@@ -33,12 +33,23 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
   const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId });
 
+  // 富集（Waterfall 富化段）：只给过了 fit 门的高价值公司补 GLEIF 法律身份 + 母子关系
+  const enrich = await acts.enrichRun({ workspaceId, runId });
+
   const status = failures === 0 ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
   await acts.finalizeRun({
     workspaceId,
     runId,
     planId,
     status,
-    stats: { perSource, companies, suppressed, fit: fit.verdicts, queries: queries.length, failures },
+    stats: {
+      perSource,
+      companies,
+      suppressed,
+      fit: fit.verdicts,
+      enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
+      queries: queries.length,
+      failures,
+    },
   });
 }

@@ -12,7 +12,7 @@
 | **P0** | **OpenStreetMap** | Overpass API 按工业标签(landuse=industrial/craft=metal_*/man_made=works)+地区，或 SearXNG osm 引擎 | 名/精确坐标/地址/OSM标签/有时官网 | 🟢 ODbL | `osm.overpass` Tool（**已实现+实测**），包成 adapter |
 | **P0** | 行业协会会员名录（VDMA ~3500 家/AMT） | SearXNG general/files 定位会员目录/PDF → Crawl4AI 分页 → Gemini **列表抽取**（一页多公司） | 名/官网/地址/sector/机械 nomenclature | 🟢 公开会员册 | 新 `association_directory` adapter（industry_data） |
 | **P0** | 展会参展商名录（Hannover Messe/EuroBLECH/广交会） | Hannover Messe 官方 **CSV 导出**优先；余者 SearXNG 定位 exhibitor-list → Crawl4AI → Gemini | 名/官网/展位/产品分类/国家/参展年份(活跃度) | 🟢🟡 实测 robots 允许 exhibitor 路径 | 新 `trade_fair` adapter（industry_data） |
-| **P0** | GLEIF LEI | 免注册 REST + 每日 Golden Copy bulk（CC0） | 法定名/LEI/注册地址/母子实体关系 | 🟢 CC0 可商用 | 新 `gleif` adapter（company_registry），**富集/去重层**非发现入口 |
+| **P0** | GLEIF LEI | 免注册 REST（`api.gleif.org`），核心名 contains 检索 + 客户端最佳匹配 | 法定名/LEI/法人形式(ELF)/实体·登记状态/注册地址/直接·最终母公司 | 🟢 CC0 可商用 | `GleifEnrichmentProvider`（**已实现+实测**）——**富集层**（fit 门后跑），非发现入口 |
 | **P1** | EU TED 招投标 | 官方开放 API + SPARQL LOD，按 CPV 品类反查需求方 | 采购方/CPV/标的/金额/中标方 | 🟢 官方开放 | 新 `ted` adapter（public_intelligence），信号型 |
 | **P1** | 专利（EPO OPS/EUIPO） | 官方免费 API（注册 key，~2.5GB/周） | 申请人/技术分类 IPC/CPC/时间 | 🟢 fair-use | 新 `epo_ops`，做 tech-fit 分层非主名单 |
 | **P1** | 新闻/PR 触发信号 | SearXNG news(reuters/bing) + time_range=month → Crawl4AI → Gemini 事件抽取 | 扩产/建厂/新产线/融资 + 公司/时间/规模 | 🟢🟡 存信号不转载全文 | 新 `news_signal`，**不建 canonical**，写 attributes 做 timing 打分 |
@@ -43,5 +43,11 @@
 
 ## 第一波落地（P0）
 
-已就绪（本轮已建适配器）：`wikidata.sparql`、`osm.overpass` —— 接成 CompanyDiscoveryAdapter + fan-out 路由即可端到端多源。
-待建：VDMA 名录列表抽取器、Hannover Messe CSV/EuroBLECH 展会器、GLEIF 富集。
+已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif`（**富集**）。
+待建：VDMA 名录列表抽取器、Hannover Messe CSV/EuroBLECH 展会器。
+
+### GLEIF 富集落地要点（本轮）
+- **定位**：不是发现入口（GLEIF 按名/国索引、不按行业）。作为独立的 `CompanyEnrichmentAdapter`，工作流里排在 **fit 门之后**（`enrichRun`），只富集 `fitVerdict=match` 的高价值公司（Waterfall「贵操作只给会跟进的线索」；GLEIF 零成本但仍限流，故限量 50/run + 已有 LEI 幂等跳过）。
+- **匹配纪律（绝不贴错身份）**：核心名（剥法人后缀）放宽召回 → 规范化名 token 比对（拼写全称法人词如 `Aktiengesellschaft`≡`AG` 归一，"Siemens" 从 123 条同前缀实体里精确挑出 `Siemens Aktiengesellschaft`）→ **置信门槛 0.72 + 歧义边距 0.1**（一堆同前缀实体挤在同一分段、无突出者 → 判 miss 不乱贴）。
+- **产出增量**：`gleif.lei / legal_name / legal_form(ELF 可读) / entity_status / registration_status / registered_country·city / parent_lei·name / ultimate_parent_lei·name`，逐字段 `field_evidence`（license=public，带 GLEIF 记录 URL）。母子关系是核心价值——实测 Audi→Volkswagen AG、BMW Bank→BMW AG、VW Financial Services→Volkswagen AG。
+- **健壮性**：adapter 层 429/5xx/网络错误退避重试（尊重 Retry-After），避免瞬时抖动导致本该富集的公司被静默跳过。

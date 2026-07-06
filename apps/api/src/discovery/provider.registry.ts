@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import {
   CompanyDiscoveryAdapter,
+  CompanyEnrichmentAdapter,
   ContactDiscoveryAdapter,
   EmailVerificationAdapter,
   SourceClass,
@@ -9,6 +10,7 @@ import { SandboxDiscoveryProvider } from './providers/sandbox.provider';
 import { PublicWebDiscoveryProvider } from './providers/public-web.provider';
 import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
+import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
 /** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -26,6 +28,7 @@ export class DiscoveryProviderRegistry {
   private readonly discovery: CompanyDiscoveryAdapter[] = [];
   private readonly contacts: ContactDiscoveryAdapter[] = [];
   private readonly emailVerifiers: EmailVerificationAdapter[] = [];
+  private readonly enrichers: CompanyEnrichmentAdapter[] = [];
 
   constructor(deps?: { gateway?: ModelGateway }) {
     if (deps?.gateway) {
@@ -37,6 +40,8 @@ export class DiscoveryProviderRegistry {
     // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
     this.discovery.push(new WikidataDiscoveryProvider());
     this.discovery.push(new OsmDiscoveryProvider());
+    // 富集源（对已归一公司补法律身份/母子关系）——GLEIF 官方开放 API，零成本。
+    this.enrichers.push(new GleifEnrichmentProvider());
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
       const sandbox = new SandboxDiscoveryProvider();
@@ -63,6 +68,11 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'openstreetmap', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
+    await db.dataProvider.upsert({
+      where: { key: 'gleif' },
+      update: {},
+      create: { key: 'gleif', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
+    });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
         where: { key: 'sandbox' },
@@ -86,6 +96,12 @@ export class DiscoveryProviderRegistry {
   async routeEmailVerification(db: ProviderDb): Promise<EmailVerificationAdapter[]> {
     const enabled = await this.enabledKeys(db);
     return this.emailVerifiers.filter((a) => enabled.has(a.key));
+  }
+
+  /** 当前 ENABLED 的富集适配器（对已归一公司补充结构化属性）。 */
+  async routeEnrichment(db: ProviderDb): Promise<CompanyEnrichmentAdapter[]> {
+    const enabled = await this.enabledKeys(db);
+    return this.enrichers.filter((a) => enabled.has(a.key));
   }
 
   private async enabledKeys(db: ProviderDb): Promise<Set<string>> {

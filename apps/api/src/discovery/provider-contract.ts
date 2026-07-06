@@ -94,3 +94,37 @@ export interface EmailVerificationAdapter {
   key: string;
   verifyEmail(email: string): Promise<EmailVerdict>;
 }
+
+/** 富集适配器的输入：已归一的 canonical 公司最小画像。 */
+export interface CompanyEnrichmentInput {
+  name: string;
+  domain?: string;
+  country?: string;
+  region?: string;
+}
+
+/**
+ * 富集结果。matched=false 表示未命中或置信不足 → 不写入 canonical（绝不贴错）。
+ * attributes 命名空间化并入 canonical.attributes；命中的字段各自留 field_evidence。
+ */
+export interface EnrichmentResult {
+  matched: boolean;
+  confidence: number; // 0..1
+  attributes: Record<string, unknown>;
+  provenance?: {
+    sourceUrl: string;
+    fetchedAt: string;
+    contentHash: string;
+    parserVersion: string;
+  };
+  costCents: number;
+}
+
+/**
+ * 公司富集类 Provider（PRD 7.4.7 Waterfall 富化段）：对已归一的公司补充
+ * 结构化属性（法律身份、母子关系、编码…）。与发现相反 —— 输入是公司、输出是增量。
+ */
+export interface CompanyEnrichmentAdapter {
+  key: string;
+  enrichCompany(input: CompanyEnrichmentInput): Promise<EnrichmentResult>;
+}
