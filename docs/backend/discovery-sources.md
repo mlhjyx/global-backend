@@ -44,8 +44,15 @@
 
 ## 第一波落地（P0）
 
-已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif` + `wikidata`（**富集**）、`directory`（名录列表抽取）。
-待优化：`directory` 的地域精度收敛、JS-SPA 展会站的逐站 API 模板。
+已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif` + `wikidata`（**富集**）、`directory`（名录列表抽取）、`trade_fair`（展会参展商 API 模板）。
+待优化：`directory` 的地域精度收敛；`trade_fair` 扩更多展会/平台。
+
+### 展会参展商 API 模板落地要点（本轮，已端到端实测）
+- **`TradeFairDiscoveryProvider` + `trade-fairs.ts` 模板注册表**：大展会官网是 JS-SPA，参展商目录由**托管搜索**（EuroBLECH/RX = **Algolia**）驱动。逆向出前端调用后**直接打其 public search-only API** 分页拿参展商结构化 JSON——绕开 JS 渲染。按 ICP 行业词 `selectFairs` 选相关展会。
+- **实测**：EuroBLECH 2026（钣金/激光/成形，正对 TRUMPF ICP）一次拉 **398 家参展商 / 5 秒**（总 909），其中带官网 324、**公开邮箱 322、电话 320**、招聘信号 55；国家分布 DE 126/IT 76/TR 48/CN 39…。字段远超爬取：公司名/官网/邮箱/电话/国家/展位/描述/产品/招聘信号。
+- **发现网络机制的方法**：Crawl4AI `capture_network_requests` 渲染 SPA 抓 `*.algolianet.com` 调用，提取 appId/apiKey/index/eventEditionId。已封装为 `scripts/discover-fair-algolia.mjs`（新增展会/换届刷新一条命令搞定）。
+- **⚠️ 维护**：apiKey/eventEditionId **按届变化**，换届重跑刷新脚本。single fair 失败（如 key 失效）不影响其余源（fail-safe 返回该源 0 条）。
+- **合规**：查询的是展会公开发布、其官网前端同一 public API 暴露的参展商名录（公开商务信息，非个人数据），用官方 search-only key、限流、分页有上限。
 
 ### 名录/列表抽取落地要点（本轮，已端到端实测）
 - **`DirectoryDiscoveryProvider` + `discovery.extract_list`**（gemini-2.5-flash 一页多公司）：SearXNG 意图词（EN+DE）定位名录页 → LISTING_HINT 正向信号过滤 + robots → Crawl4AI（有限翻页）→ 列表抽取 → 每家一条记录，按 name+domain 去重。source_hint=directory/association/trade_fair 二级路由。

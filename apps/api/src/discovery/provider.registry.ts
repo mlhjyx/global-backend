@@ -11,6 +11,7 @@ import { PublicWebDiscoveryProvider } from './providers/public-web.provider';
 import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
 import { DirectoryDiscoveryProvider } from './providers/directory.provider';
+import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
@@ -44,6 +45,8 @@ export class DiscoveryProviderRegistry {
     // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
     this.discovery.push(new WikidataDiscoveryProvider());
     this.discovery.push(new OsmDiscoveryProvider());
+    // 展会参展商（逐站/逐平台模板，直连托管搜索 API 拿结构化名录）——不依赖 gateway。
+    this.discovery.push(new TradeFairDiscoveryProvider());
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider());
@@ -83,6 +86,11 @@ export class DiscoveryProviderRegistry {
       where: { key: 'directory' },
       update: {},
       create: { key: 'directory', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'trade_fair' },
+      update: {},
+      create: { key: 'trade_fair', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
