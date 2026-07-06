@@ -44,8 +44,14 @@
 
 ## 第一波落地（P0）
 
-已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif`（**富集**）。
-待建：VDMA 名录列表抽取器、Hannover Messe CSV/EuroBLECH 展会器。
+已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif` + `wikidata`（**富集**）、`directory`（名录列表抽取）。
+待优化：`directory` 的地域精度收敛、JS-SPA 展会站的逐站 API 模板。
+
+### 名录/列表抽取落地要点（本轮，已端到端实测）
+- **`DirectoryDiscoveryProvider` + `discovery.extract_list`**（gemini-2.5-flash 一页多公司）：SearXNG 意图词（EN+DE）定位名录页 → LISTING_HINT 正向信号过滤 + robots → Crawl4AI（有限翻页）→ 列表抽取 → 每家一条记录，按 name+domain 去重。source_hint=directory/association/trade_fair 二级路由。
+- **实测**：查询「钣金/激光切割/金属冲压，Germany」一次运行从 metalstamper.net(131)+mrforum.com(10)+thefabricator.com(10) 抽出 **151 家真实公司**（带官网+地址，如 Kapco Metal Stamping/Roller Die & Forming）；单会员/单供应商详情页被正确判为 not-a-directory。
+- **前提**：SearXNG 需用放行侧引擎（Yandex/Marginalia/Mojeek，见 infra/searxng/settings.yml）；引擎冷/抖动时搜索返 0 → 名录发现空转（非代码问题）。
+- **短板**：(1) 大展会参展商多为 **JS-SPA**，Crawl4AI 静态 markdown 只拿壳（需逐站找底层 exhibitor JSON API）；(2) 地域精度——「Germany」查询会召回美国目录，靠下游 canonicalize + fit 门 + 地域过滤收敛。
 
 ### GLEIF 富集落地要点（本轮）
 - **定位**：不是发现入口（GLEIF 按名/国索引、不按行业）。作为独立的 `CompanyEnrichmentAdapter`，工作流里排在 **fit 门之后**（`enrichRun`），只富集 `fitVerdict=match` 的高价值公司（Waterfall「贵操作只给会跟进的线索」；GLEIF 零成本但仍限流，故限量 50/run + 已有 LEI 幂等跳过）。
