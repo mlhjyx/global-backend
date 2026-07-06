@@ -51,6 +51,9 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
 
 function mapTags(query: CompanyDiscoveryQuery): { k: string; v?: string }[] {
   const f = query.filters ?? {};
+  // 优先用活动层归一好的 OSM 标签（DB taxonomy）；回退到内置 vocab。
+  const resolved = f._osmTags as { k: string; v?: string }[] | undefined;
+  if (resolved?.length) return resolved;
   const terms = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
   for (const t of terms) {
     const tags = lookupIndustryOsmTags(t);

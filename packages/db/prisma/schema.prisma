@@ -272,6 +272,42 @@ model Citation {
 
 // ── Global Business Data Hub & 客户发现 (PRD 7.4 / 第8部分 / 5.5) ──────────
 
+// ── 规范词表归一（平台级参考数据，无 RLS）──────────────────────────────────
+// 行业主键=ISIC Rev.4；国家主键=ISO 3166-1 alpha-2；产品维=HS。混合归一：
+// 确定性种子命中 → 未命中冷路径 LLM（enum 约束）→ 沉淀为别名。详见
+// docs/backend/vocab-taxonomy.md。Wikidata QID / OSM 标签降级为 downstream 发现标识。
+
+model CanonicalTaxonomy {
+  id          String   @id @default(uuid()) @db.Uuid
+  kind        String // industry | country | product
+  scheme      String // ISIC | ISO3166_1 | HS
+  code        String // ISIC 叶码 / ISO alpha-2 / HS6
+  parentCode  String?  @map("parent_code") // 层级（ISIC 自引用）
+  labelEn     String   @map("label_en")
+  labels      Json? // { zh, de, native, ... } 多语言规范名
+  crosswalks  Json? // { nace:[...], naics:[...], gb4754:[...] } 官方对照
+  wikidataQid String?  @map("wikidata_qid") // downstream 发现标识（供 wikidata adapter）
+  osmTags     Json?    @map("osm_tags") // [{k,v}] downstream（供 osm adapter）
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([kind, code])
+  @@index([kind])
+  @@map("canonical_taxonomy")
+}
+
+model TermAlias {
+  id        String   @id @default(uuid()) @db.Uuid
+  term      String // 归一化词（NFC + 小写）
+  kind      String // industry | country | product
+  code      String // 指向 CanonicalTaxonomy.code
+  source    String   @default("seed") // seed | llm | manual
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([kind, term])
+  @@index([kind, term])
+  @@map("term_alias")
+}
+
 /// Provider 注册表（平台级，非租户数据 → 无 RLS）。七类 Provider（PRD 7.4.7）。
 /// 第一版只有 sandbox 实现；真源签约后加行即可，适配器按 key 挂接。
 model DataProvider {

@@ -214,6 +214,19 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  'taxonomy.normalize': {
+    id: 'taxonomy.normalize',
+    description:
+      '词表归一（冷路径）：把一个行业/国家自由词归一到给定标准码表中已有的一个 code。只能从候选码表里选，选不到必须返回 null，禁止编造码。',
+    outputSchema: { type: 'object', required: ['code'], properties: { code: { type: ['string', 'null'] } } },
+    allowedTools: [], // 纯生成，无工具
+    maxCostCents: 5,
+    timeoutMs: 60000,
+    model: 'deepseek-v4-flash', // 高频、便宜、冷路径
+    risk: 'low',
+    humanGate: false,
+  },
+
   'discovery.qualify_fit': {
     id: 'discovery.qualify_fit',
     allowedTools: [],

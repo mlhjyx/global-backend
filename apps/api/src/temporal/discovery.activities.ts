@@ -5,6 +5,7 @@ import { getTask } from '../ai-tasks/task-registry';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { CompanyDiscoveryQuery, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
+import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -40,6 +41,7 @@ export function createDiscoveryActivities(deps: {
   prisma: PrismaService;
   providers: DiscoveryProviderRegistry;
   gateway: ModelGateway;
+  taxonomy?: TaxonomyResolver;
 }) {
   return {
     async loadPlanQueries(args: { workspaceId: string; planId: string }): Promise<{ queries: PlanQuery[] }> {
@@ -63,9 +65,31 @@ export function createDiscoveryActivities(deps: {
       runId: string;
       query: PlanQuery;
     }): Promise<{ rawCount: number; costCents: number; provider: string | null }> {
+      // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
+      // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
+      // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
+      const enriched: Record<string, unknown> = { ...(args.query.filters ?? {}) };
+      if (deps.taxonomy) {
+        const industryTerms = [enriched.industry, enriched.sub_industry].flat().filter(Boolean).map(String);
+        const countryTerms = [enriched.country, enriched.region].flat().filter(Boolean).map(String);
+        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, { workspaceId: args.workspaceId });
+        if (inds.length) {
+          enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
+          enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
+          enriched._industryCodes = inds.map((n) => n.code);
+        }
+        for (const ct of countryTerms) {
+          const c = await deps.taxonomy.resolve('country', ct, { workspaceId: args.workspaceId });
+          if (c?.wikidataQid) {
+            enriched._countryQid = c.wikidataQid;
+            enriched._countryCode = c.code;
+            break;
+          }
+        }
+      }
       const q: CompanyDiscoveryQuery = {
         sourceClass: args.query.source_class as SourceClass,
-        filters: args.query.filters ?? {},
+        filters: enriched,
         keywords: args.query.keywords ?? [],
         limit: PER_SOURCE_LIMIT,
       };

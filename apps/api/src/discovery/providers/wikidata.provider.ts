@@ -56,6 +56,9 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
 
 function mapIndustries(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
+  // 优先用活动层归一好的 QID（DB taxonomy）；回退到内置 vocab。
+  const resolved = (f._industryQids as string[] | undefined)?.filter(Boolean);
+  if (resolved?.length) return resolved;
   const raw = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
   const kw = (query.keywords ?? []).map(String);
   return mapIndustryToQids([...raw, ...kw]);
@@ -63,6 +66,7 @@ function mapIndustries(query: CompanyDiscoveryQuery): string[] {
 
 function mapCountry(query: CompanyDiscoveryQuery): string | undefined {
   const f = query.filters ?? {};
+  if (f._countryQid) return String(f._countryQid);
   const raw = [f.country, f.region].flat().filter(Boolean).map(String);
   for (const term of raw) {
     const q = mapCountryToQid(term);

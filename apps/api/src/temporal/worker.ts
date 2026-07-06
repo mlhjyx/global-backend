@@ -12,6 +12,7 @@ import { createUnderstandingActivities } from './understanding.activities';
 import { createDiscoveryActivities } from './discovery.activities';
 import { createQualifyActivities } from './qualify.activities';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
+import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 
 /**
@@ -39,7 +40,12 @@ async function main(): Promise<void> {
     workflowsPath: require.resolve('./workflows'),
     activities: {
       ...createUnderstandingActivities({ prisma, gateway }),
-      ...createDiscoveryActivities({ prisma, providers: new DiscoveryProviderRegistry({ gateway }), gateway }),
+      ...createDiscoveryActivities({
+        prisma,
+        providers: new DiscoveryProviderRegistry({ gateway }),
+        gateway,
+        taxonomy: new TaxonomyResolver(prisma, gateway),
+      }),
       ...createQualifyActivities({ prisma }),
     },
   });

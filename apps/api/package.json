@@ -27,8 +27,10 @@
     "class-validator": "^0.14.1",
     "dotenv": "^16.4.5",
     "helmet": "^8.2.0",
+    "jose": "^6.2.3",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "world-countries": "^5.1.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
