@@ -1,6 +1,10 @@
 # SearXNG for the discovery layer (self-hosted meta-search; OSS registry entry).
 # JSON format enabled for the PublicWebDiscoveryProvider; limiter off for
 # server-to-server use inside the private network (DO NOT expose publicly).
+#
+# ⚠️ 本机/网络出口对多数消费级搜索引擎做 SNI 过滤（duckduckgo/brave/google/
+# startpage/qwant/wikipedia 的 TLS 握手被重置）。故只启用**放行侧**引擎，并显式
+# 禁用被阻的默认引擎，避免整轮搜索因它们 timeout 而空转。生产换到正常出口后可再放开。
 use_default_settings: true
 
 server:
@@ -14,10 +18,33 @@ search:
     - json
   safe_search: 0
 
+# 放行侧引擎里有慢的（mojeek），把出站超时抬高，避免误判为 unresponsive。
+outgoing:
+  request_timeout: 8.0
+  max_request_timeout: 12.0
+
 engines:
+  # ── 放行侧（可达）：作为主力 ──
   - name: bing
     disabled: false
+  - name: mojeek
+    disabled: false
+  - name: marginalia
+    disabled: false
+  - name: yandex
+    disabled: false
+  # ── 被 SNI 阻断：显式禁用，否则每次搜索都等它们 timeout ──
   - name: duckduckgo
-    disabled: false
+    disabled: true
   - name: brave
-    disabled: false
+    disabled: true
+  - name: google
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: qwant
+    disabled: true
+  - name: wikipedia
+    disabled: true
+  - name: wikidata
+    disabled: true
