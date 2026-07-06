@@ -68,4 +68,18 @@ export class CompanyService {
     }
     return company;
   }
+
+  /** 结构化产品/服务（理解工作流抽取，带溯源）。company 不存在时 404。 */
+  async listOfferings(ctx: RequestContext, companyId: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.companyProfile.findUnique({ where: { id: companyId }, select: { id: true } });
+      if (!company) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      return tx.offering.findMany({
+        where: { companyId },
+        orderBy: [{ confidence: 'desc' }, { name: 'asc' }],
+      });
+    });
+  }
 }

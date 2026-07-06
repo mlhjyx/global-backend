@@ -21,7 +21,7 @@ import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
-import { CompanyDto, CompanyListDto } from './dto/company.dto';
+import { CompanyDto, CompanyListDto, OfferingDto } from './dto/company.dto';
 
 @ApiTags('Companies')
 @ApiBearerAuth()
@@ -62,5 +62,16 @@ export class CompanyController {
     @Param('companyId', ParseUUIDPipe) companyId: string,
   ): Promise<CompanyDto> {
     return CompanyDto.from(await this.companies.get(ctx, companyId));
+  }
+
+  @Get(':companyId/offerings')
+  @ApiOperation({ summary: '企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）' })
+  @ApiOkResponse({ type: [OfferingDto] })
+  async listOfferings(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ): Promise<OfferingDto[]> {
+    const rows = await this.companies.listOfferings(ctx, companyId);
+    return rows.map(OfferingDto.from);
   }
 }

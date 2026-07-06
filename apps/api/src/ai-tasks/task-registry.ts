@@ -34,6 +34,39 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
   },
 
+  'company_understanding.extract_offerings': {
+    id: 'company_understanding.extract_offerings',
+    description:
+      '从企业官网页面文本中抽取结构化的产品/服务（Offering）：名称、简述、关键属性（MOQ/交期/参数/认证/材料等，仅当文本中明确出现时才填），并附来源原文片段。禁止编造文本中不存在的属性。',
+    outputSchema: {
+      type: 'object',
+      required: ['offerings'],
+      properties: {
+        offerings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['name', 'description', 'evidence', 'confidence'],
+            properties: {
+              name: { type: 'string', description: '产品/服务名（保留原文语言）' },
+              description: { type: 'string', description: '一句话简述' },
+              attributes: {
+                type: 'object',
+                description: '仅收录文本中明确出现的属性，如 moq/lead_time/materials/params/certifications',
+              },
+              evidence: { type: 'string', description: '来源文本中支持该产品存在的原文片段' },
+              confidence: { type: 'number' },
+            },
+          },
+        },
+      },
+    },
+    // 与 Claim 抽取同为高频结构化任务 → flash。
+    model: 'deepseek-v4-flash',
+    risk: 'low', // 只进结构化知识库，不直接对外
+    humanGate: false,
+  },
+
   'icp.design': {
     id: 'icp.design',
     description:

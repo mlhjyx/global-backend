@@ -79,6 +79,9 @@ model CompanyProfile {
   name        String
   website     String?
   status      CompanyStatus @default(DRAFT)
+  /// 官网上确定性抽取（正则，非 LLM）的公开联系方式/社媒，逐条带来源页 URL：
+  /// [{ type: 'email'|'phone'|'social', value, sourceUrl }] — Buyer Trust 原料（PRD 7.15）
+  publicContacts Json?      @map("public_contacts")
   version     Int           @default(1) // optimistic lock (PRD 11.16)
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
@@ -99,12 +102,16 @@ model Offering {
   companyId   String   @map("company_id") @db.Uuid
   name        String
   description String?
-  attributes  Json? // MOQ / 交期 / 参数 等
+  attributes  Json? // MOQ / 交期 / 参数 / 认证 等结构化属性
+  sourceUrl   String?  @map("source_url") // 溯源：该产品信息来自哪个页面
+  evidence    String? // 来源页原文片段
+  confidence  Float?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   company CompanyProfile @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@unique([companyId, name]) // 同一企业下按名称幂等 upsert（重跑理解不产生重复）
   @@index([workspaceId])
   @@index([companyId])
   @@map("offering")
