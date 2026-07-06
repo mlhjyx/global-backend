@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/envelope.schema.json",
+  "title": "DomainEventEnvelope",
+  "description": "Standard envelope wrapping every domain event (PRD 11.10). The `payload` schema is defined per `event_type` under events/payloads/. Consumers are at-least-once and must dedupe on event_id (ADR-009).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "workspace_id",
+    "aggregate_type",
+    "aggregate_id",
+    "occurred_at",
+    "producer",
+    "privacy_classification",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid", "description": "Unique; dedupe key." },
+    "event_type": { "type": "string", "examples": ["LeadQualified", "ClaimApproved"] },
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "workspace_id": { "type": "string", "format": "uuid" },
+    "aggregate_type": { "type": "string", "examples": ["Lead", "Claim", "Campaign"] },
+    "aggregate_id": { "type": "string" },
+    "occurred_at": { "type": "string", "format": "date-time", "description": "UTC ISO-8601." },
+    "producer": { "type": "string", "examples": ["lead-service"] },
+    "correlation_id": { "type": ["string", "null"], "description": "Ties events across a business flow (e.g. campaign_id)." },
+    "causation_id": { "type": ["string", "null"], "description": "The command/event/workflow-run that caused this." },
+    "privacy_classification": {
+      "type": "string",
+      "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"]
+    },
+    "payload": { "type": "object", "description": "Event-type-specific body; validated by its own schema." }
+  }
+}

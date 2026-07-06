@@ -1,0 +1,20 @@
+{
+  "name": "@global/db",
+  "version": "0.0.1",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "studio": "prisma studio",
+    "rls:check": "node scripts/rls-check.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.1.0"
+  }
+}

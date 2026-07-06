@@ -1,0 +1,20 @@
+{
+  "name": "@global/contracts",
+  "version": "0.0.1",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "lint": "spectral lint openapi/openapi.yaml",
+    "bundle": "redocly bundle openapi/openapi.yaml -o dist/openapi.bundled.yaml",
+    "docs": "redocly build-docs openapi/openapi.yaml -o dist/docs.html",
+    "mock": "prism mock openapi/openapi.yaml -p 4010",
+    "gen": "openapi-typescript openapi/openapi.yaml -o src/generated/api.ts"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^1.25.0",
+    "@stoplight/prism-cli": "^5.12.0",
+    "@stoplight/spectral-cli": "^6.14.0",
+    "openapi-typescript": "^7.4.0"
+  }
+}

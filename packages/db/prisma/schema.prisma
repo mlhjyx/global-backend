@@ -1,0 +1,181 @@
+// Global backend — schema.
+// Multi-tenant: every workspace-scoped table carries workspace_id and is guarded
+// by PostgreSQL RLS (ADR-001). Identity/users/permissions are owned by the
+// external SaaS platform — NOT modeled here. `workspace` is only a tenant anchor
+// whose id comes from the platform's token (JIT-provisioned on first write).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Tenancy & infrastructure ──────────────────────────────────────────────
+
+model Workspace {
+  id        String   @id @db.Uuid // = tenant id from the external platform's token
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  companyProfiles CompanyProfile[]
+  outboxEvents    OutboxEvent[]
+
+  @@map("workspace")
+}
+
+/// Transactional Outbox (ADR-009). Domain writes append events in the same tx;
+/// a relay publishes unpublished rows at-least-once.
+model OutboxEvent {
+  id                    BigInt    @id @default(autoincrement())
+  eventId               String    @unique @default(uuid()) @map("event_id") @db.Uuid
+  workspaceId           String    @map("workspace_id") @db.Uuid
+  eventType             String    @map("event_type")
+  schemaVersion         Int       @default(1) @map("schema_version")
+  aggregateType         String    @map("aggregate_type")
+  aggregateId           String    @map("aggregate_id")
+  correlationId         String?   @map("correlation_id")
+  causationId           String?   @map("causation_id")
+  privacyClassification String    @default("CONFIDENTIAL") @map("privacy_classification")
+  payload               Json
+  occurredAt            DateTime  @default(now()) @map("occurred_at")
+  publishedAt           DateTime? @map("published_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([publishedAt])
+  @@index([workspaceId])
+  @@map("outbox_event")
+}
+
+// ── Company & Knowledge (企业理解, PRD 7.2) ────────────────────────────────
+
+enum CompanyStatus {
+  DRAFT
+  ENRICHING
+  ACTIVE
+
+  @@map("company_status")
+}
+
+/// Claim lifecycle (PRD 11.9): INGESTED → EXTRACTED → NEEDS_REVIEW → APPROVED → EXPIRED/REVOKED
+enum ClaimStatus {
+  INGESTED
+  EXTRACTED
+  NEEDS_REVIEW
+  APPROVED
+  EXPIRED
+  REVOKED
+
+  @@map("claim_status")
+}
+
+model CompanyProfile {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  name        String
+  website     String?
+  status      CompanyStatus @default(DRAFT)
+  version     Int           @default(1) // optimistic lock (PRD 11.16)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  offerings Offering[]
+  sources   KnowledgeSource[]
+  claims    Claim[]
+
+  @@index([workspaceId])
+  @@map("company_profile")
+}
+
+model Offering {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  name        String
+  description String?
+  attributes  Json? // MOQ / 交期 / 参数 等
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company CompanyProfile @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([companyId])
+  @@map("offering")
+}
+
+model KnowledgeSource {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  type        String // website | pdf | docx | pptx | manual ...
+  uri         String?
+  status      String   @default("INGESTED") // 摄取生命周期
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company   CompanyProfile @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  claims    Claim[]
+  citations Citation[]
+
+  @@index([workspaceId])
+  @@index([companyId])
+  @@map("knowledge_source")
+}
+
+model Claim {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  companyId   String      @map("company_id") @db.Uuid
+  sourceId    String?     @map("source_id") @db.Uuid
+  type        String // capability | certification | case | param | value_prop ...
+  statement   String
+  status      ClaimStatus @default(EXTRACTED)
+  confidence  Float?
+  validUntil  DateTime?   @map("valid_until")
+  version     Int         @default(1)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  company  CompanyProfile   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source   KnowledgeSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  evidence Evidence[]
+
+  @@index([workspaceId])
+  @@index([companyId])
+  @@map("claim")
+}
+
+model Evidence {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  claimId     String    @map("claim_id") @db.Uuid
+  sourceUrl   String?   @map("source_url")
+  snippet     String?
+  confidence  Float?
+  fetchedAt   DateTime? @map("fetched_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([claimId])
+  @@map("evidence")
+}
+
+model Citation {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  sourceId    String   @map("source_id") @db.Uuid
+  locator     String? // page / section
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("citation")
+}

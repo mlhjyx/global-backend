@@ -1,0 +1,25 @@
+{
+  "name": "global-backend",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "api:dev": "pnpm --filter @global/api start:dev",
+    "api:build": "pnpm --filter @global/api build",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "contracts:lint": "pnpm --filter @global/contracts lint",
+    "contracts:docs": "pnpm --filter @global/contracts docs",
+    "contracts:mock": "pnpm --filter @global/contracts mock",
+    "contracts:gen": "pnpm --filter @global/contracts gen",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "nx": "^20.3.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.6.3"
+  }
+}

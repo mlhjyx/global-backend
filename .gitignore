@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+out-tsc/
+.nx/
+coverage/
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# generated contract artifacts
+packages/contracts/src/generated/
+packages/contracts/dist/
+
+# tmp
+tmp/
+*.tmp
