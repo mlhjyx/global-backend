@@ -6,7 +6,7 @@ import {
   SourceClass,
 } from '../provider-contract';
 import { discoverByArea } from '../../adapters/openstreetmap';
-import { INDUSTRY_OSM_TAGS, REGION_OSM_AREA } from '../vocab';
+import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
 
 /**
  * OpenStreetMap 地理发现 Provider（Overpass API，ODbL 开放数据，零爬取）。
@@ -53,7 +53,7 @@ function mapTags(query: CompanyDiscoveryQuery): { k: string; v?: string }[] {
   const f = query.filters ?? {};
   const terms = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
   for (const t of terms) {
-    const tags = INDUSTRY_OSM_TAGS[t.toLowerCase().trim()];
+    const tags = lookupIndustryOsmTags(t);
     if (tags) return tags;
   }
   return [];
@@ -63,7 +63,7 @@ function mapArea(query: CompanyDiscoveryQuery): string | undefined {
   const f = query.filters ?? {};
   const terms = [f.region, f.country, f.area_name].flat().filter(Boolean).map(String);
   for (const t of terms) {
-    const area = REGION_OSM_AREA[t.toLowerCase().trim()];
+    const area = lookupRegionOsmArea(t);
     if (area) return area;
   }
   return undefined;

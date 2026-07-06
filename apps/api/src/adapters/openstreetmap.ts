@@ -9,7 +9,15 @@
  * 使用政策（UA、限流）。
  */
 
-const OVERPASS = process.env.OVERPASS_URL ?? 'https://overpass-api.de/api/interpreter';
+// 公共 Overpass 实例限流严格且易超载（504）——多实例 fallback。
+// 生产建议自托管 Overpass（OVERPASS_URL 覆盖）以获得稳定配额。
+const OVERPASS_ENDPOINTS = (process.env.OVERPASS_URL
+  ? [process.env.OVERPASS_URL]
+  : [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    ]);
 const USER_AGENT = process.env.OSM_UA ?? 'GlobalDiscoveryBot/1.0 (b2b discovery)';
 
 export interface OsmPlace {
@@ -52,15 +60,26 @@ async function queryOneTag(areaName: string, f: { k: string; v?: string }, limit
 area["name"="${areaName}"]->.a;
 nwr${sel}["name"](area.a);
 out center ${Math.min(limit, 200)};`;
-  const res = await fetch(OVERPASS, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
-    body: `data=${encodeURIComponent(query)}`,
-    signal: AbortSignal.timeout(40_000),
-  });
-  if (!res.ok) throw new Error(`overpass ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const json = (await res.json()) as { elements?: OsmElement[] };
-  return (json.elements ?? []).map(elementToPlace).filter((p): p is OsmPlace => p !== null);
+  let lastErr: unknown;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(40_000),
+      });
+      if (!res.ok) {
+        lastErr = new Error(`overpass ${res.status}`); // 504/429 → 换下一个实例
+        continue;
+      }
+      const json = (await res.json()) as { elements?: OsmElement[] };
+      return (json.elements ?? []).map(elementToPlace).filter((p): p is OsmPlace => p !== null);
+    } catch (err) {
+      lastErr = err; // 超时/网络 → 换下一个实例
+    }
+  }
+  throw lastErr ?? new Error('all overpass endpoints failed');
 }
 
 interface OsmElement {

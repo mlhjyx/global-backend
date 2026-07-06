@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
+import { WsThrottlerGuard } from './common/ws-throttler.guard';
 import { AuthModule } from './auth/auth.module';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { TemporalModule } from './temporal/temporal.module';
@@ -18,6 +21,13 @@ import { LeadModule } from './lead/lead.module';
  */
 @Module({
   imports: [
+    // 按 workspace 限流（默认 300 req / 分钟 / 租户；可 env 覆盖）
+    ThrottlerModule.forRoot([
+      {
+        ttl: Number(process.env.THROTTLE_TTL_MS) || 60_000,
+        limit: Number(process.env.THROTTLE_LIMIT) || 300,
+      },
+    ]),
     PrismaModule,
     AuthModule,
     ModelGatewayModule,
@@ -30,5 +40,6 @@ import { LeadModule } from './lead/lead.module';
     LeadModule,
   ],
   controllers: [HealthController, WhoamiController],
+  providers: [{ provide: APP_GUARD, useClass: WsThrottlerGuard }],
 })
 export class AppModule {}

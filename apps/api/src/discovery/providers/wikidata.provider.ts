@@ -6,7 +6,7 @@ import {
   SourceClass,
 } from '../provider-contract';
 import { discoverCompaniesByIndustry } from '../../adapters/wikidata';
-import { INDUSTRY_QIDS, COUNTRY_QIDS } from '../vocab';
+import { mapIndustryToQids, mapCountryToQid } from '../vocab';
 
 /**
  * Wikidata 结构化发现 Provider（零爬取，CC0 开放数据）。
@@ -58,19 +58,14 @@ function mapIndustries(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const raw = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
   const kw = (query.keywords ?? []).map(String);
-  const qids = new Set<string>();
-  for (const term of [...raw, ...kw]) {
-    const q = INDUSTRY_QIDS[term.toLowerCase().trim()];
-    if (q) qids.add(q);
-  }
-  return [...qids];
+  return mapIndustryToQids([...raw, ...kw]);
 }
 
 function mapCountry(query: CompanyDiscoveryQuery): string | undefined {
   const f = query.filters ?? {};
   const raw = [f.country, f.region].flat().filter(Boolean).map(String);
   for (const term of raw) {
-    const q = COUNTRY_QIDS[term.toLowerCase().trim()];
+    const q = mapCountryToQid(term);
     if (q) return q;
   }
   return undefined;

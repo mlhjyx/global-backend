@@ -1,1 +1,2468 @@
-{"openapi":"3.0.0","paths":{"/api/v1/health":{"get":{"operationId":"HealthController_check_v1","parameters":[],"responses":{"200":{"description":""}},"summary":"健康检查（存活）","tags":["System"]}},"/api/v1/health/db":{"get":{"operationId":"HealthController_db_v1","parameters":[],"responses":{"200":{"description":""}},"summary":"数据库连通性检查（以 app_user 连接）","tags":["System"]}},"/api/v1/whoami":{"get":{"operationId":"WhoamiController_whoami_v1","parameters":[],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"返回从 token 解出的调用上下文（user / workspace / roles）","tags":["System"]}},"/api/v1/companies":{"post":{"description":"支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。","operationId":"CompanyController_create_v1","parameters":[{"name":"idempotency-key","required":true,"in":"header","schema":{"type":"string"}},{"name":"Idempotency-Key","in":"header","description":"幂等键（客户端生成，如 uuid）","required":false,"schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreateCompanyDto"}}}},"responses":{"201":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompanyDto"}}}}},"security":[{"bearer":[]}],"summary":"提交官网，创建企业画像并触发理解（异步）","tags":["Companies"]},"get":{"operationId":"CompanyController_list_v1","parameters":[{"name":"limit","required":true,"in":"query","schema":{"type":"string"}},{"name":"cursor","required":true,"in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompanyListDto"}}}}},"security":[{"bearer":[]}],"summary":"列出当前 workspace 的企业画像（游标分页）","tags":["Companies"]}},"/api/v1/companies/{companyId}":{"get":{"operationId":"CompanyController_get_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompanyDto"}}}}},"security":[{"bearer":[]}],"summary":"按 id 获取企业画像（跨租户返回 404）","tags":["Companies"]}},"/api/v1/companies/{companyId}/completeness":{"get":{"operationId":"CompanyController_completeness_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态","tags":["Companies"]}},"/api/v1/companies/{companyId}/confirm":{"post":{"operationId":"CompanyController_confirm_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompanyDto"}}}}},"security":[{"bearer":[]}],"summary":"人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）","tags":["Companies"]}},"/api/v1/companies/{companyId}/offerings":{"get":{"operationId":"CompanyController_listOfferings_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/OfferingDto"}}}}}},"security":[{"bearer":[]}],"summary":"企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）","tags":["Companies"]}},"/api/v1/companies/{companyId}/claims":{"get":{"operationId":"ClaimController_list_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}},{"name":"status","required":true,"in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/ClaimDto"}}}}}},"security":[{"bearer":[]}],"summary":"列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）","tags":["Claims"]},"post":{"operationId":"ClaimController_createManual_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreateManualClaimDto"}}}},"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ClaimDto"}}}}},"security":[{"bearer":[]}],"summary":"手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）","tags":["Claims"]}},"/api/v1/claims/{claimId}/approve":{"post":{"operationId":"ClaimController_approve_v1","parameters":[{"name":"claimId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ClaimDto"}}}}},"security":[{"bearer":[]}],"summary":"审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件","tags":["Claims"]}},"/api/v1/claims/{claimId}/reject":{"post":{"operationId":"ClaimController_reject_v1","parameters":[{"name":"claimId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ClaimDto"}}}}},"security":[{"bearer":[]}],"summary":"驳回（NEEDS_REVIEW → REVOKED）","tags":["Claims"]}},"/api/v1/claims/{claimId}/revoke":{"post":{"operationId":"ClaimController_revoke_v1","parameters":[{"name":"claimId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ClaimDto"}}}}},"security":[{"bearer":[]}],"summary":"撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）","tags":["Claims"]}},"/api/v1/companies/{companyId}/conflicts":{"get":{"operationId":"ClaimController_listConflicts_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}},{"name":"status","required":true,"in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"知识冲突列表（KNW-004；?status=OPEN）","tags":["Claims"]}},"/api/v1/conflicts/{conflictId}/resolve":{"post":{"operationId":"ClaimController_resolveConflict_v1","parameters":[{"name":"conflictId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ResolveConflictDto"}}}},"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"裁决冲突：保留一条，另一条 REVOKED","tags":["Claims"]}},"/api/v1/companies/{companyId}/icps":{"post":{"operationId":"IcpController_generate_v1","parameters":[{"name":"companyId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/IcpDto"}}}}},"security":[{"bearer":[]}],"summary":"基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）","tags":["ICP"]}},"/api/v1/icps":{"get":{"operationId":"IcpController_list_v1","parameters":[{"name":"companyId","required":true,"in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/IcpDto"}}}}}},"security":[{"bearer":[]}],"summary":"列出 ICP（可用 ?companyId= 过滤）","tags":["ICP"]}},"/api/v1/icps/{icpId}":{"get":{"operationId":"IcpController_get_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/IcpDto"}}}}},"security":[{"bearer":[]}],"summary":"获取 ICP 详情（含 Persona + 买家委员会）","tags":["ICP"]},"patch":{"operationId":"IcpController_update_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdateIcpDto"}}}},"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/IcpDto"}}}}},"security":[{"bearer":[]}],"summary":"人工修订 ICP（AI 产出是假设，可编辑；乐观锁）","tags":["ICP"]}},"/api/v1/icps/{icpId}/activate":{"post":{"operationId":"IcpController_activate_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/IcpDto"}}}}},"security":[{"bearer":[]}],"summary":"激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件","tags":["ICP"]}},"/api/v1/icps/{icpId}/rules":{"post":{"operationId":"IcpController_addRule_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreateRuleDto"}}}},"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleDto"}}}}},"security":[{"bearer":[]}],"summary":"新增验证规则（must_have / nice_to_have / exclusion，机器可评估）","tags":["ICP"]}},"/api/v1/icp-rules/{ruleId}":{"patch":{"operationId":"IcpController_updateRule_v1","parameters":[{"name":"ruleId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdateRuleDto"}}}},"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleDto"}}}}},"security":[{"bearer":[]}],"summary":"修改验证规则","tags":["ICP"]},"delete":{"operationId":"IcpController_deleteRule_v1","parameters":[{"name":"ruleId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"删除验证规则","tags":["ICP"]}},"/api/v1/icps/{icpId}/backtests":{"post":{"operationId":"IcpController_runBacktest_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/RunBacktestDto"}}}},"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/BacktestDto"}}}}},"security":[{"bearer":[]}],"summary":"用已知客户/非客户样例回测 ICP 规则（确定性评估）；HYPOTHESIS → VALIDATING","tags":["ICP"]},"get":{"operationId":"IcpController_listBacktests_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BacktestDto"}}}}}},"security":[{"bearer":[]}],"summary":"回测历史","tags":["ICP"]}},"/api/v1/icps/{icpId}/query-plans":{"post":{"operationId":"IcpController_generateQueryPlan_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/QueryPlanDto"}}}}},"security":[{"bearer":[]}],"summary":"从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）","tags":["ICP"]},"get":{"operationId":"IcpController_listQueryPlans_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/QueryPlanDto"}}}}}},"security":[{"bearer":[]}],"summary":"查询计划列表","tags":["ICP"]}},"/api/v1/query-plans/{planId}/confirm":{"post":{"operationId":"IcpController_confirmQueryPlan_v1","parameters":[{"name":"planId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":"","content":{"application/json":{"schema":{"$ref":"#/components/schemas/QueryPlanDto"}}}}},"security":[{"bearer":[]}],"summary":"人工确认查询计划（DRAFT → READY，Discover 可执行）","tags":["ICP"]}},"/api/v1/query-plans/{planId}/execute":{"post":{"operationId":"DiscoveryController_execute_v1","parameters":[{"name":"planId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"202":{"description":""}},"security":[{"bearer":[]}],"summary":"执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）","tags":["Discovery"]}},"/api/v1/discovery-runs/{runId}":{"get":{"operationId":"DiscoveryController_getRun_v1","parameters":[{"name":"runId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"发现执行状态与统计（每源计数/归一/Suppression）","tags":["Discovery"]}},"/api/v1/canonical-companies":{"get":{"operationId":"DiscoveryController_listCompanies_v1","parameters":[{"name":"status","required":true,"in":"query","schema":{"type":"string"}},{"name":"limit","required":true,"in":"query","schema":{"type":"string"}},{"name":"cursor","required":true,"in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）","tags":["Discovery"]}},"/api/v1/canonical-companies/{id}":{"get":{"operationId":"DiscoveryController_getCompany_v1","parameters":[{"name":"id","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）","tags":["Discovery"]}},"/api/v1/canonical-companies/{id}/discover-contacts":{"post":{"operationId":"DiscoveryController_discoverContacts_v1","parameters":[{"name":"id","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"201":{"description":""}},"security":[{"bearer":[]}],"summary":"按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）","tags":["Discovery"]}},"/api/v1/contact-points/{pointId}/verify":{"post":{"operationId":"DiscoveryController_verify_v1","parameters":[{"name":"pointId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID","tags":["Discovery"]}},"/api/v1/suppressions":{"post":{"operationId":"DiscoveryController_addSuppression_v1","parameters":[],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreateSuppressionDto"}}}},"responses":{"201":{"description":""}},"security":[{"bearer":[]}],"summary":"加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED","tags":["Discovery"]},"get":{"operationId":"DiscoveryController_listSuppressions_v1","parameters":[],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"禁联名单","tags":["Discovery"]}},"/api/v1/suppressions/{id}":{"delete":{"operationId":"DiscoveryController_removeSuppression_v1","parameters":[{"name":"id","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"移除禁联记录","tags":["Discovery"]}},"/api/v1/data-providers":{"get":{"operationId":"DiscoveryController_listProviders_v1","parameters":[],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）","tags":["Discovery"]}},"/api/v1/icps/{icpId}/qualify":{"post":{"operationId":"LeadController_qualify_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"202":{"description":""}},"security":[{"bearer":[]}],"summary":"对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）","tags":["Leads"]}},"/api/v1/leads":{"get":{"operationId":"LeadController_list_v1","parameters":[{"name":"icpId","required":true,"in":"query","schema":{"type":"string"}},{"name":"queue","required":true,"in":"query","schema":{"type":"string"}},{"name":"status","required":true,"in":"query","schema":{"type":"string"}},{"name":"limit","required":true,"in":"query","schema":{"type":"string"}},{"name":"cursor","required":true,"in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）","tags":["Leads"]}},"/api/v1/icps/{icpId}/lead-queues":{"get":{"operationId":"LeadController_queues_v1","parameters":[{"name":"icpId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"四队列计数（推荐/待确认/拒绝/禁联）","tags":["Leads"]}},"/api/v1/leads/{leadId}":{"get":{"operationId":"LeadController_get_v1","parameters":[{"name":"leadId","required":true,"in":"path","schema":{"type":"string"}}],"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史","tags":["Leads"]}},"/api/v1/leads/{leadId}/accept":{"post":{"operationId":"LeadController_accept_v1","parameters":[{"name":"leadId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/AcceptLeadDto"}}}},"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）","tags":["Leads"]}},"/api/v1/leads/{leadId}/reject":{"post":{"operationId":"LeadController_reject_v1","parameters":[{"name":"leadId","required":true,"in":"path","schema":{"type":"string"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/RejectLeadDto"}}}},"responses":{"200":{"description":""}},"security":[{"bearer":[]}],"summary":"拒绝 Lead（→ REJECTED，原因留痕做质量反馈）","tags":["Leads"]}}},"info":{"title":"Global API","description":"出海企业 AI 全球客户开发与增长平台 · 后端 API","version":"0.1.0","contact":{}},"tags":[],"servers":[],"components":{"securitySchemes":{"bearer":{"scheme":"bearer","bearerFormat":"JWT","type":"http"}},"schemas":{"CreateCompanyDto":{"type":"object","properties":{"website":{"type":"string","example":"https://acme-tech.com","description":"企业官网 URL"},"name":{"type":"string","example":"Shenzhen Acme Tech Co.","description":"企业名称（可选；未填则先用域名占位，理解后回填）"}},"required":["website"]},"PublicContactDto":{"type":"object","properties":{"type":{"type":"string","enum":["email","phone","social"]},"value":{"type":"string","example":"sales@acme-tech.com"},"sourceUrl":{"type":"string","description":"该联系方式被发现的页面 URL（溯源）"}},"required":["type","value","sourceUrl"]},"CompanyDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"name":{"type":"string","example":"Shenzhen Acme Tech Co."},"website":{"type":"object","nullable":true,"example":"https://acme-tech.com"},"status":{"type":"string","enum":["DRAFT","ENRICHING","REVIEW","ACTIVE"]},"industry":{"type":"object","nullable":true,"description":"行业（理解工作流回填）"},"summary":{"type":"object","nullable":true,"description":"企业简介（抽取，可人工修正）"},"publicContacts":{"description":"官网确定性抽取的公开联系方式/社媒（正则命中，非 AI 生成，逐条带来源页）","type":"array","items":{"$ref":"#/components/schemas/PublicContactDto"}},"createdAt":{"type":"string","format":"date-time"}},"required":["id","name","status","publicContacts","createdAt"]},"PageDto":{"type":"object","properties":{"nextCursor":{"type":"object","nullable":true,"description":"下一页游标；null 表示到底"},"hasMore":{"type":"boolean"}},"required":["hasMore"]},"CompanyListDto":{"type":"object","properties":{"data":{"type":"array","items":{"$ref":"#/components/schemas/CompanyDto"}},"page":{"$ref":"#/components/schemas/PageDto"}},"required":["data","page"]},"OfferingDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"name":{"type":"string","example":"CNC 精密加工件"},"description":{"type":"object","nullable":true},"attributes":{"type":"object","nullable":true,"description":"结构化属性（moq/lead_time/materials/params/certifications…，仅来源文本明确出现的）"},"sourceUrl":{"type":"object","nullable":true,"description":"溯源：来自哪个页面"},"evidence":{"type":"object","nullable":true,"description":"来源页原文片段"},"confidence":{"type":"object","nullable":true},"createdAt":{"type":"string","format":"date-time"}},"required":["id","name","createdAt"]},"ClaimEvidenceDto":{"type":"object","properties":{"sourceUrl":{"type":"object","nullable":true,"description":"来源 URL"},"snippet":{"type":"object","nullable":true,"description":"来源原文片段"},"confidence":{"type":"object","nullable":true}}},"ClaimDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"companyId":{"type":"string","format":"uuid"},"type":{"type":"string","example":"certification"},"statement":{"type":"string","example":"产品通过 ISO 9001 与 CE 认证"},"status":{"type":"string","enum":["INGESTED","EXTRACTED","NEEDS_REVIEW","APPROVED","EXPIRED","REVOKED"]},"confidence":{"type":"object","nullable":true,"example":0.95},"version":{"type":"number","description":"乐观锁版本"},"evidence":{"description":"溯源证据（来源 URL + 原文片段）","type":"array","items":{"$ref":"#/components/schemas/ClaimEvidenceDto"}},"createdAt":{"type":"string","format":"date-time"}},"required":["id","companyId","type","statement","status","version","evidence","createdAt"]},"CreateManualClaimDto":{"type":"object","properties":{"type":{"type":"string","description":"事实类型","example":"certification"},"statement":{"type":"string","example":"通过 IATF 16949 认证（2025 续证）"},"evidence":{"type":"string","description":"依据说明（证书编号、内部资料名等）"}},"required":["type","statement"]},"ResolveConflictDto":{"type":"object","properties":{"keep":{"type":"string","enum":["a","b"],"description":"保留哪条 Claim（另一条 REVOKED）"}},"required":["keep"]},"PersonaDto":{"type":"object","properties":{"title":{"type":"string"},"goals":{"type":"array","items":{"type":"string"}},"painPoints":{"type":"array","items":{"type":"string"}}},"required":["title","goals","painPoints"]},"BuyingRoleDto":{"type":"object","properties":{"role":{"type":"string","example":"decision_maker"},"title":{"type":"object","nullable":true},"concerns":{"type":"array","items":{"type":"string"}}},"required":["role","concerns"]},"IcpRuleDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"kind":{"type":"string","enum":["MUST_HAVE","NICE_TO_HAVE","EXCLUSION"]},"field":{"type":"string"},"operator":{"type":"string"},"value":{"type":"object"},"weight":{"type":"number"},"rationale":{"type":"object","nullable":true}},"required":["id","kind","field","operator","value","weight"]},"IcpDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"companyId":{"type":"string","format":"uuid"},"name":{"type":"string"},"status":{"type":"string","enum":["DRAFT","HYPOTHESIS","VALIDATING","ACTIVE","SUPERSEDED","ARCHIVED"]},"companyAttributes":{"type":"object","description":"目标公司属性：行业/规模/地区/技术等"},"painPoints":{"type":"array","items":{"type":"string"}},"triggerSignals":{"type":"array","items":{"type":"string"}},"exclusions":{"type":"array","items":{"type":"string"}},"valueProps":{"type":"array","items":{"type":"string"}},"targetMarkets":{"type":"array","items":{"type":"string"}},"version":{"type":"number"},"personas":{"type":"array","items":{"$ref":"#/components/schemas/PersonaDto"}},"buyingCommittee":{"type":"array","items":{"$ref":"#/components/schemas/BuyingRoleDto"}},"rules":{"description":"机器可评估的验证规则（LED-003）","type":"array","items":{"$ref":"#/components/schemas/IcpRuleDto"}},"createdAt":{"type":"string","format":"date-time"}},"required":["id","companyId","name","status","companyAttributes","painPoints","triggerSignals","exclusions","valueProps","targetMarkets","version","personas","buyingCommittee","rules","createdAt"]},"UpdateIcpDto":{"type":"object","properties":{"name":{"type":"string"},"companyAttributes":{"type":"object","description":"目标公司属性"},"painPoints":{"type":"array","items":{"type":"string"}},"triggerSignals":{"type":"array","items":{"type":"string"}},"exclusions":{"type":"array","items":{"type":"string"}},"valueProps":{"type":"array","items":{"type":"string"}},"targetMarkets":{"type":"array","items":{"type":"string"}},"expectedVersion":{"type":"number","description":"乐观锁：当前版本号"}}},"CreateRuleDto":{"type":"object","properties":{"kind":{"type":"string","enum":["MUST_HAVE","NICE_TO_HAVE","EXCLUSION"]},"field":{"type":"string","example":"industry","description":"规范属性名（industry/region/employee_count/...）"},"operator":{"type":"string","enum":["eq","neq","in","not_in","contains","not_contains","gte","lte","matches"]},"value":{"type":"object","description":"操作数：标量或数组","example":["automotive","aerospace"]},"weight":{"type":"number","default":1,"description":"NICE_TO_HAVE 计分权重"},"rationale":{"type":"string","description":"规则依据（推断透明）"}},"required":["kind","field","operator","value"]},"RuleDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"icpId":{"type":"string","format":"uuid"},"kind":{"type":"string","enum":["MUST_HAVE","NICE_TO_HAVE","EXCLUSION"]},"field":{"type":"string"},"operator":{"type":"string","enum":["eq","neq","in","not_in","contains","not_contains","gte","lte","matches"]},"value":{"type":"object"},"weight":{"type":"number"},"rationale":{"type":"object","nullable":true},"version":{"type":"number"}},"required":["id","icpId","kind","field","operator","value","weight","version"]},"UpdateRuleDto":{"type":"object","properties":{"kind":{"type":"string","enum":["MUST_HAVE","NICE_TO_HAVE","EXCLUSION"]},"field":{"type":"string"},"operator":{"type":"string","enum":["eq","neq","in","not_in","contains","not_contains","gte","lte","matches"]},"value":{"type":"object","description":"操作数：标量或数组"},"weight":{"type":"number"},"rationale":{"type":"string"}}},"BacktestSampleDto":{"type":"object","properties":{"name":{"type":"string","example":"Muster Metallbau GmbH"},"domain":{"type":"string","example":"muster-metallbau.de"},"attributes":{"type":"object","description":"已知的公司属性（industry/region/employee_count/...），规则据此确定性评估","example":{"industry":"metal fabrication","country":"DE","employee_count":120}},"expected":{"type":"string","enum":["match","exclude"],"description":"期望结果：已知客户=match，已知不合适=exclude"}},"required":["name","attributes","expected"]},"RunBacktestDto":{"type":"object","properties":{"samples":{"minItems":1,"type":"array","items":{"$ref":"#/components/schemas/BacktestSampleDto"}}},"required":["samples"]},"BacktestDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"icpId":{"type":"string","format":"uuid"},"results":{"type":"object","description":"逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估"},"metrics":{"type":"object","description":"matchHitRate / excludeCatchRate / unknownFieldRate / recommendation"},"createdAt":{"type":"string","format":"date-time"}},"required":["id","icpId","results","metrics","createdAt"]},"QueryPlanDto":{"type":"object","properties":{"id":{"type":"string","format":"uuid"},"icpId":{"type":"string","format":"uuid"},"status":{"type":"string","enum":["DRAFT","READY","EXECUTED"]},"queries":{"type":"object","description":"有序查询列表：source_class + filters + keywords + rationale + priority"},"estimatedVolume":{"type":"object","nullable":true},"version":{"type":"number"},"createdAt":{"type":"string","format":"date-time"}},"required":["id","icpId","status","queries","version","createdAt"]},"CreateSuppressionDto":{"type":"object","properties":{"type":{"type":"string","enum":["email","domain","company_name"]},"value":{"type":"string","example":"noreply@example.com"},"reason":{"type":"string","enum":["unsubscribe","bounce","complaint","manual","legal"]}},"required":["type","value"]},"AcceptLeadDto":{"type":"object","properties":{"reason":{"type":"string"}}},"RejectLeadDto":{"type":"object","properties":{"reason":{"type":"string","description":"拒绝原因（回流做评分质量反馈）"}}}}}}
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "HealthController_check_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "健康检查（存活）",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/health/db": {
+      "get": {
+        "operationId": "HealthController_db_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "数据库连通性检查（以 app_user 连接）",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/whoami": {
+      "get": {
+        "operationId": "WhoamiController_whoami_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "返回从 token 解出的调用上下文（user / workspace / roles）",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/companies": {
+      "post": {
+        "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
+        "operationId": "CompanyController_create_v1",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "幂等键（客户端生成，如 uuid）",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCompanyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "提交官网，创建企业画像并触发理解（异步）",
+        "tags": [
+          "Companies"
+        ]
+      },
+      "get": {
+        "operationId": "CompanyController_list_v1",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出当前 workspace 的企业画像（游标分页）",
+        "tags": [
+          "Companies"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}": {
+      "get": {
+        "operationId": "CompanyController_get_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "按 id 获取企业画像（跨租户返回 404）",
+        "tags": [
+          "Companies"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/completeness": {
+      "get": {
+        "operationId": "CompanyController_completeness_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态",
+        "tags": [
+          "Companies"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/confirm": {
+      "post": {
+        "operationId": "CompanyController_confirm_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）",
+        "tags": [
+          "Companies"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/offerings": {
+      "get": {
+        "operationId": "CompanyController_listOfferings_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OfferingDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）",
+        "tags": [
+          "Companies"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/claims": {
+      "get": {
+        "operationId": "ClaimController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClaimDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）",
+        "tags": [
+          "Claims"
+        ]
+      },
+      "post": {
+        "operationId": "ClaimController_createManual_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateManualClaimDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）",
+        "tags": [
+          "Claims"
+        ]
+      }
+    },
+    "/api/v1/claims/{claimId}/approve": {
+      "post": {
+        "operationId": "ClaimController_approve_v1",
+        "parameters": [
+          {
+            "name": "claimId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件",
+        "tags": [
+          "Claims"
+        ]
+      }
+    },
+    "/api/v1/claims/{claimId}/reject": {
+      "post": {
+        "operationId": "ClaimController_reject_v1",
+        "parameters": [
+          {
+            "name": "claimId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "驳回（NEEDS_REVIEW → REVOKED）",
+        "tags": [
+          "Claims"
+        ]
+      }
+    },
+    "/api/v1/claims/{claimId}/revoke": {
+      "post": {
+        "operationId": "ClaimController_revoke_v1",
+        "parameters": [
+          {
+            "name": "claimId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）",
+        "tags": [
+          "Claims"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/conflicts": {
+      "get": {
+        "operationId": "ClaimController_listConflicts_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "知识冲突列表（KNW-004；?status=OPEN）",
+        "tags": [
+          "Claims"
+        ]
+      }
+    },
+    "/api/v1/conflicts/{conflictId}/resolve": {
+      "post": {
+        "operationId": "ClaimController_resolveConflict_v1",
+        "parameters": [
+          {
+            "name": "conflictId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveConflictDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "裁决冲突：保留一条，另一条 REVOKED",
+        "tags": [
+          "Claims"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/icps": {
+      "post": {
+        "operationId": "IcpController_generate_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IcpDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icps": {
+      "get": {
+        "operationId": "IcpController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IcpDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出 ICP（可用 ?companyId= 过滤）",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}": {
+      "get": {
+        "operationId": "IcpController_get_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IcpDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "获取 ICP 详情（含 Persona + 买家委员会）",
+        "tags": [
+          "ICP"
+        ]
+      },
+      "patch": {
+        "operationId": "IcpController_update_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIcpDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IcpDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "人工修订 ICP（AI 产出是假设，可编辑；乐观锁）",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/activate": {
+      "post": {
+        "operationId": "IcpController_activate_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IcpDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/rules": {
+      "post": {
+        "operationId": "IcpController_addRule_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRuleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "新增验证规则（must_have / nice_to_have / exclusion，机器可评估）",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icp-rules/{ruleId}": {
+      "patch": {
+        "operationId": "IcpController_updateRule_v1",
+        "parameters": [
+          {
+            "name": "ruleId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRuleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "修改验证规则",
+        "tags": [
+          "ICP"
+        ]
+      },
+      "delete": {
+        "operationId": "IcpController_deleteRule_v1",
+        "parameters": [
+          {
+            "name": "ruleId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "删除验证规则",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/backtests": {
+      "post": {
+        "operationId": "IcpController_runBacktest_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBacktestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "用已知客户/非客户样例回测 ICP 规则（确定性评估）；HYPOTHESIS → VALIDATING",
+        "tags": [
+          "ICP"
+        ]
+      },
+      "get": {
+        "operationId": "IcpController_listBacktests_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BacktestDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "回测历史",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/query-plans": {
+      "post": {
+        "operationId": "IcpController_generateQueryPlan_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryPlanDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）",
+        "tags": [
+          "ICP"
+        ]
+      },
+      "get": {
+        "operationId": "IcpController_listQueryPlans_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueryPlanDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "查询计划列表",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/query-plans/{planId}/confirm": {
+      "post": {
+        "operationId": "IcpController_confirmQueryPlan_v1",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryPlanDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "人工确认查询计划（DRAFT → READY，Discover 可执行）",
+        "tags": [
+          "ICP"
+        ]
+      }
+    },
+    "/api/v1/query-plans/{planId}/execute": {
+      "post": {
+        "operationId": "DiscoveryController_execute_v1",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/discovery-runs/{runId}": {
+      "get": {
+        "operationId": "DiscoveryController_getRun_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "发现执行状态与统计（每源计数/归一/Suppression）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/canonical-companies": {
+      "get": {
+        "operationId": "DiscoveryController_listCompanies_v1",
+        "parameters": [
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/canonical-companies/{id}": {
+      "get": {
+        "operationId": "DiscoveryController_getCompany_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/canonical-companies/{id}/discover-contacts": {
+      "post": {
+        "operationId": "DiscoveryController_discoverContacts_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/contact-points/{pointId}/verify": {
+      "post": {
+        "operationId": "DiscoveryController_verify_v1",
+        "parameters": [
+          {
+            "name": "pointId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/suppressions": {
+      "post": {
+        "operationId": "DiscoveryController_addSuppression_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSuppressionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED",
+        "tags": [
+          "Discovery"
+        ]
+      },
+      "get": {
+        "operationId": "DiscoveryController_listSuppressions_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "禁联名单",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/suppressions/{id}": {
+      "delete": {
+        "operationId": "DiscoveryController_removeSuppression_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "移除禁联记录",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/data-providers": {
+      "get": {
+        "operationId": "DiscoveryController_listProviders_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/qualify": {
+      "post": {
+        "operationId": "LeadController_qualify_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）",
+        "tags": [
+          "Leads"
+        ]
+      }
+    },
+    "/api/v1/leads": {
+      "get": {
+        "operationId": "LeadController_list_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "queue",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）",
+        "tags": [
+          "Leads"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/lead-queues": {
+      "get": {
+        "operationId": "LeadController_queues_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
+        "tags": [
+          "Leads"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}": {
+      "get": {
+        "operationId": "LeadController_get_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史",
+        "tags": [
+          "Leads"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}/accept": {
+      "post": {
+        "operationId": "LeadController_accept_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptLeadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）",
+        "tags": [
+          "Leads"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}/reject": {
+      "post": {
+        "operationId": "LeadController_reject_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectLeadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "拒绝 Lead（→ REJECTED，原因留痕做质量反馈）",
+        "tags": [
+          "Leads"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Global API",
+    "description": "出海企业 AI 全球客户开发与增长平台 · 后端 API（前端接入见 packages/contracts/INTEGRATION.md）",
+    "version": "0.1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "CreateCompanyDto": {
+        "type": "object",
+        "properties": {
+          "website": {
+            "type": "string",
+            "example": "https://acme-tech.com",
+            "description": "企业官网 URL"
+          },
+          "name": {
+            "type": "string",
+            "example": "Shenzhen Acme Tech Co.",
+            "description": "企业名称（可选；未填则先用域名占位，理解后回填）"
+          }
+        },
+        "required": [
+          "website"
+        ]
+      },
+      "PublicContactDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "email",
+              "phone",
+              "social"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "example": "sales@acme-tech.com"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "description": "该联系方式被发现的页面 URL（溯源）"
+          }
+        },
+        "required": [
+          "type",
+          "value",
+          "sourceUrl"
+        ]
+      },
+      "CompanyDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Shenzhen Acme Tech Co."
+          },
+          "website": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://acme-tech.com"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ENRICHING",
+              "REVIEW",
+              "ACTIVE"
+            ]
+          },
+          "industry": {
+            "type": "object",
+            "nullable": true,
+            "description": "行业（理解工作流回填）"
+          },
+          "summary": {
+            "type": "object",
+            "nullable": true,
+            "description": "企业简介（抽取，可人工修正）"
+          },
+          "publicContacts": {
+            "description": "官网确定性抽取的公开联系方式/社媒（正则命中，非 AI 生成，逐条带来源页）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicContactDto"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "publicContacts",
+          "createdAt"
+        ]
+      },
+      "PageDto": {
+        "type": "object",
+        "properties": {
+          "nextCursor": {
+            "type": "object",
+            "nullable": true,
+            "description": "下一页游标；null 表示到底"
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hasMore"
+        ]
+      },
+      "CompanyListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyDto"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageDto"
+          }
+        },
+        "required": [
+          "data",
+          "page"
+        ]
+      },
+      "OfferingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "CNC 精密加工件"
+          },
+          "description": {
+            "type": "object",
+            "nullable": true
+          },
+          "attributes": {
+            "type": "object",
+            "nullable": true,
+            "description": "结构化属性（moq/lead_time/materials/params/certifications…，仅来源文本明确出现的）"
+          },
+          "sourceUrl": {
+            "type": "object",
+            "nullable": true,
+            "description": "溯源：来自哪个页面"
+          },
+          "evidence": {
+            "type": "object",
+            "nullable": true,
+            "description": "来源页原文片段"
+          },
+          "confidence": {
+            "type": "object",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ]
+      },
+      "ClaimEvidenceDto": {
+        "type": "object",
+        "properties": {
+          "sourceUrl": {
+            "type": "object",
+            "nullable": true,
+            "description": "来源 URL"
+          },
+          "snippet": {
+            "type": "object",
+            "nullable": true,
+            "description": "来源原文片段"
+          },
+          "confidence": {
+            "type": "object",
+            "nullable": true
+          }
+        }
+      },
+      "ClaimDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "example": "certification"
+          },
+          "statement": {
+            "type": "string",
+            "example": "产品通过 ISO 9001 与 CE 认证"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "INGESTED",
+              "EXTRACTED",
+              "NEEDS_REVIEW",
+              "APPROVED",
+              "EXPIRED",
+              "REVOKED"
+            ]
+          },
+          "confidence": {
+            "type": "object",
+            "nullable": true,
+            "example": 0.95
+          },
+          "version": {
+            "type": "number",
+            "description": "乐观锁版本"
+          },
+          "evidence": {
+            "description": "溯源证据（来源 URL + 原文片段）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimEvidenceDto"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "type",
+          "statement",
+          "status",
+          "version",
+          "evidence",
+          "createdAt"
+        ]
+      },
+      "CreateManualClaimDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "事实类型",
+            "example": "certification"
+          },
+          "statement": {
+            "type": "string",
+            "example": "通过 IATF 16949 认证（2025 续证）"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "依据说明（证书编号、内部资料名等）"
+          }
+        },
+        "required": [
+          "type",
+          "statement"
+        ]
+      },
+      "ResolveConflictDto": {
+        "type": "object",
+        "properties": {
+          "keep": {
+            "type": "string",
+            "enum": [
+              "a",
+              "b"
+            ],
+            "description": "保留哪条 Claim（另一条 REVOKED）"
+          }
+        },
+        "required": [
+          "keep"
+        ]
+      },
+      "PersonaDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "goals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "painPoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title",
+          "goals",
+          "painPoints"
+        ]
+      },
+      "BuyingRoleDto": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "example": "decision_maker"
+          },
+          "title": {
+            "type": "object",
+            "nullable": true
+          },
+          "concerns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "role",
+          "concerns"
+        ]
+      },
+      "IcpRuleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
+          },
+          "field": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "rationale": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "field",
+          "operator",
+          "value",
+          "weight"
+        ]
+      },
+      "IcpDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "HYPOTHESIS",
+              "VALIDATING",
+              "ACTIVE",
+              "SUPERSEDED",
+              "ARCHIVED"
+            ]
+          },
+          "companyAttributes": {
+            "type": "object",
+            "description": "目标公司属性：行业/规模/地区/技术等"
+          },
+          "painPoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "triggerSignals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "valueProps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetMarkets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "number"
+          },
+          "personas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonaDto"
+            }
+          },
+          "buyingCommittee": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BuyingRoleDto"
+            }
+          },
+          "rules": {
+            "description": "机器可评估的验证规则（LED-003）",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IcpRuleDto"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "name",
+          "status",
+          "companyAttributes",
+          "painPoints",
+          "triggerSignals",
+          "exclusions",
+          "valueProps",
+          "targetMarkets",
+          "version",
+          "personas",
+          "buyingCommittee",
+          "rules",
+          "createdAt"
+        ]
+      },
+      "UpdateIcpDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "companyAttributes": {
+            "type": "object",
+            "description": "目标公司属性"
+          },
+          "painPoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "triggerSignals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exclusions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "valueProps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetMarkets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedVersion": {
+            "type": "number",
+            "description": "乐观锁：当前版本号"
+          }
+        }
+      },
+      "CreateRuleDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
+          },
+          "field": {
+            "type": "string",
+            "example": "industry",
+            "description": "规范属性名（industry/region/employee_count/...）"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "neq",
+              "in",
+              "not_in",
+              "contains",
+              "not_contains",
+              "gte",
+              "lte",
+              "matches"
+            ]
+          },
+          "value": {
+            "type": "object",
+            "description": "操作数：标量或数组",
+            "example": [
+              "automotive",
+              "aerospace"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "default": 1,
+            "description": "NICE_TO_HAVE 计分权重"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "规则依据（推断透明）"
+          }
+        },
+        "required": [
+          "kind",
+          "field",
+          "operator",
+          "value"
+        ]
+      },
+      "RuleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icpId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
+          },
+          "field": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "neq",
+              "in",
+              "not_in",
+              "contains",
+              "not_contains",
+              "gte",
+              "lte",
+              "matches"
+            ]
+          },
+          "value": {
+            "type": "object"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "rationale": {
+            "type": "object",
+            "nullable": true
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "icpId",
+          "kind",
+          "field",
+          "operator",
+          "value",
+          "weight",
+          "version"
+        ]
+      },
+      "UpdateRuleDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
+          },
+          "field": {
+            "type": "string"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "neq",
+              "in",
+              "not_in",
+              "contains",
+              "not_contains",
+              "gte",
+              "lte",
+              "matches"
+            ]
+          },
+          "value": {
+            "type": "object",
+            "description": "操作数：标量或数组"
+          },
+          "weight": {
+            "type": "number"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        }
+      },
+      "BacktestSampleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Muster Metallbau GmbH"
+          },
+          "domain": {
+            "type": "string",
+            "example": "muster-metallbau.de"
+          },
+          "attributes": {
+            "type": "object",
+            "description": "已知的公司属性（industry/region/employee_count/...），规则据此确定性评估",
+            "example": {
+              "industry": "metal fabrication",
+              "country": "DE",
+              "employee_count": 120
+            }
+          },
+          "expected": {
+            "type": "string",
+            "enum": [
+              "match",
+              "exclude"
+            ],
+            "description": "期望结果：已知客户=match，已知不合适=exclude"
+          }
+        },
+        "required": [
+          "name",
+          "attributes",
+          "expected"
+        ]
+      },
+      "RunBacktestDto": {
+        "type": "object",
+        "properties": {
+          "samples": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BacktestSampleDto"
+            }
+          }
+        },
+        "required": [
+          "samples"
+        ]
+      },
+      "BacktestDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icpId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "results": {
+            "type": "object",
+            "description": "逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估"
+          },
+          "metrics": {
+            "type": "object",
+            "description": "matchHitRate / excludeCatchRate / unknownFieldRate / recommendation"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "icpId",
+          "results",
+          "metrics",
+          "createdAt"
+        ]
+      },
+      "QueryPlanDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icpId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "READY",
+              "EXECUTED"
+            ]
+          },
+          "queries": {
+            "type": "object",
+            "description": "有序查询列表：source_class + filters + keywords + rationale + priority"
+          },
+          "estimatedVolume": {
+            "type": "object",
+            "nullable": true
+          },
+          "version": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "icpId",
+          "status",
+          "queries",
+          "version",
+          "createdAt"
+        ]
+      },
+      "CreateSuppressionDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "email",
+              "domain",
+              "company_name"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "example": "noreply@example.com"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unsubscribe",
+              "bounce",
+              "complaint",
+              "manual",
+              "legal"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      "AcceptLeadDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "RejectLeadDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "拒绝原因（回流做评分质量反馈）"
+          }
+        }
+      }
+    }
+  }
+}

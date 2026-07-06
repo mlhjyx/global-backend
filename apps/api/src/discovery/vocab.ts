@@ -117,15 +117,36 @@ export const REGION_OSM_AREA: Record<string, string> = {
   巴伐利亚: 'Bayern',
 };
 
+/**
+ * 词表键归一：Unicode NFC + 小写 + 去空白。**必须**——含变音符的词（Württemberg 的 ü、
+ * Bayern 等）从 JSON/DB 进来可能是 NFD（组合字符），与源文件的 NFC 键不相等，
+ * toLowerCase 也救不了。所有查表都经此函数。
+ */
+export function normKey(term: string): string {
+  return term.normalize('NFC').toLowerCase().trim();
+}
+
 export function mapIndustryToQids(terms: string[]): string[] {
   const out = new Set<string>();
   for (const t of terms) {
-    const q = INDUSTRY_QIDS[t.toLowerCase().trim()];
+    const q = INDUSTRY_QIDS[normKey(t)];
     if (q) out.add(q);
   }
   return [...out];
 }
 
 export function mapCountryToQid(term: string): string | undefined {
-  return COUNTRY_QIDS[term.toLowerCase().trim()];
+  return COUNTRY_QIDS[normKey(term)];
+}
+
+export function lookupIndustryOsmTags(term: string): { k: string; v?: string }[] | undefined {
+  return INDUSTRY_OSM_TAGS[normKey(term)];
+}
+
+export function lookupRegionOsmArea(term: string): string | undefined {
+  return REGION_OSM_AREA[normKey(term)];
+}
+
+export function lookupCountryIso(term: string): string | undefined {
+  return COUNTRY_ISO[normKey(term)];
 }
