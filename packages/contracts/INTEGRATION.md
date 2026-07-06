@@ -40,7 +40,10 @@
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{runId}`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
-   - 过了 fit 门的高价值公司自动做 **GLEIF 法律身份富集**：`attributes.gleif.*`（`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`…）——UI 可展示 LEI、法人形式与**母子集团关系**（识别目标是否某集团子公司）；每字段带 `field_evidence`（`license=public`，来源 GLEIF 记录 URL）
+   - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
+     - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）
+     - `attributes.wikidata.*` —— 商业事实：`industries`/`products`/`employees`/`inception_year`/`parent_name`/`subsidiary_count`/`lei`/`isin`/`stock_exchange`/`headquarters`/`website`
+     - 每字段带 `field_evidence`（`license=public`，`provider_key` 标来源，含 GLEIF/Wikidata 记录 URL）；两源的 `lei` 可交叉验证
 5. 高价值企业按需补联系人：`POST /canonical-companies/:id/discover-contacts`；邮箱验证：`POST /contact-points/:id/verify`
 6. 禁联名单：`POST|GET|DELETE /suppressions`（domain/email/company_name；即时生效）
 

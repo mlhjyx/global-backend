@@ -12,6 +12,7 @@ import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
 import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
+import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
 /** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -43,7 +44,9 @@ export class DiscoveryProviderRegistry {
     // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
     this.discovery.push(new WikidataDiscoveryProvider());
     this.discovery.push(new OsmDiscoveryProvider());
-    // 富集源（对已归一公司补法律身份/母子关系）——GLEIF 官方开放 API，零成本。
+    // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
+    //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
+    this.enrichers.push(new WikidataEnrichmentProvider());
     this.enrichers.push(new GleifEnrichmentProvider());
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {

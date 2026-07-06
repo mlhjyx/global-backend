@@ -9,6 +9,7 @@
 |---|---|---|---|---|---|
 | **P0** | 官网（现状） | SearXNG general(site:/filetype:) → 噪声过滤 → Crawl4AI → Gemini 判站抽取 | 名/国/行业/员工数/产品/关键词 + 页面指纹 | 🟢🟡 逐域 robots | `PublicWebDiscoveryProvider`（已跑通） |
 | **P0** | **Wikidata SPARQL** | WDQS 直连，按行业 P452 + 国家 P17 枚举，**零爬取**直接返回名+官网 P856+员工数 P1128+坐标 | 名/官网/员工数/行业/母公司/LEI/坐标 | 🟢 CC0 | `wikidata.sparql` Tool（**已实现+实测**），包成 discovery adapter |
+| **P0** | **Wikidata REST**（富集） | wbsearchentities+wbgetentities，按名找实体→取 claims；**不依赖偶发不可达的 SPARQL 端点** | 行业/产品/员工/成立年/母子/LEI/ISIN/交易所/总部/官网 | 🟢 CC0 | `WikidataEnrichmentProvider`（**已实现+实测**），enrichRun 富集层，与 GLEIF 互补 |
 | **P0** | **OpenStreetMap** | Overpass API 按工业标签(landuse=industrial/craft=metal_*/man_made=works)+地区，或 SearXNG osm 引擎 | 名/精确坐标/地址/OSM标签/有时官网 | 🟢 ODbL | `osm.overpass` Tool（**已实现+实测**），包成 adapter |
 | **P0** | 行业协会会员名录（VDMA ~3500 家/AMT） | SearXNG general/files 定位会员目录/PDF → Crawl4AI 分页 → Gemini **列表抽取**（一页多公司） | 名/官网/地址/sector/机械 nomenclature | 🟢 公开会员册 | 新 `association_directory` adapter（industry_data） |
 | **P0** | 展会参展商名录（Hannover Messe/EuroBLECH/广交会） | Hannover Messe 官方 **CSV 导出**优先；余者 SearXNG 定位 exhibitor-list → Crawl4AI → Gemini | 名/官网/展位/产品分类/国家/参展年份(活跃度) | 🟢🟡 实测 robots 允许 exhibitor 路径 | 新 `trade_fair` adapter（industry_data） |

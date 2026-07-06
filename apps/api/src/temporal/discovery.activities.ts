@@ -377,9 +377,11 @@ export function createDiscoveryActivities(deps: {
 
     /**
      * 富集（Waterfall 富化段，PRD 7.4.7/7.4.8）：只对通过 ICP 资格门的高价值公司
-     * （fitVerdict=match）补结构化法律身份 —— GLEIF LEI + 法人形式 + 母子关系。
-     * 「贵操作只给会跟进的线索」；GLEIF 零成本但仍受限流，故限量并幂等（已有 LEI 跳过）。
-     * 网络调用在事务外，每家命中后单独落库（attributes 合并 + 逐字段 field_evidence）。
+     * （fitVerdict=match）补结构化事实 —— 多个富集源**互补并跑**：
+     *   GLEIF = 法律身份（LEI/法人形式/母子关系）；Wikidata = 商业事实（行业/产品/财务/官网）。
+     * 「贵操作只给会跟进的线索」；各源零成本但受限流，故限量。
+     * 幂等：按 enricher key 命名空间存 attributes，已有该源命名空间则跳过（重跑不重复写证据）。
+     * 网络调用在事务外，每家命中后单独落库（attributes 命名空间合并 + 逐字段 field_evidence）。
      */
     async enrichRun(args: {
       workspaceId: string;
@@ -390,7 +392,7 @@ export function createDiscoveryActivities(deps: {
       );
       if (!enrichers.length) return { enriched: 0, matched: 0, provider: null };
 
-      // 本 run 归一出、且过了 fit 门的公司（尚未富集过的）
+      // 本 run 归一出、且过了 fit 门的公司
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = await tx.rawSourceRecord.findMany({
           where: { runId: args.runId },
@@ -412,11 +414,10 @@ export function createDiscoveryActivities(deps: {
       let matched = 0;
       for (const c of companies.slice(0, ENRICH_LIMIT)) {
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
-        if (existing.lei) continue; // 幂等：已富集过跳过
-
-        let result: EnrichmentResult | null = null;
-        let enricherKey = '';
+        // 所有 enricher 互补并跑；已有该源命名空间的跳过（幂等）
+        const hits: { key: string; result: EnrichmentResult }[] = [];
         for (const e of enrichers) {
+          if (existing[e.key]) continue; // 该源已富集过 → 跳过（重跑不重复写）
           try {
             const r = await e.enrichCompany({
               name: c.name,
@@ -424,45 +425,42 @@ export function createDiscoveryActivities(deps: {
               country: c.country ?? undefined,
               region: c.region ?? undefined,
             });
-            if (r.matched) {
-              result = r;
-              enricherKey = e.key;
-              break; // 首个命中即用（enricher 无天然优先级时按注册序）
-            }
+            if (r.matched) hits.push({ key: e.key, result: r });
           } catch {
             // 单富集源失败不影响其余
           }
         }
         enriched += 1;
-        if (!result) continue;
+        if (!hits.length) continue;
         matched += 1;
-        providersHit.add(enricherKey);
+        hits.forEach((h) => providersHit.add(h.key));
 
-        const captured = result; // 收窄类型给闭包
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          // attributes 按 enricher key 命名空间合并（attributes.gleif.* / attributes.wikidata.*）
+          const merged: Record<string, unknown> = { ...existing };
+          for (const h of hits) merged[h.key] = h.result.attributes;
           await tx.canonicalCompany.update({
             where: { id: c.id },
-            data: {
-              attributes: { ...existing, ...captured.attributes } as never,
-              version: { increment: 1 },
-            },
+            data: { attributes: merged as never, version: { increment: 1 } },
           });
-          for (const [field, value] of Object.entries(captured.attributes)) {
-            if (value == null) continue;
-            await tx.fieldEvidence.create({
-              data: {
-                workspaceId: args.workspaceId,
-                entityType: 'company',
-                entityId: c.id,
-                field: `gleif.${field}`,
-                value: value as Prisma.InputJsonValue,
-                providerKey: enricherKey,
-                confidence: captured.confidence,
-                license: 'public', // GLEIF 为 CC0 公共领域
-                allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                ...(captured.provenance ? { fetchedAt: new Date(captured.provenance.fetchedAt) } : {}),
-              },
-            });
+          for (const h of hits) {
+            for (const [field, value] of Object.entries(h.result.attributes)) {
+              if (value == null) continue;
+              await tx.fieldEvidence.create({
+                data: {
+                  workspaceId: args.workspaceId,
+                  entityType: 'company',
+                  entityId: c.id,
+                  field: `${h.key}.${field}`,
+                  value: value as Prisma.InputJsonValue,
+                  providerKey: h.key,
+                  confidence: h.result.confidence,
+                  license: 'public', // GLEIF / Wikidata 均为 CC0 公共领域
+                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
+                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
+                },
+              });
+            }
           }
         });
       }
