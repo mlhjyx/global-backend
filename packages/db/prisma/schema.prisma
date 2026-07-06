@@ -245,6 +245,175 @@ model Citation {
   @@map("citation")
 }
 
+// ── Global Business Data Hub & 客户发现 (PRD 7.4 / 第8部分 / 5.5) ──────────
+
+/// Provider 注册表（平台级，非租户数据 → 无 RLS）。七类 Provider（PRD 7.4.7）。
+/// 第一版只有 sandbox 实现；真源签约后加行即可，适配器按 key 挂接。
+model DataProvider {
+  id               String   @id @default(uuid()) @db.Uuid
+  key              String   @unique // 'sandbox' | 'tendata' | 'apollo' ...
+  class            String // trade_data | b2b_company_person | company_registry | contact_discovery | email_verification | public_intelligence | industry_data
+  status           String   @default("ENABLED") // ENABLED | DISABLED（Kill Switch 执行点）
+  costPerCallCents Int      @default(0) @map("cost_per_call_cents")
+  config           Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("data_provider")
+}
+
+/// 一次发现执行（对应一个 READY 的查询计划）。
+model DiscoveryRun {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  planId      String    @map("plan_id") @db.Uuid
+  icpId       String    @map("icp_id") @db.Uuid
+  status      String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
+  stats       Json? // 每源计数/成本/去重结果
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  rawRecords RawSourceRecord[]
+
+  @@index([workspaceId])
+  @@index([planId])
+  @@map("discovery_run")
+}
+
+/// Raw Zone（PRD 8.7）：Provider 原始返回原样落地，永不直接进领域层（ADR-017）。
+model RawSourceRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  providerKey String   @map("provider_key")
+  sourceClass String   @map("source_class")
+  externalId  String?  @map("external_id") // Provider 侧 id（幂等去重）
+  payload     Json
+  costCents   Int      @default(0) @map("cost_cents")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run DiscoveryRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, providerKey, externalId])
+  @@index([workspaceId])
+  @@map("raw_source_record")
+}
+
+/// Canonical 公司（PRD 8.8/8.9）：跨源归一后的目标客户公司。
+/// 字段值的来源/许可/置信度在 field_evidence —— canonical 只是「当前最优视图」。
+model CanonicalCompany {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  name          String
+  domain        String?
+  country       String?
+  region        String?
+  industry      String?
+  employeeCount Int?     @map("employee_count")
+  revenueUsd    Float?   @map("revenue_usd")
+  attributes    Json? // 其余归一属性（certifications/keywords/tech/end_markets...）
+  status        String   @default("NEW") // NEW | ENRICHED | SUPPRESSED
+  dedupeKey     String   @map("dedupe_key") // 身份解析键：域名 或 name+country 规范化
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  contacts CanonicalContact[]
+
+  @@unique([workspaceId, dedupeKey])
+  @@index([workspaceId])
+  @@map("canonical_company")
+}
+
+/// Canonical 联系人（PRD 8.9 个人分层：按需、最小化、可验证）。
+model CanonicalContact {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  fullName    String   @map("full_name")
+  title       String?
+  seniority   String? // c_level | vp | director | manager | staff
+  department  String?
+  dedupeKey   String   @map("dedupe_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company       CanonicalCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactPoints ContactPoint[]
+
+  @@unique([workspaceId, dedupeKey])
+  @@index([workspaceId])
+  @@index([companyId])
+  @@map("canonical_contact")
+}
+
+/// 联系方式（PRD 7.4/8.9）：带验证状态生命周期，发送前必须 VALID。
+model ContactPoint {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  contactId   String    @map("contact_id") @db.Uuid
+  type        String // email | phone | linkedin
+  value       String
+  status      String    @default("UNVERIFIED") // UNVERIFIED | VALID | RISKY | INVALID
+  verifiedAt  DateTime? @map("verified_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  contact CanonicalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, type, value])
+  @@index([workspaceId])
+  @@map("contact_point")
+}
+
+/// 身份解析连接（PRD 8.8）：canonical 实体 ↔ raw 记录，可审计可回溯。
+model IdentityLink {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  canonicalType String   @map("canonical_type") // company | contact
+  canonicalId   String   @map("canonical_id") @db.Uuid
+  rawRecordId   String   @map("raw_record_id") @db.Uuid
+  matchRule     String   @map("match_rule") // domain_exact | name_country | provider_id
+  confidence    Float    @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([canonicalId])
+  @@map("identity_link")
+}
+
+/// 字段级 Evidence（PRD 7.4.9 / 8.10）：canonical 字段不只存最终值 ——
+/// 每个字段的每个来源值都留痕：来源/时间/置信度/许可/允许动作。
+model FieldEvidence {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  entityType     String   @map("entity_type") // company | contact
+  entityId       String   @map("entity_id") @db.Uuid
+  field          String
+  value          Json
+  providerKey    String   @map("provider_key")
+  rawRecordId    String?  @map("raw_record_id") @db.Uuid
+  confidence     Float?
+  license        String   @default("sandbox") // sandbox | licensed | public | byo
+  allowedActions Json?    @map("allowed_actions") // ['display','match','outreach']
+  fetchedAt      DateTime @default(now()) @map("fetched_at")
+
+  @@index([workspaceId])
+  @@index([workspaceId, entityType, entityId])
+  @@map("field_evidence")
+}
+
+/// Suppression（PRD 7.4 / 12.6）：禁联名单，任何对外动作前的第一道检查。
+model SuppressionRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  type        String // email | domain | company_name
+  value       String
+  reason      String? // unsubscribe | bounce | complaint | manual | legal
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, type, value])
+  @@index([workspaceId])
+  @@map("suppression_record")
+}
+
 // ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────
 
 /// ICP lifecycle (PRD 11.9): DRAFT → HYPOTHESIS → VALIDATING → ACTIVE → SUPERSEDED → ARCHIVED

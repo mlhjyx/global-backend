@@ -9,6 +9,8 @@ import { StubModelProvider } from '../model-gateway/providers/stub-model.provide
 import { buildGatewayProvider, stubAllowed } from '../model-gateway/model-providers.config';
 import { AiTraceSink } from '../model-gateway/ai-trace.sink';
 import { createUnderstandingActivities } from './understanding.activities';
+import { createDiscoveryActivities } from './discovery.activities';
+import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 
 /**
@@ -33,8 +35,11 @@ async function main(): Promise<void> {
     connection,
     namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     taskQueue: UNDERSTANDING_TASK_QUEUE,
-    workflowsPath: require.resolve('./understanding.workflow'),
-    activities: createUnderstandingActivities({ prisma, gateway }),
+    workflowsPath: require.resolve('./workflows'),
+    activities: {
+      ...createUnderstandingActivities({ prisma, gateway }),
+      ...createDiscoveryActivities({ prisma, providers: new DiscoveryProviderRegistry() }),
+    },
   });
 
   // eslint-disable-next-line no-console

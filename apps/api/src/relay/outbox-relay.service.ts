@@ -2,9 +2,11 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaClient } from '@prisma/client';
 import { TemporalClient } from '../temporal/temporal.client';
 import {
+  DISCOVERY_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
+import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -23,6 +25,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.db.$connect();
+    // 平台配置播种（data_provider 无 RLS，owner 连接写入）
+    await new DiscoveryProviderRegistry().seed(this.db).catch((err) => {
+      this.logger.warn(`provider seed failed: ${String(err)}`);
+    });
     this.timer = setInterval(() => {
       void this.tick();
     }, 2000);
@@ -76,6 +82,22 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         ],
       });
       this.logger.log(`started understanding workflow for company ${ev.aggregateId}`);
+    }
+    if (ev.eventType === 'DiscoveryRunRequested') {
+      const payload = (ev.payload ?? {}) as { planId?: string; icpId?: string };
+      await this.temporal.client.workflow.start(DISCOVERY_WORKFLOW, {
+        taskQueue: UNDERSTANDING_TASK_QUEUE,
+        workflowId: `discovery-${ev.aggregateId}`,
+        args: [
+          {
+            workspaceId: ev.workspaceId,
+            runId: ev.aggregateId,
+            planId: payload.planId ?? '',
+            icpId: payload.icpId ?? '',
+          },
+        ],
+      });
+      this.logger.log(`started discovery workflow for run ${ev.aggregateId}`);
     }
     // Other event types: no handler yet (still marked published).
   }

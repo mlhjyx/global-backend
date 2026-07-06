@@ -9,6 +9,7 @@ import { WhoamiController } from './whoami/whoami.controller';
 import { CompanyModule } from './company/company.module';
 import { ClaimModule } from './claim/claim.module';
 import { IcpModule } from './icp/icp.module';
+import { DiscoveryModule } from './discovery/discovery.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -24,6 +25,7 @@ import { IcpModule } from './icp/icp.module';
     CompanyModule,
     ClaimModule,
     IcpModule,
+    DiscoveryModule,
   ],
   controllers: [HealthController, WhoamiController],
 })
