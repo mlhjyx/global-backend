@@ -17,19 +17,19 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
           type: 'array',
           items: {
             type: 'object',
-            required: ['type', 'statement', 'confidence'],
+            required: ['type', 'statement', 'evidence', 'confidence'],
             properties: {
               type: { type: 'string', description: 'capability | certification | case | param | value_prop' },
               statement: { type: 'string' },
+              evidence: { type: 'string', description: '来源文本中支持该结论的原文片段（用于溯源，必须来自给定文本）' },
               confidence: { type: 'number' },
             },
           },
         },
       },
     },
-    // 业务需求：抽取偏中文语境 + 性价比 → DeepSeek。
-    // 在中转站里可把 'deepseek-chat' 配成带 fallback 的模型组（挂了自动切火山/GPT）。
-    model: 'deepseek-chat',
+    // 抽取是高频、结构化任务 → 用快而省的 flash（中转站里可配成带 fallback 的模型组）。
+    model: 'deepseek-v4-flash',
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
   },
@@ -88,7 +88,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         },
       },
     },
-    model: 'deepseek-chat',
+    // ICP 设计是低频、策略推理任务 → 用更强的 pro。
+    model: 'deepseek-v4-pro',
     risk: 'medium',
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
   },

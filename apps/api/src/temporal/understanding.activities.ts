@@ -12,6 +12,7 @@ export interface UnderstandingInput {
 interface ExtractedClaim {
   type: string;
   statement: string;
+  evidence?: string; // 源文本中支持该结论的原文片段（溯源）
   confidence: number;
 }
 
@@ -71,7 +72,7 @@ export function createUnderstandingActivities(deps: {
       // so the loop is observable end-to-end until a real model is registered.
       const claims: ExtractedClaim[] = Array.isArray(fromModel)
         ? fromModel
-        : [{ type: 'capability', statement: 'Stub-extracted capability claim', confidence: 0.5 }];
+        : [{ type: 'capability', statement: 'Stub-extracted capability claim', evidence: '(stub)', confidence: 0.5 }];
       return { claims };
     },
 
@@ -87,7 +88,7 @@ export function createUnderstandingActivities(deps: {
           },
         });
         for (const c of args.claims) {
-          await tx.claim.create({
+          const claim = await tx.claim.create({
             data: {
               workspaceId: args.workspaceId,
               companyId: args.companyId,
@@ -96,6 +97,18 @@ export function createUnderstandingActivities(deps: {
               statement: c.statement,
               status: 'NEEDS_REVIEW', // human Gate before ACTIVE outbound use
               confidence: c.confidence,
+            },
+          });
+          // Field-level Evidence (PRD 7.4.9 / P-04): each fact traces back to the
+          // real source URL + the supporting snippet — 事实 vs 推断 的关键区别。
+          await tx.evidence.create({
+            data: {
+              workspaceId: args.workspaceId,
+              claimId: claim.id,
+              sourceUrl: args.website,
+              snippet: c.evidence ?? null,
+              confidence: c.confidence,
+              fetchedAt: new Date(),
             },
           });
         }

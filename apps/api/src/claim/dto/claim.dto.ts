@@ -2,6 +2,29 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 const CLAIM_STATUSES = ['INGESTED', 'EXTRACTED', 'NEEDS_REVIEW', 'APPROVED', 'EXPIRED', 'REVOKED'];
 
+export class ClaimEvidenceDto {
+  @ApiPropertyOptional({ nullable: true, description: '来源 URL' })
+  sourceUrl!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: '来源原文片段' })
+  snippet!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  confidence!: number | null;
+}
+
+interface ClaimRow {
+  id: string;
+  companyId: string;
+  type: string;
+  statement: string;
+  status: string;
+  confidence: number | null;
+  version: number;
+  createdAt: Date;
+  evidence?: { sourceUrl: string | null; snippet: string | null; confidence: number | null }[];
+}
+
 export class ClaimDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -24,19 +47,13 @@ export class ClaimDto {
   @ApiProperty({ description: '乐观锁版本' })
   version!: number;
 
+  @ApiProperty({ type: [ClaimEvidenceDto], description: '溯源证据（来源 URL + 原文片段）' })
+  evidence!: ClaimEvidenceDto[];
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
-  static from(c: {
-    id: string;
-    companyId: string;
-    type: string;
-    statement: string;
-    status: string;
-    confidence: number | null;
-    version: number;
-    createdAt: Date;
-  }): ClaimDto {
+  static from(c: ClaimRow): ClaimDto {
     return {
       id: c.id,
       companyId: c.companyId,
@@ -45,6 +62,11 @@ export class ClaimDto {
       status: c.status,
       confidence: c.confidence,
       version: c.version,
+      evidence: (c.evidence ?? []).map((e) => ({
+        sourceUrl: e.sourceUrl,
+        snippet: e.snippet,
+        confidence: e.confidence,
+      })),
       createdAt: c.createdAt.toISOString(),
     };
   }

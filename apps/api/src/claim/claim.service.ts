@@ -13,6 +13,7 @@ export class ClaimService {
       tx.claim.findMany({
         where: { companyId, ...(status ? { status: status as never } : {}) },
         orderBy: { createdAt: 'desc' },
+        include: { evidence: true }, // 溯源：来源 URL + 原文片段
       }),
     );
   }
