@@ -214,6 +214,45 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  'discovery.extract_list': {
+    id: 'discovery.extract_list',
+    allowedTools: [], // 只读已抓的目录页文本；搜索/抓取由 DirectoryDiscoveryProvider 经 Broker 调用
+    maxCostCents: 20,
+    timeoutMs: 180000,
+    description:
+      '判断给定网页是否为一个企业名录/列表页（协会会员名录、展会参展商名单、行业目录），若是则抽取其中列出的**多家公司**。只允许使用页面文本中明确出现的公司，禁止编造。若页面只讲一家公司或根本不是名录，is_directory 置 false、companies 置空。每家公司尽量给出官网与所在地（仅当文本出现）。',
+    outputSchema: {
+      type: 'object',
+      required: ['is_directory', 'companies'],
+      properties: {
+        is_directory: { type: 'boolean', description: '该页是否为多公司名录/列表页' },
+        list_kind: {
+          type: 'string',
+          description: '名录类型：association_members / trade_fair_exhibitors / industry_directory / other',
+        },
+        companies: {
+          type: 'array',
+          description: '页面中列出的公司（去重）',
+          items: {
+            type: 'object',
+            required: ['name'],
+            properties: {
+              name: { type: 'string', description: '公司名（原文语言）' },
+              website: { type: 'string', description: '官网 URL 或域名（仅当页面出现）' },
+              location: { type: 'string', description: '城市/国家（仅当页面出现）' },
+              detail_url: { type: 'string', description: '该公司在名录内的详情页链接（仅当页面出现）' },
+            },
+          },
+        },
+        has_next_page: { type: 'boolean', description: '页面是否有下一页/分页' },
+      },
+    },
+    // 列表抽取是长上下文任务（一页多公司），用 gemini-2.5-flash（快、长上下文、便宜）。
+    model: 'gemini-2.5-flash',
+    risk: 'low',
+    humanGate: false,
+  },
+
   'taxonomy.normalize': {
     id: 'taxonomy.normalize',
     description:

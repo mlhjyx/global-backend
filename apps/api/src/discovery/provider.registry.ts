@@ -10,6 +10,7 @@ import { SandboxDiscoveryProvider } from './providers/sandbox.provider';
 import { PublicWebDiscoveryProvider } from './providers/public-web.provider';
 import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
+import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
@@ -36,6 +37,8 @@ export class DiscoveryProviderRegistry {
       this.discovery.push(web);
       this.contacts.push(web);
       this.emailVerifiers.push(web);
+      // 名录/列表发现（协会会员名录 + 展会参展商 + 行业目录）——同 SearXNG+Crawl4AI+Gemini 栈。
+      this.discovery.push(new DirectoryDiscoveryProvider({ gateway: deps.gateway }));
     }
     // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
     this.discovery.push(new WikidataDiscoveryProvider());
@@ -72,6 +75,11 @@ export class DiscoveryProviderRegistry {
       where: { key: 'gleif' },
       update: {},
       create: { key: 'gleif', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'directory' },
+      update: {},
+      create: { key: 'directory', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
