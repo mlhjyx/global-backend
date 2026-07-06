@@ -26,13 +26,23 @@
 - **AI 基建**：ai_trace + usage_ledger 全调用记账 · 结构化输出 ajv 校验 + 修复重试 · stub 仅 DEV · 模型调用超时 · persistClaims 幂等（ingestKey）
 - **横切**：统一错误模型全局过滤器 · Idempotency-Key（POST /companies）· 我方侧 URL/SSRF 守卫 · outbox producer 字段
 
+### 多源发现 + 工具编排 + 接口管理（2026-07-06 续）
+
+- **真实多源发现**：官网(SearXNG+Crawl4AI+Gemini) + **Wikidata SPARQL**(结构化，实测 20 家真实公司端到端) + **OpenStreetMap Overpass**(地理，多实例 fallback)；executeQuery **fan-out** 到 source_class 全部 ENABLED 适配器；source_hint 收窄子源。设计蓝图见 [discovery-sources.md](discovery-sources.md)。
+- **工具/Broker 层**（[discovery-architecture.md](discovery-architecture.md)）：Tool 契约 + Registry + **ToolBroker**（allowedTools 白名单/预算 reserve-settle/限流/source_policy/幂等/trace 统一闸门）；AiTaskContract 加 allowedTools 等边界字段。MCP=传输非授权，第一步不做。
+- **✅ 规范词表归一**（[vocab-taxonomy.md](vocab-taxonomy.md)）：canonical_taxonomy + term_alias 表；250 国 ISO3166 + 1910 多语言别名 + ISIC 行业；TaxonomyResolver 确定性 + LLM 冷路径沉淀。实测中文「半导体/德国」→ wikidata 挖到 18 家德国公司。**欠账已还**。
+- **✅ 统一接口门户**（[api-management.md](api-management.md)）：自托管 Scalar `/api/portal`（前端一个入口浏览+调试全部端点）；OpenAPI 单一事实源 `--export-openapi`；结论：单端点是伪需求、不用 Apifox（出海数据合规）。
+- **✅ 前端护栏**：helmet + CORS 白名单 + 按 workspace 限流。
+- **✅ 生产鉴权**：JwksTokenVerifier（jose，验签 iss/aud/exp）；生产禁 dev stub。**待 SaaS 平台给 JWKS 契约激活**。
+
 ### 已知欠账（按优先级）
 
-1. **规范词表归一**：AI 规则值与数据源属性值语言/词表不一致（如 industry「制造业」vs "manufacturing"）——真源接入前必须做 canonical 属性映射层
-2. Docling 文档上传路径（需对象存储 + 上传端点 + 隔离解析）
-3. OPA Policy Engine、Langfuse、Prompt/Schema Registry、Golden Set（第 9 部分 next 级）
-4. brand_profile / glossary 表与端点（KNW-008）
-5. 生产 TokenVerifier（对接 SaaS 平台真实签名校验）、API rate limit
+1. **鉴权契约对接**：JwksTokenVerifier 已就绪，但需 SaaS 平台的 JWKS 端点 + claim 约定书面确认才能激活（联调前提）。
+2. **多源 P0 补源**：VDMA 协会名录 / Hannover Messe·EuroBLECH 展会名录（需逐站抓取模板）、GLEIF LEI 富集（法人+母子关系）。
+3. 异步长任务前端交付：SSE 进度流 + 领域事件出口（现仅裸轮询）。
+4. 契约防漂移进 CI：openapi-typescript 生成前端类型 + oasdiff 破坏性变更检查。
+5. Docling 文档上传路径；OPA / Langfuse / Golden Set；brand_profile / glossary。
+6. 海关贸易公司级数据（付费 reseller，留契约插槽）；product/HS 维归一。
 
 ## 关键数据模型（本能力落地的主要表）
 
