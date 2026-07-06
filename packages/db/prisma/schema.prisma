@@ -87,6 +87,7 @@ model CompanyProfile {
   offerings Offering[]
   sources   KnowledgeSource[]
   claims    Claim[]
+  icps      IcpDefinition[]
 
   @@index([workspaceId])
   @@map("company_profile")
@@ -178,4 +179,75 @@ model Citation {
 
   @@index([workspaceId])
   @@map("citation")
+}
+
+// ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────
+
+/// ICP lifecycle (PRD 11.9): DRAFT → HYPOTHESIS → VALIDATING → ACTIVE → SUPERSEDED → ARCHIVED
+enum IcpStatus {
+  DRAFT
+  HYPOTHESIS
+  VALIDATING
+  ACTIVE
+  SUPERSEDED
+  ARCHIVED
+
+  @@map("icp_status")
+}
+
+model IcpDefinition {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  companyId         String    @map("company_id") @db.Uuid // the seller company this ICP is for
+  name              String
+  status            IcpStatus @default(DRAFT)
+  companyAttributes Json?     @map("company_attributes") // industry / size / geo / tech ...
+  painPoints        Json?     @map("pain_points") // string[]
+  triggerSignals    Json?     @map("trigger_signals") // string[] 采购触发信号
+  exclusions        Json? // string[] 排除条件（优先于正向评分）
+  valueProps        Json?     @map("value_props") // string[]
+  targetMarkets     Json?     @map("target_markets") // string[]
+  version           Int       @default(1)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  company  CompanyProfile        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  personas Persona[]
+  roles    BuyingCommitteeRole[]
+
+  @@index([workspaceId])
+  @@index([companyId])
+  @@map("icp_definition")
+}
+
+model Persona {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  icpId       String   @map("icp_id") @db.Uuid
+  title       String // 角色/职位名
+  goals       Json? // string[]
+  painPoints  Json?    @map("pain_points") // string[]
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  icp IcpDefinition @relation(fields: [icpId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([icpId])
+  @@map("persona")
+}
+
+model BuyingCommitteeRole {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  icpId       String   @map("icp_id") @db.Uuid
+  role        String // decision_maker | influencer | user | technical | finance | procurement
+  title       String? // 典型职位
+  concerns    Json? // string[] 关注点/异议
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  icp IcpDefinition @relation(fields: [icpId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([icpId])
+  @@map("buying_committee_role")
 }

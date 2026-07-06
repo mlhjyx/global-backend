@@ -8,13 +8,23 @@ import { HealthController } from './health/health.controller';
 import { WhoamiController } from './whoami/whoami.controller';
 import { CompanyModule } from './company/company.module';
 import { ClaimModule } from './claim/claim.module';
+import { IcpModule } from './icp/icp.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
  * imported here as the AI-acquisition spine lands.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, ModelGatewayModule, TemporalModule, RelayModule, CompanyModule, ClaimModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    ModelGatewayModule,
+    TemporalModule,
+    RelayModule,
+    CompanyModule,
+    ClaimModule,
+    IcpModule,
+  ],
   controllers: [HealthController, WhoamiController],
 })
 export class AppModule {}
