@@ -7,6 +7,8 @@ import {
 } from './provider-contract';
 import { SandboxDiscoveryProvider } from './providers/sandbox.provider';
 import { PublicWebDiscoveryProvider } from './providers/public-web.provider';
+import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
+import { OsmDiscoveryProvider } from './providers/osm.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
 /** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -32,6 +34,10 @@ export class DiscoveryProviderRegistry {
       this.contacts.push(web);
       this.emailVerifiers.push(web);
     }
+    // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
+    this.discovery.push(new WikidataDiscoveryProvider());
+    this.discovery.push(new OsmDiscoveryProvider());
+
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
       const sandbox = new SandboxDiscoveryProvider();
       this.discovery.push(sandbox);
@@ -46,6 +52,16 @@ export class DiscoveryProviderRegistry {
       where: { key: 'public_web' },
       update: {},
       create: { key: 'public_web', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'wikidata' },
+      update: {},
+      create: { key: 'wikidata', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'openstreetmap' },
+      update: {},
+      create: { key: 'openstreetmap', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({

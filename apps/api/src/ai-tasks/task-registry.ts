@@ -245,7 +245,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxCostCents: 40,
     timeoutMs: 180000,
     description:
-      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 Provider（trade_data / b2b_company_person / company_registry / contact_discovery / email_verification / public_intelligence / industry_data）生成有序查询：不是同时调用全部，而是按 ICP 的行业与市场特征挑选 2-4 类最相关的源。发现类源在前；contact_discovery/email_verification 属后续补全阶段，不出现在发现计划里。',
+      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（可用 filters.source_hint 精确路由，省略=该类全跑）：\n- public_intelligence → public_web（SearXNG 官网挖掘，关键词驱动）\n- company_registry → wikidata（结构化：按行业+国家零爬取查公司+官网+员工数）\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索。',
     outputSchema: {
       type: 'object',
       required: ['queries', 'estimated_volume'],
@@ -263,7 +263,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
               },
               filters: {
                 type: 'object',
-                description: '结构化过滤条件（industry/region/country/employee_count/hs_code 等）',
+                description:
+                  '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；可选 source_hint（public_web|wikidata|openstreetmap）精确路由；可选 area_name/hs_code/cpv 等。',
               },
               keywords: { type: 'array', items: { type: 'string' }, description: '检索关键词（含本地语言变体）' },
               rationale: { type: 'string', description: '为什么选这个源、这些条件' },

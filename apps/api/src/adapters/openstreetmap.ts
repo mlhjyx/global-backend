@@ -34,28 +34,33 @@ export async function discoverByArea(params: {
   limit?: number;
 }): Promise<OsmPlace[]> {
   const { areaName, tagFilters, limit = 80 } = params;
-  const filters = tagFilters
-    .map((f) => {
-      const sel = f.v ? `["${f.k}"="${f.v}"]` : `["${f.k}"]`;
-      return `  nwr${sel}["name"](area.a);`;
-    })
-    .join('\n');
-  const query = `[out:json][timeout:40];
-area["name"="${areaName}"]->.a;
-(
-${filters}
-);
-out center ${Math.min(limit, 300)};`;
+  // 逐标签分别查询再合并：一个慢/超时的标签不至于让整批返回空（州级 union 易超时）。
+  const perTag = Math.max(10, Math.ceil(limit / Math.max(1, tagFilters.length)));
+  const settled = await Promise.allSettled(tagFilters.map((f) => queryOneTag(areaName, f, perTag)));
+  const byId = new Map<string, OsmPlace>();
+  for (const s of settled) {
+    if (s.status !== 'fulfilled') continue;
+    for (const p of s.value) if (!byId.has(p.osmId)) byId.set(p.osmId, p);
+  }
+  return [...byId.values()].slice(0, limit);
+}
 
+// Overpass 规范：POST 以 application/x-www-form-urlencoded 的 data= 参数传查询。
+async function queryOneTag(areaName: string, f: { k: string; v?: string }, limit: number): Promise<OsmPlace[]> {
+  const sel = f.v ? `["${f.k}"="${f.v}"]` : `["${f.k}"]`;
+  const query = `[out:json][timeout:25];
+area["name"="${areaName}"]->.a;
+nwr${sel}["name"](area.a);
+out center ${Math.min(limit, 200)};`;
   const res = await fetch(OVERPASS, {
     method: 'POST',
-    headers: { 'Content-Type': 'text/plain', 'User-Agent': USER_AGENT },
-    body: query,
-    signal: AbortSignal.timeout(60_000),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+    body: `data=${encodeURIComponent(query)}`,
+    signal: AbortSignal.timeout(40_000),
   });
   if (!res.ok) throw new Error(`overpass ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const json = (await res.json()) as { elements?: OsmElement[] };
-  return (json.elements ?? []).map(elementToPlace).filter((p): p is OsmPlace => p !== null).slice(0, limit);
+  return (json.elements ?? []).map(elementToPlace).filter((p): p is OsmPlace => p !== null);
 }
 
 interface OsmElement {

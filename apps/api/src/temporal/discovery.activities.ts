@@ -75,54 +75,73 @@ export function createDiscoveryActivities(deps: {
         where: { reviewStatus: 'SUSPENDED' },
         select: { domain: true },
       });
-      const adapter = (await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+      // 多源 fan-out：该 source_class 下**全部 ENABLED 适配器**并行召回（蓝图集成点 1）。
+      // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
+      const hint = (args.query.filters?.source_hint as string | undefined)?.toLowerCase();
+      let adapters = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
-      ))[0];
-      if (!adapter) return { rawCount: 0, costCents: 0, provider: null };
+      );
+      if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
+      if (!adapters.length) return { rawCount: 0, costCents: 0, provider: null };
 
-      // ── 事务外：真实发现（可能耗时数十秒）──
-      const result = await adapter.discoverCompanies(q, { blockedDomains: suspended.map((s) => s.domain) });
+      // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
+      const blockedDomains = suspended.map((s) => s.domain);
+      const settled = await Promise.allSettled(
+        adapters.map((a) => a.discoverCompanies(q, { blockedDomains }).then((r) => ({ key: a.key, r }))),
+      );
 
-      // ── 事务内：持久化 raw（带公开采集留痕）──
+      // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
+      // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务
+      // （Postgres 里 catch 单条 P2002 会毒化整个事务）。批内先按 externalId 去重。
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         let rawCount = 0;
-        for (const rec of result.records) {
-          try {
-            await tx.rawSourceRecord.create({
-              data: {
-                workspaceId: args.workspaceId,
-                runId: args.runId,
-                providerKey: adapter.key,
-                sourceClass: q.sourceClass,
-                externalId: rec.externalId,
-                payload: rec as unknown as Prisma.InputJsonValue,
-                sourceUrl: rec.provenance?.sourceUrl ?? null,
-                fetchedAt: rec.provenance ? new Date(rec.provenance.fetchedAt) : null,
-                contentHash: rec.provenance?.contentHash ?? null,
-                parserVersion: rec.provenance?.parserVersion ?? null,
-                costCents: 0,
-              },
-            });
-            rawCount += 1;
-          } catch (err) {
-            if ((err as { code?: string }).code === 'P2002') continue; // 幂等：重试已写过
-            throw err;
+        let totalCost = 0;
+        const providersHit: string[] = [];
+        for (const s of settled) {
+          if (s.status !== 'fulfilled') continue;
+          const { key, r } = s.value;
+          if (r.records.length) providersHit.push(key);
+          const seen = new Set<string>();
+          const rows = r.records
+            .filter((rec) => {
+              const k = rec.externalId ?? JSON.stringify(rec);
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            })
+            .map((rec) => ({
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+              providerKey: key,
+              sourceClass: q.sourceClass,
+              externalId: rec.externalId,
+              payload: rec as unknown as Prisma.InputJsonValue,
+              sourceUrl: rec.provenance?.sourceUrl ?? null,
+              fetchedAt: rec.provenance ? new Date(rec.provenance.fetchedAt) : null,
+              contentHash: rec.provenance?.contentHash ?? null,
+              parserVersion: rec.provenance?.parserVersion ?? null,
+              costCents: 0,
+            }));
+          if (rows.length) {
+            const created = await tx.rawSourceRecord.createMany({ data: rows, skipDuplicates: true });
+            rawCount += created.count;
           }
+          totalCost += r.costCents;
         }
-        if (result.costCents > 0) {
+        if (totalCost > 0) {
           await tx.usageLedger.create({
             data: {
               workspaceId: args.workspaceId,
               resourceType: 'provider_call',
-              quantity: result.records.length,
-              costUsd: result.costCents / 100,
+              quantity: rawCount,
+              costUsd: totalCost / 100,
               refType: 'discovery_run',
               refId: args.runId,
-              meta: { provider: adapter.key, sourceClass: q.sourceClass },
+              meta: { providers: providersHit, sourceClass: q.sourceClass },
             },
           });
         }
-        return { rawCount, costCents: result.costCents, provider: adapter.key };
+        return { rawCount, costCents: totalCost, provider: providersHit.join('+') || null };
       });
     },
 
