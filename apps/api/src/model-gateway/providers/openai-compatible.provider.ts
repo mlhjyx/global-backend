@@ -83,9 +83,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
     messages: { role: string; content: string }[],
     opts: { model: string; maxTokens?: number; temperature?: number; json?: boolean },
   ): Promise<{ content: string; usage?: { inputTokens?: number; outputTokens?: number } }> {
+    const timeoutMs = Number(process.env.MODEL_TIMEOUT_MS) || 180_000;
     const res = await fetch(`${this.cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
+      signal: AbortSignal.timeout(timeoutMs), // 模型调用必须有界（PRD 9.12）
       body: JSON.stringify({
         model: opts.model,
         messages,
@@ -94,7 +96,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
       }),
     });
-    if (!res.ok) throw new Error(`${this.id} ${res.status}: ${await res.text()}`);
+    if (!res.ok) throw new Error(`${this.id} ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };

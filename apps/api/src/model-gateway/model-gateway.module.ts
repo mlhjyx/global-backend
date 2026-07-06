@@ -4,12 +4,13 @@ import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProviderRegistry } from './model-provider.registry';
 import { StubModelProvider } from './providers/stub-model.provider';
-import { buildGatewayProvider } from './model-providers.config';
+import { buildGatewayProvider, stubAllowed } from './model-providers.config';
+import { AiTraceSink } from './ai-trace.sink';
 
 /**
- * Exposes the single ModelGateway and bootstraps the provider fleet: every vendor
- * with a configured key (DeepSeek/OpenAI/Gemini/Volcengine) plus the stub as a
- * last-resort fallback. Add a key → that model goes live; no other code changes.
+ * Exposes the single ModelGateway. All vendors live behind the 中转站 (new-api);
+ * the stub is a DEV-ONLY fallback — production must fail loudly rather than
+ * silently fabricate output (差距盘点：生产静默降级是 incorrect).
  */
 @Global()
 @Module({
@@ -17,6 +18,7 @@ import { buildGatewayProvider } from './model-providers.config';
     ModelProviderRegistry,
     ModelRouter,
     StubModelProvider,
+    AiTraceSink,
     { provide: ModelGateway, useClass: RouterModelGateway },
   ],
   exports: [ModelGateway],
@@ -37,6 +39,8 @@ export class ModelGatewayModule implements OnModuleInit {
     } else {
       this.logger.warn('MODEL_GATEWAY_URL/KEY 未配置 — 暂用 stub（去 new-api 建令牌后填入）');
     }
-    this.registry.register(this.stub);
+    if (stubAllowed()) {
+      this.registry.register(this.stub);
+    }
   }
 }

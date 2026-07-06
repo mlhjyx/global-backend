@@ -1,15 +1,48 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { assertPublicHttpUrl } from '../adapters/url-guard';
+
+type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
 
 @Injectable()
 export class CompanyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Create a DRAFT profile and append the event that will drive understanding. */
-  async create(ctx: RequestContext, dto: CreateCompanyDto) {
+  /**
+   * Create a DRAFT profile and append the event that will drive understanding.
+   * website 先过我方侧 SSRF 守卫（PRD 10.7.3）；Idempotency-Key 重放返回首个结果
+   * （PRD 11.16）。
+   */
+  async create(
+    ctx: RequestContext,
+    dto: CreateCompanyDto,
+    idempotencyKey?: string,
+  ): Promise<{ company: CompanyRow; replayed: boolean }> {
+    await assertPublicHttpUrl(dto.website);
+
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      if (idempotencyKey) {
+        const prior = await tx.idempotencyKey.findUnique({
+          where: {
+            workspaceId_endpoint_key: {
+              workspaceId: ctx.workspaceId,
+              endpoint: 'POST /companies',
+              key: idempotencyKey,
+            },
+          },
+        });
+        if (prior) {
+          const stored = prior.response as unknown as CompanyRow & { createdAt: string; updatedAt: string };
+          return {
+            company: { ...stored, createdAt: new Date(stored.createdAt), updatedAt: new Date(stored.updatedAt) },
+            replayed: true,
+          };
+        }
+      }
+
       // JIT-provision the tenant anchor so domain FKs resolve.
       await tx.workspace.upsert({
         where: { id: ctx.workspaceId },
@@ -37,7 +70,18 @@ export class CompanyService {
         },
       });
 
-      return company;
+      if (idempotencyKey) {
+        await tx.idempotencyKey.create({
+          data: {
+            workspaceId: ctx.workspaceId,
+            endpoint: 'POST /companies',
+            key: idempotencyKey,
+            response: company as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+
+      return { company, replayed: false };
     });
   }
 

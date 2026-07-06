@@ -27,6 +27,60 @@ model Workspace {
   @@map("workspace")
 }
 
+/// AI 调用追踪（PRD 9.10）：每次 ModelGateway 调用一行 — task/model/延迟/tokens/结果。
+model AiTrace {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  task          String // AI Task id（如 icp.design）
+  op            String // generateText | generateStructured | embed
+  provider      String
+  model         String
+  status        String // OK | ERROR
+  errorMessage  String?  @map("error_message")
+  latencyMs     Int      @map("latency_ms")
+  inputTokens   Int?     @map("input_tokens")
+  outputTokens  Int?     @map("output_tokens")
+  costUsd       Float?   @map("cost_usd")
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([workspaceId, task])
+  @@map("ai_trace")
+}
+
+/// 用量/成本账本（PRD 8.19 / 11.7 AI & Operations 域）：先记 AI tokens，
+/// P3 起 Provider 调用成本也入此账（resourceType 区分）。
+model UsageLedger {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  resourceType String   @map("resource_type") // ai_tokens | provider_call | ...
+  quantity     Float
+  costUsd      Float?   @map("cost_usd")
+  refType      String?  @map("ref_type") // ai_trace | raw_source_record | ...
+  refId        String?  @map("ref_id")
+  meta         Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([workspaceId, resourceType])
+  @@map("usage_ledger")
+}
+
+/// 幂等键（PRD 11.16）：POST 携带 Idempotency-Key 时，同 key 重放返回首个结果。
+model IdempotencyKey {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  key         String
+  endpoint    String
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, endpoint, key])
+  @@index([workspaceId])
+  @@map("idempotency_key")
+}
+
 /// Transactional Outbox (ADR-009). Domain writes append events in the same tx;
 /// a relay publishes unpublished rows at-least-once.
 model OutboxEvent {
@@ -37,6 +91,7 @@ model OutboxEvent {
   schemaVersion         Int       @default(1) @map("schema_version")
   aggregateType         String    @map("aggregate_type")
   aggregateId           String    @map("aggregate_id")
+  producer              String    @default("global-backend") // Envelope 11.10
   correlationId         String?   @map("correlation_id")
   causationId           String?   @map("causation_id")
   privacyClassification String    @default("CONFIDENTIAL") @map("privacy_classification")
@@ -124,12 +179,14 @@ model KnowledgeSource {
   type        String // website | pdf | docx | pptx | manual ...
   uri         String?
   status      String   @default("INGESTED") // 摄取生命周期
+  ingestKey   String?  @map("ingest_key") // 幂等：workflow runId + 页 URL，重试不重复写
   createdAt   DateTime @default(now()) @map("created_at")
 
   company   CompanyProfile @relation(fields: [companyId], references: [id], onDelete: Cascade)
   claims    Claim[]
   citations Citation[]
 
+  @@unique([companyId, ingestKey])
   @@index([workspaceId])
   @@index([companyId])
   @@map("knowledge_source")

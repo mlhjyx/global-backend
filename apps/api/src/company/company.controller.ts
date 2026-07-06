@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -12,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -32,10 +34,19 @@ export class CompanyController {
 
   @Post()
   @HttpCode(202)
-  @ApiOperation({ summary: '提交官网，创建企业画像并触发理解（异步）' })
+  @ApiOperation({
+    summary: '提交官网，创建企业画像并触发理解（异步）',
+    description: '支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。',
+  })
+  @ApiHeader({ name: 'Idempotency-Key', required: false, description: '幂等键（客户端生成，如 uuid）' })
   @ApiCreatedResponse({ type: CompanyDto })
-  async create(@Ctx() ctx: RequestContext, @Body() dto: CreateCompanyDto): Promise<CompanyDto> {
-    return CompanyDto.from(await this.companies.create(ctx, dto));
+  async create(
+    @Ctx() ctx: RequestContext,
+    @Body() dto: CreateCompanyDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<CompanyDto> {
+    const { company } = await this.companies.create(ctx, dto, idempotencyKey?.trim() || undefined);
+    return CompanyDto.from(company);
   }
 
   @Get()

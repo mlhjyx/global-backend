@@ -50,6 +50,9 @@ importers:
       '@temporalio/workflow':
         specifier: ^1.11.0
         version: 1.19.0
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       class-transformer:
         specifier: ^0.5.1
         version: 0.5.1

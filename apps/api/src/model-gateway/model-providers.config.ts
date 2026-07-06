@@ -18,3 +18,11 @@ export function buildGatewayProvider(env: NodeJS.ProcessEnv = process.env): Mode
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-chat',
   });
 }
+
+/**
+ * Stub 只允许在非生产使用：生产环境模型不可用时必须失败并告警，
+ * 绝不能静默合成假数据（数据真实性 P-04）。
+ */
+export function stubAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV !== 'production' || env.MODEL_ALLOW_STUB === 'true';
+}

@@ -1,3 +1,4 @@
+import { Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
@@ -134,11 +135,21 @@ export function createUnderstandingActivities(deps: {
     async persistClaims(
       args: UnderstandingInput & { pages: { url: string; claims: ExtractedClaim[] }[] },
     ): Promise<{ claimCount: number }> {
+      // 幂等（PRD 11.16）：at-least-once 的活动重试不得重复写入。
+      // 每页的 source+claims 在同一事务里原子落库，ingestKey = runId+页URL；
+      // 已存在则整页跳过。
+      const runId = Context.current().info.workflowExecution?.runId ?? Context.current().info.activityId;
       let claimCount = 0;
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const byStatement = new Map<string, string>(); // normalized statement → claim id
         for (const page of args.pages) {
           if (!page.claims.length) continue;
+          const ingestKey = `${runId}:${page.url}`;
+          const existing = await tx.knowledgeSource.findFirst({
+            where: { companyId: args.companyId, ingestKey },
+            select: { id: true },
+          });
+          if (existing) continue; // 本次运行已写过该页
           const source = await tx.knowledgeSource.create({
             data: {
               workspaceId: args.workspaceId,
@@ -146,6 +157,7 @@ export function createUnderstandingActivities(deps: {
               type: 'website',
               uri: page.url,
               status: 'PARSED',
+              ingestKey,
             },
           });
           for (const c of page.claims) {

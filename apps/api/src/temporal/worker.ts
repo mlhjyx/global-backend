@@ -6,7 +6,8 @@ import { ModelProviderRegistry } from '../model-gateway/model-provider.registry'
 import { ModelRouter } from '../model-gateway/model-router';
 import { RouterModelGateway } from '../model-gateway/router-model-gateway';
 import { StubModelProvider } from '../model-gateway/providers/stub-model.provider';
-import { buildGatewayProvider } from '../model-gateway/model-providers.config';
+import { buildGatewayProvider, stubAllowed } from '../model-gateway/model-providers.config';
+import { AiTraceSink } from '../model-gateway/ai-trace.sink';
 import { createUnderstandingActivities } from './understanding.activities';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 
@@ -21,8 +22,8 @@ async function main(): Promise<void> {
   const registry = new ModelProviderRegistry();
   const gatewayProvider = buildGatewayProvider();
   if (gatewayProvider) registry.register(gatewayProvider);
-  registry.register(new StubModelProvider());
-  const gateway = new RouterModelGateway(new ModelRouter(registry));
+  if (stubAllowed()) registry.register(new StubModelProvider());
+  const gateway = new RouterModelGateway(new ModelRouter(registry), new AiTraceSink(prisma));
 
   const connection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
