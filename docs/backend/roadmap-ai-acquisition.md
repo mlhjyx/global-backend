@@ -18,7 +18,21 @@
 | **P2 ICP** | ✅ 数据模型 `icp_definition`/`persona`/`buying_committee_role` + RLS · ✅ AI 生成 ICP（`icp.design` Task，DeepSeek 从已确认 Claim 生成 目标属性/痛点/触发信号/排除/买家委员会）· ✅ `POST /companies/:id/icps`、`GET /icps`、`activate`（→ACTIVE + ICPActivated 事件，未回测标 HYPOTHESIS）· ⬜ 样例回测(LED-004) · ⬜ QualificationRule · ⬜ 按 ICP 生成多源查询计划(LED-005，接客户发现) | 7.5 · 5.4 · LED-001..005 | 🚧 骨架完成 |
 | **P3 客户发现** | ✅ `ProviderAdapter` 契约（七类，ADR-017 raw 不穿透领域层）· ✅ sandbox 源（确定性合成 + 显式 sandbox 标记）· ✅ Temporal discoveryWorkflow（READY 计划→逐源执行→PARTIAL 容错）· ✅ `raw_source_record`→`canonical_company`/`canonical_contact` · ✅ 确定性身份解析（domain_exact > name_country，identity_link 留痕）· ✅ 字段级 `field_evidence`（来源/许可/allowed_actions）· ✅ 联系人按需发现（Waterfall 第5步 + Suppression 先行）· ✅ 邮箱验证回写 contact_point · ✅ suppression CRUD（域名即时 SUPPRESS）· ✅ Provider 成本入 usage_ledger · ⬜ 真源接入（合同后）· ⬜ 规范词表归一（中英属性值映射，真源前必须做） | 7.4 · 5.5 · DAT-001..017 | 🚧 sandbox 闭环 |
 | **P4 验证评分** | ✅ 六维评分（确定性：规则引擎 Fit + 委员会覆盖 Role + 信号代理 Intent + 完整度 DataQuality + 可达 Reachability + Engagement=0 待触达）· ✅ `lead` + 四队列 + 分数明细（逐规则评估可审计）· ✅ 人工裁决 accept/reject + `lead_decision` 留痕 · ✅ LeadQualified 事件（Campaign 入口）· ✅ 重评不覆盖人工终态 · ⬜ 真实意向信号源 · ⬜ LLM 辅助评分层（LED-007 组合评分） | 7.5 · 5.6 · LED-006..009 | 🚧 主链完成 |
-| **P5 收口** | 领域事件按 Envelope 对外发布、契约测试、OpenAPI 导出 + 接入说明（交付前端） | 11.10/11.11 | ⬜ |
+| **P5 收口** | ✅ OpenAPI 导出（38 端点，`packages/contracts/openapi/openapi.json`）+ `INTEGRATION.md` 前端接入说明 · ✅ LeadQualified 出口事件（Campaign 入口）· ✅ 单元测试基线（vitest 24 用例：规则引擎/评分/身份解析/选页/联系方式抽取，`pnpm test`）· ⬜ API 集成测试 + RLS 回归入 CI · ⬜ 事件对外发布通道（现仅 outbox 内部消费） | 11.10/11.11 · 14.1 | 🚧 |
+
+### 补充完成（差距盘点驱动的收口，2026-07-06）
+
+- **P1 深化**：多页抓取（关键子页确定性选择）· Offering 结构化抽取（幂等 upsert + 溯源）· 公开联系方式/社媒（正则确定性，Buyer Trust 原料）· 画像回填（industry/summary）· 手工 Claim 录入 · APPROVED→REVOKED 撤销 + validUntil→EXPIRED 扫描 · 知识冲突检测（Jaccard 启发式 + 人工裁决）· **REVIEW Gate**（零审批不得 ACTIVE，审批≥3 自动激活或显式 confirm）
+- **AI 基建**：ai_trace + usage_ledger 全调用记账 · 结构化输出 ajv 校验 + 修复重试 · stub 仅 DEV · 模型调用超时 · persistClaims 幂等（ingestKey）
+- **横切**：统一错误模型全局过滤器 · Idempotency-Key（POST /companies）· 我方侧 URL/SSRF 守卫 · outbox producer 字段
+
+### 已知欠账（按优先级）
+
+1. **规范词表归一**：AI 规则值与数据源属性值语言/词表不一致（如 industry「制造业」vs "manufacturing"）——真源接入前必须做 canonical 属性映射层
+2. Docling 文档上传路径（需对象存储 + 上传端点 + 隔离解析）
+3. OPA Policy Engine、Langfuse、Prompt/Schema Registry、Golden Set（第 9 部分 next 级）
+4. brand_profile / glossary 表与端点（KNW-008）
+5. 生产 TokenVerifier（对接 SaaS 平台真实签名校验）、API rate limit
 
 ## 关键数据模型（本能力落地的主要表）
 

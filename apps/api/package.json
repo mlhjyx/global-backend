@@ -7,6 +7,7 @@
     "start": "node dist/main.js",
     "build": "nest build",
     "worker": "node dist/temporal/worker.js",
+    "test": "vitest run",
     "mg:check": "node scripts/mg-check.cjs",
     "lint": "eslint \"src/**/*.ts\""
   },
@@ -31,6 +32,7 @@
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@types/express": "^5.0.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.10"
   }
 }
