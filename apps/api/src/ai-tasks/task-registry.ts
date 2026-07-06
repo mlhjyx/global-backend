@@ -8,6 +8,9 @@ import { AiTaskContract } from './task-contract';
 export const AI_TASKS: Record<string, AiTaskContract> = {
   'company_understanding.extract_claims': {
     id: 'company_understanding.extract_claims',
+    allowedTools: [], // 纯生成：只读给定文本，工具（抓取）由确定性 Provider 调用
+    maxCostCents: 20,
+    timeoutMs: 180000,
     description:
       '从企业官网/文档文本中抽取带类型与置信度的企业事实（Claim）。覆盖 KNW-002 全范围：能力、认证、案例、参数、MOQ、交期、市场、企业基本面；发现营销性/绝对化表述时输出 forbidden_expression_candidate 供品牌审核。只抽文本中明确存在的信息。',
     outputSchema: {
@@ -41,6 +44,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'company_understanding.extract_profile': {
     id: 'company_understanding.extract_profile',
+    allowedTools: [],
+    maxCostCents: 10,
+    timeoutMs: 120000,
     description:
       '从企业官网首页文本提炼企业画像：行业归类与一段话简介（中文，仅基于给定文本，不得编造规模/年份等未出现的信息）。',
     outputSchema: {
@@ -58,6 +64,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'company_understanding.extract_offerings': {
     id: 'company_understanding.extract_offerings',
+    allowedTools: [],
+    maxCostCents: 20,
+    timeoutMs: 180000,
     description:
       '从企业官网页面文本中抽取结构化的产品/服务（Offering）：名称、简述、关键属性（MOQ/交期/参数/认证/材料等，仅当文本中明确出现时才填），并附来源原文片段。禁止编造文本中不存在的属性。',
     outputSchema: {
@@ -91,6 +100,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'icp.design': {
     id: 'icp.design',
+    allowedTools: [],
+    maxCostCents: 40,
+    timeoutMs: 180000,
     description:
       '基于卖方企业的已确认事实(Claim)，设计理想客户画像(ICP)：目标公司属性、痛点、采购触发信号、排除条件、价值主张、目标市场、买家委员会角色，以及机器可评估的验证规则(qualification_rules)。规则的 field 使用规范属性名：industry/sub_industry/region/country/employee_count/revenue/certifications/keywords/tech/business_model/end_markets。',
     outputSchema: {
@@ -176,6 +188,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.extract_company': {
     id: 'discovery.extract_company',
+    allowedTools: [], // 判站+抽取只读已抓文本；搜索/抓取由 PublicWebDiscoveryProvider 经 Broker 调用
+    maxCostCents: 15,
+    timeoutMs: 180000,
     description:
       '判断给定网页是否为一家真实企业的官网，若是则抽取结构化企业属性。只允许使用网页文本中明确出现的信息，禁止编造或从画像上下文照抄。若不是企业官网（是目录/百科/新闻/市场平台/博客），is_company_site 置 false。',
     outputSchema: {
@@ -201,6 +216,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.qualify_fit': {
     id: 'discovery.qualify_fit',
+    allowedTools: [],
+    maxCostCents: 20,
+    timeoutMs: 180000,
     description:
       '给定卖方 ICP 与一家候选公司，判断它是否为该卖方的真实目标客户。必须通过四个门：\n1) 材质门：候选的加工材质是否与 ICP 目标一致（如金属 vs 塑料/织物/粉体）——注意 "RF welding"（射频热合塑料）≠ 金属焊接，"toll processing/筛分" 处理粉末≠金属工件加工。\n2) 角色门：候选是设备/产品的下游买家，还是与卖方同类的设备制造商（竞品）？竞品判 mismatch。\n3) 工艺子集门：候选是否真正从事 ICP 核心工艺，还是仅相邻工艺（如纯机加/磨削而无激光/钣金/折弯/焊接）。\n4) 商业模式门：候选是自有产线的制造商，还是聚合第三方供应商的采购中介平台？中介平台判 weak。\n任一硬门失败判 mismatch；边缘/相邻判 weak；全部通过判 match。只依据给定信息，理由需具体。',
     outputSchema: {
@@ -223,6 +241,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.query_plan': {
     id: 'discovery.query_plan',
+    allowedTools: [],
+    maxCostCents: 40,
+    timeoutMs: 180000,
     description:
       '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 Provider（trade_data / b2b_company_person / company_registry / contact_discovery / email_verification / public_intelligence / industry_data）生成有序查询：不是同时调用全部，而是按 ICP 的行业与市场特征挑选 2-4 类最相关的源。发现类源在前；contact_discovery/email_verification 属后续补全阶段，不出现在发现计划里。',
     outputSchema: {
