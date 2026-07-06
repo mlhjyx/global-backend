@@ -75,6 +75,26 @@ export class CompanyController {
     return CompanyDto.from(await this.companies.get(ctx, companyId));
   }
 
+  @Get(':companyId/completeness')
+  @ApiOperation({ summary: '企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态' })
+  async completeness(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ) {
+    return this.companies.completeness(ctx, companyId);
+  }
+
+  @Post(':companyId/confirm')
+  @HttpCode(200)
+  @ApiOperation({ summary: '人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）' })
+  @ApiOkResponse({ type: CompanyDto })
+  async confirm(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ): Promise<CompanyDto> {
+    return CompanyDto.from(await this.companies.confirm(ctx, companyId));
+  }
+
   @Get(':companyId/offerings')
   @ApiOperation({ summary: '企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）' })
   @ApiOkResponse({ type: [OfferingDto] })

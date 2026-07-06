@@ -21,8 +21,14 @@ export class CompanyDto {
   @ApiPropertyOptional({ nullable: true, example: 'https://acme-tech.com' })
   website!: string | null;
 
-  @ApiProperty({ enum: ['DRAFT', 'ENRICHING', 'ACTIVE'] })
+  @ApiProperty({ enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] })
   status!: string;
+
+  @ApiPropertyOptional({ nullable: true, description: '行业（理解工作流回填）' })
+  industry!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: '企业简介（抽取，可人工修正）' })
+  summary!: string | null;
 
   @ApiProperty({
     type: [PublicContactDto],
@@ -38,6 +44,8 @@ export class CompanyDto {
     name: string;
     website: string | null;
     status: string;
+    industry?: string | null;
+    summary?: string | null;
     publicContacts?: unknown;
     createdAt: Date;
   }): CompanyDto {
@@ -46,6 +54,8 @@ export class CompanyDto {
       name: c.name,
       website: c.website,
       status: c.status,
+      industry: c.industry ?? null,
+      summary: c.summary ?? null,
       publicContacts: Array.isArray(c.publicContacts) ? (c.publicContacts as PublicContactDto[]) : [],
       createdAt: c.createdAt.toISOString(),
     };

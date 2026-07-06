@@ -51,7 +51,7 @@ export function createUnderstandingActivities(deps: {
     async setStatus(args: {
       companyId: string;
       workspaceId: string;
-      status: 'ENRICHING' | 'ACTIVE';
+      status: 'ENRICHING' | 'REVIEW' | 'ACTIVE';
     }): Promise<void> {
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.companyProfile.update({
@@ -108,6 +108,32 @@ export function createUnderstandingActivities(deps: {
       return { claims };
     },
 
+    /** 画像回填（KNW-002/5.2.3）：行业 + 简介，只在首页文本上跑一次。 */
+    async extractAndPersistProfile(args: UnderstandingInput & { text: string }): Promise<void> {
+      const contract = getTask('company_understanding.extract_profile');
+      const result = await deps.gateway.generateStructured(
+        {
+          task: contract?.id ?? 'company_understanding.extract_profile',
+          prompt: args.text,
+          system: contract?.description,
+          model: contract?.model,
+          schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
+        },
+        { workspaceId: args.workspaceId },
+      );
+      const out = result.data as { industry?: string; summary?: string };
+      if (!out?.industry && !out?.summary) return; // stub/空输出不回填
+      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        tx.companyProfile.update({
+          where: { id: args.companyId },
+          data: {
+            ...(out.industry ? { industry: out.industry } : {}),
+            ...(out.summary ? { summary: out.summary } : {}),
+          },
+        }),
+      );
+    },
+
     async extractOfferings(args: {
       workspaceId: string;
       text: string;
@@ -141,6 +167,12 @@ export function createUnderstandingActivities(deps: {
       const runId = Context.current().info.workflowExecution?.runId ?? Context.current().info.activityId;
       let claimCount = 0;
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        // KNW-004 冲突检测的对照集：本公司既有（其他来源/往次运行）的有效 Claim
+        const priorClaims = await tx.claim.findMany({
+          where: { companyId: args.companyId, status: { in: ['APPROVED', 'NEEDS_REVIEW'] } },
+          select: { id: true, type: true, statement: true },
+        });
+        let conflictBudget = 20; // 防洪：单次运行最多报 20 组冲突
         const byStatement = new Map<string, string>(); // normalized statement → claim id
         for (const page of args.pages) {
           if (!page.claims.length) continue;
@@ -178,6 +210,31 @@ export function createUnderstandingActivities(deps: {
               claimId = claim.id;
               byStatement.set(key, claimId);
               claimCount += 1;
+              // KNW-004：与既有同类型 Claim 高度相似但不相同 → 冲突，供人工裁决，绝不静默覆盖
+              const rival = priorClaims.find(
+                (p) => p.type === c.type && p.statement !== c.statement && jaccard(p.statement, c.statement) >= 0.55,
+              );
+              if (rival && conflictBudget > 0) {
+                conflictBudget -= 1;
+                await tx.knowledgeConflict.create({
+                  data: {
+                    workspaceId: args.workspaceId,
+                    companyId: args.companyId,
+                    claimAId: rival.id,
+                    claimBId: claim.id,
+                    claimType: c.type,
+                  },
+                });
+                await tx.outboxEvent.create({
+                  data: {
+                    workspaceId: args.workspaceId,
+                    eventType: 'KnowledgeConflictDetected',
+                    aggregateType: 'CompanyProfile',
+                    aggregateId: args.companyId,
+                    payload: { claimAId: rival.id, claimBId: claim.id, type: c.type },
+                  },
+                });
+              }
             }
             await tx.evidence.create({
               data: {
@@ -258,3 +315,20 @@ export function createUnderstandingActivities(deps: {
 }
 
 export type UnderstandingActivities = ReturnType<typeof createUnderstandingActivities>;
+
+/** 词集 Jaccard 相似度（确定性冲突启发式，KNW-004）。 */
+function jaccard(a: string, b: string): number {
+  const words = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter((w) => w.length > 1),
+    );
+  const wa = words(a);
+  const wb = words(b);
+  if (!wa.size || !wb.size) return 0;
+  let inter = 0;
+  for (const w of wa) if (wb.has(w)) inter += 1;
+  return inter / (wa.size + wb.size - inter);
+}

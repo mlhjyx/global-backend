@@ -8,7 +8,8 @@ import { AiTaskContract } from './task-contract';
 export const AI_TASKS: Record<string, AiTaskContract> = {
   'company_understanding.extract_claims': {
     id: 'company_understanding.extract_claims',
-    description: '从企业官网/文档文本中抽取带类型与置信度的企业事实（Claim）',
+    description:
+      '从企业官网/文档文本中抽取带类型与置信度的企业事实（Claim）。覆盖 KNW-002 全范围：能力、认证、案例、参数、MOQ、交期、市场、企业基本面；发现营销性/绝对化表述时输出 forbidden_expression_candidate 供品牌审核。只抽文本中明确存在的信息。',
     outputSchema: {
       type: 'object',
       required: ['claims'],
@@ -19,7 +20,11 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
             type: 'object',
             required: ['type', 'statement', 'evidence', 'confidence'],
             properties: {
-              type: { type: 'string', description: 'capability | certification | case | param | value_prop' },
+              type: {
+                type: 'string',
+                description:
+                  'capability | certification | case | param | moq | lead_time | market | company_fact | value_prop | forbidden_expression_candidate',
+              },
               statement: { type: 'string' },
               evidence: { type: 'string', description: '来源文本中支持该结论的原文片段（用于溯源，必须来自给定文本）' },
               confidence: { type: 'number' },
@@ -32,6 +37,23 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     model: 'deepseek-v4-flash',
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
+  },
+
+  'company_understanding.extract_profile': {
+    id: 'company_understanding.extract_profile',
+    description:
+      '从企业官网首页文本提炼企业画像：行业归类与一段话简介（中文，仅基于给定文本，不得编造规模/年份等未出现的信息）。',
+    outputSchema: {
+      type: 'object',
+      required: ['industry', 'summary'],
+      properties: {
+        industry: { type: 'string', description: '主行业，如「精密金属加工设备制造」' },
+        summary: { type: 'string', description: '80-150 字中文简介' },
+      },
+    },
+    model: 'deepseek-v4-flash',
+    risk: 'low',
+    humanGate: false, // 画像随 Claim 审批可被人工修正
   },
 
   'company_understanding.extract_offerings': {

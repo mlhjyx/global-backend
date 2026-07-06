@@ -21,6 +21,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private readonly db = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   private timer?: NodeJS.Timeout;
   private running = false;
+  private expireCounter = 0;
 
   constructor(private readonly temporal: TemporalClient) {}
 
@@ -44,6 +45,28 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return; // avoid overlapping ticks
     this.running = true;
     try {
+      // KNW-003/KNW-009：validUntil 到期的已批准事实 → EXPIRED（约每 60s 扫一次）
+      this.expireCounter = (this.expireCounter + 1) % 30;
+      if (this.expireCounter === 0) {
+        const expired = await this.db.claim.findMany({
+          where: { status: 'APPROVED', validUntil: { lt: new Date() } },
+          select: { id: true, workspaceId: true, companyId: true, type: true },
+          take: 100,
+        });
+        for (const c of expired) {
+          await this.db.claim.update({ where: { id: c.id }, data: { status: 'EXPIRED' } });
+          await this.db.outboxEvent.create({
+            data: {
+              workspaceId: c.workspaceId,
+              eventType: 'ClaimExpired',
+              aggregateType: 'Claim',
+              aggregateId: c.id,
+              payload: { companyId: c.companyId, type: c.type },
+            },
+          });
+        }
+        if (expired.length) this.logger.log(`expired ${expired.length} claims past validUntil`);
+      }
       const events = await this.db.outboxEvent.findMany({
         where: { publishedAt: null },
         orderBy: { id: 'asc' },

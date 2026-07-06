@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
@@ -111,6 +111,39 @@ export class CompanyService {
       throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
     }
     return company;
+  }
+
+  /** 完整度视图（5.2.7）：企业当前可用性的量化依据。 */
+  async completeness(ctx: RequestContext, id: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.companyProfile.findUnique({ where: { id }, select: { id: true, status: true } });
+      if (!company) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      const [approved, pending, offerings, conflictsOpen] = await Promise.all([
+        tx.claim.count({ where: { companyId: id, status: 'APPROVED' } }),
+        tx.claim.count({ where: { companyId: id, status: 'NEEDS_REVIEW' } }),
+        tx.offering.count({ where: { companyId: id } }),
+        tx.knowledgeConflict.count({ where: { companyId: id, status: 'OPEN' } }),
+      ]);
+      return { status: company.status, approvedClaims: approved, pendingClaims: pending, offerings, conflictsOpen };
+    });
+  }
+
+  /** 人工确认（5.2.4 Gate 的显式出口）：REVIEW → ACTIVE，不等审批阈值。 */
+  async confirm(ctx: RequestContext, id: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.companyProfile.findUnique({ where: { id } });
+      if (!company) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      if (company.status !== 'REVIEW') {
+        throw new ConflictException({
+          error: { code: 'INVALID_STATE', message: `company is ${company.status}; only REVIEW can be confirmed` },
+        });
+      }
+      return tx.companyProfile.update({ where: { id }, data: { status: 'ACTIVE', version: { increment: 1 } } });
+    });
   }
 
   /** 结构化产品/服务（理解工作流抽取，带溯源）。company 不存在时 404。 */

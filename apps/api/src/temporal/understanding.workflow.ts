@@ -63,6 +63,8 @@ export async function understandingWorkflow(input: UnderstandingWorkflowInput): 
   await dbActs.persistClaims({ workspaceId, companyId, website, pages: claimPages });
   await dbActs.persistOfferings({ workspaceId, companyId, website, pages: offeringPages });
   await dbActs.persistPublicContacts({ workspaceId, companyId, website, pages });
+  await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, text: home.text });
 
-  await dbActs.setStatus({ companyId, workspaceId, status: 'ACTIVE' });
+  // 5.2.7：理解完成 ≠ 可用。落 REVIEW，等待人工审批（Claim 审批达阈值或显式 confirm）→ ACTIVE。
+  await dbActs.setStatus({ companyId, workspaceId, status: 'REVIEW' });
 }

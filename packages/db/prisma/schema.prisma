@@ -108,9 +108,12 @@ model OutboxEvent {
 
 // ── Company & Knowledge (企业理解, PRD 7.2) ────────────────────────────────
 
+/// DRAFT → ENRICHING →（理解完成）REVIEW →（审批达完整度阈值或人工确认）ACTIVE
+/// 5.2.7：零审批不得 ACTIVE —— 未确认的关键信息不能进入对外使用。
 enum CompanyStatus {
   DRAFT
   ENRICHING
+  REVIEW
   ACTIVE
 
   @@map("company_status")
@@ -134,6 +137,8 @@ model CompanyProfile {
   name        String
   website     String?
   status      CompanyStatus @default(DRAFT)
+  industry    String? // 画像回填（KNW-002 / 5.2.3）
+  summary     String? // 一段话企业简介（抽取，随 Claim 审批修正）
   /// 官网上确定性抽取（正则，非 LLM）的公开联系方式/社媒，逐条带来源页 URL：
   /// [{ type: 'email'|'phone'|'social', value, sourceUrl }] — Buyer Trust 原料（PRD 7.15）
   publicContacts Json?      @map("public_contacts")
@@ -230,6 +235,26 @@ model Evidence {
   @@index([workspaceId])
   @@index([claimId])
   @@map("evidence")
+}
+
+/// 知识冲突（KNW-004）：不同来源对同一事实不一致时不得静默覆盖 ——
+/// 生成冲突记录供人工裁决，发 KnowledgeConflictDetected 事件。
+model KnowledgeConflict {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  companyId   String    @map("company_id") @db.Uuid
+  claimAId    String    @map("claim_a_id") @db.Uuid
+  claimBId    String    @map("claim_b_id") @db.Uuid
+  claimType   String    @map("claim_type")
+  status      String    @default("OPEN") // OPEN | RESOLVED
+  resolvedBy  String?   @map("resolved_by")
+  resolution  String? // kept_a | kept_b
+  createdAt   DateTime  @default(now()) @map("created_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@index([workspaceId])
+  @@index([companyId])
+  @@map("knowledge_conflict")
 }
 
 model Citation {
