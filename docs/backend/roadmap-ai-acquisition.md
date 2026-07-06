@@ -13,7 +13,7 @@
 
 | 阶段 | 交付物 | PRD 依据 | 状态 |
 |---|---|---|---|
-| **P0 地基** | ✅ Nx monorepo · ✅ NestJS `api` + Swagger(`/api/docs`, code-first) · ✅ 本地 PG+Redis · ✅ Prisma 多租户 + RLS（隔离已验证）· ✅ 事件 Outbox 表 · ✅ api↔db(app_user 连) · ✅ 鉴权 seam + AuthGuard + `whoami` · ✅ `workspace` 精简为租户锚点 + JIT provision · ⬜ Model Gateway 壳 · ⬜ Policy stub · ⬜ Outbox relay | 11.5 · ADR-001/002/009 | 🚧 收尾中 |
+| **P0 地基** | ✅ Nx monorepo · ✅ NestJS `api` + Swagger(`/api/docs`, code-first) · ✅ 本地 PG+Redis · ✅ Prisma 多租户 + RLS（隔离已验证）· ✅ 事件 Outbox 表 · ✅ api↔db(app_user 连) · ✅ 鉴权 seam + AuthGuard + `whoami` · ✅ `workspace` 精简为租户锚点 + JIT provision · ✅ Model Gateway 壳（多 Provider → 单一 API + 路由 + fallback，stub 顶着）· ⬜ Policy stub · ⬜ Outbox relay | 11.5 · ADR-001/002/009 | 🚧 收尾中 |
 | **P1 企业理解** | ✅ 数据模型 `company_profile`/`offering`/`knowledge_source`/`claim`/`evidence`/`citation` + RLS · ✅ `POST/GET /companies`（code-first、租户隔离验证、创建写 `CompanyProfileCreated` Outbox）· ⬜ Docling 解析服务 · ⬜ Model Gateway 抽取生成 Claim/Offering · ⬜ Claim 状态机端点 + 人工 Gate · ⬜ 知识冲突/术语表 | 7.2 · 5.2 · KNW-001..011 | 🚧 骨架完成 |
 | **P2 ICP** | `icp_definition`/`persona`/`buying_committee_role`/`qualification_rule`、样例回测（未回测标 Hypothesis） | 7.5 · 5.4 · LED-001..005 | ⬜ |
 | **P3 客户发现** | `ProviderAdapter` 契约 + DataSourceRouter + Waterfall + sandbox 源、`raw_source_record`→`canonical_company`/`canonical_contact`、身份解析/去重、`field_evidence`、成本账本 | 7.4 · 5.5 · DAT-001..017 | ⬜ |

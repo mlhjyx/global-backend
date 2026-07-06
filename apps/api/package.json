@@ -6,6 +6,7 @@
     "start:dev": "nest start --watch",
     "start": "node dist/main.js",
     "build": "nest build",
+    "mg:check": "node scripts/mg-check.cjs",
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
