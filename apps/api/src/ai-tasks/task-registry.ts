@@ -214,6 +214,46 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  'contact.find_decision_makers': {
+    id: 'contact.find_decision_makers',
+    allowedTools: [], // 只读已抓的 Impressum/团队/管理层页文本；抓取由 DecisionMaker Provider 经 Broker 调用
+    maxCostCents: 15,
+    timeoutMs: 120000,
+    description:
+      '从企业的 Impressum/法律声明/团队/管理层/联系页文本里抽取**具名的人**及其职务与联系方式，并按买家委员会角色分类。铁律：只抽取页面文本中**明确出现**的人名/职务/邮箱/电话，禁止编造或推断未写出的邮箱；抽不到就返回空数组。德国 Impressum 依法列 Geschäftsführer（总经理）——优先抽取。给定卖方 ICP 的目标买家角色时，标注每个人是否命中目标角色。所有具名人属个人数据。',
+    outputSchema: {
+      type: 'object',
+      required: ['people'],
+      properties: {
+        people: {
+          type: 'array',
+          description: '页面明确出现的具名人员（去重）',
+          items: {
+            type: 'object',
+            required: ['full_name'],
+            properties: {
+              full_name: { type: 'string' },
+              title: { type: 'string', description: '职务原文（如 Geschäftsführer / Head of Production）' },
+              email: { type: 'string', description: '仅当页面明确出现该人邮箱' },
+              phone: { type: 'string', description: '仅当页面明确出现' },
+              department: { type: 'string', description: 'management/production/procurement/engineering/sales/finance/other' },
+              seniority: { type: 'string', description: 'owner/c_level/vp/director/manager/staff/unknown' },
+              buying_role: {
+                type: 'string',
+                description: 'decision_maker/economic_buyer/technical_buyer/influencer/user/gatekeeper/unknown',
+              },
+              is_target_role: { type: 'boolean', description: '是否命中卖方 ICP 的目标买家角色' },
+              evidence: { type: 'string', description: '支持判断的原文片段' },
+            },
+          },
+        },
+      },
+    },
+    model: 'gemini-2.5-flash',
+    risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
+    humanGate: false,
+  },
+
   'discovery.extract_list': {
     id: 'discovery.extract_list',
     allowedTools: [], // 只读已抓的目录页文本；搜索/抓取由 DirectoryDiscoveryProvider 经 Broker 调用
