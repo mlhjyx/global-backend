@@ -1,7 +1,9 @@
 # Global 增长后端 · 前端接入说明
 
-> 本文档给 SaaS 平台前端/服务端开发者。REST 契约以 `openapi/openapi.json`（code-first 导出）为准，
-> 开发环境可直接打开 Swagger UI：`http://<host>:3000/api/docs`。
+> 本文档给 SaaS 平台前端/服务端开发者。REST 契约以 `openapi/openapi.json`（code-first 导出）为准。
+>
+> **统一接口门户（推荐前端入口）**：`http://<host>:3000/api/portal` —— 自托管 Scalar，一个地址浏览 + 在线调试全部端点。
+> 另有 Swagger UI `http://<host>:3000/api/docs`（内部调试）。契约由 `--export-openapi` 从代码生成，代码即事实源。
 
 ## 1. 基础约定
 

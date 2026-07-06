@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { apiReference } from '@scalar/nestjs-api-reference';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
@@ -40,7 +41,17 @@ async function bootstrap(): Promise<void> {
 
   // ── code-first OpenAPI（唯一事实源）──────────────────────────────────
   const document = buildOpenApi(app);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/docs', app, document); // 内部调试用（Swagger UI）
+  // 给前端的统一门户（自托管 Scalar，数据全留本地）：可浏览 + try-it 调试。
+  // 一个稳定入口 /api/portal，吃 code-first OpenAPI，无需外部 SaaS。
+  app.use(
+    '/api/portal',
+    apiReference({
+      content: document,
+      theme: 'purple',
+      metaData: { title: 'Global API · 前端接入门户' },
+    }),
+  );
 
   // --export-openapi：把契约落盘到 packages/contracts，供门户/CI 消费后退出。
   // 让 code-first 装饰器成为唯一事实源，手写 openapi.yaml 降级为生成物。
