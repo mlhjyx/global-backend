@@ -13,7 +13,7 @@
 | **new-api / one-api**（中转站，已采用） | 模型 API 聚合网关：统一接入 DeepSeek/GPT/Gemini/火山，UI 管渠道/key/路由/额度/日志 | Integrate | ✅ docker 已起（`:3001`） | app 只接**单一 OpenAI 兼容端点**；薄 `ModelGateway` 契约在上（ADR-007，禁厂商 SDK） | 换 LiteLLM 或其它中转站仅改 `model-providers.config.ts` |
 | **LiteLLM**（备选中转站） | 模型连接内核（PRD 原选） | Integrate | 备选 | 同上单一端点接法 | 与 new-api 互为备选 |
 | **Docling** | 文档解析（PDF/DOCX/PPTX/网页） | Integrate | Security Review 后进 M1 | `DocumentParserProvider` | 自建解析器 fallback |
-| **Crawl4AI** | 自托管公开情报采集 | Integrate Candidate | Security Gate（SSRF/网络隔离） | `WebCrawlerProvider` | 换 Firecrawl |
+| **Crawl4AI**（已采用） | 自托管公开情报采集 | Integrate | ✅ docker 已起(:11235)，**自带 SSRF egress 防护**，实测抓取通过 | `WebCrawlerProvider`（`/md` 端点，token 鉴权） | 换 Firecrawl |
 | **Firecrawl** | 托管采集备选 | Buy/API Candidate | Commercial/License Gate | 同 `WebCrawlerProvider` | 与 Crawl4AI 互为备选 |
 | **Langfuse** | Trace/Prompt/Eval | Integrate | 脱敏与保留策略 Gate | Observability 封装（写前脱敏） | 换 trace 后端 |
 | **OPA** | 确定性策略决策 | Integrate | Policy Test Gate | `PolicyEngine` Contract（allow/deny/mask/…） | 内置规则引擎兜底 |

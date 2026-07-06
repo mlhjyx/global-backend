@@ -1,6 +1,7 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
+import { crawlUrl } from '../adapters/web-crawler';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -39,24 +40,16 @@ export function createUnderstandingActivities(deps: {
       );
     },
 
-    async crawlWebsite(website: string): Promise<{ url: string; rawHtml: string }> {
-      // STUB（真实感样例，Crawl4AI 接上前先这样）→ WebCrawlerProvider
-      const sample = `<html><body>
-        <h1>Shenzhen Acme Tech Co., Ltd.</h1>
-        <p>专注新能源逆变器与储能系统的研发与制造，产品通过 ISO 9001 质量体系认证与 CE 认证。</p>
-        <p>起订量 MOQ 500 台，标准交期 30 天，支持 OEM/ODM 定制。</p>
-        <p>产品出口欧洲、东南亚与中东，已服务 20+ 海外分销商，提供两年质保。</p>
-      </body></html>`;
-      return { url: website, rawHtml: sample };
+    async crawlWebsite(website: string): Promise<{ url: string; text: string }> {
+      // Real crawl via Crawl4AI (WebCrawlerProvider). Returns extracted markdown.
+      const result = await crawlUrl(website);
+      return { url: website, text: result.text };
     },
 
-    async parseContent(raw: { url: string; rawHtml: string }): Promise<{ text: string }> {
-      // STUB → DocumentParserProvider (Docling)。先朴素去标签。
-      const text = raw.rawHtml
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      return { text };
+    async parseContent(raw: { url: string; text: string }): Promise<{ text: string }> {
+      // Website path: Crawl4AI already returns extracted text. Docling is for
+      // UPLOADED documents (PDF/DOCX/PPTX) — a separate ingestion path (KNW-001).
+      return { text: raw.text };
     },
 
     async extractClaims(args: { workspaceId: string; text: string }): Promise<{ claims: ExtractedClaim[] }> {

@@ -45,6 +45,22 @@ services:
     volumes:
       - newapi-data:/data
 
+  # Crawler (PRD §10.18: Crawl4AI, self-hosted). Isolated container (ADR-013);
+  # the worker calls its REST API behind the WebCrawlerProvider adapter.
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: global-crawl4ai
+    restart: unless-stopped
+    ports:
+      - "11235:11235"
+    shm_size: "1g" # Chromium shared memory
+    environment:
+      - CRAWL4AI_API_TOKEN=global-local-crawl-token # enables external access + auth
+      # DEV ONLY: Docker Desktop (macOS) resolves public hosts to 198.18.x.x
+      # (non-global), which Crawl4AI's SSRF guard blocks. Prod Linux resolves
+      # real public IPs, so keep SSRF on there — do NOT set this in prod.
+      - CRAWL4AI_ALLOW_INTERNAL_URLS=true
+
 volumes:
   pgdata:
   redisdata:
