@@ -72,11 +72,21 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
               },
               icpForScoring,
             );
-            // ICP 资格门优先于打分（评测驱动）：mismatch→rejected、weak→needs_review。
-            // 资格门是 LLM 四门判别，比确定性规则更能识别品类混淆/竞品/中介平台。
+            // ICP 资格门是权威 Fit 信号（评测驱动）：当它判过（fitVerdict 非空），
+            // 就以它为准，覆盖确定性规则 —— 因为当前 ICP 规则值与 canonical 属性存在
+            // 语言/词表不一致（"制造业" vs "metal fabrication"，词表归一欠账），
+            // 确定性 Fit 会误判。资格门用 LLM 四门（材质/角色/工艺/商业模式）判别，更可靠。
+            // 词表归一落地后，两者应一致，此覆盖可退化为一致性校验。
             let queue = result.queue;
-            if (c.fitVerdict === 'mismatch' && queue !== 'suppressed') queue = 'rejected';
-            else if (c.fitVerdict === 'weak' && queue === 'recommended') queue = 'needs_review';
+            if (result.queue === 'suppressed') {
+              queue = 'suppressed';
+            } else if (c.fitVerdict === 'mismatch') {
+              queue = 'rejected';
+            } else if (c.fitVerdict === 'match') {
+              queue = 'recommended'; // 资格确认为目标客户
+            } else if (c.fitVerdict === 'weak') {
+              queue = 'needs_review';
+            }
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
             const scoreDetail = { ...result.detail, fitVerdict: c.fitVerdict ?? null };

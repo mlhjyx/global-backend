@@ -68,9 +68,9 @@
 
 输出 `match / weak / mismatch` 三态 + 绑定证据，写入 `canonical_company.fit_verdict`；`mismatch` 直接进 rejected 队列，`weak` 进 needs_review，供销售分层触达。**复测验证见 §6。**
 
-## 6. 复测（资格门生效后）
+## 6. 复测（资格门生效后）✅
 
-见 `discovery-eval-round2.md`（对 6 家 weak/mismatch 重跑资格门，确认能被正确拦截）。
+见 [`discovery-eval-round2.md`](discovery-eval-round2.md)。资格门对 19 家重判 = **10 match / 4 weak / 5 mismatch**；第一轮评委标出的 6 家问题公司全部被拦，并多抓出 Schröder Group 是竞品（评委原误判 match）。端到端队列：recommended 10（match）/ needs_review 4（weak）/ rejected 5（mismatch）——**recommended 队列 100% 为资格门确认的目标客户**。
 
 ## 7. 仍存欠账
 
