@@ -1,0 +1,23 @@
+# SearXNG for the discovery layer (self-hosted meta-search; OSS registry entry).
+# JSON format enabled for the PublicWebDiscoveryProvider; limiter off for
+# server-to-server use inside the private network (DO NOT expose publicly).
+use_default_settings: true
+
+server:
+  secret_key: "global-dev-searxng-secret-change-in-prod"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+
+engines:
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false

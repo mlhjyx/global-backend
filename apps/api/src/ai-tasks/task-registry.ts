@@ -174,6 +174,31 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
   },
 
+  'discovery.extract_company': {
+    id: 'discovery.extract_company',
+    description:
+      '判断给定网页是否为一家真实企业的官网，若是则抽取结构化企业属性。只允许使用网页文本中明确出现的信息，禁止编造或从画像上下文照抄。若不是企业官网（是目录/百科/新闻/市场平台/博客），is_company_site 置 false。',
+    outputSchema: {
+      type: 'object',
+      required: ['is_company_site'],
+      properties: {
+        is_company_site: { type: 'boolean', description: '该页面是否为某家企业自己的官网' },
+        name: { type: 'string', description: '企业名称（原文语言）' },
+        country: { type: 'string', description: '国家/地区（能从文本判断时）' },
+        industry: { type: 'string', description: '行业（英文小写，如 metal fabrication）' },
+        employee_count: { type: ['number', 'null'], description: '员工数（仅当文本明确出现）' },
+        products: { type: 'array', items: { type: 'string' }, description: '主要产品/服务' },
+        keywords: { type: 'array', items: { type: 'string' }, description: '能力/技术关键词' },
+        evidence: { type: 'string', description: '支持判断的原文片段' },
+        confidence: { type: 'number' },
+      },
+    },
+    // 判站 + 抽取是高频任务，用户在中转站已接入 Gemini → 用 gemini-2.5-flash（快、长上下文、便宜）。
+    model: 'gemini-2.5-flash',
+    risk: 'low',
+    humanGate: false,
+  },
+
   'discovery.query_plan': {
     id: 'discovery.query_plan',
     description:

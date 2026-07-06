@@ -42,7 +42,10 @@ export function createDiscoveryActivities(deps: {
       });
     },
 
-    /** Waterfall 步骤 3：调用（低成本优先的）发现源，raw 原样落地（幂等 by externalId）。 */
+    /**
+     * Waterfall 步骤 3：调用（低成本优先的）发现源，raw 原样落地（幂等 by externalId）。
+     * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
+     */
     async executeQuery(args: {
       workspaceId: string;
       runId: string;
@@ -54,11 +57,22 @@ export function createDiscoveryActivities(deps: {
         keywords: args.query.keywords ?? [],
         limit: PER_SOURCE_LIMIT,
       };
+      // Source Registry（DAT-011）：SUSPENDED 的域名列入黑名单，适配器抓取前跳过。
+      // source_policy 是无 RLS 的平台治理表（app_user 有 SELECT）→ 直接读。
+      const suspended = await deps.prisma.sourcePolicy.findMany({
+        where: { reviewStatus: 'SUSPENDED' },
+        select: { domain: true },
+      });
+      const adapter = (await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
+      ))[0];
+      if (!adapter) return { rawCount: 0, costCents: 0, provider: null };
+
+      // ── 事务外：真实发现（可能耗时数十秒）──
+      const result = await adapter.discoverCompanies(q, { blockedDomains: suspended.map((s) => s.domain) });
+
+      // ── 事务内：持久化 raw（带公开采集留痕）──
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const adapters = await deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass);
-        if (!adapters.length) return { rawCount: 0, costCents: 0, provider: null };
-        const adapter = adapters[0];
-        const result = await adapter.discoverCompanies(q);
         let rawCount = 0;
         for (const rec of result.records) {
           try {
@@ -70,6 +84,10 @@ export function createDiscoveryActivities(deps: {
                 sourceClass: q.sourceClass,
                 externalId: rec.externalId,
                 payload: rec as unknown as Prisma.InputJsonValue,
+                sourceUrl: rec.provenance?.sourceUrl ?? null,
+                fetchedAt: rec.provenance ? new Date(rec.provenance.fetchedAt) : null,
+                contentHash: rec.provenance?.contentHash ?? null,
+                parserVersion: rec.provenance?.parserVersion ?? null,
                 costCents: 0,
               },
             });

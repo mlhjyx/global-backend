@@ -31,6 +31,18 @@ export interface ProviderCompanyRecord {
   employeeCount?: number;
   revenueUsd?: number;
   attributes?: Record<string, unknown>;
+  /** 公开采集留痕（PRD 8.11）：来源页/抓取时间/内容指纹/解析版本 */
+  provenance?: {
+    sourceUrl: string;
+    fetchedAt: string;
+    contentHash: string;
+    parserVersion: string;
+  };
+}
+
+export interface DiscoveryOptions {
+  /** Source Registry 中被 SUSPENDED 的域名 —— 适配器必须在爬取前跳过（DAT-011）。 */
+  blockedDomains?: string[];
 }
 
 export interface ProviderContactRecord {
@@ -64,7 +76,7 @@ export interface EmailVerdict {
 export interface CompanyDiscoveryAdapter {
   key: string;
   classes: SourceClass[];
-  discoverCompanies(query: CompanyDiscoveryQuery): Promise<DiscoveryResult>;
+  discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult>;
 }
 
 /** 联系人发现（Waterfall 第 5 步：仅对高价值企业购买联系人）。 */

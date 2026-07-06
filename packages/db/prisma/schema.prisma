@@ -286,6 +286,30 @@ model DataProvider {
   @@map("data_provider")
 }
 
+/// Source Registry（DAT-011 / PRD 7.4.11）：公开采集只允许访问已批准的来源。
+/// 平台级治理表（非租户数据，无 RLS）。爬取前逐域名检查。
+model SourcePolicy {
+  id             String    @id @default(uuid()) @db.Uuid
+  domain         String    @unique // 如 hannovermesse.de；'*' 不允许
+  sourceType     String    @map("source_type") // official_website | trade_fair | association | gov_registry | news | jobs | tender | search_engine
+  accessMode     String    @default("crawl") @map("access_mode") // crawl | api
+  allowedPaths   Json?     @map("allowed_paths") // string[] 前缀；null=全站
+  disallowedPaths Json?    @map("disallowed_paths")
+  robotsStatus   String    @default("UNREVIEWED") @map("robots_status") // ALLOWS | RESTRICTS | UNREVIEWED
+  termsStatus    String    @default("UNREVIEWED") @map("terms_status") // REVIEWED_OK | REVIEWED_RESTRICTED | UNREVIEWED
+  personalData   Boolean   @default(false) @map("personal_data") // 是否可能含个人数据（限制用途）
+  allowedPurpose Json?     @map("allowed_purpose") // ['discovery','enrichment']
+  crawlDelayMs   Int       @default(2000) @map("crawl_delay_ms")
+  retentionDays  Int       @default(365) @map("retention_days")
+  reviewStatus   String    @default("APPROVED") @map("review_status") // APPROVED | SUSPENDED
+  owner          String    @default("backend")
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("source_policy")
+}
+
 /// 一次发现执行（对应一个 READY 的查询计划）。
 model DiscoveryRun {
   id          String    @id @default(uuid()) @db.Uuid
@@ -313,6 +337,11 @@ model RawSourceRecord {
   sourceClass String   @map("source_class")
   externalId  String?  @map("external_id") // Provider 侧 id（幂等去重）
   payload     Json
+  // 公开采集留痕（PRD 8.11）：来源 URL、抓取时间、内容指纹、解析版本
+  sourceUrl   String?  @map("source_url")
+  fetchedAt   DateTime? @map("fetched_at")
+  contentHash String?  @map("content_hash")
+  parserVersion String? @map("parser_version")
   costCents   Int      @default(0) @map("cost_cents")
   createdAt   DateTime @default(now()) @map("created_at")
 
