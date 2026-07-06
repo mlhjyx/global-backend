@@ -30,10 +30,16 @@ docker-compose.yml     本地 PG + Redis
 ## 本地起步
 
 ```bash
-pnpm install            # 安装依赖
-pnpm infra:up           # 起 PostgreSQL(+pgvector) 与 Redis
-cp .env.example .env    # 配置环境变量
-pnpm api:dev            # 启动 API，健康检查 http://localhost:3000/api/health
+pnpm install                              # 安装依赖
+pnpm infra:up                             # 起 PostgreSQL(+pgvector) 与 Redis
+pnpm --filter @global/db exec prisma migrate deploy   # 建表 + RLS
+temporal server start-dev --ip 127.0.0.1  # 起 Temporal dev server（UI :8233）
+
+# 两个进程：
+pnpm --filter @global/api build && pnpm --filter @global/api worker   # 理解工作流 worker
+pnpm api:dev                              # API（含 Outbox relay），/api/v1/health、文档 /api/docs
 ```
 
-> 需要 Node ≥ 20、pnpm、Docker。psql 客户端与 Temporal CLI 按需安装。
+冒烟：`pnpm --filter @global/db rls:check`（租户隔离）、`pnpm --filter @global/api mg:check`（模型网关）。
+
+> 需要 Node ≥ 20、pnpm、Docker、Temporal CLI（`curl -sSf https://temporal.download/cli.sh | sh`）。
