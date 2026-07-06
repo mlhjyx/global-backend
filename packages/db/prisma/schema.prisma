@@ -414,6 +414,67 @@ model SuppressionRecord {
   @@map("suppression_record")
 }
 
+// ── Lead & 验证评分 (PRD 7.5 LED-006..009 / 5.6) ───────────────────────────
+
+/// Lead 状态机（PRD 11.9）：DISCOVERED → ENRICHING → REVIEW →
+/// QUALIFIED/REJECTED/SUPPRESSED → CONTACTED → CONVERTED
+enum LeadStatus {
+  DISCOVERED
+  ENRICHING
+  REVIEW
+  QUALIFIED
+  REJECTED
+  SUPPRESSED
+  CONTACTED
+  CONVERTED
+
+  @@map("lead_status")
+}
+
+/// Lead = 「这家公司 × 这个 ICP」的可跟进机会。评分是确定性计算
+/// （规则引擎 + 数据质量），AI 只在上游提议规则 —— 分数可复算可审计。
+model Lead {
+  id                 String     @id @default(uuid()) @db.Uuid
+  workspaceId        String     @map("workspace_id") @db.Uuid
+  icpId              String     @map("icp_id") @db.Uuid
+  canonicalCompanyId String     @map("canonical_company_id") @db.Uuid
+  status             LeadStatus @default(DISCOVERED)
+  /// 四队列（LED-008）：recommended | needs_review | rejected | suppressed
+  queue              String     @default("needs_review")
+  totalScore         Float?     @map("total_score")
+  /// 六维分（LED-006）：{fit, role, intent, dataQuality, reachability, engagement}
+  scores             Json?
+  /// 评分依据：规则逐条评估结果 + 各维输入（审计/申诉用）
+  scoreDetail        Json?      @map("score_detail")
+  version            Int        @default(1)
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  decisions LeadDecision[]
+
+  @@unique([workspaceId, icpId, canonicalCompanyId])
+  @@index([workspaceId])
+  @@index([workspaceId, queue])
+  @@map("lead")
+}
+
+/// 人工裁决（LED-009）：接受/拒绝 + 原因，回流做质量反馈。
+model LeadDecision {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  leadId      String   @map("lead_id") @db.Uuid
+  action      String // accept | reject
+  reason      String?
+  decidedBy   String   @map("decided_by") // 外部平台 user id（来自 token）
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([leadId])
+  @@map("lead_decision")
+}
+
 // ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────
 
 /// ICP lifecycle (PRD 11.9): DRAFT → HYPOTHESIS → VALIDATING → ACTIVE → SUPERSEDED → ARCHIVED

@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { TemporalClient } from '../temporal/temporal.client';
 import {
   DISCOVERY_WORKFLOW,
+  QUALIFY_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
@@ -98,6 +99,15 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         ],
       });
       this.logger.log(`started discovery workflow for run ${ev.aggregateId}`);
+    }
+    if (ev.eventType === 'QualifyRequested') {
+      await this.temporal.client.workflow.start(QUALIFY_WORKFLOW, {
+        taskQueue: UNDERSTANDING_TASK_QUEUE,
+        // 同一 ICP 重复请求合并到一个在跑实例；跑完可再触发
+        workflowId: `qualify-${ev.aggregateId}`,
+        args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
+      });
+      this.logger.log(`started qualify workflow for icp ${ev.aggregateId}`);
     }
     // Other event types: no handler yet (still marked published).
   }

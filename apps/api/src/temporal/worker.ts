@@ -10,6 +10,7 @@ import { buildGatewayProvider, stubAllowed } from '../model-gateway/model-provid
 import { AiTraceSink } from '../model-gateway/ai-trace.sink';
 import { createUnderstandingActivities } from './understanding.activities';
 import { createDiscoveryActivities } from './discovery.activities';
+import { createQualifyActivities } from './qualify.activities';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
     activities: {
       ...createUnderstandingActivities({ prisma, gateway }),
       ...createDiscoveryActivities({ prisma, providers: new DiscoveryProviderRegistry() }),
+      ...createQualifyActivities({ prisma }),
     },
   });
 

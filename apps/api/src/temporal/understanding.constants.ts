@@ -4,3 +4,4 @@
 export const UNDERSTANDING_TASK_QUEUE = 'understanding';
 export const UNDERSTANDING_WORKFLOW = 'understandingWorkflow';
 export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';
+export const QUALIFY_WORKFLOW = 'qualifyWorkflow';

@@ -10,6 +10,7 @@ import { CompanyModule } from './company/company.module';
 import { ClaimModule } from './claim/claim.module';
 import { IcpModule } from './icp/icp.module';
 import { DiscoveryModule } from './discovery/discovery.module';
+import { LeadModule } from './lead/lead.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -26,6 +27,7 @@ import { DiscoveryModule } from './discovery/discovery.module';
     ClaimModule,
     IcpModule,
     DiscoveryModule,
+    LeadModule,
   ],
   controllers: [HealthController, WhoamiController],
 })
