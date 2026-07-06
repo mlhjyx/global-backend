@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     workflowsPath: require.resolve('./workflows'),
     activities: {
       ...createUnderstandingActivities({ prisma, gateway }),
-      ...createDiscoveryActivities({ prisma, providers: new DiscoveryProviderRegistry({ gateway }) }),
+      ...createDiscoveryActivities({ prisma, providers: new DiscoveryProviderRegistry({ gateway }), gateway }),
       ...createQualifyActivities({ prisma }),
     },
   });

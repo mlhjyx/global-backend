@@ -199,6 +199,28 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  'discovery.qualify_fit': {
+    id: 'discovery.qualify_fit',
+    description:
+      '给定卖方 ICP 与一家候选公司，判断它是否为该卖方的真实目标客户。必须通过四个门：\n1) 材质门：候选的加工材质是否与 ICP 目标一致（如金属 vs 塑料/织物/粉体）——注意 "RF welding"（射频热合塑料）≠ 金属焊接，"toll processing/筛分" 处理粉末≠金属工件加工。\n2) 角色门：候选是设备/产品的下游买家，还是与卖方同类的设备制造商（竞品）？竞品判 mismatch。\n3) 工艺子集门：候选是否真正从事 ICP 核心工艺，还是仅相邻工艺（如纯机加/磨削而无激光/钣金/折弯/焊接）。\n4) 商业模式门：候选是自有产线的制造商，还是聚合第三方供应商的采购中介平台？中介平台判 weak。\n任一硬门失败判 mismatch；边缘/相邻判 weak；全部通过判 match。只依据给定信息，理由需具体。',
+    outputSchema: {
+      type: 'object',
+      required: ['verdict', 'material_gate', 'role_gate', 'process_gate', 'business_model_gate', 'reasons'],
+      properties: {
+        verdict: { type: 'string', description: 'match | weak | mismatch' },
+        material_gate: { type: 'string', description: 'pass | fail | unclear + 一句依据' },
+        role_gate: { type: 'string', description: 'pass(下游买家) | fail(竞品) | unclear' },
+        process_gate: { type: 'string', description: 'pass(核心工艺) | weak(相邻工艺) | fail | unclear' },
+        business_model_gate: { type: 'string', description: 'pass(自有产线) | weak(中介平台) | unclear' },
+        reasons: { type: 'array', items: { type: 'string' }, description: '具体判定依据' },
+      },
+    },
+    // 资格判别要准（评测显示 flash 召回过宽）→ 用 pro。
+    model: 'gemini-2.5-pro',
+    risk: 'low',
+    humanGate: false,
+  },
+
   'discovery.query_plan': {
     id: 'discovery.query_plan',
     description:

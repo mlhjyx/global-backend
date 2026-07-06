@@ -14,6 +14,7 @@
 | **LiteLLM**（备选中转站） | 模型连接内核（PRD 原选） | Integrate | 备选 | 同上单一端点接法 | 与 new-api 互为备选 |
 | **Docling** | 文档解析（PDF/DOCX/PPTX/网页） | Integrate | Security Review 后进 M1 | `DocumentParserProvider` | 自建解析器 fallback |
 | **Crawl4AI**（已采用） | 自托管公开情报采集 | Integrate | ✅ docker 已起(:11235)，**自带 SSRF egress 防护**，实测抓取通过 | `WebCrawlerProvider`（`/md` 端点，token 鉴权） | 换 Firecrawl |
+| **SearXNG**（已采用） | 自托管元搜索：客户发现的**发现层入口**（搜候选企业域名） | Integrate | ✅ docker 已起(:8081)，JSON API，实测真挖到真实公司 | `PublicWebDiscoveryProvider` 内部调用（`/search?format=json`）；**仅内网**、limiter off | 换商业搜索 API（Brave/Bing） |
 | **Firecrawl** | 托管采集备选 | Buy/API Candidate | Commercial/License Gate | 同 `WebCrawlerProvider` | 与 Crawl4AI 互为备选 |
 | **Langfuse** | Trace/Prompt/Eval | Integrate | 脱敏与保留策略 Gate | Observability 封装（写前脱敏） | 换 trace 后端 |
 | **OPA** | 确定性策略决策 | Integrate | Policy Test Gate | `PolicyEngine` Contract（allow/deny/mask/…） | 内置规则引擎兜底 |

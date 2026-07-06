@@ -30,12 +30,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
   const { companies, suppressed } = await acts.canonicalizeRun({ workspaceId, runId });
 
+  // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
+  const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId });
+
   const status = failures === 0 ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
   await acts.finalizeRun({
     workspaceId,
     runId,
     planId,
     status,
-    stats: { perSource, companies, suppressed, queries: queries.length, failures },
+    stats: { perSource, companies, suppressed, fit: fit.verdicts, queries: queries.length, failures },
   });
 }

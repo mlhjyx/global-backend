@@ -72,8 +72,14 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
               },
               icpForScoring,
             );
+            // ICP 资格门优先于打分（评测驱动）：mismatch→rejected、weak→needs_review。
+            // 资格门是 LLM 四门判别，比确定性规则更能识别品类混淆/竞品/中介平台。
+            let queue = result.queue;
+            if (c.fitVerdict === 'mismatch' && queue !== 'suppressed') queue = 'rejected';
+            else if (c.fitVerdict === 'weak' && queue === 'recommended') queue = 'needs_review';
             const status =
-              result.queue === 'suppressed' ? 'SUPPRESSED' : result.queue === 'rejected' ? 'REJECTED' : 'REVIEW';
+              queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
+            const scoreDetail = { ...result.detail, fitVerdict: c.fitVerdict ?? null };
             const existing = await tx.lead.findUnique({
               where: {
                 workspaceId_icpId_canonicalCompanyId: {
@@ -97,8 +103,8 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
               update: {
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
-                scoreDetail: result.detail as unknown as Prisma.InputJsonValue,
-                ...(humanFinal ? {} : { status: status as never, queue: result.queue }),
+                scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                ...(humanFinal ? {} : { status: status as never, queue }),
                 version: { increment: 1 },
               },
               create: {
@@ -106,13 +112,13 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
                 icpId: args.icpId,
                 canonicalCompanyId: c.id,
                 status: status as never,
-                queue: result.queue,
+                queue,
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
-                scoreDetail: result.detail as unknown as Prisma.InputJsonValue,
+                scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
               },
             });
-            queues[result.queue] += 1;
+            queues[queue] += 1;
             scored += 1;
           }
           cursor = companies[companies.length - 1].id;

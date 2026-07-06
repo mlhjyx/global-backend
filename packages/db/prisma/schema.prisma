@@ -366,6 +366,10 @@ model CanonicalCompany {
   revenueUsd    Float?   @map("revenue_usd")
   attributes    Json? // 其余归一属性（certifications/keywords/tech/end_markets...）
   status        String   @default("NEW") // NEW | ENRICHED | SUPPRESSED
+  // ICP 资格门（发现评测驱动）：match | weak | mismatch | null(未判)。
+  // 四门判定：材质/角色(竞品)/工艺子集/商业模式。绑定证据在 fit_reasons。
+  fitVerdict    String?  @map("fit_verdict")
+  fitReasons    Json?    @map("fit_reasons")
   dedupeKey     String   @map("dedupe_key") // 身份解析键：域名 或 name+country 规范化
   version       Int      @default(1)
   createdAt     DateTime @default(now()) @map("created_at")
