@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
+import { qualify, RuleLike } from './rule-engine';
 
 interface IcpModelOutput {
   name: string;
@@ -20,7 +21,29 @@ interface IcpModelOutput {
   target_markets: string[];
   personas: { title: string; goals: string[]; pain_points: string[] }[];
   buying_committee: { role: string; title: string; concerns: string[] }[];
+  qualification_rules?: {
+    kind: string;
+    field: string;
+    operator: string;
+    value: unknown;
+    weight?: number;
+    rationale?: string;
+  }[];
 }
+
+interface QueryPlanModelOutput {
+  queries: {
+    source_class: string;
+    filters: Record<string, unknown>;
+    keywords: string[];
+    rationale: string;
+    priority: number;
+  }[];
+  estimated_volume: number;
+}
+
+const RULE_KINDS = ['MUST_HAVE', 'NICE_TO_HAVE', 'EXCLUSION'] as const;
+const RULE_OPERATORS = ['eq', 'neq', 'in', 'not_in', 'contains', 'not_contains', 'gte', 'lte', 'matches'];
 
 const json = (v: unknown): Prisma.InputJsonValue => (v ?? []) as Prisma.InputJsonValue;
 
@@ -33,13 +56,18 @@ export class IcpService {
 
   /** AI-design an ICP from the seller company's APPROVED claims (PRD 5.4 / 7.5). */
   async generateFromCompany(ctx: RequestContext, companyId: string) {
-    const { company, claims } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    const { company, claims, offerings } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
       if (!company) {
         throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
       }
       const claims = await tx.claim.findMany({ where: { companyId, status: 'APPROVED' } });
-      return { company, claims };
+      const offerings = await tx.offering.findMany({
+        where: { companyId },
+        orderBy: { confidence: 'desc' },
+        take: 30,
+      });
+      return { company, claims, offerings };
     });
 
     if (claims.length === 0) {
@@ -50,7 +78,10 @@ export class IcpService {
 
     const contract = getTask('icp.design')!;
     const facts = claims.map((c) => `- [${c.type}] ${c.statement}`).join('\n');
-    const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}\n\n请据此设计其理想客户画像(ICP)与买家委员会，输出中文。`;
+    const products = offerings.length
+      ? `\n产品/服务（官网抽取）：\n${offerings.map((o) => `- ${o.name}${o.description ? `：${o.description}` : ''}`).join('\n')}`
+      : '';
+    const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
 
     const result = await this.gateway.generateStructured<IcpModelOutput>(
       {
@@ -101,6 +132,23 @@ export class IcpService {
           },
         });
       }
+      // 结构化验证规则（LED-003）：AI 提议 → 落库 → 由确定性规则引擎评估。
+      for (const r of out.qualification_rules ?? []) {
+        const kind = String(r.kind).toUpperCase();
+        if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) continue; // 丢弃不合法提议
+        await tx.qualificationRule.create({
+          data: {
+            workspaceId: ctx.workspaceId,
+            icpId: icp.id,
+            kind: kind as never,
+            field: r.field,
+            operator: r.operator,
+            value: (r.value ?? null) as Prisma.InputJsonValue,
+            weight: r.weight ?? 1,
+            rationale: r.rationale ?? null,
+          },
+        });
+      }
       return this.full(tx, icp.id);
     });
   }
@@ -119,7 +167,10 @@ export class IcpService {
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) => this.full(tx, icpId));
   }
 
-  /** Human Gate: promote to ACTIVE (PRD ICP state machine); emits ICPActivated. */
+  /**
+   * Human Gate: promote to ACTIVE (PRD ICP state machine); emits ICPActivated.
+   * Previous ACTIVE ICPs of the same company become SUPERSEDED (版本演进).
+   */
   async activate(ctx: RequestContext, icpId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const icp = await tx.icpDefinition.findUnique({ where: { id: icpId } });
@@ -129,6 +180,10 @@ export class IcpService {
           error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; cannot activate` },
         });
       }
+      await tx.icpDefinition.updateMany({
+        where: { companyId: icp.companyId, status: 'ACTIVE', id: { not: icpId } },
+        data: { status: 'SUPERSEDED' },
+      });
       await tx.icpDefinition.update({
         where: { id: icpId },
         data: { status: 'ACTIVE', version: { increment: 1 } },
@@ -146,10 +201,280 @@ export class IcpService {
     });
   }
 
+  /** 人工修订 ICP：AI 产出是假设，用户必须能改（乐观锁）。终态不可编辑。 */
+  async update(
+    ctx: RequestContext,
+    icpId: string,
+    patch: {
+      name?: string;
+      companyAttributes?: Record<string, unknown>;
+      painPoints?: string[];
+      triggerSignals?: string[];
+      exclusions?: string[];
+      valueProps?: string[];
+      targetMarkets?: string[];
+    },
+    expectedVersion?: number,
+  ) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const icp = await tx.icpDefinition.findUnique({ where: { id: icpId } });
+      if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
+      if (['SUPERSEDED', 'ARCHIVED'].includes(icp.status)) {
+        throw new ConflictException({
+          error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; not editable` },
+        });
+      }
+      if (expectedVersion != null && icp.version !== expectedVersion) {
+        throw new ConflictException({
+          error: { code: 'VERSION_CONFLICT', message: 'stale version', details: { current: icp.version } },
+        });
+      }
+      await tx.icpDefinition.update({
+        where: { id: icpId },
+        data: {
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.companyAttributes !== undefined ? { companyAttributes: json(patch.companyAttributes) } : {}),
+          ...(patch.painPoints !== undefined ? { painPoints: json(patch.painPoints) } : {}),
+          ...(patch.triggerSignals !== undefined ? { triggerSignals: json(patch.triggerSignals) } : {}),
+          ...(patch.exclusions !== undefined ? { exclusions: json(patch.exclusions) } : {}),
+          ...(patch.valueProps !== undefined ? { valueProps: json(patch.valueProps) } : {}),
+          ...(patch.targetMarkets !== undefined ? { targetMarkets: json(patch.targetMarkets) } : {}),
+          version: { increment: 1 },
+        },
+      });
+      return this.full(tx, icpId);
+    });
+  }
+
+  // ── QualificationRule CRUD（LED-003）──────────────────────────────────────
+
+  async addRule(
+    ctx: RequestContext,
+    icpId: string,
+    rule: { kind: string; field: string; operator: string; value: unknown; weight?: number; rationale?: string },
+  ) {
+    this.assertRuleShape(rule);
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true } });
+      if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
+      return tx.qualificationRule.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          icpId,
+          kind: rule.kind.toUpperCase() as never,
+          field: rule.field,
+          operator: rule.operator,
+          value: (rule.value ?? null) as Prisma.InputJsonValue,
+          weight: rule.weight ?? 1,
+          rationale: rule.rationale ?? null,
+        },
+      });
+    });
+  }
+
+  async updateRule(
+    ctx: RequestContext,
+    ruleId: string,
+    patch: { kind?: string; field?: string; operator?: string; value?: unknown; weight?: number; rationale?: string },
+  ) {
+    if (patch.kind !== undefined || patch.operator !== undefined) {
+      this.assertRuleShape({
+        kind: patch.kind ?? 'MUST_HAVE',
+        operator: patch.operator ?? 'eq',
+        field: patch.field ?? 'x',
+        value: patch.value,
+      });
+    }
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const rule = await tx.qualificationRule.findUnique({ where: { id: ruleId } });
+      if (!rule) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'rule not found' } });
+      return tx.qualificationRule.update({
+        where: { id: ruleId },
+        data: {
+          ...(patch.kind !== undefined ? { kind: patch.kind.toUpperCase() as never } : {}),
+          ...(patch.field !== undefined ? { field: patch.field } : {}),
+          ...(patch.operator !== undefined ? { operator: patch.operator } : {}),
+          ...(patch.value !== undefined ? { value: patch.value as Prisma.InputJsonValue } : {}),
+          ...(patch.weight !== undefined ? { weight: patch.weight } : {}),
+          ...(patch.rationale !== undefined ? { rationale: patch.rationale } : {}),
+          version: { increment: 1 },
+        },
+      });
+    });
+  }
+
+  async deleteRule(ctx: RequestContext, ruleId: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const rule = await tx.qualificationRule.findUnique({ where: { id: ruleId } });
+      if (!rule) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'rule not found' } });
+      await tx.qualificationRule.delete({ where: { id: ruleId } });
+      return { deleted: true };
+    });
+  }
+
+  private assertRuleShape(rule: { kind: string; field: string; operator: string; value: unknown }) {
+    if (!RULE_KINDS.includes(rule.kind.toUpperCase() as never)) {
+      throw new BadRequestException({
+        error: { code: 'INVALID_RULE', message: `kind must be one of ${RULE_KINDS.join('|')}` },
+      });
+    }
+    if (!RULE_OPERATORS.includes(rule.operator)) {
+      throw new BadRequestException({
+        error: { code: 'INVALID_RULE', message: `operator must be one of ${RULE_OPERATORS.join('|')}` },
+      });
+    }
+  }
+
+  // ── 样例回测（LED-004）────────────────────────────────────────────────────
+
+  /**
+   * Deterministic backtest of the ICP's rules against known sample companies.
+   * 这是 HYPOTHESIS → VALIDATING 的入口，也是 ACTIVE 决策的数据依据 —— 用
+   * 真实样例检验 AI 推断（数据真实性原则对 ICP 的落法）。
+   */
+  async runBacktest(
+    ctx: RequestContext,
+    icpId: string,
+    samples: { name: string; domain?: string; attributes: Record<string, unknown>; expected: 'match' | 'exclude' }[],
+  ) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } });
+      if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
+      if (!icp.rules.length) {
+        throw new BadRequestException({
+          error: { code: 'NO_RULES', message: 'icp has no qualification rules to backtest' },
+        });
+      }
+      const rules: RuleLike[] = icp.rules.map((r) => ({
+        id: r.id,
+        kind: r.kind as RuleLike['kind'],
+        field: r.field,
+        operator: r.operator,
+        value: r.value,
+        weight: r.weight,
+      }));
+
+      const results = samples.map((s) => {
+        const q = qualify(rules, s.attributes ?? {});
+        return { name: s.name, domain: s.domain ?? null, expected: s.expected, ...q };
+      });
+
+      const expMatch = results.filter((r) => r.expected === 'match');
+      const expExclude = results.filter((r) => r.expected === 'exclude');
+      const matchHit = expMatch.filter((r) => r.verdict === 'match').length;
+      const excludeCaught = expExclude.filter((r) => ['exclude', 'no_match'].includes(r.verdict)).length;
+      const evals = results.flatMap((r) => r.evaluations);
+      const metrics = {
+        matchHitRate: expMatch.length ? Number((matchHit / expMatch.length).toFixed(4)) : null,
+        excludeCatchRate: expExclude.length ? Number((excludeCaught / expExclude.length).toFixed(4)) : null,
+        unknownFieldRate: evals.length
+          ? Number((evals.filter((e) => e.outcome === 'unknown').length / evals.length).toFixed(4))
+          : null,
+        recommendation:
+          (expMatch.length === 0 || matchHit / Math.max(expMatch.length, 1) >= 0.7) &&
+          (expExclude.length === 0 || excludeCaught / Math.max(expExclude.length, 1) >= 0.7)
+            ? 'promote'
+            : 'revise',
+      };
+
+      const backtest = await tx.icpBacktest.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          icpId,
+          samples: samples as never,
+          results: results as never,
+          metrics: metrics as never,
+        },
+      });
+      // 状态机（PRD 11.9）：回测把假设推进到验证中；ACTIVE 仍需人工 Gate。
+      if (['DRAFT', 'HYPOTHESIS'].includes(icp.status)) {
+        await tx.icpDefinition.update({ where: { id: icpId }, data: { status: 'VALIDATING' } });
+      }
+      return backtest;
+    });
+  }
+
+  listBacktests(ctx: RequestContext, icpId: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.icpBacktest.findMany({ where: { icpId }, orderBy: { createdAt: 'desc' } }),
+    );
+  }
+
+  // ── 查询计划（LED-005）────────────────────────────────────────────────────
+
+  /** AI translates an ACTIVE ICP into an ordered multi-source query plan (Discover input). */
+  async generateQueryPlan(ctx: RequestContext, icpId: string) {
+    const icp = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
+    );
+    if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
+    if (icp.status !== 'ACTIVE') {
+      throw new ConflictException({
+        error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; query plans require an ACTIVE icp` },
+      });
+    }
+
+    const contract = getTask('discovery.query_plan')!;
+    const icpBrief = {
+      name: icp.name,
+      company_attributes: icp.companyAttributes,
+      target_markets: icp.targetMarkets,
+      trigger_signals: icp.triggerSignals,
+      exclusions: icp.exclusions,
+      rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
+    };
+    const result = await this.gateway.generateStructured<QueryPlanModelOutput>(
+      {
+        task: contract.id,
+        prompt: `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`,
+        system: contract.description,
+        model: contract.model,
+        schema: contract.outputSchema,
+      },
+      { workspaceId: ctx.workspaceId, userId: ctx.userId },
+    );
+    const out = result.data;
+
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.discoveryQueryPlan.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          icpId,
+          status: 'DRAFT', // 人工确认（→READY）后才可被 Discover 执行
+          queries: (out.queries ?? []) as never,
+          estimatedVolume: Number.isFinite(out.estimated_volume) ? Math.round(out.estimated_volume) : null,
+        },
+      }),
+    );
+  }
+
+  /** Human gate: confirm a DRAFT plan → READY (Discover may execute it). */
+  async confirmQueryPlan(ctx: RequestContext, planId: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: planId } });
+      if (!plan) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'query plan not found' } });
+      if (plan.status !== 'DRAFT') {
+        throw new ConflictException({
+          error: { code: 'INVALID_STATE', message: `plan is ${plan.status}; only DRAFT can be confirmed` },
+        });
+      }
+      return tx.discoveryQueryPlan.update({
+        where: { id: planId },
+        data: { status: 'READY', version: { increment: 1 } },
+      });
+    });
+  }
+
+  listQueryPlans(ctx: RequestContext, icpId: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.discoveryQueryPlan.findMany({ where: { icpId }, orderBy: { createdAt: 'desc' } }),
+    );
+  }
+
   private async full(tx: Prisma.TransactionClient, icpId: string) {
     const icp = await tx.icpDefinition.findUnique({
       where: { id: icpId },
-      include: { personas: true, roles: true },
+      include: { personas: true, roles: true, rules: true },
     });
     if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
     return icp;

@@ -218,13 +218,85 @@ model IcpDefinition {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  company  CompanyProfile        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  personas Persona[]
-  roles    BuyingCommitteeRole[]
+  company    CompanyProfile        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  personas   Persona[]
+  roles      BuyingCommitteeRole[]
+  rules      QualificationRule[]
+  backtests  IcpBacktest[]
+  queryPlans DiscoveryQueryPlan[]
 
   @@index([workspaceId])
   @@index([companyId])
   @@map("icp_definition")
+}
+
+/// 结构化验证规则（LED-003）：机器可评估，是 ICP 从「描述」变「可执行」的桥。
+/// EXCLUSION 永远优先于正向评分（PRD 7.5）。
+enum RuleKind {
+  MUST_HAVE
+  NICE_TO_HAVE
+  EXCLUSION
+
+  @@map("rule_kind")
+}
+
+model QualificationRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  icpId       String   @map("icp_id") @db.Uuid
+  kind        RuleKind
+  field       String // canonical 属性名：industry/region/country/employee_count/certifications/keywords/tech ...
+  operator    String // eq | neq | in | not_in | gte | lte | contains | not_contains | matches
+  value       Json // 操作数（标量或数组）
+  weight      Float    @default(1) // NICE_TO_HAVE 计分权重
+  rationale   String? // 该规则的依据（来自 AI 生成或人工），保持推断透明
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  icp IcpDefinition @relation(fields: [icpId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([icpId])
+  @@map("qualification_rule")
+}
+
+/// ICP 样例回测（LED-004）：用已知客户/非客户样例验证规则命中，
+/// 是 HYPOTHESIS → VALIDATING → ACTIVE 的数据依据。
+model IcpBacktest {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  icpId       String   @map("icp_id") @db.Uuid
+  samples     Json // [{name, domain?, attributes, expected: 'match'|'exclude'}]
+  results     Json // 逐样例 {verdict, ruleOutcomes[], score}
+  metrics     Json // {matchHitRate, excludeCatchRate, unknownFieldRate, recommendation}
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  icp IcpDefinition @relation(fields: [icpId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([icpId])
+  @@map("icp_backtest")
+}
+
+/// 多源查询计划（LED-005）：把 ICP 翻译成各数据源的可执行查询（Discover 的输入）。
+model DiscoveryQueryPlan {
+  id                 String   @id @default(uuid()) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  icpId              String   @map("icp_id") @db.Uuid
+  status             String   @default("DRAFT") // DRAFT | READY | EXECUTED
+  queries            Json // [{source, sourceClass, filters, keywords, rationale, priority}]
+  estimatedVolume    Int?     @map("estimated_volume")
+  estimatedCostCents Int?     @map("estimated_cost_cents")
+  version            Int      @default(1)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  icp IcpDefinition @relation(fields: [icpId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([icpId])
+  @@map("discovery_query_plan")
 }
 
 model Persona {

@@ -29,6 +29,25 @@ interface IcpRow {
   createdAt: Date;
   personas?: { title: string; goals: unknown; painPoints: unknown }[];
   roles?: { role: string; title: string | null; concerns: unknown }[];
+  rules?: {
+    id: string;
+    kind: string;
+    field: string;
+    operator: string;
+    value: unknown;
+    weight: number;
+    rationale: string | null;
+  }[];
+}
+
+export class IcpRuleDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ enum: ['MUST_HAVE', 'NICE_TO_HAVE', 'EXCLUSION'] }) kind!: string;
+  @ApiProperty() field!: string;
+  @ApiProperty() operator!: string;
+  @ApiProperty() value!: unknown;
+  @ApiProperty() weight!: number;
+  @ApiPropertyOptional({ nullable: true }) rationale!: string | null;
 }
 
 export class IcpDto {
@@ -45,6 +64,8 @@ export class IcpDto {
   @ApiProperty() version!: number;
   @ApiProperty({ type: [PersonaDto] }) personas!: PersonaDto[];
   @ApiProperty({ type: [BuyingRoleDto] }) buyingCommittee!: BuyingRoleDto[];
+  @ApiProperty({ type: [IcpRuleDto], description: '机器可评估的验证规则（LED-003）' })
+  rules!: IcpRuleDto[];
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 
   static from(icp: IcpRow): IcpDto {
@@ -69,6 +90,15 @@ export class IcpDto {
         role: r.role,
         title: r.title,
         concerns: r.concerns,
+      })),
+      rules: (icp.rules ?? []).map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        field: r.field,
+        operator: r.operator,
+        value: r.value,
+        weight: r.weight,
+        rationale: r.rationale,
       })),
       createdAt: icp.createdAt.toISOString(),
     };
