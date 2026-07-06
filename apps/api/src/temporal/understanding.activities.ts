@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
+import { getTask } from '../ai-tasks/task-registry';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -49,11 +50,16 @@ export function createUnderstandingActivities(deps: {
     },
 
     async extractClaims(args: { workspaceId: string; text: string }): Promise<{ claims: ExtractedClaim[] }> {
+      // Driven by the AI Task Contract: its schema shapes the output, its
+      // modelPolicy decides which vendor the router prefers (business-need routing).
+      const contract = getTask('company_understanding.extract_claims');
       const result = await deps.gateway.generateStructured(
         {
-          task: 'company_understanding.extract_claims',
+          task: contract?.id ?? 'company_understanding.extract_claims',
           prompt: args.text,
-          schema: { required: ['claims'] },
+          system: contract?.description,
+          model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
+          schema: contract?.outputSchema ?? { required: ['claims'] },
         },
         { workspaceId: args.workspaceId },
       );

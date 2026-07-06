@@ -4,9 +4,10 @@ import { ModelProvider } from './model-provider';
 import { ModelOp } from './types';
 
 /**
- * Decides the ordered provider chain for a (op, task). Today: capability filter +
- * keep the stub last as a fallback. Later: policy/cost/region/latency/health-based
- * routing per PRD 9.12 — the ModelGateway interface stays the same.
+ * Provider order for a (op, task): the real gateway (中转站) first, the stub last
+ * as a dev fallback. Vendor-level routing/fallback (which model, which vendor)
+ * lives IN the 中转站; per-task model *selection* is carried on the request
+ * (input.model, from the AI Task Contract).
  */
 @Injectable()
 export class ModelRouter {

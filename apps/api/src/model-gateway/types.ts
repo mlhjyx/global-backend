@@ -19,9 +19,10 @@ export interface ModelResult<T> {
 }
 
 export interface GenerateTextInput {
-  task: string; // routing key, e.g. 'company_understanding'
+  task: string; // task id (trace/routing key), e.g. 'company_understanding.extract_claims'
   prompt: string;
   system?: string;
+  model?: string; // model name for the 中转站 to resolve; omit → provider default
   maxTokens?: number;
   temperature?: number;
 }
@@ -30,6 +31,7 @@ export interface GenerateStructuredInput {
   task: string;
   prompt: string;
   system?: string;
+  model?: string;
   schema: Record<string, unknown>; // JSON Schema the output must satisfy
   maxTokens?: number;
 }

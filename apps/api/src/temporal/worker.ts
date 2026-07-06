@@ -6,6 +6,7 @@ import { ModelProviderRegistry } from '../model-gateway/model-provider.registry'
 import { ModelRouter } from '../model-gateway/model-router';
 import { RouterModelGateway } from '../model-gateway/router-model-gateway';
 import { StubModelProvider } from '../model-gateway/providers/stub-model.provider';
+import { buildGatewayProvider } from '../model-gateway/model-providers.config';
 import { createUnderstandingActivities } from './understanding.activities';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 
@@ -18,6 +19,8 @@ async function main(): Promise<void> {
   await prisma.$connect();
 
   const registry = new ModelProviderRegistry();
+  const gatewayProvider = buildGatewayProvider();
+  if (gatewayProvider) registry.register(gatewayProvider);
   registry.register(new StubModelProvider());
   const gateway = new RouterModelGateway(new ModelRouter(registry));
 

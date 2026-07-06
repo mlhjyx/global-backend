@@ -1,51 +1,54 @@
-// Proves the gateway presents ONE API over MANY providers, with fallback:
-//   - register a 'flaky' provider (always throws) + the 'stub' provider
-//   - router puts real providers first, stub last
-//   - generateText routes flaky → (throws) → falls back to stub
+// Proves the app calls ONE gateway (中转站) with a task-selected model name, and
+// falls back to the stub if the gateway is down — without any real vendor call.
 const { ModelProviderRegistry } = require('../dist/model-gateway/model-provider.registry');
 const { ModelRouter } = require('../dist/model-gateway/model-router');
 const { RouterModelGateway } = require('../dist/model-gateway/router-model-gateway');
 const { StubModelProvider } = require('../dist/model-gateway/providers/stub-model.provider');
 
-const flaky = {
-  id: 'flaky',
+// Fake 中转站 provider: echoes back the model name it was asked to resolve.
+const gatewayFake = (fail = false) => ({
+  id: 'gateway',
   supports: () => true,
-  health: async () => ({ healthy: false }),
-  generateText: async () => {
-    throw new Error('provider down');
+  health: async () => ({ healthy: !fail }),
+  generateText: async (input) => {
+    if (fail) throw new Error('gateway down');
+    return { data: `resolved:${input.model}`, provider: 'gateway', model: input.model };
   },
-  generateStructured: async () => {
-    throw new Error('provider down');
+  generateStructured: async (input) => {
+    if (fail) throw new Error('gateway down');
+    return { data: { claims: [] }, provider: 'gateway', model: input.model };
   },
-  embed: async () => {
-    throw new Error('provider down');
-  },
+  embed: async () => ({ data: [[0]], provider: 'gateway', model: 'x' }),
+});
+
+const gatewayWith = (...providers) => {
+  const registry = new ModelProviderRegistry();
+  for (const p of providers) registry.register(p);
+  return new RouterModelGateway(new ModelRouter(registry));
 };
+const ctx = { workspaceId: 'ws-1' };
 
 (async () => {
-  const registry = new ModelProviderRegistry();
-  registry.register(flaky);
-  registry.register(new StubModelProvider());
-  const gateway = new RouterModelGateway(new ModelRouter(registry));
-  const ctx = { workspaceId: 'ws-1', userId: 'u-1' };
-
-  const text = await gateway.generateText({ task: 'company_understanding', prompt: 'Summarize Acme Tech' }, ctx);
-  const structured = await gateway.generateStructured(
-    { task: 'extract_claims', prompt: 'x', schema: { required: ['name', 'claims'] } },
+  // 1) app → 中转站, carrying the task-selected model name.
+  const routed = await gatewayWith(new StubModelProvider(), gatewayFake()).generateText(
+    { task: 'company_understanding.extract_claims', prompt: 'x', model: 'deepseek-chat' },
     ctx,
   );
-  const emb = await gateway.embed({ task: 'retrieval', input: ['a', 'b'] }, ctx);
+  // 2) 中转站 down → fall back to stub so the pipeline still runs in dev.
+  const fellBack = await gatewayWith(new StubModelProvider(), gatewayFake(true)).generateText(
+    { task: 'company_understanding.extract_claims', prompt: 'x', model: 'deepseek-chat' },
+    ctx,
+  );
 
-  console.log('providers registered :', registry.all().map((p) => p.id));
-  console.log('generateText         →', text);
-  console.log('generateStructured   →', structured);
-  console.log('embed                →', { provider: emb.provider, n: emb.data.length, dims: emb.data[0].length });
+  console.log('via gateway →', routed.provider, '| model passthrough →', routed.data);
+  console.log('gateway down → fallback →', fellBack.provider);
 
-  const ok =
-    text.provider === 'stub' && // fell back flaky → stub
-    structured.data && 'name' in structured.data && 'claims' in structured.data &&
-    emb.data.length === 2;
-  console.log(ok ? '\nMODEL GATEWAY: PASS ✅ (one API, multi-provider, flaky→stub fallback)' : '\nMODEL GATEWAY: FAIL ❌');
+  const ok = routed.provider === 'gateway' && routed.data === 'resolved:deepseek-chat' && fellBack.provider === 'stub';
+  console.log(
+    ok
+      ? '\nMODEL GATEWAY: PASS ✅ (single 中转站 endpoint, task-selected model, stub fallback)'
+      : '\nMODEL GATEWAY: FAIL ❌',
+  );
   process.exit(ok ? 0 : 1);
 })().catch((e) => {
   console.error(e);

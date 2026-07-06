@@ -31,6 +31,21 @@ services:
       timeout: 3s
       retries: 10
 
+  # Model aggregation gateway (中转站). Manage models/channels/keys/quotas in its
+  # Web UI at http://localhost:3001 — the app calls only its one OpenAI-compatible
+  # endpoint (http://localhost:3001/v1). First-run admin: root / 123456.
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: global-new-api
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - newapi-data:/data
+
 volumes:
   pgdata:
   redisdata:
+  newapi-data:
