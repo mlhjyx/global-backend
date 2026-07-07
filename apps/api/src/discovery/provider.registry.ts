@@ -14,6 +14,7 @@ import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
+import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
 /** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -51,6 +52,9 @@ export class DiscoveryProviderRegistry {
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider());
     this.enrichers.push(new GleifEnrichmentProvider());
+    // 数字足迹（v3.0 signal 源）：从官网 HTML/DNS 解析技术栈/在投广告/服务市场/招聘/邮件商
+    //  → attributes.digital_footprint.*，喂 Intent/Reachability 打分。零付费，走 crawl4ai。
+    this.enrichers.push(new DigitalFootprintProvider());
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
       const sandbox = new SandboxDiscoveryProvider();
@@ -91,6 +95,11 @@ export class DiscoveryProviderRegistry {
       where: { key: 'trade_fair' },
       update: {},
       create: { key: 'trade_fair', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'digital_footprint' },
+      update: {},
+      create: { key: 'digital_footprint', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
