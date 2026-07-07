@@ -8,6 +8,7 @@ import { persistDiscoveredContacts } from '../discovery/contact-persist';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
+import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
 
 /**
  * 存量对账活动（backlog reconciliation）——漏斗总闸的解锁器。
@@ -74,6 +75,21 @@ export function createBacklogActivities(deps: {
     return new Set(rows.map((r) => r.domain.toLowerCase()));
   }
 
+  /**
+   * 处理后写水位（无论命中与否，含 DAT-011/新鲜跳过）：让本批已处理的行离开当批过滤集，
+   * 游标真正吞噬存量。ids 空 → no-op。updateMany 在 withWorkspace 内 → RLS 只触本租户行。
+   */
+  async function stampProcessed(
+    workspaceId: string,
+    ids: string[],
+    data: Prisma.CanonicalCompanyUpdateManyMutationInput,
+  ): Promise<void> {
+    if (!ids.length) return;
+    await deps.prisma.withWorkspace(workspaceId, (tx) =>
+      tx.canonicalCompany.updateMany({ where: { id: { in: ids } }, data }),
+    );
+  }
+
   return {
     /** 跨租户列 ACTIVE ICP（owner 只读扫描）→ backlog sweep 的处理目标。 */
     async listBacklogTargets(): Promise<{ targets: { workspaceId: string; icpId: string }[] }> {
@@ -135,6 +151,7 @@ export function createBacklogActivities(deps: {
     /** 存量快事实富集（GLEIF/Wikidata）：fit=match 且缺任一源命名空间的公司（与 enrichRun 同语义）。 */
     async enrichBacklog(args: BacklogPage): Promise<EnrichBacklogResult> {
       const limit = args.limit ?? 25;
+      const now = new Date();
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
       );
@@ -142,12 +159,8 @@ export function createBacklogActivities(deps: {
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
-          where: {
-            fitVerdict: 'match',
-            status: { not: 'SUPPRESSED' },
-            ...(args.cursor ? { id: { gt: args.cursor } } : {}),
-          },
-          orderBy: { id: 'asc' },
+          where: backlogEligibleWhere({ watermarkField: 'lastEnrichedAt', now }),
+          orderBy: backlogEligibleOrderBy('lastEnrichedAt'),
           take: limit,
           select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
         }),
@@ -204,6 +217,8 @@ export function createBacklogActivities(deps: {
           }
         });
       }
+      // 水位：本批全部已处理（命中/未命中/已有命名空间跳过）→ 离开过滤集，游标吞噬存量。
+      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { lastEnrichedAt: now });
       return {
         scanned: companies.length,
         attempted,
@@ -215,6 +230,8 @@ export function createBacklogActivities(deps: {
     /** 存量信号富集（digital_footprint/structured_harvest）：fit=match+域名，TTL 感知（与 enrichSignalsRun 同语义）。 */
     async enrichSignalsBacklog(args: BacklogPage): Promise<EnrichBacklogResult> {
       const limit = args.limit ?? 12;
+      const now = new Date();
+      const nowMs = now.getTime();
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
       );
@@ -223,19 +240,13 @@ export function createBacklogActivities(deps: {
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
-          where: {
-            fitVerdict: 'match',
-            status: { not: 'SUPPRESSED' },
-            domain: { not: null },
-            ...(args.cursor ? { id: { gt: args.cursor } } : {}),
-          },
-          orderBy: { id: 'asc' },
+          where: backlogEligibleWhere({ watermarkField: 'lastSignalAt', now, requireDomain: true }),
+          orderBy: backlogEligibleOrderBy('lastSignalAt'),
           take: limit,
           select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
         }),
       );
 
-      const nowMs = Date.now();
       let attempted = 0;
       let matched = 0;
       for (const c of companies) {
@@ -291,6 +302,8 @@ export function createBacklogActivities(deps: {
           }
         });
       }
+      // 水位：本批全部已处理（命中/未命中/DAT-011/TTL 新鲜跳过）→ 离开过滤集，游标吞噬存量。
+      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { lastSignalAt: now });
       return {
         scanned: companies.length,
         attempted,
@@ -305,16 +318,12 @@ export function createBacklogActivities(deps: {
      */
     async registerWatchesBacklog(args: BacklogPage): Promise<WatchBacklogResult> {
       const limit = args.limit ?? 12;
+      const now = new Date();
       const suspended = await suspendedDomains(); // DAT-011：SUSPENDED 域名连注册期 sitemap 探测都不发（与信号/联系人阶段一致）
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
-          where: {
-            fitVerdict: 'match',
-            status: { not: 'SUPPRESSED' },
-            domain: { not: null },
-            ...(args.cursor ? { id: { gt: args.cursor } } : {}),
-          },
-          orderBy: { id: 'asc' },
+          where: backlogEligibleWhere({ watermarkField: 'lastWatchAt', now, requireDomain: true }),
+          orderBy: backlogEligibleOrderBy('lastWatchAt'),
           take: limit,
           select: { id: true, domain: true },
         }),
@@ -341,6 +350,8 @@ export function createBacklogActivities(deps: {
           /* 单家注册失败（sitemap 不可达/DAT-011）不影响其余 */
         }
       }
+      // 水位：本批全部已处理（新注册/已注册跳过/DAT-011）→ 离开过滤集，游标吞噬存量。
+      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { lastWatchAt: now });
       return {
         scanned: companies.length,
         registered,
@@ -355,6 +366,7 @@ export function createBacklogActivities(deps: {
      */
     async discoverContactsBacklog(args: BacklogPage & { icpId: string }): Promise<ContactBacklogResult> {
       const limit = args.limit ?? 8;
+      const now = new Date();
       const suspended = await suspendedDomains();
 
       const { adapter, sellerCtx, suppressedEmails, companies } = await deps.prisma.withWorkspace(
@@ -376,14 +388,13 @@ export function createBacklogActivities(deps: {
             (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
           );
           const companies = await tx.canonicalCompany.findMany({
-            where: {
-              fitVerdict: 'match',
-              status: { not: 'SUPPRESSED' },
-              domain: { not: null },
-              contacts: { none: {} },
-              ...(args.cursor ? { id: { gt: args.cursor } } : {}),
-            },
-            orderBy: { id: 'asc' },
+            where: backlogEligibleWhere({
+              watermarkField: 'contactDiscoveryAttemptedAt',
+              now,
+              requireDomain: true,
+              requireNoContacts: true,
+            }),
+            orderBy: backlogEligibleOrderBy('contactDiscoveryAttemptedAt'),
             take: limit,
             select: { id: true, name: true, domain: true, country: true, dedupeKey: true },
           });
@@ -420,6 +431,9 @@ export function createBacklogActivities(deps: {
         );
         contactsCreated += created;
       }
+      // 水位：本批全部已处理（建联系人/无具名决策人/DAT-011）→ 离开过滤集。无具名决策人属常态，
+      // 这条防止「联系不上的公司」永占前排、每 sweep 重烧多页渲染+LLM（复审最尖锐的一条）。
+      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { contactDiscoveryAttemptedAt: now });
       return {
         scanned: companies.length,
         attempted,
