@@ -51,6 +51,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     /* 信号富集是尽力而为的富化，失败不影响 run 状态 */
   }
 
+  // 从 ICP 短名单自动注册网站变更监控（#4 loop）：对 fit=match 公司建 web_watch，交给 intentSweep 持续盯变更。
+  // best-effort（每家一次 sitemap 探测，慢）→ 长活动；失败不影响 run 状态。
+  let watches: { candidates: number; registered: number } = { candidates: 0, registered: 0 };
+  try {
+    watches = await signalActs.registerWatchesForRun({ workspaceId, runId });
+  } catch {
+    /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
+  }
+
   const status = failures === 0 ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
   await acts.finalizeRun({
     workspaceId,
@@ -64,6 +73,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       fit: fit.verdicts,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
+      watches: { registered: watches.registered, of: watches.candidates },
       queries: queries.length,
       failures,
     },
