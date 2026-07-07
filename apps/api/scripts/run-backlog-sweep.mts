@@ -24,6 +24,12 @@ const input = {
   maxSignalRounds: argNum('max-signal-rounds'),
   maxWatchRounds: argNum('max-watch-rounds'),
   maxContactRounds: argNum('max-contact-rounds'),
+  // 批大小（dev 有界样本用；缺省走 workflow 内的生产默认）
+  fitBatch: argNum('fit-batch'),
+  enrichBatch: argNum('enrich-batch'),
+  signalBatch: argNum('signal-batch'),
+  watchBatch: argNum('watch-batch'),
+  contactBatch: argNum('contact-batch'),
 };
 
 const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
