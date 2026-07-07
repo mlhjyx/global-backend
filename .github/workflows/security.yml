@@ -1,0 +1,25 @@
+name: Security
+
+# 后端命门：仓库有 .env（DB URL / 中转站 key / crawl4ai token）。每个 PR + main 推送扫密钥泄漏。
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: gitleaks 密钥扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 全历史，扫到被后续提交"覆盖"的历史泄漏
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 个人账户仓库免费；若转组织私有库需在 secrets 配 GITLEAKS_LICENSE

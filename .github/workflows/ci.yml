@@ -1,0 +1,41 @@
+name: CI
+
+# 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
+# 绿了才合。测试是纯单测（解析器/评分/身份解析等纯函数，无 DB/网络），故 CI 不需要 Postgres/服务。
+# 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 CLAUDE.md §5「真实数据不用 sandbox」），不进 CI。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build · typecheck · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # engines: node>=20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate（build/test 依赖 @prisma/client 类型）
+        run: pnpm --filter @global/db generate
+
+      - name: Build（nest build = tsc 全量类型检查）
+        run: pnpm --filter @global/api build
+
+      - name: Test（vitest 纯单测）
+        run: pnpm --filter @global/api test
