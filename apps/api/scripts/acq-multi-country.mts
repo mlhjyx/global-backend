@@ -24,7 +24,7 @@ const registry = new SourceAdapterRegistry().register(new TradeFairSourceAdapter
 const svc = new AcquisitionService({ prisma: prisma as any, registry });
 
 const INTERPHEX = {
-  sourceKey: 'interphex-2026',
+  sourceKey: 'interphex-2026', // gitleaks:allow —— 公开展会 slug（非密钥）
   label: 'INTERPHEX 2026 (NYC) — Pharmaceutical & Biotech Manufacturing',
   region: 'North America',
   sectorTags: ['pharmaceutical', 'biotech', 'life sciences manufacturing', 'aseptic processing'],
@@ -33,9 +33,9 @@ const INTERPHEX = {
     fairSlug: 'interphex-2026',
     algolia: {
       appId: 'XD0U5M6Y4R',
-      apiKey: 'd5cd7d4ec26134ff4a34d736a7f9ad47',
-      indexName: 'evt-e00ae0db-ed1e-4a16-a406-5144035f9376-index',
-      eventEditionId: 'eve-4247addc-b843-4b9e-adcf-2acb2d6c56a0',
+      apiKey: 'd5cd7d4ec26134ff4a34d736a7f9ad47', // gitleaks:allow —— RX/Algolia public search-only key（前端公开、只读，非密钥）
+      indexName: 'evt-e00ae0db-ed1e-4a16-a406-5144035f9376-index', // gitleaks:allow —— 公开 index
+      eventEditionId: 'eve-4247addc-b843-4b9e-adcf-2acb2d6c56a0', // gitleaks:allow —— 公开 edition id
       locale: 'en-us',
     },
   },
