@@ -3,6 +3,7 @@ import {
   evaluateEmailGate,
   isValidLawfulBasis,
   resolveEmailVerificationPolicy,
+  stampLawfulBasis,
 } from './email-verification-gate';
 
 const STRICT = { allowPersonalWithoutBasis: false };
@@ -96,6 +97,29 @@ describe('isValidLawfulBasis', () => {
     expect(isValidLawfulBasis(undefined)).toBe(false);
     expect(isValidLawfulBasis(null)).toBe(false);
     expect(isValidLawfulBasis({ basis: 'nope' as never })).toBe(false);
+  });
+});
+
+describe('stampLawfulBasis · 落库前补断言人/时间（Codex #13 P2）', () => {
+  it('开关合成的 basis 无 who/when → 必须能被补上（审计可回溯）', () => {
+    // 复现问题源头：override 路径合成的 basis 不带 recordedBy/recordedAt
+    const synth = evaluateEmailGate({ email: 'max.mustermann@acme.de', policy: { allowPersonalWithoutBasis: true } }).lawfulBasis!;
+    expect(synth.recordedBy).toBeUndefined();
+    expect(synth.recordedAt).toBeUndefined();
+    const stamped = stampLawfulBasis(synth, 'user-1', '2026-07-07T00:00:00.000Z');
+    expect(stamped.recordedBy).toBe('user-1');
+    expect(stamped.recordedAt).toBe('2026-07-07T00:00:00.000Z');
+    expect(stamped.basis).toBe('legitimate_interest'); // 其余字段保留
+  });
+
+  it('已带 who/when 的 basis → 尊重原值，不覆盖', () => {
+    const stamped = stampLawfulBasis(
+      { basis: 'consent', recordedBy: 'orig-user', recordedAt: '2020-01-01T00:00:00.000Z' },
+      'user-1',
+      '2026-07-07T00:00:00.000Z',
+    );
+    expect(stamped.recordedBy).toBe('orig-user');
+    expect(stamped.recordedAt).toBe('2020-01-01T00:00:00.000Z');
   });
 });
 
