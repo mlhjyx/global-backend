@@ -38,10 +38,17 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
     const domain = email.split('@')[1].toLowerCase();
 
     // source_policy 门（DAT-011）：SUSPENDED 域名在任何触网（MX/SMTP）前直接跳过 → RISKY。
-    // invoke 内部亦会再查一次（防竞态），此处是「昂贵前置前主动跳过」。
+    // 这只是「昂贵前置前的主动跳过」优化；权威判定在 broker.invoke 的合规门（防竞态、单点强制）。
+    // 读失败**不硬失败**（§5 fail-safe）：吞掉异常放行到下游，SMTP 出网仍受 invoke 合规门约束
+    // （SUSPENDED 会在那里被拒 → RISKY），绝不因一次 DB 抖动把应 RISKY 的验证变成请求 500。
     if (this.broker) {
-      const policy = await this.broker.sourcePolicy(domain);
-      if (policy?.suspended) return { status: 'RISKY', detail: 'source_policy_suspended', costCents: 0 };
+      let suspended = false;
+      try {
+        suspended = (await this.broker.sourcePolicy(domain))?.suspended ?? false;
+      } catch {
+        // 读失败 → 视为未 suspended，放行到下游 invoke 合规门权威判定（fail-safe）
+      }
+      if (suspended) return { status: 'RISKY', detail: 'source_policy_suspended', costCents: 0 };
     }
 
     let mx: { exchange: string; priority: number }[];
@@ -70,7 +77,9 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
     const randomLocal = `x-verify-${Date.now().toString(36)}-zzq`;
     const toolCtx: ToolContext = {
       workspaceId: ctx?.workspaceId ?? 'platform',
-      runId: ctx?.runId ?? 'email-verify',
+      // runId 不塞常量：broker 预算/限流按 runId ?? workspaceId 归账，留空即按真实 workspace 归属，
+      // 不把各租户折叠进同一个合成 run。
+      runId: ctx?.runId,
       correlationId: `email-verify:${domain}`,
     };
     let probe: SmtpProbeOutput;

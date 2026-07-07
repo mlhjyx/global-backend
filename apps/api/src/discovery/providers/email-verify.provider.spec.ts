@@ -85,7 +85,7 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
   const SELF_MX = [{ exchange: 'mail.acme.de', priority: 10 }];
   const okProbe: SmtpProbeOutput = { reachable: true, mailFromCode: 250, codes: [250, 550] }; // 真实 250 / 随机 550=非 catch-all
 
-  function fakeBroker(opts: { suspend?: string[]; probe?: SmtpProbeOutput; throwName?: string } = {}) {
+  function fakeBroker(opts: { suspend?: string[]; probe?: SmtpProbeOutput; throwName?: string; policyThrows?: boolean } = {}) {
     const invoke = vi.fn(async () => {
       if (opts.throwName) {
         const e = new Error('broker denied');
@@ -94,7 +94,10 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
       }
       return { data: opts.probe ?? okProbe, costCents: 0 };
     });
-    const sourcePolicy = vi.fn(async (d: string) => ({ suspended: (opts.suspend ?? []).includes(d) }));
+    const sourcePolicy = vi.fn(async (d: string) => {
+      if (opts.policyThrows) throw new Error('db blip');
+      return { suspended: (opts.suspend ?? []).includes(d) };
+    });
     const broker = { invoke, sourcePolicy } as unknown as EmailVerifyBroker;
     return { broker, invoke, sourcePolicy };
   }
@@ -123,6 +126,13 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
     expect((input as { rcptTo: string[] }).rcptTo).toHaveLength(2); // 真实 + 随机(catch-all 探测)
     expect(ctx).toMatchObject({ workspaceId: 'w' });
     expect(r.status).toBe('VALID'); // 可达+MAIL FROM过+250+catch-all 证伪
+  });
+
+  it('source_policy 早查读失败：不抛，放行到下游 invoke 合规门（§5 fail-safe，避免 DB 抖动变 500）', async () => {
+    const { broker, invoke } = fakeBroker({ policyThrows: true });
+    const r = await new SelfHostedEmailVerifier(broker).verifyEmail('user@acme.de', { workspaceId: 'w' });
+    expect(invoke).toHaveBeenCalledTimes(1); // 未被早查异常阻断，仍走到出网闸门
+    expect(r.status).toBe('VALID');
   });
 
   it('无 broker：不做原始 SMTP 出网 → RISKY smtp_gate_unavailable', async () => {

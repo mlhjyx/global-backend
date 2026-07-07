@@ -182,7 +182,9 @@ export class DiscoveryService {
 
   /** Waterfall 第 7 步：发送前邮箱验证（此处按需触发，状态回写 ContactPoint）。 */
   async verifyContactPoint(ctx: RequestContext, pointId: string) {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    // 短事务：载入 point + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经 ToolBroker
+    // 走 SMTP 出网（含限流等待 + 最长 8s 探测），持 DB 连接跨这段会拖垮连接池/触发事务超时。
+    const { pointValue, adapter } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const point = await tx.contactPoint.findUnique({ where: { id: pointId } });
       if (!point) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'contact point not found' } });
       if (point.type !== 'email') {
@@ -192,12 +194,14 @@ export class DiscoveryService {
       if (!adapters.length) {
         throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
       }
-      const verdict = await adapters[0].verifyEmail(point.value, { workspaceId: ctx.workspaceId });
-      return tx.contactPoint.update({
-        where: { id: pointId },
-        data: { status: verdict.status, verifiedAt: new Date() },
-      });
+      return { pointValue: point.value, adapter: adapters[0] };
     });
+    // 事务外：网络验证（adapter 是单例，不绑 tx）。失败会诚实降级为 verdict，不抛（§5 fail-safe）。
+    const verdict = await adapter.verifyEmail(pointValue, { workspaceId: ctx.workspaceId });
+    // 短事务：回写状态。
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.contactPoint.update({ where: { id: pointId }, data: { status: verdict.status, verifiedAt: new Date() } }),
+    );
   }
 
   // ── Suppression 治理 ──────────────────────────────────────────────────────
