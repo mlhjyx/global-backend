@@ -16,6 +16,7 @@ import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
 import { StructuredHarvestProvider } from './providers/structured-harvest.provider';
+import { SelfHostedEmailVerifier } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
 /** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -39,6 +40,10 @@ export class DiscoveryProviderRegistry {
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
   constructor(deps?: { gateway?: ModelGateway }) {
+    // 自建邮箱验证**排 emailVerifiers 首位**：verifyContactPoint 只用 adapters[0]，必须在
+    // public_web(仅 MX→RISKY) 之前，否则新 SMTP RCPT/catch-all 逻辑永不执行。不依赖 gateway。
+    // 诚实上限：Gmail/M365/catch-all/端口25不可达/catch-all未证伪 一律 RISKY，绝不谎报 VALID。
+    this.emailVerifiers.push(new SelfHostedEmailVerifier());
     if (deps?.gateway) {
       const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway });
       this.discovery.push(web);
@@ -111,6 +116,11 @@ export class DiscoveryProviderRegistry {
       where: { key: 'structured_harvest' },
       update: {},
       create: { key: 'structured_harvest', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'smtp_self' },
+      update: {},
+      create: { key: 'smtp_self', class: 'email_verification', status: 'ENABLED', costPerCallCents: 0 },
     });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
