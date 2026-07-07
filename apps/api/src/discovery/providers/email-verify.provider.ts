@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { resolveMx } from 'node:dns/promises';
 import { EmailVerdict, EmailVerificationAdapter } from '../provider-contract';
+import { resolvePublicIp } from '../../adapters/net-guard';
 
 /**
  * 自建邮箱验证（v3.0 P0，零付费，不接 ZeroBounce/NeverBounce）。
@@ -35,9 +36,16 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       return { status: 'RISKY', detail: `provider_anti_enumeration:${provider}`, costCents: 0 };
     }
 
+    // 🛡️ SSRF 护栏：mxHost 来自邮箱域名的 MX（可被投毒指向内网）——连接前解析并拒私网/内网 IP，
+    // 直连解析出的公网 IP（避免 connect 时二次解析的 TOCTOU/DNS rebinding）。
+    const guard = await resolvePublicIp(host);
+    if (!guard.safe || !guard.ip) {
+      return { status: 'RISKY', detail: `mx_egress_blocked:${guard.reason ?? 'unsafe'}`, costCents: 0 };
+    }
+
     // SMTP RCPT 探测：真实地址 + 一个随机地址（catch-all 检测），同一连接
     const randomLocal = `x-verify-${Date.now().toString(36)}-zzq`;
-    const probe = await smtpRcptProbe(host, `verify@${SENDER_DOMAIN}`, [email, `${randomLocal}@${domain}`]);
+    const probe = await smtpRcptProbe(guard.ip, `verify@${SENDER_DOMAIN}`, [email, `${randomLocal}@${domain}`]);
 
     return decideEmailVerdict({
       mxPresent: true,
