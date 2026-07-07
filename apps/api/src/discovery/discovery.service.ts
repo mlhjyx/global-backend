@@ -6,7 +6,7 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import { contactIdentity } from './identity';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
-import { evaluateEmailGate, resolveEmailVerificationPolicy } from './compliance/email-verification-gate';
+import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
 
 @Injectable()
 export class DiscoveryService {
@@ -223,24 +223,20 @@ export class DiscoveryService {
       };
     });
 
-    // 操作者显式断言的合法性基础 → 补全 who/when 供审计。
-    const lawfulBasis: LawfulBasis | undefined = opts?.lawfulBasis
-      ? {
-          ...opts.lawfulBasis,
-          recordedBy: opts.lawfulBasis.recordedBy ?? ctx.userId,
-          recordedAt: opts.lawfulBasis.recordedAt ?? new Date().toISOString(),
-        }
-      : undefined;
-
     // 🔴 合规门裁决（纯逻辑，先于任何网络/验证器调用）。
     const gate = evaluateEmailGate({
       email: loaded.pointValue,
       kind: loaded.kind,
-      lawfulBasis,
+      lawfulBasis: opts?.lawfulBasis,
       suppressed: loaded.suppressed,
       policy: resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis }),
     });
     const gateKind = gate.kind === 'invalid' ? undefined : gate.kind;
+    // 将被落库的合法性基础统一补断言人/时间——覆盖操作者显式断言的**与开关合成的**（后者无 who/when），
+    // 否则 override 路径的审计记录缺断言人（Codex #13 P2）。
+    const recordedBasis = gate.lawfulBasis
+      ? stampLawfulBasis(gate.lawfulBasis, ctx.userId, new Date().toISOString())
+      : undefined;
 
     // 事务外：门放行才做网络验证（adapter 单例，不绑 tx，失败诚实降级为 verdict，不抛，§5 fail-safe）；
     // 门拦截则合成 BLOCKED，**不路由/不触任何验证器**（即便 smtp_self 被 kill-switch 关掉也不绕过）。
@@ -256,7 +252,7 @@ export class DiscoveryService {
       const verifyCtx: EmailVerifyContext = {
         workspaceId: ctx.workspaceId,
         kind: loaded.kind,
-        lawfulBasis: gate.lawfulBasis ?? lawfulBasis,
+        lawfulBasis: recordedBasis,
         allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
         suppressed: loaded.suppressed,
       };
@@ -276,7 +272,7 @@ export class DiscoveryService {
             status: verdict.status,
             detail: verdict.detail ?? null,
             kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
-            lawfulBasis: verdict.lawfulBasis ?? gate.lawfulBasis ?? lawfulBasis ?? null,
+            lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
             suppressed: loaded.suppressed,
           } as unknown as Prisma.InputJsonValue,
           providerKey,
@@ -295,7 +291,7 @@ export class DiscoveryService {
           detail: verdict.detail ?? null,
           kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
           providerKey,
-          lawfulBasis: verdict.lawfulBasis ?? gate.lawfulBasis ?? lawfulBasis ?? null,
+          lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
         },
       };
     });
