@@ -65,6 +65,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     workspaceId,
     runId,
     planId,
+    icpId: input.icpId,
     status,
     stats: {
       perSource,

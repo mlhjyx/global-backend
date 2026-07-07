@@ -151,3 +151,50 @@ describe('scoreLead — Intent 维接入真实网站变更信号 (#4)', () => {
     expect(r.scores.intent).toBeCloseTo(0.5, 1); // 命中 '扩产'
   });
 });
+
+// ── 权威资格门（LLM 四门 fit_verdict）→ 只覆盖 Fit 维 + 队列走阈值/Reachability 硬底 ──
+describe('scoreLead — authoritativeFit（资格门覆盖 Fit 维，不再覆盖整个队列）', () => {
+  const reachable = {
+    contacts: [
+      { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+      { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+    ],
+  };
+
+  it('match + 可达联系人 + 数据完整 → recommended', () => {
+    const r = scoreLead(company(reachable), icp, { authoritativeFit: 'match' });
+    expect(r.scores.fit).toBeCloseTo(0.85, 2);
+    expect(r.queue).toBe('recommended');
+    expect(r.detail.notes.some((n) => n.includes('资格门'))).toBe(true);
+  });
+
+  it('match 但零联系方式 → needs_review（Reachability 硬底：联系不上的不算推荐）', () => {
+    const r = scoreLead(company({}), icp, { authoritativeFit: 'match' });
+    expect(r.scores.fit).toBeCloseTo(0.85, 2);
+    expect(r.queue).toBe('needs_review');
+    expect(r.detail.notes.some((n) => n.includes('先联系人发现'))).toBe(true);
+  });
+
+  it('match 覆盖规则引擎的词表误判（industry 对不上也不 rejected）', () => {
+    // 规则要 manufacturing，公司词表是中文「制造业」→ 规则引擎 no_match，但资格门 match
+    const r = scoreLead(company({ industry: '制造业', ...reachable }), icp, { authoritativeFit: 'match' });
+    expect(r.queue).not.toBe('rejected');
+    expect(r.scores.fit).toBeCloseTo(0.85, 2);
+  });
+
+  it('mismatch → rejected；weak → needs_review（即便联系人可达）', () => {
+    expect(scoreLead(company(reachable), icp, { authoritativeFit: 'mismatch' }).queue).toBe('rejected');
+    expect(scoreLead(company(reachable), icp, { authoritativeFit: 'weak' }).queue).toBe('needs_review');
+  });
+
+  it('排除规则永远优先——资格门 match 也挡不住 EXCLUSION', () => {
+    const r = scoreLead(company({ country: 'XX', ...reachable }), icp, { authoritativeFit: 'match' });
+    expect(r.queue).toBe('rejected');
+  });
+
+  it('未判定（authoritativeFit 缺省）→ 走规则引擎老路径（行为不变）', () => {
+    const r = scoreLead(company({}), icp);
+    expect(r.detail.fitVerdict).toBe('match'); // 规则引擎自己的判定
+    expect(r.queue).toBe('needs_review');
+  });
+});

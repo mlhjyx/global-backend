@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
-import { contactIdentity } from './identity';
+import { persistDiscoveredContacts } from './contact-persist';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
@@ -85,9 +85,11 @@ export class DiscoveryService {
   /**
    * Waterfall 第 5 步（PRD 7.4.8）：仅对已选中的高价值企业按需发现联系人。
    * Suppression 在写入前检查（PRD 12.6 最小化：被禁邮箱直接不入库）。
+   * 短事务①载入 → **事务外**网络发现（decision_maker 抓多页 + LLM，可达数分钟，绝不持 DB 事务跨这段）
+   * → 短事务②持久化（与 verifyContactPoint 同一纪律）。
    */
   async discoverContacts(ctx: RequestContext, companyId: string) {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.canonicalCompany.findUnique({ where: { id: companyId } });
       if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
       if (company.status === 'SUPPRESSED') {
@@ -99,69 +101,26 @@ export class DiscoveryService {
       if (!adapters.length) {
         throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no contact discovery provider enabled' } });
       }
-      const adapter = adapters[0];
-      const result = await adapter.discoverContacts({
-        name: company.name,
-        domain: company.domain ?? undefined,
-        country: company.country ?? undefined,
-      });
       const suppressedEmails = new Set(
         (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
       );
+      return { company, adapter: adapters[0], suppressedEmails };
+    });
 
-      let created = 0;
-      let skippedSuppressed = 0;
-      for (const c of result.contacts) {
-        const email = c.email?.toLowerCase();
-        if (email && suppressedEmails.has(email)) {
-          skippedSuppressed += 1;
-          continue;
-        }
-        const dedupeKey = contactIdentity({ fullName: c.fullName, email }, company.dedupeKey);
-        const contact = await tx.canonicalContact.upsert({
-          where: { workspaceId_dedupeKey: { workspaceId: ctx.workspaceId, dedupeKey } },
-          update: {
-            ...(c.title ? { title: c.title } : {}),
-            ...(c.seniority ? { seniority: c.seniority } : {}),
-            ...(c.department ? { department: c.department } : {}),
-          },
-          create: {
-            workspaceId: ctx.workspaceId,
-            companyId: company.id,
-            fullName: c.fullName,
-            title: c.title ?? null,
-            seniority: c.seniority ?? null,
-            department: c.department ?? null,
-            dedupeKey,
-          },
-        });
-        const points: { type: string; value?: string }[] = [
-          { type: 'email', value: email },
-          { type: 'phone', value: c.phone },
-          { type: 'linkedin', value: c.linkedin },
-        ];
-        for (const p of points) {
-          if (!p.value) continue;
-          await tx.contactPoint.upsert({
-            where: { contactId_type_value: { contactId: contact.id, type: p.type, value: p.value } },
-            update: {},
-            create: { workspaceId: ctx.workspaceId, contactId: contact.id, type: p.type, value: p.value },
-          });
-          await tx.fieldEvidence.create({
-            data: {
-              workspaceId: ctx.workspaceId,
-              entityType: 'contact',
-              entityId: contact.id,
-              field: p.type,
-              value: p.value as unknown as Prisma.InputJsonValue,
-              providerKey: adapter.key,
-              license: adapter.key === 'sandbox' ? 'sandbox' : 'licensed',
-              allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-            },
-          });
-        }
-        created += 1;
-      }
+    const result = await loaded.adapter.discoverContacts({
+      name: loaded.company.name,
+      domain: loaded.company.domain ?? undefined,
+      country: loaded.company.country ?? undefined,
+    });
+
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const { skippedSuppressed } = await persistDiscoveredContacts(tx, {
+        workspaceId: ctx.workspaceId,
+        company: { id: loaded.company.id, dedupeKey: loaded.company.dedupeKey },
+        adapterKey: loaded.adapter.key,
+        contacts: result.contacts,
+        suppressedEmails: loaded.suppressedEmails,
+      });
       if (result.costCents > 0) {
         await tx.usageLedger.create({
           data: {
@@ -170,13 +129,13 @@ export class DiscoveryService {
             quantity: result.contacts.length,
             costUsd: result.costCents / 100,
             refType: 'canonical_company',
-            refId: company.id,
-            meta: { provider: adapter.key, op: 'contact_discovery' },
+            refId: loaded.company.id,
+            meta: { provider: loaded.adapter.key, op: 'contact_discovery' },
           },
         });
       }
       const contacts = await tx.canonicalContact.findMany({
-        where: { companyId: company.id },
+        where: { companyId: loaded.company.id },
         include: { contactPoints: true },
       });
       return { contacts, skippedSuppressed };

@@ -4,6 +4,7 @@ import { getTask } from '../../ai-tasks/task-registry';
 import { crawlUrl } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
+import { ContactDiscoveryAdapter, ContactDiscoveryContext, ContactDiscoveryResult } from '../provider-contract';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -157,6 +158,22 @@ export class DecisionMakerProvider {
     return picked.slice(0, MAX_PEOPLE_PAGES + 2);
   }
 
+  static toContactRecords(people: DecisionMakerContact[]): ContactDiscoveryResult['contacts'] {
+    return people.map((p) => ({
+      externalId: `${p.sourcePage}#${p.fullName.toLowerCase().replace(/\s+/g, '-')}`,
+      fullName: p.fullName,
+      title: p.title,
+      seniority: p.seniority,
+      department: p.department,
+      email: p.email,
+      phone: p.phone,
+      buyingRole: p.buyingRole,
+      isTargetRole: p.isTargetRole,
+      personalData: p.personalData,
+      sourcePage: p.sourcePage,
+    }));
+  }
+
   private async extract(
     url: string,
     text: string,
@@ -183,5 +200,32 @@ export class DecisionMakerProvider {
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
       return [];
     }
+  }
+}
+
+/**
+ * ContactDiscoveryAdapter 包装：把决策人抽取接进 provider registry 路由（曾是死代码——
+ * 实现完成却从未注册，联系人发现实际走弱的 public_web 正则）。排在 public_web 之前 =
+ * 高价值公司优先拿**具名决策人**（Impressum/管理层页），而不是 info@。
+ * 无域名公司无法抓官网 → 空结果（fail-safe，路由自然落到下一个 adapter 或由调用方处理）。
+ */
+export class DecisionMakerContactAdapter implements ContactDiscoveryAdapter {
+  readonly key = 'decision_maker';
+  private readonly inner: DecisionMakerProvider;
+
+  constructor(deps: { gateway: ModelGateway }) {
+    this.inner = new DecisionMakerProvider(deps);
+  }
+
+  async discoverContacts(
+    company: { name: string; domain?: string; country?: string },
+    ctx?: ContactDiscoveryContext,
+  ): Promise<ContactDiscoveryResult> {
+    if (!company.domain) return { contacts: [], costCents: 0 };
+    const people = await this.inner.findDecisionMakers(
+      { domain: company.domain, name: company.name },
+      ctx ? { seller: ctx.seller, target_roles: ctx.targetRoles, offering: ctx.offering } : undefined,
+    );
+    return { contacts: DecisionMakerProvider.toContactRecords(people), costCents: 0 };
   }
 }

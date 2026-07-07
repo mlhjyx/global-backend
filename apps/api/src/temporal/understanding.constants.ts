@@ -9,3 +9,5 @@ export const ACQUISITION_SWEEP_WORKFLOW = 'acquisitionSweepWorkflow';
 export const ACQ_SWEEP_SCHEDULE_ID = 'acq-sweep';
 export const INTENT_SWEEP_WORKFLOW = 'intentSweepWorkflow';
 export const INTENT_SWEEP_SCHEDULE_ID = 'intent-sweep';
+export const BACKLOG_SWEEP_WORKFLOW = 'backlogSweepWorkflow';
+export const BACKLOG_SWEEP_SCHEDULE_ID = 'backlog-sweep';

@@ -27,9 +27,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.db.$connect();
-    // 平台配置播种（data_provider 无 RLS，owner 连接写入）
+    // 平台配置播种（data_provider 无 RLS，owner 连接写入）。失败要**大声**：seed 静默失败意味着
+    // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
     await new DiscoveryProviderRegistry().seed(this.db).catch((err) => {
-      this.logger.warn(`provider seed failed: ${String(err)}`);
+      this.logger.error(`provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`);
     });
     this.timer = setInterval(() => {
       void this.tick();
@@ -124,13 +125,20 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`started discovery workflow for run ${ev.aggregateId}`);
     }
     if (ev.eventType === 'QualifyRequested') {
-      await this.temporal.client.workflow.start(QUALIFY_WORKFLOW, {
-        taskQueue: UNDERSTANDING_TASK_QUEUE,
-        // 同一 ICP 重复请求合并到一个在跑实例；跑完可再触发
-        workflowId: `qualify-${ev.aggregateId}`,
-        args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
-      });
-      this.logger.log(`started qualify workflow for icp ${ev.aggregateId}`);
+      try {
+        await this.temporal.client.workflow.start(QUALIFY_WORKFLOW, {
+          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          // 同一 ICP 重复请求合并到一个在跑实例；跑完可再触发
+          workflowId: `qualify-${ev.aggregateId}`,
+          args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
+        });
+        this.logger.log(`started qualify workflow for icp ${ev.aggregateId}`);
+      } catch (err) {
+        // 合并语义的正常路径：已有在跑实例 → 视为已处理（否则事件每 2s 重试直到实例结束，日志风暴）
+        if ((err as Error)?.name === 'WorkflowExecutionAlreadyStartedError') {
+          this.logger.log(`qualify workflow for icp ${ev.aggregateId} already running — merged`);
+        } else throw err;
+      }
     }
     // Other event types: no handler yet (still marked published).
   }

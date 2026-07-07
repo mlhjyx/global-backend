@@ -54,6 +54,14 @@ export interface ProviderContactRecord {
   email?: string;
   phone?: string;
   linkedin?: string;
+  /** 买家委员会角色分类（decision_maker/economic_buyer/technical_buyer/influencer/…），仅决策人源提供。 */
+  buyingRole?: string;
+  /** 是否命中卖方 ICP 目标角色（由 sellerContext 判定）。 */
+  isTargetRole?: boolean;
+  /** 🔴 具名人 = 个人数据（GDPR）。true 时持久化侧写 person.profile 证据留痕，下游合规门前置。 */
+  personalData?: boolean;
+  /** 抽取来源页（留痕/可审计）。 */
+  sourcePage?: string;
 }
 
 export interface DiscoveryResult {
@@ -64,6 +72,13 @@ export interface DiscoveryResult {
 export interface ContactDiscoveryResult {
   contacts: ProviderContactRecord[];
   costCents: number;
+}
+
+/** 联系人发现的卖方上下文（用于买家角色分类；可选，缺省则通用分类）。 */
+export interface ContactDiscoveryContext {
+  seller?: string;
+  targetRoles?: string[];
+  offering?: string;
 }
 
 /**
@@ -99,14 +114,17 @@ export interface CompanyDiscoveryAdapter {
   discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult>;
 }
 
-/** 联系人发现（Waterfall 第 5 步：仅对高价值企业购买联系人）。 */
+/** 联系人发现（Waterfall 第 5 步：仅对高价值企业购买联系人）。ctx 可选（旧实现忽略即可，非破坏性）。 */
 export interface ContactDiscoveryAdapter {
   key: string;
-  discoverContacts(company: {
-    name: string;
-    domain?: string;
-    country?: string;
-  }): Promise<ContactDiscoveryResult>;
+  discoverContacts(
+    company: {
+      name: string;
+      domain?: string;
+      country?: string;
+    },
+    ctx?: ContactDiscoveryContext,
+  ): Promise<ContactDiscoveryResult>;
 }
 
 /**
