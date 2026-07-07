@@ -10,12 +10,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryService } from './discovery.service';
+import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
+import { LawfulBasisKind } from './provider-contract';
 
 class CreateSuppressionDto {
   @ApiProperty({ enum: ['email', 'domain', 'company_name'] })
@@ -30,6 +32,32 @@ class CreateSuppressionDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+/**
+ * 邮箱验证的合规上下文（可选）。职能邮箱可空；探测**人名邮箱**需给合法性基础或显式开关，
+ * 否则合规门返回 status=BLOCKED（不做任何 SMTP 探测）。
+ */
+class VerifyContactPointDto {
+  @ApiPropertyOptional({ enum: LAWFUL_BASIS_KINDS, description: '探测人名邮箱的合法性基础（GDPR Art.6）；职能邮箱可省略' })
+  @IsOptional()
+  @IsIn(LAWFUL_BASIS_KINDS as unknown as string[])
+  lawfulBasis?: LawfulBasisKind;
+
+  @ApiPropertyOptional({ description: 'LIA / 工单 / 合同 / 同意记录的引用（可审计）' })
+  @IsOptional()
+  @IsString()
+  lawfulBasisRef?: string;
+
+  @ApiPropertyOptional({ description: '备注' })
+  @IsOptional()
+  @IsString()
+  lawfulBasisNote?: string;
+
+  @ApiPropertyOptional({ description: '显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）' })
+  @IsOptional()
+  @IsBoolean()
+  allowPersonalWithoutBasis?: boolean;
 }
 
 @ApiTags('Discovery')
@@ -90,9 +118,24 @@ export class DiscoveryController {
 
   @Post('contact-points/:pointId/verify')
   @HttpCode(200)
-  @ApiOperation({ summary: '邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID' })
-  async verify(@Ctx() ctx: RequestContext, @Param('pointId', ParseUUIDPipe) pointId: string) {
-    return this.discovery.verifyContactPoint(ctx, pointId);
+  @ApiOperation({
+    summary: '邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED',
+    description:
+      '合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。',
+  })
+  // body 可选：职能邮箱无需合规上下文即可 body-less 调用；仅人名邮箱要 lawfulBasis。
+  @ApiBody({ type: VerifyContactPointDto, required: false })
+  async verify(
+    @Ctx() ctx: RequestContext,
+    @Param('pointId', ParseUUIDPipe) pointId: string,
+    @Body() dto?: VerifyContactPointDto,
+  ) {
+    return this.discovery.verifyContactPoint(ctx, pointId, {
+      lawfulBasis: dto?.lawfulBasis
+        ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
+        : undefined,
+      allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
+    });
   }
 
   // ── Suppression ───────────────────────────────────────────────────────────

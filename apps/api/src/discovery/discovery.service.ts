@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { contactIdentity } from './identity';
+import { EmailVerdict, EmailVerifyContext, LawfulBasis } from './provider-contract';
+import { cleanEmail } from '../acquisition/clean';
+import { evaluateEmailGate, resolveEmailVerificationPolicy } from './compliance/email-verification-gate';
 
 @Injectable()
 export class DiscoveryService {
@@ -180,28 +183,122 @@ export class DiscoveryService {
     });
   }
 
-  /** Waterfall 第 7 步：发送前邮箱验证（此处按需触发，状态回写 ContactPoint）。 */
-  async verifyContactPoint(ctx: RequestContext, pointId: string) {
-    // 短事务：载入 point + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经 ToolBroker
-    // 走 SMTP 出网（含限流等待 + 最长 8s 探测），持 DB 连接跨这段会拖垮连接池/触发事务超时。
-    const { pointValue, adapter } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+  /**
+   * Waterfall 第 7 步：发送前邮箱验证（按需触发，状态回写 ContactPoint）。
+   *
+   * 🔴 合规门：探测**人名邮箱**=处理个人数据（GDPR）。职能邮箱默认自动验证；人名邮箱需显式
+   * `lawfulBasis`（LIA/同意/合同）或开关 `allowPersonalWithoutBasis` 才探测，否则 BLOCKED（不触网）。
+   * 禁联名单命中一律 BLOCKED。门在**服务层、先于选择/调用任何验证器**裁决（provider 无关，防 kill-switch
+   * 落到忽略 ctx 的 public_web/sandbox 绕过）。每次验证写 field_evidence 留痕（含所依据的合法性基础）。
+   */
+  async verifyContactPoint(
+    ctx: RequestContext,
+    pointId: string,
+    opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean },
+  ) {
+    // 短事务①：载入 point + 分级 + 禁联命中 + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经
+    // ToolBroker 走 SMTP 出网（含限流等待 + 最长 8s 探测），持 DB 连接跨这段会拖垮连接池/触发事务超时。
+    const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const point = await tx.contactPoint.findUnique({ where: { id: pointId } });
       if (!point) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'contact point not found' } });
       if (point.type !== 'email') {
         throw new ConflictException({ error: { code: 'INVALID_TYPE', message: 'only email points can be verified' } });
       }
+      const domain = point.value.split('@')[1]?.toLowerCase();
+      const suppressed = await tx.suppressionRecord.findFirst({
+        where: {
+          OR: [
+            { type: 'email', value: point.value.toLowerCase() },
+            ...(domain ? [{ type: 'domain', value: domain }] : []),
+          ],
+        },
+      });
       const adapters = await this.providers.routeEmailVerification(tx as never);
-      if (!adapters.length) {
+      return {
+        pointValue: point.value,
+        contactId: point.contactId,
+        kind: cleanEmail(point.value)?.kind,
+        suppressed: !!suppressed,
+        adapter: adapters[0] as (typeof adapters)[number] | undefined,
+      };
+    });
+
+    // 操作者显式断言的合法性基础 → 补全 who/when 供审计。
+    const lawfulBasis: LawfulBasis | undefined = opts?.lawfulBasis
+      ? {
+          ...opts.lawfulBasis,
+          recordedBy: opts.lawfulBasis.recordedBy ?? ctx.userId,
+          recordedAt: opts.lawfulBasis.recordedAt ?? new Date().toISOString(),
+        }
+      : undefined;
+
+    // 🔴 合规门裁决（纯逻辑，先于任何网络/验证器调用）。
+    const gate = evaluateEmailGate({
+      email: loaded.pointValue,
+      kind: loaded.kind,
+      lawfulBasis,
+      suppressed: loaded.suppressed,
+      policy: resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis }),
+    });
+    const gateKind = gate.kind === 'invalid' ? undefined : gate.kind;
+
+    // 事务外：门放行才做网络验证（adapter 单例，不绑 tx，失败诚实降级为 verdict，不抛，§5 fail-safe）；
+    // 门拦截则合成 BLOCKED，**不路由/不触任何验证器**（即便 smtp_self 被 kill-switch 关掉也不绕过）。
+    let verdict: EmailVerdict;
+    let providerKey: string;
+    if (!gate.allowed) {
+      verdict = { status: 'BLOCKED', detail: `lawful_basis_gate:${gate.reason}`, costCents: 0, kind: gateKind };
+      providerKey = 'compliance_gate';
+    } else {
+      if (!loaded.adapter) {
         throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
       }
-      return { pointValue: point.value, adapter: adapters[0] };
+      const verifyCtx: EmailVerifyContext = {
+        workspaceId: ctx.workspaceId,
+        kind: loaded.kind,
+        lawfulBasis: gate.lawfulBasis ?? lawfulBasis,
+        allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
+        suppressed: loaded.suppressed,
+      };
+      verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
+      providerKey = loaded.adapter.key;
+    }
+
+    // 短事务②：审计留痕（裁决 + 合法性基础）+ 回写状态。返回 point + verification 元数据供前端判断。
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      await tx.fieldEvidence.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          entityType: 'contact',
+          entityId: loaded.contactId,
+          field: 'email.verification',
+          value: {
+            status: verdict.status,
+            detail: verdict.detail ?? null,
+            kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
+            lawfulBasis: verdict.lawfulBasis ?? gate.lawfulBasis ?? lawfulBasis ?? null,
+            suppressed: loaded.suppressed,
+          } as unknown as Prisma.InputJsonValue,
+          providerKey,
+          license: providerKey === 'sandbox' ? 'sandbox' : 'public',
+          allowedActions: allowedActionsFor(verdict.status) as unknown as Prisma.InputJsonValue,
+        },
+      });
+      const updated = await tx.contactPoint.update({
+        where: { id: pointId },
+        data: { status: verdict.status, verifiedAt: new Date() },
+      });
+      return {
+        ...updated,
+        verification: {
+          status: verdict.status,
+          detail: verdict.detail ?? null,
+          kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
+          providerKey,
+          lawfulBasis: verdict.lawfulBasis ?? gate.lawfulBasis ?? lawfulBasis ?? null,
+        },
+      };
     });
-    // 事务外：网络验证（adapter 是单例，不绑 tx）。失败会诚实降级为 verdict，不抛（§5 fail-safe）。
-    const verdict = await adapter.verifyEmail(pointValue, { workspaceId: ctx.workspaceId });
-    // 短事务：回写状态。
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.contactPoint.update({ where: { id: pointId }, data: { status: verdict.status, verifiedAt: new Date() } }),
-    );
   }
 
   // ── Suppression 治理 ──────────────────────────────────────────────────────
@@ -253,4 +350,11 @@ export class DiscoveryService {
   listProviders(ctx: RequestContext) {
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) => tx.dataProvider.findMany({ orderBy: { key: 'asc' } }));
   }
+}
+
+/** 验证裁决 → field_evidence.allowed_actions（诚实：BLOCKED 不授予任何动作；仅 VALID 授 outreach）。 */
+function allowedActionsFor(status: string): string[] {
+  if (status === 'BLOCKED') return [];
+  if (status === 'VALID') return ['display', 'match', 'outreach'];
+  return ['display', 'match'];
 }
