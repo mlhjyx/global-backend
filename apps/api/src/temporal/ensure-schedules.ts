@@ -1,0 +1,54 @@
+import { Client, Connection, ScheduleOverlapPolicy, type ScheduleSpec } from '@temporalio/client';
+
+/** @temporalio/common 非直接依赖（pnpm 严格解析），从 client 的公开类型间接取 Duration。 */
+type Duration = NonNullable<ScheduleSpec['intervals']>[number]['every'];
+import {
+  ACQ_SWEEP_SCHEDULE_ID,
+  ACQUISITION_SWEEP_WORKFLOW,
+  BACKLOG_SWEEP_SCHEDULE_ID,
+  BACKLOG_SWEEP_WORKFLOW,
+  INTENT_SWEEP_SCHEDULE_ID,
+  INTENT_SWEEP_WORKFLOW,
+  UNDERSTANDING_TASK_QUEUE,
+} from './understanding.constants';
+
+/**
+ * 幂等保障平台三个周期 Schedule 存在（采集 sweep / intent sweep / 存量对账 sweep）。
+ * 由 **worker 启动时调用**——dev 的 Temporal server（start-dev + SQLite）一重置 Schedule 就全丢，
+ * 此前只能靠人记得手跑 ensure-*.mts 脚本，忘了 = 定时管线无声停摆。worker 是执行这些 workflow
+ * 的进程，由它自愈保障最合理。已存在则不动（保留 ops 手工改频率/暂停的状态）。
+ */
+const SPECS = [
+  { id: ACQ_SWEEP_SCHEDULE_ID, workflowType: ACQUISITION_SWEEP_WORKFLOW, everyEnv: 'ACQ_SWEEP_EVERY', everyDefault: '10m' },
+  { id: INTENT_SWEEP_SCHEDULE_ID, workflowType: INTENT_SWEEP_WORKFLOW, everyEnv: 'INTENT_SWEEP_EVERY', everyDefault: '1h' },
+  // 存量对账日级足够：新公司靠 run 内前向路径即时处理，backlog 只兜投影进来的/漏判的
+  { id: BACKLOG_SWEEP_SCHEDULE_ID, workflowType: BACKLOG_SWEEP_WORKFLOW, everyEnv: 'BACKLOG_SWEEP_EVERY', everyDefault: '24h' },
+];
+
+export async function ensurePlatformSchedules(): Promise<void> {
+  const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
+  const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' });
+  try {
+    for (const s of SPECS) {
+      try {
+        await client.schedule.create({
+          scheduleId: s.id,
+          spec: { intervals: [{ every: (process.env[s.everyEnv] ?? s.everyDefault) as Duration }] },
+          action: {
+            type: 'startWorkflow',
+            workflowType: s.workflowType,
+            taskQueue: UNDERSTANDING_TASK_QUEUE,
+            args: [{}],
+          },
+          policies: { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' },
+        });
+        console.log(`[worker] schedule '${s.id}' created (every ${process.env[s.everyEnv] ?? s.everyDefault}, overlap=SKIP)`);
+      } catch (e) {
+        if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) continue; // 已存在则不动
+        throw e;
+      }
+    }
+  } finally {
+    await connection.close();
+  }
+}

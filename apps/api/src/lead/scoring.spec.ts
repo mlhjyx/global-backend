@@ -151,3 +151,98 @@ describe('scoreLead — Intent 维接入真实网站变更信号 (#4)', () => {
     expect(r.scores.intent).toBeCloseTo(0.5, 1); // 命中 '扩产'
   });
 });
+
+// ── 权威资格门（LLM 四门 fit_verdict）→ 只覆盖 Fit 维 + 队列走阈值/Reachability 硬底 ──
+describe('scoreLead — authoritativeFit（资格门覆盖 Fit 维，不再覆盖整个队列）', () => {
+  const reachable = {
+    contacts: [
+      { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+      { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+    ],
+  };
+
+  it('match + 可达联系人 + 数据完整 → recommended', () => {
+    const r = scoreLead(company(reachable), icp, { authoritativeFit: 'match' });
+    expect(r.scores.fit).toBeCloseTo(0.85, 2);
+    expect(r.queue).toBe('recommended');
+    expect(r.detail.notes.some((n) => n.includes('资格门'))).toBe(true);
+  });
+
+  it('match 但零联系方式 → needs_review（Reachability 硬底：联系不上的不算推荐）', () => {
+    const r = scoreLead(company({}), icp, { authoritativeFit: 'match' });
+    expect(r.scores.fit).toBeCloseTo(0.85, 2);
+    expect(r.queue).toBe('needs_review');
+    expect(r.detail.notes.some((n) => n.includes('先联系人发现'))).toBe(true);
+  });
+
+  it('match 覆盖规则引擎的词表误判（industry 对不上也不 rejected）', () => {
+    // 规则要 manufacturing，公司词表是中文「制造业」→ 规则引擎 no_match，但资格门 match
+    const r = scoreLead(company({ industry: '制造业', ...reachable }), icp, { authoritativeFit: 'match' });
+    expect(r.queue).not.toBe('rejected');
+    expect(r.scores.fit).toBeCloseTo(0.85, 2);
+  });
+
+  it('mismatch → rejected；weak → needs_review（即便联系人可达）', () => {
+    expect(scoreLead(company(reachable), icp, { authoritativeFit: 'mismatch' }).queue).toBe('rejected');
+    expect(scoreLead(company(reachable), icp, { authoritativeFit: 'weak' }).queue).toBe('needs_review');
+  });
+
+  it('排除规则永远优先——资格门 match 也挡不住 EXCLUSION', () => {
+    const r = scoreLead(company({ country: 'XX', ...reachable }), icp, { authoritativeFit: 'match' });
+    expect(r.queue).toBe('rejected');
+  });
+
+  it('未判定（authoritativeFit 缺省）→ 走规则引擎老路径（行为不变）', () => {
+    const r = scoreLead(company({}), icp);
+    expect(r.detail.fitVerdict).toBe('match'); // 规则引擎自己的判定
+    expect(r.queue).toBe('needs_review');
+  });
+});
+
+// ── Reachability 硬底对所有推荐路径统一生效（非权威规则引擎老路径也不例外）──
+describe('scoreLead — Reachability 硬底（非权威路径同样生效）', () => {
+  const twoValidContacts = [
+    { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+    { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+  ];
+
+  it('非权威 match + 总分≥0.55 但零可达联系方式 → needs_review（绝不进推荐）', () => {
+    // fitVerdict=null 存量常态：规则引擎自判 match + 近期真实 intent + 数据完整，但一个联系人都没有。
+    // Reachability 硬底此前只在 authoritative 分支生效 → 老路径漏出「联系不上的伪推荐」。
+    const r = scoreLead(
+      company(withIntent([{ type: 'SOURCING_OPENED', at: daysAgo(6), strength: 1 }])),
+      icp,
+      { nowMs: NOW },
+    );
+    expect(r.detail.fitVerdict).toBe('match'); // 规则引擎自身判定（非权威路径）
+    expect(r.totalScore).toBeGreaterThanOrEqual(0.55);
+    expect(r.scores.reachability).toBe(0);
+    expect(r.queue).toBe('needs_review'); // 修复前此处会误判 recommended
+    expect(r.detail.notes.some((n) => n.includes('先联系人发现'))).toBe(true);
+  });
+
+  it('非权威 match + 总分≥0.55 + 可达联系方式 → recommended', () => {
+    const r = scoreLead(
+      company({
+        ...withIntent([{ type: 'SOURCING_OPENED', at: daysAgo(6), strength: 1 }]),
+        contacts: twoValidContacts,
+      }),
+      icp,
+      { nowMs: NOW },
+    );
+    expect(r.scores.reachability).toBe(1);
+    expect(r.queue).toBe('recommended');
+  });
+
+  it('authoritativeFit 只覆盖 Fit 维——其余五维与不传时逐维完全相等', () => {
+    const c = company({ contacts: twoValidContacts });
+    const withAuth = scoreLead(c, icp, { authoritativeFit: 'match', nowMs: NOW });
+    const without = scoreLead(c, icp, { nowMs: NOW });
+    expect(withAuth.scores.role).toBe(without.scores.role);
+    expect(withAuth.scores.intent).toBe(without.scores.intent);
+    expect(withAuth.scores.dataQuality).toBe(without.scores.dataQuality);
+    expect(withAuth.scores.reachability).toBe(without.scores.reachability);
+    expect(withAuth.scores.engagement).toBe(without.scores.engagement);
+    expect(withAuth.scores.fit).not.toBe(without.scores.fit); // 仅 Fit 维被覆盖（0.8→0.85）
+  });
+});

@@ -10,6 +10,8 @@ const acts = proxyActivities<IntentActivities>({
 export interface IntentSweepResult {
   swept: number;
   results: (WatchResult & { error?: string })[];
+  /** loop 收口：本轮 sweep 后自动投影进各租户的结果（事件 → attributes.intent.* → 评分可见）。 */
+  projected: { workspaces: number; companiesTouched: number; eventsProjected: number };
 }
 
 /**
@@ -33,5 +35,14 @@ export async function intentSweepWorkflow(input?: { limit?: number }): Promise<I
       });
     }
   }
-  return { swept: sourceIds.length, results };
+
+  // loop 收口：sweep 完自动把新事件投影进各租户（此前投影无自动触发 → 事件永不流到 Intent 维评分）。
+  // fail-safe：投影失败不影响 sweep 本身的结果。
+  let projected = { workspaces: 0, companiesTouched: 0, eventsProjected: 0 };
+  try {
+    projected = await acts.projectIntentAllWorkspaces({});
+  } catch {
+    /* 投影是尽力而为的收口 */
+  }
+  return { swept: sourceIds.length, results, projected };
 }

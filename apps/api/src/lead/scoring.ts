@@ -72,18 +72,36 @@ function companyAttributes(c: CompanyForScoring): Record<string, unknown> {
   };
 }
 
-export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?: { nowMs?: number }): LeadScoreResult {
+export interface ScoreLeadOpts {
+  nowMs?: number;
+  /**
+   * ICP 资格门（LLM 四门）的权威 Fit 判定（canonical.fit_verdict）。存在时**只覆盖 Fit 维**——
+   * 当前 ICP 规则值与 canonical 属性存在语言/词表不一致（"制造业" vs "metal fabrication"，
+   * 词表归一欠账），确定性规则 Fit 会误判；资格门更可靠。但队列归属仍走六维总分 + 阈值 +
+   * Reachability 硬底——此前 fitVerdict=match 直接盖整个队列，推荐队列里 9/11 家一个联系人
+   * 都没有（联系不上的"推荐"），其余五维形同虚设。词表归一落地后此覆盖退化为一致性校验。
+   */
+  authoritativeFit?: 'match' | 'weak' | 'mismatch' | null;
+}
+
+/** 权威 Fit 判定 → Fit 维分值（match 高带、weak 复核带、mismatch 零）。 */
+const AUTHORITATIVE_FIT_SCORE: Record<'match' | 'weak' | 'mismatch', number> = { match: 0.85, weak: 0.45, mismatch: 0 };
+
+export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?: ScoreLeadOpts): LeadScoreResult {
   const notes: string[] = [];
   const attrs = companyAttributes(company);
   const fitResult = qualify(icp.rules, attrs);
+  const authoritative = opts?.authoritativeFit ?? null;
 
-  // Fit
-  const fit =
-    fitResult.verdict === 'match'
+  // Fit：权威资格门判过 → 用它（只覆盖本维）；否则规则引擎
+  const fit = authoritative
+    ? AUTHORITATIVE_FIT_SCORE[authoritative]
+    : fitResult.verdict === 'match'
       ? 0.6 + 0.4 * (fitResult.score ?? 0.5)
       : fitResult.verdict === 'review'
         ? 0.3 + 0.3 * (fitResult.score ?? 0)
         : 0;
+  if (authoritative) notes.push(`Fit 维由 ICP 资格门（LLM 四门）判定=${authoritative}，覆盖规则引擎（词表归一欠账）`);
 
   // Role coverage：委员会角色被联系人 title 覆盖的比例
   const titles = company.contacts.map((c) => `${c.title ?? ''} ${c.seniority ?? ''}`.toLowerCase());
@@ -137,12 +155,29 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
     Object.entries(WEIGHTS).reduce((s, [k, w]) => s + w * scores[k as keyof typeof scores], 0),
   );
 
-  // 队列（LED-008）：硬排除 > 数据不足 > 阈值
+  // 队列（LED-008）：硬排除 > 权威资格门 > 阈值 + Reachability 硬底。
+  // 排除规则（EXCLUSION）永远优先——即便资格门 match（如后来进禁联行业名单）。
+  // Reachability 硬底：推荐 = 「对的公司 + 联系得上」。总分达标但零可达联系方式的一律进复核
+  // （下一步动作明确：先做联系人发现），**绝不进推荐**——用户点开却无从触达的"推荐"是伪推荐。
+  // 此底对**所有会进 recommended 的分支统一生效**（权威 match 与规则引擎老路径皆然），不再只挡权威分支。
+  const reachable = reachability > 0;
+  const canRecommend = totalScore >= RECOMMEND_THRESHOLD && reachable;
   let queue: LeadScoreResult['queue'];
   if (company.status === 'SUPPRESSED') queue = 'suppressed';
-  else if (fitResult.verdict === 'exclude' || fitResult.verdict === 'no_match') queue = 'rejected';
+  else if (fitResult.verdict === 'exclude') queue = 'rejected';
+  else if (authoritative === 'mismatch') queue = 'rejected';
+  else if (authoritative === 'weak') queue = 'needs_review';
+  else if (authoritative === 'match') {
+    queue = canRecommend ? 'recommended' : 'needs_review';
+    if (!reachable) notes.push('资格门 match 但无可达联系方式 —— 先联系人发现，再进推荐');
+  } else if (fitResult.verdict === 'no_match') queue = 'rejected';
   else if (fitResult.verdict === 'review') queue = 'needs_review';
-  else queue = totalScore >= RECOMMEND_THRESHOLD ? 'recommended' : 'needs_review';
+  else {
+    queue = canRecommend ? 'recommended' : 'needs_review';
+    if (!reachable && totalScore >= RECOMMEND_THRESHOLD) {
+      notes.push('总分达标但无可达联系方式 —— 先联系人发现，再进推荐');
+    }
+  }
 
   return {
     queue,

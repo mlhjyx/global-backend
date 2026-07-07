@@ -12,6 +12,7 @@ import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
 import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
+import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
@@ -48,6 +49,9 @@ export class DiscoveryProviderRegistry {
     if (deps?.gateway) {
       const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway });
       this.discovery.push(web);
+      // 决策人抽取排联系人发现**首位**（调用方取 adapters[0]）：Impressum/管理层页的具名决策人
+      // 优先于 public_web 的正则邮箱扫描（后者只挖到 info@，Role/Reachability 维恒零的根因之一）。
+      this.contacts.push(new DecisionMakerContactAdapter({ gateway: deps.gateway }));
       this.contacts.push(web);
       this.emailVerifiers.push(web);
       // 名录/列表发现（协会会员名录 + 展会参展商 + 行业目录）——同 SearXNG+Crawl4AI+Gemini 栈。
@@ -122,6 +126,12 @@ export class DiscoveryProviderRegistry {
       where: { key: 'smtp_self' },
       update: {},
       create: { key: 'smtp_self', class: 'email_verification', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // 决策人抽取（Impressum/管理层/团队页 → 具名人+职务+买家角色）——联系人发现首选 adapter。
+    await db.dataProvider.upsert({
+      where: { key: 'decision_maker' },
+      update: {},
+      create: { key: 'decision_maker', class: 'contact_discovery', status: 'ENABLED', costPerCallCents: 0 },
     });
     // 网站变更 intent 引擎（v3.0 #4，signal 源）——平台级 kill-switch/可观测（DISABLED = intentSweep 全局停抓）。
     // 注：具体监控源的常规开关是 monitored_source.status；此行是引擎级总闸 + 与其它 signal 源登记一致。

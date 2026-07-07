@@ -7,3 +7,4 @@ export { discoveryWorkflow } from './discovery.workflow';
 export { qualifyWorkflow } from './qualify.workflow';
 export { acquisitionSweepWorkflow } from './acquisition.workflow';
 export { intentSweepWorkflow } from './intent.workflow';
+export { backlogSweepWorkflow } from './backlog.workflow';

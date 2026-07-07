@@ -18,16 +18,17 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
       scored: number;
       queues: Record<string, number>;
     }> {
-      const batchSize = args.batchSize ?? 200;
-      return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+      const batchSize = args.batchSize ?? 100;
+      // ICP 载入单独短事务；批循环**每批一个事务**——全量千余家塞单个交互事务会撞
+      // Prisma 默认 5s 事务超时（P2028），且长事务持连接。批间用 id>cursor 续扫。
+      const icpForScoring = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icp = await tx.icpDefinition.findUnique({
           where: { id: args.icpId },
           include: { rules: true, roles: true },
         });
         if (!icp) throw new Error(`icp ${args.icpId} not found`);
         if (icp.status !== 'ACTIVE') throw new Error(`icp is ${icp.status}; qualify requires ACTIVE`);
-
-        const icpForScoring = {
+        return {
           rules: icp.rules.map(
             (r): RuleLike => ({
               id: r.id,
@@ -41,18 +42,20 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
           triggerSignals: Array.isArray(icp.triggerSignals) ? (icp.triggerSignals as string[]) : [],
           committeeRoles: icp.roles.map((r) => ({ role: r.role, title: r.title })),
         };
+      });
 
-        let cursor: string | undefined;
-        let scored = 0;
-        const queues: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0 };
-        for (;;) {
+      let cursor: string | undefined;
+      let scored = 0;
+      const queues: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0 };
+      for (;;) {
+        const done = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const companies = await tx.canonicalCompany.findMany({
             take: batchSize,
-            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            ...(cursor ? { where: { id: { gt: cursor } } } : {}),
             orderBy: { id: 'asc' },
             include: { contacts: { include: { contactPoints: true } } },
           });
-          if (!companies.length) break;
+          if (!companies.length) return true;
           for (const c of companies) {
             const result = scoreLead(
               {
@@ -71,22 +74,11 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
                 })),
               },
               icpForScoring,
+              // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
+              // Reachability 硬底决定（此前 match 直接盖整个队列 → 推荐里大半联系不上）。
+              { authoritativeFit: c.fitVerdict as 'match' | 'weak' | 'mismatch' | null },
             );
-            // ICP 资格门是权威 Fit 信号（评测驱动）：当它判过（fitVerdict 非空），
-            // 就以它为准，覆盖确定性规则 —— 因为当前 ICP 规则值与 canonical 属性存在
-            // 语言/词表不一致（"制造业" vs "metal fabrication"，词表归一欠账），
-            // 确定性 Fit 会误判。资格门用 LLM 四门（材质/角色/工艺/商业模式）判别，更可靠。
-            // 词表归一落地后，两者应一致，此覆盖可退化为一致性校验。
-            let queue = result.queue;
-            if (result.queue === 'suppressed') {
-              queue = 'suppressed';
-            } else if (c.fitVerdict === 'mismatch') {
-              queue = 'rejected';
-            } else if (c.fitVerdict === 'match') {
-              queue = 'recommended'; // 资格确认为目标客户
-            } else if (c.fitVerdict === 'weak') {
-              queue = 'needs_review';
-            }
+            const queue = result.queue;
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
             const scoreDetail = { ...result.detail, fitVerdict: c.fitVerdict ?? null };
@@ -132,9 +124,12 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
             scored += 1;
           }
           cursor = companies[companies.length - 1].id;
-          if (companies.length < batchSize) break;
-        }
-        await tx.outboxEvent.create({
+          return companies.length < batchSize;
+        });
+        if (done) break;
+      }
+      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        tx.outboxEvent.create({
           data: {
             workspaceId: args.workspaceId,
             eventType: 'LeadsScored',
@@ -142,9 +137,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
             aggregateId: args.icpId,
             payload: { scored, queues } as Prisma.InputJsonValue,
           },
-        });
-        return { scored, queues };
-      });
+        }),
+      );
+      return { scored, queues };
     },
   };
 }
