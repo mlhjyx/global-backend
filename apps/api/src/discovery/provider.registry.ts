@@ -16,7 +16,7 @@ import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
 import { StructuredHarvestProvider } from './providers/structured-harvest.provider';
-import { SelfHostedEmailVerifier } from './providers/email-verify.provider';
+import { SelfHostedEmailVerifier, EmailVerifyBroker } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
 /** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -39,11 +39,12 @@ export class DiscoveryProviderRegistry {
    *  绝不塞进 enrichRun 的 2 分钟活动（否则 50 家 × 抓取会超时重试整段富集）。 */
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
-  constructor(deps?: { gateway?: ModelGateway }) {
+  constructor(deps?: { gateway?: ModelGateway; broker?: EmailVerifyBroker }) {
     // 自建邮箱验证**排 emailVerifiers 首位**：verifyContactPoint 只用 adapters[0]，必须在
     // public_web(仅 MX→RISKY) 之前，否则新 SMTP RCPT/catch-all 逻辑永不执行。不依赖 gateway。
     // 诚实上限：Gmail/M365/catch-all/端口25不可达/catch-all未证伪 一律 RISKY，绝不谎报 VALID。
-    this.emailVerifiers.push(new SelfHostedEmailVerifier());
+    // SMTP 出网走注入的 ToolBroker 闸门（source_policy/限流/预算/Trace）；无 broker=不做原始出网。
+    this.emailVerifiers.push(new SelfHostedEmailVerifier(deps?.broker));
     if (deps?.gateway) {
       const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway });
       this.discovery.push(web);

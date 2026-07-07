@@ -89,10 +89,16 @@ export interface ContactDiscoveryAdapter {
   }): Promise<ContactDiscoveryResult>;
 }
 
+/** 邮箱验证上下文（可选）：SMTP 出网走 ToolBroker 闸门时，用于预算/Trace 归属。 */
+export interface EmailVerifyContext {
+  workspaceId?: string;
+  runId?: string;
+}
+
 /** 邮箱验证（发送前实时验证，PRD 7.4.7）。 */
 export interface EmailVerificationAdapter {
   key: string;
-  verifyEmail(email: string): Promise<EmailVerdict>;
+  verifyEmail(email: string, ctx?: EmailVerifyContext): Promise<EmailVerdict>;
 }
 
 /** 富集适配器的输入：已归一的 canonical 公司最小画像。 */

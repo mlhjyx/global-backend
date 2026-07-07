@@ -76,6 +76,33 @@ export class ToolBroker {
     for (const t of this.registry.all()) this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
   }
 
+  /**
+   * 查某域名的 source_policy（无 reader 或未登记 → null）。checkSourcePolicy 与调用方按需取用。
+   */
+  async sourcePolicy(domain: string): Promise<{ suspended: boolean; allowedPurpose?: string[] } | null> {
+    if (!this.deps.sourcePolicyReader) return null;
+    return this.deps.sourcePolicyReader(domain);
+  }
+
+  /**
+   * source_policy 判定（**SUSPENDED + 用途门**），**不执行工具**。invoke 的合规门与调用方
+   * 「昂贵前置（DNS/网络）前主动跳过」共用同一判定（单点真相，避免只查 suspended 的半吊子早跳过）。
+   * 工具无需 source_policy 或无 reader → 一律 allowed。
+   */
+  async checkSourcePolicy(
+    toolId: string,
+    domain: string,
+  ): Promise<{ allowed: boolean; reason?: 'suspended' | 'purpose_not_allowed' }> {
+    const tool = this.registry.get(toolId);
+    if (!tool?.compliance.requiresSourcePolicy || !this.deps.sourcePolicyReader) return { allowed: true };
+    const policy = await this.sourcePolicy(domain);
+    if (policy?.suspended) return { allowed: false, reason: 'suspended' };
+    if (policy?.allowedPurpose && !policy.allowedPurpose.some((p) => tool.compliance.allowedPurpose.includes(p))) {
+      return { allowed: false, reason: 'purpose_not_allowed' };
+    }
+    return { allowed: true };
+  }
+
   /** 唯一执行入口。所有闸门在此强制。 */
   async invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>> {
     const now = this.deps.now ?? Date.now;
@@ -93,19 +120,15 @@ export class ToolBroker {
       }
     }
 
-    // 2) 合规门：source_policy（SUSPENDED / 用途）
+    // 2) 合规门：source_policy（SUSPENDED / 用途）——与早跳过共用 checkSourcePolicy（单点判定）。
     if (tool.compliance.requiresSourcePolicy && this.deps.sourcePolicyReader) {
       const domain = extractDomain(input);
       if (domain) {
-        const policy = await this.deps.sourcePolicyReader(domain);
-        if (policy?.suspended) {
-          this.trace(ctx, tool, 'DENIED', `source_policy SUSPENDED: ${domain}`, 0, now() - started);
-          throw new ToolPolicyDenied(toolId, `domain ${domain} is SUSPENDED`);
-        }
-        const purposes = tool.compliance.allowedPurpose;
-        if (policy?.allowedPurpose && !policy.allowedPurpose.some((p) => purposes.includes(p))) {
-          this.trace(ctx, tool, 'DENIED', `purpose not allowed for ${domain}`, 0, now() - started);
-          throw new ToolPolicyDenied(toolId, `purpose not allowed for ${domain}`);
+        const chk = await this.checkSourcePolicy(toolId, domain);
+        if (!chk.allowed) {
+          const detail = chk.reason === 'suspended' ? `source_policy SUSPENDED: ${domain}` : `purpose not allowed for ${domain}`;
+          this.trace(ctx, tool, 'DENIED', detail, 0, now() - started);
+          throw new ToolPolicyDenied(toolId, chk.reason === 'suspended' ? `domain ${domain} is SUSPENDED` : `purpose not allowed for ${domain}`);
         }
       }
     }
