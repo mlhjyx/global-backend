@@ -6,6 +6,13 @@ const acts = proxyActivities<DiscoveryActivities>({
   retry: { maximumAttempts: 3 },
 });
 
+// 信号富集是**慢活动**（抓官网/sitemap，逐家数十秒）：单独长超时代理，绝不用上面的 2 分钟超时
+// （否则会超时重试整段富集）。工作量有界（SIGNAL_ENRICH_LIMIT 家 × 逐家有 AbortSignal 超时），30 分钟足够。
+const signalActs = proxyActivities<DiscoveryActivities>({
+  startToCloseTimeout: '30 minutes',
+  retry: { maximumAttempts: 2 },
+});
+
 /**
  * Discover 编排（PRD 5.5 / 7.4.8 Waterfall 的发现段）：
  * READY 计划 → 按 priority 逐源执行（单源失败不终止整个 run → PARTIAL）→
@@ -33,8 +40,16 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
   const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId });
 
-  // 富集（Waterfall 富化段）：只给过了 fit 门的高价值公司补 GLEIF 法律身份 + 母子关系
+  // 富集（Waterfall 富化段）：只给过了 fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
   const enrich = await acts.enrichRun({ workspaceId, runId });
+
+  // 信号富集（数字足迹 + 结构化收割）：慢且时变，走独立长活动 + heartbeat；失败不拖垮整个 run
+  let signals: { matched: number; enriched: number; provider: string | null } = { matched: 0, enriched: 0, provider: null };
+  try {
+    signals = await signalActs.enrichSignalsRun({ workspaceId, runId });
+  } catch {
+    /* 信号富集是尽力而为的富化，失败不影响 run 状态 */
+  }
 
   const status = failures === 0 ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
   await acts.finalizeRun({
@@ -48,6 +63,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       suppressed,
       fit: fit.verdicts,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
+      signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       queries: queries.length,
       failures,
     },

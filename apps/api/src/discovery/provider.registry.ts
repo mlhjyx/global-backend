@@ -34,6 +34,9 @@ export class DiscoveryProviderRegistry {
   private readonly contacts: ContactDiscoveryAdapter[] = [];
   private readonly emailVerifiers: EmailVerificationAdapter[] = [];
   private readonly enrichers: CompanyEnrichmentAdapter[] = [];
+  /** 信号类富集（抓官网/sitemap，**慢**且**时变**）——与快事实富集分开：走独立长活动 + TTL 刷新，
+   *  绝不塞进 enrichRun 的 2 分钟活动（否则 50 家 × 抓取会超时重试整段富集）。 */
+  private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
   constructor(deps?: { gateway?: ModelGateway }) {
     if (deps?.gateway) {
@@ -53,12 +56,11 @@ export class DiscoveryProviderRegistry {
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider());
     this.enrichers.push(new GleifEnrichmentProvider());
-    // 数字足迹（v3.0 signal 源）：从官网 HTML/DNS 解析技术栈/在投广告/服务市场/招聘/邮件商
-    //  → attributes.digital_footprint.*，喂 Intent/Reachability 打分。零付费，走 crawl4ai。
-    this.enrichers.push(new DigitalFootprintProvider());
-    // 结构化收割（v3.0 signal 源）：sitemap 定位 careers 页 → JobPosting 招聘信号
-    //  → attributes.structured_harvest.*（发布者主动供机器消费的公开数据，🟢 更干净）。
-    this.enrichers.push(new StructuredHarvestProvider());
+    // 信号类富集（v3.0，**独立长活动 enrichSignalsRun** 跑，不进 enrichRun 的 2 分钟活动）：
+    //  数字足迹（官网 HTML/DNS → 技术栈/在投广告/服务市场/邮件商）+ 结构化收割（sitemap → 招聘信号）。
+    //  → attributes.digital_footprint.* / .structured_harvest.*，喂 Intent/Reachability 打分。零付费。
+    this.signalEnrichers.push(new DigitalFootprintProvider());
+    this.signalEnrichers.push(new StructuredHarvestProvider());
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
       const sandbox = new SandboxDiscoveryProvider();
@@ -139,6 +141,12 @@ export class DiscoveryProviderRegistry {
   async routeEnrichment(db: ProviderDb): Promise<CompanyEnrichmentAdapter[]> {
     const enabled = await this.enabledKeys(db);
     return this.enrichers.filter((a) => enabled.has(a.key));
+  }
+
+  /** 当前 ENABLED 的**信号类**富集适配器（慢/时变，走独立长活动 + TTL 刷新）。 */
+  async routeSignalEnrichment(db: ProviderDb): Promise<CompanyEnrichmentAdapter[]> {
+    const enabled = await this.enabledKeys(db);
+    return this.signalEnrichers.filter((a) => enabled.has(a.key));
   }
 
   private async enabledKeys(db: ProviderDb): Promise<Set<string>> {

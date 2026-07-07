@@ -8,6 +8,11 @@ describe('采集清洗（源无关）', () => {
     expect(cleanEmail('john.smith@acme.com')).toEqual({ value: 'john.smith@acme.com', kind: 'personal' });
     expect(cleanEmail('m.mueller@acme.de')?.kind).toBe('personal');
     expect(cleanEmail('vertrieb@acme.de')?.kind).toBe('role'); // 德语职能词
+    // 保守分级（GDPR）：未在白名单的单词名判 personal，防个人邮箱绕过隔离门
+    expect(cleanEmail('max@vendor.com')?.kind).toBe('personal');
+    expect(cleanEmail('jane@vendor.com')?.kind).toBe('personal');
+    expect(cleanEmail('orders@acme.com')?.kind).toBe('role'); // 扩充职能词
+    expect(cleanEmail('sales2@acme.com')?.kind).toBe('role'); // 去尾数后仍职能
     expect(cleanEmail('not-an-email')).toBeNull();
     expect(cleanEmail(null)).toBeNull();
   });

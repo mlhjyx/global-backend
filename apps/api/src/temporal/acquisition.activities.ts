@@ -11,23 +11,22 @@ const DUE_LIMIT = 50;
 export function createAcquisitionActivities(deps: { prisma: PrismaService; registry: SourceAdapterRegistry }) {
   const svc = new AcquisitionService({ prisma: deps.prisma, registry: deps.registry });
   return {
-    /** 到期的自动源：ACTIVE + 有 cadence.everyMs + (从未抓 或 nextFetchAt 到点)。手动源（无 cadence）不自动扫。 */
+    /** 到期的自动源：ACTIVE + 有 cadence.everyMs>0 + (从未抓 或 nextFetchAt 到点)。手动源（无 cadence）不自动扫。
+     *  cadence 过滤下推到 DB（JSON path）——否则大量手动源(nextFetchAt=null 排最前)会挤占 take、把真正到期的自动源饿死。 */
     async listDueSources(args?: { limit?: number }): Promise<{ sourceIds: string[] }> {
       const now = new Date();
       const limit = args?.limit ?? DUE_LIMIT;
       const rows = await deps.prisma.monitoredSource.findMany({
-        where: { status: 'ACTIVE', OR: [{ nextFetchAt: null }, { nextFetchAt: { lte: now } }] },
-        select: { id: true, cadence: true },
+        where: {
+          status: 'ACTIVE',
+          cadence: { path: ['everyMs'], gt: 0 },
+          OR: [{ nextFetchAt: null }, { nextFetchAt: { lte: now } }],
+        },
+        select: { id: true },
         orderBy: [{ nextFetchAt: { sort: 'asc', nulls: 'first' } }],
-        take: limit * 4,
+        take: limit,
       });
-      const due = rows
-        .filter((r) => {
-          const everyMs = (r.cadence as { everyMs?: number } | null)?.everyMs;
-          return typeof everyMs === 'number' && everyMs > 0;
-        })
-        .slice(0, limit);
-      return { sourceIds: due.map((r) => r.id) };
+      return { sourceIds: rows.map((r) => r.id) };
     },
 
     /** 对一个源跑一次 acquire（抓取→清洗→落库→增量）。幂等 by externalId，可安全重试。 */

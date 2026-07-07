@@ -6,6 +6,7 @@ import { cleanEntity, CleanedEntity } from './clean';
 const PARSER_VERSION = 'acquisition/v1';
 const MISS_THRESHOLD = 2; // 连续缺席 N 次才判退出（防单次抓取失败误杀，研究建议）
 const CHUNK = 50;
+const DEFAULT_FETCH_LIMIT = 10000; // 显式抓取上限；raw 达此值视为「疑似截断」→ 本次不判 REMOVED（防误杀）。源可用 config.fetchLimit 覆盖
 
 export interface AcquireResult {
   sourceId: string;
@@ -45,9 +46,13 @@ export class AcquisitionService {
 
     // ── 抓取（事务外，网络）+ 清洗 ──
     let cleaned: CleanedEntity[];
+    let truncated = false; // raw 达到抓取上限 → 快照可能不完整
     try {
       const config = { ...(source.config as Record<string, unknown>), sourceKey: source.sourceKey };
-      const raw = await adapter.fetch(config, opts?.limit);
+      const configLimit = Number((source.config as Record<string, unknown>)?.fetchLimit);
+      const limit = opts?.limit ?? (Number.isFinite(configLimit) && configLimit > 0 ? configLimit : DEFAULT_FETCH_LIMIT);
+      const raw = await adapter.fetch(config, limit);
+      truncated = raw.length >= limit;
       const byExt = new Map<string, CleanedEntity>();
       for (const r of raw) {
         const c = cleanEntity(r);
@@ -93,17 +98,21 @@ export class AcquisitionService {
       }
     }
 
-    // 缺席 → miss / removed（防误杀：连续缺席达阈值才判退出）
+    // 缺席 → miss / removed（防误杀：连续缺席达阈值才判退出）。
+    // **截断快照跳过缺席判定**：raw 达到抓取上限时，"缺席"可能只是超出上限被截断（如定时 sweep
+    // 用默认上限抓一个 >上限 的大展会），不应据此累计 miss / 判 REMOVED，否则会误杀仍在场的实体。
     const toMiss: { id: string; miss: number }[] = [];
     const toRemove: string[] = [];
-    for (const e of existing) {
-      if (seen.has(e.externalId) || e.withdrawnAt) continue;
-      const miss = e.missCount + 1;
-      if (miss >= MISS_THRESHOLD) {
-        toRemove.push(e.id);
-        changes.push({ sourceId, fetchId: fetch.id, externalId: e.externalId, changeType: 'REMOVED', detail: Prisma.JsonNull });
-      } else {
-        toMiss.push({ id: e.id, miss });
+    if (!truncated) {
+      for (const e of existing) {
+        if (seen.has(e.externalId) || e.withdrawnAt) continue;
+        const miss = e.missCount + 1;
+        if (miss >= MISS_THRESHOLD) {
+          toRemove.push(e.id);
+          changes.push({ sourceId, fetchId: fetch.id, externalId: e.externalId, changeType: 'REMOVED', detail: Prisma.JsonNull });
+        } else {
+          toMiss.push({ id: e.id, miss });
+        }
       }
     }
 

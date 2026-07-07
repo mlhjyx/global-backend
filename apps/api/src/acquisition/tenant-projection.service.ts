@@ -79,25 +79,35 @@ export class TenantProjectionService {
             source_key: source.sourceKey,
           });
 
-          const canonical = await tx.canonicalCompany.upsert({
+          // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
+          // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
+          const prior = await tx.canonicalCompany.findUnique({
             where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: identity.dedupeKey } },
-            update: {
-              // 后到的源只补缺（domain/country），不覆盖已有；merge attributes
-              ...(e.domain ? { domain: { set: e.domain } } : {}),
-              ...(e.country ? { country: { set: e.country } } : {}),
-              status: isSuppressed ? 'SUPPRESSED' : undefined,
-              version: { increment: 1 },
-            },
-            create: {
-              workspaceId,
-              name: e.name,
-              domain: e.domain ?? null,
-              country: e.country ?? null,
-              attributes: attributes as Prisma.InputJsonValue,
-              status: isSuppressed ? 'SUPPRESSED' : 'NEW',
-              dedupeKey: identity.dedupeKey,
-            },
+            select: { id: true, attributes: true },
           });
+          const canonical = prior
+            ? await tx.canonicalCompany.update({
+                where: { id: prior.id },
+                data: {
+                  // 后到的源只补缺（domain/country），不覆盖已有
+                  ...(e.domain ? { domain: { set: e.domain } } : {}),
+                  ...(e.country ? { country: { set: e.country } } : {}),
+                  attributes: mergeAttributes((prior.attributes ?? {}) as Record<string, unknown>, attributes) as Prisma.InputJsonValue,
+                  status: isSuppressed ? 'SUPPRESSED' : undefined,
+                  version: { increment: 1 },
+                },
+              })
+            : await tx.canonicalCompany.create({
+                data: {
+                  workspaceId,
+                  name: e.name,
+                  domain: e.domain ?? null,
+                  country: e.country ?? null,
+                  attributes: attributes as Prisma.InputJsonValue,
+                  status: isSuppressed ? 'SUPPRESSED' : 'NEW',
+                  dedupeKey: identity.dedupeKey,
+                },
+              });
           if (isSuppressed) suppressed += 1;
           projected += 1;
 
@@ -150,4 +160,16 @@ export class TenantProjectionService {
 
 function pruneUndefined(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null));
+}
+
+/** 合并已有 canonical.attributes 与新源属性：新源覆盖同名标量、**并集 products**，
+ *  保留 prev 里其它键（含 gleif/wikidata/digital_footprint 等富集命名空间）。 */
+function mergeAttributes(prev: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...prev, ...next };
+  const prods = [
+    ...(Array.isArray(prev.products) ? (prev.products as unknown[]) : []),
+    ...(Array.isArray(next.products) ? (next.products as unknown[]) : []),
+  ].map(String);
+  if (prods.length) merged.products = [...new Set(prods)];
+  return merged;
 }

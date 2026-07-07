@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
+import { lookup } from 'node:dns/promises';
 import { CompanyEnrichmentAdapter, CompanyEnrichmentInput, EnrichmentResult } from '../provider-contract';
 import { crawlHtml } from '../../adapters/web-crawler';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -147,6 +148,8 @@ export function isBuyingRole(title: string): boolean {
 /** 取域名的 sitemap URL 全集：robots.txt 的 Sitemap: 指令 + /sitemap.xml + /sitemap_index.xml，
  *  遇 sitemap index 再取前若干子 sitemap；支持 .gz。总量与子表数有上限。 */
 export async function fetchSitemapUrls(domain: string): Promise<string[]> {
+  // SSRF 护栏：plain fetch 不经 crawl4ai 的 egress 防护，故先确认 domain 本身解析到公网 IP
+  if (!(await isSafeSameSiteUrl(`https://${domain}/robots.txt`, domain))) return [];
   const roots = new Set<string>();
   for (const line of (await fetchText(`https://${domain}/robots.txt`).catch(() => '')).split('\n')) {
     const m = line.match(/^\s*sitemap:\s*(\S+)/i);
@@ -159,12 +162,15 @@ export async function fetchSitemapUrls(domain: string): Promise<string[]> {
   let childBudget = MAX_CHILD_SITEMAPS;
   for (const root of roots) {
     if (out.length >= MAX_URLS) break;
+    // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只抓同注册域 + 公网 IP
+    if (!(await isSafeSameSiteUrl(root, domain))) continue;
     const xml = await fetchText(root).catch(() => '');
     if (!xml) continue;
     const { locs, isIndex } = parseSitemapXml(xml);
     if (isIndex) {
       for (const child of locs) {
         if (childBudget-- <= 0 || out.length >= MAX_URLS) break;
+        if (!(await isSafeSameSiteUrl(child, domain))) continue;
         const childXml = await fetchText(child).catch(() => '');
         out.push(...parseSitemapXml(childXml).locs);
       }
@@ -175,8 +181,48 @@ export async function fetchSitemapUrls(domain: string): Promise<string[]> {
   return [...new Set(out)].slice(0, MAX_URLS);
 }
 
+/** SSRF 护栏：plain fetch 的 URL 必须 http(s)、同注册域(含子域)、非 IP 字面量、且解析到公网 IP。
+ *  （careers 页走 crawl4ai 自带 egress 防护，不经此。） */
+async function isSafeSameSiteUrl(raw: string, domain: string): Promise<boolean> {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  const host = u.hostname.toLowerCase();
+  const d = domain.toLowerCase();
+  if (host !== d && !host.endsWith(`.${d}`)) return false; // 只允许同注册域(含子域)
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) return false; // 拒 IP 字面量
+  try {
+    const { address } = await lookup(host);
+    return !isPrivateIp(address); // 解析到内网/元数据(169.254.169.254 等) → 拒
+  } catch {
+    return false;
+  }
+}
+
+function isPrivateIp(ip: string): boolean {
+  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    return (
+      a === 10 || a === 127 || a === 0 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) || // link-local + 云元数据 169.254.169.254
+      (a === 100 && b >= 64 && b <= 127) // CGNAT
+    );
+  }
+  const low = ip.toLowerCase();
+  return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80');
+}
+
 /** 常见 careers 固定路径兜底（sitemap 无命中时）。 */
 export async function probeCommonCareersPath(domain: string): Promise<string | undefined> {
+  if (!(await isSafeSameSiteUrl(`https://${domain}/`, domain))) return undefined; // SSRF 护栏（plain HEAD）
   for (const p of ['/careers', '/en/careers', '/career', '/jobs', '/karriere', '/company/careers']) {
     const u = `https://${domain}${p}`;
     try {
