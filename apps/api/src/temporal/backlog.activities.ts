@@ -305,6 +305,7 @@ export function createBacklogActivities(deps: {
      */
     async registerWatchesBacklog(args: BacklogPage): Promise<WatchBacklogResult> {
       const limit = args.limit ?? 12;
+      const suspended = await suspendedDomains(); // DAT-011：SUSPENDED 域名连注册期 sitemap 探测都不发（与信号/联系人阶段一致）
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
           where: {
@@ -332,6 +333,7 @@ export function createBacklogActivities(deps: {
       let registered = 0;
       for (const c of companies) {
         if (!c.domain || existing.has(keyOf(c.domain))) continue;
+        if (suspended.has(c.domain.toLowerCase())) continue; // DAT-011：kill-switch 域名不注册、不探测 sitemap
         try {
           await intentSvc.registerWatch(args.workspaceId, c.id);
           registered += 1;

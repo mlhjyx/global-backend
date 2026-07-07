@@ -157,23 +157,27 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
 
   // 队列（LED-008）：硬排除 > 权威资格门 > 阈值 + Reachability 硬底。
   // 排除规则（EXCLUSION）永远优先——即便资格门 match（如后来进禁联行业名单）。
+  // Reachability 硬底：推荐 = 「对的公司 + 联系得上」。总分达标但零可达联系方式的一律进复核
+  // （下一步动作明确：先做联系人发现），**绝不进推荐**——用户点开却无从触达的"推荐"是伪推荐。
+  // 此底对**所有会进 recommended 的分支统一生效**（权威 match 与规则引擎老路径皆然），不再只挡权威分支。
+  const reachable = reachability > 0;
+  const canRecommend = totalScore >= RECOMMEND_THRESHOLD && reachable;
   let queue: LeadScoreResult['queue'];
   if (company.status === 'SUPPRESSED') queue = 'suppressed';
   else if (fitResult.verdict === 'exclude') queue = 'rejected';
   else if (authoritative === 'mismatch') queue = 'rejected';
   else if (authoritative === 'weak') queue = 'needs_review';
   else if (authoritative === 'match') {
-    // Reachability 硬底：推荐 = 「对的公司 + 联系得上」。match 但零联系方式的进复核队列
-    // （下一步动作明确：先做联系人发现），绝不进推荐——用户点开却无从触达的"推荐"是伪推荐。
-    if (reachability <= 0) {
-      queue = 'needs_review';
-      notes.push('资格门 match 但无可达联系方式 —— 先联系人发现，再进推荐');
-    } else {
-      queue = totalScore >= RECOMMEND_THRESHOLD ? 'recommended' : 'needs_review';
-    }
+    queue = canRecommend ? 'recommended' : 'needs_review';
+    if (!reachable) notes.push('资格门 match 但无可达联系方式 —— 先联系人发现，再进推荐');
   } else if (fitResult.verdict === 'no_match') queue = 'rejected';
   else if (fitResult.verdict === 'review') queue = 'needs_review';
-  else queue = totalScore >= RECOMMEND_THRESHOLD ? 'recommended' : 'needs_review';
+  else {
+    queue = canRecommend ? 'recommended' : 'needs_review';
+    if (!reachable && totalScore >= RECOMMEND_THRESHOLD) {
+      notes.push('总分达标但无可达联系方式 —— 先联系人发现，再进推荐');
+    }
+  }
 
   return {
     queue,

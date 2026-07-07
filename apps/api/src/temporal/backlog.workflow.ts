@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { proxyActivities, log } from '@temporalio/workflow';
 import type {
   BacklogActivities,
   ContactBacklogResult,
@@ -89,8 +89,8 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
           break;
         }
       }
-    } catch {
-      /* 资格门批失败（如网关长时不可用）不阻断后续阶段 */
+    } catch (err) {
+      log.warn('[backlogSweep] 资格门阶段失败（网关不可用等），不阻断后续', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
     // ② 快事实富集（GLEIF/Wikidata，fit=match 缺命名空间者）
@@ -104,8 +104,8 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         cursor = r.nextCursor;
         if (!cursor) break;
       }
-    } catch {
-      /* fail-safe */
+    } catch (err) {
+      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
     // ③ 信号富集（数字足迹/结构化收割，TTL 感知）
@@ -119,8 +119,8 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         cursor = r.nextCursor;
         if (!cursor) break;
       }
-    } catch {
-      /* fail-safe */
+    } catch (err) {
+      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
     // ④ 网站监控注册（web_watch → intentSweep 持续盯）
@@ -133,8 +133,8 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         cursor = r.nextCursor;
         if (!cursor) break;
       }
-    } catch {
-      /* fail-safe */
+    } catch (err) {
+      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
     // ⑤ 联系人发现（decision_maker 首选：具名决策人 + 买家角色）
@@ -148,16 +148,16 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         cursor = r.nextCursor;
         if (!cursor) break;
       }
-    } catch {
-      /* fail-safe */
+    } catch (err) {
+      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
     // ⑥ 重评分（新 verdict/信号/联系人 → lead 四队列刷新）
     try {
       const scored = await scoreActs.scoreCandidates({ workspaceId: t.workspaceId, icpId: t.icpId });
       stats.scored = scored.scored;
-    } catch {
-      /* fail-safe */
+    } catch (err) {
+      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
     all.push(stats);
