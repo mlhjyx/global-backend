@@ -1229,6 +1229,7 @@
     },
     "/api/v1/contact-points/{pointId}/verify": {
       "post": {
+        "description": "合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。",
         "operationId": "DiscoveryController_verify_v1",
         "parameters": [
           {
@@ -1240,6 +1241,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyContactPointDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": ""
@@ -1250,7 +1261,7 @@
             "bearer": []
           }
         ],
-        "summary": "邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID",
+        "summary": "邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED",
         "tags": [
           "Discovery"
         ]
@@ -2414,6 +2425,33 @@
           "version",
           "createdAt"
         ]
+      },
+      "VerifyContactPointDto": {
+        "type": "object",
+        "properties": {
+          "lawfulBasis": {
+            "type": "string",
+            "enum": [
+              "legitimate_interest",
+              "consent",
+              "contract",
+              "legal_obligation"
+            ],
+            "description": "探测人名邮箱的合法性基础（GDPR Art.6）；职能邮箱可省略"
+          },
+          "lawfulBasisRef": {
+            "type": "string",
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）"
+          },
+          "lawfulBasisNote": {
+            "type": "string",
+            "description": "备注"
+          },
+          "allowPersonalWithoutBasis": {
+            "type": "boolean",
+            "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
+          }
+        }
       },
       "CreateSuppressionDto": {
         "type": "object",
