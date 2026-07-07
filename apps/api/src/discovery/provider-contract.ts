@@ -66,10 +66,30 @@ export interface ContactDiscoveryResult {
   costCents: number;
 }
 
+/**
+ * 探测人名邮箱（personalData）= 处理可识别自然人数据（GDPR Art.14）。需**合法性基础**（Art.6）留痕。
+ * 职能邮箱（role，info@/sales@…）非个人数据（Recital 14），无需 basis。见合规红线 §10.3。
+ */
+export type LawfulBasisKind = 'legitimate_interest' | 'consent' | 'contract' | 'legal_obligation';
+export interface LawfulBasis {
+  basis: LawfulBasisKind;
+  /** LIA / 工单 / 合同 / 同意记录的引用（可审计）。 */
+  ref?: string;
+  note?: string;
+  /** 谁在何时断言此 basis（默认由发起验证的 user + 时间填充）。 */
+  recordedBy?: string;
+  recordedAt?: string;
+}
+
 export interface EmailVerdict {
-  status: 'VALID' | 'RISKY' | 'INVALID';
+  /** BLOCKED = 合规门拦截（人名邮箱无合法性基础），**未做任何网络探测**。 */
+  status: 'VALID' | 'RISKY' | 'INVALID' | 'BLOCKED';
   detail?: string;
   costCents: number;
+  /** 探测时的邮箱分级（留痕）。 */
+  kind?: 'role' | 'personal';
+  /** 探测人名邮箱所依据的合法性基础（写入 field_evidence）。 */
+  lawfulBasis?: LawfulBasis;
 }
 
 /** 公司发现类 Provider（trade_data / b2b / registry / public_intelligence / industry_data）。 */
@@ -89,10 +109,22 @@ export interface ContactDiscoveryAdapter {
   }): Promise<ContactDiscoveryResult>;
 }
 
-/** 邮箱验证上下文（可选）：SMTP 出网走 ToolBroker 闸门时，用于预算/Trace 归属。 */
+/**
+ * 邮箱验证上下文（可选）。两层用途：
+ *  - **ToolBroker 归属**：SMTP 出网走闸门时的预算/Trace 归属（workspaceId / runId）。
+ *  - **合规门**（GDPR）：探测人名邮箱前的分级 + 合法性基础。缺基础且未开开关 → 门拦截，不探测。
+ */
 export interface EmailVerifyContext {
   workspaceId?: string;
   runId?: string;
+  /** 调用方已知的分级（role / personal）；省略则验证器用本地部分自行分级。 */
+  kind?: 'role' | 'personal';
+  /** 人名邮箱的合法性基础（显式标记）。缺失且未开开关 → 门拦截 BLOCKED，不探测。 */
+  lawfulBasis?: LawfulBasis;
+  /** 显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false；命中仍留痕）。 */
+  allowPersonalWithoutBasis?: boolean;
+  /** 该地址是否已在禁联名单（suppression）——命中则一律不探测。 */
+  suppressed?: boolean;
 }
 
 /** 邮箱验证（发送前实时验证，PRD 7.4.7）。 */
