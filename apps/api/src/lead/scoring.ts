@@ -4,7 +4,7 @@ import { qualify, QualifyResult, RuleLike } from '../icp/rule-engine';
  * 六维评分（LED-006, PRD 5.6/7.5）—— 全部确定性计算，AI 不参与打分：
  * Fit          规则引擎判定 + nice-to-have 加权分
  * Role         已发现联系人对买家委员会角色的覆盖
- * Intent       触发信号命中（当前无真实信号源 → 关键词代理，来源标注在 detail）
+ * Intent       **真实网站变更 intent 事件（#4，attributes.intent.*）按新近度衰减取最强** + ICP 关键词代理兜底
  * DataQuality  关键字段完整度
  * Reachability 联系方式可达性（VALID > UNVERIFIED > 无）
  * Engagement   互动历史（触达能力未上线 → 恒 0，权重最低）
@@ -48,6 +48,8 @@ export interface LeadScoreResult {
     fitVerdict: QualifyResult['verdict'];
     ruleEvaluations: QualifyResult['evaluations'];
     matchedSignals: string[];
+    /** 命中的真实 intent 事件类型（来自 #4 attributes.intent.events，如 SOURCING_OPENED/HIRING_UP）。 */
+    intentSignals: string[];
     missingFields: string[];
     notes: string[];
   };
@@ -55,6 +57,8 @@ export interface LeadScoreResult {
 
 const WEIGHTS = { fit: 0.35, role: 0.15, intent: 0.15, dataQuality: 0.15, reachability: 0.15, engagement: 0.05 };
 const RECOMMEND_THRESHOLD = 0.55;
+const INTENT_HALFLIFE_DAYS = 60; // 意向信号半衰期：B2B 买家信号约 2 月衰减一半（越久越弱，防陈旧信号长期占分）
+const DAY_MS = 86_400_000;
 
 function companyAttributes(c: CompanyForScoring): Record<string, unknown> {
   return {
@@ -68,7 +72,7 @@ function companyAttributes(c: CompanyForScoring): Record<string, unknown> {
   };
 }
 
-export function scoreLead(company: CompanyForScoring, icp: IcpForScoring): LeadScoreResult {
+export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?: { nowMs?: number }): LeadScoreResult {
   const notes: string[] = [];
   const attrs = companyAttributes(company);
   const fitResult = qualify(icp.rules, attrs);
@@ -95,14 +99,11 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring): LeadS
       : 0;
   if (!company.contacts.length) notes.push('无联系人 —— Role/Reachability 低分，先做联系人发现');
 
-  // Intent：触发信号 ↔ 公司关键词/属性 文本命中（无真实信号源前的代理指标）
-  const attrText = JSON.stringify(attrs).toLowerCase();
-  const matchedSignals = icp.triggerSignals.filter((s) => {
-    const words = s.toLowerCase().split(/[\s，,、]+/).filter((w) => w.length > 1);
-    return words.some((w) => attrText.includes(w));
-  });
-  const intent = icp.triggerSignals.length ? Math.min(1, matchedSignals.length / Math.min(icp.triggerSignals.length, 3)) : 0;
-  notes.push('Intent 基于关键词代理（真实意向信号源未接入）');
+  // Intent：真实网站变更 intent 事件（#4，attributes.intent.*，按新近度衰减）为主 + ICP 关键词代理兜底
+  const intentDim = intentDimension(attrs, icp.triggerSignals, opts?.nowMs ?? Date.now());
+  const intent = intentDim.intent;
+  const matchedSignals = intentDim.matchedSignals;
+  notes.push(intentDim.note);
 
   // DataQuality：关键字段完整度
   const keyFields: [string, unknown][] = [
@@ -147,8 +148,91 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring): LeadS
     queue,
     totalScore,
     scores,
-    detail: { fitVerdict: fitResult.verdict, ruleEvaluations: fitResult.evaluations, matchedSignals, missingFields, notes },
+    detail: {
+      fitVerdict: fitResult.verdict,
+      ruleEvaluations: fitResult.evaluations,
+      matchedSignals,
+      intentSignals: intentDim.intentSignals,
+      missingFields,
+      notes,
+    },
   };
+}
+
+interface IntentEventLike {
+  type?: unknown;
+  at?: unknown;
+  strength?: unknown;
+}
+interface IntentAttrLike {
+  intent_score?: unknown;
+  last_change_at?: unknown;
+  events?: unknown;
+}
+
+/**
+ * 意向维：**真实网站变更 intent 事件**（#4 网站变更引擎投影的 `attributes.intent.*`）为主，
+ * 逐事件按新近度指数衰减(半衰期 60d)后取最强；无真实信号时回退到 ICP 关键词代理（弱先验）。
+ * intent = max(realIntent, keywordIntent)——让真实证据能压过纯关键词命中，同时保留代理兜底。
+ */
+function intentDimension(
+  attrs: Record<string, unknown>,
+  triggerSignals: string[],
+  nowMs: number,
+): { intent: number; matchedSignals: string[]; intentSignals: string[]; note: string } {
+  // ① 真实 intent：attributes.intent.events 逐条 strength × 新近度衰减，取最强
+  const intentAttr = attrs.intent as IntentAttrLike | undefined;
+  let realIntent = 0;
+  const intentSignals: string[] = [];
+  if (intentAttr && typeof intentAttr === 'object') {
+    const events = Array.isArray(intentAttr.events) ? (intentAttr.events as IntentEventLike[]) : [];
+    for (const e of events) {
+      const strength = typeof e.strength === 'number' ? e.strength : 0;
+      const atMs = typeof e.at === 'string' ? Date.parse(e.at) : NaN;
+      const decayed = strength * recencyDecay(nowMs - atMs);
+      if (decayed > realIntent) realIntent = decayed;
+      if (typeof e.type === 'string' && !intentSignals.includes(e.type)) intentSignals.push(e.type);
+    }
+    // 事件缺失但有 intent_score 概要 → 用概要 × last_change_at 衰减兜底
+    if (!events.length && typeof intentAttr.intent_score === 'number') {
+      realIntent = intentAttr.intent_score * recencyDecay(nowMs - Date.parse(String(intentAttr.last_change_at)));
+    }
+  }
+  realIntent = clamp01(realIntent);
+
+  // ② 关键词代理：ICP triggerSignals ↔ 公司属性文本命中（弱先验兜底）。
+  //    **排除 intent 命名空间**——否则触发词会命中 intent 事件自身的元数据（type/page_kind 如 "sourcing"），
+  //    对同一信号在 realIntent(已衰减) 之外再计一次未衰减的分（双重计数，且陈旧信号无法真正衰减到底）。
+  const { intent: _omitIntent, ...attrsForKeyword } = attrs;
+  const attrText = JSON.stringify(attrsForKeyword).toLowerCase();
+  const matchedSignals = triggerSignals.filter((s) => {
+    const words = s.toLowerCase().split(/[\s，,、]+/).filter((w) => w.length > 1);
+    return words.some((w) => attrText.includes(w));
+  });
+  const keywordIntent = triggerSignals.length
+    ? Math.min(1, matchedSignals.length / Math.min(triggerSignals.length, 3))
+    : 0;
+
+  const intent = clamp01(Math.max(realIntent, keywordIntent));
+  // 注/信号来源以**实际决定最终分的项**为准（含仅有 intent_score 概要、无逐事件的兜底路径），
+  // 否则概要兜底会被误标成「关键词代理·无真实信号」，与 0.65 的真实分自相矛盾（可审计性）。
+  const usedReal = realIntent > 0 && realIntent >= keywordIntent;
+  const note = usedReal
+    ? `Intent 由真实网站变更信号驱动（${intentSignals.length ? intentSignals.join('/') : 'intent 概要'}；新近度加权 realIntent=${r4(realIntent)}）`
+    : 'Intent 基于关键词代理（无真实意向信号）';
+  return { intent, matchedSignals, intentSignals, note };
+}
+
+/** 指数衰减：半衰期 INTENT_HALFLIFE_DAYS。刚发生/未来(时钟偏移)→1；越旧越接近 0；
+ *  **无有效/不可解析时间戳→0（不给分）**——防无日期或畸形信号盖过真实的陈旧信号 / 半掉一个概要分。 */
+function recencyDecay(ageMs: number): number {
+  if (!Number.isFinite(ageMs)) return 0;
+  if (ageMs <= 0) return 1;
+  return Math.pow(0.5, ageMs / DAY_MS / INTENT_HALFLIFE_DAYS);
+}
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 
 const r4 = (n: number): number => Number(n.toFixed(4));
