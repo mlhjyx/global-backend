@@ -27,9 +27,12 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       return { status: 'INVALID', detail: 'dns_lookup_failed', costCents: 0 };
     }
     if (!mx.length) return { status: 'INVALID', detail: 'no_mx', costCents: 0 };
+    // Null MX（RFC 7505：单条 exchange="."）= 域明示不收邮件 → INVALID，不去探测 "."
+    const usable = mx.filter((m) => m.exchange && m.exchange !== '.');
+    if (!usable.length) return { status: 'INVALID', detail: 'null_mx_no_mail', costCents: 0 };
 
-    const { provider, enumResistant } = classifyEmailProvider(mx.map((m) => m.exchange));
-    const host = mx.sort((a, b) => a.priority - b.priority)[0].exchange;
+    const { provider, enumResistant } = classifyEmailProvider(usable.map((m) => m.exchange));
+    const host = usable.sort((a, b) => a.priority - b.priority)[0].exchange;
 
     // 反枚举 provider（Gmail/M365…）：SMTP 一律 250，探了也白探 → 直接 RISKY，省一次连接
     if (enumResistant) {
@@ -46,14 +49,17 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
     // SMTP RCPT 探测：真实地址 + 一个随机地址（catch-all 检测），同一连接
     const randomLocal = `x-verify-${Date.now().toString(36)}-zzq`;
     const probe = await smtpRcptProbe(guard.ip, `verify@${SENDER_DOMAIN}`, [email, `${randomLocal}@${domain}`]);
+    const randomCode = probe.codes[1] ?? null;
 
     return decideEmailVerdict({
       mxPresent: true,
       provider,
       enumResistant,
       smtpReachable: probe.reachable,
+      mailFromOk: isAccepted(probe.mailFromCode), // MAIL FROM 被拒 → RCPT 结果不可信
       rcptCode: probe.codes[0] ?? null,
-      catchAll: isAccepted(probe.codes[1] ?? null), // 随机地址被接受 = catch-all
+      // catch-all 三态：随机地址被接受=catch_all；被明确拒收=not_catch_all（证伪）；4xx/无=inconclusive
+      catchAllStatus: isAccepted(randomCode) ? 'catch_all' : isRejected(randomCode) ? 'not_catch_all' : 'inconclusive',
     });
   }
 }
@@ -84,23 +90,35 @@ export function isRejected(code: number | null): boolean {
   return code != null && code >= 500 && code < 600;
 }
 
+export type CatchAllStatus = 'catch_all' | 'not_catch_all' | 'inconclusive';
+
 export interface VerdictSignals {
   mxPresent: boolean;
   provider: string;
   enumResistant: boolean;
   smtpReachable: boolean;
+  mailFromOk: boolean; // MAIL FROM 是否被接受（被拒则 RCPT 结果不可信）
   rcptCode: number | null;
-  catchAll: boolean;
+  catchAllStatus: CatchAllStatus;
 }
 
-/** 核心裁决（诚实：反枚举/catch-all/不可达一律 RISKY，绝不谎报 VALID）。 */
+/**
+ * 核心裁决（诚实：反枚举/catch-all/不可达/MAIL FROM被拒/catch-all未证伪 一律 RISKY，绝不谎报 VALID）。
+ * VALID 唯一路径：可达 + MAIL FROM 通过 + RCPT 接受 + **catch-all 已证伪(not_catch_all)** + 非反枚举。
+ */
 export function decideEmailVerdict(s: VerdictSignals): EmailVerdict {
   if (!s.mxPresent) return { status: 'INVALID', detail: 'no_mx', costCents: 0 };
   if (s.enumResistant) return { status: 'RISKY', detail: `provider_anti_enumeration:${s.provider}`, costCents: 0 };
   if (!s.smtpReachable) return { status: 'RISKY', detail: 'smtp_unreachable(port25_blocked?)_mx_present', costCents: 0 };
+  // MAIL FROM 被拒（发件人策略/503/554…）→ RCPT 结果不代表 mailbox 存在性，不可判 INVALID
+  if (!s.mailFromOk) return { status: 'RISKY', detail: 'mail_from_rejected', costCents: 0 };
   if (isRejected(s.rcptCode)) return { status: 'INVALID', detail: `mailbox_rejected:${s.rcptCode}`, costCents: 0 };
-  if (s.catchAll) return { status: 'RISKY', detail: 'catch_all_domain', costCents: 0 };
-  if (isAccepted(s.rcptCode)) return { status: 'VALID', detail: `smtp_accepted:${s.rcptCode}`, costCents: 0 };
+  if (s.catchAllStatus === 'catch_all') return { status: 'RISKY', detail: 'catch_all_domain', costCents: 0 };
+  if (isAccepted(s.rcptCode) && s.catchAllStatus === 'not_catch_all') {
+    return { status: 'VALID', detail: `smtp_accepted:${s.rcptCode}`, costCents: 0 };
+  }
+  // 真实地址被接受、但 catch-all 未证伪(inconclusive) → 不能判 VALID（可能是 catch-all）
+  if (isAccepted(s.rcptCode)) return { status: 'RISKY', detail: 'catch_all_unproven', costCents: 0 };
   return { status: 'RISKY', detail: `inconclusive:${s.rcptCode ?? 'no_code'}`, costCents: 0 };
 }
 
@@ -115,9 +133,10 @@ export function smtpRcptProbe(
   mailFrom: string,
   rcptTo: string[],
   timeoutMs = 8000,
-): Promise<{ reachable: boolean; codes: (number | null)[] }> {
+): Promise<{ reachable: boolean; mailFromCode: number | null; codes: (number | null)[] }> {
   return new Promise((resolve) => {
     const codes: (number | null)[] = [];
+    let mailFromCode: number | null = null;
     let reachable = false;
     let resolved = false;
     // 命令序列：EHLO → MAIL FROM → RCPT×N → QUIT。第 1 个响应是 220 greeting（对应 cmds[-1]）。
@@ -138,7 +157,7 @@ export function smtpRcptProbe(
       } catch {
         /* ignore */
       }
-      resolve({ reachable, codes });
+      resolve({ reachable, mailFromCode, codes });
     };
 
     socket.on('connect', () => {
@@ -156,6 +175,7 @@ export function smtpRcptProbe(
       const code = finalLine ? parseInt(finalLine.slice(0, 3), 10) : NaN;
       buf = '';
       const respFor = sent - 1; // 本响应对应刚发出的 cmds[respFor]；-1 = greeting
+      if (respFor === 1) mailFromCode = Number.isFinite(code) ? code : null; // cmds[1] = MAIL FROM
       if (respFor >= rcptCmdLo && respFor < rcptCmdLo + rcptTo.length) {
         codes.push(Number.isFinite(code) ? code : null);
       }
@@ -169,7 +189,7 @@ export function smtpRcptProbe(
     socket.on('error', () => {
       if (resolved) return;
       resolved = true;
-      resolve({ reachable: false, codes });
+      resolve({ reachable: false, mailFromCode, codes });
     });
     socket.on('close', done);
   });

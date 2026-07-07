@@ -20,35 +20,47 @@ describe('自建邮箱验证 · 纯逻辑（诚实上限）', () => {
     expect(isRejected(250)).toBe(false);
   });
 
+  const base = { mxPresent: true, provider: 'other_or_self_hosted', enumResistant: false, smtpReachable: true, mailFromOk: true } as const;
+
   it('裁决：反枚举 provider 永不 VALID（即便 RCPT 250）', () => {
-    const v = decideEmailVerdict({ mxPresent: true, provider: 'google_workspace', enumResistant: true, smtpReachable: true, rcptCode: 250, catchAll: false });
+    const v = decideEmailVerdict({ ...base, provider: 'google_workspace', enumResistant: true, rcptCode: 250, catchAllStatus: 'not_catch_all' });
     expect(v.status).toBe('RISKY');
     expect(v.detail).toContain('anti_enumeration');
   });
 
   it('裁决：catch-all 域永不 VALID', () => {
-    const v = decideEmailVerdict({ mxPresent: true, provider: 'other_or_self_hosted', enumResistant: false, smtpReachable: true, rcptCode: 250, catchAll: true });
+    const v = decideEmailVerdict({ ...base, rcptCode: 250, catchAllStatus: 'catch_all' });
     expect(v.status).toBe('RISKY');
     expect(v.detail).toBe('catch_all_domain');
   });
 
   it('裁决：SMTP 不可达(端口25封) → RISKY 不谎报 INVALID', () => {
-    const v = decideEmailVerdict({ mxPresent: true, provider: 'other_or_self_hosted', enumResistant: false, smtpReachable: false, rcptCode: null, catchAll: false });
+    const v = decideEmailVerdict({ ...base, smtpReachable: false, mailFromOk: false, rcptCode: null, catchAllStatus: 'inconclusive' });
     expect(v.status).toBe('RISKY');
     expect(v.detail).toContain('smtp_unreachable');
   });
 
-  it('裁决：唯一 VALID 路径 = 可达+接受+非catch-all+非反枚举', () => {
-    const v = decideEmailVerdict({ mxPresent: true, provider: 'other_or_self_hosted', enumResistant: false, smtpReachable: true, rcptCode: 250, catchAll: false });
-    expect(v.status).toBe('VALID');
+  it('裁决：MAIL FROM 被拒 → RISKY 不判 mailbox INVALID', () => {
+    const v = decideEmailVerdict({ ...base, mailFromOk: false, rcptCode: 550, catchAllStatus: 'not_catch_all' });
+    expect(v.status).toBe('RISKY');
+    expect(v.detail).toBe('mail_from_rejected');
   });
 
-  it('裁决：RCPT 550 明确拒收 = INVALID', () => {
-    const v = decideEmailVerdict({ mxPresent: true, provider: 'other_or_self_hosted', enumResistant: false, smtpReachable: true, rcptCode: 550, catchAll: false });
-    expect(v.status).toBe('INVALID');
+  it('裁决：唯一 VALID = 可达+MAIL FROM过+接受+catch-all已证伪+非反枚举', () => {
+    expect(decideEmailVerdict({ ...base, rcptCode: 250, catchAllStatus: 'not_catch_all' }).status).toBe('VALID');
+  });
+
+  it('裁决：真实地址接受但 catch-all 未证伪(inconclusive) → RISKY（不谎报 VALID）', () => {
+    const v = decideEmailVerdict({ ...base, rcptCode: 250, catchAllStatus: 'inconclusive' });
+    expect(v.status).toBe('RISKY');
+    expect(v.detail).toBe('catch_all_unproven');
+  });
+
+  it('裁决：RCPT 550 明确拒收(MAIL FROM 过) = INVALID', () => {
+    expect(decideEmailVerdict({ ...base, rcptCode: 550, catchAllStatus: 'not_catch_all' }).status).toBe('INVALID');
   });
 
   it('裁决：无 MX = INVALID', () => {
-    expect(decideEmailVerdict({ mxPresent: false, provider: 'x', enumResistant: false, smtpReachable: false, rcptCode: null, catchAll: false }).status).toBe('INVALID');
+    expect(decideEmailVerdict({ ...base, mxPresent: false, rcptCode: null, catchAllStatus: 'inconclusive' }).status).toBe('INVALID');
   });
 });

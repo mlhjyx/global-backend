@@ -40,6 +40,10 @@ export class DiscoveryProviderRegistry {
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
   constructor(deps?: { gateway?: ModelGateway }) {
+    // 自建邮箱验证**排 emailVerifiers 首位**：verifyContactPoint 只用 adapters[0]，必须在
+    // public_web(仅 MX→RISKY) 之前，否则新 SMTP RCPT/catch-all 逻辑永不执行。不依赖 gateway。
+    // 诚实上限：Gmail/M365/catch-all/端口25不可达/catch-all未证伪 一律 RISKY，绝不谎报 VALID。
+    this.emailVerifiers.push(new SelfHostedEmailVerifier());
     if (deps?.gateway) {
       const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway });
       this.discovery.push(web);
@@ -62,9 +66,6 @@ export class DiscoveryProviderRegistry {
     //  → attributes.digital_footprint.* / .structured_harvest.*，喂 Intent/Reachability 打分。零付费。
     this.signalEnrichers.push(new DigitalFootprintProvider());
     this.signalEnrichers.push(new StructuredHarvestProvider());
-    // 自建邮箱验证（v3.0，零付费）：语法+MX+SMTP RCPT+catch-all+provider 分级；不依赖 gateway，始终可用。
-    // 诚实上限：Gmail/M365/catch-all/端口25不可达 一律 RISKY，绝不谎报 VALID。
-    this.emailVerifiers.push(new SelfHostedEmailVerifier());
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
       const sandbox = new SandboxDiscoveryProvider();
