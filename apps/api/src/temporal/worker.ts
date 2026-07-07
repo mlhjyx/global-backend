@@ -13,6 +13,8 @@ import { createDiscoveryActivities } from './discovery.activities';
 import { createQualifyActivities } from './qualify.activities';
 import { createAcquisitionActivities } from './acquisition.activities';
 import { buildSourceAdapterRegistry } from '../acquisition/registry';
+import { createIntentActivities } from './intent.activities';
+import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
@@ -50,6 +52,7 @@ async function main(): Promise<void> {
       }),
       ...createQualifyActivities({ prisma }),
       ...createAcquisitionActivities({ prisma, registry: buildSourceAdapterRegistry() }),
+      ...createIntentActivities({ prisma, fetcher: new Crawl4aiPageFetcher() }),
     },
   });
 

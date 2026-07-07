@@ -7,3 +7,5 @@ export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';
 export const QUALIFY_WORKFLOW = 'qualifyWorkflow';
 export const ACQUISITION_SWEEP_WORKFLOW = 'acquisitionSweepWorkflow';
 export const ACQ_SWEEP_SCHEDULE_ID = 'acq-sweep';
+export const INTENT_SWEEP_WORKFLOW = 'intentSweepWorkflow';
+export const INTENT_SWEEP_SCHEDULE_ID = 'intent-sweep';

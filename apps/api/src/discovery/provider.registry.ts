@@ -122,6 +122,13 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'smtp_self', class: 'email_verification', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // 网站变更 intent 引擎（v3.0 #4，signal 源）——平台级 kill-switch/可观测（DISABLED = intentSweep 全局停抓）。
+    // 注：具体监控源的常规开关是 monitored_source.status；此行是引擎级总闸 + 与其它 signal 源登记一致。
+    await db.dataProvider.upsert({
+      where: { key: 'web_watch' },
+      update: {},
+      create: { key: 'web_watch', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
         where: { key: 'sandbox' },
