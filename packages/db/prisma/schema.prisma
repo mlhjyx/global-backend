@@ -508,10 +508,23 @@ model CanonicalCompany {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
+  // 存量对账下游阶段的「处理水位」（null=从未处理）。各阶段处理后**无论命中与否**写时间戳，
+  // 让「已处理且未过冷却期」的行离开当批过滤集 → id 游标真正吞噬存量，预算位次后的公司不再被永久饿死。
+  // 详见 backlog.eligibility.ts / backlog.activities.ts。冷却期到后自然重新入选（信号刷新/富集复核）。
+  lastEnrichedAt              DateTime? @map("last_enriched_at")               // 快事实富集（GLEIF/Wikidata）
+  lastSignalAt                DateTime? @map("last_signal_at")                 // 信号富集（digital_footprint/structured_harvest）
+  lastWatchAt                 DateTime? @map("last_watch_at")                  // web_watch 监控注册
+  contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
+
   contacts CanonicalContact[]
 
   @@unique([workspaceId, dedupeKey])
   @@index([workspaceId])
+  // 下游阶段收缩集扫描：workspace + fit=match 等值 + 水位列 null/过期范围（防 900+ 行 seq-scan）。
+  @@index([workspaceId, fitVerdict, lastEnrichedAt])
+  @@index([workspaceId, fitVerdict, lastSignalAt])
+  @@index([workspaceId, fitVerdict, lastWatchAt])
+  @@index([workspaceId, fitVerdict, contactDiscoveryAttemptedAt])
   @@map("canonical_company")
 }
 
