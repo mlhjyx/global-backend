@@ -2,9 +2,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SourceAdapterRegistry } from './source-adapter';
 import { cleanEntity, CleanedEntity } from './clean';
+import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
 
 const PARSER_VERSION = 'acquisition/v1';
-const MISS_THRESHOLD = 2; // 连续缺席 N 次才判退出（防单次抓取失败误杀，研究建议）
 const CHUNK = 50;
 const DEFAULT_FETCH_LIMIT = 10000; // 显式抓取上限；raw 达此值视为「疑似截断」→ 本次不判 REMOVED（防误杀）。源可用 config.fetchLimit 覆盖
 
@@ -141,10 +141,9 @@ export class AcquisitionService {
       where: { id: fetch.id },
       data: { status: 'DONE', total: result.total, added: result.added, updated: result.updated, removed: result.removed, unchanged: result.unchanged, finishedAt: now },
     });
-    const cadence = source.cadence as { everyMs?: number } | null;
     await prisma.monitoredSource.update({
       where: { id: sourceId },
-      data: { lastFetchAt: now, nextFetchAt: cadence?.everyMs ? new Date(now.getTime() + cadence.everyMs) : null },
+      data: { lastFetchAt: now, nextFetchAt: computeNextFetchAt(source.cadence, now) },
     });
     return result;
   }

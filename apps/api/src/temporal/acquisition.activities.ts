@@ -19,6 +19,10 @@ export function createAcquisitionActivities(deps: { prisma: PrismaService; regis
       const rows = await deps.prisma.monitoredSource.findMany({
         where: {
           status: 'ACTIVE',
+          // **正向**过滤：只扫本注册表有适配器的源。无适配器的源（如 web_watch，走独立 intentSweep）
+          // 天然被排除——AcquisitionService.acquire 无 web_watch 适配器会抛错，且通用层不该按名字认识
+          // 每个下游管线（黑名单式耦合脆弱）。新增非适配器管线无需再改这里。
+          providerKey: { in: deps.registry.keys() },
           cadence: { path: ['everyMs'], gt: 0 },
           OR: [{ nextFetchAt: null }, { nextFetchAt: { lte: now } }],
         },

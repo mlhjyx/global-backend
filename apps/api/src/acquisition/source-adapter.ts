@@ -24,4 +24,11 @@ export class SourceAdapterRegistry {
   get(providerKey: string): MonitoredSourceAdapter | undefined {
     return this.byKey.get(providerKey);
   }
+
+  /** 本注册表拥有适配器的 providerKey 集合。通用 sweep 用它做**正向**过滤——
+   *  只扫自己能处理的源，天然排除无适配器的源（如 web_watch 走独立 intentSweep），
+   *  无需在通用层按名字黑名单每个下游管线（避免脆弱耦合）。 */
+  keys(): string[] {
+    return [...this.byKey.keys()];
+  }
 }
