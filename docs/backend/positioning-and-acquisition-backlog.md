@@ -30,13 +30,20 @@
 - SAM.gov / 海关 HS / 认证库：需「ICP 行业 → NAICS / HS / 品类」映射
 - SearXNG / 发现查询：按 ICP 国家+行业+关键词生成
 
-## 4. 角色分工
+## 4. 团队分工（3 人 + 我们）
+
+数据流：**我们（C + Claude 后端）──OpenAPI 契约 + 事件──▶ B（对接人）──API 集成──▶ A（前端整个 SaaS 平台）**
 
 | 角色 | 做什么 |
 |---|---|
-| **用户（产品负责人，非技术）** | 给业务方向框架、拍板开放决策（§6）、当「后端↔做 API 的人」的桥（把 `/api/portal` 给对方+转达问题）、审中文产出。**不碰** 代码/git/联调/团队流程。 |
-| **本后端（Claude）** | 规划+写代码+真实测试+自审+自合+管 CI/git（自主，见 CONTRIBUTING.md + 记忆 autonomous-pr-merge）。 |
-| **做 API 的人（另一人）** | 拿我们的 OpenAPI 契约 → 做前端集成。我们只保证契约稳定+有文档。 |
+| **A** | 前端**整个 SaaS 平台**（含身份/登录/鉴权系统）。**B↔A 怎么对接是他俩的事，我们不介入、也不需要懂。** |
+| **B（对接人）** | 拿我们的 OpenAPI 契约 → 用 API 接进 A 的平台。**是我们真正的「客户」**——契约越干净稳定有文档，B 越省事、C 被问得越少。 |
+| **C（用户，产品负责人，非技术）** | 对外**只跟 B** 打交道（给契约门户、答「怎么调用」）；对内给业务方向、拍板开放决策（§6）、审中文产出。**不碰** 代码/git/联调/B↔A。 |
+| **本后端（Claude）** | 规划+写码+真测+自审+自合+管 CI/git（自主，见 CONTRIBUTING.md + 记忆 autonomous-pr-merge）；产出 OpenAPI 契约 + 领域事件 + `packages/contracts/INTEGRATION.md`。 |
+
+**给 B 的交付物已存在**：`packages/contracts/`（`openapi/openapi.json` + 事件 schema + `INTEGRATION.md` 对接指南：base URL / 鉴权 / 错误 / 分页 / 获客主线端到端调用顺序 / 事件清单）。随获客新接口**保持最新**即可，不必从零写。**不要删** controller/contracts——那是我们该交给 B 的东西（我们「建」API，B「调/接」API，同词不同边）。
+
+**🔴 需早敲定的跨团队握手 —— 鉴权**：我们不做登录，靠 **A 平台签发 token + 我们 JWKS 验签**解出 workspace。要真跑通需 A 给两样：① JWKS 端点（公钥），② token claim 约定（`workspace_id` / `roles`）。**B 应早跟 A 敲定**，否则接口对接时鉴权通不了。
 
 ## 5. 获客 Backlog（未做项 + 排序）
 
