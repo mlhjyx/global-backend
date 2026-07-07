@@ -1,22 +1,22 @@
-# gitleaks 配置：默认规则集 + 针对性 allowlist。
-# 只放行**已知公开**的凭据（RX/Algolia client-side search-only key）；其余一律照默认规则扫。
+# gitleaks 配置：默认规则集 + 针对性 allowlist。只放行**已知公开**的 RX/Algolia 前端配置，
+# 其余一律照默认规则扫。用 [[allowlists]]（各条独立 OR），避免单块内 paths+regexes 的 AND 语义。
 title = "Global backend gitleaks"
 
 [extend]
 useDefault = true
 
-[allowlist]
-description = """
-RX/Algolia public search-only keys：展会官网前端公开暴露的 client-side 只读搜索 key，
-仅能读该展会公开参展商目录（无写权限、无付费额度），设计上就是公开的，非密钥。
-EuroBLECH/INTERPHEX 等 RX 系展会共用同一 appId+apiKey。见 adapters/trade-fair-algolia.ts 顶注。
-"""
-# 该 public key 出现在任何文件都放行（发现/适配器/dev 脚本）
-regexes = [
-  '''d5cd7d4ec26134ff4a34d736a7f9ad47''',
-]
-# 展会模板/适配器文件只承载公开 fair 配置，路径级放行（未来新增 RX 展会的 public key 免逐个登记）
+# 展会模板/适配器/发现脚本：只承载 RX/Algolia **public search-only** 配置——前端公开暴露的
+# client-side 只读搜索 key + 公开的 index/eventEdition id，设计上就是公开、非密钥。路径级放行。
+[[allowlists]]
+description = "RX/Algolia public fair configs (client-side search-only key + public index/edition ids)"
 paths = [
   '''apps/api/src/discovery/trade-fairs\.ts''',
   '''apps/api/src/adapters/trade-fair-algolia\.ts''',
+  '''apps/api/scripts/acq-multi-country\.mts''',
+  '''apps/api/scripts/discover-fair-algolia\.mjs''',
 ]
+
+# 该 public search-only key（EuroBLECH/INTERPHEX 等 RX 系共用）出现在任何文件都放行。
+[[allowlists]]
+description = "RX/Algolia public search-only apiKey (non-secret, exposed in fair website frontend)"
+regexes = ['''d5cd7d4ec26134ff4a34d736a7f9ad47''']
