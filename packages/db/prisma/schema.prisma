@@ -346,6 +346,103 @@ model SourcePolicy {
   @@map("source_policy")
 }
 
+/// 采集与监控层（Acquisition & Monitoring，源无关）。展会/名录/官网/注册处等**任一数据源**
+/// 都注册为一个 monitored_source，统一走「抓取 → 清洗 → 快照落库 → diff 增量更新」。
+/// 平台级共享参考数据（无 RLS，像 data_provider/canonical_taxonomy）：一个源抓一次服务所有租户。
+/// 行业不写死——靠 sectorTags 打标，按 ICP 行业选源。
+model MonitoredSource {
+  id          String    @id @default(uuid()) @db.Uuid
+  providerKey String    @map("provider_key") // 用哪个采集适配器：trade_fair | directory | public_web | ...
+  sourceKey   String    @unique @map("source_key") // 人类可读唯一键，如 'trade_fair:euroblech-2026'
+  label       String
+  config      Json // 源特定配置（展会 Algolia cfg / 名录 URL / 查询参数…）
+  sectorTags  Json?     @map("sector_tags") // string[] 行业标签（归一到 ISIC 词表），按 ICP 选源；不硬编码行业
+  region      String?
+  seriesKey   String?   @map("series_key") // 跨届/跨次分组（如展会系列 'euroblech'），做纵向关联
+  status      String    @default("ACTIVE") // ACTIVE | PAUSED | ARCHIVED（Kill-Switch）
+  cadence     Json?     // 抓取节奏 { kind:'fixed'|'adaptive', everyMs?, state? }
+  lastFetchAt DateTime? @map("last_fetch_at")
+  nextFetchAt DateTime? @map("next_fetch_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  fetches  SourceFetch[]
+  entities SourceEntity[]
+  changes  SourceEntityChange[]
+
+  @@index([providerKey, status])
+  @@index([nextFetchAt])
+  @@map("monitored_source")
+}
+
+/// 一次采集（一个 monitored_source 的一次抓取），带增量统计审计。
+model SourceFetch {
+  id            String    @id @default(uuid()) @db.Uuid
+  sourceId      String    @map("source_id") @db.Uuid
+  status        String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
+  total         Int       @default(0) // 本次抓到的记录数
+  added         Int       @default(0)
+  updated       Int       @default(0)
+  removed       Int       @default(0)
+  unchanged     Int       @default(0)
+  costCents     Int       @default(0) @map("cost_cents")
+  parserVersion String?   @map("parser_version")
+  error         String?
+  startedAt     DateTime  @default(now()) @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+
+  source  MonitoredSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  changes SourceEntityChange[]
+
+  @@index([sourceId])
+  @@map("source_fetch")
+}
+
+/// 一个源里的一条已清洗、去重、持久化的实体（公司/联系人）+ 快照指纹 + 生命周期。
+/// 增量更新的锚：按 (source, externalId) upsert，contentHash 判是否变化，缺席判退出。
+model SourceEntity {
+  id          String    @id @default(uuid()) @db.Uuid
+  sourceId    String    @map("source_id") @db.Uuid
+  externalId  String    @map("external_id") // 源侧稳定 id（如 organisationGuid / 域名）
+  entityKind  String    @default("company") @map("entity_kind") // company | contact
+  name        String
+  domain      String?
+  country     String?
+  cleaned     Json // 清洗后的结构化字段（email/phone/products/stand/hiring…，命名空间化）
+  contentHash String    @map("content_hash") // 清洗后内容指纹，diff 用
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  withdrawnAt DateTime? @map("withdrawn_at") // 非空=已从源退出（连续缺席判定）
+  missCount   Int       @default(0) @map("miss_count") // 连续缺席次数（防单次抓取失败误杀）
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  source MonitoredSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, externalId])
+  @@index([domain])
+  @@index([sourceId, withdrawnAt])
+  @@map("source_entity")
+}
+
+/// 增量变更事件（=获客时机信号）：新增/退出/字段变化，供下游触达编排消费。
+model SourceEntityChange {
+  id         String   @id @default(uuid()) @db.Uuid
+  sourceId   String   @map("source_id") @db.Uuid
+  fetchId    String?  @map("fetch_id") @db.Uuid
+  externalId String   @map("external_id")
+  changeType String   @map("change_type") // ADDED | REMOVED | UPDATED | PRODUCTS_CHANGED | CONTACT_CHANGED
+  detail     Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  source MonitoredSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  fetch  SourceFetch?    @relation(fields: [fetchId], references: [id], onDelete: SetNull)
+
+  @@index([sourceId, changeType])
+  @@index([createdAt])
+  @@map("source_entity_change")
+}
+
 /// 一次发现执行（对应一个 READY 的查询计划）。
 model DiscoveryRun {
   id          String    @id @default(uuid()) @db.Uuid

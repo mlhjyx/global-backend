@@ -23,6 +23,8 @@ export interface PlanQuery {
 
 const PER_SOURCE_LIMIT = 25; // sandbox 阶段每源上限；真源接入后由预算/配额驱动（PRD 7.4.8）
 const ENRICH_LIMIT = 50; // 单 run 富集上限（护栏；GLEIF 限流）
+const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
+const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
@@ -456,6 +458,103 @@ export function createDiscoveryActivities(deps: {
                   providerKey: h.key,
                   confidence: h.result.confidence,
                   license: 'public', // GLEIF / Wikidata 均为 CC0 公共领域
+                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
+                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
+                },
+              });
+            }
+          }
+        });
+      }
+      return { enriched, matched, provider: providersHit.size ? [...providersHit].join('+') : null };
+    },
+
+    /**
+     * 信号富集（v3.0）——与 enrichRun **分开的独立活动**（抓官网/sitemap 慢且时变，绝不塞进
+     * enrichRun 的 2 分钟活动）。由 discoveryWorkflow 用**长 startToCloseTimeout + heartbeat** 代理。
+     *  - DAT-011：SUSPENDED 域名跳过（富集侧同样遵守 source_policy）。
+     *  - TTL 刷新：命名空间 `_ts` 在 SIGNAL_TTL_MS 内则跳过（信号时变，不能像 GLEIF 静态事实那样一次写死）。
+     *  - 每家 heartbeat + 上限 SIGNAL_ENRICH_LIMIT，防长活动被判卡死。
+     */
+    async enrichSignalsRun(args: {
+      workspaceId: string;
+      runId: string;
+    }): Promise<{ enriched: number; matched: number; provider: string | null }> {
+      const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        deps.providers.routeSignalEnrichment(tx as never),
+      );
+      if (!enrichers.length) return { enriched: 0, matched: 0, provider: null };
+
+      // DAT-011：SUSPENDED 域名黑名单（平台级 source_policy，富集侧同样遵守 —— 富集也会抓这些域名）
+      const suspended = new Set(
+        (await deps.prisma.sourcePolicy.findMany({ where: { reviewStatus: 'SUSPENDED' }, select: { domain: true } })).map(
+          (s) => s.domain.toLowerCase(),
+        ),
+      );
+
+      const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const rawIds = await tx.rawSourceRecord.findMany({ where: { runId: args.runId }, select: { id: true } });
+        const links = await tx.identityLink.findMany({
+          where: { canonicalType: 'company', rawRecordId: { in: rawIds.map((r) => r.id) } },
+          select: { canonicalId: true },
+        });
+        const ids = [...new Set(links.map((l) => l.canonicalId))];
+        return tx.canonicalCompany.findMany({
+          where: { id: { in: ids }, fitVerdict: 'match', status: { not: 'SUPPRESSED' }, domain: { not: null } },
+          select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
+        });
+      });
+
+      const providersHit = new Set<string>();
+      let enriched = 0;
+      let matched = 0;
+      const nowMs = Date.now();
+      for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
+        if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
+
+        const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+        const hits: { key: string; result: EnrichmentResult }[] = [];
+        for (const e of enrichers) {
+          const prev = existing[e.key] as { _ts?: string } | undefined;
+          if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
+          try {
+            const r = await e.enrichCompany({
+              name: c.name,
+              domain: c.domain ?? undefined,
+              country: c.country ?? undefined,
+              region: c.region ?? undefined,
+            });
+            if (r.matched) hits.push({ key: e.key, result: r });
+          } catch {
+            /* 单信号源失败不影响其余 */
+          }
+        }
+        enriched += 1;
+        if (!hits.length) continue;
+        matched += 1;
+        hits.forEach((h) => providersHit.add(h.key));
+
+        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const merged: Record<string, unknown> = { ...existing };
+          // 命名空间存入并盖 _ts（供下次 TTL 判新鲜）
+          for (const h of hits) merged[h.key] = { ...h.result.attributes, _ts: new Date(nowMs).toISOString() };
+          await tx.canonicalCompany.update({
+            where: { id: c.id },
+            data: { attributes: merged as never, version: { increment: 1 } },
+          });
+          for (const h of hits) {
+            for (const [field, value] of Object.entries(h.result.attributes)) {
+              if (value == null) continue;
+              await tx.fieldEvidence.create({
+                data: {
+                  workspaceId: args.workspaceId,
+                  entityType: 'company',
+                  entityId: c.id,
+                  field: `${h.key}.${field}`,
+                  value: value as Prisma.InputJsonValue,
+                  providerKey: h.key,
+                  confidence: h.result.confidence,
+                  license: 'public',
                   allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
                   ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
                 },

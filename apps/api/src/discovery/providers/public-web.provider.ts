@@ -75,7 +75,7 @@ export class PublicWebDiscoveryProvider
   }
 
   private log(msg: string): void {
-    // eslint-disable-next-line no-console
+     
     console.log(`[public_web] ${msg}`);
   }
 

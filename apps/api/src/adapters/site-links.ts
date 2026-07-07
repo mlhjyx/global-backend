@@ -27,7 +27,7 @@ export function extractSameSiteLinks(markdown: string, baseUrl: string): string[
   const re = /\]\(\s*(<[^>]+>|[^)\s]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(markdown)) !== null) {
-    let raw = m[1].replace(/^<|>$/g, '');
+    const raw = m[1].replace(/^<|>$/g, '');
     if (raw.startsWith('mailto:') || raw.startsWith('tel:') || raw.startsWith('javascript:')) continue;
     try {
       const url = new URL(raw, base);

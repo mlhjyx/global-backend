@@ -70,7 +70,7 @@ export class DecisionMakerProvider {
   constructor(private readonly deps: { gateway: ModelGateway }) {}
 
   private log(msg: string): void {
-    // eslint-disable-next-line no-console
+     
     console.log(`[decision_maker] ${msg}`);
   }
 

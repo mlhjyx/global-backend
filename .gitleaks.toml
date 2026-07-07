@@ -1,0 +1,23 @@
+# gitleaks 配置：默认规则集 + 针对性 allowlist。只放行**已知公开**的 RX/Algolia 前端配置。
+title = "Global backend gitleaks"
+
+[extend]
+useDefault = true
+
+# 全局 allowlist（singular，条件 OR）：命中任一即放行。
+[allowlist]
+description = """
+RX/Algolia public fair configs：展会模板/适配器/dev 脚本只承载前端公开暴露的
+public search-only key + 公开 index/eventEdition id + 展会 slug，设计上就是公开、非密钥。
+"""
+paths = [
+  '''apps/api/src/discovery/trade-fairs\.ts''',
+  '''apps/api/src/adapters/trade-fair-algolia\.ts''',
+  '''apps/api/scripts/acq-multi-country\.mts''',
+  '''apps/api/scripts/discover-fair-algolia\.mjs''',
+]
+# 兜底：这些公开串出现在任何文件都放行（RX 共用 public key + 展会 slug）
+regexes = [
+  '''d5cd7d4ec26134ff4a34d736a7f9ad47''',
+  '''interphex-2026''',
+]

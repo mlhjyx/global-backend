@@ -11,6 +11,8 @@ import { AiTraceSink } from '../model-gateway/ai-trace.sink';
 import { createUnderstandingActivities } from './understanding.activities';
 import { createDiscoveryActivities } from './discovery.activities';
 import { createQualifyActivities } from './qualify.activities';
+import { createAcquisitionActivities } from './acquisition.activities';
+import { buildSourceAdapterRegistry } from '../acquisition/registry';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
@@ -47,16 +49,17 @@ async function main(): Promise<void> {
         taxonomy: new TaxonomyResolver(prisma, gateway),
       }),
       ...createQualifyActivities({ prisma }),
+      ...createAcquisitionActivities({ prisma, registry: buildSourceAdapterRegistry() }),
     },
   });
 
-  // eslint-disable-next-line no-console
+   
   console.log(`[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`);
   await worker.run();
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
+   
   console.error(err);
   process.exit(1);
 });

@@ -5,3 +5,4 @@
 export { understandingWorkflow } from './understanding.workflow';
 export { discoveryWorkflow } from './discovery.workflow';
 export { qualifyWorkflow } from './qualify.workflow';
+export { acquisitionSweepWorkflow } from './acquisition.workflow';

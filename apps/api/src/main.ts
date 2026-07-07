@@ -59,7 +59,7 @@ async function bootstrap(): Promise<void> {
     const out = resolve(__dirname, '../../../packages/contracts/openapi/openapi.json');
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify(document, null, 2));
-    // eslint-disable-next-line no-console
+     
     console.log(`[openapi] exported ${Object.keys(document.paths ?? {}).length} paths → ${out}`);
     await app.close();
     return;
@@ -67,7 +67,7 @@ async function bootstrap(): Promise<void> {
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await app.listen(port);
-  // eslint-disable-next-line no-console
+   
   console.log(`[api] listening on http://localhost:${port}/api  (docs: /api/docs)`);
 }
 

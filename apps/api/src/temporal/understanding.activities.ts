@@ -80,7 +80,7 @@ export function createUnderstandingActivities(deps: {
         if (s.status === 'fulfilled' && s.value.text.trim()) {
           pages.push({ url: urls[i], text: s.value.text.slice(0, MAX_PAGE_CHARS) });
         } else if (s.status === 'rejected') {
-          // eslint-disable-next-line no-console
+           
           console.warn(`[understanding] subpage crawl failed ${urls[i]}: ${String(s.reason).slice(0, 200)}`);
         }
       });

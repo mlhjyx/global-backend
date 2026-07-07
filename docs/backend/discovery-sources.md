@@ -34,6 +34,8 @@
 
 **第一版做法**：`trade_data` 类只落**国家级上下文**（Comtrade/Eurostat），明确标注无公司名、不进公司发现主流程；**公司级不接付费 reseller、不自建 manifest 抓取**，但保留 `data_provider` 表 `class='trade_data'` 契约插槽，待商业授权决策后接 reseller API。对 TRUMPF（卖设备给私营金属加工厂）场景，贸易数据本就匹配偏弱（提单多是成品/零件流而非设备采购），故整体列为**上下文/信号层**而非主发现源。
 
+> **⚠️ 更新（2026-07-07，见 [buyer-intelligence-v3.md §A1/§10.1](buyer-intelligence-v3.md)）**：上面「公司级只能付费」的结论**部分放宽**——对**中国工厂找海外买家**的主用户场景，美国海运提单**法定公开**（19 USC §1431），存在免费公司级通道：**ImportYeti 免费按公司名搜**（~50 票/公司顶，无 HS 反查/无 CSV/无免费 API）+ **Data Liberation Project 的 FOIA 提单开放数据集**（真免费可再分发，做离线基线）+ 逆向 ImportYeti 内部 JSON API 做 HS 反查（crawl4ai capture）。付费商卖的是「检索+聚合」不是数据授权。美国以外交易级仍基本付费。consignee 含自然人时 🔴 隔离。
+
 ## 与现有管线的集成点
 
 1. **路由 fan-out**（`discovery.activities.ts executeQuery`）：现在 `routeCompanyDiscovery` 只取 `adapters[0]`（最低成本单源）。改为按 source_class **fan-out 到该类下全部 ENABLED 适配器**并行召回；或用 `filters.source_hint` 二级路由键选具体子源。所有源产出统一进 `raw_source_record` → `canonicalizeRun` 去重归并（已支持后到源只补缺）——天然完成跨源合并。
@@ -44,7 +46,7 @@
 
 ## 第一波落地（P0）
 
-已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif` + `wikidata`（**富集**）、`directory`（名录列表抽取）、`trade_fair`（展会参展商 API 模板）。
+已就绪（已建适配器 + 实测）：`wikidata.sparql`、`osm.overpass`（发现，fan-out 路由）、`gleif` + `wikidata` + **`digital_footprint`（技术栈/在投广告/服务市场/邮件商/JSON-LD）+ `structured_harvest`（sitemap→招聘信号）**（**富集/信号**）、`directory`（名录列表抽取）、`trade_fair`（展会参展商 API 模板）。采集监控层另有 `mapyourshow` 源适配器 + Temporal 定时增量。
 待优化：`directory` 的地域精度收敛；`trade_fair` 扩更多展会/平台。
 
 ### 展会参展商 API 模板落地要点（本轮，已端到端实测）

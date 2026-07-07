@@ -5,3 +5,5 @@ export const UNDERSTANDING_TASK_QUEUE = 'understanding';
 export const UNDERSTANDING_WORKFLOW = 'understandingWorkflow';
 export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';
 export const QUALIFY_WORKFLOW = 'qualifyWorkflow';
+export const ACQUISITION_SWEEP_WORKFLOW = 'acquisitionSweepWorkflow';
+export const ACQ_SWEEP_SCHEDULE_ID = 'acq-sweep';
