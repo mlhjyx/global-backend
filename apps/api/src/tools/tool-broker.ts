@@ -76,6 +76,15 @@ export class ToolBroker {
     for (const t of this.registry.all()) this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
   }
 
+  /**
+   * 查某域名的 source_policy（无 reader 或未登记 → null）。invoke 内部合规门用之；
+   * 亦供调用方在**昂贵前置步骤前**（如邮箱验证的 MX 解析/SMTP 出网）主动跳过 SUSPENDED 域名。
+   */
+  async sourcePolicy(domain: string): Promise<{ suspended: boolean; allowedPurpose?: string[] } | null> {
+    if (!this.deps.sourcePolicyReader) return null;
+    return this.deps.sourcePolicyReader(domain);
+  }
+
   /** 唯一执行入口。所有闸门在此强制。 */
   async invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>> {
     const now = this.deps.now ?? Date.now;
@@ -97,7 +106,7 @@ export class ToolBroker {
     if (tool.compliance.requiresSourcePolicy && this.deps.sourcePolicyReader) {
       const domain = extractDomain(input);
       if (domain) {
-        const policy = await this.deps.sourcePolicyReader(domain);
+        const policy = await this.sourcePolicy(domain);
         if (policy?.suspended) {
           this.trace(ctx, tool, 'DENIED', `source_policy SUSPENDED: ${domain}`, 0, now() - started);
           throw new ToolPolicyDenied(toolId, `domain ${domain} is SUSPENDED`);

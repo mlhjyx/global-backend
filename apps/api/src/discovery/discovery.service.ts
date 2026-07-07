@@ -192,7 +192,7 @@ export class DiscoveryService {
       if (!adapters.length) {
         throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
       }
-      const verdict = await adapters[0].verifyEmail(point.value);
+      const verdict = await adapters[0].verifyEmail(point.value, { workspaceId: ctx.workspaceId });
       return tx.contactPoint.update({
         where: { id: pointId },
         data: { status: verdict.status, verifiedAt: new Date() },

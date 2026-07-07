@@ -1,11 +1,26 @@
-import net from 'node:net';
 import { resolveMx } from 'node:dns/promises';
-import { EmailVerdict, EmailVerificationAdapter } from '../provider-contract';
-import { resolvePublicIp } from '../../adapters/net-guard';
+import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext } from '../provider-contract';
+import type { ToolContext, ToolResult } from '../../tools/tool-contract';
+import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
+
+/**
+ * ToolBroker 的最小面（供本 verifier 依赖 + 测试注入假实现）。SMTP 原始出网**只能**经此闸门：
+ * `invoke('smtp.rcpt_probe', …)` 会强制 source_policy(SUSPENDED/用途) + 预算 + 限流 + 幂等 + Trace。
+ */
+export interface EmailVerifyBroker {
+  sourcePolicy(domain: string): Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+  invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
+}
+
+const SMTP_PROBE_TOOL = 'smtp.rcpt_probe';
 
 /**
  * 自建邮箱验证（v3.0 P0，零付费，不接 ZeroBounce/NeverBounce）。
- * 管线：语法 → MX → **SMTP RCPT 探测**（不发 DATA）→ catch-all 检测 → provider 分级。
+ * 管线：语法 → **source_policy 门（SUSPENDED 跳过）** → MX → **经 ToolBroker 的 SMTP RCPT 探测**
+ *       （不发 DATA）→ catch-all 检测 → provider 分级。
+ *
+ * 🛡️ SMTP 出网**不自行发起**：一律走注入的 ToolBroker（唯一确定性执行闸门——白名单/预算/限流/
+ *    source_policy/幂等/Trace + 工具内 SSRF 护栏）。无 broker = 不做原始出网，诚实降级 RISKY。
  *
  * 🔴 诚实上限（buyer-intelligence-v3.md §10.3，务必守）：
  *  - Gmail / Microsoft 365 等**反枚举**邮服对任意地址一律返 250 → **永不判 VALID**，只 RISKY。
@@ -16,9 +31,18 @@ import { resolvePublicIp } from '../../adapters/net-guard';
 export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
   readonly key = 'smtp_self';
 
-  async verifyEmail(email: string): Promise<EmailVerdict> {
+  constructor(private readonly broker?: EmailVerifyBroker) {}
+
+  async verifyEmail(email: string, ctx?: EmailVerifyContext): Promise<EmailVerdict> {
     if (!EMAIL_RE.test(email)) return { status: 'INVALID', detail: 'syntax', costCents: 0 };
     const domain = email.split('@')[1].toLowerCase();
+
+    // source_policy 门（DAT-011）：SUSPENDED 域名在任何触网（MX/SMTP）前直接跳过 → RISKY。
+    // invoke 内部亦会再查一次（防竞态），此处是「昂贵前置前主动跳过」。
+    if (this.broker) {
+      const policy = await this.broker.sourcePolicy(domain);
+      if (policy?.suspended) return { status: 'RISKY', detail: 'source_policy_suspended', costCents: 0 };
+    }
 
     let mx: { exchange: string; priority: number }[];
     try {
@@ -39,16 +63,34 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       return { status: 'RISKY', detail: `provider_anti_enumeration:${provider}`, costCents: 0 };
     }
 
-    // 🛡️ SSRF 护栏：mxHost 来自邮箱域名的 MX（可被投毒指向内网）——连接前解析并拒私网/内网 IP，
-    // 直连解析出的公网 IP（避免 connect 时二次解析的 TOCTOU/DNS rebinding）。
-    const guard = await resolvePublicIp(host);
-    if (!guard.safe || !guard.ip) {
-      return { status: 'RISKY', detail: `mx_egress_blocked:${guard.reason ?? 'unsafe'}`, costCents: 0 };
-    }
+    // 无闸门 = 不允许原始 SMTP 出网（绝不绕过 ToolBroker）→ 诚实降级。
+    if (!this.broker) return { status: 'RISKY', detail: 'smtp_gate_unavailable', costCents: 0 };
 
-    // SMTP RCPT 探测：真实地址 + 一个随机地址（catch-all 检测），同一连接
+    // SMTP RCPT 探测经 ToolBroker：真实地址 + 一个随机地址（catch-all 检测）。SSRF 护栏在工具内。
     const randomLocal = `x-verify-${Date.now().toString(36)}-zzq`;
-    const probe = await smtpRcptProbe(guard.ip, `verify@${SENDER_DOMAIN}`, [email, `${randomLocal}@${domain}`]);
+    const toolCtx: ToolContext = {
+      workspaceId: ctx?.workspaceId ?? 'platform',
+      runId: ctx?.runId ?? 'email-verify',
+      correlationId: `email-verify:${domain}`,
+    };
+    let probe: SmtpProbeOutput;
+    try {
+      const res = await this.broker.invoke<SmtpProbeInput, SmtpProbeOutput>(
+        SMTP_PROBE_TOOL,
+        { domain, mxHost: host, rcptTo: [email, `${randomLocal}@${domain}`] },
+        toolCtx,
+      );
+      probe = res.data;
+    } catch (err) {
+      // Broker 拒绝：SUSPENDED/用途门（竞态）= source_policy_denied；其余（预算/限流兜底）= probe_failed。
+      // 任何情况都**不**回落到原始出网。
+      const denied = (err as { name?: string })?.name === 'ToolPolicyDenied';
+      return { status: 'RISKY', detail: denied ? 'source_policy_denied' : 'smtp_probe_failed', costCents: 0 };
+    }
+    // 工具内 SSRF 护栏拦截（MX 指向私网/内网）→ 未发生出网 → RISKY。
+    if (probe.egressBlocked) {
+      return { status: 'RISKY', detail: `mx_egress_blocked:${probe.egressBlocked}`, costCents: 0 };
+    }
     const randomCode = probe.codes[1] ?? null;
 
     return decideEmailVerdict({
@@ -65,7 +107,6 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
 }
 
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-const SENDER_DOMAIN = process.env.EMAIL_VERIFY_SENDER_DOMAIN ?? 'example.com';
 
 // ─────────────────────── 纯逻辑（可测，不触网） ───────────────────────
 
@@ -120,77 +161,4 @@ export function decideEmailVerdict(s: VerdictSignals): EmailVerdict {
   // 真实地址被接受、但 catch-all 未证伪(inconclusive) → 不能判 VALID（可能是 catch-all）
   if (isAccepted(s.rcptCode)) return { status: 'RISKY', detail: 'catch_all_unproven', costCents: 0 };
   return { status: 'RISKY', detail: `inconclusive:${s.rcptCode ?? 'no_code'}`, costCents: 0 };
-}
-
-// ─────────────────────── SMTP 探测（net，端口 25；不发 DATA，不真正发信） ───────────────────────
-
-/**
- * 对 mxHost:25 依次 EHLO → MAIL FROM → 每个 addr 一次 RCPT TO，收集每个 RCPT 的响应码；QUIT。
- * 不发 DATA（不投递）。端口 25 被封/超时 → reachable=false（上层判 RISKY）。
- */
-export function smtpRcptProbe(
-  mxHost: string,
-  mailFrom: string,
-  rcptTo: string[],
-  timeoutMs = 8000,
-): Promise<{ reachable: boolean; mailFromCode: number | null; codes: (number | null)[] }> {
-  return new Promise((resolve) => {
-    const codes: (number | null)[] = [];
-    let mailFromCode: number | null = null;
-    let reachable = false;
-    let resolved = false;
-    // 命令序列：EHLO → MAIL FROM → RCPT×N → QUIT。第 1 个响应是 220 greeting（对应 cmds[-1]）。
-    const cmds = [`EHLO ${SENDER_DOMAIN}`, `MAIL FROM:<${mailFrom}>`, ...rcptTo.map((r) => `RCPT TO:<${r}>`), 'QUIT'];
-    // 本响应对应「刚发出的 cmds[sent-1]」；RCPT 命令在 cmds 里的下标区间是 [2, 2+N-1]。
-    const rcptCmdLo = 2;
-    let sent = 0; // 已发命令数
-
-    const socket = net.createConnection(25, mxHost);
-    socket.setTimeout(timeoutMs);
-    let buf = '';
-
-    const done = () => {
-      if (resolved) return;
-      resolved = true;
-      try {
-        socket.destroy();
-      } catch {
-        /* ignore */
-      }
-      resolve({ reachable, mailFromCode, codes });
-    };
-
-    socket.on('connect', () => {
-      reachable = true;
-    });
-    socket.on('data', (d) => {
-      buf += d.toString();
-      // SMTP 多行响应：续行 "NNN-...", 末行 "NNN ..."（码后空格）。等到出现末行才算一次响应完成。
-      if (!/^\d{3} [^\n]*\r?\n/m.test(buf)) return;
-      const finalLine = buf
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .reverse()
-        .find((l) => /^\d{3} /.test(l));
-      const code = finalLine ? parseInt(finalLine.slice(0, 3), 10) : NaN;
-      buf = '';
-      const respFor = sent - 1; // 本响应对应刚发出的 cmds[respFor]；-1 = greeting
-      if (respFor === 1) mailFromCode = Number.isFinite(code) ? code : null; // cmds[1] = MAIL FROM
-      if (respFor >= rcptCmdLo && respFor < rcptCmdLo + rcptTo.length) {
-        codes.push(Number.isFinite(code) ? code : null);
-      }
-      if (sent < cmds.length) {
-        socket.write(cmds[sent++] + '\r\n');
-      } else {
-        done();
-      }
-    });
-    socket.on('timeout', done);
-    socket.on('error', () => {
-      if (resolved) return;
-      resolved = true;
-      resolve({ reachable: false, mailFromCode, codes });
-    });
-    socket.on('close', done);
-  });
 }

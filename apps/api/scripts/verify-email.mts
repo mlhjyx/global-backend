@@ -1,10 +1,12 @@
 /**
- * 自建邮箱验证 · 真实验证。对真实邮箱跑 SelfHostedEmailVerifier(MX+SMTP+分级)。
+ * 自建邮箱验证 · 真实验证。对真实邮箱跑 SelfHostedEmailVerifier(source_policy→MX→SMTP→分级)。
+ * SMTP 出网经 ToolBroker 闸门（此脚本无 DB → source_policy reader 缺省=无策略，一律放行）。
  * 注:Mac/多数网络封出网 25 端口 → SMTP 段会 smtp_unreachable→RISKY(诚实降级,非 bug)。
  *   node --import tsx scripts/verify-email.mts [email ...]
  */
 import { readFileSync } from 'node:fs';
 import { SelfHostedEmailVerifier } from '../src/discovery/providers/email-verify.provider';
+import { buildToolBroker } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -14,7 +16,7 @@ for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').spl
 const targets = process.argv.slice(2).length
   ? process.argv.slice(2)
   : ['someone@gmail.com', 'info@trumpf.com', 'not-an-email', 'nobody@nonexistent-domain-zzq-xyz.com'];
-const v = new SelfHostedEmailVerifier();
+const v = new SelfHostedEmailVerifier(buildToolBroker());
 
 for (const email of targets) {
   const t0 = Date.now();
