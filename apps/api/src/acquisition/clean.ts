@@ -107,6 +107,7 @@ export function cleanEntity(raw: RawSourceEntity): CleanedEntity | null {
     email_kind: email?.kind,
     phone,
     stand: typeof f.stand === 'string' ? f.stand.trim() : undefined,
+    hall: typeof f.hall === 'string' ? f.hall.trim() : undefined,
     products: products.length ? products : undefined,
     hiring: f.hiring === true ? true : undefined,
     description: typeof f.description === 'string' ? f.description.slice(0, 500).trim() || undefined : undefined,
