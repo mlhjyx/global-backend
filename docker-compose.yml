@@ -47,8 +47,12 @@ services:
 
   # Crawler (PRD §10.18: Crawl4AI, self-hosted). Isolated container (ADR-013);
   # the worker calls its REST API behind the WebCrawlerProvider adapter.
+  # Built from a thin dev wrapper (infra/crawl4ai/Dockerfile) that only disables
+  # the image's bundled cache-Redis persistence — see that file for the why.
   crawl4ai:
-    image: unclecode/crawl4ai:latest
+    build:
+      context: ./infra/crawl4ai
+    image: global-crawl4ai:local # local tag for the patched wrapper build
     container_name: global-crawl4ai
     restart: unless-stopped
     ports:
