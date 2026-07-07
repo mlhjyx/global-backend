@@ -45,6 +45,19 @@ export function isValidLawfulBasis(b?: LawfulBasis | null): b is LawfulBasis {
 }
 
 /**
+ * 给要落库的合法性基础补齐审计的「谁/何时」（缺才补，已填则尊重）。用于任何**将被持久化**的 basis——
+ * 无论操作者显式断言的还是开关合成的（`allowPersonalWithoutBasis` 合成的 basis 无 who/when），
+ * 都必须带断言人 + 时间，审计才可回溯。纯函数（时间由调用方传入，保持可测/不读时钟）。
+ */
+export function stampLawfulBasis(basis: LawfulBasis, recordedBy: string, recordedAt: string): LawfulBasis {
+  return {
+    ...basis,
+    recordedBy: basis.recordedBy ?? recordedBy,
+    recordedAt: basis.recordedAt ?? recordedAt,
+  };
+}
+
+/**
  * 从 env + 每次调用的显式开关解析策略。env `EMAIL_VERIFY_ALLOW_PERSONAL_WITHOUT_BASIS=true` 为全局兜底开关，
  * ctx.allowPersonalWithoutBasis 优先（逐次覆盖）。**默认 false**（保守：人名邮箱需显式 basis）。
  */
