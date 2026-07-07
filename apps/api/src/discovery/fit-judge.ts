@@ -88,6 +88,10 @@ export async function judgeFitCompany(
       },
       { workspaceId },
     );
+    // 🔴 stub 兜底绝不写真实判定：dev 里网关瞬时失败会 fallback 到 stub（罐头 null 输出），
+    // 归一化后变成 weak 假判定污染 canonical（实测抓到 2 家：fit_reasons 全 null）。宁可不判、
+    // 下个 sweep 真模型重试。
+    if (result.provider === 'stub') return null;
     out = result.data;
   } catch {
     return null;

@@ -8,9 +8,10 @@ import type {
 } from './backlog.activities';
 import type { QualifyActivities } from './qualify.activities';
 
-// 资格门批 = 几十次 LLM 结构化调用（每次数秒），15 分钟上界
+// 资格门批 = 每家一次 LLM 结构化调用。实测 gemini-2.5-pro 单家 10-30s（含 schema 修复重试可更长）
+// → 批默认 20 家 × 30s ≈ 10 分钟，配 30 分钟上界（40×20s 曾逼近 15 分钟超时线，会整批重试）。
 const fitActs = proxyActivities<BacklogActivities>({
-  startToCloseTimeout: '15 minutes',
+  startToCloseTimeout: '30 minutes',
   retry: { maximumAttempts: 2 },
 });
 // 抓取类批（信号/监控/联系人：官网+sitemap+多页渲染，逐家数十秒）
@@ -77,8 +78,8 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     // ① 资格门（解锁 fitVerdict=null 存量）
     try {
       let cursor: string | null = null;
-      for (let round = 0; round < (input?.maxFitRounds ?? 30); round++) {
-        const r: FitBacklogResult = await fitActs.qualifyFitBacklog({ ...t, limit: input?.fitBatch ?? 40, cursor });
+      for (let round = 0; round < (input?.maxFitRounds ?? 60); round++) {
+        const r: FitBacklogResult = await fitActs.qualifyFitBacklog({ ...t, limit: input?.fitBatch ?? 20, cursor });
         stats.fit.scanned += r.scanned;
         stats.fit.judged += r.judged;
         for (const [k, v] of Object.entries(r.verdicts)) stats.fit.verdicts[k] = (stats.fit.verdicts[k] ?? 0) + v;
