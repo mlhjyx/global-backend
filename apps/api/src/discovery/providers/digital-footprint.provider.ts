@@ -25,15 +25,9 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
     const base = `https://${input.domain}/`;
     if (!(await isAllowedByRobots(base).catch(() => true))) return miss();
 
-    let html = '';
-    let headers: Record<string, string> = {};
-    try {
-      const page = await crawlHtml(base);
-      html = page.html;
-      headers = page.headers;
-    } catch {
-      return miss();
-    }
+    const page = await crawlHtml(base).catch(() => null);
+    if (!page) return miss();
+    const { html, headers } = page;
     if (html.length < 200) return miss();
 
     const jsonld = extractJsonLd(html);

@@ -25,7 +25,7 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly classes: SourceClass[] = ['industry_data'];
 
   private log(msg: string): void {
-    // eslint-disable-next-line no-console
+     
     console.log(`[trade_fair] ${msg}`);
   }
 

@@ -34,6 +34,9 @@ jobs:
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
+      - name: Lint（eslint flat config，typescript-eslint）
+        run: pnpm --filter @global/api lint
+
       - name: Build（nest build = tsc 全量类型检查）
         run: pnpm --filter @global/api build
 

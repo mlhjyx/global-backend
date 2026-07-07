@@ -53,13 +53,13 @@ async function main(): Promise<void> {
     },
   });
 
-  // eslint-disable-next-line no-console
+   
   console.log(`[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`);
   await worker.run();
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
+   
   console.error(err);
   process.exit(1);
 });

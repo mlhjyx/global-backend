@@ -60,7 +60,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   }
 
   private log(msg: string): void {
-    // eslint-disable-next-line no-console
+     
     console.log(`[directory] ${msg}`);
   }
 
