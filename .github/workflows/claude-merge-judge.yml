@@ -1,0 +1,67 @@
+name: Claude Merge Judge
+
+# merge-judge（合并就绪判官，L2）—— 每个 PR 由 Claude 按风险分级审查：
+#   🟢 低风险(docs/chore/CI/测试/隔离新 provider) → 批准（配 auto-merge 即自动合）
+#   🔴 高风险(DB migration/RLS/鉴权/GDPR/对外抓取/大量删除) → 标 needs-human，不批准
+# 策略与规则见 docs/backend/ci-merge-automation.md。判官**只审+评论/批准，从不自己 merge**。
+#
+# 未配 ANTHROPIC_API_KEY（或未装 Claude GitHub App）时**整段自动跳过**（job 成功，不产生红叉）。
+# 启用：仓库 Settings → Secrets → 加 ANTHROPIC_API_KEY（或 /install-github-app）+ 开 Allow auto-merge。
+# ⚠️ anthropics/claude-code-action 输入项可能随版本变化，启用前对照其 README 校准。
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write # 发审查/评论/批准
+  checks: read
+  id-token: write
+
+concurrency:
+  group: claude-judge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    if: ${{ github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检测是否已配 key（未配则跳过后续）
+        id: gate
+        run: |
+          if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配 ANTHROPIC_API_KEY，Claude merge-judge 跳过（见 docs/backend/ci-merge-automation.md 启用步骤）"
+          fi
+
+      - if: steps.gate.outputs.on == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude merge-judge
+        if: steps.gate.outputs.on == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            你是本仓（NestJS + Prisma + Postgres 后端）的「合并就绪判官」。审查当前 PR，遵循
+            docs/backend/ci-merge-automation.md 的风险分级策略。**绝不执行 merge**，只审+评论/批准。
+
+            步骤：
+            1. 核对必需检查（build·typecheck·test / gitleaks 密钥扫描）是否全绿；有无未 resolved 的审查线程。
+            2. 风险分级 diff：
+               🔴 高风险（需人签字，即便闸绿）：packages/db/prisma/migrations/** 或 schema.prisma 变更、
+                  RLS/鉴权/权限/workspace 隔离、GDPR/个人数据/suppression/lawful-basis、对外抓取/SSRF/
+                  source_policy/ToolBroker、大量删除、禁用/删除测试、疑似密钥。
+               🟢 低风险：docs/chore/CI/依赖补丁、纯新增隔离 provider+单测、不碰上述任何面。
+            3. 裁决并行动：
+               - 🟢 低风险 且 闸全绿 且 线程全 resolved → 发一条 **APPROVE** 审查（简述理由）。
+               - 🔴 高风险 → 发 **COMMENT**（非 approve）指出需人复核的具体文件/点，并加标签 `needs-human`。
+               - 闸未绿/有未 resolved 线程 → 发 COMMENT 说明阻断项（HOLD）。
+            4. 评论用结构化：decision / risk_tier / gate / blocking_issues / high_risk_changes / notes（中文，简洁）。
+          claude_args: '--max-turns 20'
