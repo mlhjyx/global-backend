@@ -8,7 +8,7 @@ import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools'
  * `invoke('smtp.rcpt_probe', …)` 会强制 source_policy(SUSPENDED/用途) + 预算 + 限流 + 幂等 + Trace。
  */
 export interface EmailVerifyBroker {
-  sourcePolicy(domain: string): Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+  checkSourcePolicy(toolId: string, domain: string): Promise<{ allowed: boolean; reason?: 'suspended' | 'purpose_not_allowed' }>;
   invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
 }
 
@@ -37,18 +37,19 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
     if (!EMAIL_RE.test(email)) return { status: 'INVALID', detail: 'syntax', costCents: 0 };
     const domain = email.split('@')[1].toLowerCase();
 
-    // source_policy 门（DAT-011）：SUSPENDED 域名在任何触网（MX/SMTP）前直接跳过 → RISKY。
-    // 这只是「昂贵前置前的主动跳过」优化；权威判定在 broker.invoke 的合规门（防竞态、单点强制）。
-    // 读失败**不硬失败**（§5 fail-safe）：吞掉异常放行到下游，SMTP 出网仍受 invoke 合规门约束
-    // （SUSPENDED 会在那里被拒 → RISKY），绝不因一次 DB 抖动把应 RISKY 的验证变成请求 500。
+    // source_policy 门（DAT-011）：在任何触网（**MX 解析**/SMTP）前查 SUSPENDED + 用途门，
+    // 不通过直接跳过 → RISKY（连 DNS 都不为被禁用途做）。与 broker.invoke 共用 checkSourcePolicy
+    // 单点判定，避免只查 suspended 的半吊子早跳过、也避免反枚举 provider 在 invoke 前短路绕过用途门。
+    // 读失败**不硬失败**（§5 fail-safe）：吞异常放行到下游，SMTP 出网仍受 invoke 合规门权威约束，
+    // 绝不因一次 DB 抖动把应 RISKY 的验证变成请求 500。
     if (this.broker) {
-      let suspended = false;
+      let precheck: { allowed: boolean; reason?: string } = { allowed: true };
       try {
-        suspended = (await this.broker.sourcePolicy(domain))?.suspended ?? false;
+        precheck = await this.broker.checkSourcePolicy(SMTP_PROBE_TOOL, domain);
       } catch {
-        // 读失败 → 视为未 suspended，放行到下游 invoke 合规门权威判定（fail-safe）
+        // 读失败 → 放行到下游 invoke 合规门权威判定（fail-safe）
       }
-      if (suspended) return { status: 'RISKY', detail: 'source_policy_suspended', costCents: 0 };
+      if (!precheck.allowed) return { status: 'RISKY', detail: `source_policy_${precheck.reason ?? 'denied'}`, costCents: 0 };
     }
 
     let mx: { exchange: string; priority: number }[];

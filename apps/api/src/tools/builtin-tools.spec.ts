@@ -18,11 +18,12 @@ function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean
 }
 
 describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
-  it('已注册为 verify/email_verification，且 requiresSourcePolicy（受合规门约束）', () => {
+  it('已注册为 verify/email_verification，requiresSourcePolicy + personalData（受合规门约束、标个人数据）', () => {
     expect(smtpRcptProbeTool.id).toBe('smtp.rcpt_probe');
     expect(smtpRcptProbeTool.category).toBe('verify');
     expect(smtpRcptProbeTool.sourceClass).toBe('email_verification');
     expect(smtpRcptProbeTool.compliance.requiresSourcePolicy).toBe(true);
+    expect(smtpRcptProbeTool.compliance.personalData).toBe(true); // rcptTo 可含具名人邮箱
     expect(registerBuiltinTools(new ToolRegistry()).get('smtp.rcpt_probe')).toBeDefined();
   });
 
@@ -31,6 +32,19 @@ describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
     const input: SmtpProbeInput = { domain: 'blocked.de', mxHost: '127.0.0.1', rcptTo: ['a@blocked.de'] };
     await expect(b.invoke('smtp.rcpt_probe', input, { workspaceId: 'w' })).rejects.toThrow(ToolPolicyDenied);
     await expect(b.invoke('smtp.rcpt_probe', input, { workspaceId: 'w' })).rejects.toThrow(/SUSPENDED/);
+  });
+
+  it('用途门：域策略 allowedPurpose 与工具 [discovery,enrichment] 无交集 → execute 前拒绝', async () => {
+    const b = broker(async () => ({ suspended: false, allowedPurpose: ['news_only'] }));
+    const input: SmtpProbeInput = { domain: 'acme.de', mxHost: '127.0.0.1', rcptTo: ['a@acme.de'] };
+    await expect(b.invoke('smtp.rcpt_probe', input, { workspaceId: 'w' })).rejects.toThrow(/purpose not allowed/);
+  });
+
+  it('用途门：域策略 allowedPurpose=[discovery] 与工具有交集 → 放行到 execute（不误拒）', async () => {
+    const b = broker(async () => ({ suspended: false, allowedPurpose: ['discovery'] }));
+    const input: SmtpProbeInput = { domain: 'acme.de', mxHost: '127.0.0.1', rcptTo: ['a@acme.de'] };
+    const res = await b.invoke<SmtpProbeInput, SmtpProbeOutput>('smtp.rcpt_probe', input, { workspaceId: 'w' });
+    expect(res.data.egressBlocked).toBe('ip_literal_not_allowed'); // 过了合规门，被 SSRF 护栏挡在真实出网前
   });
 
   it('非 SUSPENDED：工具内 SSRF 护栏拦截私网/IP 字面量 MX → egressBlocked，不发生出网', async () => {

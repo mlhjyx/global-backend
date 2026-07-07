@@ -151,9 +151,11 @@ export const smtpRcptProbeTool: Tool<SmtpProbeInput, SmtpProbeOutput> = {
   cost: { unit: 'call', estimatedCents: 0, external: false },
   // MX 出网要克制：低 rps + 小并发，避免被反垃圾 tarpit/拉黑（每域延迟由 source_policy 兜）。
   rateLimit: { rps: 1, concurrency: 2 },
+  // personalData:true —— rcptTo 可含具名人邮箱（john.doe@…），RCPT 握手会把地址发给对端 MX；
+  // 按仓库 🔴 红线，凡可能承载人名邮箱的工具一律标 true（喂个人数据/脱敏门的工具元数据判据）。
   // 用途门覆盖 source_policy 词表两种用途：邮箱可达性探测属发现/富集流水线的一环，
   // 只要域策略允许其一即放行（仍受 SUSPENDED 硬门约束）；避免只登记 ['discovery'] 的域被误拒。
-  compliance: { requiresSourcePolicy: true, respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'medium' },
+  compliance: { requiresSourcePolicy: true, respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'medium' },
   capabilities: { produces: [], accepts: ['domain'] },
   idempotencyKey: (i) => `smtp.rcpt_probe:${stableKey({ domain: i.domain, mxHost: i.mxHost, rcptTo: i.rcptTo })}`,
   healthCheck: async () => ({ healthy: true, detail: 'smtp' }),

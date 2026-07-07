@@ -85,7 +85,7 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
   const SELF_MX = [{ exchange: 'mail.acme.de', priority: 10 }];
   const okProbe: SmtpProbeOutput = { reachable: true, mailFromCode: 250, codes: [250, 550] }; // 真实 250 / 随机 550=非 catch-all
 
-  function fakeBroker(opts: { suspend?: string[]; probe?: SmtpProbeOutput; throwName?: string; policyThrows?: boolean } = {}) {
+  function fakeBroker(opts: { suspend?: string[]; denyPurpose?: string[]; probe?: SmtpProbeOutput; throwName?: string; policyThrows?: boolean } = {}) {
     const invoke = vi.fn(async () => {
       if (opts.throwName) {
         const e = new Error('broker denied');
@@ -94,12 +94,14 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
       }
       return { data: opts.probe ?? okProbe, costCents: 0 };
     });
-    const sourcePolicy = vi.fn(async (d: string) => {
+    const checkSourcePolicy = vi.fn(async (_toolId: string, d: string) => {
       if (opts.policyThrows) throw new Error('db blip');
-      return { suspended: (opts.suspend ?? []).includes(d) };
+      if ((opts.suspend ?? []).includes(d)) return { allowed: false, reason: 'suspended' as const };
+      if ((opts.denyPurpose ?? []).includes(d)) return { allowed: false, reason: 'purpose_not_allowed' as const };
+      return { allowed: true };
     });
-    const broker = { invoke, sourcePolicy } as unknown as EmailVerifyBroker;
-    return { broker, invoke, sourcePolicy };
+    const broker = { invoke, checkSourcePolicy } as unknown as EmailVerifyBroker;
+    return { broker, invoke, checkSourcePolicy };
   }
 
   beforeEach(() => {
@@ -113,6 +115,14 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
     expect(r).toEqual({ status: 'RISKY', detail: 'source_policy_suspended', costCents: 0 });
     expect(invoke).not.toHaveBeenCalled();
     expect(mockedMx).not.toHaveBeenCalled(); // 连 MX 解析都不触发
+  });
+
+  it('用途门不通过：MX 解析前即跳过 → RISKY source_policy_purpose_not_allowed，不 invoke/不解析 MX', async () => {
+    const { broker, invoke } = fakeBroker({ denyPurpose: ['acme.de'] });
+    const r = await new SelfHostedEmailVerifier(broker).verifyEmail('a@acme.de', { workspaceId: 'w' });
+    expect(r).toEqual({ status: 'RISKY', detail: 'source_policy_purpose_not_allowed', costCents: 0 });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(mockedMx).not.toHaveBeenCalled(); // 用途门在 DNS 之前，连 MX 都不为被禁用途做
   });
 
   it('SMTP 出网走 broker.invoke(smtp.rcpt_probe)，input.domain=邮箱域名（source_policy 以此为键）', async () => {
