@@ -16,6 +16,7 @@ import { buildSourceAdapterRegistry } from '../acquisition/registry';
 import { createIntentActivities } from './intent.activities';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 
@@ -46,7 +47,11 @@ async function main(): Promise<void> {
       ...createUnderstandingActivities({ prisma, gateway }),
       ...createDiscoveryActivities({
         prisma,
-        providers: new DiscoveryProviderRegistry({ gateway }),
+        // 邮箱验证 SMTP 出网经 ToolBroker 闸门；source_policy 走平台级治理表（无 RLS，直读）。
+        providers: new DiscoveryProviderRegistry({
+          gateway,
+          broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }),
+        }),
         gateway,
         taxonomy: new TaxonomyResolver(prisma, gateway),
       }),
