@@ -12,6 +12,7 @@ import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
 import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
+import { TedDiscoveryProvider } from './providers/ted.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
@@ -20,8 +21,11 @@ import { StructuredHarvestProvider } from './providers/structured-harvest.provid
 import { SelfHostedEmailVerifier, EmailVerifyBroker } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 
-/** data_provider 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
-type ProviderDb = { dataProvider: PrismaClient['dataProvider'] };
+/** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
+type ProviderDb = {
+  dataProvider: PrismaClient['dataProvider'];
+  sourcePolicy?: PrismaClient['sourcePolicy'];
+};
 
 /**
  * DataSourceRouter 的适配器面（PRD 8.13）：代码内注册适配器实现，
@@ -62,6 +66,9 @@ export class DiscoveryProviderRegistry {
     this.discovery.push(new OsmDiscoveryProvider());
     // 展会参展商（逐站/逐平台模板，直连托管搜索 API 拿结构化名录）——不依赖 gateway。
     this.discovery.push(new TradeFairDiscoveryProvider());
+    // TED 中标发现（欧盟采购官方 API，零鉴权，归 public_intelligence 类）——不依赖 gateway。
+    // 无 CPV 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
+    this.discovery.push(new TedDiscoveryProvider());
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider());
@@ -112,6 +119,32 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'trade_fair', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // TED 招投标（欧盟采购官方 API）——中标发现 + 招标 intent（P3）。零鉴权、costPerCallCents=0。
+    await db.dataProvider.upsert({
+      where: { key: 'ted' },
+      update: {},
+      create: { key: 'ted', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // 合规注册（spec §3.3.5）：官方 REST（非爬，平台合约轨干净）；personalData=true —— notice 可能
+    // 含具名联系人（即便走 API），绿事实 CC BY 4.0 署名义务、具名联系人 🔴 隔离（不入绿库）。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.ted.europa.eu' },
+        update: {},
+        create: {
+          domain: 'api.ted.europa.eu',
+          sourceType: 'tender',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'TED v3 官方 Search API（零鉴权）。绿事实 CC BY 4.0 署名义务；具名联系人 🔴 隔离。',
+        },
+      });
+    }
     await db.dataProvider.upsert({
       where: { key: 'digital_footprint' },
       update: {},
