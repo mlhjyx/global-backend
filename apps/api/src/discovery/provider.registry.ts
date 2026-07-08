@@ -20,6 +20,7 @@ import { DigitalFootprintProvider } from './providers/digital-footprint.provider
 import { StructuredHarvestProvider } from './providers/structured-harvest.provider';
 import { SelfHostedEmailVerifier, EmailVerifyBroker } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
+import { SourcePolicyReader } from '../tools/tool-broker.factory';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -44,7 +45,7 @@ export class DiscoveryProviderRegistry {
    *  绝不塞进 enrichRun 的 2 分钟活动（否则 50 家 × 抓取会超时重试整段富集）。 */
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
-  constructor(deps?: { gateway?: ModelGateway; broker?: EmailVerifyBroker }) {
+  constructor(deps?: { gateway?: ModelGateway; broker?: EmailVerifyBroker; sourcePolicyReader?: SourcePolicyReader }) {
     // 自建邮箱验证**排 emailVerifiers 首位**：verifyContactPoint 只用 adapters[0]，必须在
     // public_web(仅 MX→RISKY) 之前，否则新 SMTP RCPT/catch-all 逻辑永不执行。不依赖 gateway。
     // 诚实上限：Gmail/M365/catch-all/端口25不可达/catch-all未证伪 一律 RISKY，绝不谎报 VALID。
@@ -68,7 +69,7 @@ export class DiscoveryProviderRegistry {
     this.discovery.push(new TradeFairDiscoveryProvider());
     // TED 中标发现（欧盟采购官方 API，零鉴权，归 public_intelligence 类）——不依赖 gateway。
     // 无 CPV 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
-    this.discovery.push(new TedDiscoveryProvider());
+    this.discovery.push(new TedDiscoveryProvider({ sourcePolicyReader: deps?.sourcePolicyReader }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider());

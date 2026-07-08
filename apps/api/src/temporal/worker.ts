@@ -65,9 +65,11 @@ async function main(): Promise<void> {
   });
 
   // 邮箱验证 SMTP 出网经 ToolBroker 闸门；source_policy 走平台级治理表（无 RLS，直读）。
+  const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
   const providers = new DiscoveryProviderRegistry({
     gateway,
-    broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }),
+    broker: buildToolBroker({ sourcePolicyReader }),
+    sourcePolicyReader, // §8.8：TED adapter 直连前查 source_policy 用途门（含个人数据源必走）
   });
 
   const worker = await Worker.create({

@@ -5,6 +5,7 @@ import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { judgeFitCompany, loadIcpBrief } from '../discovery/fit-judge';
 import { CompanyDiscoveryQuery, EnrichmentResult, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
+import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 
@@ -197,9 +198,16 @@ export function createDiscoveryActivities(deps: {
             employeeCount?: number;
             revenueUsd?: number;
             attributes?: Record<string, unknown>;
+            identifier?: { scheme: string; value: string }; // §8.4 provider 标识（税号/注册号）
+            license?: string; // §8.5 记录声明许可（绿事实源署名义务，如 TED CC BY 4.0）
           };
           if (!rec.name) continue;
-          const identity = companyIdentity({ name: rec.name, domain: rec.domain, country: rec.country });
+          const identity = companyIdentity({
+            name: rec.name,
+            domain: rec.domain,
+            country: rec.country,
+            identifier: rec.identifier, // §8.4：无域名时按税号消歧，防同名同国不同实体误并
+          });
           const isSuppressed =
             (rec.domain && suppressedDomains.has(rec.domain.toLowerCase())) ||
             suppressedNames.has(rec.name.toLowerCase());
@@ -241,7 +249,7 @@ export function createDiscoveryActivities(deps: {
                 canonicalId: canonical.id,
                 rawRecordId: raw.id,
                 matchRule: identity.matchRule,
-                confidence: identity.matchRule === 'domain_exact' ? 1 : 0.8,
+                confidence: identity.matchRule === 'name_country' ? 0.8 : 1, // §8.4：identifier_exact 同 domain_exact=1
               },
             });
             // 字段级 Evidence：该 raw 记录贡献的每个非空字段留痕
@@ -266,7 +274,7 @@ export function createDiscoveryActivities(deps: {
                   value: value as Prisma.InputJsonValue,
                   providerKey: raw.providerKey,
                   rawRecordId: raw.id,
-                  license: raw.providerKey === 'sandbox' ? 'sandbox' : 'licensed',
+                  license: resolveEvidenceLicense(rec.license, raw.providerKey), // §8.5：记录声明许可优先（TED CC BY 4.0），否则回退不变
                   allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
                 },
               });

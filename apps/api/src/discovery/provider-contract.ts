@@ -4,6 +4,8 @@
  * 归一后才进 canonical。
  */
 
+import type { CompanyIdentifier } from './identity';
+
 export type SourceClass =
   | 'trade_data'
   | 'b2b_company_person'
@@ -31,6 +33,10 @@ export interface ProviderCompanyRecord {
   employeeCount?: number;
   revenueUsd?: number;
   attributes?: Record<string, unknown>;
+  /** provider 侧法人标识（税号/注册号/LEI…）——§8.4 身份消歧：无域名时按此归一，防同名同国误并。 */
+  identifier?: CompanyIdentifier;
+  /** 该记录字段许可（写入 field_evidence.license）——绿事实源须声明署名义务许可（如 TED='CC BY 4.0'）；缺省回退 providerKey 推断。 */
+  license?: string;
   /** 公开采集留痕（PRD 8.11）：来源页/抓取时间/内容指纹/解析版本 */
   provenance?: {
     sourceUrl: string;

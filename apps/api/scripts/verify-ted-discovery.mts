@@ -39,6 +39,7 @@ const WS = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; // 一次性验证 workspace
 const RUN = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa001';
 const PLAN = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa002';
 const ICP = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa003';
+const RUN2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa004'; // §8.8 负向门一次性 run
 const CPV = '42120000'; // 泵与压缩机
 const COUNTRY = 'DEU';
 let failed = 0;
@@ -102,9 +103,11 @@ async function main() {
   if (gp) reg.register(gp);
   if (stubAllowed()) reg.register(new StubModelProvider());
   const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
+  const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
   const providers = new DiscoveryProviderRegistry({
     gateway,
-    broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }),
+    broker: buildToolBroker({ sourcePolicyReader }),
+    sourcePolicyReader, // §8.8：TED adapter 直连前查 source_policy 用途门
   });
   const acts = createDiscoveryActivities({ prisma, providers, gateway });
 
@@ -128,6 +131,32 @@ async function main() {
   );
   const withTed = landed.filter((c) => !!(c.attributes as Record<string, unknown> | null)?.ted);
   ok(withTed.length > 0, 'canonical.attributes.ted 命名空间事实已写入');
+
+  // ── §8.5 证据署名 + §8.4 税号身份 + §8.3 alpha-2（审查修正落库验证）──
+  // 仅核验本 run 证据（field_evidence 无 FK → 跨 run 不级联删；按本 run raw 精确圈定，排除历史遗留行）。
+  const runRawIds = await prisma.withWorkspace(WS, (tx) =>
+    tx.rawSourceRecord.findMany({ where: { runId: RUN }, select: { id: true } }),
+  );
+  const ev = await prisma.withWorkspace(WS, (tx) =>
+    tx.fieldEvidence.findMany({
+      where: { workspaceId: WS, providerKey: 'ted', rawRecordId: { in: runRawIds.map((r) => r.id) } },
+      select: { license: true },
+    }),
+  );
+  ok(ev.length > 0 && ev.every((e) => e.license === 'CC BY 4.0'), `§8.5 field_evidence.license='CC BY 4.0'（本 run ${ev.length} 条，非 licensed）`);
+  const keys = await prisma.withWorkspace(WS, (tx) =>
+    tx.canonicalCompany.findMany({ where: { workspaceId: WS }, select: { dedupeKey: true, country: true } }),
+  );
+  ok(keys.some((k) => k.dedupeKey.startsWith('id:ted-natid:')), '§8.4 无域名中标方按税号成 id:ted-natid: key（防同名同国误并）');
+  ok(keys.some((k) => k.country?.length === 2), '§8.3 canonical 国别已转 alpha-2（DE 非 DEU）');
+
+  // ── §8.8 负向门：allowedPurpose 去掉 discovery → TED 直连被拒（不发请求、零落地）──
+  await ownerDb.sourcePolicy.update({ where: { domain: 'api.ted.europa.eu' }, data: { allowedPurpose: ['enrichment'] } });
+  await ownerDb.discoveryRun.deleteMany({ where: { id: RUN2 } });
+  await ownerDb.discoveryRun.create({ data: { id: RUN2, workspaceId: WS, planId: PLAN, icpId: ICP, status: 'RUNNING' } });
+  const exec2 = await acts.executeQuery({ workspaceId: WS, runId: RUN2, query: planQuery });
+  ok(exec2.provider !== 'ted' && exec2.rawCount === 0, `§8.8 用途门：去 discovery 用途 → TED 零落地（provider=${exec2.provider}, raw=${exec2.rawCount}）`);
+  await ownerDb.sourcePolicy.update({ where: { domain: 'api.ted.europa.eu' }, data: { allowedPurpose: ['discovery', 'enrichment'] } });
 
   // ══════════ Tier 3 · 真 fit 门 ══════════
   console.log('\n══ Tier 3 · 真 fit 门：泵部件卖家 ICP → judgeFitCompany（四门判别）══');
@@ -158,8 +187,12 @@ try {
   await main();
 } finally {
   // 清理（owner 连接绕 RLS）：删 run 级联 raw；删 canonical 级联 identity_link/field_evidence
+  await ownerDb.sourcePolicy
+    .update({ where: { domain: 'api.ted.europa.eu' }, data: { allowedPurpose: ['discovery', 'enrichment'] } })
+    .catch(() => {}); // §8.8 负向门失败也复位策略
+  await ownerDb.fieldEvidence.deleteMany({ where: { workspaceId: WS } }).catch(() => {}); // 无 FK，手动清（防跨 run 累积）
   await ownerDb.canonicalCompany.deleteMany({ where: { workspaceId: WS } }).catch(() => {});
-  await ownerDb.discoveryRun.deleteMany({ where: { id: RUN } }).catch(() => {});
+  await ownerDb.discoveryRun.deleteMany({ where: { id: { in: [RUN, RUN2] } } }).catch(() => {});
   console.log(`\n══ ${failed === 0 ? '✅ 全部通过' : `❌ ${failed} 条失败`} ══`);
   await prisma.$disconnect();
   await ownerDb.$disconnect();

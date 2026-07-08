@@ -29,3 +29,39 @@ describe('identity resolution（PRD 8.8 确定性规则）', () => {
     expect(a.dedupeKey).toBe(b.dedupeKey);
   });
 });
+
+describe('§8.4 identifier 身份规则（税号/注册号）—— 优先级 domain > identifier > name+country', () => {
+  it('无域名 + identifier → identifier_exact（scheme:归一值）', () => {
+    expect(
+      companyIdentity({ name: 'SPIE GmbH', country: 'DE', identifier: { scheme: 'ted-natid', value: 'DE 291499156' } }),
+    ).toEqual({ dedupeKey: 'id:ted-natid:de291499156', matchRule: 'identifier_exact' });
+  });
+
+  it('有域名时 domain 仍压过 identifier（域名最强）', () => {
+    const k = companyIdentity({
+      name: 'SPIE',
+      domain: 'spie.de',
+      identifier: { scheme: 'ted-natid', value: 'DE 291499156' },
+    });
+    expect(k).toEqual({ dedupeKey: 'd:spie.de', matchRule: 'domain_exact' });
+  });
+
+  it('同名同国、identifier 不同 → 不同 key（根治 §8.4 误并）', () => {
+    const a = companyIdentity({ name: 'Müller GmbH', country: 'DE', identifier: { scheme: 'ted-natid', value: 'DE111' } });
+    const b = companyIdentity({ name: 'Müller GmbH', country: 'DE', identifier: { scheme: 'ted-natid', value: 'DE222' } });
+    expect(a.dedupeKey).not.toBe(b.dedupeKey);
+  });
+
+  it('同值不同 scheme（ted-natid vs lei）→ 不同 key（绝不跨 id 体系串号）', () => {
+    const a = companyIdentity({ name: 'X', country: 'DE', identifier: { scheme: 'ted-natid', value: '529900X' } });
+    const b = companyIdentity({ name: 'X', country: 'DE', identifier: { scheme: 'lei', value: '529900X' } });
+    expect(a.dedupeKey).not.toBe(b.dedupeKey);
+  });
+
+  it('空/空白 identifier 值 → 回退 name_country（不产生 id:scheme: 空 key）', () => {
+    expect(companyIdentity({ name: 'Acme GmbH', country: 'DE', identifier: { scheme: 'ted-natid', value: '  ' } })).toEqual({
+      dedupeKey: 'n:acme:de',
+      matchRule: 'name_country',
+    });
+  });
+});

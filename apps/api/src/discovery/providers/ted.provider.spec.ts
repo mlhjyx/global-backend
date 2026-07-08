@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { TedDiscoveryProvider, mapNoticeToRecords, toAlpha2 } from './ted.provider';
-import { TedAwardNotice } from '../../adapters/ted-api';
+import { TedAwardNotice, searchAwardNotices } from '../../adapters/ted-api';
 import { CompanyDiscoveryQuery } from '../provider-contract';
+
+vi.mock('../../adapters/ted-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../adapters/ted-api')>();
+  return { ...actual, searchAwardNotices: vi.fn() };
+});
+const mockedSearch = vi.mocked(searchAwardNotices);
 
 const NOW = '2026-07-08T00:00:00.000Z';
 
@@ -41,6 +47,9 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     expect(ted.license).toBe('CC-BY-4.0');
     expect(String(ted.attribution)).toMatch(/European Union/i);
     expect(r.provenance?.parserVersion).toBe('ted/v1');
+    // §8.5 top-level 记录许可（写入 field_evidence.license）+ §8.4 provider 标识（税号）
+    expect(r.license).toBe('CC BY 4.0');
+    expect(r.identifier).toEqual({ scheme: 'ted-natid', value: 'DE111' });
   });
 
   it('🔴 合规：绿事实记录里绝不含具名邮箱/个人联系点', () => {
@@ -70,6 +79,7 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     const recs = mapNoticeToRecords(notice({ winners: [{ name: 'Gamma GmbH', country: 'DEU' }] }), NOW);
     const ted = recs[0].attributes?.ted as Record<string, unknown>;
     expect('winner_identifier' in ted).toBe(false);
+    expect(recs[0].identifier).toBeUndefined(); // §8.4 无标识 → 不设 top-level identifier
   });
 
   it('空名中标方被过滤', () => {
@@ -95,6 +105,59 @@ describe('§8.3 toAlpha2 国别归一', () => {
   });
   it('空值透传', () => {
     expect(toAlpha2(undefined)).toBeUndefined();
+  });
+});
+
+describe('§8.8 source_policy 用途门（含个人数据源，直连 HTTP 前必校验）', () => {
+  const gq = q({ cpv: '42120000', buyer_country: 'DEU' });
+  beforeEach(() => mockedSearch.mockReset());
+
+  it('SUSPENDED → 空且不发请求', async () => {
+    const p = new TedDiscoveryProvider({ sourcePolicyReader: async () => ({ suspended: true }) });
+    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
+    expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it('策略行缺失(null) → 空且不发请求（reader 在场 = fail-closed）', async () => {
+    const p = new TedDiscoveryProvider({ sourcePolicyReader: async () => null });
+    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
+    expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it('allowedPurpose 不含 discovery → 空且不发请求', async () => {
+    const p = new TedDiscoveryProvider({
+      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['enrichment'] }),
+    });
+    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
+    expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it('reader 抛错 → 空且不发请求（fail-closed）', async () => {
+    const p = new TedDiscoveryProvider({
+      sourcePolicyReader: async () => {
+        throw new Error('db down');
+      },
+    });
+    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
+    expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it('APPROVED + discovery 允许 → 发请求并映射', async () => {
+    mockedSearch.mockResolvedValue([notice({ winners: [{ name: 'Acme AG', country: 'DEU', identifier: 'DE1' }] })]);
+    const p = new TedDiscoveryProvider({
+      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['discovery', 'enrichment'] }),
+    });
+    const res = await p.discoverCompanies(gq);
+    expect(mockedSearch).toHaveBeenCalledOnce();
+    expect(res.records).toHaveLength(1);
+    expect(res.records[0].name).toBe('Acme AG');
+  });
+
+  it('无 reader（直连探针/测试）→ 不设门，照常发请求（fail-open）', async () => {
+    mockedSearch.mockResolvedValue([notice({ winners: [{ name: 'Bravo SA', country: 'FRA' }] })]);
+    const res = await new TedDiscoveryProvider().discoverCompanies(gq);
+    expect(mockedSearch).toHaveBeenCalledOnce();
+    expect(res.records).toHaveLength(1);
   });
 });
 
