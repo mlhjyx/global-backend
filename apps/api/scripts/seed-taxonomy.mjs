@@ -61,6 +61,26 @@ async function seedCountries() {
   return { nodes: n, aliases: a };
 }
 
+// CPV 子树种子（§2.3 有界·手工核验·frozen source='seed'，非全 9450 码树）。
+// 8 位码 + parentCode 自引用（前缀嵌套）；供 ISIC.crosswalks.cpv 锚定 + 产品精修枚举 + node('cpv',code) 校验。
+const CPV_SEED = [
+  { code: '42000000', parent: null, en: 'Industrial machinery', zh: '工业机械', de: 'Industrielle Maschinen' },
+  { code: '42120000', parent: '42000000', en: 'Pumps and compressors', zh: '泵与压缩机', de: 'Pumpen und Kompressoren' },
+  { code: '42122000', parent: '42120000', en: 'Pumps', zh: '泵', de: 'Pumpen' },
+  { code: '42122130', parent: '42122000', en: 'Water pumps', zh: '水泵', de: 'Wasserpumpen' },
+  { code: '42123000', parent: '42120000', en: 'Compressors', zh: '压缩机', de: 'Kompressoren' },
+];
+
+async function seedCpv() {
+  let n = 0, a = 0;
+  for (const c of CPV_SEED) {
+    await upsertNode('cpv', 'CPV', c.code, { parentCode: c.parent, labelEn: c.en, labels: { zh: c.zh, de: c.de } });
+    n++;
+    for (const al of [c.en, c.zh, c.de]) { if (al) { await upsertAlias('cpv', al, c.code, 'seed'); a++; } }
+  }
+  return { nodes: n, aliases: a };
+}
+
 async function seedIndustries() {
   let n = 0, a = 0;
   for (const node of ISIC_SEED) {
@@ -81,8 +101,10 @@ async function seedIndustries() {
 
 const cty = await seedCountries();
 const ind = await seedIndustries();
+const cpv = await seedCpv();
 console.log(`countries: ${cty.nodes} nodes, ${cty.aliases} aliases`);
 console.log(`industries: ${ind.nodes} nodes, ${ind.aliases} aliases`);
+console.log(`cpv: ${cpv.nodes} nodes, ${cpv.aliases} aliases`);
 const totalAlias = await db.termAlias.count();
 const totalNode = await db.canonicalTaxonomy.count();
 console.log(`TOTAL: ${totalNode} canonical nodes, ${totalAlias} aliases`);
