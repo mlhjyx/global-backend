@@ -335,3 +335,18 @@ export interface CompanyEnrichmentAdapter {
 ## 7. Provenance
 
 本规格由 4-agent workflow 产出(3 并行 research:API 实测 / 代码库接缝 / CPV+合规 → 1 对抗验证复验 API 事实),2026-07-08 全程活体实测、无 sandbox。原始 research 存 scratchpad(`allfields.txt` 1830 字段名、`can_resp.json` 中标公告样本等)。验证 pass 修正了研究稿的体量数字错误与中标联系方式产出率高估(§1.7 已并入)。
+
+---
+
+## 8. 审查修正（Codex 2026-07-08 · 已代码/活 API 复核并入 · 实施必读）
+
+下列 8 点经 Codex 审查 + 我方**代码/活 API 复核全部确认**,实施时**按此覆盖正文对应处**:
+
+1. **body flag 不止 7 个**:TED Swagger 还支持 `checkQuerySyntax`、`onlyLatestVersions`。**`scope=ALL` 回填必设 `onlyLatestVersions=true`**——否则被更正的 notice 会以旧版本重复摄入,污染供应商发现与 intent 历史。建库时对 Swagger 确认完整 flag 集,把期望的 latest-version 行为写死。
+2. **`TaxonomyResolver.resolve()` 剥掉 crosswalks**(代码确认:`node()` 只返 `kind/scheme/code/labelEn/labels/wikidataQid/osmTags`,**无 `crosswalks`**)。§2.3 的 `industryNode.crosswalks.cpv` 取不到 → **P2 必做前置:扩 `TaxonomyResolver`/`CanonicalNode` 暴露 `crosswalks`(或直接读 `canonical_taxonomy.crosswalks`)**;country 的 `crosswalks.alpha3` 同理。
+3. **国别码归一 ISO-3→alpha-2**:canonical 国别码是 **alpha-2**(`DE`;`identity.ts` dedupeKey=`n:<name>:<country.toLowerCase()>`,seed 用 `c.cca2`),TED `winner-country`/`buyer-country` 是 **ISO-3**(`DEU`)。直接用会让同一德国公司经 TED vs GLEIF/Wikidata dedupe 到**不同 key**(`n:x:deu` vs `n:x:de`)+ 国别资格规则漏判。**canonical 化前把 TED 国别转回 alpha-2**(用 country 节点 `crosswalks.alpha3` 反查)。
+4. **dedupe 用 `winner-identifier`**:现 canonicalization 只按域名或 name+country;TED 中标常缺 URL 但有税号/注册号。**加 provider-id/tax-id 身份规则(或 TED 专属 canonicalization)**,否则同名同国的不同中标方会误并、改名法人会漏并。
+5. **discovery 证据带 TED 署名**:`canonicalizeRun` 硬编码 `field_evidence.license='licensed'`(`discovery.activities.ts:269`),**不带** TED 署名串/notice id;§3 要求 CC BY 强制署名 → **只走 raw→canonical 会产出无法合规展示/导出的公司字段**。须为 provider `ted` 改 discovery 证据(`license='CC BY 4.0'` + notice id/attribution),不只富集路(富集路 `enrichRun` 可设 license,但发现路是硬编码)。
+6. **打分前归一发布日期**:TED `publication-date`=`2026-07-08+02:00`,`scoring.ts` 的 `Date.parse()` 判 **invalid → NaN → recencyDecay=0 → Intent 不得分**(§4.4 已提「须合法 ISO」,此处明确格式)。intent 投影写 `attributes.intent.events[].at` 前**必转 `2026-07-08T00:00:00+02:00`**。
+7. **教 query planner 路由 TED**:仅注册 adapter 不够——`apps/api/src/ai-tasks/task-registry.ts:340` 的 `query_plan` prompt 只在 `public_intelligence` 下列 `public_web`、`source_hint` 例子无 `ted` → planner 不生成 CPV/buyer-country 的 TED 查询,**provider 注册了却从生成计划够不到**。**须改 `task-registry.ts`**:prompt 列 `ted` + `source_hint` + CPV/buyer-country filter 契约。→ 加进 §4.6「改」清单。
+8. **直连 TED 强制 source_policy**:plain discovery 路只把 SUSPENDED 域当 `blockedDomains`(`discovery.activities.ts:108`),**不查 `allowedPurpose`/`personalData`**。TED 可能返具名联系人 → 光有 DB 行不是门。§4.2「ToolBroker 可选」对**含个人数据的招投标源不成立**——改为**在 adapter 显式查 source_policy/purpose,或 HTTP 走 ToolBroker**(必走)。
