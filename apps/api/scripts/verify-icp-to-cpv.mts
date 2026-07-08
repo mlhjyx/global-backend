@@ -61,6 +61,18 @@ async function main() {
   const ted = queries.find((q) => q.filters.source_hint === 'ted');
   ok(!!ted && String(ted.filters.cpv).startsWith('4212') && ted.filters.buyer_country === 'DEU', `buildTedQuery 注入 source_hint=ted（cpv=${ted?.filters.cpv} buyer=${ted?.filters.buyer_country}）`);
 
+  // ── 对抗复审修正验证：CPV 子树前缀（去尾零）+ 缓存子树作用域（真库，确定性无 LLM）──
+  await ownerDb.termAlias.upsert({
+    where: { kind_term: { kind: 'cpv', term: 'xtest pump' } },
+    update: { code: '42122130', source: 'seed' },
+    create: { kind: 'cpv', term: 'xtest pump', code: '42122130', source: 'seed' },
+  });
+  const inSub = await tax.resolveCpvForProduct('xtest pump', ['42120000'], { allowLlm: false });
+  ok(inSub === '42122130', `复审修 #1：产品精修落到子树内子码 42122130（全码锚 42120000 去尾零→4212 覆盖子树；=${inSub}）`);
+  const crossSub = await tax.resolveCpvForProduct('xtest pump', ['33000000'], { allowLlm: false });
+  ok(crossSub === null, `复审修 #2：缓存码 42122130 不在当前子树(33*) → 不跨 ICP 串用（=${crossSub}）`);
+  await ownerDb.termAlias.delete({ where: { kind_term: { kind: 'cpv', term: 'xtest pump' } } }).catch(() => {});
+
   // ══════════ Tier 2 · 真 API：注入的 filters 真驱动 TED（闭环）══════════
   console.log('\n══ Tier 2 · 真 API：ICP→CPV 注入的 filters → TED 真拉中标公司（闭环）══');
   const provider = new TedDiscoveryProvider({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });

@@ -29,6 +29,12 @@ export interface CanonicalNode {
 const norm = (s: string): string => s.normalize('NFC').toLowerCase().trim();
 
 /**
+ * CPV 层级前缀：去尾零占位符（'42120000'→'4212'）。CPV 全为 8 位、子码自第一个非零位起分叉，
+ * 故对全码做 startsWith 只命中锚自身；取有效前缀才能覆盖子树（42122000/42122130/42123000…）。
+ */
+export const cpvSubtreePrefix = (code: string): string => code.replace(/0+$/, '') || code;
+
+/**
  * 词表归一（混合，docs/backend/vocab-taxonomy.md）：
  * 1) 确定性：normKey → TermAlias 命中 → CanonicalTaxonomy 节点（零成本零延迟）。
  * 2) 冷路径 LLM：未命中 → taxonomy.normalize（enum 约束 code 值域，杜绝幻觉）→
@@ -137,14 +143,16 @@ export class TaxonomyResolver {
   ): Promise<string | null> {
     const term = norm(product);
     if (!term || !subtreePrefixes.length) return null;
+    const prefixes = subtreePrefixes.map(cpvSubtreePrefix);
 
     const alias = await this.prisma.termAlias.findUnique({ where: { kind_term: { kind: 'cpv', term } } });
-    if (alias) return alias.code;
+    // 缓存命中须落在**当前子树**内：别名按 (kind,term) 全局缓存、不按子树，跨 ICP 不同行业子树同产品词不可串用。
+    if (alias && prefixes.some((p) => alias.code.startsWith(p))) return alias.code;
     if (opts?.allowLlm === false) return null;
 
     // 有界枚举：仅子树前缀命中的 CPV 码（绝不整表；这是与 llmResolve 整表 slice 的关键区别）
     const rows = await this.prisma.canonicalTaxonomy.findMany({
-      where: { kind: 'cpv', OR: subtreePrefixes.map((p) => ({ code: { startsWith: p } })) },
+      where: { kind: 'cpv', OR: prefixes.map((p) => ({ code: { startsWith: p } })) },
       select: { code: true, labelEn: true, labels: true },
       take: 500,
     });

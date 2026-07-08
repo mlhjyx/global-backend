@@ -80,6 +80,31 @@ function uniq(arr: string[]): string[] {
   return [...new Set(arr.filter(Boolean))];
 }
 
+/** 拆分自由词：数组递归摊平；字符串按逗号/分号/斜杠/顿号切分（"pumps, valves" → ['pumps','valves']）。 */
+export function splitTerms(v: unknown): string[] {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.flatMap(splitTerms);
+  return String(v)
+    .split(/[,;/、]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 汇集行业词（§8.7 稳健化）：从 ICP company_attributes（industry/sub_industry/product）**与**
+ * planner 生成的各查询 filters（industry/sub_industry）双路采集并去重。
+ * 逗号合并串会被拆开，company_attributes 缺失时靠 planner 的按查询行业词兜底 → TED 注入不因单字段脆弱而漏。
+ */
+export function collectIndustryTerms(companyAttributes: unknown, planned: PlanQueryShape[]): string[] {
+  const attrs = (companyAttributes ?? {}) as Record<string, unknown>;
+  return uniq([
+    ...splitTerms(attrs.industry),
+    ...splitTerms(attrs.sub_industry),
+    ...splitTerms(attrs.product),
+    ...planned.flatMap((q) => [...splitTerms(q.filters?.industry), ...splitTerms(q.filters?.sub_industry)]),
+  ]);
+}
+
 /** 查询计划条目形状（与 discovery.query_plan 输出的 queries[] 结构一致）。 */
 export interface PlanQueryShape {
   source_class: string;

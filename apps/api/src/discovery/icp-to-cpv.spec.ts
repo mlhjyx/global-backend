@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resolveIcpToCpv, TED_COVERAGE, CpvTaxonomyPort, buildTedQuery, PlanQueryShape } from './icp-to-cpv';
-import { CanonicalNode } from './taxonomy-resolver';
+import {
+  resolveIcpToCpv,
+  TED_COVERAGE,
+  CpvTaxonomyPort,
+  buildTedQuery,
+  PlanQueryShape,
+  splitTerms,
+  collectIndustryTerms,
+} from './icp-to-cpv';
+import { CanonicalNode, cpvSubtreePrefix } from './taxonomy-resolver';
 
 function node(kind: string, code: string, crosswalks: Record<string, unknown>): CanonicalNode {
   return {
@@ -153,5 +161,39 @@ describe('buildTedQuery（§8.7 计划注入，纯函数）', () => {
   it('无码无 warning → 原样返回', () => {
     const out = buildTedQuery({ cpvCodes: [], buyerCountries: [], warnings: [] }, [web]);
     expect(out).toEqual([web]);
+  });
+});
+
+describe('复审修正 · cpvSubtreePrefix + 词采集稳健化', () => {
+  it('cpvSubtreePrefix 去尾零占位符（覆盖子树的关键）', () => {
+    expect(cpvSubtreePrefix('42120000')).toBe('4212');
+    expect(cpvSubtreePrefix('42122000')).toBe('42122');
+    expect(cpvSubtreePrefix('42122130')).toBe('4212213');
+    expect(cpvSubtreePrefix('00000000')).toBe('00000000'); // 全零回退原值（不产生空前缀）
+  });
+
+  it('splitTerms 拆逗号/顿号、数组摊平、去空', () => {
+    expect(splitTerms('pumps, valves')).toEqual(['pumps', 'valves']);
+    expect(splitTerms('泵、压缩机')).toEqual(['泵', '压缩机']);
+    expect(splitTerms(['a', 'b, c'])).toEqual(['a', 'b', 'c']);
+    expect(splitTerms(null)).toEqual([]);
+    expect(splitTerms('  ')).toEqual([]);
+  });
+
+  it('collectIndustryTerms 双路采集（attrs + planner）+ 去重', () => {
+    const planned: PlanQueryShape[] = [
+      { source_class: 'x', filters: { industry: 'machinery' }, keywords: [], rationale: '', priority: 2 },
+    ];
+    const terms = collectIndustryTerms({ industry: 'pumps, machinery', product: 'water pump' }, planned);
+    expect(terms).toContain('pumps');
+    expect(terms).toContain('water pump');
+    expect(terms.filter((t) => t === 'machinery')).toHaveLength(1); // attrs + planner 都有 → 去重
+  });
+
+  it('collectIndustryTerms 空 company_attributes 靠 planner 行业词兜底（防 §8.7 漏注入）', () => {
+    const planned: PlanQueryShape[] = [
+      { source_class: 'x', filters: { industry: 'pumps' }, keywords: [], rationale: '', priority: 2 },
+    ];
+    expect(collectIndustryTerms(null, planned)).toEqual(['pumps']);
   });
 });

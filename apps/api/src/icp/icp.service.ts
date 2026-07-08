@@ -11,7 +11,7 @@ import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
 import { qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
-import { resolveIcpToCpv, buildTedQuery } from '../discovery/icp-to-cpv';
+import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from '../discovery/icp-to-cpv';
 
 interface IcpModelOutput {
   name: string;
@@ -465,8 +465,9 @@ export class IcpService {
     planned: QueryPlanModelOutput['queries'],
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
-    const industryTerms = [attrs.industry, attrs.sub_industry, attrs.product].flat().filter(Boolean).map(String);
-    const targetCountries = (Array.isArray(icp.targetMarkets) ? icp.targetMarkets : []).map(String);
+    // §8.7 稳健：从 company_attributes + planner 各查询双路采集行业词（拆逗号），防单字段缺失/合并串漏掉 TED 注入。
+    const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
+    const targetCountries = splitTerms(icp.targetMarkets);
     try {
       const taxonomy = new TaxonomyResolver(this.prisma, this.gateway);
       const cpv = await resolveIcpToCpv(
