@@ -156,6 +156,8 @@ export async function searchAwardNotices(params: SearchAwardParams): Promise<Ted
       limit,
       scope,
       paginationMode: 'ITERATION',
+      // §8.1：ALL 回填必设 onlyLatestVersions，否则被更正的 notice 以旧版本重复摄入，污染发现/intent 历史。
+      ...(scope === 'ALL' ? { onlyLatestVersions: true } : {}),
     };
     if (token) body.iterationNextToken = token;
 

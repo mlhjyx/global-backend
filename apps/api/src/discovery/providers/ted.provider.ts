@@ -90,7 +90,7 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         externalId: `ted:${notice.publicationNumber ?? 'na'}:${i}`,
         name: w.name.trim(),
         domain,
-        country: w.country,
+        country: toAlpha2(w.country), // §8.3：TED 给 ISO-3(DEU)，canonical 用 alpha-2(DE)——转齐防跨源 dedupe 裂键
         attributes: { ted },
         provenance: {
           sourceUrl: notice.publicationNumber ? `${NOTICE_DETAIL_BASE}${notice.publicationNumber}` : NOTICE_DETAIL_BASE,
@@ -131,4 +131,26 @@ function csvList(v: unknown): string[] {
 
 function prune(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, val]) => val != null));
+}
+
+/**
+ * §8.3 国别码归一：TED `winner-country` 是 ISO-3（DEU），canonical/identity.ts dedupeKey 用 alpha-2（DE，
+ * 镜像 country seed 的 `cca2`）。不转 → 同一德国公司经 TED(`n:x:deu`) vs GLEIF/Wikidata(`n:x:de`) 裂成两 key，
+ * 且国别资格规则漏判。此处按 ISO 3166 标准（= country 节点 crosswalks.alpha3 的同一映射）转齐；
+ * 覆盖 TED 买方覆盖集（§2.4 EU/EEA/UK）+ 常见中标方来源国。未收录码保留原值（best-effort，不静默出错）。
+ */
+const TED_ISO3_TO_ISO2: Record<string, string> = {
+  AUT: 'AT', BEL: 'BE', BGR: 'BG', CHE: 'CH', CYP: 'CY', CZE: 'CZ', DEU: 'DE', DNK: 'DK',
+  ESP: 'ES', EST: 'EE', FIN: 'FI', FRA: 'FR', GBR: 'GB', GRC: 'GR', HRV: 'HR', HUN: 'HU',
+  IRL: 'IE', ISL: 'IS', ITA: 'IT', LIE: 'LI', LTU: 'LT', LUX: 'LU', LVA: 'LV', MLT: 'MT',
+  NLD: 'NL', NOR: 'NO', POL: 'PL', PRT: 'PT', ROU: 'RO', SVK: 'SK', SVN: 'SI', SWE: 'SE',
+  // 常见非欧盟中标方来源
+  USA: 'US', CHN: 'CN', JPN: 'JP', KOR: 'KR', TUR: 'TR', IND: 'IN', CAN: 'CA', AUS: 'AU',
+  BRA: 'BR', RUS: 'RU', UKR: 'UA', SRB: 'RS', ISR: 'IL',
+};
+
+/** ISO-3 → alpha-2（未收录保留原值）。空/无值透传。 */
+export function toAlpha2(iso3?: string): string | undefined {
+  if (!iso3) return iso3;
+  return TED_ISO3_TO_ISO2[iso3.toUpperCase()] ?? iso3;
 }

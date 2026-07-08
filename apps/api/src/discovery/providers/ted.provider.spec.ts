@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TedDiscoveryProvider, mapNoticeToRecords } from './ted.provider';
+import { TedDiscoveryProvider, mapNoticeToRecords, toAlpha2 } from './ted.provider';
 import { TedAwardNotice } from '../../adapters/ted-api';
 import { CompanyDiscoveryQuery } from '../provider-contract';
 
@@ -33,7 +33,7 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     const r = recs[0];
     expect(r.name).toBe('Acme Pumps Ltd');
     expect(r.domain).toBe('acme-pumps.example');
-    expect(r.country).toBe('DEU');
+    expect(r.country).toBe('DE'); // §8.3：ISO-3 DEU → alpha-2 DE
     const ted = r.attributes?.ted as Record<string, unknown>;
     expect(ted.publication_number).toBe('123456-2026');
     expect(ted.cpv).toEqual(['42120000']);
@@ -76,6 +76,25 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     const recs = mapNoticeToRecords(notice({ winners: [{ name: '  ' }, { name: 'Real Co' }] }), NOW);
     expect(recs).toHaveLength(1);
     expect(recs[0].name).toBe('Real Co');
+  });
+
+  it('§8.3 国别 ISO-3 → alpha-2（canonical 一致，防跨源 dedupe 裂键）', () => {
+    const recs = mapNoticeToRecords(notice({ winners: [{ name: 'Acme AG', country: 'DEU' }] }), NOW);
+    expect(recs[0].country).toBe('DE');
+  });
+});
+
+describe('§8.3 toAlpha2 国别归一', () => {
+  it('TED 覆盖集 ISO-3 → alpha-2', () => {
+    expect(toAlpha2('DEU')).toBe('DE');
+    expect(toAlpha2('FRA')).toBe('FR');
+    expect(toAlpha2('GBR')).toBe('GB');
+  });
+  it('未收录码保留原值（best-effort，不静默出错）', () => {
+    expect(toAlpha2('ZZZ')).toBe('ZZZ');
+  });
+  it('空值透传', () => {
+    expect(toAlpha2(undefined)).toBeUndefined();
   });
 });
 
