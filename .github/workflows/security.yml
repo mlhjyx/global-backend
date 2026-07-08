@@ -10,6 +10,13 @@ concurrency:
   group: security-${{ github.ref }}
   cancel-in-progress: true
 
+# 仓库转私有后，GITHUB_TOKEN 默认权限收紧，gitleaks-action 读取 PR commits
+# (GET pulls/{n}/commits) 会 403「Resource not accessible by integration」。
+# 显式授权：读取内容 + 读写 PR(供命中时回评)。缺此块则每个 PR 的密钥扫描都会挂。
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   secret-scan:
     name: gitleaks 密钥扫描

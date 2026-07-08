@@ -57,7 +57,7 @@
 | # | 做什么 | 价值 | 依赖 | 状态 |
 |---|---|---|---|---|
 | 1 | **backlog 下游游标饿死修复**（加 schema 水位列） | 让存量公司真进漏斗（尾部现永久饿死） | 需 migration（高风险自审） | 🟢 进行中（另一会话） |
-| 2 | **TED v3 招投标 + openFDA 认证库** | 最快见效的「需求证据+时机」，**零鉴权/免 key**，当天可验证 | 需 ICP→CPV/NAICS 映射 | ⬜ |
+| 2 | **TED v3 招投标 + openFDA 认证库** | 最快见效的「需求证据+时机」，**零鉴权/免 key**，当天可验证 | 需 ICP→CPV/NAICS 映射 | 📋 **规格就绪** → [ted-provider-spec.md](ted-provider-spec.md)（活 API 实测契约 + ICP→CPV 映射 + 合规 + 接缝 + 实施顺序）；openFDA 待写 |
 | 3 | **GDPR 删除编排**（DSR/删除依赖图/Temporal 删除流） | 我们在存决策人个人数据却无法删=Art.17 暴露；触达上线前必做 | 无 | ⬜🔴 |
 | 4 | **专利 inventor + 自有 ATS 招聘 JSON + 提单 FOIA 基线** | 继续补免费需求/时机/决策人源（§10.6 排序） | 无 | ⬜ |
 | 5 | **六维 加法→乘法门** `Fit^a×(1+Intent)×Reachability×(1+DemandProof)` | 让联系不上/无需求的不占推荐位 | **必须等 #1 修完**（否则饿死致 Reachability=0，乘法门误杀+校准基线脏） | ⬜ |
