@@ -10,6 +10,8 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
 import { qualify, RuleLike } from './rule-engine';
+import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
+import { resolveIcpToCpv, buildTedQuery } from '../discovery/icp-to-cpv';
 
 interface IcpModelOutput {
   name: string;
@@ -435,17 +437,49 @@ export class IcpService {
     );
     const out = result.data;
 
+    // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
+    // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
+    const queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries']);
+
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.discoveryQueryPlan.create({
         data: {
           workspaceId: ctx.workspaceId,
           icpId,
           status: 'DRAFT', // 人工确认（→READY）后才可被 Discover 执行
-          queries: (out.queries ?? []) as never,
+          queries: queries as never,
           estimatedVolume: Number.isFinite(out.estimated_volume) ? Math.round(out.estimated_volume) : null,
         },
       }),
     );
+  }
+
+  /**
+   * §2.3 冷路径：把 ICP→CPV 解析出的 TED 中标发现查询前置进计划（priority 1）。
+   * fail-safe：解析失败/无覆盖国 → 不阻断计划（其余源照常）；覆盖 warning 附到 rationale，人工门可见。
+   * CPV/国别全由确定性 crosswalk 解析注入，planner LLM 绝不臆造码。
+   */
+  private async injectTedQuery(
+    workspaceId: string,
+    icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
+    planned: QueryPlanModelOutput['queries'],
+  ): Promise<QueryPlanModelOutput['queries']> {
+    const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
+    const industryTerms = [attrs.industry, attrs.sub_industry, attrs.product].flat().filter(Boolean).map(String);
+    const targetCountries = (Array.isArray(icp.targetMarkets) ? icp.targetMarkets : []).map(String);
+    try {
+      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway);
+      const cpv = await resolveIcpToCpv(
+        taxonomy,
+        { industryTerms, product: attrs.product ? String(attrs.product) : undefined, targetCountries },
+        { workspaceId },
+      );
+      return buildTedQuery(cpv, planned) as QueryPlanModelOutput['queries'];
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[icp] icp→cpv resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
+      return planned;
+    }
   }
 
   /** Human gate: confirm a DRAFT plan → READY (Discover may execute it). */

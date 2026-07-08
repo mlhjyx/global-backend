@@ -5,6 +5,16 @@ import { getTask } from '../ai-tasks/task-registry';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 
+/** 官方码制对照（§8.2 暴露给 resolveIcpToCpv 等冷路径；schemaless JSON，键按 kind 选用）。 */
+export interface TaxonomyCrosswalks {
+  cpv?: string[]; // ISIC→CPV 锚（8 位码或 division/class 前缀）
+  alpha3?: string[]; // country→ISO-3（TED buyer-country 格式，如 ['DEU']）
+  numeric?: string[];
+  nace?: string[];
+  naics?: string[];
+  gb4754?: string[];
+}
+
 export interface CanonicalNode {
   kind: string;
   scheme: string;
@@ -13,6 +23,7 @@ export interface CanonicalNode {
   labels: Record<string, string> | null;
   wikidataQid: string | null;
   osmTags: { k: string; v?: string }[] | null;
+  crosswalks: TaxonomyCrosswalks | null;
 }
 
 const norm = (s: string): string => s.normalize('NFC').toLowerCase().trim();
@@ -68,6 +79,7 @@ export class TaxonomyResolver {
       labels: (row.labels as Record<string, string>) ?? null,
       wikidataQid: row.wikidataQid,
       osmTags: (row.osmTags as { k: string; v?: string }[]) ?? null,
+      crosswalks: (row.crosswalks as TaxonomyCrosswalks) ?? null, // §8.2：列已 fetch，此前仅在映射处丢弃
     };
   }
 
@@ -109,6 +121,74 @@ export class TaxonomyResolver {
       return node;
     } catch (e) {
       this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
+      return null;
+    }
+  }
+
+  /**
+   * §2.3/§8.2 冷路径：把产品自由词精修到 crosswalk 子树内的某个 CPV 码。
+   * **枚举永远限于子树前缀命中的 CPV 码**（≤ 数百），绝不走 llmResolve 的整表 slice(0,6000) 截断陷阱。
+   * 先查 TermAlias 缓存；miss + allowLlm 才请求 LLM（enum 约束 code 值域），命中后校验存在 + 沉淀别名。
+   */
+  async resolveCpvForProduct(
+    product: string,
+    subtreePrefixes: string[],
+    opts?: { workspaceId?: string; allowLlm?: boolean },
+  ): Promise<string | null> {
+    const term = norm(product);
+    if (!term || !subtreePrefixes.length) return null;
+
+    const alias = await this.prisma.termAlias.findUnique({ where: { kind_term: { kind: 'cpv', term } } });
+    if (alias) return alias.code;
+    if (opts?.allowLlm === false) return null;
+
+    // 有界枚举：仅子树前缀命中的 CPV 码（绝不整表；这是与 llmResolve 整表 slice 的关键区别）
+    const rows = await this.prisma.canonicalTaxonomy.findMany({
+      where: { kind: 'cpv', OR: subtreePrefixes.map((p) => ({ code: { startsWith: p } })) },
+      select: { code: true, labelEn: true, labels: true },
+      take: 500,
+    });
+    if (!rows.length) return null;
+
+    const contract = getTask('taxonomy.normalize');
+    if (!contract) return null;
+    const catalog = rows.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
+    const schema = {
+      type: 'object',
+      required: ['code'],
+      properties: {
+        code: {
+          type: ['string', 'null'],
+          enum: [...rows.map((n) => n.code), null],
+          description: '子树内最匹配的 CPV 码；无则 null',
+        },
+      },
+    };
+    try {
+      const result = await this.gateway.generateStructured<{ code: string | null }>(
+        {
+          task: contract.id,
+          system: contract.description,
+          model: contract.model,
+          schema,
+          prompt: `把产品「${product}」精修到下面 CPV 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
+        },
+        { workspaceId: opts?.workspaceId ?? 'taxonomy' },
+      );
+      const code = result.data?.code;
+      if (!code) return null;
+      const node = await this.node('cpv', code); // 校验 code 真实存在
+      if (!node) return null;
+      await this.prisma.termAlias
+        .upsert({
+          where: { kind_term: { kind: 'cpv', term } },
+          update: { code, source: 'llm' },
+          create: { kind: 'cpv', term, code, source: 'llm' },
+        })
+        .catch((e) => this.logger.warn(`cpv alias sediment failed: ${String(e).slice(0, 120)}`));
+      return code;
+    } catch (e) {
+      this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
   }
