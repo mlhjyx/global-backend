@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { TedDiscoveryProvider, mapNoticeToRecords, toAlpha2 } from './ted.provider';
 import { TedAwardNotice, searchAwardNotices } from '../../adapters/ted-api';
+import { companyIdentity } from '../identity';
 import { CompanyDiscoveryQuery } from '../provider-contract';
 
 vi.mock('../../adapters/ted-api', async (importOriginal) => {
@@ -49,7 +50,7 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     expect(r.provenance?.parserVersion).toBe('ted/v1');
     // §8.5 top-level 记录许可（写入 field_evidence.license）+ §8.4 provider 标识（税号）
     expect(r.license).toBe('CC BY 4.0');
-    expect(r.identifier).toEqual({ scheme: 'ted-natid', value: 'DE111' });
+    expect(r.identifier).toEqual({ scheme: 'ted-natid:de', value: 'DE111' }); // §8.4 scheme 国别限定（DEU→de）
   });
 
   it('🔴 合规：绿事实记录里绝不含具名邮箱/个人联系点', () => {
@@ -80,6 +81,16 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     const ted = recs[0].attributes?.ted as Record<string, unknown>;
     expect('winner_identifier' in ted).toBe(false);
     expect(recs[0].identifier).toBeUndefined(); // §8.4 无标识 → 不设 top-level identifier
+  });
+
+  it('§8.4 identifier scheme 按国别限定 → 不同国同号的不同法人不跨境误并（审查修正）', () => {
+    const de = mapNoticeToRecords(notice({ winners: [{ name: 'Müller Bau GmbH', country: 'DEU', identifier: '12345678' }] }), NOW);
+    const pt = mapNoticeToRecords(notice({ winners: [{ name: 'Silva Lda', country: 'PRT', identifier: '12345678' }] }), NOW);
+    expect(de[0].identifier).toEqual({ scheme: 'ted-natid:de', value: '12345678' });
+    expect(pt[0].identifier).toEqual({ scheme: 'ted-natid:pt', value: '12345678' });
+    const kDe = companyIdentity({ name: de[0].name, country: de[0].country, identifier: de[0].identifier }).dedupeKey;
+    const kPt = companyIdentity({ name: pt[0].name, country: pt[0].country, identifier: pt[0].identifier }).dedupeKey;
+    expect(kDe).not.toBe(kPt); // 跨境同号 → 不同 dedupeKey（绝不贴错身份）
   });
 
   it('空名中标方被过滤', () => {
