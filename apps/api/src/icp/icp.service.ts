@@ -12,6 +12,7 @@ import { getTask } from '../ai-tasks/task-registry';
 import { qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from '../discovery/icp-to-cpv';
+import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
 
 interface IcpModelOutput {
   name: string;
@@ -439,7 +440,9 @@ export class IcpService {
 
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    const queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries']);
+    let queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries']);
+    // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
+    queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries);
 
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.discoveryQueryPlan.create({
@@ -479,6 +482,37 @@ export class IcpService {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn(`[icp] icp→cpv resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
+      return planned;
+    }
+  }
+
+  /**
+   * §2.3（openFDA）冷路径：把 ICP→FDA 解析出的器械注册发现查询前置进计划（priority 1）。
+   * 贸易侧从 company_attributes.trade_side 取（默认进口商）；product code 全由确定性 crosswalk + 有界 LLM 精修解析，
+   * planner LLM 绝不臆造码。fail-safe：解析失败 → 不阻断计划。
+   */
+  private async injectFdaQuery(
+    workspaceId: string,
+    icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
+    planned: QueryPlanModelOutput['queries'],
+  ): Promise<QueryPlanModelOutput['queries']> {
+    const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
+    const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
+    try {
+      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway);
+      const fda = await resolveIcpToFda(
+        taxonomy,
+        {
+          industryTerms,
+          product: attrs.product ? String(attrs.product) : undefined,
+          tradeSide: attrs.trade_side ? String(attrs.trade_side) : undefined,
+        },
+        { workspaceId },
+      );
+      return buildFdaQuery(fda, planned) as QueryPlanModelOutput['queries'];
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[icp] icp→fda resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;
     }
   }

@@ -10,7 +10,7 @@ export interface IsicNode {
   en: string;
   zh: string;
   de?: string;
-  crosswalks?: { cpv?: string[]; nace?: string[]; naics?: string[]; gb4754?: string[] };
+  crosswalks?: { cpv?: string[]; fdaPanels?: string[]; fdaProductCodes?: string[]; nace?: string[]; naics?: string[]; gb4754?: string[] };
   wikidataQid?: string;
   osmTags?: { k: string; v?: string }[];
   aliases?: string[]; // 归一到该 code 的别名（中/英/德/口语）
@@ -55,6 +55,11 @@ export const ISIC_SEED: IsicNode[] = [
   { code: '26', parent: 'C', en: 'Manufacture of computer, electronic and optical products', zh: '电子及光学产品制造', de: 'Elektronik',
     crosswalks: { nace: ['26'], naics: ['334'], gb4754: ['39', '40'] }, wikidataQid: 'Q11650',
     aliases: ['电子', 'electronics', 'elektronik', '电子制造', 'consumer electronics'] },
+
+  // 医疗器械制造（→ FDA 专科 panel crosswalk，供 ICP→FDA 产品码映射 P2；panel 码见 seed-taxonomy FDA_PANEL_SEED）
+  { code: '325', parent: 'C', en: 'Manufacture of medical and dental instruments and supplies', zh: '医疗器械制造', de: 'Medizintechnik',
+    crosswalks: { fdaPanels: ['RA', 'CV', 'OR', 'SU', 'GU', 'EN'], nace: ['32.5'], naics: ['3391'] }, wikidataQid: 'Q12140',
+    aliases: ['医疗器械', 'medical device', 'medical devices', 'medical equipment', '医疗设备', 'medtech', 'radiology', '放射', '放射影像', 'imaging', 'medical imaging', 'diagnostic imaging', '医学影像', 'radiology imaging devices', 'device', '器械'] },
   { code: '2610', parent: '26', en: 'Manufacture of electronic components (semiconductors)', zh: '半导体制造', de: 'Halbleiter',
     crosswalks: { nace: ['26.11'], naics: ['334413'] }, wikidataQid: 'Q11661',
     aliases: ['半导体', 'semiconductor', 'semiconductors', 'halbleiter', '芯片', 'chip', '集成电路'] },
