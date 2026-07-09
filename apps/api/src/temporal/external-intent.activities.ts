@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { SourcePolicyReader } from '../tools/tool-broker.factory';
-import { resolveIcpToCpv, collectIndustryTerms, splitTerms } from '../discovery/icp-to-cpv';
+import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
 import { TedIntentProjectionService, ProjectTendersResult } from '../intent/ted-intent-projection.service';
 import { OpenFdaIntentProjectionService, ProjectClearancesResult } from '../intent/openfda-intent-projection.service';
@@ -96,14 +96,33 @@ export function createExternalIntentActivities(deps: {
       });
       if (!icp) return out;
 
+      // 稀疏 companyAttributes 兜底（Codex 复审）：复用 ICP 已存 discovery 查询计划的 filters.industry 补 industry 词
+      // （镜像 icp.service 把 planned 传进 collectIndustryTerms）——否则 industry 空 → 解析 0 码 → 静默跳过该 ICP。
+      const plan = await deps.ownerDb.discoveryQueryPlan.findFirst({
+        where: { icpId: args.icpId },
+        orderBy: { updatedAt: 'desc' },
+        select: { queries: true },
+      });
+      const planned = (Array.isArray(plan?.queries) ? plan!.queries : []) as unknown as PlanQueryShape[];
+
       const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
-      const industryTerms = collectIndustryTerms(icp.companyAttributes, []);
+      const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
       const targetCountries = splitTerms(icp.targetMarkets);
       const product = attrs.product ? String(attrs.product) : undefined;
       const tradeSide = attrs.trade_side ? String(attrs.trade_side) : undefined;
 
+      // **逐 ICP 重读 live kill-switch**（Codex 复审）：sweep 现在全量枚举可能很长，若只用 sweep 开始时捕获的
+      // args.*Enabled，中途 ops 翻 data_provider 开关本轮不生效、仍打外部 API。live 状态 AND 捕获标志（捕获标志
+      // 供单测/有界跑显式关闭；live 供中途生效）→ 任一为停即跳过。
+      const live = await deps.ownerDb.dataProvider.findMany({
+        where: { key: { in: [TED_PROVIDER, OPENFDA_PROVIDER] } },
+        select: { key: true, status: true },
+      });
+      const tedLive = args.tedEnabled && live.some((p) => p.key === TED_PROVIDER && p.status === 'ENABLED');
+      const openfdaLive = args.openfdaEnabled && live.some((p) => p.key === OPENFDA_PROVIDER && p.status === 'ENABLED');
+
       // TED 招标 intent（CPV 确定性解析 → projectTenders）
-      if (args.tedEnabled) {
+      if (tedLive) {
         try {
           const cpv = await resolveIcpToCpv(
             deps.taxonomy,
@@ -111,7 +130,9 @@ export function createExternalIntentActivities(deps: {
             { allowLlm: false, workspaceId: args.workspaceId },
           );
           out.cpvCodes = cpv.cpvCodes.length;
-          if (cpv.cpvCodes.length) {
+          // 需 CPV **且**有覆盖买方国别才投影（镜像 discovery 的 buildTedQuery 守卫，Codex 复审）：空 buyerCountries
+          // 会令 buildAwardQuery 省略国别子句 → 拉全 EU → 把无关欧盟买方 intent 灌进本 workspace（如非 EU 目标 ICP）。
+          if (cpv.cpvCodes.length && cpv.buyerCountries.length) {
             out.tenders = await tedProj.projectTenders(args.workspaceId, {
               cpvCodes: cpv.cpvCodes,
               buyerCountries: cpv.buyerCountries,
@@ -124,7 +145,7 @@ export function createExternalIntentActivities(deps: {
       }
 
       // openFDA 510(k) 清关 intent（FDA 产品码确定性解析 → projectClearances）
-      if (args.openfdaEnabled) {
+      if (openfdaLive) {
         try {
           const fda = await resolveIcpToFda(
             deps.taxonomy,

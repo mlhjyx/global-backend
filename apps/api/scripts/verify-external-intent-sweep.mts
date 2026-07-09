@@ -58,12 +58,21 @@ const taxonomy = new TaxonomyResolver(prisma, gateway);
 const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
 const acts = createExternalIntentActivities({ prisma, taxonomy, ownerDb, sourcePolicyReader });
 
+const POLICY_DOMAINS = ['api.ted.europa.eu', 'api.fda.gov'];
 let pumpIcpId = '';
 let radioIcpId = '';
+// 快照 provider/policy 原状态（Codex 复审）：finally 还原**原值**而非恒置 ENABLED/APPROVED——否则在共享库上
+// 会清掉 ops 故意的停用/暂停，让新调度 sweep 意外恢复对外抓取。
+let origProviders: { key: string; status: string }[] = [];
+let origPolicies: { domain: string; reviewStatus: string }[] = [];
 
 async function seed() {
-  await new DiscoveryProviderRegistry().seed(ownerDb); // data_provider ted/openfda + source_policy APPROVED
-  await ownerDb.sourcePolicy.updateMany({ where: { domain: { in: ['api.ted.europa.eu', 'api.fda.gov'] } }, data: { reviewStatus: 'APPROVED' } });
+  // 先快照（在 registry.seed / 强置之前），拿到 ops 真原状态
+  origProviders = await ownerDb.dataProvider.findMany({ where: { key: { in: ['ted', 'openfda'] } }, select: { key: true, status: true } });
+  origPolicies = await ownerDb.sourcePolicy.findMany({ where: { domain: { in: POLICY_DOMAINS } }, select: { domain: true, reviewStatus: true } });
+
+  await new DiscoveryProviderRegistry().seed(ownerDb); // 确保 data_provider ted/openfda + source_policy 行存在
+  await ownerDb.sourcePolicy.updateMany({ where: { domain: { in: POLICY_DOMAINS } }, data: { reviewStatus: 'APPROVED' } });
   await ownerDb.dataProvider.updateMany({ where: { key: { in: ['ted', 'openfda'] } }, data: { status: 'ENABLED' } });
   await ownerDb.workspace.upsert({ where: { id: WS }, create: { id: WS, name: 'verify-external-intent' }, update: {} });
   const company = await ownerDb.companyProfile.create({ data: { workspaceId: WS, name: 'Verify Seller Co' } });
@@ -117,9 +126,9 @@ async function main() {
 try {
   await main();
 } finally {
-  // 清理（owner 绕 RLS）：source_policy 复位 + provider 复位 + 删本 WS 全部数据
-  await ownerDb.sourcePolicy.updateMany({ where: { domain: { in: ['api.ted.europa.eu', 'api.fda.gov'] } }, data: { reviewStatus: 'APPROVED' } }).catch(() => {});
-  await ownerDb.dataProvider.updateMany({ where: { key: { in: ['ted', 'openfda'] } }, data: { status: 'ENABLED' } }).catch(() => {});
+  // 还原 provider/policy 到 **pre-run 原状态**（不恒置 ENABLED/APPROVED，防清掉 ops 故意停用）+ 删本 WS 全部数据
+  for (const p of origProviders) await ownerDb.dataProvider.update({ where: { key: p.key }, data: { status: p.status } }).catch(() => {});
+  for (const p of origPolicies) await ownerDb.sourcePolicy.update({ where: { domain: p.domain }, data: { reviewStatus: p.reviewStatus } }).catch(() => {});
   await ownerDb.fieldEvidence.deleteMany({ where: { workspaceId: WS } }).catch(() => {});
   await ownerDb.canonicalCompany.deleteMany({ where: { workspaceId: WS } }).catch(() => {});
   await ownerDb.icpDefinition.deleteMany({ where: { workspaceId: WS } }).catch(() => {});
