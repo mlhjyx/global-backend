@@ -143,6 +143,13 @@ describe('§8.6 发布日 ISO 归一（tedDateToIso）—— 防 Date.parse NaN 
     expect(tedDateToIso('')).toBeUndefined();
     expect(tedDateToIso('notadate')).toBeUndefined();
   });
+  it('含 T 但畸形 → undefined（不透传 Date.parse=NaN 的串，堵 `at=iso??now` 兜底漏洞）', () => {
+    expect(tedDateToIso('2026-07-08Tx')).toBeUndefined();
+    expect(tedDateToIso('2026-07-08T99:99:99Z')).toBeUndefined();
+  });
+  it('合规格式但非法日历日（2026-13-40）→ undefined', () => {
+    expect(tedDateToIso('2026-13-40')).toBeUndefined();
+  });
   it('归一结果 Date.parse 合法（§8.6 核心：否则 recencyDecay=0）', () => {
     expect(Number.isNaN(Date.parse(tedDateToIso('2026-07-08+02:00')!))).toBe(false);
     expect(Number.isNaN(Date.parse('2026-07-08+02:00'))).toBe(true); // 原始形式确实 invalid（证明有必要归一）

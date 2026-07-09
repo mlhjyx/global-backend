@@ -172,10 +172,13 @@ function attributeUrl(urls: string[], winnerCount: number, i: number): string | 
 export function tedDateToIso(raw?: string): string | undefined {
   if (!raw) return undefined;
   const s = raw.trim();
-  if (s.includes('T')) return s;
+  // 契约「不可解析 → undefined」对**含 T 的串同样兜底**：畸形但含 T 的值（'2026-07-08Tx'）若原样透传，
+  // 下游 `at = iso ?? now` 因其已定义而不回退 → Date.parse=NaN → recencyDecay=0 → Intent 静默不得分（正是本函数要防的）。
+  if (s.includes('T')) return Number.isNaN(Date.parse(s)) ? undefined : s;
   const m = s.match(/^(\d{4}-\d{2}-\d{2})(Z|[+-]\d{2}:\d{2})?$/);
   if (!m) return undefined;
-  return `${m[1]}T00:00:00${m[2] ?? 'Z'}`;
+  const iso = `${m[1]}T00:00:00${m[2] ?? 'Z'}`;
+  return Number.isNaN(Date.parse(iso)) ? undefined : iso; // 兜住 '2026-13-40' 这类合规格式但非法日期
 }
 
 /**
