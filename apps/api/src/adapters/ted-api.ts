@@ -35,6 +35,18 @@ const AWARD_FIELDS = [
   'winner-city',
 ];
 
+/** 招标公告（buyer 需求）字段：买方 + CPV + 截止 + 发布日；不取 winner-*（招标无中标方）。 */
+const CONTRACT_FIELDS = [
+  'publication-number',
+  'publication-date',
+  'notice-type',
+  'form-type',
+  'classification-cpv',
+  'buyer-name',
+  'buyer-country',
+  'deadline-receipt-tender-date-lot',
+];
+
 export interface AwardQueryParams {
   /** 8 位 CPV 码或前缀通配（如 `421*`）。必填 —— TED 发现绝不裸拉全库。 */
   cpvCodes: string[];
@@ -76,6 +88,18 @@ export interface TedAwardNotice {
   buyerNames: string[];
   buyerCountries: string[];
   winners: TedWinner[];
+}
+
+/** 招标公告（buyer 需求视角）：买方 + CPV + 截止日 + 发布日（含 §8.6 ISO 归一），无 winner-*。 */
+export interface TedContractNotice {
+  publicationNumber?: string;
+  publicationDate?: string; // 原始（如 "2026-07-08+02:00"）
+  publicationDateIso?: string; // §8.6 归一（"2026-07-08T00:00:00+02:00"），供 Date.parse/评分
+  noticeType?: string;
+  cpvCodes: string[];
+  buyerNames: string[]; // eng 优先解包
+  buyerCountries: string[]; // ISO-3
+  deadlines: string[]; // deadline-receipt-tender-date-lot（投标截止日，原始）
 }
 
 /** expert query 串（过滤 + 排序一体）。空 CPV 抛错（绝不裸拉全库）。 */
@@ -140,23 +164,56 @@ function attributeUrl(urls: string[], winnerCount: number, i: number): string | 
   return undefined;
 }
 
-/** 拉中标公告（iteration 滚动，累计到 maxRecords 或翻完为止）。网络失败向上抛，由 provider fail-safe。 */
-export async function searchAwardNotices(params: SearchAwardParams): Promise<TedAwardNotice[]> {
-  const query = buildAwardQuery(params);
-  const limit = Math.min(params.limit ?? MAX_LIMIT, MAX_LIMIT);
-  const maxRecords = params.maxRecords ?? limit;
-  const scope = params.scope ?? 'ACTIVE';
+/**
+ * §8.6 发布日归一到合法 ISO：TED `publication-date`=`2026-07-08+02:00`（缺 T 与时分秒）→
+ * `2026-07-08T00:00:00+02:00`，否则 `Date.parse` 判 invalid → NaN → recencyDecay=0 → Intent 不得分。
+ * 已含 T 的原样返回；只日期无时区补 `Z`；不可解析返 undefined。
+ */
+export function tedDateToIso(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const s = raw.trim();
+  if (s.includes('T')) return s;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(Z|[+-]\d{2}:\d{2})?$/);
+  if (!m) return undefined;
+  return `${m[1]}T00:00:00${m[2] ?? 'Z'}`;
+}
 
-  const out: TedAwardNotice[] = [];
+/**
+ * 一条原始招标公告（contract notice）→ 归一 TedContractNotice。
+ * 买方需求视角：buyer + CPV + 截止日 + 发布日（ISO 归一）；无 winner-*（招标未中标）。
+ */
+export function mapContractNotice(raw: Record<string, unknown>): TedContractNotice {
+  const publicationDate = firstString(raw['publication-date']);
+  return {
+    publicationNumber: firstString(raw['publication-number']),
+    publicationDate,
+    publicationDateIso: tedDateToIso(publicationDate),
+    noticeType: firstString(raw['notice-type']),
+    cpvCodes: asStringArray(raw['classification-cpv']),
+    buyerNames: unpackMultilang(raw['buyer-name']),
+    buyerCountries: asStringArray(raw['buyer-country']),
+    deadlines: asStringArray(raw['deadline-receipt-tender-date-lot']),
+  };
+}
+
+/** 通用滚动分页拉取（iteration，累计到 maxRecords 或翻完）。返回原始按字段投影的 notice 对象。 */
+async function fetchNoticesRaw(
+  query: string,
+  fields: string[],
+  scope: 'ALL' | 'ACTIVE' | 'LATEST',
+  limit: number,
+  maxRecords: number,
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
   let token: string | undefined;
   for (let page = 0; page < MAX_PAGES && out.length < maxRecords; page++) {
     const body: Record<string, unknown> = {
       query,
-      fields: AWARD_FIELDS,
+      fields,
       limit,
       scope,
       paginationMode: 'ITERATION',
-      // §8.1：ALL 回填必设 onlyLatestVersions，否则被更正的 notice 以旧版本重复摄入，污染发现/intent 历史。
+      // §8.1：ALL 回填必设 onlyLatestVersions，否则被更正 notice 以旧版本重复摄入，污染发现/intent 历史。
       ...(scope === 'ALL' ? { onlyLatestVersions: true } : {}),
     };
     if (token) body.iterationNextToken = token;
@@ -164,7 +221,7 @@ export async function searchAwardNotices(params: SearchAwardParams): Promise<Ted
     const json = await tedPost(body);
     const notices = Array.isArray(json.notices) ? json.notices : [];
     for (const n of notices) {
-      out.push(mapAwardNotice(n as Record<string, unknown>));
+      out.push(n as Record<string, unknown>);
       if (out.length >= maxRecords) break;
     }
     token = typeof json.iterationNextToken === 'string' && json.iterationNextToken ? json.iterationNextToken : undefined;
@@ -172,6 +229,23 @@ export async function searchAwardNotices(params: SearchAwardParams): Promise<Ted
     await sleep(THROTTLE_MS);
   }
   return out;
+}
+
+/** 拉中标公告（award notice，winner-* 揭示供应商）。网络失败向上抛，由 provider fail-safe。 */
+export async function searchAwardNotices(params: SearchAwardParams): Promise<TedAwardNotice[]> {
+  const scope = params.scope ?? 'ACTIVE';
+  const limit = Math.min(params.limit ?? MAX_LIMIT, MAX_LIMIT);
+  const raw = await fetchNoticesRaw(buildAwardQuery(params), AWARD_FIELDS, scope, limit, params.maxRecords ?? limit);
+  return raw.map(mapAwardNotice);
+}
+
+/** 拉招标公告（contract notice，cn-standard；买方需求 = intent/时机）。默认 scope=ACTIVE（当前开放机会）。 */
+export async function searchContractNotices(params: SearchAwardParams): Promise<TedContractNotice[]> {
+  const scope = params.scope ?? 'ACTIVE';
+  const limit = Math.min(params.limit ?? MAX_LIMIT, MAX_LIMIT);
+  const query = buildAwardQuery({ ...params, noticeType: params.noticeType ?? 'cn-standard' });
+  const raw = await fetchNoticesRaw(query, CONTRACT_FIELDS, scope, limit, params.maxRecords ?? limit);
+  return raw.map(mapContractNotice);
 }
 
 interface TedSearchResponse {
