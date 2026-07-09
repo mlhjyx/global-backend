@@ -22,7 +22,10 @@ export interface ExternalIntentSweepResult {
  * 与 web_watch 的 intentSweep 并列但分开调度：外部源按 ICP 拉、web_watch 按监控源拉。
  */
 export async function externalIntentSweepWorkflow(input?: { limit?: number }): Promise<ExternalIntentSweepResult> {
-  const { targets, tedEnabled, openfdaEnabled } = await acts.listExternalIntentTargets({ limit: input?.limit ?? 200 });
+  // 默认不传 limit → 枚举全部 ACTIVE ICP（无静默截断/不饿死旧 ICP）；调用方可显式传 limit 做有界跑。
+  const { targets, tedEnabled, openfdaEnabled } = await acts.listExternalIntentTargets(
+    input?.limit ? { limit: input.limit } : {},
+  );
 
   const agg: ExternalIntentSweepResult = {
     swept: 0, tenderCompaniesTouched: 0, tenderEvents: 0, clearanceCompaniesTouched: 0, clearanceEvents: 0, results: [],

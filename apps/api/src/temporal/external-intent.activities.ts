@@ -64,11 +64,15 @@ export function createExternalIntentActivities(deps: {
       const openfdaEnabled = providers.some((p) => p.key === OPENFDA_PROVIDER && p.status === 'ENABLED');
       if (!tedEnabled && !openfdaEnabled) return { targets: [], tedEnabled, openfdaEnabled }; // 全停 → 不枚举
 
+      // **无静默截断**：默认枚举全部 ACTIVE ICP（loop 收口要求每个 ICP 最终都被投影）。给了 arbitrary
+      // take 上限 + orderBy updatedAt desc 会**永久饿死**旧 ICP——投影只写 canonical_company、不动
+      // icp_definition，ICP 的 updatedAt 冻结，一旦 ACTIVE 数超上限，末尾的永远轮不到（同 backlog id>cursor
+      // 防活锁的教训）。`limit` 仅供单测/有界跑；生产 schedule 不传 → 全量。超大规模再上 lastSweptAt 水位列增量。
       const icps = await deps.ownerDb.icpDefinition.findMany({
         where: { status: 'ACTIVE' },
         select: { id: true, workspaceId: true },
-        orderBy: { updatedAt: 'desc' },
-        take: args?.limit ?? 200,
+        orderBy: { id: 'asc' }, // 稳定序（非 updatedAt，避免"最近编辑优先"倾斜）
+        ...(args?.limit ? { take: args.limit } : {}),
       });
       return { targets: icps.map((i) => ({ workspaceId: i.workspaceId, icpId: i.id })), tedEnabled, openfdaEnabled };
     },
