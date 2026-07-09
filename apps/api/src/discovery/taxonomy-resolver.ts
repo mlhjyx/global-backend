@@ -9,6 +9,8 @@ export type TaxonomyKind = 'industry' | 'country' | 'product';
 export interface TaxonomyCrosswalks {
   cpv?: string[]; // ISIC→CPV 锚（8 位码或 division/class 前缀）
   alpha3?: string[]; // country→ISO-3（TED buyer-country 格式，如 ['DEU']）
+  fdaPanels?: string[]; // ISIC→FDA 医疗专科 panel 2 字母码锚（如 ['RA'] 放射）——product code 无前缀层级，靠显式 panel 父维
+  fdaProductCodes?: string[]; // 直接锚定的 FDA 3 字母 product code（窄行业可跳过 panel）
   numeric?: string[];
   nace?: string[];
   naics?: string[];
@@ -199,5 +201,82 @@ export class TaxonomyResolver {
       this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
+  }
+
+  /**
+   * §2.3（openFDA）冷路径：把产品自由词精修到 **panel 子树内**的某个 FDA product code。
+   * FDA product code 是**不透明 3 字母、无前缀层级**（与 CPV 数字前缀嵌套不同）→ 枚举靠 `parentCode ∈ panelCodes`
+   * 显式父维圈定（≤ 单 panel 数百），**绝不 `resolve('fda_product_code', term)` 打全 ~6000 表**（llmResolve 整表 slice 截断陷阱）。
+   */
+  async resolveFdaProductCode(
+    product: string,
+    panelCodes: string[],
+    opts?: { workspaceId?: string; allowLlm?: boolean },
+  ): Promise<string | null> {
+    const term = norm(product);
+    if (!term || !panelCodes.length) return null;
+
+    const alias = await this.prisma.termAlias.findUnique({ where: { kind_term: { kind: 'fda_product_code', term } } });
+    // 缓存命中须落在**当前 panel 子树**内（别名全局缓存、不按 panel，跨 ICP 不同专科同产品词不可串用）。
+    if (alias) {
+      const leaf = await this.prisma.canonicalTaxonomy.findUnique({
+        where: { kind_code: { kind: 'fda_product_code', code: alias.code } },
+        select: { parentCode: true },
+      });
+      if (leaf?.parentCode && panelCodes.includes(leaf.parentCode)) return alias.code;
+    }
+    if (opts?.allowLlm === false) return null;
+
+    const rows = await this.prisma.canonicalTaxonomy.findMany({
+      where: { kind: 'fda_product_code', parentCode: { in: panelCodes } },
+      select: { code: true, labelEn: true, labels: true },
+      take: 500,
+    });
+    if (!rows.length) return null;
+
+    const contract = getTask('taxonomy.normalize');
+    if (!contract) return null;
+    const catalog = rows.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
+    const schema = {
+      type: 'object',
+      required: ['code'],
+      properties: {
+        code: { type: ['string', 'null'], enum: [...rows.map((n) => n.code), null], description: 'panel 子树内最匹配的 FDA product code；无则 null' },
+      },
+    };
+    try {
+      const result = await this.gateway.generateStructured<{ code: string | null }>(
+        {
+          task: contract.id,
+          system: contract.description,
+          model: contract.model,
+          schema,
+          prompt: `把医疗器械产品「${product}」精修到下面 FDA product code 表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
+        },
+        { workspaceId: opts?.workspaceId ?? 'taxonomy' },
+      );
+      const code = result.data?.code;
+      if (!code) return null;
+      const node = await this.node('fda_product_code', code); // 校验 code 真实存在
+      if (!node) return null;
+      await this.prisma.termAlias
+        .upsert({ where: { kind_term: { kind: 'fda_product_code', term } }, update: { code, source: 'llm' }, create: { kind: 'fda_product_code', term, code, source: 'llm' } })
+        .catch((e) => this.logger.warn(`fda alias sediment failed: ${String(e).slice(0, 120)}`));
+      return code;
+    } catch (e) {
+      this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
+      return null;
+    }
+  }
+
+  /** panel 子树下全部 FDA product code（宽网：产品词缺失或未精修命中时，按整专科捞）。 */
+  async listFdaProductCodes(panelCodes: string[]): Promise<string[]> {
+    if (!panelCodes.length) return [];
+    const rows = await this.prisma.canonicalTaxonomy.findMany({
+      where: { kind: 'fda_product_code', parentCode: { in: panelCodes } },
+      select: { code: true },
+      take: 500,
+    });
+    return rows.map((r) => r.code);
   }
 }

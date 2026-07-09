@@ -81,6 +81,42 @@ async function seedCpv() {
   return { nodes: n, aliases: a };
 }
 
+// FDA 器械分类（curated 子集，手工核验自 openFDA /device/classification；非全 ~6000 树，同 CPV 子树种子哲学）。
+// panel = 2 字母专科（parentCode null）；product code = 3 字母（parentCode = panel，无前缀层级靠显式父维）。
+const FDA_PANEL_SEED = [
+  { code: 'RA', en: 'Radiology', zh: '放射' },
+  { code: 'CV', en: 'Cardiovascular', zh: '心血管' },
+  { code: 'OR', en: 'Orthopedic', zh: '骨科' },
+  { code: 'SU', en: 'General & Plastic Surgery', zh: '普通与整形外科' },
+  { code: 'GU', en: 'Gastroenterology & Urology', zh: '胃肠与泌尿' },
+  { code: 'EN', en: 'Ear, Nose & Throat', zh: '耳鼻喉' },
+];
+const FDA_CODE_SEED = [
+  { code: 'LLZ', panel: 'RA', en: 'System, Image Processing, Radiological', zh: '放射影像处理系统', cls: '2', reg: '892.2050' },
+  { code: 'IZF', panel: 'RA', en: 'System, X-Ray, Tomographic', zh: 'X 射线断层扫描系统', cls: '2', reg: '892.1740' },
+  { code: 'OXO', panel: 'RA', en: 'Image-Intensified Fluoroscopic X-Ray System, Mobile', zh: '移动影像增强透视 X 射线系统', cls: '2', reg: '892.1650' },
+  { code: 'KPS', panel: 'RA', en: 'System, Tomography, Computed, Emission', zh: '发射计算机断层系统', cls: '2', reg: '892.1200' },
+  { code: 'IZL', panel: 'RA', en: 'System, X-Ray, Mobile', zh: '移动 X 射线系统', cls: '2', reg: '892.1720' },
+  { code: 'QQE', panel: 'RA', en: 'Image Management Software For Planning Of Otologic And Neurotologic Procedures', zh: '耳科与神经耳科手术规划影像管理软件', cls: '2', reg: '892.2050' },
+];
+async function seedFda() {
+  let n = 0, a = 0;
+  for (const p of FDA_PANEL_SEED) {
+    await upsertNode('fda_panel', 'FDA_PANEL', p.code, { parentCode: null, labelEn: p.en, labels: { zh: p.zh } });
+    n++;
+    for (const al of [p.en, p.zh]) { if (al) { await upsertAlias('fda_panel', al, p.code, 'seed'); a++; } }
+  }
+  for (const c of FDA_CODE_SEED) {
+    await upsertNode('fda_product_code', 'FDA_PRODUCT_CODE', c.code, {
+      parentCode: c.panel, labelEn: c.en, labels: { zh: c.zh },
+      crosswalks: { fdaPanels: [c.panel], deviceClass: c.cls, regulationNumber: c.reg },
+    });
+    n++;
+    for (const al of [c.en, c.zh, c.code]) { if (al) { await upsertAlias('fda_product_code', al, c.code, 'seed'); a++; } }
+  }
+  return { nodes: n, aliases: a };
+}
+
 async function seedIndustries() {
   let n = 0, a = 0;
   for (const node of ISIC_SEED) {
@@ -102,9 +138,11 @@ async function seedIndustries() {
 const cty = await seedCountries();
 const ind = await seedIndustries();
 const cpv = await seedCpv();
+const fda = await seedFda();
 console.log(`countries: ${cty.nodes} nodes, ${cty.aliases} aliases`);
 console.log(`industries: ${ind.nodes} nodes, ${ind.aliases} aliases`);
 console.log(`cpv: ${cpv.nodes} nodes, ${cpv.aliases} aliases`);
+console.log(`fda: ${fda.nodes} nodes, ${fda.aliases} aliases`);
 const totalAlias = await db.termAlias.count();
 const totalNode = await db.canonicalTaxonomy.count();
 console.log(`TOTAL: ${totalNode} canonical nodes, ${totalAlias} aliases`);
