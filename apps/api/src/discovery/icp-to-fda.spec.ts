@@ -70,6 +70,21 @@ describe('resolveIcpToFda —— ICP → FDA 产品码（crosswalk 锚定 + pane
     );
     expect(r.productCodes).toEqual(['LLZ', 'IZF']); // 宽网，非精修单码
   });
+
+  it('直锚码 + panel 侧码**并集**（精修不覆盖直锚码，绝不丢租户意图）', async () => {
+    const r = await resolveIcpToFda(
+      // 一个节点带直锚码 MNI（无 panel），一个带 panel RA（无直锚码）；product 精修 RA 子树 → LLZ
+      port({ nodes: [node('pace', undefined, ['MNI']), node('325', ['RA'])], refined: 'LLZ' }),
+      { industryTerms: ['pacemaker', 'radiology'], product: 'x-ray' },
+    );
+    expect(r.productCodes.sort()).toEqual(['LLZ', 'MNI']); // 并集，非 [LLZ] 覆盖掉 MNI
+  });
+
+  it('未识别贸易侧（拼写/未建模）→ 默认进口 + warning（绝不静默吞意图）', async () => {
+    const r = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], tradeSide: 'reseller-ish-typo' });
+    expect(r.importerOnly).toBe(true);
+    expect(r.warnings.some((w) => w.includes('未识别贸易侧'))).toBe(true);
+  });
 });
 
 describe('buildFdaQuery —— 注入 openFDA 发现查询', () => {

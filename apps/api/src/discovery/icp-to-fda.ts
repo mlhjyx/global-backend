@@ -1,6 +1,10 @@
 import { CanonicalNode, TaxonomyKind } from './taxonomy-resolver';
 import { PlanQueryShape } from './icp-to-cpv';
 
+// 贸易侧词表（活枚举以数据为准）：制造商侧 vs 美国进口渠道侧。未识别的非空值 → 默认进口 + warn（不静默）。
+const MANUFACTURER_SIDES: ReadonlySet<string> = new Set(['manufacturer', 'peer', 'oem', 'contract manufacturer']);
+const IMPORTER_SIDES: ReadonlySet<string> = new Set(['', 'importer', 'channel', 'us_importer', 'distributor', 'reseller']);
+
 /** resolveIcpToFda 依赖的最小 taxonomy 面（结构化 —— 真 TaxonomyResolver 天然满足，便于单测替身）。 */
 export interface FdaTaxonomyPort {
   resolveMany(kind: TaxonomyKind, terms: string[], opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<CanonicalNode[]>;
@@ -45,28 +49,37 @@ export async function resolveIcpToFda(
   const panels = uniq(industryNodes.flatMap((n) => n.crosswalks?.fdaPanels ?? []));
   const directCodes = uniq(industryNodes.flatMap((n) => n.crosswalks?.fdaProductCodes ?? []));
 
-  // (b) 产品精修（枚举限 panel 子树）→ 单码；否则 panel 宽网；再否则直锚码兜底
-  let productCodes = directCodes;
-  if (input.product?.trim() && panels.length && opts?.allowLlm !== false) {
-    const refined = await taxonomy.resolveFdaProductCode(input.product.trim(), panels, opts);
-    if (refined) productCodes = [refined];
+  // (b) panel 侧码：product 精修（枚举限 panel 子树）→ 单码；否则 panel 宽网（整专科）。
+  let panelCodes: string[] = [];
+  if (panels.length) {
+    if (input.product?.trim() && opts?.allowLlm !== false) {
+      const refined = await taxonomy.resolveFdaProductCode(input.product.trim(), panels, opts);
+      if (refined) panelCodes = [refined];
+    }
+    if (!panelCodes.length) panelCodes = await taxonomy.listFdaProductCodes(panels); // 宽网
   }
-  if (!productCodes.length && panels.length) productCodes = await taxonomy.listFdaProductCodes(panels); // 宽网：整专科
+  // 直锚码（窄行业 crosswalk.fdaProductCodes）与 panel 侧码**并集**——两个独立来源，绝不互相覆盖（否则丢租户意图）。
+  const productCodes = uniq([...directCodes, ...panelCodes]);
 
   if (industryNodes.length && !panels.length && !directCodes.length) {
     warnings.push('icp_seed_gap: 行业已归一但无 FDA panel/product 码 crosswalk（需补 seed-fda）');
   }
-  if (panels.length && !productCodes.length) {
+  if (panels.length && !panelCodes.length) {
     warnings.push('icp_seed_gap: panel 已锚定但子树下无 product code 种子');
   }
 
-  // (c) 贸易侧 → establishmentTypeFilter（US 市场恒定，无「目标市场不覆盖」空返）
-  const side = (input.tradeSide ?? '').toLowerCase();
-  const manufacturerSide = side === 'manufacturer' || side === 'peer' || side === 'oem';
-  const importerOnly = !manufacturerSide && (side === '' || side === 'importer' || side === 'channel' || side === 'us_importer' || side === 'distributor');
+  // (c) 贸易侧 → establishmentTypeFilter（US 市场恒定，无「目标市场不覆盖」空返）。
+  // 未识别的非空贸易侧（拼写/未建模）→ 默认进口渠道 + warn（绝不静默吞租户意图，DRAFT 门可见）。
+  const side = (input.tradeSide ?? '').trim().toLowerCase();
+  const manufacturerSide = MANUFACTURER_SIDES.has(side);
+  let importerOnly = manufacturerSide ? false : IMPORTER_SIDES.has(side);
+  if (side && !manufacturerSide && !importerOnly) {
+    importerOnly = true;
+    warnings.push(`icp_fit_warning: 未识别贸易侧「${input.tradeSide}」，默认按美国进口渠道（importer）`);
+  }
 
   return {
-    productCodes: uniq(productCodes),
+    productCodes,
     panels,
     importerOnly,
     establishmentTypes: manufacturerSide ? ['Manufacturer'] : [],

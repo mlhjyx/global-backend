@@ -94,10 +94,10 @@ const FDA_PANEL_SEED = [
 const FDA_CODE_SEED = [
   { code: 'LLZ', panel: 'RA', en: 'System, Image Processing, Radiological', zh: '放射影像处理系统', cls: '2', reg: '892.2050' },
   { code: 'IZF', panel: 'RA', en: 'System, X-Ray, Tomographic', zh: 'X 射线断层扫描系统', cls: '2', reg: '892.1740' },
-  { code: 'OXO', panel: 'RA', en: 'Image-Intensified Fluoroscopic X-Ray System', zh: '影像增强透视 X 射线系统', cls: '2', reg: '892.1650' },
+  { code: 'OXO', panel: 'RA', en: 'Image-Intensified Fluoroscopic X-Ray System, Mobile', zh: '移动影像增强透视 X 射线系统', cls: '2', reg: '892.1650' },
   { code: 'KPS', panel: 'RA', en: 'System, Tomography, Computed, Emission', zh: '发射计算机断层系统', cls: '2', reg: '892.1200' },
   { code: 'IZL', panel: 'RA', en: 'System, X-Ray, Mobile', zh: '移动 X 射线系统', cls: '2', reg: '892.1720' },
-  { code: 'QQE', panel: 'RA', en: 'Image Management Software For Planning', zh: '影像管理规划软件', cls: '2', reg: '892.2050' },
+  { code: 'QQE', panel: 'RA', en: 'Image Management Software For Planning Of Otologic And Neurotologic Procedures', zh: '耳科与神经耳科手术规划影像管理软件', cls: '2', reg: '892.2050' },
 ];
 async function seedFda() {
   let n = 0, a = 0;

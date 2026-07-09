@@ -56,10 +56,12 @@ export const ISIC_SEED: IsicNode[] = [
     crosswalks: { nace: ['26'], naics: ['334'], gb4754: ['39', '40'] }, wikidataQid: 'Q11650',
     aliases: ['电子', 'electronics', 'elektronik', '电子制造', 'consumer electronics'] },
 
-  // 医疗器械制造（→ FDA 专科 panel crosswalk，供 ICP→FDA 产品码映射 P2；panel 码见 seed-taxonomy FDA_PANEL_SEED）
+  // 医疗器械制造（→ FDA 专科 panel crosswalk，供 ICP→FDA 产品码映射 P2；panel 码见 seed-taxonomy FDA_PANEL_SEED）。
+  // fdaPanels 只列**已种子 product code 的 panel**（当前 curated=放射 RA）——绝不 over-claim 无码 panel（否则非放射 ICP 静默拿到放射码）。
+  // 扩种子（foiclass 全表 / 其它专科）后同步加 panel。wikidataQid=Q6554101（medical device，非 Q12140=medication/药品）。
   { code: '325', parent: 'C', en: 'Manufacture of medical and dental instruments and supplies', zh: '医疗器械制造', de: 'Medizintechnik',
-    crosswalks: { fdaPanels: ['RA', 'CV', 'OR', 'SU', 'GU', 'EN'], nace: ['32.5'], naics: ['3391'] }, wikidataQid: 'Q12140',
-    aliases: ['医疗器械', 'medical device', 'medical devices', 'medical equipment', '医疗设备', 'medtech', 'radiology', '放射', '放射影像', 'imaging', 'medical imaging', 'diagnostic imaging', '医学影像', 'radiology imaging devices', 'device', '器械'] },
+    crosswalks: { fdaPanels: ['RA'], nace: ['32.5'], naics: ['3391'] }, wikidataQid: 'Q6554101',
+    aliases: ['医疗器械', 'medical device', 'medical devices', 'medical equipment', '医疗设备', 'medtech', 'radiology', '放射', '放射影像', 'imaging', 'medical imaging', 'diagnostic imaging', '医学影像', 'radiology imaging devices'] },
   { code: '2610', parent: '26', en: 'Manufacture of electronic components (semiconductors)', zh: '半导体制造', de: 'Halbleiter',
     crosswalks: { nace: ['26.11'], naics: ['334413'] }, wikidataQid: 'Q11661',
     aliases: ['半导体', 'semiconductor', 'semiconductors', 'halbleiter', '芯片', 'chip', '集成电路'] },
