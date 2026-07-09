@@ -7,6 +7,8 @@ import {
   ACQUISITION_SWEEP_WORKFLOW,
   BACKLOG_SWEEP_SCHEDULE_ID,
   BACKLOG_SWEEP_WORKFLOW,
+  EXTERNAL_INTENT_SWEEP_SCHEDULE_ID,
+  EXTERNAL_INTENT_SWEEP_WORKFLOW,
   INTENT_SWEEP_SCHEDULE_ID,
   INTENT_SWEEP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
@@ -23,6 +25,8 @@ const SPECS = [
   { id: INTENT_SWEEP_SCHEDULE_ID, workflowType: INTENT_SWEEP_WORKFLOW, everyEnv: 'INTENT_SWEEP_EVERY', everyDefault: '1h' },
   // 存量对账日级足够：新公司靠 run 内前向路径即时处理，backlog 只兜投影进来的/漏判的
   { id: BACKLOG_SWEEP_SCHEDULE_ID, workflowType: BACKLOG_SWEEP_WORKFLOW, everyEnv: 'BACKLOG_SWEEP_EVERY', everyDefault: '24h' },
+  // 外部源 intent（TED 招标 / openFDA 510k 清关）→ ACTIVE ICP 投影动 Intent 维；招标/清关日级信号，6h 足够
+  { id: EXTERNAL_INTENT_SWEEP_SCHEDULE_ID, workflowType: EXTERNAL_INTENT_SWEEP_WORKFLOW, everyEnv: 'EXTERNAL_INTENT_SWEEP_EVERY', everyDefault: '6h' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {
