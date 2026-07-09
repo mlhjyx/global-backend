@@ -13,6 +13,7 @@ import { OsmDiscoveryProvider } from './providers/osm.provider';
 import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
+import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
@@ -70,6 +71,9 @@ export class DiscoveryProviderRegistry {
     // TED 中标发现（欧盟采购官方 API，零鉴权，归 public_intelligence 类）——不依赖 gateway。
     // 无 CPV 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
     this.discovery.push(new TedDiscoveryProvider({ sourcePolicyReader: deps?.sourcePolicyReader }));
+    // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
+    // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
+    this.discovery.push(new OpenFdaDiscoveryProvider({ sourcePolicyReader: deps?.sourcePolicyReader }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider());
@@ -143,6 +147,32 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'TED v3 官方 Search API（零鉴权）。绿事实 CC BY 4.0 署名义务；具名联系人 🔴 隔离。',
+        },
+      });
+    }
+    // openFDA 认证注册库（美国 FDA 官方 API）——器械注册发现 + 510k intent（后续 P3）。零鉴权、costPerCallCents=0。
+    await db.dataProvider.upsert({
+      where: { key: 'openfda' },
+      update: {},
+      create: { key: 'openfda', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // 合规注册（spec §3.3.7）：官方 REST（非爬）；**CC0 公共领域**（署名非义务，与 TED CC BY 不同）；
+    // personalData=true —— registrationlisting 记录可能含具名 us_agent/contact（即便走 API），绿事实入库、具名个人 🔴 隔离。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.fda.gov' },
+        update: {},
+        create: {
+          domain: 'api.fda.gov',
+          sourceType: 'registry',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'openFDA（api.fda.gov）官方开放数据 API（零鉴权）。CC0 公共领域可商用（署名非义务）；「注册≠核准」文案红线；具名 us_agent/contact 🔴 隔离；MAUDE/FAERS 不摄入。',
         },
       });
     }
