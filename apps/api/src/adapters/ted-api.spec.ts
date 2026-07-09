@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAwardQuery, mapAwardNotice } from './ted-api';
+import { buildAwardQuery, mapAwardNotice, tedDateToIso, mapContractNotice } from './ted-api';
 
 describe('TED expert query 构造（buildAwardQuery）', () => {
   it('单 CPV + 单国：= 算子 + notice-type + 相对日期 + SORT DESC', () => {
@@ -124,5 +124,59 @@ describe('TED 中标公告映射（mapAwardNotice）—— 多语言解包 / 缺
     expect(n.cpvCodes).toEqual(['42120000', '42122000']);
     expect(n.buyerNames).toEqual(['City of Munich']);
     expect(n.buyerCountries).toEqual(['DEU']);
+  });
+});
+
+describe('§8.6 发布日 ISO 归一（tedDateToIso）—— 防 Date.parse NaN → Intent 不得分', () => {
+  it('日期+时区偏移 → 补 T00:00:00', () => {
+    expect(tedDateToIso('2026-07-08+02:00')).toBe('2026-07-08T00:00:00+02:00');
+    expect(tedDateToIso('2026-07-08-05:00')).toBe('2026-07-08T00:00:00-05:00');
+  });
+  it('只日期 → 补 T00:00:00Z', () => {
+    expect(tedDateToIso('2026-07-08')).toBe('2026-07-08T00:00:00Z');
+  });
+  it('已含 T 的原样返回', () => {
+    expect(tedDateToIso('2026-07-08T12:34:00Z')).toBe('2026-07-08T12:34:00Z');
+  });
+  it('空/不可解析 → undefined', () => {
+    expect(tedDateToIso(undefined)).toBeUndefined();
+    expect(tedDateToIso('')).toBeUndefined();
+    expect(tedDateToIso('notadate')).toBeUndefined();
+  });
+  it('含 T 但畸形 → undefined（不透传 Date.parse=NaN 的串，堵 `at=iso??now` 兜底漏洞）', () => {
+    expect(tedDateToIso('2026-07-08Tx')).toBeUndefined();
+    expect(tedDateToIso('2026-07-08T99:99:99Z')).toBeUndefined();
+  });
+  it('合规格式但非法日历日（2026-13-40）→ undefined', () => {
+    expect(tedDateToIso('2026-13-40')).toBeUndefined();
+  });
+  it('归一结果 Date.parse 合法（§8.6 核心：否则 recencyDecay=0）', () => {
+    expect(Number.isNaN(Date.parse(tedDateToIso('2026-07-08+02:00')!))).toBe(false);
+    expect(Number.isNaN(Date.parse('2026-07-08+02:00'))).toBe(true); // 原始形式确实 invalid（证明有必要归一）
+  });
+});
+
+describe('TED 招标公告映射（mapContractNotice）—— 买方需求视角', () => {
+  it('买方多语言 eng 优先 + CPV + 截止 + 发布日 ISO', () => {
+    const n = mapContractNotice({
+      'publication-number': '900-2026',
+      'publication-date': '2026-07-08+02:00',
+      'notice-type': 'cn-standard',
+      'classification-cpv': ['42120000'],
+      'buyer-name': { deu: ['Stadt München'], eng: ['City of Munich'] },
+      'buyer-country': ['DEU'],
+      'deadline-receipt-tender-date-lot': ['2026-08-15+02:00'],
+    });
+    expect(n.buyerNames).toEqual(['City of Munich']);
+    expect(n.buyerCountries).toEqual(['DEU']);
+    expect(n.cpvCodes).toEqual(['42120000']);
+    expect(n.publicationDateIso).toBe('2026-07-08T00:00:00+02:00');
+    expect(n.deadlines).toEqual(['2026-08-15+02:00']);
+  });
+  it('缺键当 null（空数组 / undefined）', () => {
+    const n = mapContractNotice({ 'publication-number': '901-2026' });
+    expect(n.buyerNames).toEqual([]);
+    expect(n.cpvCodes).toEqual([]);
+    expect(n.publicationDateIso).toBeUndefined();
   });
 });

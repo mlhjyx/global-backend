@@ -138,8 +138,8 @@ export class IntentProjectionService {
 
 // ─────────────────────── intent 聚合 ───────────────────────
 
-interface IntentEvent { type: string; at: string; strength: number; page_kind?: string; page_url?: string; evidence?: unknown }
-interface IntentAttr {
+export interface IntentEvent { type: string; at: string; strength: number; page_kind?: string; page_url?: string; evidence?: unknown }
+export interface IntentAttr {
   last_change_at: string;
   intent_score: number; // 近窗口最强信号强度（0..1）——喂未来六维 Intent 维的提示值
   counts: Record<string, number>;
@@ -160,8 +160,8 @@ function toEvent(ch: { changeType: string; createdAt: Date; detail: unknown }): 
   };
 }
 
-/** 合并已有 intent 与新事件：滚动保留近 N 条、累计类型计数、intent_score=近窗口最强强度。 */
-function mergeIntent(prev: IntentAttr | undefined, incoming: IntentEvent[]): IntentAttr {
+/** 合并已有 intent 与新事件：滚动保留近 N 条、累计类型计数、intent_score=近窗口最强强度。共享（web_watch + TED 招标 intent）。 */
+export function mergeIntent(prev: IntentAttr | undefined, incoming: IntentEvent[]): IntentAttr {
   const seen = new Set<string>();
   const all = [...incoming, ...(prev?.events ?? [])]
     .filter((e) => {
