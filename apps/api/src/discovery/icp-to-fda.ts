@@ -1,9 +1,10 @@
 import { CanonicalNode, TaxonomyKind } from './taxonomy-resolver';
 import { PlanQueryShape } from './icp-to-cpv';
 
-// 贸易侧词表（活枚举以数据为准）：制造商侧 vs 美国进口渠道侧。未识别的非空值 → 默认进口 + warn（不静默）。
-const MANUFACTURER_SIDES: ReadonlySet<string> = new Set(['manufacturer', 'peer', 'oem', 'contract manufacturer']);
-const IMPORTER_SIDES: ReadonlySet<string> = new Set(['', 'importer', 'channel', 'us_importer', 'distributor', 'reseller']);
+// openFDA 仅美国市场 → ICP 目标市场门（镜像 TED 覆盖门，方向相反：非美国目标 → 不注入）。
+const US_MARKET: ReadonlySet<string> = new Set(['us', 'usa', 'united states', 'united states of america', 'america', '美国', '美国市场', 'u.s.', 'u.s.a.']);
+// 制造商侧 establishment_type 用**活值**（registrationlisting count 实测），非泛称 'Manufacturer'（exact 搜零命中）。
+const MANUFACTURER_ESTABLISHMENT_TYPE = 'Manufacture Medical Device';
 
 /** resolveIcpToFda 依赖的最小 taxonomy 面（结构化 —— 真 TaxonomyResolver 天然满足，便于单测替身）。 */
 export interface FdaTaxonomyPort {
@@ -17,6 +18,8 @@ export interface IcpToFdaInput {
   product?: string;
   /** 贸易哪一侧：'importer'/'channel'=找美国进口渠道；'manufacturer'=找同类制造商。默认进口商（出海卖家最想要）。 */
   tradeSide?: string;
+  /** ICP 目标市场（自由词）；非空且不含美国 → openFDA 仅美国市场，跳过注入（避免给 EU-only ICP 塞美国注册商）。 */
+  targetCountries?: string[];
 }
 
 export interface IcpToFdaResult {
@@ -43,6 +46,12 @@ export async function resolveIcpToFda(
 ): Promise<IcpToFdaResult> {
   const warnings: string[] = [];
 
+  // (US 市场门) openFDA 只有在美注册商 → ICP 有明确目标市场且不含美国 → 不注入（绝不静默给 EU-only ICP 塞美国数据）。
+  const targets = (input.targetCountries ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (targets.length && !targets.some((t) => US_MARKET.has(t))) {
+    return { productCodes: [], panels: [], importerOnly: true, establishmentTypes: [], warnings: ['icp_fit_warning: openFDA 仅覆盖美国市场，本 ICP 目标市场不含美国 → 跳过 openFDA 注入'] };
+  }
+
   // (a) 行业 → crosswalk.fdaPanels（+ 直锚 product code）确定性
   const industryTerms = input.industryTerms.filter((t) => t && t.trim());
   const industryNodes = industryTerms.length ? await taxonomy.resolveMany('industry', industryTerms, opts) : [];
@@ -68,12 +77,13 @@ export async function resolveIcpToFda(
     warnings.push('icp_seed_gap: panel 已锚定但子树下无 product code 种子');
   }
 
-  // (c) 贸易侧 → establishmentTypeFilter（US 市场恒定，无「目标市场不覆盖」空返）。
-  // 未识别的非空贸易侧（拼写/未建模）→ 默认进口渠道 + warn（绝不静默吞租户意图，DRAFT 门可见）。
+  // (c) 贸易侧 → establishmentTypeFilter（US 市场恒定）。free-form 输入 → 子串/多语言归一（'importers'/' importer '/
+  // 'import channels'/'进口商'/'distributor'…）；制造商侧同理。未识别的非空值 → 默认进口渠道 + warn（绝不静默吞意图）。
   const side = (input.tradeSide ?? '').trim().toLowerCase();
-  const manufacturerSide = MANUFACTURER_SIDES.has(side);
-  let importerOnly = manufacturerSide ? false : IMPORTER_SIDES.has(side);
-  if (side && !manufacturerSide && !importerOnly) {
+  const manufacturerSide = /manufactur|\boem\b|\bpeer\b|制造商|厂商|生产商/.test(side);
+  const importerSide = !side || /import|进口|channel|渠道|distribut|经销|reseller|分销/.test(side);
+  let importerOnly = manufacturerSide ? false : importerSide;
+  if (side && !manufacturerSide && !importerSide) {
     importerOnly = true;
     warnings.push(`icp_fit_warning: 未识别贸易侧「${input.tradeSide}」，默认按美国进口渠道（importer）`);
   }
@@ -82,7 +92,8 @@ export async function resolveIcpToFda(
     productCodes,
     panels,
     importerOnly,
-    establishmentTypes: manufacturerSide ? ['Manufacturer'] : [],
+    // 活值 exact（'Manufacturer' 泛称搜零命中；registrationlisting 主制造商类型 = 'Manufacture Medical Device'）。
+    establishmentTypes: manufacturerSide ? [MANUFACTURER_ESTABLISHMENT_TYPE] : [],
     warnings,
   };
 }

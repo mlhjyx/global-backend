@@ -59,7 +59,32 @@ describe('resolveIcpToFda —— ICP → FDA 产品码（crosswalk 锚定 + pane
     expect(imp.establishmentTypes).toEqual([]);
     const man = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], tradeSide: 'manufacturer' });
     expect(man.importerOnly).toBe(false);
-    expect(man.establishmentTypes).toEqual(['Manufacturer']);
+    expect(man.establishmentTypes).toEqual(['Manufacture Medical Device']); // 活值 exact，非泛称 'Manufacturer'
+  });
+
+  it('贸易侧 free-form 归一（复数/中文/空格/同义词，无误判 warning）', async () => {
+    for (const side of ['importers', ' importer ', 'import channels', '进口商', 'distributor', '经销商']) {
+      const r = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], tradeSide: side });
+      expect(r.importerOnly, `side=${side}`).toBe(true);
+      expect(r.warnings.some((w) => w.includes('未识别贸易侧')), `side=${side} 不应 warn`).toBe(false);
+    }
+    for (const side of ['contract manufacturer', '制造商', 'OEM']) {
+      const r = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], tradeSide: side });
+      expect(r.establishmentTypes, `side=${side}`).toEqual(['Manufacture Medical Device']);
+    }
+  });
+
+  it('US 市场门：非美国目标市场 → 不注入（openFDA 仅美国）+ warning', async () => {
+    const de = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], targetCountries: ['Germany', 'France'] });
+    expect(de.productCodes).toEqual([]);
+    expect(de.warnings.some((w) => w.includes('仅覆盖美国市场'))).toBe(true);
+  });
+
+  it('US 市场门：目标含美国 或 无目标 → 正常解析', async () => {
+    const us = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], targetCountries: ['US', 'Germany'] });
+    expect(us.productCodes).toEqual(['LLZ']);
+    const any = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], targetCountries: [] });
+    expect(any.productCodes).toEqual(['LLZ']);
   });
 
   it('allowLlm=false → 不精修，仍走确定性 panel 宽网', async () => {
@@ -80,8 +105,8 @@ describe('resolveIcpToFda —— ICP → FDA 产品码（crosswalk 锚定 + pane
     expect(r.productCodes.sort()).toEqual(['LLZ', 'MNI']); // 并集，非 [LLZ] 覆盖掉 MNI
   });
 
-  it('未识别贸易侧（拼写/未建模）→ 默认进口 + warning（绝不静默吞意图）', async () => {
-    const r = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], tradeSide: 'reseller-ish-typo' });
+  it('未识别贸易侧（无任何同义词命中）→ 默认进口 + warning（绝不静默吞意图）', async () => {
+    const r = await resolveIcpToFda(port({ nodes: [node('325', ['RA'])], listed: ['LLZ'] }), { industryTerms: ['device'], tradeSide: 'buyer' });
     expect(r.importerOnly).toBe(true);
     expect(r.warnings.some((w) => w.includes('未识别贸易侧'))).toBe(true);
   });

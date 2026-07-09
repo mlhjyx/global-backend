@@ -506,6 +506,7 @@ export class IcpService {
           industryTerms,
           product: attrs.product ? String(attrs.product) : undefined,
           tradeSide: attrs.trade_side ? String(attrs.trade_side) : undefined,
+          targetCountries: splitTerms(icp.targetMarkets), // openFDA 仅美国市场门（非美国目标 → 不注入）
         },
         { workspaceId },
       );
