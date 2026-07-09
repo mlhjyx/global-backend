@@ -160,6 +160,31 @@ function toEvent(ch: { changeType: string; createdAt: Date; detail: unknown }): 
   };
 }
 
+/**
+ * 合并后 intent 与既有是否**实质相同**（忽略每次都变的 _ts）——投影幂等门用，防同一信号每 sweep 复现时重复写。
+ * 关键：既有 intent 来自 DB jsonb（Postgres **规范化对象键序**），新 intent 是内存对象（插入键序）——直接
+ * JSON.stringify 会因键序不同误判「变了」（TED P3 实测抓到过此 bug）。故先 canonical 递归排序键再比。
+ * 共享给 TED / openFDA intent 投影（DRY，勿各自复制）。
+ */
+export function sameIntent(a: IntentAttr, b: IntentAttr): boolean {
+  const stripTs = ({ _ts, ...rest }: IntentAttr): unknown => rest;
+  return JSON.stringify(canonicalize(stripTs(a))) === JSON.stringify(canonicalize(stripTs(b)));
+}
+
+/** 递归按键名排序（数组保序）——生成键序无关的规范形，供 jsonb 往返对象的稳定比较。 */
+export function canonicalize(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonicalize);
+  if (v && typeof v === 'object') {
+    return Object.keys(v as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((o, k) => {
+        o[k] = canonicalize((v as Record<string, unknown>)[k]);
+        return o;
+      }, {});
+  }
+  return v;
+}
+
 /** 合并已有 intent 与新事件：滚动保留近 N 条、累计类型计数、intent_score=近窗口最强强度。共享（web_watch + TED 招标 intent）。 */
 export function mergeIntent(prev: IntentAttr | undefined, incoming: IntentEvent[]): IntentAttr {
   const seen = new Set<string>();
@@ -171,7 +196,11 @@ export function mergeIntent(prev: IntentAttr | undefined, incoming: IntentEvent[
       seen.add(k);
       return true;
     })
-    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    // 新近优先降序；相等 at 返回 0 → 保留输入序（V8 稳定排序）。**不可**对相等 at 返回 ±1：会产生不一致
+    // 比较器（同时判 a<b、b<a），令相等事件在重排后顺序不定 → canonicalize 保序比较误判「变了」→ 破幂等。
+    // 本 provider 的 FDA_CLEARANCE 与 web_watch/TED 事件 at 格式不同（date-only vs full ISO），跨源同 at 罕见，
+    // 但作为 3 子系统共享的幂等基石，比较器必须一致（防未来调用方输入序变动时静默重写）。
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
     .slice(0, MAX_EVENTS_KEPT);
   const counts: Record<string, number> = {};
   for (const e of all) counts[e.type] = (counts[e.type] ?? 0) + 1;

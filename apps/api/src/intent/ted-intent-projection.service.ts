@@ -4,7 +4,7 @@ import { companyIdentity } from '../discovery/identity';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { searchContractNotices, TedContractNotice } from '../adapters/ted-api';
 import { SourcePolicyReader } from '../tools/tool-broker.factory';
-import { mergeIntent, IntentAttr, IntentEvent } from './intent-projection.service';
+import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
 /** TED 招标公告 intent 类型 + 强度（开放招标 = 很强的实时需求信号，仅次于 web_watch SOURCING_OPENED=1）。 */
 export const TENDER_PUBLISHED = 'TENDER_PUBLISHED';
@@ -176,6 +176,8 @@ export class TedIntentProjectionService {
     });
   }
 
+  // 幂等门用的 sameIntent / canonicalize 已上移到 intent-projection.service.ts（DRY，与 openFDA intent 投影共享）。
+
   /**
    * §8.8 用途门（镜像 ted.provider.purposeAllowed）：reader 在场时校验 source_policy(api.ted.europa.eu)——
    * SUSPENDED / 策略缺失 / 用途不含 intent|discovery / reader 抛错 一律 fail-closed（不发请求）。
@@ -204,28 +206,4 @@ export class TedIntentProjectionService {
     }
     return true;
   }
-}
-
-/**
- * 合并后 intent 与既有是否**实质相同**（忽略每次都变的 _ts）——幂等门用，防开放招标每 sweep 复现时重复写。
- * 关键：既有 intent 来自 DB jsonb（Postgres **规范化对象键序**），新 intent 是内存对象（插入键序）——
- * 直接 JSON.stringify 会因键序不同而误判「变了」（本 bug 就是这么被实测抓到的）。故先 canonical 递归排序键再比。
- */
-function sameIntent(a: IntentAttr, b: IntentAttr): boolean {
-  const stripTs = ({ _ts, ...rest }: IntentAttr): unknown => rest;
-  return JSON.stringify(canonicalize(stripTs(a))) === JSON.stringify(canonicalize(stripTs(b)));
-}
-
-/** 递归按键名排序（数组保序）——生成键序无关的规范形，供 jsonb 往返对象的稳定比较。 */
-function canonicalize(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(canonicalize);
-  if (v && typeof v === 'object') {
-    return Object.keys(v as Record<string, unknown>)
-      .sort()
-      .reduce<Record<string, unknown>>((o, k) => {
-        o[k] = canonicalize((v as Record<string, unknown>)[k]);
-        return o;
-      }, {});
-  }
-  return v;
 }
