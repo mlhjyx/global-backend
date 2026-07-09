@@ -75,8 +75,9 @@ async function main() {
   ok(res.records.every((r) => r.license === 'CC0-1.0'), '每条 license=CC0-1.0（CC0 公共领域，署名非义务）');
   ok(res.records.every((r) => String((r.attributes?.fda as Record<string, unknown>)?.disclaimer ?? '').includes('非 FDA 核准')), '🔴 每条带「注册≠核准」免责（文案红线）');
   // 🔴 合规硬自检：绿记录里绝不出现 us_agent/邮箱/具名个人
+  // 键锚定：只逮**具名个人**键（us_agent/owner_operator 对象/contact），放行非个人的 owner_operator_number(s)（firm id 数字）。
   const serialized = JSON.stringify(res.records);
-  ok(!/@/.test(serialized) && !/us_agent|owner_operator|"?contact"?/i.test(serialized), '🔴 绿记录里无 us_agent/邮箱/具名联系点（个人数据隔离）');
+  ok(!/@/.test(serialized) && !/"us_agent"|"owner_operator"|"contact"/i.test(serialized), '🔴 绿记录里无 us_agent/owner_operator/contact 具名个人 + 无邮箱（个人数据隔离）');
 
   if (!res.records.length) {
     console.log('   ⚠️ 该产品码无注册进口商，跳过 Tier 2-4（非失败，属数据稀疏）');
@@ -130,7 +131,7 @@ async function main() {
   ok(ev.length > 0 && ev.every((e) => e.license === 'CC0-1.0'), `field_evidence.license='CC0-1.0'（本 run ${ev.length} 条，非硬编码 licensed）`);
   // 🔴 落库端合规复核：canonical/证据里无具名个人
   const landedSerialized = JSON.stringify(landed);
-  ok(!/@/.test(landedSerialized) && !/us_agent|owner_operator/i.test(landedSerialized), '🔴 落库 canonical 里无 us_agent/邮箱（个人数据隔离）');
+  ok(!/@/.test(landedSerialized) && !/"us_agent"|"owner_operator"|"contact"/i.test(landedSerialized), '🔴 落库 canonical 里无 us_agent/owner_operator/contact 具名个人 + 无邮箱（个人数据隔离）');
 
   // ══════════ Tier 3 · 真 fit 门 ══════════
   console.log('\n══ Tier 3 · 真 fit 门：放射影像器械美国渠道 ICP → judgeFitCompany（四门判别）══');

@@ -117,9 +117,9 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
  * 绝不写入 us_agent/contact 等 🔴 具名个人（adapter 已剥离）；标注「注册≠核准」文案红线。
  */
 export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string): ProviderCompanyRecord {
-  const idValue = est.registrationNumber?.trim();
+  const idValue = est.registrationNumber?.trim() || undefined; // 空串注册号当无（?? 不兜空串）
   const fda = prune({
-    registration_number: est.registrationNumber,
+    registration_number: idValue,
     fei_number: est.feiNumber,
     status_code: est.statusCode,
     city: est.city,
@@ -128,24 +128,29 @@ export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string)
     initial_importer: est.initialImporter,
     product_codes: est.productCodes.length ? est.productCodes : undefined,
     device_facts: est.deviceFacts,
+    owner_operator_numbers: est.ownerOperatorNumbers.length ? est.ownerOperatorNumbers : undefined, // 🟢 非个人 firm id（未来跨设施归并）
     created_date: est.createdDate,
     license: OPENFDA_LICENSE, // CC0-1.0（署名非义务）
     attribution: OPENFDA_ATTRIBUTION,
     disclaimer: FDA_REGISTRATION_DISCLAIMER, // 🔴 注册≠核准
   });
+  // externalId 必须**每个 distinct establishment 唯一**（raw @@unique[runId,providerKey,externalId]）：
+  // 无注册号时退 name+country（与 dedupeKey 同粒度）——绝不塌成 name-only，否则跨国同名互撞被 skipDuplicates 静默丢一个。
+  const idKey = idValue ?? `${est.name}:${est.country ?? ''}`;
   return {
-    externalId: `openfda:${idValue ?? est.name}`,
+    externalId: `openfda:${idKey}`,
     name: est.name,
     country: est.country,
-    industry: est.deviceFacts?.medicalSpecialtyDescription, // 专科 ≈ 行业维（便利，非硬编码）
+    industry: est.deviceFacts?.medicalSpecialtyDescription, // 匹配搜索码的专科 ≈ 行业维（便利，非硬编码）
+    // fit 门只读 attributes.products（fit-judge.ts）→ 喂可读设备名（无则退产品码），否则 openFDA 线索在门前设备信号为空。
+    attributes: { fda, products: est.deviceNames.length ? est.deviceNames : est.productCodes },
     // FDA 注册号全局唯一（非国别税号）→ scheme 不按国别限定。
     identifier: idValue ? { scheme: FDA_ID_SCHEME, value: idValue } : undefined,
     license: OPENFDA_LICENSE, // 写入 field_evidence.license（CC0，非硬编码 licensed）
-    attributes: { fda },
     provenance: {
       sourceUrl: idValue ? `${REG_QUERY_BASE}${idValue}` : 'https://open.fda.gov/apis/device/registrationlisting/',
       fetchedAt: now,
-      contentHash: createHash('sha256').update(`openfda:${idValue ?? ''}:${est.name}`).digest('hex'),
+      contentHash: createHash('sha256').update(`openfda:${idKey}:${est.name}`).digest('hex'),
       parserVersion: PARSER_VERSION,
     },
   };

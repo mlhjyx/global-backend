@@ -55,6 +55,8 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
     initialImporter: true,
     productCodes: ['LLZ', 'IYN'],
     deviceFacts: { deviceName: 'System, Image Processing, Radiological', deviceClass: '2', medicalSpecialtyDescription: 'Radiology', regulationNumber: '892.2050' },
+    deviceNames: ['System, Image Processing, Radiological'],
+    ownerOperatorNumbers: ['9012345'],
     createdDate: '2009-03-01',
   };
 
@@ -89,9 +91,33 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
     expect(key.startsWith('id:fda-reg:')).toBe(true);
   });
 
-  it('无注册号 → 回退 name+country 身份（不臆造 identifier）', () => {
+  it('fit 门可读设备信号：attributes.products = device_name（无则退产品码）', () => {
+    const rec = mapEstablishmentToRecord(est, NOW);
+    expect((rec.attributes as { products: string[] }).products).toEqual(['System, Image Processing, Radiological']);
+    const noNames = mapEstablishmentToRecord({ ...est, deviceNames: [] }, NOW);
+    expect((noNames.attributes as { products: string[] }).products).toEqual(['LLZ', 'IYN']); // 退产品码
+  });
+
+  it('attributes.fda.owner_operator_numbers 落库（🟢 非个人 firm id，未来跨设施归并）', () => {
+    const rec = mapEstablishmentToRecord(est, NOW);
+    expect((rec.attributes!.fda as Record<string, unknown>).owner_operator_numbers).toEqual(['9012345']);
+  });
+
+  it('无注册号 → 回退 name+country 身份 + externalId 含国别（防跨国同名互撞）', () => {
     const rec = mapEstablishmentToRecord({ ...est, registrationNumber: undefined }, NOW);
     expect(rec.identifier).toBeUndefined();
-    expect(rec.externalId).toBe('openfda:Philips Ultrasound LLC');
+    expect(rec.externalId).toBe('openfda:Philips Ultrasound LLC:US'); // 含国别，非塌成 name-only
+  });
+
+  it('无注册号的两家同名不同国 → externalId 各异（不被 raw @@unique skipDuplicates 静默丢一个）', () => {
+    const us = mapEstablishmentToRecord({ ...est, registrationNumber: undefined, country: 'US' }, NOW);
+    const cn = mapEstablishmentToRecord({ ...est, registrationNumber: undefined, country: 'CN' }, NOW);
+    expect(us.externalId).not.toBe(cn.externalId);
+  });
+
+  it('空串注册号当无（|| 不 ?? 兜空串）→ 不产生空 identifier / externalId', () => {
+    const rec = mapEstablishmentToRecord({ ...est, registrationNumber: '' }, NOW);
+    expect(rec.identifier).toBeUndefined();
+    expect(rec.externalId).toBe('openfda:Philips Ultrasound LLC:US');
   });
 });

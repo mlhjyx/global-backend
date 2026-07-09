@@ -51,8 +51,12 @@ export interface OpenFdaEstablishment {
   initialImporter: boolean;
   /** 该 establishment 名下产品的 product code（去重）。 */
   productCodes: string[];
-  /** 首个产品的谐调分类事实（便利富集；缺块当 null）。 */
+  /** 分类事实：优先取**匹配 ICP 搜索码**的产品（否则首个带谐调块的产品；缺块当 null）。 */
   deviceFacts?: OpenFdaDeviceFacts;
+  /** 全部产品谐调块里的 device_name（去重）——喂 fit 门可读设备描述（比不透明 3 字母码有用）。 */
+  deviceNames: string[];
+  /** products[].owner_operator_number（🟢 非个人法人 id，跨设施归同一 firm 用；不含 owner_operator 具名个人）。 */
+  ownerOperatorNumbers: string[];
   /** 记录里最早的 product created_date（YYYY-MM-DD，若有）。 */
   createdDate?: string;
 }
@@ -93,15 +97,19 @@ function orClause(field: string, values: string[]): string {
  * 🔴 **绝不提取** `registration.us_agent` / `contact`（具名个人，GDPR）——绿事实只取法人字段。
  * `openfda` 谐调块缺块/缺字段当 null（谐调精确匹配失败即整块缺失）。
  */
-export function mapRegistration(raw: Record<string, unknown>): OpenFdaEstablishment | null {
+export function mapRegistration(raw: Record<string, unknown>, preferProductCodes?: string[]): OpenFdaEstablishment | null {
   const reg = asObject(raw['registration']);
   const name = str(reg['name'])?.trim();
   if (!name) return null; // 无法人名 → 跳过（主解析键缺失，不臆造）
 
-  const products = asArray(raw['products']);
-  const productCodes = dedupe(products.map((p) => str(asObject(p)['product_code'])).filter(isNonEmpty));
-  const createdDates = products.map((p) => str(asObject(p)['created_date'])).filter(isNonEmpty).sort();
-  const firstOpenfda = asObject(asObject(products[0])['openfda']);
+  const products = asArray(raw['products']).map(asObject);
+  const productCodes = dedupe(products.map((p) => str(p['product_code'])).filter(isNonEmpty));
+  const createdDates = products.map((p) => str(p['created_date'])).filter(isNonEmpty).sort();
+  // 分类事实取**匹配 ICP 搜索码**的产品（openFDA 返回该 establishment 全部产品、顺序不定；
+  // 只看 products[0] 会取到无关设备的专科 → 误导 fit 门）。无匹配退首个带谐调块的产品。
+  const deviceFacts = pickDeviceFacts(products, preferProductCodes);
+  const deviceNames = dedupe(products.map((p) => first(asObject(p['openfda'])['device_name'])).filter(isNonEmpty));
+  const ownerOperatorNumbers = dedupe(products.map((p) => str(p['owner_operator_number'])).filter(isNonEmpty));
 
   return {
     registrationNumber: str(reg['registration_number']),
@@ -114,9 +122,20 @@ export function mapRegistration(raw: Record<string, unknown>): OpenFdaEstablishm
     establishmentTypes: asArray(raw['establishment_type']).map(String).filter(isNonEmpty),
     initialImporter: str(reg['initial_importer_flag'])?.toUpperCase() === 'Y',
     productCodes,
-    deviceFacts: unpackDeviceFacts(firstOpenfda),
+    deviceFacts,
+    deviceNames,
+    ownerOperatorNumbers,
     createdDate: createdDates[0],
   };
+}
+
+/** 从产品数组挑分类事实：优先匹配 preferProductCodes 的产品谐调块，否则首个带谐调块的产品；皆无 → undefined。 */
+function pickDeviceFacts(products: Record<string, unknown>[], preferProductCodes?: string[]): OpenFdaDeviceFacts | undefined {
+  const prefer = new Set((preferProductCodes ?? []).map((c) => c.toUpperCase()));
+  const withBlock = products.filter((p) => Object.keys(asObject(p['openfda'])).length > 0);
+  const matched = prefer.size ? withBlock.find((p) => prefer.has(str(p['product_code'])?.toUpperCase() ?? '')) : undefined;
+  const chosen = matched ?? withBlock[0];
+  return chosen ? unpackDeviceFacts(asObject(chosen['openfda'])) : undefined;
 }
 
 function unpackDeviceFacts(openfda: Record<string, unknown>): OpenFdaDeviceFacts | undefined {
@@ -142,7 +161,7 @@ export async function searchRegistrations(params: RegistrationSearchParams): Pro
     if (json.error) break; // NOT_FOUND / 其它 → 视作无更多结果
     const results = Array.isArray(json.results) ? json.results : [];
     for (const r of results) {
-      const est = mapRegistration(r as Record<string, unknown>);
+      const est = mapRegistration(r as Record<string, unknown>, params.productCodes); // 分类事实优先取搜索命中的产品
       if (est) out.push(est);
       if (out.length >= maxRecords) break;
     }
