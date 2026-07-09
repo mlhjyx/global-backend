@@ -208,8 +208,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         confidence: { type: 'number' },
       },
     },
-    // 判站 + 抽取是高频任务，用户在中转站已接入 Gemini → 用 gemini-2.5-flash（快、长上下文、便宜）。
-    model: 'gemini-2.5-flash',
+    // 判站 + 抽取是高频任务。原用 gemini-2.5-flash（快、长上下文、便宜）；2026-07-09 网关 Gemini
+    // 预付额度耗尽（429）→ 改路由到同为高频便宜档的 deepseek-v4-flash。额度恢复后可切回 gemini-2.5-flash。
+    model: 'deepseek-v4-flash',
     risk: 'low',
     humanGate: false,
   },
@@ -249,7 +250,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         },
       },
     },
-    model: 'gemini-2.5-flash',
+    // 原 gemini-2.5-flash；2026-07-09 网关 Gemini 额度耗尽（429）→ 改 deepseek-v4-flash（额度恢复可切回）。
+    model: 'deepseek-v4-flash',
     risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
     humanGate: false,
   },
@@ -287,8 +289,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         has_next_page: { type: 'boolean', description: '页面是否有下一页/分页' },
       },
     },
-    // 列表抽取是长上下文任务（一页多公司），用 gemini-2.5-flash（快、长上下文、便宜）。
-    model: 'gemini-2.5-flash',
+    // 列表抽取是长上下文任务（一页多公司）。原 gemini-2.5-flash；2026-07-09 网关 Gemini 额度耗尽（429）
+    // → 改 deepseek-v4-flash（同为长上下文/便宜档，额度恢复可切回）。
+    model: 'deepseek-v4-flash',
     risk: 'low',
     humanGate: false,
   },
@@ -325,8 +328,11 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         reasons: { type: 'array', items: { type: 'string' }, description: '具体判定依据' },
       },
     },
-    // 资格判别要准（评测显示 flash 召回过宽）→ 用 pro。
-    model: 'gemini-2.5-pro',
+    // 资格判别要准（评测显示 flash 召回过宽）→ 用 pro 档。原 gemini-2.5-pro；2026-07-09 网关 Gemini
+    // 额度耗尽（429）→ 改 deepseek-v4-pro（同为 pro 档强推理，已用于 icp.design/query_plan）。
+    // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：本网关上二者都别名到 deepseek-v4-flash，会重蹈 flash 召回过宽。
+    // 额度恢复后可切回 gemini-2.5-pro。
+    model: 'deepseek-v4-pro',
     risk: 'low',
     humanGate: false,
   },
