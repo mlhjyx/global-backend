@@ -16,6 +16,7 @@ import { createAcquisitionActivities } from './acquisition.activities';
 import { buildSourceAdapterRegistry } from '../acquisition/registry';
 import { createIntentActivities } from './intent.activities';
 import { createBacklogActivities } from './backlog.activities';
+import { createExternalIntentActivities } from './external-intent.activities';
 import { ensurePlatformSchedules } from './ensure-schedules';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
 
   // 邮箱验证 SMTP 出网经 ToolBroker 闸门；source_policy 走平台级治理表（无 RLS，直读）。
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
+  const taxonomy = new TaxonomyResolver(prisma, gateway); // discovery + external-intent sweep 共享一实例
   const providers = new DiscoveryProviderRegistry({
     gateway,
     broker: buildToolBroker({ sourcePolicyReader }),
@@ -83,12 +85,14 @@ async function main(): Promise<void> {
         prisma,
         providers,
         gateway,
-        taxonomy: new TaxonomyResolver(prisma, gateway),
+        taxonomy,
       }),
       ...createQualifyActivities({ prisma }),
       ...createAcquisitionActivities({ prisma, registry: buildSourceAdapterRegistry() }),
       ...createIntentActivities({ prisma, fetcher: new Crawl4aiPageFetcher(), ownerDb }),
       ...createBacklogActivities({ prisma, providers, gateway, ownerDb }),
+      // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
+      ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, sourcePolicyReader }),
     },
   });
 

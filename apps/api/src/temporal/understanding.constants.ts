@@ -11,3 +11,5 @@ export const INTENT_SWEEP_WORKFLOW = 'intentSweepWorkflow';
 export const INTENT_SWEEP_SCHEDULE_ID = 'intent-sweep';
 export const BACKLOG_SWEEP_WORKFLOW = 'backlogSweepWorkflow';
 export const BACKLOG_SWEEP_SCHEDULE_ID = 'backlog-sweep';
+export const EXTERNAL_INTENT_SWEEP_WORKFLOW = 'externalIntentSweepWorkflow';
+export const EXTERNAL_INTENT_SWEEP_SCHEDULE_ID = 'external-intent-sweep';
