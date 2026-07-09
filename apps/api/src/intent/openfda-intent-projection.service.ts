@@ -160,14 +160,16 @@ export class OpenFdaIntentProjectionService {
         select: { id: true },
       });
 
-      // 🟢 intent 清关事实证据（CC0：署名非义务但存 provenance；不落具名 contact）
+      // 🟢 intent 清关事实证据（CC0：署名非义务但存 provenance；不落具名 contact）。
+      // **只存本 provider 贡献的清关事件**，不存 mergeIntent 的跨源合并对象——否则既有 TED/web_watch 事件会被
+      // 一并记进 providerKey='openfda'/CC0 证据行、在公司详情里误标成 openFDA/CC0 来源（Codex 复审）。
       await tx.fieldEvidence.create({
         data: {
           workspaceId,
           entityType: 'company',
           entityId: saved.id,
           field: 'intent.clearance',
-          value: intent as unknown as Prisma.InputJsonValue,
+          value: event as unknown as Prisma.InputJsonValue,
           providerKey: 'openfda',
           confidence: 1,
           license: OPENFDA_LICENSE,
@@ -240,7 +242,9 @@ const ORG_MARKER = /\b(inc|llc|ltd|co|corp|corporation|company|gmbh|ag|sa|sas|bv
 export function isLikelyIndividualApplicant(name: string): boolean {
   const s = name.trim();
   if (!s) return true; // 空名不入库
-  if (PERSON_TITLE.test(s)) return true; // Dr./Mr./… 头衔
-  if (SURNAME_COMMA_GIVEN.test(s) && !ORG_MARKER.test(s)) return true; // "Smith, John"（无组织标记）
+  // 组织标记**先判**：带法人后缀的一律保留，即便以头衔起头（"Dr. Mach GmbH & Co. KG" 是真公司；Codex 复审）。
+  if (ORG_MARKER.test(s)) return false;
+  if (PERSON_TITLE.test(s)) return true; // Dr./Mr./… 头衔（无组织标记）
+  if (SURNAME_COMMA_GIVEN.test(s)) return true; // "Smith, John"（无组织标记）
   return false;
 }
