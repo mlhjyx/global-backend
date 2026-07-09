@@ -180,6 +180,154 @@ export async function countField(endpoint: string, field: string, search?: strin
     .filter((r) => r.term);
 }
 
+// ═══════════════ 510(k) 清关（device/510k）—— 具名申请人 + decision_date = 新品/时机 intent ═══════════════
+// 契约据 spec §2.2/§8.5/§8.6（2026-07-09 活体实测）：`device/510k.json?search=product_code:X AND
+// country_code:CN AND decision_date:[FROM TO TO]`。字段 `applicant`/`k_number`/`decision_date`/`decision_code`/
+// `device_name` = 🟢 绿事实；`contact`/地址明细里的自然人 = 🔴（绝不提取）。`openfda` 谐调块**顶层**（不同于
+// registrationlisting 的 products 作用域）。
+
+/**
+ * FDA 日期归一到 ISO 日期 'YYYY-MM-DD'（spec §8.6 / §8.5 gotcha #5）：`decision_date` 实测多为 'YYYY-MM-DD'，
+ * 但其它字段/端点有紧凑 'YYYYMMDD' —— scoring.ts 的 `Date.parse` 对紧凑格式返 **NaN → intent 静默不得分**。
+ * 统一转 'YYYY-MM-DD'（Date.parse 合法）；不可解析 / 合规格式但非法日期（'2024-13-40'）→ undefined
+ * （调用方跳过，绝不写 NaN 的 `at`）。
+ */
+export function fdaDateToIso(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const s = raw.trim();
+  let iso: string | undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) iso = s; // 已 ISO 日期
+  else if (/^\d{8}$/.test(s)) iso = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`; // 紧凑 YYYYMMDD
+  else if (s.includes('T')) {
+    const d = s.slice(0, 10);
+    iso = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined; // ISO datetime → 取日期部
+  }
+  if (!iso) return undefined;
+  return Number.isNaN(Date.parse(iso)) ? undefined : iso; // 兜住合规格式但非法日期（'2024-13-40'）
+}
+
+// 只对**已清关**的 510(k) 投 FDA_CLEARANCE（spec §8.6 红线：NSE/被拒/撤回绝不投，否则给被拒公司误加分）。
+// 允许清单（**fail toward 不投影**——漏投=丢线索[安全]，误投 NSE=误加分[红线]）：
+//  · `SE*` 前缀 = Substantially Equivalent 家族（SESE/SESK/SESU/SESD/SESP/SEKD…；活 API 主体 SESE=171,902）；
+//    NSE（Not Substantially Equivalent）码以 'N' 前缀，天然排除。
+//  · 显式非 SE 前缀的等同变体（活 API decision_description 实测均 "Substantially Equivalent - …"）：SN/ST/PT/SI。
+//  · DENG = De Novo Granted（新颖低中风险器械上市授权）；DENN（denied）不在内。
+const CLEARED_DECISION_CODES: ReadonlySet<string> = new Set(['SN', 'ST', 'PT', 'SI', 'DENG']);
+
+/** decision_code 是否代表**正向清关/授权**（见 CLEARED_DECISION_CODES 注释）。空/未知 → false（不投影）。 */
+export function isClearedDecision(decisionCode?: string): boolean {
+  if (!decisionCode) return false;
+  const c = decisionCode.trim().toUpperCase();
+  if (c.startsWith('SE')) return true; // Substantially Equivalent 家族（NSE 是 N 前缀，天然排除）
+  return CLEARED_DECISION_CODES.has(c);
+}
+
+/** 一条 510(k) 清关记录 → 绿事实（🟢 法人 + 清关事实 + 分类块；无具名 contact/us_agent）。 */
+export interface Fda510kClearance {
+  kNumber?: string;
+  applicant: string; // 申请人法人名（🟢；个体户自然人边界在 projection 过滤）
+  country?: string; // country_code（alpha-2）
+  productCode?: string;
+  decisionDateIso?: string; // fdaDateToIso 归一（§8.6）
+  decisionCode?: string;
+  deviceName?: string; // 申请人自报器械名（顶层 device_name）
+  deviceFacts?: OpenFdaDeviceFacts; // 顶层 openfda 谐调块（缺块当 null）
+}
+
+export interface Build510kParams {
+  productCodes: string[]; // 3 字母码，至少一个——绝不裸拉全库
+  countries?: string[]; // 申请人 country_code（alpha-2）
+  decisionDateFrom?: string; // ISO 'YYYY-MM-DD'
+  decisionDateTo?: string; // ISO 'YYYY-MM-DD'
+}
+
+/**
+ * 510(k) search 子句 AND 拼接（**顶层** product_code/country_code，不同于 registrationlisting 的 products.*）。
+ * decision_code 过滤**不进 query**（清关码集多变、且 openFDA 难表达 NOT NSE）→ 客户端 isClearedDecision 过滤。
+ * 日期范围括号 `[FROM TO TO]`：openFDA 语法，URLSearchParams 编码 `[`→`%5B`（spec §2.2 认可，裸括号会空返）。
+ */
+export function build510kSearch(p: Build510kParams): string {
+  if (!p.productCodes.length) {
+    throw new Error('build510kSearch: productCodes required (openFDA 510k 发现必须带产品码，绝不裸拉全库)');
+  }
+  const clauses: string[] = [orClause('product_code', p.productCodes)];
+  const countries = (p.countries ?? []).map((c) => c.toUpperCase()).filter(Boolean);
+  if (countries.length) clauses.push(orClause('country_code', countries));
+  if (p.decisionDateFrom && p.decisionDateTo) clauses.push(`decision_date:[${p.decisionDateFrom} TO ${p.decisionDateTo}]`);
+  return clauses.join(' AND ');
+}
+
+/**
+ * 一条原始 510(k) 记录 → 归一 Fda510kClearance（绿事实）。
+ * 🔴 **绝不提取** `contact`（具名个人）/ 地址明细里的自然人 —— 只取法人名 + 清关事实 + 分类块。
+ * 无 `applicant`（法人名）→ null（主解析键缺失，不臆造）。
+ */
+export function map510k(raw: Record<string, unknown>): Fda510kClearance | null {
+  const applicant = str(raw['applicant'])?.trim();
+  if (!applicant) return null;
+  const openfda = asObject(raw['openfda']); // 510k 谐调块在顶层（registrationlisting 在 products 下）
+  return {
+    kNumber: str(raw['k_number']),
+    applicant,
+    country: str(raw['country_code'])?.toUpperCase(),
+    productCode: str(raw['product_code']),
+    decisionDateIso: fdaDateToIso(str(raw['decision_date'])),
+    decisionCode: str(raw['decision_code']),
+    deviceName: str(raw['device_name']),
+    deviceFacts: Object.keys(openfda).length ? unpackDeviceFacts(openfda) : undefined,
+  };
+}
+
+export interface Search510kParams {
+  productCodes: string[]; // 必填
+  countries?: string[]; // 申请人 country_code（alpha-2）过滤
+  sinceDays?: number; // decision_date 窗口（默认 365；清关比招标稀，窗口更宽）
+  limit?: number; // ≤1000
+  maxRecords?: number; // 跨页累计上限（有界样本）
+  clearedOnly?: boolean; // 默认 true（只要正向清关，排除 NSE/denial/withdrawal）
+  now?: number; // 可注入时钟（测试确定性；默认 Date.now()）
+}
+
+/**
+ * 拉 510(k) 清关（有界样本分页）。decision_date 窗口 = [now-sinceDays, now]。
+ * `clearedOnly`（默认 true）客户端过滤 isClearedDecision；无合法 decisionDateIso 的记录丢弃
+ * （§8.6：无可靠时机信号）。网络/错误向上抛由 provider fail-safe；0 命中（error.NOT_FOUND）返 []。
+ */
+export async function search510kClearances(params: Search510kParams): Promise<Fda510kClearance[]> {
+  const now = params.now ?? Date.now();
+  const search = build510kSearch({
+    productCodes: params.productCodes,
+    countries: params.countries,
+    decisionDateFrom: isoDate(now - (params.sinceDays ?? 365) * 86_400_000),
+    decisionDateTo: isoDate(now),
+  });
+  const limit = Math.min(params.limit ?? 100, MAX_LIMIT);
+  const maxRecords = params.maxRecords ?? limit;
+  const clearedOnly = params.clearedOnly !== false;
+  const out: Fda510kClearance[] = [];
+  for (let page = 0; page < MAX_PAGES && out.length < maxRecords; page++) {
+    const skip = page * limit;
+    if (skip > MAX_SKIP) break;
+    const json = await openFdaGet('/device/510k.json', { search, limit, skip });
+    if (json.error) break; // NOT_FOUND / 其它 → 无更多结果
+    const results = Array.isArray(json.results) ? json.results : [];
+    for (const r of results) {
+      const c = map510k(r as Record<string, unknown>);
+      if (!c || !c.decisionDateIso) continue; // 无法人名 / 无合法日期 → 跳过
+      if (clearedOnly && !isClearedDecision(c.decisionCode)) continue; // NSE/denial/withdrawal → 跳过
+      out.push(c);
+      if (out.length >= maxRecords) break;
+    }
+    if (results.length < limit) break; // 最后一页
+    await sleep(THROTTLE_MS);
+  }
+  return out;
+}
+
+function isoDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 interface OpenFdaResponse {
   meta?: { results?: { total?: number } };
   results?: unknown[];
