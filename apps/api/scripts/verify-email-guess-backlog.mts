@@ -122,10 +122,10 @@ const gp = buildGatewayProvider();
 if (gp) reg.register(gp);
 if (stubAllowed()) reg.register(new StubModelProvider());
 const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
-const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
-const providers = new DiscoveryProviderRegistry({ gateway, broker: buildToolBroker({ sourcePolicyReader }), sourcePolicyReader });
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+const providers = new DiscoveryProviderRegistry({ gateway, broker });
 await providers.seed(ownerDb); // 幂等：确保 smtp_self ENABLED + email_guess 行存在
-const acts = createBacklogActivities({ prisma, providers, gateway, ownerDb });
+const acts = createBacklogActivities({ prisma, providers, gateway, ownerDb, broker });
 
 // ══════════ 段 1 · 双闸全开 → 自动补全 + 落库 + 水位 ══════════
 console.log('══ 段 1 · 双闸全开（email_guess ENABLED + config.lawfulBasis）→ 自动补全 ══');

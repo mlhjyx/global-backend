@@ -9,6 +9,8 @@
 import { readFileSync } from 'node:fs';
 import { Crawl4aiPageFetcher } from '../src/intent/page-fetcher';
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageSignals } from '../src/intent/page-signals';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -24,7 +26,11 @@ const DEFAULT_URLS = [
 ];
 
 const urls = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_URLS;
-const fetcher = new Crawl4aiPageFetcher();
+// 收口②：抓取出网统一经 ToolBroker（source_policy 读取需 postgres 在跑）
+const prisma = new PrismaService();
+await prisma.$connect();
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+const fetcher = new Crawl4aiPageFetcher(broker);
 
 const snapshots: { url: string; signals: PageSignals }[] = [];
 for (const url of urls) {
@@ -71,3 +77,4 @@ if (snapshots.length) {
   }
 }
 console.log('\n完成。');
+await prisma.$disconnect();

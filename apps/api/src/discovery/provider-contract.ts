@@ -22,6 +22,22 @@ export interface CompanyDiscoveryQuery {
   limit: number;
 }
 
+/**
+ * 执行上下文（收口②）：由编排层（activity/service）构造并**贯穿**到 provider——
+ * LLM 调用（AiContext）与工具出网（ToolContext）都用它归属真租户/run。
+ * workspaceId 必须是真实 workspace uuid（ai_trace/usage_ledger 列是 @db.Uuid，
+ * 伪值如 'discovery' 会令记账静默失败——这正是本收口消灭的缺陷）；
+ * 平台级无租户的执行（采集 sweep 等）用 PLATFORM_WORKSPACE 哨兵，且**绝不**流入 AiContext。
+ */
+export interface ExecutionContext {
+  workspaceId: string;
+  runId?: string;
+  correlationId?: string;
+}
+
+/** 平台级执行的 ToolContext 哨兵（对齐 email-verify 先例）；只用于工具 Trace/预算归属，禁止流入 AiContext。 */
+export const PLATFORM_WORKSPACE = 'platform';
+
 /** Provider 返回的公司记录（适配器已做字段名归一，值保持原样）。 */
 export interface ProviderCompanyRecord {
   externalId: string;
@@ -117,10 +133,10 @@ export interface EmailVerdict {
 export interface CompanyDiscoveryAdapter {
   key: string;
   classes: SourceClass[];
-  discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult>;
+  discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult>;
 }
 
-/** 联系人发现（Waterfall 第 5 步：仅对高价值企业购买联系人）。ctx 可选（旧实现忽略即可，非破坏性）。 */
+/** 联系人发现（Waterfall 第 5 步：仅对高价值企业购买联系人）。sellerCtx 可选（旧实现忽略即可，非破坏性）。 */
 export interface ContactDiscoveryAdapter {
   key: string;
   discoverContacts(
@@ -129,7 +145,8 @@ export interface ContactDiscoveryAdapter {
       domain?: string;
       country?: string;
     },
-    ctx?: ContactDiscoveryContext,
+    ctx: ExecutionContext,
+    sellerCtx?: ContactDiscoveryContext,
   ): Promise<ContactDiscoveryResult>;
 }
 
@@ -188,5 +205,5 @@ export interface EnrichmentResult {
  */
 export interface CompanyEnrichmentAdapter {
   key: string;
-  enrichCompany(input: CompanyEnrichmentInput): Promise<EnrichmentResult>;
+  enrichCompany(input: CompanyEnrichmentInput, ctx: ExecutionContext): Promise<EnrichmentResult>;
 }

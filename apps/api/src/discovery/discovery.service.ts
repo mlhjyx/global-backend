@@ -110,11 +110,15 @@ export class DiscoveryService {
       return { company, adapter: adapters[0], suppressedEmails };
     });
 
-    const result = await loaded.adapter.discoverContacts({
-      name: loaded.company.name,
-      domain: loaded.company.domain ?? undefined,
-      country: loaded.company.country ?? undefined,
-    });
+    const result = await loaded.adapter.discoverContacts(
+      {
+        name: loaded.company.name,
+        domain: loaded.company.domain ?? undefined,
+        country: loaded.company.country ?? undefined,
+      },
+      // 收口②：真租户贯穿（LLM/抓取按 workspace 归属 trace/预算）
+      { workspaceId: ctx.workspaceId, correlationId: companyId },
+    );
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const { skippedSuppressed } = await persistDiscoveredContacts(tx, {

@@ -1,11 +1,14 @@
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
+  DiscoveryOptions,
   DiscoveryResult,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
-import { discoverByArea } from '../../adapters/openstreetmap';
+import type { OsmPlace } from '../../adapters/openstreetmap';
+import type { ExecutionBroker } from '../../tools/tool-contract';
 import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
 
 /**
@@ -13,17 +16,46 @@ import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
  * 按 filters.industry → OSM 标签、filters.region/country → OSM area 枚举工业实体。
  * 产出真实企业名 + 坐标 + 地址；website 命中率参差，交 mineDomain 富化。
  * 属 industry_data 类。
+ *
+ * 收口②：出网经 ToolBroker（`osm.overpass` 为 required 工具）——SUSPENDED/未登记/
+ * 用途不符一律 fail-closed；无 broker 不允许直连。
  */
 export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'openstreetmap';
   readonly classes: SourceClass[] = ['industry_data'];
 
-  async discoverCompanies(query: CompanyDiscoveryQuery): Promise<DiscoveryResult> {
+  constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
+
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+    if (!this.deps?.broker) {
+       
+      console.warn('[openstreetmap] broker unavailable, fail-closed (no raw egress)');
+      return { records: [], costCents: 0 };
+    }
+    void opts; // 本源产出多无域名，blockedDomains 不适用（签名统一保留）
+
     const tagFilters = mapTags(query);
     const areaName = mapArea(query);
     if (!tagFilters.length || !areaName) return { records: [], costCents: 0 };
 
-    const places = await discoverByArea({ areaName, tagFilters, limit: Math.min(query.limit, 80) });
+    let places: OsmPlace[];
+    try {
+      const res = await this.deps.broker.invoke<
+        { areaName: string; tagFilters: { k: string; v?: string }[]; limit?: number },
+        { places: OsmPlace[] }
+      >(
+        'osm.overpass',
+        { areaName, tagFilters, limit: Math.min(query.limit, 80) },
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+      );
+      places = res.data.places ?? [];
+    } catch (err) {
+      // fail-safe：单源失败/闸门拒绝不阻断其余源（CLAUDE.md §5）；拒绝原因已入 Broker DENIED trace
+       
+      console.warn(`[openstreetmap] discover failed: ${String(err).slice(0, 150)}`);
+      return { records: [], costCents: 0 };
+    }
+
     const now = new Date().toISOString();
     const records: ProviderCompanyRecord[] = places.map((p) => ({
       externalId: `osm:${p.osmId}`,

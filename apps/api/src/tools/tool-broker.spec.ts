@@ -12,7 +12,7 @@ function fakeTool(id: string, costCents = 5, exec?: () => Promise<unknown>): Too
     category: 'search',
     cost: { unit: 'call', estimatedCents: costCents, external: false },
     rateLimit: { rps: 100, concurrency: 10 },
-    compliance: { requiresSourcePolicy: false, respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
+    compliance: { sourcePolicy: 'none', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
     capabilities: { produces: ['domain'], accepts: ['keywords'] },
     idempotencyKey: () => `${id}:k`,
     healthCheck: async () => ({ healthy: true }),
@@ -99,12 +99,103 @@ describe('ToolBroker — Trace + source_policy', () => {
 
   it('SUSPENDED 域名 → denied（合规门）', async () => {
     const tool = fakeTool('crawl4ai.fetch');
-    tool.compliance.requiresSourcePolicy = true;
+    tool.compliance.sourcePolicy = 'advisory';
     const { broker } = makeBroker(tool, {
       sourcePolicyReader: async (d) => ({ suspended: d === 'blocked.com' }),
     });
     await expect(
       broker.invoke('crawl4ai.fetch', { url: 'https://blocked.com/x' }, { workspaceId: 'w' }),
     ).rejects.toThrow(/SUSPENDED/);
+  });
+
+  it('预算超限也要留 DENIED trace（审计可见）', async () => {
+    const traces: { status: string; reason?: string }[] = [];
+    const budget = new BudgetLedger();
+    const { broker } = makeBroker(fakeTool('t.pricy', 30), { budget, traceRecorder: (t) => traces.push(t) });
+    budget.open('run1', 10);
+    await expect(broker.invoke('t.pricy', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow(BudgetExceededError);
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({ status: 'DENIED' });
+    expect(traces[0].reason).toMatch(/budget/i);
+  });
+});
+
+describe('ToolBroker — source_policy fail-closed（收口②：未登记不放行）', () => {
+  function requiredTool(policyDomain?: string): Tool {
+    const t = fakeTool('gov.source');
+    t.compliance.sourcePolicy = 'required';
+    if (policyDomain) t.compliance.policyDomain = policyDomain;
+    return t;
+  }
+
+  it('required + 未登记域（reader 返 null）→ denied(unregistered)，工具不执行', async () => {
+    const exec = vi.fn(async () => ({ ok: true }));
+    const t = requiredTool();
+    t.execute = async () => ({ data: await exec(), costCents: 0 });
+    const { broker } = makeBroker(t, { sourcePolicyReader: async () => null });
+    await expect(
+      broker.invoke('gov.source', { domain: 'unknown.example' }, { workspaceId: 'w' }),
+    ).rejects.toThrow(/unregistered/);
+    expect(exec).not.toHaveBeenCalled();
+    const chk = await broker.checkSourcePolicy('gov.source', 'unknown.example');
+    expect(chk).toEqual({ allowed: false, reason: 'unregistered' });
+  });
+
+  it('required + 无 sourcePolicyReader → denied(policy_unavailable)（忘注入即拒，非放行）', async () => {
+    const { broker } = makeBroker(requiredTool());
+    await expect(
+      broker.invoke('gov.source', { domain: 'api.example' }, { workspaceId: 'w' }),
+    ).rejects.toThrow(/policy_unavailable|source_policy/);
+    const chk = await broker.checkSourcePolicy('gov.source', 'api.example');
+    expect(chk).toEqual({ allowed: false, reason: 'policy_unavailable' });
+  });
+
+  it('required + input 提不出域名且无 policyDomain → denied（不静默跳过合规门）', async () => {
+    const { broker } = makeBroker(requiredTool(), { sourcePolicyReader: async () => ({ suspended: false }) });
+    await expect(broker.invoke('gov.source', { q: 'no-domain-here' }, { workspaceId: 'w' })).rejects.toThrow(ToolPolicyDenied);
+  });
+
+  it('required + policyDomain 固定治理域：input 无 url 也按 policyDomain 查策略并放行', async () => {
+    const seen: string[] = [];
+    const { broker } = makeBroker(requiredTool('api.ted.europa.eu'), {
+      sourcePolicyReader: async (d) => {
+        seen.push(d);
+        return { suspended: false, allowedPurpose: ['discovery'] };
+      },
+    });
+    const r = await broker.invoke('gov.source', { q: 'pumps' }, { workspaceId: 'w' });
+    expect(r.data).toEqual({ ok: true });
+    expect(seen).toEqual(['api.ted.europa.eu']);
+  });
+
+  it('required + 用途不允许 → denied(purpose_not_allowed)', async () => {
+    const { broker } = makeBroker(requiredTool('api.example'), {
+      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['outreach'] }),
+    });
+    await expect(broker.invoke('gov.source', {}, { workspaceId: 'w' })).rejects.toThrow(/purpose/);
+  });
+
+  it('advisory + 未登记域 → 放行（标的公司站点由 robots/DAT-011 兜底）', async () => {
+    const t = fakeTool('crawl.subject');
+    t.compliance.sourcePolicy = 'advisory';
+    const { broker } = makeBroker(t, { sourcePolicyReader: async () => null });
+    const r = await broker.invoke('crawl.subject', { url: 'https://some-company.example/' }, { workspaceId: 'w' });
+    expect(r.data).toEqual({ ok: true });
+  });
+
+  it('advisory + 已登记 SUSPENDED → denied（登记则强制）', async () => {
+    const t = fakeTool('crawl.subject');
+    t.compliance.sourcePolicy = 'advisory';
+    const { broker } = makeBroker(t, { sourcePolicyReader: async () => ({ suspended: true }) });
+    await expect(
+      broker.invoke('crawl.subject', { url: 'https://blocked.example/' }, { workspaceId: 'w' }),
+    ).rejects.toThrow(/SUSPENDED/);
+  });
+
+  it('sourcePolicy=none → 不查策略（自托管基座）', async () => {
+    const reader = vi.fn(async () => null);
+    const { broker } = makeBroker(fakeTool('searxng.search'), { sourcePolicyReader: reader });
+    await broker.invoke('searxng.search', { q: 'x' }, { workspaceId: 'w' });
+    expect(reader).not.toHaveBeenCalled();
   });
 });

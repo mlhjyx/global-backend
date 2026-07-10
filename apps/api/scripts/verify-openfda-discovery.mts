@@ -54,17 +54,22 @@ const prisma = new PrismaService();
 await prisma.$connect();
 const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 await ownerDb.$connect();
+// 收口②：唯一执行闸门——直连与 registry 共用同一 ToolBroker（source_policy fail-closed）
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
 
 async function main() {
   // ══════════ Tier 1 · 真 API（provider 直打 openFDA）══════════
   console.log(`\n══ Tier 1 · 真 API：产品码 ${PRODUCT_CODE}（放射影像）美国进口商（initial_importer_flag:Y）══`);
-  const provider = new OpenFdaDiscoveryProvider();
-  const res = await provider.discoverCompanies({
-    sourceClass: 'public_intelligence',
-    filters: { product_code: PRODUCT_CODE, trade_side: 'importer' },
-    keywords: [],
-    limit: 25,
-  });
+  const provider = new OpenFdaDiscoveryProvider({ broker });
+  const res = await provider.discoverCompanies(
+    {
+      sourceClass: 'public_intelligence',
+      filters: { product_code: PRODUCT_CODE, trade_side: 'importer' },
+      keywords: [],
+      limit: 25,
+    },
+    { workspaceId: WS },
+  );
   console.log(`   拉到 ${res.records.length} 家在美注册进口商（去重后）`);
   for (const r of res.records.slice(0, 8)) {
     const fda = r.attributes?.fda as Record<string, unknown>;
@@ -101,8 +106,7 @@ async function main() {
   if (gp) reg.register(gp);
   if (stubAllowed()) reg.register(new StubModelProvider());
   const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
-  const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
-  const providers = new DiscoveryProviderRegistry({ gateway, broker: buildToolBroker({ sourcePolicyReader }), sourcePolicyReader });
+  const providers = new DiscoveryProviderRegistry({ gateway, broker }); // §8.8 用途门在 Broker 内单点判定（收口②）
   const acts = createDiscoveryActivities({ prisma, providers, gateway });
 
   const planQuery: PlanQuery = {

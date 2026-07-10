@@ -38,9 +38,9 @@ export async function understandingWorkflow(input: UnderstandingWorkflowInput): 
   const { workspaceId, companyId, website } = input;
   await dbActs.setStatus({ companyId, workspaceId, status: 'ENRICHING' });
 
-  const home = await crawlActs.crawlWebsite(website);
+  const home = await crawlActs.crawlWebsite({ workspaceId, website });
   const subUrls = await dbActs.selectSubpages({ markdown: home.text, website });
-  const { pages: subPages } = await crawlActs.crawlPages(subUrls);
+  const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, urls: subUrls });
   const pages = [home, ...subPages];
 
   // Per-page extraction so every Evidence row points at the page it came from.

@@ -93,6 +93,9 @@ export class TaxonomyResolver {
 
   /** 冷路径：让 LLM 在标准码表内选一个 code（enum 约束），校验后沉淀。 */
   private async llmResolve(kind: TaxonomyKind, term: string, workspaceId?: string): Promise<CanonicalNode | null> {
+    // 收口②：无真实租户上下文不走 LLM 冷路径——伪 workspace（曾用 'taxonomy'）会令
+    // ai_trace/usage_ledger 的 @db.Uuid 列写入静默失败，记账全盲。确定性路径不受影响。
+    if (!workspaceId) return null;
     const contract = getTask('taxonomy.normalize');
     if (!contract) return null;
     // 候选码表（该 kind 全部节点，作为 enum 约束）
@@ -116,7 +119,7 @@ export class TaxonomyResolver {
           schema,
           prompt: `把词「${term}」归一到下面 ${kind} 标准码表中最匹配的一个 code（只能选表中已有的 code，选不到就返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId: workspaceId ?? 'taxonomy' },
+        { workspaceId },
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -151,6 +154,8 @@ export class TaxonomyResolver {
     // 缓存命中须落在**当前子树**内：别名按 (kind,term) 全局缓存、不按子树，跨 ICP 不同行业子树同产品词不可串用。
     if (alias && prefixes.some((p) => alias.code.startsWith(p))) return alias.code;
     if (opts?.allowLlm === false) return null;
+    // 收口②：无真实租户上下文不走 LLM（伪 workspace 会令 ai_trace 记账静默失败）
+    if (!opts?.workspaceId) return null;
 
     // 有界枚举：仅子树前缀命中的 CPV 码（绝不整表；这是与 llmResolve 整表 slice 的关键区别）
     const rows = await this.prisma.canonicalTaxonomy.findMany({
@@ -183,7 +188,7 @@ export class TaxonomyResolver {
           schema,
           prompt: `把产品「${product}」精修到下面 CPV 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId: opts?.workspaceId ?? 'taxonomy' },
+        { workspaceId: opts.workspaceId },
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -226,6 +231,8 @@ export class TaxonomyResolver {
       if (leaf?.parentCode && panelCodes.includes(leaf.parentCode)) return alias.code;
     }
     if (opts?.allowLlm === false) return null;
+    // 收口②：无真实租户上下文不走 LLM（伪 workspace 会令 ai_trace 记账静默失败）
+    if (!opts?.workspaceId) return null;
 
     const rows = await this.prisma.canonicalTaxonomy.findMany({
       where: { kind: 'fda_product_code', parentCode: { in: panelCodes } },
@@ -253,7 +260,7 @@ export class TaxonomyResolver {
           schema,
           prompt: `把医疗器械产品「${product}」精修到下面 FDA product code 表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId: opts?.workspaceId ?? 'taxonomy' },
+        { workspaceId: opts.workspaceId },
       );
       const code = result.data?.code;
       if (!code) return null;

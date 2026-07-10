@@ -23,7 +23,7 @@ export const searxngSearchTool: Tool<
   sourceClass: 'public_intelligence',
   cost: { unit: 'request', estimatedCents: 0, external: false },
   rateLimit: { rps: 3, concurrency: 3 },
-  compliance: { requiresSourcePolicy: false, respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
+  compliance: { sourcePolicy: 'none', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['domain'], accepts: ['keywords'] },
   idempotencyKey: (i) => `searxng.search:${stableKey(i)}`,
   healthCheck: async () => {
@@ -51,7 +51,8 @@ export const crawl4aiFetchTool: Tool<{ url: string }, { url: string; text: strin
   sourceClass: 'public_intelligence',
   cost: { unit: 'page', estimatedCents: 1, external: false },
   rateLimit: { rps: 2, concurrency: 3, perDomainCrawlDelayMs: 2000 },
-  compliance: { requiresSourcePolicy: true, respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
+  compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['company', 'domain', 'contact'], accepts: ['domain'] },
   idempotencyKey: (i) => `crawl4ai.fetch:${hash(i.url)}`,
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
@@ -81,7 +82,8 @@ export const wikidataTool: Tool<
   sourceClass: 'company_registry',
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
-  compliance: { requiresSourcePolicy: false, respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  // required：受治理数据源（未登记 fail-closed）；治理域固定为 SPARQL 端点，seed 于 provider.registry。
+  compliance: { sourcePolicy: 'required', policyDomain: 'query.wikidata.org', respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['company', 'relation'], accepts: ['keywords'], enrichesOnly: false },
   idempotencyKey: (i) => `wikidata.sparql:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'wdqs' }),
@@ -106,7 +108,8 @@ export const osmOverpassTool: Tool<
   sourceClass: 'industry_data',
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
-  compliance: { requiresSourcePolicy: false, respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
+  // required：受治理数据源；主端点 overpass-api.de（adapter 可能落 kumi 镜像，治理键固定主端点）。
+  compliance: { sourcePolicy: 'required', policyDomain: 'overpass-api.de', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['company'], accepts: ['coordinates', 'keywords'] },
   idempotencyKey: (i) => `osm.overpass:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'overpass' }),
@@ -138,7 +141,7 @@ export interface SmtpProbeOutput {
 }
 
 /**
- * SMTP RCPT 探测工具（邮箱验证）。**requiresSourcePolicy=true** → Broker 执行前按 `domain`
+ * SMTP RCPT 探测工具（邮箱验证）。**sourcePolicy=advisory** → Broker 执行前按 `domain`
  * 查 source_policy（SUSPENDED 拒 + 用途门），并纳入限流/预算/Trace。SSRF 护栏在 execute 内先行：
  * MX 主机来自外部域名（可被投毒指向内网），解析为公网 IP 才连接，否则 egressBlocked 返回、绝不出网。
  * 不发 DATA（不真正发信）。端口 25 被封/超时 → reachable=false（上层诚实降级 RISKY）。
@@ -155,7 +158,8 @@ export const smtpRcptProbeTool: Tool<SmtpProbeInput, SmtpProbeOutput> = {
   // 按仓库 🔴 红线，凡可能承载人名邮箱的工具一律标 true（喂个人数据/脱敏门的工具元数据判据）。
   // 用途门覆盖 source_policy 词表两种用途：邮箱可达性探测属发现/富集流水线的一环，
   // 只要域策略允许其一即放行（仍受 SUSPENDED 硬门约束）；避免只登记 ['discovery'] 的域被误拒。
-  compliance: { requiresSourcePolicy: true, respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'medium' },
+  // advisory：标的=任意公司邮箱域（要求预登记会杀死邮箱验证）；登记即强制 SUSPENDED/用途门。
+  compliance: { sourcePolicy: 'advisory', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'medium' },
   capabilities: { produces: [], accepts: ['domain'] },
   idempotencyKey: (i) => `smtp.rcpt_probe:${stableKey({ domain: i.domain, mxHost: i.mxHost, rcptTo: i.rcptTo })}`,
   healthCheck: async () => ({ healthy: true, detail: 'smtp' }),

@@ -1,10 +1,16 @@
 import { createHash } from 'node:crypto';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
-import { crawlUrl } from '../../adapters/web-crawler';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
-import { ContactDiscoveryAdapter, ContactDiscoveryContext, ContactDiscoveryResult } from '../provider-contract';
+import {
+  ContactDiscoveryAdapter,
+  ContactDiscoveryContext,
+  ContactDiscoveryResult,
+  ExecutionContext,
+} from '../provider-contract';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -68,21 +74,33 @@ interface ExtractedPeople {
 export class DecisionMakerProvider {
   readonly key = 'decision_maker';
 
-  constructor(private readonly deps: { gateway: ModelGateway }) {}
+  constructor(private readonly deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {}
 
   private log(msg: string): void {
-     
+
     console.log(`[decision_maker] ${msg}`);
+  }
+
+  /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
+  private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
+    return { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, taskContractId };
   }
 
   /**
    * @param company.domain 目标公司域名
+   * @param ctx 执行上下文（真租户/run 归属，贯穿 LLM 与工具出网）
    * @param sellerContext 卖方/ICP 摘要 + 目标买家角色（用于判 is_target_role），可选
    */
   async findDecisionMakers(
     company: { domain: string; name?: string },
+    ctx: ExecutionContext,
     sellerContext?: { seller?: string; target_roles?: string[]; offering?: string },
   ): Promise<DecisionMakerContact[]> {
+    // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
+    if (!this.deps.broker) {
+      this.log('skip: broker unavailable (fail-closed, no raw egress)');
+      return [];
+    }
     const base = `https://${company.domain}/`;
     if (!(await isAllowedByRobots(base))) {
       this.log(`skip ${company.domain}: robots disallow`);
@@ -90,7 +108,7 @@ export class DecisionMakerProvider {
     }
 
     // 1) 选人物页：首页链接里按 people-pattern 打分 + 固定路径兜底
-    const pages = await this.selectPeoplePages(company.domain, base);
+    const pages = await this.selectPeoplePages(company.domain, base, ctx);
     if (!pages.length) return [];
 
     // 2) 逐页抓取 + LLM 抽取分类，按人名去重合并
@@ -99,13 +117,18 @@ export class DecisionMakerProvider {
       if (!(await isAllowedByRobots(url))) continue;
       let text: string;
       try {
-        text = (await crawlUrl(url)).text.slice(0, 30_000);
+        const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
+          'crawl4ai.fetch',
+          { url },
+          this.toolCtx(ctx, 'contact.find_decision_makers'),
+        );
+        text = crawled.data.text.slice(0, 30_000);
       } catch {
         continue;
       }
       if (text.trim().length < 120) continue;
 
-      const people = await this.extract(url, text, sellerContext);
+      const people = await this.extract(url, text, ctx, sellerContext);
       for (const p of people) {
         const name = p.full_name?.trim();
         if (!name) continue;
@@ -138,11 +161,15 @@ export class DecisionMakerProvider {
     return out;
   }
 
-  private async selectPeoplePages(domain: string, base: string): Promise<string[]> {
+  private async selectPeoplePages(domain: string, base: string, ctx: ExecutionContext): Promise<string[]> {
     const picked: string[] = [];
     try {
-      const home = await crawlUrl(base);
-      const links = extractSameSiteLinks(home.text, base);
+      const home = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
+        'crawl4ai.fetch',
+        { url: base },
+        this.toolCtx(ctx, 'contact.find_decision_makers'),
+      );
+      const links = extractSameSiteLinks(home.data.text, base);
       const scored = links
         .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
         .filter((s) => s.w > 0)
@@ -177,6 +204,7 @@ export class DecisionMakerProvider {
   private async extract(
     url: string,
     text: string,
+    ctx: ExecutionContext,
     sellerContext?: { seller?: string; target_roles?: string[]; offering?: string },
   ): Promise<NonNullable<ExtractedPeople['people']>> {
     const contract = getTask('contact.find_decision_makers');
@@ -193,7 +221,8 @@ export class DecisionMakerProvider {
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['people'] },
         },
-        { workspaceId: 'discovery' },
+        // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
       );
       return result.data?.people ?? [];
     } catch (err) {
@@ -213,18 +242,20 @@ export class DecisionMakerContactAdapter implements ContactDiscoveryAdapter {
   readonly key = 'decision_maker';
   private readonly inner: DecisionMakerProvider;
 
-  constructor(deps: { gateway: ModelGateway }) {
+  constructor(deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {
     this.inner = new DecisionMakerProvider(deps);
   }
 
   async discoverContacts(
     company: { name: string; domain?: string; country?: string },
-    ctx?: ContactDiscoveryContext,
+    ctx: ExecutionContext,
+    sellerCtx?: ContactDiscoveryContext,
   ): Promise<ContactDiscoveryResult> {
     if (!company.domain) return { contacts: [], costCents: 0 };
     const people = await this.inner.findDecisionMakers(
       { domain: company.domain, name: company.name },
-      ctx ? { seller: ctx.seller, target_roles: ctx.targetRoles, offering: ctx.offering } : undefined,
+      ctx,
+      sellerCtx ? { seller: sellerCtx.seller, target_roles: sellerCtx.targetRoles, offering: sellerCtx.offering } : undefined,
     );
     return { contacts: DecisionMakerProvider.toContactRecords(people), costCents: 0 };
   }

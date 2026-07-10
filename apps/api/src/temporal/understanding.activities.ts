@@ -2,7 +2,8 @@ import { Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
-import { crawlUrl } from '../adapters/web-crawler';
+import type { CrawlResult } from '../adapters/web-crawler';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links';
 import { extractPublicContacts } from '../adapters/contact-extractor';
 
@@ -46,7 +47,19 @@ const MAX_SUBPAGES = 6;
 export function createUnderstandingActivities(deps: {
   prisma: PrismaService;
   gateway: ModelGateway;
+  /** 收口②：页面抓取经 ToolBroker（crawl4ai.fetch，白名单绑定 extract_claims 契约）。 */
+  broker?: ExecutionBroker;
 }) {
+  const crawlViaBroker = async (workspaceId: string, url: string): Promise<string> => {
+    if (!deps.broker) throw new Error('understanding: broker unavailable (fail-closed, no raw egress)');
+    const r = await deps.broker.invoke<{ url: string }, CrawlResult>(
+      'crawl4ai.fetch',
+      { url },
+      { workspaceId, taskContractId: 'company_understanding.extract_claims', correlationId: url },
+    );
+    return r.data.text;
+  };
+
   return {
     async setStatus(args: {
       companyId: string;
@@ -61,9 +74,9 @@ export function createUnderstandingActivities(deps: {
       );
     },
 
-    async crawlWebsite(website: string): Promise<CrawledPage> {
-      const result = await crawlUrl(website);
-      return { url: website, text: result.text.slice(0, MAX_PAGE_CHARS) };
+    async crawlWebsite(args: { workspaceId: string; website: string }): Promise<CrawledPage> {
+      const text = await crawlViaBroker(args.workspaceId, args.website);
+      return { url: args.website, text: text.slice(0, MAX_PAGE_CHARS) };
     },
 
     /** Deterministic: pick key subpages (products/about/certifications/cases/contact…). */
@@ -73,15 +86,15 @@ export function createUnderstandingActivities(deps: {
     },
 
     /** Crawl subpages, tolerating individual failures — a broken page must not kill the run. */
-    async crawlPages(urls: string[]): Promise<{ pages: CrawledPage[] }> {
-      const settled = await Promise.allSettled(urls.map((u) => crawlUrl(u)));
+    async crawlPages(args: { workspaceId: string; urls: string[] }): Promise<{ pages: CrawledPage[] }> {
+      const settled = await Promise.allSettled(args.urls.map((u) => crawlViaBroker(args.workspaceId, u)));
       const pages: CrawledPage[] = [];
       settled.forEach((s, i) => {
-        if (s.status === 'fulfilled' && s.value.text.trim()) {
-          pages.push({ url: urls[i], text: s.value.text.slice(0, MAX_PAGE_CHARS) });
+        if (s.status === 'fulfilled' && s.value.trim()) {
+          pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
         } else if (s.status === 'rejected') {
-           
-          console.warn(`[understanding] subpage crawl failed ${urls[i]}: ${String(s.reason).slice(0, 200)}`);
+
+          console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
         }
       });
       return { pages };

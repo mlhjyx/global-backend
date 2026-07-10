@@ -22,7 +22,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { searchContractNotices } from '../src/adapters/ted-api';
 import { TedIntentProjectionService, TENDER_PUBLISHED } from '../src/intent/ted-intent-projection.service';
 import { DiscoveryProviderRegistry } from '../src/discovery/provider.registry';
-import { sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { scoreLead, CompanyForScoring, IcpForScoring } from '../src/lead/scoring';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
@@ -56,8 +56,8 @@ const prisma = new PrismaService();
 await prisma.$connect();
 const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 await ownerDb.$connect();
-// §8.8：注入 source_policy 门（生产 registry 两处注入同一 reader）——不注入=fail-open，测不出门。
-const svc = new TedIntentProjectionService({ prisma, sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+// §8.8：经 ToolBroker 注入 source_policy 门（收口②：唯一执行闸门）——无 broker = fail-closed 不出网，测不出门。
+const svc = new TedIntentProjectionService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }) });
 
 const evidenceCount = () =>
   prisma.withWorkspace(WS, (tx) => tx.fieldEvidence.count({ where: { workspaceId: WS, providerKey: 'ted' } }));

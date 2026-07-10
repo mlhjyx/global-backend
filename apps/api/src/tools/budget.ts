@@ -66,3 +66,23 @@ export class BudgetLedger {
 
 /** 进程级单例（worker/API 各自持有；预算按 run 隔离）。 */
 export const budgetLedger = new BudgetLedger();
+
+// ── 预算上限配置（收口②「真开账」：编排层用这些 cap 调 open()，超限 reserve 抛错=真拦截）──
+
+function intFromEnv(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
+}
+
+/** 单个 discovery run 的预算上限（¢）。默认宽松（$20），先让账真实开起来，再按 backtest 收紧。 */
+export function runBudgetCents(): number {
+  return intFromEnv('RUN_BUDGET_CENTS', 2000);
+}
+
+/** 单轮 sweep（backlog 等·per-workspace）的预算上限（¢）。 */
+export function sweepBudgetCents(): number {
+  return intFromEnv('SWEEP_BUDGET_CENTS', 5000);
+}
+
+/** LLM 调用无任务契约 maxCostCents 时的保守预留估算（¢）。 */
+export const DEFAULT_LLM_EST_CENTS = 20;

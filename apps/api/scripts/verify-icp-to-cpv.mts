@@ -16,7 +16,8 @@ import { ModelGateway } from '../src/model-gateway/model-gateway';
 import { TaxonomyResolver } from '../src/discovery/taxonomy-resolver';
 import { resolveIcpToCpv, buildTedQuery } from '../src/discovery/icp-to-cpv';
 import { TedDiscoveryProvider } from '../src/discovery/providers/ted.provider';
-import { sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
+import { PLATFORM_WORKSPACE } from '../src/discovery/provider-contract';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -75,13 +76,16 @@ async function main() {
 
   // ══════════ Tier 2 · 真 API：注入的 filters 真驱动 TED（闭环）══════════
   console.log('\n══ Tier 2 · 真 API：ICP→CPV 注入的 filters → TED 真拉中标公司（闭环）══');
-  const provider = new TedDiscoveryProvider({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
-  const res = await provider.discoverCompanies({
-    sourceClass: 'public_intelligence',
-    filters: { ...ted!.filters, since_days: 90 },
-    keywords: [],
-    limit: 10,
-  });
+  const provider = new TedDiscoveryProvider({ broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }) });
+  const res = await provider.discoverCompanies(
+    {
+      sourceClass: 'public_intelligence',
+      filters: { ...ted!.filters, since_days: 90 },
+      keywords: [],
+      limit: 10,
+    },
+    { workspaceId: PLATFORM_WORKSPACE },
+  );
   console.log(`   TED 用计划注入 filters（cpv=${ted!.filters.cpv}, buyer=${ted!.filters.buyer_country}）拉到 ${res.records.length} 家`);
   for (const c of res.records.slice(0, 5)) console.log(`   · ${c.name} [${c.country ?? '?'}]`);
   ok(res.records.length > 0, 'TED 用 ICP→CPV 注入的 filters 真拉到中标公司（闭环成立）');

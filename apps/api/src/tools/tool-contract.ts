@@ -35,8 +35,20 @@ export interface RateLimitSpec {
   perDomainCrawlDelayMs?: number;
 }
 
+/**
+ * source_policy 治理模式（收口②，fail-closed 分层）：
+ *  - required：受治理**数据源**（TED/openFDA/GLEIF/Wikidata/Algolia…）。未登记、无 reader、
+ *    提不出治理域 → 一律拒（fail-closed）。数据源必须先过合规审查登记才可直连。
+ *  - advisory：**标的站点**类工具（抓任意公司官网 / SMTP 探测任意邮箱域）。要求预登记会杀死
+ *    发现引擎——未登记放行（robots/SSRF/DAT-011 兜底），但**登记即强制**（SUSPENDED/用途门）。
+ *  - none：自托管基座（searxng），无外部源治理对象。
+ */
+export type SourcePolicyMode = 'required' | 'advisory' | 'none';
+
 export interface ComplianceMeta {
-  requiresSourcePolicy: boolean; // true → Broker 执行前查 source_policy（非 SUSPENDED 等）
+  sourcePolicy: SourcePolicyMode; // Broker 执行前的 source_policy 闸门模式（见上）
+  /** required 工具的固定治理域（API 类工具的策略键，如 'api.ted.europa.eu'）；缺省从 input 提取 url/domain。 */
+  policyDomain?: string;
   respectsRobots: boolean; // true → 抓取前 isAllowedByRobots
   personalData: boolean; // true → 走用途/脱敏门
   allowedPurpose: string[]; // ['discovery','enrichment']
@@ -65,6 +77,18 @@ export interface ToolResult<T = unknown> {
     parserVersion: string;
   };
   degraded?: boolean; // 走了 fallback / 降级
+}
+
+/** source_policy 闸门的拒绝原因（checkSourcePolicy 与 invoke 共用词表）。 */
+export type SourcePolicyDenyReason = 'suspended' | 'purpose_not_allowed' | 'unregistered' | 'policy_unavailable';
+
+/**
+ * Broker 的最小执行面（provider/service 依赖注入用，测试可注假实现；ToolBroker 实现之）。
+ * 所有原始出网（HTTP/SMTP）必须经 invoke —— 白名单/source_policy/预算/限流/Trace 在闸门内强制。
+ */
+export interface ExecutionBroker {
+  checkSourcePolicy(toolId: string, domain: string): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }>;
+  invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
 }
 
 export interface Tool<I = unknown, O = unknown> {

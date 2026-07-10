@@ -13,13 +13,12 @@ import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.fa
     {
       provide: DiscoveryProviderRegistry,
       // API 侧的联系人发现/邮箱验证走真实 public_web —— 注入全局 ModelGateway。
-      // 邮箱验证 SMTP 出网经 ToolBroker 闸门；source_policy 读平台级治理表（无 RLS，直读）。
+      // 收口②：全部 provider 原始出网统一经 ToolBroker（source_policy fail-closed + 预算 + 限流 + Trace）。
       useFactory: (gateway: ModelGateway, prisma: PrismaService) => {
         const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
         return new DiscoveryProviderRegistry({
           gateway,
           broker: buildToolBroker({ sourcePolicyReader }),
-          sourcePolicyReader, // §8.8：TED adapter 直连前查 source_policy 用途门
         });
       },
       inject: [ModelGateway, PrismaService],

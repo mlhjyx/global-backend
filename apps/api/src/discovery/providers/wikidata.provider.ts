@@ -1,11 +1,14 @@
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
+  DiscoveryOptions,
   DiscoveryResult,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
-import { discoverCompaniesByIndustry } from '../../adapters/wikidata';
+import type { WikidataCompany } from '../../adapters/wikidata';
+import type { ExecutionBroker } from '../../tools/tool-contract';
 import { mapIndustryToQids, mapCountryToQid } from '../vocab';
 
 /**
@@ -13,22 +16,45 @@ import { mapIndustryToQids, mapCountryToQid } from '../vocab';
  * 按 filters.industry/country 映射到 Wikidata QID（词表归一层），SPARQL 直接
  * 拿到 公司名 + 官网 + 员工数 + 坐标。官网命中率高，交给 canonicalize 后由
  * mineDomain 富化。属 company_registry / industry_data 类。
+ *
+ * 收口②：出网经 ToolBroker（`wikidata.sparql` 为 required 工具）——SUSPENDED/未登记/
+ * 用途不符一律 fail-closed；无 broker 不允许直连。
  */
 export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'wikidata';
   readonly classes: SourceClass[] = ['company_registry', 'industry_data'];
 
-  async discoverCompanies(query: CompanyDiscoveryQuery): Promise<DiscoveryResult> {
+  constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
+
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+    if (!this.deps?.broker) {
+       
+      console.warn('[wikidata] broker unavailable, fail-closed (no raw egress)');
+      return { records: [], costCents: 0 };
+    }
+    void opts; // 本源无域名维度，blockedDomains 不适用（签名统一保留）
+
     const industryQids = mapIndustries(query);
     if (!industryQids.length) return { records: [], costCents: 0 }; // 无法映射行业 → 该源无产出（词表欠账时预期）
     const countryQid = mapCountry(query);
 
-    const companies = await discoverCompaniesByIndustry({
-      industryQids,
-      countryQid,
-      requireWebsite: false,
-      limit: Math.min(query.limit, 60),
-    });
+    let companies: WikidataCompany[];
+    try {
+      const res = await this.deps.broker.invoke<
+        { industryQids: string[]; countryQid?: string; limit?: number },
+        { companies: WikidataCompany[] }
+      >(
+        'wikidata.sparql',
+        { industryQids, countryQid, limit: Math.min(query.limit, 60) },
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+      );
+      companies = res.data.companies ?? [];
+    } catch (err) {
+      // fail-safe：单源失败/闸门拒绝不阻断其余源（CLAUDE.md §5）；拒绝原因已入 Broker DENIED trace
+       
+      console.warn(`[wikidata] discover failed: ${String(err).slice(0, 150)}`);
+      return { records: [], costCents: 0 };
+    }
 
     const now = new Date().toISOString();
     const records: ProviderCompanyRecord[] = companies.map((c) => ({

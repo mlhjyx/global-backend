@@ -2,8 +2,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
-import { searchContractNotices, TedContractNotice } from '../adapters/ted-api';
-import { SourcePolicyReader } from '../tools/tool-broker.factory';
+import type { TedContractNotice } from '../adapters/ted-api';
+import type { TedSearchInput, TedSearchOutput } from '../tools/source-tools';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
 /** TED 招标公告 intent 类型 + 强度（开放招标 = 很强的实时需求信号，仅次于 web_watch SOURCING_OPENED=1）。 */
@@ -11,10 +12,6 @@ export const TENDER_PUBLISHED = 'TENDER_PUBLISHED';
 export const TENDER_STRENGTH = 0.9;
 const DEFAULT_SINCE_DAYS = 30;
 const DEFAULT_MAX_NOTICES = 100; // 有界样本（绝不 grind 全量）
-const TED_API_DOMAIN = 'api.ted.europa.eu'; // §8.8 source_policy 门锚点（与 ted.provider 同）
-// 招标 intent 投影 = 对 TED discovery 端点同源、同绿字段的读取；TED source_policy 用途含 discovery，故接受
-// intent/discovery 任一（既有 seed 只有 discovery 时仍放行，未来 seed 显式列 intent 亦放行）。
-const ALLOWED_PURPOSES = ['intent', 'discovery'];
 const TED_ATTRIBUTION = 'Source: TED — © European Union; reused under CC BY 4.0'; // CC BY 4.0 署名义务（§3.1）
 
 export interface ProjectTendersResult {
@@ -41,13 +38,14 @@ interface BuyerDemand {
  *
  * §8.6：发布日经 `tedDateToIso` 归一（mapContractNotice 已做）；**无合法发布日的招标直接跳过**（绝不写 NaN
  *   触发 0 分，亦不用 now 兜底——now 每 sweep 变 → 跨 sweep 同招标重复堆事件）。
- * §8.8：直连 api.ted.europa.eu（personalData=true）前必过 source_policy 门（SUSPENDED / 策略缺失 /
- *   用途不含 → fail-closed，不发请求）——与 P1 provider 同一 DAT-011 kill-switch。
+ * §8.8（收口②：Broker 单点判定）：ted.search 是 required 工具——直连 api.ted.europa.eu（personalData=true）
+ *   一律经 ExecutionBroker，SUSPENDED / 未登记 / 用途不符 / 无 reader 由闸门 fail-closed（不发请求）。
+ *   无 broker = 不允许直连（零投影返回）——与 P1 provider 同一 DAT-011 kill-switch。
  * 幂等：合并结果与既有 intent 实质相同 → 不 bump version / 不堆 field_evidence（开放招标每日 sweep 复现时）。
  * 合规：招标/CPV/买方组织事实 🟢 CC BY 4.0（买方=法人）；不摄入具名联系人。fail-safe：无 CPV/拉取失败 → 零结果不抛。
  */
 export class TedIntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; sourcePolicyReader?: SourcePolicyReader }) {}
+  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
 
   async projectTenders(
     workspaceId: string,
@@ -57,19 +55,35 @@ export class TedIntentProjectionService {
       noticesFetched: 0, companiesTouched: 0, eventsProjected: 0, skippedNoBuyer: 0, skippedNoCountry: 0, skippedNoDate: 0,
     };
     if (!params.cpvCodes.length) return base; // 无 CPV → 不启动（绝不裸拉全库）
-    if (!(await this.purposeAllowed())) return base; // §8.8 用途/SUSPENDED 门（fail-closed，不发请求）
+
+    // §8.8 合规门（收口②：Broker 单点判定）：ted.search 是 required 工具——SUSPENDED/未登记/用途不符/
+    // 无 reader 一律 fail-closed。无 broker = 不允许直连（生产由调用方注入）。
+    if (!this.deps.broker) {
+       
+      console.warn('[ted-intent] broker unavailable, fail-closed (no raw egress)');
+      return base;
+    }
 
     let notices: TedContractNotice[];
     try {
-      notices = await searchContractNotices({
-        cpvCodes: params.cpvCodes,
-        buyerCountries: params.buyerCountries,
-        sinceDays: params.sinceDays ?? DEFAULT_SINCE_DAYS,
-        scope: 'ACTIVE', // 当前开放的招标 = 有效需求窗口
-        maxRecords: params.maxNotices ?? DEFAULT_MAX_NOTICES,
-      });
+      const res = await this.deps.broker.invoke<TedSearchInput, TedSearchOutput>(
+        'ted.search',
+        {
+          kind: 'contract',
+          params: {
+            cpvCodes: params.cpvCodes,
+            buyerCountries: params.buyerCountries,
+            sinceDays: params.sinceDays ?? DEFAULT_SINCE_DAYS,
+            scope: 'ACTIVE', // 当前开放的招标 = 有效需求窗口
+            maxRecords: params.maxNotices ?? DEFAULT_MAX_NOTICES,
+          },
+        },
+        { workspaceId, correlationId: 'ted-intent' },
+      );
+      notices = res.data.notices ?? [];
     } catch (err) {
-      // eslint-disable-next-line no-console
+      // fail-safe：拉取失败/闸门拒绝零投影不抛（拒绝原因已入 Broker DENIED trace）
+       
       console.warn(`[ted-intent] fetch failed: ${String(err).slice(0, 150)}`);
       return base;
     }
@@ -177,33 +191,6 @@ export class TedIntentProjectionService {
   }
 
   // 幂等门用的 sameIntent / canonicalize 已上移到 intent-projection.service.ts（DRY，与 openFDA intent 投影共享）。
-
-  /**
-   * §8.8 用途门（镜像 ted.provider.purposeAllowed）：reader 在场时校验 source_policy(api.ted.europa.eu)——
-   * SUSPENDED / 策略缺失 / 用途不含 intent|discovery / reader 抛错 一律 fail-closed（不发请求）。
-   * 无 reader（单测/直连探针）→ fail-open（生产由调用方注入 sourcePolicyReaderFrom(prisma)）。
-   */
-  private async purposeAllowed(): Promise<boolean> {
-    const reader = this.deps.sourcePolicyReader;
-    if (!reader) return true;
-    let policy: { suspended: boolean; allowedPurpose?: string[] } | null;
-    try {
-      policy = await reader(TED_API_DOMAIN);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[ted-intent] source_policy 读取失败，fail-closed: ${String(err).slice(0, 120)}`);
-      return false;
-    }
-    if (!policy || policy.suspended) {
-      // eslint-disable-next-line no-console
-      console.warn(`[ted-intent] source_policy 未批准/缺失/SUSPENDED，跳过直连（${TED_API_DOMAIN}）`);
-      return false;
-    }
-    if (policy.allowedPurpose && !policy.allowedPurpose.some((p) => ALLOWED_PURPOSES.includes(p))) {
-      // eslint-disable-next-line no-console
-      console.warn('[ted-intent] source_policy 用途不含 intent/discovery，跳过直连');
-      return false;
-    }
-    return true;
-  }
+  // 手写 §8.8 purposeAllowed 镜像已删除（收口②）：ted.search 为 required 工具，SUSPENDED/未登记/用途不符/
+  // 无 reader 由 ExecutionBroker 单点 fail-closed（原镜像存在「无 reader fail-open」缺陷）。
 }

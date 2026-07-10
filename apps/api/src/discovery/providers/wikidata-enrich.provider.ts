@@ -3,14 +3,12 @@ import {
   CompanyEnrichmentAdapter,
   CompanyEnrichmentInput,
   EnrichmentResult,
+  ExecutionContext,
 } from '../provider-contract';
-import {
-  wikidataSearchEntity,
-  wikidataGetEntities,
-  parseCompanyFacts,
-  referencedQids,
-  WikidataCompanyFacts,
-} from '../../adapters/wikidata';
+import { parseCompanyFacts, referencedQids, WikidataCompanyFacts } from '../../adapters/wikidata';
+import type { RawEntity, WikidataEntitySummary } from '../../adapters/wikidata';
+import type { WikidataEntityInput, WikidataEntityOutput } from '../../tools/source-tools';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { pickBestByName } from '../name-match';
 
 const PARSER_VERSION = 'wikidata-enrich/v1';
@@ -30,19 +28,30 @@ const MAX_CANDIDATES = 7;
 export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
   readonly key = 'wikidata';
 
-  async enrichCompany(input: CompanyEnrichmentInput): Promise<EnrichmentResult> {
-    let candidates: { qid: string; label: string }[];
+  constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
+
+  async enrichCompany(input: CompanyEnrichmentInput, ctx: ExecutionContext): Promise<EnrichmentResult> {
+    // 收口②：wikidata.entity 是 required 工具——出网只经 Broker（source_policy/预算/限流/Trace 单点强制）。
+    // 无 broker → 诚实降级返回 miss（不直连；生产 registry 注入）。
+    const broker = this.deps?.broker;
+    if (!broker) {
+       
+      console.warn('[wikidata] broker unavailable, skip enrichment (no raw egress)');
+      return miss();
+    }
+    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    let candidates: WikidataEntitySummary[];
     try {
-      candidates = await wikidataSearchEntity(input.name, MAX_CANDIDATES);
+      candidates = await searchEntityViaBroker(broker, input.name, MAX_CANDIDATES, toolCtx);
     } catch {
       return miss();
     }
     if (!candidates.length) return miss();
 
     // 取候选实体的 claims+labels，只保留"是公司/组织"的
-    let entities: Awaited<ReturnType<typeof wikidataGetEntities>>;
+    let entities: Record<string, RawEntity>;
     try {
-      entities = await wikidataGetEntities(candidates.map((c) => c.qid));
+      entities = await getEntitiesViaBroker(broker, candidates.map((c) => c.qid), undefined, toolCtx);
     } catch {
       return miss();
     }
@@ -64,7 +73,7 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
     try {
       const refs = referencedQids(winnerEntity);
       if (refs.length) {
-        const labelEntities = await wikidataGetEntities([...new Set(refs)], 'labels');
+        const labelEntities = await getEntitiesViaBroker(broker, [...new Set(refs)], 'labels', toolCtx);
         refLabels = Object.fromEntries(
           Object.entries(labelEntities).map(([qid, e]) => [qid, e.labels?.en?.value ?? qid]),
         );
@@ -110,6 +119,36 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
 
 function miss(): EnrichmentResult {
   return { matched: false, confidence: 0, attributes: {}, costCents: 0 };
+}
+
+/** 实体搜索经 Broker（wikidata.entity op=search）；错误上抛由调用点 miss()。 */
+async function searchEntityViaBroker(
+  broker: ExecutionBroker,
+  name: string,
+  limit: number,
+  ctx: ToolContext,
+): Promise<WikidataEntitySummary[]> {
+  const res = await broker.invoke<WikidataEntityInput, WikidataEntityOutput>(
+    'wikidata.entity',
+    { op: 'search', name, limit },
+    ctx,
+  );
+  return res.data.search ?? [];
+}
+
+/** 实体取回经 Broker（wikidata.entity op=get）；错误上抛由调用点处置（claims 致命 / labels 降级）。 */
+async function getEntitiesViaBroker(
+  broker: ExecutionBroker,
+  qids: string[],
+  props: string | undefined,
+  ctx: ToolContext,
+): Promise<Record<string, RawEntity>> {
+  const res = await broker.invoke<WikidataEntityInput, WikidataEntityOutput>(
+    'wikidata.entity',
+    { op: 'get', qids, props },
+    ctx,
+  );
+  return res.data.entities ?? {};
 }
 
 function normalizeToDomain(website: string): string | undefined {

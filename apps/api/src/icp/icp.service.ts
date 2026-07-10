@@ -480,7 +480,7 @@ export class IcpService {
       );
       return buildTedQuery(cpv, planned) as QueryPlanModelOutput['queries'];
     } catch (e) {
-      // eslint-disable-next-line no-console
+       
       console.warn(`[icp] icp→cpv resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;
     }
@@ -512,7 +512,7 @@ export class IcpService {
       );
       return buildFdaQuery(fda, planned) as QueryPlanModelOutput['queries'];
     } catch (e) {
-      // eslint-disable-next-line no-console
+       
       console.warn(`[icp] icp→fda resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;
     }

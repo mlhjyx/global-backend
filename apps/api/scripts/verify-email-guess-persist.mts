@@ -42,7 +42,7 @@ async function main() {
   if (stubAllowed()) reg.register(new StubModelProvider());
   const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
   const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
-  const registry = new DiscoveryProviderRegistry({ gateway, broker, sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+  const registry = new DiscoveryProviderRegistry({ gateway, broker });
   const service = new DiscoveryService(prisma, registry);
   const ctx = { userId: 'demo-user', workspaceId: WS, roles: ['admin'] };
 

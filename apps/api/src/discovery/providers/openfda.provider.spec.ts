@@ -1,44 +1,61 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OpenFdaDiscoveryProvider, mapEstablishmentToRecord } from './openfda.provider';
 import { OpenFdaEstablishment } from '../../adapters/openfda-api';
 import { companyIdentity } from '../identity';
+import { ExecutionContext } from '../provider-contract';
+import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
+import type { OpenFdaSearchOutput } from '../../tools/source-tools';
 
 const NOW = '2026-07-09T00:00:00Z';
+const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
 
-describe('OpenFdaDiscoveryProvider.discoverCompanies —— fail-safe + §8.8 门（不触网）', () => {
-  it('无 product code → 空（绝不裸拉全库，不触网）', async () => {
-    const p = new OpenFdaDiscoveryProvider();
-    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: {}, keywords: [], limit: 50 });
+/** 假 Broker：记录 invoke；impl 抛错=闸门拒绝/工具失败。 */
+function fakeBroker(impl: () => Promise<OpenFdaSearchOutput>): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
+  const invokeMock = vi.fn(async (_toolId: string, _input: unknown, _ctx: ToolContext): Promise<ToolResult<unknown>> => {
+    return { data: await impl(), costCents: 0 };
+  });
+  return {
+    invokeMock,
+    checkSourcePolicy: async () => ({ allowed: true }),
+    invoke: invokeMock as ExecutionBroker['invoke'],
+  };
+}
+
+describe('OpenFdaDiscoveryProvider.discoverCompanies —— fail-safe + §8.8 门（收口②：Broker 单点，不触网）', () => {
+  it('无 product code → 空（绝不裸拉全库，零 invoke）', async () => {
+    const broker = fakeBroker(async () => ({ establishments: [] }));
+    const p = new OpenFdaDiscoveryProvider({ broker });
+    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: {}, keywords: [], limit: 50 }, CTX);
     expect(res.records).toEqual([]);
     expect(res.costCents).toBe(0);
+    expect(broker.invokeMock).not.toHaveBeenCalled();
   });
 
-  it('§8.8 source_policy SUSPENDED → fail-closed（返回空，不发请求）', async () => {
-    const p = new OpenFdaDiscoveryProvider({ sourcePolicyReader: async () => ({ suspended: true }) });
-    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 });
+  it('无 broker → fail-closed（旧「无 reader fail-open」缺陷已反转）', async () => {
+    const p = new OpenFdaDiscoveryProvider();
+    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 }, CTX);
     expect(res.records).toEqual([]);
   });
 
-  it('§8.8 策略缺失（null）→ fail-closed', async () => {
-    const p = new OpenFdaDiscoveryProvider({ sourcePolicyReader: async () => null });
-    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 });
-    expect(res.records).toEqual([]);
-  });
-
-  it('§8.8 用途不含 discovery → fail-closed', async () => {
-    const p = new OpenFdaDiscoveryProvider({ sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['enrichment'] }) });
-    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 });
-    expect(res.records).toEqual([]);
-  });
-
-  it('§8.8 reader 抛错 → fail-closed', async () => {
-    const p = new OpenFdaDiscoveryProvider({
-      sourcePolicyReader: async () => {
-        throw new Error('db down');
-      },
+  it('Broker 拒绝（SUSPENDED/未登记/用途门 → invoke 抛错）→ fail-safe 空结果', async () => {
+    const broker = fakeBroker(async () => {
+      throw new Error('tool openfda.search denied: source_policy SUSPENDED: api.fda.gov');
     });
-    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 });
+    const p = new OpenFdaDiscoveryProvider({ broker });
+    const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 }, CTX);
     expect(res.records).toEqual([]);
+    expect(broker.invokeMock).toHaveBeenCalledOnce();
+  });
+
+  it('Broker 放行 → 经 openfda.search 工具（kind=registration）拉取，透传真 workspace/run', async () => {
+    const broker = fakeBroker(async () => ({ establishments: [] }));
+    const p = new OpenFdaDiscoveryProvider({ broker });
+    await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 }, CTX);
+    expect(broker.invokeMock).toHaveBeenCalledOnce();
+    const [toolId, input, toolCtx] = broker.invokeMock.mock.calls[0] as [string, { kind: string }, ToolContext];
+    expect(toolId).toBe('openfda.search');
+    expect(input.kind).toBe('registration');
+    expect(toolCtx).toMatchObject({ workspaceId: 'ws-1', runId: 'run-1' });
   });
 });
 

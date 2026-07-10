@@ -52,18 +52,20 @@ const prisma = new PrismaService();
 await prisma.$connect();
 const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 await ownerDb.$connect();
+// 收口②：唯一执行闸门——直连与 registry 共用同一 ToolBroker（source_policy fail-closed）
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
 
 async function main() {
   // ══════════ Tier 1 · 真 API（provider 直打 TED）══════════
   console.log(`\n══ Tier 1 · 真 API：泵(CPV ${CPV}) + 德国(${COUNTRY}) 近 60 天中标公告 ══`);
-  const provider = new TedDiscoveryProvider();
+  const provider = new TedDiscoveryProvider({ broker });
   const q = {
     sourceClass: 'public_intelligence' as const,
     filters: { cpv: CPV, buyer_country: COUNTRY, since_days: 60 },
     keywords: [],
     limit: 25,
   };
-  const res = await provider.discoverCompanies(q);
+  const res = await provider.discoverCompanies(q, { workspaceId: WS });
   console.log(`   拉到 ${res.records.length} 家中标公司（去重后）`);
   for (const r of res.records.slice(0, 8)) {
     const ted = r.attributes?.ted as Record<string, unknown>;
@@ -103,12 +105,7 @@ async function main() {
   if (gp) reg.register(gp);
   if (stubAllowed()) reg.register(new StubModelProvider());
   const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
-  const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
-  const providers = new DiscoveryProviderRegistry({
-    gateway,
-    broker: buildToolBroker({ sourcePolicyReader }),
-    sourcePolicyReader, // §8.8：TED adapter 直连前查 source_policy 用途门
-  });
+  const providers = new DiscoveryProviderRegistry({ gateway, broker }); // §8.8 用途门在 Broker 内单点判定（收口②）
   const acts = createDiscoveryActivities({ prisma, providers, gateway });
 
   const planQuery: PlanQuery = {

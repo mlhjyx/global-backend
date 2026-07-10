@@ -2,7 +2,9 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
-import { EnrichmentResult, LawfulBasis, LawfulBasisKind } from '../discovery/provider-contract';
+import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind } from '../discovery/provider-contract';
+import { budgetLedger, sweepBudgetCents } from '../tools/budget';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import { persistDiscoveredContacts } from '../discovery/contact-persist';
 import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
@@ -114,8 +116,21 @@ export function createBacklogActivities(deps: {
   gateway: ModelGateway;
   /** owner 连接（DATABASE_URL）：仅跨租户只读扫描（列 ACTIVE ICP）。 */
   ownerDb: PrismaClient;
+  /** 收口②：registerWatch 的 sitemap 探测出网经此闸门。 */
+  broker?: ExecutionBroker;
 }) {
-  const intentSvc = new IntentProjectionService({ prisma: deps.prisma });
+  const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
+
+  /**
+   * 收口② D：sweep 阶段预算——按「阶段×workspace」立独立账（进程内），阶段结束即关。
+   * 单阶段单轮的 LLM 消耗有硬上界（SWEEP_BUDGET_CENTS）；超限 reserve 抛错走各家 fail-safe
+   * catch（该家跳过、游标照常前进，下轮 sweep 重试）。
+   */
+  const openStageBudget = (stage: string, workspaceId: string): { key: string; close: () => void } => {
+    const key = `sweep:${stage}:${workspaceId}`;
+    budgetLedger.open(key, sweepBudgetCents());
+    return { key, close: () => budgetLedger.close(key) };
+  };
 
   /** DAT-011：SUSPENDED 域名黑名单（平台治理表，无 RLS）。 */
   async function suspendedDomains(): Promise<Set<string>> {
@@ -175,14 +190,19 @@ export function createBacklogActivities(deps: {
 
       const verdicts: Record<string, number> = { match: 0, weak: 0, mismatch: 0 };
       let judged = 0;
-      for (const c of companies) {
-        const judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c);
-        if (!judgment) continue; // 单家判别失败不影响其余；本 sweep 不重试（游标只前进），下个 sweep 再来
-        verdicts[judgment.verdict] += 1;
-        judged += 1;
-        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
-        );
+      const budget = openStageBudget('fit', args.workspaceId);
+      try {
+        for (const c of companies) {
+          const judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, { runId: budget.key });
+          if (!judgment) continue; // 单家判别失败不影响其余；本 sweep 不重试（游标只前进），下个 sweep 再来
+          verdicts[judgment.verdict] += 1;
+          judged += 1;
+          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
+          );
+        }
+      } finally {
+        budget.close();
       }
       return {
         scanned: companies.length,
@@ -218,14 +238,18 @@ export function createBacklogActivities(deps: {
         if (!pending.length) continue;
         attempted += 1;
         const hits: { key: string; result: EnrichmentResult }[] = [];
+        const ctx: ExecutionContext = { workspaceId: args.workspaceId, correlationId: 'backlog-enrich' };
         for (const e of pending) {
           try {
-            const r = await e.enrichCompany({
-              name: c.name,
-              domain: c.domain ?? undefined,
-              country: c.country ?? undefined,
-              region: c.region ?? undefined,
-            });
+            const r = await e.enrichCompany(
+              {
+                name: c.name,
+                domain: c.domain ?? undefined,
+                country: c.country ?? undefined,
+                region: c.region ?? undefined,
+              },
+              ctx,
+            );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch {
             /* 单富集源失败不影响其余 */
@@ -304,14 +328,18 @@ export function createBacklogActivities(deps: {
         if (!pending.length) continue;
         attempted += 1;
         const hits: { key: string; result: EnrichmentResult }[] = [];
+        const ctx: ExecutionContext = { workspaceId: args.workspaceId, correlationId: 'backlog-signals' };
         for (const e of pending) {
           try {
-            const r = await e.enrichCompany({
-              name: c.name,
-              domain: c.domain ?? undefined,
-              country: c.country ?? undefined,
-              region: c.region ?? undefined,
-            });
+            const r = await e.enrichCompany(
+              {
+                name: c.name,
+                domain: c.domain ?? undefined,
+                country: c.country ?? undefined,
+                region: c.region ?? undefined,
+              },
+              ctx,
+            );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch {
             /* 单信号源失败不影响其余 */
@@ -450,6 +478,8 @@ export function createBacklogActivities(deps: {
 
       let attempted = 0;
       let contactsCreated = 0;
+      const budget = openStageBudget('contact', args.workspaceId);
+      try {
       for (const c of companies) {
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：联系人抓取同样遵守
         attempted += 1;
@@ -458,6 +488,7 @@ export function createBacklogActivities(deps: {
           // 网络（抓多页 + LLM）在事务外
           const result = await adapter.discoverContacts(
             { name: c.name, domain: c.domain ?? undefined, country: c.country ?? undefined },
+            { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-contacts' },
             sellerCtx,
           );
           contacts = result.contacts;
@@ -475,6 +506,9 @@ export function createBacklogActivities(deps: {
           }),
         );
         contactsCreated += created;
+      }
+      } finally {
+        budget.close();
       }
       // 水位：本批全部已处理（建联系人/无具名决策人/DAT-011）→ 离开过滤集。无具名决策人属常态，
       // 这条防止「联系不上的公司」永占前排、每 sweep 重烧多页渲染+LLM（复审最尖锐的一条）。

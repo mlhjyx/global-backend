@@ -5,6 +5,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { DigitalFootprintProvider } from '../src/discovery/providers/digital-footprint.provider';
+import { PLATFORM_WORKSPACE } from '../src/discovery/provider-contract';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -13,13 +16,17 @@ for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').spl
 
 const domains = process.argv.slice(2);
 const targets = domains.length ? domains : ['trumpf.com', 'bystronic.com', 'protolabs.com'];
-const provider = new DigitalFootprintProvider();
+// 收口②：原始出网统一经 ToolBroker（source_policy 读取需 postgres 在跑）
+const prisma = new PrismaService();
+await prisma.$connect();
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+const provider = new DigitalFootprintProvider({ broker });
 
 for (const domain of targets) {
   console.log(`\n═══ ${domain} ═══`);
   const t0 = Date.now();
   try {
-    const r = await provider.enrichCompany({ name: domain, domain });
+    const r = await provider.enrichCompany({ name: domain, domain }, { workspaceId: PLATFORM_WORKSPACE });
     console.log(`matched=${r.matched} conf=${r.confidence} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     if (r.matched) {
       const a = r.attributes as Record<string, unknown>;
@@ -36,3 +43,4 @@ for (const domain of targets) {
     console.log('  ERROR:', String(err).slice(0, 160));
   }
 }
+await prisma.$disconnect();

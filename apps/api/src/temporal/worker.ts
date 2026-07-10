@@ -65,14 +65,12 @@ async function main(): Promise<void> {
     address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
   });
 
-  // 邮箱验证 SMTP 出网经 ToolBroker 闸门；source_policy 走平台级治理表（无 RLS，直读）。
+  // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
+  // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
+  const broker = buildToolBroker({ sourcePolicyReader });
   const taxonomy = new TaxonomyResolver(prisma, gateway); // discovery + external-intent sweep 共享一实例
-  const providers = new DiscoveryProviderRegistry({
-    gateway,
-    broker: buildToolBroker({ sourcePolicyReader }),
-    sourcePolicyReader, // §8.8：TED adapter 直连前查 source_policy 用途门（含个人数据源必走）
-  });
+  const providers = new DiscoveryProviderRegistry({ gateway, broker });
 
   const worker = await Worker.create({
     connection,
@@ -80,19 +78,20 @@ async function main(): Promise<void> {
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
     activities: {
-      ...createUnderstandingActivities({ prisma, gateway }),
+      ...createUnderstandingActivities({ prisma, gateway, broker }),
       ...createDiscoveryActivities({
         prisma,
         providers,
         gateway,
         taxonomy,
+        broker,
       }),
       ...createQualifyActivities({ prisma }),
-      ...createAcquisitionActivities({ prisma, registry: buildSourceAdapterRegistry() }),
-      ...createIntentActivities({ prisma, fetcher: new Crawl4aiPageFetcher(), ownerDb }),
-      ...createBacklogActivities({ prisma, providers, gateway, ownerDb }),
+      ...createAcquisitionActivities({ prisma, registry: buildSourceAdapterRegistry(broker) }),
+      ...createIntentActivities({ prisma, fetcher: new Crawl4aiPageFetcher(broker), ownerDb, broker }),
+      ...createBacklogActivities({ prisma, providers, gateway, ownerDb, broker }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
-      ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, sourcePolicyReader }),
+      ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
     },
   });
 
