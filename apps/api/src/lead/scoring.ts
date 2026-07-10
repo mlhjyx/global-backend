@@ -93,14 +93,18 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const fitResult = qualify(icp.rules, attrs);
   const authoritative = opts?.authoritativeFit ?? null;
 
-  // Fit：权威资格门判过 → 用它（只覆盖本维）；否则规则引擎
-  const fit = authoritative
-    ? AUTHORITATIVE_FIT_SCORE[authoritative]
-    : fitResult.verdict === 'match'
-      ? 0.6 + 0.4 * (fitResult.score ?? 0.5)
-      : fitResult.verdict === 'review'
-        ? 0.3 + 0.3 * (fitResult.score ?? 0)
-        : 0;
+  // Fit：权威资格门判过 → 用它（只覆盖本维）；否则规则引擎。
+  // clamp01（J）：nice-to-have 权重若混入负值，归一化比可超 1 → fit>1 会污染 totalScore 与队列排序
+  //（与 intent 维已有的 clamp 对齐；DTO @Min(0) 是第一道门，此处是系统边界兜底）。
+  const fit = clamp01(
+    authoritative
+      ? AUTHORITATIVE_FIT_SCORE[authoritative]
+      : fitResult.verdict === 'match'
+        ? 0.6 + 0.4 * (fitResult.score ?? 0.5)
+        : fitResult.verdict === 'review'
+          ? 0.3 + 0.3 * (fitResult.score ?? 0)
+          : 0,
+  );
   if (authoritative) notes.push(`Fit 维由 ICP 资格门（LLM 四门）判定=${authoritative}，覆盖规则引擎（词表归一欠账）`);
 
   // Role coverage：委员会角色被联系人 title 覆盖的比例
@@ -266,7 +270,8 @@ function recencyDecay(ageMs: number): number {
   return Math.pow(0.5, ageMs / DAY_MS / INTENT_HALFLIFE_DAYS);
 }
 
-function clamp01(n: number): number {
+/** [0,1] 夹取：评分/快照契约的系统边界共用（lead-qualified-snapshot.ts 复用）。 */
+export function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 

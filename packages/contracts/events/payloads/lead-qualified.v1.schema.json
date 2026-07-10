@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/lead-qualified.v1.schema.json",
+  "title": "LeadQualifiedSnapshotV1",
+  "description": "LeadQualified payload v1 (收口③): immutable snapshot taken inside the decide(accept) transaction. company_ref carries green-zone company facts only; contact_refs carry refs + role metadata and MUST NOT embed full_name/email (GDPR minimization — SaaS fetches details by contact_id via the governed API). Consumers dedupe on the envelope event_id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshot_version",
+    "lead_id",
+    "workspace_id",
+    "icp_id",
+    "icp_version",
+    "company_ref",
+    "contact_refs",
+    "scores",
+    "fit_verdict",
+    "evidence_refs",
+    "qualification_rule_version",
+    "storage_rights_decision",
+    "personal_data_class",
+    "suppression_state",
+    "recommended_action",
+    "valid_until"
+  ],
+  "properties": {
+    "snapshot_version": { "type": "integer", "const": 1 },
+    "lead_id": { "type": "string", "format": "uuid" },
+    "workspace_id": { "type": "string", "format": "uuid" },
+    "icp_id": { "type": "string", "format": "uuid" },
+    "icp_version": { "type": ["integer", "null"], "description": "icpDefinition.version at decide time; null if the ICP row is gone." },
+    "company_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_company_id", "name", "domain", "country", "identifiers"],
+      "properties": {
+        "canonical_company_id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string" },
+        "domain": { "type": ["string", "null"] },
+        "country": { "type": ["string", "null"] },
+        "identifiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lei", "fda_reg"],
+          "properties": {
+            "lei": { "type": ["string", "null"], "description": "attributes.gleif.lei" },
+            "fda_reg": { "type": ["string", "null"], "description": "attributes.fda.registration_number" }
+          }
+        }
+      }
+    },
+    "contact_refs": {
+      "type": "array",
+      "description": "Refs + role metadata only. full_name/email are intentionally NOT representable (additionalProperties:false).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contact_id", "title", "seniority", "department", "has_verified_contact_point", "personal_data"],
+        "properties": {
+          "contact_id": { "type": "string", "format": "uuid" },
+          "title": { "type": ["string", "null"] },
+          "seniority": { "type": ["string", "null"] },
+          "department": { "type": ["string", "null"] },
+          "has_verified_contact_point": { "type": "boolean" },
+          "personal_data": { "type": "boolean" }
+        }
+      }
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fit", "role", "intent", "demand_proof", "reachability", "data_quality", "engagement", "total"],
+      "properties": {
+        "fit": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "role": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "intent": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "demand_proof": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Always null until 收口⑤ (demand evidence)." },
+        "reachability": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "data_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "engagement": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "total": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+      }
+    },
+    "fit_verdict": { "type": ["string", "null"], "examples": ["match", "weak", "mismatch"] },
+    "evidence_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score_detail_available", "fit_reasons_available"],
+      "properties": {
+        "score_detail_available": { "type": "boolean" },
+        "fit_reasons_available": { "type": "boolean" }
+      }
+    },
+    "qualification_rule_version": { "type": "string", "examples": ["additive-6dim-v1"] },
+    "storage_rights_decision": { "type": ["string", "null"], "description": "Always null until 收口⑥ (storage rights)." },
+    "personal_data_class": { "type": "string", "enum": ["named_person_refs", "company_facts_only"] },
+    "suppression_state": { "type": "string", "enum": ["none", "suppressed"] },
+    "recommended_action": { "type": "string", "examples": ["handoff_to_campaign"] },
+    "valid_until": { "type": ["string", "null"], "format": "date-time", "description": "null in v1 (no freshness model); v2 wires evidence freshness." }
+  }
+}

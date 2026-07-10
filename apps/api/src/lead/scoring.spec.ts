@@ -246,3 +246,24 @@ describe('scoreLead — Reachability 硬底（非权威路径同样生效）', (
     expect(withAuth.scores.fit).not.toBe(without.scores.fit); // 仅 Fit 维被覆盖（0.8→0.85）
   });
 });
+
+describe('scoreLead — Fit 维值域护栏（J：clamp01 系统边界兜底）', () => {
+  it('负权重混入（绕过 DTO 的历史/直写数据）→ 归一化比可超 1，fit 与总分仍被夹回 [0,1]', () => {
+    // nice-to-have 权重 [5, -4]：分母 total=1，命中 weight=5 的规则 → got/total=5 → 未夹取时
+    // fit = 0.6 + 0.4×5 = 2.6 > 1（旧代码 RED），污染 totalScore 与队列排序。
+    const poisonedIcp: IcpForScoring = {
+      rules: [
+        { kind: 'NICE_TO_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing', weight: 5 },
+        { kind: 'NICE_TO_HAVE', field: 'country', operator: 'eq', value: 'XX', weight: -4 },
+      ],
+      triggerSignals: [],
+      committeeRoles: [],
+    };
+    const r = scoreLead(company({}), poisonedIcp);
+
+    expect(r.scores.fit).toBeLessThanOrEqual(1);
+    expect(r.scores.fit).toBeGreaterThanOrEqual(0);
+    expect(r.scores.fit).toBe(1); // 2.6 夹到 1
+    expect(r.totalScore).toBeLessThanOrEqual(1);
+  });
+});

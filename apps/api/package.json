@@ -37,6 +37,7 @@
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@types/express": "^5.0.0",
+    "ajv-formats": "^3.0.1",
     "typescript": "^5.6.3",
     "vitest": "^4.1.10"
   }

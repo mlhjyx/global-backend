@@ -9,6 +9,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
@@ -33,9 +34,10 @@ export class CreateRuleDto {
   @ApiProperty({ description: '操作数：标量或数组', example: ['automotive', 'aerospace'] })
   value!: unknown;
 
-  @ApiPropertyOptional({ default: 1, description: 'NICE_TO_HAVE 计分权重' })
+  @ApiPropertyOptional({ default: 1, minimum: 0, description: 'NICE_TO_HAVE 计分权重（≥0；排除语义用 EXCLUSION 规则表达，负权重会静默污染归一化分母）' })
   @IsOptional()
   @IsNumber()
+  @Min(0)
   weight?: number;
 
   @ApiPropertyOptional({ description: '规则依据（推断透明）' })
@@ -64,9 +66,10 @@ export class UpdateRuleDto {
   @IsOptional()
   value?: unknown;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ minimum: 0, description: 'NICE_TO_HAVE 计分权重（≥0）' })
   @IsOptional()
   @IsNumber()
+  @Min(0)
   weight?: number;
 
   @ApiPropertyOptional()
