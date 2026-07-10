@@ -4,6 +4,7 @@ import type {
   ContactBacklogResult,
   EnrichBacklogResult,
   FitBacklogResult,
+  GuessEmailsBacklogResult,
   WatchBacklogResult,
 } from './backlog.activities';
 import type { QualifyActivities } from './qualify.activities';
@@ -39,6 +40,8 @@ export interface BacklogSweepInput {
   maxWatchRounds?: number;
   contactBatch?: number;
   maxContactRounds?: number;
+  guessBatch?: number;
+  maxGuessRounds?: number;
 }
 
 export interface BacklogSweepTargetStats {
@@ -49,6 +52,7 @@ export interface BacklogSweepTargetStats {
   signals: { scanned: number; attempted: number; matched: number };
   watches: { scanned: number; registered: number };
   contacts: { scanned: number; attempted: number; contactsCreated: number };
+  guesses: { scanned: number; attempted: number; guessed: number };
   scored: number;
 }
 
@@ -72,6 +76,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
       signals: { scanned: 0, attempted: 0, matched: 0 },
       watches: { scanned: 0, registered: 0 },
       contacts: { scanned: 0, attempted: 0, contactsCreated: 0 },
+      guesses: { scanned: 0, attempted: 0, guessed: 0 },
       scored: 0,
     };
 
@@ -145,6 +150,21 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         stats.contacts.scanned += r.scanned;
         stats.contacts.attempted += r.attempted;
         stats.contacts.contactsCreated += r.contactsCreated;
+        cursor = r.nextCursor;
+        if (!cursor) break;
+      }
+    } catch (err) {
+      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+    }
+
+    // ⑤b 决策人邮箱猜测（默认关；双闸 email_guess ENABLED + config.lawfulBasis 才自动探测。缺邮箱决策人补全）
+    try {
+      let cursor: string | null = null;
+      for (let round = 0; round < (input?.maxGuessRounds ?? 3); round++) {
+        const r: GuessEmailsBacklogResult = await slowActs.guessEmailsBacklog({ ...t, limit: input?.guessBatch ?? 6, cursor });
+        stats.guesses.scanned += r.scanned;
+        stats.guesses.attempted += r.attempted;
+        stats.guesses.guessed += r.guessed;
         cursor = r.nextCursor;
         if (!cursor) break;
       }

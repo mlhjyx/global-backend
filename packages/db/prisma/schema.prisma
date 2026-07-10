@@ -542,6 +542,7 @@ model CanonicalCompany {
   lastSignalAt                DateTime? @map("last_signal_at")                 // 信号富集（digital_footprint/structured_harvest）
   lastWatchAt                 DateTime? @map("last_watch_at")                  // web_watch 监控注册
   contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
+  emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at")        // 决策人邮箱猜测尝试（选项 B P0.4）
 
   contacts CanonicalContact[]
   leads    Lead[]
@@ -554,6 +555,7 @@ model CanonicalCompany {
   @@index([workspaceId, lastSignalAt])
   @@index([workspaceId, lastWatchAt])
   @@index([workspaceId, contactDiscoveryAttemptedAt])
+  @@index([workspaceId, emailGuessAttemptedAt])
   @@map("canonical_company")
 }
 

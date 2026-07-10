@@ -204,6 +204,15 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'web_watch', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // 自动邮箱猜测引擎级 kill-switch（选项 B P0.4）——**默认 DISABLED=关**。仅当 ENABLED **且**
+    // config.lawfulBasis 有合法记录（interim 全局 LIA）时，backlog sweep 阶段⑤b 才对缺邮箱决策人自动 SMTP 探测。
+    // 区别于 smtp_self（验证器 adapter，验证既有地址）：本行是「自动猜测新地址」的合规总闸（个人数据红线）。
+    // **update:{}** 保证不覆盖 ops 手动改过的 status/config（开了就别被 reseed 关掉）。
+    await db.dataProvider.upsert({
+      where: { key: 'email_guess' },
+      update: {},
+      create: { key: 'email_guess', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
       await db.dataProvider.upsert({
         where: { key: 'sandbox' },

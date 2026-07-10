@@ -10,8 +10,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
@@ -58,6 +58,44 @@ class VerifyContactPointDto {
   @IsOptional()
   @IsBoolean()
   allowPersonalWithoutBasis?: boolean;
+}
+
+/**
+ * 决策人邮箱猜测的合规上下文（可选）。猜出的候选**都是人名邮箱**（个人数据），缺 lawfulBasis
+ * 且未开 allowPersonalWithoutBasis → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
+ */
+class GuessEmailsDto {
+  @ApiPropertyOptional({ enum: LAWFUL_BASIS_KINDS, description: '探测人名邮箱的合法性基础（GDPR Art.6）；猜出的都是人名邮箱' })
+  @IsOptional()
+  @IsIn(LAWFUL_BASIS_KINDS as unknown as string[])
+  lawfulBasis?: LawfulBasisKind;
+
+  @ApiPropertyOptional({ description: 'LIA / 工单 / 合同 / 同意记录的引用（可审计）' })
+  @IsOptional()
+  @IsString()
+  lawfulBasisRef?: string;
+
+  @ApiPropertyOptional({ description: '备注' })
+  @IsOptional()
+  @IsString()
+  lawfulBasisNote?: string;
+
+  @ApiPropertyOptional({ description: '显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）' })
+  @IsOptional()
+  @IsBoolean()
+  allowPersonalWithoutBasis?: boolean;
+
+  @ApiPropertyOptional({ description: '最多补全几个缺邮箱决策人（有界护栏，默认 25）' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxContacts?: number;
+
+  @ApiPropertyOptional({ description: '每人最多探测几个候选（有界护栏，默认 8）' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxProbe?: number;
 }
 
 @ApiTags('Discovery')
@@ -135,6 +173,27 @@ export class DiscoveryController {
         ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
         : undefined,
       allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
+    });
+  }
+
+  @Post('canonical-companies/:id/guess-emails')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）',
+    description:
+      '合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。' +
+      'RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。',
+  })
+  // body 可选：无 body 则全 blocked（无 lawfulBasis），诚实不探。
+  @ApiBody({ type: GuessEmailsDto, required: false })
+  async guessEmails(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto?: GuessEmailsDto) {
+    return this.discovery.guessEmailsForCompany(ctx, id, {
+      lawfulBasis: dto?.lawfulBasis
+        ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
+        : undefined,
+      allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
+      maxContacts: dto?.maxContacts,
+      maxProbe: dto?.maxProbe,
     });
   }
 

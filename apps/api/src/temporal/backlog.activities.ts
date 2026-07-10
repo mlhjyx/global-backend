@@ -2,9 +2,14 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
-import { EnrichmentResult } from '../discovery/provider-contract';
+import { EnrichmentResult, LawfulBasis, LawfulBasisKind } from '../discovery/provider-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import { persistDiscoveredContacts } from '../discovery/contact-persist';
+import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
+import { persistGuessedEmail } from '../discovery/email-guess-persist';
+import { buildGuessTargets } from '../discovery/email-guess-targets';
+import { LAWFUL_BASIS_KINDS } from '../discovery/compliance/email-verification-gate';
+import { KnownEmailSample } from '../discovery/email-format-learning';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
@@ -28,6 +33,27 @@ import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibil
  */
 
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 与 discovery.activities 的 SIGNAL_TTL_MS 对齐（信号时变，7 天刷新）
+
+/** 引擎级 kill-switch 的 data_provider key（默认 DISABLED；见 provider.registry seed）。 */
+const EMAIL_GUESS_KEY = 'email_guess';
+
+/**
+ * 从 `email_guess` provider 的 `config`（Json）解析已配置的 **interim 全局 LIA**（选项 B P0.4 §2）。
+ * 形如 `{ lawfulBasis: { basis, ref?, note? } }`，`basis` 必须 ∈ {@link LAWFUL_BASIS_KINDS}；
+ * 缺失/非法 → undefined（自动路径**一个都不探**，绝不用 allowPersonalWithoutBasis 兜底）。纯函数、可测。
+ */
+export function parseConfiguredLawfulBasis(config: unknown): LawfulBasis | undefined {
+  if (!config || typeof config !== 'object') return undefined;
+  const raw = (config as Record<string, unknown>).lawfulBasis;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.basis !== 'string' || !(LAWFUL_BASIS_KINDS as readonly string[]).includes(r.basis)) return undefined;
+  return {
+    basis: r.basis as LawfulBasisKind,
+    ...(typeof r.ref === 'string' ? { ref: r.ref } : {}),
+    ...(typeof r.note === 'string' ? { note: r.note } : {}),
+  };
+}
 
 export interface BacklogPage {
   workspaceId: string;
@@ -58,6 +84,28 @@ export interface ContactBacklogResult {
   attempted: number;
   contactsCreated: number;
   nextCursor: string | null;
+}
+export interface GuessEmailsBacklogResult {
+  scanned: number;
+  attempted: number;
+  guessed: number;
+  /** 双闸未过（kill-switch/无 LIA）或无验证器 → 未探测。 */
+  skipped?: boolean;
+  reason?: string;
+  nextCursor: string | null;
+}
+
+/** 邮箱猜测阶段的单个补全对象（缺 email contact_point 的具名决策人）。 */
+interface EmaillessTarget {
+  contactId: string;
+  fullName: string;
+}
+/** 邮箱猜测阶段的单家公司（有域名 + 有界缺邮箱决策人 + 同域格式样本）。 */
+interface GuessTargetCompany {
+  id: string;
+  domain: string;
+  emailless: EmaillessTarget[];
+  knownSamples: KnownEmailSample[];
 }
 
 export function createBacklogActivities(deps: {
@@ -436,6 +484,144 @@ export function createBacklogActivities(deps: {
         attempted,
         contactsCreated,
         nextCursor: companies.length === limit ? companies[companies.length - 1].id : null,
+      };
+    },
+
+    /**
+     * 存量决策人邮箱猜测（选项 B · P0.4，阶段⑤b）：对 fit=match+域名 且**有缺邮箱具名决策人**的公司，
+     * 自动补全决策人邮箱（EmailGuesser 排列/格式学习 + SMTP RCPT 验证 → persistGuessedEmail 落库）。
+     * 复用 guessEmailsForCompany 的底层纯件，与 discoverContactsBacklog 同事务纪律。
+     *
+     * 🔴 双闸合规门（自动路径**永不** allowPersonalWithoutBasis，红线）：
+     *   ① 全局 kill-switch：`email_guess` provider 必须 ENABLED（默认 DISABLED=关，需 ops 显式点）。
+     *   ② 已记录 LIA：该 provider 的 `config.lawfulBasis` 有合法记录（basis ∈ LAWFUL_BASIS_KINDS）。
+     *   两闸都过才探；未过 → 一个都不探（skipped，零触网）。此 `config.lawfulBasis` 是 **interim 全局**
+     *   （对该实例所有租户套同一 LIA，仅适用当前单客户/dev）；per-tenant LIA 采集归收口⑥（设计 doc §2）。
+     *
+     * 事务纪律：短事务①载入 → **事务外** SMTP 猜测（可数分钟）→ 短事务②落库 → 水位 stamp-all
+     * （命中/未命中/DAT-011 跳过都 stamp，30d TTL 防每 sweep 重锤 MX）。每公司缺邮箱决策人经 buildGuessTargets
+     * 有界截断（默认 25）→ 单活动有界完成、收尾水位必 stamp（复审 MEDIUM）。
+     *
+     * 注：`icpId` 仅为与 workflow `{...t}` 调用对称（避免动 proxyActivities 类型）；函数体未用——猜测是公司级。
+     */
+    async guessEmailsBacklog(args: BacklogPage & { icpId: string }): Promise<GuessEmailsBacklogResult> {
+      const limit = args.limit ?? 6;
+      const now = new Date();
+
+      // ── 双闸前置（零触网；未过直接 skip，绝不 allowPersonalWithoutBasis）──
+      const provider = await deps.ownerDb.dataProvider.findFirst({
+        where: { key: EMAIL_GUESS_KEY, status: 'ENABLED' },
+        select: { config: true },
+      });
+      if (!provider) {
+        return { scanned: 0, attempted: 0, guessed: 0, skipped: true, reason: 'kill_switch_disabled', nextCursor: null };
+      }
+      const lawfulBasis = parseConfiguredLawfulBasis(provider.config);
+      if (!lawfulBasis) {
+        return { scanned: 0, attempted: 0, guessed: 0, skipped: true, reason: 'no_lawful_basis_configured', nextCursor: null };
+      }
+
+      const suspended = await suspendedDomains();
+
+      // ── 短事务①载入：首选验证器 + 目标公司 + 缺邮箱决策人 + 同域格式样本 + 禁联 ──
+      const loaded = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const verifiers = await deps.providers.routeEmailVerification(tx as never);
+        const verifier = verifiers[0];
+        if (!verifier) {
+          return { verifier: undefined, companyIds: [] as string[], guessCompanies: [] as GuessTargetCompany[], suppressedEmails: new Set<string>() };
+        }
+        const companies = await tx.canonicalCompany.findMany({
+          where: backlogEligibleWhere({
+            watermarkField: 'emailGuessAttemptedAt',
+            now,
+            requireDomain: true,
+            requireEmaillessContact: true,
+          }),
+          orderBy: backlogEligibleOrderBy('emailGuessAttemptedAt'),
+          take: limit,
+          select: { id: true, domain: true }, // country/dedupeKey/name 未用（猜测走 buildGuessTargets 派生）
+        });
+        const suppressedEmails = new Set(
+          (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+        );
+        const contacts = await tx.canonicalContact.findMany({
+          where: { companyId: { in: companies.map((c) => c.id) } },
+          include: { contactPoints: true },
+        });
+        const byCompany = new Map<string, typeof contacts>();
+        for (const ct of contacts) {
+          const arr = byCompany.get(ct.companyId) ?? [];
+          arr.push(ct);
+          byCompany.set(ct.companyId, arr);
+        }
+        const guessCompanies: GuessTargetCompany[] = [];
+        for (const c of companies) {
+          if (!c.domain) continue; // requireDomain 已保证；narrow 到 string
+          // 共用纯件：同域非-RISKY 格式样本 + 缺邮箱决策人（默认 cap 25，与手动路径一致，防单活动超时）。
+          const { knownSamples, emailless } = buildGuessTargets(byCompany.get(c.id) ?? [], c.domain);
+          guessCompanies.push({ id: c.id, domain: c.domain, emailless, knownSamples });
+        }
+        return { verifier, companyIds: companies.map((c) => c.id), guessCompanies, suppressedEmails };
+      });
+
+      if (!loaded.verifier) {
+        return { scanned: 0, attempted: 0, guessed: 0, skipped: true, reason: 'no_verifier', nextCursor: null };
+      }
+      const { verifier, companyIds, guessCompanies, suppressedEmails } = loaded;
+      if (!companyIds.length) return { scanned: 0, attempted: 0, guessed: 0, nextCursor: null };
+
+      // ── 事务外：逐公司逐缺邮箱决策人 SMTP 猜测（DAT-011 SUSPENDED 域跳过；单人失败 fail-safe）──
+      const guesser = new EmailGuesser(verifier);
+      const results: { contactId: string; result: GuessResult }[] = [];
+      let attempted = 0;
+      for (const gc of guessCompanies) {
+        if (suspended.has(gc.domain.toLowerCase())) continue; // DAT-011：SUSPENDED 域连 MX/SMTP 都不探
+        for (const t of gc.emailless) {
+          attempted += 1;
+          try {
+            const result = await guesser.guess(
+              { fullName: t.fullName, domain: gc.domain, knownSamples: gc.knownSamples },
+              {
+                workspaceId: args.workspaceId,
+                lawfulBasis, // interim 全局 LIA（config 配置）；🔴 自动路径**绝不**传 allowPersonalWithoutBasis
+                actor: 'backlog',
+                suppressedEmails,
+                maxProbe: undefined,
+              },
+            );
+            results.push({ contactId: t.contactId, result });
+          } catch {
+            /* 单人猜测失败（SMTP 异常等）不影响其余 */
+          }
+        }
+      }
+
+      // ── 短事务②落库：RISKY 无 outreach、suppression 不落、personal_data + lawful_basis 留痕（persistGuessedEmail 保证）──
+      let guessed = 0;
+      if (results.length) {
+        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          for (const r of results) {
+            const out = await persistGuessedEmail(tx, {
+              workspaceId: args.workspaceId,
+              contactId: r.contactId,
+              result: r.result,
+              suppressedEmails,
+              // 门实际采用（已 stamp）的依据优先；否则退回 config 的 interim 全局 LIA（问责留痕一致）。
+              lawfulBasis: r.result.lawfulBasis ?? lawfulBasis,
+              now,
+            });
+            if (out.persisted) guessed += 1;
+          }
+        });
+      }
+
+      // ── 水位 stamp-all（命中/未命中/DAT-011 跳过都 stamp）：30d TTL 防每 sweep 重锤 MX，游标吞噬存量 ──
+      await stampProcessed(args.workspaceId, companyIds, { emailGuessAttemptedAt: now });
+      return {
+        scanned: companyIds.length,
+        attempted,
+        guessed,
+        nextCursor: companyIds.length === limit ? companyIds[companyIds.length - 1] : null,
       };
     },
   };
