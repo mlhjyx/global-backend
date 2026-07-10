@@ -1,3 +1,5 @@
+> 【定位变更 2026-07-10】本文件是发现系统的**目标态设计**（Target Architecture），部分已实现。as-built 现状与缺口见 [../architecture/current.md](../architecture/current.md)——注意：文中「ToolBroker 是唯一执行闸门」为目标而非现状（缺口 #2，收口②整改中）。
+
 # 多源发现系统架构：工具契约 · Agent 编排 · MCP
 
 > 设计依据：PRD 第 9 部分（9.2 AI 分层 / 9.4 Task Contract / 9.8 Durable Workflow / 9.11 无超级 Agent / 9.13 Tool Registry）+ 10.19（禁止直接暴露 OSS 未认证 API / 外部队列替代核心 Workflow）。
