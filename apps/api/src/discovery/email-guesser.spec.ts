@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EmailGuesser } from './email-guesser';
+import { generateEmailCandidates } from './email-permutation';
 import { EmailVerdict, EmailVerificationAdapter } from './provider-contract';
 
 /** 假 SMTP 验证器：按地址查表返回 verdict，记录被探测顺序。 */
@@ -69,6 +70,20 @@ describe('EmailGuesser · 诚实降级（域级事实短路）', () => {
     expect(calls).toHaveLength(1); // 会话级事实，探一次即停
   });
 
+  it('先 INVALID 拒收、后遇域级事实：最优猜测排除已证伪地址，且 verdict 与 email 同源（HIGH 回归）', async () => {
+    const { adapter } = fakeVerifier((e) => {
+      if (e === 'hans.herold@acme.de') return { status: 'INVALID', detail: 'mailbox_rejected:550', costCents: 0 }; // c0 已证实不存在
+      if (e === 'h.herold@acme.de') return { status: 'RISKY', detail: 'catch_all_domain', costCents: 0 }; // c1 触发域级事实
+      return REJECT;
+    });
+    const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, CTX);
+    expect(r.status).toBe('unverified');
+    expect(r.domainFact).toBe('catch_all');
+    expect(r.best?.email).toBe('h.herold@acme.de'); // 绝不把已被拒收的 hans.herold 当最优猜测
+    expect(r.best?.verdict.detail).toBe('catch_all_domain'); // verdict 与 email 同源，不错位
+    expect(r.triedCount).toBe(2);
+  });
+
   it('无 MX → undeliverable_domain，无最优猜测', async () => {
     const { adapter } = fakeVerifier(() => ({ status: 'INVALID', detail: 'no_mx', costCents: 0 }));
     const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, CTX);
@@ -124,6 +139,17 @@ describe('EmailGuesser · 边界', () => {
     const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, { ...CTX, maxProbe: 2 });
     expect(r.triedCount).toBe(2);
     expect(calls).toHaveLength(2);
+  });
+
+  it('候选全在禁联名单 → 一次未探，exhausted 标 all_candidates_suppressed（不谎称已探测拒收，MEDIUM 回归）', async () => {
+    const all = new Set(generateEmailCandidates('Hans Herold', 'acme.de').map((c) => c.email.toLowerCase()));
+    const { adapter, calls } = fakeVerifier(() => REJECT);
+    const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, { ...CTX, suppressedEmails: all });
+    expect(r.status).toBe('exhausted');
+    expect(r.reason).toBe('all_candidates_suppressed');
+    expect(r.domainFact).toBe('suppressed');
+    expect(r.triedCount).toBe(0);
+    expect(calls).toHaveLength(0);
   });
 
   it('姓名/域无法生成候选 → no_candidates', async () => {

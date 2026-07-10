@@ -96,6 +96,14 @@ const DOMAIN_FACT_REASON: Record<NonNullable<GuessResult['domainFact']>, string>
   suppressed: 'source_policy_denied',
 };
 
+/** 未验证猜测的置信度 = 先验 × 0.4（明显低于 SMTP 证实的 0.9+），保留两位小数。 */
+function unverifiedConfidence(prior: number): number {
+  return Math.round(prior * 0.4 * 100) / 100;
+}
+
+/** 格式学习样本上界（一致样本少量即够，防病态大输入）。 */
+const MAX_LEARN_SAMPLES = 50;
+
 /**
  * 邮箱猜测编排器。注入 SMTP 验证器（生产=SelfHostedEmailVerifier；测试=假实现）。
  * 不自行触网——所有 SMTP 出网都经注入验证器（其内部走 ToolBroker 唯一闸门）。
@@ -139,7 +147,10 @@ export class EmailGuesser {
     const maxProbe = ctx.maxProbe ?? 8;
     const suppressed = ctx.suppressedEmails ?? new Set<string>();
     let tried = 0;
-    let bestUnverified: EmailGuess | null = null;
+    // 最优「未被证伪」候选：第一个非 INVALID 的探测（候选按先验降序 → 即最高先验的可信猜测）。
+    // 🔴 关键：**排除已被 SMTP 明确拒收(INVALID)的地址**，绝不把证实不存在的邮箱当最优猜测；
+    //    且 email 与 verdict 取自**同一次**探测（不像旧版把 c1 的 verdict 拼到 c0 的 email 上）。
+    let bestPlausible: EmailGuess | null = null;
 
     for (const cand of candidates) {
       if (tried >= maxProbe) break;
@@ -158,38 +169,45 @@ export class EmailGuesser {
         };
       }
 
-      // 域级事实（catch-all/反枚举/不可达/无 MX/SSRF/policy）→ 全候选同命 → 短路
-      const fact = domainFactOf(verdict);
-      if (fact) {
-        if (fact === 'no_mx') {
-          return { status: 'undeliverable_domain', domainFact: fact, triedCount: tried, candidates, reason: DOMAIN_FACT_REASON[fact] };
-        }
-        if (fact === 'egress_blocked' || fact === 'suppressed') {
-          return { status: 'unverified', domainFact: fact, triedCount: tried, candidates, reason: DOMAIN_FACT_REASON[fact] };
-        }
-        // catch_all / anti_enumeration / unreachable：给出最优先验候选作**未验证**猜测
-        const top = candidates[0];
-        return {
-          status: 'unverified',
-          domainFact: fact,
-          best: { ...top, verdict, confidence: Math.round(top.prior * 0.4 * 100) / 100 },
-          triedCount: tried,
-          candidates,
-          reason: DOMAIN_FACT_REASON[fact],
-        };
+      // 记录最优可信猜测：非 INVALID 即未被证伪（含 RISKY 域级事实/inconclusive）。
+      if (verdict.status !== 'INVALID' && !bestPlausible) {
+        bestPlausible = { ...cand, verdict, confidence: unverifiedConfidence(cand.prior) };
       }
 
-      // INVALID 且非域级（mailbox_rejected）：此地址不存在 → 试下一个
-      // 其余 RISKY（catch_all_unproven/inconclusive）：留作兜底，继续试更优的
-      if (verdict.status === 'RISKY' && !bestUnverified) {
-        bestUnverified = { ...cand, verdict, confidence: Math.round(cand.prior * 0.4 * 100) / 100 };
-      }
+      // 域级事实（catch-all/反枚举/不可达/无 MX/SSRF/policy）→ 全候选同命 → 一次即短路。
+      const fact = domainFactOf(verdict);
+      if (fact) return this.domainFactResult(fact, bestPlausible, tried, candidates);
+
+      // 其余（INVALID mailbox_rejected 证伪 / RISKY inconclusive）→ 试下一个更优候选。
     }
 
-    if (bestUnverified) {
-      return { status: 'unverified', best: bestUnverified, triedCount: tried, candidates, reason: 'no_valid_best_effort_risky' };
+    if (bestPlausible) {
+      return { status: 'unverified', best: bestPlausible, triedCount: tried, candidates, reason: 'no_valid_best_effort_risky' };
+    }
+    if (tried === 0) {
+      // 候选全在禁联名单 → 一次都没探 → 别谎称「已逐个探测后拒收」。
+      return { status: 'exhausted', domainFact: 'suppressed', triedCount: 0, candidates, reason: 'all_candidates_suppressed' };
     }
     return { status: 'exhausted', triedCount: tried, candidates, reason: 'all_probed_candidates_rejected' };
+  }
+
+  /** 域级事实收尾（抽出以缩短 guess）：no_mx=不可投递无猜测；被闸门挡=无信号无猜测；其余给最优可信猜测。 */
+  private domainFactResult(
+    fact: NonNullable<GuessResult['domainFact']>,
+    bestPlausible: EmailGuess | null,
+    tried: number,
+    candidates: EmailCandidate[],
+  ): GuessResult {
+    const reason = DOMAIN_FACT_REASON[fact];
+    if (fact === 'no_mx') {
+      return { status: 'undeliverable_domain', domainFact: fact, triedCount: tried, candidates, reason };
+    }
+    // egress_blocked / source_policy：被 SSRF 护栏或用途门挡下 → 无任何投递信号 → 诚实不给猜测。
+    if (fact === 'egress_blocked' || fact === 'suppressed') {
+      return { status: 'unverified', domainFact: fact, triedCount: tried, candidates, reason };
+    }
+    // catch_all / anti_enumeration / unreachable：域收信但无法逐地址证实 → 给最优可信猜测（排除已证伪者）。
+    return { status: 'unverified', domainFact: fact, best: bestPlausible ?? undefined, triedCount: tried, candidates, reason };
   }
 
   /** 生成候选：有已知样本先学格式（高置信在前），再拼盲排列兜底，去重保序。 */
@@ -197,7 +215,8 @@ export class EmailGuesser {
     const out: EmailCandidate[] = [];
     const seen = new Set<string>();
     if (input.knownSamples?.length) {
-      const learned = inferEmailPattern(input.knownSamples);
+      // 上界防御：格式学习只需少量一致样本，截断防病态大输入拖慢（每样本 O(变体×模式)）。
+      const learned = inferEmailPattern(input.knownSamples.slice(0, MAX_LEARN_SAMPLES));
       if (learned) {
         for (const c of applyLearnedPattern(learned, input.fullName, input.domain)) {
           if (!seen.has(c.email)) { seen.add(c.email); out.push(c); }
