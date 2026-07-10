@@ -2,3 +2,5 @@ extends: ["spectral:oas"]
 rules:
   # 契约随域增长，早期允许未被引用的共享组件存在
   oas3-unused-component: off
+  # code-first 约定：操作文档由 @ApiOperation.summary 承载（description 可选补充）
+  operation-description: off

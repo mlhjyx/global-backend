@@ -1,6 +1,8 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { AckEventsDto, EventsController } from './events.controller';
+import { AckEventsDto, EVENT_ENVELOPE_SCHEMA, EventsController } from './events.controller';
 import { EventsService } from './events.service';
 
 /**
@@ -55,5 +57,63 @@ describe('EventsController.ack — sink 锁死 pull sink（F）', () => {
     // 精确到参数个数：第三个 sink 参数不存在（缺省交给 service 锁 'saas'）
     expect(ack).toHaveBeenCalledWith(ctx, dto.event_ids);
     expect(ack.mock.calls[0]).toHaveLength(2);
+  });
+});
+
+describe('EventsController — 统一响应信封（收口④）', () => {
+  const ctx = { workspaceId: 'ws-1', userId: 'u-1' };
+
+  it('GET /events 返回分页信封 { data, page: { next_cursor, has_more } }', async () => {
+    const envelopes = [{ event_id: 'aaaaaaaa-0000-0000-0000-000000000001' }];
+    const list = vi.fn(async () => ({ data: envelopes, nextCursor: '42', hasMore: true }));
+    const controller = new EventsController({ list } as unknown as EventsService);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await controller.list(ctx as any);
+
+    expect(res).toEqual({
+      data: envelopes,
+      page: { next_cursor: '42', has_more: true },
+    });
+  });
+
+  it('POST /events/ack 返回 { data: { acked } }', async () => {
+    const ack = vi.fn(async () => ({ acked: 3 }));
+    const controller = new EventsController({ ack } as unknown as EventsService);
+    const dto = Object.assign(new AckEventsDto(), {
+      event_ids: ['aaaaaaaa-0000-0000-0000-000000000001'],
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await controller.ack(ctx as any, dto);
+
+    expect(res).toEqual({ data: { acked: 3 } });
+  });
+});
+
+describe('EVENT_ENVELOPE_SCHEMA — 与 contracts/events/envelope.schema.json 镜像一致（防双源漂移）', () => {
+  const contract = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '../../../../packages/contracts/events/envelope.schema.json'),
+      'utf8',
+    ),
+  ) as { required: string[]; properties: Record<string, { enum?: string[] }> };
+
+  it('required 列表与事件契约一致', () => {
+    expect([...(EVENT_ENVELOPE_SCHEMA.required ?? [])].sort()).toEqual(
+      [...contract.required].sort(),
+    );
+  });
+
+  it('privacy_classification 枚举与事件契约一致', () => {
+    expect(EVENT_ENVELOPE_SCHEMA.properties.privacy_classification.enum).toEqual(
+      contract.properties.privacy_classification.enum,
+    );
+  });
+
+  it('属性键集覆盖事件契约全部属性（openapi 不少字段）', () => {
+    const contractKeys = Object.keys(contract.properties).sort();
+    const schemaKeys = Object.keys(EVENT_ENVELOPE_SCHEMA.properties).sort();
+    expect(schemaKeys).toEqual(contractKeys);
   });
 });

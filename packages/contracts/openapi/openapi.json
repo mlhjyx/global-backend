@@ -7,7 +7,28 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "service": {
+                      "type": "string",
+                      "example": "global-api"
+                    },
+                    "ts": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "健康检查（存活）",
@@ -22,7 +43,20 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "db": {
+                      "type": "string",
+                      "example": "ok"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "summary": "数据库连通性检查（以 app_user 连接）",
@@ -37,7 +71,42 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "userId",
+                        "workspaceId",
+                        "roles"
+                      ],
+                      "properties": {
+                        "userId": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "roles": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -58,17 +127,9 @@
         "parameters": [
           {
             "name": "idempotency-key",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
+            "required": false,
             "in": "header",
             "description": "幂等键（客户端生成，如 uuid）",
-            "required": false,
             "schema": {
               "type": "string"
             }
@@ -85,12 +146,20 @@
           }
         },
         "responses": {
-          "201": {
+          "202": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompanyDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
                 }
               }
             }
@@ -111,15 +180,17 @@
         "parameters": [
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
             }
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -132,7 +203,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompanyListDto"
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CompanyDto"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -168,7 +268,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompanyDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
                 }
               }
             }
@@ -200,7 +308,46 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "approvedClaims",
+                        "pendingClaims",
+                        "offerings",
+                        "conflictsOpen"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        },
+                        "approvedClaims": {
+                          "type": "integer"
+                        },
+                        "pendingClaims": {
+                          "type": "integer"
+                        },
+                        "offerings": {
+                          "type": "integer"
+                        },
+                        "conflictsOpen": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -233,7 +380,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompanyDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
                 }
               }
             }
@@ -269,9 +424,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/OfferingDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OfferingDto"
+                      }
+                    }
                   }
                 }
               }
@@ -303,7 +466,7 @@
           },
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -316,9 +479,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ClaimDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ClaimDto"
+                      }
+                    }
                   }
                 }
               }
@@ -358,12 +529,20 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ClaimDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ClaimDto"
+                    }
+                  }
                 }
               }
             }
@@ -399,7 +578,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ClaimDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ClaimDto"
+                    }
+                  }
                 }
               }
             }
@@ -435,7 +622,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ClaimDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ClaimDto"
+                    }
+                  }
                 }
               }
             }
@@ -471,7 +666,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ClaimDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ClaimDto"
+                    }
+                  }
                 }
               }
             }
@@ -502,7 +705,7 @@
           },
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -511,7 +714,27 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "知识冲突（两条矛盾 Claim + 状态）"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -550,7 +773,24 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "知识冲突（两条矛盾 Claim + 状态）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -578,12 +818,20 @@
           }
         ],
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IcpDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IcpDto"
+                    }
+                  }
                 }
               }
             }
@@ -606,7 +854,7 @@
         "parameters": [
           {
             "name": "companyId",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -619,9 +867,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/IcpDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/IcpDto"
+                      }
+                    }
                   }
                 }
               }
@@ -658,7 +914,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IcpDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IcpDto"
+                    }
+                  }
                 }
               }
             }
@@ -702,7 +966,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IcpDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IcpDto"
+                    }
+                  }
                 }
               }
             }
@@ -738,7 +1010,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IcpDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IcpDto"
+                    }
+                  }
                 }
               }
             }
@@ -779,12 +1059,20 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuleDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RuleDto"
+                    }
+                  }
                 }
               }
             }
@@ -830,7 +1118,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuleDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RuleDto"
+                    }
+                  }
                 }
               }
             }
@@ -860,7 +1156,30 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "deleted"
+                      ],
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -898,12 +1217,20 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BacktestDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BacktestDto"
+                    }
+                  }
                 }
               }
             }
@@ -937,9 +1264,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BacktestDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BacktestDto"
+                      }
+                    }
                   }
                 }
               }
@@ -971,12 +1306,20 @@
           }
         ],
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QueryPlanDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/QueryPlanDto"
+                    }
+                  }
                 }
               }
             }
@@ -1010,9 +1353,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/QueryPlanDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QueryPlanDto"
+                      }
+                    }
                   }
                 }
               }
@@ -1049,7 +1400,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QueryPlanDto"
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/QueryPlanDto"
+                    }
+                  }
                 }
               }
             }
@@ -1081,7 +1440,35 @@
         ],
         "responses": {
           "202": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "runId",
+                        "status"
+                      ],
+                      "properties": {
+                        "runId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1110,7 +1497,61 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "planId",
+                        "icpId",
+                        "status",
+                        "stats",
+                        "createdAt",
+                        "completedAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "planId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "icpId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "stats": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1130,7 +1571,7 @@
         "parameters": [
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1138,15 +1579,17 @@
           },
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
             }
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1155,7 +1598,45 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1184,7 +1665,24 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1213,7 +1711,24 @@
         ],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "联系人发现结果（新建联系人/联系点计数）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1253,7 +1768,24 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "验证结果（status + 探测细节留痕）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1283,7 +1815,24 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Suppression 记录"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1301,7 +1850,27 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "Suppression 记录"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1330,7 +1899,30 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "deleted"
+                      ],
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1350,7 +1942,27 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "DataProvider（源/状态/成本）"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1379,7 +1991,35 @@
         ],
         "responses": {
           "202": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "accepted",
+                        "eventId"
+                      ],
+                      "properties": {
+                        "accepted": {
+                          "type": "boolean"
+                        },
+                        "eventId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1399,7 +2039,7 @@
         "parameters": [
           {
             "name": "icpId",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1407,7 +2047,7 @@
           },
           {
             "name": "queue",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1415,7 +2055,7 @@
           },
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1423,15 +2063,17 @@
           },
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
             }
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1440,7 +2082,45 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "Lead（六维分+队列+裁决状态）"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1469,7 +2149,42 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "recommended",
+                        "needs_review",
+                        "rejected",
+                        "suppressed"
+                      ],
+                      "properties": {
+                        "recommended": {
+                          "type": "integer"
+                        },
+                        "needs_review": {
+                          "type": "integer"
+                        },
+                        "rejected": {
+                          "type": "integer"
+                        },
+                        "suppressed": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1498,7 +2213,24 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1537,7 +2269,24 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1576,7 +2325,24 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1589,6 +2355,207 @@
           "Leads"
         ]
       }
+    },
+    "/api/v1/events": {
+      "get": {
+        "operationId": "EventsController_list_v1",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "游标（上次响应的 nextCursor；缺省从头拉）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "description": "按集成事件类型过滤（如 LeadQualified）",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "事件 envelope（见 packages/contracts/events/envelope.schema.json）",
+                        "required": [
+                          "event_id",
+                          "event_type",
+                          "schema_version",
+                          "workspace_id",
+                          "aggregate_type",
+                          "aggregate_id",
+                          "occurred_at",
+                          "producer",
+                          "privacy_classification",
+                          "payload"
+                        ],
+                        "properties": {
+                          "event_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "event_type": {
+                            "type": "string"
+                          },
+                          "schema_version": {
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "aggregate_type": {
+                            "type": "string"
+                          },
+                          "aggregate_id": {
+                            "type": "string"
+                          },
+                          "occurred_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "producer": {
+                            "type": "string"
+                          },
+                          "correlation_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "causation_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "privacy_classification": {
+                            "type": "string",
+                            "enum": [
+                              "PUBLIC",
+                              "INTERNAL",
+                              "CONFIDENTIAL",
+                              "RESTRICTED"
+                            ]
+                          },
+                          "payload": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/api/v1/events/ack": {
+      "post": {
+        "operationId": "EventsController_ack_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AckEventsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "acked"
+                      ],
+                      "properties": {
+                        "acked": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）",
+        "tags": [
+          "Events"
+        ]
+      }
     }
   },
   "info": {
@@ -1597,8 +2564,42 @@
     "version": "0.1.0",
     "contact": {}
   },
-  "tags": [],
-  "servers": [],
+  "tags": [
+    {
+      "name": "Companies",
+      "description": ""
+    },
+    {
+      "name": "Claims",
+      "description": ""
+    },
+    {
+      "name": "ICP",
+      "description": ""
+    },
+    {
+      "name": "Discovery",
+      "description": ""
+    },
+    {
+      "name": "Leads",
+      "description": ""
+    },
+    {
+      "name": "Events",
+      "description": ""
+    },
+    {
+      "name": "System",
+      "description": ""
+    }
+  ],
+  "servers": [
+    {
+      "url": "/",
+      "description": "同源部署（相对路径；具体 host 由部署环境决定）"
+    }
+  ],
   "components": {
     "securitySchemes": {
       "bearer": {
@@ -1608,24 +2609,6 @@
       }
     },
     "schemas": {
-      "CreateCompanyDto": {
-        "type": "object",
-        "properties": {
-          "website": {
-            "type": "string",
-            "example": "https://acme-tech.com",
-            "description": "企业官网 URL"
-          },
-          "name": {
-            "type": "string",
-            "example": "Shenzhen Acme Tech Co.",
-            "description": "企业名称（可选；未填则先用域名占位，理解后回填）"
-          }
-        },
-        "required": [
-          "website"
-        ]
-      },
       "PublicContactDto": {
         "type": "object",
         "properties": {
@@ -1664,7 +2647,7 @@
             "example": "Shenzhen Acme Tech Co."
           },
           "website": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "https://acme-tech.com"
           },
@@ -1678,12 +2661,12 @@
             ]
           },
           "industry": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "行业（理解工作流回填）"
           },
           "summary": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "企业简介（抽取，可人工修正）"
           },
@@ -1702,43 +2685,30 @@
         "required": [
           "id",
           "name",
+          "website",
           "status",
+          "industry",
+          "summary",
           "publicContacts",
           "createdAt"
         ]
       },
-      "PageDto": {
+      "CreateCompanyDto": {
         "type": "object",
         "properties": {
-          "nextCursor": {
-            "type": "object",
-            "nullable": true,
-            "description": "下一页游标；null 表示到底"
+          "website": {
+            "type": "string",
+            "example": "https://acme-tech.com",
+            "description": "企业官网 URL"
           },
-          "hasMore": {
-            "type": "boolean"
+          "name": {
+            "type": "string",
+            "example": "Shenzhen Acme Tech Co.",
+            "description": "企业名称（可选；未填则先用域名占位，理解后回填）"
           }
         },
         "required": [
-          "hasMore"
-        ]
-      },
-      "CompanyListDto": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CompanyDto"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/PageDto"
-          }
-        },
-        "required": [
-          "data",
-          "page"
+          "website"
         ]
       },
       "OfferingDto": {
@@ -1753,26 +2723,27 @@
             "example": "CNC 精密加工件"
           },
           "description": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "attributes": {
             "type": "object",
+            "additionalProperties": true,
             "nullable": true,
             "description": "结构化属性（moq/lead_time/materials/params/certifications…，仅来源文本明确出现的）"
           },
           "sourceUrl": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "溯源：来自哪个页面"
           },
           "evidence": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "来源页原文片段"
           },
           "confidence": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "createdAt": {
@@ -1783,6 +2754,11 @@
         "required": [
           "id",
           "name",
+          "description",
+          "attributes",
+          "sourceUrl",
+          "evidence",
+          "confidence",
           "createdAt"
         ]
       },
@@ -1790,20 +2766,25 @@
         "type": "object",
         "properties": {
           "sourceUrl": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "来源 URL"
           },
           "snippet": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "来源原文片段"
           },
           "confidence": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "sourceUrl",
+          "snippet",
+          "confidence"
+        ]
       },
       "ClaimDto": {
         "type": "object",
@@ -1836,7 +2817,7 @@
             ]
           },
           "confidence": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 0.95
           },
@@ -1862,6 +2843,7 @@
           "type",
           "statement",
           "status",
+          "confidence",
           "version",
           "evidence",
           "createdAt"
@@ -1873,15 +2855,18 @@
           "type": {
             "type": "string",
             "description": "事实类型",
-            "example": "certification"
+            "example": "certification",
+            "maxLength": 50
           },
           "statement": {
             "type": "string",
-            "example": "通过 IATF 16949 认证（2025 续证）"
+            "example": "通过 IATF 16949 认证（2025 续证）",
+            "maxLength": 2000
           },
           "evidence": {
             "type": "string",
-            "description": "依据说明（证书编号、内部资料名等）"
+            "description": "依据说明（证书编号、内部资料名等）",
+            "maxLength": 2000
           }
         },
         "required": [
@@ -1938,7 +2923,7 @@
             "example": "decision_maker"
           },
           "title": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "concerns": {
@@ -1950,6 +2935,7 @@
         },
         "required": [
           "role",
+          "title",
           "concerns"
         ]
       },
@@ -1975,13 +2961,28 @@
             "type": "string"
           },
           "value": {
-            "type": "object"
+            "description": "操作数：标量或数组",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
           },
           "weight": {
             "type": "number"
           },
           "rationale": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           }
         },
@@ -1991,7 +2992,8 @@
           "field",
           "operator",
           "value",
-          "weight"
+          "weight",
+          "rationale"
         ]
       },
       "IcpDto": {
@@ -2021,6 +3023,7 @@
           },
           "companyAttributes": {
             "type": "object",
+            "additionalProperties": true,
             "description": "目标公司属性：行业/规模/地区/技术等"
           },
           "painPoints": {
@@ -2106,6 +3109,7 @@
           },
           "companyAttributes": {
             "type": "object",
+            "additionalProperties": true,
             "description": "目标公司属性"
           },
           "painPoints": {
@@ -2144,61 +3148,6 @@
           }
         }
       },
-      "CreateRuleDto": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "MUST_HAVE",
-              "NICE_TO_HAVE",
-              "EXCLUSION"
-            ]
-          },
-          "field": {
-            "type": "string",
-            "example": "industry",
-            "description": "规范属性名（industry/region/employee_count/...）"
-          },
-          "operator": {
-            "type": "string",
-            "enum": [
-              "eq",
-              "neq",
-              "in",
-              "not_in",
-              "contains",
-              "not_contains",
-              "gte",
-              "lte",
-              "matches"
-            ]
-          },
-          "value": {
-            "type": "object",
-            "description": "操作数：标量或数组",
-            "example": [
-              "automotive",
-              "aerospace"
-            ]
-          },
-          "weight": {
-            "type": "number",
-            "default": 1,
-            "description": "NICE_TO_HAVE 计分权重"
-          },
-          "rationale": {
-            "type": "string",
-            "description": "规则依据（推断透明）"
-          }
-        },
-        "required": [
-          "kind",
-          "field",
-          "operator",
-          "value"
-        ]
-      },
       "RuleDto": {
         "type": "object",
         "properties": {
@@ -2236,13 +3185,28 @@
             ]
           },
           "value": {
-            "type": "object"
+            "description": "操作数：标量或数组",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
           },
           "weight": {
             "type": "number"
           },
           "rationale": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "version": {
@@ -2257,7 +3221,78 @@
           "operator",
           "value",
           "weight",
+          "rationale",
           "version"
+        ]
+      },
+      "CreateRuleDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
+          },
+          "field": {
+            "type": "string",
+            "example": "industry",
+            "description": "规范属性名（industry/region/employee_count/...）"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "neq",
+              "in",
+              "not_in",
+              "contains",
+              "not_contains",
+              "gte",
+              "lte",
+              "matches"
+            ]
+          },
+          "value": {
+            "description": "操作数：标量或数组",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ],
+            "example": [
+              "automotive",
+              "aerospace"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "default": 1,
+            "minimum": 0,
+            "description": "NICE_TO_HAVE 计分权重（≥0；排除语义用 EXCLUSION 规则表达，负权重会静默污染归一化分母）"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "规则依据（推断透明）"
+          }
+        },
+        "required": [
+          "kind",
+          "field",
+          "operator",
+          "value"
         ]
       },
       "UpdateRuleDto": {
@@ -2289,16 +3324,69 @@
             ]
           },
           "value": {
-            "type": "object",
-            "description": "操作数：标量或数组"
+            "description": "操作数：标量或数组",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
           },
           "weight": {
-            "type": "number"
+            "type": "number",
+            "minimum": 0,
+            "description": "NICE_TO_HAVE 计分权重（≥0）"
           },
           "rationale": {
             "type": "string"
           }
         }
+      },
+      "BacktestDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icpId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "matchHitRate / excludeCatchRate / unknownFieldRate / recommendation"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "icpId",
+          "results",
+          "metrics",
+          "createdAt"
+        ]
       },
       "BacktestSampleDto": {
         "type": "object",
@@ -2313,6 +3401,7 @@
           },
           "attributes": {
             "type": "object",
+            "additionalProperties": true,
             "description": "已知的公司属性（industry/region/employee_count/...），规则据此确定性评估",
             "example": {
               "industry": "metal fabrication",
@@ -2340,6 +3429,7 @@
         "properties": {
           "samples": {
             "minItems": 1,
+            "maxItems": 200,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BacktestSampleDto"
@@ -2348,38 +3438,6 @@
         },
         "required": [
           "samples"
-        ]
-      },
-      "BacktestDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "icpId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "results": {
-            "type": "object",
-            "description": "逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估"
-          },
-          "metrics": {
-            "type": "object",
-            "description": "matchHitRate / excludeCatchRate / unknownFieldRate / recommendation"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "icpId",
-          "results",
-          "metrics",
-          "createdAt"
         ]
       },
       "QueryPlanDto": {
@@ -2402,11 +3460,15 @@
             ]
           },
           "queries": {
-            "type": "object",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
             "description": "有序查询列表：source_class + filters + keywords + rationale + priority"
           },
           "estimatedVolume": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "version": {
@@ -2422,6 +3484,7 @@
           "icpId",
           "status",
           "queries",
+          "estimatedVolume",
           "version",
           "createdAt"
         ]
@@ -2500,6 +3563,24 @@
             "description": "拒绝原因（回流做评分质量反馈）"
           }
         }
+      },
+      "AckEventsDto": {
+        "type": "object",
+        "properties": {
+          "event_ids": {
+            "type": "array",
+            "description": "要 ACK 的 event_id 列表（envelope.event_id，uuid）",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "event_ids"
+        ]
       }
     }
   }

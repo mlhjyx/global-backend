@@ -10,7 +10,7 @@ export class PersonaDto {
 
 export class BuyingRoleDto {
   @ApiProperty({ example: 'decision_maker' }) role!: string;
-  @ApiPropertyOptional({ nullable: true }) title!: string | null;
+  @ApiProperty({ type: String, nullable: true }) title!: string | null;
   @ApiProperty({ type: [String] }) concerns!: unknown;
 }
 
@@ -45,9 +45,9 @@ export class IcpRuleDto {
   @ApiProperty({ enum: ['MUST_HAVE', 'NICE_TO_HAVE', 'EXCLUSION'] }) kind!: string;
   @ApiProperty() field!: string;
   @ApiProperty() operator!: string;
-  @ApiProperty() value!: unknown;
+  @ApiProperty({ description: '操作数：标量或数组', oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'array', items: {} }] }) value!: unknown;
   @ApiProperty() weight!: number;
-  @ApiPropertyOptional({ nullable: true }) rationale!: string | null;
+  @ApiProperty({ type: String, nullable: true }) rationale!: string | null;
 }
 
 export class IcpDto {
@@ -55,7 +55,7 @@ export class IcpDto {
   @ApiProperty({ format: 'uuid' }) companyId!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ enum: ICP_STATUSES }) status!: string;
-  @ApiProperty({ description: '目标公司属性：行业/规模/地区/技术等' }) companyAttributes!: unknown;
+  @ApiProperty({ type: 'object', additionalProperties: true, description: '目标公司属性：行业/规模/地区/技术等' }) companyAttributes!: unknown;
   @ApiProperty({ type: [String] }) painPoints!: unknown;
   @ApiProperty({ type: [String] }) triggerSignals!: unknown;
   @ApiProperty({ type: [String] }) exclusions!: unknown;
