@@ -71,6 +71,12 @@ export interface GuessResult {
   /** 生成的候选（透明化，便于审计/调参；不代表都探测了）。 */
   candidates: EmailCandidate[];
   reason: string;
+  /**
+   * 本次探测实际采用的合法性基础（已 stamp 断言人/时间）——**门放行才有**（含开关合成的 override 依据）。
+   * 落库必须持久化**这条**而非调用方原始入参，否则开关放行路径会 personal_data=true 却 lawful_basis=null
+   * （GDPR Art.5(2) 问责缺口）。blocked/no_candidates（未触网）无此值。
+   */
+  lawfulBasis?: LawfulBasis;
 }
 
 /** 从验证器 verdict.detail 归类**域级**事实（命中即对全部候选成立 → 短路）。 */
@@ -166,6 +172,7 @@ export class EmailGuesser {
           triedCount: tried,
           candidates,
           reason: `smtp_verified:${cand.pattern}`,
+          lawfulBasis: recordedBasis,
         };
       }
 
@@ -176,19 +183,19 @@ export class EmailGuesser {
 
       // 域级事实（catch-all/反枚举/不可达/无 MX/SSRF/policy）→ 全候选同命 → 一次即短路。
       const fact = domainFactOf(verdict);
-      if (fact) return this.domainFactResult(fact, bestPlausible, tried, candidates);
+      if (fact) return this.domainFactResult(fact, bestPlausible, tried, candidates, recordedBasis);
 
       // 其余（INVALID mailbox_rejected 证伪 / RISKY inconclusive）→ 试下一个更优候选。
     }
 
     if (bestPlausible) {
-      return { status: 'unverified', best: bestPlausible, triedCount: tried, candidates, reason: 'no_valid_best_effort_risky' };
+      return { status: 'unverified', best: bestPlausible, triedCount: tried, candidates, reason: 'no_valid_best_effort_risky', lawfulBasis: recordedBasis };
     }
     if (tried === 0) {
       // 候选全在禁联名单 → 一次都没探 → 别谎称「已逐个探测后拒收」。
-      return { status: 'exhausted', domainFact: 'suppressed', triedCount: 0, candidates, reason: 'all_candidates_suppressed' };
+      return { status: 'exhausted', domainFact: 'suppressed', triedCount: 0, candidates, reason: 'all_candidates_suppressed', lawfulBasis: recordedBasis };
     }
-    return { status: 'exhausted', triedCount: tried, candidates, reason: 'all_probed_candidates_rejected' };
+    return { status: 'exhausted', triedCount: tried, candidates, reason: 'all_probed_candidates_rejected', lawfulBasis: recordedBasis };
   }
 
   /** 域级事实收尾（抽出以缩短 guess）：no_mx=不可投递无猜测；被闸门挡=无信号无猜测；其余给最优可信猜测。 */
@@ -197,17 +204,18 @@ export class EmailGuesser {
     bestPlausible: EmailGuess | null,
     tried: number,
     candidates: EmailCandidate[],
+    lawfulBasis: LawfulBasis | undefined,
   ): GuessResult {
     const reason = DOMAIN_FACT_REASON[fact];
     if (fact === 'no_mx') {
-      return { status: 'undeliverable_domain', domainFact: fact, triedCount: tried, candidates, reason };
+      return { status: 'undeliverable_domain', domainFact: fact, triedCount: tried, candidates, reason, lawfulBasis };
     }
     // egress_blocked / source_policy：被 SSRF 护栏或用途门挡下 → 无任何投递信号 → 诚实不给猜测。
     if (fact === 'egress_blocked' || fact === 'suppressed') {
-      return { status: 'unverified', domainFact: fact, triedCount: tried, candidates, reason };
+      return { status: 'unverified', domainFact: fact, triedCount: tried, candidates, reason, lawfulBasis };
     }
     // catch_all / anti_enumeration / unreachable：域收信但无法逐地址证实 → 给最优可信猜测（排除已证伪者）。
-    return { status: 'unverified', domainFact: fact, best: bestPlausible ?? undefined, triedCount: tried, candidates, reason };
+    return { status: 'unverified', domainFact: fact, best: bestPlausible ?? undefined, triedCount: tried, candidates, reason, lawfulBasis };
   }
 
   /** 生成候选：有已知样本先学格式（高置信在前），再拼盲排列兜底，去重保序。 */

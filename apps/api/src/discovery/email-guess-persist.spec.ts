@@ -55,6 +55,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
     const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(), lawfulBasis: LIA, now: NOW });
     expect(out).toMatchObject({ persisted: true, email: 'h.herold@acme.de', status: 'VALID' });
     expect(upsert.mock.calls[0][0].create).toMatchObject({ status: 'VALID', verifiedAt: NOW, type: 'email' });
+    expect(upsert.mock.calls[0][0].update).toMatchObject({ status: 'VALID', verifiedAt: NOW }); // 重 upsert 也置 verifiedAt
     expect(create.mock.calls[0][0].data.allowedActions).toContain('outreach');
     expect(create.mock.calls[0][0].data.value.personal_data).toBe(true);
   });
@@ -65,6 +66,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
     expect(out).toMatchObject({ persisted: true, status: 'RISKY' });
     expect(upsert.mock.calls[0][0].create.status).toBe('RISKY');
     expect(upsert.mock.calls[0][0].create.verifiedAt).toBeNull();
+    expect(upsert.mock.calls[0][0].update.verifiedAt).toBeNull(); // 降级也显式清 verifiedAt（不留 stale）
     expect(create.mock.calls[0][0].data.allowedActions).not.toContain('outreach');
   });
 

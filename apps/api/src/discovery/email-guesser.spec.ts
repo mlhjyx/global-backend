@@ -122,6 +122,30 @@ describe('EmailGuesser · 合规红线', () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 
+  it('开关放行(无显式 basis)：门合成的 legitimate_interest 依据串回 result.lawfulBasis（HIGH 回归）', async () => {
+    const { adapter } = fakeVerifier((e) => (e === 'hans.herold@acme.de' ? { status: 'VALID', detail: 'ok', costCents: 0 } : REJECT));
+    const r = await new EmailGuesser(adapter).guess(
+      { fullName: 'Hans Herold', domain: 'acme.de' },
+      { allowPersonalWithoutBasis: true, actor: 'demo', nowIso: '2026-07-10T00:00:00.000Z' },
+    );
+    expect(r.status).toBe('verified');
+    // 落库要用这条（否则 personal_data=true 却 lawful_basis=null），且已 stamp 断言人/时间
+    expect(r.lawfulBasis).toMatchObject({ basis: 'legitimate_interest', recordedBy: 'demo', recordedAt: '2026-07-10T00:00:00.000Z' });
+  });
+
+  it('显式 basis 经 stamp 串回 result.lawfulBasis（含 who/when）', async () => {
+    const { adapter } = fakeVerifier((e) => (e === 'hans.herold@acme.de' ? { status: 'VALID', detail: 'ok', costCents: 0 } : REJECT));
+    const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, { ...CTX, actor: 'demo' });
+    expect(r.lawfulBasis).toMatchObject({ basis: 'legitimate_interest', ref: 'LIA-1', recordedBy: 'demo', recordedAt: '2026-07-10T00:00:00.000Z' });
+  });
+
+  it('BLOCKED（无 basis 无开关）：result.lawfulBasis 为空（未触网、无可留痕依据）', async () => {
+    const { adapter } = fakeVerifier(() => REJECT);
+    const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, { allowPersonalWithoutBasis: false });
+    expect(r.status).toBe('blocked');
+    expect(r.lawfulBasis).toBeUndefined();
+  });
+
   it('禁联候选跳过不探测', async () => {
     const { adapter, calls } = fakeVerifier((e) => (e === 'h.herold@acme.de' ? { status: 'VALID', detail: 'ok', costCents: 0 } : REJECT));
     const r = await new EmailGuesser(adapter).guess(

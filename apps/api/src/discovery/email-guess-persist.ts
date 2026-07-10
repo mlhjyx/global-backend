@@ -76,7 +76,9 @@ export async function persistGuessedEmail(
 
   await tx.contactPoint.upsert({
     where: { contactId_type_value: { contactId: args.contactId, type: 'email', value: plan.email } },
-    update: { status: plan.pointStatus, ...(plan.verified ? { verifiedAt: args.now } : {}) },
+    // 显式 null（非条件 spread）：既有 VALID 行被 RISKY 结果重 upsert 时清掉旧 verifiedAt，
+    // 守住「RISKY 无 verifiedAt」不变式（复审 MEDIUM：防降级留下 stale 时间戳）。
+    update: { status: plan.pointStatus, verifiedAt: plan.verified ? args.now : null },
     create: {
       workspaceId: args.workspaceId,
       contactId: args.contactId,

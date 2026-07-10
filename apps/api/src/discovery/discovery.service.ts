@@ -178,10 +178,11 @@ export class DiscoveryService {
     });
 
     const domain = loaded.domain;
-    // 已知具名邮箱（同域）→ 格式学习样本（命中率更高）
+    // 已知具名邮箱（同域）→ 格式学习样本（命中率更高）。排除 status=RISKY——那是本器自己未证实的
+    // 猜测，拿它学格式会用错命名法污染后续候选（scraped 邮箱为 UNVERIFIED、SMTP 证实为 VALID，都保留）。
     const knownSamples = loaded.contacts.flatMap((c) =>
       c.contactPoints
-        .filter((p) => p.type === 'email' && p.value.split('@')[1]?.toLowerCase() === domain.toLowerCase())
+        .filter((p) => p.type === 'email' && p.status !== 'RISKY' && p.value.split('@')[1]?.toLowerCase() === domain.toLowerCase())
         .map((p) => ({ fullName: c.fullName, email: p.value })),
     );
     // 缺 email contact_point 的具名人 = 补全对象
@@ -224,7 +225,9 @@ export class DiscoveryService {
           contactId: r.contactId,
           result: r.result,
           suppressedEmails: loaded.suppressedEmails,
-          lawfulBasis: opts?.lawfulBasis,
+          // 用门**实际采用**的（已 stamp）依据，而非调用方原始入参——开关合成的 override 依据也在此，
+          // 否则 allowPersonalWithoutBasis 路径会 personal_data=true 却 lawful_basis=null（复审 HIGH）。
+          lawfulBasis: r.result.lawfulBasis ?? opts?.lawfulBasis,
           now,
         });
         if (out.persisted) {
