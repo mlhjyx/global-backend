@@ -97,14 +97,17 @@ export class ToolBroker implements ExecutionBroker {
   async checkSourcePolicy(
     toolId: string,
     domain: string,
-    purpose?: string,
+    purpose?: string | string[],
   ): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }> {
     const tool = this.registry.get(toolId);
     const mode = tool?.compliance.sourcePolicy ?? 'none';
     if (mode === 'none') return { allowed: true };
-    // 调用用途必须在工具声明集内（工具不得被用于未声明的用途）
-    if (purpose && tool && !tool.compliance.allowedPurpose.includes(purpose)) {
-      return { allowed: false, reason: 'purpose_not_allowed' };
+    // 调用用途（可多值）先与工具声明集求交——工具不得被用于未声明的用途；交集为调用的有效用途集
+    let effective = tool?.compliance.allowedPurpose ?? [];
+    if (purpose) {
+      const callPurposes = Array.isArray(purpose) ? purpose : [purpose];
+      effective = callPurposes.filter((p) => effective.includes(p));
+      if (!effective.length) return { allowed: false, reason: 'purpose_not_allowed' };
     }
     if (!this.deps.sourcePolicyReader) {
       return mode === 'required' ? { allowed: false, reason: 'policy_unavailable' } : { allowed: true };
@@ -114,11 +117,8 @@ export class ToolBroker implements ExecutionBroker {
       return mode === 'required' ? { allowed: false, reason: 'unregistered' } : { allowed: true };
     }
     if (policy.suspended) return { allowed: false, reason: 'suspended' };
-    if (policy.allowedPurpose && tool) {
-      const effective = purpose ? [purpose] : tool.compliance.allowedPurpose;
-      if (!policy.allowedPurpose.some((p) => effective.includes(p))) {
-        return { allowed: false, reason: 'purpose_not_allowed' };
-      }
+    if (policy.allowedPurpose && !policy.allowedPurpose.some((p) => effective.includes(p))) {
+      return { allowed: false, reason: 'purpose_not_allowed' };
     }
     return { allowed: true };
   }

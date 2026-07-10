@@ -78,7 +78,9 @@ export class TedIntentProjectionService {
             maxRecords: params.maxNotices ?? DEFAULT_MAX_NOTICES,
           },
         },
-        { workspaceId, correlationId: 'ted-intent' },
+        // purpose=['intent','discovery']：保留旧 §8.8 门语义——域策略允许其一即放行；
+        // 收窄为 ['enrichment'] 时本路径被拒（复审 medium：用途门修复须覆盖 intent 路径）。
+        { workspaceId, correlationId: 'ted-intent', purpose: ['intent', 'discovery'] },
       );
       notices = res.data.notices ?? [];
     } catch (err) {

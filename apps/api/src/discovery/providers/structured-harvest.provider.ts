@@ -220,13 +220,14 @@ function isSameSiteUrl(raw: string, domain: string): boolean {
   return true;
 }
 
-/** 常见 careers 固定路径兜底（sitemap 无命中时；HEAD 探测经 http.get 工具）。 */
+/** 常见 careers 固定路径兜底（sitemap 无命中时；HEAD 探测经 http.get 工具）。
+ *  返回重定向后**最终落地 URL**（与原实现语义一致——证据记录真实入口）；跳出注册域退回探测路径。 */
 export async function probeCommonCareersPath(domain: string, httpGet: HttpGetFn): Promise<string | undefined> {
   for (const p of ['/careers', '/en/careers', '/career', '/jobs', '/karriere', '/company/careers']) {
     const u = `https://${domain}${p}`;
     try {
       const res = await httpGet({ url: u, method: 'HEAD', timeoutMs: 8000 });
-      if (res.ok) return u;
+      if (res.ok) return res.finalUrl && isSameSiteUrl(res.finalUrl, domain) ? res.finalUrl : u;
     } catch {
       // 试下一个
     }

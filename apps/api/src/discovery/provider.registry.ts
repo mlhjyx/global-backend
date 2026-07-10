@@ -146,9 +146,9 @@ export class DiscoveryProviderRegistry {
           robotsStatus: 'ALLOWS',
           termsStatus: 'REVIEWED_OK',
           personalData: true,
-          allowedPurpose: ['discovery', 'enrichment'],
+          allowedPurpose: ['discovery', 'enrichment', 'intent'],
           retentionDays: 365,
-          notes: 'TED v3 官方 Search API（零鉴权）。绿事实 CC BY 4.0 署名义务；具名联系人 🔴 隔离。',
+          notes: 'TED v3 官方 Search API（零鉴权）。绿事实 CC BY 4.0 署名义务；具名联系人 🔴 隔离。intent=招标 TENDER_PUBLISHED 投影用途。',
         },
       });
     }
@@ -172,9 +172,9 @@ export class DiscoveryProviderRegistry {
           robotsStatus: 'ALLOWS',
           termsStatus: 'REVIEWED_OK',
           personalData: true,
-          allowedPurpose: ['discovery', 'enrichment'],
+          allowedPurpose: ['discovery', 'enrichment', 'intent'],
           retentionDays: 365,
-          notes: 'openFDA（api.fda.gov）官方开放数据 API（零鉴权）。CC0 公共领域可商用（署名非义务）；「注册≠核准」文案红线；具名 us_agent/contact 🔴 隔离；MAUDE/FAERS 不摄入。',
+          notes: 'openFDA（api.fda.gov）官方开放数据 API（零鉴权）。CC0 公共领域可商用（署名非义务）；「注册≠核准」文案红线；具名 us_agent/contact 🔴 隔离；MAUDE/FAERS 不摄入。intent=510k FDA_CLEARANCE 投影用途。',
         },
       });
     }

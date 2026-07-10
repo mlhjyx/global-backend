@@ -43,8 +43,9 @@ export const searxngSearchTool: Tool<
   },
 };
 
-/** crawl4ai.fetch —— 抓单页（需 source_policy + robots）。 */
-export const crawl4aiFetchTool: Tool<{ url: string }, { url: string; text: string; contentHash: string }> = {
+/** crawl4ai.fetch —— 抓单页（需 source_policy + robots）。maxChars 由调用方按任务上下文需求指定
+ *  （名录列表页 60k vs 普通页 40k——复审抓到统一 40k 令 directory 抽取静默丢 1/3 上下文）。 */
+export const crawl4aiFetchTool: Tool<{ url: string; maxChars?: number }, { url: string; text: string; contentHash: string }> = {
   id: 'crawl4ai.fetch',
   version: '1.0.0',
   category: 'fetch',
@@ -54,7 +55,7 @@ export const crawl4aiFetchTool: Tool<{ url: string }, { url: string; text: strin
   // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
   compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['company', 'domain', 'contact'], accepts: ['domain'] },
-  idempotencyKey: (i) => `crawl4ai.fetch:${hash(i.url)}`,
+  idempotencyKey: (i) => `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}`,
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
   execute: async (input) => {
     if (!(await isAllowedByRobots(input.url))) {
@@ -62,7 +63,7 @@ export const crawl4aiFetchTool: Tool<{ url: string }, { url: string; text: strin
       return { data: { url: input.url, text: '', contentHash: '' }, costCents: 0 };
     }
     const r = await crawlUrl(input.url);
-    const text = r.text.slice(0, 40_000);
+    const text = r.text.slice(0, Math.min(input.maxChars ?? 40_000, 100_000));
     return {
       data: { url: input.url, text, contentHash: hash(text) },
       costCents: 1,

@@ -132,9 +132,10 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       }
       let text: string;
       try {
-        const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
+        const crawled = await this.deps.broker!.invoke<{ url: string; maxChars?: number }, CrawlResult>(
           'crawl4ai.fetch',
-          { url: pageUrl },
+          // maxChars=60k：名录列表页单页数百家公司，工具默认 40k 会静默砍掉尾部 1/3 条目（复审 medium）
+          { url: pageUrl, maxChars: 60_000 },
           this.toolCtx(ctx, 'discovery.extract_list'),
         );
         text = crawled.data.text.slice(0, 60_000);

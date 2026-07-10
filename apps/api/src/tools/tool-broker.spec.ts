@@ -218,4 +218,26 @@ describe('ToolBroker — source_policy fail-closed（收口②：未登记不放
     const { broker } = makeBroker(t, { sourcePolicyReader: async () => ({ suspended: false }) });
     await expect(broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: 'outreach' })).rejects.toThrow(/purpose/);
   });
+
+  it("intent 投影回归锁：purpose=['intent','discovery'] + 域策略仅 ['enrichment'] → 拒（旧门语义恢复）", async () => {
+    const t = requiredTool('api.ted.europa.eu');
+    t.compliance.allowedPurpose = ['discovery', 'enrichment', 'intent'];
+    const { broker } = makeBroker(t, {
+      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['enrichment'] }),
+    });
+    await expect(
+      broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: ['intent', 'discovery'] }),
+    ).rejects.toThrow(/purpose/);
+  });
+
+  it("intent 投影回归锁：域策略显式含 'intent' → 放行（旧门注释承诺的行为）", async () => {
+    const t = requiredTool('api.ted.europa.eu');
+    t.compliance.allowedPurpose = ['discovery', 'enrichment', 'intent'];
+    const { broker } = makeBroker(t, {
+      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['intent'] }),
+    });
+    await expect(
+      broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: ['intent', 'discovery'] }),
+    ).resolves.toBeDefined();
+  });
 });

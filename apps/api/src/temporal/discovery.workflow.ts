@@ -60,7 +60,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
   }
 
-  const status = failures === 0 ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
+  // 预算截断的 run 绝不假 DONE（复审 HIGH）：fit 有漏判 → PARTIAL，且截断量进 stats 可观测。
+  const budgetTruncated = (fit.skippedForBudget ?? 0) > 0;
+  const status =
+    failures === 0 && !budgetTruncated ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
   await acts.finalizeRun({
     workspaceId,
     runId,
@@ -72,6 +75,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       companies,
       suppressed,
       fit: fit.verdicts,
+      fitSkippedForBudget: fit.skippedForBudget ?? 0,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },

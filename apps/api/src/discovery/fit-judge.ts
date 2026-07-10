@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
+import { BudgetExceededError } from '../tools/budget';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -129,7 +130,10 @@ export async function judgeFitCompany(
     // 下个 sweep 真模型重试。
     if (result.provider === 'stub') return null;
     out = result.data;
-  } catch {
+  } catch (err) {
+    // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
+    // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
+    if (err instanceof BudgetExceededError) throw err;
     return null;
   }
   const verdict = (['match', 'weak', 'mismatch'].includes(out.verdict) ? out.verdict : 'weak') as FitJudgment['verdict'];

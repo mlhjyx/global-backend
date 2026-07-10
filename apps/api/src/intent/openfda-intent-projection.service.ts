@@ -89,7 +89,8 @@ export class OpenFdaIntentProjectionService {
             clearedOnly: true, // §8.6：只要正向清关
           },
         },
-        { workspaceId, correlationId: 'openfda-intent' },
+        // purpose=['intent','discovery']：保留旧 §8.8 门语义（同 ted-intent-projection）。
+        { workspaceId, correlationId: 'openfda-intent', purpose: ['intent', 'discovery'] },
       );
       clearances = res.data.clearances ?? [];
     } catch (err) {
