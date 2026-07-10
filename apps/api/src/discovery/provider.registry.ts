@@ -19,9 +19,9 @@ import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
 import { StructuredHarvestProvider } from './providers/structured-harvest.provider';
-import { SelfHostedEmailVerifier, EmailVerifyBroker } from './providers/email-verify.provider';
+import { SelfHostedEmailVerifier } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
-import { SourcePolicyReader } from '../tools/tool-broker.factory';
+import type { ExecutionBroker } from '../tools/tool-contract';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -46,43 +46,45 @@ export class DiscoveryProviderRegistry {
    *  绝不塞进 enrichRun 的 2 分钟活动（否则 50 家 × 抓取会超时重试整段富集）。 */
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
-  constructor(deps?: { gateway?: ModelGateway; broker?: EmailVerifyBroker; sourcePolicyReader?: SourcePolicyReader }) {
+  constructor(deps?: { gateway?: ModelGateway; broker?: ExecutionBroker }) {
+    const broker = deps?.broker;
     // 自建邮箱验证**排 emailVerifiers 首位**：verifyContactPoint 只用 adapters[0]，必须在
     // public_web(仅 MX→RISKY) 之前，否则新 SMTP RCPT/catch-all 逻辑永不执行。不依赖 gateway。
     // 诚实上限：Gmail/M365/catch-all/端口25不可达/catch-all未证伪 一律 RISKY，绝不谎报 VALID。
-    // SMTP 出网走注入的 ToolBroker 闸门（source_policy/限流/预算/Trace）；无 broker=不做原始出网。
-    this.emailVerifiers.push(new SelfHostedEmailVerifier(deps?.broker));
+    // 收口②：**全部** provider 的原始出网统一走注入的 ToolBroker 闸门（allowedTools/
+    // source_policy fail-closed/预算/限流/Trace）；无 broker = 不做任何原始出网（诚实降级空/miss）。
+    this.emailVerifiers.push(new SelfHostedEmailVerifier(broker));
     if (deps?.gateway) {
-      const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway });
+      const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway, broker });
       this.discovery.push(web);
       // 决策人抽取排联系人发现**首位**（调用方取 adapters[0]）：Impressum/管理层页的具名决策人
       // 优先于 public_web 的正则邮箱扫描（后者只挖到 info@，Role/Reachability 维恒零的根因之一）。
-      this.contacts.push(new DecisionMakerContactAdapter({ gateway: deps.gateway }));
+      this.contacts.push(new DecisionMakerContactAdapter({ gateway: deps.gateway, broker }));
       this.contacts.push(web);
       this.emailVerifiers.push(web);
       // 名录/列表发现（协会会员名录 + 展会参展商 + 行业目录）——同 SearXNG+Crawl4AI+Gemini 栈。
-      this.discovery.push(new DirectoryDiscoveryProvider({ gateway: deps.gateway }));
+      this.discovery.push(new DirectoryDiscoveryProvider({ gateway: deps.gateway, broker }));
     }
     // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
-    this.discovery.push(new WikidataDiscoveryProvider());
-    this.discovery.push(new OsmDiscoveryProvider());
-    // 展会参展商（逐站/逐平台模板，直连托管搜索 API 拿结构化名录）——不依赖 gateway。
-    this.discovery.push(new TradeFairDiscoveryProvider());
+    this.discovery.push(new WikidataDiscoveryProvider({ broker }));
+    this.discovery.push(new OsmDiscoveryProvider({ broker }));
+    // 展会参展商（逐站/逐平台模板，经 tradefair.algolia 工具拿结构化名录）——不依赖 gateway。
+    this.discovery.push(new TradeFairDiscoveryProvider({ broker }));
     // TED 中标发现（欧盟采购官方 API，零鉴权，归 public_intelligence 类）——不依赖 gateway。
     // 无 CPV 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
-    this.discovery.push(new TedDiscoveryProvider({ sourcePolicyReader: deps?.sourcePolicyReader }));
+    this.discovery.push(new TedDiscoveryProvider({ broker }));
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
-    this.discovery.push(new OpenFdaDiscoveryProvider({ sourcePolicyReader: deps?.sourcePolicyReader }));
+    this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
-    this.enrichers.push(new WikidataEnrichmentProvider());
-    this.enrichers.push(new GleifEnrichmentProvider());
+    this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
+    this.enrichers.push(new GleifEnrichmentProvider({ broker }));
     // 信号类富集（v3.0，**独立长活动 enrichSignalsRun** 跑，不进 enrichRun 的 2 分钟活动）：
     //  数字足迹（官网 HTML/DNS → 技术栈/在投广告/服务市场/邮件商）+ 结构化收割（sitemap → 招聘信号）。
     //  → attributes.digital_footprint.* / .structured_harvest.*，喂 Intent/Reachability 打分。零付费。
-    this.signalEnrichers.push(new DigitalFootprintProvider());
-    this.signalEnrichers.push(new StructuredHarvestProvider());
+    this.signalEnrichers.push(new DigitalFootprintProvider({ broker }));
+    this.signalEnrichers.push(new StructuredHarvestProvider({ broker }));
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
       const sandbox = new SandboxDiscoveryProvider();
@@ -144,9 +146,9 @@ export class DiscoveryProviderRegistry {
           robotsStatus: 'ALLOWS',
           termsStatus: 'REVIEWED_OK',
           personalData: true,
-          allowedPurpose: ['discovery', 'enrichment'],
+          allowedPurpose: ['discovery', 'enrichment', 'intent'],
           retentionDays: 365,
-          notes: 'TED v3 官方 Search API（零鉴权）。绿事实 CC BY 4.0 署名义务；具名联系人 🔴 隔离。',
+          notes: 'TED v3 官方 Search API（零鉴权）。绿事实 CC BY 4.0 署名义务；具名联系人 🔴 隔离。intent=招标 TENDER_PUBLISHED 投影用途。',
         },
       });
     }
@@ -170,11 +172,43 @@ export class DiscoveryProviderRegistry {
           robotsStatus: 'ALLOWS',
           termsStatus: 'REVIEWED_OK',
           personalData: true,
-          allowedPurpose: ['discovery', 'enrichment'],
+          allowedPurpose: ['discovery', 'enrichment', 'intent'],
           retentionDays: 365,
-          notes: 'openFDA（api.fda.gov）官方开放数据 API（零鉴权）。CC0 公共领域可商用（署名非义务）；「注册≠核准」文案红线；具名 us_agent/contact 🔴 隔离；MAUDE/FAERS 不摄入。',
+          notes: 'openFDA（api.fda.gov）官方开放数据 API（零鉴权）。CC0 公共领域可商用（署名非义务）；「注册≠核准」文案红线；具名 us_agent/contact 🔴 隔离；MAUDE/FAERS 不摄入。intent=510k FDA_CLEARANCE 投影用途。',
         },
       });
+    }
+    // 收口②：required 工具的治理域登记（未登记 fail-closed）。这些行是各直连数据源的
+    // **显性合规审查记录**——SUSPENDED 任一行即该源全链停抓（Broker 单点强制）。
+    if (db.sourcePolicy) {
+      const requiredSourceRows = [
+        { domain: 'query.wikidata.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'Wikidata SPARQL 端点（CC0）。wikidata.sparql 工具治理域。' },
+        { domain: 'www.wikidata.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'Wikidata REST API（CC0）。wikidata.entity 工具治理域（富集）。' },
+        { domain: 'overpass-api.de', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'OSM Overpass API（ODbL，需署名+同源共享）。osm.overpass 工具治理域（kumi 镜像同策略）。' },
+        { domain: 'api.gleif.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'GLEIF LEI API（CC0）。gleif.fetch 工具治理域。' },
+        // ⚠️ ToS 灰偏红（trade-fair-intelligence.md §0：public key 打 Algolia 撞 RX ToS §4.5(h)）。
+        // 本行把既有实践变成显性登记点：termsStatus 如实标 REVIEWED_RESTRICTED，治理裁决=SUSPENDED 即全链停抓。
+        { domain: 'algolia.net', sourceType: 'trade_fair', termsStatus: 'REVIEWED_RESTRICTED', personalData: true, notes: 'RX 展会参展商（Algolia 托管搜索，public search-only key）。ToS 灰偏红——风险评估见 trade-fair-intelligence.md §0；参展商记录可内联联系人（🔴 具名隔离）。' },
+        { domain: 'mapyourshow.com', sourceType: 'trade_fair', termsStatus: 'UNREVIEWED', personalData: false, notes: 'MapYourShow 参展商 JSON（无鉴权公开端点，列表仅公司名/展位/描述）。mapyourshow.fetch 工具治理域。' },
+      ];
+      for (const row of requiredSourceRows) {
+        await db.sourcePolicy.upsert({
+          where: { domain: row.domain },
+          update: {},
+          create: {
+            domain: row.domain,
+            sourceType: row.sourceType,
+            accessMode: 'api',
+            reviewStatus: 'APPROVED',
+            robotsStatus: 'ALLOWS',
+            termsStatus: row.termsStatus,
+            personalData: row.personalData,
+            allowedPurpose: ['discovery', 'enrichment'],
+            retentionDays: 365,
+            notes: row.notes,
+          },
+        });
+      }
     }
     await db.dataProvider.upsert({
       where: { key: 'digital_footprint' },

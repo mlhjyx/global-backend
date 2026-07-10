@@ -18,11 +18,12 @@ function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean
 }
 
 describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
-  it('已注册为 verify/email_verification，requiresSourcePolicy + personalData（受合规门约束、标个人数据）', () => {
+  it('已注册为 verify/email_verification，sourcePolicy=advisory + personalData（登记即强制、标个人数据）', () => {
     expect(smtpRcptProbeTool.id).toBe('smtp.rcpt_probe');
     expect(smtpRcptProbeTool.category).toBe('verify');
     expect(smtpRcptProbeTool.sourceClass).toBe('email_verification');
-    expect(smtpRcptProbeTool.compliance.requiresSourcePolicy).toBe(true);
+    // advisory：标的=任意公司邮箱域，未登记放行（required 会杀死邮箱验证）；登记即强制 SUSPENDED/用途门
+    expect(smtpRcptProbeTool.compliance.sourcePolicy).toBe('advisory');
     expect(smtpRcptProbeTool.compliance.personalData).toBe(true); // rcptTo 可含具名人邮箱
     expect(registerBuiltinTools(new ToolRegistry()).get('smtp.rcpt_probe')).toBeDefined();
   });

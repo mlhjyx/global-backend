@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
-import { SourcePolicyReader } from '../tools/tool-broker.factory';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
 import { TedIntentProjectionService, ProjectTendersResult } from '../intent/ted-intent-projection.service';
@@ -34,16 +34,17 @@ export interface ExternalIntentIcpResult {
  * 架构与 intent.activities（web_watch sweep）并列但**分开调度**：外部源按 ICP 拉、web_watch 按监控源拉。
  * 跨租户枚举 ACTIVE ICP 走 ownerDb 只读（RLS 下 app_user 不可见，同 OutboxRelay/backlog 的「受信系统扫描器」先例）；
  * 每 ICP 的投影写仍走各自 service 的 `withWorkspace`（RLS 安全）。ICP→CPV/FDA 码用**确定性**解析（`allowLlm:false`，
- * 调度里不臆造码、可复现、零 LLM 成本）。§8.8 source_policy 用途门由两 projection service 各自把守（SUSPENDED→fail-closed）。
+ * 调度里不臆造码、可复现、零 LLM 成本）。§8.8 门（收口②）：ted.search/openfda.search 为 required 工具，
+ * SUSPENDED/未登记/用途不符由 ExecutionBroker 单点 fail-closed（无 broker → 两 service 零投影不出网）。
  */
 export function createExternalIntentActivities(deps: {
   prisma: PrismaService;
   taxonomy: TaxonomyResolver;
   ownerDb?: PrismaClient;
-  sourcePolicyReader?: SourcePolicyReader;
+  broker?: ExecutionBroker;
 }) {
-  const tedProj = new TedIntentProjectionService({ prisma: deps.prisma, sourcePolicyReader: deps.sourcePolicyReader });
-  const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma, sourcePolicyReader: deps.sourcePolicyReader });
+  const tedProj = new TedIntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
+  const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
 
   return {
     /**

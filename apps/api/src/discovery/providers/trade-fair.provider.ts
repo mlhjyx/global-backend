@@ -4,10 +4,13 @@ import {
   CompanyDiscoveryQuery,
   DiscoveryOptions,
   DiscoveryResult,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
-import { queryAlgoliaExhibitors } from '../../adapters/trade-fair-algolia';
+import type { FairExhibitor } from '../../adapters/trade-fair-algolia';
+import type { TradeFairAlgoliaInput } from '../../tools/source-tools';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { selectFairs, TradeFairTemplate } from '../trade-fairs';
 import { normalizeDomain } from '../identity';
 
@@ -19,22 +22,35 @@ const PER_FAIR_LIMIT = 400; // 单展会拉取上限（护栏；尊重 Algolia �
  * （trade-fairs.ts 注册表），直接打其托管搜索 API（RX/Algolia）拿参展商结构化名录：
  * 公司名 + 官网 + **公开邮箱/电话**（展会公示的商务联系点）+ 国家 + 展位 + 产品 + 招聘信号。
  * 大展会 SPA 的 JS 渲染短板由此绕开。属 industry_data 类；source_hint=trade_fair 二级路由。
+ *
+ * 收口②：出网经 ToolBroker（`tradefair.algolia` 为 required 工具，ToS 灰偏红源）——
+ * SUSPENDED/未登记/用途不符一律 fail-closed；无 broker 不允许直连。
  */
 export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'trade_fair';
   readonly classes: SourceClass[] = ['industry_data'];
 
+  constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
+
   private log(msg: string): void {
-     
+
     console.log(`[trade_fair] ${msg}`);
   }
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+    const broker = this.deps?.broker;
+    if (!broker) {
+       
+      console.warn('[trade_fair] broker unavailable, fail-closed (no raw egress)');
+      return { records: [], costCents: 0 };
+    }
+
     const f = query.filters ?? {};
     const industryTerms = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
     const fairs = selectFairs({ industryTerms, keywords: query.keywords, region: String(f.region ?? '') });
     if (!fairs.length) return { records: [], costCents: 0 };
 
+    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const dedup = new Map<string, ProviderCompanyRecord>();
     const perFair = Math.min(PER_FAIR_LIMIT, Math.max(query.limit, 50));
@@ -42,10 +58,10 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     for (const fair of fairs) {
       let records: ProviderCompanyRecord[];
       try {
-        records = await this.pullFair(fair, perFair, query.sourceClass);
+        records = await this.pullFair(broker, toolCtx, fair, perFair, query.sourceClass);
       } catch (err) {
         this.log(`skip ${fair.slug}: ${String(err).slice(0, 100)}`);
-        continue; // 单展会失败不影响其余（如 key 换届失效）
+        continue; // 单展会失败/闸门拒绝不影响其余（如 key 换届失效、SUSPENDED）
       }
       for (const rec of records) {
         if (rec.domain && blocked.has(rec.domain)) continue;
@@ -58,11 +74,18 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
   }
 
   private async pullFair(
+    broker: ExecutionBroker,
+    toolCtx: ToolContext,
     fair: TradeFairTemplate,
     limit: number,
     sourceClass: SourceClass,
   ): Promise<ProviderCompanyRecord[]> {
-    const exhibitors = await queryAlgoliaExhibitors(fair.algolia, limit);
+    const res = await broker.invoke<TradeFairAlgoliaInput, { exhibitors: FairExhibitor[] }>(
+      'tradefair.algolia',
+      { cfg: fair.algolia, limit },
+      toolCtx,
+    );
+    const exhibitors = res.data.exhibitors ?? [];
     const now = new Date().toISOString();
     return exhibitors.map((e) => ({
       externalId: `${fair.slug}:${e.externalId}`,

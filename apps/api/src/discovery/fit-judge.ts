@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
+import { BudgetExceededError } from '../tools/budget';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -103,6 +104,7 @@ export async function judgeFitCompany(
   workspaceId: string,
   icpBrief: IcpBrief | Record<string, never>,
   company: FitJudgeCompany,
+  opts?: { runId?: string },
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
   const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
@@ -120,14 +122,18 @@ export async function judgeFitCompany(
         model: contract.model,
         schema: contract.outputSchema,
       },
-      { workspaceId },
+      // runId=预算归账键（run 内 fit 判定消耗计入该 run 的账；sweep 无 runId 则按 workspace 归账）
+      { workspaceId, runId: opts?.runId },
     );
     // 🔴 stub 兜底绝不写真实判定：dev 里网关瞬时失败会 fallback 到 stub（罐头 null 输出），
     // 归一化后变成 weak 假判定污染 canonical（实测抓到 2 家：fit_reasons 全 null）。宁可不判、
     // 下个 sweep 真模型重试。
     if (result.provider === 'stub') return null;
     out = result.data;
-  } catch {
+  } catch (err) {
+    // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
+    // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
+    if (err instanceof BudgetExceededError) throw err;
     return null;
   }
   const verdict = (['match', 'weak', 'mismatch'].includes(out.verdict) ? out.verdict : 'weak') as FitJudgment['verdict'];

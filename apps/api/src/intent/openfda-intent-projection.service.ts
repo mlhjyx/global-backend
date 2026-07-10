@@ -2,13 +2,13 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
 import {
-  search510kClearances,
   Fda510kClearance,
   OPENFDA_ATTRIBUTION,
   OPENFDA_LICENSE,
   FDA_REGISTRATION_DISCLAIMER,
 } from '../adapters/openfda-api';
-import { SourcePolicyReader } from '../tools/tool-broker.factory';
+import type { OpenFdaSearchInput, OpenFdaSearchOutput } from '../tools/source-tools';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
 /** 510(k) 清关 intent 类型 + 强度：具名申请人清关 = 新品/上市时机（略弱于 TED 开放招标 0.9=正在采购）。 */
@@ -16,10 +16,6 @@ export const FDA_CLEARANCE = 'FDA_CLEARANCE';
 export const FDA_CLEARANCE_STRENGTH = 0.85;
 const DEFAULT_SINCE_DAYS = 365; // 清关比招标稀疏 → 更宽窗口
 const DEFAULT_MAX_RECORDS = 200; // 有界样本（绝不 grind 17 万全量）
-const FDA_API_DOMAIN = 'api.fda.gov'; // §8.8 source_policy 门锚点（与 openfda.provider 同）
-// 510k intent 投影 = 对 openFDA discovery 端点同源、同绿字段的读取；openFDA source_policy 用途 seed=['discovery','enrichment']，
-// 故接受 intent/discovery 任一（既有 seed 有 discovery 即放行，未来显式列 intent 亦放行）。
-const ALLOWED_PURPOSES = ['intent', 'discovery'];
 
 export interface ProjectClearancesResult {
   clearancesFetched: number;
@@ -53,35 +49,53 @@ interface Clearance {
  *
  * §8.6：决定日经 `fdaDateToIso` 归一（search510kClearances 已做）；**无合法决定日的记录直接跳过**（绝不写 NaN
  *   触发 0 分，亦不用 now 兜底）。
- * §8.8：直连 api.fda.gov（personalData=true）前必过 source_policy 门（SUSPENDED / 策略缺失 / 用途不含 →
- *   fail-closed，不发请求）——与 P1 provider 同一 DAT-011 kill-switch。
- * §8.6 清关码：`search510kClearances(clearedOnly=true)` 只返正向清关（SE 家族/DENG），NSE/被拒/撤回绝不投。
+ * §8.8（收口②：Broker 单点判定）：openfda.search 是 required 工具——直连 api.fda.gov（personalData=true）
+ *   一律经 ExecutionBroker，SUSPENDED / 未登记 / 用途不符 / 无 reader 由闸门 fail-closed（不发请求）。
+ *   无 broker = 不允许直连（零投影返回）——与 P1 provider 同一 DAT-011 kill-switch。
+ * §8.6 清关码：`openfda.search(kind:'510k', clearedOnly=true)` 只返正向清关（SE 家族/DENG），NSE/被拒/撤回绝不投。
  * §6 边界：疑似个体户自然人申请人跳过（不把自然人名当绿事实入库）。
  * 幂等：合并结果与既有 intent 实质相同 → 不 bump version / 不堆 field_evidence（同一清关每 sweep 复现时）。
  * 合规（**与 TED 关键差异**）：CC0 公共领域，**署名非义务**（license='CC0-1.0'）；「注册/清关≠核准」文案红线
  *   （attributes.fda.disclaimer）；不摄入 contact/us_agent 具名个人。fail-safe：无产品码/拉取失败 → 零结果不抛。
  */
 export class OpenFdaIntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; sourcePolicyReader?: SourcePolicyReader }) {}
+  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
 
   async projectClearances(workspaceId: string, params: ProjectClearancesParams): Promise<ProjectClearancesResult> {
     const base: ProjectClearancesResult = {
       clearancesFetched: 0, companiesTouched: 0, eventsProjected: 0, skippedNoCountry: 0, skippedNoDate: 0, skippedIndividual: 0,
     };
     if (!params.productCodes.length) return base; // 无产品码 → 不启动（绝不裸拉全库）
-    if (!(await this.purposeAllowed())) return base; // §8.8 用途/SUSPENDED 门（fail-closed，不发请求）
+
+    // §8.8 合规门（收口②：Broker 单点判定）：openfda.search 是 required 工具——SUSPENDED/未登记/用途不符/
+    // 无 reader 一律 fail-closed。无 broker = 不允许直连（生产由调用方注入）。
+    if (!this.deps.broker) {
+       
+      console.warn('[openfda-intent] broker unavailable, fail-closed (no raw egress)');
+      return base;
+    }
 
     let clearances: Fda510kClearance[];
     try {
-      clearances = await search510kClearances({
-        productCodes: params.productCodes,
-        countries: params.applicantCountries,
-        sinceDays: params.sinceDays ?? DEFAULT_SINCE_DAYS,
-        maxRecords: params.maxRecords ?? DEFAULT_MAX_RECORDS,
-        clearedOnly: true, // §8.6：只要正向清关
-      });
+      const res = await this.deps.broker.invoke<OpenFdaSearchInput, OpenFdaSearchOutput>(
+        'openfda.search',
+        {
+          kind: '510k',
+          params: {
+            productCodes: params.productCodes,
+            countries: params.applicantCountries,
+            sinceDays: params.sinceDays ?? DEFAULT_SINCE_DAYS,
+            maxRecords: params.maxRecords ?? DEFAULT_MAX_RECORDS,
+            clearedOnly: true, // §8.6：只要正向清关
+          },
+        },
+        // purpose=['intent','discovery']：保留旧 §8.8 门语义（同 ted-intent-projection）。
+        { workspaceId, correlationId: 'openfda-intent', purpose: ['intent', 'discovery'] },
+      );
+      clearances = res.data.clearances ?? [];
     } catch (err) {
-      // eslint-disable-next-line no-console
+      // fail-safe：拉取失败/闸门拒绝零投影不抛（拒绝原因已入 Broker DENIED trace）
+       
       console.warn(`[openfda-intent] fetch failed: ${String(err).slice(0, 150)}`);
       return base;
     }
@@ -196,34 +210,8 @@ export class OpenFdaIntentProjectionService {
     });
   }
 
-  /**
-   * §8.8 用途门（镜像 openfda.provider.purposeAllowed）：reader 在场时校验 source_policy(api.fda.gov)——
-   * SUSPENDED / 策略缺失 / 用途不含 intent|discovery / reader 抛错 一律 fail-closed（不发请求）。
-   * 无 reader（单测/直连探针）→ fail-open（生产由调用方注入 sourcePolicyReaderFrom(prisma)）。
-   */
-  private async purposeAllowed(): Promise<boolean> {
-    const reader = this.deps.sourcePolicyReader;
-    if (!reader) return true;
-    let policy: { suspended: boolean; allowedPurpose?: string[] } | null;
-    try {
-      policy = await reader(FDA_API_DOMAIN);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[openfda-intent] source_policy 读取失败，fail-closed: ${String(err).slice(0, 120)}`);
-      return false;
-    }
-    if (!policy || policy.suspended) {
-      // eslint-disable-next-line no-console
-      console.warn(`[openfda-intent] source_policy 未批准/缺失/SUSPENDED，跳过直连（${FDA_API_DOMAIN}）`);
-      return false;
-    }
-    if (policy.allowedPurpose && !policy.allowedPurpose.some((p) => ALLOWED_PURPOSES.includes(p))) {
-      // eslint-disable-next-line no-console
-      console.warn('[openfda-intent] source_policy 用途不含 intent/discovery，跳过直连');
-      return false;
-    }
-    return true;
-  }
+  // 手写 §8.8 purposeAllowed 镜像已删除（收口②）：openfda.search 为 required 工具，SUSPENDED/未登记/
+  // 用途不符/无 reader 由 ExecutionBroker 单点 fail-closed（原镜像存在「无 reader fail-open」缺陷）。
 }
 
 const PERSON_TITLE = /^(dr|mr|mrs|ms|prof|sir|dame)\.?\s+\S/i; // 人称头衔前缀

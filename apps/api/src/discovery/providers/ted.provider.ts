@@ -4,12 +4,14 @@ import {
   CompanyDiscoveryQuery,
   DiscoveryOptions,
   DiscoveryResult,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
-import { searchAwardNotices, TedAwardNotice } from '../../adapters/ted-api';
+import type { TedAwardNotice } from '../../adapters/ted-api';
+import type { TedSearchInput, TedSearchOutput } from '../../tools/source-tools';
+import type { ExecutionBroker } from '../../tools/tool-contract';
 import { companyIdentity, normalizeDomain } from '../identity';
-import { SourcePolicyReader } from '../../tools/tool-broker.factory';
 
 const PARSER_VERSION = 'ted/v1';
 const NOTICE_DETAIL_BASE = 'https://ted.europa.eu/en/notice/-/detail/';
@@ -19,8 +21,6 @@ const NOTICE_CAP = 250; // 有界样本上限（绝不 grind 全量；全量是 
 const DEFAULT_SINCE_DAYS = 30;
 const TED_LICENSE = 'CC BY 4.0'; // §8.5 写入 field_evidence.license（展示/法务 token；SPDX slug 'CC-BY-4.0' 见 attributes.ted.license）
 const TED_ID_SCHEME = 'ted-natid'; // §8.4 国别税号/注册号命名空间（绝不与 lei 等其它 id 体系串号）
-const TED_API_DOMAIN = 'api.ted.europa.eu'; // §8.8 source_policy 门锚点
-const PURPOSE_DISCOVERY = 'discovery';
 
 /**
  * TED 中标发现 Provider（归 public_intelligence 类，复用 discovery→fit→enrich→score 全管线）。
@@ -36,27 +36,41 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'ted';
   readonly classes: SourceClass[] = ['public_intelligence'];
 
-  constructor(private readonly deps?: { sourcePolicyReader?: SourcePolicyReader }) {}
+  constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
     const filters = query.filters ?? {};
     const cpvCodes = readCpvCodes(filters);
     if (!cpvCodes.length) return { records: [], costCents: 0 }; // 无 CPV → 不启动（绝不裸拉全库）
 
-    // §8.8 合规门：TED notice 可能含具名联系人 → 直连 HTTP 前必校验 source_policy（用途 + SUSPENDED）。
-    if (!(await this.purposeAllowed())) return { records: [], costCents: 0 };
+    // §8.8 合规门（收口②：Broker 单点判定）：ted.search 是 required 工具——SUSPENDED/未登记/
+    // 用途不符/无 reader 一律 fail-closed。无 broker = 不允许直连（生产 registry 两处均注入）。
+    if (!this.deps?.broker) {
+       
+      console.warn('[ted] broker unavailable, fail-closed (no raw egress)');
+      return { records: [], costCents: 0 };
+    }
 
     let notices: TedAwardNotice[];
     try {
-      notices = await searchAwardNotices({
-        cpvCodes,
-        buyerCountries: readBuyerCountries(filters),
-        sinceDays: readSinceDays(filters),
-        maxRecords: Math.min(Math.max(query.limit ?? 25, 50), NOTICE_CAP),
-      });
+      const res = await this.deps.broker.invoke<TedSearchInput, TedSearchOutput>(
+        'ted.search',
+        {
+          kind: 'award',
+          params: {
+            cpvCodes,
+            buyerCountries: readBuyerCountries(filters),
+            sinceDays: readSinceDays(filters),
+            maxRecords: Math.min(Math.max(query.limit ?? 25, 50), NOTICE_CAP),
+          },
+        },
+        // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
+      );
+      notices = res.data.awards ?? [];
     } catch (err) {
-      // fail-safe：单源失败不阻断其余源（CLAUDE.md §5）
-      // eslint-disable-next-line no-console
+      // fail-safe：单源失败/闸门拒绝不阻断其余源（CLAUDE.md §5）；拒绝原因已入 Broker DENIED trace
+       
       console.warn(`[ted] discover failed: ${String(err).slice(0, 150)}`);
       return { records: [], costCents: 0 };
     }
@@ -79,34 +93,6 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
     return { records: [...dedup.values()], costCents: 0 };
   }
 
-  /**
-   * §8.8 用途门：reader 在场时校验 source_policy(api.ted.europa.eu)——SUSPENDED / 策略缺失 /
-   * 用途不含 discovery / reader 抛错 一律 fail-closed（不发请求，含个人数据源「有 DB 行 ≠ 有门」）。
-   * 无 reader（直连探针/单测）→ fail-open（生产 registry 两处均注入 reader）。
-   */
-  private async purposeAllowed(): Promise<boolean> {
-    const reader = this.deps?.sourcePolicyReader;
-    if (!reader) return true;
-    let policy: { suspended: boolean; allowedPurpose?: string[] } | null;
-    try {
-      policy = await reader(TED_API_DOMAIN);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[ted] source_policy 读取失败，fail-closed: ${String(err).slice(0, 120)}`);
-      return false;
-    }
-    if (!policy || policy.suspended) {
-      // eslint-disable-next-line no-console
-      console.warn(`[ted] source_policy 未批准/缺失，跳过直连（${TED_API_DOMAIN}）`);
-      return false;
-    }
-    if (policy.allowedPurpose && !policy.allowedPurpose.includes(PURPOSE_DISCOVERY)) {
-      // eslint-disable-next-line no-console
-      console.warn('[ted] source_policy 不含 discovery 用途，跳过直连');
-      return false;
-    }
-    return true;
-  }
 }
 
 /**

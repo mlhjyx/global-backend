@@ -1,7 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain, companyIdentity } from '../discovery/identity';
-import { fetchSitemapUrls } from '../discovery/providers/structured-harvest.provider';
+import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-harvest.provider';
+import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
+import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageKind, classifyPageKind } from './page-signals';
 import { WEB_WATCH_KEY } from './website-watch.service';
 
@@ -35,7 +38,7 @@ export interface ProjectIntentResult {
  * 平台采集一次、租户各自投影 —— 与 acquisition/TenantProjectionService 同一架构。
  */
 export class IntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService }) {}
+  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
 
   async registerWatch(
     workspaceId: string,
@@ -50,7 +53,7 @@ export class IntentProjectionService {
     const domain = company.domain ? normalizeDomain(company.domain) ?? undefined : undefined;
     if (!domain) throw new Error(`company ${canonicalCompanyId} has no domain — cannot watch website`);
 
-    const pages = (opts?.pages?.length ? opts.pages : await discoverWatchPages(domain)).slice(0, 12);
+    const pages = (opts?.pages?.length ? opts.pages : await discoverWatchPages(domain, this.sitemapHttpGet())).slice(0, 12);
     const sourceKey = `${WEB_WATCH_KEY}:${domain}`;
     const config = { company: { name: company.name, domain }, pages } as unknown as Prisma.InputJsonValue;
     const cadence = { kind: 'fixed', everyMs: opts?.cadenceMs ?? DEFAULT_CADENCE_MS } as unknown as Prisma.InputJsonValue;
@@ -134,6 +137,27 @@ export class IntentProjectionService {
     }
     return { companiesTouched, eventsProjected };
   }
+
+  /**
+   * 出网绑定（收口②）：sitemap/探测经 http.get 工具（SSRF 护栏在工具内权威强制）。平台级监控注册
+   * 无租户 → PLATFORM_WORKSPACE 哨兵（只入工具 Trace/预算，绝不流入任何 AiContext）。
+   * 无 broker = 不允许原始出网 → undefined（discoverWatchPages 跳过 sitemap/探测，退既有兜底页集）。
+   */
+  private sitemapHttpGet(): HttpGetFn | undefined {
+    const broker = this.deps.broker;
+    if (!broker) {
+       
+      console.warn('[intent-projection] broker unavailable — skip sitemap discovery (fail-closed, no raw egress)');
+      return undefined;
+    }
+    return async (input) =>
+      (
+        await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
+          workspaceId: PLATFORM_WORKSPACE,
+          correlationId: 'register-watch',
+        })
+      ).data;
+  }
 }
 
 // ─────────────────────── intent 聚合 ───────────────────────
@@ -213,10 +237,12 @@ export function mergeIntent(prev: IntentAttr | undefined, incoming: IntentEvent[
  * 每类（供应商/招聘/产品/新闻）取路径最短者 = 落地页 + 首页。
  * 真实站各站路径各异（TRUMPF `/en_INT/products/`、`/en_US/company/principles/suppliers/`…）——
  * 盲猜英文固定路径大多 404；从 sitemap 取真实 URL 才有效。sitemap 空时兜底只监控首页。
+ * 出网经调用方绑定的 httpGet（http.get 工具）；无 httpGet（无 broker）→ 不出网，退兜底页集（仅首页）。
  */
-export async function discoverWatchPages(domain: string): Promise<{ url: string; kind: PageKind }[]> {
+export async function discoverWatchPages(domain: string, httpGet?: HttpGetFn): Promise<{ url: string; kind: PageKind }[]> {
   const pages: { url: string; kind: PageKind }[] = [{ url: `https://${domain}/`, kind: 'generic' }];
-  const urls = await fetchSitemapUrls(domain).catch(() => [] as string[]);
+  if (!httpGet) return pages; // fail-closed：无出网函数 → 既有兜底页集
+  const urls = await fetchSitemapUrls(domain, httpGet).catch(() => [] as string[]);
   const pathLen = (u: string) => {
     try {
       return new URL(u).pathname.length;

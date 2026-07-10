@@ -9,12 +9,15 @@ import {
   DiscoveryResult,
   EmailVerdict,
   EmailVerificationAdapter,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
-import { crawlUrl } from '../../adapters/web-crawler';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import type { SearxResult } from '../../adapters/searxng';
+import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -68,24 +71,30 @@ export class PublicWebDiscoveryProvider
   readonly key = 'public_web';
   readonly classes: SourceClass[] = ['public_intelligence', 'industry_data'];
 
-  constructor(private readonly deps: { gateway: ModelGateway; searxngUrl?: string }) {}
-
-  private get searxng(): string {
-    return this.deps.searxngUrl ?? process.env.SEARXNG_URL ?? 'http://localhost:8081';
-  }
+  constructor(private readonly deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {}
 
   private log(msg: string): void {
-     
+
     console.log(`[public_web] ${msg}`);
   }
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
+  private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
+    return { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, taskContractId };
+  }
+
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+    // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
+    if (!this.deps.broker) {
+      this.log('skip: broker unavailable (fail-closed, no raw egress)');
+      return { records: [], costCents: 0 };
+    }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
     const candidates = new Map<string, { url: string; title: string }>(); // domain → first hit
 
     for (const q of searches) {
-      const results = await this.search(q);
+      const results = await this.search(q, ctx);
       for (const r of results) {
         const domain = normalizeDomain(r.url);
         if (!domain) continue;
@@ -101,7 +110,7 @@ export class PublicWebDiscoveryProvider
     // 有限并发地：抓首页 → LLM 判站 + 抽取
     for (let i = 0; i < domains.length; i += CRAWL_CONCURRENCY) {
       const batch = domains.slice(i, i + CRAWL_CONCURRENCY);
-      const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query)));
+      const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
       for (const s of settled) {
         if (s.status === 'fulfilled' && s.value) records.push(s.value);
       }
@@ -109,29 +118,34 @@ export class PublicWebDiscoveryProvider
     return { records, costCents: 0 };
   }
 
-  /** SearXNG JSON 搜索（自托管元搜索，engines 池化降低单引擎被封影响）。 */
-  private async search(q: string): Promise<{ url: string; title: string }[]> {
-    const url = `${this.searxng}/search?q=${encodeURIComponent(q)}&format=json&language=en&safesearch=0`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) throw new Error(`searxng ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const json = (await res.json()) as { results?: { url: string; title: string }[] };
-    return (json.results ?? []).slice(0, 20);
+  /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
+  private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
+    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
+      'searxng.search',
+      { q, language: 'en' },
+      this.toolCtx(ctx, 'discovery.extract_company'),
+    );
+    return res.data.results.slice(0, 20);
   }
 
-  private async mineDomain(domain: string, query: CompanyDiscoveryQuery): Promise<ProviderCompanyRecord | null> {
+  private async mineDomain(domain: string, query: CompanyDiscoveryQuery, ctx: ExecutionContext): Promise<ProviderCompanyRecord | null> {
     const homeUrl = `https://${domain}/`;
-    // 合规闸门（DAT-011）：robots 禁抓则放弃，不换 UA 硬闯
+    // 合规闸门（DAT-011）：robots 禁抓则放弃，不换 UA 硬闯（robots.ts 有缓存；工具内亦权威强制）
     if (!(await isAllowedByRobots(homeUrl))) {
       this.log(`skip ${domain}: robots disallow`);
       return null;
     }
     let text: string;
     try {
-      const crawled = await crawlUrl(homeUrl);
-      text = crawled.text.slice(0, 30_000);
+      const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
+        'crawl4ai.fetch',
+        { url: homeUrl },
+        this.toolCtx(ctx, 'discovery.extract_company'),
+      );
+      text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
       this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
-      return null; // 站点不可达 → 放弃该候选
+      return null; // 站点不可达/闸门拒绝 → 放弃该候选
     }
     if (text.trim().length < 200) {
       this.log(`skip ${domain}: too little text (${text.trim().length})`);
@@ -150,7 +164,8 @@ export class PublicWebDiscoveryProvider
         model: contract?.model,
         schema: contract?.outputSchema ?? { required: ['is_company_site'] },
       },
-      { workspaceId: 'discovery' }, // trace 维度；RLS 数据写入在活动层完成
+      // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
+      { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
     );
     const out = result.data;
     if (!out?.is_company_site || !out.name?.trim()) {
@@ -184,21 +199,24 @@ export class PublicWebDiscoveryProvider
 
   // ── 联系人（公开、确定性）────────────────────────────────────────────────
 
-  async discoverContacts(company: { name: string; domain?: string }): Promise<ContactDiscoveryResult> {
+  async discoverContacts(company: { name: string; domain?: string }, ctx: ExecutionContext): Promise<ContactDiscoveryResult> {
     if (!company.domain) return { contacts: [], costCents: 0 };
+    if (!this.deps.broker) return { contacts: [], costCents: 0 }; // fail-closed：无闸门不出网
     const base = `https://${company.domain}/`;
     if (!(await isAllowedByRobots(base))) return { contacts: [], costCents: 0 };
+    const crawl = (url: string) =>
+      this.deps.broker!.invoke<{ url: string }, CrawlResult>('crawl4ai.fetch', { url }, this.toolCtx(ctx, 'contact.find_decision_makers'));
     const pages: { url: string; text: string }[] = [];
     try {
-      const home = await crawlUrl(base);
-      pages.push({ url: base, text: home.text.slice(0, 40_000) });
-      const links = extractSameSiteLinks(home.text, base).filter((l) =>
+      const home = await crawl(base);
+      pages.push({ url: base, text: home.data.text.slice(0, 40_000) });
+      const links = extractSameSiteLinks(home.data.text, base).filter((l) =>
         /contact|kontakt|impressum|imprint|about|legal/i.test(l),
       );
       for (const link of links.slice(0, 2)) {
         try {
-          const p = await crawlUrl(link);
-          pages.push({ url: link, text: p.text.slice(0, 40_000) });
+          const p = await crawl(link);
+          pages.push({ url: link, text: p.data.text.slice(0, 40_000) });
         } catch {
           // 单页失败可容忍
         }

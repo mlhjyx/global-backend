@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
-import { lookup } from 'node:dns/promises';
-import { CompanyEnrichmentAdapter, CompanyEnrichmentInput, EnrichmentResult } from '../provider-contract';
-import { crawlHtml } from '../../adapters/web-crawler';
+import {
+  CompanyEnrichmentAdapter,
+  CompanyEnrichmentInput,
+  EnrichmentResult,
+  ExecutionContext,
+} from '../provider-contract';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import type { CrawlHtmlResult } from '../../adapters/web-crawler';
+import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { extractJsonLd } from './digital-footprint.provider';
 
@@ -20,12 +25,22 @@ const MAX_URLS = 5000;
 export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
   readonly key = 'structured_harvest';
 
-  async enrichCompany(input: CompanyEnrichmentInput): Promise<EnrichmentResult> {
-    if (!input.domain) return miss();
+  constructor(private readonly deps: { broker?: ExecutionBroker } = {}) {}
 
-    const urls = await fetchSitemapUrls(input.domain).catch(() => [] as string[]);
+  async enrichCompany(input: CompanyEnrichmentInput, ctx: ExecutionContext): Promise<EnrichmentResult> {
+    if (!input.domain) return miss();
+    // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级 miss（fail-closed）。
+    if (!this.deps.broker) {
+      console.warn('[structured_harvest] skip: broker unavailable (fail-closed, no raw egress)');
+      return miss();
+    }
+    const broker = this.deps.broker;
+    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const httpGet: HttpGetFn = async (req) => (await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', req, toolCtx)).data;
+
+    const urls = await fetchSitemapUrls(input.domain, httpGet).catch(() => [] as string[]);
     const sections = tallySections(urls);
-    const careersUrl = pickCareersUrl(urls) ?? (await probeCommonCareersPath(input.domain));
+    const careersUrl = pickCareersUrl(urls) ?? (await probeCommonCareersPath(input.domain, httpGet));
 
     let hiring: Record<string, unknown> | undefined;
     // ① 优先：sitemap 里的职位详情 URL（把职位放进 sitemap 的公司直接可数，无需 JS 渲染）
@@ -39,9 +54,14 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
         has_buying_role: titles.some(isBuyingRole),
       };
     } else if (careersUrl && (await isAllowedByRobots(careersUrl).catch(() => true))) {
-      // ② 兜底：抓 careers 落地页取 JobPosting JSON-LD（若有）
+      // ② 兜底：抓 careers 落地页取 JobPosting JSON-LD（若有；robots 亦在 crawl4ai.render 工具内权威强制）
       try {
-        const jobs = extractJsonLd((await crawlHtml(careersUrl)).html).jobPostings;
+        const page = await broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
+          'crawl4ai.render',
+          { url: careersUrl },
+          toolCtx,
+        );
+        const jobs = page.data.robotsBlocked ? [] : extractJsonLd(page.data.html).jobPostings;
         if (jobs.length) {
           const titles = jobs.map((j) => j.title);
           hiring = {
@@ -143,15 +163,16 @@ export function isBuyingRole(title: string): boolean {
   return BUYING_ROLE_RE.test(title);
 }
 
-// ─────────────────────── 触网取数（sitemap/robots，普通 fetch，快） ───────────────────────
+// ─────────────────────── 触网取数（sitemap/robots.txt/careers 探测，一律经 http.get 工具） ───────────────────────
+
+/** 出网函数：由 provider 用 ExecutionBroker 绑定到 http.get 工具（SSRF 公网解析护栏在工具内权威强制）。 */
+export type HttpGetFn = (input: HttpGetInput) => Promise<HttpGetOutput>;
 
 /** 取域名的 sitemap URL 全集：robots.txt 的 Sitemap: 指令 + /sitemap.xml + /sitemap_index.xml，
- *  遇 sitemap index 再取前若干子 sitemap；支持 .gz。总量与子表数有上限。 */
-export async function fetchSitemapUrls(domain: string): Promise<string[]> {
-  // SSRF 护栏：plain fetch 不经 crawl4ai 的 egress 防护，故先确认 domain 本身解析到公网 IP
-  if (!(await isSafeSameSiteUrl(`https://${domain}/robots.txt`, domain))) return [];
+ *  遇 sitemap index 再取前若干子 sitemap。总量与子表数有上限。 */
+export async function fetchSitemapUrls(domain: string, httpGet: HttpGetFn): Promise<string[]> {
   const roots = new Set<string>();
-  for (const line of (await fetchText(`https://${domain}/robots.txt`).catch(() => '')).split('\n')) {
+  for (const line of (await fetchText(`https://${domain}/robots.txt`, httpGet).catch(() => '')).split('\n')) {
     const m = line.match(/^\s*sitemap:\s*(\S+)/i);
     if (m) roots.add(m[1].trim());
   }
@@ -162,16 +183,17 @@ export async function fetchSitemapUrls(domain: string): Promise<string[]> {
   let childBudget = MAX_CHILD_SITEMAPS;
   for (const root of roots) {
     if (out.length >= MAX_URLS) break;
-    // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只抓同注册域 + 公网 IP
-    if (!(await isSafeSameSiteUrl(root, domain))) continue;
-    const xml = await fetchText(root).catch(() => '');
+    // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只收同注册域
+    //（业务归属规则，留在 provider 侧；私网/SSRF 拦截由 http.get 工具权威强制）
+    if (!isSameSiteUrl(root, domain)) continue;
+    const xml = await fetchText(root, httpGet).catch(() => '');
     if (!xml) continue;
     const { locs, isIndex } = parseSitemapXml(xml);
     if (isIndex) {
       for (const child of locs) {
         if (childBudget-- <= 0 || out.length >= MAX_URLS) break;
-        if (!(await isSafeSameSiteUrl(child, domain))) continue;
-        const childXml = await fetchText(child).catch(() => '');
+        if (!isSameSiteUrl(child, domain)) continue;
+        const childXml = await fetchText(child, httpGet).catch(() => '');
         out.push(...parseSitemapXml(childXml).locs);
       }
     } else {
@@ -181,9 +203,9 @@ export async function fetchSitemapUrls(domain: string): Promise<string[]> {
   return [...new Set(out)].slice(0, MAX_URLS);
 }
 
-/** SSRF 护栏：plain fetch 的 URL 必须 http(s)、同注册域(含子域)、非 IP 字面量、且解析到公网 IP。
- *  （careers 页走 crawl4ai 自带 egress 防护，不经此。） */
-async function isSafeSameSiteUrl(raw: string, domain: string): Promise<boolean> {
+/** 「同站」业务校验：URL 必须 http(s)、同注册域(含子域)、非 IP 字面量——确保采到的数据归属目标公司域。
+ *  （私网/云元数据 IP 的 SSRF 拦截已在 http.get 工具内权威强制，不在此重复 DNS 解析。） */
+function isSameSiteUrl(raw: string, domain: string): boolean {
   let u: URL;
   try {
     u = new URL(raw);
@@ -195,39 +217,17 @@ async function isSafeSameSiteUrl(raw: string, domain: string): Promise<boolean> 
   const d = domain.toLowerCase();
   if (host !== d && !host.endsWith(`.${d}`)) return false; // 只允许同注册域(含子域)
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) return false; // 拒 IP 字面量
-  try {
-    const { address } = await lookup(host);
-    return !isPrivateIp(address); // 解析到内网/元数据(169.254.169.254 等) → 拒
-  } catch {
-    return false;
-  }
+  return true;
 }
 
-function isPrivateIp(ip: string): boolean {
-  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    return (
-      a === 10 || a === 127 || a === 0 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254) || // link-local + 云元数据 169.254.169.254
-      (a === 100 && b >= 64 && b <= 127) // CGNAT
-    );
-  }
-  const low = ip.toLowerCase();
-  return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80');
-}
-
-/** 常见 careers 固定路径兜底（sitemap 无命中时）。 */
-export async function probeCommonCareersPath(domain: string): Promise<string | undefined> {
-  if (!(await isSafeSameSiteUrl(`https://${domain}/`, domain))) return undefined; // SSRF 护栏（plain HEAD）
+/** 常见 careers 固定路径兜底（sitemap 无命中时；HEAD 探测经 http.get 工具）。
+ *  返回重定向后**最终落地 URL**（与原实现语义一致——证据记录真实入口）；跳出注册域退回探测路径。 */
+export async function probeCommonCareersPath(domain: string, httpGet: HttpGetFn): Promise<string | undefined> {
   for (const p of ['/careers', '/en/careers', '/career', '/jobs', '/karriere', '/company/careers']) {
     const u = `https://${domain}${p}`;
     try {
-      const res = await fetch(u, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(8000) });
-      if (res.ok) return res.url || u;
+      const res = await httpGet({ url: u, method: 'HEAD', timeoutMs: 8000 });
+      if (res.ok) return res.finalUrl && isSameSiteUrl(res.finalUrl, domain) ? res.finalUrl : u;
     } catch {
       // 试下一个
     }
@@ -235,17 +235,11 @@ export async function probeCommonCareersPath(domain: string): Promise<string | u
   return undefined;
 }
 
-async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GlobalBot/1.0)' },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!res.ok) throw new Error(`fetch ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  // gzip 魔数 → 解压（.xml.gz sitemap 常见）
-  if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) return gunzipSync(buf).toString('utf8');
-  return buf.toString('utf8');
+async function fetchText(url: string, httpGet: HttpGetFn): Promise<string> {
+  const res = await httpGet({ url, timeoutMs: 12_000 });
+  // blocked = SSRF 护栏拦截（未出网）；非 ok 与原 fetch 失败路径同义 → 抛错交由调用方 catch 降级。
+  if (res.blocked || !res.ok) throw new Error(`http.get ${res.blocked ?? res.status}`);
+  return res.text;
 }
 
 // ─────────────────────── helpers ───────────────────────

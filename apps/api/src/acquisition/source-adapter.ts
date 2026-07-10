@@ -5,6 +5,10 @@ import { RawSourceEntity } from './clean';
  * 展会/名录/官网/注册处各实现一个，统一由 AcquisitionService 走「清洗→快照→diff」。
  * 与 discovery 的 CompanyDiscoveryAdapter 区别：那是 ICP-query 驱动的一次性发现；
  * 这是 source-config 驱动的可重复采集（支持增量监控）。
+ *
+ * 出网规则（收口②）：adapter 不得自行 HTTP——需要出网的实现经构造函数注入
+ * ExecutionBroker（buildSourceAdapterRegistry 传入），fetch 内 broker.invoke 对应
+ * L0 工具（required 治理域，source_policy fail-closed）；未注入 broker 即 throw。
  */
 export interface MonitoredSourceAdapter {
   providerKey: string;

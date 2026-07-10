@@ -6,6 +6,7 @@ import {
   DiscoveryResult,
   EmailVerdict,
   EmailVerificationAdapter,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
@@ -67,7 +68,7 @@ export class SandboxDiscoveryProvider
     'industry_data',
   ];
 
-  async discoverCompanies(query: CompanyDiscoveryQuery): Promise<DiscoveryResult> {
+  async discoverCompanies(query: CompanyDiscoveryQuery, _ctx: ExecutionContext): Promise<DiscoveryResult> {
     const seed = hash32(JSON.stringify({ c: query.sourceClass, f: query.filters, k: query.keywords }));
     const rnd = mulberry32(seed);
     const countries = asStrArr(query.filters.country ?? query.filters.countries ?? query.filters.region);
@@ -104,7 +105,7 @@ export class SandboxDiscoveryProvider
     return { records, costCents: 0 };
   }
 
-  async discoverContacts(company: { name: string; domain?: string }): Promise<ContactDiscoveryResult> {
+  async discoverContacts(company: { name: string; domain?: string }, _ctx: ExecutionContext): Promise<ContactDiscoveryResult> {
     const seed = hash32(company.domain ?? company.name);
     const rnd = mulberry32(seed);
     const count = 2 + Math.floor(rnd() * 2);

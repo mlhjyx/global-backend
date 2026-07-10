@@ -3,11 +3,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
-import { CompanyDiscoveryQuery, EnrichmentResult, SourceClass } from '../discovery/provider-contract';
+import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
+import { BudgetExceededError, budgetLedger, runBudgetCents } from '../tools/budget';
+import type { ExecutionBroker } from '../tools/tool-contract';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -39,7 +41,13 @@ export function createDiscoveryActivities(deps: {
   providers: DiscoveryProviderRegistry;
   gateway: ModelGateway;
   taxonomy?: TaxonomyResolver;
+  /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
+  broker?: ExecutionBroker;
 }) {
+  // 收口② D「真开账」：每个活动入口幂等 open（open 取较大值，重复无害；账本进程内，
+  // 活动重试/换 worker 也能重新立账）。run 结束由 finalizeRun close。
+  const ensureRunBudget = (runId: string): void => budgetLedger.open(runId, runBudgetCents());
+
   return {
     async loadPlanQueries(args: { workspaceId: string; planId: string }): Promise<{ queries: PlanQuery[] }> {
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -106,9 +114,12 @@ export function createDiscoveryActivities(deps: {
       if (!adapters.length) return { rawCount: 0, costCents: 0, provider: null };
 
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
+      // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
+      ensureRunBudget(args.runId);
+      const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: args.runId, correlationId: args.runId };
       const blockedDomains = suspended.map((s) => s.domain);
       const settled = await Promise.allSettled(
-        adapters.map((a) => a.discoverCompanies(q, { blockedDomains }).then((r) => ({ key: a.key, r }))),
+        adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
       );
 
       // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
@@ -296,7 +307,8 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
       icpId: string;
-    }): Promise<{ judged: number; verdicts: Record<string, number> }> {
+    }): Promise<{ judged: number; verdicts: Record<string, number>; skippedForBudget: number }> {
+      ensureRunBudget(args.runId); // fit 判定（LLM）消耗计入本 run 预算
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
@@ -326,8 +338,21 @@ export function createDiscoveryActivities(deps: {
       let judged = 0;
 
       // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
-      for (const c of companies) {
-        const judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c);
+      let skippedForBudget = 0;
+      for (let i = 0; i < companies.length; i++) {
+        const c = companies[i];
+        let judgment;
+        try {
+          judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, { runId: args.runId });
+        } catch (err) {
+          if (err instanceof BudgetExceededError) {
+            // 预算耗尽=本批余下全部会失败 → 中断并显性计数（复审 HIGH：绝不静默漏判假 DONE）
+            skippedForBudget = companies.length - i;
+            console.warn(`[discovery] run ${args.runId} fit 预算耗尽：跳过余下 ${skippedForBudget} 家（进 stats，backlog sweep 兜底）`);
+            break;
+          }
+          throw err;
+        }
         if (!judgment) continue; // 单家判别失败不影响其余
         verdicts[judgment.verdict] += 1;
         judged += 1;
@@ -335,7 +360,7 @@ export function createDiscoveryActivities(deps: {
           upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
-      return { judged, verdicts };
+      return { judged, verdicts, skippedForBudget };
     },
 
     /**
@@ -377,6 +402,8 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
+      ensureRunBudget(args.runId);
+      const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: args.runId, correlationId: args.runId };
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
@@ -387,12 +414,15 @@ export function createDiscoveryActivities(deps: {
         for (const e of enrichers) {
           if (existing[e.key]) continue; // 该源已富集过 → 跳过（重跑不重复写）
           try {
-            const r = await e.enrichCompany({
-              name: c.name,
-              domain: c.domain ?? undefined,
-              country: c.country ?? undefined,
-              region: c.region ?? undefined,
-            });
+            const r = await e.enrichCompany(
+              {
+                name: c.name,
+                domain: c.domain ?? undefined,
+                country: c.country ?? undefined,
+                region: c.region ?? undefined,
+              },
+              ctx,
+            );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch {
             // 单富集源失败不影响其余
@@ -479,6 +509,8 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
+      ensureRunBudget(args.runId);
+      const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: args.runId, correlationId: args.runId };
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
@@ -492,12 +524,15 @@ export function createDiscoveryActivities(deps: {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
           try {
-            const r = await e.enrichCompany({
-              name: c.name,
-              domain: c.domain ?? undefined,
-              country: c.country ?? undefined,
-              region: c.region ?? undefined,
-            });
+            const r = await e.enrichCompany(
+              {
+                name: c.name,
+                domain: c.domain ?? undefined,
+                country: c.country ?? undefined,
+                region: c.region ?? undefined,
+              },
+              ctx,
+            );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch {
             /* 单信号源失败不影响其余 */
@@ -547,7 +582,7 @@ export function createDiscoveryActivities(deps: {
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
      */
     async registerWatchesForRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{ candidates: number; registered: number }> {
-      const intentSvc = new IntentProjectionService({ prisma: deps.prisma });
+      const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = await tx.rawSourceRecord.findMany({ where: { runId: args.runId }, select: { id: true } });
         const links = await tx.identityLink.findMany({
@@ -623,6 +658,7 @@ export function createDiscoveryActivities(deps: {
           });
         }
       });
+      budgetLedger.close(args.runId, { force: true }); // 收口② D：run 终点强制关账（run 内多活动各 open 过）
     },
   };
 }

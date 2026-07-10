@@ -17,6 +17,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { TaxonomyResolver } from '../src/discovery/taxonomy-resolver';
 import { resolveIcpToFda, buildFdaQuery } from '../src/discovery/icp-to-fda';
 import { OpenFdaDiscoveryProvider } from '../src/discovery/providers/openfda.provider';
+import { PLATFORM_WORKSPACE } from '../src/discovery/provider-contract';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
@@ -70,8 +72,13 @@ async function main() {
 
   // ══════════ Tier 3 · 闭环（ICP→码→真公司）══════════
   console.log('\n══ Tier 3 · 闭环：解析出的 product code → 真 openFDA API → 真在美注册进口商 ══');
-  const provider = new OpenFdaDiscoveryProvider(); // 无 reader = fail-open（§8.8 已在 verify-openfda-discovery 单独证）
-  const res = await provider.discoverCompanies({ sourceClass: 'public_intelligence', filters: q.filters, keywords: [], limit: 15 });
+  // 收口②：直连经 ToolBroker（§8.8 门在 Broker 内单点判定；负向门单独证明见 verify-openfda-discovery）
+  const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+  const provider = new OpenFdaDiscoveryProvider({ broker });
+  const res = await provider.discoverCompanies(
+    { sourceClass: 'public_intelligence', filters: q.filters, keywords: [], limit: 15 },
+    { workspaceId: PLATFORM_WORKSPACE },
+  );
   console.log(`   拉到 ${res.records.length} 家（ICP 文本 → 无硬编码码 → 真公司）`);
   for (const r of res.records.slice(0, 6)) console.log(`   · ${r.name} [${r.country ?? '?'}] 专科=${r.industry ?? '—'}`);
   ok(res.records.length > 0, 'Tier 3：ICP→FDA 产品码→真在美注册公司闭环（多租户不硬编码）');

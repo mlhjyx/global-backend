@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { ToolRegistry } from './tool-registry';
 import { registerBuiltinTools } from './builtin-tools';
+import { registerSourceTools } from './source-tools';
 import { ToolBroker, ToolTrace } from './tool-broker';
 
 /** source_policy 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
@@ -37,7 +38,7 @@ export function buildToolBroker(deps?: {
   sourcePolicyReader?: SourcePolicyReader;
   traceRecorder?: (t: ToolTrace) => void;
 }): ToolBroker {
-  const registry = registerBuiltinTools(new ToolRegistry());
+  const registry = registerSourceTools(registerBuiltinTools(new ToolRegistry()));
   const traceRecorder =
     deps?.traceRecorder ??
     ((t: ToolTrace) => {

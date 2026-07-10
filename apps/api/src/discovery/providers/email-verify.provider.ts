@@ -1,16 +1,14 @@
 import { resolveMx } from 'node:dns/promises';
 import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext } from '../provider-contract';
-import type { ToolContext, ToolResult } from '../../tools/tool-contract';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
 
 /**
  * ToolBroker 的最小面（供本 verifier 依赖 + 测试注入假实现）。SMTP 原始出网**只能**经此闸门：
  * `invoke('smtp.rcpt_probe', …)` 会强制 source_policy(SUSPENDED/用途) + 预算 + 限流 + 幂等 + Trace。
+ * 收口②后收敛为全仓统一的 ExecutionBroker（本别名保持既有调用方/测试不变）。
  */
-export interface EmailVerifyBroker {
-  checkSourcePolicy(toolId: string, domain: string): Promise<{ allowed: boolean; reason?: 'suspended' | 'purpose_not_allowed' }>;
-  invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
-}
+export type EmailVerifyBroker = ExecutionBroker;
 
 const SMTP_PROBE_TOOL = 'smtp.rcpt_probe';
 

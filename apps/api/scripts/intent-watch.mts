@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { IntentProjectionService } from '../src/intent/intent-projection.service';
 import { classifyPageKind } from '../src/intent/page-signals';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -17,7 +18,8 @@ for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').spl
 const [cmd, workspaceId, arg, ...rest] = process.argv.slice(2);
 const prisma = new PrismaService();
 await prisma.$connect();
-const svc = new IntentProjectionService({ prisma });
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+const svc = new IntentProjectionService({ prisma, broker });
 
 if (cmd === 'register' && workspaceId && arg) {
   const pages = rest.length ? rest.map((url) => ({ url, kind: classifyPageKind(url) })) : undefined;

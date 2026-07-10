@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
 import { resolveMx } from 'node:dns/promises';
-import { CompanyEnrichmentAdapter, CompanyEnrichmentInput, EnrichmentResult } from '../provider-contract';
-import { crawlHtml } from '../../adapters/web-crawler';
+import {
+  CompanyEnrichmentAdapter,
+  CompanyEnrichmentInput,
+  EnrichmentResult,
+  ExecutionContext,
+} from '../provider-contract';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import { isAllowedByRobots } from '../../adapters/robots';
 
 const PARSER_VERSION = 'digital-footprint/v1';
@@ -20,14 +26,25 @@ const PARSER_VERSION = 'digital-footprint/v1';
 export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
   readonly key = 'digital_footprint';
 
-  async enrichCompany(input: CompanyEnrichmentInput): Promise<EnrichmentResult> {
+  constructor(private readonly deps: { broker?: ExecutionBroker } = {}) {}
+
+  async enrichCompany(input: CompanyEnrichmentInput, ctx: ExecutionContext): Promise<EnrichmentResult> {
     if (!input.domain) return miss();
+    // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级 miss（fail-closed）。
+    if (!this.deps.broker) {
+      console.warn('[digital_footprint] skip: broker unavailable (fail-closed, no raw egress)');
+      return miss();
+    }
     const base = `https://${input.domain}/`;
+    // robots 早跳过（robots.ts 有缓存；crawl4ai.render 工具内亦权威强制）
     if (!(await isAllowedByRobots(base).catch(() => true))) return miss();
 
-    const page = await crawlHtml(base).catch(() => null);
-    if (!page) return miss();
-    const { html, headers } = page;
+    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const page = await this.deps.broker
+      .invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>('crawl4ai.render', { url: base }, toolCtx)
+      .catch(() => null);
+    if (!page || page.data.robotsBlocked) return miss();
+    const { html, headers } = page.data;
     if (html.length < 200) return miss();
 
     const jsonld = extractJsonLd(html);
@@ -172,7 +189,7 @@ export function detectServedMarkets(html: string): { langs: string[]; countries:
   return { langs: [...langs].slice(0, 30), countries: [...countries].slice(0, 60) };
 }
 
-/** MX 记录 → 邮件服务商分类（DNS，非 SMTP；出网友好）。 */
+/** MX 记录 → 邮件服务商分类（DNS，非 SMTP；出网友好）。DNS 解析是 Broker 登记例外，保留直连。 */
 export async function classifyMxProvider(domain: string): Promise<string | undefined> {
   let mx: { exchange: string }[];
   try {

@@ -16,6 +16,7 @@ import { WebsiteWatchService } from '../src/intent/website-watch.service';
 import { Crawl4aiPageFetcher } from '../src/intent/page-fetcher';
 import { scoreLead, CompanyForScoring, IcpForScoring } from '../src/lead/scoring';
 import { companyIdentity } from '../src/discovery/identity';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -32,8 +33,9 @@ const icp: IcpForScoring = {
 
 const prisma = new PrismaService();
 await prisma.$connect();
-const intentSvc = new IntentProjectionService({ prisma });
-const watchSvc = new WebsiteWatchService({ prisma, fetcher: new Crawl4aiPageFetcher() });
+const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
+const intentSvc = new IntentProjectionService({ prisma, broker });
+const watchSvc = new WebsiteWatchService({ prisma, fetcher: new Crawl4aiPageFetcher(broker) });
 
 // ① fit=match + 域名 的 canonical 公司
 const identity = companyIdentity({ name: 'TRUMPF', domain: 'trumpf.com', country: 'DE' });

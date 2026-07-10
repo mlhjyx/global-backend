@@ -4,12 +4,15 @@ import {
   CompanyDiscoveryQuery,
   DiscoveryOptions,
   DiscoveryResult,
+  ExecutionContext,
   ProviderCompanyRecord,
   SourceClass,
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
-import { crawlUrl } from '../../adapters/web-crawler';
+import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import type { SearxResult } from '../../adapters/searxng';
+import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
@@ -53,25 +56,31 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'directory';
   readonly classes: SourceClass[] = ['industry_data'];
 
-  constructor(private readonly deps: { gateway: ModelGateway; searxngUrl?: string }) {}
-
-  private get searxng(): string {
-    return this.deps.searxngUrl ?? process.env.SEARXNG_URL ?? 'http://localhost:8081';
-  }
+  constructor(private readonly deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {}
 
   private log(msg: string): void {
-     
+
     console.log(`[directory] ${msg}`);
   }
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
+  private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
+    return { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, taskContractId };
+  }
+
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+    // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
+    if (!this.deps.broker) {
+      this.log('skip: broker unavailable (fail-closed, no raw egress)');
+      return { records: [], costCents: 0 };
+    }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildDirectorySearches(query);
 
     // 1) 找候选名录页（跨多条意图查询取并集，正向信号优先）
     const listingUrls = new Map<string, string>(); // url → title
     for (const q of searches) {
-      const hits = await this.search(q);
+      const hits = await this.search(q, ctx);
       for (const h of hits) {
         const domain = normalizeDomain(h.url);
         if (!domain || blocked.has(domain)) continue;
@@ -87,7 +96,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     const dedup = new Map<string, ProviderCompanyRecord>();
     for (let i = 0; i < urls.length; i += CRAWL_CONCURRENCY) {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
-      const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query)));
+      const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query, ctx)));
       for (const s of settled) {
         if (s.status !== 'fulfilled') continue;
         for (const rec of s.value) {
@@ -99,17 +108,18 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     return { records: [...dedup.values()], costCents: 0 };
   }
 
-  /** SearXNG JSON 搜索（放行侧引擎池，见 infra/searxng/settings.yml）。 */
-  private async search(q: string): Promise<{ url: string; title: string }[]> {
-    const url = `${this.searxng}/search?q=${encodeURIComponent(q)}&format=json&safesearch=0`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) throw new Error(`searxng ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    const json = (await res.json()) as { results?: { url: string; title: string }[] };
-    return (json.results ?? []).slice(0, 20);
+  /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
+  private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
+    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
+      'searxng.search',
+      { q, language: 'en' },
+      this.toolCtx(ctx, 'discovery.extract_list'),
+    );
+    return res.data.results.slice(0, 20);
   }
 
   /** 抓一个名录页（含有限翻页）→ 列表抽取 → 该页所有公司记录。 */
-  private async mineListing(listUrl: string, query: CompanyDiscoveryQuery): Promise<ProviderCompanyRecord[]> {
+  private async mineListing(listUrl: string, query: CompanyDiscoveryQuery, ctx: ExecutionContext): Promise<ProviderCompanyRecord[]> {
     const out: ProviderCompanyRecord[] = [];
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
@@ -122,15 +132,20 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       }
       let text: string;
       try {
-        const crawled = await crawlUrl(pageUrl);
-        text = crawled.text.slice(0, 60_000);
+        const crawled = await this.deps.broker!.invoke<{ url: string; maxChars?: number }, CrawlResult>(
+          'crawl4ai.fetch',
+          // maxChars=60k：名录列表页单页数百家公司，工具默认 40k 会静默砍掉尾部 1/3 条目（复审 medium）
+          { url: pageUrl, maxChars: 60_000 },
+          this.toolCtx(ctx, 'discovery.extract_list'),
+        );
+        text = crawled.data.text.slice(0, 60_000);
       } catch (err) {
         this.log(`skip ${pageUrl}: crawl failed (${String(err).slice(0, 80)})`);
         break;
       }
       if (text.trim().length < 200) break;
 
-      const extracted = await this.extractList(pageUrl, text, query);
+      const extracted = await this.extractList(pageUrl, text, query, ctx);
       if (!extracted?.is_directory || !extracted.companies?.length) {
         if (page === 0) this.log(`${pageUrl}: not a directory (llm)`);
         break; // 首页就不是名录 → 放弃；翻页中途变样 → 停
@@ -169,6 +184,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     url: string,
     text: string,
     query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
   ): Promise<ExtractedList | null> {
     const contract = getTask('discovery.extract_list');
     try {
@@ -183,7 +199,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['is_directory', 'companies'] },
         },
-        { workspaceId: 'discovery' },
+        // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
       );
       return result.data;
     } catch (err) {

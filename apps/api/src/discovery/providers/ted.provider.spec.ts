@@ -1,16 +1,25 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TedDiscoveryProvider, mapNoticeToRecords, toAlpha2 } from './ted.provider';
-import { TedAwardNotice, searchAwardNotices } from '../../adapters/ted-api';
+import { TedAwardNotice } from '../../adapters/ted-api';
 import { companyIdentity } from '../identity';
-import { CompanyDiscoveryQuery } from '../provider-contract';
-
-vi.mock('../../adapters/ted-api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../adapters/ted-api')>();
-  return { ...actual, searchAwardNotices: vi.fn() };
-});
-const mockedSearch = vi.mocked(searchAwardNotices);
+import { CompanyDiscoveryQuery, ExecutionContext } from '../provider-contract';
+import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
+import type { TedSearchOutput } from '../../tools/source-tools';
 
 const NOW = '2026-07-08T00:00:00.000Z';
+const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
+
+/** 假 Broker：记录 invoke 调用；impl 抛错=闸门拒绝/工具失败。 */
+function fakeBroker(impl: () => Promise<TedSearchOutput>): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
+  const invokeMock = vi.fn(async (_toolId: string, _input: unknown, _ctx: ToolContext): Promise<ToolResult<unknown>> => {
+    return { data: await impl(), costCents: 0 };
+  });
+  return {
+    invokeMock,
+    checkSourcePolicy: async () => ({ allowed: true }),
+    invoke: invokeMock as ExecutionBroker['invoke'],
+  };
+}
 
 function notice(overrides: Partial<TedAwardNotice> = {}): TedAwardNotice {
   return {
@@ -119,56 +128,36 @@ describe('§8.3 toAlpha2 国别归一', () => {
   });
 });
 
-describe('§8.8 source_policy 用途门（含个人数据源，直连 HTTP 前必校验）', () => {
+describe('§8.8 合规门（收口②：Broker 单点 fail-closed，provider 不再自建镜像）', () => {
   const gq = q({ cpv: '42120000', buyer_country: 'DEU' });
-  beforeEach(() => mockedSearch.mockReset());
 
-  it('SUSPENDED → 空且不发请求', async () => {
-    const p = new TedDiscoveryProvider({ sourcePolicyReader: async () => ({ suspended: true }) });
-    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
-    expect(mockedSearch).not.toHaveBeenCalled();
-  });
-
-  it('策略行缺失(null) → 空且不发请求（reader 在场 = fail-closed）', async () => {
-    const p = new TedDiscoveryProvider({ sourcePolicyReader: async () => null });
-    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
-    expect(mockedSearch).not.toHaveBeenCalled();
-  });
-
-  it('allowedPurpose 不含 discovery → 空且不发请求', async () => {
-    const p = new TedDiscoveryProvider({
-      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['enrichment'] }),
+  it('Broker 拒绝（SUSPENDED/未登记/用途门 → invoke 抛错）→ fail-safe 空结果', async () => {
+    const broker = fakeBroker(async () => {
+      throw new Error('tool ted.search denied: source_policy unregistered: api.ted.europa.eu');
     });
-    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
-    expect(mockedSearch).not.toHaveBeenCalled();
+    const p = new TedDiscoveryProvider({ broker });
+    expect(await p.discoverCompanies(gq, CTX)).toEqual({ records: [], costCents: 0 });
+    expect(broker.invokeMock).toHaveBeenCalledOnce(); // 拒绝发生在 Broker 内（单点），provider 只管 fail-safe
   });
 
-  it('reader 抛错 → 空且不发请求（fail-closed）', async () => {
-    const p = new TedDiscoveryProvider({
-      sourcePolicyReader: async () => {
-        throw new Error('db down');
-      },
-    });
-    expect(await p.discoverCompanies(gq)).toEqual({ records: [], costCents: 0 });
-    expect(mockedSearch).not.toHaveBeenCalled();
+  it('无 broker → fail-closed：空且零出网（旧「无 reader fail-open」缺陷已反转）', async () => {
+    const p = new TedDiscoveryProvider();
+    expect(await p.discoverCompanies(gq, CTX)).toEqual({ records: [], costCents: 0 });
   });
 
-  it('APPROVED + discovery 允许 → 发请求并映射', async () => {
-    mockedSearch.mockResolvedValue([notice({ winners: [{ name: 'Acme AG', country: 'DEU', identifier: 'DE1' }] })]);
-    const p = new TedDiscoveryProvider({
-      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['discovery', 'enrichment'] }),
-    });
-    const res = await p.discoverCompanies(gq);
-    expect(mockedSearch).toHaveBeenCalledOnce();
+  it('Broker 放行 → 经 ted.search 工具发请求并映射，透传真 workspace/run 归属', async () => {
+    const broker = fakeBroker(async () => ({
+      awards: [notice({ winners: [{ name: 'Acme AG', country: 'DEU', identifier: 'DE1' }] })],
+    }));
+    const p = new TedDiscoveryProvider({ broker });
+    const res = await p.discoverCompanies(gq, CTX);
+    expect(broker.invokeMock).toHaveBeenCalledOnce();
+    const [toolId, input, toolCtx] = broker.invokeMock.mock.calls[0] as [string, { kind: string }, ToolContext];
+    expect(toolId).toBe('ted.search');
+    expect(input.kind).toBe('award');
+    expect(toolCtx).toMatchObject({ workspaceId: 'ws-1', runId: 'run-1' });
     expect(res.records).toHaveLength(1);
     expect(res.records[0].name).toBe('Acme AG');
-  });
-
-  it('无 reader（直连探针/测试）→ 不设门，照常发请求（fail-open）', async () => {
-    mockedSearch.mockResolvedValue([notice({ winners: [{ name: 'Bravo SA', country: 'FRA' }] })]);
-    const res = await new TedDiscoveryProvider().discoverCompanies(gq);
-    expect(mockedSearch).toHaveBeenCalledOnce();
-    expect(res.records).toHaveLength(1);
   });
 });
 
@@ -180,8 +169,10 @@ describe('TedDiscoveryProvider 契约', () => {
   });
 
   it('无 CPV 过滤 → 直接返回空（fail-safe，不发网络请求、不裸拉全库）', async () => {
-    const p = new TedDiscoveryProvider();
-    const res = await p.discoverCompanies(q({}));
+    const broker = fakeBroker(async () => ({ awards: [] }));
+    const p = new TedDiscoveryProvider({ broker });
+    const res = await p.discoverCompanies(q({}), CTX);
     expect(res).toEqual({ records: [], costCents: 0 });
+    expect(broker.invokeMock).not.toHaveBeenCalled();
   });
 });

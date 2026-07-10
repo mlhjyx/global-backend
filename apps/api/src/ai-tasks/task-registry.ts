@@ -8,7 +8,8 @@ import { AiTaskContract } from './task-contract';
 export const AI_TASKS: Record<string, AiTaskContract> = {
   'company_understanding.extract_claims': {
     id: 'company_understanding.extract_claims',
-    allowedTools: [], // 纯生成：只读给定文本，工具（抓取）由确定性 Provider 调用
+    // 理解管线的页面抓取以本契约身份经 Broker（understanding.activities）——白名单收口②填实。
+    allowedTools: ['crawl4ai.fetch'],
     maxCostCents: 20,
     timeoutMs: 180000,
     description:
@@ -188,7 +189,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.extract_company': {
     id: 'discovery.extract_company',
-    allowedTools: [], // 判站+抽取只读已抓文本；搜索/抓取由 PublicWebDiscoveryProvider 经 Broker 调用
+    // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②：白名单真实生效）。
+    allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 15,
     timeoutMs: 180000,
     description:
@@ -217,7 +219,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'contact.find_decision_makers': {
     id: 'contact.find_decision_makers',
-    allowedTools: [], // 只读已抓的 Impressum/团队/管理层页文本；抓取由 DecisionMaker Provider 经 Broker 调用
+    // DecisionMaker/public_web 联系人路径以本契约身份经 Broker 搜索/抓取（收口②）。
+    allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 15,
     timeoutMs: 120000,
     description:
@@ -258,7 +261,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.extract_list': {
     id: 'discovery.extract_list',
-    allowedTools: [], // 只读已抓的目录页文本；搜索/抓取由 DirectoryDiscoveryProvider 经 Broker 调用
+    // DirectoryDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②）。
+    allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 20,
     timeoutMs: 180000,
     description:
