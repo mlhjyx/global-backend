@@ -82,7 +82,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 
 **SaaS 回传（仅作学习标签）**：QgoCreated · SalesAccepted · CommercialOutcomeVerified · LeadOutcomeRejected。
 
-**投递语义（收口③，P0 阻塞）**：内部 workflow command 与外部 integration event 分开；`outbox_delivery(sink, status, attempts, acked_at)` 按 sink 投递/重试/ACK/DLQ；**禁止无 handler 事件标记 published**（现状 relay 对无 handler 事件直接标 published——已核验，LeadQualified 事实上被静默丢弃）。每个外部事件有 payload schema（AsyncAPI 入 packages/contracts/events）+ Consumer Test。
+**投递语义（✅ 收口③已落地，PR #46）**：事件注册表三分支（`relay/event-registry.ts` 穷举）——内部 workflow command（3 种→Temporal，AlreadyStarted 幂等）/外部 integration event（8 种→`outbox_delivery` 账本单事务原子路由，`publishedAt` 语义=已路由进交付层）/未注册类型 `parkedAt` 停靠+大声报错（不假发布、不毒化轮询）。sink：`saas` 拉模式（`GET /events` 游标=**交付账本行 id**、任意重放 at-least-once、`POST /events/ack` 幂等且锁死 pull sink）+ `webhook` 推模式（URL+SECRET 且 https 才启用；HMAC-SHA256 签名、指数退避封顶 1h、10 次 DEAD=DLQ、双路径 CAS）。LeadQualified payload=快照 v1（`packages/contracts/events/payloads/lead-qualified.v1.schema.json`，ajv Consumer Test；contact_refs 只带 ref+职务元数据不嵌 PII，含具名 refs 事件分级 RESTRICTED）。**部署约束**：relay 单写者（多副本前需 advisory lock）；其余 7 种 integration 事件的专用 payload schema 待补（现走 envelope 通契约）。
 
 ## 7. API ownership
 
@@ -96,7 +96,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 |---|---|---|---|
 | 1 | ~~Fit 挂错聚合根（canonical_company 而非 ICP×公司，多 ICP 互相覆盖）~~ | ~~schema.prisma:504~~ | ✅ **已修（PR #43）**：fit_verdict/fit_reasons 迁到 Lead（ICP×公司），共享 upsertLeadFit，真库真 RLS 实测两 ICP 独立互不覆盖 |
 | 2 | ToolBroker 非唯一闸门：主链直调 adapter；source_policy 未登记默认放行（fail-open）；BudgetLedger.open 零调用；allowedTools 全空；伪 workspace 'discovery' 令 AI trace 静默写入失败 | tool-broker.ts:97、discovery.activities.ts:99 | 收口② |
-| 3 | Outbox 假发布：LeadQualified 等无 sink 仍标 published——**无真实对外交付能力，P0** | apps/api/src/relay/outbox-relay.service.ts:143 | 收口③ |
+| 3 | ~~Outbox 假发布：LeadQualified 等无 sink 仍标 published——无真实对外交付能力~~ | ~~outbox-relay.service.ts:143~~ | ✅ **已修（PR #46）**：事件注册表三分支 + `outbox_delivery` 账本 + `GET /events` 拉取/ACK + 快照 v1 契约；真库 RLS 实测 24 断言 + 对抗复审 13 findings 全修 |
 | 4 | OpenAPI 双事实源：38-path JSON vs 旧 3-path YAML，contracts 5 脚本全读旧 YAML | packages/contracts/package.json | 收口④ |
 | 5 | Intent 是 JSON 投影非一等事实；外部源按 ICP 重复拉取 | attributes.intent.events[] | 收口⑤ |
 | 6 | 实体解析单键选择非身份图（无 merge/split/回放） | identity.ts:45 | ADR-007；R2 落最小版（R3 新 provider 前置） |
