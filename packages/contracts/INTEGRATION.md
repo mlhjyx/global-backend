@@ -38,7 +38,7 @@
 ### 阶段 2：发现（Discover）
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
-3. 执行：`POST /query-plans/:id/execute` → 202 `{runId}`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
+3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）
@@ -49,7 +49,7 @@
 
 ### 阶段 3：验证评分（Qualify）
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
-2. 队列视图：`GET /icps/:id/lead-queues` → `{recommended, needs_review, rejected, suppressed}`
+2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 

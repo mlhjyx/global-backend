@@ -75,8 +75,15 @@ jobs:
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
 
-      - name: Drift check（提交的 openapi.json 必须与代码一致）
-        run: git diff --exit-code -- packages/contracts/openapi/openapi.json
+      # git status --porcelain 同时抓「有 diff」与「文件未被跟踪/被删除」（git diff 对 untracked 视而不见）
+      - name: Drift check（提交的 openapi.json 必须与代码一致且被跟踪）
+        run: |
+          if [ -n "$(git status --porcelain -- packages/contracts/openapi/openapi.json)" ]; then
+            git status --porcelain -- packages/contracts/openapi/openapi.json
+            git diff -- packages/contracts/openapi/openapi.json | head -100
+            echo "::error::openapi.json 与代码不一致（或未被 git 跟踪）——本地重导出后提交"
+            exit 1
+          fi
 
       - name: Spectral lint（error 级即失败）
         run: pnpm --filter @global/contracts lint
@@ -103,3 +110,5 @@ jobs:
           base: base-openapi.json
           revision: packages/contracts/openapi/openapi.json
           fail-on: ERR
+          # 私有契约不外发：v0.1.6 默认 review:true 会把 spec 上传 oasdiff.com 并发 PR 评论
+          review: 'false'

@@ -82,6 +82,11 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "userId",
+                        "workspaceId",
+                        "roles"
+                      ],
                       "properties": {
                         "userId": {
                           "type": "string"
@@ -122,17 +127,9 @@
         "parameters": [
           {
             "name": "idempotency-key",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
+            "required": false,
             "in": "header",
             "description": "幂等键（客户端生成，如 uuid）",
-            "required": false,
             "schema": {
               "type": "string"
             }
@@ -183,15 +180,17 @@
         "parameters": [
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
             }
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -320,6 +319,13 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "status",
+                        "approvedClaims",
+                        "pendingClaims",
+                        "offerings",
+                        "conflictsOpen"
+                      ],
                       "properties": {
                         "status": {
                           "type": "string"
@@ -460,7 +466,7 @@
           },
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -699,7 +705,7 @@
           },
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -721,6 +727,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "additionalProperties": true,
                         "description": "知识冲突（两条矛盾 Claim + 状态）"
                       }
                     }
@@ -777,6 +784,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "知识冲突（两条矛盾 Claim + 状态）"
                     }
                   }
@@ -846,7 +854,7 @@
         "parameters": [
           {
             "name": "companyId",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1159,6 +1167,9 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "deleted"
+                      ],
                       "properties": {
                         "deleted": {
                           "type": "boolean"
@@ -1440,6 +1451,10 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "runId",
+                        "status"
+                      ],
                       "properties": {
                         "runId": {
                           "type": "string",
@@ -1493,6 +1508,15 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "id",
+                        "planId",
+                        "icpId",
+                        "status",
+                        "stats",
+                        "createdAt",
+                        "completedAt"
+                      ],
                       "properties": {
                         "id": {
                           "type": "string",
@@ -1510,7 +1534,8 @@
                           "type": "string"
                         },
                         "stats": {
-                          "type": "object"
+                          "type": "object",
+                          "additionalProperties": true
                         },
                         "createdAt": {
                           "type": "string",
@@ -1546,7 +1571,7 @@
         "parameters": [
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1554,15 +1579,17 @@
           },
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
             }
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1585,6 +1612,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "additionalProperties": true,
                         "description": "CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）"
                       }
                     },
@@ -1648,6 +1676,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）"
                     }
                   }
@@ -1693,6 +1722,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "联系人发现结果（新建联系人/联系点计数）"
                     }
                   }
@@ -1749,6 +1779,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "验证结果（status + 探测细节留痕）"
                     }
                   }
@@ -1795,6 +1826,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "Suppression 记录"
                     }
                   }
@@ -1831,6 +1863,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "additionalProperties": true,
                         "description": "Suppression 记录"
                       }
                     }
@@ -1877,6 +1910,9 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "deleted"
+                      ],
                       "properties": {
                         "deleted": {
                           "type": "boolean"
@@ -1919,6 +1955,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "additionalProperties": true,
                         "description": "DataProvider（源/状态/成本）"
                       }
                     }
@@ -1965,6 +2002,10 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "accepted",
+                        "eventId"
+                      ],
                       "properties": {
                         "accepted": {
                           "type": "boolean"
@@ -1998,7 +2039,7 @@
         "parameters": [
           {
             "name": "icpId",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -2006,7 +2047,7 @@
           },
           {
             "name": "queue",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -2014,7 +2055,7 @@
           },
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -2022,15 +2063,17 @@
           },
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
             }
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -2053,6 +2096,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "additionalProperties": true,
                         "description": "Lead（六维分+队列+裁决状态）"
                       }
                     },
@@ -2116,6 +2160,12 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "recommended",
+                        "needs_review",
+                        "rejected",
+                        "suppressed"
+                      ],
                       "properties": {
                         "recommended": {
                           "type": "integer"
@@ -2174,6 +2224,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "Lead（六维分+队列+裁决状态）"
                     }
                   }
@@ -2229,6 +2280,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "Lead（六维分+队列+裁决状态）"
                     }
                   }
@@ -2284,6 +2336,7 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "additionalProperties": true,
                       "description": "Lead（六维分+队列+裁决状态）"
                     }
                   }
@@ -2353,6 +2406,18 @@
                       "items": {
                         "type": "object",
                         "description": "事件 envelope（见 packages/contracts/events/envelope.schema.json）",
+                        "required": [
+                          "event_id",
+                          "event_type",
+                          "schema_version",
+                          "workspace_id",
+                          "aggregate_type",
+                          "aggregate_id",
+                          "occurred_at",
+                          "producer",
+                          "privacy_classification",
+                          "payload"
+                        ],
                         "properties": {
                           "event_id": {
                             "type": "string",
@@ -2390,10 +2455,17 @@
                             "nullable": true
                           },
                           "privacy_classification": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "PUBLIC",
+                              "INTERNAL",
+                              "CONFIDENTIAL",
+                              "RESTRICTED"
+                            ]
                           },
                           "payload": {
-                            "type": "object"
+                            "type": "object",
+                            "additionalProperties": true
                           }
                         }
                       }
@@ -2459,6 +2531,9 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "acked"
+                      ],
                       "properties": {
                         "acked": {
                           "type": "integer"
@@ -2610,7 +2685,10 @@
         "required": [
           "id",
           "name",
+          "website",
           "status",
+          "industry",
+          "summary",
           "publicContacts",
           "createdAt"
         ]
@@ -2650,6 +2728,7 @@
           },
           "attributes": {
             "type": "object",
+            "additionalProperties": true,
             "nullable": true,
             "description": "结构化属性（moq/lead_time/materials/params/certifications…，仅来源文本明确出现的）"
           },
@@ -2675,6 +2754,11 @@
         "required": [
           "id",
           "name",
+          "description",
+          "attributes",
+          "sourceUrl",
+          "evidence",
+          "confidence",
           "createdAt"
         ]
       },
@@ -2695,7 +2779,12 @@
             "type": "number",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "sourceUrl",
+          "snippet",
+          "confidence"
+        ]
       },
       "ClaimDto": {
         "type": "object",
@@ -2754,6 +2843,7 @@
           "type",
           "statement",
           "status",
+          "confidence",
           "version",
           "evidence",
           "createdAt"
@@ -2765,15 +2855,18 @@
           "type": {
             "type": "string",
             "description": "事实类型",
-            "example": "certification"
+            "example": "certification",
+            "maxLength": 50
           },
           "statement": {
             "type": "string",
-            "example": "通过 IATF 16949 认证（2025 续证）"
+            "example": "通过 IATF 16949 认证（2025 续证）",
+            "maxLength": 2000
           },
           "evidence": {
             "type": "string",
-            "description": "依据说明（证书编号、内部资料名等）"
+            "description": "依据说明（证书编号、内部资料名等）",
+            "maxLength": 2000
           }
         },
         "required": [
@@ -2842,6 +2935,7 @@
         },
         "required": [
           "role",
+          "title",
           "concerns"
         ]
       },
@@ -2898,7 +2992,8 @@
           "field",
           "operator",
           "value",
-          "weight"
+          "weight",
+          "rationale"
         ]
       },
       "IcpDto": {
@@ -2928,6 +3023,7 @@
           },
           "companyAttributes": {
             "type": "object",
+            "additionalProperties": true,
             "description": "目标公司属性：行业/规模/地区/技术等"
           },
           "painPoints": {
@@ -3013,6 +3109,7 @@
           },
           "companyAttributes": {
             "type": "object",
+            "additionalProperties": true,
             "description": "目标公司属性"
           },
           "painPoints": {
@@ -3124,6 +3221,7 @@
           "operator",
           "value",
           "weight",
+          "rationale",
           "version"
         ]
       },
@@ -3267,12 +3365,14 @@
           "results": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": true
             },
             "description": "逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估"
           },
           "metrics": {
             "type": "object",
+            "additionalProperties": true,
             "description": "matchHitRate / excludeCatchRate / unknownFieldRate / recommendation"
           },
           "createdAt": {
@@ -3301,6 +3401,7 @@
           },
           "attributes": {
             "type": "object",
+            "additionalProperties": true,
             "description": "已知的公司属性（industry/region/employee_count/...），规则据此确定性评估",
             "example": {
               "industry": "metal fabrication",
@@ -3328,6 +3429,7 @@
         "properties": {
           "samples": {
             "minItems": 1,
+            "maxItems": 200,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BacktestSampleDto"
@@ -3360,7 +3462,8 @@
           "queries": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": true
             },
             "description": "有序查询列表：source_class + filters + keywords + rationale + priority"
           },
@@ -3381,6 +3484,7 @@
           "icpId",
           "status",
           "queries",
+          "estimatedVolume",
           "version",
           "createdAt"
         ]
@@ -3464,11 +3568,14 @@
         "type": "object",
         "properties": {
           "event_ids": {
-            "description": "要 ACK 的 event_id 列表（envelope.event_id，uuid）",
             "type": "array",
+            "description": "要 ACK 的 event_id 列表（envelope.event_id，uuid）",
             "items": {
-              "type": "string"
-            }
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 200
           }
         },
         "required": [

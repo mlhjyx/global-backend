@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -13,17 +13,18 @@ class CreateManualClaimDto {
   @ApiProperty({
     description: '事实类型',
     example: 'certification',
+    maxLength: 50,
   })
   @IsString()
   @MaxLength(50)
   type!: string;
 
-  @ApiProperty({ example: '通过 IATF 16949 认证（2025 续证）' })
+  @ApiProperty({ example: '通过 IATF 16949 认证（2025 续证）', maxLength: 2000 })
   @IsString()
   @MaxLength(2000)
   statement!: string;
 
-  @ApiPropertyOptional({ description: '依据说明（证书编号、内部资料名等）' })
+  @ApiPropertyOptional({ description: '依据说明（证书编号、内部资料名等）', maxLength: 2000 })
   @IsOptional()
   @IsString()
   @MaxLength(2000)
@@ -37,7 +38,7 @@ class ResolveConflictDto {
 }
 
 /** 知识冲突行（KNW-004）；结构化 DTO 待冲突裁决 UI 定型。 */
-const CONFLICT_SCHEMA = { type: 'object', description: '知识冲突（两条矛盾 Claim + 状态）' };
+const CONFLICT_SCHEMA = { type: 'object', additionalProperties: true, description: '知识冲突（两条矛盾 Claim + 状态）' };
 
 @ApiTags('Claims')
 @ApiBearerAuth()
@@ -48,6 +49,7 @@ export class ClaimController {
 
   @Get('companies/:companyId/claims')
   @ApiOperation({ summary: '列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）' })
+  @ApiQuery({ name: 'status', required: false })
   @ApiListEnvelope(ClaimDto)
   async list(
     @Ctx() ctx: RequestContext,
@@ -105,6 +107,7 @@ export class ClaimController {
 
   @Get('companies/:companyId/conflicts')
   @ApiOperation({ summary: '知识冲突列表（KNW-004；?status=OPEN）' })
+  @ApiQuery({ name: 'status', required: false })
   @ApiListEnvelope(CONFLICT_SCHEMA)
   async listConflicts(
     @Ctx() ctx: RequestContext,

@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
@@ -33,7 +33,8 @@ export class CompanyController {
     summary: '提交官网，创建企业画像并触发理解（异步）',
     description: '支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。',
   })
-  @ApiHeader({ name: 'Idempotency-Key', required: false, description: '幂等键（客户端生成，如 uuid）' })
+  // name 必须与 @Headers('idempotency-key') 推断名精确一致（含大小写）才会合并成单个 required:false 参数
+  @ApiHeader({ name: 'idempotency-key', required: false, description: '幂等键（客户端生成，如 uuid）' })
   @ApiEnvelope(CompanyDto, { status: 202 })
   async create(
     @Ctx() ctx: RequestContext,
@@ -46,6 +47,8 @@ export class CompanyController {
 
   @Get()
   @ApiOperation({ summary: '列出当前 workspace 的企业画像（游标分页）' })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } })
+  @ApiQuery({ name: 'cursor', required: false })
   @ApiPageEnvelope(CompanyDto)
   async list(
     @Ctx() ctx: RequestContext,
@@ -71,6 +74,7 @@ export class CompanyController {
   @ApiOperation({ summary: '企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态' })
   @ApiEnvelope({
     type: 'object',
+    required: ['status', 'approvedClaims', 'pendingClaims', 'offerings', 'conflictsOpen'],
     properties: {
       status: { type: 'string' },
       approvedClaims: { type: 'integer' },

@@ -18,16 +18,16 @@ export class CompanyDto {
   @ApiProperty({ example: 'Shenzhen Acme Tech Co.' })
   name!: string;
 
-  @ApiPropertyOptional({ type: String, nullable: true, example: 'https://acme-tech.com' })
+  @ApiProperty({ type: String, nullable: true, example: 'https://acme-tech.com' })
   website!: string | null;
 
   @ApiProperty({ enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] })
   status!: string;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: '行业（理解工作流回填）' })
+  @ApiProperty({ type: String, nullable: true, description: '行业（理解工作流回填）' })
   industry!: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: '企业简介（抽取，可人工修正）' })
+  @ApiProperty({ type: String, nullable: true, description: '企业简介（抽取，可人工修正）' })
   summary!: string | null;
 
   @ApiProperty({
@@ -69,22 +69,24 @@ export class OfferingDto {
   @ApiProperty({ example: 'CNC 精密加工件' })
   name!: string;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiProperty({ type: String, nullable: true })
   description!: string | null;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: true,
     nullable: true,
     description: '结构化属性（moq/lead_time/materials/params/certifications…，仅来源文本明确出现的）',
   })
   attributes!: Record<string, unknown> | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: '溯源：来自哪个页面' })
+  @ApiProperty({ type: String, nullable: true, description: '溯源：来自哪个页面' })
   sourceUrl!: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: '来源页原文片段' })
+  @ApiProperty({ type: String, nullable: true, description: '来源页原文片段' })
   evidence!: string | null;
 
-  @ApiPropertyOptional({ type: Number, nullable: true })
+  @ApiProperty({ type: Number, nullable: true })
   confidence!: number | null;
 
   @ApiProperty({ format: 'date-time' })

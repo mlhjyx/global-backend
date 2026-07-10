@@ -1,6 +1,8 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { AckEventsDto, EventsController } from './events.controller';
+import { AckEventsDto, EVENT_ENVELOPE_SCHEMA, EventsController } from './events.controller';
 import { EventsService } from './events.service';
 
 /**
@@ -86,5 +88,32 @@ describe('EventsController — 统一响应信封（收口④）', () => {
     const res = await controller.ack(ctx as any, dto);
 
     expect(res).toEqual({ data: { acked: 3 } });
+  });
+});
+
+describe('EVENT_ENVELOPE_SCHEMA — 与 contracts/events/envelope.schema.json 镜像一致（防双源漂移）', () => {
+  const contract = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '../../../../packages/contracts/events/envelope.schema.json'),
+      'utf8',
+    ),
+  ) as { required: string[]; properties: Record<string, { enum?: string[] }> };
+
+  it('required 列表与事件契约一致', () => {
+    expect([...(EVENT_ENVELOPE_SCHEMA.required ?? [])].sort()).toEqual(
+      [...contract.required].sort(),
+    );
+  });
+
+  it('privacy_classification 枚举与事件契约一致', () => {
+    expect(EVENT_ENVELOPE_SCHEMA.properties.privacy_classification.enum).toEqual(
+      contract.properties.privacy_classification.enum,
+    );
+  });
+
+  it('属性键集覆盖事件契约全部属性（openapi 不少字段）', () => {
+    const contractKeys = Object.keys(contract.properties).sort();
+    const schemaKeys = Object.keys(EVENT_ENVELOPE_SCHEMA.properties).sort();
+    expect(schemaKeys).toEqual(contractKeys);
   });
 });

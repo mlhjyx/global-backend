@@ -12,10 +12,25 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const MAX_ACK_BATCH = 200;
 
-/** 事件 envelope（契约：packages/contracts/events/envelope.schema.json，键 snake_case）。 */
-const EVENT_ENVELOPE_SCHEMA = {
+/**
+ * 事件 envelope（契约：packages/contracts/events/envelope.schema.json，键 snake_case）。
+ * required/enum 必须与该 JSON Schema 镜像一致——events.controller.spec.ts 有一致性单测防漂移。
+ */
+export const EVENT_ENVELOPE_SCHEMA = {
   type: 'object',
   description: '事件 envelope（见 packages/contracts/events/envelope.schema.json）',
+  required: [
+    'event_id',
+    'event_type',
+    'schema_version',
+    'workspace_id',
+    'aggregate_type',
+    'aggregate_id',
+    'occurred_at',
+    'producer',
+    'privacy_classification',
+    'payload',
+  ],
   properties: {
     event_id: { type: 'string', format: 'uuid' },
     event_type: { type: 'string' },
@@ -27,8 +42,8 @@ const EVENT_ENVELOPE_SCHEMA = {
     producer: { type: 'string' },
     correlation_id: { type: 'string', nullable: true },
     causation_id: { type: 'string', nullable: true },
-    privacy_classification: { type: 'string' },
-    payload: { type: 'object' },
+    privacy_classification: { type: 'string', enum: ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'] },
+    payload: { type: 'object', additionalProperties: true },
   },
 };
 
@@ -38,7 +53,13 @@ const EVENT_ENVELOPE_SCHEMA = {
  * 伪造推送已达（YAGNI + 完整性）。
  */
 class AckEventsDto {
-  @ApiProperty({ description: '要 ACK 的 event_id 列表（envelope.event_id，uuid）', type: [String] })
+  @ApiProperty({
+    description: '要 ACK 的 event_id 列表（envelope.event_id，uuid）',
+    type: 'array',
+    items: { type: 'string', format: 'uuid' },
+    minItems: 1,
+    maxItems: MAX_ACK_BATCH,
+  })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_ACK_BATCH)
@@ -84,7 +105,7 @@ export class EventsController {
   @Post('ack')
   @HttpCode(200)
   @ApiOperation({ summary: 'ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）' })
-  @ApiEnvelope({ type: 'object', properties: { acked: { type: 'integer' } } })
+  @ApiEnvelope({ type: 'object', required: ['acked'], properties: { acked: { type: 'integer' } } })
   async ack(@Ctx() ctx: RequestContext, @Body() dto: AckEventsDto) {
     // sink 不透传：恒走 service 缺省的 pull sink（'saas'）。
     return envelope(await this.events.ack(ctx, dto.event_ids));

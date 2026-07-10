@@ -15,6 +15,7 @@ export class WhoamiController {
   @ApiOperation({ summary: '返回从 token 解出的调用上下文（user / workspace / roles）' })
   @ApiEnvelope({
     type: 'object',
+    required: ['userId', 'workspaceId', 'roles'],
     properties: {
       userId: { type: 'string' },
       workspaceId: { type: 'string', format: 'uuid' },

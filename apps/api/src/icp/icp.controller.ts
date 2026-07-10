@@ -11,7 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
@@ -49,6 +49,7 @@ export class IcpController {
 
   @Get('icps')
   @ApiOperation({ summary: '列出 ICP（可用 ?companyId= 过滤）' })
+  @ApiQuery({ name: 'companyId', required: false })
   @ApiListEnvelope(IcpDto)
   async list(
     @Ctx() ctx: RequestContext,
@@ -118,7 +119,7 @@ export class IcpController {
 
   @Delete('icp-rules/:ruleId')
   @ApiOperation({ summary: '删除验证规则' })
-  @ApiEnvelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })
+  @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
   async deleteRule(
     @Ctx() ctx: RequestContext,
     @Param('ruleId', ParseUUIDPipe) ruleId: string,

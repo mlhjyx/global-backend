@@ -86,7 +86,7 @@ export class RuleDto {
   @ApiProperty({ enum: OPERATORS }) operator!: string;
   @ApiProperty({ description: '操作数：标量或数组', oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'array', items: {} }] }) value!: unknown;
   @ApiProperty() weight!: number;
-  @ApiPropertyOptional({ type: String, nullable: true }) rationale!: string | null;
+  @ApiProperty({ type: String, nullable: true }) rationale!: string | null;
   @ApiProperty() version!: number;
 
   static from(r: {
@@ -127,6 +127,8 @@ export class BacktestSampleDto {
   domain?: string;
 
   @ApiProperty({
+    type: 'object',
+    additionalProperties: true,
     description: '已知的公司属性（industry/region/employee_count/...），规则据此确定性评估',
     example: { industry: 'metal fabrication', country: 'DE', employee_count: 120 },
   })
@@ -139,7 +141,7 @@ export class BacktestSampleDto {
 }
 
 export class RunBacktestDto {
-  @ApiProperty({ type: [BacktestSampleDto], minItems: 1 })
+  @ApiProperty({ type: [BacktestSampleDto], minItems: 1, maxItems: 200 })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(200)
@@ -151,9 +153,9 @@ export class RunBacktestDto {
 export class BacktestDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) icpId!: string;
-  @ApiProperty({ type: 'array', items: { type: 'object' }, description: '逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估' })
+  @ApiProperty({ type: 'array', items: { type: 'object', additionalProperties: true }, description: '逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估' })
   results!: unknown;
-  @ApiProperty({ description: 'matchHitRate / excludeCatchRate / unknownFieldRate / recommendation' })
+  @ApiProperty({ type: 'object', additionalProperties: true, description: 'matchHitRate / excludeCatchRate / unknownFieldRate / recommendation' })
   metrics!: unknown;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 
@@ -174,9 +176,9 @@ export class QueryPlanDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) icpId!: string;
   @ApiProperty({ enum: ['DRAFT', 'READY', 'EXECUTED'] }) status!: string;
-  @ApiProperty({ type: 'array', items: { type: 'object' }, description: '有序查询列表：source_class + filters + keywords + rationale + priority' })
+  @ApiProperty({ type: 'array', items: { type: 'object', additionalProperties: true }, description: '有序查询列表：source_class + filters + keywords + rationale + priority' })
   queries!: unknown;
-  @ApiPropertyOptional({ type: Number, nullable: true }) estimatedVolume!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) estimatedVolume!: number | null;
   @ApiProperty() version!: number;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 
@@ -209,7 +211,7 @@ export class UpdateIcpDto {
   @IsString()
   name?: string;
 
-  @ApiPropertyOptional({ description: '目标公司属性' })
+  @ApiPropertyOptional({ type: 'object', additionalProperties: true, description: '目标公司属性' })
   @IsOptional()
   @IsObject()
   companyAttributes?: Record<string, unknown>;

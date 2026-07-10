@@ -3,13 +3,13 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 const CLAIM_STATUSES = ['INGESTED', 'EXTRACTED', 'NEEDS_REVIEW', 'APPROVED', 'EXPIRED', 'REVOKED'];
 
 export class ClaimEvidenceDto {
-  @ApiPropertyOptional({ type: String, nullable: true, description: '来源 URL' })
+  @ApiProperty({ type: String, nullable: true, description: '来源 URL' })
   sourceUrl!: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: '来源原文片段' })
+  @ApiProperty({ type: String, nullable: true, description: '来源原文片段' })
   snippet!: string | null;
 
-  @ApiPropertyOptional({ type: Number, nullable: true })
+  @ApiProperty({ type: Number, nullable: true })
   confidence!: number | null;
 }
 
@@ -41,7 +41,7 @@ export class ClaimDto {
   @ApiProperty({ enum: CLAIM_STATUSES })
   status!: string;
 
-  @ApiPropertyOptional({ type: Number, nullable: true, example: 0.95 })
+  @ApiProperty({ type: Number, nullable: true, example: 0.95 })
   confidence!: number | null;
 
   @ApiProperty({ description: '乐观锁版本' })

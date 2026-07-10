@@ -9,7 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -19,7 +19,7 @@ import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
 
 /** Lead 行（六维分+队列）；完整字段结构化 DTO 待收口⑤ 一等 Signal 后定型。 */
-const LEAD_SCHEMA = { type: 'object', description: 'Lead（六维分+队列+裁决状态）' };
+const LEAD_SCHEMA = { type: 'object', additionalProperties: true, description: 'Lead（六维分+队列+裁决状态）' };
 
 class RejectLeadDto {
   @ApiPropertyOptional({ description: '拒绝原因（回流做评分质量反馈）' })
@@ -48,6 +48,7 @@ export class LeadController {
   @ApiEnvelope(
     {
       type: 'object',
+      required: ['accepted', 'eventId'],
       properties: {
         accepted: { type: 'boolean' },
         eventId: { type: 'string', format: 'uuid' },
@@ -61,6 +62,12 @@ export class LeadController {
 
   @Get('leads')
   @ApiOperation({ summary: 'Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）' })
+  // swagger 对裸 @Query 推断 required:true（无 CLI 插件），可选参数必须显式声明（同 events.controller）
+  @ApiQuery({ name: 'icpId', required: false })
+  @ApiQuery({ name: 'queue', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } })
+  @ApiQuery({ name: 'cursor', required: false })
   @ApiPageEnvelope(LEAD_SCHEMA)
   async list(
     @Ctx() ctx: RequestContext,
@@ -79,6 +86,7 @@ export class LeadController {
   @ApiOperation({ summary: '四队列计数（推荐/待确认/拒绝/禁联）' })
   @ApiEnvelope({
     type: 'object',
+    required: ['recommended', 'needs_review', 'rejected', 'suppressed'],
     properties: {
       recommended: { type: 'integer' },
       needs_review: { type: 'integer' },
