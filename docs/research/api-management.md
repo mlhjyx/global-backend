@@ -1,3 +1,5 @@
+> 【已收编 2026-07-10】本文件结论（Scalar 门户/code-first/单端点是伪需求）已收编进 [../architecture/current.md](../architecture/current.md) §7 与 ADR-009。保留作决策过程记录。
+
 # 统一接口管理：结论与方案
 
 ## 一句话结论

@@ -1,3 +1,5 @@
+> 【Implementation Record 2026-07-10】P1 中标发现 / P2 ICP→CPV / P3 招标 intent / P5 Schedule 已完成（PR #30/#31/#33/#38）；剩余 P4 SAM.gov Sources Sought。规格正文以「§8 审查修正」+ 现有代码为准，不再是 build-ready 待实施稿。
+
 # TED v3 招投标 Provider — 落地规格（build-ready）
 
 > 2026-07-08 定。给**下一个开工会话**的权威实施规格。API 事实**均为当日活体实测 + 独立对抗复验**(4 agent research→verify),用哪个数字/字段直接照抄本文。

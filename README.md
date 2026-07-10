@@ -1,45 +1,52 @@
-# Global — 出海企业 AI 全球客户开发与增长执行平台（后端）
+# Global — 出海企业 AI 全球客户开发与增长执行平台（获客后端）
 
-面向中国出海企业的 AI 全球客户开发与增长执行平台的**后端**。前端由独立团队开发，前后端通过接口（OpenAPI / AsyncAPI）对接。
+面向中国出海企业的 AI 全球客户开发与增长执行平台的**获客情报后端**（买家智能与机会资格引擎）：多源发现 → 身份解析 → 证据/权利 → 意向信号 → 决策人与邮箱验证 → 六维评分 → 合格线索交付。边界止于 `LeadQualifiedPackage`（ADR-001）；身份/Campaign/触达/QGO/归因归外部 SaaS 平台（另一团队开发，接口对接）。
 
-产品文档（权威基线，v3.0）：
-- `出海企业AI全球客户开发与增长执行平台_产品总纲与产品手册_v3.0_完整评审稿.docx` — 上游权威（定位 / 宪章 / QGO / 边界）
-- `出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx` — 实现基线（流程 / 状态机 / 数据 / API / ADR）
+## 文档入口（单一事实源体系）
 
-后端路线图见 [`docs/backend/roadmap-ai-acquisition.md`](docs/backend/roadmap-ai-acquisition.md)。
+| 问题 | 看哪里 |
+|---|---|
+| 产品是什么、边界、决策 | [docs/product-scope.md](docs/product-scope.md) |
+| 本仓架构（as-built + 缺口） | [docs/architecture/current.md](docs/architecture/current.md) |
+| 架构/产品决策注册表 | [docs/adr/registry.md](docs/adr/registry.md) |
+| 当前状态与待拍板 | [docs/status/current.md](docs/status/current.md) |
+| 收口 backlog 与路线 | [docs/roadmap/release-plan.md](docs/roadmap/release-plan.md)（历史见 [changelog](docs/roadmap/changelog.md)） |
+| 全平台顶层基底（L0/L1） | [docs/platform/](docs/platform/) 交付包（待批准评审稿） |
+| 研究归档 | [docs/research/](docs/research/)（含冻结的 v3.0 相关研究；两份 v3.0 Word 评审稿=研究综合稿，不再是权威基线） |
 
-## 技术栈
+> 跨会话工程上下文：[CLAUDE.md](CLAUDE.md)（Claude）/ [AGENTS.md](AGENTS.md)（Codex）。
 
-NestJS/Nx 模块化单体 · PostgreSQL(+pgvector) · Redis · Temporal · LiteLLM 模型网关 · OPA 策略 · Transactional Outbox。详见 PRD 第 11 部分与已锁定 ADR。
+## 技术栈（as-built）
 
-## 目录结构（PRD 11.5）
+NestJS/Nx 模块化单体（单 `apps/api`，含 Temporal worker 入口）· Prisma + PostgreSQL(+pgvector) 多租户 RLS · Redis · Temporal（3 workflow + 4 Schedule）· **new-api 模型中转站**（单一 OpenAI 兼容端点；非 LiteLLM）· Transactional Outbox · ToolBroker/source_policy/field_evidence/suppression。OPA 未上（确定性 PolicyPort 过渡）。API 门户：Scalar `/api/portal`，OpenAPI 由代码生成（`packages/contracts/openapi/openapi.json` 为唯一 REST 真值）。
+
+## 目录结构（as-built）
 
 ```
-apps/
-  api/                 NestJS BFF/API（当前：/health）
-  worker-ai/           AI tasks & retrieval（P1+）
-  worker-data/         provider / identity / crawling（P3+）
-packages/
-  contracts/           OpenAPI · AsyncAPI events · JSON Schemas
-  domain-*/            领域模型与应用服务（P1+，不依赖 Provider SDK）
-  adapters-*/          Provider 反腐层（P3+）
-docs/backend/          路线图与设计
-docker-compose.yml     本地 PG + Redis
+apps/api/            NestJS API + Temporal worker（模块：company/claim/icp/discovery/
+                     adapters/acquisition/intent/lead/contact/tools/model-gateway/relay/auth…）
+packages/db/         Prisma schema + migrations（RLS）
+packages/contracts/  OpenAPI 导出（openapi.json）· 事件 envelope · 通用约定
+docs/                文档树（见上表）
+infra/               searxng 等本地服务配置
+docker-compose.yml   PG + Redis + new-api + crawl4ai + searxng
 ```
 
 ## 本地起步
 
 ```bash
-pnpm install                              # 安装依赖
-pnpm infra:up                             # 起 PostgreSQL(+pgvector) 与 Redis
-pnpm --filter @global/db exec prisma migrate deploy   # 建表 + RLS
-temporal server start-dev --ip 127.0.0.1  # 起 Temporal dev server（UI :8233）
-
-# 两个进程：
-pnpm --filter @global/api build && pnpm --filter @global/api worker   # 理解工作流 worker
-pnpm api:dev                              # API（含 Outbox relay），/api/v1/health、文档 /api/docs
+pnpm install
+docker compose up -d                       # PG(pgvector) / Redis / new-api:3001 / crawl4ai:11235 / searxng:8081
+cd packages/db && DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \
+  pnpm exec prisma migrate deploy && pnpm exec prisma generate
+DATABASE_URL=... node apps/api/scripts/seed-taxonomy.mjs   # 词表种子（先 build）
+~/.temporalio/bin/temporal server start-dev --db-filename ~/temporal.db &   # :7233
+pnpm --filter @global/api build
+pnpm --filter @global/api start:dev        # API（含 Outbox relay），门户 /api/portal
+pnpm --filter @global/api worker           # Temporal worker（启动时幂等 seed + ensure 4 个 Schedule）
+cd apps/api && pnpm test                   # vitest（340+ 单测）
 ```
 
-冒烟：`pnpm --filter @global/db rls:check`（租户隔离）、`pnpm --filter @global/api mg:check`（模型网关）。
+Provider/采集/富集类改动**必须真实数据实测**（`node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 CLAUDE.md §8。
 
-> 需要 Node ≥ 20、pnpm、Docker、Temporal CLI（`curl -sSf https://temporal.download/cli.sh | sh`）。
+> 需要 Node ≥ 20、pnpm、Docker、Temporal CLI。

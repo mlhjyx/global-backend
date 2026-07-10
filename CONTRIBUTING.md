@@ -39,4 +39,4 @@ cd apps/api && node --import tsx scripts/verify-*.mts
 ## 合规红线（涉数据源/联系人）
 
 数据分级 🟢公司事实(可商用) / 🟡职能邮箱(ePrivacy) / 🔴人名·联系人(默认隔离 + LIA)。
-抓取守 robots/ToS；「法定公开 ≠ 可自由再分发」。详见 [buyer-intelligence-v3.md](docs/backend/buyer-intelligence-v3.md)。
+抓取守 robots/ToS；「法定公开 ≠ 可自由再分发」。详见 [buyer-intelligence-v3.md](docs/research/buyer-intelligence-v3.md)。

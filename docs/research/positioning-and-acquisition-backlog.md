@@ -1,3 +1,5 @@
+> 【定位职能已移交 2026-07-10】本文件的「定位/边界/分工」职能已由 [../product-scope.md](../product-scope.md) 取代（其中团队分工事实仍有效）；backlog 状态表已过时（TED/openFDA/水位修复等已完成，见 [../status/current.md](../status/current.md)）。保留作历史。
+
 # 定位、现阶段范围与获客 Backlog（权威梳理）
 
 > 2026-07-08 定。给团队和未来 Claude 会话的**唯一权威「我们是谁、现在做什么、还剩什么、谁的活」**。

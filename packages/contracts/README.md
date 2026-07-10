@@ -1,3 +1,5 @@
+> 【2026-07-10】**REST 契约唯一真值 = code-first 导出的 `openapi/openapi.json`**（NestJS decorators 生成）。本目录旧 `openapi.yaml`（3 paths）已过时，且下方脚本仍读取旧 YAML——收口④（见 docs/roadmap/release-plan.md）将删除旧 YAML 并把 lint/docs/mock/gen 切到 JSON；在此之前**勿以 YAML 或本 README 的 contract-first 描述为准**。
+
 # @global/contracts — 前后端接口契约（唯一事实源）
 
 前端与后端**都以本包为准**对接。后端照契约实现，前端照契约（+ Mock）开发。任何接口/事件变更先改这里，CI 做兼容性检查（ADR-017）。

@@ -1,3 +1,5 @@
+> 【SUPERSEDED 2026-07-10】本文件是顶层设计 **v1**，已被合流定稿取代：[../product-scope.md](../product-scope.md) + [../architecture/current.md](../architecture/current.md) + [../adr/registry.md](../adr/registry.md)。**其中「QGO/Opportunity B+C 同库共建」「全部业务真相在增长库」等表述已被 ADR-001（本仓止于 LeadQualifiedPackage，QGO 归 SaaS）改判**，勿再引用。保留仅作研究归档。
+
 # 出海企业 AI 全球客户开发与增长执行平台 · 总体顶层设计
 
 > 2026-07-10 v1。**本文是整个平台（不只获客后端）的顶层设计**：把 v3.0 两份 Word 评审稿（《产品总纲与产品手册》=why、《产品总体 PRD》=what，均待批准）消化成一份三人团队可执行的总体设计。
