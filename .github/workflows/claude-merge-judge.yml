@@ -39,7 +39,7 @@ jobs:
           fi
 
       - if: steps.gate.outputs.on == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

@@ -22,7 +22,7 @@ jobs:
     name: gitleaks 密钥扫描
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # 全历史，扫到被后续提交"覆盖"的历史泄漏
       - name: Gitleaks

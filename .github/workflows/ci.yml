@@ -21,7 +21,7 @@ jobs:
     name: build · typecheck · test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
       - uses: pnpm/action-setup@v4
@@ -50,7 +50,7 @@ jobs:
     name: contracts · drift · lint · breaking
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
 
