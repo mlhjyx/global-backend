@@ -18,16 +18,16 @@ export class CompanyDto {
   @ApiProperty({ example: 'Shenzhen Acme Tech Co.' })
   name!: string;
 
-  @ApiPropertyOptional({ nullable: true, example: 'https://acme-tech.com' })
+  @ApiPropertyOptional({ type: String, nullable: true, example: 'https://acme-tech.com' })
   website!: string | null;
 
   @ApiProperty({ enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] })
   status!: string;
 
-  @ApiPropertyOptional({ nullable: true, description: '行业（理解工作流回填）' })
+  @ApiPropertyOptional({ type: String, nullable: true, description: '行业（理解工作流回填）' })
   industry!: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: '企业简介（抽取，可人工修正）' })
+  @ApiPropertyOptional({ type: String, nullable: true, description: '企业简介（抽取，可人工修正）' })
   summary!: string | null;
 
   @ApiProperty({
@@ -69,7 +69,7 @@ export class OfferingDto {
   @ApiProperty({ example: 'CNC 精密加工件' })
   name!: string;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   description!: string | null;
 
   @ApiPropertyOptional({
@@ -78,13 +78,13 @@ export class OfferingDto {
   })
   attributes!: Record<string, unknown> | null;
 
-  @ApiPropertyOptional({ nullable: true, description: '溯源：来自哪个页面' })
+  @ApiPropertyOptional({ type: String, nullable: true, description: '溯源：来自哪个页面' })
   sourceUrl!: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: '来源页原文片段' })
+  @ApiPropertyOptional({ type: String, nullable: true, description: '来源页原文片段' })
   evidence!: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: Number, nullable: true })
   confidence!: number | null;
 
   @ApiProperty({ format: 'date-time' })
@@ -111,20 +111,4 @@ export class OfferingDto {
       createdAt: o.createdAt.toISOString(),
     };
   }
-}
-
-export class PageDto {
-  @ApiPropertyOptional({ nullable: true, description: '下一页游标；null 表示到底' })
-  nextCursor!: string | null;
-
-  @ApiProperty()
-  hasMore!: boolean;
-}
-
-export class CompanyListDto {
-  @ApiProperty({ type: [CompanyDto] })
-  data!: CompanyDto[];
-
-  @ApiProperty({ type: PageDto })
-  page!: PageDto;
 }

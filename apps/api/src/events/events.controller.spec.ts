@@ -57,3 +57,34 @@ describe('EventsController.ack — sink 锁死 pull sink（F）', () => {
     expect(ack.mock.calls[0]).toHaveLength(2);
   });
 });
+
+describe('EventsController — 统一响应信封（收口④）', () => {
+  const ctx = { workspaceId: 'ws-1', userId: 'u-1' };
+
+  it('GET /events 返回分页信封 { data, page: { next_cursor, has_more } }', async () => {
+    const envelopes = [{ event_id: 'aaaaaaaa-0000-0000-0000-000000000001' }];
+    const list = vi.fn(async () => ({ data: envelopes, nextCursor: '42', hasMore: true }));
+    const controller = new EventsController({ list } as unknown as EventsService);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await controller.list(ctx as any);
+
+    expect(res).toEqual({
+      data: envelopes,
+      page: { next_cursor: '42', has_more: true },
+    });
+  });
+
+  it('POST /events/ack 返回 { data: { acked } }', async () => {
+    const ack = vi.fn(async () => ({ acked: 3 }));
+    const controller = new EventsController({ ack } as unknown as EventsService);
+    const dto = Object.assign(new AckEventsDto(), {
+      event_ids: ['aaaaaaaa-0000-0000-0000-000000000001'],
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await controller.ack(ctx as any, dto);
+
+    expect(res).toEqual({ data: { acked: 3 } });
+  });
+});

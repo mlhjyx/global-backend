@@ -13,7 +13,7 @@
 | 认证 | `Authorization: Bearer <token>` —— token 由 **SaaS 平台侧签发**，本后端只校验并解出 `sub`（用户）、`workspace_id`（租户）、`roles`。开发环境用 base64url(JSON) 即可：`base64url({"sub":"u1","workspace_id":"<uuid>","roles":["admin"]})` |
 | 租户 | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数 |
 | 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED` |
-| 分页 | 游标式：`?limit=&cursor=` → `{ data, page: { nextCursor, hasMore } }` |
+| 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封 |
 | 幂等 | 创建类 POST 支持 `Idempotency-Key` 头（如 `POST /companies`），同 key 重放返回首次结果 |
 | 乐观锁 | 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，冲突返回 409 `VERSION_CONFLICT` |
 | 异步 | 长任务（理解/发现/评分）返回 `202`，前端轮询对应状态端点（见下） |

@@ -3,9 +3,12 @@ name: CI
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
 # 绿了才合。测试是纯单测（解析器/评分/身份解析等纯函数，无 DB/网络），故 CI 不需要 Postgres/服务。
 # 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 CLAUDE.md §5「真实数据不用 sandbox」），不进 CI。
+# contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
+# pull_request 加 labeled/unlabeled：打/摘 `breaking-change-approved` label 要重估 breaking 门。
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -42,3 +45,61 @@ jobs:
 
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
+
+  contracts:
+    name: contracts · drift · lint · breaking
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm --filter @global/db generate
+
+      - name: Build API
+        run: pnpm --filter @global/api build
+
+      # 导出不连任何服务：Prisma 懒连接、Temporal/relay 只在 app.init() 才启动，
+      # 假 DATABASE_URL 即可（本地同款验证过）。
+      - name: Export OpenAPI（code-first 单一真值）
+        run: node apps/api/dist/main.js --export-openapi
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+      - name: Drift check（提交的 openapi.json 必须与代码一致）
+        run: git diff --exit-code -- packages/contracts/openapi/openapi.json
+
+      - name: Spectral lint（error 级即失败）
+        run: pnpm --filter @global/contracts lint
+
+      # 破坏性变更拦截：对比 PR base 分支契约。确需破坏 → PR 打 `breaking-change-approved`
+      # label 放行（升主版本 + 迁移说明，见 packages/contracts/README.md）。
+      - name: Fetch base contract（仅 PR）
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "$GITHUB_BASE_REF"
+          if git show "origin/$GITHUB_BASE_REF:packages/contracts/openapi/openapi.json" > base-openapi.json 2>/dev/null; then
+            echo "HAS_BASE=1" >> "$GITHUB_ENV"
+          else
+            echo "base 分支无契约文件，跳过 breaking 检查"
+          fi
+
+      - name: oasdiff breaking（PR 且未标 breaking-change-approved）
+        if: >-
+          github.event_name == 'pull_request' &&
+          env.HAS_BASE == '1' &&
+          !contains(github.event.pull_request.labels.*.name, 'breaking-change-approved')
+        uses: oasdiff/oasdiff-action/breaking@024f6c399f9a21ada1addb0f9a36ce1bfac995f1 # v0.1.6
+        with:
+          base: base-openapi.json
+          revision: packages/contracts/openapi/openapi.json
+          fail-on: ERR

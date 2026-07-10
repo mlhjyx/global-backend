@@ -31,7 +31,7 @@ export class CreateRuleDto {
   @IsIn(OPERATORS)
   operator!: string;
 
-  @ApiProperty({ description: '操作数：标量或数组', example: ['automotive', 'aerospace'] })
+  @ApiProperty({ description: '操作数：标量或数组', oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'array', items: {} }], example: ['automotive', 'aerospace'] })
   value!: unknown;
 
   @ApiPropertyOptional({ default: 1, minimum: 0, description: 'NICE_TO_HAVE 计分权重（≥0；排除语义用 EXCLUSION 规则表达，负权重会静默污染归一化分母）' })
@@ -62,7 +62,7 @@ export class UpdateRuleDto {
   @IsIn(OPERATORS)
   operator?: string;
 
-  @ApiPropertyOptional({ description: '操作数：标量或数组' })
+  @ApiPropertyOptional({ description: '操作数：标量或数组', oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'array', items: {} }] })
   @IsOptional()
   value?: unknown;
 
@@ -84,9 +84,9 @@ export class RuleDto {
   @ApiProperty({ enum: KINDS }) kind!: string;
   @ApiProperty() field!: string;
   @ApiProperty({ enum: OPERATORS }) operator!: string;
-  @ApiProperty() value!: unknown;
+  @ApiProperty({ description: '操作数：标量或数组', oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'array', items: {} }] }) value!: unknown;
   @ApiProperty() weight!: number;
-  @ApiPropertyOptional({ nullable: true }) rationale!: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true }) rationale!: string | null;
   @ApiProperty() version!: number;
 
   static from(r: {
@@ -151,7 +151,7 @@ export class RunBacktestDto {
 export class BacktestDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) icpId!: string;
-  @ApiProperty({ description: '逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估' })
+  @ApiProperty({ type: 'array', items: { type: 'object' }, description: '逐样例判定：verdict(match/exclude/no_match/review) + 每条规则的评估' })
   results!: unknown;
   @ApiProperty({ description: 'matchHitRate / excludeCatchRate / unknownFieldRate / recommendation' })
   metrics!: unknown;
@@ -174,9 +174,9 @@ export class QueryPlanDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) icpId!: string;
   @ApiProperty({ enum: ['DRAFT', 'READY', 'EXECUTED'] }) status!: string;
-  @ApiProperty({ description: '有序查询列表：source_class + filters + keywords + rationale + priority' })
+  @ApiProperty({ type: 'array', items: { type: 'object' }, description: '有序查询列表：source_class + filters + keywords + rationale + priority' })
   queries!: unknown;
-  @ApiPropertyOptional({ nullable: true }) estimatedVolume!: number | null;
+  @ApiPropertyOptional({ type: Number, nullable: true }) estimatedVolume!: number | null;
   @ApiProperty() version!: number;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 
