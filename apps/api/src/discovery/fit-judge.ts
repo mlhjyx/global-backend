@@ -46,6 +46,40 @@ interface FitOutput {
   reasons: string[];
 }
 
+/**
+ * 资格门判定 → **Lead(workspace × icp × company)** 落库（CandidateAssessment）。两条判定路径共享
+ * （qualifyFitForRun 增量 + qualifyFitBacklog 存量），语义与写法必须一致，故抽出。
+ *  - fit 挂 Lead 而非 canonical：同 workspace 多 ICP 各自独立判、互不覆盖（本次重构的根因修复）。
+ *  - 只写 fit 判定；scores/status 由评分阶段负责，此处不覆盖（幂等：重判只刷 verdict + version）。
+ *  - 首判即建行：status 用 schema 默认（DISCOVERED），尚无 scores；queue 按 verdict 映射初始值
+ *    （mismatch→rejected，其余→needs_review）——否则评分跑完前的窗口里，明确不匹配的公司会挂在
+ *    人工待审队列误导使用者。评分阶段会按六维总分重算覆盖 queue。
+ */
+export async function upsertLeadFit(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  icpId: string,
+  canonicalCompanyId: string,
+  judgment: FitJudgment,
+): Promise<void> {
+  await tx.lead.upsert({
+    where: { workspaceId_icpId_canonicalCompanyId: { workspaceId, icpId, canonicalCompanyId } },
+    update: {
+      fitVerdict: judgment.verdict,
+      fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
+    create: {
+      workspaceId,
+      icpId,
+      canonicalCompanyId,
+      fitVerdict: judgment.verdict,
+      fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
+      queue: judgment.verdict === 'mismatch' ? 'rejected' : 'needs_review',
+    },
+  });
+}
+
 /** 事务内加载 ICP 摘要（供判定 prompt）。ICP 不存在时返回空对象（与既有行为一致）。 */
 export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string): Promise<IcpBrief | Record<string, never>> {
   const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { company: true } });

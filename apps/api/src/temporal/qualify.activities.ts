@@ -57,6 +57,19 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
           });
           if (!companies.length) return true;
           for (const c of companies) {
+            // 该 (icpId, company) 的既有 Lead——资格门① 写在这里（fitVerdict/fitReasons），是 CandidateAssessment。
+            // 权威 Fit 来自**本 ICP 的 Lead**（不再读 canonical，那是「上一个判定该公司的 ICP」的值 → 串 ICP 的根 bug）。
+            const existing = await tx.lead.findUnique({
+              where: {
+                workspaceId_icpId_canonicalCompanyId: {
+                  workspaceId: args.workspaceId,
+                  icpId: args.icpId,
+                  canonicalCompanyId: c.id,
+                },
+              },
+              select: { id: true, status: true, fitVerdict: true },
+            });
+            const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
             const result = scoreLead(
               {
                 name: c.name,
@@ -76,24 +89,15 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
               icpForScoring,
               // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
               // Reachability 硬底决定（此前 match 直接盖整个队列 → 推荐里大半联系不上）。
-              { authoritativeFit: c.fitVerdict as 'match' | 'weak' | 'mismatch' | null },
+              { authoritativeFit },
             );
             const queue = result.queue;
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
-            const scoreDetail = { ...result.detail, fitVerdict: c.fitVerdict ?? null };
-            const existing = await tx.lead.findUnique({
-              where: {
-                workspaceId_icpId_canonicalCompanyId: {
-                  workspaceId: args.workspaceId,
-                  icpId: args.icpId,
-                  canonicalCompanyId: c.id,
-                },
-              },
-              select: { id: true, status: true },
-            });
+            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit };
             // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
             const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
+            // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
             await tx.lead.upsert({
               where: {
                 workspaceId_icpId_canonicalCompanyId: {

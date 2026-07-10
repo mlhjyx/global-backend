@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
  * 存量对账下游阶段的「收缩集」谓词 + 排序，与处理水位。
  *
  * 修的根因（PR #20 对抗式复审 HIGH #1/#2）：下游四阶段（富集/信号/监控/联系人）的 WHERE 只按
- * `fitVerdict='match'`(+域名/结果依赖) 过滤，处理成功**不改变该谓词** → 扫描集永不收缩；叠加
+ * 「fit=match」(+域名/结果依赖) 过滤，处理成功**不改变该谓词** → 扫描集永不收缩；叠加
  * workflow 每 sweep 把游标复位为 null（无跨-sweep 持久化）+ id 随机 UUID → 每 sweep 重扫最前固定
  * N 家，预算位次后的 match 公司永久够不到。
  *
@@ -24,8 +24,8 @@ import { Prisma } from '@prisma/client';
  *
  * 防活锁不变式因此从「id>cursor 分页」换成「stamp-after-touch」：单 sweep 每行至多处理一次（stamp 使其
  * 离开后续轮次），轮次上限封顶单 sweep 总量。下游阶段不再需要 id 游标（args.cursor 被忽略；workflow 的
- * nextCursor 退化为「本批满 = 还有更多」哨兵）。资格门① qualifyFitBacklog 仍用 id 游标——它判定后 fitVerdict
- * 由 null 变值、永久离开过滤集、无冷却期复活，集单调收缩、无跑步机，id 游标在那里是对的。
+ * nextCursor 退化为「本批满 = 还有更多」哨兵）。资格门① qualifyFitBacklog 仍用 id 游标——它判定后本 ICP 的
+ * Lead.fitVerdict 由 null 变值、永久离开该 ICP 过滤集、无冷却期复活，集单调收缩、无跑步机，id 游标在那里是对的。
  */
 
 export type WatermarkField = 'lastEnrichedAt' | 'lastSignalAt' | 'lastWatchAt' | 'contactDiscoveryAttemptedAt';
@@ -80,14 +80,16 @@ export interface BacklogEligibleOpts {
 }
 
 /**
- * 下游阶段收缩集谓词：fit=match + 未抑制 (+域名 +无联系人) + 水位 null/过期。
- * 顶层键隐式 AND：`fit AND status [AND domain] [AND contacts] AND (水位null OR 水位stale)`。
+ * 下游阶段收缩集谓词：存在任一 ICP 的 match Lead + 未抑制 (+域名 +无联系人) + 水位 null/过期。
+ * fit=match 现挂 Lead（per ICP×公司）→ 用 `leads: { some: { fitVerdict:'match' } }` 关联子查询过滤：
+ * 富集/信号/监控/联系人是**公司级**处理（一次处理多 ICP 共享），故不按 ICP 限定，任一 ICP 判 match 即入选。
+ * 顶层键隐式 AND：`leads.some AND status [AND domain] [AND contacts] AND (水位null OR 水位stale)`。
  * 分页/进度不靠 id 游标，靠 stamp-after-touch（见模块头）+ backlogEligibleOrderBy 的 LRU 排序。
  */
 export function backlogEligibleWhere(opts: BacklogEligibleOpts): Prisma.CanonicalCompanyWhereInput {
   const cutoff = watermarkCutoff(opts.watermarkField, opts.now);
   return {
-    fitVerdict: 'match',
+    leads: { some: { fitVerdict: 'match' } },
     status: { not: 'SUPPRESSED' },
     ...(opts.requireDomain ? { domain: { not: null } } : {}),
     ...(opts.requireNoContacts ? { contacts: { none: {} } } : {}),

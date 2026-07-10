@@ -10,9 +10,11 @@ import {
 const NOW = new Date('2026-07-08T00:00:00.000Z');
 
 describe('backlogEligibleWhere（存量下游阶段收缩集谓词）', () => {
-  it('恒含 fit=match + 未抑制（漏斗资格门后的处理目标）', () => {
+  it('恒含 fit=match（任一 ICP 的 match Lead）+ 未抑制（漏斗资格门后的处理目标）', () => {
     const where = backlogEligibleWhere({ watermarkField: 'lastEnrichedAt', now: NOW });
-    expect(where.fitVerdict).toBe('match');
+    // fit 现挂 Lead（per ICP×公司）→ 用关联子查询过滤；公司级处理不按 ICP 限定，任一 ICP match 即入选。
+    expect(where.leads).toEqual({ some: { fitVerdict: 'match' } });
+    expect('fitVerdict' in where).toBe(false);
     expect(where.status).toEqual({ not: 'SUPPRESSED' });
   });
 

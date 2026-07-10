@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
-import { judgeFitCompany, loadIcpBrief } from '../discovery/fit-judge';
+import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import { CompanyDiscoveryQuery, EnrichmentResult, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
@@ -287,9 +287,10 @@ export function createDiscoveryActivities(deps: {
 
     /**
      * ICP 资格门（发现评测驱动，PRD 5.6 前置）：对本次 run 归一出的、尚未判定的
-     * canonical 公司逐家跑四门判别（材质/角色/工艺/商业模式），写 fit_verdict。
+     * canonical 公司逐家跑四门判别（材质/角色/工艺/商业模式），写 **Lead(本 run ICP × 公司)** 的 fit_verdict。
      * 召回与资格分离——挖掘负责"是不是真公司"，这里负责"是不是该 ICP 的客户"。
-     * 网络调用在事务外，落库在事务内。
+     * 判定即 CandidateAssessment：发现候选就建 Lead 行（status=DISCOVERED、无 scores），评分阶段再填 scores。
+     * fit 挂 Lead 而非 canonical —— 同 workspace 多 ICP 各自独立判，互不覆盖。网络调用在事务外，落库在事务内。
      */
     async qualifyFitForRun(args: {
       workspaceId: string;
@@ -309,7 +310,13 @@ export function createDiscoveryActivities(deps: {
         });
         const ids = [...new Set(links.map((l) => l.canonicalId))];
         const companies = await tx.canonicalCompany.findMany({
-          where: { id: { in: ids }, fitVerdict: null, status: { not: 'SUPPRESSED' } },
+          // 尚无「本 run ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）才判定——防重复判、
+          // 且以 icpId 限定 → 别的 ICP 判过的公司在本 ICP 仍会被判（修「后判 ICP 判不了」的漏斗断流）。
+          where: {
+            id: { in: ids },
+            status: { not: 'SUPPRESSED' },
+            NOT: { leads: { some: { icpId: args.icpId, fitVerdict: { not: null } } } },
+          },
           select: { id: true, name: true, domain: true, country: true, industry: true, attributes: true },
         });
         return { icpBrief, companies };
@@ -325,14 +332,7 @@ export function createDiscoveryActivities(deps: {
         verdicts[judgment.verdict] += 1;
         judged += 1;
         await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          tx.canonicalCompany.update({
-            where: { id: c.id },
-            data: {
-              fitVerdict: judgment.verdict,
-              fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
-              status: judgment.verdict === 'match' ? 'ENRICHED' : undefined,
-            },
-          }),
+          upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
       return { judged, verdicts };
@@ -349,13 +349,14 @@ export function createDiscoveryActivities(deps: {
     async enrichRun(args: {
       workspaceId: string;
       runId: string;
+      icpId: string;
     }): Promise<{ enriched: number; matched: number; provider: string | null }> {
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
       );
       if (!enrichers.length) return { enriched: 0, matched: 0, provider: null };
 
-      // 本 run 归一出、且过了 fit 门的公司
+      // 本 run 归一出、且过了本 run ICP 资格门（Lead.fitVerdict='match'）的公司
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = await tx.rawSourceRecord.findMany({
           where: { runId: args.runId },
@@ -367,7 +368,11 @@ export function createDiscoveryActivities(deps: {
         });
         const ids = [...new Set(links.map((l) => l.canonicalId))];
         return tx.canonicalCompany.findMany({
-          where: { id: { in: ids }, fitVerdict: 'match', status: { not: 'SUPPRESSED' } },
+          where: {
+            id: { in: ids },
+            status: { not: 'SUPPRESSED' },
+            leads: { some: { icpId: args.icpId, fitVerdict: 'match' } },
+          },
           select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
         });
       });
@@ -402,9 +407,11 @@ export function createDiscoveryActivities(deps: {
           // attributes 按 enricher key 命名空间合并（attributes.gleif.* / attributes.wikidata.*）
           const merged: Record<string, unknown> = { ...existing };
           for (const h of hits) merged[h.key] = h.result.attributes;
-          await tx.canonicalCompany.update({
-            where: { id: c.id },
-            data: { attributes: merged as never, version: { increment: 1 } },
+          // status=ENRICHED 在「真正富集成功」时写（fit 迁 Lead 后由此处负责其本义「已富集」，
+          // 供 ?status=ENRICHED 列表过滤）；updateMany + SUPPRESSED 守护：并发被抑制的公司不被翻回。
+          await tx.canonicalCompany.updateMany({
+            where: { id: c.id, status: { not: 'SUPPRESSED' } },
+            data: { attributes: merged as never, status: 'ENRICHED', version: { increment: 1 } },
           });
           for (const h of hits) {
             for (const [field, value] of Object.entries(h.result.attributes)) {
@@ -440,6 +447,7 @@ export function createDiscoveryActivities(deps: {
     async enrichSignalsRun(args: {
       workspaceId: string;
       runId: string;
+      icpId: string;
     }): Promise<{ enriched: number; matched: number; provider: string | null }> {
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
@@ -461,7 +469,12 @@ export function createDiscoveryActivities(deps: {
         });
         const ids = [...new Set(links.map((l) => l.canonicalId))];
         return tx.canonicalCompany.findMany({
-          where: { id: { in: ids }, fitVerdict: 'match', status: { not: 'SUPPRESSED' }, domain: { not: null } },
+          where: {
+            id: { in: ids },
+            status: { not: 'SUPPRESSED' },
+            domain: { not: null },
+            leads: { some: { icpId: args.icpId, fitVerdict: 'match' } },
+          },
           select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
         });
       });
@@ -533,7 +546,7 @@ export function createDiscoveryActivities(deps: {
      * 交给独立 intentSweep 持续盯产品/招聘/供应商招募/新闻页变更 → intent 事件 → 投影进 attributes.intent.*。
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
      */
-    async registerWatchesForRun(args: { workspaceId: string; runId: string }): Promise<{ candidates: number; registered: number }> {
+    async registerWatchesForRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{ candidates: number; registered: number }> {
       const intentSvc = new IntentProjectionService({ prisma: deps.prisma });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = await tx.rawSourceRecord.findMany({ where: { runId: args.runId }, select: { id: true } });
@@ -543,7 +556,12 @@ export function createDiscoveryActivities(deps: {
         });
         const ids = [...new Set(links.map((l) => l.canonicalId))];
         return tx.canonicalCompany.findMany({
-          where: { id: { in: ids }, fitVerdict: 'match', status: { not: 'SUPPRESSED' }, domain: { not: null } },
+          where: {
+            id: { in: ids },
+            status: { not: 'SUPPRESSED' },
+            domain: { not: null },
+            leads: { some: { icpId: args.icpId, fitVerdict: 'match' } },
+          },
           select: { id: true },
         });
       });
