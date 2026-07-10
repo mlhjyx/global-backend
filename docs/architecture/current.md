@@ -88,7 +88,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 
 - 保留：`/companies` `/icps` `/query-plans` `/discovery-runs` `/canonical-companies` `/leads` `/suppressions`（+补 `/events` 拉取、`/evidence` 查询、`/deletion-requests`）。
 - `/campaigns` `/outreach` `/qgos` `/opportunities` **不属于本仓，任何时候不在本仓新增**；改边界唯一途径=修订 ADR-001+三方书面确认。
-- 统一返回信封（Evidence/Quality/Rights/Freshness/Cost/Partial）：owner=C 定义+B 套用，并入收口④、R0 内定稿。
+- 统一返回信封 **✅ 收口④已定稿（PR #48）**：2xx 一律 `{data}`；分页 `{data, page:{next_cursor, has_more}}`；错误 `{error:{code,message,details?}}`；`/health*` 探针例外。协议键 snake_case、资源字段 camelCase；运行时与 swagger 声明同源（`common/envelope.ts` + `common/api-envelope.decorator.ts`）。契约唯一真值=code-first 导出的 `packages/contracts/openapi/openapi.json`（40 paths），CI contracts job 三道门（drift/spectral/oasdiff breaking + `breaking-change-approved` label 放行）。Evidence/Quality/Rights/Freshness/Cost/Partial 等信封扩展字段待收口⑤⑥随一等 Signal/权利词表补充。
 
 ## 8. as-built 缺口登记（已核验，8 项）
 
@@ -97,7 +97,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 | 1 | ~~Fit 挂错聚合根（canonical_company 而非 ICP×公司，多 ICP 互相覆盖）~~ | ~~schema.prisma:504~~ | ✅ **已修（PR #43）**：fit_verdict/fit_reasons 迁到 Lead（ICP×公司），共享 upsertLeadFit，真库真 RLS 实测两 ICP 独立互不覆盖 |
 | 2 | ToolBroker 非唯一闸门：主链直调 adapter；source_policy 未登记默认放行（fail-open）；BudgetLedger.open 零调用；allowedTools 全空；伪 workspace 'discovery' 令 AI trace 静默写入失败 | tool-broker.ts:97、discovery.activities.ts:99 | 收口② |
 | 3 | ~~Outbox 假发布：LeadQualified 等无 sink 仍标 published——无真实对外交付能力~~ | ~~outbox-relay.service.ts:143~~ | ✅ **已修（PR #46）**：事件注册表三分支 + `outbox_delivery` 账本 + `GET /events` 拉取/ACK + 快照 v1 契约；真库 RLS 实测 24 断言 + 对抗复审 13 findings 全修 |
-| 4 | OpenAPI 双事实源：38-path JSON vs 旧 3-path YAML，contracts 5 脚本全读旧 YAML | packages/contracts/package.json | 收口④ |
+| 4 | ~~OpenAPI 双事实源：38-path JSON vs 旧 3-path YAML，contracts 5 脚本全读旧 YAML~~ | ~~packages/contracts/package.json~~ | ✅ **已修（PR #48）**：旧 YAML 删除、5 脚本切 code-first openapi.json（40 paths）；统一信封定稿（2xx 一律 `{data}`/`{data,page:{next_cursor,has_more}}`，/health 探针例外）38 业务操作全套 + swagger 响应 schema 0 缺失；CI contracts job 三道门（drift=git status porcelain + spectral + oasdiff breaking，label 放行）；对抗复审 10 findings 全修 |
 | 5 | Intent 是 JSON 投影非一等事实；外部源按 ICP 重复拉取 | attributes.intent.events[] | 收口⑤ |
 | 6 | 实体解析单键选择非身份图（无 merge/split/回放） | identity.ts:45 | ADR-007；R2 落最小版（R3 新 provider 前置） |
 | 7 | 合规半落地：无一等 LIA/consent/Art.14/retention/deletion；roles 解析后未用；app_user 全表 CRUD；PII 无列级加密 | RLS migration :22 | 收口⑥ + roles→scopes 执行点归 B（R0） |
