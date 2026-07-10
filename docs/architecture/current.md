@@ -14,7 +14,7 @@ Modular Acquisition Core（C：Seller / ICP / Discovery / Identity / Signals / C
         ▼
 Temporal Workflows（编排；业务状态在 Postgres）
         ▼
-ToolBroker / Execution Gateway（唯一执行闸门——目标态，现状见 §8 缺口2）
+ToolBroker / Execution Gateway（唯一执行闸门——✅ 已收口，PR #51：13 工具 + fail-closed + 预算 + Trace）
         ▼
 ProviderAdapters / Anti-Corruption Layer
         ▼
@@ -95,7 +95,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 | # | 缺口 | 证据 | 处置 |
 |---|---|---|---|
 | 1 | ~~Fit 挂错聚合根（canonical_company 而非 ICP×公司，多 ICP 互相覆盖）~~ | ~~schema.prisma:504~~ | ✅ **已修（PR #43）**：fit_verdict/fit_reasons 迁到 Lead（ICP×公司），共享 upsertLeadFit，真库真 RLS 实测两 ICP 独立互不覆盖 |
-| 2 | ToolBroker 非唯一闸门：主链直调 adapter；source_policy 未登记默认放行（fail-open）；BudgetLedger.open 零调用；allowedTools 全空；伪 workspace 'discovery' 令 AI trace 静默写入失败 | tool-broker.ts:97、discovery.activities.ts:99 | 收口② |
+| 2 | ~~ToolBroker 非唯一闸门：主链直调 adapter；source_policy 未登记默认放行（fail-open）；BudgetLedger.open 零调用；allowedTools 全空；伪 workspace 'discovery' 令 AI trace 静默写入失败~~ | ~~tool-broker.ts:97、discovery.activities.ts:99~~ | ✅ **已修（PR #51，收口②完成）**：13 个 L0 工具收编 22 处直连出网（发现/富集/intent/采集/理解五链全经 `broker.invoke`，例外四类登记：robots.txt/DNS/模型网关/outbox webhook）；`sourcePolicy=required\|advisory\|none` 分层 fail-closed（未登记/无 reader 拒；用途门按本次调用 purpose 判）+ 8 治理域 seed（algolia.net 如实 REVIEWED_RESTRICTED）；预算真开账（run 开/关账 + sweep 阶段账引用计数 + **LLM 网关 reserve-then-settle**，settle 按 token 折算、截断显性化 run 转 PARTIAL）；allowedTools 4 任务填实 + taskContractId 绑定；ExecutionContext 贯穿灭 'discovery'/'taxonomy' 伪 workspace——AI trace 真库实证写入成功。真库 verify 15 断言 + TED E2E 全绿；对抗复审 11 findings 全修 |
 | 3 | ~~Outbox 假发布：LeadQualified 等无 sink 仍标 published——无真实对外交付能力~~ | ~~outbox-relay.service.ts:143~~ | ✅ **已修（PR #46）**：事件注册表三分支 + `outbox_delivery` 账本 + `GET /events` 拉取/ACK + 快照 v1 契约；真库 RLS 实测 24 断言 + 对抗复审 13 findings 全修 |
 | 4 | ~~OpenAPI 双事实源：38-path JSON vs 旧 3-path YAML，contracts 5 脚本全读旧 YAML~~ | ~~packages/contracts/package.json~~ | ✅ **已修（PR #48）**：旧 YAML 删除、5 脚本切 code-first openapi.json（40 paths）；统一信封定稿（2xx 一律 `{data}`/`{data,page:{next_cursor,has_more}}`，/health 探针例外）38 业务操作全套 + swagger 响应 schema 0 缺失；CI contracts job 三道门（drift=git status porcelain + spectral + oasdiff breaking，label 放行）；对抗复审 10 findings 全修 |
 | 5 | Intent 是 JSON 投影非一等事实；外部源按 ICP 重复拉取 | attributes.intent.events[] | 收口⑤ |
