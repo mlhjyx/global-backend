@@ -172,3 +172,12 @@
 - **对抗复审**（3 维 18 agent 逐条核验）：15 findings→确认 13（2 对重复=11 独立）**全修**，杀 2 误报。记档不阻塞：游标 volume 侧信道→后续不透明游标；LeadQualificationRevoked 撤销事件；internal command attempts 上限停靠。
 - **实测**：build 零错 · 435 vitest（RED→GREEN 有据）· 真库真 RLS `verify-outbox-delivery.mts` 24 断言全绿（app_user 非 superuser 硬 guard；路由/幂等/停靠/账本游标翻页不漏不重/跨租户 RLS/端到端 decide→快照→拉取→ajv 契约校验→无 PII/重复 decide 幂等）。
 - **部署注意**：relay 单写者约束（多副本前需 advisory lock）；存量已假发布旧事件不回补（thin payload 无快照可补）。
+
+## 2026-07-10 · 收口④ OpenAPI 单一真值 + 统一信封（PR #48，缺口#4 已修）
+
+- **统一响应信封定稿**（PRD 11.12/11.15 + contracts README 既有约定落地）：2xx 一律 `{data}`；分页 `{data, page:{next_cursor, has_more}}`（协议键 snake_case、资源字段 camelCase）；错误 `{error}`；`/health*` 探针例外。8 控制器 38 业务操作全套 + `@ApiEnvelope/@ApiPageEnvelope/@ApiListEnvelope`（与运行时 `common/envelope.ts` 同源），响应 schema 覆盖 23 缺失→0。
+- **双源消失**：删旧 3-path `openapi.yaml`；contracts lint/bundle/docs/mock/gen 5 脚本切 code-first 导出的 `openapi.json`（40 paths）；README 重写 code-first；`src/generated/api.ts` 从 JSON 重生成。顺手修 17 处 DTO 契约错型（`string|null` 联合被 swagger 推断成 object）+ create 202/201 错位。
+- **CI contracts job 三道门**：`--export-openapi`（无需 DB/Temporal，假 DATABASE_URL 实测可跑）→ drift（`git status --porcelain`，抓修改+untracked+删除态）→ spectral lint → oasdiff breaking（PR base 对比；`breaking-change-approved` label 放行——本 PR 即首例，v1 无消费方是定稿零成本窗口；`review:'false'` 关掉 action 默认把私有契约上传 oasdiff.com 的外发）。
+- **对抗复审**（3 维 find + 逐条对抗核验，14 agent）：11 findings → 10 确认全修 + 1 误报杀掉。HIGH×2：6 端点 13 个可选 @Query 被推断 required:true（prism mock 实测合法首页请求 422）→ 显式 @ApiQuery；Idempotency-Key 大小写不合并成双 header 矛盾参数 → 改小写合并。MEDIUM×4：事件 envelope schema 与 envelope.schema.json 双源漂移（补 10 required+枚举+3 条一致性单测）；恒在可空字段错标可缺失（@ApiProperty+nullable 正确建模）；22 处裸 `{type:'object'}` 致 codegen `Record<string,never>` 字段访问全编译错（补 additionalProperties:true）。LOW×4：drift 门 untracked 盲区、oasdiff 隐私外发、class-validator 约束进契约、INTEGRATION.md 旧示例。
+- **实测**（真实数据无 sandbox）：461 vitest 全绿（TDD RED→GREEN）· `verify-envelope.mts` 真 API+真 dev 库 18 断言全绿（1040 家 canonical 真数据游标续拉不重复、真事件 snake_case envelope、404/400 错误模型、真响应逐个过 openapi.json ajv 校验）· 契约复检（query required 清零/单 idempotency header/events 10 required+enum/裸 object 清零）· CI contracts job 首跑即绿（ubuntu 重导出与提交契约逐字节一致=跨平台确定性）。
+- **记档不阻塞**：Lead/CanonicalCompany 等松散 object 的结构化 DTO 待收口⑤/实体解析定型后收紧；信封扩展字段（Evidence/Quality/Rights/Freshness/Cost/Partial）随收口⑤⑥补。
