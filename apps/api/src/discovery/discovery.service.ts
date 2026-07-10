@@ -6,6 +6,7 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
 import { EmailGuesser, GuessResult } from './email-guesser';
 import { persistGuessedEmail } from './email-guess-persist';
+import { buildGuessTargets } from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
@@ -178,16 +179,13 @@ export class DiscoveryService {
     });
 
     const domain = loaded.domain;
-    // 已知具名邮箱（同域）→ 格式学习样本（命中率更高）。排除 status=RISKY——那是本器自己未证实的
-    // 猜测，拿它学格式会用错命名法污染后续候选（scraped 邮箱为 UNVERIFIED、SMTP 证实为 VALID，都保留）。
-    const knownSamples = loaded.contacts.flatMap((c) =>
-      c.contactPoints
-        .filter((p) => p.type === 'email' && p.status !== 'RISKY' && p.value.split('@')[1]?.toLowerCase() === domain.toLowerCase())
-        .map((p) => ({ fullName: c.fullName, email: p.value })),
+    // 格式学习样本（同域非-RISKY，全公司合并）+ 缺邮箱决策人（有界，默认 25）——与 backlog 阶段⑤b 共用
+    // 纯件 buildGuessTargets（复审 MEDIUM：消 service/backlog 逐字重复漂移 + 统一 per-company cap）。
+    const { knownSamples, emailless: targets, emaillessTotal } = buildGuessTargets(
+      loaded.contacts,
+      domain,
+      opts?.maxContacts,
     );
-    // 缺 email contact_point 的具名人 = 补全对象
-    const emailless = loaded.contacts.filter((c) => !c.contactPoints.some((p) => p.type === 'email'));
-    const targets = emailless.slice(0, opts?.maxContacts ?? 25);
 
     // 事务外：逐人 SMTP 猜测（adapter 单例不绑 tx）
     const guesser = new EmailGuesser(loaded.adapter);
@@ -204,14 +202,14 @@ export class DiscoveryService {
           suppressedEmails: loaded.suppressedEmails,
         },
       );
-      results.push({ contactId: c.id, fullName: c.fullName, result });
+      results.push({ contactId: c.contactId, fullName: c.fullName, result });
     }
 
     // 短事务②：落库
     const now = new Date();
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const summary = {
-        emaillessContacts: emailless.length,
+        emaillessContacts: emaillessTotal,
         attempted: targets.length,
         persisted: 0,
         verified: 0,

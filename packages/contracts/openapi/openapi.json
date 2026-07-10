@@ -1799,6 +1799,63 @@
         ]
       }
     },
+    "/api/v1/canonical-companies/{id}/guess-emails": {
+      "post": {
+        "description": "合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。",
+        "operationId": "DiscoveryController_guessEmails_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuessEmailsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "邮箱猜测结果（补全计数 + 逐决策人状态/落库态）"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
     "/api/v1/suppressions": {
       "post": {
         "operationId": "DiscoveryController_addSuppression_v1",
@@ -3513,6 +3570,41 @@
           "allowPersonalWithoutBasis": {
             "type": "boolean",
             "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
+          }
+        }
+      },
+      "GuessEmailsDto": {
+        "type": "object",
+        "properties": {
+          "lawfulBasis": {
+            "type": "string",
+            "enum": [
+              "legitimate_interest",
+              "consent",
+              "contract",
+              "legal_obligation"
+            ],
+            "description": "探测人名邮箱的合法性基础（GDPR Art.6）；猜出的都是人名邮箱"
+          },
+          "lawfulBasisRef": {
+            "type": "string",
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）"
+          },
+          "lawfulBasisNote": {
+            "type": "string",
+            "description": "备注"
+          },
+          "allowPersonalWithoutBasis": {
+            "type": "boolean",
+            "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
+          },
+          "maxContacts": {
+            "type": "number",
+            "description": "最多补全几个缺邮箱决策人（有界护栏，默认 25）"
+          },
+          "maxProbe": {
+            "type": "number",
+            "description": "每人最多探测几个候选（有界护栏，默认 8）"
           }
         }
       },

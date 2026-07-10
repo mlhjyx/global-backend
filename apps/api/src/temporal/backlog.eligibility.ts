@@ -28,7 +28,12 @@ import { Prisma } from '@prisma/client';
  * Lead.fitVerdict 由 null 变值、永久离开该 ICP 过滤集、无冷却期复活，集单调收缩、无跑步机，id 游标在那里是对的。
  */
 
-export type WatermarkField = 'lastEnrichedAt' | 'lastSignalAt' | 'lastWatchAt' | 'contactDiscoveryAttemptedAt';
+export type WatermarkField =
+  | 'lastEnrichedAt'
+  | 'lastSignalAt'
+  | 'lastWatchAt'
+  | 'contactDiscoveryAttemptedAt'
+  | 'emailGuessAttemptedAt';
 
 /**
  * 各水位的冷却期（处理后多久才重新入选）。分级依据数据时变性：
@@ -36,12 +41,14 @@ export type WatermarkField = 'lastEnrichedAt' | 'lastSignalAt' | 'lastWatchAt' |
  *  - signal（digital_footprint/structured_harvest 时变信号）：7d，与 attributes.<源>._ts 的刷新周期对齐。
  *  - watch（web_watch 注册基本一次性；失败/无 sitemap 的重试冷却）：14d 双周复核。
  *  - contact（多页渲染+LLM，最贵；无具名决策人属常态）：14d，让「尝试过但空」的公司歇 14d 再试。
+ *  - emailGuess（SMTP RCPT 探测，MX 准静态、探测贵）：30d 月度复核，别老锤 MX。
  */
 export const BACKLOG_WATERMARK_TTL_MS: Record<WatermarkField, number> = {
   lastEnrichedAt: 30 * 24 * 3600 * 1000,
   lastSignalAt: 7 * 24 * 3600 * 1000,
   lastWatchAt: 14 * 24 * 3600 * 1000,
   contactDiscoveryAttemptedAt: 14 * 24 * 3600 * 1000,
+  emailGuessAttemptedAt: 30 * 24 * 3600 * 1000, // SMTP 探测贵、别老锤 MX
 };
 
 /** 处理后的冷却截止时刻：水位 < 此值（或为 null）才重新入选。 */
@@ -58,6 +65,10 @@ const STALE_OR: Record<WatermarkField, (cutoff: Date) => Prisma.CanonicalCompany
     { contactDiscoveryAttemptedAt: null },
     { contactDiscoveryAttemptedAt: { lt: cutoff } },
   ],
+  emailGuessAttemptedAt: (cutoff) => [
+    { emailGuessAttemptedAt: null },
+    { emailGuessAttemptedAt: { lt: cutoff } },
+  ],
 };
 
 // 「最久未处理优先」排序：水位 ASC NULLS FIRST（从未处理的 NULL 行先于任何已处理行），id ASC 决胜。
@@ -66,6 +77,7 @@ const LRU_ORDER: Record<WatermarkField, Prisma.CanonicalCompanyOrderByWithRelati
   lastSignalAt: [{ lastSignalAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
   lastWatchAt: [{ lastWatchAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
   contactDiscoveryAttemptedAt: [{ contactDiscoveryAttemptedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
+  emailGuessAttemptedAt: [{ emailGuessAttemptedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
 };
 
 export interface BacklogEligibleOpts {
@@ -77,6 +89,8 @@ export interface BacklogEligibleOpts {
   requireDomain?: boolean;
   /** 联系人阶段：仅尚无任何联系人的公司（与水位冷却叠加，覆盖不相交场景）。 */
   requireNoContacts?: boolean;
+  /** 邮箱猜测阶段：仅**有缺 email 决策人**的公司（有联系人但至少一位无 email contact_point）。 */
+  requireEmaillessContact?: boolean;
 }
 
 /**
@@ -93,6 +107,10 @@ export function backlogEligibleWhere(opts: BacklogEligibleOpts): Prisma.Canonica
     status: { not: 'SUPPRESSED' },
     ...(opts.requireDomain ? { domain: { not: null } } : {}),
     ...(opts.requireNoContacts ? { contacts: { none: {} } } : {}),
+    // 有联系人但至少一位缺 email contact_point → 邮箱猜测的补全对象（与 requireNoContacts 互斥语义）。
+    ...(opts.requireEmaillessContact
+      ? { contacts: { some: { contactPoints: { none: { type: 'email' } } } } }
+      : {}),
     OR: STALE_OR[opts.watermarkField](cutoff),
   };
 }
