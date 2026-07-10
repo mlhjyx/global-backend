@@ -7,7 +7,7 @@
 | # | 收口 | 做什么 | 验收 |
 |---|---|---|---|
 | ✅① | **CandidateAssessment（完成，PR #43）** | Fit/原因/评分特征/水位从 canonical_company 迁到 ICP×公司维（演进现有 Lead 表或新表 + migration） | 同 workspace 两个 ACTIVE ICP 各自独立 Fit 不互相覆盖（回归测试）；backlog sweep 按 ICP 维取件 |
-| ② | **ExecutionContext + Broker 真收口** | ExecutionContext 贯穿；发现/富集/intent 主链全经 Broker；source_policy 未登记 fail-closed；BudgetLedger 真开账；allowedTools 填实；修伪 workspace trace 静默失败 | provider 无直连 HTTP（登记例外除外）；预算超限真拦截；AI trace 写入成功 |
+| ✅② | **ExecutionContext + Broker 真收口（完成，PR #51）** | ExecutionContext 贯穿；发现/富集/intent 主链全经 Broker；source_policy 未登记 fail-closed；BudgetLedger 真开账；allowedTools 填实；修伪 workspace trace 静默失败 | ✅ provider 无直连 HTTP（13 工具收编 22 处出网，业务层 grep 清零；例外四类登记：robots/DNS/模型网关/outbox webhook）；预算超限真拦截（Broker 工具门 + LLM 网关门真库实证；settle 按 token 折算，截断显性化 run 转 PARTIAL）；AI trace 写入成功（真库 15 断言：真写入 + 伪 workspace 负向对照 0 行；TED E2E 全绿；对抗复审 11 findings 全修） |
 | ✅③ | **LeadQualifiedPackage 真实交付（完成，PR #46）** | 快照 schema（v1，demand_proof 可空）入 contracts；`outbox_delivery` 按 sink 投递/重试/ACK/DLQ；`GET /events?cursor`（B 出端点）；**禁止无 handler 事件标 published** | ✅ 未注册事件 parked 不标 published；游标=交付账本行 id、任意重放 + ACK 幂等（真库 RLS 实测 24 断言）；LeadQualified 有 ajv Consumer Test（单测 + 真库端到端） |
 | ✅④ | **OpenAPI 单一真值 + 统一信封（完成，PR #48）** | 删旧 YAML；contracts 脚本改读 openapi.json；CI：导出+lint+oasdiff；contracts README 改 code-first；统一返回信封定稿 | ✅ 双源消失（YAML 删、5 脚本读 JSON）；破坏性变更 CI 拦截（contracts job：drift+spectral+oasdiff，`breaking-change-approved` label 放行，首跑即绿）；B 读路径 38 业务操作全套 `{data}`/`{data,page:{next_cursor,has_more}}` 信封（真库 18 断言 + 契约 ajv 校验） |
 | ⑤ | **一等 Signal + ingest-once** | `source_signal`（平台级零个人数据）+ 租户投影两层 + 状态机；TED/FDA 写 Signal；attributes.intent 降为投影；快照 scores 升 v2 填 demand_proof | 同一外部源同一时间窗**跨 workspace 只拉取一次**；信号可过期/可复算/可 backtest |

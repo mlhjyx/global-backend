@@ -2,13 +2,13 @@
 
 > 2026-07-10。当前状态的唯一权威（历史见 [../roadmap/changelog.md](../roadmap/changelog.md)）。
 
-## 真实具备（9 组，均真实数据实测；461 单测，40 REST paths）
+## 真实具备（9 组，均真实数据实测；494 单测，40 REST paths）
 
-企业理解（Claim/Evidence/冲突/人审）· ICP（规则/回测/查询计划/CPV/FDA 映射）· 发现（public_web/wikidata/OSM/名录/展会/TED/openFDA）· 富集（GLEIF/Wikidata/数字足迹/结构化收割）· 采集监控（4 表+增量 diff）· 买家信号（web_watch/TED 招标/510k 清关/决策人/smtp_self）· 资格（六维评分/Reachability 硬门/四队列/人工裁决）· **事件交付**（LeadQualified 快照 v1 契约/`outbox_delivery` 账本/`GET /events` 拉取+ACK/可选 HMAC webhook）· 平台地基（JWKS 座/RLS/Outbox/Temporal 4 Schedule/模型网关/ToolBroker 框架/API 门户 + **统一信封契约**：code-first openapi.json 单一真值、CI 契约三道门）。
+企业理解（Claim/Evidence/冲突/人审）· ICP（规则/回测/查询计划/CPV/FDA 映射）· 发现（public_web/wikidata/OSM/名录/展会/TED/openFDA）· 富集（GLEIF/Wikidata/数字足迹/结构化收割）· 采集监控（4 表+增量 diff）· 买家信号（web_watch/TED 招标/510k 清关/决策人/smtp_self）· 资格（六维评分/Reachability 硬门/四队列/人工裁决）· **事件交付**（LeadQualified 快照 v1 契约/`outbox_delivery` 账本/`GET /events` 拉取+ACK/可选 HMAC webhook）· 平台地基（JWKS 座/RLS/Outbox/Temporal 4 Schedule/模型网关/API 门户 + **统一信封契约**：code-first openapi.json 单一真值、CI 契约三道门 + **ToolBroker 唯一执行闸门**：13 个 L0 工具收编全部主链出网、source_policy fail-closed 分层、预算 reserve-then-settle 真拦截、ExecutionContext 贯穿真租户归账）。
 
-## as-built 缺口（8 项，已核验；#1 #3 #4 已修）
+## as-built 缺口（8 项，已核验；#1 #2 #3 #4 已修——R0 四刀全部完成）
 
-见 [../architecture/current.md](../architecture/current.md) §8。**#1 Fit 聚合根已修（PR #43，收口①完成）**；**#3 Outbox 假发布已修（PR #46，收口③完成）**——LeadQualified 现以快照 v1 契约经交付账本真实交付，未注册事件 parked 不再假发布；**#4 OpenAPI 双源已修（PR #48，收口④完成）**——统一信封定稿（`{data}`/`{data,page:{next_cursor,has_more}}`/`{error}`），旧 YAML 删除、契约唯一真值=code-first `openapi.json`，CI contracts job（drift+spectral+oasdiff breaking，label 放行）拦截破坏性变更。**商业试点前置=六项收口完成+封版定义满足**（见 [../roadmap/release-plan.md](../roadmap/release-plan.md)）；当前坦承：可直接商业试点程度尚未达到。
+见 [../architecture/current.md](../architecture/current.md) §8。**#1 Fit 聚合根已修（PR #43，收口①完成）**；**#2 Broker 非唯一闸门已修（PR #51，收口②完成）**——13 个 L0 工具收编 22 处直连出网（发现/富集/intent/采集/理解五链全经 `broker.invoke`，例外四类登记），source_policy `required|advisory|none` 分层 fail-closed + 用途门按调用 purpose 判，预算真开账（run/sweep 开关账 + LLM 网关 reserve-then-settle 按 token 折算 + 截断显性化 run 转 PARTIAL），伪 workspace 清零、AI trace 真库实证写入成功；**#3 Outbox 假发布已修（PR #46，收口③完成）**——LeadQualified 现以快照 v1 契约经交付账本真实交付，未注册事件 parked 不再假发布；**#4 OpenAPI 双源已修（PR #48，收口④完成）**——统一信封定稿（`{data}`/`{data,page:{next_cursor,has_more}}`/`{error}`），旧 YAML 删除、契约唯一真值=code-first `openapi.json`，CI contracts job（drift+spectral+oasdiff breaking，label 放行）拦截破坏性变更。**商业试点前置=六项收口完成+封版定义满足**（见 [../roadmap/release-plan.md](../roadmap/release-plan.md)）；当前坦承：可直接商业试点程度尚未达到（剩收口⑤⑥）。
 
 ## 与 PRD v3.0 的登记偏差（8 条，不再静默）
 
