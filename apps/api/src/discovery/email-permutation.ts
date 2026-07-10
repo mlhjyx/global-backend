@@ -47,7 +47,7 @@ const SURNAME_PARTICLES = new Set([
 
 /** 去称谓 token（"dr." / "dipl.-ing." 均可）。 */
 function isHonorific(token: string): boolean {
-  const parts = token.toLowerCase().split(/[.\-]/).filter(Boolean);
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
   return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
 }
 
