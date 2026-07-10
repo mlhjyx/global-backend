@@ -64,7 +64,8 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
             maxRecords: Math.min(Math.max(query.limit ?? 25, 50), NOTICE_CAP),
           },
         },
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
       );
       notices = res.data.awards ?? [];
     } catch (err) {

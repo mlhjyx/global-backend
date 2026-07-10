@@ -198,4 +198,24 @@ describe('ToolBroker — source_policy fail-closed（收口②：未登记不放
     await broker.invoke('searxng.search', { q: 'x' }, { workspaceId: 'w' });
     expect(reader).not.toHaveBeenCalled();
   });
+
+  it('ctx.purpose：用途门按**本次调用用途**判——域策略只允许 enrichment 时，discovery 调用被拒（TED E2E 抓到的回归）', async () => {
+    const t = requiredTool('api.example');
+    t.compliance.allowedPurpose = ['discovery', 'enrichment']; // 工具声明多用途
+    const { broker } = makeBroker(t, {
+      sourcePolicyReader: async () => ({ suspended: false, allowedPurpose: ['enrichment'] }),
+    });
+    // 不传 purpose → 工具声明集任一交集（enrichment 命中）→ 放行（多用途工具既有语义）
+    await expect(broker.invoke('gov.source', {}, { workspaceId: 'w' })).resolves.toBeDefined();
+    // 传 purpose='discovery' → 域策略不允许该用途 → 拒
+    await expect(broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: 'discovery' })).rejects.toThrow(/purpose/);
+    // 传 purpose='enrichment' → 放行
+    await expect(broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: 'enrichment' })).resolves.toBeDefined();
+  });
+
+  it('ctx.purpose 不在工具声明集内 → 拒（工具不得被用于未声明用途）', async () => {
+    const t = requiredTool('api.example');
+    const { broker } = makeBroker(t, { sourcePolicyReader: async () => ({ suspended: false }) });
+    await expect(broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: 'outreach' })).rejects.toThrow(/purpose/);
+  });
 });

@@ -91,14 +91,21 @@ export class ToolBroker implements ExecutionBroker {
    *  - required：无 reader → policy_unavailable；未登记 → unregistered（一律拒，fail-closed）。
    *  - advisory：无 reader / 未登记 → 放行（robots/SSRF/DAT-011 兜底）；**登记即强制**。
    *  - none：不查。
+   * 用途门：传了 purpose（本次调用用途）→ 域策略必须允许**该用途**（且工具须声明它）；
+   * 缺省 → 工具声明集任一交集（多用途工具的既有语义，避免只登记单用途的域被误拒）。
    */
   async checkSourcePolicy(
     toolId: string,
     domain: string,
+    purpose?: string,
   ): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }> {
     const tool = this.registry.get(toolId);
     const mode = tool?.compliance.sourcePolicy ?? 'none';
     if (mode === 'none') return { allowed: true };
+    // 调用用途必须在工具声明集内（工具不得被用于未声明的用途）
+    if (purpose && tool && !tool.compliance.allowedPurpose.includes(purpose)) {
+      return { allowed: false, reason: 'purpose_not_allowed' };
+    }
     if (!this.deps.sourcePolicyReader) {
       return mode === 'required' ? { allowed: false, reason: 'policy_unavailable' } : { allowed: true };
     }
@@ -107,8 +114,11 @@ export class ToolBroker implements ExecutionBroker {
       return mode === 'required' ? { allowed: false, reason: 'unregistered' } : { allowed: true };
     }
     if (policy.suspended) return { allowed: false, reason: 'suspended' };
-    if (policy.allowedPurpose && tool && !policy.allowedPurpose.some((p) => tool.compliance.allowedPurpose.includes(p))) {
-      return { allowed: false, reason: 'purpose_not_allowed' };
+    if (policy.allowedPurpose && tool) {
+      const effective = purpose ? [purpose] : tool.compliance.allowedPurpose;
+      if (!policy.allowedPurpose.some((p) => effective.includes(p))) {
+        return { allowed: false, reason: 'purpose_not_allowed' };
+      }
     }
     return { allowed: true };
   }
@@ -143,7 +153,7 @@ export class ToolBroker implements ExecutionBroker {
         }
         // advisory：无域可查 → 交给 robots/SSRF/DAT-011 兜底
       } else {
-        const chk = await this.checkSourcePolicy(toolId, domain);
+        const chk = await this.checkSourcePolicy(toolId, domain, ctx.purpose);
         if (!chk.allowed) {
           const detail =
             chk.reason === 'suspended'

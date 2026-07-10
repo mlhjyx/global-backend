@@ -63,6 +63,12 @@ export interface ToolContext {
   runId?: string;
   taskContractId?: string; // 发起此调用的 AI Task（用于 allowedTools 校验与 Trace）
   correlationId?: string;
+  /**
+   * 本次调用的用途（'discovery' | 'enrichment' …）。source_policy 用途门优先按它判
+   * （域策略必须允许**这次**的用途）；缺省退回工具声明的 allowedPurpose 任一交集
+   * （多用途工具如 smtp.rcpt_probe 的既有语义）。
+   */
+  purpose?: string;
   /** Broker 查过的 source_policy 快照（工具据此避免重复查库）。 */
   sourcePolicySnapshot?: Record<string, unknown>;
 }
@@ -87,7 +93,7 @@ export type SourcePolicyDenyReason = 'suspended' | 'purpose_not_allowed' | 'unre
  * 所有原始出网（HTTP/SMTP）必须经 invoke —— 白名单/source_policy/预算/限流/Trace 在闸门内强制。
  */
 export interface ExecutionBroker {
-  checkSourcePolicy(toolId: string, domain: string): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }>;
+  checkSourcePolicy(toolId: string, domain: string, purpose?: string): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }>;
   invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
 }
 

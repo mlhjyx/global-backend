@@ -71,7 +71,8 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
             maxRecords: Math.min(Math.max(query.limit ?? 50, 50), RECORD_CAP),
           },
         },
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
       );
       establishments = res.data.establishments ?? [];
     } catch (err) {
