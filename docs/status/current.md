@@ -6,9 +6,9 @@
 
 企业理解（Claim/Evidence/冲突/人审）· ICP（规则/回测/查询计划/CPV/FDA 映射）· 发现（public_web/wikidata/OSM/名录/展会/TED/openFDA）· 富集（GLEIF/Wikidata/数字足迹/结构化收割）· 采集监控（4 表+增量 diff）· 买家信号（web_watch/TED 招标/510k 清关/决策人/smtp_self）· 资格（六维评分/Reachability 硬门/四队列/人工裁决）· 平台地基（JWKS 座/RLS/Outbox/Temporal 4 Schedule/模型网关/ToolBroker 框架/API 门户）。
 
-## as-built 缺口（8 项，已核验）
+## as-built 缺口（8 项，已核验；#1 已修）
 
-见 [../architecture/current.md](../architecture/current.md) §8。最重（P0）：**缺口 3 Outbox 假发布**——LeadQualified 当前无真实对外交付能力。**商业试点前置=六项收口完成+封版定义满足**（见 [../roadmap/release-plan.md](../roadmap/release-plan.md)）；当前坦承：可直接商业试点程度尚未达到。
+见 [../architecture/current.md](../architecture/current.md) §8。**#1 Fit 聚合根已修（PR #43，收口①完成）**。最重（P0）：**缺口 3 Outbox 假发布**——LeadQualified 当前无真实对外交付能力。**商业试点前置=六项收口完成+封版定义满足**（见 [../roadmap/release-plan.md](../roadmap/release-plan.md)）；当前坦承：可直接商业试点程度尚未达到。
 
 ## 与 PRD v3.0 的登记偏差（8 条，不再静默）
 
