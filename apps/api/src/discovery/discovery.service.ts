@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
+import { EmailGuesser, GuessResult } from './email-guesser';
+import { persistGuessedEmail } from './email-guess-persist';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
@@ -139,6 +141,106 @@ export class DiscoveryService {
         include: { contactPoints: true },
       });
       return { contacts, skippedSuppressed };
+    });
+  }
+
+  /**
+   * 选项 B · P0.3：对某公司**缺邮箱的具名决策人**批量猜测邮箱并落库。
+   * 复用 discoverContacts 纪律：短事务①载入（公司+联系人+已知样本+禁联）→ **事务外**网络
+   * （EmailGuesser 逐人 SMTP 验证，可数分钟，绝不持 DB 事务）→ 短事务②落库（persistGuessedEmail）。
+   *
+   * 🔴 合规：猜出的都是人名邮箱，需 lawfulBasis 或显式开关（否则 guesser 返回 blocked、零探测）；
+   *    RISKY 未证实猜测落库但 allowedActions 不含 outreach；suppression 命中不落。
+   */
+  async guessEmailsForCompany(
+    ctx: RequestContext,
+    companyId: string,
+    opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean; maxContacts?: number; maxProbe?: number },
+  ) {
+    const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.canonicalCompany.findUnique({ where: { id: companyId } });
+      if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      if (company.status === 'SUPPRESSED') {
+        throw new ConflictException({ error: { code: 'SUPPRESSED', message: 'company suppressed; email guessing blocked' } });
+      }
+      if (!company.domain) {
+        throw new ConflictException({ error: { code: 'NO_DOMAIN', message: 'company has no domain; cannot guess emails' } });
+      }
+      const adapters = await this.providers.routeEmailVerification(tx as never);
+      if (!adapters.length) {
+        throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
+      }
+      const contacts = await tx.canonicalContact.findMany({ where: { companyId }, include: { contactPoints: true } });
+      const suppressedEmails = new Set(
+        (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+      );
+      return { company, domain: company.domain, adapter: adapters[0], contacts, suppressedEmails };
+    });
+
+    const domain = loaded.domain;
+    // 已知具名邮箱（同域）→ 格式学习样本（命中率更高）
+    const knownSamples = loaded.contacts.flatMap((c) =>
+      c.contactPoints
+        .filter((p) => p.type === 'email' && p.value.split('@')[1]?.toLowerCase() === domain.toLowerCase())
+        .map((p) => ({ fullName: c.fullName, email: p.value })),
+    );
+    // 缺 email contact_point 的具名人 = 补全对象
+    const emailless = loaded.contacts.filter((c) => !c.contactPoints.some((p) => p.type === 'email'));
+    const targets = emailless.slice(0, opts?.maxContacts ?? 25);
+
+    // 事务外：逐人 SMTP 猜测（adapter 单例不绑 tx）
+    const guesser = new EmailGuesser(loaded.adapter);
+    const results: { contactId: string; fullName: string; result: GuessResult }[] = [];
+    for (const c of targets) {
+      const result = await guesser.guess(
+        { fullName: c.fullName, domain, knownSamples },
+        {
+          workspaceId: ctx.workspaceId,
+          lawfulBasis: opts?.lawfulBasis,
+          allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
+          actor: ctx.userId,
+          maxProbe: opts?.maxProbe,
+          suppressedEmails: loaded.suppressedEmails,
+        },
+      );
+      results.push({ contactId: c.id, fullName: c.fullName, result });
+    }
+
+    // 短事务②：落库
+    const now = new Date();
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const summary = {
+        emaillessContacts: emailless.length,
+        attempted: targets.length,
+        persisted: 0,
+        verified: 0,
+        unverified: 0,
+        blocked: 0,
+        perContact: [] as { fullName: string; status: GuessResult['status']; email: string | null; pointStatus: string | null }[],
+      };
+      for (const r of results) {
+        const out = await persistGuessedEmail(tx, {
+          workspaceId: ctx.workspaceId,
+          contactId: r.contactId,
+          result: r.result,
+          suppressedEmails: loaded.suppressedEmails,
+          lawfulBasis: opts?.lawfulBasis,
+          now,
+        });
+        if (out.persisted) {
+          summary.persisted += 1;
+          if (out.status === 'VALID') summary.verified += 1;
+          else summary.unverified += 1;
+        }
+        if (r.result.status === 'blocked') summary.blocked += 1;
+        summary.perContact.push({
+          fullName: r.fullName,
+          status: r.result.status,
+          email: out.email ?? null,
+          pointStatus: out.status ?? null,
+        });
+      }
+      return summary;
     });
   }
 

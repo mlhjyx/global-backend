@@ -74,9 +74,13 @@
 **P0 —— 最高 ROI，直接补痛点，复用 smtp_self**（不接任何新外部源）
 1. ✅ **邮箱模式排列生成器**（途径 B，已落地）：`discovery/email-permutation.ts`（纯：姓名解析去称谓/贵族前缀 + 德语标准/去音标双音译变体 + 10 种 B2B 命名法按先验排序、去重、有界）→ `discovery/email-guesser.ts`（编排：**合规门一次判** → 逐候选经 `SelfHostedEmailVerifier`(ToolBroker) SMTP 验证 → 命中 VALID 即停、域级事实一次短路 → 置信打分）。把「有名字没邮箱」变成「有可用邮箱」，零新源。
 2. ✅ **公司邮箱格式学习**（途径 C，已落地）：`discovery/email-format-learning.ts`（纯：从站内已知具名邮箱多样本投票反推命名法 → 套用到其他决策人，置信压过盲排列；与排列器共享 `KNOWN_PATTERNS`/`buildLocalPart`，DRY）。
-3. ⬜ 决策人档案模型 + 跨源身份解析（name-match）+ field_evidence + 合规隔离（部分复用既有 `contact-persist.ts` 的 person.profile 留痕；档案落库接线待做）。
+3. ✅ **落库接线**（P0.3，已落地）：`discovery/email-guess-persist.ts`（`guessedEmailWritePlan` 纯决策 + `persistGuessedEmail` 写 `contact_point`(status VALID/RISKY + verifiedAt) + `field_evidence`(email.guess 证据)）+ service `guessEmailsForCompany`（对公司缺邮箱具名决策人批量猜测并落库，照 discoverContacts 的「载入→事务外网络→落库」纪律）。🔴 只落 verified/unverified；**RISKY 猜测 allowedActions 不含 outreach**（不可群发）；suppression 不落；人名邮箱 personal_data 隔离 + lawful_basis 留痕。**遗留**：跨源身份解析（name-match 合并多源同一人）+ 接入 discovery/backlog 主链自动触发。
 
-> **已落地实测**（`scripts/verify-email-guess.mts`，真库真爬真 SMTP、无 sandbox）：searxng 发现德国泵企 → crawl4ai 抽真决策人「Ruud Croonen — Geschäftsführer」（无公开邮箱）→ 排列真产 `ruud.croonen@/r.croonen@/ruudcroonen@/rcroonen@/ruud@osna-pumpen.de` → 经 ToolBroker 真 SMTP → 诚实降级 `unverified`（`mail_from_rejected`，**不谎报 VALID**）。40 单测（排列/格式学习/编排三模块，含合规 BLOCKED、catch-all/反枚举/no-MX 短路、格式学习优先、suppression 跳过）。真数据反抓并加固：`mail_from_rejected` = 会话级事实，一次即短路。**遗留**：档案落库接线 + 接入 discovery/backlog 主链（下一步）。
+> **已落地实测**（真库真爬真 SMTP、无 sandbox）：
+> - 猜测（`scripts/verify-email-guess.mts`）：searxng 发现德国泵企 → crawl4ai 抽「Ruud Croonen — Geschäftsführer」（无公开邮箱）→ 排列真产 `ruud.croonen@/r.croonen@/…osna-pumpen.de` → 经 ToolBroker 真 SMTP → 诚实降级 `unverified`（`mail_from_rejected`，**不谎报 VALID**）。真数据反抓并加固 `mail_from_rejected`=会话级事实一次短路。
+> - 落库（`scripts/verify-email-guess-persist.mts`）：seed 缺邮箱决策人 → `guessEmailsForCompany` → 库内读回 `contact_point: ruud.croonen@osna-pumpen.de status=RISKY`、`field_evidence[email.guess]` allowedActions=`["display","match"]`（无 outreach）、personal_data=true、lawful_basis 已记录。
+>
+> 质量：**50 单测**（排列/格式学习/编排/落库四模块，含合规 BLOCKED、catch-all/反枚举/no-MX/mail-from-rejected 短路、格式学习优先、suppression 跳过、先拒收后域级事实的 HIGH 回归、落库 VALID/RISKY/suppressed 分支）+ 对抗式复审（HIGH+2MEDIUM+LOW 全修带回归）。
 
 **P1 —— 扩身份途径（免费绿源优先）**
 4. **专利 inventor**（USPTO PatentsView / EPO OPS）—— 绿事实、具名工程决策人。
