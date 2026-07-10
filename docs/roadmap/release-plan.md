@@ -18,6 +18,13 @@
 满足后**封版为可消费服务**：① 输入 Company/Offering/ICP 后一个受控 Run 产出 Candidate Batch；② 每个公司/联系人带 Canonical ID、来源、Evidence、权利、时效、验证状态、成本和未知项；③ 候选带分解评分与 Reason Code；④ 用户可接受/拒绝/纠正，反馈进评测且不跨租户泄露；⑤ 支持取消/重试/Partial/预算停止/Provider 降级/公平扫描（无饿死）；⑥ OpenAPI、事件、进度、RLS、删除、审计、测试、SLO 完整；⑦ 一组真实企业样本 E2E/UAT；⑧ **输出合同被下一能力真实消费，而不是停在数据库里**。
 裁决：Docling/Langfuse **不进**封版 Gate（按需后置）；Golden Set 三任务在 R2。
 
+## 1.6 选项 B —— 决策人多途径发现与联系方式补全（业务价值线，与收口并行）
+
+用户痛点：官网能拿决策人姓名+职务，缺「本人可用邮箱」。方案=多途径交叉 + 邮箱排列验证 + 融合档案，**不局限单一途径、不碰 LinkedIn 直爬红线**。完整立项 spec（9 条身份途径 + 5 条联系方式途径 + 融合架构 + 分期 backlog + 合规红线 + 诚实能力预期）见 **[decision-maker-multi-source-spec.md](decision-maker-multi-source-spec.md)**。
+- **P0**（最省、最对痛点，复用 smtp_self）：✅ 邮箱模式排列生成器 + ✅ 公司邮箱格式学习（`discovery/email-permutation.ts`·`email-format-learning.ts`·`email-guesser.ts`，40 单测 + 真数据实测，见 spec）；⬜ 决策人档案落库接线 + 接入主链（下一步）。
+- **P1**（免费绿源）：专利 inventor · 公司注册处董事 · 商标代表。
+- **P2**（灰/谨慎）：LinkedIn 经搜索 · 新闻 PR · 展会演讲者。
+
 ## 2. R0-R3 路线（与交付包 R0-R5 映射：其 R0=本 R0，R1 获客 Pilot=本 R0/R1 封版，R2 Campaign=本 R1 SaaS 侧，R3 QGO Pilot=本 R1 末~R2，R4/R5=本 R3+）
 
 | 阶段 | 本仓 C+Claude | B | A / SaaS 侧 | 退出条件（标注归属） |
