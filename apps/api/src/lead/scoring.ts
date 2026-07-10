@@ -75,7 +75,7 @@ function companyAttributes(c: CompanyForScoring): Record<string, unknown> {
 export interface ScoreLeadOpts {
   nowMs?: number;
   /**
-   * ICP 资格门（LLM 四门）的权威 Fit 判定（canonical.fit_verdict）。存在时**只覆盖 Fit 维**——
+   * ICP 资格门（LLM 四门）的权威 Fit 判定（Lead.fit_verdict，per ICP×公司）。存在时**只覆盖 Fit 维**——
    * 当前 ICP 规则值与 canonical 属性存在语言/词表不一致（"制造业" vs "metal fabrication"，
    * 词表归一欠账），确定性规则 Fit 会误判；资格门更可靠。但队列归属仍走六维总分 + 阈值 +
    * Reachability 硬底——此前 fitVerdict=match 直接盖整个队列，推荐队列里 9/11 家一个联系人

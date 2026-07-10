@@ -42,7 +42,9 @@ export class LeadService {
         },
         take: opts.limit + 1,
         ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-        orderBy: [{ totalScore: 'desc' }, { id: 'asc' }],
+        // nulls last：fit 门先建的 Lead 尚无分（totalScore=null），PG 默认 DESC NULLS FIRST 会把
+        // 未评分行顶到列表最前——显式压到最后，评分完成后自然按分排。
+        orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
       });
       const hasMore = rows.length > opts.limit;
       const data = hasMore ? rows.slice(0, opts.limit) : rows;

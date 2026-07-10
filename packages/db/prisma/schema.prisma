@@ -499,10 +499,8 @@ model CanonicalCompany {
   revenueUsd    Float?   @map("revenue_usd")
   attributes    Json? // 其余归一属性（certifications/keywords/tech/end_markets...）
   status        String   @default("NEW") // NEW | ENRICHED | SUPPRESSED
-  // ICP 资格门（发现评测驱动）：match | weak | mismatch | null(未判)。
-  // 四门判定：材质/角色(竞品)/工艺子集/商业模式。绑定证据在 fit_reasons。
-  fitVerdict    String?  @map("fit_verdict")
-  fitReasons    Json?    @map("fit_reasons")
+  // ICP 资格门判定（fit_verdict/fit_reasons）已迁到 Lead —— Fit 语义是「某公司 × 某 ICP」，
+  // 挂在公司级会让同 workspace 后判的 ICP 读到/覆盖前判 ICP 的判定。见 Lead.fitVerdict。
   dedupeKey     String   @map("dedupe_key") // 身份解析键：域名 或 name+country 规范化
   version       Int      @default(1)
   createdAt     DateTime @default(now()) @map("created_at")
@@ -517,14 +515,16 @@ model CanonicalCompany {
   contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
 
   contacts CanonicalContact[]
+  leads    Lead[]
 
   @@unique([workspaceId, dedupeKey])
   @@index([workspaceId])
-  // 下游阶段收缩集扫描：workspace + fit=match 等值 + 水位列 null/过期范围（防 900+ 行 seq-scan）。
-  @@index([workspaceId, fitVerdict, lastEnrichedAt])
-  @@index([workspaceId, fitVerdict, lastSignalAt])
-  @@index([workspaceId, fitVerdict, lastWatchAt])
-  @@index([workspaceId, fitVerdict, contactDiscoveryAttemptedAt])
+  // 下游阶段收缩集扫描：workspace + 水位列 null/过期范围（防 900+ 行 seq-scan）。
+  // fit=match 现由 `leads: { some: { fitVerdict:'match' } }` 关联子查询过滤（fit 退出本表索引）。
+  @@index([workspaceId, lastEnrichedAt])
+  @@index([workspaceId, lastSignalAt])
+  @@index([workspaceId, lastWatchAt])
+  @@index([workspaceId, contactDiscoveryAttemptedAt])
   @@map("canonical_company")
 }
 
@@ -643,6 +643,12 @@ model Lead {
   icpId              String     @map("icp_id") @db.Uuid
   canonicalCompanyId String     @map("canonical_company_id") @db.Uuid
   status             LeadStatus @default(DISCOVERED)
+  /// ICP 资格门（LLM 四门）判定：match | weak | mismatch | null(未判)。
+  /// 语义 = 「这家公司 × 这个 ICP」的 Fit —— 从 CanonicalCompany 迁来，随 (workspace, icp, company)
+  /// 唯一键独立存储，同 workspace 多 ICP 互不覆盖。判定由 qualifyFit* 写；评分阶段只读、不覆盖。
+  fitVerdict         String?    @map("fit_verdict")
+  /// 四门判定绑定证据（材质/角色(竞品)/工艺子集/商业模式 + reasons）。
+  fitReasons         Json?      @map("fit_reasons")
   /// 四队列（LED-008）：recommended | needs_review | rejected | suppressed
   queue              String     @default("needs_review")
   totalScore         Float?     @map("total_score")
@@ -654,11 +660,14 @@ model Lead {
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
-  decisions LeadDecision[]
+  canonicalCompany CanonicalCompany @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade)
+  decisions        LeadDecision[]
 
   @@unique([workspaceId, icpId, canonicalCompanyId])
   @@index([workspaceId])
   @@index([workspaceId, queue])
+  // 下游阶段按「本 ICP 的 match」关联过滤 canonical（leads.some）+ qualify 查询「已判 Lead」。
+  @@index([workspaceId, icpId, fitVerdict])
   @@map("lead")
 }
 

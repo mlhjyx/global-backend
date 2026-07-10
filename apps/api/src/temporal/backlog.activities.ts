@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { EnrichmentResult } from '../discovery/provider-contract';
-import { judgeFitCompany, loadIcpBrief } from '../discovery/fit-judge';
+import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import { persistDiscoveredContacts } from '../discovery/contact-persist';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
@@ -102,8 +102,10 @@ export function createBacklogActivities(deps: {
     },
 
     /**
-     * 存量资格门：对 fitVerdict=null 的 canonical 公司跑四门判别（与 qualifyFitForRun 同核心）。
-     * 这是解锁 920+ 家投影公司进漏斗的总闸。
+     * 存量资格门（**per-ICP**）：对「尚无本 ICP 已判 Lead」的 canonical 公司跑四门判别，写
+     * Lead(本 ICP × 公司).fit_verdict（与 qualifyFitForRun 共享 upsertLeadFit 核心）。
+     * 这是解锁 920+ 家投影公司进漏斗的总闸；listBacklogTargets 已按 ACTIVE ICP 枚举 → 每 ICP 独立判、互不覆盖。
+     * 游标语义仍成立：判定后该公司获得本 ICP 的 Lead.fitVerdict≠null → 永久离开本 ICP 过滤集（集单调收缩、无冷却复活）。
      */
     async qualifyFitBacklog(args: BacklogPage & { icpId: string }): Promise<FitBacklogResult> {
       const limit = args.limit ?? 40;
@@ -111,7 +113,8 @@ export function createBacklogActivities(deps: {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
         const companies = await tx.canonicalCompany.findMany({
           where: {
-            fitVerdict: null,
+            // 尚无「本 ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）→ 才判定（per-ICP，非公司级）。
+            NOT: { leads: { some: { icpId: args.icpId, fitVerdict: { not: null } } } },
             status: { not: 'SUPPRESSED' },
             ...(args.cursor ? { id: { gt: args.cursor } } : {}),
           },
@@ -130,14 +133,7 @@ export function createBacklogActivities(deps: {
         verdicts[judgment.verdict] += 1;
         judged += 1;
         await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          tx.canonicalCompany.update({
-            where: { id: c.id },
-            data: {
-              fitVerdict: judgment.verdict,
-              fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
-              status: judgment.verdict === 'match' ? 'ENRICHED' : undefined,
-            },
-          }),
+          upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
       return {
@@ -192,9 +188,10 @@ export function createBacklogActivities(deps: {
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const merged: Record<string, unknown> = { ...existing };
           for (const h of hits) merged[h.key] = h.result.attributes;
-          await tx.canonicalCompany.update({
-            where: { id: c.id },
-            data: { attributes: merged as never, version: { increment: 1 } },
+          // status=ENRICHED 在「真正富集成功」时写（与 enrichRun 一致）；SUPPRESSED 守护防竞态翻回。
+          await tx.canonicalCompany.updateMany({
+            where: { id: c.id, status: { not: 'SUPPRESSED' } },
+            data: { attributes: merged as never, status: 'ENRICHED', version: { increment: 1 } },
           });
           for (const h of hits) {
             for (const [field, value] of Object.entries(h.result.attributes)) {
