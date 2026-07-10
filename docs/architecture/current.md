@@ -94,7 +94,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 
 | # | 缺口 | 证据 | 处置 |
 |---|---|---|---|
-| 1 | Fit 挂错聚合根（canonical_company 而非 ICP×公司，多 ICP 互相覆盖） | schema.prisma:504 | 收口① |
+| 1 | ~~Fit 挂错聚合根（canonical_company 而非 ICP×公司，多 ICP 互相覆盖）~~ | ~~schema.prisma:504~~ | ✅ **已修（PR #43）**：fit_verdict/fit_reasons 迁到 Lead（ICP×公司），共享 upsertLeadFit，真库真 RLS 实测两 ICP 独立互不覆盖 |
 | 2 | ToolBroker 非唯一闸门：主链直调 adapter；source_policy 未登记默认放行（fail-open）；BudgetLedger.open 零调用；allowedTools 全空；伪 workspace 'discovery' 令 AI trace 静默写入失败 | tool-broker.ts:97、discovery.activities.ts:99 | 收口② |
 | 3 | Outbox 假发布：LeadQualified 等无 sink 仍标 published——**无真实对外交付能力，P0** | apps/api/src/relay/outbox-relay.service.ts:143 | 收口③ |
 | 4 | OpenAPI 双事实源：38-path JSON vs 旧 3-path YAML，contracts 5 脚本全读旧 YAML | packages/contracts/package.json | 收口④ |

@@ -6,7 +6,7 @@
 
 | # | 收口 | 做什么 | 验收 |
 |---|---|---|---|
-| ① | **CandidateAssessment** | Fit/原因/评分特征/水位从 canonical_company 迁到 ICP×公司维（演进现有 Lead 表或新表 + migration） | 同 workspace 两个 ACTIVE ICP 各自独立 Fit 不互相覆盖（回归测试）；backlog sweep 按 ICP 维取件 |
+| ✅① | **CandidateAssessment（完成，PR #43）** | Fit/原因/评分特征/水位从 canonical_company 迁到 ICP×公司维（演进现有 Lead 表或新表 + migration） | 同 workspace 两个 ACTIVE ICP 各自独立 Fit 不互相覆盖（回归测试）；backlog sweep 按 ICP 维取件 |
 | ② | **ExecutionContext + Broker 真收口** | ExecutionContext 贯穿；发现/富集/intent 主链全经 Broker；source_policy 未登记 fail-closed；BudgetLedger 真开账；allowedTools 填实；修伪 workspace trace 静默失败 | provider 无直连 HTTP（登记例外除外）；预算超限真拦截；AI trace 写入成功 |
 | ③ | **LeadQualifiedPackage 真实交付（P0）** | 快照 schema（v1，demand_proof 可空）入 contracts；`outbox_delivery` 按 sink 投递/重试/ACK/DLQ；`GET /events?cursor`（B 出端点）；**禁止无 handler 事件标 published** | 未消费事件不标 published；SaaS 侧可重放且幂等；LeadQualified 有 Consumer Test |
 | ④ | **OpenAPI 单一真值 + 统一信封** | 删旧 YAML；contracts 脚本改读 openapi.json；CI：导出+lint+oasdiff；contracts README 改 code-first；统一返回信封定稿 | 双源消失；破坏性变更 CI 拦截；B 读路径端点全部套用信封 |
