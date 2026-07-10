@@ -42,8 +42,8 @@
 | # | 途径 | 方式 | 挖到 | 合规 | 命中率 | 现状 |
 |---|---|---|---|---|---|---|
 | A | **官网具名邮箱/电话直抽** | crawl4ai + AI 抽（只抽页面明确写出的，不推断） | 具名邮箱/电话 | 🟢 | 低（页面常只写名字） | ✅ 已落地 |
-| B | **⭐ 邮箱模式排列 + SMTP 验证** | 姓名 + 域名 → 排列 `f.last@/first.last@/last@/fl@…` → 逐个 SMTP RCPT 验证 → 命中 VALID 即其邮箱 | 决策人**可用邮箱** | 🟡 验证不发信 | 中（中小企业）/低（大企业 catch-all/M365 反枚举） | ⬜ **核心补全器，最缺** |
-| C | **公司邮箱格式学习** | 从该公司已知一个具名邮箱（如官网某人）反推格式 → 套用到其他决策人 → 验证 | 同上，命中率更高 | 🟡 | 中 | ⬜ |
+| B | **⭐ 邮箱模式排列 + SMTP 验证** | 姓名 + 域名 → 排列 `f.last@/first.last@/last@/fl@…` → 逐个 SMTP RCPT 验证 → 命中 VALID 即其邮箱 | 决策人**可用邮箱** | 🟡 验证不发信 | 中（中小企业）/低（大企业 catch-all/M365 反枚举） | ✅ 已落地（P0） |
+| C | **公司邮箱格式学习** | 从该公司已知一个具名邮箱（如官网某人）反推格式 → 套用到其他决策人 → 验证 | 同上，命中率更高 | 🟡 | 中 | ✅ 已落地（P0） |
 | D | **新闻/专利/商标文件 联系邮箱** | 从 §2 的 3/4/5 途径文件里带出的联系邮箱 | 邮箱（部分职能） | 🟢🟡 | 低 | ⬜ |
 | E | WHOIS/RDAP 注册人 | RDAP 查域名注册联系 | 邮箱（多隐私保护） | 🟡 | 很低 | ⬜（低优先） |
 
@@ -72,9 +72,11 @@
 ## 5. 分期 backlog（按 ROI × 合规 × 复用现有基建）
 
 **P0 —— 最高 ROI，直接补痛点，复用 smtp_self**（不接任何新外部源）
-1. **邮箱模式排列生成器**（途径 B）：已抽到的决策人姓名 + 公司域名 → 排列候选 → 经 ToolBroker 批量 SMTP 验证 → 置信打分。这是把「有名字没邮箱」变成「有可用邮箱」的关键一环，最对痛点、最省（零新源）。
-2. **公司邮箱格式学习**（途径 C）：复用途径 1 已抽到的具名邮箱推格式，提高排列命中率。
-3. 决策人档案模型 + 跨源身份解析（name-match）+ field_evidence + 合规隔离。
+1. ✅ **邮箱模式排列生成器**（途径 B，已落地）：`discovery/email-permutation.ts`（纯：姓名解析去称谓/贵族前缀 + 德语标准/去音标双音译变体 + 10 种 B2B 命名法按先验排序、去重、有界）→ `discovery/email-guesser.ts`（编排：**合规门一次判** → 逐候选经 `SelfHostedEmailVerifier`(ToolBroker) SMTP 验证 → 命中 VALID 即停、域级事实一次短路 → 置信打分）。把「有名字没邮箱」变成「有可用邮箱」，零新源。
+2. ✅ **公司邮箱格式学习**（途径 C，已落地）：`discovery/email-format-learning.ts`（纯：从站内已知具名邮箱多样本投票反推命名法 → 套用到其他决策人，置信压过盲排列；与排列器共享 `KNOWN_PATTERNS`/`buildLocalPart`，DRY）。
+3. ⬜ 决策人档案模型 + 跨源身份解析（name-match）+ field_evidence + 合规隔离（部分复用既有 `contact-persist.ts` 的 person.profile 留痕；档案落库接线待做）。
+
+> **已落地实测**（`scripts/verify-email-guess.mts`，真库真爬真 SMTP、无 sandbox）：searxng 发现德国泵企 → crawl4ai 抽真决策人「Ruud Croonen — Geschäftsführer」（无公开邮箱）→ 排列真产 `ruud.croonen@/r.croonen@/ruudcroonen@/rcroonen@/ruud@osna-pumpen.de` → 经 ToolBroker 真 SMTP → 诚实降级 `unverified`（`mail_from_rejected`，**不谎报 VALID**）。40 单测（排列/格式学习/编排三模块，含合规 BLOCKED、catch-all/反枚举/no-MX 短路、格式学习优先、suppression 跳过）。真数据反抓并加固：`mail_from_rejected` = 会话级事实，一次即短路。**遗留**：档案落库接线 + 接入 discovery/backlog 主链（下一步）。
 
 **P1 —— 扩身份途径（免费绿源优先）**
 4. **专利 inventor**（USPTO PatentsView / EPO OPS）—— 绿事实、具名工程决策人。
