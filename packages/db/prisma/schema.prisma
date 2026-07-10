@@ -21,8 +21,9 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  companyProfiles CompanyProfile[]
-  outboxEvents    OutboxEvent[]
+  companyProfiles  CompanyProfile[]
+  outboxEvents     OutboxEvent[]
+  outboxDeliveries OutboxDelivery[]
 
   @@map("workspace")
 }
@@ -98,12 +99,40 @@ model OutboxEvent {
   payload               Json
   occurredAt            DateTime  @default(now()) @map("occurred_at")
   publishedAt           DateTime? @map("published_at")
+  /// 无注册 handler 的事件停靠位（收口③）：不假发布、不毒化轮询。人工/后续版本处置。
+  parkedAt              DateTime? @map("parked_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace  Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries OutboxDelivery[]
 
   @@index([publishedAt])
   @@index([workspaceId])
   @@map("outbox_event")
+}
+
+/// 外部集成事件按 sink 的交付账本（收口③）。outbox_event.publishedAt 语义 = 「已路由进交付层」；
+/// 消费侧真值（送达/ACK/死信）在本表。pull sink（saas）用 ACK API；webhook sink 用重试+退避+DLQ。
+model OutboxDelivery {
+  id            BigInt    @id @default(autoincrement())
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  eventId       String    @map("event_id") @db.Uuid
+  sink          String // 'saas'（拉模式） | 'webhook'（推模式，env 启用）
+  status        String    @default("PENDING") // PENDING | ACKED | DEAD
+  attempts      Int       @default(0) // webhook 推送尝试数（pull sink 恒 0）
+  lastError     String?   @map("last_error")
+  nextAttemptAt DateTime? @map("next_attempt_at") // webhook 退避调度；pull sink null
+  deliveredAt   DateTime? @map("delivered_at")
+  ackedAt       DateTime? @map("acked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  event     OutboxEvent @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, sink])
+  @@index([workspaceId, sink, status])
+  @@index([sink, status, nextAttemptAt]) // webhook 派送循环扫描
+  @@index([workspaceId, sink, id]) // GET /events 游标翻页（账本 id 序 = 路由可见序）
+  @@map("outbox_delivery")
 }
 
 // ── Company & Knowledge (企业理解, PRD 7.2) ────────────────────────────────
