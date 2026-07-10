@@ -13,7 +13,7 @@
 | 认证 | `Authorization: Bearer <token>` —— token 由 **SaaS 平台侧签发**，本后端只校验并解出 `sub`（用户）、`workspace_id`（租户）、`roles`。开发环境用 base64url(JSON) 即可：`base64url({"sub":"u1","workspace_id":"<uuid>","roles":["admin"]})` |
 | 租户 | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数 |
 | 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED` |
-| 分页 | 游标式：`?limit=&cursor=` → `{ data, page: { nextCursor, hasMore } }` |
+| 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封 |
 | 幂等 | 创建类 POST 支持 `Idempotency-Key` 头（如 `POST /companies`），同 key 重放返回首次结果 |
 | 乐观锁 | 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，冲突返回 409 `VERSION_CONFLICT` |
 | 异步 | 长任务（理解/发现/评分）返回 `202`，前端轮询对应状态端点（见下） |
@@ -38,7 +38,7 @@
 ### 阶段 2：发现（Discover）
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
-3. 执行：`POST /query-plans/:id/execute` → 202 `{runId}`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
+3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）
@@ -49,7 +49,7 @@
 
 ### 阶段 3：验证评分（Qualify）
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
-2. 队列视图：`GET /icps/:id/lead-queues` → `{recommended, needs_review, rejected, suppressed}`
+2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 

@@ -16,6 +16,14 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .setTitle('Global API')
     .setDescription('出海企业 AI 全球客户开发与增长平台 · 后端 API（前端接入见 packages/contracts/INTEGRATION.md）')
     .setVersion('0.1.0')
+    .addServer('/', '同源部署（相对路径；具体 host 由部署环境决定）')
+    .addTag('Companies')
+    .addTag('Claims')
+    .addTag('ICP')
+    .addTag('Discovery')
+    .addTag('Leads')
+    .addTag('Events')
+    .addTag('System')
     .addBearerAuth()
     .build();
   return SwaggerModule.createDocument(app, config);
