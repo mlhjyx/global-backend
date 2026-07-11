@@ -12,9 +12,24 @@ import {
  */
 
 describe('detectAtsBoard — 从 HTML 检测 ATS 供应商 + token', () => {
-  it('Greenhouse embed（?for=TOKEN）', () => {
+  it('Greenhouse embed（iframe job_board?for=TOKEN）', () => {
     const html = `<iframe src="https://boards.greenhouse.io/embed/job_board?for=acmecorp&b=1"></iframe>`;
     expect(detectAtsBoard(html)).toEqual({ vendor: 'greenhouse', token: 'acmecorp' });
+  });
+  it('Greenhouse 官方 JS 嵌入（embed/job_board/js?for=TOKEN）', () => {
+    const html = `<script src="https://boards.greenhouse.io/embed/job_board/js?for=acme"></script>`;
+    expect(detectAtsBoard(html)).toEqual({ vendor: 'greenhouse', token: 'acme' });
+  });
+  it('for= 在任意查询参数位（?a=1&b=2&for=TOKEN）', () => {
+    expect(detectAtsBoard('https://boards.greenhouse.io/embed/job_board?a=1&b=2&for=acme3')).toEqual({
+      vendor: 'greenhouse',
+      token: 'acme3',
+    });
+  });
+  it('denylist 首命中不掩盖后段有效直链（/embed 段 → 后续 board 直链）', () => {
+    // 先出现 /embed 路径（token 段 "embed" 被 denylist），后段有真 board 直链 → 应取后者
+    const html = `<a href="https://boards.greenhouse.io/embed/foo">x</a> ... <a href="https://boards.greenhouse.io/realcompany">Jobs</a>`;
+    expect(detectAtsBoard(html)).toEqual({ vendor: 'greenhouse', token: 'realcompany' });
   });
   it('Greenhouse boards-api 直链', () => {
     expect(detectAtsBoard('fetch("https://boards-api.greenhouse.io/v1/boards/gitlab/jobs")')).toEqual({
@@ -63,7 +78,7 @@ describe('detectAtsBoard — 从 HTML 检测 ATS 供应商 + token', () => {
 describe('atsApiUrl — 公开 JSON API URL', () => {
   it('三家各自端点', () => {
     expect(atsApiUrl({ vendor: 'greenhouse', token: 'gitlab' })).toBe(
-      'https://boards-api.greenhouse.io/v1/boards/gitlab/jobs?content=true',
+      'https://boards-api.greenhouse.io/v1/boards/gitlab/jobs',
     );
     expect(atsApiUrl({ vendor: 'lever', token: 'plaid' })).toBe('https://api.lever.co/v0/postings/plaid?mode=json');
     expect(atsApiUrl({ vendor: 'ashby', token: 'ramp' })).toBe(

@@ -59,21 +59,26 @@ function validToken(t: string | undefined | null): string | null {
 export function detectAtsBoard(html: string): AtsBoard | null {
   if (!html) return null;
   const patterns: Array<{ vendor: AtsVendor; re: RegExp }> = [
-    // Greenhouse（更具体的先匹配）
-    { vendor: 'greenhouse', re: /boards\.greenhouse\.io\/embed\/job_board\?(?:[^"'&\s]*&)?for=([a-z0-9._-]+)/i },
-    { vendor: 'greenhouse', re: /boards-api\.greenhouse\.io\/v1\/boards\/([a-z0-9._-]+)/i },
-    { vendor: 'greenhouse', re: /data-board-token=["']([a-z0-9._-]+)["']/i },
-    { vendor: 'greenhouse', re: /boards\.greenhouse\.io\/([a-z0-9._-]+)/i },
+    // Greenhouse（更具体的先匹配）——embed 以 for= 为锚，兼容 iframe(job_board?for=) 与
+    // 官方主推 JS 嵌入(embed/job_board/js?for=)，且 for= 可在任意查询参数位。
+    { vendor: 'greenhouse', re: /boards\.greenhouse\.io\/embed\/job_board(?:\/js)?\?[^"'\s]*\bfor=([a-z0-9._-]+)/gi },
+    { vendor: 'greenhouse', re: /boards-api\.greenhouse\.io\/v1\/boards\/([a-z0-9._-]+)/gi },
+    { vendor: 'greenhouse', re: /data-board-token=["']([a-z0-9._-]+)["']/gi },
+    { vendor: 'greenhouse', re: /boards\.greenhouse\.io\/([a-z0-9._-]+)/gi },
     // Lever
-    { vendor: 'lever', re: /api\.lever\.co\/v0\/postings\/([a-z0-9._-]+)/i },
-    { vendor: 'lever', re: /jobs\.lever\.co\/([a-z0-9._-]+)/i },
+    { vendor: 'lever', re: /api\.lever\.co\/v0\/postings\/([a-z0-9._-]+)/gi },
+    { vendor: 'lever', re: /jobs\.lever\.co\/([a-z0-9._-]+)/gi },
     // Ashby
-    { vendor: 'ashby', re: /api\.ashbyhq\.com\/posting-api\/job-board\/([a-z0-9._-]+)/i },
-    { vendor: 'ashby', re: /jobs\.ashbyhq\.com\/([a-z0-9._-]+)/i },
+    { vendor: 'ashby', re: /api\.ashbyhq\.com\/posting-api\/job-board\/([a-z0-9._-]+)/gi },
+    { vendor: 'ashby', re: /jobs\.ashbyhq\.com\/([a-z0-9._-]+)/gi },
   ];
+  // 逐 pattern（保供应商优先级），扫**全部**命中取首个通过 validToken 的——
+  // 避免 denylist 首命中（如 /embed 路径段）掩盖文档后段的有效 board 直链。
   for (const { vendor, re } of patterns) {
-    const token = validToken(re.exec(html)?.[1]);
-    if (token) return { vendor, token };
+    for (const m of html.matchAll(re)) {
+      const token = validToken(m[1]);
+      if (token) return { vendor, token };
+    }
   }
   return null;
 }
@@ -83,7 +88,10 @@ export function atsApiUrl(board: AtsBoard): string {
   const token = encodeURIComponent(board.token);
   switch (board.vendor) {
     case 'greenhouse':
-      return `https://boards-api.greenhouse.io/v1/boards/${token}/jobs?content=true`;
+      // 不加 ?content=true：它会为每岗返回整段职位描述 HTML（gitlab 实测 105KB→2.38MB，23×，
+      // 且富文本可能含招聘官姓名等个人数据）。核心信号（标题/地点/更新时间/买家岗）无需 content；
+      // departments 需 content 故 Greenhouse 侧留空（数据最小化取舍）——Ashby/Lever 基础响应仍带部门。
+      return `https://boards-api.greenhouse.io/v1/boards/${token}/jobs`;
     case 'lever':
       return `https://api.lever.co/v0/postings/${token}?mode=json`;
     case 'ashby':
@@ -112,16 +120,18 @@ export function buildHiringFromAtsJobs(vendor: AtsVendor, jobs: AtsJob[]): AtsHi
   const titles = uniq(jobs.map((j) => j.title)).slice(0, 20);
   const departments = uniq(jobs.map((j) => j.department)).slice(0, 12);
   const locations = uniq(jobs.map((j) => j.location)).slice(0, 12);
-  const times = jobs
-    .map((j) => (j.updatedAt ? Date.parse(j.updatedAt) : NaN))
-    .filter((n) => Number.isFinite(n));
+  // reduce（非 Math.max(...spread)）：对超大响应也不展开数组、无栈风险。
+  const latestMs = jobs.reduce((max, j) => {
+    const ms = j.updatedAt ? Date.parse(j.updatedAt) : NaN;
+    return Number.isFinite(ms) && ms > max ? ms : max;
+  }, -Infinity);
   return {
     source: `ats:${vendor}`,
     open_roles: jobs.length,
     titles,
     departments,
     locations,
-    most_recent_at: times.length ? new Date(Math.max(...times)).toISOString() : null,
+    most_recent_at: Number.isFinite(latestMs) ? new Date(latestMs).toISOString() : null,
   };
 }
 
@@ -151,7 +161,7 @@ function parseLever(json: unknown): AtsJob[] {
       return {
         title: str(o?.text) ?? '',
         department: str(cat?.department) ?? str(cat?.team),
-        location: str(cat?.location) ?? str(cat?.allLocations),
+        location: str(cat?.location) ?? firstStr(cat?.allLocations), // allLocations 是字符串数组
         updatedAt: toIso(o?.createdAt),
       };
     })
@@ -183,6 +193,10 @@ function asArray(v: unknown): unknown[] {
 }
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+/** 数组取第一个字符串元素（Lever categories.allLocations 等）。 */
+function firstStr(v: unknown): string | null {
+  return Array.isArray(v) ? str(v[0]) : null;
 }
 function uniq(arr: Array<string | null>): string[] {
   return [...new Set(arr.filter((x): x is string => !!x))];

@@ -54,7 +54,8 @@ async function checkBoard(board: AtsBoard, careersSignatureHtml: string): Promis
 async function main(): Promise<void> {
   await checkBoard(
     { vendor: 'greenhouse', token: 'gitlab' },
-    '<iframe src="https://boards-api.greenhouse.io/v1/boards/gitlab/jobs"></iframe>',
+    // 用官方 JS 嵌入形态（embed/job_board/js?for=）验证新检测 pattern
+    '<script src="https://boards.greenhouse.io/embed/job_board/js?for=gitlab"></script>',
   );
   await checkBoard(
     { vendor: 'ashby', token: 'ramp' },
