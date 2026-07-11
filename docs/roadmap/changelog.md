@@ -203,3 +203,14 @@
 - **实测**（真库真源无 sandbox）：`verify-broker-closure.mts` 15/15 断言（未登记拒/无 reader 拒/SUSPENDED 真库翻转 Broker 真拦/预算双门真拦截/**ai_trace 真写入** + 伪 workspace 负向对照 22P02 静默 0 行/TED 真拉 5 中标/SSRF 真拦云元数据 IP）· `verify-ted-discovery.mts` 端到端全绿（raw 13→canonical 13→CC BY 证据→真 LLM fit 四门）· 494 vitest（+33 新测）· 15 个 verify 脚本同步新契约。
 - **对抗复审**（3 维 find + 14 agent 逐条对抗核验）：11 findings 确认全修（HIGH×2：预算按上限记账静默截断假 DONE、http.get redirect:'follow' SSRF 绕过→改 manual 逐跳护栏≤3 跳；MEDIUM×4：intent 用途门缺口、directory 名录页 60k→40k 上下文劣化（工具加 maxChars）、http.get 丢浏览器兼容 UA、sweep 预算生命周期注释与事实不符；LOW×3）+ 3 误报核验杀掉（含 algolia seed APPROVED——显性登记优于 main 零门现状）。
 - **记档不阻塞**：整轮 sweep 硬上界需持久化账本（收口⑤/R2 预算基建）；DNS-rebinding TOCTOU 连接层 IP pinning（收口⑥安全加固）；Broker ToolTrace 落库（现 console，成本/合规决策审计表后续）；幂等闸门仍为 trace 元数据（无结果缓存）。
+
+### 选项 B · 待办 2 跨源决策人身份解析（2026-07-11，PR #54，设计 [decision-maker-cross-source-identity-design.md](decision-maker-cross-source-identity-design.md)）
+
+> 承接 P0.4（#49）+ 设计定稿（#53）：落库前加 `resolvePersonIdentity` 解析前置——先问「本公司是否已有同一人」，有则并入、无则新建——修 P0.4 令其更活的决策人重复 bug（email/无-email 桥 + 人名变体），并建成待办 3（专利/注册处/商标）复用缝。
+
+- **新 `person-name.ts`**：从 `email-permutation.ts` **搬迁**人名归一（去称谓/贵族前缀/"Surname, Given" 语序/NFC/德语去音标），email-permutation 改 import + re-export，**行为逐字不变**（69 email 测全绿）。
+- **新 `person-identity.ts` `resolvePersonIdentity`**：同 companyId 内 4-Tier（externalId / 邮箱精确 / 归一名精确 / 高置信模糊）。🔴 **绝不错并**：仅同公司 + fuzzy 严阈值 **0.9 + margin 0.1** + **邮箱冲突守卫**（同公司同名不同邮箱→判不同人、不并）；方向宁欠并不错并。
+- **改 `contact-persist.ts`**：命中并入（title/seniority 补空不覆盖 + `identity.merge` snake_case 证据）、无则原 `contactIdentity` 键新建；`created`/`merged` 分计。**无 schema 迁移**（键形不变、matchRule 走 field_evidence、Tier0 留 TODO 供待办 3）。
+- **对抗复审**（单 reviewer 逐条对抗核验）：抓 **1 HIGH（🔴 错并）**——Tier 3 原误借**公司名匹配器** `normForMatch` 剥法人后缀（co/sa/oy/as…），姓氏恰为这些真实姓氏时（"Marco Sa"/"Erik Oy"/挪威姓 "…As"）→ 剥成只剩名 → 错并两人；**已修**：Tier 3 改用人名归一 token Jaccard、不碰公司匹配器 + 锁死回归测。2 LOW（`created` 含并入、证据 camelCase→snake_case）一并修；邮箱守卫/欠并方向/重构等价/事务纪律逐条核验安全。
+- **实测**：build 零错 · **521 vitest**（+3 错并回归）· 真库真 RLS `verify-cross-source-identity.mts` 三场景全绿（①一人无邮箱→带邮箱同名→并一条 ②同公司同名不同邮箱→两条不并🔴 ③"Dr. Johann Schmidt"→"Johann Schmidt"→并）。
+- **遗留**：待办 3 P1 身份源（专利 inventor/注册处董事/商标申请人）——本期已建 `externalIds→Tier 0` 缝、留 TODO 空跑通。
