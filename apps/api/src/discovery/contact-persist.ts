@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { contactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
-import { encryptPii } from '../compliance/pii-crypto';
+import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
 import { cleanEmail } from '../acquisition/clean';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
@@ -24,7 +24,7 @@ export interface PersistDiscoveredContactsArgs {
  *  - Suppression 前置（PRD 12.6 最小化：被禁邮箱直接不入库）；
  *  - **解析前置**（选项 B 待办 2）：resolvePersonIdentity 先问「本公司是否已有同一人」——
  *    命中 → 并入现有联系人（不新建，补空不覆盖 + 写 identity.merge 证据）；未中 → 按
- *    contactIdentity 键（键形不变，零迁移）新建；
+ *    contactIdentity 键**盲化后**（blindContactKey，不可逆 HMAC，去 PII 明文）新建；
  *  - contact_point 按 (contact, type, value) 幂等；逐点 field_evidence 留痕；
  *  - 🔴 具名人（personalData=true）额外写 person.profile 证据（买家角色/来源页/
  *    personal_data 标记），allowedActions 不含 outreach——触达前必须过合规门。
@@ -121,14 +121,19 @@ export async function persistDiscoveredContacts(
   return { created, merged, skippedSuppressed };
 }
 
-/** 新建路径（resolve 未命中）：按 contactIdentity 键 upsert（键形不变，零迁移）。 */
+/**
+ * 新建路径（resolve 未命中）：按 contactIdentity 键 upsert。
+ * 收口⑥ PR #60 补丁：原文键（`e:<email>` / `c:<companyKey>:<人名>`）含 PII，**盲化**为不可逆 HMAC
+ * `bi:v1:<hex>` 后落库——写 where 与 create 同经 blindContactKey，唯一键/幂等在盲值上仍成立，
+ * 而 email/人名不再明文泄进 `dedupe_key`（存量经 backfill-pii-encryption.mts 一次性回填）。
+ */
 async function createContact(
   tx: Prisma.TransactionClient,
   args: PersistDiscoveredContactsArgs,
   c: ProviderContactRecord,
   email: string | undefined,
 ): Promise<string> {
-  const dedupeKey = contactIdentity({ fullName: c.fullName, email }, args.company.dedupeKey);
+  const dedupeKey = blindContactKey(contactIdentity({ fullName: c.fullName, email }, args.company.dedupeKey));
   const contact = await tx.canonicalContact.upsert({
     where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey } },
     update: {

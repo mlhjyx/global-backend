@@ -16,6 +16,9 @@ const PREFIX = 'enc:v1:';
 const KEY_ENV = 'PII_ENCRYPTION_KEY';
 const IV_LEN = 12;
 const TAG_LEN = 16;
+/** 联系人去重键盲索引前缀（不可逆 HMAC）；域分隔标签 ≠ encryptPii 的 IV 派生标签，避免互相关。 */
+const BLIND_PREFIX = 'bi:v1:';
+const BLIND_LABEL = 'pii-blind:v1:';
 
 /** 解析 32 字节 key（hex64 或 base64）。未配置 → null；长度错 → 抛（配置错误要大声）。 */
 function resolveKey(): Buffer | null {
@@ -62,4 +65,27 @@ export function decryptPii(stored: string): string {
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+}
+
+/** 已盲化（bi:v1: 前缀）。legacy 明文键（e:/c: 前缀）返回 false。 */
+export function isBlindedContactKey(value: string): boolean {
+  return typeof value === 'string' && value.startsWith(BLIND_PREFIX);
+}
+
+/**
+ * 联系人去重键盲化（收口⑥ PR #60 补丁）：把 {@link contactIdentity} 产出的**含 PII** 原文键
+ * （`e:<email>` / `c:<companyKey>:<人名>`）换成**不可逆** HMAC 盲索引 `bi:v1:<hex>`。
+ *
+ *  - **确定性**（同 raw → 同盲值）→ `(workspace_id, dedupe_key)` 唯一键与 upsert-by-key 在盲值上仍成立。
+ *  - **不可逆**：原文 email/人名无法从列还原（去重键从不回读/展示，故比可逆密文更优——攻击面更小）。
+ *  - **域分隔**（`pii-blind:v1:` 标签 ≠ encryptPii 的 `pii-iv:v1:`）→ 盲值不与加密 IV 派生互相关。
+ *  - key 缺失 → **fail-closed 抛**（绝不把明文键落库，与 {@link encryptPii} 一致）。
+ *  - **幂等**：已盲化的原样返回（回填可重跑）。
+ */
+export function blindContactKey(rawKey: string): string {
+  if (isBlindedContactKey(rawKey)) return rawKey;
+  const key = resolveKey();
+  if (!key) throw new Error(`${KEY_ENV} 未配置 — 拒绝以明文存储联系人去重键（fail-closed）`);
+  const mac = createHmac('sha256', key).update(BLIND_LABEL).update(rawKey, 'utf8').digest('hex');
+  return BLIND_PREFIX + mac;
 }

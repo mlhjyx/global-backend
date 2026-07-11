@@ -12,6 +12,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { DiscoveryService } from '../src/discovery/discovery.service';
 import { DiscoveryProviderRegistry } from '../src/discovery/provider.registry';
 import { contactIdentity } from '../src/discovery/identity';
+import { blindContactKey } from '../src/compliance/pii-crypto';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
@@ -55,7 +56,7 @@ async function main() {
       update: { domain: DOMAIN, status: 'ACTIVE' },
       create: { workspaceId: WS, name: NAME, domain: DOMAIN, dedupeKey: DOMAIN },
     });
-    const cdk = contactIdentity({ fullName: PERSON }, company.dedupeKey);
+    const cdk = blindContactKey(contactIdentity({ fullName: PERSON }, company.dedupeKey));
     const contact = await tx.canonicalContact.upsert({
       where: { workspaceId_dedupeKey: { workspaceId: WS, dedupeKey: cdk } },
       update: { title: 'Geschäftsführer' },
