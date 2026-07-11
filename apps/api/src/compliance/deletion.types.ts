@@ -14,7 +14,9 @@ export type DeletionReason = (typeof DELETION_REASONS)[number];
 
 /** 冻结阶段写入的禁联项（对外动作第一道闸；删除期间与删除后都禁止该主体再入库/再触达）。 */
 export interface SuppressionEntry {
-  type: 'email' | 'domain' | 'company_name';
+  // contact_key = person-level 禁联键（盲化 HMAC，email-独立）——被擦除的具名人即便换邮箱/无邮箱
+  // 再被发现也命中禁联而不再入库。suppression_record.type 为自由字符串列，新增值零迁移。
+  type: 'email' | 'domain' | 'company_name' | 'contact_key';
   value: string;
   reason: string; // 'legal'（Art.17 擦除/Art.21 反对 = 法定义务保留最小禁联项）
 }

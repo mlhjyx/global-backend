@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
@@ -87,7 +87,7 @@ export class DeletionController {
   @Get(':id')
   @ApiOperation({ summary: '查询删除请求状态与擦除回执' })
   @ApiEnvelope(DELETION_REQUEST_SCHEMA)
-  async get(@Ctx() ctx: RequestContext, @Param('id') id: string): Promise<Enveloped<DeletionRequestView>> {
+  async get(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string): Promise<Enveloped<DeletionRequestView>> {
     return envelope(await this.deletion.getRequest(ctx.workspaceId, id));
   }
 }

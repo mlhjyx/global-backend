@@ -25,8 +25,8 @@ import {
  *
  * 🔴 内容最小化：跨活动/进 Temporal 历史的 `located` 只含 uuid+计数；禁联项（含邮箱明文）仅在 ① 内部
  * 计算并落库，永不返回。source_signal 是平台共享零-PII 绿库，租户 DSR 不撤（signalsRevoked 恒 0）。
- * 幂等：每步用 CAS（updateMany where status=<expected>）守，Temporal 重试不产生重复副作用；计数取自 ① 快照，
- * 故重试（行已删、二次统计为 0）也不失真。所有租户读写经 withWorkspace（RLS，app_user）。
+ * 幂等：每步用 CAS（updateMany where status=<expected>）守，Temporal 重试不产生重复副作用；擦除计数取自
+ * ② 擦除时刻的真实擦除面并落 stats，故重试（行已删、二次统计为 0）也不失真。所有租户读写经 withWorkspace（RLS，app_user）。
  */
 export function createDeletionActivities(deps: { prisma: PrismaService }) {
   const { prisma } = deps;
@@ -35,15 +35,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
     async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedErasureTargets> {
       const { located, suppressionEntries } = await locate(prisma, input);
       await prisma.withWorkspace(input.workspaceId, async (tx) => {
-        for (const s of suppressionEntries) {
-          await tx.suppressionRecord.upsert({
-            where: {
-              workspaceId_type_value: { workspaceId: input.workspaceId, type: s.type, value: s.value },
-            },
-            update: {}, // 已存在则保留（更早的禁联时间/原因不覆盖）
-            create: { workspaceId: input.workspaceId, type: s.type, value: s.value, reason: s.reason },
-          });
-        }
+        await upsertSuppressionEntries(tx, input.workspaceId, suppressionEntries);
         // company 主体：**冻结即标 SUPPRESSED**（不等到 eraseSubject）——联系人发现/存量 sweep 以 company.status
         // ==='SUPPRESSED' 为载入闸门，尽早置位可拦下 freeze 之后才发起的发现，收窄「漏网新联系人」窗口。
         if (located.companyIdsToSuppress.length) {
@@ -66,31 +58,73 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
       located: LocatedErasureTargets;
     }): Promise<ErasureCounts> {
       const { input, located } = args;
-      const counts = countsFromLocated(located);
-      await prisma.withWorkspace(input.workspaceId, async (tx) => {
-        // FROZEN → ERASING（幂等 CAS：已擦除过则 count=0，跳过全部删除/发事件副作用）+ **同 tx 持久化真实计数**
-        //（stats），供 completeDeletion 忠实取用——即便 complete 后续失败、人工重跑时 located 重算为空，也不伪造 0。
+      return prisma.withWorkspace(input.workspaceId, async (tx) => {
+        // 幂等 CAS：FROZEN → ERASING。已擦除过（≠FROZEN）→ 取**擦除时刻持久化的真实 stats** 返回，跳过全部
+        // 删除/发事件副作用（Temporal 重试不重复擦除）。stats 未持久化则回退快照计数（合法的空/0）。
         const moved = await tx.deletionRequest.updateMany({
           where: { id: input.deletionRequestId, status: 'FROZEN' },
-          data: { status: 'ERASING', stats: counts as unknown as Prisma.InputJsonValue },
+          data: { status: 'ERASING' },
         });
-        if (moved.count === 0) return;
-
-        // 待硬删的联系人集：company 主体在**擦除时刻重查**（捕获冻结后并发发现的漏网联系人，保证 Art.17 完整）；
-        // contact 主体用冻结快照的单一 id。
-        let eraseContactIds = located.contactIds;
-        if (located.companyIdsToSuppress.length) {
-          const cur = await tx.canonicalContact.findMany({
-            where: { companyId: { in: located.companyIdsToSuppress } },
-            select: { id: true },
+        if (moved.count === 0) {
+          const req = await tx.deletionRequest.findUnique({
+            where: { id: input.deletionRequestId },
+            select: { stats: true },
           });
-          eraseContactIds = cur.map((c) => c.id);
+          return (req?.stats as ErasureCounts | null) ?? countsFromLocated(located);
         }
+
+        // 🔒 Codex P1「Prevent inserts after the company contact re-read」：company 主体擦除前对公司行取
+        // **FOR UPDATE** 排他锁（与并发 contact INSERT 的 FK FOR KEY SHARE 互斥）。先起的发现事务被本锁挡住 →
+        // 本事务提交（公司已 SUPPRESSED）后其 persistDiscoveredContacts 的 FOR SHARE 状态复检命中 SUPPRESSED 而
+        // 整批跳过；已提交的漏网联系人则被下面的重查捕获。二者合拢=完成删除后不再有新 PII 落到本公司。
+        if (located.companyIdsToSuppress.length) {
+          await tx.$queryRaw`SELECT id FROM canonical_company WHERE id IN (${Prisma.join(
+            located.companyIdsToSuppress.map((id) => Prisma.sql`${id}::uuid`),
+          )}) FOR UPDATE`;
+        }
+
+        // 待硬删的联系人集（连同当前 contactPoints 一并重查）：company 主体在**擦除时刻重查**（捕获冻结后并发
+        // 发现的漏网联系人，保证 Art.17 完整）；contact 主体用冻结快照的单一 id。带 points 重查供 ① 真实计数
+        // ② 冻结后新增邮箱补写禁联。
+        const eraseTargetWhere: Prisma.CanonicalContactWhereInput | null = located.companyIdsToSuppress.length
+          ? { companyId: { in: located.companyIdsToSuppress } }
+          : located.contactIds.length
+            ? { id: { in: located.contactIds } }
+            : null;
+        const eraseContacts = eraseTargetWhere
+          ? await tx.canonicalContact.findMany({
+              where: eraseTargetWhere,
+              select: { id: true, contactPoints: { select: { type: true, value: true } } },
+            })
+          : [];
+        const eraseContactIds = eraseContacts.map((c) => c.id);
+
+        // Codex P1「Suppress emails added after the freeze step」：从**擦除时刻**联系人的当前邮箱补写
+        // suppression（冻结后才挂上、快照未见的邮箱），级联删前先固化禁联——防发现/猜测路径日后重建或再触达。
+        // upsert 幂等，与冻结所写取并集。
+        const lateEmails = eraseContacts.flatMap((c) =>
+          c.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value)),
+        );
+        if (lateEmails.length) {
+          await upsertSuppressionEntries(
+            tx,
+            input.workspaceId,
+            buildSuppressionEntries({ subjectType: 'contact', emails: lateEmails }),
+          );
+        }
+
+        // 真实擦除计数（Codex P1「Recompute counts from the final erase set」）：contactPoints 删前点数；
+        // field_evidence / canonical_contact 取 deleteMany 返回 count——回执/事件/stats 忠实反映实际擦除面
+        //（此前用冻结快照计数，漏报冻结后新增的行）。
+        let contactPointsErased = 0;
+        let fieldEvidenceErased = 0;
         if (eraseContactIds.length) {
+          contactPointsErased = eraseContacts.reduce((n, c) => n + c.contactPoints.length, 0);
           // field_evidence 无 FK 级联 → 显式按 contact 实体删（含 person.profile red 行 + 邮箱/电话加密副本）
-          await tx.fieldEvidence.deleteMany({
+          const fe = await tx.fieldEvidence.deleteMany({
             where: { entityType: 'contact', entityId: { in: eraseContactIds } },
           });
+          fieldEvidenceErased = fe.count;
           // canonical_contact 硬删 → DB 级联删 contact_point（onDelete: Cascade）
           await tx.canonicalContact.deleteMany({ where: { id: { in: eraseContactIds } } });
         }
@@ -116,8 +150,23 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             },
           });
         }
+
+        const counts: ErasureCounts = {
+          contactsErased: eraseContactIds.length,
+          contactPointsErased,
+          fieldEvidenceErased,
+          signalsRevoked: located.signalsToRevoke,
+          companiesSuppressed: located.companyIdsToSuppress.length,
+          leadsRescoreRequested: located.affectedIcpIds.length,
+        };
+        // 同 tx 持久化真实计数（stats），供 completeDeletion 忠实取用——即便 complete 后续失败、人工重跑时
+        // located 重算为空，也不伪造 0。CAS where=ERASING（本 tx 内已置）。
+        await tx.deletionRequest.updateMany({
+          where: { id: input.deletionRequestId, status: 'ERASING' },
+          data: { stats: counts as unknown as Prisma.InputJsonValue },
+        });
+        return counts;
       });
-      return counts;
     },
 
     async completeDeletion(args: {
@@ -222,6 +271,21 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
 export type DeletionActivities = ReturnType<typeof createDeletionActivities>;
 
+/** suppression_record 幂等 upsert（冻结与擦除两阶段共用）：已存在则保留更早的禁联时间/原因，不覆盖。 */
+async function upsertSuppressionEntries(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  entries: SuppressionEntry[],
+): Promise<void> {
+  for (const s of entries) {
+    await tx.suppressionRecord.upsert({
+      where: { workspaceId_type_value: { workspaceId, type: s.type, value: s.value } },
+      update: {}, // 已存在则保留（更早的禁联时间/原因不覆盖）
+      create: { workspaceId, type: s.type, value: s.value, reason: s.reason },
+    });
+  }
+}
+
 /** 受影响的 ACTIVE ICP（对该公司持有 Lead 的 ICP）——重评分目标；非 ACTIVE 的 ICP 排除（scoreCandidates 要求 ACTIVE）。 */
 async function affectedActiveIcpIds(tx: Prisma.TransactionClient, companyId: string): Promise<string[]> {
   const leads = await tx.lead.findMany({
@@ -261,7 +325,7 @@ async function locate(
     if (input.subjectType === 'contact') {
       const contact = await tx.canonicalContact.findUnique({
         where: { id: input.subjectId },
-        include: { contactPoints: true },
+        include: { contactPoints: true, company: { select: { dedupeKey: true } } },
       });
       if (!contact) return { located: base, suppressionEntries: [] };
       // contactPoints.value 经 PII 扩展在读路径解密；decryptPii 对已明文值幂等（防嵌套解密漏层）。
@@ -280,7 +344,14 @@ async function locate(
           fieldEvidenceCount,
           affectedIcpIds,
         },
-        suppressionEntries: buildSuppressionEntries({ subjectType: 'contact', emails }),
+        // contactName + companyKey → 写 person-level 禁联键（Codex P1「Add a person-level suppression」）：
+        // 擦除后该具名人即便换邮箱/无邮箱再被发现，也命中禁联而不重建。fullName 经 PII 扩展读路径解密为明文。
+        suppressionEntries: buildSuppressionEntries({
+          subjectType: 'contact',
+          emails,
+          contactName: contact.fullName,
+          companyKey: contact.company.dedupeKey,
+        }),
       };
     }
 

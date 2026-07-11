@@ -13,7 +13,10 @@ type FakeCandidate = { id: string; fullName: string; contactPoints: { type: stri
  *  - `findUnique` 按 where 形状分流：`{id}` → mergeIntoContact 读 title/seniority/department；
  *    `{workspaceId_dedupeKey}` → createContact 的**碰撞探测**（命中 opts.existingBlindedKeys → 返行、否则 null）。
  */
-function fakeTx(candidates: FakeCandidate[], opts?: { existingBlindedKeys?: string[] }) {
+function fakeTx(
+  candidates: FakeCandidate[],
+  opts?: { existingBlindedKeys?: string[]; companyStatus?: string; suppressedContactKeys?: string[] },
+) {
   const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
   const contactPointUpsert = vi.fn(async () => ({}));
   const fieldEvidenceCreate = vi.fn(async () => ({}));
@@ -27,6 +30,9 @@ function fakeTx(candidates: FakeCandidate[], opts?: { existingBlindedKeys?: stri
     }
     return { title: 'Geschäftsführer', seniority: null, department: null };
   });
+  // $queryRaw = 公司 FOR SHARE 状态复检（默认 NEW=未 SUPPRESSED）；suppressionRecord.findMany = person-level 禁联键。
+  const suppressionFindMany = vi.fn(async () => (opts?.suppressedContactKeys ?? []).map((value) => ({ value })));
+  const queryRaw = vi.fn(async () => [{ status: opts?.companyStatus ?? 'NEW' }]);
   const tx = {
     canonicalContact: {
       findMany: vi.fn(async () => candidates),
@@ -36,8 +42,10 @@ function fakeTx(candidates: FakeCandidate[], opts?: { existingBlindedKeys?: stri
     },
     contactPoint: { upsert: contactPointUpsert },
     fieldEvidence: { create: fieldEvidenceCreate },
+    suppressionRecord: { findMany: suppressionFindMany },
+    $queryRaw: queryRaw,
   } as unknown as Prisma.TransactionClient;
-  return { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert, canonicalUpdate, canonicalFindUnique };
+  return { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert, canonicalUpdate, canonicalFindUnique, suppressionFindMany, queryRaw };
 }
 
 /** 从 canonicalContact.upsert 的调用取实际写入的 dedupeKey（盲值）。 */
@@ -216,6 +224,58 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     expect(whereKey).toBe(createdKey); // where 与 create 同盲值 → upsert 幂等成立
     expect(createdKey).not.toContain('anna'); // 明文 email 不泄进去重键
     expect(createdKey).not.toContain('e:'); // 非 legacy 明文键形
+  });
+});
+
+describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63）', () => {
+  const companyKey = company.dedupeKey; // d:astrazeneca.com
+
+  it('公司已 SUPPRESSED（FOR SHARE 复检命中）→ 整批不入库（防完成删除后的漏网写入）', async () => {
+    const { tx, canonicalUpsert, queryRaw } = fakeTx([], { companyStatus: 'SUPPRESSED' });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [
+        { externalId: 'x', fullName: 'Late One', email: 'late1@x.test', personalData: true },
+        { externalId: 'y', fullName: 'Late Two', email: 'late2@x.test', personalData: true },
+      ],
+      suppressedEmails: new Set(),
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1); // 取了 FOR SHARE 状态锁并复读
+    expect(res.created).toBe(0);
+    expect(res.skippedSuppressed).toBe(2); // 整批跳过
+    expect(canonicalUpsert).not.toHaveBeenCalled(); // 未新建任何联系人
+  });
+
+  it('person-level 禁联键命中 → 同一人换新邮箱再现也跳过（不重建被 Art.17 擦除的具名人）', async () => {
+    // 该人此前被删，冻结时写了 person-level 禁联键（email-独立）。现以**不同邮箱**被重新发现。
+    const personKey = blindContactKey(contactIdentity({ fullName: 'Klaus Löschmann' }, companyKey)).toLowerCase();
+    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: [personKey] });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'x', fullName: 'Klaus Löschmann', email: 'klaus.NEW@other.test', personalData: true }],
+      suppressedEmails: new Set(), // 新邮箱不在 email 禁联表 → 只有 person-level 键能拦
+    });
+    expect(res.created).toBe(0);
+    expect(res.skippedSuppressed).toBe(1); // person-level 键命中
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+  });
+
+  it('person-level 禁联键未命中 → 正常新建（正向路径不被破坏）', async () => {
+    const otherKey = blindContactKey(contactIdentity({ fullName: 'Someone Else' }, companyKey)).toLowerCase();
+    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: [otherKey] });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'x', fullName: 'Fresh Person', email: 'fresh@x.test', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    expect(canonicalUpsert).toHaveBeenCalledTimes(1);
   });
 });
 
