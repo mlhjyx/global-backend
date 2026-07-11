@@ -101,11 +101,14 @@ function fakePrisma(signals: SignalRow[]): PrismaService & FakeTenant {
     companies,
     evidence,
     sourceSignal: {
-      findMany: async ({ where, take }: {
+      // 支持 (occurredAt desc, id desc) 稳定排序 + Prisma cursor 分页（cursor/skip）——投影端分页扫描 CPV 匹配。
+      findMany: async ({ where, take, cursor, skip }: {
         where: { providerKey: string; signalType: string; status: string; occurredAt: { gte: Date }; subjectCountry: { in: string[] } };
         take: number;
-      }) =>
-        signals
+        cursor?: { id: string };
+        skip?: number;
+      }) => {
+        const rows = signals
           .filter(
             (s) =>
               s.providerKey === where.providerKey &&
@@ -114,8 +117,14 @@ function fakePrisma(signals: SignalRow[]): PrismaService & FakeTenant {
               s.occurredAt.getTime() >= where.occurredAt.gte.getTime() &&
               where.subjectCountry.in.includes(s.subjectCountry),
           )
-          .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
-          .slice(0, take),
+          .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+        let start = 0;
+        if (cursor) {
+          const idx = rows.findIndex((s) => s.id === cursor.id);
+          start = idx < 0 ? rows.length : idx + (skip ?? 0);
+        }
+        return rows.slice(start, start + take);
+      },
     },
     withWorkspace: async (_ws: string, fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   } as unknown as PrismaService & FakeTenant;
@@ -213,6 +222,21 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
     const r = await svc.projectTenders(WS, params);
     expect(r.companiesTouched).toBe(0);
     expect(prisma.evidence.length).toBe(0);
+  });
+
+  it('分页扫描：>SCAN_LIMIT 条更新的非匹配 ACTIVE 信号不截断更旧的 CPV 匹配信号（#56 P2）', async () => {
+    // 首页 2000 条更"新"的异子树信号（cpv:33*，不匹配 ICP 42*）+ 1 条更旧的匹配信号（cpv:42122130）。
+    // 旧单次 take:2000 只拿到首页 → 匹配信号被截断在窗外（signalsMatched=0）；分页后第二页扫到它。
+    const noise = Array.from({ length: 2000 }, (_, i) =>
+      tedSignal({ name: `Noise ${i}`, occurredAt: new Date(now - DAY_MS - i), taxonomyKeys: ['cpv:33100000'], id: `noise-${String(i).padStart(5, '0')}` }),
+    );
+    const oldMatch = tedSignal({ name: 'Stadt Alt', occurredAt: new Date(now - 20 * DAY_MS), externalId: 'N-old', id: 'zmatch-old' });
+    const prisma = fakePrisma([...noise, oldMatch]);
+    const svc = new TedIntentProjectionService({ prisma });
+    const r = await svc.projectTenders(WS, params);
+    expect(r.signalsMatched).toBe(1);
+    expect(prisma.companies.size).toBe(1);
+    expect([...prisma.companies.values()][0].name).toBe('Stadt Alt');
   });
 
   it('空码/空国别 → 零投影（本 ICP 无匹配面）', async () => {

@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { SourceSignal } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
@@ -9,7 +10,8 @@ export { TENDER_PUBLISHED, TENDER_STRENGTH };
 
 const DEFAULT_SINCE_DAYS = 30;
 const DEFAULT_MAX_COMPANIES = 100; // 单 ICP 单轮投影的公司上限（有界，绝不 grind 全量）
-const SIGNAL_SCAN_LIMIT = 2000; // 平台表近窗扫描上限（防超大窗全表拉入内存）
+const SIGNAL_SCAN_LIMIT = 2000; // 单页扫描上限（防超大窗全表拉入内存）
+const SIGNAL_SCAN_MAX_PAGES = 10; // CPV 匹配分页扫描的页数硬顶（最多 10×2000 条/国别窗/ICP，防病态窗无界扫）
 const TED_ATTRIBUTION = 'Source: TED — © European Union; reused under CC BY 4.0'; // CC BY 4.0 署名义务（§3.1）
 
 export interface ProjectTendersResult {
@@ -50,33 +52,50 @@ export class TedIntentProjectionService {
 
     const since = new Date(Date.now() - (params.sinceDays ?? DEFAULT_SINCE_DAYS) * 86_400_000);
     const countries = [...new Set(params.buyerCountries.map((c) => toAlpha2(c)).filter((c): c is string => !!c))];
-    const signals = await this.deps.prisma.sourceSignal.findMany({
-      where: {
-        providerKey: 'ted',
-        signalType: TENDER_PUBLISHED,
-        status: 'ACTIVE', // 状态机：过期/撤回信号不再投影
-        occurredAt: { gte: since },
-        subjectCountry: { in: countries },
-      },
-      orderBy: { occurredAt: 'desc' },
-      take: SIGNAL_SCAN_LIMIT,
-    });
-    if (signals.length === SIGNAL_SCAN_LIMIT) {
-      // CPV 子树前缀无法像 FDA 精确码那样下推 jsonb 过滤（记档：归一前缀列+GIN 为后续项）——先显性告警不静默。
-      console.warn(`[ted-intent] signal scan window saturated (limit=${SIGNAL_SCAN_LIMIT}) — 更旧的匹配信号可能被截断`);
-    }
+    const maxCompanies = params.maxCompanies ?? DEFAULT_MAX_COMPANIES;
 
-    // ICP CPV 码 ∩ 信号分类键（去尾零前缀双向匹配——CPV 子树语义，拉取端按码检索、投影端复过滤）。
-    const matched = signals.filter((s) => {
-      const keys = Array.isArray(s.taxonomyKeys) ? (s.taxonomyKeys as string[]) : [];
-      return keys.some((k) => params.cpvCodes.some((icpCode) => cpvOverlap(icpCode, k)));
-    });
+    // CPV 子树前缀无法像 FDA 精确码那样下推 jsonb 过滤（记档：归一前缀列+GIN 为根治）——故**分页扫描**国别/时间窗，
+    // **每页先做 CPV 匹配再累积**，把上限施加到"匹配后"的信号。否则 >单页(SIGNAL_SCAN_LIMIT) 条 ACTIVE 信号（跨
+    // 全部 CPV）时，只取最新一页会把更旧的 CPV 匹配信号截断在窗外（#56 P2）。稳定游标 (occurredAt desc, id desc)
+    // 处理同发布日并列；页数硬顶 SIGNAL_SCAN_MAX_PAGES 防病态窗无界扫（触顶仍未扫尽 → 显性告警不静默）。
+    const matched: SourceSignal[] = [];
+    const seenSubjects = new Set<string>();
+    let cursorId: string | undefined;
+    let windowExhausted = false;
+    for (let page = 0; page < SIGNAL_SCAN_MAX_PAGES; page += 1) {
+      const rows: SourceSignal[] = await this.deps.prisma.sourceSignal.findMany({
+        where: {
+          providerKey: 'ted',
+          signalType: TENDER_PUBLISHED,
+          status: 'ACTIVE', // 状态机：过期/撤回信号不再投影
+          occurredAt: { gte: since },
+          subjectCountry: { in: countries },
+        },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        take: SIGNAL_SCAN_LIMIT,
+        ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      });
+      if (!rows.length) { windowExhausted = true; break; }
+      for (const s of rows) {
+        const keys = Array.isArray(s.taxonomyKeys) ? (s.taxonomyKeys as string[]) : [];
+        if (keys.some((k) => params.cpvCodes.some((icpCode) => cpvOverlap(icpCode, k)))) {
+          matched.push(s);
+          seenSubjects.add(s.subjectKey);
+        }
+      }
+      cursorId = rows[rows.length - 1].id;
+      // rows 按 occurredAt desc → 主体首见即最新；已凑够 maxCompanies 个不同买方 → 更旧信号不会带来新主体 → 可停。
+      if (seenSubjects.size >= maxCompanies) break;
+      if (rows.length < SIGNAL_SCAN_LIMIT) { windowExhausted = true; break; }
+    }
+    if (!windowExhausted && seenSubjects.size < maxCompanies) {
+      console.warn(`[ted-intent] CPV 匹配分页达页上限(${SIGNAL_SCAN_MAX_PAGES}×${SIGNAL_SCAN_LIMIT})仍未扫尽窗口——更旧匹配信号可能仍被截断（记档：CPV 前缀列+GIN 根治）`);
+    }
     base.signalsMatched = matched.length;
     if (!matched.length) return base;
 
     // 按买方身份归并（同买方多招标 → 取最新发布日代表其最新需求）。rows 已按 occurredAt desc → 首见即最新。
     const byKey = new Map<string, BuyerDemand>();
-    const maxCompanies = params.maxCompanies ?? DEFAULT_MAX_COMPANIES;
     const overflow = new Set<string>(); // 触顶后被排除的主体（可观测，不静默丢；复审 MEDIUM）
     for (const s of matched) {
       if (byKey.has(s.subjectKey) || overflow.has(s.subjectKey)) continue;
