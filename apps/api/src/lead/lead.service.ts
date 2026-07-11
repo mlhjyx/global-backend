@@ -168,13 +168,12 @@ export class LeadService {
           .map((g) => ({ dataClass: g.dataClass, fetchedAt: g._min.fetchedAt as Date }));
         // 收口⑥：存储权利判定 + **强制**（不只标注，确定性纯引擎、缓存规则同步无 await）。
         // 具名决策人 → red；公司国别 → 主体法域；公司 SUPPRESSED → DENY。
-        const rights = this.dataRights.evaluate(
-          storageRightsContextForLead({
-            country: company.country,
-            status: company.status,
-            hasNamedContacts: company.contacts.length > 0,
-          }),
-        );
+        const rightsCtx = storageRightsContextForLead({
+          country: company.country,
+          status: company.status,
+          hasNamedContacts: company.contacts.length > 0,
+        });
+        const rights = this.dataRights.evaluate(rightsCtx);
         // 🔴 !allowed 一律**不交棒**——统一挡住：① 禁联/Art.17 冻结（freezeSubject 置
         // company.status=SUPPRESSED，而 Lead 状态异步才更新，存在竞态窗口）② 跨境人审
         // REQUIRE_APPROVAL（EU/UK 主体→CN 处理地）③ 无合法性基础 ALLOW_WITH_BASIS（如 PIPL CN 主体）。
@@ -188,6 +187,14 @@ export class LeadService {
             },
           });
         }
+        // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
+        // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 路径上方已 throw 回滚，故此处只记**成功交棒**
+        // 的 STORE 判定（含 effect/rule/actor/subject/Art.14 标记），补齐合规审计对"为何允许具名 refs 离开后端"的证据。
+        await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
+          subjectType: 'lead',
+          subjectId: leadId,
+          actorId: ctx.userId,
+        });
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
           company,
