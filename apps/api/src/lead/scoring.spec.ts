@@ -175,6 +175,16 @@ describe('scoreLead — authoritativeFit（资格门覆盖 Fit 维，不再覆�
     expect(r.detail.notes.some((n) => n.includes('先联系人发现'))).toBe(true);
   });
 
+  it('🔴 P1（#58）：董事仅有 external_id 点（无 email/phone）→ 零可达 → needs_review（external_id 不给 Reachability 信用）', () => {
+    const r = scoreLead(
+      company({ contacts: [{ title: 'Director', seniority: 'director', contactPoints: [{ type: 'external_id', status: 'UNVERIFIED' }] }] }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(r.scores.reachability).toBe(0); // external_id 被排除 → 零可达
+    expect(r.queue).toBe('needs_review'); // 联系不上 → 绝不进 recommended
+  });
+
   it('match 覆盖规则引擎的词表误判（industry 对不上也不 rejected）', () => {
     // 规则要 manufacturing，公司词表是中文「制造业」→ 规则引擎 no_match，但资格门 match
     const r = scoreLead(company({ industry: '制造业', ...reachable }), icp, { authoritativeFit: 'match' });
