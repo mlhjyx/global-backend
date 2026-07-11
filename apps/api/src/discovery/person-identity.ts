@@ -110,15 +110,27 @@ function personNameJaccard(a: Set<string>, b: Set<string>): number {
   return inter / (a.size + b.size - inter);
 }
 
+/** 解析结果：命中行 + 是否因**同名歧义**拒并（供 create 层决定是否改用不碰撞的拒并键）。 */
+export interface PersonResolveOutcome {
+  hit: PersonResolveHit | null;
+  /**
+   * hit=null 且因**同名歧义**（Tier 2 有 ≥2 合格同名候选 / Tier 3 高分但 margin 不足）拒并 → true；
+   * genuinely new（无同名候选）→ false。此信号**与 DB 当前占位无关**（只看候选语义），故 create 层可据它
+   * 幂等地走拒并键——避免「歧义但明文键恰空 → 首跑落明文键、再跑翻 dx 键生重复」的非幂等（待办 2 收尾）。
+   */
+  ambiguous: boolean;
+}
+
 /**
- * 在候选集内分层解析同一人（纯函数）。首个命中即返回；全不中 → null。
+ * 在候选集内分层解析同一人（纯函数）**并给出拒并原因**。首个命中 → `{hit, ambiguous:false}`；
+ * 全不中 → `{hit:null, ambiguous}`（ambiguous=同名歧义拒并）。
  * Tier 0 externalId → Tier 1 邮箱精确 → Tier 2 归一名精确 → Tier 3 高置信模糊。
  * Tier 2/3 受邮箱**与 externalId** 冲突守卫（跳过冲突候选继续找下一个）；Tier 0/1 精确相同即同人，不受此限。
  */
-export function resolveAmongCandidates(
+function resolveWithReason(
   input: { fullName: string; email?: string | null; externalIds?: PersonExternalId[] },
   candidates: ContactCandidate[],
-): PersonResolveHit | null {
+): PersonResolveOutcome {
   const email = input.email?.toLowerCase() || null;
 
   // Tier 0：externalId 精确（待办 3）。本期 externalIds 恒空即跳过。
@@ -129,19 +141,20 @@ export function resolveAmongCandidates(
     const hit = candidates.find((c) =>
       c.contactPoints.some((p) => p.type === 'external_id' && p.value.toLowerCase() === key),
     );
-    if (hit) return { contactId: hit.id, matchRule: 'external_id' };
+    if (hit) return { hit: { contactId: hit.id, matchRule: 'external_id' }, ambiguous: false };
   }
 
   // Tier 1：邮箱精确（跨名字变体桥接："J. Smith" 带 email ≡ "John Smith"）。
   // 🔴 只认**非 RISKY** 邮箱作身份证据——RISKY 盲猜地址不同人可能相同，绝不据此并（#54 P1）。
   if (email) {
     const hit = candidates.find((c) => emailsOf(c, true).includes(email));
-    if (hit) return { contactId: hit.id, matchRule: 'email_exact' };
+    if (hit) return { hit: { contactId: hit.id, matchRule: 'email_exact' }, ambiguous: false };
   }
 
   // Tier 2：归一名精确（同公司），跳过邮箱**或 externalId**冲突候选（🔴 同名不同 officer_id 绝不误并）。
   // 🔴 **唯一才并**：同公司有 ≥2 个同归一名的合格候选（本就允许的同名不同人）→ 歧义，不据名并——
   //    否则无邮箱/无 externalId 的记录（如 EPO 发明人）会被并进 findMany 首个返回的错人（#54 P1）。
+  let ambiguous = false;
   const inputNorm = normalizePersonName(input.fullName);
   if (inputNorm) {
     const nameMatches = candidates.filter(
@@ -150,8 +163,8 @@ export function resolveAmongCandidates(
         !hasEmailConflict(email, c) &&
         !hasExternalIdConflict(input.externalIds, c),
     );
-    if (nameMatches.length === 1) return { contactId: nameMatches[0].id, matchRule: 'name_exact' };
-    // ≥2 → 歧义，落到 Tier 3（其 margin 守卫同样不会并，最终新建，欠并方向）。
+    if (nameMatches.length === 1) return { hit: { contactId: nameMatches[0].id, matchRule: 'name_exact' }, ambiguous: false };
+    if (nameMatches.length >= 2) ambiguous = true; // ≥2 同名合格候选 → 歧义拒并（落 Tier 3 亦不会并）
   }
 
   // Tier 3：高置信模糊 = 空格语序重排（"Johann Schmidt"≡"Schmidt Johann"，Tier 2 只处理逗号语序）。
@@ -168,22 +181,35 @@ export function resolveAmongCandidates(
     if (best) {
       const margin = best.score - (scored[1]?.score ?? 0);
       if (best.score >= FUZZY_MIN_SCORE && margin >= FUZZY_MIN_MARGIN) {
-        return { contactId: best.contact.id, matchRule: 'name_fuzzy', score: best.score };
+        return { hit: { contactId: best.contact.id, matchRule: 'name_fuzzy', score: best.score }, ambiguous: false };
       }
+      if (best.score >= FUZZY_MIN_SCORE && margin < FUZZY_MIN_MARGIN) ambiguous = true; // 高分并列 → 歧义拒并
     }
   }
 
-  return null;
+  return { hit: null, ambiguous };
+}
+
+/**
+ * 在候选集内分层解析同一人（纯函数）。首个命中即返回；全不中 → null。
+ * （{@link resolveWithReason} 的薄封装——只取 hit，保持既有签名与调用点不变。）
+ */
+export function resolveAmongCandidates(
+  input: { fullName: string; email?: string | null; externalIds?: PersonExternalId[] },
+  candidates: ContactCandidate[],
+): PersonResolveHit | null {
+  return resolveWithReason(input, candidates).hit;
 }
 
 /**
  * 在**同一 companyId** 内解析代表同一人的现有 canonicalContact（DB 薄查询 + 纯匹配）。
- * @returns 命中 `{contactId, matchRule, score?}`；全不中 → null（= 新人）。
+ * @returns `{hit, ambiguous}`——hit 命中行 `{contactId, matchRule, score?}`（全不中 → null=新人）；
+ *          ambiguous=因同名歧义拒并（供 create 层选不碰撞的拒并键、保幂等）。
  */
 export async function resolvePersonIdentity(
   tx: Prisma.TransactionClient,
   input: PersonResolveInput,
-): Promise<PersonResolveHit | null> {
+): Promise<PersonResolveOutcome> {
   const rows = await tx.canonicalContact.findMany({
     where: { workspaceId: input.workspaceId, companyId: input.companyId },
     include: { contactPoints: true },
@@ -193,5 +219,5 @@ export async function resolvePersonIdentity(
     fullName: r.fullName,
     contactPoints: r.contactPoints.map((p) => ({ type: p.type, value: p.value, status: p.status })),
   }));
-  return resolveAmongCandidates(input, candidates);
+  return resolveWithReason(input, candidates);
 }

@@ -1,25 +1,53 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { persistDiscoveredContacts } from './contact-persist';
+import { contactIdentity, declinedContactIdentity } from './identity';
+import { blindContactKey } from '../compliance/pii-crypto';
 import type { ProviderContactRecord } from './provider-contract';
 
-/** 可编排的假 tx：canonicalContact.findMany 返回给定候选（供 resolvePersonIdentity）。 */
-function fakeTx(candidates: { id: string; fullName: string; contactPoints: { type: string; value: string }[] }[]) {
+type FakeCandidate = { id: string; fullName: string; contactPoints: { type: string; value: string; status?: string }[] };
+
+/**
+ * 可编排的假 tx：
+ *  - `findMany` 返回给定候选（供 resolvePersonIdentity 分层匹配）；
+ *  - `findUnique` 按 where 形状分流：`{id}` → mergeIntoContact 读 title/seniority/department；
+ *    `{workspaceId_dedupeKey}` → createContact 的**碰撞探测**（命中 opts.existingBlindedKeys → 返行、否则 null）。
+ */
+function fakeTx(candidates: FakeCandidate[], opts?: { existingBlindedKeys?: string[] }) {
+  const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
   const contactPointUpsert = vi.fn(async () => ({}));
   const fieldEvidenceCreate = vi.fn(async () => ({}));
   const canonicalUpsert = vi.fn(async () => ({ id: 'new-contact-1' }));
   const canonicalUpdate = vi.fn(async () => ({}));
+  const canonicalFindUnique = vi.fn(async (arg: { where: Record<string, unknown> }) => {
+    const where = arg?.where ?? {};
+    if ('workspaceId_dedupeKey' in where) {
+      const key = (where.workspaceId_dedupeKey as { dedupeKey: string }).dedupeKey;
+      return existingKeys.has(key) ? { id: 'collide-existing' } : null;
+    }
+    return { title: 'Geschäftsführer', seniority: null, department: null };
+  });
   const tx = {
     canonicalContact: {
       findMany: vi.fn(async () => candidates),
-      findUnique: vi.fn(async () => ({ title: 'Geschäftsführer', seniority: null, department: null })),
+      findUnique: canonicalFindUnique,
       upsert: canonicalUpsert,
       update: canonicalUpdate,
     },
     contactPoint: { upsert: contactPointUpsert },
     fieldEvidence: { create: fieldEvidenceCreate },
   } as unknown as Prisma.TransactionClient;
-  return { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert, canonicalUpdate };
+  return { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert, canonicalUpdate, canonicalFindUnique };
+}
+
+/** 从 canonicalContact.upsert 的调用取实际写入的 dedupeKey（盲值）。 */
+function upsertDedupeKey(canonicalUpsert: ReturnType<typeof vi.fn>): string {
+  const call = canonicalUpsert.mock.calls[0][0] as {
+    where: { workspaceId_dedupeKey: { dedupeKey: string } };
+    create: { dedupeKey: string };
+  };
+  expect(call.where.workspaceId_dedupeKey.dedupeKey).toBe(call.create.dedupeKey); // where 与 create 同键
+  return call.create.dedupeKey;
 }
 
 const chDirector: ProviderContactRecord = {
@@ -141,5 +169,146 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     expect(whereKey).toBe(createdKey); // where 与 create 同盲值 → upsert 幂等成立
     expect(createdKey).not.toContain('anna'); // 明文 email 不泄进去重键
     expect(createdKey).not.toContain('e:'); // 非 legacy 明文键形
+  });
+});
+
+describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊重 resolve 的「拒并」（不经键控 upsert 旁路）', () => {
+  const companyKey = company.dedupeKey; // d:astrazeneca.com
+
+  it('#54-E RISKY：不同名记录撞既有 RISKY catch-all 邮箱 → resolve 拒并 → 新建独立行（按名 dx 键，不并回邮箱行）', async () => {
+    // 既有 Anna 的邮箱点后被标 RISKY；来的 Bob Jones 撞同一 catch-all 地址
+    const annaEmailKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber', email: 'a.weber@catchall.test' }, companyKey));
+    const { tx, canonicalUpsert } = fakeTx(
+      [{ id: 'anna', fullName: 'Anna Weber', contactPoints: [{ type: 'email', value: 'a.weber@catchall.test', status: 'RISKY' }] }],
+      { existingBlindedKeys: [annaEmailKey] },
+    );
+    const bob: ProviderContactRecord = { externalId: 'x', fullName: 'Bob Jones', email: 'a.weber@catchall.test', personalData: true };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [bob],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    expect(res.merged).toBe(0);
+    const key = upsertDedupeKey(canonicalUpsert);
+    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Bob Jones' }, companyKey))); // dx:c 按名
+    expect(key).not.toBe(annaEmailKey); // 🔴 绝不并回 Anna 的邮箱行（catch-all 误并被根治）
+  });
+
+  it('#54-D 同名歧义：≥2 同归一名候选 → resolve 拒并 → 新建独立行（dx 键，不并回既有 Anna 行）', async () => {
+    // 既有 Anna Weber 与 Dr. Anna Weber 共存（归一同名、原名键不同）；来的 Anna Weber 无邮箱/externalId
+    const annaNameKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey));
+    const { tx, canonicalUpsert } = fakeTx(
+      [
+        { id: 'anna', fullName: 'Anna Weber', contactPoints: [] },
+        { id: 'dr-anna', fullName: 'Dr. Anna Weber', contactPoints: [] },
+      ],
+      { existingBlindedKeys: [annaNameKey] },
+    );
+    const incoming: ProviderContactRecord = { externalId: 'x', fullName: 'Anna Weber', personalData: true };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'patent_inventor',
+      contacts: [incoming],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    const key = upsertDedupeKey(canonicalUpsert);
+    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey)));
+    expect(key).not.toBe(annaNameKey); // 🔴 歧义守卫不再被 create 层旁路
+  });
+
+  it('🔴 同源再跑幂等：declined 记录二次 persist → 同一 dx 键（确定性 → 真库 upsert-by-key 落回同行，不产生第三行）', async () => {
+    const annaNameKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey));
+    const incoming: ProviderContactRecord = { externalId: 'x', fullName: 'Anna Weber', personalData: true };
+    const runOnce = async (): Promise<string> => {
+      const { tx, canonicalUpsert } = fakeTx(
+        [
+          { id: 'anna', fullName: 'Anna Weber', contactPoints: [] },
+          { id: 'dr-anna', fullName: 'Dr. Anna Weber', contactPoints: [] },
+        ],
+        { existingBlindedKeys: [annaNameKey] },
+      );
+      await persistDiscoveredContacts(tx, {
+        workspaceId: 'ws-1',
+        company,
+        adapterKey: 'patent_inventor',
+        contacts: [incoming],
+        suppressedEmails: new Set(),
+      });
+      return upsertDedupeKey(canonicalUpsert);
+    };
+    const keyRun1 = await runOnce();
+    const keyRun2 = await runOnce();
+    expect(keyRun1).toBe(keyRun2); // 确定性
+    expect(keyRun1).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey)));
+  });
+
+  it('🔴 歧义幂等硬化：歧义候选不占用来件明文键（两条邮箱行）→ 仍走 dx 键（不新建明文键行，杜绝再跑翻键生重复）', async () => {
+    // 两条同名不同邮箱的 Anna（键 e:a / e:b）→ 来件无邮箱 Anna 的明文名键 c:…anna weber 本是「空」的。
+    // 只靠碰撞探测会误用明文名键新建，二次跑该行反成碰撞 → 翻成 dx 键 → 生第三行（破幂等）。
+    // 故同名歧义必须由 resolve 直接判 declined，令 create 层无论明文键空否都走 dx（DB-state 无关 → 幂等）。
+    const { tx, canonicalUpsert } = fakeTx(
+      [
+        { id: 'anna-a', fullName: 'Anna Weber', contactPoints: [{ type: 'email', value: 'anna.a@x.test', status: 'VALID' }] },
+        { id: 'anna-b', fullName: 'Anna Weber', contactPoints: [{ type: 'email', value: 'anna.b@x.test', status: 'VALID' }] },
+      ],
+      { existingBlindedKeys: [] }, // 明文名键空 → 碰撞探测返 false
+    );
+    const incoming: ProviderContactRecord = { externalId: 'x', fullName: 'Anna Weber', personalData: true };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'patent_inventor',
+      contacts: [incoming],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    const key = upsertDedupeKey(canonicalUpsert);
+    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey))); // dx 键
+    expect(key).not.toBe(blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey))); // 🔴 绝不用明文名键
+  });
+
+  it('🔴 误并回归：同名歧义但各带**不同 VALID 邮箱** → 各自成键（不因同名塌成一行）', async () => {
+    // 两条无邮箱同名 John Smith（如两名不同 officer_id 董事）令来件歧义；来件是两个**不同**人，各带不同邮箱。
+    // declined 键必须保留**邮箱判别符**——否则 dx:c:<name> 只按名，会把 alice 与 bob 塌成一行（净新误并，破红线）。
+    const twoNoEmailJohns = [
+      { id: 'r1', fullName: 'John Smith', contactPoints: [] },
+      { id: 'r2', fullName: 'John Smith', contactPoints: [] },
+    ];
+    const keyFor = async (email: string): Promise<string> => {
+      const { tx, canonicalUpsert } = fakeTx(twoNoEmailJohns, { existingBlindedKeys: [] }); // 来件邮箱各自 free
+      await persistDiscoveredContacts(tx, {
+        workspaceId: 'ws-1',
+        company,
+        adapterKey: 'decision_maker',
+        contacts: [{ externalId: 'x', fullName: 'John Smith', email, personalData: true }],
+        suppressedEmails: new Set(),
+      });
+      return upsertDedupeKey(canonicalUpsert);
+    };
+    const kAlice = await keyFor('alice@acme.com');
+    const kBob = await keyFor('bob@gmail.com');
+    expect(kAlice).not.toBe(kBob); // 🔴 不同人不同键（含 VALID 邮箱判别符），绝不塌成一行
+    expect(kAlice).toBe(blindContactKey(declinedContactIdentity({ fullName: 'John Smith', email: 'alice@acme.com' }, companyKey)));
+  });
+
+  it('无碰撞的真新人 → 仍用明文键盲值（不误入 dx 命名空间，正向路径不被破坏）', async () => {
+    const { tx, canonicalUpsert } = fakeTx([]); // 无候选、无既有键 → 碰撞探测返 null
+    const zoe: ProviderContactRecord = { externalId: 'x', fullName: 'Zoe New', email: 'zoe@new.test', personalData: true };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [zoe],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    const key = upsertDedupeKey(canonicalUpsert);
+    expect(key).toBe(blindContactKey(contactIdentity({ fullName: 'Zoe New', email: 'zoe@new.test' }, companyKey))); // 明文 e: 键盲值
+    expect(key).not.toBe(blindContactKey(declinedContactIdentity({ fullName: 'Zoe New' }, companyKey))); // 非 dx
   });
 });

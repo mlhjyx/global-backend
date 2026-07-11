@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { contactIdentity } from './identity';
+import { contactIdentity, declinedContactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
@@ -47,7 +47,7 @@ export async function persistDiscoveredContacts(
     }
     // 解析前置：本公司是否已有同一人（同 companyId 内分层匹配）？
     // externalIds（待办 3：CH officer id…）→ Tier 0 精确并（同一董事跨源/跨时间稳定命中）。
-    const hit = await resolvePersonIdentity(tx, {
+    const { hit, ambiguous } = await resolvePersonIdentity(tx, {
       workspaceId: args.workspaceId,
       companyId: args.company.id,
       companyKey: args.company.dedupeKey,
@@ -57,7 +57,7 @@ export async function persistDiscoveredContacts(
     });
     const contactId = hit
       ? await mergeIntoContact(tx, args, c, hit)
-      : await createContact(tx, args, c, email);
+      : await createContact(tx, args, c, email, ambiguous);
 
     // 身份源须声明署名义务许可（CH=OGL-UK-3.0…），缺省回退现有语义（licensed/sandbox）。
     const evidenceLicense = c.license ?? (args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed');
@@ -126,14 +126,44 @@ export async function persistDiscoveredContacts(
  * 收口⑥ PR #60 补丁：原文键（`e:<email>` / `c:<companyKey>:<人名>`）含 PII，**盲化**为不可逆 HMAC
  * `bi:v1:<hex>` 后落库——写 where 与 create 同经 blindContactKey，唯一键/幂等在盲值上仍成立，
  * 而 email/人名不再明文泄进 `dedupe_key`（存量经 backfill-pii-encryption.mts 一次性回填）。
+ *
+ * 🔴 **待办 2 create 层收尾（#54-D/#54-E / #62-2/#62-3）**：resolve 已返 null（未命中合并）。若不尊重其
+ * 拒并，`contactIdentity` 明文键控 upsert 会把新记录并回键相同的旧行，令拒并形同虚设。故用
+ * {@link declinedContactIdentity} 的**不碰撞确定性拒并键**（`dx:` 命名空间，externalId 优先否则按名，绝不用
+ * RISKY 邮箱）新建独立行的条件有二，二者取或：
+ *  - **`ambiguous`**（resolve 判同名歧义）：与 DB 当前占位**无关**——即便明文键此刻恰空也走拒并键，杜绝
+ *    「首跑落明文键、二次跑该行反成碰撞→翻 dx 键生第三行」的非幂等（#54-D 硬化）；
+ *  - **明文键与既有**不同**联系人碰撞**：涵盖 RISKY/catch-all 同址（#54-E）与同名不同 externalId（HIGH-1）——
+ *    碰撞行是外部既存、永久占位，故据此判定亦幂等。
+ * 拒并键确定性 → **同源再跑落回同一行**（幂等）；`dx:` 与明文 `e:`/`c:` 互斥 → 绝不并回既有非-declined 行。
+ *
+ * 🔴 拒并键的判别符还须保留**可信 email**：同名不同人各带不同 VALID 邮箱、因他人同名而歧义时，若只按人名
+ * (`dx:c:<name>`) 会把两人塌成一行（净新误并）。故当来件 email **未被既有行占用**（明文键 `e:<email>` 无碰撞
+ * = 非 catch-all/RISKY 共享地址）时，把它作为判别符传入 {@link declinedContactIdentity}（→`dx:e:<email>`）；
+ * 已占用（碰撞=catch-all/RISKY 别人在用）则不传、退回人名——**杜绝不同人撞同址塌键**（#54-E 与本回归两全）。
  */
 async function createContact(
   tx: Prisma.TransactionClient,
   args: PersistDiscoveredContactsArgs,
   c: ProviderContactRecord,
   email: string | undefined,
+  ambiguous: boolean,
 ): Promise<string> {
-  const dedupeKey = blindContactKey(contactIdentity({ fullName: c.fullName, email }, args.company.dedupeKey));
+  const plainKey = blindContactKey(contactIdentity({ fullName: c.fullName, email }, args.company.dedupeKey));
+  // 探测明文键是否已被既有**不同**联系人占用。用途有二：① 非歧义时决定是否走拒并键；
+  // ② 决定 email 能否作拒并判别符（占用 = catch-all/RISKY 共享 → 不可信，退回人名）。
+  const plainCollides =
+    (await tx.canonicalContact.findUnique({
+      where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: plainKey } },
+      select: { id: true },
+    })) != null;
+  const usableEmail = email && !plainCollides ? email : undefined; // 未占用的 email 才可信作判别符
+  const dedupeKey =
+    ambiguous || plainCollides
+      ? blindContactKey(
+          declinedContactIdentity({ fullName: c.fullName, email: usableEmail, externalIds: c.externalIds }, args.company.dedupeKey),
+        )
+      : plainKey;
   const contact = await tx.canonicalContact.upsert({
     where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey } },
     update: {

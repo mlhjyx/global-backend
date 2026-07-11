@@ -60,7 +60,44 @@ export function companyIdentity(rec: {
   };
 }
 
+/** 联系人去重键的人名归一（小写 + 折叠空白 + 去首尾）；contactIdentity 的 c 形与 declined 键共用。 */
+function contactNameKeyPart(fullName: string): string {
+  return fullName.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 export function contactIdentity(contact: { fullName: string; email?: string | null }, companyKey: string): string {
   if (contact.email) return `e:${contact.email.trim().toLowerCase()}`;
-  return `c:${companyKey}:${contact.fullName.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+  return `c:${companyKey}:${contactNameKeyPart(contact.fullName)}`;
+}
+
+/** 源侧稳定标识排序取首（确定性，不受输入顺序影响）；归一为 `scheme:value` 小写。空 → null。 */
+function stableExternalIdKey(externalIds?: { scheme: string; value: string }[]): string | null {
+  if (!externalIds?.length) return null;
+  const normalized = externalIds.map((e) => `${e.scheme}:${e.value}`.toLowerCase()).sort();
+  return normalized[0] ?? null;
+}
+
+/**
+ * **拒并键**（待办 2 create 层收尾）：`resolvePersonIdentity` 明确「拒并」（同名歧义 / RISKY 猜测邮箱）
+ * 但 {@link contactIdentity} 的明文键与既有**不同**联系人碰撞时，改用此键新建独立行——既尊重 resolve
+ * 的拒并、绝不并回错行，又**确定性** → 同源再跑落到同一行（幂等）。
+ *
+ * 判别符优先级 **externalId > 可信 email > 人名**（越强越先，绝不塌不同人为一键）：
+ *  - **externalId** `dx:x:<companyKey>:<scheme:value>`（全局稳定：同名不同 officer_id 各自成键，
+ *    同一董事跨源经 Tier 0 再归并）；
+ *  - **可信 email** `dx:e:<companyKey>:<归一名>:<email>`（🔴 同名不同人各带不同 VALID 邮箱靠 email 区分、
+ *    **不同名共用同一 catch-all 地址靠人名区分**——名+邮箱双判别符，不同人绝不塌成一行）——⚠️ 调用方须只在
+ *    email **可信**（未被既有行占用 = 非 catch-all/RISKY 共享地址）时才传入 email，已占用则传 undefined 退回纯人名；
+ *  - **人名** `dx:c:<companyKey>:<归一名>`（无 externalId、无可信 email 的兜底；同名无其他信息才折叠=floor）。
+ *  - `dx:` 命名空间与明文 `e:`/`c:` 互斥 → declined 行绝不与既有 non-declined 行碰撞；按 `companyKey` 隔离。
+ */
+export function declinedContactIdentity(
+  contact: { fullName: string; email?: string | null; externalIds?: { scheme: string; value: string }[] },
+  companyKey: string,
+): string {
+  const eid = stableExternalIdKey(contact.externalIds);
+  if (eid) return `dx:x:${companyKey}:${eid}`;
+  // 名+邮箱双判别符：不同名（Alice/Bob）共用一 catch-all 地址靠名分开；同名不同邮箱靠邮箱分开。
+  if (contact.email) return `dx:e:${companyKey}:${contactNameKeyPart(contact.fullName)}:${contact.email.trim().toLowerCase()}`;
+  return `dx:c:${companyKey}:${contactNameKeyPart(contact.fullName)}`;
 }
