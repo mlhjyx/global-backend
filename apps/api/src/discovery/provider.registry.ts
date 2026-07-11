@@ -16,6 +16,7 @@ import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
+import { InpiRneContactProvider } from './providers/inpi-rne.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
@@ -81,6 +82,10 @@ export class DiscoveryProviderRegistry {
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
     this.contacts.push(new CompaniesHouseContactProvider({ broker }));
+    // 法国 dirigeants 发现（待办 3 第三个身份源；开放政务 API Recherche d'entreprises，无鉴权）——contact_discovery 类。
+    // 不依赖 gateway（结构化 API，无 LLM）；FR 门外/无 broker 时 fail-safe 返空（天然 no-op）。
+    // dirigeant 无 person id → 走 resolvePersonIdentity Tier 2/3 归一名并（同 EPO，非 Tier 0）。
+    this.contacts.push(new InpiRneContactProvider({ broker }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
@@ -260,6 +265,35 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'UK Companies House 官方注册处 API（Basic auth）。OGL v3.0（© Crown copyright）绿事实可商用但署名义务；董事 = 🔴 具名个人（GDPR），数据最小化（只取 name/role/officer_id，不摄 DOB/国籍/住址），触达前过 lawful-basis 门。',
+        },
+      });
+    }
+    // 法国 dirigeants 发现（待办 3 第三个身份源）——开放政务 API Recherche d'entreprises（recherche-entreprises.api.gouv.fr）。
+    // **无鉴权**、costPerCallCents=0；数据源 = INPI RNE + INSEE Sirene。可本会话真测通过 → 默认 ENABLED（不同于 EPO 的 DISABLED）。
+    await db.dataProvider.upsert({
+      where: { key: 'inpi_rne' },
+      update: {},
+      create: { key: 'inpi_rne', class: 'contact_discovery', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // 合规注册：官方开放政务 API（非爬，平台合约轨干净）；personalData=true —— dirigeants 是具名负责人（GDPR）。
+    // Licence Ouverte 2.0（Etalab）绿事实可商用**但署名是 license 义务**；数据最小化（无 DOB/国籍）在 adapter 层强制；
+    // 开放网关自动排除 entreprises non-diffusibles（选择不公示者不返回）。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'recherche-entreprises.api.gouv.fr' },
+        update: {},
+        create: {
+          domain: 'recherche-entreprises.api.gouv.fr',
+          sourceType: 'company_registry',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes:
+            "API Recherche d'entreprises（DINUM，开放政务网关，零鉴权；数据源 = INPI RNE + INSEE Sirene）。Licence Ouverte 2.0（Etalab）绿事实可商用但署名义务；dirigeant = 🔴 具名个人（GDPR），数据最小化（只取 nom/prenoms/qualite，不摄 DOB/国籍），触达前过 lawful-basis 门；非公示公司网关自动排除。",
         },
       });
     }
