@@ -138,6 +138,11 @@ async function main() {
   ok(b1.contacts.length === res.contacts.length && p1.created === res.contacts.length, `B：落库 ${b1.contacts.length} 名 dirigeant（created=${p1.created}）`);
   ok(b1.evidence.some((e) => e.field === 'person.profile' && (e.value as { personal_data?: boolean }).personal_data === true), 'person.profile 证据（personal_data 标记）');
   ok(b1.evidence.some((e) => e.field === 'person.profile') && b1.contacts.length > 0, 'person.profile 证据存在');
+  // 🔴 name-merge 源不发联系点 → person.profile 是新建行的**唯一**证据；须带源署名许可（非硬编码 public）。
+  ok(
+    b1.evidence.every((e) => e.field !== 'person.profile' || e.license === 'Licence-Ouverte-2.0'),
+    'person.profile 证据带 Licence-Ouverte-2.0 署名（源许可不再被丢成 public）',
+  );
 
   const p2 = await persist(coB, 'inpi_rne', res.contacts); // 二次跑
   const b2 = await readCompany(coB.id);

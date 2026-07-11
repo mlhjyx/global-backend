@@ -109,7 +109,10 @@ export async function persistDiscoveredContacts(
             source_page: c.sourcePage ?? null,
           } as unknown as Prisma.InputJsonValue,
           providerKey: args.adapterKey,
-          license: 'public',
+          // 身份源署名许可须落到 person.profile（归一名合并源如 inpi_rne=Licence-Ouverte-2.0 /
+          // epo_ops=CC-BY-4.0 不发联系点，person.profile 是新建行的唯一证据——此前硬编码 public 会丢署名）；
+          // 无源 license（如 decision_maker）回退 'public'，保留既有语义。
+          license: c.license ?? 'public',
           allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
           dataClass: 'red', // 具名人侧写=个人数据（GDPR Art.4）
         },

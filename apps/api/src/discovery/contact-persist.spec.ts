@@ -149,6 +149,53 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     expect(emailEvidence?.data.license).toBe('licensed');
   });
 
+  it('🔴 name-merge 身份源（inpi_rne，无联系点）新建 → person.profile 证据带该源 license（不再硬编码 public）', async () => {
+    // 法国 dirigeant / EPO inventor 这类**归一名合并**源不发任何 contact_point（无 email/phone/linkedin/externalId），
+    // 故一条新建联系人的**唯一**证据就是 person.profile。此前它硬编码 license:'public'，把源署名许可
+    // （INPI RNE=Licence-Ouverte-2.0 / EPO=CC-BY-4.0）整个丢掉（仅在发生合并时才落到 identity.merge）。
+    const { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert } = fakeTx([]); // 无候选 → 新建
+    const dirigeant: ProviderContactRecord = {
+      externalId: 'inpi_rne:552081317:jean-dupont',
+      fullName: 'Jean Dupont',
+      seniority: 'executive',
+      buyingRole: 'economic_buyer',
+      personalData: true,
+      sourcePage: 'https://annuaire-entreprises.data.gouv.fr/entreprise/552081317',
+      license: 'Licence-Ouverte-2.0',
+      // 无 email/phone/linkedin/externalIds —— 归一名合并源不发联系点
+    };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'inpi_rne',
+      contacts: [dirigeant],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    expect(canonicalUpsert).toHaveBeenCalledTimes(1);
+    expect(contactPointUpsert).not.toHaveBeenCalled(); // name-merge 源不写任何 contact_point
+    const profile = fieldEvidenceCreate.mock.calls
+      .map((c) => c[0] as { data: { field: string; license: string } })
+      .find((e) => e.data.field === 'person.profile');
+    expect(profile).toBeDefined(); // 唯一证据
+    expect(profile?.data.license).toBe('Licence-Ouverte-2.0'); // 🔴 修复前 = 'public'（源署名许可被丢）
+  });
+
+  it('无 license 的 adapter（decision_maker）→ person.profile 证据回退 public（保留既有默认）', async () => {
+    const { tx, fieldEvidenceCreate } = fakeTx([]);
+    await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'x', fullName: 'Anna Weber', email: 'anna@x.test', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    const profile = fieldEvidenceCreate.mock.calls
+      .map((c) => c[0] as { data: { field: string; license: string } })
+      .find((e) => e.data.field === 'person.profile');
+    expect(profile?.data.license).toBe('public'); // 无源 license → 保留 public 默认
+  });
+
   it('🔴 收口⑥ PR #60：新建的 dedupe_key 已盲化（bi:v1:），where 与 create 同键，不含明文 email', async () => {
     const { tx, canonicalUpsert } = fakeTx([]); // 无候选 → 新建
     await persistDiscoveredContacts(tx, {
