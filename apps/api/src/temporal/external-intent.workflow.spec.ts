@@ -178,3 +178,41 @@ describe('externalIntentSweepWorkflow — limit 透传', () => {
     expect(acts.listExternalIntentTargets).toHaveBeenCalledWith({});
   });
 });
+
+// Codex P1 on PR #70 折中(c)：单次读 + 每 K 个 ICP 在批次头重读——把「sweep 执行途中翻 kill-switch」的
+// stale 窗口封到 ≤K 个投影，同时把 owner-DB 读从 N 降到 ⌈N/K⌉（保住 #70 单次读优化绝大部分）。
+describe('externalIntentSweepWorkflow — 每 K 个 ICP 重读 kill-switch（#70 折中）', () => {
+  const targets = (n: number) => Array.from({ length: n }, (_, i) => target(`ws-${i}`, `icp-${i}`));
+
+  it('N ≤ K（默认 K=25）→ 仍只读一次（保住 #70 单次读，等价旧行为）', async () => {
+    primeHappyPath(targets(3));
+    await externalIntentSweepWorkflow({});
+    expect(acts.liveProviderState).toHaveBeenCalledTimes(1);
+  });
+
+  it('N=5, K=2 → 读 ⌈N/K⌉=3 次（i=0/2/4 批次头）', async () => {
+    primeHappyPath(targets(5));
+    await externalIntentSweepWorkflow({ liveRefreshEvery: 2 });
+    expect(acts.liveProviderState).toHaveBeenCalledTimes(3);
+  });
+
+  it('批中途 disable → 后续批次投影用新（停用）快照，前面批次不受影响（stale 窗口封到 ≤K）', async () => {
+    primeHappyPath(targets(4));
+    // 首批读到全启用；运维随后翻闸 → 第二批读到全停用。
+    acts.liveProviderState.mockReset();
+    acts.liveProviderState
+      .mockResolvedValueOnce({ ted: true, openfda: true })
+      .mockResolvedValueOnce({ ted: false, openfda: false });
+
+    await externalIntentSweepWorkflow({ liveRefreshEvery: 2 });
+
+    const calls = acts.projectExternalIntentForIcp.mock.calls;
+    expect(calls).toHaveLength(4);
+    // 批 0（ICP 0,1）用首读快照；批 1（ICP 2,3）用重读到的停用快照 → 翻闸在 ≤K 个投影内生效。
+    expect((calls[0][0] as { live: unknown }).live).toEqual({ ted: true, openfda: true });
+    expect((calls[1][0] as { live: unknown }).live).toEqual({ ted: true, openfda: true });
+    expect((calls[2][0] as { live: unknown }).live).toEqual({ ted: false, openfda: false });
+    expect((calls[3][0] as { live: unknown }).live).toEqual({ ted: false, openfda: false });
+    expect(acts.liveProviderState).toHaveBeenCalledTimes(2);
+  });
+});
