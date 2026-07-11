@@ -148,8 +148,12 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const missingFields = keyFields.filter(([, v]) => v == null).map(([k]) => k);
   const dataQuality = (keyFields.length - missingFields.length) / keyFields.length;
 
-  // Reachability：最优联系方式状态
-  const points = company.contacts.flatMap((c) => c.contactPoints);
+  // Reachability：最优联系方式状态。🔴 **排除标识点 external_id**——它不是可达渠道（#58 P1：CH officer_id
+  //    默认 UNVERIFIED，若计入会让「无邮箱/电话的董事」被误判可达、越过推荐队列 Reachability 硬底）。
+  //    用黑名单（非白名单 email/phone）以保留 linkedin 等真实联系渠道（#62 复审 P2）。
+  const points = company.contacts
+    .flatMap((c) => c.contactPoints)
+    .filter((p) => p.type !== 'external_id');
   const reachability = points.some((p) => p.status === 'VALID')
     ? 1
     : points.some((p) => p.status === 'UNVERIFIED' || p.status === 'RISKY')

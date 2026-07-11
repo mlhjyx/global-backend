@@ -42,17 +42,22 @@ export interface PersonResolveHit {
 export interface ContactCandidate {
   id: string;
   fullName: string;
-  contactPoints: { type: string; value: string }[];
+  /** status：VALID/RISKY/UNVERIFIED —— Tier 1 排除 RISKY 猜测地址作身份证据（#54 P1）。 */
+  contactPoints: { type: string; value: string; status?: string }[];
 }
 
 // 🔴 贴错人比贴错公司危害大：fuzzy 门 0.9（比公司 0.72 严），margin 0.1（歧义即弃）。
 const FUZZY_MIN_SCORE = 0.9;
 const FUZZY_MIN_MARGIN = 0.1;
 
-/** 候选行已有的 email（小写去空）。 */
-function emailsOf(candidate: ContactCandidate): string[] {
+/**
+ * 候选行已有的 email（小写去空）。`excludeRisky`=true 时排除 RISKY 猜测地址——
+ * 🔴 RISKY 多为 catch-all/反枚举域的**盲猜**（email-guess backlog 写入），不是身份证据：不同人可能
+ * 撞同一生成地址，据此并会张冠李戴（#54 P1）。冲突守卫仍用全量 email（欠并方向，RISKY 也能拦误并）。
+ */
+function emailsOf(candidate: ContactCandidate, excludeRisky = false): string[] {
   return candidate.contactPoints
-    .filter((p) => p.type === 'email' && p.value)
+    .filter((p) => p.type === 'email' && p.value && (!excludeRisky || p.status !== 'RISKY'))
     .map((p) => p.value.toLowerCase());
 }
 
@@ -128,21 +133,25 @@ export function resolveAmongCandidates(
   }
 
   // Tier 1：邮箱精确（跨名字变体桥接："J. Smith" 带 email ≡ "John Smith"）。
+  // 🔴 只认**非 RISKY** 邮箱作身份证据——RISKY 盲猜地址不同人可能相同，绝不据此并（#54 P1）。
   if (email) {
-    const hit = candidates.find((c) => emailsOf(c).includes(email));
+    const hit = candidates.find((c) => emailsOf(c, true).includes(email));
     if (hit) return { contactId: hit.id, matchRule: 'email_exact' };
   }
 
   // Tier 2：归一名精确（同公司），跳过邮箱**或 externalId**冲突候选（🔴 同名不同 officer_id 绝不误并）。
+  // 🔴 **唯一才并**：同公司有 ≥2 个同归一名的合格候选（本就允许的同名不同人）→ 歧义，不据名并——
+  //    否则无邮箱/无 externalId 的记录（如 EPO 发明人）会被并进 findMany 首个返回的错人（#54 P1）。
   const inputNorm = normalizePersonName(input.fullName);
   if (inputNorm) {
-    const hit = candidates.find(
+    const nameMatches = candidates.filter(
       (c) =>
         normalizePersonName(c.fullName) === inputNorm &&
         !hasEmailConflict(email, c) &&
         !hasExternalIdConflict(input.externalIds, c),
     );
-    if (hit) return { contactId: hit.id, matchRule: 'name_exact' };
+    if (nameMatches.length === 1) return { contactId: nameMatches[0].id, matchRule: 'name_exact' };
+    // ≥2 → 歧义，落到 Tier 3（其 margin 守卫同样不会并，最终新建，欠并方向）。
   }
 
   // Tier 3：高置信模糊 = 空格语序重排（"Johann Schmidt"≡"Schmidt Johann"，Tier 2 只处理逗号语序）。
@@ -182,7 +191,7 @@ export async function resolvePersonIdentity(
   const candidates: ContactCandidate[] = rows.map((r) => ({
     id: r.id,
     fullName: r.fullName,
-    contactPoints: r.contactPoints.map((p) => ({ type: p.type, value: p.value })),
+    contactPoints: r.contactPoints.map((p) => ({ type: p.type, value: p.value, status: p.status })),
   }));
   return resolveAmongCandidates(input, candidates);
 }
