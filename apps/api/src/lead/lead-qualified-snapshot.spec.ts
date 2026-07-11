@@ -268,7 +268,18 @@ function makeDecideTx(
     leadDecision: { create: decisionCreate },
     canonicalCompany: { findUnique: async () => company },
     icpDefinition: { findUnique: async () => ({ version: 3 }) },
-    fieldEvidence: { findMany: async () => evidenceRows }, // 鲜度模型 v2：decide 取证据算 valid_until
+    // 鲜度模型 v2：decide 用 groupBy 取每分级最早 fetchedAt。mock 忠实按 dataClass 归组取 min。
+    fieldEvidence: {
+      groupBy: async () => {
+        const toMs = (v: Date | string): number => (v instanceof Date ? v.getTime() : Date.parse(String(v)));
+        const minByClass = new Map<string, Date | string>();
+        for (const r of evidenceRows) {
+          const cur = minByClass.get(r.dataClass);
+          if (cur === undefined || toMs(r.fetchedAt) < toMs(cur)) minByClass.set(r.dataClass, r.fetchedAt);
+        }
+        return [...minByClass].map(([dataClass, fetchedAt]) => ({ dataClass, _min: { fetchedAt } }));
+      },
+    },
     outboxEvent: { create: outboxCreate },
   };
 }
@@ -518,7 +529,7 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     expect(ok).toBe(true);
   });
 
-  it('decide 接线：fieldEvidence.findMany 返回证据 → payload.valid_until 落值', async () => {
+  it('decide 接线：fieldEvidence.groupBy 返回每分级最早证据 → payload.valid_until 落值', async () => {
     const fetchedAt = '2026-01-01T00:00:00.000Z';
     const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
     const svc = makeDecideService(
@@ -527,5 +538,20 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     await svc.decide(decideCtx, LEAD_ID, 'accept');
     const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
     expect(payload.valid_until).toBe(iso(Date.parse(fetchedAt) + 180 * day));
+  });
+
+  it('decide 接线：同分级多条证据 → 取最早抓取（groupBy _min 语义，最早失效）', async () => {
+    const earlier = '2026-01-01T00:00:00.000Z';
+    const later = '2026-04-01T00:00:00.000Z';
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const svc = makeDecideService(
+      makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
+        { dataClass: GREEN, fetchedAt: later },
+        { dataClass: GREEN, fetchedAt: earlier },
+      ]),
+    );
+    await svc.decide(decideCtx, LEAD_ID, 'accept');
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.valid_until).toBe(iso(Date.parse(earlier) + 180 * day)); // 最早抓取决定最早失效
   });
 });

@@ -145,12 +145,17 @@ export class LeadService {
           where: { id: lead.icpId },
           select: { version: true },
         });
-        // 鲜度模型（v2）：取本公司 + 其联系人的 field_evidence 分级 + 抓取时刻，算快照 valid_until。
-        // entity_id 是全局唯一 uuid（跨租户不撞）；withWorkspace(RLS) 再兜一层作用域。
-        const evidence = await tx.fieldEvidence.findMany({
+        // 鲜度模型（v2）：取本公司 + 其联系人 field_evidence **每个分级的最早抓取时刻**算 valid_until。
+        // groupBy 有界（每分级 1 行，≤3~4 条）——同一分级 TTL 恒定 → 最早抓取即该级最早失效；
+        // 避免把一家公司累积的全部证据行拉进 decide 写事务。entity_id 全局唯一 uuid + withWorkspace(RLS) 双重作用域。
+        const evidenceByClass = await tx.fieldEvidence.groupBy({
+          by: ['dataClass'],
           where: { entityId: { in: [company.id, ...company.contacts.map((c) => c.id)] } },
-          select: { dataClass: true, fetchedAt: true },
+          _min: { fetchedAt: true },
         });
+        const evidence = evidenceByClass
+          .filter((g) => g._min.fetchedAt != null)
+          .map((g) => ({ dataClass: g.dataClass, fetchedAt: g._min.fetchedAt as Date }));
         // 收口⑥：存储权利判定 + **强制**（不只标注，确定性纯引擎、缓存规则同步无 await）。
         // 具名决策人 → red；公司国别 → 主体法域；公司 SUPPRESSED → DENY。
         const rights = this.dataRights.evaluate(
