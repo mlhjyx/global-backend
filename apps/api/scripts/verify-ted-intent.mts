@@ -1,5 +1,7 @@
 /**
  * TED P3 招标公告 → Intent 投影 —— 真实数据端到端（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * 收口⑤两层架构：**平台摄取**（SignalIngestService → source_signal 一等事实 + signal_ingest 账本，
+ * ingest-once）+ **投影只读平台表**（TedIntentProjectionService 不再出网）。
  * 需 postgres 在跑（gateway 不需要——本链路不过 fit 门，Intent 维为确定性计算）。
  * 一个真 ICP：泵采购买方 + 欧盟 → CPV 42120000（泵与压缩机）。方向 = **招标公告 = 买方需求**。
  *
@@ -10,16 +12,20 @@
  * 五段证明（有界样本，绝不 grind 全量）：
  *   Tier 1 · 真 API：searchContractNotices 直打 TED cn-standard → 真开放招标（买方 + CPV + 发布日）+
  *            §8.6 每条 publicationDateIso 经 Date.parse 合法 + 合规自检（无具名邮箱/联系点）。
- *   Tier 2 · 真投影：seed source_policy(APPROVED) → projectTenders（过 §8.8 门）→ 买方 canonical +
+ *   Tier 2 · 真摄取+投影：seed source_policy(APPROVED) → ingestTed（经 Broker 过 §8.8 门 → source_signal
+ *            平台表 + signal_ingest 账本）→ projectTenders（**只读平台表**）→ 买方 canonical +
  *            attributes.intent.TENDER_PUBLISHED（at=发布日 ISO）+ field_evidence（CC BY 4.0/无邮箱）。
- *   Tier 2b· 幂等：同参再跑 → companiesTouched=0 / eventsProjected=0，field_evidence 行数不变（不堆行/不虚报）。
+ *   Tier 2b· 幂等：同参再投影 → companiesTouched=0 / eventsProjected=0，field_evidence 行数不变（不堆行/不虚报）。
  *   Tier 3 · 真评分：scoreLead → Intent 维 0（投影前）→ >0（后，TENDER_PUBLISHED 驱动），signals 含 TENDER_PUBLISHED。
- *   Tier 4 · §8.8 门：source_policy 置 SUSPENDED → projectTenders fail-closed（noticesFetched=0，不发请求）。
+ *   Tier 4 · §8.8 负向门（**摄取层**）：source_policy 置 SUSPENDED → ingestTed（新时间窗避开账本命中）
+ *            fail-closed（error 非空、signalsUpserted=0，不发请求）。投影层零出网——门在摄取层。
  */
 import { readFileSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { searchContractNotices } from '../src/adapters/ted-api';
+import { SignalIngestService } from '../src/signals/signal-ingest.service';
+import { canonicalTedSpec, queryFingerprint, ingestWindowMs } from '../src/signals/signal-query';
 import { TedIntentProjectionService, TENDER_PUBLISHED } from '../src/intent/ted-intent-projection.service';
 import { DiscoveryProviderRegistry } from '../src/discovery/provider.registry';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
@@ -37,6 +43,7 @@ const CPV = '42120000'; // 泵与压缩机
 const PRIMARY_COUNTRIES = ['DEU']; // 真 ICP：泵 + 德国
 const WIDE_COUNTRIES = ['DEU', 'FRA', 'ITA', 'ESP', 'NLD', 'BEL', 'AUT', 'POL']; // 数据稀疏时放宽到欧盟主力
 const SINCE_DAYS = 90;
+const MAX_RECORDS = 100;
 const TED_DOMAIN = 'api.ted.europa.eu';
 
 // intent 事件的关键词代理绝不命中（证明 Intent 分纯由 TENDER_PUBLISHED 驱动，非关键词兜底）
@@ -56,8 +63,10 @@ const prisma = new PrismaService();
 await prisma.$connect();
 const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 await ownerDb.$connect();
-// §8.8：经 ToolBroker 注入 source_policy 门（收口②：唯一执行闸门）——无 broker = fail-closed 不出网，测不出门。
-const svc = new TedIntentProjectionService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }) });
+// §8.8（收口⑤）：出网收敛在**摄取层**——SignalIngestService 经 ToolBroker 过 source_policy 门（无 broker =
+// fail-closed 不出网）；投影 service 只收 prisma（只读 source_signal 平台表，零出网）。
+const ingest = new SignalIngestService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }) });
+const svc = new TedIntentProjectionService({ prisma });
 
 const evidenceCount = () =>
   prisma.withWorkspace(WS, (tx) => tx.fieldEvidence.count({ where: { workspaceId: WS, providerKey: 'ted' } }));
@@ -66,11 +75,11 @@ async function main() {
   // ══════════ Tier 1 · 真 API（直打 TED 招标公告 cn-standard）══════════
   console.log(`\n══ Tier 1 · 真 API：泵(CPV ${CPV}) 采购招标 近 ${SINCE_DAYS} 天（scope=ACTIVE 开放机会）══`);
   let countries = PRIMARY_COUNTRIES;
-  let notices = await searchContractNotices({ cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, scope: 'ACTIVE', maxRecords: 100 });
+  let notices = await searchContractNotices({ cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, scope: 'ACTIVE', maxRecords: MAX_RECORDS });
   if (!notices.length) {
     console.log(`   ⚠️ 泵+德国近 ${SINCE_DAYS} 天无开放招标（数据稀疏），放宽到欧盟主力国再拉一次`);
     countries = WIDE_COUNTRIES;
-    notices = await searchContractNotices({ cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, scope: 'ACTIVE', maxRecords: 100 });
+    notices = await searchContractNotices({ cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, scope: 'ACTIVE', maxRecords: MAX_RECORDS });
   }
   console.log(`   拉到 ${notices.length} 条开放招标（买方国别集 ${countries.join(',')}）`);
   for (const n of notices.slice(0, 8)) {
@@ -91,12 +100,19 @@ async function main() {
     return;
   }
 
-  // ══════════ Tier 2 · 真投影（seed source_policy APPROVED → projectTenders 过 §8.8 门）══════════
-  console.log('\n══ Tier 2 · 真投影：seed source_policy(APPROVED) → projectTenders → 买方 canonical + TENDER_PUBLISHED ══');
+  // ══════════ Tier 2 · 真摄取 + 真投影（两层拆开：ingestTed → source_signal → projectTenders 只读）══════════
+  console.log('\n══ Tier 2 · 真摄取+投影：seed source_policy(APPROVED) → ingestTed → source_signal → projectTenders ══');
   await new DiscoveryProviderRegistry().seed(ownerDb); // 幂等 upsert：data_provider ted + source_policy(APPROVED, allowedPurpose[discovery,enrichment])
   await ownerDb.sourcePolicy.update({ where: { domain: TED_DOMAIN }, data: { reviewStatus: 'APPROVED' } }).catch(() => {}); // 复位以防上次 Tier 4 遗留
-  const result = await svc.projectTenders(WS, { cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, maxNotices: 100 });
-  console.log(`   noticesFetched=${result.noticesFetched} companiesTouched=${result.companiesTouched} eventsProjected=${result.eventsProjected} skippedNoBuyer=${result.skippedNoBuyer} skippedNoCountry=${result.skippedNoCountry} skippedNoDate=${result.skippedNoDate}`);
+  // 摄取层：经 Broker 过 §8.8 门 → source_signal 平台表（Tier 1 已选定 countries——数据稀疏放宽逻辑在 Tier 1）。
+  const ingested = await ingest.ingestTed({ cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, maxRecords: MAX_RECORDS });
+  console.log(`   ingest: recordsFetched=${ingested.recordsFetched} signalsUpserted=${ingested.signalsUpserted} ledgerHit=${ingested.ledgerHit} window=${ingested.windowKey} skipped=${JSON.stringify(ingested.skipped)}`);
+  ok(!ingested.error, `摄取无错（error=${ingested.error ?? '—'}）`);
+  ok(ingested.recordsFetched > 0, `摄取层真拉 ${ingested.recordsFetched} 条招标 → source_signal（ledgerHit=${ingested.ledgerHit}）`);
+  // 投影层：只读 source_signal（零出网）→ 本租户 canonical。
+  const result = await svc.projectTenders(WS, { cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS });
+  console.log(`   projection: signalsMatched=${result.signalsMatched} companiesTouched=${result.companiesTouched} eventsProjected=${result.eventsProjected}`);
+  ok(result.signalsMatched > 0, `投影匹配平台表信号 ${result.signalsMatched} 条（CPV 子树 × alpha-2 国别过滤）`);
   ok(result.companiesTouched > 0, `Tier 2：投影 ≥1 家买方 canonical（去重后 ${result.companiesTouched} 家）`);
   ok(result.eventsProjected > 0, `TENDER_PUBLISHED 事件投影 ${result.eventsProjected} 条`);
 
@@ -127,12 +143,12 @@ async function main() {
   ok(ev.some((e) => e.field === 'identity'), '新建买方写了 identity 署名证据（CC BY 4.0 provenance 锚点）');
   ok(!/@/.test(JSON.stringify(ev.map((e) => e.value))), '🔴 field_evidence 里无邮箱（个人数据隔离）');
 
-  // ══════════ Tier 2b · 幂等（同参再跑 → 零改动、不堆行）══════════
+  // ══════════ Tier 2b · 幂等（同参再投影 → 零改动、不堆行）══════════
   console.log('\n══ Tier 2b · 幂等：同参再跑 projectTenders ══');
   const evBefore = await evidenceCount();
-  const rerun = await svc.projectTenders(WS, { cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, maxNotices: 100 });
+  const rerun = await svc.projectTenders(WS, { cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS });
   const evAfter = await evidenceCount();
-  console.log(`   再跑 companiesTouched=${rerun.companiesTouched} eventsProjected=${rerun.eventsProjected}；field_evidence ${evBefore}→${evAfter}`);
+  console.log(`   再跑 signalsMatched=${rerun.signalsMatched} companiesTouched=${rerun.companiesTouched} eventsProjected=${rerun.eventsProjected}；field_evidence ${evBefore}→${evAfter}`);
   ok(rerun.companiesTouched === 0 && rerun.eventsProjected === 0, '幂等：同一开放招标再投影零改动（不 bump version / 不虚报指标）');
   ok(evAfter === evBefore, '幂等：field_evidence 行数不变（不堆重复证据行）');
 
@@ -164,11 +180,15 @@ async function main() {
     ok(after.totalScore > before.totalScore, '总分随 Intent 维上升（招标信号有正贡献）');
   }
 
-  // ══════════ Tier 4 · §8.8 负向门（SUSPENDED → fail-closed，不发请求）══════════
-  console.log('\n══ Tier 4 · §8.8 负向门：source_policy 置 SUSPENDED → projectTenders 不直连 ══');
+  // ══════════ Tier 4 · §8.8 负向门（摄取层：SUSPENDED → fail-closed，不发请求）══════════
+  console.log('\n══ Tier 4 · §8.8 负向门（摄取层）：source_policy 置 SUSPENDED → ingestTed 不直连 ══');
   await ownerDb.sourcePolicy.update({ where: { domain: TED_DOMAIN }, data: { reviewStatus: 'SUSPENDED' } });
-  const gated = await svc.projectTenders(WS, { cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, maxNotices: 100 });
-  ok(gated.noticesFetched === 0 && gated.companiesTouched === 0, `§8.8 SUSPENDED → fail-closed（noticesFetched=${gated.noticesFetched}，不发请求、零落地）`);
+  // 新时间窗（+1 窗宽）避开 Tier 2 的 OK 账本行——账本命中会不出网、根本测不到门。
+  const gated = await ingest.ingestTed(
+    { cpvCodes: [CPV], buyerCountries: countries, sinceDays: SINCE_DAYS, maxRecords: MAX_RECORDS },
+    { nowMs: Date.now() + ingestWindowMs() },
+  );
+  ok(!!gated.error && gated.signalsUpserted === 0, `§8.8 SUSPENDED → 摄取层 fail-closed（error=${gated.error ?? '—'}，零落库、不发请求；投影层零出网——门在摄取层）`);
   await ownerDb.sourcePolicy.update({ where: { domain: TED_DOMAIN }, data: { reviewStatus: 'APPROVED' } });
 }
 
@@ -179,6 +199,12 @@ try {
   await ownerDb.sourcePolicy.update({ where: { domain: TED_DOMAIN }, data: { reviewStatus: 'APPROVED' } }).catch(() => {});
   await ownerDb.fieldEvidence.deleteMany({ where: { workspaceId: WS } }).catch(() => {});
   await ownerDb.canonicalCompany.deleteMany({ where: { workspaceId: WS } }).catch(() => {});
+  // 删本脚本产生的 signal_ingest 账本行（两个候选国别集 × 全部时间窗，含 Tier 4 未来窗 ERROR 行）——
+  // 防旧 OK 账本行让下次真跑账本命中不出网。source_signal 行保留（平台事实，非本脚本私有）。
+  const tedFingerprints = [PRIMARY_COUNTRIES, WIDE_COUNTRIES].map((c) =>
+    queryFingerprint(canonicalTedSpec({ cpvCodes: [CPV], buyerCountries: c, sinceDays: SINCE_DAYS, maxRecords: MAX_RECORDS })),
+  );
+  await ownerDb.signalIngest.deleteMany({ where: { providerKey: 'ted', queryFingerprint: { in: tedFingerprints } } }).catch(() => {});
   console.log(`\n══ ${failed === 0 ? '✅ 全部通过' : `❌ ${failed} 条失败`} ══`);
   await prisma.$disconnect();
   await ownerDb.$disconnect();

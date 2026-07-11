@@ -74,7 +74,7 @@
         "fit": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
         "role": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
         "intent": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-        "demand_proof": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Always null until 收口⑤ (demand evidence)." },
+        "demand_proof": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Demand evidence dimension (since 收口⑤, sourced from first-class signals: tender published / supplier sourcing opened). null = lead scored before rule 'additive-6dim-v2'. Observational: not part of total until the multiplicative gate ships (R2 backtest)." },
         "reachability": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
         "data_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
         "engagement": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },

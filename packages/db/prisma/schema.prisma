@@ -472,6 +472,63 @@ model SourceEntityChange {
   @@map("source_entity_change")
 }
 
+/// 一等买家信号（收口⑤，ADR-006）：全局公开源（TED/openFDA）的需求/时机事实，**平台级采一次服务所有租户**
+///（无 RLS，同 monitored_source 惯例）。🔴 零个人数据红线：payload 只存绿字段白名单（signal-mappers 强制 +
+/// 单测断言），具名个人（TED buyer-email / FDA contact/us_agent / 个体户自然人申请人）在摄取层即拒。
+/// `attributes.intent.*` 自此降为本表的**租户投影**（可复算）；状态机 ACTIVE → EXPIRED | REVOKED
+///（DETECTED 为保留态，官方 API 源摄取即 ACTIVE；EXPIRED 由 sweep 按 expiresAt 翻转，REVOKED 供合规撤回）。
+model SourceSignal {
+  id             String    @id @default(uuid()) @db.Uuid
+  providerKey    String    @map("provider_key") // ted | openfda
+  signalType     String    @map("signal_type") // TENDER_PUBLISHED | FDA_CLEARANCE
+  externalId     String    @map("external_id") // 源侧稳定 id（TED publication-number / FDA k_number）——无 id 的记录摄取层跳过
+  subjectName    String    @map("subject_name") // 主体组织名（买方/申请人，法人 🟢）
+  subjectCountry String    @map("subject_country") // alpha-2（无国别的记录摄取层跳过，防跨国同名误并）
+  subjectKey     String    @map("subject_key") // companyIdentity({name,country}).dedupeKey——与租户 canonical 同规范化，投影按此匹配
+  taxonomyKeys   Json      @map("taxonomy_keys") // 带 scheme 前缀的分类键（'cpv:42122000' / 'fda:LLZ'），投影按 ICP 码交集过滤
+  strength       Float // 信号基准强度（0..1，评分侧再按新近度衰减）
+  occurredAt     DateTime  @map("occurred_at") // 事件时间（招标发布日/清关决定日）——双时间轴之一，backtest 用
+  observedAt     DateTime  @map("observed_at") // 摄取时间——双时间轴之二
+  payload        Json // 绿字段白名单载荷（TED: cpv/notice；FDA: product_code/k_number/device）
+  license        String // 实值 'CC BY 4.0'（TED，对齐既有 field_evidence 行）| 'CC0-1.0'（FDA，SPDX）；统一 SPDX 随收口⑥ 权利词表（租户投影侧履行署名义务）
+  jurisdiction   String? // 'EU' | 'US'
+  status         String    @default("ACTIVE") @map("status") // ACTIVE | EXPIRED | REVOKED
+  expiresAt      DateTime  @map("expires_at") // = occurredAt + 类型 TTL（招标 90d / 清关 365d，env 可调）
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // 摄取幂等锚（同记录跨 sweep 复现不重复行）。含 subjectKey 的已知取舍（复审记档）：源侧买方名
+  // 规范化漂移会产生同 externalId 双行、30d 投影窗内同招标在两个 dedupeKey 上各计一次——名漂移低频、
+  // 窗口自愈、不同 dedupeKey 在租户体系本就是不同主体；根治（同 externalId 旧行标 EXPIRED）留后续。
+  @@unique([providerKey, externalId, signalType, subjectKey])
+  @@index([providerKey, signalType, status, occurredAt])
+  @@index([subjectKey])
+  @@index([status, expiresAt])
+  @@map("source_signal")
+}
+
+/// ingest-once 账本（收口⑤验收：同一外部源同一时间窗**跨 workspace 只拉取一次**）。
+/// 拉取键 = (providerKey, queryFingerprint, windowKey)：指纹=规范化查询参数哈希（码/国别排序去重、
+/// 键序无关），窗口=对齐的时间桶（默认 6h，env SIGNAL_INGEST_WINDOW_MS）。同键已有 OK 行 → 跳过外部拉取；
+/// ERROR 行可重试覆盖。querySpec 存规范化参数原文（审计 + 复算）。
+model SignalIngest {
+  id               String   @id @default(uuid()) @db.Uuid
+  providerKey      String   @map("provider_key") // ted | openfda
+  queryFingerprint String   @map("query_fingerprint") // sha256(canonical query params)
+  windowKey        String   @map("window_key") // 时间桶键（如 '2026-07-11T06:00:00.000Z'）
+  querySpec        Json     @map("query_spec") // 规范化查询参数（cpvCodes/countries/sinceDays…）
+  recordsFetched   Int      @default(0) @map("records_fetched") // 外部 API 返回的原始记录数
+  signalsUpserted  Int      @default(0) @map("signals_upserted") // 落进 source_signal 的行数（含更新）
+  status           String   @default("OK") // OK | ERROR
+  error            String?
+  fetchedAt        DateTime @default(now()) @map("fetched_at")
+
+  @@unique([providerKey, queryFingerprint, windowKey])
+  @@index([fetchedAt])
+  @@map("signal_ingest")
+}
+
 /// 一次发现执行（对应一个 READY 的查询计划）。
 model DiscoveryRun {
   id          String    @id @default(uuid()) @db.Uuid

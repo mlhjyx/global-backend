@@ -1,4 +1,5 @@
 import { qualify, QualifyResult, RuleLike } from '../icp/rule-engine';
+import { TENDER_PUBLISHED } from '../signals/signal-mappers';
 
 /**
  * 六维评分（LED-006, PRD 5.6/7.5）—— 全部确定性计算，AI 不参与打分：
@@ -40,6 +41,13 @@ export interface LeadScoreResult {
     fit: number;
     role: number;
     intent: number;
+    /**
+     * 需求证据维（收口⑤）：**观测值，不进 totalScore**——只由带 evidence 的真实需求类事件驱动
+     *（TENDER_PUBLISHED 招标 / SOURCING_OPENED 供应商招募），按新近度衰减取最强；无关键词代理
+     *（ADR-010：无 evidence 的字段不得参与评分）。乘法门 Fit^a×(1+DemandProof)×… 待 R2 backtest
+     *（人工确认 QGO 标签 ≥50 条）后启用。
+     */
+    demandProof: number;
     dataQuality: number;
     reachability: number;
     engagement: number;
@@ -55,7 +63,10 @@ export interface LeadScoreResult {
   };
 }
 
+// 加法六维权重（不含 demandProof——观测维不进总分，乘法门待 R2 backtest；见 LeadScoreResult.scores 注）。
 const WEIGHTS = { fit: 0.35, role: 0.15, intent: 0.15, dataQuality: 0.15, reachability: 0.15, engagement: 0.05 };
+/** 需求证据类事件（收口⑤拍板）：买方公开采购 + 供应商招募页开放；FDA_CLEARANCE 属上市时机留 Intent 维。 */
+const DEMAND_PROOF_EVENT_TYPES = new Set<string>([TENDER_PUBLISHED, 'SOURCING_OPENED']);
 const RECOMMEND_THRESHOLD = 0.55;
 const INTENT_HALFLIFE_DAYS = 60; // 意向信号半衰期：B2B 买家信号约 2 月衰减一半（越久越弱，防陈旧信号长期占分）
 const DAY_MS = 86_400_000;
@@ -151,10 +162,12 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
     fit: r4(fit),
     role: r4(role),
     intent: r4(intent),
+    demandProof: r4(intentDim.demandProof),
     dataQuality: r4(dataQuality),
     reachability: r4(reachability),
     engagement,
   };
+  // totalScore 只按 WEIGHTS 六键合成——demandProof 是观测维（键不在 WEIGHTS 中，天然不入总分）。
   const totalScore = r4(
     Object.entries(WEIGHTS).reduce((s, [k, w]) => s + w * scores[k as keyof typeof scores], 0),
   );
@@ -202,6 +215,7 @@ interface IntentEventLike {
   type?: unknown;
   at?: unknown;
   strength?: unknown;
+  evidence?: unknown;
 }
 interface IntentAttrLike {
   intent_score?: unknown;
@@ -218,10 +232,11 @@ function intentDimension(
   attrs: Record<string, unknown>,
   triggerSignals: string[],
   nowMs: number,
-): { intent: number; matchedSignals: string[]; intentSignals: string[]; note: string } {
+): { intent: number; demandProof: number; matchedSignals: string[]; intentSignals: string[]; note: string } {
   // ① 真实 intent：attributes.intent.events 逐条 strength × 新近度衰减，取最强
   const intentAttr = attrs.intent as IntentAttrLike | undefined;
   let realIntent = 0;
+  let demandProof = 0; // 需求证据维（收口⑤）：仅需求类事件（招标/供应商招募），无代理兜底
   const intentSignals: string[] = [];
   if (intentAttr && typeof intentAttr === 'object') {
     const events = Array.isArray(intentAttr.events) ? (intentAttr.events as IntentEventLike[]) : [];
@@ -230,6 +245,10 @@ function intentDimension(
       const atMs = typeof e.at === 'string' ? Date.parse(e.at) : NaN;
       const decayed = strength * recencyDecay(nowMs - atMs);
       if (decayed > realIntent) realIntent = decayed;
+      // evidence 判据强制（ADR-010「无 evidence 的字段不得参与评分或导出」——demand_proof 会进快照导出）
+      if (typeof e.type === 'string' && DEMAND_PROOF_EVENT_TYPES.has(e.type) && e.evidence != null && decayed > demandProof) {
+        demandProof = decayed;
+      }
       if (typeof e.type === 'string' && !intentSignals.includes(e.type)) intentSignals.push(e.type);
     }
     // 事件缺失但有 intent_score 概要 → 用概要 × last_change_at 衰减兜底
@@ -259,7 +278,7 @@ function intentDimension(
   const note = usedReal
     ? `Intent 由真实网站变更信号驱动（${intentSignals.length ? intentSignals.join('/') : 'intent 概要'}；新近度加权 realIntent=${r4(realIntent)}）`
     : 'Intent 基于关键词代理（无真实意向信号）';
-  return { intent, matchedSignals, intentSignals, note };
+  return { intent, demandProof: clamp01(demandProof), matchedSignals, intentSignals, note };
 }
 
 /** 指数衰减：半衰期 INTENT_HALFLIFE_DAYS。刚发生/未来(时钟偏移)→1；越旧越接近 0；

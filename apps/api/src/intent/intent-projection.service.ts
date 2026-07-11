@@ -10,7 +10,8 @@ import { WEB_WATCH_KEY } from './website-watch.service';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
-const INTENT_CHANGE_TYPES = ['SOURCING_OPENED', 'HIRING_UP', 'HIRING_DOWN', 'NEW_PRODUCTS', 'NEWS_POSTED', 'PAGE_CHANGED'];
+/** web_watch 的 intent 变更类型（导出供 intent 复算重放同一事实集，收口⑤）。 */
+export const INTENT_CHANGE_TYPES = ['SOURCING_OPENED', 'HIRING_UP', 'HIRING_DOWN', 'NEW_PRODUCTS', 'NEWS_POSTED', 'PAGE_CHANGED'];
 
 /** 各 intent 类型的基准强度（与 page-signals 对齐；projection 取 max 作 intent_score 提示，喂未来六维 Intent 维）。 */
 const TYPE_STRENGTH: Record<string, number> = {
@@ -113,7 +114,7 @@ export class IntentProjectionService {
         });
         if (!company || company.status === 'SUPPRESSED') return false;
 
-        const events = changes.map(toEvent);
+        const events = changes.map(toIntentEvent);
         const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const priorIntent = (existing.intent as IntentAttr | undefined) ?? undefined;
         const intent = mergeIntent(priorIntent, events);
@@ -171,7 +172,8 @@ export interface IntentAttr {
   _ts: string;
 }
 
-function toEvent(ch: { changeType: string; createdAt: Date; detail: unknown }): IntentEvent {
+/** source_entity_change 行 → IntentEvent（导出供 intent 复算重放 web_watch 事实，收口⑤）。 */
+export function toIntentEvent(ch: { changeType: string; createdAt: Date; detail: unknown }): IntentEvent {
   const detail = (ch.detail ?? {}) as Record<string, unknown>;
   const strength = typeof detail.strength === 'number' ? detail.strength : TYPE_STRENGTH[ch.changeType] ?? 0.3;
   return {
@@ -209,22 +211,42 @@ export function canonicalize(v: unknown): unknown {
   return v;
 }
 
+/**
+ * at 的时间键：可解析 → epoch 串——**格式漂移免疫**（'2026-05-05' 与 '2026-05-05T00:00:00.000Z' 与
+ * '2026-07-08T00:00:00+02:00' 的 UTC 等刻串同键）。收口⑤把事件 at 统一为 occurredAt.toISOString()，
+ * 若按原串比对，存量旧格式事件会与新格式**同刻不同串** → 同一招标/清关翻倍（对抗复审 HIGH）；epoch 归一
+ * 后新旧同刻自然去重（首见=incoming 新格式存活，一次重写即收敛，生产 sweep 即触发无需 backfill）。
+ * 不可解析 → 原串兜底（评分侧 recencyDecay 对其记 0 分，不受影响）。
+ */
+function atKey(at: string): string {
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? String(ms) : at;
+}
+
 /** 合并已有 intent 与新事件：滚动保留近 N 条、累计类型计数、intent_score=近窗口最强强度。共享（web_watch + TED 招标 intent）。 */
 export function mergeIntent(prev: IntentAttr | undefined, incoming: IntentEvent[]): IntentAttr {
   const seen = new Set<string>();
   const all = [...incoming, ...(prev?.events ?? [])]
     .filter((e) => {
       // 含页面 URL 区分：同一 sweep 里多页写的变更共享 createdAt，仅 type|at 会误并（如两页同为 PAGE_CHANGED）
-      const k = `${e.type}|${e.at}|${e.page_url ?? e.page_kind ?? ''}`;
+      const k = `${e.type}|${atKey(e.at)}|${e.page_url ?? e.page_kind ?? ''}`;
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
     })
-    // 新近优先降序；相等 at 返回 0 → 保留输入序（V8 稳定排序）。**不可**对相等 at 返回 ±1：会产生不一致
-    // 比较器（同时判 a<b、b<a），令相等事件在重排后顺序不定 → canonicalize 保序比较误判「变了」→ 破幂等。
-    // 本 provider 的 FDA_CLEARANCE 与 web_watch/TED 事件 at 格式不同（date-only vs full ISO），跨源同 at 罕见，
-    // 但作为 3 子系统共享的幂等基石，比较器必须一致（防未来调用方输入序变动时静默重写）。
-    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    // 新近优先降序（epoch 优先，跨格式排序正确）；相等返回 0 → 保留输入序（V8 稳定排序）。**不可**对相等
+    // 返回 ±1：会产生不一致比较器（同时判 a<b、b<a），令相等事件在重排后顺序不定 → canonicalize 保序比较
+    // 误判「变了」→ 破幂等（3 子系统共享的幂等基石，比较器必须一致）。不可解析 at 视作最旧（评分侧本就 0 分）；
+    // 双不可解析退回字符串比较——三段规则构成一致的全序。
+    .sort((a, b) => {
+      const am = Date.parse(a.at);
+      const bm = Date.parse(b.at);
+      const af = Number.isFinite(am);
+      const bf = Number.isFinite(bm);
+      if (af && bf) return am < bm ? 1 : am > bm ? -1 : 0;
+      if (af !== bf) return af ? -1 : 1; // 可解析者视为更新（不可解析=最旧）
+      return a.at < b.at ? 1 : a.at > b.at ? -1 : 0;
+    })
     .slice(0, MAX_EVENTS_KEPT);
   const counts: Record<string, number> = {};
   for (const e of all) counts[e.type] = (counts[e.type] ?? 0) + 1;

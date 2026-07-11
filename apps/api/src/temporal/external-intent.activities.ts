@@ -2,19 +2,41 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
 import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
+import { SignalIngestService, IngestOutcome } from '../signals/signal-ingest.service';
+import { canonicalFdaSpec, canonicalTedSpec, queryFingerprint } from '../signals/signal-query';
 import { TedIntentProjectionService, ProjectTendersResult } from '../intent/ted-intent-projection.service';
 import { OpenFdaIntentProjectionService, ProjectClearancesResult } from '../intent/openfda-intent-projection.service';
 
-const DEFAULT_MAX_NOTICES = 100; // 单 ICP 有界样本（绝不 grind 全库）
+const DEFAULT_MAX_NOTICES = 100; // 单指纹有界样本（绝不 grind 全库）
 const DEFAULT_MAX_RECORDS = 100;
 const TED_PROVIDER = 'ted';
 const OPENFDA_PROVIDER = 'openfda';
+const SWEEP_BUDGET_KEY = 'sweep:external-intent'; // 平台级 sweep 预算账（收口② reserve-settle）
 
 export interface ExternalIntentTarget {
   workspaceId: string;
   icpId: string;
+}
+
+/** ICP → 确定性解析出的查询面（解析与摄取/投影拆层：本身零出网）。 */
+export interface ResolvedIntentTarget extends ExternalIntentTarget {
+  cpvCodes: string[];
+  buyerCountries: string[]; // ISO-3（TED 查询格式；投影端归 alpha-2）
+  fdaProductCodes: string[];
+  error?: string;
+}
+
+export interface IngestSweepSummary {
+  tedSpecs: number; // 去重后的唯一 TED 查询指纹数
+  fdaSpecs: number;
+  fetches: number; // 真实出网拉取尝试次数（含失败；账本命中/未出网不计）
+  ledgerHits: number; // ingest-once 命中数（跨 workspace/ICP 共享）
+  signalsUpserted: number;
+  budgetExceeded: boolean;
+  errors: string[];
 }
 
 export interface ExternalIntentIcpResult {
@@ -28,14 +50,15 @@ export interface ExternalIntentIcpResult {
 }
 
 /**
- * **外部源 intent sweep** 的 Temporal 活动：把已落地的 TED 招标 + openFDA 510(k) 清关 intent 投影**接进周期调度**，
- * 让「已建的东西在生产真跑」（loop 收口）——此前两投影只在 verify 脚本里活，生产永不触发。
- *
- * 架构与 intent.activities（web_watch sweep）并列但**分开调度**：外部源按 ICP 拉、web_watch 按监控源拉。
- * 跨租户枚举 ACTIVE ICP 走 ownerDb 只读（RLS 下 app_user 不可见，同 OutboxRelay/backlog 的「受信系统扫描器」先例）；
- * 每 ICP 的投影写仍走各自 service 的 `withWorkspace`（RLS 安全）。ICP→CPV/FDA 码用**确定性**解析（`allowLlm:false`，
- * 调度里不臆造码、可复现、零 LLM 成本）。§8.8 门（收口②）：ted.search/openfda.search 为 required 工具，
- * SUSPENDED/未登记/用途不符由 ExecutionBroker 单点 fail-closed（无 broker → 两 service 零投影不出网）。
+ * **外部源 intent sweep** 的 Temporal 活动（收口⑤重构：ingest-once + 两层投影）。
+ * 旧结构「逐 ICP 各自 broker.invoke 直连 TED/openFDA + 直接 upsert」= 同一外部记录被 N 个 ICP×workspace
+ * 重复拉取、原始事实不落任何平台表（as-built 缺口#5）。新结构四段：
+ *   ① listExternalIntentTargets：ownerDb 跨租户枚举全部 ACTIVE ICP（受信系统扫描器先例，无静默截断）；
+ *   ② resolveExternalIntentTarget：逐 ICP **确定性**解析 CPV/FDA 码（allowLlm:false，零出网零 LLM 成本）；
+ *   ③ ingestExternalSignals：按 (provider, queryFingerprint, windowKey) **全局去重后拉取一次** →
+ *      source_signal 平台表（零个人数据）；预算 `sweep:external-intent` 开账，BudgetExceeded 停拉不停投影；
+ *   ④ projectExternalIntentForIcp：逐 ICP 从 source_signal **只读投影**进本租户 canonical（withWorkspace RLS）。
+ * kill-switch：③ 每指纹拉取前 live 重读 data_provider（中途 ops 关停本轮即生效）；②④ 零出网只受捕获标志门。
  */
 export function createExternalIntentActivities(deps: {
   prisma: PrismaService;
@@ -43,8 +66,22 @@ export function createExternalIntentActivities(deps: {
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker;
 }) {
-  const tedProj = new TedIntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
-  const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
+  const ingestSvc = new SignalIngestService({ prisma: deps.prisma, broker: deps.broker });
+  const tedProj = new TedIntentProjectionService({ prisma: deps.prisma });
+  const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma });
+
+  /** live kill-switch：拉取前重读 data_provider 状态（ownerDb 只读；缺失 → 全停）。 */
+  async function liveEnabled(): Promise<{ ted: boolean; openfda: boolean }> {
+    if (!deps.ownerDb) return { ted: false, openfda: false };
+    const rows = await deps.ownerDb.dataProvider.findMany({
+      where: { key: { in: [TED_PROVIDER, OPENFDA_PROVIDER] } },
+      select: { key: true, status: true },
+    });
+    return {
+      ted: rows.some((p) => p.key === TED_PROVIDER && p.status === 'ENABLED'),
+      openfda: rows.some((p) => p.key === OPENFDA_PROVIDER && p.status === 'ENABLED'),
+    };
+  }
 
   return {
     /**
@@ -57,38 +94,27 @@ export function createExternalIntentActivities(deps: {
       openfdaEnabled: boolean;
     }> {
       if (!deps.ownerDb) return { targets: [], tedEnabled: false, openfdaEnabled: false };
-      const providers = await deps.ownerDb.dataProvider.findMany({
-        where: { key: { in: [TED_PROVIDER, OPENFDA_PROVIDER] } },
-        select: { key: true, status: true },
-      });
-      const tedEnabled = providers.some((p) => p.key === TED_PROVIDER && p.status === 'ENABLED');
-      const openfdaEnabled = providers.some((p) => p.key === OPENFDA_PROVIDER && p.status === 'ENABLED');
-      if (!tedEnabled && !openfdaEnabled) return { targets: [], tedEnabled, openfdaEnabled }; // 全停 → 不枚举
+      const live = await liveEnabled();
+      if (!live.ted && !live.openfda) return { targets: [], tedEnabled: live.ted, openfdaEnabled: live.openfda }; // 全停 → 不枚举
 
       // **无静默截断**：默认枚举全部 ACTIVE ICP（loop 收口要求每个 ICP 最终都被投影）。给了 arbitrary
-      // take 上限 + orderBy updatedAt desc 会**永久饿死**旧 ICP——投影只写 canonical_company、不动
-      // icp_definition，ICP 的 updatedAt 冻结，一旦 ACTIVE 数超上限，末尾的永远轮不到（同 backlog id>cursor
-      // 防活锁的教训）。`limit` 仅供单测/有界跑；生产 schedule 不传 → 全量。超大规模再上 lastSweptAt 水位列增量。
+      // take 上限 + orderBy updatedAt desc 会**永久饿死**旧 ICP（同 backlog id>cursor 防活锁的教训）。
+      // `limit` 仅供单测/有界跑；生产 schedule 不传 → 全量。超大规模再上 lastSweptAt 水位列增量。
       const icps = await deps.ownerDb.icpDefinition.findMany({
         where: { status: 'ACTIVE' },
         select: { id: true, workspaceId: true },
         orderBy: { id: 'asc' }, // 稳定序（非 updatedAt，避免"最近编辑优先"倾斜）
         ...(args?.limit ? { take: args.limit } : {}),
       });
-      return { targets: icps.map((i) => ({ workspaceId: i.workspaceId, icpId: i.id })), tedEnabled, openfdaEnabled };
+      return { targets: icps.map((i) => ({ workspaceId: i.workspaceId, icpId: i.id })), tedEnabled: live.ted, openfdaEnabled: live.openfda };
     },
 
     /**
-     * 对一个 ICP 跑外部源 intent 投影：ICP → 确定性解析 CPV/FDA 码 → projectTenders + projectClearances。
-     * 各 provider 独立 enabled 门（细粒度 kill-switch）；单 provider 解析/投影失败 fail-safe 不阻断另一个。
+     * ICP → 确定性解析 CPV/FDA 码（零出网零 LLM：allowLlm:false，调度里不臆造码、可复现）。
+     * 稀疏 companyAttributes 兜底：复用 ICP 已存 discovery 查询计划的 filters.industry 补 industry 词。
      */
-    async projectExternalIntentForIcp(args: ExternalIntentTarget & {
-      tedEnabled: boolean;
-      openfdaEnabled: boolean;
-      maxNotices?: number;
-      maxRecords?: number;
-    }): Promise<ExternalIntentIcpResult> {
-      const out: ExternalIntentIcpResult = { workspaceId: args.workspaceId, icpId: args.icpId, cpvCodes: 0, fdaProductCodes: 0 };
+    async resolveExternalIntentTarget(args: ExternalIntentTarget): Promise<ResolvedIntentTarget> {
+      const out: ResolvedIntentTarget = { ...args, cpvCodes: [], buyerCountries: [], fdaProductCodes: [] };
       if (!deps.ownerDb) return out;
 
       const icp = await deps.ownerDb.icpDefinition.findUnique({
@@ -97,8 +123,6 @@ export function createExternalIntentActivities(deps: {
       });
       if (!icp) return out;
 
-      // 稀疏 companyAttributes 兜底（Codex 复审）：复用 ICP 已存 discovery 查询计划的 filters.industry 补 industry 词
-      // （镜像 icp.service 把 planned 传进 collectIndustryTerms）——否则 industry 空 → 解析 0 码 → 静默跳过该 ICP。
       const plan = await deps.ownerDb.discoveryQueryPlan.findFirst({
         where: { icpId: args.icpId },
         orderBy: { updatedAt: 'desc' },
@@ -112,54 +136,138 @@ export function createExternalIntentActivities(deps: {
       const product = attrs.product ? String(attrs.product) : undefined;
       const tradeSide = attrs.trade_side ? String(attrs.trade_side) : undefined;
 
-      // **逐 ICP 重读 live kill-switch**（Codex 复审）：sweep 现在全量枚举可能很长，若只用 sweep 开始时捕获的
-      // args.*Enabled，中途 ops 翻 data_provider 开关本轮不生效、仍打外部 API。live 状态 AND 捕获标志（捕获标志
-      // 供单测/有界跑显式关闭；live 供中途生效）→ 任一为停即跳过。
-      const live = await deps.ownerDb.dataProvider.findMany({
-        where: { key: { in: [TED_PROVIDER, OPENFDA_PROVIDER] } },
-        select: { key: true, status: true },
-      });
-      const tedLive = args.tedEnabled && live.some((p) => p.key === TED_PROVIDER && p.status === 'ENABLED');
-      const openfdaLive = args.openfdaEnabled && live.some((p) => p.key === OPENFDA_PROVIDER && p.status === 'ENABLED');
+      try {
+        const cpv = await resolveIcpToCpv(
+          deps.taxonomy,
+          { industryTerms, product, targetCountries },
+          { allowLlm: false, workspaceId: args.workspaceId },
+        );
+        out.cpvCodes = cpv.cpvCodes;
+        out.buyerCountries = cpv.buyerCountries;
+      } catch (err) {
+        out.error = `cpv: ${String(err).slice(0, 120)}`;
+      }
+      try {
+        const fda = await resolveIcpToFda(
+          deps.taxonomy,
+          { industryTerms, product, tradeSide, targetCountries },
+          { allowLlm: false, workspaceId: args.workspaceId },
+        );
+        out.fdaProductCodes = fda.productCodes;
+      } catch (err) {
+        out.error = `${out.error ? out.error + '; ' : ''}fda: ${String(err).slice(0, 120)}`;
+      }
+      return out;
+    },
 
-      // TED 招标 intent（CPV 确定性解析 → projectTenders）
-      if (tedLive) {
-        try {
-          const cpv = await resolveIcpToCpv(
-            deps.taxonomy,
-            { industryTerms, product, targetCountries },
-            { allowLlm: false, workspaceId: args.workspaceId },
-          );
-          out.cpvCodes = cpv.cpvCodes.length;
-          // 需 CPV **且**有覆盖买方国别才投影（镜像 discovery 的 buildTedQuery 守卫，Codex 复审）：空 buyerCountries
-          // 会令 buildAwardQuery 省略国别子句 → 拉全 EU → 把无关欧盟买方 intent 灌进本 workspace（如非 EU 目标 ICP）。
-          if (cpv.cpvCodes.length && cpv.buyerCountries.length) {
-            out.tenders = await tedProj.projectTenders(args.workspaceId, {
-              cpvCodes: cpv.cpvCodes,
-              buyerCountries: cpv.buyerCountries,
-              maxNotices: args.maxNotices ?? DEFAULT_MAX_NOTICES,
-            });
+    /**
+     * 平台层摄取（ingest-once 核心）：全部 ICP 的查询面按指纹**全局去重**，每唯一 (provider, 指纹, 时间窗)
+     * 只拉一次 → source_signal。预算：`sweep:external-intent` 开账（sweepBudgetCents 上界），
+     * BudgetExceededError → 停止后续拉取（已落库的信号仍供投影），**显性上报不静默**。
+     */
+    async ingestExternalSignals(args: {
+      targets: ResolvedIntentTarget[];
+      tedEnabled: boolean;
+      openfdaEnabled: boolean;
+      maxNotices?: number;
+      maxRecords?: number;
+    }): Promise<IngestSweepSummary> {
+      const summary: IngestSweepSummary = {
+        tedSpecs: 0, fdaSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [],
+      };
+
+      // 指纹级全局去重：两个 workspace 的同参 ICP → 同一指纹 → 一次拉取（收口⑤验收）。
+      const tedByFp = new Map<string, { cpvCodes: string[]; buyerCountries: string[]; maxRecords?: number }>();
+      const fdaByFp = new Map<string, { productCodes: string[]; maxRecords?: number }>();
+      for (const t of args.targets) {
+        if (args.tedEnabled && t.cpvCodes.length && t.buyerCountries.length) {
+          // 需 CPV **且**有覆盖买方国别（空国别会令查询省略国别子句 → 拉全 EU，绝不裸拉）。
+          const params = { cpvCodes: t.cpvCodes, buyerCountries: t.buyerCountries, maxRecords: args.maxNotices ?? DEFAULT_MAX_NOTICES };
+          tedByFp.set(queryFingerprint(canonicalTedSpec(params)), params);
+        }
+        if (args.openfdaEnabled && t.fdaProductCodes.length) {
+          const params = { productCodes: t.fdaProductCodes, maxRecords: args.maxRecords ?? DEFAULT_MAX_RECORDS };
+          fdaByFp.set(queryFingerprint(canonicalFdaSpec(params)), params);
+        }
+      }
+      summary.tedSpecs = tedByFp.size;
+      summary.fdaSpecs = fdaByFp.size;
+      if (!tedByFp.size && !fdaByFp.size) return summary;
+
+      budgetLedger.open(SWEEP_BUDGET_KEY, sweepBudgetCents());
+      try {
+        const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {
+          try {
+            const r = await fetch();
+            // fetches=真实出网尝试次数（含失败——外部配额审计口径；复审 LOW）；未出网的
+            // broker_unavailable/empty_query 不计；ledgerHit 命中不出网只计 ledgerHits。
+            if (r.ledgerHit) summary.ledgerHits += 1;
+            else if (r.error !== 'broker_unavailable' && r.error !== 'empty_query') summary.fetches += 1;
+            if (r.error) summary.errors.push(`${r.provider}: ${r.error}`);
+            summary.signalsUpserted += r.signalsUpserted; // ledgerHit 归 0（本轮真实落库数，不跨窗双计）
+            return true;
+          } catch (err) {
+            if (err instanceof BudgetExceededError) {
+              summary.budgetExceeded = true; // 显性截断：预算打穿即停拉（绝不静默假完成）
+              summary.errors.push('budget_exceeded');
+              return false;
+            }
+            summary.errors.push(String(err).slice(0, 150));
+            return true; // 单指纹失败 fail-safe 不阻断其余
           }
+        };
+
+        for (const params of tedByFp.values()) {
+          const live = await liveEnabled(); // 每指纹 live 重读：中途 ops 关停本轮即生效
+          if (!live.ted) break;
+          if (!(await runOne(() => ingestSvc.ingestTed(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+        }
+        for (const params of fdaByFp.values()) {
+          const live = await liveEnabled();
+          if (!live.openfda) break;
+          if (!(await runOne(() => ingestSvc.ingestFda(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+        }
+        return summary;
+      } finally {
+        budgetLedger.close(SWEEP_BUDGET_KEY);
+      }
+    },
+
+    /** 状态机 sweep：ACTIVE 且过期 → EXPIRED（投影前跑，过期信号绝不再投）。 */
+    async expireStaleSignals(): Promise<{ expired: number }> {
+      return { expired: await ingestSvc.expireStale() };
+    },
+
+    /**
+     * 对一个 ICP 从 source_signal **只读投影**（零出网）：TED 招标 + openFDA 清关 → 本租户 canonical。
+     * 各 provider 独立 enabled 门；单 provider 投影失败 fail-safe 不阻断另一个。
+     */
+    async projectExternalIntentForIcp(args: ResolvedIntentTarget & {
+      tedEnabled: boolean;
+      openfdaEnabled: boolean;
+    }): Promise<ExternalIntentIcpResult> {
+      const out: ExternalIntentIcpResult = {
+        workspaceId: args.workspaceId, icpId: args.icpId,
+        cpvCodes: args.cpvCodes.length, fdaProductCodes: args.fdaProductCodes.length,
+        ...(args.error ? { error: args.error } : {}),
+      };
+
+      if (args.tedEnabled && args.cpvCodes.length && args.buyerCountries.length) {
+        try {
+          out.tenders = await tedProj.projectTenders(args.workspaceId, {
+            cpvCodes: args.cpvCodes,
+            buyerCountries: args.buyerCountries,
+          });
         } catch (err) {
-          out.error = `ted: ${String(err).slice(0, 120)}`;
+          out.error = `${out.error ? out.error + '; ' : ''}ted: ${String(err).slice(0, 120)}`;
         }
       }
 
-      // openFDA 510(k) 清关 intent（FDA 产品码确定性解析 → projectClearances）
-      if (openfdaLive) {
+      if (args.openfdaEnabled && args.fdaProductCodes.length) {
         try {
-          const fda = await resolveIcpToFda(
-            deps.taxonomy,
-            { industryTerms, product, tradeSide, targetCountries },
-            { allowLlm: false, workspaceId: args.workspaceId },
-          );
-          out.fdaProductCodes = fda.productCodes.length;
-          if (fda.productCodes.length) {
-            out.clearances = await openfdaProj.projectClearances(args.workspaceId, {
-              productCodes: fda.productCodes,
-              maxRecords: args.maxRecords ?? DEFAULT_MAX_RECORDS,
-            });
-          }
+          out.clearances = await openfdaProj.projectClearances(args.workspaceId, {
+            productCodes: args.fdaProductCodes,
+          });
         } catch (err) {
           out.error = `${out.error ? out.error + '; ' : ''}openfda: ${String(err).slice(0, 120)}`;
         }

@@ -9,14 +9,19 @@
 import { clamp01 } from './scoring';
 
 export const LEAD_QUALIFIED_SCHEMA_VERSION = 1;
-/** 现行 scoring.ts 加法六维 + recommended≥0.55 且 Reachability>0。 */
-export const QUALIFICATION_RULE_VERSION = 'additive-6dim-v1';
+/**
+ * v2（收口⑤）：总分构成不变（加法六维 + recommended≥0.55 且 Reachability>0），新增 **demand_proof
+ * 观测维填充**（一等 Signal 事实驱动，不入总分——乘法门待 R2 backtest）。快照 v1 契约已预留
+ * demand_proof 为 number|null 槽位，填充**非破坏**、无需 v2 schema 文件（snapshot_version 仍 1）。
+ */
+export const QUALIFICATION_RULE_VERSION = 'additive-6dim-v2';
 
 /** lead.scores Json 的现行形状（lead/scoring.ts 写入）。 */
 interface LeadScoresJson {
   fit?: number;
   role?: number;
   intent?: number;
+  demandProof?: number; // 收口⑤观测维（旧 lead 无此键 → 快照 null）
   dataQuality?: number;
   reachability?: number;
   engagement?: number;
@@ -117,7 +122,7 @@ function mapScores(scores: unknown, totalScore: number | null): LeadQualifiedSna
     fit: dim(s?.fit),
     role: dim(s?.role),
     intent: dim(s?.intent),
-    demand_proof: null, // 收口⑤（需求证据）前恒 null
+    demand_proof: dim(s?.demandProof), // 收口⑤：一等 Signal 需求证据（旧 lead 未重评 → null，如实）
     reachability: dim(s?.reachability),
     data_quality: dim(s?.dataQuality),
     engagement: dim(s?.engagement),

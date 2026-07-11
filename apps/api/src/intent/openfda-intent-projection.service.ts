@@ -1,120 +1,108 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { companyIdentity } from '../discovery/identity';
-import {
-  Fda510kClearance,
-  OPENFDA_ATTRIBUTION,
-  OPENFDA_LICENSE,
-  FDA_REGISTRATION_DISCLAIMER,
-} from '../adapters/openfda-api';
-import type { OpenFdaSearchInput, OpenFdaSearchOutput } from '../tools/source-tools';
-import type { ExecutionBroker } from '../tools/tool-contract';
+import { OPENFDA_ATTRIBUTION, OPENFDA_LICENSE, FDA_REGISTRATION_DISCLAIMER } from '../adapters/openfda-api';
+import { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
-/** 510(k) 清关 intent 类型 + 强度：具名申请人清关 = 新品/上市时机（略弱于 TED 开放招标 0.9=正在采购）。 */
-export const FDA_CLEARANCE = 'FDA_CLEARANCE';
-export const FDA_CLEARANCE_STRENGTH = 0.85;
+// 单一真值在 signals/signal-mappers（摄取层先用：§6 个体户在摄取层即拒）；re-export 保持既有 import 路径不破。
+export { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant };
+
 const DEFAULT_SINCE_DAYS = 365; // 清关比招标稀疏 → 更宽窗口
-const DEFAULT_MAX_RECORDS = 200; // 有界样本（绝不 grind 17 万全量）
+const DEFAULT_MAX_COMPANIES = 200; // 单 ICP 单轮投影的公司上限（有界，绝不 grind 全量）
+const SIGNAL_SCAN_LIMIT = 2000;
 
 export interface ProjectClearancesResult {
-  clearancesFetched: number;
+  signalsMatched: number;
   companiesTouched: number;
   eventsProjected: number;
-  skippedNoCountry: number;
-  skippedNoDate: number;
-  skippedIndividual: number; // §6 边界：疑似个体户自然人申请人（不入绿库）
+  skippedIndividual: number; // §6 防御纵深：摄取层已拒，投影层再守一道
+  /** maxCompanies 触顶后被排除的主体数（可观测，不静默；游标化根治随缺口#8 fast-follow）。 */
+  subjectsTruncated: number;
 }
 
 export interface ProjectClearancesParams {
-  productCodes: string[]; // ICP→FDA 产品码（必填，绝不裸拉全库）
-  applicantCountries?: string[]; // 申请人 country_code（alpha-2）过滤；空=不限国别
+  productCodes: string[]; // ICP→FDA 产品码（必填，无码=本 ICP 无匹配面）
+  applicantCountries?: string[]; // 申请人 country（alpha-2）过滤；空=不限国别（全美市场语义）
   sinceDays?: number;
-  maxRecords?: number;
+  maxCompanies?: number;
 }
 
 interface Clearance {
   applicant: string;
-  country: string; // alpha-2（必有——无国别跳过，防跨国同名误并）
-  decisionDateIso: string; // 必有（无合法决定日跳过，无可靠时机信号）
+  country: string; // alpha-2
+  decisionDateIso: string; // 事件时间（source_signal.occurredAt 的 UTC ISO）
   productCode?: string;
   kNumber?: string;
   deviceName?: string;
 }
 
 /**
- * openFDA 510(k) 清关 → Intent 投影（spec §4.1/§5.3 P3，镜像 TED 招标 intent 投影）。方向：**具名申请人清关 =
- * 该公司刚把一款新器械合规带上美国市场 = 新品/上市时机信号**。按申请人身份解析 canonical（有则更新、无则建为线索），
- * append `attributes.intent.events[{type:'FDA_CLEARANCE', at:<决定日 ISO>, strength}]` → 动六维 Intent 维。
- *
- * §8.6：决定日经 `fdaDateToIso` 归一（search510kClearances 已做）；**无合法决定日的记录直接跳过**（绝不写 NaN
- *   触发 0 分，亦不用 now 兜底）。
- * §8.8（收口②：Broker 单点判定）：openfda.search 是 required 工具——直连 api.fda.gov（personalData=true）
- *   一律经 ExecutionBroker，SUSPENDED / 未登记 / 用途不符 / 无 reader 由闸门 fail-closed（不发请求）。
- *   无 broker = 不允许直连（零投影返回）——与 P1 provider 同一 DAT-011 kill-switch。
- * §8.6 清关码：`openfda.search(kind:'510k', clearedOnly=true)` 只返正向清关（SE 家族/DENG），NSE/被拒/撤回绝不投。
- * §6 边界：疑似个体户自然人申请人跳过（不把自然人名当绿事实入库）。
- * 幂等：合并结果与既有 intent 实质相同 → 不 bump version / 不堆 field_evidence（同一清关每 sweep 复现时）。
- * 合规（**与 TED 关键差异**）：CC0 公共领域，**署名非义务**（license='CC0-1.0'）；「注册/清关≠核准」文案红线
- *   （attributes.fda.disclaimer）；不摄入 contact/us_agent 具名个人。fail-safe：无产品码/拉取失败 → 零结果不抛。
+ * openFDA 510(k) 清关 intent 投影（收口⑤反转，镜像 TED）：**只读平台层 `source_signal`**
+ *（FDA_CLEARANCE，SignalIngestService 已 ingest-once 落库），本 service 不再出网。
+ * 按 ICP 的 FDA 产品码（'fda:CODE' 精确匹配——3 字母码无前缀层级）过滤 ACTIVE 信号，按申请人身份归并
+ * 取最新决定日 → upsert canonical + FDA_CLEARANCE 事件（形状不变，评分零改动）。
+ * 「清关≠核准」红线：attributes.fda.disclaimer 恒置。§6：个体户自然人摄取层已拒，此处防御纵深再判。
+ * 合规：CC0 公共领域（署名非义务，存 provenance）；不摄入 contact/us_agent 具名个人。
  */
 export class OpenFdaIntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: { prisma: PrismaService }) {}
 
   async projectClearances(workspaceId: string, params: ProjectClearancesParams): Promise<ProjectClearancesResult> {
-    const base: ProjectClearancesResult = {
-      clearancesFetched: 0, companiesTouched: 0, eventsProjected: 0, skippedNoCountry: 0, skippedNoDate: 0, skippedIndividual: 0,
-    };
-    if (!params.productCodes.length) return base; // 无产品码 → 不启动（绝不裸拉全库）
+    const base: ProjectClearancesResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, skippedIndividual: 0, subjectsTruncated: 0 };
+    if (!params.productCodes.length) return base;
 
-    // §8.8 合规门（收口②：Broker 单点判定）：openfda.search 是 required 工具——SUSPENDED/未登记/用途不符/
-    // 无 reader 一律 fail-closed。无 broker = 不允许直连（生产由调用方注入）。
-    if (!this.deps.broker) {
-       
-      console.warn('[openfda-intent] broker unavailable, fail-closed (no raw egress)');
-      return base;
+    const since = new Date(Date.now() - (params.sinceDays ?? DEFAULT_SINCE_DAYS) * 86_400_000);
+    // 码集大写归一；匹配时剥 'fda:' 前缀后按码比（绝不对整键 toUpperCase——前缀是小写，整键大写化会永不相等）。
+    const wantedCodes = new Set(params.productCodes.map((c) => c.trim().toUpperCase()).filter(Boolean));
+    const countries = params.applicantCountries?.length
+      ? [...new Set(params.applicantCountries.map((c) => c.trim().toUpperCase()).filter(Boolean))]
+      : undefined;
+    const signals = await this.deps.prisma.sourceSignal.findMany({
+      where: {
+        providerKey: 'openfda',
+        signalType: FDA_CLEARANCE,
+        status: 'ACTIVE', // 状态机：过期/撤回信号不再投影
+        occurredAt: { gte: since },
+        ...(countries ? { subjectCountry: { in: countries } } : {}),
+        // 码过滤下推 SQL（jsonb @> 任一码；复审：过滤放截断后会让无关码/他租户信号挤占扫描窗，
+        // 匹配信号被静默截丢）。内存 filter 仍保留作防御纵深（大小写容错）。
+        OR: [...wantedCodes].map((code) => ({ taxonomyKeys: { array_contains: [`fda:${code}`] } })),
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: SIGNAL_SCAN_LIMIT,
+    });
+    if (signals.length === SIGNAL_SCAN_LIMIT) {
+      console.warn(`[openfda-intent] signal scan window saturated (limit=${SIGNAL_SCAN_LIMIT}) — 更旧的匹配信号可能被截断`);
     }
 
-    let clearances: Fda510kClearance[];
-    try {
-      const res = await this.deps.broker.invoke<OpenFdaSearchInput, OpenFdaSearchOutput>(
-        'openfda.search',
-        {
-          kind: '510k',
-          params: {
-            productCodes: params.productCodes,
-            countries: params.applicantCountries,
-            sinceDays: params.sinceDays ?? DEFAULT_SINCE_DAYS,
-            maxRecords: params.maxRecords ?? DEFAULT_MAX_RECORDS,
-            clearedOnly: true, // §8.6：只要正向清关
-          },
-        },
-        // purpose=['intent','discovery']：保留旧 §8.8 门语义（同 ted-intent-projection）。
-        { workspaceId, correlationId: 'openfda-intent', purpose: ['intent', 'discovery'] },
-      );
-      clearances = res.data.clearances ?? [];
-    } catch (err) {
-      // fail-safe：拉取失败/闸门拒绝零投影不抛（拒绝原因已入 Broker DENIED trace）
-       
-      console.warn(`[openfda-intent] fetch failed: ${String(err).slice(0, 150)}`);
-      return base;
-    }
-    base.clearancesFetched = clearances.length;
+    const matched = signals.filter((s) => {
+      const keys = Array.isArray(s.taxonomyKeys) ? (s.taxonomyKeys as string[]) : [];
+      return keys.some((k) => k.startsWith('fda:') && wantedCodes.has(k.slice(4).toUpperCase()));
+    });
+    base.signalsMatched = matched.length;
+    if (!matched.length) return base;
 
-    // 按申请人身份归并（同申请人多次清关 → 取最新决定日代表其最新上市动作；dedupeKey 与其它源一致 name+alpha-2）。
-    // 无国别 / 无合法决定日 / 疑似个体户 各自跳过并计数（可审计），绝不降级成不可靠身份或时间、绝不把自然人入绿库。
+    // 按申请人身份归并（同申请人多次清关 → 取最新决定日）。rows 已按 occurredAt desc → 首见即最新。
     const byKey = new Map<string, Clearance>();
-    for (const c of clearances) {
-      if (!c.country) { base.skippedNoCountry += 1; continue; } // §8.4：无国别 → name-only 键会跨国误并
-      if (!c.decisionDateIso) { base.skippedNoDate += 1; continue; } // §8.6：无合法决定日 → 无可靠时机信号
-      if (isLikelyIndividualApplicant(c.applicant)) { base.skippedIndividual += 1; continue; } // §6：个体户自然人不入绿库
-      const demand: Clearance = {
-        applicant: c.applicant, country: c.country, decisionDateIso: c.decisionDateIso,
-        productCode: c.productCode, kNumber: c.kNumber, deviceName: c.deviceName,
-      };
-      const key = companyIdentity({ name: c.applicant, country: c.country }).dedupeKey;
-      const prior = byKey.get(key);
-      if (!prior || demand.decisionDateIso > prior.decisionDateIso) byKey.set(key, demand); // ISO 字典序 = 时间序
+    const maxCompanies = params.maxCompanies ?? DEFAULT_MAX_COMPANIES;
+    const overflow = new Set<string>(); // 触顶后被排除的主体（可观测，不静默丢；复审 MEDIUM）
+    for (const s of matched) {
+      if (byKey.has(s.subjectKey) || overflow.has(s.subjectKey)) continue;
+      if (isLikelyIndividualApplicant(s.subjectName)) { base.skippedIndividual += 1; continue; } // 防御纵深
+      if (byKey.size >= maxCompanies) { overflow.add(s.subjectKey); continue; }
+      const payload = (s.payload ?? {}) as Record<string, unknown>;
+      byKey.set(s.subjectKey, {
+        applicant: s.subjectName,
+        country: s.subjectCountry,
+        decisionDateIso: s.occurredAt.toISOString(),
+        productCode: typeof payload.product_code === 'string' ? payload.product_code : undefined,
+        kNumber: typeof payload.k_number === 'string' ? payload.k_number : s.externalId,
+        deviceName: typeof payload.device === 'string' ? payload.device : undefined,
+      });
+    }
+    base.subjectsTruncated = overflow.size;
+    if (overflow.size) {
+      console.warn(`[openfda-intent] maxCompanies=${maxCompanies} 触顶，${overflow.size} 个主体本轮未投影（游标化根治随缺口#8）`);
     }
 
     for (const [dedupeKey, clearance] of byKey) {
@@ -145,7 +133,7 @@ export class OpenFdaIntentProjectionService {
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
       const event: IntentEvent = {
         type: FDA_CLEARANCE,
-        at: c.decisionDateIso, // §8.6：必为合法 ISO（无合法决定日的记录在归并阶段已跳过）
+        at: c.decisionDateIso, // §8.6：source_signal.occurredAt 保证合法时间
         strength: FDA_CLEARANCE_STRENGTH,
         evidence: { product_code: c.productCode, k_number: c.kNumber, device: c.deviceName, source: 'openfda' },
       };
@@ -209,30 +197,4 @@ export class OpenFdaIntentProjectionService {
       return true;
     });
   }
-
-  // 手写 §8.8 purposeAllowed 镜像已删除（收口②）：openfda.search 为 required 工具，SUSPENDED/未登记/
-  // 用途不符/无 reader 由 ExecutionBroker 单点 fail-closed（原镜像存在「无 reader fail-open」缺陷）。
-}
-
-const PERSON_TITLE = /^(dr|mr|mrs|ms|prof|sir|dame)\.?\s+\S/i; // 人称头衔前缀
-const SURNAME_COMMA_GIVEN = /^[A-Za-z][A-Za-z'’-]+,\s*[A-Za-z][A-Za-z'’-]+(\s+[A-Za-z]\.?)?$/; // "Surname, Given [M.]"
-const ORG_MARKER = /\b(inc|llc|ltd|co|corp|corporation|company|gmbh|ag|sa|sas|bv|srl|plc|pty|kg|oy|oyj|ab|nv|spa|limited|llp|lp|kk)\b/i;
-
-/**
- * §6 边界：疑似**个体户自然人**申请人（不入绿库）。**高精度**判定——只在明确的人名格式上触发，绝不用宽松的
- * 「几个大写词」形状去误伤真公司（"GE Precision Healthcare"/"Karl Storz Endoscopy" 都是 3 词却是公司；按形状
- * 误伤=丢真线索，直接损害核心功能）。触发条件：
- *  · 人称头衔前缀（Dr./Mr./Mrs./Ms./Prof./Sir/Dame）；或
- *  · "Surname, Given [M.]" 逗号姓名格式（两段纯字母、无组织标记）。
- * 裸「John Smith」式**不**自动判个体（会误伤真公司）；风险有界——本 provider 从不落 contact/邮箱等具名个人字段，
- * applicant 是公开 510(k) 备案的主体名、绝大多数为组织。空名视作不可入库。
- */
-export function isLikelyIndividualApplicant(name: string): boolean {
-  const s = name.trim();
-  if (!s) return true; // 空名不入库
-  // 组织标记**先判**：带法人后缀的一律保留，即便以头衔起头（"Dr. Mach GmbH & Co. KG" 是真公司；Codex 复审）。
-  if (ORG_MARKER.test(s)) return false;
-  if (PERSON_TITLE.test(s)) return true; // Dr./Mr./… 头衔（无组织标记）
-  if (SURNAME_COMMA_GIVEN.test(s)) return true; // "Smith, John"（无组织标记）
-  return false;
 }
