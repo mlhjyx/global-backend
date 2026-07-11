@@ -165,6 +165,13 @@ async function main() {
   const stale = await acts.projectExternalIntentForIcp({ ...resolvedPump, tedEnabled: true, openfdaEnabled: gated.openfdaEnabled });
   ok(stale.tenders === undefined, '捕获 tedEnabled=true 但 data_provider DISABLED → 投影 live 重读 kill-switch，TED 仍跳过（TOCTOU 收口）');
   await ownerDb.dataProvider.update({ where: { key: 'ted' }, data: { status: 'ENABLED' } });
+
+  // fast-follow 单次读优化：注入快照优先于自读。data_provider ted 现为 ENABLED，但注入 live.ted=false →
+  // 投影用**注入快照**（非自读 ENABLED）跳过 TED，证明 workflow 单次 liveProviderState 重读 thread 生效、投影不再每 ICP 自读。
+  const snap = await acts.liveProviderState();
+  ok(snap.ted === true && snap.openfda === true, 'liveProviderState 单次重读：两 provider ENABLED → {ted:true,openfda:true}');
+  const injected = await acts.projectExternalIntentForIcp({ ...resolvedPump, tedEnabled: true, openfdaEnabled: false, live: { ted: false, openfda: false } });
+  ok(injected.tenders === undefined, '注入 live.ted=false（尽管 data_provider ENABLED）→ 投影用注入快照跳过 TED（单次读优化生效，非自读）');
 }
 
 try {

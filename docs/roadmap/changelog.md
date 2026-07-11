@@ -267,3 +267,12 @@ Codex 复审 #56（收口⑤ 一等 Signal）提 **P1 TOCTOU**：`temporal/exter
 - **`createContact` 拒并键**（`identity.ts` 新纯件 `declinedContactIdentity` + `contact-persist.ts` 守卫）：resolve 返 null 时，若 `ambiguous || 明文键（盲值）与既有**不同**联系人碰撞`（`findUnique` 探测，同 tx 读己写），改用**不碰撞确定性拒并键**新建独立行——`dx:` 命名空间与明文 `e:`/`c:` 互斥、按 `companyKey` 隔离；判别符优先级 **externalId `dx:x:<ck>:<scheme:value>` > 可信 email `dx:e:<ck>:<归一名>:<email>` > 人名 `dx:c:<ck>:<归一名>`**。可信 email=明文键 `e:<email>` 未被占用（非 catch-all/RISKY 共享地址），占用则退回人名。拒并键盲化落库（复用 #65 `blindContactKey`，去 PII 明文）。
 - 🔴 **绝不错并**：同名不同 externalId（HIGH-1）/ 同址不同名（catch-all，#54-E）/ **同名不同 VALID 邮箱**（名+邮箱双判别符）三类全分开。**同源再跑幂等**：`ambiguous` DB-state 无关 + 拒并键确定性 → 二次跑落回同一行、不生重复（纯碰撞探测会在「歧义但来件明文键恰空」翻键生第三/四行，故 `ambiguous` 信号必需）；正常合并/新建路径行为逐字不变（EPO/CH verify 二次跑 created=0 不破）。
 - **质量**：TDD **725 vitest**（新增 `declinedContactIdentity` 单测 + `createContact` 歧义/RISKY/误并回归 + `resolvePersonIdentity` `ambiguous` 信号）· build 0 · 真库真 RLS 真盲化 `verify-contact-decline-honor.mts` **三场景全绿**（① RISKY 同址不同名新建+二次跑幂等 ② 歧义无邮箱新建独立行+二次跑不生第 4 行 ③ 同名不同邮箱各自成行+二次跑幂等）。**对抗复审 3 维（误并 / 幂等 / 集成完整性，逐条 adversarial + 修后再攻）**：误并维抓 **1 HIGH**（`dx:c` 只按名致同名不同 VALID 邮箱塌键=净新误并）→ 补 email 判别符 → 再攻确认闭合 + 补**名+邮箱双判别符**闭合「不同名共用 catch-all」残余（LOW）；幂等维 5 场景全幂等；集成维 6 类（ripple/blinding/regression/completeness/tx/test）全净。**无 schema 迁移**。#62 的 2 条 Codex 线程已回复「create 层于本 PR 修」并 resolve。
+
+## 2026-07-11 · 收口⑤ fast-follow²：外部源 intent 投影 kill-switch 单次重读优化（承 #64）
+
+承 #64（Codex #56 P1，投影每 ICP `liveEnabled()` 重读 DataProvider kill-switch）。#64 的 per-ICP 重读正确但每 ICP 一次 owner-DB 读；本 PR 把它降到**每 sweep 一次**，同时**不丢活动自守与任何既有保证**（保严格性优化，非「移守卫出活动去信任调用方」的降级式改法）。
+
+- **workflow 单次读 + thread**：`externalIntentSweepWorkflow` 摄取后调**一次** `liveProviderState()`（新活动=`liveEnabled()` 薄封装），把 `LiveProviderState` 快照 thread 给逐 ICP `projectExternalIntentForIcp`。取「投影阶段开始前一刻」的 live 态——覆盖 #64 关掉的**主窗口**（sweep 头部捕获→摄取全程分钟级 egress→投影开始），残留仅投影循环自身（零出网、下轮自愈）。
+- **投影活动保留自守（防御纵深）**：`projectExternalIntentForIcp` 新增可选 `live?: LiveProviderState`，`const live = args.live ?? await liveEnabled()`——**注入优先**（省读），**缺省自读兜底**（直连调用者=测试/verify/未来调用不被信任，#64 的 TOCTOU 断言与单测零改动仍绿）。仍逐 ICP AND 各自捕获标志（捕获=false 者无论 live 都不投）。workflow 单次读失败 fail-safe→undefined→投影自读兜底（一次读故障不放大成整轮不投）。
+- **刻意仍不做**：`source_policy` SUSPENDED 门不入投影（停采不停用，见 §4/#64）。
+- **实测**：build 0 · **759 vitest**（新增注入快照 4 测：注入门控且零自读 / 注入优先 / 捕获标志不被绕过 / 缺省自读兜底）· 真库真 TED/openFDA `verify-external-intent-sweep.mts` 全绿（Tier 5 加：`liveProviderState` 单次重读 + 「data_provider ENABLED 但注入 live.ted=false → 投影用注入快照跳过 TED」证明非自读）。**无 schema 迁移**。

@@ -1,5 +1,5 @@
 import { proxyActivities } from '@temporalio/workflow';
-import type { ExternalIntentActivities, ExternalIntentIcpResult, IngestSweepSummary, ResolvedIntentTarget } from './external-intent.activities';
+import type { ExternalIntentActivities, ExternalIntentIcpResult, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
 
 const acts = proxyActivities<ExternalIntentActivities>({
   startToCloseTimeout: '10 minutes', // 摄取活动可能拉多个唯一指纹（各有界分页）
@@ -55,11 +55,21 @@ export async function externalIntentSweepWorkflow(input?: { limit?: number }): P
     agg.ingest = { tedSpecs: 0, fdaSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
   }
 
-  // 逐 ICP 只读投影。
+  // 摄取后**单次**重读 kill-switch（fast-follow 优化）：把「每 ICP 一次 owner-DB 读」降到「每 sweep 一次」，
+  // 把 live 快照 thread 给逐 ICP 投影。取投影阶段开始前一刻的 live 态——provider 摄取全程若被 ops 关停即反映。
+  // 单次读失败 fail-safe → undefined：投影活动自读兜底（防御纵深，不因一次读故障放大成整轮不投）。
+  let live: LiveProviderState | undefined;
+  try {
+    live = await acts.liveProviderState();
+  } catch {
+    live = undefined;
+  }
+
+  // 逐 ICP 只读投影（用摄取后单次重读的 live 快照门控；缺省 undefined 时活动自读兜底）。
   for (const t of resolved) {
     let r: ExternalIntentIcpResult;
     try {
-      r = await acts.projectExternalIntentForIcp({ ...t, tedEnabled, openfdaEnabled });
+      r = await acts.projectExternalIntentForIcp({ ...t, tedEnabled, openfdaEnabled, live });
     } catch (err) {
       r = { workspaceId: t.workspaceId, icpId: t.icpId, cpvCodes: 0, fdaProductCodes: 0, error: String(err).slice(0, 200) };
     }
