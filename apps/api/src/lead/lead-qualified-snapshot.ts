@@ -87,6 +87,12 @@ export interface LeadQualifiedSnapshotInput {
    * 缺省 null（未接线的旧调用方/测试保持原样，非破坏）。
    */
   storageRightsDecision?: string | null;
+  /**
+   * 鲜度模型（v2）：本线索所依赖事实的 field_evidence 分级 + 抓取时刻。调用方（lead.service.decide）
+   * 按 company/contacts 的 entity_id 取 field_evidence(dataClass, fetchedAt) 传入；缺省空数组
+   *（旧调用方/测试 → valid_until 仅由 intent 事件驱动或 null，非破坏）。
+   */
+  evidence?: readonly EvidenceFreshness[];
   company: {
     id: string;
     name: string;
@@ -145,6 +151,62 @@ export function classifyLeadQualified(snapshot: LeadQualifiedSnapshotV1): 'RESTR
   return snapshot.contact_refs.length ? 'RESTRICTED' : 'CONFIDENTIAL';
 }
 
+/** 一条支撑事实的鲜度输入：分级 + 抓取时刻（Date 或 ISO 串皆可）。 */
+export interface EvidenceFreshness {
+  dataClass: string; // green | amber | red（field_evidence.data_class）
+  fetchedAt: Date | string;
+}
+
+const DAY_MS = 86_400_000;
+/**
+ * 鲜度 TTL（天）：数据按易变性分级失效。公司事实(green)稳定 → 长；具名个人(red)/职能邮箱(amber)——
+ * 人换岗、邮箱失效更快 → 短。未知分级保守取短（更早提示复核）。ADR-010：鲜度锚定真实 evidence.fetchedAt。
+ */
+const FRESHNESS_TTL_DAYS: Record<string, number> = { green: 180, amber: 90, red: 90 };
+const DEFAULT_TTL_DAYS = 90;
+/** 时机窗（天）：intent 信号「现在是好时机」的有效期——约一季度后需重新确认时机。 */
+const INTENT_TIMING_TTL_DAYS = 90;
+
+/** attributes.intent 里最新一条事件的 at（ms）；无逐事件回退 intent.last_change_at；都无 → null。 */
+function latestIntentAtMs(attributes: unknown): number | null {
+  const attrs = (attributes ?? {}) as Record<string, unknown>;
+  const intent = attrs.intent as { events?: unknown; last_change_at?: unknown } | undefined;
+  if (!intent || typeof intent !== 'object') return null;
+  let latest: number | null = null;
+  const events = Array.isArray(intent.events) ? intent.events : [];
+  for (const ev of events) {
+    const at = (ev as { at?: unknown })?.at;
+    const ms = typeof at === 'string' ? Date.parse(at) : NaN;
+    if (Number.isFinite(ms) && (latest == null || ms > latest)) latest = ms;
+  }
+  if (latest == null && typeof intent.last_change_at === 'string') {
+    const ms = Date.parse(intent.last_change_at);
+    if (Number.isFinite(ms)) latest = ms;
+  }
+  return latest;
+}
+
+/**
+ * valid_until（鲜度模型 v2）：快照当刻起，这条线索所依赖事实**最早何时失效**。
+ * = min( 每条 evidence.fetchedAt + 源分级 TTL，最新 intent 事件 at + 时机窗 )。
+ * 取 min（最保守）：线索可行动性只与其**最易腐的关键事实**一样新——某条已过期即应先重新核实再触达。
+ * 无任何 evidence 且无 intent 事件 → null（诚实：无鲜度依据，不臆造有效期）。
+ * 纯函数、**不读时钟**（仅由输入时间戳与固定 TTL 决定，可复现）；不可解析时间戳跳过（不注入 NaN）。
+ */
+export function computeValidUntil(evidence: readonly EvidenceFreshness[], attributes: unknown): string | null {
+  const expiries: number[] = [];
+  for (const e of evidence) {
+    const fetchedMs = e.fetchedAt instanceof Date ? e.fetchedAt.getTime() : Date.parse(String(e.fetchedAt));
+    if (!Number.isFinite(fetchedMs)) continue;
+    const ttlDays = FRESHNESS_TTL_DAYS[e.dataClass] ?? DEFAULT_TTL_DAYS;
+    expiries.push(fetchedMs + ttlDays * DAY_MS);
+  }
+  const intentMs = latestIntentAtMs(attributes);
+  if (intentMs != null) expiries.push(intentMs + INTENT_TIMING_TTL_DAYS * DAY_MS);
+  if (!expiries.length) return null;
+  return new Date(Math.min(...expiries)).toISOString();
+}
+
 export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): LeadQualifiedSnapshotV1 {
   const { lead, company, icpVersion } = input;
   const contactRefs = company.contacts.map((c) => ({
@@ -180,6 +242,7 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
     personal_data_class: contactRefs.length ? 'named_person_refs' : 'company_facts_only',
     suppression_state: company.status === 'SUPPRESSED' ? 'suppressed' : 'none',
     recommended_action: 'handoff_to_campaign',
-    valid_until: null, // v1 无鲜度模型；v2 接 evidence freshness
+    // 鲜度 v2：min(evidence.fetchedAt + 分级TTL, 最新 intent.at + 时机窗)；无鲜度依据 → null。
+    valid_until: computeValidUntil(input.evidence ?? [], company.attributes),
   };
 }

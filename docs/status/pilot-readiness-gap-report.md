@@ -5,7 +5,7 @@
 
 ## 0. 一句话结论
 
-**工程六项收口全完成、9 组能力逐阶段真实数据可用；「能获客」现已端到端跑通证明**（`verify-e2e-acquisition-funnel.mts` 真库真 SMTP 全绿：同一 Lead 补全决策人可达邮箱后，队列 `needs_review → recommended` 翻转，唯一变量=可达性）。**离「可直接商业试点」还差三类：⑧ 输出被下游真实消费（卡 A/SaaS，非本仓）+ ⑦ 真实用户 UAT（需 A + design partner）+ 输出合同三处硬缺（权利/时效/成本未落进快照）。** 后者是**本仓可独立收口**的最短路径。
+**工程六项收口全完成、9 组能力逐阶段真实数据可用；「能获客」现已端到端跑通证明**（`verify-e2e-acquisition-funnel.mts` 真库真 SMTP 全绿：同一 Lead 补全决策人可达邮箱后，队列 `needs_review → recommended` 翻转，唯一变量=可达性）。**离「可直接商业试点」还差三类：⑧ 输出被下游真实消费（卡 A/SaaS，非本仓）+ ⑦ 真实用户 UAT（需 A + design partner）+ 输出合同硬缺（权利 ✅#72 / 时效 ✅#76 已收，**余成本**未落进快照）。** 后者是**本仓可独立收口**的最短路径。
 
 > **更新（2026-07-12，封版⑦ 机测半已补）**：新增全漏斗闭环 E2E `apps/api/scripts/verify-e2e-acquisition-funnel.mts`——首次端到端证明「对的公司 + 对的人 + 联系得上 → 推荐队列」。BEFORE：reachability=0、total=0.7249、`needs_review`（纯被可达门挡，非分不够）；开 email_guess 双闸 → 真 SMTP 猜测 `max.mustermann@osna-pumpen.de` 落 RISKY（诚实不谎报 VALID）→ AFTER：reachability=0.5、total=0.7999、`recommended`。快照携带决策人 ref（personal_data）+ reachability。真人 UAT（⑦ 另一半）仍需 A 的 UI + design partner。
 
@@ -14,7 +14,7 @@
 | # | 封版项 | 裁决 | 证据 / 缺口 |
 |---|---|---|---|
 | ① | 输入 Company/Offering/ICP → 受控 Run 产出 Candidate Batch | ✅ 基本 | 三工作流（understanding/discovery/qualify）+ `run-backlog-sweep` 产出评分 leads，逐阶段真测（9 组）。**缺**：无「一个 Run → Candidate Batch」作为一等对象的端到端验收（现跨阶段+sweep 拼装）。 |
-| ② | 每公司/联系人带 Canonical ID/来源/Evidence/**权利**/**时效**/验证/**成本**/未知项 | ◑ **部分（2 硬缺，权利已收）** | Canonical ID ✅、验证态 `has_verified_contact_point` ✅、来源/Evidence 走 `evidence_refs` 指针（受控 API 取详情，合规设计）◑。✅ **权利**（PR #72）：`storage_rights_decision` 已接 `DataRightsService` STORE 判定（具名决策人→red/国别→主体法域），且 `decide` **`!allowed` 一律不交棒**（挡禁联/Art.17 冻结竞态/跨境人审/无基础）——从「引擎建好线未接」到「接线且强制」。🔴 **时效** `valid_until` **恒 null**（v1 无鲜度模型，需 `field_evidence.fetchedAt`+TTL）；🔴 **成本** 快照**完全缺**（`usage_ledger` 无 per-lead/run 归集，需 schema 设计）。 |
+| ② | 每公司/联系人带 Canonical ID/来源/Evidence/**权利**/**时效**/验证/**成本**/未知项 | ◑ **部分（1 硬缺：成本；权利+时效已收）** | Canonical ID ✅、验证态 `has_verified_contact_point` ✅、来源/Evidence 走 `evidence_refs` 指针（受控 API 取详情，合规设计）◑。✅ **权利**（PR #72）：`storage_rights_decision` 已接 `DataRightsService` STORE 判定（具名决策人→red/国别→主体法域），且 `decide` **`!allowed` 一律不交棒**（挡禁联/Art.17 冻结竞态/跨境人审/无基础）。✅ **时效**（PR #76）：`valid_until` 接 evidence 鲜度模型（min(`field_evidence.fetchedAt`+分级TTL, 最新 intent.at+时机窗)；无依据→null，诚实）——从恒 null 到 evidence-grounded。🔴 **成本** 快照**完全缺**（`usage_ledger` 无 per-lead/run 归集，需 schema 设计）。 |
 | ③ | 候选带分解评分 + Reason Code | ✅ 基本 | `scores` 六维 + demand_proof + total ✅；`fitReasons`/`scoreDetail` 存在，走 `evidence_refs` 布尔 + 受控 API 取详情。◑ Reason Code 非内嵌（可接受，SaaS 拉取）。 |
 | ④ | 可接受/拒绝/纠正 + 反馈进评测 + 不跨租户 | ◑ | `lead.decide`（accept/reject）+ RLS 不跨租户 ✅；**纠正 + 反馈进评测闭环**待核（Golden Set 在 R2）。 |
 | ⑤ | 取消/重试/Partial/预算停止/降级/**公平扫描（无饿死）** | ◑ | 预算停止 ✅（收口② BudgetLedger reserve-settle 真拦截、截断→run PARTIAL）；降级 ✅（provider fail-safe 返空）；重试 ✅（Temporal）；Partial ✅。🟠 **公平扫描**=缺口#8 游标饿死**未根治**（`subjectsTruncated` 可观测但未根修，R2）。 |
@@ -31,7 +31,7 @@
 | 优先 | 动作 | 归属 | 量级 |
 |---|---|---|---|
 | ~~P0~~ ✅ | ~~把 `storage_rights_decision` 接进快照~~ **已交付（PR #72）**：接 `DataRightsService` STORE 判定 + `decide` `!allowed` 强制不交棒 + `DATA_PROCESSOR_JURISDICTION` 配置。对抗复审 2 HIGH 全修。 | C+Claude | ✅ 完成 |
-| P0 | 快照补 **`valid_until`（鲜度=evidence freshness `field_evidence.fetchedAt`+TTL）+ 成本（usage_ledger 需先加 per-lead/run 归集）** → 封版② 余 2 硬缺 | C+Claude | 中（valid_until 小，cost 需 schema 设计） |
+| ~~P0~~ ◑ | ~~快照补 `valid_until`~~ **已交付（PR #76）** evidence 鲜度模型；**余 成本**（`usage_ledger` 需加 per-lead/run 归集，需 schema）→ 封版② 余 1 硬缺 | C+Claude | cost 需 schema 设计 |
 | P1 | 闭「对的人→联系得上」环：具名决策人→按需 `guessEmailsForCompany`→补可用邮箱→进 Reachability（让身份源真出价值）；自动路径待 per-tenant LIA | C+Claude | 中 |
 | ~~P1~~ ✅ | ~~一个真·全漏斗 E2E 验收脚本~~ **已交付** `verify-e2e-acquisition-funnel.mts`（评分→补全→重评→快照全链，断言可达性闭环把 `needs_review`→`recommended`）——补 ⑦ 机测半 | C+Claude | ✅ 完成 |
 | P2 | 缺口#8 游标公平根治（R2）+ SLO 定义/监控（⑥）| C+Claude | R2 |

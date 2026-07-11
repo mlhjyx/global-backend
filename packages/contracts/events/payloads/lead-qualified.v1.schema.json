@@ -96,6 +96,6 @@
     "personal_data_class": { "type": "string", "enum": ["named_person_refs", "company_facts_only"] },
     "suppression_state": { "type": "string", "enum": ["none", "suppressed"] },
     "recommended_action": { "type": "string", "examples": ["handoff_to_campaign"] },
-    "valid_until": { "type": ["string", "null"], "format": "date-time", "description": "null in v1 (no freshness model); v2 wires evidence freshness." }
+    "valid_until": { "type": ["string", "null"], "format": "date-time", "description": "Earliest expiry of the facts backing this lead = min(evidence.fetchedAt + per-class TTL, latest intent event.at + timing window). null when no freshness basis (no evidence, no intent). Past value => backing data already stale, re-qualify before outreach." }
   }
 }
