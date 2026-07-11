@@ -1,15 +1,20 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
+import { applyPiiEncryption } from '../compliance/pii-crypto.middleware';
 
 /**
  * Connects as the non-superuser app_user (APP_DATABASE_URL) so RLS is enforced.
  * Domain services run their DB work inside withWorkspace() — never raw find
  * with a manual workspace filter — so tenant isolation is guaranteed by the DB.
+ *
+ * 收口⑥：注册 PII 透明加解密中间件（canonical_contact.full_name / contact_point.value 密文落库、
+ * 读时解密），对所有调用点（含 withWorkspace 事务内）透明。
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     super({ datasourceUrl: process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL });
+    applyPiiEncryption(this);
   }
 
   async onModuleInit(): Promise<void> {

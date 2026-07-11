@@ -15,6 +15,7 @@ import { IcpModule } from './icp/icp.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { LeadModule } from './lead/lead.module';
 import { EventsModule } from './events/events.module';
+import { ComplianceModule } from './compliance/compliance.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -40,6 +41,7 @@ import { EventsModule } from './events/events.module';
     DiscoveryModule,
     LeadModule,
     EventsModule,
+    ComplianceModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [{ provide: APP_GUARD, useClass: WsThrottlerGuard }],
