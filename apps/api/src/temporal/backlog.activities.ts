@@ -485,7 +485,7 @@ export function createBacklogActivities(deps: {
               watermarkField: 'contactDiscoveryAttemptedAt',
               now,
               requireDomain: true,
-              requireNoContacts: true,
+              requireNoPersonContact: true,
             }),
             orderBy: backlogEligibleOrderBy('contactDiscoveryAttemptedAt'),
             take: limit,
