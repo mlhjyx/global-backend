@@ -81,6 +81,12 @@ export interface LeadQualifiedSnapshotInput {
   };
   /** icpDefinition.version（ICP 已删则 null——lead.icpId 无 FK 强约束）。 */
   icpVersion: number | null;
+  /**
+   * 收口⑥ 存储权利判定（DataRightsService.evaluate 对 STORE 动作的 effect：
+   * ALLOW / ALLOW_WITH_BASIS / REQUIRE_APPROVAL / DENY）。调用方（lead.service.decide）算好传入；
+   * 缺省 null（未接线的旧调用方/测试保持原样，非破坏）。
+   */
+  storageRightsDecision?: string | null;
   company: {
     id: string;
     name: string;
@@ -170,7 +176,7 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
       fit_reasons_available: lead.fitReasons != null,
     },
     qualification_rule_version: QUALIFICATION_RULE_VERSION,
-    storage_rights_decision: null, // 收口⑥（storage rights）前恒 null
+    storage_rights_decision: input.storageRightsDecision ?? null, // 收口⑥：DataRightsService STORE 判定（调用方传入）
     personal_data_class: contactRefs.length ? 'named_person_refs' : 'company_facts_only',
     suppression_state: company.status === 'SUPPRESSED' ? 'suppressed' : 'none',
     recommended_action: 'handoff_to_campaign',

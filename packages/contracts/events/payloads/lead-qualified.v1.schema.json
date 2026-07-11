@@ -92,7 +92,7 @@
       }
     },
     "qualification_rule_version": { "type": "string", "examples": ["additive-6dim-v1"] },
-    "storage_rights_decision": { "type": ["string", "null"], "description": "Always null until 收口⑥ (storage rights)." },
+    "storage_rights_decision": { "type": ["string", "null"], "description": "DataRightsService STORE-action verdict (ALLOW | ALLOW_WITH_BASIS | REQUIRE_APPROVAL | DENY); null if the producer did not evaluate rights." },
     "personal_data_class": { "type": "string", "enum": ["named_person_refs", "company_facts_only"] },
     "suppression_state": { "type": "string", "enum": ["none", "suppressed"] },
     "recommended_action": { "type": "string", "examples": ["handoff_to_campaign"] },

@@ -127,11 +127,23 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     expect(snap.fit_verdict).toBe('match');
     expect(snap.evidence_refs).toEqual({ score_detail_available: true, fit_reasons_available: true });
     expect(snap.qualification_rule_version).toBe('additive-6dim-v2');
-    expect(snap.storage_rights_decision).toBeNull();
+    expect(snap.storage_rights_decision).toBeNull(); // 未传 storageRightsDecision → 缺省 null（非破坏）
     expect(snap.personal_data_class).toBe('named_person_refs');
     expect(snap.suppression_state).toBe('none');
     expect(snap.recommended_action).toBe('handoff_to_campaign');
     expect(snap.valid_until).toBeNull();
+  });
+
+  it('收口⑥：传入 storageRightsDecision → 落进 storage_rights_decision（且仍过契约校验）', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead(),
+      company: makeCompany(),
+      icpVersion: 3,
+      storageRightsDecision: 'ALLOW',
+    });
+    expect(validate(snap)).toBe(true);
+    expect(snap.storage_rights_decision).toBe('ALLOW');
   });
 
   it('🔴 contact_refs 只带 ref+职务元数据：绝不含 full_name/email（对象键断言）', () => {
@@ -259,10 +271,14 @@ function makeDecideTx(
   };
 }
 
-function makeDecideService(tx: unknown): LeadService {
+function makeDecideService(tx: unknown, rights: { effect: string; allowed: boolean } = { effect: 'ALLOW', allowed: true }): LeadService {
   const prisma = { withWorkspace: async (_ws: string, fn: (t: unknown) => Promise<unknown>) => fn(tx) };
+  // DataRights 桩：decide 用 evaluate().effect（快照）+ .allowed（强制门）；真判定由 data-rights.context.spec 覆盖。
+  const dataRights = {
+    evaluate: () => ({ reason: 'test', ruleId: null, ruleVersion: 'v1', requiresLawfulBasis: false, article14NoticeRequired: false, ...rights }),
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new LeadService(prisma as any);
+  return new LeadService(prisma as any, dataRights as any);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -283,10 +299,24 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     const payload = created.payload as Record<string, unknown>;
     // 旧 payload = {icpId, canonicalCompanyId, totalScore} → snapshot_version undefined → RED
     expect(payload.snapshot_version).toBe(1);
+    // 收口⑥：decide 经 DataRightsService 把存储权利判定接进快照（此前恒 null）
+    expect(payload.storage_rights_decision).toBe('ALLOW');
     const { validate } = loadValidator();
     const ok = validate(payload);
     expect(validate.errors ?? []).toEqual([]);
     expect(ok).toBe(true);
+  });
+
+  it('收口⑥ 强制：storage_rights !allowed（DENY/跨境人审）→ accept 抛 CONFLICT，绝不发 handoff', async () => {
+    const outboxCreate = vi.fn();
+    const svc = makeDecideService(
+      makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn()),
+      { effect: 'DENY', allowed: false },
+    );
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'STORAGE_RIGHTS_NOT_GRANTED' } },
+    });
+    expect(outboxCreate).not.toHaveBeenCalled(); // 存储权利不 allow → 不把具名 refs 交给 SaaS
   });
 
   it('H：含具名人 refs 的快照 → 事件 privacyClassification=RESTRICTED；无联系人 → CONFIDENTIAL', async () => {
