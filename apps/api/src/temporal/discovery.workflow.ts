@@ -1,5 +1,6 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
+import { resolveRunStatus } from './discovery.run-status';
 
 const acts = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '2 minutes',
@@ -23,12 +24,18 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const { workspaceId, runId, planId } = input;
   const perSource: Record<string, { rawCount: number; provider: string | null; error?: string }> = {};
   let failures = 0;
+  let discoveryBudgetTruncated = false;
+
+  // 起始清账：同 runId 重试时，清除上次崩溃 attempt 残留的预算账户/打穿标记（否则首个 executeQuery 误报截断）。
+  await acts.resetRunBudget({ runId });
 
   const { queries } = await acts.loadPlanQueries({ workspaceId, planId });
   for (const query of queries) {
     try {
       const r = await acts.executeQuery({ workspaceId, runId, query });
       perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
+      // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
+      if (r.budgetTruncated) discoveryBudgetTruncated = true;
     } catch (err) {
       failures += 1;
       perSource[query.source_class] = { rawCount: 0, provider: null, error: String(err).slice(0, 200) };
@@ -44,7 +51,11 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const enrich = await acts.enrichRun({ workspaceId, runId, icpId: input.icpId });
 
   // 信号富集（数字足迹 + 结构化收割）：慢且时变，走独立长活动 + heartbeat；失败不拖垮整个 run
-  let signals: { matched: number; enriched: number; provider: string | null } = { matched: 0, enriched: 0, provider: null };
+  let signals: { matched: number; enriched: number; provider: string | null; budgetTruncated?: boolean } = {
+    matched: 0,
+    enriched: 0,
+    provider: null,
+  };
   try {
     signals = await signalActs.enrichSignalsRun({ workspaceId, runId, icpId: input.icpId });
   } catch {
@@ -60,10 +71,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
   }
 
-  // 预算截断的 run 绝不假 DONE（复审 HIGH）：fit 有漏判 → PARTIAL，且截断量进 stats 可观测。
-  const budgetTruncated = (fit.skippedForBudget ?? 0) > 0;
-  const status =
-    failures === 0 && !budgetTruncated ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
+  // 预算截断的 run 绝不假 DONE（复审 HIGH）：**任一**预算消耗阶段打穿 run 预算 → PARTIAL——
+  // fit 漏判 / 发现阶段 / 富集 / 信号富集，均共享同一 run 预算账户，各自 wasExhausted 检出并上报，
+  // 编排层聚合（绝不因某阶段被 provider 吞掉 BudgetExceededError 而假 DONE）。截断量进 stats 可观测。
+  const budgetTruncated =
+    (fit.skippedForBudget ?? 0) > 0 ||
+    discoveryBudgetTruncated ||
+    enrich.budgetTruncated ||
+    (signals.budgetTruncated ?? false);
+  const status = resolveRunStatus({ failures, totalQueries: queries.length, budgetTruncated });
   await acts.finalizeRun({
     workspaceId,
     runId,
@@ -76,6 +92,11 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       suppressed,
       fit: fit.verdicts,
       fitSkippedForBudget: fit.skippedForBudget ?? 0,
+      // 预算截断按阶段拆开可观测（哪一路耗预算阶段打穿了 run 预算）+ 聚合总判。
+      discoveryBudgetTruncated,
+      enrichBudgetTruncated: enrich.budgetTruncated,
+      signalsBudgetTruncated: signals.budgetTruncated ?? false,
+      budgetTruncated,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },
