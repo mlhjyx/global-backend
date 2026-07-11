@@ -10,6 +10,13 @@ import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { extractJsonLd } from './digital-footprint.provider';
+import {
+  detectAtsBoard,
+  atsApiUrl,
+  parseAtsJobs,
+  buildHiringFromAtsJobs,
+  type AtsBoard,
+} from '../../adapters/ats-boards';
 
 const PARSER_VERSION = 'structured-harvest/v1';
 const MAX_CHILD_SITEMAPS = 3;
@@ -54,22 +61,32 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
         has_buying_role: titles.some(isBuyingRole),
       };
     } else if (careersUrl && (await isAllowedByRobots(careersUrl).catch(() => true))) {
-      // ② 兜底：抓 careers 落地页取 JobPosting JSON-LD（若有；robots 亦在 crawl4ai.render 工具内权威强制）
+      // ② 抓 careers 落地页 → 优先 ATS 结构化真值，兜底 JobPosting JSON-LD（robots 在 crawl4ai.render 工具内权威强制）
       try {
         const page = await broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
           'crawl4ai.render',
           { url: careersUrl },
           toolCtx,
         );
-        const jobs = page.data.robotsBlocked ? [] : extractJsonLd(page.data.html).jobPostings;
-        if (jobs.length) {
-          const titles = jobs.map((j) => j.title);
-          hiring = {
-            source: careersUrl,
-            open_roles: titles.length,
-            titles: titles.slice(0, 12),
-            has_buying_role: titles.some(isBuyingRole),
-          };
+        const html = page.data.robotsBlocked ? '' : page.data.html;
+        // ②a ATS 优先：检测 Greenhouse/Lever/Ashby board → 拉公开 JSON = 结构化招聘真值
+        //     （真实站多不发 JobPosting JSON-LD → ATS 直连覆盖高得多）。
+        const board = html ? detectAtsBoard(html) : null;
+        if (board) {
+          const ats = await fetchAtsHiring(board, httpGet);
+          if (ats) hiring = { ...ats, has_buying_role: ats.titles.some(isBuyingRole) };
+        }
+        // ②b 兜底：careers 页自带 JobPosting JSON-LD
+        if (!hiring && html) {
+          const titles = extractJsonLd(html).jobPostings.map((j) => j.title);
+          if (titles.length) {
+            hiring = {
+              source: careersUrl,
+              open_roles: titles.length,
+              titles: titles.slice(0, 12),
+              has_buying_role: titles.some(isBuyingRole),
+            };
+          }
         }
       } catch {
         // careers 抓取失败不致命
@@ -167,6 +184,18 @@ export function isBuyingRole(title: string): boolean {
 
 /** 出网函数：由 provider 用 ExecutionBroker 绑定到 http.get 工具（SSRF 公网解析护栏在工具内权威强制）。 */
 export type HttpGetFn = (input: HttpGetInput) => Promise<HttpGetOutput>;
+
+/** 拉 ATS board 公开 JSON（经 http.get 工具出网）→ 归一招聘信号；失败/非 JSON 一律 null（fail-safe）。 */
+async function fetchAtsHiring(board: AtsBoard, httpGet: HttpGetFn) {
+  try {
+    const res = await httpGet({ url: atsApiUrl(board), timeoutMs: 12_000 });
+    if (res.blocked || !res.ok) return null;
+    const json = JSON.parse(res.text) as unknown;
+    return buildHiringFromAtsJobs(board.vendor, parseAtsJobs(board.vendor, json));
+  } catch {
+    return null;
+  }
+}
 
 /** 取域名的 sitemap URL 全集：robots.txt 的 Sitemap: 指令 + /sitemap.xml + /sitemap_index.xml，
  *  遇 sitemap index 再取前若干子 sitemap。总量与子表数有上限。 */
