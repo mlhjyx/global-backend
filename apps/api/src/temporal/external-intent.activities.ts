@@ -58,7 +58,8 @@ export interface ExternalIntentIcpResult {
  *   ③ ingestExternalSignals：按 (provider, queryFingerprint, windowKey) **全局去重后拉取一次** →
  *      source_signal 平台表（零个人数据）；预算 `sweep:external-intent` 开账，BudgetExceeded 停拉不停投影；
  *   ④ projectExternalIntentForIcp：逐 ICP 从 source_signal **只读投影**进本租户 canonical（withWorkspace RLS）。
- * kill-switch：③ 每指纹拉取前 live 重读 data_provider（中途 ops 关停本轮即生效）；②④ 零出网只受捕获标志门。
+ * kill-switch：③ 每指纹拉取前、④ 每 ICP 投影前均 live 重读 data_provider（中途 ops 关停本轮即生效，
+ *   投影同拦——Codex #56 P1）；② 解析零出网只受捕获标志门。SUSPENDED=停采不停用不入投影（architecture §5）。
  */
 export function createExternalIntentActivities(deps: {
   prisma: PrismaService;
@@ -252,7 +253,18 @@ export function createExternalIntentActivities(deps: {
         ...(args.error ? { error: args.error } : {}),
       };
 
-      if (args.tedEnabled && args.cpvCodes.length && args.buyerCountries.length) {
+      // 投影前 **live 重读 DataProvider kill-switch**（Codex #56 P1 收口）：tedEnabled/openfdaEnabled 是
+      // sweep 头部 listExternalIntentTargets 捕获的、可能已过时的标志。摄取活动逐指纹已 liveEnabled 重读；
+      // 投影此前只受捕获门——provider 被 ops 中途置 DISABLED（schema DataProvider.status = Kill Switch 执行点）
+      // 仍会把缓存 source_signal 投进本租户 canonical 造新线索。此处对齐摄取纪律：provider 中途下线本轮即不投影，
+      // 让 kill-switch 成为**非破坏性「停一切新活动」**闸。
+      //   ⚠️ 刻意**不**在此加 source_policy SUSPENDED 门：SUSPENDED=**停采不停用**（egress-only，见 architecture
+      //   §5 两级撤停语义）——停「用」存量信号的正解是 revokeByProvider（翻 REVOKED，投影已按 status='ACTIVE' 剔除）。
+      const live = await liveEnabled();
+      const tedOn = args.tedEnabled && live.ted;
+      const openfdaOn = args.openfdaEnabled && live.openfda;
+
+      if (tedOn && args.cpvCodes.length && args.buyerCountries.length) {
         try {
           out.tenders = await tedProj.projectTenders(args.workspaceId, {
             cpvCodes: args.cpvCodes,
@@ -263,7 +275,7 @@ export function createExternalIntentActivities(deps: {
         }
       }
 
-      if (args.openfdaEnabled && args.fdaProductCodes.length) {
+      if (openfdaOn && args.fdaProductCodes.length) {
         try {
           out.clearances = await openfdaProj.projectClearances(args.workspaceId, {
             productCodes: args.fdaProductCodes,
