@@ -97,7 +97,9 @@ export async function persistDiscoveredContacts(
             source_page: c.sourcePage ?? null,
           } as unknown as Prisma.InputJsonValue,
           providerKey: args.adapterKey,
-          license: 'public',
+          // 侧写由源数据派生 → 带**源 license**（CC BY / OGL 署名义务落库；无联系点的源如 EPO 靠此承载署名）。
+          // 缺 license 回退 'public'（decision_maker 等语义不变）。
+          license: c.license ?? 'public',
           allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
         },
       });

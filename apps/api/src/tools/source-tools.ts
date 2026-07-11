@@ -24,6 +24,7 @@ import {
 } from '../adapters/openfda-api';
 import { queryAlgoliaExhibitors, AlgoliaFairConfig, FairExhibitor } from '../adapters/trade-fair-algolia';
 import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapters/companies-house';
+import { epoOps, EpoPatentRecord } from '../adapters/epo-ops';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -305,6 +306,46 @@ export const companiesHouseSearchTool: Tool<CompaniesHouseInput, CompaniesHouseO
   },
 };
 
+export interface EpoOpsInput {
+  applicant: string;
+  fromYear: number;
+  toYear: number;
+  range?: number;
+}
+export interface EpoOpsOutput {
+  patents?: EpoPatentRecord[];
+}
+
+/**
+ * epo_ops.search —— EPO OPS 官方开放专利服务（OAuth2 client-credentials；发明人 = 具名技术买家）。
+ * required 治理：发明人 = 🔴 具名个人（GDPR）→ personalData=true → §8.8 用途门 fail-closed（未登记/
+ * SUSPENDED/用途不符即拒）。authRequired=true（consumer key/secret 走 env，业务码不见）。
+ * 数据最小化（只 name，无 residence/地址/国籍）在 adapter 层强制；CC BY 4.0 署名义务由 provider 写 field_evidence.license。
+ */
+export const epoOpsSearchTool: Tool<EpoOpsInput, EpoOpsOutput> = {
+  id: 'epo_ops.search',
+  version: '1.0.0',
+  category: 'structured_source',
+  sourceClass: 'public_intelligence',
+  cost: { unit: 'call', estimatedCents: 0, external: true },
+  rateLimit: { rps: 1, concurrency: 1 },
+  // personalData:true —— inventors 是具名发明人（GDPR）；数据最小化（只 name）在 adapter 层强制。
+  compliance: { sourcePolicy: 'required', policyDomain: 'ops.epo.org', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: true, risk: 'low' },
+  capabilities: { produces: ['contact'], accepts: ['keywords'] },
+  idempotencyKey: (i) => `epo_ops.search:${stableKey(i)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'epo-ops' }),
+  execute: async (input) => ({
+    data: {
+      patents: await epoOps.searchPatentsByApplicant(input.applicant, {
+        fromYear: input.fromYear,
+        toYear: input.toYear,
+        range: input.range,
+      }),
+    },
+    costCents: 0,
+  }),
+};
+
 export interface TradeFairAlgoliaInput {
   cfg: AlgoliaFairConfig;
   limit?: number;
@@ -387,5 +428,6 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(tradeFairAlgoliaTool as Tool);
   registry.register(mapYourShowFetchTool as Tool);
   registry.register(companiesHouseSearchTool as Tool);
+  registry.register(epoOpsSearchTool as Tool);
   return registry;
 }

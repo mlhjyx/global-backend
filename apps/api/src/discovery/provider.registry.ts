@@ -16,6 +16,7 @@ import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
+import { EpoOpsInventorProvider } from './providers/epo-ops.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
@@ -81,6 +82,10 @@ export class DiscoveryProviderRegistry {
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
     this.contacts.push(new CompaniesHouseContactProvider({ broker }));
+    // EPO OPS 发明人发现（待办 3 第二个身份源；官方 OPS API，OAuth2）——contact_discovery 类。
+    // 不依赖 gateway（结构化 API，无 LLM）；无 broker/无 creds/低置信对齐时 fail-safe 返空（天然 no-op）。
+    // 发明人经归一名走 resolvePersonIdentity Tier 2/3 并（EPO 无稳定人 id → 不走 Tier 0，见设计 §3）。
+    this.contacts.push(new EpoOpsInventorProvider({ broker }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
@@ -260,6 +265,35 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'UK Companies House 官方注册处 API（Basic auth）。OGL v3.0（© Crown copyright）绿事实可商用但署名义务；董事 = 🔴 具名个人（GDPR），数据最小化（只取 name/role/officer_id，不摄 DOB/国籍/住址），触达前过 lawful-basis 门。',
+        },
+      });
+    }
+    // EPO OPS 发明人发现（待办 3 第二个身份源）——官方 OPS API（OAuth2 client-credentials）。costPerCallCents=0。
+    // **默认 DISABLED**：OPS JSON 解析目前仅对合成 fixture 校准过，真库真 API 未跑（EPO 账号审批中）。
+    // 待 `scripts/verify-epo-ops.mts` 真测通过后由 ops 手动/reseed 翻 ENABLED（`update:{}` 不覆盖手动改）。
+    // verify 脚本直接 new Provider 跑、不经路由，故 DISABLED 不挡真测；DISABLED 时生产 fan-out 不路由本源（无静默错采）。
+    await db.dataProvider.upsert({
+      where: { key: 'epo_ops' },
+      update: {},
+      create: { key: 'epo_ops', class: 'contact_discovery', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // 合规注册：官方 REST（非爬，平台合约轨干净）；personalData=true —— inventors 是具名发明人（GDPR）。
+    // CC BY 4.0 绿事实可商用**但署名是 license 义务**；数据最小化（只 name，无 residence/地址/国籍）在 adapter 层强制。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'ops.epo.org' },
+        update: {},
+        create: {
+          domain: 'ops.epo.org',
+          sourceType: 'patent_registry',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'EPO OPS（ops.epo.org）官方开放专利服务 API（OAuth2 client-credentials）。CC BY 4.0 绿事实可商用但署名义务（Data © EPO, CC BY 4.0）；发明人 = 🔴 具名个人（GDPR），数据最小化（只 name，不摄 residence/地址/国籍），触达前过 lawful-basis 门。',
         },
       });
     }

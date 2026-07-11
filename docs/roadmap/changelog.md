@@ -237,3 +237,14 @@
 - **对抗复审**（PoC 单测在分支上实测复现）：抓 **2 HIGH 全修**——① Tier 0 缺反向守卫致同公司同名不同 officer_id 董事误并（加 `hasExternalIdConflict` 对称 email 守卫，Tier 2/3 拦冲突）；② GB 门 `.uk` 域名当辖区可绕过（`.uk` 2014 全球开放），改 country 优先（非英一律拒、`.uk` 仅缺国别弱兜底）+ 1 MED（fan-out 静默 catch 补 warn）。已核验安全：数据最小化/§8.8 门/公司对齐 margin/key 不泄漏/自足性（committed schema 构建通过，不依赖并发 storage-compliance WIP）。
 - **实测**：build 0 · **610 vitest**（含错并回归）· 真库真 CH API `verify-companies-house.mts` 四段全绿（AstraZeneca 真拉 12 董事·对齐 1.00·Tier 0 二次幂等 merged=12·跨源与 Impressum 并一条·§8.8 去用途→拒→零联系人·无 DOB/国籍入库）。
 - **遗留**：待办 3 后续源（专利 inventor USPTO/EPO、商标 EUIPO/WIPO；CH 扩德/法）——fan-out + Tier 0 缝已跑通，后续源同法接入。
+
+## 2026-07-11 · 待办 3 第二身份源 = EPO OPS 发明人（feat/epo-ops-inventor）
+
+> 承接待办 3 首源 CH（#58）。原定 USPTO PatentsView，因 2026-03 迁 USPTO ODP + key 改需 **ID.me 实名**（非美国身份卡死）→ 转 **EPO OPS**（官方 OPS API，OAuth2，零实名，CC BY 4.0）。按 applicant 检索近 5 年专利 → 具名发明人 = 技术买家 → 经归一名并入决策人图谱。
+
+- 新 `adapters/epo-ops.ts`（OAuth2 client-credentials token 缓存/刷新 + `searchPatentsByApplicant`，🔴 数据最小化只取 inventor name）+ `providers/epo-ops.provider.ts`（`ContactDiscoveryAdapter`：applicant `pickBestByName` 0.9·margin + 国别门 + 近 5 年 + 上限 25 → `technical_buyer`）+ `tools/source-tools.ts` `epo_ops.search`（required，policyDomain `ops.epo.org`，personalData）+ registry fan-out push + seed（`epo_ops` data_provider + `ops.epo.org` source_policy）。**无 schema 迁移**。
+- 🔴 **EPO 无消歧人 id → 不走 Tier 0**：经归一名走 Tier 2/3 并（第 3 源压测跨源名并）；不产 externalIds（硬凑「公开号+名字」键会触 `hasExternalIdConflict` 误拆同一人）。
+- 🔴 合规：§8.8 用途门 fail-closed + CC BY 4.0 署名 + 发明人 personalData + 数据最小化（adapter 层剥 residence/地址/国籍）。**补缺口**：`contact-persist` 的 `person.profile` 证据改带**源 license**（原硬编码 'public'）——无联系点的源（EPO）靠此承载 CC BY 署名，CH 亦更准（OGL）。
+- **对抗复审**（code-reviewer agent，1 HIGH+2 MED 全修带回归）：① 🔴 HIGH **合著专利误挂**——EPO biblio 的 applicants/inventors 无「谁属谁」映射，合著专利会把合作方员工误挂到对齐公司 → 改**只取独家申请人专利**（漏采 < 错挂）；② MED **同公司拼写变体自相竞争压 margin 误弃** → applicant 候选**按 `normForMatch` 归一去重**、逐专利比对亦走归一名；③ MED **未真测即 ENABLED** → `epo_ops` seed 改 **DISABLED**，待真测通过翻 ENABLED（verify 直连 provider 不经路由，DISABLED 不挡真测）。
+- **实测**：build 0 · **645 vitest**（EPO adapter 解析/OAuth/数据最小化 + provider 对齐/国别/去重/cap/独家申请人/合著防误挂/fail-safe + persist 源 license 回归，共 +35）· eslint 0。**真库真 API 实测待 EPO 账号审批**（`scripts/verify-epo-ops.mts` 就绪：A 真 API/B 落库幂等/C 跨源名并/D §8.8 门四段，Siemens/DE）。
+- **遗留**：EPO 账号审批通过后跑 `verify-epo-ops.mts` 真测校准 API 字段路径 → 翻 `epo_ops` ENABLED；待办 3 后续源（商标 EUIPO/WIPO；CH 扩德/法）。

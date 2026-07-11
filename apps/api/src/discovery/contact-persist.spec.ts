@@ -60,8 +60,9 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     const evidence = fieldEvidenceCreate.mock.calls.map((c) => c[0] as { data: { field: string; license: string } });
     const extIdEvidence = evidence.find((e) => e.data.field === 'external_id');
     expect(extIdEvidence?.data.license).toBe('OGL-UK-3.0');
-    // 具名人 person.profile 证据存在（personal_data 标记）
+    // 具名人 person.profile 证据存在（personal_data 标记）+ 带 CH 源 license（OGL 署名落库）
     expect(evidence.some((e) => e.data.field === 'person.profile')).toBe(true);
+    expect(evidence.find((e) => e.data.field === 'person.profile')?.data.license).toBe('OGL-UK-3.0');
   });
 
   it('Tier 0：候选已有匹配 external_id 点 → 并入现有行（不新建）+ identity.merge match_rule=external_id', async () => {
@@ -119,5 +120,33 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
       .map((c) => c[0] as { data: { field: string; license: string } })
       .find((e) => e.data.field === 'email');
     expect(emailEvidence?.data.license).toBe('licensed');
+  });
+
+  it('🟢 EPO 类无联系点具名人：person.profile 证据带源 license（CC BY 署名落库），不写任何 contact_point', async () => {
+    const { tx, fieldEvidenceCreate, contactPointUpsert } = fakeTx([]); // 无候选 → 新建
+    const inventor: ProviderContactRecord = {
+      externalId: 'epo_ops:siemens-ag:hans-mueller',
+      fullName: 'Hans Müller',
+      title: 'Inventor',
+      buyingRole: 'technical_buyer',
+      personalData: true,
+      sourcePage: 'https://worldwide.espacenet.com/',
+      license: 'CC-BY-4.0',
+      // 🔴 无 email/phone/linkedin/externalIds —— EPO 发明人无联系点
+    };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'epo_ops',
+      contacts: [inventor],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1);
+    expect(contactPointUpsert).not.toHaveBeenCalled(); // 无联系点 → 不写 contact_point
+    // CC BY 署名靠 person.profile 承载（否则 EPO 的署名义务不入库）
+    const profile = fieldEvidenceCreate.mock.calls
+      .map((c) => c[0] as { data: { field: string; license: string } })
+      .find((e) => e.data.field === 'person.profile');
+    expect(profile?.data.license).toBe('CC-BY-4.0');
   });
 });
