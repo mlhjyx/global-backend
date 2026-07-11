@@ -685,6 +685,7 @@ model FieldEvidence {
   confidence     Float?
   license        String   @default("sandbox") // sandbox | licensed | public | byo
   allowedActions Json?    @map("allowed_actions") // ['display','match','outreach']
+  dataClass      String   @default("green") @map("data_class") // green（公司事实）| amber（职能邮箱 ePrivacy）| red（具名个人 GDPR Art.4）——收口⑥：替代 value JSON 里的 personal_data 代码纪律，可查询/可索引；喂 DataRightsService
   fetchedAt      DateTime @default(now()) @map("fetched_at")
 
   @@index([workspaceId])
@@ -704,6 +705,103 @@ model SuppressionRecord {
   @@unique([workspaceId, type, value])
   @@index([workspaceId])
   @@map("suppression_record")
+}
+
+// ── 存储侧合规（收口⑥ · ADR-010 COMPLIANCE-SCORING / ADR-003 PII-rights zone） ──
+
+/// jurisdiction_policy（收口⑥）：DataRightsService.evaluate() 的规则数据行（含 PIPL 法域对）。
+/// 平台级治理表（非租户数据，无 RLS），随 API 启动 seed（同 source_policy/data_provider）。
+/// 规则 = (主体法域 × 处理地法域 × 数据分级 × 动作) → effect；'*' = 通配，最具体优先匹配。
+model JurisdictionPolicy {
+  id                    String   @id @default(uuid()) @db.Uuid
+  subjectJurisdiction   String   @map("subject_jurisdiction") // EU | UK | US | CN | OTHER | *（数据主体法域）
+  processorJurisdiction String   @map("processor_jurisdiction") // 同上；'*' = 任意处理地
+  dataClass             String   @map("data_class") // green | amber | red | *
+  action                String // STORE | AI_PROCESS | DERIVE | RETAIN | EXPORT | OUTREACH | VIEW | *
+  effect                String // ALLOW | ALLOW_WITH_BASIS | REQUIRE_APPROVAL | DENY
+  requiresLawfulBasis   Boolean  @default(false) @map("requires_lawful_basis")
+  article14Required     Boolean  @default(false) @map("article14_required")
+  retentionDays         Int?     @map("retention_days") // 该组合的保留期上限（RETAIN 判定用）
+  ruleVersion           String   @default("v1") @map("rule_version")
+  note                  String?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([subjectJurisdiction, processorJurisdiction, dataClass, action, ruleVersion])
+  @@map("jurisdiction_policy")
+}
+
+/// policy_decision_log（收口⑥）：DataRightsService 每次判定留痕。租户 RLS，**append-only**
+///（migration REVOKE UPDATE,DELETE FROM app_user——审计不可篡改，DB 层保证非代码纪律）。
+/// 🔴 内容最小化：只存 subjectId 引用 + dataClass，**绝不嵌人名/邮箱明文**。
+model PolicyDecisionLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  workspaceId           String   @map("workspace_id") @db.Uuid
+  action                String
+  dataClass             String   @map("data_class")
+  subjectJurisdiction   String   @map("subject_jurisdiction")
+  processorJurisdiction String   @map("processor_jurisdiction")
+  effect                String // ALLOW | ALLOW_WITH_BASIS | REQUIRE_APPROVAL | DENY
+  allowed               Boolean
+  reason                String
+  ruleId                String?  @map("rule_id")
+  ruleVersion           String   @map("rule_version")
+  article14Required     Boolean  @default(false) @map("article14_required")
+  subjectType           String?  @map("subject_type") // contact | company（引用类别，非 PII）
+  subjectId             String?  @map("subject_id") @db.Uuid // 主体行 id 引用（非人名明文）
+  lawfulBasisRef        String?  @map("lawful_basis_ref") // LIA/工单引用（非明文）
+  actorId               String?  @map("actor_id") // 发起动作的操作者 id
+  correlationId         String?  @map("correlation_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([workspaceId, action])
+  @@map("policy_decision_log")
+}
+
+/// lia_record（收口⑥）：一等 Legitimate Interest Assessment（GDPR Art.6(1)(f) balancing test）。
+/// 租户 RLS（版本化，撤回=status WITHDRAWN）。承接 platform-top-level-design §11「LIA 记录」。
+model LiaRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  scope         String // 适用范围：workspace | company | contact
+  scopeRef      String?   @map("scope_ref") @db.Uuid // 具体主体 id（scope 非 workspace 时）
+  basis         String // legitimate_interest | consent | contract | legal_obligation
+  purpose       String // 处理目的陈述
+  necessityNote String?   @map("necessity_note") // 必要性论证
+  balancingNote String?   @map("balancing_note") // 利益权衡结论（对数据主体影响）
+  ref           String? // 外部 LIA 文档/工单引用
+  recordedBy    String    @map("recorded_by") // 断言人
+  version       String    @default("v1")
+  status        String    @default("ACTIVE") // ACTIVE | WITHDRAWN | SUPERSEDED
+  effectiveAt   DateTime  @default(now()) @map("effective_at")
+  withdrawnAt   DateTime? @map("withdrawn_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([workspaceId, scope])
+  @@map("lia_record")
+}
+
+/// article14_notice（收口⑥）：GDPR Art.14 间接收集透明义务记录（获取后 1 个月内 / 首次接触时告知）。
+/// 租户 RLS。obligation 判定由 DataRightsService 产出，履行状态在此追踪。
+model Article14Notice {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  subjectType  String    @map("subject_type") // contact
+  subjectId    String    @map("subject_id") @db.Uuid // 主体行 id 引用（非人名明文）
+  jurisdiction String // 主体法域（EU | UK …）
+  obligation   String    @default("REQUIRED") // REQUIRED | EXEMPT（豁免：本人已知/不成比例努力 Art.14(5)）
+  dueAt        DateTime  @map("due_at") // 履行截止（获取时间 + 1 个月）
+  status       String    @default("PENDING") // PENDING | FULFILLED | EXEMPTED | WITHDRAWN
+  fulfilledAt  DateTime? @map("fulfilled_at")
+  channel      String? // 履行渠道（email | first_contact …）
+  note         String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([workspaceId, subjectId])
+  @@map("article14_notice")
 }
 
 // ── Lead & 验证评分 (PRD 7.5 LED-006..009 / 5.6) ───────────────────────────

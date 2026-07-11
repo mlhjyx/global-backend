@@ -18,6 +18,7 @@ import { createIntentActivities } from './intent.activities';
 import { createBacklogActivities } from './backlog.activities';
 import { createExternalIntentActivities } from './external-intent.activities';
 import { ensurePlatformSchedules } from './ensure-schedules';
+import { seedJurisdictionPolicy } from '../compliance/jurisdiction-policy.seed';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
@@ -46,6 +47,15 @@ async function main(): Promise<void> {
     console.log('[worker] data_provider seed ok');
   } catch (err) {
     console.error(`[worker] data_provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`);
+  }
+
+  // 收口⑥：jurisdiction_policy seed（平台规则表，owner 写）。worker 的删除编排/合规判定需之；
+  // 失败大声——规则空则 DataRights 对 red 数据 fail-closed。
+  try {
+    const n = await seedJurisdictionPolicy(ownerDb);
+    console.log(`[worker] jurisdiction_policy seed ok (${n} rules)`);
+  } catch (err) {
+    console.error(`[worker] jurisdiction_policy seed FAILED — DataRights fail-closed for red data: ${String(err)}`);
   }
 
   // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
