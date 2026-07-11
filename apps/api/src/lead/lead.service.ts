@@ -131,8 +131,18 @@ export class LeadService {
         },
       });
       if (action === 'accept') {
+        // 🔴 Art.17 竞态闸（Codex PR #72）：交棒前**先对公司行加行锁**（SELECT … FOR UPDATE），
+        // 与 freezeSubject 的 `status=SUPPRESSED` updateMany 串行化。两种交错都被关死：
+        //  ① freeze 先提交 → 本锁在其提交后才拿到，READ COMMITTED 下随后 findUnique 读到 SUPPRESSED
+        //     → 下方 rights=DENY 挡下交棒；
+        //  ② 本 decide 先拿锁 → freeze 阻塞到 handoff 提交后才 suppress（合法的「冻结之前」序）。
+        // 纯 findUnique 无锁：freeze 可在「读之后、本事务提交之前」落定 SUPPRESSED，旧代码仍据陈旧
+        // ENRICHED 交棒——正是本 guard 要堵的 Art.17 漏网。锁行是关闭该窗口的唯一手段（重读只窄化不关闭）。
+        // 行不存在（FK 保证不会）→ 返 0 行、无锁，下方 findUnique 得 null 走 NOT_FOUND 守卫。
+        await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${lead.canonicalCompanyId}::uuid FOR UPDATE`;
         // 收口③：payload = LeadQualified 快照 v1（decide 事务当刻取数的不可变副本，
         // 之后 lead/company 变化不回写）。契约 lead-qualified.v1.schema.json。
+        // 加锁后再读——company.status 此刻反映 freeze 是否已提交的最新状态，快照+权利判定同基于此读。
         const company = await tx.canonicalCompany.findUnique({
           where: { id: lead.canonicalCompanyId },
           include: { contacts: { include: { contactPoints: true } } },
