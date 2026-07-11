@@ -1,109 +1,98 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { companyIdentity } from '../discovery/identity';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
-import type { TedContractNotice } from '../adapters/ted-api';
-import type { TedSearchInput, TedSearchOutput } from '../tools/source-tools';
-import type { ExecutionBroker } from '../tools/tool-contract';
+import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
-/** TED 招标公告 intent 类型 + 强度（开放招标 = 很强的实时需求信号，仅次于 web_watch SOURCING_OPENED=1）。 */
-export const TENDER_PUBLISHED = 'TENDER_PUBLISHED';
-export const TENDER_STRENGTH = 0.9;
+// 单一真值在 signals/signal-mappers（摄取层先用）；此处 re-export 保持既有 import 路径不破。
+export { TENDER_PUBLISHED, TENDER_STRENGTH };
+
 const DEFAULT_SINCE_DAYS = 30;
-const DEFAULT_MAX_NOTICES = 100; // 有界样本（绝不 grind 全量）
+const DEFAULT_MAX_COMPANIES = 100; // 单 ICP 单轮投影的公司上限（有界，绝不 grind 全量）
+const SIGNAL_SCAN_LIMIT = 2000; // 平台表近窗扫描上限（防超大窗全表拉入内存）
 const TED_ATTRIBUTION = 'Source: TED — © European Union; reused under CC BY 4.0'; // CC BY 4.0 署名义务（§3.1）
 
 export interface ProjectTendersResult {
-  noticesFetched: number;
+  signalsMatched: number;
   companiesTouched: number;
   eventsProjected: number;
-  skippedNoBuyer: number;
-  skippedNoCountry: number;
-  skippedNoDate: number;
+  /** maxCompanies 触顶后被排除的主体数（可观测，不静默；游标化根治随缺口#8 fast-follow）。 */
+  subjectsTruncated: number;
 }
 
 interface BuyerDemand {
   name: string;
-  country: string; // alpha-2（必有——无国别的招标跳过，防跨国同名误并）
-  publicationDateIso: string; // §8.6 合法 ISO（必有——无有效发布日的招标跳过，无可靠时机信号）
+  country: string; // alpha-2（摄取层已保证）
+  publicationDateIso: string; // 事件时间（source_signal.occurredAt 的 UTC ISO）
   cpvCodes: string[];
   publicationNumber?: string;
 }
 
 /**
- * TED 招标公告 → Intent 投影（spec §4.1a / §5.3 P3）。方向：**招标公告 = 买方需求**——买方（采购机构）
- * 是卖家的潜在客户，其发布招标 = 实时需求/时机。按买方身份解析 canonical（有则更新、无则建为线索），
- * append `attributes.intent.events[{type:'TENDER_PUBLISHED', at:<发布日 ISO>, strength}]` → 动六维 Intent 维。
- *
- * §8.6：发布日经 `tedDateToIso` 归一（mapContractNotice 已做）；**无合法发布日的招标直接跳过**（绝不写 NaN
- *   触发 0 分，亦不用 now 兜底——now 每 sweep 变 → 跨 sweep 同招标重复堆事件）。
- * §8.8（收口②：Broker 单点判定）：ted.search 是 required 工具——直连 api.ted.europa.eu（personalData=true）
- *   一律经 ExecutionBroker，SUSPENDED / 未登记 / 用途不符 / 无 reader 由闸门 fail-closed（不发请求）。
- *   无 broker = 不允许直连（零投影返回）——与 P1 provider 同一 DAT-011 kill-switch。
- * 幂等：合并结果与既有 intent 实质相同 → 不 bump version / 不堆 field_evidence（开放招标每日 sweep 复现时）。
- * 合规：招标/CPV/买方组织事实 🟢 CC BY 4.0（买方=法人）；不摄入具名联系人。fail-safe：无 CPV/拉取失败 → 零结果不抛。
+ * TED 招标 intent 投影（收口⑤反转）：**只读平台层 `source_signal`**（TENDER_PUBLISHED，
+ * SignalIngestService 已 ingest-once 落库），本 service 不再出网——fetch 与投影彻底拆层。
+ * 按 ICP 的 CPV 码（去尾零前缀双向匹配子树）× 买方国别（ISO-3 → alpha-2 归一）过滤 ACTIVE 信号，
+ * 按买方身份归并取最新发布日 → upsert canonical（有则更新、无则建为线索）→ append TENDER_PUBLISHED
+ * 事件（形状不变，评分零改动）。attributes.intent 自此为**可复算投影**（recompute 见 intent-recompute）。
+ * 状态机：只投影 status='ACTIVE'（EXPIRED/REVOKED 剔除）；已投影的历史事件由评分新近度衰减自然老化。
+ * 幂等：合并结果与既有 intent 实质相同 → 不 bump version / 不堆 field_evidence（同一信号每 sweep 复现时）。
+ * 合规：招标/CPV/买方组织事实 🟢 CC BY 4.0（租户侧履行署名义务：intent 证据行 + 新建时 identity 署名行）。
  */
 export class TedIntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: { prisma: PrismaService }) {}
 
   async projectTenders(
     workspaceId: string,
-    params: { cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number; maxNotices?: number },
+    params: { cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number; maxCompanies?: number },
   ): Promise<ProjectTendersResult> {
-    const base: ProjectTendersResult = {
-      noticesFetched: 0, companiesTouched: 0, eventsProjected: 0, skippedNoBuyer: 0, skippedNoCountry: 0, skippedNoDate: 0,
-    };
-    if (!params.cpvCodes.length) return base; // 无 CPV → 不启动（绝不裸拉全库）
+    const base: ProjectTendersResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, subjectsTruncated: 0 };
+    if (!params.cpvCodes.length || !params.buyerCountries.length) return base; // 无码/无国别 → 本 ICP 无匹配面
 
-    // §8.8 合规门（收口②：Broker 单点判定）：ted.search 是 required 工具——SUSPENDED/未登记/用途不符/
-    // 无 reader 一律 fail-closed。无 broker = 不允许直连（生产由调用方注入）。
-    if (!this.deps.broker) {
-       
-      console.warn('[ted-intent] broker unavailable, fail-closed (no raw egress)');
-      return base;
+    const since = new Date(Date.now() - (params.sinceDays ?? DEFAULT_SINCE_DAYS) * 86_400_000);
+    const countries = [...new Set(params.buyerCountries.map((c) => toAlpha2(c)).filter((c): c is string => !!c))];
+    const signals = await this.deps.prisma.sourceSignal.findMany({
+      where: {
+        providerKey: 'ted',
+        signalType: TENDER_PUBLISHED,
+        status: 'ACTIVE', // 状态机：过期/撤回信号不再投影
+        occurredAt: { gte: since },
+        subjectCountry: { in: countries },
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: SIGNAL_SCAN_LIMIT,
+    });
+    if (signals.length === SIGNAL_SCAN_LIMIT) {
+      // CPV 子树前缀无法像 FDA 精确码那样下推 jsonb 过滤（记档：归一前缀列+GIN 为后续项）——先显性告警不静默。
+      console.warn(`[ted-intent] signal scan window saturated (limit=${SIGNAL_SCAN_LIMIT}) — 更旧的匹配信号可能被截断`);
     }
 
-    let notices: TedContractNotice[];
-    try {
-      const res = await this.deps.broker.invoke<TedSearchInput, TedSearchOutput>(
-        'ted.search',
-        {
-          kind: 'contract',
-          params: {
-            cpvCodes: params.cpvCodes,
-            buyerCountries: params.buyerCountries,
-            sinceDays: params.sinceDays ?? DEFAULT_SINCE_DAYS,
-            scope: 'ACTIVE', // 当前开放的招标 = 有效需求窗口
-            maxRecords: params.maxNotices ?? DEFAULT_MAX_NOTICES,
-          },
-        },
-        // purpose=['intent','discovery']：保留旧 §8.8 门语义——域策略允许其一即放行；
-        // 收窄为 ['enrichment'] 时本路径被拒（复审 medium：用途门修复须覆盖 intent 路径）。
-        { workspaceId, correlationId: 'ted-intent', purpose: ['intent', 'discovery'] },
-      );
-      notices = res.data.notices ?? [];
-    } catch (err) {
-      // fail-safe：拉取失败/闸门拒绝零投影不抛（拒绝原因已入 Broker DENIED trace）
-       
-      console.warn(`[ted-intent] fetch failed: ${String(err).slice(0, 150)}`);
-      return base;
-    }
-    base.noticesFetched = notices.length;
+    // ICP CPV 码 ∩ 信号分类键（去尾零前缀双向匹配——CPV 子树语义，拉取端按码检索、投影端复过滤）。
+    const matched = signals.filter((s) => {
+      const keys = Array.isArray(s.taxonomyKeys) ? (s.taxonomyKeys as string[]) : [];
+      return keys.some((k) => params.cpvCodes.some((icpCode) => cpvOverlap(icpCode, k)));
+    });
+    base.signalsMatched = matched.length;
+    if (!matched.length) return base;
 
-    // 按买方身份归并（同买方多招标 → 取最新发布日代表其最新需求；dedupeKey 与其它源一致 name+alpha-2）。
-    // 无买方名 / 无国别 / 无合法发布日的招标各自跳过并计数（可审计），绝不降级成不可靠身份或时间。
+    // 按买方身份归并（同买方多招标 → 取最新发布日代表其最新需求）。rows 已按 occurredAt desc → 首见即最新。
     const byKey = new Map<string, BuyerDemand>();
-    for (const n of notices) {
-      const name = n.buyerNames[0]?.trim();
-      if (!name) { base.skippedNoBuyer += 1; continue; }
-      const country = toAlpha2(n.buyerCountries[0]);
-      if (!country) { base.skippedNoCountry += 1; continue; } // §8.4：无国别 → name-only 键会跨国误并
-      if (!n.publicationDateIso) { base.skippedNoDate += 1; continue; } // §8.6：无有效发布日 → 无可靠时机信号
-      const demand: BuyerDemand = { name, country, publicationDateIso: n.publicationDateIso, cpvCodes: n.cpvCodes, publicationNumber: n.publicationNumber };
-      const key = companyIdentity({ name, country }).dedupeKey;
-      const prior = byKey.get(key);
-      if (!prior || demand.publicationDateIso > prior.publicationDateIso) byKey.set(key, demand); // ISO 字典序 = 时间序
+    const maxCompanies = params.maxCompanies ?? DEFAULT_MAX_COMPANIES;
+    const overflow = new Set<string>(); // 触顶后被排除的主体（可观测，不静默丢；复审 MEDIUM）
+    for (const s of matched) {
+      if (byKey.has(s.subjectKey) || overflow.has(s.subjectKey)) continue;
+      if (byKey.size >= maxCompanies) { overflow.add(s.subjectKey); continue; }
+      const payload = (s.payload ?? {}) as Record<string, unknown>;
+      byKey.set(s.subjectKey, {
+        name: s.subjectName,
+        country: s.subjectCountry,
+        publicationDateIso: s.occurredAt.toISOString(),
+        cpvCodes: Array.isArray(payload.cpv) ? (payload.cpv as string[]) : [],
+        publicationNumber: typeof payload.notice === 'string' ? payload.notice : s.externalId,
+      });
+    }
+    base.subjectsTruncated = overflow.size;
+    if (overflow.size) {
+      console.warn(`[ted-intent] maxCompanies=${maxCompanies} 触顶，${overflow.size} 个主体本轮未投影（游标化根治随缺口#8）`);
     }
 
     for (const [dedupeKey, demand] of byKey) {
@@ -133,7 +122,7 @@ export class TedIntentProjectionService {
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
       const event: IntentEvent = {
         type: TENDER_PUBLISHED,
-        at: demand.publicationDateIso, // §8.6：必为合法 ISO（无合法发布日的招标在归并阶段已跳过）
+        at: demand.publicationDateIso, // §8.6：source_signal.occurredAt 保证合法时间
         strength: TENDER_STRENGTH,
         evidence: { cpv: demand.cpvCodes, notice: demand.publicationNumber, source: 'ted' },
       };
@@ -191,8 +180,16 @@ export class TedIntentProjectionService {
       return true;
     });
   }
+}
 
-  // 幂等门用的 sameIntent / canonicalize 已上移到 intent-projection.service.ts（DRY，与 openFDA intent 投影共享）。
-  // 手写 §8.8 purposeAllowed 镜像已删除（收口②）：ted.search 为 required 工具，SUSPENDED/未登记/用途不符/
-  // 无 reader 由 ExecutionBroker 单点 fail-closed（原镜像存在「无 reader fail-open」缺陷）。
+/**
+ * CPV 子树重叠（去尾零前缀，双向）：ICP 码 '42120000' ↔ 信号键 'cpv:42122130' 视为同子树。
+ * 双向前缀（而非仅 ICP→信号）——信号可能带比 ICP 更粗的码，拉取端既按该码检索到，投影端不应反而丢弃。
+ */
+export function cpvOverlap(icpCode: string, signalKey: string): boolean {
+  if (!signalKey.startsWith('cpv:')) return false;
+  const sig = signalKey.slice(4).replace(/0+$/, '');
+  const icp = icpCode.trim().replace(/0+$/, '');
+  if (!sig || !icp) return false;
+  return sig.startsWith(icp) || icp.startsWith(sig);
 }

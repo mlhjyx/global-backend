@@ -267,3 +267,57 @@ describe('scoreLead — Fit 维值域护栏（J：clamp01 系统边界兜底）'
     expect(r.totalScore).toBeLessThanOrEqual(1);
   });
 });
+
+describe('scoreLead — DemandProof 观测维（收口⑤：一等 Signal 需求证据，不进总分）', () => {
+  const NOW = Date.parse('2026-07-11T00:00:00Z');
+  const daysAgo = (d: number) => new Date(NOW - d * 86_400_000).toISOString();
+  const withEvents = (events: unknown[]) =>
+    company({ attributes: { intent: { last_change_at: daysAgo(1), intent_score: 0.9, counts: {}, events, _ts: 'x' } } });
+
+  it('TENDER_PUBLISHED（招标）/ SOURCING_OPENED（供应商招募）→ demandProof 按衰减取最强', () => {
+    const tender = scoreLead(withEvents([{ type: 'TENDER_PUBLISHED', at: daysAgo(3), strength: 0.9, evidence: { notice: 'N-1', source: 'ted' } }]), icp, { nowMs: NOW });
+    expect(tender.scores.demandProof).toBeGreaterThan(0.85); // 0.9 × 3d 衰减 ≈ 0.87
+    const sourcing = scoreLead(withEvents([{ type: 'SOURCING_OPENED', at: daysAgo(3), strength: 1, evidence: { page: 1 } }]), icp, { nowMs: NOW });
+    expect(sourcing.scores.demandProof).toBeGreaterThan(0.95);
+  });
+
+  it('FDA_CLEARANCE 属上市时机 → 动 Intent 维但 demandProof=0（维度切分拍板）', () => {
+    const r = scoreLead(withEvents([{ type: 'FDA_CLEARANCE', at: daysAgo(3), strength: 0.85 }]), icp, { nowMs: NOW });
+    expect(r.scores.intent).toBeGreaterThan(0.8);
+    expect(r.scores.demandProof).toBe(0);
+  });
+
+  it('关键词代理绝不喂 demandProof（ADR-010：无 evidence 不参与需求证据）', () => {
+    const r = scoreLead(company({ attributes: { keywords: ['new production line planned'] } }), icp, { nowMs: NOW });
+    expect(r.scores.intent).toBeGreaterThan(0); // 代理兜底只作用于 Intent 维
+    expect(r.scores.demandProof).toBe(0);
+  });
+
+  it('demandProof 不进 totalScore：总分 = 六维加权和（观测维零权重）', () => {
+    const r = scoreLead(withEvents([{ type: 'TENDER_PUBLISHED', at: daysAgo(3), strength: 0.9, evidence: { notice: 'N-1', source: 'ted' } }]), icp, { nowMs: NOW });
+    const expected =
+      0.35 * r.scores.fit + 0.15 * r.scores.role + 0.15 * r.scores.intent +
+      0.15 * r.scores.dataQuality + 0.15 * r.scores.reachability + 0.05 * r.scores.engagement;
+    expect(r.totalScore).toBeCloseTo(expected, 4);
+  });
+
+  it('陈旧需求信号按 60d 半衰期衰减（demandProof 可过期的评分侧体现）', () => {
+    const fresh = scoreLead(withEvents([{ type: 'TENDER_PUBLISHED', at: daysAgo(3), strength: 0.9, evidence: { notice: 'N-1', source: 'ted' } }]), icp, { nowMs: NOW });
+    const stale = scoreLead(withEvents([{ type: 'TENDER_PUBLISHED', at: daysAgo(180), strength: 0.9, evidence: { notice: 'N-2', source: 'ted' } }]), icp, { nowMs: NOW });
+    expect(stale.scores.demandProof).toBeLessThan(fresh.scores.demandProof);
+    expect(stale.scores.demandProof).toBeLessThan(0.15); // 3 个半衰期 ≈ ×0.125
+  });
+});
+
+describe('scoreLead — DemandProof evidence 判据（ADR-010：无 evidence 不参与评分或导出）', () => {
+  it('type 命中但无 evidence 的事件 → 不计入 demandProof（Intent 维不受此判据影响）', () => {
+    const NOW2 = Date.parse('2026-07-11T00:00:00Z');
+    const at = new Date(NOW2 - 3 * 86_400_000).toISOString();
+    const co = company({
+      attributes: { intent: { last_change_at: at, intent_score: 0.9, counts: {}, events: [{ type: 'TENDER_PUBLISHED', at, strength: 0.9 }], _ts: 'x' } },
+    });
+    const r = scoreLead(co, icp, { nowMs: NOW2 });
+    expect(r.scores.demandProof).toBe(0); // 无 evidence → 不进需求证据维
+    expect(r.scores.intent).toBeGreaterThan(0.8); // Intent 维按既有语义仍计
+  });
+});

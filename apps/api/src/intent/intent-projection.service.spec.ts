@@ -69,3 +69,40 @@ describe('mergeIntent —— 合并/去重/滚动/幂等', () => {
     expect(merged.events.length).toBeLessThanOrEqual(20);
   });
 });
+
+// ─── 收口⑤ HIGH 回归锁：mergeIntent at 格式漂移免疫（epoch 归一去重键 + 一致比较器）───
+import { mergeIntent as mergeIntentFn, sameIntent as sameIntentFn } from './intent-projection.service';
+
+describe('mergeIntent — at 格式漂移免疫（存量旧格式与新 UTC ISO 同刻去重，一次重写即收敛）', () => {
+  it('date-only / UTC ISO / 带时区 ISO 同刻 → 去重为一条（incoming 新格式存活）', () => {
+    const prev = mergeIntentFn(undefined, [{ type: 'FDA_CLEARANCE', at: '2026-05-05', strength: 0.85 }]);
+    const next = mergeIntentFn(prev, [{ type: 'FDA_CLEARANCE', at: '2026-05-05T00:00:00.000Z', strength: 0.85 }]);
+    expect(next.events).toHaveLength(1);
+    expect(next.events[0].at).toBe('2026-05-05T00:00:00.000Z');
+    // 一次重写后收敛（再合并同事件 → 实质不变，增量 sweep 幂等恢复）
+    const again = mergeIntentFn(next, [{ type: 'FDA_CLEARANCE', at: '2026-05-05T00:00:00.000Z', strength: 0.85 }]);
+    expect(sameIntentFn(next, again)).toBe(true);
+
+    const tzPrev = mergeIntentFn(undefined, [{ type: 'TENDER_PUBLISHED', at: '2026-07-08T00:00:00+02:00', strength: 0.9 }]);
+    const tzNext = mergeIntentFn(tzPrev, [{ type: 'TENDER_PUBLISHED', at: '2026-07-07T22:00:00.000Z', strength: 0.9 }]);
+    expect(tzNext.events).toHaveLength(1); // +02:00 与 UTC 等刻 → 同键
+  });
+
+  it('跨格式排序按真实时刻；不可解析 at 视为最旧（评分侧本就 0 分）', () => {
+    const merged = mergeIntentFn(undefined, [
+      { type: 'A', at: 'not-a-date', strength: 0.5 },
+      { type: 'B', at: '2026-07-01', strength: 0.5 },
+      { type: 'C', at: '2026-07-02T00:00:00+02:00', strength: 0.5 }, // = 2026-07-01T22:00Z，晚于 B
+    ]);
+    expect(merged.events.map((e) => e.type)).toEqual(['C', 'B', 'A']);
+  });
+
+  it('同刻不同 type / 不同 page_url 绝不误并（去重键其余维度保留）', () => {
+    const merged = mergeIntentFn(undefined, [
+      { type: 'PAGE_CHANGED', at: '2026-07-01T00:00:00.000Z', strength: 0.3, page_url: 'https://a.example/x' },
+      { type: 'PAGE_CHANGED', at: '2026-07-01T00:00:00.000Z', strength: 0.3, page_url: 'https://a.example/y' },
+      { type: 'HIRING_UP', at: '2026-07-01T00:00:00.000Z', strength: 0.6 },
+    ]);
+    expect(merged.events).toHaveLength(3);
+  });
+});

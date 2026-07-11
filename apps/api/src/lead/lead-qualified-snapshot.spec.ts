@@ -113,7 +113,7 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
       country: 'DE',
       identifiers: { lei: '5299000J2N45DDNE4Y28', fda_reg: '3001234567' },
     });
-    // scores 映射：dataQuality → data_quality；demand_proof 收口⑤前恒 null
+    // scores 映射：dataQuality → data_quality；demand_proof：旧 lead（scores 无 demandProof 键）→ null 如实
     expect(snap.scores).toEqual({
       fit: 0.8,
       role: 0.5,
@@ -126,7 +126,7 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     });
     expect(snap.fit_verdict).toBe('match');
     expect(snap.evidence_refs).toEqual({ score_detail_available: true, fit_reasons_available: true });
-    expect(snap.qualification_rule_version).toBe('additive-6dim-v1');
+    expect(snap.qualification_rule_version).toBe('additive-6dim-v2');
     expect(snap.storage_rights_decision).toBeNull();
     expect(snap.personal_data_class).toBe('named_person_refs');
     expect(snap.suppression_state).toBe('none');
@@ -179,6 +179,21 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     expect(snap.contact_refs).toEqual([]);
     expect(snap.personal_data_class).toBe('company_facts_only');
     expect(snap.evidence_refs).toEqual({ score_detail_available: false, fit_reasons_available: false });
+  });
+
+  it('收口⑤：lead.scores 带 demandProof → 快照 demand_proof 填数值且仍过 v1 契约（预留槽位，零 schema 变更）', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({
+        scores: { fit: 0.8, role: 0.5, intent: 0.9, demandProof: 0.83, dataQuality: 0.7, reachability: 0.6, engagement: 0 },
+      }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    const ok = validate(snap);
+    expect(validate.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+    expect(snap.scores.demand_proof).toBe(0.83);
   });
 
   it('SUPPRESSED 公司 → suppression_state=suppressed', () => {
