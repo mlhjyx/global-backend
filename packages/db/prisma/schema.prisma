@@ -804,6 +804,55 @@ model Article14Notice {
   @@map("article14_notice")
 }
 
+/// deletion_request（收口⑥ PR-B，GDPR Art.17 删除编排）：DSR 删除请求状态机。租户 RLS，
+/// 全 CRUD（状态转移需 UPDATE）。RECEIVED → FROZEN → ERASING → COMPLETED | FAILED。
+/// subjectId = 主体行 id 引用（canonical_contact.id 或 canonical_company.id）——非人名明文。
+model DeletionRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  subjectType String    @map("subject_type") // contact | company
+  subjectId   String    @map("subject_id") @db.Uuid
+  status      String    @default("RECEIVED") // RECEIVED | FROZEN | ERASING | COMPLETED | FAILED
+  requestedBy String    @map("requested_by") // 发起者（token user id，非 PII）
+  requestRef  String?   @map("request_ref") // 工单/LIA/请求来源引用（可审计，非明文 PII）
+  reason      String? // erasure | objection | legal | manual
+  error       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  receipt DeletionReceipt?
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([workspaceId, subjectType, subjectId])
+  @@map("deletion_request")
+}
+
+/// deletion_receipt（收口⑥ PR-B）：删除完成证明。租户 RLS，**append-only**（migration
+/// REVOKE UPDATE,DELETE FROM app_user——擦除问责证据不可篡改，GDPR Art.5(2)；DB 层保证非代码纪律）。
+/// 🔴 内容最小化：只存**计数** + 主体 id 引用，绝不嵌人名/邮箱明文。
+model DeletionReceipt {
+  id                    String   @id @default(uuid()) @db.Uuid
+  workspaceId           String   @map("workspace_id") @db.Uuid
+  deletionRequestId     String   @unique @map("deletion_request_id") @db.Uuid
+  subjectType           String   @map("subject_type")
+  subjectId             String   @map("subject_id") @db.Uuid
+  contactsErased        Int      @default(0) @map("contacts_erased")
+  contactPointsErased   Int      @default(0) @map("contact_points_erased")
+  fieldEvidenceErased   Int      @default(0) @map("field_evidence_erased")
+  signalsRevoked        Int      @default(0) @map("signals_revoked")
+  companiesSuppressed   Int      @default(0) @map("companies_suppressed")
+  leadsRescoreRequested Int      @default(0) @map("leads_rescore_requested")
+  ruleVersion           String   @map("rule_version")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  request DeletionRequest @relation(fields: [deletionRequestId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("deletion_receipt")
+}
+
 // ── Lead & 验证评分 (PRD 7.5 LED-006..009 / 5.6) ───────────────────────────
 
 /// Lead 状态机（PRD 11.9）：DISCOVERED → ENRICHING → REVIEW →

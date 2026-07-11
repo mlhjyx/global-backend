@@ -13,3 +13,5 @@ export const BACKLOG_SWEEP_WORKFLOW = 'backlogSweepWorkflow';
 export const BACKLOG_SWEEP_SCHEDULE_ID = 'backlog-sweep';
 export const EXTERNAL_INTENT_SWEEP_WORKFLOW = 'externalIntentSweepWorkflow';
 export const EXTERNAL_INTENT_SWEEP_SCHEDULE_ID = 'external-intent-sweep';
+// 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
+export const DELETION_WORKFLOW = 'deletionWorkflow';
