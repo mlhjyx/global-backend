@@ -44,6 +44,14 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             create: { workspaceId: input.workspaceId, type: s.type, value: s.value, reason: s.reason },
           });
         }
+        // company 主体：**冻结即标 SUPPRESSED**（不等到 eraseSubject）——联系人发现/存量 sweep 以 company.status
+        // ==='SUPPRESSED' 为载入闸门，尽早置位可拦下 freeze 之后才发起的发现，收窄「漏网新联系人」窗口。
+        if (located.companyIdsToSuppress.length) {
+          await tx.canonicalCompany.updateMany({
+            where: { id: { in: located.companyIdsToSuppress } },
+            data: { status: 'SUPPRESSED' },
+          });
+        }
         // RECEIVED → FROZEN（幂等 CAS：非 RECEIVED 则匹配 0 行，绝不倒退）
         await tx.deletionRequest.updateMany({
           where: { id: input.deletionRequestId, status: 'RECEIVED' },
@@ -58,24 +66,36 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
       located: LocatedErasureTargets;
     }): Promise<ErasureCounts> {
       const { input, located } = args;
+      const counts = countsFromLocated(located);
       await prisma.withWorkspace(input.workspaceId, async (tx) => {
-        // FROZEN → ERASING（幂等 CAS：已擦除过则 count=0，跳过全部删除/发事件副作用）
+        // FROZEN → ERASING（幂等 CAS：已擦除过则 count=0，跳过全部删除/发事件副作用）+ **同 tx 持久化真实计数**
+        //（stats），供 completeDeletion 忠实取用——即便 complete 后续失败、人工重跑时 located 重算为空，也不伪造 0。
         const moved = await tx.deletionRequest.updateMany({
           where: { id: input.deletionRequestId, status: 'FROZEN' },
-          data: { status: 'ERASING' },
+          data: { status: 'ERASING', stats: counts as unknown as Prisma.InputJsonValue },
         });
         if (moved.count === 0) return;
 
-        if (located.contactIds.length) {
+        // 待硬删的联系人集：company 主体在**擦除时刻重查**（捕获冻结后并发发现的漏网联系人，保证 Art.17 完整）；
+        // contact 主体用冻结快照的单一 id。
+        let eraseContactIds = located.contactIds;
+        if (located.companyIdsToSuppress.length) {
+          const cur = await tx.canonicalContact.findMany({
+            where: { companyId: { in: located.companyIdsToSuppress } },
+            select: { id: true },
+          });
+          eraseContactIds = cur.map((c) => c.id);
+        }
+        if (eraseContactIds.length) {
           // field_evidence 无 FK 级联 → 显式按 contact 实体删（含 person.profile red 行 + 邮箱/电话加密副本）
           await tx.fieldEvidence.deleteMany({
-            where: { entityType: 'contact', entityId: { in: located.contactIds } },
+            where: { entityType: 'contact', entityId: { in: eraseContactIds } },
           });
           // canonical_contact 硬删 → DB 级联删 contact_point（onDelete: Cascade）
-          await tx.canonicalContact.deleteMany({ where: { id: { in: located.contactIds } } });
+          await tx.canonicalContact.deleteMany({ where: { id: { in: eraseContactIds } } });
         }
 
-        // company 主体：整公司标 SUPPRESSED（保留绿区公司事实，仅禁对外动作；company 非自然人，无需硬删记录）
+        // company 主体：整公司标 SUPPRESSED（幂等——freeze 已置；此处兜底。保留绿区公司事实，company 非自然人不硬删）
         if (located.companyIdsToSuppress.length) {
           await tx.canonicalCompany.updateMany({
             where: { id: { in: located.companyIdsToSuppress } },
@@ -97,7 +117,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           });
         }
       });
-      return countsFromLocated(located);
+      return counts;
     },
 
     async completeDeletion(args: {
@@ -105,15 +125,40 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
       located: LocatedErasureTargets;
     }): Promise<ErasureCounts> {
       const { input, located } = args;
-      const counts = countsFromLocated(located);
       const erasedAt = new Date().toISOString();
-      await prisma.withWorkspace(input.workspaceId, async (tx) => {
+      return prisma.withWorkspace(input.workspaceId, async (tx) => {
         const req = await tx.deletionRequest.findUnique({
           where: { id: input.deletionRequestId },
-          select: { status: true },
+          select: { status: true, stats: true },
         });
         if (!req) throw new Error(`deletion_request ${input.deletionRequestId} not found`);
-        if (req.status === 'COMPLETED') return; // 幂等：回执与事件已在上一次成功里写过
+
+        // 🔴 真实计数优先取擦除阶段持久化的 stats（防 complete 后失败、人工重跑时 located 重算为空 → 伪造 0 回执）；
+        // stats 未持久化 = 擦除尚未发生，回退 located（此时应为合法的空/0）。
+        const persisted = (req.stats as ErasureCounts | null) ?? null;
+        const counts = persisted ?? countsFromLocated(located);
+
+        if (req.status === 'COMPLETED') return counts; // 幂等：回执与事件已写过
+
+        const existing = await tx.deletionReceipt.findUnique({
+          where: { deletionRequestId: input.deletionRequestId },
+        });
+        if (existing) {
+          // 回执已写但状态未收尾（complete 在 create 之后崩）→ 只补状态（CAS，绝不覆盖 COMPLETED），不重复发事件
+          await tx.deletionRequest.updateMany({
+            where: { id: input.deletionRequestId, status: { notIn: ['COMPLETED'] } },
+            data: { status: 'COMPLETED', completedAt: new Date() },
+          });
+          return counts;
+        }
+
+        // 🔴 拒绝为「擦除从未发生」的请求伪造回执/事件：仅当擦除已发生（状态 ERASING，或 stats 已持久化）才收尾。
+        const eraseHappened = req.status === 'ERASING' || persisted !== null;
+        if (!eraseHappened) {
+          throw new Error(
+            `completeDeletion: erase not performed (status=${req.status}) — refuse to fabricate receipt`,
+          );
+        }
 
         // 回执（append-only）——🔴 只计数 + subjectId 引用，绝不嵌人名/邮箱
         await tx.deletionReceipt.create({
@@ -151,12 +196,13 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           },
         });
 
-        await tx.deletionRequest.update({
-          where: { id: input.deletionRequestId },
+        // CAS：仅从 ERASING/FAILED 收尾为 COMPLETED（FAILED-with-stats = 擦除已发生的合法收尾；绝不无条件直更）
+        await tx.deletionRequest.updateMany({
+          where: { id: input.deletionRequestId, status: { in: ['ERASING', 'FAILED'] } },
           data: { status: 'COMPLETED', completedAt: new Date() },
         });
+        return counts;
       });
-      return counts;
     },
 
     async failDeletion(args: {

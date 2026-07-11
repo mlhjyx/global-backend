@@ -170,6 +170,79 @@ async function main(): Promise<void> {
   const crossReceipts = await prisma.withWorkspace(WS2, (tx) => tx.deletionReceipt.count({}));
   check('D2 RLS：他租户 deletion_receipt 计数为 0（本 WS 的不可见）', crossReceipts === 0);
 
+  // ═══════════ E. F2：回执 append-only 不可被删父级联绕过 ═══════════════════════════
+  // view 是 B 段已 COMPLETED 且有回执的请求；app_user 删其父 deletion_request 应被拒（REVOKE DELETE + FK RESTRICT）。
+  let delBlocked = false;
+  try { await prisma.withWorkspace(WS, (tx) => tx.deletionRequest.deleteMany({ where: { id: view.id } })); } catch { delBlocked = true; }
+  check('E1 F2：app_user 删有回执的 deletion_request 被拒（护回执 append-only 不被级联抹除）', delBlocked);
+
+  // ═══════════ F. F3：并发重复 DSR 去重（部分唯一索引 + P2002 复用）══════════════════
+  const fCompany = await owner.canonicalCompany.create({ data: { workspaceId: WS, name: 'F Race Co', domain: 'frace.example', dedupeKey: 'd:frace.example', status: 'NEW' } });
+  const fContactId = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: fCompany.id, fullName: 'Race Person', dedupeKey: 'e:race@frace.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'race@frace.example' } });
+    return c.id;
+  });
+  const races = await Promise.allSettled([
+    delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: fContactId }),
+    delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: fContactId }),
+  ]);
+  const okViews = races.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof delSvc.createRequest>>> => r.status === 'fulfilled').map((r) => r.value);
+  const distinctReqs = await owner.deletionRequest.count({ where: { workspaceId: WS, subjectType: 'contact', subjectId: fContactId } });
+  check('F1 F3：并发同主体两次受理只落 1 条 deletion_request（部分唯一索引兜底 + P2002 复用）', distinctReqs === 1 && okViews.length === 2 && okViews[0].id === okViews[1].id);
+
+  // ═══════════ G. F1：部分失败恢复——擦除已发生但状态 FAILED，重跑取持久化 stats 写忠实回执不伪造 0 ═══
+  const gCompany = await owner.canonicalCompany.create({ data: { workspaceId: WS, name: 'G Recover Co', domain: 'grecover.example', dedupeKey: 'd:grecover.example', status: 'NEW' } });
+  const gContactId = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: gCompany.id, fullName: 'Recover Person', dedupeKey: 'e:recover@grecover.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'recover@grecover.example' } });
+    return c.id;
+  });
+  const gView = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: gContactId });
+  const gInput: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: gView.id, subjectType: 'contact', subjectId: gContactId };
+  await acts.freezeSubject(gInput);
+  await acts.eraseSubject({ input: gInput, located: await acts.freezeSubject(gInput) }); // 擦除 + stats 持久化，contact 已删
+  await owner.deletionRequest.update({ where: { id: gView.id }, data: { status: 'FAILED', error: 'simulated complete failure' } });
+  // 人工重跑：freeze 重算 located=空（contact 已删）→ complete 应取持久化 stats（=1）而非伪造 0
+  const gEmptyLocated = await acts.freezeSubject(gInput);
+  const gCounts = await acts.completeDeletion({ input: gInput, located: gEmptyLocated });
+  const gReceipt = await owner.deletionReceipt.findUnique({ where: { deletionRequestId: gView.id } });
+  const gReq = await owner.deletionRequest.findUnique({ where: { id: gView.id } });
+  check('G1 F1：FAILED(擦除已发生) 重跑取持久化 stats 写忠实回执（contactsErased=1 非 0）', gReceipt?.contactsErased === 1 && gCounts.contactsErased === 1);
+  check('G2 F1：FAILED(擦除已发生) 收尾为 COMPLETED', gReq?.status === 'COMPLETED');
+  // 反例：擦除从未发生（FROZEN）的 complete 应拒绝伪造回执
+  const g2ContactId = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: gCompany.id, fullName: 'Never Erased', dedupeKey: 'e:never@grecover.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'never@grecover.example' } });
+    return c.id;
+  });
+  const g2View = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: g2ContactId });
+  const g2Input: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: g2View.id, subjectType: 'contact', subjectId: g2ContactId };
+  const g2Located = await acts.freezeSubject(g2Input); // 只 FROZEN，未 erase
+  let refused = false;
+  try { await acts.completeDeletion({ input: g2Input, located: g2Located }); } catch { refused = true; }
+  check('G3 F1：擦除未发生(FROZEN) 的 complete 拒绝伪造回执', refused);
+
+  // ═══════════ H. F4：company 冻结即 SUPPRESSED + 擦除时刻捕获漏网新联系人 ═══════════════
+  const hCompany = await owner.canonicalCompany.create({ data: { workspaceId: WS, name: 'H Straggler Co', domain: 'hstrag.example', dedupeKey: 'd:hstrag.example', status: 'NEW' } });
+  await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: hCompany.id, fullName: 'Straggler One', dedupeKey: 'e:one@hstrag.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'one@hstrag.example' } });
+  });
+  const hView = await delSvc.createRequest(WS, 'actor', { subjectType: 'company', subjectId: hCompany.id });
+  const hInput: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: hView.id, subjectType: 'company', subjectId: hCompany.id };
+  const hLocated = await acts.freezeSubject(hInput);
+  const hCoAfterFreeze = await owner.canonicalCompany.findUnique({ where: { id: hCompany.id } });
+  check('H1 F4：company 冻结即标 SUPPRESSED（不等到 erase，尽早拦发现）', hCoAfterFreeze?.status === 'SUPPRESSED');
+  // 模拟冻结后并发发现新增的漏网联系人
+  await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: hCompany.id, fullName: 'Straggler Two', dedupeKey: 'e:two@hstrag.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'two@hstrag.example' } });
+  });
+  await acts.eraseSubject({ input: hInput, located: hLocated });
+  const hRemaining = await owner.canonicalContact.count({ where: { companyId: hCompany.id } });
+  check('H2 F4：擦除时刻重查捕获冻结后新增的漏网联系人（0 残留）', hRemaining === 0);
+
   // 清理
   await cleanup(owner, WS);
   await cleanup(owner, WS2);

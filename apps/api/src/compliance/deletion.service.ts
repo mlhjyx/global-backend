@@ -60,43 +60,59 @@ export class DeletionService {
     }
 
     const reason: DeletionReason = (dto.reason as DeletionReason) ?? 'erasure';
-    const row = await this.prisma.withWorkspace(workspaceId, async (tx) => {
-      const active = await tx.deletionRequest.findFirst({
-        where: {
-          subjectType: dto.subjectType,
-          subjectId: dto.subjectId,
-          status: { in: ['RECEIVED', 'FROZEN', 'ERASING'] },
-        },
-        orderBy: { createdAt: 'desc' },
-        include: { receipt: true },
-      });
-      if (active) return active; // 幂等：在途请求复用，不重复触发编排
+    const activeWhere = {
+      subjectType: dto.subjectType,
+      subjectId: dto.subjectId,
+      status: { in: ['RECEIVED', 'FROZEN', 'ERASING'] },
+    };
+    try {
+      const row = await this.prisma.withWorkspace(workspaceId, async (tx) => {
+        const active = await tx.deletionRequest.findFirst({
+          where: activeWhere,
+          orderBy: { createdAt: 'desc' },
+          include: { receipt: true },
+        });
+        if (active) return active; // 幂等：在途请求复用，不重复触发编排
 
-      const created = await tx.deletionRequest.create({
-        data: {
-          workspaceId,
-          subjectType: dto.subjectType,
-          subjectId: dto.subjectId,
-          requestedBy: actorId,
-          requestRef: dto.requestRef ?? null,
-          reason,
-        },
-        include: { receipt: true },
+        const created = await tx.deletionRequest.create({
+          data: {
+            workspaceId,
+            subjectType: dto.subjectType,
+            subjectId: dto.subjectId,
+            requestedBy: actorId,
+            requestRef: dto.requestRef ?? null,
+            reason,
+          },
+          include: { receipt: true },
+        });
+        // 事务性 outbox：请求落库 ⇔ DeletionRequested 命令存在（同 tx 原子）。payload 只带 uuid 引用，无 PII。
+        await tx.outboxEvent.create({
+          data: {
+            workspaceId,
+            eventType: 'DeletionRequested',
+            aggregateType: 'DeletionRequest',
+            aggregateId: created.id,
+            payload: { subjectType: dto.subjectType, subjectId: dto.subjectId } as Prisma.InputJsonValue,
+          },
+        });
+        return created;
       });
-      // 事务性 outbox：请求落库 ⇔ DeletionRequested 命令存在（同 tx 原子）。payload 只带 uuid 引用，无 PII。
-      await tx.outboxEvent.create({
-        data: {
-          workspaceId,
-          eventType: 'DeletionRequested',
-          aggregateType: 'DeletionRequest',
-          aggregateId: created.id,
-          payload: { subjectType: dto.subjectType, subjectId: dto.subjectId } as Prisma.InputJsonValue,
-        },
-      });
-      return created;
-    });
-
-    return toView(row);
+      return toView(row);
+    } catch (err) {
+      // 并发第二插入撞「同主体至多一条在途」部分唯一索引（P2002）→ 复用已提交的在途请求（幂等，非报错）。
+      // findFirst 在 READ COMMITTED 下看不到对方未提交插入，故靠 DB 唯一索引兜底，冲突后另起事务重读。
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const active = await this.prisma.withWorkspace(workspaceId, (tx) =>
+          tx.deletionRequest.findFirst({
+            where: activeWhere,
+            orderBy: { createdAt: 'desc' },
+            include: { receipt: true },
+          }),
+        );
+        if (active) return toView(active);
+      }
+      throw err;
+    }
   }
 
   async getRequest(workspaceId: string, id: string): Promise<DeletionRequestView> {

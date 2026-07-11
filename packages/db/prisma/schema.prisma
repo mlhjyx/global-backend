@@ -816,6 +816,9 @@ model DeletionRequest {
   requestedBy String    @map("requested_by") // 发起者（token user id，非 PII）
   requestRef  String?   @map("request_ref") // 工单/LIA/请求来源引用（可审计，非明文 PII）
   reason      String? // erasure | objection | legal | manual
+  // 擦除阶段（eraseSubject 同 tx）持久化的真实计数（🔴 只计数无 PII）。completeDeletion 从此读取，
+  // 使「擦除已提交但 complete 后续失败 → 人工重跑（located 重算为空）」仍能写出忠实回执，不伪造 0。
+  stats       Json?
   error       String?
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
@@ -826,6 +829,8 @@ model DeletionRequest {
   @@index([workspaceId])
   @@index([workspaceId, status])
   @@index([workspaceId, subjectType, subjectId])
+  // 「同主体至多一条在途请求」的部分唯一索引（WHERE status IN active）由 migration 裸 SQL 维护
+  // （Prisma 尚不支持部分唯一索引）——DB 层防 createRequest find-then-create 并发竞态产生重复请求/回执。
   @@map("deletion_request")
 }
 
@@ -847,7 +852,9 @@ model DeletionReceipt {
   ruleVersion           String   @map("rule_version")
   createdAt             DateTime @default(now()) @map("created_at")
 
-  request DeletionRequest @relation(fields: [deletionRequestId], references: [id], onDelete: Cascade)
+  // onDelete: Restrict——回执在则父 deletion_request 不可删（防级联删绕过 receipt 的 append-only：
+  // PG 级联删以属主身份执行、绕过子表 REVOKE DELETE）。回执成为其父的「锚」，问责证据不可被删父带走。
+  request DeletionRequest @relation(fields: [deletionRequestId], references: [id], onDelete: Restrict)
 
   @@index([workspaceId])
   @@map("deletion_receipt")
