@@ -40,11 +40,17 @@ describe('CH · isUkCompany（GB 门）', () => {
   it('英国国别归一集命中', () => {
     for (const c of ['GB', 'uk', 'GBR', 'United Kingdom', 'England']) expect(isUkCompany(c)).toBe(true);
   });
-  it('.uk 域名命中（国别缺失也放行）', () => {
+  it('国别缺失时 .uk/.co.uk 域名作弱兜底 → true', () => {
     expect(isUkCompany(undefined, 'foo.co.uk')).toBe(true);
-    expect(isUkCompany('DE', 'foo.co.uk')).toBe(true);
+    expect(isUkCompany('', 'foo.uk')).toBe(true);
   });
-  it('非英公司（DE + .de）→ false', () => {
+  it('🔴 HIGH-2 country 优先：显式非英辖区（.uk 域名）一律 false', () => {
+    // 新加坡公司买 .uk 营销域名 → 绝不当英国公司搜（.uk 自 2014 全球开放注册 ≠ 英国辖区）
+    expect(isUkCompany('SG', 'precisiontools.uk')).toBe(false);
+    expect(isUkCompany('DE', 'foo.co.uk')).toBe(false);
+    expect(isUkCompany('GB', undefined)).toBe(true); // country=GB 无域名 → true
+  });
+  it('非英公司（DE + .de）→ false；两者皆空 → false', () => {
     expect(isUkCompany('DE', 'foo.de')).toBe(false);
     expect(isUkCompany(undefined, undefined)).toBe(false);
   });

@@ -16,15 +16,19 @@ const OFFICER_SCHEME = 'uk-ch-officer';
 const ALIGN_MIN_SCORE = 0.9;
 const ALIGN_MIN_MARGIN = 0.1;
 
-/** GB 判定：英国国别归一集 或 域名以 .uk 结尾（防搜非英公司误挂）。 */
+/**
+ * GB 判定（🔴 **country 优先**，防跨辖区挂错）：
+ *  - country 有值 → 只按 country 判（∈ GB 集合 → true；**显式非英辖区一律 false，忽略域名**）。
+ *    `.uk` 自 2014 全球开放注册 ≠ 英国辖区（新加坡公司买 `.uk` 营销域名 → 绝不当英国公司搜）。
+ *  - country 缺失/空 → 才用 `.uk`/`.co.uk` 域名作**弱兜底**（仅缺国别时）。
+ */
 const GB_COUNTRIES: ReadonlySet<string> = new Set([
   'gb', 'uk', 'gbr', 'united kingdom', 'great britain', 'england', 'scotland', 'wales', 'northern ireland',
 ]);
 export function isUkCompany(country?: string, domain?: string): boolean {
   const c = (country ?? '').trim().toLowerCase();
-  if (c && GB_COUNTRIES.has(c)) return true;
-  const d = (domain ?? '').trim().toLowerCase();
-  return d.endsWith('.uk');
+  if (c) return GB_COUNTRIES.has(c); // country 优先：非英辖区不管域名一律拒
+  return (domain ?? '').trim().toLowerCase().endsWith('.uk'); // 仅国别缺失时的弱兜底
 }
 
 /**

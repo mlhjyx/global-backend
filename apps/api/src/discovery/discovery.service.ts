@@ -125,8 +125,9 @@ export class DiscoveryService {
           { workspaceId: ctx.workspaceId, correlationId: companyId },
         );
         perAdapter.push({ key: adapter.key, contacts: result.contacts, costCents: result.costCents });
-      } catch {
-        // 单 adapter fail-safe：不阻断其余源
+      } catch (err) {
+        // 单 adapter fail-safe：不阻断其余源——但**留痕**（交互端点不静默退化为 0 联系人）
+        console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
       }
     }
 

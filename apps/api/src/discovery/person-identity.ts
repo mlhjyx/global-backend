@@ -69,6 +69,27 @@ export function hasEmailConflict(inputEmail: string | null | undefined, candidat
 }
 
 /**
+ * 🔴 externalId 冲突守卫（对称于 {@link hasEmailConflict}）：input 与候选**都有同 scheme** 的
+ * externalId 且值不同 → 判不同人（同公司两名同名不同 officer_id 的真实不同人绝不被名字精确误并）。
+ * input 无 externalId、或候选无该 scheme 的点 → 不冲突（放行，欠并方向）。
+ */
+export function hasExternalIdConflict(
+  inputExternalIds: PersonExternalId[] | undefined,
+  candidate: ContactCandidate,
+): boolean {
+  if (!inputExternalIds?.length) return false;
+  for (const eid of inputExternalIds) {
+    const schemePrefix = `${eid.scheme.toLowerCase()}:`;
+    const key = `${eid.scheme}:${eid.value}`.toLowerCase();
+    const candSameScheme = candidate.contactPoints
+      .filter((p) => p.type === 'external_id' && p.value.toLowerCase().startsWith(schemePrefix))
+      .map((p) => p.value.toLowerCase());
+    if (candSameScheme.length && !candSameScheme.includes(key)) return true; // 同 scheme 有值但都不等 → 冲突
+  }
+  return false;
+}
+
+/**
  * 人名归一 token 集（Tier 3 专用）。**用 normalizePersonName、绝不借公司匹配器**——
  * 公司匹配器的 normForMatch 会剥法人后缀（co/sa/oy/as/ab/bv/pty/company/holdings…），
  * 姓氏恰为这些词时（"Marco Sa"/"Erik Oy"/挪威姓 "…As"）会被剥成只剩名 → 错并两个人。
@@ -87,7 +108,7 @@ function personNameJaccard(a: Set<string>, b: Set<string>): number {
 /**
  * 在候选集内分层解析同一人（纯函数）。首个命中即返回；全不中 → null。
  * Tier 0 externalId → Tier 1 邮箱精确 → Tier 2 归一名精确 → Tier 3 高置信模糊。
- * Tier 2/3 受邮箱冲突守卫（跳过冲突候选继续找下一个）；Tier 1 邮箱相同即同人，不受此限。
+ * Tier 2/3 受邮箱**与 externalId** 冲突守卫（跳过冲突候选继续找下一个）；Tier 0/1 精确相同即同人，不受此限。
  */
 export function resolveAmongCandidates(
   input: { fullName: string; email?: string | null; externalIds?: PersonExternalId[] },
@@ -112,18 +133,23 @@ export function resolveAmongCandidates(
     if (hit) return { contactId: hit.id, matchRule: 'email_exact' };
   }
 
-  // Tier 2：归一名精确（同公司），跳过邮箱冲突候选。
+  // Tier 2：归一名精确（同公司），跳过邮箱**或 externalId**冲突候选（🔴 同名不同 officer_id 绝不误并）。
   const inputNorm = normalizePersonName(input.fullName);
   if (inputNorm) {
     const hit = candidates.find(
-      (c) => normalizePersonName(c.fullName) === inputNorm && !hasEmailConflict(email, c),
+      (c) =>
+        normalizePersonName(c.fullName) === inputNorm &&
+        !hasEmailConflict(email, c) &&
+        !hasExternalIdConflict(input.externalIds, c),
     );
     if (hit) return { contactId: hit.id, matchRule: 'name_exact' };
   }
 
   // Tier 3：高置信模糊 = 空格语序重排（"Johann Schmidt"≡"Schmidt Johann"，Tier 2 只处理逗号语序）。
-  // 用人名归一 token Jaccard（严阈值 + margin），先滤掉邮箱冲突候选。
-  const eligible = candidates.filter((c) => !hasEmailConflict(email, c));
+  // 用人名归一 token Jaccard（严阈值 + margin），先滤掉邮箱**或 externalId**冲突候选。
+  const eligible = candidates.filter(
+    (c) => !hasEmailConflict(email, c) && !hasExternalIdConflict(input.externalIds, c),
+  );
   if (inputNorm) {
     const inputTokens = new Set(inputNorm.split(' ').filter(Boolean));
     const scored = eligible

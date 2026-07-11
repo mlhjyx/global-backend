@@ -86,6 +86,26 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     expect(merge?.data.license).toBe('OGL-UK-3.0'); // 合并证据也带 CH 署名
   });
 
+  it('🔴 HIGH-1 端到端：同公司同名不同 officer_id → 不并（Tier 2 externalId 冲突守卫）→ 新建', async () => {
+    // contact-A 已挂 uk-ch-officer:OID1、无 email；来的是同名董事但 officerId OID2（真实不同人）
+    const { tx, canonicalUpsert, fieldEvidenceCreate } = fakeTx([
+      { id: 'contact-A', fullName: 'John Smith', contactPoints: [{ type: 'external_id', value: 'uk-ch-officer:OID1' }] },
+    ]);
+    const directorOid2: ProviderContactRecord = { ...chDirector, externalId: 'x', externalIds: [{ scheme: 'uk-ch-officer', value: 'OID2' }] };
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'companies_house',
+      contacts: [directorOid2],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(1); // 🔴 新建（不误并到 contact-A）
+    expect(res.merged).toBe(0);
+    expect(canonicalUpsert).toHaveBeenCalledTimes(1);
+    // 未写 identity.merge（没有发生合并）
+    expect(fieldEvidenceCreate.mock.calls.map((c) => (c[0] as { data: { field: string } }).data.field)).not.toContain('identity.merge');
+  });
+
   it('无 license 的 adapter（decision_maker）→ 回退 licensed（不破坏既有语义）', async () => {
     const { tx, fieldEvidenceCreate } = fakeTx([]);
     await persistDiscoveredContacts(tx, {
