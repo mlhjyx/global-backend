@@ -1,14 +1,17 @@
-import { proxyActivities } from '@temporalio/workflow';
-import type { ExternalIntentActivities, ExternalIntentIcpResult, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
+import { proxyActivities, patched } from '@temporalio/workflow';
+import type { ExternalIntentActivities, ExternalIntentIcpResult, ExternalIntentRecomputeSummary, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
 
 const acts = proxyActivities<ExternalIntentActivities>({
-  startToCloseTimeout: '10 minutes', // 摄取活动可能拉多个唯一指纹（各有界分页）
+  // 摄取活动对**全部** ACTIVE ICP 的唯一 TED/openFDA 指纹逐个有界分页——查询面多的 workspace 下时长可观，
+  // 10min 易在触到尾部指纹前超时并整体重试。放宽到 30min 给全目标工作量足够 headroom（#56 P2）。
+  startToCloseTimeout: '30 minutes',
   retry: { maximumAttempts: 2 },
 });
 
 export interface ExternalIntentSweepResult {
   swept: number;
   expiredSignals: number; // 状态机翻转数（ACTIVE→EXPIRED）
+  recompute?: ExternalIntentRecomputeSummary; // 过期后 intent 复算收敛统计（#56 P2）
   ingest?: IngestSweepSummary; // 平台层摄取统计（fetches/ledgerHits = ingest-once 可观测证据）
   tenderCompaniesTouched: number;
   tenderEvents: number;
@@ -58,6 +61,21 @@ export async function externalIntentSweepWorkflow(
   } catch (err) {
     // 摄取整体失败 fail-safe：投影仍可吃此前窗口已落库的信号。
     agg.ingest = { tedSpecs: 0, fdaSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
+  }
+
+  // 过期后 intent **复算收敛**（#56 P2）：expireStaleSignals 只翻转信号状态，增量投影只加不删——已写进
+  // canonical.attributes.intent 的过期事件仍被评分（评分读租户属性而非 source_signal）直到自然衰减。故从事实源
+  // 确定性重建受影响 workspace 的投影（无匹配事件即清除）。
+  // 🔴 Temporal 版本化守卫（#70 P2）：新增活动命令用 `patched` 门——飞行中的**旧历史**（无此命令）replay 时走
+  //    else（不调此活动），命令序列与旧历史一致、不触发非确定性重放失败；新执行走 true 分支。既有 liveProviderState
+  //    命令**不重新包 patch**（已部署，重包反而破坏在飞历史）——版本化纪律自本次新插入命令起生效。
+  if (patched('external-intent-recompute-v1')) {
+    try {
+      agg.recompute = await acts.recomputeExpiredIntent({ targets: resolved });
+    } catch (err) {
+      // fail-safe：复算失败不阻断本轮投影（过期事件仍会随评分新近度衰减，非硬失效）。
+      agg.recompute = { workspacesRecomputed: 0, companiesRebuilt: 0, companiesCleared: 0, truncated: 0, error: String(err).slice(0, 200) };
+    }
   }
 
   // 摄取后逐 ICP 只读投影，用 kill-switch live 快照门控。**每 K 个 ICP 在批次头重读一次**（承 #70 单次读
