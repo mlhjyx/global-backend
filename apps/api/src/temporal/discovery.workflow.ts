@@ -1,5 +1,6 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
+import { resolveRunStatus } from './discovery.run-status';
 
 const acts = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '2 minutes',
@@ -23,12 +24,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   const { workspaceId, runId, planId } = input;
   const perSource: Record<string, { rawCount: number; provider: string | null; error?: string }> = {};
   let failures = 0;
+  let discoveryBudgetTruncated = false;
 
   const { queries } = await acts.loadPlanQueries({ workspaceId, planId });
   for (const query of queries) {
     try {
       const r = await acts.executeQuery({ workspaceId, runId, query });
       perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
+      // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
+      if (r.budgetTruncated) discoveryBudgetTruncated = true;
     } catch (err) {
       failures += 1;
       perSource[query.source_class] = { rawCount: 0, provider: null, error: String(err).slice(0, 200) };
@@ -60,10 +64,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
   }
 
-  // 预算截断的 run 绝不假 DONE（复审 HIGH）：fit 有漏判 → PARTIAL，且截断量进 stats 可观测。
-  const budgetTruncated = (fit.skippedForBudget ?? 0) > 0;
-  const status =
-    failures === 0 && !budgetTruncated ? 'DONE' : failures < queries.length ? 'PARTIAL' : 'FAILED';
+  // 预算截断的 run 绝不假 DONE（复审 HIGH）：fit 漏判 **或** 发现阶段某源打穿预算 → PARTIAL，
+  // 且截断量进 stats 可观测。
+  const budgetTruncated = (fit.skippedForBudget ?? 0) > 0 || discoveryBudgetTruncated;
+  const status = resolveRunStatus({ failures, totalQueries: queries.length, budgetTruncated });
   await acts.finalizeRun({
     workspaceId,
     runId,
@@ -76,6 +80,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       suppressed,
       fit: fit.verdicts,
       fitSkippedForBudget: fit.skippedForBudget ?? 0,
+      discoveryBudgetTruncated,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },

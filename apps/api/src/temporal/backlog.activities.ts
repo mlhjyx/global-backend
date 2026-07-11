@@ -498,14 +498,22 @@ export function createBacklogActivities(deps: {
 
       let attempted = 0;
       let contactsCreated = 0;
+      // 只 stamp **真正处理过**的公司（含 DAT-011 跳过——不需抓，防每 sweep 重扫）；预算耗尽/未触达的
+      // 尾部不入此表 → 保留水位、下轮 sweep 重试（与 qualifyFitBacklog 同纪律）。
+      const processedIds: string[] = [];
+      let budgetExhausted = false;
       const budget = openStageBudget('contact', args.workspaceId);
       try {
       for (const c of companies) {
-        if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：联系人抓取同样遵守
-        attempted += 1;
+        if (c.domain && suspended.has(c.domain.toLowerCase())) {
+          processedIds.push(c.id); // DAT-011：跳过抓取但仍已处理 → stamp（离开过滤集）
+          continue;
+        }
         // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
-        // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；各自保留 adapterKey。
+        // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；🔴 但预算耗尽（sweep:contact 账户打穿）不是
+        // 单源失败——绝不吞：停止本页、不 stamp 本家及后续（下轮重试），否则未处理公司会离开水位、永不重试。
         const perAdapter: { key: string; contacts: ProviderContactRecord[] }[] = [];
+        let companyBudgetHit = false;
         for (const adapter of adapters) {
           try {
             const result = await adapter.discoverContacts(
@@ -514,10 +522,18 @@ export function createBacklogActivities(deps: {
               sellerCtx,
             );
             if (result.contacts.length) perAdapter.push({ key: adapter.key, contacts: result.contacts });
-          } catch {
+          } catch (err) {
+            if (err instanceof BudgetExceededError) {
+              budgetExhausted = true;
+              companyBudgetHit = true;
+              break; // 停止对本家继续 fan-out
+            }
             // 单 adapter fail-safe：不阻断其余源
           }
         }
+        if (companyBudgetHit) break; // 本家未处理完 → 不计 attempted、不 stamp、不翻页（下轮 sweep 重试）
+        attempted += 1;
+        processedIds.push(c.id); // 本家已处理（建联系人/无具名决策人）
         if (!perAdapter.length) continue;
         // 同一 tx 内顺序 persist：同一人经 resolvePersonIdentity 跨 adapter 合并（email + officer_id 落同一条）。
         const created = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -539,9 +555,16 @@ export function createBacklogActivities(deps: {
       } finally {
         budget.close();
       }
-      // 水位：本批全部已处理（建联系人/无具名决策人/DAT-011）→ 离开过滤集。无具名决策人属常态，
-      // 这条防止「联系不上的公司」永占前排、每 sweep 重烧多页渲染+LLM（复审最尖锐的一条）。
-      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { contactDiscoveryAttemptedAt: now });
+      // 水位：只对**已处理**的公司写 contactDiscoveryAttemptedAt（无具名决策人属常态，这条防「联系不上的
+      // 公司」永占前排、每 sweep 重烧多页渲染+LLM——复审最尖锐的一条）。预算耗尽的尾部不 stamp、下轮重试。
+      await stampProcessed(args.workspaceId, processedIds, { contactDiscoveryAttemptedAt: now });
+      if (budgetExhausted) {
+        // 预算耗尽即收手：nextCursor=null 停止翻页（继续只会连环触发同账户超限，与 qualifyFitBacklog 一致）。
+        console.warn(
+          `[backlog] contact 阶段预算耗尽（ws=${args.workspaceId}）：本页处理 ${processedIds.length} 家后停，未处理的保留水位下轮重试`,
+        );
+        return { scanned: companies.length, attempted, contactsCreated, nextCursor: null };
+      }
       return {
         scanned: companies.length,
         attempted,

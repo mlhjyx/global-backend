@@ -15,6 +15,7 @@ import {
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
+import { BudgetExceededError } from '../../tools/budget';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SearxResult } from '../../adapters/searxng';
 import type { CrawlResult } from '../../adapters/web-crawler';
@@ -112,7 +113,13 @@ export class PublicWebDiscoveryProvider
       const batch = domains.slice(i, i + CRAWL_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
       for (const s of settled) {
-        if (s.status === 'fulfilled' && s.value) records.push(s.value);
+        if (s.status === 'fulfilled') {
+          if (s.value) records.push(s.value);
+        } else if (s.reason instanceof BudgetExceededError) {
+          // 预算耗尽绝不吞成部分成功：冒泡出去，让 executeQuery 显性上报截断（run 判 PARTIAL 而非假 DONE）。
+          throw s.reason;
+        }
+        // 其余单域失败（抓取不可达/非预算异常）仍 fail-safe 跳过，不阻断其余候选。
       }
     }
     return { records, costCents: 0 };
@@ -144,6 +151,7 @@ export class PublicWebDiscoveryProvider
       );
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
+      if (err instanceof BudgetExceededError) throw err; // 预算真拦截透传（绝不吞成「站点不可达」）
       this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
       return null; // 站点不可达/闸门拒绝 → 放弃该候选
     }

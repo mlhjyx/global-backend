@@ -69,7 +69,7 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
       query: PlanQuery;
-    }): Promise<{ rawCount: number; costCents: number; provider: string | null }> {
+    }): Promise<{ rawCount: number; costCents: number; provider: string | null; budgetTruncated: boolean }> {
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -111,7 +111,7 @@ export function createDiscoveryActivities(deps: {
         deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
       );
       if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
-      if (!adapters.length) return { rawCount: 0, costCents: 0, provider: null };
+      if (!adapters.length) return { rawCount: 0, costCents: 0, provider: null, budgetTruncated: false };
 
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
@@ -121,6 +121,9 @@ export function createDiscoveryActivities(deps: {
       const settled = await Promise.allSettled(
         adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
       );
+      // 预算耗尽绝不被 allSettled 吞成假成功：某源打穿 run 预算 → 显性上报截断，让 workflow 判 PARTIAL
+      // 而非 DONE（其余源已拉到的记录仍照常落库，不因一源打穿而丢）。
+      const budgetTruncated = settled.some((s) => s.status === 'rejected' && s.reason instanceof BudgetExceededError);
 
       // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
       // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务
@@ -173,7 +176,7 @@ export function createDiscoveryActivities(deps: {
             },
           });
         }
-        return { rawCount, costCents: totalCost, provider: providersHit.join('+') || null };
+        return { rawCount, costCents: totalCost, provider: providersHit.join('+') || null, budgetTruncated };
       });
     },
 
