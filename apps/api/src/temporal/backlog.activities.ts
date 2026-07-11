@@ -505,15 +505,21 @@ export function createBacklogActivities(deps: {
       const budget = openStageBudget('contact', args.workspaceId);
       try {
       for (const c of companies) {
+        // 预算已打穿（本 sweep:contact 账户任一 reserve 失败）→ 停机：本家及后续不处理、不 stamp（下轮重试）。
+        // 🔴 关键：adapter 的 fail-safe catch（decision_maker/public_web/companies_house 各自）会把
+        // BudgetExceededError 吞成空结果，编排层区分不出「没决策人」还是「预算打穿被吞」——故用 BudgetLedger
+        // 唯一真相点 wasExhausted 判，不靠源抛错（否则打穿后每家被误当「无决策人」stamp、离开水位永不重试）。
+        if (budgetLedger.wasExhausted(budget.key)) {
+          budgetExhausted = true;
+          break;
+        }
         if (c.domain && suspended.has(c.domain.toLowerCase())) {
           processedIds.push(c.id); // DAT-011：跳过抓取但仍已处理 → stamp（离开过滤集）
           continue;
         }
         // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
-        // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；🔴 但预算耗尽（sweep:contact 账户打穿）不是
-        // 单源失败——绝不吞：停止本页、不 stamp 本家及后续（下轮重试），否则未处理公司会离开水位、永不重试。
+        // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe，含被 provider 吞掉的预算错——由 ledger 检出）。
         const perAdapter: { key: string; contacts: ProviderContactRecord[] }[] = [];
-        let companyBudgetHit = false;
         for (const adapter of adapters) {
           try {
             const result = await adapter.discoverContacts(
@@ -522,16 +528,15 @@ export function createBacklogActivities(deps: {
               sellerCtx,
             );
             if (result.contacts.length) perAdapter.push({ key: adapter.key, contacts: result.contacts });
-          } catch (err) {
-            if (err instanceof BudgetExceededError) {
-              budgetExhausted = true;
-              companyBudgetHit = true;
-              break; // 停止对本家继续 fan-out
-            }
+          } catch {
             // 单 adapter fail-safe：不阻断其余源
           }
         }
-        if (companyBudgetHit) break; // 本家未处理完 → 不计 attempted、不 stamp、不翻页（下轮 sweep 重试）
+        // 本家处理过程中打穿预算 → 本家未真正处理完：不计 attempted、不 stamp、停机（下轮 sweep 重试）。
+        if (budgetLedger.wasExhausted(budget.key)) {
+          budgetExhausted = true;
+          break;
+        }
         attempted += 1;
         processedIds.push(c.id); // 本家已处理（建联系人/无具名决策人）
         if (!perAdapter.length) continue;

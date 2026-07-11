@@ -26,6 +26,13 @@ interface Account {
 
 export class BudgetLedger {
   private readonly accounts = new Map<string, Account>();
+  /**
+   * 曾发生 reserve 失败（预算打穿）的账户键集合。这是「本 run/sweep 是否被预算截断」的**唯一真相点**：
+   * provider 的 fail-safe catch 会把 BudgetExceededError 吞成空结果（对源失败是对的），编排层无法从
+   * 返回值判断是「真没数据」还是「预算打穿被吞」。故在 reserve 抛错处打标，编排层用 {@link wasExhausted}
+   * 独立于 provider 是否吞错地检出截断。账户 close（真正删除）时一并清除，生命周期与账户一致。
+   */
+  private readonly exhausted = new Set<string>();
 
   /** 为一个 run 设定预算上限（幂等：已存在则取较大值 + 引用计数 +1，允许追加）。 */
   open(runId: string, capCents: number): void {
@@ -46,7 +53,10 @@ export class BudgetLedger {
       return { runId, estCents: 0 };
     }
     const remaining = acc.capCents - acc.reservedCents - acc.settledCents;
-    if (estCents > remaining) throw new BudgetExceededError(runId, estCents, remaining);
+    if (estCents > remaining) {
+      this.exhausted.add(runId); // 唯一真相点：打穿即打标，供编排层 wasExhausted 检出（哪怕 provider 吞了错）
+      throw new BudgetExceededError(runId, estCents, remaining);
+    }
     acc.reservedCents += estCents;
     return { runId, estCents };
   }
@@ -66,6 +76,14 @@ export class BudgetLedger {
   }
 
   /**
+   * 本账户在其生命周期内是否曾 reserve 失败（预算打穿）。编排层据此判定「run/sweep 被预算截断」——
+   * 无需 provider 把 BudgetExceededError 透传（provider 可继续 fail-safe 返回已拿到的部分结果）。
+   */
+  wasExhausted(runId: string): boolean {
+    return this.exhausted.has(runId);
+  }
+
+  /**
    * 引用计数 -1，归零才真正删账（open/close 配对；多余 close 容忍为 no-op）。
    * force=true 无视计数直接删（run 生命周期终点，如 finalizeRun——run 内多个活动各 open 过）。
    */
@@ -73,7 +91,10 @@ export class BudgetLedger {
     const acc = this.accounts.get(runId);
     if (!acc) return;
     acc.refs -= 1;
-    if (opts?.force || acc.refs <= 0) this.accounts.delete(runId);
+    if (opts?.force || acc.refs <= 0) {
+      this.accounts.delete(runId);
+      this.exhausted.delete(runId); // 打穿标记与账户同生命周期：下次 open 同键从干净状态起（防跨轮/跨测泄漏）
+    }
   }
 }
 

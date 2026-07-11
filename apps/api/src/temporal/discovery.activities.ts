@@ -121,9 +121,11 @@ export function createDiscoveryActivities(deps: {
       const settled = await Promise.allSettled(
         adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
       );
-      // 预算耗尽绝不被 allSettled 吞成假成功：某源打穿 run 预算 → 显性上报截断，让 workflow 判 PARTIAL
-      // 而非 DONE（其余源已拉到的记录仍照常落库，不因一源打穿而丢）。
-      const budgetTruncated = settled.some((s) => s.status === 'rejected' && s.reason instanceof BudgetExceededError);
+      // 预算耗尽绝不被吞成假成功。**不能**靠「某源 reject」判断——provider 的 fail-safe catch 会把
+      // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
+      // 改由 BudgetLedger 唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
+      // wasExhausted=true → 显性上报截断，让 workflow 判 PARTIAL 而非假 DONE（各源 fail-safe 拿到的部分记录仍落库）。
+      const budgetTruncated = budgetLedger.wasExhausted(args.runId);
 
       // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
       // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务

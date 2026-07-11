@@ -1,13 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
-import { BudgetExceededError } from '../tools/budget';
-import type { CompanyDiscoveryAdapter, DiscoveryResult, ProviderCompanyRecord } from '../discovery/provider-contract';
+import { budgetLedger } from '../tools/budget';
+import type {
+  CompanyDiscoveryAdapter,
+  ExecutionContext,
+  ProviderCompanyRecord,
+} from '../discovery/provider-contract';
 
 /**
- * executeQuery 预算截断透传单测（Codex PR #51 P1）：fan-out 中某源打穿 run 预算并抛
- * BudgetExceededError 时，executeQuery 不能被外层 Promise.allSettled 吞成假成功——它必须显性
- * 上报 budgetTruncated，让 workflow 把 run 判成 PARTIAL 而非 DONE（其余源已拉到的记录照常落库）。
+ * executeQuery 预算截断透传单测（Codex PR #51 P1，根治版）：fan-out 中某源打穿 run 预算时，**真实 provider
+ * 的 fail-safe catch 会把 BudgetExceededError 吞成空结果**（对源失败是对的）——所以 executeQuery 不能靠
+ * 「某源 reject」判断，必须靠 BudgetLedger.wasExhausted 检出，据此返回 budgetTruncated 让 workflow 判 PARTIAL
+ * 而非 DONE。本测用一个「reserve 打穿 → 自己吞掉」的假 adapter 复刻生产形态（而非直接抛错的合成 mock）。
  */
 
 const REC: ProviderCompanyRecord = {
@@ -18,8 +23,28 @@ const REC: ProviderCompanyRecord = {
   provenance: { sourceUrl: 'https://acme.de/', fetchedAt: '2026-07-11T00:00:00.000Z', contentHash: 'h', parserVersion: 'v1' },
 };
 
-function adapter(key: string, impl: () => Promise<DiscoveryResult>): CompanyDiscoveryAdapter {
-  return { key, classes: ['public_intelligence'], discoverCompanies: impl } as unknown as CompanyDiscoveryAdapter;
+/** 模拟真实 provider：broker/gateway 的 reserve 打穿预算 → provider 自己 fail-safe 吞成空结果（不透传）。 */
+function budgetSwallowingAdapter(key: string): CompanyDiscoveryAdapter {
+  return {
+    key,
+    classes: ['public_intelligence'],
+    discoverCompanies: async (_q, ctx: ExecutionContext) => {
+      try {
+        budgetLedger.reserve(ctx.runId ?? ctx.workspaceId, 10_000_000); // 远超 cap → 打穿
+      } catch {
+        /* 如真实 provider：fail-safe catch 吞掉 BudgetExceededError */
+      }
+      return { records: [], costCents: 0 };
+    },
+  } as unknown as CompanyDiscoveryAdapter;
+}
+
+function okAdapter(key: string, records: ProviderCompanyRecord[]): CompanyDiscoveryAdapter {
+  return {
+    key,
+    classes: ['public_intelligence'],
+    discoverCompanies: async () => ({ records, costCents: 0 }),
+  } as unknown as CompanyDiscoveryAdapter;
 }
 
 function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
@@ -37,25 +62,26 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
 
 const QUERY = { source_class: 'public_intelligence', filters: {}, keywords: [], priority: 1 };
 
-describe('executeQuery —— 预算截断显性上报（不假 DONE）', () => {
-  it('某源预算耗尽 → budgetTruncated=true，其余源记录仍落库', async () => {
-    const deps = makeDeps([
-      adapter('public_web', async () => {
-        throw new BudgetExceededError('run-x', 20, 0);
-      }),
-      adapter('wikidata', async () => ({ records: [REC], costCents: 0 })),
-    ]);
+// executeQuery 不 close run 预算账户（finalizeRun 才 close）→ 测试自行 force-close，清打标防单例泄漏。
+afterEach(() => {
+  budgetLedger.close('run-budget-x', { force: true });
+  budgetLedger.close('run-ok-x', { force: true });
+});
+
+describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错', () => {
+  it('某源打穿 run 预算并被 fail-safe 吞掉 → wasExhausted 检出 budgetTruncated=true，其余源记录仍落库', async () => {
+    const deps = makeDeps([budgetSwallowingAdapter('public_web'), okAdapter('wikidata', [REC])]);
     const acts = createDiscoveryActivities(deps);
     const r = await acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-budget-x', query: QUERY });
     expect(r.budgetTruncated).toBe(true);
     expect(r.rawCount).toBe(1); // wikidata 的记录不因 public_web 打穿而丢失
   });
 
-  it('全部源正常 → budgetTruncated 假/未置，记录照常落库', async () => {
-    const deps = makeDeps([adapter('wikidata', async () => ({ records: [REC], costCents: 0 }))]);
+  it('全部源正常 → budgetTruncated=false，记录照常落库', async () => {
+    const deps = makeDeps([okAdapter('wikidata', [REC])]);
     const acts = createDiscoveryActivities(deps);
     const r = await acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-ok-x', query: QUERY });
-    expect(r.budgetTruncated ?? false).toBe(false);
+    expect(r.budgetTruncated).toBe(false);
     expect(r.rawCount).toBe(1);
   });
 });
