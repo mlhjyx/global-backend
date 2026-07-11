@@ -120,4 +120,26 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
       .find((e) => e.data.field === 'email');
     expect(emailEvidence?.data.license).toBe('licensed');
   });
+
+  it('🔴 收口⑥ PR #60：新建的 dedupe_key 已盲化（bi:v1:），where 与 create 同键，不含明文 email', async () => {
+    const { tx, canonicalUpsert } = fakeTx([]); // 无候选 → 新建
+    await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'x', fullName: 'Anna Weber', email: 'anna@x.test', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(canonicalUpsert).toHaveBeenCalledTimes(1);
+    const call = canonicalUpsert.mock.calls[0][0] as {
+      where: { workspaceId_dedupeKey: { dedupeKey: string } };
+      create: { dedupeKey: string };
+    };
+    const createdKey = call.create.dedupeKey;
+    const whereKey = call.where.workspaceId_dedupeKey.dedupeKey;
+    expect(createdKey.startsWith('bi:v1:')).toBe(true); // 盲化前缀
+    expect(whereKey).toBe(createdKey); // where 与 create 同盲值 → upsert 幂等成立
+    expect(createdKey).not.toContain('anna'); // 明文 email 不泄进去重键
+    expect(createdKey).not.toContain('e:'); // 非 legacy 明文键形
+  });
 });

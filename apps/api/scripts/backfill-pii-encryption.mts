@@ -1,15 +1,20 @@
 /**
  * 收口⑥ 存量 PII 加密回填（一次性数据迁移，必须在 PII 加密代码上线时/后立即跑）。
- * 把历史明文 canonical_contact.full_name / contact_point.value / field_evidence PII 副本加密为 enc:v1:。
- * 幂等：已加密行跳过（isEncryptedPii）。确定性密文使唯一键成立——contact_point 若已存在同 (contact,type,密文)
- * 行（历史误 upsert 产生的密文 dup），删除本明文行而非更新（避免唯一键冲突 + 消重）。
+ * 把历史明文 canonical_contact.full_name / contact_point.value / field_evidence PII 副本加密为 enc:v1:，
+ * 并把 **canonical_contact.dedupe_key 盲化为 bi:v1:**（收口⑥ PR #60 补丁：原文去重键 `e:<email>` /
+ * `c:<companyKey>:<人名>` 含 PII，换成不可逆 HMAC 盲索引，去 PII 明文）。
+ * 幂等：已加密/已盲化行跳过（isEncryptedPii / isBlindedContactKey）。确定性密文/盲值使唯一键成立——
+ * contact_point 若已存在同 (contact,type,密文) 行（历史误 upsert 产生的密文 dup），删除本明文行而非更新
+ * （避免唯一键冲突 + 消重）；canonical_contact 因 (workspace_id, dedupe_key) 唯一键保证同租户原文键已
+ * 互异，盲化（HMAC 注入）后仍互异，故纯 update 无冲突。
  *
- * ⚠️ 未跑此回填则：新 upsert 的 where.value 被加密后匹配不到旧明文行 → 造重复行 + 旧明文 PII 永留库。
+ * ⚠️ 未跑此回填则：新 upsert 的 where.value/dedupe_key 被加密/盲化后匹配不到旧明文行 → 造重复行 +
+ * 旧明文 PII 永留库。故须与新代码上线同步跑（与既有 contact_point 回填同一运维步）。
  * 运行：cd apps/api && node --import tsx scripts/backfill-pii-encryption.mts
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
-import { encryptPii, isEncryptedPii } from '../src/compliance/pii-crypto';
+import { encryptPii, isEncryptedPii, blindContactKey, isBlindedContactKey } from '../src/compliance/pii-crypto';
 
 const PII_TYPES = ['email', 'phone', 'linkedin'];
 
@@ -18,16 +23,22 @@ async function main(): Promise<void> {
   // owner 裸 client（无扩展）：直接读写存储值，精确控制密文，避免透明层双重处理。
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   let names = 0;
+  let dedupeKeys = 0;
   let points = 0;
   let dedup = 0;
   let evidence = 0;
 
-  // 1. canonical_contact.full_name（唯一键在 dedupeKey，无 value 冲突 → 直接 update）。
-  const contacts = await owner.canonicalContact.findMany({ select: { id: true, fullName: true } });
+  // 1. canonical_contact：full_name 加密 + dedupe_key 盲化（一次遍历，各自幂等）。
+  //    (workspace_id, dedupe_key) 唯一键 → 同租户原文键已互异 → 盲化后仍互异，纯 update 无冲突。
+  const contacts = await owner.canonicalContact.findMany({ select: { id: true, fullName: true, dedupeKey: true } });
   for (const c of contacts) {
-    if (isEncryptedPii(c.fullName)) continue;
-    await owner.canonicalContact.update({ where: { id: c.id }, data: { fullName: encryptPii(c.fullName) } });
-    names++;
+    const data: { fullName?: string; dedupeKey?: string } = {};
+    if (!isEncryptedPii(c.fullName)) data.fullName = encryptPii(c.fullName);
+    if (!isBlindedContactKey(c.dedupeKey)) data.dedupeKey = blindContactKey(c.dedupeKey);
+    if (Object.keys(data).length === 0) continue; // 两者都已处理 → 跳过（幂等重跑）
+    await owner.canonicalContact.update({ where: { id: c.id }, data });
+    if (data.fullName) names++;
+    if (data.dedupeKey) dedupeKeys++;
   }
 
   // 2. contact_point.value（PII 类型；确定性密文 → 冲突则删明文消重）。
@@ -69,7 +80,10 @@ async function main(): Promise<void> {
   }
 
   await owner.$disconnect();
-  console.log(`✅ 回填完成：full_name ${names} 行、contact_point ${points} 行加密 + ${dedup} 行去重、field_evidence ${evidence} 行`);
+  console.log(
+    `✅ 回填完成：full_name ${names} 行加密 + dedupe_key ${dedupeKeys} 行盲化、` +
+      `contact_point ${points} 行加密 + ${dedup} 行去重、field_evidence ${evidence} 行`,
+  );
 }
 
 main().catch((e) => {
