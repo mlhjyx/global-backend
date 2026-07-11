@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { ConflictException } from '@nestjs/common';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
-import { buildLeadQualifiedSnapshot, classifyLeadQualified } from './lead-qualified-snapshot';
+import { buildLeadQualifiedSnapshot, classifyLeadQualified, computeValidUntil } from './lead-qualified-snapshot';
 import { LeadService } from './lead.service';
 
 /**
@@ -246,6 +246,7 @@ function makeDecideTx(
   company: Record<string, unknown>,
   outboxCreate: ReturnType<typeof vi.fn>,
   decisionCreate: ReturnType<typeof vi.fn>,
+  evidenceRows: Array<{ dataClass: string; fetchedAt: Date | string }> = [],
 ) {
   return {
     lead: {
@@ -267,6 +268,7 @@ function makeDecideTx(
     leadDecision: { create: decisionCreate },
     canonicalCompany: { findUnique: async () => company },
     icpDefinition: { findUnique: async () => ({ version: 3 }) },
+    fieldEvidence: { findMany: async () => evidenceRows }, // 鲜度模型 v2：decide 取证据算 valid_until
     outboxEvent: { create: outboxCreate },
   };
 }
@@ -435,5 +437,95 @@ describe('mapScores 值域护栏 — 契约是系统边界（J）', () => {
     const ok = validate(snap);
     expect(validate.errors ?? []).toEqual([]);
     expect(ok).toBe(true);
+  });
+});
+
+describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', () => {
+  const GREEN = 'green';
+  const RED = 'red';
+  const day = 86_400_000;
+  const iso = (ms: number): string => new Date(ms).toISOString();
+
+  it('无 evidence 且无 intent → null（诚实：无鲜度依据，不臆造有效期）', () => {
+    expect(computeValidUntil([], {})).toBeNull();
+    expect(computeValidUntil([], null)).toBeNull();
+    expect(computeValidUntil([], { intent: { events: [] } })).toBeNull();
+  });
+
+  it('单条 green evidence → fetchedAt + 180d', () => {
+    const fetchedAt = '2026-01-01T00:00:00.000Z';
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt }], {})).toBe(iso(Date.parse(fetchedAt) + 180 * day));
+  });
+
+  it('取 min：同刻抓取的 red(90d) 比 green(180d) 先失效 → valid_until = red 到期', () => {
+    const fetchedAt = '2026-01-01T00:00:00.000Z';
+    const v = computeValidUntil([{ dataClass: GREEN, fetchedAt }, { dataClass: RED, fetchedAt }], {});
+    expect(v).toBe(iso(Date.parse(fetchedAt) + 90 * day));
+  });
+
+  it('未知分级 → 保守取默认 90d', () => {
+    const fetchedAt = '2026-01-01T00:00:00.000Z';
+    expect(computeValidUntil([{ dataClass: 'unknown', fetchedAt }], {})).toBe(iso(Date.parse(fetchedAt) + 90 * day));
+  });
+
+  it('intent 取最新事件 at + 时机窗(90d)，比 evidence 更早时它决定 valid_until', () => {
+    const evFetched = '2026-01-01T00:00:00.000Z'; // green → +180d = 6/30
+    const intentAt = '2026-02-01T00:00:00.000Z'; // 最新事件 → +90d = 5/2（早于 green 到期）
+    const attrs = {
+      intent: {
+        events: [
+          { type: 'SOURCING_OPENED', at: '2026-01-10T00:00:00.000Z' },
+          { type: 'HIRING_UP', at: intentAt },
+        ],
+      },
+    };
+    const v = computeValidUntil([{ dataClass: GREEN, fetchedAt: evFetched }], attrs);
+    expect(v).toBe(iso(Date.parse(intentAt) + 90 * day));
+  });
+
+  it('intent 无逐事件但有 last_change_at → 用它 + 时机窗', () => {
+    const at = '2026-03-01T00:00:00.000Z';
+    expect(computeValidUntil([], { intent: { last_change_at: at } })).toBe(iso(Date.parse(at) + 90 * day));
+  });
+
+  it('不可解析 fetchedAt 跳过（不注入 NaN）；仅剩 intent 决定', () => {
+    const at = '2026-03-01T00:00:00.000Z';
+    const v = computeValidUntil([{ dataClass: GREEN, fetchedAt: 'not-a-date' }], { intent: { events: [{ at }] } });
+    expect(v).toBe(iso(Date.parse(at) + 90 * day));
+  });
+
+  it('全部不可解析且无 intent → null', () => {
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt: 'x' }], {})).toBeNull();
+  });
+
+  it('Date 对象 fetchedAt 也支持（Prisma 返回 Date）', () => {
+    const d = new Date('2026-01-01T00:00:00.000Z');
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt: d }], {})).toBe(iso(d.getTime() + 180 * day));
+  });
+
+  it('通过 builder：传 evidence → snap.valid_until 落值且过契约 date-time 校验', () => {
+    const { validate } = loadValidator();
+    const fetchedAt = '2026-01-01T00:00:00.000Z';
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead(),
+      company: makeCompany(),
+      icpVersion: 3,
+      evidence: [{ dataClass: GREEN, fetchedAt }],
+    });
+    expect(snap.valid_until).toBe(iso(Date.parse(fetchedAt) + 180 * day));
+    const ok = validate(snap);
+    expect(validate.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+  });
+
+  it('decide 接线：fieldEvidence.findMany 返回证据 → payload.valid_until 落值', async () => {
+    const fetchedAt = '2026-01-01T00:00:00.000Z';
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const svc = makeDecideService(
+      makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [{ dataClass: GREEN, fetchedAt }]),
+    );
+    await svc.decide(decideCtx, LEAD_ID, 'accept');
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.valid_until).toBe(iso(Date.parse(fetchedAt) + 180 * day));
   });
 });

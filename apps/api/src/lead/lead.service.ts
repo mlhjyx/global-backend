@@ -145,6 +145,12 @@ export class LeadService {
           where: { id: lead.icpId },
           select: { version: true },
         });
+        // 鲜度模型（v2）：取本公司 + 其联系人的 field_evidence 分级 + 抓取时刻，算快照 valid_until。
+        // entity_id 是全局唯一 uuid（跨租户不撞）；withWorkspace(RLS) 再兜一层作用域。
+        const evidence = await tx.fieldEvidence.findMany({
+          where: { entityId: { in: [company.id, ...company.contacts.map((c) => c.id)] } },
+          select: { dataClass: true, fetchedAt: true },
+        });
         // 收口⑥：存储权利判定 + **强制**（不只标注，确定性纯引擎、缓存规则同步无 await）。
         // 具名决策人 → red；公司国别 → 主体法域；公司 SUPPRESSED → DENY。
         const rights = this.dataRights.evaluate(
@@ -172,6 +178,7 @@ export class LeadService {
           company,
           icpVersion: icp?.version ?? null,
           storageRightsDecision: rights.effect,
+          evidence,
         });
         await tx.outboxEvent.create({
           data: {
