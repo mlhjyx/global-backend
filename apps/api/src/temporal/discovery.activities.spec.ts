@@ -29,7 +29,7 @@ function budgetSwallowingAdapter(key: string): CompanyDiscoveryAdapter {
   return {
     key,
     classes: ['public_intelligence'],
-    discoverCompanies: async (_q, ctx: ExecutionContext) => {
+    discoverCompanies: async (_q: unknown, ctx: ExecutionContext) => {
       try {
         budgetLedger.reserve(ctx.runId ?? ctx.workspaceId, 10_000_000); // 远超 cap → 打穿
       } catch {
@@ -65,7 +65,7 @@ const QUERY = { source_class: 'public_intelligence', filters: {}, keywords: [], 
 
 // executeQuery/enrichRun 不 close run 预算账户（finalizeRun 才 close）→ 测试自行 force-close，清打标防单例泄漏。
 afterEach(() => {
-  for (const k of ['run-budget-x', 'run-ok-x', 'run-enrich-x', 'run-enrich-ok', 'run-leak']) {
+  for (const k of ['run-budget-x', 'run-ok-x', 'run-enrich-x', 'run-enrich-ok', 'run-signal-x', 'run-leak']) {
     budgetLedger.close(k, { force: true });
   }
 });
@@ -129,6 +129,13 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃
     const acts = createDiscoveryActivities(deps);
     const r = await acts.enrichRun({ workspaceId: 'ws-1', runId: 'run-enrich-ok', icpId: 'icp-1' });
     expect(r.budgetTruncated).toBe(false);
+  });
+
+  it('信号富集源打穿 run 预算并被 fail-safe 吞掉 → enrichSignalsRun.budgetTruncated=true（与 enrichRun 对称）', async () => {
+    const deps = makeEnrichDeps([budgetSwallowingEnricher]);
+    const acts = createDiscoveryActivities(deps);
+    const r = await acts.enrichSignalsRun({ workspaceId: 'ws-1', runId: 'run-signal-x', icpId: 'icp-1' });
+    expect(r.budgetTruncated).toBe(true);
   });
 
   it('resetRunBudget 清除同 runId 残留的打穿标记（崩溃重试防误报截断）', async () => {

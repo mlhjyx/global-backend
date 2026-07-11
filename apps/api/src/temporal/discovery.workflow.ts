@@ -92,7 +92,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       suppressed,
       fit: fit.verdicts,
       fitSkippedForBudget: fit.skippedForBudget ?? 0,
+      // 预算截断按阶段拆开可观测（哪一路耗预算阶段打穿了 run 预算）+ 聚合总判。
       discoveryBudgetTruncated,
+      enrichBudgetTruncated: enrich.budgetTruncated,
+      signalsBudgetTruncated: signals.budgetTruncated ?? false,
       budgetTruncated,
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },

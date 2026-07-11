@@ -53,6 +53,11 @@ export function createDiscoveryActivities(deps: {
      * run 起始清账：强制关闭本 runId 可能残留的预算账户（含 wasExhausted 打标）。用于同 runId 的**重试**：
      * 上次 attempt 若在 finalizeRun 前崩溃，进程内账户与打穿标记会残留（budgetLedger 无 GC），
      * 令重试的首个 executeQuery 误报 budgetTruncated。workflow 起始调一次即从干净状态起（单 worker 前提下）。
+     *
+     * 权衡（对抗复审 MEDIUM）：重试因此拿到**全新 cap**，不继承崩溃 attempt 已发生的 settledCents ——
+     * 极端下同 runId 跨 attempt 实际花费可达 ~2×cap（cap 目前是宽松占位值，可接受）。反面（保留残留账户）
+     * 更糟：残留的打穿标记会令**每次**重试都被永久误判截断、run 永不成功。真正的跨 attempt 成本对账需
+     * 待预算基建换持久化后端（budget.ts 顶注已记档），非本进程内实现能力范围。
      */
     async resetRunBudget(args: { runId: string }): Promise<void> {
       budgetLedger.close(args.runId, { force: true });
