@@ -24,6 +24,7 @@ import {
 } from '../adapters/openfda-api';
 import { queryAlgoliaExhibitors, AlgoliaFairConfig, FairExhibitor } from '../adapters/trade-fair-algolia';
 import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapters/companies-house';
+import { searchCompaniesWithDirigeants, FrCompanyHit } from '../adapters/inpi-rne';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -305,6 +306,34 @@ export const companiesHouseSearchTool: Tool<CompaniesHouseInput, CompaniesHouseO
   },
 };
 
+export type InpiRneInput = { op: 'search'; query: string; limit?: number };
+export interface InpiRneOutput {
+  companies?: FrCompanyHit[];
+}
+
+/**
+ * inpi_rne.search —— 法国 dirigeants（经开放政务网关 API Recherche d'entreprises，数据源 = INPI RNE + Sirene）。
+ * required 治理：dirigeant = 🔴 具名个人（GDPR）→ personalData=true → §8.8 用途门 fail-closed（未登记/
+ * SUSPENDED/用途不符即拒）。**开放 API 无鉴权**（authRequired=false）。数据最小化（无 DOB/国籍）在 adapter 层。
+ */
+export const inpiRneSearchTool: Tool<InpiRneInput, InpiRneOutput> = {
+  id: 'inpi_rne.search',
+  version: '1.0.0',
+  category: 'structured_source',
+  sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true },
+  rateLimit: { rps: 2, concurrency: 2 },
+  // personalData:true —— dirigeants 是具名负责人（GDPR）；数据最小化（无 DOB/国籍/住址）在 adapter 层强制。
+  compliance: { sourcePolicy: 'required', policyDomain: 'recherche-entreprises.api.gouv.fr', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['contact', 'company'], accepts: ['keywords'] },
+  idempotencyKey: (i) => `inpi_rne.search:${stableKey(i)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'inpi-rne' }),
+  execute: async (input) => ({
+    data: { companies: await searchCompaniesWithDirigeants(input.query, input.limit) },
+    costCents: 0,
+  }),
+};
+
 export interface TradeFairAlgoliaInput {
   cfg: AlgoliaFairConfig;
   limit?: number;
@@ -387,5 +416,6 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(tradeFairAlgoliaTool as Tool);
   registry.register(mapYourShowFetchTool as Tool);
   registry.register(companiesHouseSearchTool as Tool);
+  registry.register(inpiRneSearchTool as Tool);
   return registry;
 }
