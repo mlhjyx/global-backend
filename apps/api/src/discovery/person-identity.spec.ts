@@ -160,4 +160,19 @@ describe('resolvePersonIdentity · DB 薄查询（假 tx）', () => {
     });
     expect(hit).toBeNull();
   });
+
+  it('待办 3 Tier 0：候选有 external_id 点 + 同 scheme:value 输入 → matchRule=external_id（大小写不敏感）', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { id: 'c1', fullName: 'Different Display Name', contactPoints: [{ type: 'external_id', value: 'uk-ch-officer:oid1' }] },
+    ]);
+    const tx = { canonicalContact: { findMany } } as unknown as Prisma.TransactionClient;
+    const hit = await resolvePersonIdentity(tx, {
+      workspaceId: 'w1',
+      companyId: 'co1',
+      companyKey: 'd:acme.com',
+      fullName: 'Whoever',
+      externalIds: [{ scheme: 'uk-ch-officer', value: 'OID1' }], // 输入大写，候选点小写 → 仍命中
+    });
+    expect(hit).toEqual({ contactId: 'c1', matchRule: 'external_id' });
+  });
 });

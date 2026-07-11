@@ -2,7 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
-import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind } from '../discovery/provider-contract';
+import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, ProviderContactRecord } from '../discovery/provider-contract';
 import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
@@ -462,7 +462,7 @@ export function createBacklogActivities(deps: {
       const now = new Date();
       const suspended = await suspendedDomains();
 
-      const { adapter, sellerCtx, suppressedEmails, companies } = await deps.prisma.withWorkspace(
+      const { adapters, sellerCtx, suppressedEmails, companies } = await deps.prisma.withWorkspace(
         args.workspaceId,
         async (tx) => {
           const adapters = await deps.providers.routeContactDiscovery(tx as never);
@@ -491,10 +491,10 @@ export function createBacklogActivities(deps: {
             take: limit,
             select: { id: true, name: true, domain: true, country: true, dedupeKey: true },
           });
-          return { adapter: adapters[0], sellerCtx, suppressedEmails, companies };
+          return { adapters, sellerCtx, suppressedEmails, companies };
         },
       );
-      if (!adapter || !companies.length) return { scanned: companies.length, attempted: 0, contactsCreated: 0, nextCursor: null };
+      if (!adapters.length || !companies.length) return { scanned: companies.length, attempted: 0, contactsCreated: 0, nextCursor: null };
 
       let attempted = 0;
       let contactsCreated = 0;
@@ -503,28 +503,37 @@ export function createBacklogActivities(deps: {
       for (const c of companies) {
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：联系人抓取同样遵守
         attempted += 1;
-        let contacts;
-        try {
-          // 网络（抓多页 + LLM）在事务外
-          const result = await adapter.discoverContacts(
-            { name: c.name, domain: c.domain ?? undefined, country: c.country ?? undefined },
-            { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-contacts' },
-            sellerCtx,
-          );
-          contacts = result.contacts;
-        } catch {
-          continue; // 单家失败不影响其余
+        // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
+        // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；各自保留 adapterKey。
+        const perAdapter: { key: string; contacts: ProviderContactRecord[] }[] = [];
+        for (const adapter of adapters) {
+          try {
+            const result = await adapter.discoverContacts(
+              { name: c.name, domain: c.domain ?? undefined, country: c.country ?? undefined },
+              { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-contacts' },
+              sellerCtx,
+            );
+            if (result.contacts.length) perAdapter.push({ key: adapter.key, contacts: result.contacts });
+          } catch {
+            // 单 adapter fail-safe：不阻断其余源
+          }
         }
-        if (!contacts.length) continue;
-        const { created } = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          persistDiscoveredContacts(tx, {
-            workspaceId: args.workspaceId,
-            company: { id: c.id, dedupeKey: c.dedupeKey },
-            adapterKey: adapter.key,
-            contacts,
-            suppressedEmails,
-          }),
-        );
+        if (!perAdapter.length) continue;
+        // 同一 tx 内顺序 persist：同一人经 resolvePersonIdentity 跨 adapter 合并（email + officer_id 落同一条）。
+        const created = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          let n = 0;
+          for (const pa of perAdapter) {
+            const res = await persistDiscoveredContacts(tx, {
+              workspaceId: args.workspaceId,
+              company: { id: c.id, dedupeKey: c.dedupeKey },
+              adapterKey: pa.key,
+              contacts: pa.contacts,
+              suppressedEmails,
+            });
+            n += res.created;
+          }
+          return n;
+        });
         contactsCreated += created;
       }
       } finally {

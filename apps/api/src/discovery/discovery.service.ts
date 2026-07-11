@@ -7,7 +7,7 @@ import { persistDiscoveredContacts } from './contact-persist';
 import { EmailGuesser, GuessResult } from './email-guesser';
 import { persistGuessedEmail } from './email-guess-persist';
 import { buildGuessTargets } from './email-guess-targets';
-import { EmailVerdict, EmailVerifyContext, LawfulBasis } from './provider-contract';
+import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
 
@@ -107,39 +107,55 @@ export class DiscoveryService {
       const suppressedEmails = new Set(
         (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
       );
-      return { company, adapter: adapters[0], suppressedEmails };
+      return { company, adapters, suppressedEmails };
     });
 
-    const result = await loaded.adapter.discoverContacts(
-      {
-        name: loaded.company.name,
-        domain: loaded.company.domain ?? undefined,
-        country: loaded.company.country ?? undefined,
-      },
-      // 收口②：真租户贯穿（LLM/抓取按 workspace 归属 trace/预算）
-      { workspaceId: ctx.workspaceId, correlationId: companyId },
-    );
+    // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
+    // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；各自保留自己的 adapterKey。
+    const perAdapter: { key: string; contacts: ProviderContactRecord[]; costCents: number }[] = [];
+    for (const adapter of loaded.adapters) {
+      try {
+        const result = await adapter.discoverContacts(
+          {
+            name: loaded.company.name,
+            domain: loaded.company.domain ?? undefined,
+            country: loaded.company.country ?? undefined,
+          },
+          // 收口②：真租户贯穿（LLM/抓取按 workspace 归属 trace/预算）
+          { workspaceId: ctx.workspaceId, correlationId: companyId },
+        );
+        perAdapter.push({ key: adapter.key, contacts: result.contacts, costCents: result.costCents });
+      } catch {
+        // 单 adapter fail-safe：不阻断其余源
+      }
+    }
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const { skippedSuppressed } = await persistDiscoveredContacts(tx, {
-        workspaceId: ctx.workspaceId,
-        company: { id: loaded.company.id, dedupeKey: loaded.company.dedupeKey },
-        adapterKey: loaded.adapter.key,
-        contacts: result.contacts,
-        suppressedEmails: loaded.suppressedEmails,
-      });
-      if (result.costCents > 0) {
-        await tx.usageLedger.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            resourceType: 'provider_call',
-            quantity: result.contacts.length,
-            costUsd: result.costCents / 100,
-            refType: 'canonical_company',
-            refId: loaded.company.id,
-            meta: { provider: loaded.adapter.key, op: 'contact_discovery' },
-          },
+      // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
+      // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
+      let skippedSuppressed = 0;
+      for (const pa of perAdapter) {
+        const res = await persistDiscoveredContacts(tx, {
+          workspaceId: ctx.workspaceId,
+          company: { id: loaded.company.id, dedupeKey: loaded.company.dedupeKey },
+          adapterKey: pa.key,
+          contacts: pa.contacts,
+          suppressedEmails: loaded.suppressedEmails,
         });
+        skippedSuppressed += res.skippedSuppressed;
+        if (pa.costCents > 0) {
+          await tx.usageLedger.create({
+            data: {
+              workspaceId: ctx.workspaceId,
+              resourceType: 'provider_call',
+              quantity: pa.contacts.length,
+              costUsd: pa.costCents / 100,
+              refType: 'canonical_company',
+              refId: loaded.company.id,
+              meta: { provider: pa.key, op: 'contact_discovery' },
+            },
+          });
+        }
       }
       const contacts = await tx.canonicalContact.findMany({
         where: { companyId: loaded.company.id },

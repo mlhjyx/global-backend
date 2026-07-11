@@ -23,6 +23,7 @@ import {
   Fda510kClearance,
 } from '../adapters/openfda-api';
 import { queryAlgoliaExhibitors, AlgoliaFairConfig, FairExhibitor } from '../adapters/trade-fair-algolia';
+import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapters/companies-house';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -271,6 +272,39 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
   },
 };
 
+export type CompaniesHouseInput =
+  | { op: 'search'; query: string; limit?: number }
+  | { op: 'officers'; companyNumber: string; limit?: number };
+export interface CompaniesHouseOutput {
+  companies?: ChCompanyHit[];
+  officers?: ChOfficer[];
+}
+
+/**
+ * companies_house.search —— UK Companies House 官方注册处 API（Basic auth；董事 = 具名经济买家）。
+ * required 治理：董事 = 🔴 具名个人（GDPR）→ personalData=true → §8.8 用途门 fail-closed（未登记/
+ * SUSPENDED/用途不符即拒）。authRequired=true（key 走 env，业务码不见）。数据最小化在 adapter 层。
+ */
+export const companiesHouseSearchTool: Tool<CompaniesHouseInput, CompaniesHouseOutput> = {
+  id: 'companies_house.search',
+  version: '1.0.0',
+  category: 'structured_source',
+  sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true },
+  rateLimit: { rps: 2, concurrency: 2 },
+  // personalData:true —— officers 是具名董事（GDPR）；数据最小化（无 DOB/国籍/住址）在 adapter 层强制。
+  compliance: { sourcePolicy: 'required', policyDomain: 'api.company-information.service.gov.uk', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: true, risk: 'low' },
+  capabilities: { produces: ['contact', 'company'], accepts: ['keywords'] },
+  idempotencyKey: (i) => `companies_house.search:${stableKey(i)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'companies-house' }),
+  execute: async (input) => {
+    if (input.op === 'search') {
+      return { data: { companies: await searchCompanies(input.query, input.limit) }, costCents: 0 };
+    }
+    return { data: { officers: await listOfficers(input.companyNumber, input.limit) }, costCents: 0 };
+  },
+};
+
 export interface TradeFairAlgoliaInput {
   cfg: AlgoliaFairConfig;
   limit?: number;
@@ -352,5 +386,6 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(openFdaSearchTool as Tool);
   registry.register(tradeFairAlgoliaTool as Tool);
   registry.register(mapYourShowFetchTool as Tool);
+  registry.register(companiesHouseSearchTool as Tool);
   return registry;
 }
