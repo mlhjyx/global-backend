@@ -110,6 +110,19 @@ describe('declinedContactIdentity（待办2 create 层收尾：resolve 拒并时
     expect(declinedContactIdentity({ fullName: '  Anna   Weber ' }, ck)).toBe('dx:c:d:acme.com:anna weber');
   });
 
+  it('declined dx:c 用 resolver 同款归一 → 称谓/逗号语序变体幂等落同一 declined 行（#67 P2）', () => {
+    const plain = declinedContactIdentity({ fullName: 'Anna Weber' }, ck);
+    expect(declinedContactIdentity({ fullName: 'Dr. Anna Weber' }, ck)).toBe(plain);
+    expect(declinedContactIdentity({ fullName: 'Weber, Anna' }, ck)).toBe(plain);
+    expect(plain).toBe('dx:c:d:acme.com:anna weber');
+  });
+
+  it('declined dx:e 人名部同样 resolver 归一（Dr. 变体 + 同 email 幂等同键）', () => {
+    expect(declinedContactIdentity({ fullName: 'Dr. John Smith', email: 'a@acme.com' }, ck)).toBe(
+      declinedContactIdentity({ fullName: 'John Smith', email: 'a@acme.com' }, ck),
+    );
+  });
+
   it('确定性：同输入 → 同键（同源再跑幂等的基石）', () => {
     const a = declinedContactIdentity({ fullName: 'Anna Weber' }, ck);
     const b = declinedContactIdentity({ fullName: 'Anna Weber' }, ck);

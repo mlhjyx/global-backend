@@ -29,6 +29,14 @@ const HONORIFICS = new Set([
   'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'hon', 'rer', 'nat', 'habil',
 ]);
 
+// 身份归一"安全"称谓集：**只**含明确不会是真实姓名 token 的称谓/学位（单 token 判别用）。
+// 从 HONORIFICS 排除 ma/ba/ing/mag/med/hon/rer/nat——它们同时是真实姓氏/名（"Anna Ma"/"Erik Ing"），
+// 身份路径剥它们会把不同人塌成同一归一名（#54 P2）。email 本地部仍用全量 HONORIFICS（parseName 默认）。
+const IDENTITY_HONORIFICS = new Set([
+  'dr', 'prof', 'dipl', 'phd', 'mba', 'bsc', 'msc',
+  'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'habil',
+]);
+
 // 贵族/介词前缀（归入姓；小写比对）。
 const SURNAME_PARTICLES = new Set([
   'von', 'van', 'vom', 'zum', 'zur', 'zu', 'de', 'del', 'della', 'der', 'den', 'di',
@@ -39,6 +47,18 @@ const SURNAME_PARTICLES = new Set([
 function isHonorific(token: string): boolean {
   const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
   return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
+}
+
+/**
+ * 身份归一称谓判定（比 email 侧保守）：多段学位串（"dipl.-ing."，含 . / -）各段皆称谓即剥；
+ * 单 token 仅当属**明确**称谓集 {@link IDENTITY_HONORIFICS} 才剥——防止把真实姓名里的歧义短
+ * token（Ma/Ba/Ing…）当称谓塌掉不同人（#54 P2）。方向偏欠并（宁多留 token 不误并）。
+ */
+function isIdentityHonorific(token: string): boolean {
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
+  if (parts.length === 0) return false;
+  if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p));
+  return IDENTITY_HONORIFICS.has(parts[0]);
 }
 
 /**
@@ -66,13 +86,20 @@ export function transliterateVariants(raw: string): string[] {
   return out;
 }
 
-/** 解析全名 → 部件（strip 称谓、识别贵族前缀、拆名/姓）。空/无效返回 null。 */
-export function parseName(fullName: string): ParsedName | null {
+/**
+ * 解析全名 → 部件（strip 称谓、识别贵族前缀、拆名/姓）。空/无效返回 null。
+ * `isHonorificToken` 可注入：email 本地部用默认全量 {@link isHonorific}（行为逐字不变）；
+ * 身份路径用更保守的 {@link isIdentityHonorific}（不误剥真实姓名里的歧义 token，#54 P2）。
+ */
+export function parseName(
+  fullName: string,
+  isHonorificToken: (token: string) => boolean = isHonorific,
+): ParsedName | null {
   const tokens = fullName
     .replace(/[,;]/g, ' ')
     .split(/\s+/)
     .map((t) => t.trim())
-    .filter((t) => t && !isHonorific(t));
+    .filter((t) => t && !isHonorificToken(t));
   if (tokens.length === 0) return null;
   if (tokens.length === 1) {
     // 只有一个 token：当作 given，姓留空（只能出 first/first-only 模式）
@@ -106,9 +133,17 @@ export interface ParsedPersonName {
   normalizedFull: string;
 }
 
-/** 取 ASCII 归一首选变体（德语标准 ä→ae）；空 → ''。 */
-function primaryVariant(raw: string): string {
-  return transliterateVariants(raw)[0] ?? '';
+/**
+ * 身份归一单变体（**保留** Unicode 字母/数字）：小写 + 德语标准音译（ä→ae ö→oe ü→ue ß→ss）+ 去组合音标，
+ * 但不像 email 本地部那样 ASCII-only 删空——否则 "张 Wei"/"李 Wei" 都塌成 "wei" 令不同人误并（#54 P2）。
+ * 仅供身份路径（{@link parsePersonName}）；email 本地部仍用 {@link transliterateVariants}（ASCII-only）。
+ */
+function identityVariant(raw: string): string {
+  const lower = (raw ?? '').toLowerCase().trim();
+  if (!lower) return '';
+  const stripMarks = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const german = stripMarks(lower.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss'));
+  return german.replace(/[^\p{L}\p{N}]+/gu, ''); // 保 Unicode 字母/数字，仅去标点/空白/符号
 }
 
 /**
@@ -133,12 +168,13 @@ const EMPTY_PERSON_NAME: ParsedPersonName = { given: '', family: '', normalizedF
 export function parsePersonName(raw: string): ParsedPersonName {
   const nfc = (raw ?? '').normalize('NFC').trim();
   if (!nfc) return EMPTY_PERSON_NAME;
-  const parsed = parseName(reorderSurnameComma(nfc));
+  // 身份路径用保守称谓集（不误剥 Ma/Ba/Ing…）+ 保 Unicode 变体（不删 CJK/西里尔 token）。
+  const parsed = parseName(reorderSurnameComma(nfc), isIdentityHonorific);
   if (!parsed) return EMPTY_PERSON_NAME;
-  const given = primaryVariant(parsed.given);
-  const family = primaryVariant(parsed.surnameCore || parsed.surname);
+  const given = identityVariant(parsed.given);
+  const family = identityVariant(parsed.surnameCore || parsed.surname);
   const normalizedFull = [parsed.given, ...parsed.middles, parsed.surname]
-    .map(primaryVariant)
+    .map(identityVariant)
     .filter(Boolean)
     .join(' ');
   return { given, family, normalizedFull };
