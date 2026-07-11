@@ -237,3 +237,16 @@
 - **对抗复审**（PoC 单测在分支上实测复现）：抓 **2 HIGH 全修**——① Tier 0 缺反向守卫致同公司同名不同 officer_id 董事误并（加 `hasExternalIdConflict` 对称 email 守卫，Tier 2/3 拦冲突）；② GB 门 `.uk` 域名当辖区可绕过（`.uk` 2014 全球开放），改 country 优先（非英一律拒、`.uk` 仅缺国别弱兜底）+ 1 MED（fan-out 静默 catch 补 warn）。已核验安全：数据最小化/§8.8 门/公司对齐 margin/key 不泄漏/自足性（committed schema 构建通过，不依赖并发 storage-compliance WIP）。
 - **实测**：build 0 · **610 vitest**（含错并回归）· 真库真 CH API `verify-companies-house.mts` 四段全绿（AstraZeneca 真拉 12 董事·对齐 1.00·Tier 0 二次幂等 merged=12·跨源与 Impressum 并一条·§8.8 去用途→拒→零联系人·无 DOB/国籍入库）。
 - **遗留**：待办 3 后续源（专利 inventor USPTO/EPO、商标 EUIPO/WIPO；CH 扩德/法）——fan-out + Tier 0 缝已跑通，后续源同法接入。
+
+## 2026-07-11 · 收口⑥ 存储合规 PR-B 删除编排（GDPR Art.17，六项工程收口最后一项完成）
+
+设计见 [../implementation-records/storage-compliance-spec.md §8](../implementation-records/storage-compliance-spec.md)。承 PR-A #60（存储合规地基），本 PR 落地 DSR 删除编排，**满足收口⑥ 验收① DSR 全链演练 + ②「删除编排先于任何发送上线」时序门前置**——**六项工程收口至此全部完成**。
+
+- **schema**：`deletion_request`（状态机 RECEIVED→FROZEN→ERASING→COMPLETED\|FAILED，租户 RLS，`stats` 持久化擦除计数）+ `deletion_receipt`（租户 RLS + **append-only** REVOKE UPDATE,DELETE + **FK onDelete RESTRICT** 防级联删绕过 + `REVOKE DELETE ON deletion_request`）+ 「同主体至多一条在途」**部分唯一索引**。
+- **纯核**（+12 单测）：`deletion.types/state`(状态机)/`plan`(禁联项)/`snapshot`(最小化事件 payload)。
+- **Temporal 三段编排 + 四活动（CAS 幂等）**：`freezeSubject`（定位擦除面 pre-deletion 快照 + 写 suppression_record 对外动作第一道闸 + **company 即标 SUPPRESSED**）→ `eraseSubject`（硬删 canonical_contact 级联 contact_point + 显式删 field_evidence(contact) + **擦除时刻重查 company 联系人捕漏网** + 受影响 ACTIVE ICP 发 QualifyRequested 重评分 + 同 tx 持久化 stats）→ `completeDeletion`（写回执 append-only + DeletionCompleted 事件同 tx + **取持久化 stats 写忠实回执、拒绝为未擦除请求伪造回执、CAS 收尾**）。
+- **`DeletionService`**：受理 → **事务性 outbox 发 DeletionRequested** → relay dispatch 起 deletionWorkflow（Temporal 暂挂靠 relay 重试起，「受理即必然执行」）；`createRequest` catch P2002 → 复用在途请求（并发去重）。**`DeletionController`** `POST/GET /deletion-requests`（authN + RLS 隔离，**无 RolesGuard**=授权归 SaaS，R1 加固）。
+- **outbox 注册** DeletionRequested(internal)+DeletionCompleted(integration) + 契约 `deletion-completed.v1.schema.json`。
+- 🔴 **合规红线**：located 进 Temporal 历史 **PII-free**（只 uuid+计数，禁联邮箱仅 freeze 内部落库不外泄）；`source_signal` 是**平台共享零-PII 绿库** → 租户 DSR **不撤**（避免跨租户误删），signalsRevoked 恒 0；回执/事件**内容最小化**只计数 + 行 id 引用；receipt DB 层 append-only + FK RESTRICT 双护 GDPR Art.5(2) 问责证据。
+- **质量**：TDD **682 单测**（12 新纯核）+ **真库 DSR 全链演练 31 断言全绿**（contact/company 主体 + 幂等 + 无 PII 残留 + RLS 隔离 + 并发去重 + 部分失败忠实回执 + append-only 护证 + 擦除完整性）+ **对抗复审（5 维·16 agent·逐条 adversarial 核验）6 findings（11 raised）去重 4 根因全修**：F1 部分失败伪造 0 回执（stats 持久化 + 拒伪造 + CAS）、F2 append-only 被级联删绕过（FK RESTRICT + REVOKE DELETE）、F3 createRequest 并发竞态重复请求（部分唯一索引 + P2002 复用）、F4 company freeze→erase 窗口漏网新联系人（freeze 即 SUPPRESSED + 擦除时刻重查）；驳回 HIGH「verify 不真跑 Temporal」（测试覆盖 gap 非可触发缺陷）。openapi 无 drift。
+- **下一步**：R1 发送侧上线时联合校验「删除编排先于发送」时序门；细粒度 RolesGuard、consent_record(Art.21)、retention sweep 随 R1；`verify-deletion-orchestration.mts` 后续可补 Temporal 端到端（现活动级）。
