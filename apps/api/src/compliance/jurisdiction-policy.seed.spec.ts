@@ -15,7 +15,7 @@ describe('jurisdiction_policy 种子矩阵', () => {
   });
 
   it('red × 每个主体法域 × 全 7 动作都有行（无遗漏=无 fail-closed 意外拒）', () => {
-    for (const subject of ['EU', 'UK', 'US', 'OTHER'] as const) {
+    for (const subject of ['EU', 'UK', 'US', 'OTHER', 'CN'] as const) {
       for (const action of DATA_ACTIONS) {
         const row = RULES.find(
           (r) => r.subjectJurisdiction === subject && r.processorJurisdiction === '*' && r.dataClass === 'red' && r.action === action,
@@ -25,13 +25,17 @@ describe('jurisdiction_policy 种子矩阵', () => {
     }
   });
 
-  it('PIPL 跨境行存在（EU/UK → CN 高风险动作 REQUIRE_APPROVAL）', () => {
+  it('PIPL 跨境行存在（EU/UK → CN 全动作通配 REQUIRE_APPROVAL，无逃逸动作）', () => {
     const piplEu = RULES.filter(
       (r) => r.subjectJurisdiction === 'EU' && r.processorJurisdiction === 'CN' && r.effect === 'REQUIRE_APPROVAL',
     );
-    expect(piplEu.length).toBe(4); // AI_PROCESS/DERIVE/EXPORT/OUTREACH
+    expect(piplEu.length).toBe(1); // 通配 action 行覆盖全 7 动作
+    expect(piplEu[0].action).toBe('*');
     const cnSubject = RULES.find((r) => r.subjectJurisdiction === 'CN' && r.action === 'OUTREACH');
     expect(cnSubject?.effect).toBe('REQUIRE_APPROVAL');
+    // CN 主体 STORE 有覆盖（非 fail-closed DENY）
+    const cnStore = RULES.find((r) => r.subjectJurisdiction === 'CN' && r.action === 'STORE');
+    expect(cnStore?.effect).toBe('ALLOW_WITH_BASIS');
   });
 
   it('ALLOW_WITH_BASIS 行恒 requiresLawfulBasis=true（不变式）', () => {

@@ -135,3 +135,12 @@ interface DataRightsDecision {
 - TDD：DataRightsService（7 动作 × 三色 × 跨法域 × basis 存在性，含 PIPL 跨境 REQUIRE_APPROVAL）、PiiCryptoService（往返/legacy 明文/缺 key fail-closed/篡改检测）、evaluateEmailGate subsume 回归、dataClass 落列、article14 判定。
 - 真库实测（无 sandbox，superuser guard）：`verify-data-rights.mts`——7 动作跨法域判定 + policy_decision_log 落行 + PII 加密往返（密文落库、明文绝不落列）+ jurisdiction_policy PIPL 行 seed。PR-B：`verify-deletion-orchestration.mts` DSR 全链演练。
 - 对抗复审（Workflow 3 维 pipeline 逐条核验），每 PR 一轮。
+
+## 11. PR-A 对抗复审修复（3 维 18 agent，5 CONFIRMED / 10 驳回）
+
+- **HIGH 存量明文 PII 未迁移**：确定性 where-by-value 加密后 upsert 匹配不到旧明文行 → 造重复行 + 旧明文永留。**修**：`scripts/backfill-pii-encryption.mts`（一次性、幂等、冲突删明文消重），加密存量 full_name/contact_point.value/field_evidence 副本。🔴 **部署硬要求：PII 加密代码上线时/后必须立即跑此回填**（dev 实测 4 name+3 point+3 evidence 加密，0 明文残留）。
+- **HIGH PIPL 跨境转移逃逸**：EU/UK 红数据 STORE/RETAIN/VIEW 落 CN 处理地被 plain ALLOW。**修**：`(EU|UK, CN, red, *)` 通配 REQUIRE_APPROVAL 行（全动作人审，靠引擎同分取更严压过 ALLOW），无逃逸动作。
+- **MEDIUM CN 主体 fail-closed 全拒**：CN 主体红数据除 OUTREACH 外全 DENY unregistered_red（自相矛盾 + 误导 reason）。**修**：`RED_EFFECTS.CN` 一等法域覆盖（多动作 ALLOW_WITH_BASIS、EXPORT/OUTREACH REQUIRE_APPROVAL）。
+- **MEDIUM dataClass 回填漏存量联系人 PII**：email/phone/linkedin 证据留 green。**修**：回填 `field IN (person.profile,email,phone,linkedin,email.guess)` 一律 red（SQL 无法廉价区分职能/人名邮箱，保守偏严）。
+- **LOW 问责记录可硬删**：lia_record/article14_notice 未 REVOKE DELETE。**修**：`REVOKE DELETE`（保留 UPDATE 供生命周期，软删走 status；与 policy_decision_log append-only 一致）。
+- 驳回 10 条含：dedupe_key 明文（非可逆 PII，是 hash）、决定性 GCM 全局 key 跨租户等值（已文档化取舍）、key 轮换缺失（运维特性非 bug）、证据先行省略绕过/amber blanket ALLOW（引擎当前零生产调用方，属未来接线时的加固点，非现触发缺陷）等——记档，接线评分门时复核。

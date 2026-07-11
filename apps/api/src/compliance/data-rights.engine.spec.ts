@@ -98,6 +98,25 @@ describe('evaluateDataRights — PIPL 跨境（最具体优先）', () => {
     const d = evaluateDataRights(ctx({ action: 'OUTREACH', subjectJurisdiction: 'CN', processorJurisdiction: 'US' }), RULES);
     expect(d.effect).toBe('REQUIRE_APPROVAL');
   });
+
+  it('回归：EU 主体 → CN 处理地 STORE 也人审（转移门无逃逸，非 plain ALLOW）', () => {
+    const d = evaluateDataRights(ctx({ action: 'STORE', processorJurisdiction: 'CN' }), RULES);
+    expect(d.effect).toBe('REQUIRE_APPROVAL');
+    expect(d.allowed).toBe(false);
+  });
+
+  it('回归：EU 主体 → CN 处理地 RETAIN/VIEW 同样人审', () => {
+    for (const action of ['RETAIN', 'VIEW'] as const) {
+      const d = evaluateDataRights(ctx({ action, processorJurisdiction: 'CN' }), RULES);
+      expect(d.effect, action).toBe('REQUIRE_APPROVAL');
+    }
+  });
+
+  it('回归：CN 主体 red STORE 非 fail-closed DENY（有覆盖=ALLOW_WITH_BASIS）', () => {
+    const d = evaluateDataRights(ctx({ action: 'STORE', subjectJurisdiction: 'CN', processorJurisdiction: 'US' }), RULES);
+    expect(d.reason).not.toBe('unregistered_red');
+    expect(d.effect).toBe('ALLOW_WITH_BASIS');
+  });
 });
 
 describe('evaluateDataRights — 红线优先级', () => {

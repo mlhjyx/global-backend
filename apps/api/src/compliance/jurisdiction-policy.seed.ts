@@ -32,19 +32,20 @@ function row(
   };
 }
 
-/** red 数据按主体法域的动作→effect 表。EU/UK=GDPR 严格；US=CCPA 较宽；OTHER=保守。 */
-const RED_EFFECTS: Record<'EU' | 'UK' | 'US' | 'OTHER', Record<DataAction, PolicyEffect>> = {
+/**
+ * red 数据按主体法域的动作→effect 表。EU/UK=GDPR 严格；US=CCPA 较宽；OTHER=保守；
+ * CN=PIPL（需合法性基础，跨境导出/触达人审——CN 主体作一等法域覆盖，避免 fail-closed 全拒的自相矛盾）。
+ */
+const RED_EFFECTS: Record<'EU' | 'UK' | 'US' | 'OTHER' | 'CN', Record<DataAction, PolicyEffect>> = {
   EU: { STORE: 'ALLOW', AI_PROCESS: 'ALLOW_WITH_BASIS', DERIVE: 'ALLOW_WITH_BASIS', RETAIN: 'ALLOW', EXPORT: 'ALLOW_WITH_BASIS', OUTREACH: 'ALLOW_WITH_BASIS', VIEW: 'ALLOW' },
   UK: { STORE: 'ALLOW', AI_PROCESS: 'ALLOW_WITH_BASIS', DERIVE: 'ALLOW_WITH_BASIS', RETAIN: 'ALLOW', EXPORT: 'ALLOW_WITH_BASIS', OUTREACH: 'ALLOW_WITH_BASIS', VIEW: 'ALLOW' },
   US: { STORE: 'ALLOW', AI_PROCESS: 'ALLOW', DERIVE: 'ALLOW', RETAIN: 'ALLOW', EXPORT: 'ALLOW', OUTREACH: 'ALLOW_WITH_BASIS', VIEW: 'ALLOW' },
   OTHER: { STORE: 'ALLOW', AI_PROCESS: 'ALLOW_WITH_BASIS', DERIVE: 'ALLOW_WITH_BASIS', RETAIN: 'ALLOW', EXPORT: 'ALLOW_WITH_BASIS', OUTREACH: 'REQUIRE_APPROVAL', VIEW: 'ALLOW' },
+  CN: { STORE: 'ALLOW_WITH_BASIS', AI_PROCESS: 'ALLOW_WITH_BASIS', DERIVE: 'ALLOW_WITH_BASIS', RETAIN: 'ALLOW_WITH_BASIS', EXPORT: 'REQUIRE_APPROVAL', OUTREACH: 'REQUIRE_APPROVAL', VIEW: 'ALLOW_WITH_BASIS' },
 };
 
 /** red 保留期上限（天）——RETAIN 判定的元数据，供保留期 sweep 使用（本 PR 不接线）。 */
 const RED_RETENTION_DAYS = 730;
-
-/** PIPL 跨境：主体在 EU/UK、处理地在 CN 的高风险动作一律人审（比 (subj,*) 更具体，特异度胜出）。 */
-const PIPL_ACTIONS: DataAction[] = ['AI_PROCESS', 'DERIVE', 'EXPORT', 'OUTREACH'];
 
 function buildSeed(): SeedRow[] {
   const rows: SeedRow[] = [
@@ -52,7 +53,7 @@ function buildSeed(): SeedRow[] {
     row('*', '*', 'amber', '*', 'ALLOW', { note: '职能邮箱 info@/sales@（Recital 14 非个人数据，ePrivacy）' }),
   ];
 
-  for (const subject of ['EU', 'UK', 'US', 'OTHER'] as const) {
+  for (const subject of ['EU', 'UK', 'US', 'OTHER', 'CN'] as const) {
     for (const action of DATA_ACTIONS) {
       rows.push(
         row(subject, '*', 'red', action, RED_EFFECTS[subject][action], {
@@ -62,12 +63,12 @@ function buildSeed(): SeedRow[] {
     }
   }
 
+  // PIPL/GDPR Chapter V 跨境：EU/UK 自然人数据→中国处理地——**全动作**人审（含 STORE/RETAIN/VIEW，
+  // 存到/看在中国本身即受限转移）。通配 action 行特异度=3，与 (subj,*,red,action) 同分 → 引擎同分取更严
+  // 使 REQUIRE_APPROVAL 压过 ALLOW；无逃逸动作。
   for (const subject of ['EU', 'UK'] as const) {
-    for (const action of PIPL_ACTIONS) {
-      rows.push(row(subject, 'CN', 'red', action, 'REQUIRE_APPROVAL', { note: 'PIPL 跨境：EU/UK 自然人数据→中国处理地，人审' }));
-    }
+    rows.push(row(subject, 'CN', 'red', '*', 'REQUIRE_APPROVAL', { note: 'PIPL/GDPR 跨境：EU/UK 自然人数据→中国处理地，全动作人审' }));
   }
-  rows.push(row('CN', '*', 'red', 'OUTREACH', 'REQUIRE_APPROVAL', { note: 'PIPL：中国主体对外触达需人审' }));
 
   return rows;
 }

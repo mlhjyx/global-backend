@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   await svc.onModuleInit(); // seed jurisdiction_policy（owner）+ loadRules（app_user SELECT）
   check('B1 规则加载 > 30 行（含 PIPL）', svc.ruleCount() > 30);
   const piplRows = await owner.jurisdictionPolicy.count({ where: { processorJurisdiction: 'CN', effect: 'REQUIRE_APPROVAL' } });
-  check('B2 jurisdiction_policy PIPL 行已 seed', piplRows >= 4);
+  check('B2 jurisdiction_policy PIPL 跨境行已 seed（EU/UK→CN 通配）', piplRows >= 2);
 
   // ── C. 7 动作跨法域判定（确定性引擎）───────────────────────────────────────────
   const dGreen = svc.evaluate({ action: 'EXPORT', dataClass: 'green', subjectJurisdiction: 'EU', processorJurisdiction: 'EU', hasEvidence: true });

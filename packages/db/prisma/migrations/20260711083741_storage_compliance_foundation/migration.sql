@@ -133,9 +133,17 @@ CREATE POLICY "article14_notice_tenant_isolation" ON "article14_notice"
   USING ("workspace_id" = current_workspace_id())
   WITH CHECK ("workspace_id" = current_workspace_id());
 
--- field_evidence.data_class 回填：已存的具名个人证据（person.profile / value.personal_data:true）标 red；
--- 其余保持 green 默认（职能邮箱 amber 细分留给前向写路径，legacy 保守不误标）。
+-- lia_record / article14_notice：保留 UPDATE（生命周期=撤回/版本化/履行状态 PENDING→FULFILLED），但
+-- REVOKE DELETE——GDPR Art.5(2) 问责证据（LIA 权衡、Art.14 告知履行）不可硬删，软删除走 status；
+-- 与 policy_decision_log append-only 立场一致（DB 层保证，非代码纪律）。
+REVOKE DELETE ON "lia_record" FROM app_user;
+REVOKE DELETE ON "article14_notice" FROM app_user;
+
+-- field_evidence.data_class 回填：存量具名个人数据一律标 red（合规保守=偏严）。含：person.profile、
+-- value.personal_data:true、以及联系点第二副本证据（email/phone/linkedin/email.guess——这些行的 value
+-- 即人名邮箱/电话/领英，皆个人数据 GDPR Art.4）。SQL 无法廉价区分职能/人名邮箱，故 email 一律 red；
+-- 前向写路径按 cleanEmail 精分 amber/red。green 是最宽松档，legacy PII 留 green 会漏保护。
 UPDATE "field_evidence"
 SET "data_class" = 'red'
-WHERE "field" = 'person.profile'
+WHERE "field" IN ('person.profile', 'email', 'phone', 'linkedin', 'email.guess')
    OR ("value" ? 'personal_data' AND ("value" ->> 'personal_data') = 'true');
