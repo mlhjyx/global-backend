@@ -15,7 +15,7 @@
 删除编排**不可逆**（硬删 PII），且依赖加密列 + 判定日志就位，故独立成 PR 单独聚焦审查 + 单独 DSR 演练。
 
 - **PR-A 存储合规地基**（`feat/compliance-storage-foundation`）：schema（jurisdiction_policy / policy_decision_log / lia_record / article14_notice / dataClass 列）+ `DataRightsService.evaluate()` 7 动作引擎 + jurisdiction_policy seed(含 PIPL) + policy_decision_log 接线 + subsume `evaluateEmailGate` + PII 列级加密（contact_point.value / canonical_contact.full_name / field_evidence.value）+ dataClass 落列 + DB 角色拆分（append-only 审计表）。→ 满足验收③ + 判定/LIA/Art.14/jurisdiction。
-- **PR-B 删除编排**（`feat/compliance-deletion-orchestration`）：deletion_request/receipt + deletionWorkflow 五步 + `POST /deletion-requests` + Art.17 擦除链 + 删除先于发送时序门。→ 满足验收① + ②。
+- **PR-B 删除编排**（`feat/compliance-deletion-orchestration`）✅ **已完成**：deletion_request/receipt + deletionWorkflow（冻结→擦除→重评分→回执 三段活动，CAS 幂等）+ `POST/GET /deletion-requests` + Art.17 擦除链（contact/company 主体）+ 事务性 outbox 起编排 + DeletionCompleted 事件 + 删除先于发送时序门前置。→ 满足验收① + ②。**实现见 [changelog 2026-07-11 收口⑥ PR-B](../roadmap/changelog.md)**；真库 31 断言 + 对抗复审 4 findings 全修。加固超出原设计：回执 FK RESTRICT + `REVOKE DELETE ON deletion_request`（防级联删绕过 append-only）、stats 持久化（部分失败忠实回执）、部分唯一索引（并发去重）、freeze 即 SUPPRESSED + 擦除时刻重查（company 擦除完整性）、source_signal 平台共享零-PII **不纳入租户 DSR**（避免跨租户误删）。
 
 ## 2. 7 动作词表（DataAction）
 

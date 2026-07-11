@@ -2613,6 +2613,261 @@
           "Events"
         ]
       }
+    },
+    "/api/v1/deletion-requests": {
+      "post": {
+        "operationId": "DeletionController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeletionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "RECEIVED",
+                            "FROZEN",
+                            "ERASING",
+                            "COMPLETED",
+                            "FAILED"
+                          ]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": [
+                            "contact",
+                            "company"
+                          ]
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "requestRef": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "receipt": {
+                          "type": "object",
+                          "nullable": true,
+                          "description": "擦除回执（COMPLETED 后有值）——🔴 只计数，无 PII",
+                          "properties": {
+                            "contactsErased": {
+                              "type": "integer"
+                            },
+                            "contactPointsErased": {
+                              "type": "integer"
+                            },
+                            "fieldEvidenceErased": {
+                              "type": "integer"
+                            },
+                            "signalsRevoked": {
+                              "type": "integer"
+                            },
+                            "companiesSuppressed": {
+                              "type": "integer"
+                            },
+                            "leadsRescoreRequested": {
+                              "type": "integer"
+                            },
+                            "ruleVersion": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "受理数据主体删除请求（GDPR Art.17）——异步编排，返回 202 + 请求 id",
+        "tags": [
+          "Compliance"
+        ]
+      }
+    },
+    "/api/v1/deletion-requests/{id}": {
+      "get": {
+        "operationId": "DeletionController_get_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "RECEIVED",
+                            "FROZEN",
+                            "ERASING",
+                            "COMPLETED",
+                            "FAILED"
+                          ]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": [
+                            "contact",
+                            "company"
+                          ]
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "requestRef": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "receipt": {
+                          "type": "object",
+                          "nullable": true,
+                          "description": "擦除回执（COMPLETED 后有值）——🔴 只计数，无 PII",
+                          "properties": {
+                            "contactsErased": {
+                              "type": "integer"
+                            },
+                            "contactPointsErased": {
+                              "type": "integer"
+                            },
+                            "fieldEvidenceErased": {
+                              "type": "integer"
+                            },
+                            "signalsRevoked": {
+                              "type": "integer"
+                            },
+                            "companiesSuppressed": {
+                              "type": "integer"
+                            },
+                            "leadsRescoreRequested": {
+                              "type": "integer"
+                            },
+                            "ruleVersion": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "查询删除请求状态与擦除回执",
+        "tags": [
+          "Compliance"
+        ]
+      }
     }
   },
   "info": {
@@ -3672,6 +3927,42 @@
         },
         "required": [
           "event_ids"
+        ]
+      },
+      "CreateDeletionRequestDto": {
+        "type": "object",
+        "properties": {
+          "subjectType": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "company"
+            ],
+            "description": "删除主体类型"
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "主体行 id（canonical_contact.id 或 canonical_company.id）"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "erasure",
+              "objection",
+              "legal",
+              "manual"
+            ],
+            "description": "删除依据（默认 erasure）"
+          },
+          "requestRef": {
+            "type": "string",
+            "description": "工单/LIA/请求来源引用（审计用，🔴 非明文 PII）"
+          }
+        },
+        "required": [
+          "subjectType",
+          "subjectId"
         ]
       }
     }

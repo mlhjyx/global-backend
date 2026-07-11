@@ -9,3 +9,4 @@ export { acquisitionSweepWorkflow } from './acquisition.workflow';
 export { intentSweepWorkflow } from './intent.workflow';
 export { backlogSweepWorkflow } from './backlog.workflow';
 export { externalIntentSweepWorkflow } from './external-intent.workflow';
+export { deletionWorkflow } from './deletion.workflow';

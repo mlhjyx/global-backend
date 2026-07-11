@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/deletion-completed.v1.schema.json",
+  "title": "DeletionCompletedPayloadV1",
+  "description": "DeletionCompleted payload v1 (收口⑥ PR-B, GDPR Art.17 擦除完成). 🔴 内容最小化: 只含计数 + subject 行 id 引用, MUST NOT embed full_name/email. Consumers dedupe on the envelope event_id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshot_version",
+    "deletion_request_id",
+    "subject_type",
+    "subject_ref",
+    "contacts_erased",
+    "contact_points_erased",
+    "field_evidence_erased",
+    "signals_revoked",
+    "companies_suppressed",
+    "leads_rescore_requested",
+    "rule_version",
+    "erased_at"
+  ],
+  "properties": {
+    "snapshot_version": { "type": "integer", "const": 1 },
+    "deletion_request_id": { "type": "string", "format": "uuid" },
+    "subject_type": { "type": "string", "enum": ["contact", "company"] },
+    "subject_ref": {
+      "type": "string",
+      "format": "uuid",
+      "description": "主体行 id 引用（canonical_contact.id / canonical_company.id）——非人名明文"
+    },
+    "contacts_erased": { "type": "integer", "minimum": 0 },
+    "contact_points_erased": { "type": "integer", "minimum": 0 },
+    "field_evidence_erased": { "type": "integer", "minimum": 0 },
+    "signals_revoked": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "恒 0：source_signal 是平台共享零-PII 绿库，租户 DSR 不撤（保留列以备平台级处置）"
+    },
+    "companies_suppressed": { "type": "integer", "minimum": 0 },
+    "leads_rescore_requested": { "type": "integer", "minimum": 0 },
+    "rule_version": { "type": "string" },
+    "erased_at": { "type": "string", "format": "date-time" }
+  }
+}

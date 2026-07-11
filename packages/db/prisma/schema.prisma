@@ -804,6 +804,62 @@ model Article14Notice {
   @@map("article14_notice")
 }
 
+/// deletion_request（收口⑥ PR-B，GDPR Art.17 删除编排）：DSR 删除请求状态机。租户 RLS，
+/// 全 CRUD（状态转移需 UPDATE）。RECEIVED → FROZEN → ERASING → COMPLETED | FAILED。
+/// subjectId = 主体行 id 引用（canonical_contact.id 或 canonical_company.id）——非人名明文。
+model DeletionRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  subjectType String    @map("subject_type") // contact | company
+  subjectId   String    @map("subject_id") @db.Uuid
+  status      String    @default("RECEIVED") // RECEIVED | FROZEN | ERASING | COMPLETED | FAILED
+  requestedBy String    @map("requested_by") // 发起者（token user id，非 PII）
+  requestRef  String?   @map("request_ref") // 工单/LIA/请求来源引用（可审计，非明文 PII）
+  reason      String? // erasure | objection | legal | manual
+  // 擦除阶段（eraseSubject 同 tx）持久化的真实计数（🔴 只计数无 PII）。completeDeletion 从此读取，
+  // 使「擦除已提交但 complete 后续失败 → 人工重跑（located 重算为空）」仍能写出忠实回执，不伪造 0。
+  stats       Json?
+  error       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  receipt DeletionReceipt?
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([workspaceId, subjectType, subjectId])
+  // 「同主体至多一条在途请求」的部分唯一索引（WHERE status IN active）由 migration 裸 SQL 维护
+  // （Prisma 尚不支持部分唯一索引）——DB 层防 createRequest find-then-create 并发竞态产生重复请求/回执。
+  @@map("deletion_request")
+}
+
+/// deletion_receipt（收口⑥ PR-B）：删除完成证明。租户 RLS，**append-only**（migration
+/// REVOKE UPDATE,DELETE FROM app_user——擦除问责证据不可篡改，GDPR Art.5(2)；DB 层保证非代码纪律）。
+/// 🔴 内容最小化：只存**计数** + 主体 id 引用，绝不嵌人名/邮箱明文。
+model DeletionReceipt {
+  id                    String   @id @default(uuid()) @db.Uuid
+  workspaceId           String   @map("workspace_id") @db.Uuid
+  deletionRequestId     String   @unique @map("deletion_request_id") @db.Uuid
+  subjectType           String   @map("subject_type")
+  subjectId             String   @map("subject_id") @db.Uuid
+  contactsErased        Int      @default(0) @map("contacts_erased")
+  contactPointsErased   Int      @default(0) @map("contact_points_erased")
+  fieldEvidenceErased   Int      @default(0) @map("field_evidence_erased")
+  signalsRevoked        Int      @default(0) @map("signals_revoked")
+  companiesSuppressed   Int      @default(0) @map("companies_suppressed")
+  leadsRescoreRequested Int      @default(0) @map("leads_rescore_requested")
+  ruleVersion           String   @map("rule_version")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  // onDelete: Restrict——回执在则父 deletion_request 不可删（防级联删绕过 receipt 的 append-only：
+  // PG 级联删以属主身份执行、绕过子表 REVOKE DELETE）。回执成为其父的「锚」，问责证据不可被删父带走。
+  request DeletionRequest @relation(fields: [deletionRequestId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId])
+  @@map("deletion_receipt")
+}
+
 // ── Lead & 验证评分 (PRD 7.5 LED-006..009 / 5.6) ───────────────────────────
 
 /// Lead 状态机（PRD 11.9）：DISCOVERED → ENRICHING → REVIEW →

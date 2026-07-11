@@ -17,6 +17,7 @@ import { buildSourceAdapterRegistry } from '../acquisition/registry';
 import { createIntentActivities } from './intent.activities';
 import { createBacklogActivities } from './backlog.activities';
 import { createExternalIntentActivities } from './external-intent.activities';
+import { createDeletionActivities } from './deletion.activities';
 import { ensurePlatformSchedules } from './ensure-schedules';
 import { seedJurisdictionPolicy } from '../compliance/jurisdiction-policy.seed';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
@@ -102,6 +103,8 @@ async function main(): Promise<void> {
       ...createBacklogActivities({ prisma, providers, gateway, ownerDb, broker }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
       ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
+      // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
+      ...createDeletionActivities({ prisma }),
     },
   });
 

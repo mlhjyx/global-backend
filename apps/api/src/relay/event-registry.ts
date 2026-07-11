@@ -11,6 +11,7 @@ export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([
   'CompanyProfileCreated',
   'DiscoveryRunRequested',
   'QualifyRequested',
+  'DeletionRequested', // 收口⑥ PR-B：relay dispatch → 起 deletionWorkflow（Art.17 擦除编排）
 ]);
 
 /** 外部集成事件：路由进 outbox_delivery，SaaS 经 GET /events 拉取或 webhook 推送。 */
@@ -23,6 +24,7 @@ export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
   'ClaimRevoked',
   'ClaimExpired',
   'KnowledgeConflictDetected',
+  'DeletionCompleted', // 收口⑥ PR-B：擦除完成对外交付事件（🔴 payload 只计数 + subject 引用，无 PII）
 ]);
 
 /** pull sink：SaaS 主动 GET /events + POST /events/ack。 */

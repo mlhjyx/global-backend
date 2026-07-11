@@ -3,6 +3,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@ne
 import { PrismaClient } from '@prisma/client';
 import { TemporalClient } from '../temporal/temporal.client';
 import {
+  DELETION_WORKFLOW,
   DISCOVERY_WORKFLOW,
   QUALIFY_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
@@ -389,6 +390,26 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
         },
         `qualify workflow for icp ${ev.aggregateId}`,
+      );
+    }
+    if (ev.eventType === 'DeletionRequested') {
+      // 收口⑥ PR-B：起 GDPR Art.17 删除编排。workflowId=deletion-<requestId> 唯一，重放合并到在跑实例。
+      const payload = (ev.payload ?? {}) as { subjectType?: string; subjectId?: string };
+      await this.startWorkflowIdempotent(
+        DELETION_WORKFLOW,
+        {
+          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          workflowId: `deletion-${ev.aggregateId}`,
+          args: [
+            {
+              workspaceId: ev.workspaceId,
+              deletionRequestId: ev.aggregateId,
+              subjectType: payload.subjectType ?? '',
+              subjectId: payload.subjectId ?? '',
+            },
+          ],
+        },
+        `deletion workflow for request ${ev.aggregateId}`,
       );
     }
   }
