@@ -218,7 +218,7 @@ describe('resolvePersonIdentity · DB 薄查询（假 tx）', () => {
     ]);
     const tx = { canonicalContact: { findMany } } as unknown as Prisma.TransactionClient;
 
-    const hit = await resolvePersonIdentity(tx, {
+    const { hit } = await resolvePersonIdentity(tx, {
       workspaceId: 'w1',
       companyId: 'co1',
       companyKey: 'd:acme.com',
@@ -233,16 +233,33 @@ describe('resolvePersonIdentity · DB 薄查询（假 tx）', () => {
     });
   });
 
-  it('无候选 → null', async () => {
+  it('无候选 → hit=null、ambiguous=false（genuinely new，非歧义拒并）', async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const tx = { canonicalContact: { findMany } } as unknown as Prisma.TransactionClient;
-    const hit = await resolvePersonIdentity(tx, {
+    const { hit, ambiguous } = await resolvePersonIdentity(tx, {
       workspaceId: 'w1',
       companyId: 'co1',
       companyKey: 'd:acme.com',
       fullName: 'New Person',
     });
     expect(hit).toBeNull();
+    expect(ambiguous).toBe(false);
+  });
+
+  it('≥2 同归一名候选、来件无邮箱 → hit=null、ambiguous=true（同名歧义拒并信号）', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { id: 'c1', fullName: 'Anna Weber', contactPoints: [] },
+      { id: 'c2', fullName: 'Dr. Anna Weber', contactPoints: [] },
+    ]);
+    const tx = { canonicalContact: { findMany } } as unknown as Prisma.TransactionClient;
+    const { hit, ambiguous } = await resolvePersonIdentity(tx, {
+      workspaceId: 'w1',
+      companyId: 'co1',
+      companyKey: 'd:acme.com',
+      fullName: 'Anna Weber',
+    });
+    expect(hit).toBeNull();
+    expect(ambiguous).toBe(true);
   });
 
   it('待办 3 Tier 0：候选有 external_id 点 + 同 scheme:value 输入 → matchRule=external_id（大小写不敏感）', async () => {
@@ -250,7 +267,7 @@ describe('resolvePersonIdentity · DB 薄查询（假 tx）', () => {
       { id: 'c1', fullName: 'Different Display Name', contactPoints: [{ type: 'external_id', value: 'uk-ch-officer:oid1' }] },
     ]);
     const tx = { canonicalContact: { findMany } } as unknown as Prisma.TransactionClient;
-    const hit = await resolvePersonIdentity(tx, {
+    const { hit } = await resolvePersonIdentity(tx, {
       workspaceId: 'w1',
       companyId: 'co1',
       companyKey: 'd:acme.com',
