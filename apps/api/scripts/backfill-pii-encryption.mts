@@ -67,15 +67,20 @@ function pointNormKey(pt: { type: string; value: string }): string {
 /**
  * 把 legacy 联系人 fromId **合并进**存活联系人 toId（盲化撞唯一键时走此路，替代会崩迁移的 bare update）：
  *  - contact_point 逐点移交：目标已有等价点（归一密文相同）→ 折叠更强验证态到保留点再删本点（#60 P2）；
- *    否则改挂 contactId 到 toId（归一不同 ⟹ (contactId,type,value) 唯一键必不冲突）。
- *  - field_evidence（entityType=contact）改挂到 toId（无 FK，手动迁移防孤儿；无唯一键无需去重）。
+ *    否则改挂 contactId 到 toId（归一不同 ⟹ (contactId,type,value) 唯一键必不冲突）。折叠后**回写 toByKey**：
+ *    防同一 legacy 的另一同值点（明文+密文并存）据陈旧态把已折叠的更强验证态降级。
+ *  - 标量字段 title/seniority/department **有则补空**到 survivor（绝不覆盖已有非空，照 contact-persist.mergeIntoContact
+ *    的不可变合并语义，迁移不静默丢失职务元数据；full_name 非空必填且已在 survivor，无需补）。
+ *  - field_evidence（entityType=contact）改挂到 toId（无 FK，手动迁移防孤儿；append-only 审计，同既有写路径不跨行去重）。
  *  - 无 contact 型 identity_link（写路径仅建 company 型）⟹ 无需迁移。
  *  - 最后硬删 fromId（其 contact_point 已全部移走/删除）。
  */
 async function mergeContactInto(owner: PrismaClient, fromId: string, toId: string): Promise<void> {
-  const [fromPoints, toPoints] = await Promise.all([
+  const [fromPoints, toPoints, from, to] = await Promise.all([
     owner.contactPoint.findMany({ where: { contactId: fromId } }),
     owner.contactPoint.findMany({ where: { contactId: toId } }),
+    owner.canonicalContact.findUnique({ where: { id: fromId }, select: { title: true, seniority: true, department: true } }),
+    owner.canonicalContact.findUnique({ where: { id: toId }, select: { title: true, seniority: true, department: true } }),
   ]);
   const toByKey = new Map(toPoints.map((pt) => [pointNormKey(pt), pt]));
   for (const fp of fromPoints) {
@@ -83,13 +88,23 @@ async function mergeContactInto(owner: PrismaClient, fromId: string, toId: strin
     const match = toByKey.get(key);
     if (match) {
       const upd = strongerVerification(match, fp);
-      if (upd) await owner.contactPoint.update({ where: { id: match.id }, data: upd });
+      if (upd) {
+        await owner.contactPoint.update({ where: { id: match.id }, data: upd });
+        // 回写 map：后续同键点按**已折叠**的态比较，杜绝陈旧态降级（如先折 VALID、再来 RISKY 覆盖）。
+        toByKey.set(key, { ...match, status: upd.status, verifiedAt: upd.verifiedAt });
+      }
       await owner.contactPoint.delete({ where: { id: fp.id } });
     } else {
       await owner.contactPoint.update({ where: { id: fp.id }, data: { contactId: toId } });
       toByKey.set(key, { ...fp, contactId: toId });
     }
   }
+  // 标量字段有则补空（不覆盖 survivor 已有非空）——迁移合并不丢职务元数据。
+  const patch: { title?: string; seniority?: string; department?: string } = {};
+  if (from?.title && !to?.title) patch.title = from.title;
+  if (from?.seniority && !to?.seniority) patch.seniority = from.seniority;
+  if (from?.department && !to?.department) patch.department = from.department;
+  if (Object.keys(patch).length > 0) await owner.canonicalContact.update({ where: { id: toId }, data: patch });
   await owner.fieldEvidence.updateMany({
     where: { entityType: 'contact', entityId: fromId },
     data: { entityId: toId },

@@ -23,6 +23,9 @@ const WS = '99999999-9999-4999-8999-999999999902';
 const EMAIL = 'proc@merge.example';
 const RAW_KEY = `e:${EMAIL}`;
 const VERIFIED_AT = new Date('2026-01-01T00:00:00.000Z');
+// 独立联系人 T（已盲化，不参与 step-1 合并）：单行内明文 VALID + 密文 UNVERIFIED 同值点 → 专测 step-2 去重折叠。
+const T_EMAIL = 'solo@merge.example';
+const T_VERIFIED_AT = new Date('2026-02-02T00:00:00.000Z');
 
 const owner = new PrismaClient({ datasourceUrl: OWNER_URL });
 
@@ -45,12 +48,15 @@ async function main(): Promise<void> {
   });
   const blinded = blindContactKey(RAW_KEY);
 
-  // L = legacy 明文行（明文键 + 明文 full_name + VALID 明文 email 点 + 明文 phone 点）
+  // L = legacy 明文行（明文键 + 明文 full_name + 标量元数据 + VALID 明文 email 点 + 明文 phone 点）
   const legacy = await owner.canonicalContact.create({
     data: {
       workspaceId: WS,
       companyId: company.id,
       fullName: 'Legacy Person',
+      title: 'Head of Procurement', // survivor 缺此三项 → 合并须补空（不丢职务元数据）
+      seniority: 'director',
+      department: 'procurement',
       dedupeKey: RAW_KEY,
       contactPoints: {
         create: [
@@ -74,9 +80,26 @@ async function main(): Promise<void> {
       workspaceId: WS,
       companyId: company.id,
       fullName: encryptPii('Legacy Person'),
-      dedupeKey: blinded,
+      dedupeKey: blinded, // 缺 title/seniority/department → 合并须从 legacy 补空
       contactPoints: {
         create: [{ workspaceId: WS, type: 'email', value: encryptPii(EMAIL), status: 'UNVERIFIED' }],
+      },
+    },
+  });
+
+  // T = 已盲化独立行（不参与 step-1 合并）：单行内明文 VALID + 密文 UNVERIFIED 同 email 值（历史误 upsert 密文 dup）
+  //     → 专测 step-2 去重折叠分支（#60 P2 新代码路径，此前无 verify 覆盖=false-green）。
+  const solo = await owner.canonicalContact.create({
+    data: {
+      workspaceId: WS,
+      companyId: company.id,
+      fullName: encryptPii('Solo Person'),
+      dedupeKey: blindContactKey(`e:${T_EMAIL}`),
+      contactPoints: {
+        create: [
+          { workspaceId: WS, type: 'email', value: T_EMAIL, status: 'VALID', verifiedAt: T_VERIFIED_AT },
+          { workspaceId: WS, type: 'email', value: encryptPii(T_EMAIL), status: 'UNVERIFIED' },
+        ],
       },
     },
   });
@@ -112,6 +135,25 @@ async function main(): Promise<void> {
   const evOnLegacy = await owner.fieldEvidence.count({ where: { entityType: 'contact', entityId: legacy.id } });
   const evOnSurvivor = await owner.fieldEvidence.count({ where: { entityType: 'contact', entityId: survivor.id } });
   assert(evOnLegacy === 0 && evOnSurvivor === 1, '② field_evidence 由 legacy 改挂到 survivor（无孤儿证据）');
+
+  // ②b 标量补空：survivor 缺 title/seniority/department → 合并从 legacy 补齐（不丢职务元数据）
+  const survScalars = await owner.canonicalContact.findUnique({
+    where: { id: survivor.id }, select: { title: true, seniority: true, department: true },
+  });
+  assert(
+    survScalars?.title === 'Head of Procurement' && survScalars?.seniority === 'director' && survScalars?.department === 'procurement',
+    '②b 合并把 legacy 的 title/seniority/department 补空到 survivor（迁移不静默丢失职务元数据）',
+  );
+
+  // ②c step-2 去重折叠分支（#60 P2 新路径）：T 明文 VALID + 密文 UNVERIFIED 同值 → 明文加密后撞既有密文点 → 折叠保 VALID、删明文
+  assert(counts.dedup >= 1, `②c step-2 去重分支确被执行（dedup=${counts.dedup} ≥1）`);
+  const soloPts = await owner.contactPoint.findMany({ where: { contactId: solo.id, type: 'email' } });
+  assert(soloPts.length === 1, `②c step-2 去重后 T 仅剩 1 个 email 点——实得 ${soloPts.length}`);
+  assert(isEncryptedPii(soloPts[0].value), '②c 保留点是密文');
+  assert(
+    soloPts[0].status === 'VALID' && soloPts[0].verifiedAt?.getTime() === T_VERIFIED_AT.getTime(),
+    '🔴②c step-2 去重分支验证态保全：折叠后=VALID+verifiedAt（#60 P2 新路径真被验证，非 false-green）',
+  );
 
   // ③ 幂等再跑
   const again = await runBackfill();
