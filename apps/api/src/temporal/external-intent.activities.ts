@@ -49,6 +49,12 @@ export interface ExternalIntentIcpResult {
   error?: string;
 }
 
+/** 两 provider 的 live kill-switch 态（`DataProvider.status === 'ENABLED'`）。sweep 摄取后单次重读、thread 给逐 ICP 投影。 */
+export interface LiveProviderState {
+  ted: boolean;
+  openfda: boolean;
+}
+
 /**
  * **外部源 intent sweep** 的 Temporal 活动（收口⑤重构：ingest-once + 两层投影）。
  * 旧结构「逐 ICP 各自 broker.invoke 直连 TED/openFDA + 直接 upsert」= 同一外部记录被 N 个 ICP×workspace
@@ -58,8 +64,9 @@ export interface ExternalIntentIcpResult {
  *   ③ ingestExternalSignals：按 (provider, queryFingerprint, windowKey) **全局去重后拉取一次** →
  *      source_signal 平台表（零个人数据）；预算 `sweep:external-intent` 开账，BudgetExceeded 停拉不停投影；
  *   ④ projectExternalIntentForIcp：逐 ICP 从 source_signal **只读投影**进本租户 canonical（withWorkspace RLS）。
- * kill-switch：③ 每指纹拉取前、④ 每 ICP 投影前均 live 重读 data_provider（中途 ops 关停本轮即生效，
- *   投影同拦——Codex #56 P1）；② 解析零出网只受捕获标志门。SUSPENDED=停采不停用不入投影（architecture §5）。
+ * kill-switch：③ 每指纹拉取前 live 重读 data_provider；④ 投影用 workflow 摄取后**单次** liveProviderState 重读的
+ *   live 快照门控（中途 ops 关停本轮即生效；快照缺省则活动自读兜底=防御纵深——Codex #56 P1 + fast-follow 单次读优化）；
+ *   ② 解析零出网只受捕获标志门。SUSPENDED=停采不停用不入投影（architecture §5）。
  */
 export function createExternalIntentActivities(deps: {
   prisma: PrismaService;
@@ -72,7 +79,7 @@ export function createExternalIntentActivities(deps: {
   const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma });
 
   /** live kill-switch：拉取前重读 data_provider 状态（ownerDb 只读；缺失 → 全停）。 */
-  async function liveEnabled(): Promise<{ ted: boolean; openfda: boolean }> {
+  async function liveEnabled(): Promise<LiveProviderState> {
     if (!deps.ownerDb) return { ted: false, openfda: false };
     const rows = await deps.ownerDb.dataProvider.findMany({
       where: { key: { in: [TED_PROVIDER, OPENFDA_PROVIDER] } },
@@ -240,12 +247,23 @@ export function createExternalIntentActivities(deps: {
     },
 
     /**
+     * live kill-switch 快照（fast-follow 单次读优化）：workflow 摄取后调**一次**，把结果 thread 给逐 ICP
+     * `projectExternalIntentForIcp`——把「每 ICP 一次 owner-DB 读」降到「每 sweep 一次」。取的是**投影阶段开始前一刻**
+     * 的 live 态（摄取全程若 ops 关停即反映）；投影仍逐 ICP AND 各自捕获标志。缺省不注入时投影自读兜底（防御纵深）。
+     */
+    async liveProviderState(): Promise<LiveProviderState> {
+      return liveEnabled();
+    },
+
+    /**
      * 对一个 ICP 从 source_signal **只读投影**（零出网）：TED 招标 + openFDA 清关 → 本租户 canonical。
      * 各 provider 独立 enabled 门；单 provider 投影失败 fail-safe 不阻断另一个。
      */
     async projectExternalIntentForIcp(args: ResolvedIntentTarget & {
       tedEnabled: boolean;
       openfdaEnabled: boolean;
+      /** workflow 摄取后单次 liveProviderState 重读的 live 快照；缺省则本活动自读 data_provider（防御纵深）。 */
+      live?: LiveProviderState;
     }): Promise<ExternalIntentIcpResult> {
       const out: ExternalIntentIcpResult = {
         workspaceId: args.workspaceId, icpId: args.icpId,
@@ -253,14 +271,15 @@ export function createExternalIntentActivities(deps: {
         ...(args.error ? { error: args.error } : {}),
       };
 
-      // 投影前 **live 重读 DataProvider kill-switch**（Codex #56 P1 收口）：tedEnabled/openfdaEnabled 是
-      // sweep 头部 listExternalIntentTargets 捕获的、可能已过时的标志。摄取活动逐指纹已 liveEnabled 重读；
-      // 投影此前只受捕获门——provider 被 ops 中途置 DISABLED（schema DataProvider.status = Kill Switch 执行点）
-      // 仍会把缓存 source_signal 投进本租户 canonical 造新线索。此处对齐摄取纪律：provider 中途下线本轮即不投影，
-      // 让 kill-switch 成为**非破坏性「停一切新活动」**闸。
+      // 投影前 **live 门控 DataProvider kill-switch**（Codex #56 P1 收口 + fast-follow 单次读优化）：
+      // tedEnabled/openfdaEnabled 是 sweep 头部 listExternalIntentTargets 捕获的、可能已过时的标志——provider 被
+      // ops 中途置 DISABLED（schema DataProvider.status = Kill Switch 执行点）时，若只信捕获门会把缓存 source_signal
+      // 投进本租户 canonical 造新线索。故用 live 态 AND 捕获标志：**优先用 workflow 摄取后单次 liveProviderState 重读
+      // 的 `args.live` 快照**（省每-ICP owner-DB 读）；未注入时自读 liveEnabled() 兜底（直连调用者=测试/verify/未来
+      // 调用不被信任，防御纵深）。provider 中途下线本轮即不投影——kill-switch 成为**非破坏性「停一切新活动」**闸。
       //   ⚠️ 刻意**不**在此加 source_policy SUSPENDED 门：SUSPENDED=**停采不停用**（egress-only，见 architecture
       //   §5 两级撤停语义）——停「用」存量信号的正解是 revokeByProvider（翻 REVOKED，投影已按 status='ACTIVE' 剔除）。
-      const live = await liveEnabled();
+      const live = args.live ?? (await liveEnabled());
       const tedOn = args.tedEnabled && live.ted;
       const openfdaOn = args.openfdaEnabled && live.openfda;
 
