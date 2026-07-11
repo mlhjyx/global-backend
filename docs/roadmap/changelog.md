@@ -214,3 +214,16 @@
 - **对抗复审**（单 reviewer 逐条对抗核验）：抓 **1 HIGH（🔴 错并）**——Tier 3 原误借**公司名匹配器** `normForMatch` 剥法人后缀（co/sa/oy/as…），姓氏恰为这些真实姓氏时（"Marco Sa"/"Erik Oy"/挪威姓 "…As"）→ 剥成只剩名 → 错并两人；**已修**：Tier 3 改用人名归一 token Jaccard、不碰公司匹配器 + 锁死回归测。2 LOW（`created` 含并入、证据 camelCase→snake_case）一并修；邮箱守卫/欠并方向/重构等价/事务纪律逐条核验安全。
 - **实测**：build 零错 · **521 vitest**（+3 错并回归）· 真库真 RLS `verify-cross-source-identity.mts` 三场景全绿（①一人无邮箱→带邮箱同名→并一条 ②同公司同名不同邮箱→两条不并🔴 ③"Dr. Johann Schmidt"→"Johann Schmidt"→并）。
 - **遗留**：待办 3 P1 身份源（专利 inventor/注册处董事/商标申请人）——本期已建 `externalIds→Tier 0` 缝、留 TODO 空跑通。
+
+## 2026-07-11 · 收口⑤ 一等 Signal + ingest-once（PR #56 代码 + 本 PR 文档）
+
+**缺口#5 根治**：intent 从「JSON 投影非一等事实 + 外部源按 ICP×workspace 重复直拉」反转为两层模型。
+
+- **平台层**：`source_signal` 一等信号表（无 RLS 零个人数据：payload 白名单显式构造 + FDA 个体户摄取层即拒 + 对抗单测锁；subject 身份键与租户 dedupeKey 同规范化；双时间轴 occurred/observed=backtest 基础；license 行级；状态机 ACTIVE→EXPIRED|REVOKED + 类型 TTL 招标 90d/清关 365d）+ `signal_ingest` ingest-once 账本。**时间窗拍板：6h UTC 对齐桶**（env `SIGNAL_INGEST_WINDOW_MS`），拉取键=(provider, 规范化查询指纹, windowKey)——跨 workspace 同参 ICP 天然共享一次拉取。
+- **SignalIngestService**：经 Broker（PLATFORM_WORKSPACE + purpose=['intent','discovery']）+ `sweep:external-intent` 预算开账 + BudgetExceeded 透传；ERROR 条件记账绝不覆盖并发 OK 行（TOCTOU 护栏）；**撤即脱敏** revoke + revokeBySubjectKey/ByProvider（Art.17 路径）。**两级撤停语义拍板**：source_policy SUSPENDED=停采不停用（只拦出网），「采集被判违规」类事件用 revokeByProvider 处置存量。
+- **投影反转**：TED/openFDA intent 投影只读 source_signal（fetch 拆层、构造去 broker）；FDA 码过滤下推 jsonb；扫描窗/上限截断显性告警 + subjectsTruncated 可观测。sweep 四段化（枚举→确定性解析→指纹去重拉取一次→逐 ICP 投影），expireStale 状态机先行。
+- **可复算**：IntentRecomputeService（surfaces=与增量投影同过滤面——对抗复审 HIGH：防跨 CPV/跨 ICP 注入与抖动循环，不动点回归锁）；mergeIntent 去重键 epoch 归一（对抗复审 HIGH：存量旧格式 at 与新 UTC ISO 同刻去重，生产 sweep 一次重写自然收敛，无需 backfill）。web_watch 按 ADR-006 留租户轨（事实账本=source_entity_change，复算地平线=保留期）。
+- **demand_proof 维切分拍板**：需求证据=TENDER_PUBLISHED+SOURCING_OPENED（FDA_CLEARANCE 属上市时机留 Intent 维）；evidence 判据强制（ADR-010）；观测维**不进总分**（乘法门待 R2 backtest ≥50 QGO 标签）；快照 v1 契约预留槽位 → **零破坏填充**（snapshot_version 保持 1，不开 v2 文件防混流；qualification_rule_version→additive-6dim-v2）。
+- **实测**（真库真 API 无 sandbox，四脚本全绿）：verify-signal-first 38 断言（验收①②③各有专属断言：24 条真招标一次拉取双租户各投 18 家零出网 / EXPIRED-REVOKED 剔除+脱敏 / 复算重建 unchanged）；三旧脚本适配两层架构（真跑抓到并修 openFDA 投影 taxonomy 键大小写 bug）。547/547 vitest（+53 新测 TDD）+ build + eslint 零告警。
+- **对抗复审**：3 维 21 agent 逐 finding 独立核验——14 缺陷确认全修/记档（2 HIGH 根治+回归锁）、2 误报驳回。
+- **记档不阻塞**：ingest PENDING 抢锁根治 · TED CPV 前缀列+GIN 下推 · 投影上限游标化（缺口#8 同类）· license 值 SPDX 统一（随收口⑥ 权利词表）。
