@@ -18,14 +18,20 @@ import { DataRightsContext, JURISDICTIONS, Jurisdiction } from './data-rights.ty
  * 会被误判为 ALLOW 而非 REQUIRE_APPROVAL（GDPR Ch.V/PIPL 人审）——出海中企务必按真实处理地设置。**
  *
  * env DATA_PROCESSOR_JURISDICTION（值 ∈ JURISDICTIONS）。非法值 → 抛（fail-fast 防拼写）；
- * 生产未设 → 大声告警并缺省 EU（不 brick 应用，但运维可见）；dev 未设 → 静默缺省 EU。
+ * 🔴 **生产未设 → 抛（fail-closed，Codex P1 on PR #72）**：缺省 EU 会把在华处理误判为 ALLOW（漏
+ * GDPR Ch.V/PIPL 跨境人审），故生产必须显式设真实处理地，宁可 fail-fast 不启动也不静默错判；
+ * dev/test 未设 → 缺省 EU（便于本地/CI 跑）。nodeEnv 可注入便于单测。
  */
-function resolveProcessorJurisdiction(raw?: string | null): Jurisdiction {
+export function resolveProcessorJurisdiction(
+  raw?: string | null,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): Jurisdiction {
   const v = (raw ?? '').trim().toUpperCase();
   if (!v) {
-    if (process.env.NODE_ENV === 'production') {
-      console.warn(
-        '[compliance] DATA_PROCESSOR_JURISDICTION 未设 → 缺省 EU；跨境规则（EU/UK 主体→CN 处理地）不会触发。请按真实处理地设置。',
+    if (nodeEnv === 'production') {
+      throw new Error(
+        'DATA_PROCESSOR_JURISDICTION 未设：生产环境必须显式设置真实数据处理地' +
+          `（${JURISDICTIONS.join(' | ')}），否则 EU/UK 主体的跨境存储会被误判为 ALLOW 而非 REQUIRE_APPROVAL。`,
       );
     }
     return 'EU';
