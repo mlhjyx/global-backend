@@ -7,10 +7,15 @@ import {
   classifyLeadQualified,
   LEAD_QUALIFIED_SCHEMA_VERSION,
 } from './lead-qualified-snapshot';
+import { DataRightsService } from '../compliance/data-rights.service';
+import { storageRightsContextForLead } from '../compliance/data-rights.context';
 
 @Injectable()
 export class LeadService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dataRights: DataRightsService,
+  ) {}
 
   /** 触发对某 ACTIVE ICP 的评分（异步，Temporal）。 */
   async qualify(ctx: RequestContext, icpId: string) {
@@ -140,10 +145,33 @@ export class LeadService {
           where: { id: lead.icpId },
           select: { version: true },
         });
+        // 收口⑥：存储权利判定 + **强制**（不只标注，确定性纯引擎、缓存规则同步无 await）。
+        // 具名决策人 → red；公司国别 → 主体法域；公司 SUPPRESSED → DENY。
+        const rights = this.dataRights.evaluate(
+          storageRightsContextForLead({
+            country: company.country,
+            status: company.status,
+            hasNamedContacts: company.contacts.length > 0,
+          }),
+        );
+        // 🔴 !allowed 一律**不交棒**——统一挡住：① 禁联/Art.17 冻结（freezeSubject 置
+        // company.status=SUPPRESSED，而 Lead 状态异步才更新，存在竞态窗口）② 跨境人审
+        // REQUIRE_APPROVAL（EU/UK 主体→CN 处理地）③ 无合法性基础 ALLOW_WITH_BASIS（如 PIPL CN 主体）。
+        // 防「storage_rights=DENY 却仍 handoff_to_campaign + 具名 refs」的自相矛盾输出流向 SaaS。
+        // 规则未加载时引擎对 red 数据 fail-closed（DENY）→ 同样挡下（安全）。
+        if (!rights.allowed) {
+          throw new ConflictException({
+            error: {
+              code: 'STORAGE_RIGHTS_NOT_GRANTED',
+              message: `storage rights ${rights.effect} — handoff blocked pending approval/lawful basis`,
+            },
+          });
+        }
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
           company,
           icpVersion: icp?.version ?? null,
+          storageRightsDecision: rights.effect,
         });
         await tx.outboxEvent.create({
           data: {

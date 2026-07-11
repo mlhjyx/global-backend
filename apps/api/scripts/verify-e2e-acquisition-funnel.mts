@@ -39,6 +39,8 @@ import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broke
 import { companyIdentity, contactIdentity } from '../src/discovery/identity';
 import { blindContactKey } from '../src/compliance/pii-crypto';
 import { buildLeadQualifiedSnapshot, LeadQualifiedSnapshotInput } from '../src/lead/lead-qualified-snapshot';
+import { DataRightsService } from '../src/compliance/data-rights.service';
+import { storageRightsContextForLead } from '../src/compliance/data-rights.context';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -206,6 +208,9 @@ const providers = new DiscoveryProviderRegistry({ gateway, broker });
 await providers.seed(ownerDb); // 幂等：smtp_self ENABLED + email_guess 行存在（默认 DISABLED）
 const backlog = createBacklogActivities({ prisma, providers, gateway, ownerDb, broker });
 const qualify = createQualifyActivities({ prisma });
+// 收口⑥ DataRights：onModuleInit 幂等 seed jurisdiction_policy + 加载规则（决 storage_rights_decision）
+const dataRights = new DataRightsService(prisma);
+await dataRights.onModuleInit();
 
 const { icpId, companyId, contactId } = await seed();
 await setEmailGuess('DISABLED', {}); // 确保起点：邮箱补全默认关（证明 BEFORE 的可达=0 不是靠猜测）
@@ -280,15 +285,26 @@ const snapInput = await prisma.withWorkspace(WS, async (tx) => {
   };
   return input;
 });
-const snap = buildLeadQualifiedSnapshot(snapInput);
+// 收口⑥：与 lead.service.decide 同法算 STORE 存储权利判定，接进快照（此前恒 null）
+const rights = dataRights.evaluate(
+  storageRightsContextForLead({
+    country: snapInput.company.country,
+    status: snapInput.company.status,
+    hasNamedContacts: snapInput.company.contacts.length > 0,
+  }),
+);
+const snap = buildLeadQualifiedSnapshot({ ...snapInput, storageRightsDecision: rights.effect });
 console.log(`  snapshot: contact_refs=${snap.contact_refs.length} personal_data_class=${snap.personal_data_class} recommended_action=${snap.recommended_action}`);
 console.log(`  snapshot.scores.reachability=${snap.scores.reachability}  fit_verdict=${snap.fit_verdict}`);
 ok(snap.contact_refs.length === 1, '快照携带 1 名决策人 ref');
 ok(snap.contact_refs[0].personal_data === true, '决策人 ref 标 personal_data=true（GDPR 最小化：只带 id+职务）');
 ok((snap.scores.reachability ?? 0) > 0, '快照 scores.reachability>0（下游知道此线索可达）');
 ok(snap.recommended_action === 'handoff_to_campaign', 'recommended_action=handoff_to_campaign（交棒 Campaign）');
-// 显性暴露封版② 输出合同硬缺（本测顺带取证，供下一步收口）
-console.log(`  ⚠️ 输出合同缺口（封版②）：storage_rights_decision=${snap.storage_rights_decision}  valid_until=${snap.valid_until}  cost=<缺字段>`);
+// 收口⑥：storage_rights_decision 已接线（DE=EU 主体 + 具名决策人 red + STORE → ALLOW）
+console.log(`  storage_rights_decision=${snap.storage_rights_decision}（红数据 EU STORE 判定，DataRightsService）`);
+ok(snap.storage_rights_decision === 'ALLOW', '收口⑥：storage_rights_decision 已接线为真值（不再恒 null）');
+// 仍待收口的输出合同缺口（诚实标注）
+console.log(`  ⚠️ 仍缺（后续）：valid_until=${snap.valid_until}（鲜度模型）  cost=<缺字段>`);
 
 // ── 收尾：email_guess 回默认 DISABLED + 清理 seed ──
 await setEmailGuess('DISABLED', {});
