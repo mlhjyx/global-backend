@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { GuessResult } from './email-guesser';
 import { LawfulBasis } from './provider-contract';
+import { encryptPii } from '../compliance/pii-crypto';
 
 /**
  * 邮箱猜测结果的落库（选项 B · P0.3）——把 {@link EmailGuesser} 猜到的决策人邮箱写进
@@ -96,7 +97,8 @@ export async function persistGuessedEmail(
       entityId: args.contactId,
       field: 'email.guess',
       value: {
-        email: plan.email,
+        // 收口⑥：证据里的人名邮箱=第二份 PII → 加密落库（确定性，与 contact_point 密文一致）。
+        email: encryptPii(plan.email),
         pattern: plan.pattern,
         confidence: plan.confidence,
         status: plan.pointStatus,
@@ -109,6 +111,7 @@ export async function persistGuessedEmail(
       providerKey: 'email_guess',
       license: 'derived',
       allowedActions: allowedActionsForGuess(plan.pointStatus) as unknown as Prisma.InputJsonValue,
+      dataClass: 'red', // 猜出的人名邮箱=个人数据
     },
   });
 

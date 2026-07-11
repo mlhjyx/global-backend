@@ -2,6 +2,13 @@ import { Prisma } from '@prisma/client';
 import { contactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
+import { encryptPii } from '../compliance/pii-crypto';
+import { cleanEmail } from '../acquisition/clean';
+
+/** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
+function emailDataClass(email: string): 'amber' | 'red' {
+  return cleanEmail(email)?.kind === 'role' ? 'amber' : 'red';
+}
 
 export interface PersistDiscoveredContactsArgs {
   workspaceId: string;
@@ -62,16 +69,21 @@ export async function persistDiscoveredContacts(
         update: {},
         create: { workspaceId: args.workspaceId, contactId, type: p.type, value: p.value },
       });
+      // 收口⑥：field_evidence 是同一 PII 的第二副本——PII 值加密落库（确定性，与 contact_point 密文一致），
+      // 并落 dataClass 分级（email 按职能/人名分 amber/red，phone/linkedin red）。
+      const isPii = p.type === 'email' || p.type === 'phone' || p.type === 'linkedin';
+      const dataClass = isPii ? (p.type === 'email' ? emailDataClass(p.value) : 'red') : 'green';
       await tx.fieldEvidence.create({
         data: {
           workspaceId: args.workspaceId,
           entityType: 'contact',
           entityId: contactId,
           field: p.type,
-          value: p.value as unknown as Prisma.InputJsonValue,
+          value: (isPii ? encryptPii(p.value) : p.value) as unknown as Prisma.InputJsonValue,
           providerKey: args.adapterKey,
           license: args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed',
           allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
+          dataClass,
         },
       });
     }
@@ -92,6 +104,7 @@ export async function persistDiscoveredContacts(
           providerKey: args.adapterKey,
           license: 'public',
           allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
+          dataClass: 'red', // 具名人侧写=个人数据（GDPR Art.4）
         },
       });
     }
