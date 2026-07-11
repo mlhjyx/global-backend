@@ -159,6 +159,11 @@ async function main() {
   ok(gatedIngest.tedSpecs === 0 && gatedIngest.fetches === 0, 'tedEnabled=false → 摄取零 TED spec、零出网');
   const skip = await acts.projectExternalIntentForIcp({ ...resolvedPump, tedEnabled: false, openfdaEnabled: gated.openfdaEnabled });
   ok(skip.tenders === undefined, 'tedEnabled=false → TED 投影跳过（解析已拆层零出网；投影不读不写）');
+
+  // TOCTOU 收口（Codex #56 P1）：喂**过时的**捕获标志 tedEnabled=true（模拟 sweep 头部捕获后 ops 才 DISABLE），
+  // ted data_provider 仍 DISABLED——投影必须 live 重读 kill-switch 并跳过 TED，绝不拿缓存 source_signal 造新线索。
+  const stale = await acts.projectExternalIntentForIcp({ ...resolvedPump, tedEnabled: true, openfdaEnabled: gated.openfdaEnabled });
+  ok(stale.tenders === undefined, '捕获 tedEnabled=true 但 data_provider DISABLED → 投影 live 重读 kill-switch，TED 仍跳过（TOCTOU 收口）');
   await ownerDb.dataProvider.update({ where: { key: 'ted' }, data: { status: 'ENABLED' } });
 }
 
