@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import {
   ContactCandidate,
   hasEmailConflict,
+  hasExternalIdConflict,
   resolveAmongCandidates,
   resolvePersonIdentity,
 } from './person-identity';
@@ -87,6 +88,52 @@ describe('resolveAmongCandidates · 🔴 邮箱冲突守卫（宁欠并不错并
   });
 });
 
+describe('resolveAmongCandidates · 🔴 externalId 冲突守卫（HIGH-1 回归：同名不同 officer_id）', () => {
+  const extPoint = (value: string) => ({ type: 'external_id', value });
+
+  it('同公司两名同名董事、不同 officer_id、都无邮箱 → Tier 2 不误并 → null', () => {
+    // contact-A 已挂 uk-ch-officer:OID1；输入是同名但 officerId OID2（真实不同人）
+    const hit = resolveAmongCandidates(
+      { fullName: 'John Smith', externalIds: [{ scheme: 'uk-ch-officer', value: 'OID2' }] },
+      [cand('contact-A', 'John Smith', [], [extPoint('uk-ch-officer:OID1')])],
+    );
+    expect(hit).toBeNull();
+  });
+
+  it('相同 officer_id（OID1）→ Tier 0 精确命中（正向不破）', () => {
+    const hit = resolveAmongCandidates(
+      { fullName: 'John Smith', externalIds: [{ scheme: 'uk-ch-officer', value: 'OID1' }] },
+      [cand('contact-A', 'John Smith', [], [extPoint('uk-ch-officer:OID1')])],
+    );
+    expect(hit).toEqual({ contactId: 'contact-A', matchRule: 'external_id' });
+  });
+
+  it('Tier 3 亦守卫：不同 officer_id 语序重排同名 → null', () => {
+    const hit = resolveAmongCandidates(
+      { fullName: 'Johann Schmidt', externalIds: [{ scheme: 'uk-ch-officer', value: 'OID2' }] },
+      [cand('c1', 'Schmidt Johann', [], [extPoint('uk-ch-officer:OID1')])],
+    );
+    expect(hit).toBeNull();
+  });
+
+  it('冲突守卫跳过冲突行、命中下一无 externalId 的同名行（欠并方向，仍可名并到无 id 行）', () => {
+    const hit = resolveAmongCandidates(
+      { fullName: 'John Smith', externalIds: [{ scheme: 'uk-ch-officer', value: 'OID2' }] },
+      [cand('c1', 'John Smith', [], [extPoint('uk-ch-officer:OID1')]), cand('c2', 'John Smith')],
+    );
+    expect(hit).toEqual({ contactId: 'c2', matchRule: 'name_exact' });
+  });
+
+  it('hasExternalIdConflict：input 无 id / 候选无同 scheme 点 / 不同 scheme → 不冲突（放行）', () => {
+    const c = cand('c', 'X', [], [extPoint('uk-ch-officer:OID1')]);
+    expect(hasExternalIdConflict(undefined, c)).toBe(false);
+    expect(hasExternalIdConflict([{ scheme: 'uk-ch-officer', value: 'OID1' }], cand('c', 'X'))).toBe(false); // 候选无点
+    expect(hasExternalIdConflict([{ scheme: 'uspto-inventor', value: 'Z9' }], c)).toBe(false); // 不同 scheme
+    expect(hasExternalIdConflict([{ scheme: 'uk-ch-officer', value: 'OID2' }], c)).toBe(true); // 同 scheme 值不同
+    expect(hasExternalIdConflict([{ scheme: 'UK-CH-Officer', value: 'oid1' }], c)).toBe(false); // 大小写不敏感 → 同值
+  });
+});
+
 describe('resolveAmongCandidates · margin 弃 + 跨 email/无-email 桥', () => {
   it('两个同置信候选（margin<0.1）→ 歧义即弃 → null', () => {
     const hit = resolveAmongCandidates({ fullName: 'Johann Peter Schmidt' }, [
@@ -159,5 +206,20 @@ describe('resolvePersonIdentity · DB 薄查询（假 tx）', () => {
       fullName: 'New Person',
     });
     expect(hit).toBeNull();
+  });
+
+  it('待办 3 Tier 0：候选有 external_id 点 + 同 scheme:value 输入 → matchRule=external_id（大小写不敏感）', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { id: 'c1', fullName: 'Different Display Name', contactPoints: [{ type: 'external_id', value: 'uk-ch-officer:oid1' }] },
+    ]);
+    const tx = { canonicalContact: { findMany } } as unknown as Prisma.TransactionClient;
+    const hit = await resolvePersonIdentity(tx, {
+      workspaceId: 'w1',
+      companyId: 'co1',
+      companyKey: 'd:acme.com',
+      fullName: 'Whoever',
+      externalIds: [{ scheme: 'uk-ch-officer', value: 'OID1' }], // 输入大写，候选点小写 → 仍命中
+    });
+    expect(hit).toEqual({ contactId: 'c1', matchRule: 'external_id' });
   });
 });

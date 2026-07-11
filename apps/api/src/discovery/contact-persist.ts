@@ -39,21 +39,28 @@ export async function persistDiscoveredContacts(
       continue;
     }
     // 解析前置：本公司是否已有同一人（同 companyId 内分层匹配）？
+    // externalIds（待办 3：CH officer id…）→ Tier 0 精确并（同一董事跨源/跨时间稳定命中）。
     const hit = await resolvePersonIdentity(tx, {
       workspaceId: args.workspaceId,
       companyId: args.company.id,
       companyKey: args.company.dedupeKey,
       fullName: c.fullName,
       email,
+      externalIds: c.externalIds,
     });
     const contactId = hit
       ? await mergeIntoContact(tx, args, c, hit)
       : await createContact(tx, args, c, email);
 
+    // 身份源须声明署名义务许可（CH=OGL-UK-3.0…），缺省回退现有语义（licensed/sandbox）。
+    const evidenceLicense = c.license ?? (args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed');
     const points: { type: string; value?: string }[] = [
       { type: 'email', value: email },
       { type: 'phone', value: c.phone },
       { type: 'linkedin', value: c.linkedin },
+      // external_id 点（value=`${scheme}:${value}`，与 person-identity Tier 0 查法一致，小写比对）——
+      // 写上后，下次同源/跨源同人经 Tier 0 精确并（不再靠人名模糊）。
+      ...(c.externalIds ?? []).map((e) => ({ type: 'external_id', value: `${e.scheme}:${e.value}` })),
     ];
     for (const p of points) {
       if (!p.value) continue;
@@ -70,7 +77,7 @@ export async function persistDiscoveredContacts(
           field: p.type,
           value: p.value as unknown as Prisma.InputJsonValue,
           providerKey: args.adapterKey,
-          license: args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed',
+          license: evidenceLicense,
           allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
         },
       });
@@ -164,7 +171,7 @@ async function mergeIntoContact(
         ...(hit.score != null ? { score: hit.score } : {}),
       } as unknown as Prisma.InputJsonValue,
       providerKey: args.adapterKey,
-      license: args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed',
+      license: c.license ?? (args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed'),
       allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
     },
   });

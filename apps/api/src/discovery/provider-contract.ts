@@ -84,6 +84,13 @@ export interface ProviderContactRecord {
   personalData?: boolean;
   /** 抽取来源页（留痕/可审计）。 */
   sourcePage?: string;
+  /**
+   * 源侧稳定标识（待办 3：注册处 officer id / 专利 inventor id…）→ resolvePersonIdentity **Tier 0** 精确并；
+   * 持久化时逐个写 `external_id` contactPoint（value=`${scheme}:${value}`）。缺省 → Tier 0 跳过。
+   */
+  externalIds?: { scheme: string; value: string }[];
+  /** 该联系人字段许可（写入 field_evidence.license）——身份源须声明署名义务许可（如 CH=OGL-UK-3.0）；缺省回退 'licensed'。 */
+  license?: string;
 }
 
 export interface DiscoveryResult {
