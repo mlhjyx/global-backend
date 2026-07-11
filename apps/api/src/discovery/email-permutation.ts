@@ -12,6 +12,14 @@
  *    去音标变体（ö→o）两套（不同公司两种都有），候选**有界**（默认上限）避免无谓 SMTP 扇出。
  */
 
+// 人名解析（去称谓/贵族前缀/音译）已抽成共享纯件 `./person-name`（消 DRY，供 person-identity 复用）。
+// 此处 re-export 保持既有下游（email-format-learning / email-guesser / spec）零改动、行为逐字不变。
+import { parseName, transliterateVariants } from './person-name';
+import type { ParsedName } from './person-name';
+
+export { parseName, transliterateVariants };
+export type { ParsedName };
+
 /** 一条候选邮箱：地址 + 生成它的模式标签 + 该模式的经验先验（0-1，越高越可能是公司实际命名法）。 */
 export interface EmailCandidate {
   email: string;
@@ -19,91 +27,6 @@ export interface EmailCandidate {
   pattern: string;
   /** 该模式在 B2B 的经验先验概率（排序 + 置信度输入，非保证）。 */
   prior: number;
-}
-
-/** 解析后的姓名部件（音译前）。 */
-export interface ParsedName {
-  /** 名（去称谓后的第一个 token）。 */
-  given: string;
-  /** 姓（含贵族前缀 von/van/de 时为其后整体；见 surnameCore 备用）。 */
-  surname: string;
-  /** 姓去掉贵族前缀后的最后一段（如 "von der berg" → "berg"），无前缀时与 surname 相同。 */
-  surnameCore: string;
-  /** 中间名（多数命名法不用，保留供扩展）。 */
-  middles: string[];
-}
-
-// 称谓/学位前后缀（去点/连字符后比对）——中小企业官网常见。
-const HONORIFICS = new Set([
-  'dr', 'prof', 'dipl', 'ing', 'mag', 'med', 'phd', 'mba', 'bsc', 'msc', 'ba', 'ma',
-  'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'hon', 'rer', 'nat', 'habil',
-]);
-
-// 贵族/介词前缀（归入姓；小写比对）。
-const SURNAME_PARTICLES = new Set([
-  'von', 'van', 'vom', 'zum', 'zur', 'zu', 'de', 'del', 'della', 'der', 'den', 'di',
-  'da', 'dos', 'das', 'du', 'la', 'le', 'el', 'af', 'av', 'ter', 'ten', 'op',
-]);
-
-/** 去称谓 token（"dr." / "dipl.-ing." 均可）。 */
-function isHonorific(token: string): boolean {
-  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
-  return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
-}
-
-/**
- * 音译成小写 ASCII 变体集合（去重、保序）。返回**多个**变体：
- *  - 德语标准：ä→ae ö→oe ü→ue ß→ss
- *  - 去音标：é→e ñ→n ç→c … + ä→a ö→o ü→u（NFD 去组合记号）
- * 两种都常见于真实公司邮箱，故都作为候选。
- */
-export function transliterateVariants(raw: string): string[] {
-  const lower = raw.toLowerCase().trim();
-  if (!lower) return [];
-  const stripMarks = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
-  // 变体 1：德语标准替换（ä→ae…）后仍 NFD 去残留音标（é→e），避免未覆盖重音被 clean 直接删成错串
-  const german = stripMarks(
-    lower.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss'),
-  );
-  // 变体 2：纯去组合音标（ö→o；ß NFD 不拆，先 ß→ss）
-  const stripped = stripMarks(lower.replace(/ß/g, 'ss'));
-  const clean = (s: string): string => s.replace(/[^a-z0-9]/g, '');
-  const out: string[] = [];
-  for (const v of [german, stripped]) {
-    const c = clean(v);
-    if (c && !out.includes(c)) out.push(c);
-  }
-  return out;
-}
-
-/** 解析全名 → 部件（strip 称谓、识别贵族前缀、拆名/姓）。空/无效返回 null。 */
-export function parseName(fullName: string): ParsedName | null {
-  const tokens = fullName
-    .replace(/[,;]/g, ' ')
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t && !isHonorific(t));
-  if (tokens.length === 0) return null;
-  if (tokens.length === 1) {
-    // 只有一个 token：当作 given，姓留空（只能出 first/first-only 模式）
-    return { given: tokens[0], surname: '', surnameCore: '', middles: [] };
-  }
-  const given = tokens[0];
-  // 找第一个贵族前缀作为姓的起点；没有则姓=最后一个 token
-  let surnameStart = tokens.length - 1;
-  for (let i = 1; i < tokens.length; i += 1) {
-    if (SURNAME_PARTICLES.has(tokens[i].toLowerCase())) {
-      surnameStart = i;
-      break;
-    }
-  }
-  const surnameTokens = tokens.slice(surnameStart);
-  const middles = tokens.slice(1, surnameStart);
-  const surname = surnameTokens.join(' ');
-  // core = 去掉前缀后的最后一段（"von der berg" → "berg"）
-  const nonParticle = surnameTokens.filter((t) => !SURNAME_PARTICLES.has(t.toLowerCase()));
-  const surnameCore = (nonParticle[nonParticle.length - 1] ?? surname).trim();
-  return { given, surname, surnameCore, middles };
 }
 
 /** 模式定义：给定 first/last 部件片段，产出 local-part；prior=经验先验。 */
