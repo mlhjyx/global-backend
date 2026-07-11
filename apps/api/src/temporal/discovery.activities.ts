@@ -49,6 +49,15 @@ export function createDiscoveryActivities(deps: {
   const ensureRunBudget = (runId: string): void => budgetLedger.open(runId, runBudgetCents());
 
   return {
+    /**
+     * run 起始清账：强制关闭本 runId 可能残留的预算账户（含 wasExhausted 打标）。用于同 runId 的**重试**：
+     * 上次 attempt 若在 finalizeRun 前崩溃，进程内账户与打穿标记会残留（budgetLedger 无 GC），
+     * 令重试的首个 executeQuery 误报 budgetTruncated。workflow 起始调一次即从干净状态起（单 worker 前提下）。
+     */
+    async resetRunBudget(args: { runId: string }): Promise<void> {
+      budgetLedger.close(args.runId, { force: true });
+    },
+
     async loadPlanQueries(args: { workspaceId: string; planId: string }): Promise<{ queries: PlanQuery[] }> {
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: args.planId } });
@@ -380,11 +389,11 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
       icpId: string;
-    }): Promise<{ enriched: number; matched: number; provider: string | null }> {
+    }): Promise<{ enriched: number; matched: number; provider: string | null; budgetTruncated: boolean }> {
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
       );
-      if (!enrichers.length) return { enriched: 0, matched: 0, provider: null };
+      if (!enrichers.length) return { enriched: 0, matched: 0, provider: null, budgetTruncated: false };
 
       // 本 run 归一出、且过了本 run ICP 资格门（Lead.fitVerdict='match'）的公司
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -469,7 +478,14 @@ export function createDiscoveryActivities(deps: {
           }
         });
       }
-      return { enriched, matched, provider: providersHit.size ? [...providersHit].join('+') : null };
+      // 富集阶段与发现共享 run 预算账户：某源在富集中打穿 → wasExhausted 检出，让 run 判 PARTIAL 而非假 DONE
+      // （provider fail-safe 吞了 BudgetExceededError，仍靠 ledger 唯一真相点判——与 executeQuery 一致）。
+      return {
+        enriched,
+        matched,
+        provider: providersHit.size ? [...providersHit].join('+') : null,
+        budgetTruncated: budgetLedger.wasExhausted(args.runId),
+      };
     },
 
     /**
@@ -483,11 +499,11 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
       icpId: string;
-    }): Promise<{ enriched: number; matched: number; provider: string | null }> {
+    }): Promise<{ enriched: number; matched: number; provider: string | null; budgetTruncated: boolean }> {
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
       );
-      if (!enrichers.length) return { enriched: 0, matched: 0, provider: null };
+      if (!enrichers.length) return { enriched: 0, matched: 0, provider: null, budgetTruncated: false };
 
       // DAT-011：SUSPENDED 域名黑名单（平台级 source_policy，富集侧同样遵守 —— 富集也会抓这些域名）
       const suspended = new Set(
@@ -577,7 +593,12 @@ export function createDiscoveryActivities(deps: {
           }
         });
       }
-      return { enriched, matched, provider: providersHit.size ? [...providersHit].join('+') : null };
+      return {
+        enriched,
+        matched,
+        provider: providersHit.size ? [...providersHit].join('+') : null,
+        budgetTruncated: budgetLedger.wasExhausted(args.runId),
+      };
     },
 
     /**
