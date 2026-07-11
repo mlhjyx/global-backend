@@ -227,3 +227,13 @@
 - **实测**（真库真 API 无 sandbox，四脚本全绿）：verify-signal-first 38 断言（验收①②③各有专属断言：24 条真招标一次拉取双租户各投 18 家零出网 / EXPIRED-REVOKED 剔除+脱敏 / 复算重建 unchanged）；三旧脚本适配两层架构（真跑抓到并修 openFDA 投影 taxonomy 键大小写 bug）。547/547 vitest（+53 新测 TDD）+ build + eslint 零告警。
 - **对抗复审**：3 维 21 agent 逐 finding 独立核验——14 缺陷确认全修/记档（2 HIGH 根治+回归锁）、2 误报驳回。
 - **记档不阻塞**：ingest PENDING 抢锁根治 · TED CPV 前缀列+GIN 下推 · 投影上限游标化（缺口#8 同类）· license 值 SPDX 统一（随收口⑥ 权利词表）。
+
+### 选项 B · 待办 3 首个身份源 UK Companies House（2026-07-11，PR #58，设计 [decision-maker-p1-companies-house-design.md](decision-maker-p1-companies-house-design.md)）
+
+> 承接待办 2（#54）**兑现 `resolvePersonIdentity` 的 Tier 0 externalId 缝**：对 fit=match 英国公司 → CH 官方注册处取现任董事 → 高置信对齐公司 → `externalId(uk-ch-officer)` 走 Tier 0 精确并/新建；**同董事若也在 Impressum 出现→自动并成一条**（兑现待办 2 跨源合并）。
+
+- 新 `adapters/companies-house.ts`（Basic auth CH client，经 ToolBroker 出网）+ `providers/companies-house.provider.ts`（`ContactDiscoveryAdapter`）；扩 `ProviderContactRecord.externalIds/license` + `contact-persist` 写 `external_id` 点/传 resolve；联系人发现改 **fan-out 全部 enabled adapter**（CH 与 decision_maker 并跑经缝合并，逐 adapter fail-safe）；seed `companies_house` data_provider（无 key 天然 no-op）+ source_policy。**无 schema 迁移**。
+- 🔴 合规：**GB country 门**（非英不搜）+ 公司对齐 `pickBestByName` 0.9·margin（绝不挂错公司）+ **数据最小化**（只 name+role+officer_id，不摄 DOB/国籍/职业/住址）+ **§8.8 source_policy 用途门 fail-closed** + 董事 personalData + **OGL-UK-3.0** 署名穿透 field_evidence。
+- **对抗复审**（PoC 单测在分支上实测复现）：抓 **2 HIGH 全修**——① Tier 0 缺反向守卫致同公司同名不同 officer_id 董事误并（加 `hasExternalIdConflict` 对称 email 守卫，Tier 2/3 拦冲突）；② GB 门 `.uk` 域名当辖区可绕过（`.uk` 2014 全球开放），改 country 优先（非英一律拒、`.uk` 仅缺国别弱兜底）+ 1 MED（fan-out 静默 catch 补 warn）。已核验安全：数据最小化/§8.8 门/公司对齐 margin/key 不泄漏/自足性（committed schema 构建通过，不依赖并发 storage-compliance WIP）。
+- **实测**：build 0 · **610 vitest**（含错并回归）· 真库真 CH API `verify-companies-house.mts` 四段全绿（AstraZeneca 真拉 12 董事·对齐 1.00·Tier 0 二次幂等 merged=12·跨源与 Impressum 并一条·§8.8 去用途→拒→零联系人·无 DOB/国籍入库）。
+- **遗留**：待办 3 后续源（专利 inventor USPTO/EPO、商标 EUIPO/WIPO；CH 扩德/法）——fan-out + Tier 0 缝已跑通，后续源同法接入。
