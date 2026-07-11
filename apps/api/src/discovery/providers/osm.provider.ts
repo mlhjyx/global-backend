@@ -46,7 +46,8 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
       >(
         'osm.overpass',
         { areaName, tagFilters, limit: Math.min(query.limit, 80) },
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        // #51：传本次调用用途，用途门按 discovery 判（osm.overpass allowedPurpose=['discovery']）
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
       );
       places = res.data.places ?? [];
     } catch (err) {

@@ -105,10 +105,13 @@ export class RouterModelGateway extends ModelGateway {
     // 预算门（收口② D）：task.maxCostCents 从纯声明变真闸——reserve-then-settle，
     // 账户（runId ?? workspaceId）超限即抛 BudgetExceededError（调用不发生=真拦截）。
     // settle 优先级：costUsd（按实）→ token 折算（centsFromTokens）→ est 兜底。
-    const estCents = getTask(input.task)?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
+    const baseCents = getTask(input.task)?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
+    // generateStructured 可能做一次校验-修复重试（第二次模型调用，见下）——预留**两次**上限，否则账户仅够
+    // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
+    const reserveCents = op === 'generateStructured' ? baseCents * 2 : baseCents;
     let reservation: { runId: string; estCents: number };
     try {
-      reservation = this.budget.reserve(ctx.runId ?? ctx.workspaceId, estCents);
+      reservation = this.budget.reserve(ctx.runId ?? ctx.workspaceId, reserveCents);
     } catch (err) {
       // 预算拒绝必须可审计（对齐 ToolBroker 的 DENIED trace）：否则截断完全不可观测。
       if (err instanceof BudgetExceededError) {
@@ -140,7 +143,7 @@ export class RouterModelGateway extends ModelGateway {
         try {
           const result = await call(provider);
           const costUsd = result.usage?.costUsd;
-          settle(costUsd != null ? Math.ceil(costUsd * 100) : centsFromTokens(result.usage) ?? estCents);
+          settle(costUsd != null ? Math.ceil(costUsd * 100) : centsFromTokens(result.usage) ?? baseCents);
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,

@@ -51,6 +51,27 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     expect((provider.generateText as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
   });
 
+  it('generateStructured 预留两次上限（含校验-修复重试）→ 账户仅够一次时整体在 reserve 处被拦（#51 P2）', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 30); // maxCostCents=20 → 单次(20)够、两次(40)不够
+    const provider = fakeProvider();
+    const gw = gatewayWith(provider, budget);
+    await expect(
+      gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toThrow(BudgetExceededError);
+    // 修复预算无法预留 → 第一次模型调用也不发生（reserve 在调用前，修复不再打穿账户）
+    expect((provider.generateStructured as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it('generateStructured 预算充足（≥两次上限）→ 正常执行', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 40); // 恰够两次上限
+    const provider = fakeProvider();
+    const gw = gatewayWith(provider, budget);
+    const r = await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' });
+    expect(r.data).toEqual({});
+  });
+
   it('provider 不上报 costUsd → 按声明上限记账（settle=est，保守上界）', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 100);
