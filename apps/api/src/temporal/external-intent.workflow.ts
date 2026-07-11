@@ -23,7 +23,12 @@ export interface ExternalIntentSweepResult {
  * 写 source_signal → 逐 ICP 从平台表只读投影进本租户（动 Intent 维）。
  * 单 ICP 解析/投影失败不影响其余（fail-safe）；预算打穿停拉不停投影（已落库信号仍生效）。
  */
-export async function externalIntentSweepWorkflow(input?: { limit?: number }): Promise<ExternalIntentSweepResult> {
+/** 投影循环里每处理 K 个 ICP 就在批次头重读一次 kill-switch 快照（把 sweep 中途翻闸的 stale 窗口封到 ≤K）。 */
+const LIVE_REFRESH_EVERY = 25;
+
+export async function externalIntentSweepWorkflow(
+  input?: { limit?: number; liveRefreshEvery?: number },
+): Promise<ExternalIntentSweepResult> {
   // 默认不传 limit → 枚举全部 ACTIVE ICP（无静默截断/不饿死旧 ICP）；调用方可显式传 limit 做有界跑。
   const { targets, tedEnabled, openfdaEnabled } = await acts.listExternalIntentTargets(
     input?.limit ? { limit: input.limit } : {},
@@ -55,18 +60,21 @@ export async function externalIntentSweepWorkflow(input?: { limit?: number }): P
     agg.ingest = { tedSpecs: 0, fdaSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
   }
 
-  // 摄取后**单次**重读 kill-switch（fast-follow 优化）：把「每 ICP 一次 owner-DB 读」降到「每 sweep 一次」，
-  // 把 live 快照 thread 给逐 ICP 投影。取投影阶段开始前一刻的 live 态——provider 摄取全程若被 ops 关停即反映。
-  // 单次读失败 fail-safe → undefined：投影活动自读兜底（防御纵深，不因一次读故障放大成整轮不投）。
+  // 摄取后逐 ICP 只读投影，用 kill-switch live 快照门控。**每 K 个 ICP 在批次头重读一次**（承 #70 单次读
+  // 优化 + Codex P1 修正）：把「运维在 sweep 执行途中翻 DataProvider kill-switch」的 stale 窗口封到 ≤K 个投影，
+  // 同时把 owner-DB 读从「每 ICP 一次」(N) 降到 ⌈N/K⌉——保住 #70 优化的绝大部分。首个批次头即在所有投影前读到
+  // 最新态；单批读失败 fail-safe → undefined（该批投影退回活动自读兜底，防御纵深，不因一次读故障放大成整轮不投）。
+  const refreshEvery = Math.max(1, input?.liveRefreshEvery ?? LIVE_REFRESH_EVERY);
   let live: LiveProviderState | undefined;
-  try {
-    live = await acts.liveProviderState();
-  } catch {
-    live = undefined;
-  }
-
-  // 逐 ICP 只读投影（用摄取后单次重读的 live 快照门控；缺省 undefined 时活动自读兜底）。
-  for (const t of resolved) {
+  for (let i = 0; i < resolved.length; i++) {
+    const t = resolved[i];
+    if (i % refreshEvery === 0) {
+      try {
+        live = await acts.liveProviderState();
+      } catch {
+        live = undefined;
+      }
+    }
     let r: ExternalIntentIcpResult;
     try {
       r = await acts.projectExternalIntentForIcp({ ...t, tedEnabled, openfdaEnabled, live });
