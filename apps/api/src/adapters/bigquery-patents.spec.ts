@@ -120,3 +120,35 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
     expect(seen?.query).toContain('LIMIT 2000'); // clamp 到 MAX_ROWS_CEIL
   });
 });
+
+describe('BigQueryPatents · maximumBytesBilled 成本护栏（env/默认路径）', () => {
+  const saved = process.env.GOOGLE_PATENTS_MAX_GB;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.GOOGLE_PATENTS_MAX_GB;
+    else process.env.GOOGLE_PATENTS_MAX_GB = saved;
+  });
+
+  async function capturedMaxBytes(): Promise<string | undefined> {
+    let seen: Parameters<BigQueryLike['query']>[0] | undefined;
+    const client = new BigQueryPatentsClient({ makeClient: () => fakeClient([], (opts) => (seen = opts)) });
+    await client.searchPatentsByAssignee('Siemens', { fromYear: 2021, toYear: 2026 });
+    return seen?.maximumBytesBilled;
+  }
+
+  it('零配置（无 deps.maxGb、无 env）→ 默认 200GB', async () => {
+    delete process.env.GOOGLE_PATENTS_MAX_GB;
+    expect(await capturedMaxBytes()).toBe(String(200 * GB));
+  });
+
+  it('env 有效正值 → 尊重运维意图', async () => {
+    process.env.GOOGLE_PATENTS_MAX_GB = '75';
+    expect(await capturedMaxBytes()).toBe(String(75 * GB));
+  });
+
+  it('env=0（或负/NaN）→ 回落默认 200GB（不静默放行 0 字节顶）', async () => {
+    process.env.GOOGLE_PATENTS_MAX_GB = '0';
+    expect(await capturedMaxBytes()).toBe(String(200 * GB));
+    process.env.GOOGLE_PATENTS_MAX_GB = 'not-a-number';
+    expect(await capturedMaxBytes()).toBe(String(200 * GB));
+  });
+});

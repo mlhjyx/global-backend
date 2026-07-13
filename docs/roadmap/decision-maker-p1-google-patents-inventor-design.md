@@ -1,7 +1,9 @@
 # 待办 3 · BigQuery Google Patents 发明人身份源（替代被封 EPO OPS）
 
-> 状态：代码完成 + CI 绿（342 vitest），seed **DISABLED**，真库真测待 GCP 服务账号 key。
+> 状态：代码完成 + CI 绿 + **真库真 BigQuery 四段 verify 全绿**（2026-07-14，用户 GCP key），seed **仍 DISABLED**（见 §4 规模警示：生产启用走物化小表 fast-follow，非全量 fan-out）。
 > 这是「选项 B · 决策人多途径身份源」待办 3 的**专利发明人**能力——原定 EPO OPS（PR #61）因账号被网关封禁停摆，改走 **BigQuery Google Patents Public Data**（等价数据、更低门槛：仅需 Google 账号，无审批/无身份墙/无封号风险）。
+>
+> **实测（`scripts/verify-google-patents.mts`，真库真 API 无 sandbox）**：A 真 API Siemens(DE)→**25 名真实发明人**（Eichler Roman/Mehl Sebastian/Reichmann Jürgen…），六护栏全绿（personalData/technical_buyer/CC-BY-4.0/无 externalIds/无 residence 地址国籍 country_code）；B 落库 25 + person.profile 证据（CC-BY-4.0 署名 + personal_data）、无 external_id 点，二次跑幂等（created=0/merged=25 Tier 2 归一名）；C 跨源并（Impressum 同名 + 发明人 → 并同一行 match_rule=name_exact）；D §8.8 用途门 → ToolBroker DENIED → 零发明人。
 
 ## 1. 为什么换 EPO → BigQuery Google Patents
 
@@ -56,9 +58,9 @@ provider 层（`discovery/providers/bigquery-patents.provider.ts`）几乎原样
 | `scripts/verify-google-patents.mts` | 真库真 API 四段（真 API / 落库幂等 / 跨源名并 / §8.8 门），app_user 硬 guard |
 | `*.spec.ts` ×2 | 30 单测（adapter 纯函数 + 成本护栏 + provider 全护栏） |
 
-## 6. ENABLE 前置（真库真测）
+## 6. ENABLE 决策（真测已过，仍刻意 DISABLED）
 
-1. 建免费 GCP 项目 + 服务账号（授 BigQuery Job User），下载 JSON key（无审批/无身份墙）。
-2. `.env` 设 `GOOGLE_PATENTS_SA_JSON`（key 文件路径，仓库外）+ `GOOGLE_PATENTS_PROJECT`。
-3. `node --import tsx scripts/verify-google-patents.mts` 四段全绿。
-4. 核实 CC BY attribution 文案 → 由 ops 手动/reseed 把 `google_patents` data_provider 翻 ENABLED。
+- ✅ 1–3 已完成：GCP 服务账号 key（用户 2026-07-14 提供）→ `.env` 配 `GOOGLE_PATENTS_SA_JSON`/`_PROJECT` → `scripts/verify-google-patents.mts` 四段全绿（25 名真实 Siemens 发明人）。
+- ✅ license 确认：Google Patents Public Data = **CC BY 4.0**（Google Cloud 公共数据集页文档），`GOOGLE_PATENTS_LICENSE` 属实。
+- 🔴 **仍不直接翻 ENABLED**：§4 规模警示——publications 无 assignee 分区，生产逐公司 fan-out = 每查全表扫（数十 GB），会**快速吃光用户 1TB/月免费额度**（真金白银风险）。
+- **生产启用路径（fast-follow，scale-safe）**：一次性物化「近 N 年 assignee→inventor」过滤表进自有 dataset（一次大扫）→ provider 改查那张小表（每查 MB 级）→ 再翻 ENABLED。此改是独立 P 级迭代，需用户拍板是否投入。

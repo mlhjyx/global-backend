@@ -147,7 +147,9 @@ export class BigQueryPatentsClient {
   }
 
   private maxBytes(): string {
-    const maxGb = this.deps.maxGb ?? (Number(process.env.GOOGLE_PATENTS_MAX_GB) || DEFAULT_MAX_GB);
+    const envGb = Number(process.env.GOOGLE_PATENTS_MAX_GB);
+    // 显式判断而非 `|| DEFAULT`：运维设 =0（或负/NaN）都回落默认，但**有效正值**（含很小值）尊重运维意图。
+    const maxGb = this.deps.maxGb ?? (Number.isFinite(envGb) && envGb > 0 ? envGb : DEFAULT_MAX_GB);
     return String(Math.floor(maxGb * BYTES_PER_GB));
   }
 
