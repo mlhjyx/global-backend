@@ -1,5 +1,6 @@
 import type { TedContractNotice } from '../adapters/ted-api';
 import { OPENFDA_LICENSE, type Fda510kClearance } from '../adapters/openfda-api';
+import type { SamSourcesSought } from '../adapters/sam-api';
 import { companyIdentity } from '../discovery/identity';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 
@@ -16,13 +17,18 @@ export const TENDER_PUBLISHED = 'TENDER_PUBLISHED';
 export const TENDER_STRENGTH = 0.9; // 开放招标 = 很强的实时需求信号（仅次于 web_watch SOURCING_OPENED=1）
 export const FDA_CLEARANCE = 'FDA_CLEARANCE';
 export const FDA_CLEARANCE_STRENGTH = 0.85; // 清关 = 新品/上市时机（略弱于开放招标）
+export const US_FED_SOURCES_SOUGHT = 'US_FED_SOURCES_SOUGHT';
+export const SOURCES_SOUGHT_STRENGTH = 0.7; // Sources Sought = 招标前市场调研（最早但最软，低于开放招标 0.9）
 
 export const TED_PAYLOAD_KEYS = ['cpv', 'notice', 'source'] as const;
 export const FDA_PAYLOAD_KEYS = ['product_code', 'k_number', 'device', 'source'] as const;
+// 🔴 GDPR 白名单：SAM 只透传机构/公告绿字段——绝不含 PrimaryContact*/SecondaryContact*（联系官）/Awardee。
+export const SAM_PAYLOAD_KEYS = ['naics', 'notice', 'notice_type', 'response_deadline', 'source'] as const;
 
 const DAY_MS = 86_400_000;
 const DEFAULT_TENDER_TTL_DAYS = 90; // 招标窗口关闭 → 需求信号过期
 const DEFAULT_CLEARANCE_TTL_DAYS = 365; // 上市时机长尾
+const DEFAULT_SOURCES_SOUGHT_TTL_DAYS = 120; // Sources Sought → 真 RFP 常隔数月，意图窗比招标(90)更长
 
 function envDays(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -41,9 +47,14 @@ export function clearanceTtlDays(): number {
   return envDays('SIGNAL_TTL_CLEARANCE_DAYS', DEFAULT_CLEARANCE_TTL_DAYS);
 }
 
+/** US_FED_SOURCES_SOUGHT 的 TTL（天）：env SIGNAL_TTL_SOURCES_SOUGHT_DAYS，默认 120。 */
+export function sourcesSoughtTtlDays(): number {
+  return envDays('SIGNAL_TTL_SOURCES_SOUGHT_DAYS', DEFAULT_SOURCES_SOUGHT_TTL_DAYS);
+}
+
 /** source_signal 行草稿（persist 层转 Prisma create 输入）。 */
 export interface SignalDraft {
-  providerKey: 'ted' | 'openfda';
+  providerKey: 'ted' | 'openfda' | 'samgov';
   signalType: string;
   externalId: string;
   subjectName: string;
@@ -130,6 +141,58 @@ export function mapFdaClearance(c: Fda510kClearance, observedAt: Date): MapOutco
       expiresAt: new Date(occurredAt.getTime() + clearanceTtlDays() * DAY_MS),
     },
   };
+}
+
+/**
+ * SAM.gov Sources Sought → Signal 行。买方 = 联邦机构（法人组织，🟢）：**不套** isLikelyIndividualApplicant
+ *（机构永远非个体户自然人，同 TED buyer 论证）。country 恒 'US'（美国联邦市场）。
+ * payload **白名单**（SAM_PAYLOAD_KEYS）——🔴 上游 CSV 的联系官具名字段（PrimaryContact / SecondaryContact）已在
+ * adapter 层结构性剔除，此处再守一道：绝不透传具名个人。许可 = 美国政府作品公共领域（17 U.S.C. §105，署名非义务）。
+ * 缺幂等锚(noticeId)/缺买方名/缺时机(postedDate)/缺分类码(naics) 各自跳过并计数。
+ */
+export function mapSamSourcesSought(n: SamSourcesSought, observedAt: Date): MapOutcome {
+  const name = samBuyerName(n);
+  if (!name) return { skip: 'no_buyer' };
+  const externalId = n.noticeId?.trim();
+  if (!externalId) return { skip: 'no_external_id' }; // 无稳定外部 id → 无幂等锚
+  const occurredAt = n.postedDateIso ? new Date(n.postedDateIso) : undefined;
+  if (!occurredAt || !Number.isFinite(occurredAt.getTime())) return { skip: 'no_date' };
+  const naics = n.naicsCode?.trim();
+  if (!naics) return { skip: 'no_taxonomy' }; // 无分类码 → 投影永远匹配不到
+  return {
+    row: {
+      providerKey: 'samgov',
+      signalType: US_FED_SOURCES_SOUGHT,
+      externalId,
+      subjectName: name,
+      subjectCountry: 'US', // 美国联邦市场恒定
+      subjectKey: companyIdentity({ name, country: 'US' }).dedupeKey,
+      taxonomyKeys: [`naics:${naics}`],
+      strength: SOURCES_SOUGHT_STRENGTH,
+      occurredAt,
+      observedAt,
+      // 白名单 SAM_PAYLOAD_KEYS——绝不透传联系官/中标方等上游字段。naics 存**数组**（与 TED payload.cpv
+      // 同形 → 投影/复算证据同形 → sameIntent 幂等不动点成立）。
+      payload: {
+        naics: [naics],
+        notice: externalId,
+        notice_type: 'Sources Sought',
+        response_deadline: n.responseDeadlineIso ?? undefined,
+        source: 'samgov',
+      },
+      license: 'Public Domain (U.S. Government Work)', // 17 U.S.C. §105：署名非义务（同 openFDA CC0 档）
+      jurisdiction: 'US',
+      expiresAt: new Date(occurredAt.getTime() + sourcesSoughtTtlDays() * DAY_MS),
+    },
+  };
+}
+
+/** SAM 买方身份名：`Department — Sub-Tier`（Sub-Tier 缺则退 Department；都缺 → 空跳过）。 */
+function samBuyerName(n: SamSourcesSought): string {
+  const dept = n.department?.trim();
+  const sub = n.subTier?.trim();
+  if (dept && sub) return `${dept} — ${sub}`;
+  return sub || dept || '';
 }
 
 const PERSON_TITLE = /^(dr|mr|mrs|ms|prof|sir|dame)\.?\s+\S/i; // 人称头衔前缀

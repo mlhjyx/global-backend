@@ -3,17 +3,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import { BudgetExceededError } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import type { OpenFdaSearchInput, OpenFdaSearchOutput, TedSearchInput, TedSearchOutput } from '../tools/source-tools';
+import type { OpenFdaSearchInput, OpenFdaSearchOutput, SamSearchInput, SamSearchOutput, TedSearchInput, TedSearchOutput } from '../tools/source-tools';
 import type { Fda510kClearance } from '../adapters/openfda-api';
 import type { TedContractNotice } from '../adapters/ted-api';
+import type { SamSourcesSought } from '../adapters/sam-api';
 import {
   CanonicalQuerySpec,
   canonicalFdaSpec,
+  canonicalSamSpec,
   canonicalTedSpec,
   queryFingerprint,
   windowKeyFor,
 } from './signal-query';
-import { MapOutcome, mapFdaClearance, mapTedNotice } from './signal-mappers';
+import { MapOutcome, mapFdaClearance, mapSamSourcesSought, mapTedNotice } from './signal-mappers';
 
 /**
  * 平台层信号摄取（收口⑤ ingest-once）：外部源 → source_signal 一等事实，**拉取一次服务所有租户**。
@@ -79,6 +81,27 @@ export class SignalIngestService {
       );
       const clearances: Fda510kClearance[] = res.data.clearances ?? [];
       return { records: clearances.length, outcomes: clearances.map((c) => mapFdaClearance(c, ctx.observedAt)) };
+    });
+  }
+
+  /**
+   * SAM.gov Sources Sought 摄取（bulk-CSV，**NAICS 无关**）：整包 CSV 无服务端按码过滤 → 无 empty_query 守，
+   * 每窗口恒下载一次（指纹只含窗参数 → 全 ICP 收敛一次拉取），投影层再按 NAICS 过滤。🔴 联系官 PII 已在
+   * adapter/mapper 双层剔除，绿库只落机构/公告事实。
+   */
+  async ingestSam(
+    params: { sinceDays?: number; maxRecords?: number },
+    opts?: IngestOpts,
+  ): Promise<IngestOutcome> {
+    const spec = canonicalSamSpec(params);
+    return this.ingest(spec, opts, async (broker, ctx) => {
+      const res = await broker.invoke<SamSearchInput, SamSearchOutput>(
+        'samgov.search',
+        { params: { sinceDays: spec.sinceDays, maxRecords: spec.maxRecords } },
+        ctx,
+      );
+      const notices: SamSourcesSought[] = res.data.notices ?? [];
+      return { records: notices.length, outcomes: notices.map((n) => mapSamSourcesSought(n, ctx.observedAt)) };
     });
   }
 
@@ -285,7 +308,7 @@ export interface IngestOpts {
 }
 
 export interface IngestOutcome {
-  provider: 'ted' | 'openfda';
+  provider: 'ted' | 'openfda' | 'samgov';
   fingerprint: string;
   windowKey: string;
   /** true = 账本 OK 行命中，本次未出网（ingest-once）。 */
@@ -296,6 +319,6 @@ export interface IngestOutcome {
   error?: string;
 }
 
-function emptyOutcome(provider: 'ted' | 'openfda', error: string): IngestOutcome {
+function emptyOutcome(provider: 'ted' | 'openfda' | 'samgov', error: string): IngestOutcome {
   return { provider, fingerprint: '', windowKey: '', ledgerHit: false, recordsFetched: 0, signalsUpserted: 0, skipped: {}, error };
 }

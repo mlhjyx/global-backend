@@ -347,6 +347,35 @@ export class DiscoveryProviderRegistry {
         },
       });
     }
+    // SAM.gov Sources Sought（美国联邦招标前意图，P4）——keyless 公开 CSV（datagov 分区）。
+    // **默认 DISABLED**：真测通过前不路由（同 google_patents 先例，update:{} 不覆盖 ops 手改）。
+    // ⚠️ 与专利缓存不同：SAM **不物化 PII**（联系官不入库、买方=联邦机构组织）→ 真测绿后可直接翻 ENABLED，无需 LIA/DPIA。
+    await db.dataProvider.upsert({
+      where: { key: 'samgov' },
+      update: {},
+      create: { key: 'samgov', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // 合规注册：keyless 公开 CSV（非爬网页）；美国政府作品公共领域（署名非义务，同 openFDA CC0）；
+    // personalData=true —— CSV 含联系官具名字段（adapter+mapper 双层结构性剔除，绿库只落机构/公告事实）。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'sam.gov' },
+        update: {},
+        create: {
+          domain: 'sam.gov',
+          sourceType: 'gov_opportunity',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment', 'intent'],
+          retentionDays: 365,
+          notes:
+            'SAM.gov Contract Opportunities 公开数据抽取（datagov 分区，keyless api_key=null → 预签名 S3）。只经公开 CSV/API，绝不爬网页 UI、绝不触敏感端点。美国政府作品公共领域（17 U.S.C. §105，署名非义务）；「Sources Sought=市场调研非招标」市场信号红线；联系官（PrimaryContact*/SecondaryContact*）= 🔴 具名个人，adapter+mapper 双层结构性剔除不入绿库；买方=联邦机构（法人组织）。intent=Sources Sought US_FED_SOURCES_SOUGHT 投影用途。',
+        },
+      });
+    }
     // 网站变更 intent 引擎（v3.0 #4，signal 源）——平台级 kill-switch/可观测（DISABLED = intentSweep 全局停抓）。
     // 注：具体监控源的常规开关是 monitored_source.status；此行是引擎级总闸 + 与其它 signal 源登记一致。
     await db.dataProvider.upsert({

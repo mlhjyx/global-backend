@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain } from '../discovery/identity';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { cpvOverlap } from '../intent/ted-intent-projection.service';
+import { naicsOverlap } from '../intent/sam-intent-projection.service';
 import {
   INTENT_CHANGE_TYPES,
   IntentAttr,
@@ -19,6 +20,7 @@ const DEFAULT_PAGE_LIMIT = 200;
 const WEB_WATCH_REPLAY_TAKE = 500;
 const TED_DEFAULT_SINCE_DAYS = 30; // 与增量投影同窗（ted-intent-projection DEFAULT_SINCE_DAYS）
 const FDA_DEFAULT_SINCE_DAYS = 365;
+const SAM_DEFAULT_SINCE_DAYS = 120; // 与 sam-intent-projection DEFAULT_SINCE_DAYS 同窗
 const DAY_MS = 86_400_000;
 
 /**
@@ -28,7 +30,8 @@ const DAY_MS = 86_400_000;
  */
 export type ProjectionSurface =
   | { provider: 'ted'; cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number }
-  | { provider: 'openfda'; productCodes: string[]; applicantCountries?: string[]; sinceDays?: number };
+  | { provider: 'openfda'; productCodes: string[]; applicantCountries?: string[]; sinceDays?: number }
+  | { provider: 'samgov'; naicsCodes: string[]; sinceDays?: number };
 
 export type RecomputeCompanyOutcome = 'unchanged' | 'rebuilt' | 'cleared' | 'missing';
 
@@ -187,6 +190,13 @@ function surfaceMatches(
     if (!countries.has(s.subjectCountry)) return false;
     return keys.some((k) => sf.cpvCodes.some((icpCode) => cpvOverlap(icpCode, k)));
   }
+  if (sf.provider === 'samgov') {
+    if (!sf.naicsCodes.length) return false;
+    const since = nowMs - (sf.sinceDays ?? SAM_DEFAULT_SINCE_DAYS) * DAY_MS;
+    if (s.occurredAt.getTime() < since) return false;
+    // 无国别门（SAM 恒 US）；无个体户门（买方恒联邦机构组织）
+    return keys.some((k) => sf.naicsCodes.some((icpCode) => naicsOverlap(icpCode, k)));
+  }
   if (!sf.productCodes.length) return false;
   const since = nowMs - (sf.sinceDays ?? FDA_DEFAULT_SINCE_DAYS) * DAY_MS;
   if (s.occurredAt.getTime() < since) return false;
@@ -205,6 +215,14 @@ function signalEvidence(providerKey: string, payload: Record<string, unknown>, e
       cpv: Array.isArray(payload.cpv) ? payload.cpv : [],
       notice: typeof payload.notice === 'string' ? payload.notice : externalId,
       source: 'ted',
+    };
+  }
+  if (providerKey === 'samgov') {
+    // 必与 SamIntentProjectionService.projectOne 的 event.evidence 同形（键序一致）→ sameIntent 幂等不动点。
+    return {
+      naics: Array.isArray(payload.naics) ? payload.naics : [],
+      notice: typeof payload.notice === 'string' ? payload.notice : externalId,
+      source: 'samgov',
     };
   }
   return {
