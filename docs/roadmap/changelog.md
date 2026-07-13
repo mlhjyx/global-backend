@@ -276,3 +276,13 @@ Codex 复审 #56（收口⑤ 一等 Signal）提 **P1 TOCTOU**：`temporal/exter
 - **投影活动保留自守（防御纵深）**：`projectExternalIntentForIcp` 新增可选 `live?: LiveProviderState`，`const live = args.live ?? await liveEnabled()`——**注入优先**（省读），**缺省自读兜底**（直连调用者=测试/verify/未来调用不被信任，#64 的 TOCTOU 断言与单测零改动仍绿）。仍逐 ICP AND 各自捕获标志（捕获=false 者无论 live 都不投）。workflow 单次读失败 fail-safe→undefined→投影自读兜底（一次读故障不放大成整轮不投）。
 - **刻意仍不做**：`source_policy` SUSPENDED 门不入投影（停采不停用，见 §4/#64）。
 - **实测**：build 0 · **759 vitest**（新增注入快照 4 测：注入门控且零自读 / 注入优先 / 捕获标志不被绕过 / 缺省自读兜底）· 真库真 TED/openFDA `verify-external-intent-sweep.mts` 全绿（Tier 5 加：`liveProviderState` 单次重读 + 「data_provider ENABLED 但注入 live.ted=false → 投影用注入快照跳过 TED」证明非自读）。**无 schema 迁移**。
+
+## 待办 3 第二源 · 专利发明人 BigQuery Google Patents（替代被封 EPO OPS）
+
+- **背景**：EPO OPS（PR #61）账号被网关封停、PatentsView 卡 ID.me 美国身份墙 → 专利发明人源改走 **BigQuery Google Patents Public Data**（`patents-public-data.patents.publications`，IFI CLAIMS 谐调）：仅需 Google 账号，**无审批/无身份墙/无封号风险**，1TB/月查询免费。
+- **DRY 源无关移植**：provider（`bigquery-patents.provider.ts`）几乎原样移植自 #61 `epo-ops.provider.ts`——那套护栏源无关，只换 L0 数据客户端（EPO OPS REST → BigQuery）。保留：applicant 高置信对齐（0.9·margin 0.1）+ 归一名去重候选 + **只取独家申请人专利**（防合著误挂）+ 国别门 + 近 5 年·cap 25 + **归一名并（非 Tier 0，无 externalIds）**。
+- **L0 adapter**（`adapters/bigquery-patents.ts`）：`assigneeLikeAnchor` 宽预筛锚（provider 再精确对齐）+ `buildQuery` 只 SELECT 2 列 + **`maximumBytesBilled` 成本硬顶**（默认 200GB，超顶即 fail-closed，护免费额度）+ `normalizeRow` 🔴 **数据最小化**（inventor 只留 name，丢 country_code）+ 无 SA key/project → 天然 no-op 返空。
+- **合规**：`google_patents.search` = required 工具（personalData=true，policyDomain `bigquery.googleapis.com`，§8.8 用途门 fail-closed）+ CC-BY-4.0 署名写 `field_evidence.license`（⚠️ ENABLE 前核实确切 attribution 文案）+ SA key 文件 gitignored（`.env.example` 记 `GOOGLE_PATENTS_SA_JSON`/`_PROJECT`/`_MAX_GB`）。
+- **⚠️ 规模警示**：publications 表无 assignee 分区 → 每查全表扫描（约数十 GB/查）→ 适合有界样本/周期 sweep，不适合高频实时逐公司；生产规模 fast-follow = 物化「assignee→inventor」小表。
+- **seed DISABLED**：`google_patents` data_provider 种 DISABLED（真库真测待 GCP key），`bigquery.googleapis.com` source_policy APPROVED（供 verify 过 §8.8 门）。verify 脚本直 new Provider 跑，DISABLED 不挡真测；生产 fan-out 不路由（无静默错采）。
+- **质量**：build 0 · eslint 0 · **906 vitest**（新增 30：adapter `assigneeLikeAnchor`/`normalizeRow` 数据最小化/成本护栏/无 creds fail-safe + provider 全护栏移植测）。真库真测 `scripts/verify-google-patents.mts` 四段（真 API/落库幂等/跨源名并/§8.8 门）**待 GCP key**。**无 schema 迁移**（新增依赖 `@google-cloud/bigquery`）。EPO 代码 PR #61 留档 DISABLED。

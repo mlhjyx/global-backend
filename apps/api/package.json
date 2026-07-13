@@ -12,6 +12,7 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^8.3.1",
     "@nestjs/common": "^10.4.15",
     "@nestjs/core": "^10.4.15",
     "@nestjs/platform-express": "^10.4.15",
