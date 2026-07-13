@@ -1,7 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { decryptPii } from '../compliance/pii-crypto';
-import { buildSuppressionEntries } from '../compliance/deletion-plan';
+import { blindContactKey, decryptPii } from '../compliance/pii-crypto';
+import { buildSuppressionEntries, selectReconcileStragglerIds } from '../compliance/deletion-plan';
+import { contactIdentity } from '../discovery/identity';
 import {
   DELETION_RULE_VERSION,
   buildDeletionCompletedPayload,
@@ -83,13 +84,20 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           )}) FOR UPDATE`;
         }
 
-        // 待硬删的联系人集（连同当前 contactPoints 一并重查）：company 主体在**擦除时刻重查**（捕获冻结后并发
-        // 发现的漏网联系人，保证 Art.17 完整）；contact 主体用冻结快照的单一 id。带 points 重查供 ① 真实计数
-        // ② 冻结后新增邮箱补写禁联。
+        // 待硬删的联系人集（连同当前 contactPoints 一并重查，供真实计数 + 冻结后新增邮箱补写禁联）：
+        //  · company 主体：擦除时刻**全量重查**（捕获冻结后并发发现的漏网联系人，保证 Art.17 完整）；
+        //  · contact 主体：不封停公司（不标 SUPPRESSED），但同样对属主公司取**瞬时 FOR UPDATE 排空并发插入**
+        //    后，按 person-key + createdAt **有界对账**把「冻结提交 contact_key 前抢跑新建的重物化同人行」纳入
+        //    擦除集——收口 PR #80 复审 CONFIRMED 的残留并发窗口（见 deletion-art17-residual-window.md）。
+        const reconciledContactIds = located.companyIdsToSuppress.length
+          ? null
+          : located.contactIds.length
+            ? await reconcileContactSubjectEraseIds(tx, input, located)
+            : null;
         const eraseTargetWhere: Prisma.CanonicalContactWhereInput | null = located.companyIdsToSuppress.length
           ? { companyId: { in: located.companyIdsToSuppress } }
-          : located.contactIds.length
-            ? { id: { in: located.contactIds } }
+          : reconciledContactIds && reconciledContactIds.length
+            ? { id: { in: reconciledContactIds } }
             : null;
         const eraseContacts = eraseTargetWhere
           ? await tx.canonicalContact.findMany({
@@ -284,6 +292,52 @@ async function upsertSuppressionEntries(
       create: { workspaceId, type: s.type, value: s.value, reason: s.reason },
     });
   }
+}
+
+/**
+ * Art.17 contact 主体擦除集的**排空 + 有界对账**（收口 PR #80 复审 CONFIRMED 残留并发窗口，
+ * 见 docs/implementation-records/deletion-art17-residual-window.md）。仅 contact 主体调用（此时
+ * located.contactIds=[冻结快照单一 id]、companyIdsToSuppress 为空）。返回 = 原始件 ∪ 重物化同人漏网件。
+ *
+ * 1) 读原始件（首次真擦除时尚在；已删=幂等重跑）拿 fullName + 属主公司；已删则回退快照 id（deleteMany 命中 0）。
+ * 2) 对属主公司取**瞬时 FOR UPDATE**（不标 SUPPRESSED，不封停公司发现）——与并发插入 persist 的 FK
+ *    FOR KEY SHARE / 显式 FOR SHARE 互斥，建立 happens-before：本锁到手即所有竞态 persist 已提交、其
+ *    「冻结提交 contact_key 前抢跑新建」的重物化行已可见。
+ * 3) 候选 = 同公司、DSR 受理（deletion_request.createdAt）后新建、非原始件；按 person-key（与创建闸同构）
+ *    有界对账挑出重物化同人行。🔴 createdAt 过滤只触碰 DSR 受理后新建的行，先存的同名另一真人绝不入选。
+ */
+async function reconcileContactSubjectEraseIds(
+  tx: Prisma.TransactionClient,
+  input: DeletionWorkflowInput,
+  located: LocatedErasureTargets,
+): Promise<string[]> {
+  const originalId = located.contactIds[0];
+  const original = await tx.canonicalContact.findUnique({
+    where: { id: originalId },
+    select: { id: true, fullName: true, companyId: true, company: { select: { dedupeKey: true } } },
+  });
+  // 原始件已不在：Temporal 重跑的幂等由前面 moved.count===0 早返回守（不会走到这里）；此分支守的是
+  // **并发跨主体删除**（如同公司的 company 主体擦除先删到该行）——回退快照 id（后续 deleteMany 命中 0，安全）。
+  if (!original) return located.contactIds;
+
+  // 排空锚点：属主公司行 FOR UPDATE（仅锁不改状态；$queryRaw 不经读路径解密，无需 PII）
+  await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${original.companyId}::uuid FOR UPDATE`;
+
+  const req = await tx.deletionRequest.findUnique({
+    where: { id: input.deletionRequestId },
+    select: { createdAt: true },
+  });
+  if (!req) return [originalId];
+
+  const companyKey = original.company.dedupeKey;
+  const erasedPersonKey = blindContactKey(contactIdentity({ fullName: original.fullName }, companyKey)).toLowerCase();
+  // 候选走扩展 client → fullName 读路径解密为明文（供 person-key 计算）
+  const candidates = await tx.canonicalContact.findMany({
+    where: { companyId: original.companyId, id: { not: originalId }, createdAt: { gte: req.createdAt } },
+    select: { id: true, fullName: true, createdAt: true },
+  });
+  const stragglers = selectReconcileStragglerIds({ erasedPersonKey, companyKey, since: req.createdAt, candidates });
+  return [originalId, ...stragglers];
 }
 
 /** 受影响的 ACTIVE ICP（对该公司持有 Lead 的 ICP）——重评分目标；非 ACTIVE 的 ICP 排除（scoreCandidates 要求 ACTIVE）。 */

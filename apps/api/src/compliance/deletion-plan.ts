@@ -40,3 +40,37 @@ export function buildSuppressionEntries(args: {
   }
   return entries;
 }
+
+/**
+ * Art.17 contact 主体擦除的**有界对账选择器**（纯）——收口 PR #80 复审 CONFIRMED 的残留并发窗口。
+ * 见 docs/implementation-records/deletion-art17-residual-window.md。
+ *
+ * 从候选联系人里挑出「重物化被擦除自然人」的行：person-key 命中被擦除人的 `contact_key`
+ *（`blindContactKey(contactIdentity({fullName}, companyKey))`，与创建闸/冻结**同构**）
+ * **且** `createdAt >= since`。
+ *
+ * 🔴 `since`（= `deletion_request.createdAt`）过滤是与 PR #80 **驳回的无界 sweep** 的关键差异：
+ * 只触碰 **DSR 受理后新建**的行；先于 DSR 就存在的**同名另一真人**（`createdAt < since`）绝不入选——
+ * 杜绝数据丢失。窗口内被选的同名新行 = 创建闸在顺序情形下本就会拒建者，净数据态一致。
+ *
+ * @param erasedPersonKey 被擦除人的盲化 person-key（应已 lowercase；内部再兜底 lowercase）
+ * @param companyKey 属主公司 dedupeKey（与冻结所用一致）
+ * @param since 只有 createdAt >= 此刻的候选才入选（含边界）
+ * @param candidates 属主公司下的候选（fullName 须为读路径解密后的明文）
+ */
+export function selectReconcileStragglerIds(args: {
+  erasedPersonKey: string;
+  companyKey: string;
+  since: Date;
+  candidates: { id: string; fullName: string; createdAt: Date }[];
+}): string[] {
+  const target = args.erasedPersonKey.toLowerCase();
+  const sinceMs = args.since.getTime();
+  return args.candidates
+    .filter((c) => {
+      if (c.createdAt.getTime() < sinceMs) return false;
+      const key = blindContactKey(contactIdentity({ fullName: c.fullName }, args.companyKey)).toLowerCase();
+      return key === target;
+    })
+    .map((c) => c.id);
+}
