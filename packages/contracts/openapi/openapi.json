@@ -2714,6 +2714,9 @@
                             "leadsRescoreRequested": {
                               "type": "integer"
                             },
+                            "patentCacheErased": {
+                              "type": "integer"
+                            },
                             "ruleVersion": {
                               "type": "string"
                             },
@@ -2839,6 +2842,9 @@
                               "type": "integer"
                             },
                             "leadsRescoreRequested": {
+                              "type": "integer"
+                            },
+                            "patentCacheErased": {
                               "type": "integer"
                             },
                             "ruleVersion": {
