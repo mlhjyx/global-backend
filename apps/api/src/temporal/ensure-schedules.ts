@@ -11,6 +11,8 @@ import {
   EXTERNAL_INTENT_SWEEP_WORKFLOW,
   INTENT_SWEEP_SCHEDULE_ID,
   INTENT_SWEEP_WORKFLOW,
+  PATENTS_CACHE_REFRESH_SCHEDULE_ID,
+  PATENTS_CACHE_REFRESH_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
 } from './understanding.constants';
 
@@ -27,6 +29,9 @@ const SPECS = [
   { id: BACKLOG_SWEEP_SCHEDULE_ID, workflowType: BACKLOG_SWEEP_WORKFLOW, everyEnv: 'BACKLOG_SWEEP_EVERY', everyDefault: '24h' },
   // 外部源 intent（TED 招标 / openFDA 510k 清关）→ ACTIVE ICP 投影动 Intent 维；招标/清关日级信号，6h 足够
   { id: EXTERNAL_INTENT_SWEEP_SCHEDULE_ID, workflowType: EXTERNAL_INTENT_SWEEP_WORKFLOW, everyEnv: 'EXTERNAL_INTENT_SWEEP_EVERY', everyDefault: '6h' },
+  // 专利发明人缓存刷新（scale-safe #89）：一次共享大扫 → postgres 缓存。周更（BQ 扫数十 GB → 节制，稳在 1TB/月内）。
+  // 注：env 名沿用兄弟 Schedule 的 `*_EVERY` 时长串约定（设计文档暂拟 _MS，实际机制用 Duration 串如 '7d'，故用 _EVERY）。
+  { id: PATENTS_CACHE_REFRESH_SCHEDULE_ID, workflowType: PATENTS_CACHE_REFRESH_WORKFLOW, everyEnv: 'PATENT_CACHE_REFRESH_EVERY', everyDefault: '7d' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {

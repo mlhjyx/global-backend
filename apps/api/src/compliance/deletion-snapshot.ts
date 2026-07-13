@@ -31,6 +31,7 @@ export interface DeletionCompletedPayloadV1 {
   signals_revoked: number;
   companies_suppressed: number;
   leads_rescore_requested: number;
+  patent_cache_erased: number; // 平台专利发明人缓存按盲键命中删的行数（Art.17 扫描面，scale-safe #89）
   rule_version: string;
   erased_at: string; // ISO（调用方注入，避免 workflow 内非确定性时间）
 }
@@ -55,6 +56,7 @@ export function buildDeletionCompletedPayload(input: DeletionCompletedInput): De
     signals_revoked: input.counts.signalsRevoked,
     companies_suppressed: input.counts.companiesSuppressed,
     leads_rescore_requested: input.counts.leadsRescoreRequested,
+    patent_cache_erased: input.counts.patentCacheErased ?? 0,
     rule_version: DELETION_RULE_VERSION,
     erased_at: input.erasedAt,
   };

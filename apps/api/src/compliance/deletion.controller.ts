@@ -54,6 +54,7 @@ const DELETION_REQUEST_SCHEMA = {
         signalsRevoked: { type: 'integer' },
         companiesSuppressed: { type: 'integer' },
         leadsRescoreRequested: { type: 'integer' },
+        patentCacheErased: { type: 'integer' },
         ruleVersion: { type: 'string' },
         createdAt: { type: 'string', format: 'date-time' },
       },

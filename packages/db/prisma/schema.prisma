@@ -518,6 +518,7 @@ model PatentInventorCache {
   assigneeNorm    String   @map("assignee_norm") // normForMatch(raw)——与 provider/canonical 同规范化，检索键
   assigneeCountry String   @default("") @map("assignee_country") // 🔴 公司 alpha-2 小写 或 ''（未知）——护栏③/T1，进唯一键令 DE/US 同名分两行
   inventorName    String   @map("inventor_name") // 🔴 仅 name（护栏⑥，绝无 residence/国籍/country_code）；🔴 pii-crypto 确定性加密落盘
+  inventorNameKey String   @default("") @map("inventor_name_key") // 🔴 归一人名的**不可逆盲索引**（blindContactKey(normalizePersonName)）——供 Art.17 擦除按人名 O(1) 命中且不泄明文；跨名格式（"Surname, Given"↔"Given Surname"）收敛
   windowFromYear  Int      @map("window_from_year") // 护栏④ 该行覆盖窗口（刷新按滚动窗裁旧行）
   windowToYear    Int      @map("window_to_year")
   license         String   @default("CC-BY-4.0") @map("license") // 护栏⑦ 派生溯源（provider 仍从常量注入 field_evidence.license）
@@ -529,6 +530,7 @@ model PatentInventorCache {
   @@unique([assigneeNorm, assigneeCountry, inventorName])
   @@index([assigneeNorm])
   @@index([expiresAt])
+  @@index([inventorNameKey]) // Art.17 擦除按人名盲键 O(1) 命中
   @@map("patent_inventor_cache")
 }
 
@@ -906,6 +908,7 @@ model DeletionReceipt {
   signalsRevoked        Int      @default(0) @map("signals_revoked")
   companiesSuppressed   Int      @default(0) @map("companies_suppressed")
   leadsRescoreRequested Int      @default(0) @map("leads_rescore_requested")
+  patentCacheErased     Int      @default(0) @map("patent_cache_erased") // 平台专利发明人缓存按盲键命中删的行数（Art.17 扫描面审计，scale-safe #89）
   ruleVersion           String   @map("rule_version")
   createdAt             DateTime @default(now()) @map("created_at")
 

@@ -25,6 +25,7 @@ import { StructuredHarvestProvider } from './providers/structured-harvest.provid
 import { SelfHostedEmailVerifier } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import { readPatentCache, enqueuePatentLookup } from '../adapters/patent-inventor-cache';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -49,8 +50,19 @@ export class DiscoveryProviderRegistry {
    *  绝不塞进 enrichRun 的 2 分钟活动（否则 50 家 × 抓取会超时重试整段富集）。 */
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
-  constructor(deps?: { gateway?: ModelGateway; broker?: ExecutionBroker }) {
+  constructor(deps?: { gateway?: ModelGateway; broker?: ExecutionBroker; prisma?: PrismaClient }) {
     const broker = deps?.broker;
+    // 专利缓存读/攒集队列 enqueue 闭包（绑 app_user prisma；平台表无 RLS）——仅当注入 prisma 时可用
+    // （seed-only 构造无 prisma → cache 模式降级空，direct 仍走 broker）。读缓存零 egress、不经 broker。
+    const prisma = deps?.prisma;
+    const patentCacheReader = prisma
+      ? (companyName: string, opts: { fromYear: number; toYear: number }) => readPatentCache(prisma, companyName, opts)
+      : undefined;
+    const patentEnqueue = prisma
+      ? async (companyName: string, country?: string): Promise<void> => {
+          await enqueuePatentLookup(prisma, { companyName, country });
+        }
+      : undefined;
     // 自建邮箱验证**排 emailVerifiers 首位**：verifyContactPoint 只用 adapters[0]，必须在
     // public_web(仅 MX→RISKY) 之前，否则新 SMTP RCPT/catch-all 逻辑永不执行。不依赖 gateway。
     // 诚实上限：Gmail/M365/catch-all/端口25不可达/catch-all未证伪 一律 RISKY，绝不谎报 VALID。
@@ -90,7 +102,9 @@ export class DiscoveryProviderRegistry {
     // BigQuery Google Patents 发明人发现（待办 3 · 替代被封 EPO OPS；官方 BigQuery 公共数据集）——contact_discovery 类。
     // 不依赖 gateway（结构化查询，无 LLM）；无 broker/无 SA key/低置信对齐时 fail-safe 返空（天然 no-op）。
     // 发明人无稳定 person id → 走 resolvePersonIdentity Tier 2/3 归一名并（同 EPO/INPI，非 Tier 0，见设计 §3）。
-    this.contacts.push(new GooglePatentsInventorProvider({ broker }));
+    // scale-safe：PATENT_SOURCE_MODE=cache 时走 cacheReader（读 postgres 缓存，零 BQ 字节）+ miss enqueue；
+    // =direct 走 broker（逐公司 BQ，仅 verify/调试，§8.8）；=off（默认）返空。缓存刷新由第 5 个 Temporal Schedule 驱动。
+    this.contacts.push(new GooglePatentsInventorProvider({ broker, cacheReader: patentCacheReader, enqueue: patentEnqueue }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
@@ -329,7 +343,7 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes:
-            'BigQuery Google Patents Public Data（bigquery.googleapis.com；patents-public-data.patents.publications，IFI CLAIMS 谐调）。服务账号鉴权 + maximumBytesBilled 成本护栏（护 1TB/月免费额度）。CC BY 4.0 绿事实可商用但署名义务（Google Patents Public Data / IFI CLAIMS，⚠️ ENABLE 前核实确切文案）；发明人 = 🔴 具名个人（GDPR），数据最小化（只 name，不摄 residence/国籍），触达前过 lawful-basis 门。',
+            'BigQuery Google Patents Public Data（bigquery.googleapis.com；patents-public-data.patents.publications，IFI CLAIMS 谐调）。服务账号鉴权 + maximumBytesBilled 成本护栏（护 1TB/月免费额度）。CC BY 4.0 绿事实可商用但署名义务（Google Patents Public Data / IFI CLAIMS，⚠️ ENABLE 前核实确切文案）；发明人 = 🔴 具名个人（GDPR），数据最小化（只 name，不摄 residence/国籍），触达前过 lawful-basis 门。scale-safe #89：逐公司查改走 postgres scoped 缓存（patent_inventor_cache）——一次共享大扫落库、逐公司零 BQ 字节读；缓存 inventorName 列级 encryptPii 落盘 + 盲键 inventorNameKey，TTL≤180d（严于 retentionDays）到期/出窗自动清理，Art.17 擦除按盲键扫描面命中删。§8.8 用途门刷新侧自守（SUSPENDED→DENIED 不扫）。🔴 翻 ENABLED（缓存把 lawful-basis 门前 PII 静态化多一存储面）须用户先签 LIA/DPIA——在此之前 data_provider.google_patents=DISABLED 且 PATENT_SOURCE_MODE=off。',
         },
       });
     }

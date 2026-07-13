@@ -1,6 +1,6 @@
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import type { GooglePatentsInput, GooglePatentsOutput } from '../../tools/source-tools';
-import { GOOGLE_PATENTS_LICENSE, PatentApplicant } from '../../adapters/bigquery-patents';
+import { GOOGLE_PATENTS_LICENSE, PatentApplicant, PatentRecord, PatentSearchOptions } from '../../adapters/bigquery-patents';
 import {
   ContactDiscoveryAdapter,
   ContactDiscoveryContext,
@@ -76,13 +76,75 @@ export function toContactRecord(rawName: string, applicantName: string): Provide
  * 🔴 用途门：google_patents.search = required 工具，直连前过 §8.8 fail-closed（无 broker = 不出网）。
  * fail-safe：任何失败（无 creds/网络/闸门拒绝/超额）返空、不抛穿（单源不阻断其余）。
  */
+/** 专利源模式（env `PATENT_SOURCE_MODE`）：cache=读 postgres 缓存（生产，零 BQ 字节/零 egress）|
+ *  direct=逐公司 BQ（仅 verify/调试，走 §8.8 broker）| off=关（默认；未签 LIA 前恒 off）。无效值 → off。 */
+export type PatentSourceMode = 'cache' | 'direct' | 'off';
+export function resolvePatentSourceMode(raw?: string): PatentSourceMode {
+  const m = (raw ?? process.env.PATENT_SOURCE_MODE ?? 'off').toLowerCase();
+  return m === 'cache' || m === 'direct' ? m : 'off';
+}
+
+export interface GooglePatentsProviderDeps {
+  broker?: ExecutionBroker;
+  now?: () => number;
+  /** cache 模式读缓存（读 postgres，无 egress，不经 broker）。缺失 → cache 模式降级空。 */
+  cacheReader?: (companyName: string, opts: PatentSearchOptions) => Promise<PatentRecord[]>;
+  /** cache miss → 攒集队列预热（best-effort）。 */
+  enqueue?: (companyName: string, country?: string) => Promise<void>;
+  /** 显式覆盖模式（测试用）；缺省读 env `PATENT_SOURCE_MODE`。 */
+  mode?: PatentSourceMode;
+}
+
 export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
   readonly key = 'google_patents';
 
-  constructor(private readonly deps?: { broker?: ExecutionBroker; now?: () => number }) {}
+  constructor(private readonly deps?: GooglePatentsProviderDeps) {}
 
   private log(msg: string): void {
     console.warn(`[google_patents] ${msg}`);
+  }
+
+  private mode(): PatentSourceMode {
+    return resolvePatentSourceMode(this.deps?.mode);
+  }
+
+  /**
+   * 按模式取专利记录（形状统一 → 后续对齐逻辑零分支）：
+   *  - cache：读 postgres 缓存（零 BQ 字节/零 egress）；miss 时 enqueue 预热（best-effort）。
+   *  - direct：现 broker.invoke 路径（§8.8 用途门 fail-closed；仅 verify/调试）。
+   */
+  private async fetchPatents(
+    company: { name: string; country?: string },
+    fromYear: number,
+    toYear: number,
+    purposeCtx: { workspaceId: string; runId?: string; correlationId?: string; purpose: string },
+  ): Promise<PatentRecord[]> {
+    if (this.mode() === 'cache') {
+      if (!this.deps?.cacheReader) {
+        this.log('skip: cache 模式但无 cacheReader（降级空）');
+        return [];
+      }
+      const patents = await this.deps.cacheReader(company.name, { fromYear, toYear });
+      if (!patents.length && this.deps.enqueue) {
+        try {
+          await this.deps.enqueue(company.name, company.country); // miss → 预热队列
+        } catch {
+          /* enqueue 失败不影响本次（本次仍返空）——最终一致靠下一刷新周期 */
+        }
+      }
+      return patents;
+    }
+    // direct：绝不绕 ToolBroker（§8.8）。无闸门 = 不允许原始出网 → 空。
+    if (!this.deps?.broker) {
+      this.log('skip: broker unavailable (fail-closed, no raw egress)');
+      return [];
+    }
+    const res = await this.deps.broker.invoke<GooglePatentsInput, GooglePatentsOutput>(
+      'google_patents.search',
+      { applicant: company.name, fromYear, toYear },
+      purposeCtx,
+    );
+    return res.data.patents ?? [];
   }
 
   async discoverContacts(
@@ -92,12 +154,12 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
   ): Promise<ContactDiscoveryResult> {
     const name = company.name?.trim();
     if (!name) return { contacts: [], costCents: 0 };
-    // 无闸门 = 不允许原始出网（绝不绕 ToolBroker）→ 诚实降级空。
-    if (!this.deps?.broker) {
-      this.log('skip: broker unavailable (fail-closed, no raw egress)');
+    const mode = this.mode();
+    if (mode === 'off') {
+      this.log('skip: PATENT_SOURCE_MODE=off（未启用）');
       return { contacts: [], costCents: 0 };
     }
-    const toYear = currentYear(this.deps.now);
+    const toYear = currentYear(this.deps?.now);
     const fromYear = toYear - RECENCY_YEARS;
     const purposeCtx = {
       workspaceId: ctx.workspaceId,
@@ -106,12 +168,7 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
       purpose: 'discovery',
     };
     try {
-      const res = await this.deps.broker.invoke<GooglePatentsInput, GooglePatentsOutput>(
-        'google_patents.search',
-        { applicant: name, fromYear, toYear },
-        purposeCtx,
-      );
-      const patents = res.data.patents ?? [];
+      const patents = await this.fetchPatents({ name, country: company.country }, fromYear, toYear, purposeCtx);
       if (!patents.length) return { contacts: [], costCents: 0 };
 
       // 1) 收集 distinct applicant 候选（**按归一名去重**：同一公司的拼写变体 "Siemens AG"/"Siemens
@@ -120,7 +177,18 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
       for (const p of patents) {
         for (const a of p.applicants) {
           const key = normForMatch(a.name);
-          if (a.name && key && !applicantMap.has(key)) applicantMap.set(key, a);
+          if (!a.name || !key) continue;
+          const existing = applicantMap.get(key);
+          if (!existing) {
+            applicantMap.set(key, a);
+            continue;
+          }
+          // 🔴 同归一名多国别（缓存路径尤甚：一家公司跨国 → 多个 (norm,country) 组，如 Siemens de/us/at…）→
+          // 偏好与本公司国别**不冲突**的代表，令下面 step2 的 country 门不因任意排序恰好选中他国同名组而误弃整源。
+          // step3 仍逐记录过国别门（护栏③不放松，绝不并他国同名公司发明人）；company.country 未知则不改（保首见）。
+          if (countryConflicts(company.country, existing.country) && !countryConflicts(company.country, a.country)) {
+            applicantMap.set(key, a);
+          }
         }
       }
       const best = pickBestByName(name, [...applicantMap.values()], (a) => a.name);

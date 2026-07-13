@@ -71,6 +71,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
   }
 
+  // 专利缓存冷启动预热（scale-safe #89）：对本 run fit=match 公司 enqueue patent_lookup_request，populates 刷新队列。
+  // cheap upsert（非慢活动）→ 走常规 2 分钟活动；best-effort，失败不影响 run 状态。
+  let patentEnqueue: { candidates: number; enqueued: number } = { candidates: 0, enqueued: 0 };
+  try {
+    patentEnqueue = await acts.enqueuePatentLookupsForRun({ workspaceId, runId, icpId: input.icpId });
+  } catch {
+    /* 专利预热是尽力而为的收口，失败不影响 run 状态 */
+  }
+
   // 预算截断的 run 绝不假 DONE（复审 HIGH）：**任一**预算消耗阶段打穿 run 预算 → PARTIAL——
   // fit 漏判 / 发现阶段 / 富集 / 信号富集，均共享同一 run 预算账户，各自 wasExhausted 检出并上报，
   // 编排层聚合（绝不因某阶段被 provider 吞掉 BudgetExceededError 而假 DONE）。截断量进 stats 可观测。
@@ -100,6 +109,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
       signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
       watches: { registered: watches.registered, of: watches.candidates },
+      patentEnqueue: { enqueued: patentEnqueue.enqueued, of: patentEnqueue.candidates },
       queries: queries.length,
       failures,
     },

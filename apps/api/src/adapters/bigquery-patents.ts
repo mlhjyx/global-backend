@@ -140,6 +140,22 @@ function buildRefreshQuery(): string {
   `;
 }
 
+/** BigQuery job 统计（statistics.totalBytesProcessed 供配额观测）。 */
+interface BigQueryJobMeta {
+  statistics?: {
+    totalBytesProcessed?: string | number;
+    query?: { totalBytesProcessed?: string | number };
+  };
+}
+
+/** BigQuery 查询任务句柄的最小面。 */
+export interface BigQueryJobLike {
+  getQueryResults(): Promise<[Array<Record<string, unknown>>, ...unknown[]]>;
+  /** 任务完成后刷新 metadata（createQueryJob 时 statistics 尚未含最终扫描字节）。 */
+  getMetadata?(): Promise<[BigQueryJobMeta, ...unknown[]]>;
+  metadata?: BigQueryJobMeta;
+}
+
 /** BigQuery client 的最小接口（便于测试注入，不绑死 @google-cloud/bigquery 具体形状）。 */
 export interface BigQueryLike {
   query(opts: {
@@ -148,6 +164,36 @@ export interface BigQueryLike {
     types?: Record<string, unknown>;
     maximumBytesBilled?: string;
   }): Promise<[Array<Record<string, unknown>>, ...unknown[]]>;
+  /** 可选：真 BigQuery 支持——建任务后从 job.metadata 读实际扫描字节（配额告警/成本可观测）。测试 mock 可不实现（回退 query，bytes=null）。 */
+  createQueryJob?(opts: {
+    query: string;
+    params?: Record<string, unknown>;
+    types?: Record<string, unknown>;
+    maximumBytesBilled?: string;
+  }): Promise<[BigQueryJobLike, ...unknown[]]>;
+}
+
+/** 刷新扫描结果 + 实际扫描字节（bytesScanned=null 当客户端不暴露 job 统计，如测试 mock）。 */
+export interface RefreshScanResult {
+  rows: RefreshInventorRow[];
+  bytesScanned: number | null;
+}
+
+/** BigQuery 行 → RefreshInventorRow（🔴 inventor 只留 name，护栏⑥）。 */
+function mapRefreshRow(r: Record<string, unknown>): RefreshInventorRow {
+  return {
+    assigneeName: String(r.assignee_name ?? '').trim(),
+    assigneeCountry: normCountry(r.assignee_country),
+    inventorName: String(r.inventor_name ?? '').trim(), // 🔴 仅 name
+  };
+}
+
+/** job metadata 里尽力取 totalBytesProcessed（query.* 优先，回退顶层）→ number 或 null。 */
+function bytesFromMeta(meta?: BigQueryJobMeta): number | null {
+  const raw = meta?.statistics?.query?.totalBytesProcessed ?? meta?.statistics?.totalBytesProcessed;
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 export interface BigQueryPatentsDeps {
@@ -212,26 +258,48 @@ export class BigQueryPatentsClient {
    * 无 anchor/无 creds → 返空（天然 no-op）。查询错误向上抛，由调用方 fail-safe 兜。
    */
   async searchInventorsForAnchors(anchors: string[], opts: PatentSearchOptions): Promise<RefreshInventorRow[]> {
+    return (await this.searchInventorsForAnchorsWithStats(anchors, opts)).rows;
+  }
+
+  /**
+   * 同 {@link searchInventorsForAnchors}，但**带实际扫描字节**（配额观测/Step 9-A 证据）。
+   * 真 BigQuery（暴露 createQueryJob）→ 建任务读 job.metadata.statistics.totalBytesProcessed；
+   * 仅暴露 query 的 mock/旧客户端 → 回退 query，bytesScanned=null（行为与旧路径逐字一致，测试不破）。
+   */
+  async searchInventorsForAnchorsWithStats(anchors: string[], opts: PatentSearchOptions): Promise<RefreshScanResult> {
     const uniq = [...new Set(anchors.filter((a) => a && a.trim()))];
-    if (!uniq.length) return [];
+    if (!uniq.length) return { rows: [], bytesScanned: null };
     const client = this.getClient();
-    if (!client) return [];
-    const [rows] = await client.query({
+    if (!client) return { rows: [], bytesScanned: null };
+    const queryOpts = {
       query: buildRefreshQuery(),
       params: { fromDate: yearToStart(opts.fromYear), toDate: yearToEnd(opts.toYear), anchors: uniq },
       types: { fromDate: 'INT64', toDate: 'INT64', anchors: ['STRING'] },
       maximumBytesBilled: this.maxBytes(),
-    });
-    return (rows ?? [])
-      .map((r) => {
-        const row = r as Record<string, unknown>;
-        return {
-          assigneeName: String(row.assignee_name ?? '').trim(),
-          assigneeCountry: normCountry(row.assignee_country),
-          inventorName: String(row.inventor_name ?? '').trim(), // 🔴 仅 name
-        };
-      })
-      .filter((r) => r.assigneeName && r.inventorName);
+    };
+    let rawRows: Array<Record<string, unknown>>;
+    let bytesScanned: number | null = null;
+    if (client.createQueryJob) {
+      const [job] = await client.createQueryJob(queryOpts);
+      const [rows] = await job.getQueryResults();
+      rawRows = rows ?? [];
+      // createQueryJob 时 statistics 未含最终扫描字节 → 完成后刷新 metadata 取准确值（取不到则退回 job.metadata）。
+      let meta = job.metadata;
+      if (job.getMetadata) {
+        try {
+          const [refreshed] = await job.getMetadata();
+          meta = refreshed;
+        } catch {
+          /* getMetadata 失败退回 job.metadata（bytesScanned 可能 null，不阻断落库） */
+        }
+      }
+      bytesScanned = bytesFromMeta(meta);
+    } else {
+      const [rows] = await client.query(queryOpts);
+      rawRows = rows ?? [];
+    }
+    const rows = rawRows.map(mapRefreshRow).filter((r) => r.assigneeName && r.inventorName);
+    return { rows, bytesScanned };
   }
 }
 
