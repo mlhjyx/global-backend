@@ -10,4 +10,5 @@ export { intentSweepWorkflow } from './intent.workflow';
 export { backlogSweepWorkflow } from './backlog.workflow';
 export { externalIntentSweepWorkflow } from './external-intent.workflow';
 export { deletionWorkflow } from './deletion.workflow';
+export { patentsCacheRefreshWorkflow } from './patents-cache.workflow';
 export { demoV0Workflow } from './site-builder.workflow';

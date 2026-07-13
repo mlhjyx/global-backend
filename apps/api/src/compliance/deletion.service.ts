@@ -17,6 +17,7 @@ export interface DeletionReceiptView {
   signalsRevoked: number;
   companiesSuppressed: number;
   leadsRescoreRequested: number;
+  patentCacheErased: number;
   ruleVersion: string;
   createdAt: string;
 }
@@ -161,6 +162,7 @@ function toView(row: DeletionRequestRow): DeletionRequestView {
           signalsRevoked: row.receipt.signalsRevoked,
           companiesSuppressed: row.receipt.companiesSuppressed,
           leadsRescoreRequested: row.receipt.leadsRescoreRequested,
+          patentCacheErased: row.receipt.patentCacheErased,
           ruleVersion: row.receipt.ruleVersion,
           createdAt: row.receipt.createdAt.toISOString(),
         }

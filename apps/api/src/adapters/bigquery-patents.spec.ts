@@ -18,6 +18,21 @@ function fakeClient(rows: Array<Record<string, unknown>>, capture?: (opts: Param
   };
 }
 
+/** 假 BigQuery client（真 client 形态）：createQueryJob → getQueryResults + getMetadata（totalBytesProcessed 在完成后刷新）。 */
+function fakeJobClient(rows: Array<Record<string, unknown>>, totalBytes?: string | number): BigQueryLike {
+  return {
+    query: async () => [rows],
+    createQueryJob: async () => [
+      {
+        getQueryResults: async () => [rows],
+        // createQueryJob 时 statistics 未含最终字节；getMetadata 完成后刷新（镜像真 @google-cloud/bigquery）
+        metadata: { statistics: {} },
+        getMetadata: async () => [{ statistics: { query: { totalBytesProcessed: totalBytes } } }],
+      },
+    ],
+  };
+}
+
 describe('BigQueryPatents · assigneeLikeAnchor（SQL 宽预筛锚）', () => {
   it('剥法人后缀，取最长 token，包 %…%', () => {
     expect(assigneeLikeAnchor('Siemens AG')).toBe('%SIEMENS%');
@@ -155,5 +170,37 @@ describe('BigQueryPatents · maximumBytesBilled 成本护栏（env/默认路径�
     expect(await capturedMaxBytes()).toBe(String(200 * GB));
     process.env.GOOGLE_PATENTS_MAX_GB = 'not-a-number';
     expect(await capturedMaxBytes()).toBe(String(200 * GB));
+  });
+});
+
+describe('BigQueryPatents · searchInventorsForAnchorsWithStats（bytesScanned 捕获）', () => {
+  const OPTS = { fromYear: 2021, toYear: 2026 };
+  const anchorRows = [{ assignee_name: 'Siemens AG', assignee_country: 'DE', inventor_name: 'MUELLER, HANS' }];
+
+  it('真 client（createQueryJob）→ getMetadata 刷新后取 totalBytesProcessed', async () => {
+    const client = new BigQueryPatentsClient({ makeClient: () => fakeJobClient(anchorRows, '48318382080') });
+    const res = await client.searchInventorsForAnchorsWithStats(['%SIEMENS%'], OPTS);
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].inventorName).toBe('MUELLER, HANS');
+    expect(res.bytesScanned).toBe(48318382080); // 字符串字节 → number
+  });
+
+  it('查询缓存命中（totalBytesProcessed=0）→ bytesScanned=0（非 null，机制仍捕获）', async () => {
+    const client = new BigQueryPatentsClient({ makeClient: () => fakeJobClient(anchorRows, 0) });
+    const res = await client.searchInventorsForAnchorsWithStats(['%SIEMENS%'], OPTS);
+    expect(res.bytesScanned).toBe(0);
+  });
+
+  it('仅 query 的旧/mock client（无 createQueryJob）→ 回退 query，bytesScanned=null，行为不变', async () => {
+    const client = new BigQueryPatentsClient({ makeClient: () => fakeClient(anchorRows) });
+    const res = await client.searchInventorsForAnchorsWithStats(['%SIEMENS%'], OPTS);
+    expect(res.rows).toHaveLength(1);
+    expect(res.bytesScanned).toBeNull();
+  });
+
+  it('无 creds（无 makeClient/env）→ 空 + bytesScanned=null（天然 no-op）', async () => {
+    const client = new BigQueryPatentsClient();
+    const res = await client.searchInventorsForAnchorsWithStats(['%SIEMENS%'], OPTS);
+    expect(res).toEqual({ rows: [], bytesScanned: null });
   });
 });

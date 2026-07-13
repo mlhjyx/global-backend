@@ -508,6 +508,65 @@ model SourceSignal {
   @@map("source_signal")
 }
 
+/// 待办3 · 专利发明人缓存（scale-safe #89 fast-follow）。平台级共享、**无 workspace_id、无 RLS**（镜像 source_signal）。
+/// 机制：一次共享大扫（Job User 只读）把「近5年·独家申请人·仅 name」的 assignee→inventor 拉回本表 →
+///       逐公司发现时只读本表（零 BQ 字节）。一行 = 一个 (assignee 归一名, 公司国别, 发明人名)。
+/// 🔴 inventorName **列级加密**落盘（pii-crypto，收口⑥地基）——门前 PII 缓冲最小化。seed DISABLED，ENABLE 待 LIA 拍板。
+model PatentInventorCache {
+  id              String   @id @default(uuid()) @db.Uuid
+  assigneeNameRaw String   @map("assignee_name_raw") // 谐调申请人原名逐字（供 provider pickBestByName ≥0.9 精判 + 证据）
+  assigneeNorm    String   @map("assignee_norm") // normForMatch(raw)——与 provider/canonical 同规范化，检索键
+  assigneeCountry String   @default("") @map("assignee_country") // 🔴 公司 alpha-2 小写 或 ''（未知）——护栏③/T1，进唯一键令 DE/US 同名分两行
+  inventorName    String   @map("inventor_name") // 🔴 仅 name（护栏⑥，绝无 residence/国籍/country_code）；🔴 pii-crypto 确定性加密落盘
+  inventorNameKey String   @default("") @map("inventor_name_key") // 🔴 归一人名的**不可逆盲索引**（blindContactKey(normalizePersonName)）——供 Art.17 擦除按人名 O(1) 命中且不泄明文；跨名格式（"Surname, Given"↔"Given Surname"）收敛
+  windowFromYear  Int      @map("window_from_year") // 护栏④ 该行覆盖窗口（刷新按滚动窗裁旧行）
+  windowToYear    Int      @map("window_to_year")
+  license         String   @default("CC-BY-4.0") @map("license") // 护栏⑦ 派生溯源（provider 仍从常量注入 field_evidence.license）
+  refreshedAt     DateTime @default(now()) @map("refreshed_at")
+  expiresAt       DateTime @map("expires_at") // TTL（默认 180d，env）→ 改名/退源行自然清理 + GDPR 存储限制
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // 幂等去重键（country 未知存 '' 而非 NULL，令唯一键成立）。inventorName 确定性加密 → 密文相等性 → 唯一键仍幂等。
+  @@unique([assigneeNorm, assigneeCountry, inventorName])
+  @@index([assigneeNorm])
+  @@index([expiresAt])
+  @@index([inventorNameKey]) // Art.17 擦除按人名盲键 O(1) 命中
+  @@map("patent_inventor_cache")
+}
+
+/// 专利缓存攒集队列（驱动**条件触发**刷新 + 冷启动预热）。平台级、无 RLS。空队列 → 刷新整轮跳过（零 BQ 成本）。
+model PatentLookupRequest {
+  id               String    @id @default(uuid()) @db.Uuid
+  assigneeNorm     String    @map("assignee_norm")
+  country          String    @default("") @map("country") // alpha-2 或 ''
+  anchor           String    @map("anchor") // assigneeLikeAnchor 产物（%TOKEN%）——刷新 SQL 的 LIKE 谓词
+  sampleName       String    @map("sample_name") // 触发时公司原名（诊断/证据）
+  status           String    @default("PENDING") @map("status") // PENDING | CACHED | EMPTY
+  firstRequestedAt DateTime  @default(now()) @map("first_requested_at")
+  lastRequestedAt  DateTime  @default(now()) @map("last_requested_at")
+  refreshedAt      DateTime? @map("refreshed_at")
+  nextRefreshAt    DateTime? @map("next_refresh_at") // 过期后可再刷（TTL 到期重排）
+
+  @@unique([assigneeNorm, country])
+  @@index([status, nextRefreshAt])
+  @@map("patent_lookup_request")
+}
+
+/// 专利缓存刷新审计（quota 观测/告警：bytesScanned 超阈可告警）。平台级、无 RLS。
+model PatentCacheRefreshAudit {
+  id           String    @id @default(uuid()) @db.Uuid
+  startedAt    DateTime  @default(now()) @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  anchorCount  Int       @default(0) @map("anchor_count")
+  rowCount     Int       @default(0) @map("row_count")
+  bytesScanned BigInt?   @map("bytes_scanned")
+  status       String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | DENIED | FAILED
+  detail       String?   @map("detail")
+
+  @@index([startedAt])
+  @@map("patent_cache_refresh_audit")
+}
+
 /// ingest-once 账本（收口⑤验收：同一外部源同一时间窗**跨 workspace 只拉取一次**）。
 /// 拉取键 = (providerKey, queryFingerprint, windowKey)：指纹=规范化查询参数哈希（码/国别排序去重、
 /// 键序无关），窗口=对齐的时间桶（默认 6h，env SIGNAL_INGEST_WINDOW_MS）。同键已有 OK 行 → 跳过外部拉取；
@@ -849,6 +908,7 @@ model DeletionReceipt {
   signalsRevoked        Int      @default(0) @map("signals_revoked")
   companiesSuppressed   Int      @default(0) @map("companies_suppressed")
   leadsRescoreRequested Int      @default(0) @map("leads_rescore_requested")
+  patentCacheErased     Int      @default(0) @map("patent_cache_erased") // 平台专利发明人缓存按盲键命中删的行数（Art.17 扫描面审计，scale-safe #89）
   ruleVersion           String   @map("rule_version")
   createdAt             DateTime @default(now()) @map("created_at")
 

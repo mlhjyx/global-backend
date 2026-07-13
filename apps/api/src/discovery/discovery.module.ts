@@ -19,6 +19,7 @@ import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.fa
         return new DiscoveryProviderRegistry({
           gateway,
           broker: buildToolBroker({ sourcePolicyReader }),
+          prisma, // 专利缓存读/enqueue 闭包（app_user，平台表无 RLS）
         });
       },
       inject: [ModelGateway, PrismaService],

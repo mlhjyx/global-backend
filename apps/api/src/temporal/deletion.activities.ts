@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptPii } from '../compliance/pii-crypto';
+import { inventorErasureKeys } from '../adapters/patent-inventor-cache';
 import { buildSuppressionEntries, selectReconcileStragglerIds } from '../compliance/deletion-plan';
 import {
   DELETION_RULE_VERSION,
@@ -101,7 +102,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         const eraseContacts = eraseTargetWhere
           ? await tx.canonicalContact.findMany({
               where: eraseTargetWhere,
-              select: { id: true, contactPoints: { select: { type: true, value: true } } },
+              select: { id: true, fullName: true, contactPoints: { select: { type: true, value: true } } },
             })
           : [];
         const eraseContactIds = eraseContacts.map((c) => c.id);
@@ -125,6 +126,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         //（此前用冻结快照计数，漏报冻结后新增的行）。
         let contactPointsErased = 0;
         let fieldEvidenceErased = 0;
+        let patentCacheErased = 0;
         if (eraseContactIds.length) {
           contactPointsErased = eraseContacts.reduce((n, c) => n + c.contactPoints.length, 0);
           // field_evidence 无 FK 级联 → 显式按 contact 实体删（含 person.profile red 行 + 邮箱/电话加密副本）
@@ -134,6 +136,16 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           fieldEvidenceErased = fe.count;
           // canonical_contact 硬删 → DB 级联删 contact_point（onDelete: Cascade）
           await tx.canonicalContact.deleteMany({ where: { id: { in: eraseContactIds } } });
+        }
+
+        // 🔴 Art.17 扫描面（scale-safe #89）：平台级专利发明人缓存（patent_inventor_cache，无 RLS/无 workspace）
+        //   按被擦除人**盲键**命中并删。inventorErasureKeys(fullName) 走 personNameKeyVariants（over-suppress 方向：
+        //   宁过删缓存也不漏——缓存可 TTL 内重新预热，误删他人同名缓存行只是让其下次刷新重建，无数据主体权利损害）。
+        //   缓存键仅按人名（无公司绑定），故同名不同公司行也一并删——Art.17 安全侧。fullName 经 PII 扩展读路径已解密。
+        const erasureKeys = [...new Set(eraseContacts.flatMap((c) => inventorErasureKeys(c.fullName)))];
+        if (erasureKeys.length) {
+          const pc = await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } } });
+          patentCacheErased = pc.count;
         }
 
         // company 主体：整公司标 SUPPRESSED（幂等——freeze 已置；此处兜底。保留绿区公司事实，company 非自然人不硬删）
@@ -165,6 +177,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           signalsRevoked: located.signalsToRevoke,
           companiesSuppressed: located.companyIdsToSuppress.length,
           leadsRescoreRequested: located.affectedIcpIds.length,
+          patentCacheErased,
         };
         // 同 tx 持久化真实计数（stats），供 completeDeletion 忠实取用——即便 complete 后续失败、人工重跑时
         // located 重算为空，也不伪造 0。CAS where=ERASING（本 tx 内已置）。
@@ -229,6 +242,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             signalsRevoked: counts.signalsRevoked,
             companiesSuppressed: counts.companiesSuppressed,
             leadsRescoreRequested: counts.leadsRescoreRequested,
+            patentCacheErased: counts.patentCacheErased ?? 0,
             ruleVersion: DELETION_RULE_VERSION,
           },
         });
