@@ -267,3 +267,16 @@ export function personNameKeyVariants(raw: string): string[] {
   }
   return [...forms].sort();
 }
+
+/**
+ * 归一人名的**最大折叠**单值（Art.17 缓存盲键锚）——= {@link personNameKeyVariants} 的 umlautFold 形
+ * （ä|ae→a、ö|oe→o、ü|ue→u + 去音标）。**不变式**：本形恒 ∈ personNameKeyVariants → 缓存**存本单形**、擦除**用变体集**，
+ * 令跨 umlaut 拼写（Müller/Mueller/Muller）与 "Surname, Given" 语序都收敛到同一键。空/纯称谓 → ''。
+ */
+export function foldedPersonNameKey(raw: string): string {
+  const nfc = (raw ?? '').normalize('NFC').trim();
+  if (!nfc) return '';
+  const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitles);
+  if (!parsed) return '';
+  return [parsed.given, ...parsed.middles, parsed.surname].map(umlautFoldVariant).filter(Boolean).join(' ');
+}

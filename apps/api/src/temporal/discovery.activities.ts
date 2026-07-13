@@ -8,6 +8,7 @@ import { companyIdentity } from '../discovery/identity';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
+import { enqueuePatentLookup } from '../adapters/patent-inventor-cache';
 import { BudgetExceededError, budgetLedger, runBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
 
@@ -30,6 +31,7 @@ const ENRICH_LIMIT = 50; // 单 run 富集上限（护栏；GLEIF 限流）
 const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 const WATCH_REGISTER_LIMIT = 12; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
+const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
 
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
@@ -641,6 +643,47 @@ export function createDiscoveryActivities(deps: {
         }
       }
       return { candidates: companies.length, registered };
+    },
+
+    /**
+     * 专利缓存**冷启动预热 enqueue**（scale-safe #89 · 仿 registerWatchesForRun）：对本 run fit=match + 非
+     * SUPPRESSED 公司把 (assigneeNorm, country) 排进 `patent_lookup_request`（PENDING）——**populates 刷新队列**，
+     * 令第 5 个 Temporal Schedule（patentsCacheRefresh）知道该缓存哪些公司。绝不阻断 run（best-effort、单家失败继续）。
+     * 注：专利按**公司名**对齐（非域名），故不筛域名——enqueuePatentLookup 自筛无效锚（纯法人词/空名 no-op）。
+     * enqueue = 廉价 upsert（非慢活动/无 BQ 出网），故上限比 web_watch 宽；capped 记 log（不静默截断）。
+     * 冷启动时序（首次 contact discovery 早于首刷）由 Step 10 灰度启用的**手跑刷新预热**兜（见设计文档）。
+     */
+    async enqueuePatentLookupsForRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{ candidates: number; enqueued: number }> {
+      const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const rawIds = await tx.rawSourceRecord.findMany({ where: { runId: args.runId }, select: { id: true } });
+        const links = await tx.identityLink.findMany({
+          where: { canonicalType: 'company', rawRecordId: { in: rawIds.map((r) => r.id) } },
+          select: { canonicalId: true },
+        });
+        const ids = [...new Set(links.map((l) => l.canonicalId))];
+        return tx.canonicalCompany.findMany({
+          where: {
+            id: { in: ids },
+            status: { not: 'SUPPRESSED' },
+            leads: { some: { icpId: args.icpId, fitVerdict: 'match' } },
+          },
+          select: { name: true, country: true },
+        });
+      });
+      if (companies.length > PATENT_ENQUEUE_LIMIT) {
+
+        console.warn(`[patent-enqueue] run ${args.runId}: ${companies.length} fit=match 超上限 ${PATENT_ENQUEUE_LIMIT}——本轮取前 ${PATENT_ENQUEUE_LIMIT}`);
+      }
+      let enqueued = 0;
+      for (const c of companies.slice(0, PATENT_ENQUEUE_LIMIT)) {
+        try {
+          const r = await enqueuePatentLookup(deps.prisma, { companyName: c.name, country: c.country ?? undefined });
+          if (r.enqueued) enqueued += 1;
+        } catch {
+          /* 单家 enqueue 失败（DB 抖动）不影响其余；最终一致靠下一刷新周期 */
+        }
+      }
+      return { candidates: companies.length, enqueued };
     },
 
     async finalizeRun(args: {

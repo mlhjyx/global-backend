@@ -59,6 +59,28 @@ describe('deletion-snapshot', () => {
     expect(Object.keys(p).join(',')).not.toMatch(/name|email|value|full/i);
   });
 
+  it('专利缓存擦除计数流入 payload（Art.17 审计链补齐，scale-safe #89）', () => {
+    const p = buildDeletionCompletedPayload({
+      deletionRequestId: 'req1',
+      subjectType: 'contact',
+      subjectId: 'subj1',
+      counts: { ...zero, contactsErased: 1, patentCacheErased: 3 },
+      erasedAt: '2026-07-11T00:00:00.000Z',
+    });
+    expect(p.patent_cache_erased).toBe(3);
+  });
+
+  it('counts 无 patentCacheErased（located 回退）→ payload patent_cache_erased 缺省 0', () => {
+    const p = buildDeletionCompletedPayload({
+      deletionRequestId: 'req1',
+      subjectType: 'contact',
+      subjectId: 'subj1',
+      counts: countsFromLocated(located),
+      erasedAt: '2026-07-11T00:00:00.000Z',
+    });
+    expect(p.patent_cache_erased).toBe(0);
+  });
+
   it('classifies erasure touching a named person as RESTRICTED, else CONFIDENTIAL', () => {
     expect(classifyDeletionCompleted({ ...zero, contactsErased: 1 })).toBe('RESTRICTED');
     expect(classifyDeletionCompleted({ ...zero, companiesSuppressed: 1 })).toBe('CONFIDENTIAL');

@@ -18,6 +18,7 @@ import { createIntentActivities } from './intent.activities';
 import { createBacklogActivities } from './backlog.activities';
 import { createExternalIntentActivities } from './external-intent.activities';
 import { createDeletionActivities } from './deletion.activities';
+import { createPatentsCacheActivities } from './patents-cache.activities';
 import { ensurePlatformSchedules } from './ensure-schedules';
 import { seedJurisdictionPolicy } from '../compliance/jurisdiction-policy.seed';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
@@ -81,7 +82,8 @@ async function main(): Promise<void> {
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
   const broker = buildToolBroker({ sourcePolicyReader });
   const taxonomy = new TaxonomyResolver(prisma, gateway); // discovery + external-intent sweep 共享一实例
-  const providers = new DiscoveryProviderRegistry({ gateway, broker });
+  // prisma（app_user）给专利缓存读/enqueue 闭包（平台表无 RLS）——PATENT_SOURCE_MODE=cache 时零 BQ 字节读缓存。
+  const providers = new DiscoveryProviderRegistry({ gateway, broker, prisma });
 
   const worker = await Worker.create({
     connection,
@@ -105,6 +107,8 @@ async function main(): Promise<void> {
       ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
       // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
       ...createDeletionActivities({ prisma }),
+      // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
+      ...createPatentsCacheActivities({ ownerDb }),
     },
   });
 

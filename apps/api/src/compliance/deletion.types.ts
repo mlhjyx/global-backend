@@ -48,6 +48,8 @@ export interface ErasureCounts {
   signalsRevoked: number;
   companiesSuppressed: number;
   leadsRescoreRequested: number;
+  /** 平台级专利发明人缓存（patent_inventor_cache）按被擦除人**盲键**命中并删的行数（Art.17 扫描面，可选：无缓存时缺省）。 */
+  patentCacheErased?: number;
 }
 
 /** 删除工作流输入（Temporal args，全部为 id/枚举，可确定性序列化）。 */
