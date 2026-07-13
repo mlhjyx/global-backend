@@ -93,9 +93,12 @@ export function contactIdentity(contact: { fullName: string; email?: string | nu
  * email-独立（禁联从不按邮箱，被擦除人换邮箱也须拦），故仅取 fullName + companyKey。
  */
 export function contactSuppressionKeys(fullName: string, companyKey: string): string[] {
-  const variants = personNameKeyVariants(fullName);
-  const parts = variants.length > 0 ? variants : [contactNameKeyPart(fullName)];
-  return parts.map((part) => `c:${companyKey}:${part}`);
+  // 变体集（德语音译 / 纯去音标 / umlaut 折叠）+ **旧单值形**（保变音/称谓/语序的 contactNameKeyPart）。
+  // 🔴 叠加旧单值形是**向后兼容**：本改动前写入的 contact_key（= blind(c:<ck>:<旧归一>))仅存盲值、明文已擦除、
+  //    无法回填——把旧形留在键集里，令这些既有记录仍按其精确形命中，杜绝「静默失配回归」（变体集只增不减匹配面）。
+  // 空/纯称谓时旧形亦为空 → filter 去空 → []（不塌成 `c:<ck>:` 空键；调用方按空集处理）。
+  const parts = [...personNameKeyVariants(fullName), contactNameKeyPart(fullName)].filter((p) => p.length > 0);
+  return [...new Set(parts.map((part) => `c:${companyKey}:${part}`))].sort();
 }
 
 /** 源侧稳定标识排序取首（确定性，不受输入顺序影响）；归一为 `scheme:value` 小写。空 → null。 */

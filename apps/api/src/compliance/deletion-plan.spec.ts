@@ -44,7 +44,7 @@ describe('deletion-plan buildSuppressionEntries', () => {
     expect(e).toContainEqual({ type: 'email', value: 'klaus@acme.com', reason: 'legal' });
     // 变体集：德语音译(ö→oe) + 纯去音标(ö→o) 两键都写入，令跨源拼写变体重现都能命中禁联
     const keys = contactSuppressionKeys('Klaus Löschmann', 'd:acme.com').map((k) => blindContactKey(k).toLowerCase());
-    expect(keys.length).toBe(2);
+    expect(keys.length).toBeGreaterThanOrEqual(2); // 德语音译 + 纯去音标 (+ umlaut 折叠 + 旧单值形，去重后 ≥2)
     for (const k of keys) {
       expect(e).toContainEqual({ type: 'contact_key', value: k, reason: 'legal' });
       expect(k.startsWith('bi:v1:')).toBe(true); // 🔴 盲化 HMAC

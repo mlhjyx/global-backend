@@ -178,17 +178,33 @@ describe('contactSuppressionKeys（Art.17 person-level 禁联/对账变体键集
     return contactSuppressionKeys(a, ck).some((k) => bs.has(k));
   };
 
-  it('每变体 → `c:<companyKey>:<归一名变体>`（德语音译 + 纯去音标两形，稳定排序）', () => {
-    expect(contactSuppressionKeys('Petra Wiedergänger', ck)).toEqual([
-      'c:d:acme.com:petra wiedergaenger',
-      'c:d:acme.com:petra wiederganger',
-    ]);
+  it('变体集含德语音译 + 纯去音标 + 旧单值形（向后兼容），稳定排序、去重', () => {
+    const keys = contactSuppressionKeys('Petra Wiedergänger', ck);
+    expect(keys).toContain('c:d:acme.com:petra wiedergaenger'); // 德语音译 ä→ae
+    expect(keys).toContain('c:d:acme.com:petra wiederganger'); // 纯去音标 ä→a
+    expect(keys.length).toBeGreaterThanOrEqual(2);
+    expect(keys).toEqual([...keys].sort()); // 稳定排序（确定性）
+    expect(new Set(keys).size).toBe(keys.length); // 去重
+  });
+
+  it('🔴 向后兼容：变体集含**旧单值形**（保变音的 contactNameKeyPart），令本改动前既有 contact_key 精确形仍命中', () => {
+    // 旧 person-level 键 = blind(contactIdentity({fullName})) = blind(c:<ck>:<contactNameKeyPart>)。旧记录明文已擦除
+    // 无法回填；把旧形留在集合里 → 既有记录仍按精确形命中（无静默失配回归）。
+    expect(contactSuppressionKeys('Petra Wiedergänger', ck)).toContain(contactIdentity({ fullName: 'Petra Wiedergänger' }, ck));
+    expect(contactSuppressionKeys('Dr. Anna Weber', ck)).toContain(contactIdentity({ fullName: 'Dr. Anna Weber' }, ck));
+  });
+
+  it('🔴 空白名 → 空集（不塌成 `c:<ck>:` 空键，MEDIUM/LOW 复审修复）', () => {
+    expect(contactSuppressionKeys('   ', ck)).toEqual([]);
+    expect(contactSuppressionKeys('', ck)).toEqual([]);
   });
 
   it('🔴 变音丢弃 / "Surname, Given" 语序 / 德语 ASCII 拼写变体都与原名共享 ≥1 键（禁联命中的基础）', () => {
     expect(shares('Petra Wiedergänger', 'Petra Wiederganger')).toBe(true); // 变音丢弃
     expect(shares('Petra Wiedergänger', 'Wiedergänger, Petra')).toBe(true); // 语序
     expect(shares('Hans Müller', 'Hans Mueller')).toBe(true); // ü→ue
+    expect(shares('Hans Mueller', 'Hans Muller')).toBe(true); // 🔴 纯 ASCII ue↔u（无变音锚点，本轮复审 MEDIUM 修复）
+    expect(shares('Hans Muller', 'Hans Miller')).toBe(false); // 折叠不误并无关名（Miller 无 ue → 不折）
   });
 
   it('🔴 按公司隔离：同名不同 companyKey → 无共享键（不跨公司误禁）', () => {
