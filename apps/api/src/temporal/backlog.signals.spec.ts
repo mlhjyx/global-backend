@@ -118,4 +118,28 @@ describe('enrichSignalsBacklog —— 信号抓取计入 sweep:signals 预算 + 
     expect(updateManyCalls[0].ids).toEqual(['c1']);
     expect(r.attempted).toBe(0);
   });
+
+  it('本家内首个 enricher 打穿 → 后续 enricher 不再出网（逐 enricher 检 kill-switch，#82 P2）', async () => {
+    const calls: string[] = [];
+    const e1 = { key: 'digital_footprint', enrichCompany: async (_i: unknown, ctx: ExecutionContext) => { calls.push('e1'); return swallowBudget(ctx); } };
+    const e2 = { key: 'structured_harvest', enrichCompany: async () => { calls.push('e2'); return MISS; } };
+    const tx = {
+      canonicalCompany: {
+        findMany: async ({ take }: { take?: number }) => [C('c1', 'c1.de')].slice(0, take ?? 1),
+        update: async () => ({}),
+        updateMany: async () => ({ count: 1 }),
+      },
+      fieldEvidence: { create: async () => ({}) },
+    };
+    const prisma = {
+      withWorkspace: async <T>(_ws: string, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
+      sourcePolicy: { findMany: async () => [] as { domain: string }[] },
+    };
+    const providers = { routeSignalEnrichment: async () => [e1, e2] };
+    const deps = { prisma, providers, gateway: {}, ownerDb: {} } as unknown as Parameters<typeof createBacklogActivities>[0];
+
+    await createBacklogActivities(deps).enrichSignalsBacklog({ workspaceId: WS, limit: 1 });
+
+    expect(calls).toEqual(['e1']); // e1 打穿 sweep:signals 后，structured_harvest(e2) 不再出网探测
+  });
 });

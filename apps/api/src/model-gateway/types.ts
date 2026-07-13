@@ -19,6 +19,9 @@ export interface ModelResult<T> {
   provider: string; // which provider served it
   model: string;
   usage?: ModelUsage;
+  /** 本次结果实际发生的模型调用数（generateStructured 校验-修复重试=2；缺省视为 1）——
+   *  供**无 usage 上报**时按调用数结算预算，防修复调用被少记（否则退还预留的另一半，硬上界形同虚设）。 */
+  callCount?: number;
 }
 
 export interface GenerateTextInput {

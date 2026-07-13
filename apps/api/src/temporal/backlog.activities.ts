@@ -358,6 +358,9 @@ export function createBacklogActivities(deps: {
         // #51：信号抓取计入 sweep:signals 预算账户（runId=budget.key），否则计到裸 workspace = 无账户 = 不限额。
         const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-signals' };
         for (const e of pending) {
+          // #82 P2：本家内**逐 enricher** 检 kill-switch——首个 enricher 打穿 sweep:signals 后（其 fail-safe 吞
+          // BudgetExceededError），后续 enricher（如 structured_harvest 的 sitemap http.get）不得再在已耗尽账户上出网。
+          if (budgetLedger.wasExhausted(budget.key)) break;
           try {
             const r = await e.enrichCompany(
               {

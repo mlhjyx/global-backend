@@ -78,13 +78,15 @@ export class RouterModelGateway extends ModelGateway {
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join('; ')}`,
         );
       }
-      // usage 合并：重试消耗也要入账
+      // usage 合并：重试消耗也要入账。callCount=2 → 无 usage 上报时 settle 按**两次**兜底（否则少记一次、
+      // 退还预留的另一半，40¢ 上限跑一个修复过的 20¢ 任务仍剩 20¢，硬上界失效，#82 P2）。
       return {
         ...repair,
         usage: {
           inputTokens: (first.usage?.inputTokens ?? 0) + (repair.usage?.inputTokens ?? 0),
           outputTokens: (first.usage?.outputTokens ?? 0) + (repair.usage?.outputTokens ?? 0),
         },
+        callCount: 2,
       };
     });
   }
@@ -143,7 +145,7 @@ export class RouterModelGateway extends ModelGateway {
         try {
           const result = await call(provider);
           const costUsd = result.usage?.costUsd;
-          settle(costUsd != null ? Math.ceil(costUsd * 100) : centsFromTokens(result.usage) ?? baseCents);
+          settle(costUsd != null ? Math.ceil(costUsd * 100) : centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1));
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,
