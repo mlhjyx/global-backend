@@ -2,6 +2,7 @@
  * 身份解析（PRD 8.8）：确定性规则优先 —— 域名精确匹配 > 名称+国家规范化。
  * 纯函数，可测试；匹配规则名记入 identity_link.match_rule 供审计。
  */
+import { normalizePersonName } from './person-name';
 
 const LEGAL_SUFFIXES =
   /\b(gmbh|ag|kg|co\.?|ltd\.?|llc|inc\.?|corp\.?|s\.?a\.?|s\.?r\.?l\.?|b\.?v\.?|oy|ab|as|plc|pty|limited|company|holdings?)\b|有限公司|株式会社|주식회사/gi;
@@ -60,9 +61,18 @@ export function companyIdentity(rec: {
   };
 }
 
-/** 联系人去重键的人名归一（小写 + 折叠空白 + 去首尾）；contactIdentity 的 c 形与 declined 键共用。 */
+/** 联系人去重键的人名归一（小写 + 折叠空白 + 去首尾）；contactIdentity 的明文 c 形用。 */
 function contactNameKeyPart(fullName: string): string {
   return fullName.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * **拒并键**的人名判别符：用 resolver 同款 {@link normalizePersonName}（去称谓 / "Family, Given" 语序 /
+ * 音译）——与 `resolveWithReason` 判同名歧义的归一同源，故 "Anna Weber" / "Dr. Anna Weber" / "Weber, Anna"
+ * 落**同一** declined 行（幂等，#67 P2）。归一为空（纯称谓/无解析）时回退明文键，保留可区分性、不塌成一键。
+ */
+function declinedNameKeyPart(fullName: string): string {
+  return normalizePersonName(fullName) || contactNameKeyPart(fullName);
 }
 
 export function contactIdentity(contact: { fullName: string; email?: string | null }, companyKey: string): string {
@@ -98,6 +108,8 @@ export function declinedContactIdentity(
   const eid = stableExternalIdKey(contact.externalIds);
   if (eid) return `dx:x:${companyKey}:${eid}`;
   // 名+邮箱双判别符：不同名（Alice/Bob）共用一 catch-all 地址靠名分开；同名不同邮箱靠邮箱分开。
-  if (contact.email) return `dx:e:${companyKey}:${contactNameKeyPart(contact.fullName)}:${contact.email.trim().toLowerCase()}`;
-  return `dx:c:${companyKey}:${contactNameKeyPart(contact.fullName)}`;
+  // 人名部用 resolver 同款归一（#67 P2），称谓/逗号语序变体幂等落同一 declined 行。
+  const nameKey = declinedNameKeyPart(contact.fullName);
+  if (contact.email) return `dx:e:${companyKey}:${nameKey}:${contact.email.trim().toLowerCase()}`;
+  return `dx:c:${companyKey}:${nameKey}`;
 }

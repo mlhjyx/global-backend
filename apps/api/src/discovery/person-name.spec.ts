@@ -71,6 +71,46 @@ describe('person-name · NFC 归一 + 德语去音标', () => {
   });
 });
 
+describe('person-name · 身份归一不塌真实姓名里的学位同形 token（#54 P2）', () => {
+  it('姓氏 Ma/Ba 等学位同形词保留 → 不同人不塌成同一归一名', () => {
+    // 'ma'/'ba' 在 HONORIFICS 里（M.A./B.A.），但也是真实姓氏（Chinese/西语）——身份路径不得剥
+    expect(normalizePersonName('Anna Ma')).not.toBe(normalizePersonName('Anna Ba'));
+    expect(normalizePersonName('Anna Ma')).not.toBe(normalizePersonName('Anna'));
+    expect(normalizePersonName('Anna Ma')).toBe('anna ma');
+  });
+
+  it('明确称谓/学位仍剥离（Dr./Prof./多段 Dipl.-Ing. 串）', () => {
+    expect(normalizePersonName('Dr. Anna Weber')).toBe('anna weber');
+    expect(normalizePersonName('Dr. Anna Weber')).toBe(normalizePersonName('Anna Weber'));
+    expect(normalizePersonName('Dipl.-Ing. Klaus Weber')).toBe('klaus weber');
+  });
+
+  it('空格分写的学术称谓串剥离（Dr. med./Dr. rer. nat./Dipl. Ing.）→ 匹配无称谓名（#77 P2）', () => {
+    expect(normalizePersonName('Dr. med. Anna Weber')).toBe('anna weber');
+    expect(normalizePersonName('Dr. med. Anna Weber')).toBe(normalizePersonName('Anna Weber'));
+    expect(normalizePersonName('Dr. rer. nat. Anna Weber')).toBe('anna weber');
+    expect(normalizePersonName('Dipl. Ing. Klaus Weber')).toBe('klaus weber');
+  });
+
+  it('学术后缀同形词仅在紧跟称谓时剥；前置/末位姓氏不剥（Ma Yun / Dr. Ma / Erik Ing）', () => {
+    expect(normalizePersonName('Ma Yun')).toBe('ma yun'); // 前置姓氏 Ma 不剥
+    expect(normalizePersonName('Dr. Ma')).toBe('ma'); // Dr. 后的 Ma（非后缀集）保留为姓
+    expect(normalizePersonName('Erik Ing')).toBe('erik ing'); // 末位 Ing 非紧跟称谓 → 保留
+  });
+});
+
+describe('person-name · 身份归一保留非拉丁 token（#54 P2）', () => {
+  it('CJK 姓保留 → 张 Wei ≠ 李 Wei（不塌成 wei）', () => {
+    expect(normalizePersonName('张 Wei')).not.toBe(normalizePersonName('李 Wei'));
+    expect(normalizePersonName('张 Wei')).toBe('张 wei');
+  });
+
+  it('西里尔 token 保留、拉丁重音仍德语音译（Müller→mueller）', () => {
+    expect(normalizePersonName('Müller')).toBe('mueller');
+    expect(normalizePersonName('Владимир Putin')).toBe('владимир putin');
+  });
+});
+
 describe('person-name · 空 / 单 token 边界', () => {
   it('空 / 纯空白 / 纯称谓 → 全空', () => {
     expect(parsePersonName('')).toEqual({ given: '', family: '', normalizedFull: '' });

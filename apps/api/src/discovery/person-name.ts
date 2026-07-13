@@ -29,6 +29,16 @@ const HONORIFICS = new Set([
   'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'hon', 'rer', 'nat', 'habil',
 ]);
 
+// 身份归一：明确的**前置**称谓/学位（单 token 即可剥；总出现在名字最前）。从 HONORIFICS 排除
+// ma/ba/ing/mag/med/hon/rer/nat——它们同时是真实姓氏/名（"Anna Ma"/"Ma Yun"），单独出现绝不剥（#54 P2）。
+const IDENTITY_TITLE_PREFIX = new Set([
+  'dr', 'prof', 'dipl', 'phd', 'mba', 'bsc', 'msc',
+  'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'habil',
+]);
+// 学术**后缀**：仅当**紧跟已剥的称谓**时才剥（"Dr. med."/"Dr. rer. nat."/"Dipl. Ing." 的空格分写形；#77 P2）——
+// 独立出现（"Dr. Ma" 的 Ma、"Erik Ing" 的 Ing）绝不剥。🔴 ma/ba **不**入此集（常见真实姓氏，永不剥）。
+const IDENTITY_TITLE_SUFFIX = new Set(['med', 'rer', 'nat', 'ing', 'mag', 'hon']);
+
 // 贵族/介词前缀（归入姓；小写比对）。
 const SURNAME_PARTICLES = new Set([
   'von', 'van', 'vom', 'zum', 'zur', 'zu', 'de', 'del', 'della', 'der', 'den', 'di',
@@ -39,6 +49,39 @@ const SURNAME_PARTICLES = new Set([
 function isHonorific(token: string): boolean {
   const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
   return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
+}
+
+/** 单 token 是否明确**前置**称谓（含多段学位串 "dipl.-ing."：拆 . / - 后各段皆全量 HONORIFICS 即算）。 */
+function isIdentityTitlePrefix(token: string): boolean {
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
+  if (parts.length === 0) return false;
+  if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p));
+  return IDENTITY_TITLE_PREFIX.has(parts[0]);
+}
+
+/** 单 token 是否学术**后缀**（med/rer/nat/ing…）——仅供"紧跟称谓才剥"的位置判定。 */
+function isIdentityTitleSuffix(token: string): boolean {
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
+  return parts.length === 1 && IDENTITY_TITLE_SUFFIX.has(parts[0]);
+}
+
+/**
+ * 身份归一称谓剥离（**位置感知**，防误剥真实姓名 token）：从前往后剥明确前置称谓；紧跟已剥称谓的学术后缀
+ * （"Dr. med. Anna"/"Dipl. Ing. Klaus"/"Dr. rer. nat."）也剥；**一旦遇到非称谓 token，其后全部保留**——
+ * "Anna Ma" 的 Ma、"Ma Yun" 的 Ma、"Dr. Ma" 的 Ma（Ma 不在后缀集）都不剥（#54/#77 P2）。方向偏欠并。
+ */
+function stripIdentityTitles(tokens: string[]): string[] {
+  const out: string[] = [];
+  let prevStripped = false;
+  for (const t of tokens) {
+    if (isIdentityTitlePrefix(t) || (prevStripped && isIdentityTitleSuffix(t))) {
+      prevStripped = true;
+      continue;
+    }
+    out.push(t);
+    prevStripped = false;
+  }
+  return out;
 }
 
 /**
@@ -66,13 +109,27 @@ export function transliterateVariants(raw: string): string[] {
   return out;
 }
 
-/** 解析全名 → 部件（strip 称谓、识别贵族前缀、拆名/姓）。空/无效返回 null。 */
-export function parseName(fullName: string): ParsedName | null {
-  const tokens = fullName
-    .replace(/[,;]/g, ' ')
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t && !isHonorific(t));
+/** email 侧默认称谓剥离：逐 token 剥全量 {@link HONORIFICS}（行为逐字不变）。 */
+function defaultStripHonorifics(tokens: string[]): string[] {
+  return tokens.filter((t) => !isHonorific(t));
+}
+
+/**
+ * 解析全名 → 部件（strip 称谓、识别贵族前缀、拆名/姓）。空/无效返回 null。
+ * `stripHonorifics` 可注入（收 token 数组返 token 数组）：email 本地部用默认 {@link defaultStripHonorifics}
+ * （逐 token 全量剥，行为逐字不变）；身份路径用位置感知的 {@link stripIdentityTitles}（不误剥真实姓名 token，#54/#77 P2）。
+ */
+export function parseName(
+  fullName: string,
+  stripHonorifics: (tokens: string[]) => string[] = defaultStripHonorifics,
+): ParsedName | null {
+  const tokens = stripHonorifics(
+    fullName
+      .replace(/[,;]/g, ' ')
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean),
+  );
   if (tokens.length === 0) return null;
   if (tokens.length === 1) {
     // 只有一个 token：当作 given，姓留空（只能出 first/first-only 模式）
@@ -106,9 +163,17 @@ export interface ParsedPersonName {
   normalizedFull: string;
 }
 
-/** 取 ASCII 归一首选变体（德语标准 ä→ae）；空 → ''。 */
-function primaryVariant(raw: string): string {
-  return transliterateVariants(raw)[0] ?? '';
+/**
+ * 身份归一单变体（**保留** Unicode 字母/数字）：小写 + 德语标准音译（ä→ae ö→oe ü→ue ß→ss）+ 去组合音标，
+ * 但不像 email 本地部那样 ASCII-only 删空——否则 "张 Wei"/"李 Wei" 都塌成 "wei" 令不同人误并（#54 P2）。
+ * 仅供身份路径（{@link parsePersonName}）；email 本地部仍用 {@link transliterateVariants}（ASCII-only）。
+ */
+function identityVariant(raw: string): string {
+  const lower = (raw ?? '').toLowerCase().trim();
+  if (!lower) return '';
+  const stripMarks = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const german = stripMarks(lower.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss'));
+  return german.replace(/[^\p{L}\p{N}]+/gu, ''); // 保 Unicode 字母/数字，仅去标点/空白/符号
 }
 
 /**
@@ -133,12 +198,13 @@ const EMPTY_PERSON_NAME: ParsedPersonName = { given: '', family: '', normalizedF
 export function parsePersonName(raw: string): ParsedPersonName {
   const nfc = (raw ?? '').normalize('NFC').trim();
   if (!nfc) return EMPTY_PERSON_NAME;
-  const parsed = parseName(reorderSurnameComma(nfc));
+  // 身份路径用位置感知称谓剥离（不误剥 Ma/Ba/Ing…，但剥 "Dr. med." 空格后缀）+ 保 Unicode 变体（不删 CJK/西里尔）。
+  const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitles);
   if (!parsed) return EMPTY_PERSON_NAME;
-  const given = primaryVariant(parsed.given);
-  const family = primaryVariant(parsed.surnameCore || parsed.surname);
+  const given = identityVariant(parsed.given);
+  const family = identityVariant(parsed.surnameCore || parsed.surname);
   const normalizedFull = [parsed.given, ...parsed.middles, parsed.surname]
-    .map(primaryVariant)
+    .map(identityVariant)
     .filter(Boolean)
     .join(' ');
   return { given, family, normalizedFull };
