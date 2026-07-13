@@ -11,7 +11,7 @@ import type { Mock } from 'vitest';
 // 工厂动态 import 与下方静态 import 解析到同一模块实例 → 同一 spy 注册表。
 vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
 
-import { acts, resetActivities } from './testing/temporal-workflow.mock';
+import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { externalIntentSweepWorkflow } from './external-intent.workflow';
 
 interface Target {
@@ -39,6 +39,7 @@ function primeHappyPath(targets: Target[], live: { ted: boolean; openfda: boolea
   acts.expireStaleSignals.mockResolvedValue({ expired: 3 });
   acts.resolveExternalIntentTarget.mockImplementation(async (t: Target) => resolvedEcho(t));
   acts.ingestExternalSignals.mockResolvedValue(ingestSummary());
+  acts.recomputeExpiredIntent.mockResolvedValue({ workspacesRecomputed: 1, companiesRebuilt: 2, companiesCleared: 1, truncated: 0 });
   acts.liveProviderState.mockResolvedValue(live);
   acts.projectExternalIntentForIcp.mockImplementation(async (t: Record<string, unknown>) => ({
     workspaceId: t.workspaceId,
@@ -162,6 +163,46 @@ describe('externalIntentSweepWorkflow — fail-safe 分支', () => {
     expect(out.ingest).toMatchObject({ tedSpecs: 0, fdaSpecs: 0, signalsUpserted: 0, budgetExceeded: false });
     expect(acts.liveProviderState).toHaveBeenCalledTimes(1);
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('externalIntentSweepWorkflow — 过期后 intent 复算 + patched 版本化守卫（#56/#70 P2）', () => {
+  it('patched=true（新执行）→ recomputeExpiredIntent 在 ingest 后、所有投影前调一次，收 resolved targets，聚合进 out.recompute', async () => {
+    primeHappyPath([target('ws-1', 'icp-1'), target('ws-2', 'icp-2')]);
+
+    const out = await externalIntentSweepWorkflow({});
+
+    expect(acts.recomputeExpiredIntent).toHaveBeenCalledTimes(1);
+    const arg = acts.recomputeExpiredIntent.mock.calls[0][0] as { targets: Array<Record<string, unknown>> };
+    expect(arg.targets).toHaveLength(2);
+    expect(arg.targets[0]).toMatchObject({ workspaceId: 'ws-1', cpvCodes: ['42122000'], buyerCountries: ['DEU'], fdaProductCodes: ['LLZ'] });
+    // 顺序：ingest 后、所有投影之前（过期事件先清出，投影再按 ACTIVE 信号加）。
+    expect(firstOrder(acts.ingestExternalSignals)).toBeLessThan(firstOrder(acts.recomputeExpiredIntent));
+    expect(firstOrder(acts.recomputeExpiredIntent)).toBeLessThan(Math.min(...acts.projectExternalIntentForIcp.mock.invocationCallOrder));
+    expect(out.recompute).toEqual({ workspacesRecomputed: 1, companiesRebuilt: 2, companiesCleared: 1, truncated: 0 });
+  });
+
+  it('patched=false（飞行中旧历史 replay）→ recomputeExpiredIntent **不**被调（命令序列与旧历史一致），投影仍跑', async () => {
+    primeHappyPath([target('ws-1', 'icp-1'), target('ws-2', 'icp-2')]);
+    setPatched(() => false);
+
+    const out = await externalIntentSweepWorkflow({});
+
+    expect(acts.recomputeExpiredIntent).not.toHaveBeenCalled();
+    expect(out.recompute).toBeUndefined();
+    expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(2); // 旧路径投影不受影响
+    expect(out.swept).toBe(2);
+  });
+
+  it('recomputeExpiredIntent reject → fail-safe（out.recompute 记 error），workflow 仍完成投影', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    acts.recomputeExpiredIntent.mockRejectedValue(new Error('recompute boom'));
+
+    const out = await externalIntentSweepWorkflow({});
+
+    expect(out.recompute?.error).toContain('recompute boom');
+    expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(1); // 复算失败不阻断投影
+    expect(out.swept).toBe(1);
   });
 });
 
