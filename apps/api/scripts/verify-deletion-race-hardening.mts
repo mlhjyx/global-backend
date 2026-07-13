@@ -202,10 +202,88 @@ async function main(): Promise<void> {
   const co5Left = await owner.canonicalContact.count({ where: { companyId: co5.id } });
   check('F4b.2 🔴 完成擦除后无「漏网」新 PII 落到本公司', co5Left === 0);
 
+  // ═══════════ F5. contact 主体重物化残留并发窗口收口（PR #80 复审 CONFIRMED）══════════════════════════
+  // F5a 有界对账（确定性）+ 数据丢失护栏；F5b 真并发：erase 对账的 FOR UPDATE 排空并发 persist 的 FOR SHARE。
+  // 见 docs/implementation-records/deletion-art17-residual-window.md。
+  const REBORN = 'Wiedergeborener Zeuge';
+
+  // — F5a：对账删净窗口内重物化件；先存同名另一真人（createdAt < 受理时）绝不误删（=与被驳回 sweep 的关键差异）——
+  const co6 = await owner.canonicalCompany.create({
+    data: { workspaceId: WS, name: 'Race Co Six', domain: 'race6.example', dedupeKey: 'd:race6.example', status: 'NEW' },
+  });
+  // 先存的**同名另一真人**（早于 DSR 受理）——护栏对象，必须存活。经扩展 client 建（fullName 加密，贴近真实数据）
+  // 后回填 createdAt 到 DSR 之前。🔴 id-based 断言（不按 fullName 过滤——owner 非扩展 client 读到的是密文）。
+  const preExistingId = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co6.id, fullName: REBORN, dedupeKey: 'e:other.samename@race6.example' } });
+    return c.id;
+  });
+  await owner.canonicalContact.update({ where: { id: preExistingId }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } });
+  // DSR 目标原始件
+  const c6Id = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co6.id, fullName: REBORN, dedupeKey: 'e:reborn.old@race6.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'reborn.old@race6.example' } });
+    return c.id;
+  });
+  const v6 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c6Id });
+  const in6: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: v6.id, subjectType: 'contact', subjectId: c6Id };
+  const loc6 = await acts.freezeSubject(in6);
+  // 模拟竞态 persist 的产物：受理后新建的**同人新邮箱**重物化件（真实竞态里创建闸读快照在冻结提交前 → 漏拦）
+  const artifactId = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co6.id, fullName: REBORN, dedupeKey: 'e:reborn.NEW@elsewhere.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'reborn.NEW@elsewhere.example' } });
+    return c.id;
+  });
+  const counts6 = await acts.eraseSubject({ input: in6, located: loc6 });
+  check('F5a 对账把「原始件 + 重物化同人件」一并擦除（contactsErased=2）', counts6.contactsErased === 2);
+  const artifactGone = await owner.canonicalContact.findUnique({ where: { id: artifactId } });
+  check('F5a.1 🔴 竞态重物化件（受理后新建同人）被对账删净', artifactGone === null);
+  const survivor = await owner.canonicalContact.findUnique({ where: { id: preExistingId } });
+  check('F5a.2 🔴 先存的同名另一真人（createdAt < 受理时，同名同公司）未被误删（数据丢失护栏）', survivor !== null);
+
+  // — F5b：真并发。B（发现侧）持 FOR SHARE + 新建重物化件不提交；freeze 写 contact_key；erase 对账的
+  //   FOR UPDATE 应被 B 挡住（排空）→ 放行 B 提交后对账见其重物化件并删净。——
+  const co7 = await owner.canonicalCompany.create({
+    data: { workspaceId: WS, name: 'Race Co Seven', domain: 'race7.example', dedupeKey: 'd:race7.example', status: 'NEW' },
+  });
+  const PERSON7 = 'Konkurrent Wiedergänger';
+  const c7Id = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co7.id, fullName: PERSON7, dedupeKey: 'e:k.old@race7.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'k.old@race7.example' } });
+    return c.id;
+  });
+  const v7 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c7Id });
+  const in7: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: v7.id, subjectType: 'contact', subjectId: c7Id };
+  const loc7 = await acts.freezeSubject(in7); // 冻结提交 contact_key（B 已在窗口内，见下）
+
+  const bHeld = deferred();
+  const bRelease = deferred();
+  const bPromise7 = prisma.withWorkspace(WS, async (tx) => {
+    // 模拟竞态 persist：先对公司取 FOR SHARE（与 persistDiscoveredContacts 同），再新建同人新邮箱行，持锁不提交
+    await tx.$queryRaw`SELECT status FROM canonical_company WHERE id = ${co7.id}::uuid FOR SHARE`;
+    await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co7.id, fullName: PERSON7, dedupeKey: 'e:k.race@elsewhere.example' } });
+    bHeld.resolve();
+    await bRelease.p; // 持 FOR SHARE 不提交
+  });
+  await bHeld.p;
+  // erase 对账的 FOR UPDATE 应阻塞在 B 的 FOR SHARE 上：400ms 后仍未返回 = 确实被挡（区分「无锁则早返回」）。
+  let eDone = false;
+  const ePromise7 = acts.eraseSubject({ input: in7, located: loc7 }).then((r) => {
+    eDone = true;
+    return r;
+  });
+  await sleep(400);
+  check('F5b erase 对账的 FOR UPDATE 被并发 persist 的 FOR SHARE 阻塞（400ms 后仍未返回）', eDone === false);
+  bRelease.resolve(); // 放行 B 提交（重物化件此刻落库、createdAt > 受理时）
+  await bPromise7;
+  const counts7 = await ePromise7;
+  check('F5b.1 🔴 排空后对账把并发重物化件纳入擦除（contactsErased=2）', counts7.contactsErased === 2);
+  const co7Left = await owner.canonicalContact.count({ where: { companyId: co7.id } });
+  check('F5b.2 🔴 完成擦除后公司下 0 该人行（含真并发重物化件）', co7Left === 0);
+
   await cleanup(owner);
   await prisma.$disconnect();
   await owner.$disconnect();
-  console.log(fail === 0 ? '\n🎉 删除竞态硬化验证全绿（Codex P1/P2 on PR #63）' : `\n💥 ${fail} 处失败`);
+  console.log(fail === 0 ? '\n🎉 删除竞态硬化验证全绿（Codex P1/P2 on PR #63 + PR #80 残留窗口收口 F5）' : `\n💥 ${fail} 处失败`);
   process.exit(fail === 0 ? 0 : 1);
 }
 

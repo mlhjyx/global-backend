@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSuppressionEntries } from './deletion-plan';
+import { buildSuppressionEntries, selectReconcileStragglerIds } from './deletion-plan';
 import { blindContactKey } from './pii-crypto';
 import { contactIdentity } from '../discovery/identity';
 
@@ -65,5 +65,70 @@ describe('deletion-plan buildSuppressionEntries', () => {
       companyKey: 'd:acme.com',
     });
     expect(e.some((x) => x.type === 'contact_key')).toBe(false);
+  });
+});
+
+describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对账)', () => {
+  const companyKey = 'd:acme.com';
+  const erasedName = 'Petra Wiedergänger';
+  const erasedPersonKey = blindContactKey(contactIdentity({ fullName: erasedName }, companyKey)).toLowerCase();
+  const freeze = new Date('2026-07-13T12:00:00.000Z');
+  const before = new Date('2026-07-13T11:59:00.000Z');
+  const after = new Date('2026-07-13T12:00:30.000Z');
+
+  it('🔴 选中「同 person-key + createdAt >= since」的重物化行（竞态窗口内新建）', () => {
+    const ids = selectReconcileStragglerIds({
+      erasedPersonKey,
+      companyKey,
+      since: freeze,
+      candidates: [{ id: 'straggler', fullName: erasedName, createdAt: after }],
+    });
+    expect(ids).toEqual(['straggler']);
+  });
+
+  it('🔴 绝不选「先于 since 就存在」的同名行（先存同名同事，避免数据丢失=与被驳回 sweep 的关键差异）', () => {
+    const ids = selectReconcileStragglerIds({
+      erasedPersonKey,
+      companyKey,
+      since: freeze,
+      candidates: [{ id: 'preexisting-same-name', fullName: erasedName, createdAt: before }],
+    });
+    expect(ids).toEqual([]);
+  });
+
+  it('createdAt === since 视为窗口内（>= 含边界）', () => {
+    const ids = selectReconcileStragglerIds({
+      erasedPersonKey,
+      companyKey,
+      since: freeze,
+      candidates: [{ id: 'boundary', fullName: erasedName, createdAt: freeze }],
+    });
+    expect(ids).toEqual(['boundary']);
+  });
+
+  it('不同人名（person-key 不符）即便窗口内也不选', () => {
+    const ids = selectReconcileStragglerIds({
+      erasedPersonKey,
+      companyKey,
+      since: freeze,
+      candidates: [{ id: 'other-person', fullName: 'Someone Else', createdAt: after }],
+    });
+    expect(ids).toEqual([]);
+  });
+
+  it('归一化对齐创建闸：大小写/空白差异的同名仍命中（与 contactIdentity 同构）', () => {
+    const ids = selectReconcileStragglerIds({
+      erasedPersonKey,
+      companyKey,
+      since: freeze,
+      candidates: [{ id: 'normalized', fullName: '  petra   WIEDERGÄNGER ', createdAt: after }],
+    });
+    expect(ids).toEqual(['normalized']);
+  });
+
+  it('空候选集 → 空结果', () => {
+    expect(
+      selectReconcileStragglerIds({ erasedPersonKey, companyKey, since: freeze, candidates: [] }),
+    ).toEqual([]);
   });
 });
