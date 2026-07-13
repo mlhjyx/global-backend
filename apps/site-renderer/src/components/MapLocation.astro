@@ -1,0 +1,35 @@
+---
+/**
+ * D16 地图（04 §5）：M0 渲染 static 变体（地址卡，无外呼零 GDPR 面）；
+ * interactive 变体 = Embed API iframe 两步加载（点击才载入），随 M1 接前端 key。
+ */
+interface Props {
+  titleKey: string;
+  addressKey: string;
+  variant?: 'static' | 'interactive';
+  coords?: { lat: number; lng: number } | null;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, addressKey, t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="location">
+  <h2>{t(titleKey)}</h2>
+  <div class="card">
+    <p>{t(addressKey)}</p>
+  </div>
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.25rem;
+  }
+  .card {
+    border: 1px solid var(--c-surface-alt);
+    border-left: 4px solid var(--c-primary);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    max-width: 560px;
+  }
+</style>

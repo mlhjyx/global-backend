@@ -1,0 +1,71 @@
+---
+interface ProductCard {
+  nameKey: string;
+  blurbKey?: string;
+  image?: { assetId: string } | null;
+}
+interface Props {
+  titleKey: string;
+  products: ProductCard[];
+  columns?: number;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, products = [], t, alt } = Astro.props;
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
+---
+
+<section class:list={['block', { alt }]} id="products">
+  <h2>{t(titleKey)}</h2>
+  <div class="grid cards">
+    {
+      products.map((p) => {
+        const name = t(p.nameKey);
+        return (
+          <article class="card">
+            <div class="thumb" aria-hidden="true">
+              {initials(name)}
+            </div>
+            <h3>{name}</h3>
+            {p.blurbKey && <p class="muted">{t(p.blurbKey)}</p>}
+          </article>
+        );
+      })
+    }
+  </div>
+</section>
+
+<style>
+  h2 {
+    font-size: clamp(1.5rem, 3vw, 2.2rem);
+    margin-bottom: 2rem;
+  }
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  .card {
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    display: grid;
+    gap: 0.6rem;
+    background: var(--c-surface);
+  }
+  /* 用户产品图未上传时的占位（M1 图片管线接手真实图）*/
+  .thumb {
+    height: 120px;
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, var(--c-surface-alt), var(--c-surface));
+    color: var(--c-primary);
+    display: grid;
+    place-items: center;
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+</style>

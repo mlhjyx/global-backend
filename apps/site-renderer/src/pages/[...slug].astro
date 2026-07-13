@@ -1,0 +1,30 @@
+---
+import Base from '../layouts/Base.astro';
+import Section from '../components/Section.astro';
+import { loadSpec, makeT, pagePathToSlug } from '../lib/spec';
+
+export function getStaticPaths() {
+  const spec = loadSpec();
+  // M0：只渲染默认 locale；多语种路径（/{locale}/…）随 M1 copy agent 落
+  return spec.pages.map((page) => ({
+    params: { slug: pagePathToSlug(page.path) },
+    props: { pageId: page.id },
+  }));
+}
+
+const { pageId } = Astro.props;
+const spec = loadSpec();
+const locale = spec.site.defaultLocale;
+const t = makeT(spec, locale);
+const page = spec.pages.find((p) => p.id === pageId)!;
+---
+
+<Base
+  spec={spec}
+  locale={locale}
+  t={t}
+  title={t(page.seo.titleKey)}
+  description={t(page.seo.descriptionKey)}
+>
+  {page.puck.content.map((block, i) => <Section block={block} t={t} index={i} />)}
+</Base>

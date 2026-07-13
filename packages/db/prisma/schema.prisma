@@ -1072,3 +1072,145 @@ model BuyingCommitteeRole {
   @@index([icpId])
   @@map("buying_committee_role")
 }
+
+// ── Site builder（独立站建设，docs/site-builder/02 §2）───────────────────────
+// 全部 workspace_id + RLS。brand_profile 随 M1（精装修 P1）、inquiry 随 M2 落表。
+
+/// 站点：每 workspace 可多站（v1 业务限 1 站）。slug 全局唯一（承载预览子域）。
+model Site {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  name            String // 站点名（默认=公司英文名）
+  slug            String // 预览子域 slug（随机不可枚举，06 §7）
+  mode            String   @default("builder") // builder | diagnosis(M3)
+  status          String   @default("draft") // draft | building | ready | published
+  stylePreset     String?  @map("style_preset")
+  locales         Json     @default("[\"en\"]") // string[]，BCP-47
+  activeVersionId String?  @map("active_version_id") @db.Uuid // 指针式发布/回滚（05 §4）
+  intake          Json // 注册引导 6 项原始提交（01 §2）
+  profile         Json? // 建站向导五组（companyProfile/trustAssets/onlineAssets/brand/contact）
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  versions  SiteVersion[]
+  buildRuns SiteBuildRun[]
+  assets    Asset[]
+  documents KbDocument[]
+
+  @@unique([slug])
+  @@index([workspaceId])
+  @@map("site")
+}
+
+/// 站点版本：spec=SiteSpec（04 契约），回滚=切 site.active_version_id 指针。
+model SiteVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  siteId      String   @map("site_id") @db.Uuid
+  version     Int // 站内递增
+  source      String   @default("build") // demo_v0 | build | manual
+  spec        Json // SiteSpec（结构+textKey；文案在 CopyBundle 内嵌 per-locale）
+  specVersion String   @map("spec_version") // 契约 semver（04 §8 迁移）
+  artifactKey String?  @map("artifact_key") // 对象存储构建产物前缀
+  buildStatus String   @default("pending") @map("build_status") // pending | building | succeeded | failed
+  buildRunId  String?  @map("build_run_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, version])
+  @@index([workspaceId])
+  @@map("site_version")
+}
+
+/// 一次生成管线运行（demo v0 或精装修），进度/成本/错误供前端轮询与 SSE。
+model SiteBuildRun {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  siteId        String    @map("site_id") @db.Uuid
+  kind          String    @default("demo_v0") // demo_v0 | refurbish(M1)
+  scope         Json? // { scope: site|page|section, targetId?, options? }
+  status        String    @default("queued") // queued | running | succeeded | failed | cancelled
+  phase         String? // P1_understanding … P5_publish（02 §4）
+  progress      Float     @default(0)
+  steps         Json? // 步骤明细 [{key,status,at}]
+  costSummary   Json?     @map("cost_summary") // 预算 reserve-settle 汇总
+  temporalRunId String?   @map("temporal_run_id")
+  error         String?
+  startedAt     DateTime? @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, siteId])
+  @@map("site_build_run")
+}
+
+/// 素材：presign→PUT 直传→commit 三步（07 §3）。object_key 全局唯一（含 content hash 幂等）。
+model Asset {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  siteId           String   @map("site_id") @db.Uuid
+  kind             String // logo | product_image | factory_image | cert | doc | video | generated
+  filename         String // 原始文件名（展示用，不参与 key）
+  mime             String
+  sizeBytes        Int      @map("size_bytes")
+  objectKey        String   @map("object_key") // ws/{workspace_id}/{site_id}/{kind}/{content_hash}.{ext}
+  contentHash      String?  @map("content_hash") // sha256，commit 校验后回填
+  derivedKeys      Json?    @map("derived_keys") // 多尺寸 webp/avif 等派生产物
+  processingStatus String   @default("pending_upload") @map("processing_status") // pending_upload | queued | processing | ready | failed | rejected
+  meta             Json? // 尺寸/EXIF 已剥离标记/来源等
+  error            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([objectKey])
+  @@index([workspaceId, siteId, kind])
+  @@map("asset")
+}
+
+/// 知识库文档（02 §12）：Docling 解析 → 结构感知切块 → 向量化。删除=chunk 级联（分租户护栏②）。
+model KbDocument {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  siteId      String   @map("site_id") @db.Uuid
+  assetId     String?  @map("asset_id") @db.Uuid // upload 来源对应素材
+  source      String // intake | wizard | upload | storefront | web_research
+  title       String
+  lang        String?
+  status      String   @default("queued") // queued | parsing | chunking | embedding | ready | failed
+  parsedMeta  Json?    @map("parsed_meta") // Docling 结构摘要（页/表格/标题树）
+  chunkCount  Int      @default(0) @map("chunk_count")
+  error       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  site   Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  chunks KbChunk[]
+
+  @@index([workspaceId, siteId])
+  @@map("kb_document")
+}
+
+/// 知识库切块：embedding vector(1024)=BGE-M3（D14）；行上记模型+版本，换模型按版本重嵌不混空间。
+model KbChunk {
+  id           String                       @id @default(uuid()) @db.Uuid
+  workspaceId  String                       @map("workspace_id") @db.Uuid
+  documentId   String                       @map("document_id") @db.Uuid
+  seq          Int
+  text         String
+  meta         Json? // 章节路径/页码/表格标记（结构感知切块产物）
+  embedModel   String                       @map("embed_model") // bge-m3
+  embedVersion String                       @map("embed_version") // 模型版本标签
+  embedding    Unsupported("vector(1024)")?
+  createdAt    DateTime                     @default(now()) @map("created_at")
+
+  document KbDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, seq])
+  @@index([workspaceId])
+  @@map("kb_chunk")
+}

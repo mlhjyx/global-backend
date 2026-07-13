@@ -18,6 +18,11 @@ import { createIntentActivities } from './intent.activities';
 import { createBacklogActivities } from './backlog.activities';
 import { createExternalIntentActivities } from './external-intent.activities';
 import { createDeletionActivities } from './deletion.activities';
+import { createSiteBuilderActivities } from './site-builder.activities';
+import { KbService } from '../site-builder/kb.service';
+import { EmbeddingsClient } from '../site-builder/embeddings.client';
+import { DoclingClient } from '../site-builder/docling.client';
+import { StorageService } from '../site-builder/storage.service';
 import { ensurePlatformSchedules } from './ensure-schedules';
 import { seedJurisdictionPolicy } from '../compliance/jurisdiction-policy.seed';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
@@ -105,6 +110,12 @@ async function main(): Promise<void> {
       ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
       // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
       ...createDeletionActivities({ prisma }),
+      // 独立站建设 demo v0（intake 触发 demoV0Workflow；KB=注册资料入库 best-effort）
+      ...createSiteBuilderActivities({
+        prisma,
+        gateway,
+        kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),
+      }),
     },
   });
 

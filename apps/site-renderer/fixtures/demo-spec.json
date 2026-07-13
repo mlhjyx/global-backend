@@ -1,0 +1,87 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "modern-industrial" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.products", "pageId": "products" },
+      { "labelKey": "nav.contact", "pageId": "contact" }
+    ],
+    "seoGlobal": { "siteName": "Acme Pump Co., Ltd." }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          { "type": "HeroBanner", "props": { "id": "HeroBanner-1", "headlineKey": "home.hero.headline", "subheadKey": "home.hero.subhead", "cta": { "labelKey": "home.hero.cta", "pageId": "contact" } } },
+          { "type": "StatsBand", "props": { "id": "StatsBand-1", "stats": [ { "value": "20+", "labelKey": "stats.years" }, { "value": "40+", "labelKey": "stats.countries" }, { "value": "ISO 9001", "labelKey": "stats.qms" } ] } },
+          { "type": "ProductGrid", "props": { "id": "ProductGrid-1", "titleKey": "products.title", "products": [ { "nameKey": "products.p1.name", "blurbKey": "products.p1.blurb" }, { "nameKey": "products.p2.name", "blurbKey": "products.p2.blurb" } ] } },
+          { "type": "AboutBlock", "props": { "id": "AboutBlock-1", "titleKey": "about.title", "bodyKey": "about.body", "foundedYear": 2004 } },
+          { "type": "CertWall", "props": { "id": "CertWall-1", "titleKey": "certs.title", "certs": [ { "labelKey": "certs.ce" }, { "labelKey": "certs.iso" } ] } },
+          { "type": "CtaBanner", "props": { "id": "CtaBanner-1", "headlineKey": "cta.headline", "cta": { "labelKey": "cta.label" } } }
+        ]
+      }
+    },
+    {
+      "id": "products",
+      "path": "/products",
+      "seo": { "titleKey": "seo.products.title", "descriptionKey": "seo.products.desc" },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          { "type": "ProductGrid", "props": { "id": "ProductGrid-2", "titleKey": "products.title", "products": [ { "nameKey": "products.p1.name", "blurbKey": "products.p1.blurb" }, { "nameKey": "products.p2.name", "blurbKey": "products.p2.blurb" } ] } },
+          { "type": "ProcessTimeline", "props": { "id": "ProcessTimeline-1", "titleKey": "process.title", "steps": [ { "titleKey": "process.s1.title", "bodyKey": "process.s1.body" }, { "titleKey": "process.s2.title", "bodyKey": "process.s2.body" }, { "titleKey": "process.s3.title", "bodyKey": "process.s3.body" } ] } },
+          { "type": "FaqAccordion", "props": { "id": "FaqAccordion-1", "titleKey": "faq.title", "items": [ { "qKey": "faq.q1", "aKey": "faq.a1" }, { "qKey": "faq.q2", "aKey": "faq.a2" } ] } }
+        ]
+      }
+    },
+    {
+      "id": "contact",
+      "path": "/contact",
+      "seo": { "titleKey": "seo.contact.title", "descriptionKey": "seo.contact.desc" },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          { "type": "InquiryForm", "props": { "id": "InquiryForm-1", "titleKey": "inquiry.title", "subKey": "inquiry.sub" } },
+          { "type": "MapLocation", "props": { "id": "MapLocation-1", "titleKey": "location.title", "addressKey": "location.address", "variant": "static" } }
+        ]
+      }
+    }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.home": "Home", "nav.products": "Products", "nav.contact": "Contact",
+      "footer.tagline": "Industrial pump manufacturer serving 40+ countries.",
+      "seo.home.title": "Acme Pump Co., Ltd. — Industrial Pump Manufacturer",
+      "seo.home.desc": "Centrifugal and screw pumps engineered in China, trusted worldwide.",
+      "seo.products.title": "Products — Acme Pump", "seo.products.desc": "Centrifugal pumps, screw pumps and OEM solutions.",
+      "seo.contact.title": "Contact — Acme Pump", "seo.contact.desc": "Request a quote from Acme Pump.",
+      "home.hero.headline": "Industrial Pumps Engineered for Reliability",
+      "home.hero.subhead": "20 years of manufacturing centrifugal and screw pumps for chemical, marine and water treatment industries.",
+      "home.hero.cta": "Request a Quote",
+      "stats.years": "Years of manufacturing", "stats.countries": "Export markets", "stats.qms": "Certified quality system",
+      "products.title": "Our Products",
+      "products.p1.name": "Centrifugal Pumps", "products.p1.blurb": "High-efficiency pumps for chemical and water treatment plants.",
+      "products.p2.name": "Screw Pumps", "products.p2.blurb": "Robust positive displacement pumps for viscous media.",
+      "about.title": "About Acme Pump", "about.body": "Founded in 2004, Acme Pump designs and manufactures industrial pumps in a 20,000 m² facility, serving distributors and OEM partners across Europe, North America and Southeast Asia.",
+      "certs.title": "Certifications", "certs.ce": "CE", "certs.iso": "ISO 9001",
+      "process.title": "How We Work", "process.s1.title": "Requirement Review", "process.s1.body": "Our engineers confirm duty point, media and materials.",
+      "process.s2.title": "Manufacturing & QC", "process.s2.body": "CNC machining, assembly and 100% hydro testing.",
+      "process.s3.title": "Delivery & Support", "process.s3.body": "Export packaging, documentation and after-sales support.",
+      "faq.title": "FAQ", "faq.q1": "What is your MOQ?", "faq.a1": "MOQ is 1 unit for standard models.",
+      "faq.q2": "Do you support OEM?", "faq.a2": "Yes, OEM and ODM projects are welcome.",
+      "cta.headline": "Tell us about your project", "cta.label": "Get in touch",
+      "inquiry.title": "Send an Inquiry", "inquiry.sub": "We reply within one business day.",
+      "inquiry.field.name": "Your name", "inquiry.field.email": "Work email", "inquiry.field.message": "Tell us about your requirements",
+      "inquiry.submit": "Send inquiry", "inquiry.m0.note": "Inquiry form goes live at publish.",
+      "location.title": "Factory Location", "location.address": "No. 88 Pump Industrial Park, Hangzhou, Zhejiang, China"
+    }
+  }
+}

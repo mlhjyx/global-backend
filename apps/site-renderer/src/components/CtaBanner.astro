@@ -1,0 +1,25 @@
+---
+interface Props {
+  headlineKey: string;
+  cta: { labelKey: string; pageId?: string; url?: string };
+  t: (key: string) => string;
+}
+const { headlineKey, cta, t } = Astro.props;
+const href = cta?.url ?? '#inquiry';
+---
+
+<section class="block cta">
+  <h2>{t(headlineKey)}</h2>
+  <a class="btn" href={href}>{t(cta.labelKey)}</a>
+</section>
+
+<style>
+  .cta {
+    background: var(--c-secondary);
+    color: var(--c-on-primary);
+    text-align: center;
+    display: grid;
+    gap: 1.25rem;
+    justify-items: center;
+  }
+</style>
