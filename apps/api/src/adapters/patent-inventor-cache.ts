@@ -385,46 +385,48 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   // 7) 落库前**三重收窄**（数据最小化 + Art.17），把「广谱扫描命中」收敛成「与排队公司对齐的最小 PII 集」：
   //    P1-2 按已排队身份过滤（宽锚 %APPLE% 溜进的无关 assignee 不落）→ P2-5 去被擦除人墓碑（不重物化）→
   //    P2-6 每 (assigneeNorm,country) cap 到 25（对齐 provider 读侧上限，不静态化上千无用发明人 PII）。
-  const queuedNorms = new Set(processed.map((e) => e.assigneeNorm)); // 本轮排队公司归一名集
-  const scoped = scan.rows
-    .map((r) => ({ r, norm: normForMatch(r.assigneeName), country: r.assigneeCountry ?? '' }))
-    .filter((e) => e.norm && e.r.inventorName && queuedNorms.has(e.norm)); // P1-2（先做，便宜）
-  // 盲键只对 P1-2-scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
-  const enriched = scoped.map((e) => ({ ...e, nameKey: inventorBlindKey(e.r.inventorName) }));
-
-  // P2-5：按盲键查墓碑，被擦除人绝不重物化（over-suppress 侧：宁跳过也不重建被擦除 PII）。
-  const candidateKeys = [...new Set(enriched.map((e) => e.nameKey).filter(Boolean))];
-  const tombstoned = candidateKeys.length
-    ? new Set(
-        (
-          await db.patentInventorTombstone.findMany({
-            where: { inventorNameKey: { in: candidateKeys } },
-            select: { inventorNameKey: true },
-          })
-        ).map((t) => t.inventorNameKey),
-      )
-    : new Set<string>();
-  const notErased = enriched.filter((e) => !(e.nameKey && tombstoned.has(e.nameKey)));
-
-  // P2-6：确定性排序 → 每 (assigneeNorm,country) cap 到 MAX_INVENTORS_PER_ASSIGNEE（幂等：同批每次落同一 25 位）。
-  notErased.sort(
-    (a, b) => a.norm.localeCompare(b.norm) || a.country.localeCompare(b.country) || a.r.inventorName.localeCompare(b.r.inventorName),
-  );
-  const perGroup = new Map<string, number>();
-  const toUpsert: typeof notErased = [];
-  for (const e of notErased) {
-    const gk = `${e.norm}\u0000${e.country}`;
-    const n = perGroup.get(gk) ?? 0;
-    if (n >= MAX_INVENTORS_PER_ASSIGNEE) continue;
-    perGroup.set(gk, n + 1);
-    toUpsert.push(e);
-  }
-
-  // upsert（🔴encryptPii + 盲键）——确定性密文令唯一键幂等。🔴 P2-7：写阶段包 try/catch → 失败标 audit FAILED
-  //   （不逃逸令 audit 卡 RUNNING + Temporal 重扫烧配额）。preflight 已挡 key 缺失，此处兜 upsert 瞬时错。
+  // 🔴 P2-7（复审 HIGH 收口）：整个写阶段（盲键 crypto + 墓碑 findMany + upsert）**全包 try/catch** → 任一步抛错
+  //   标 audit FAILED、graceful 返回（不逃逸令 audit 卡 RUNNING + Temporal 重试整活动重扫 BQ 烧配额）。scan 成功后
+  //   BQ 配额已花，下游任何 DB/crypto 抖动（含 rolling deploy 墓碑表未及应用）绝不触发白白重扫。
   const resultKeys = new Set<string>();
   let rowCount = 0;
   try {
+    const queuedNorms = new Set(processed.map((e) => e.assigneeNorm)); // 本轮排队公司归一名集
+    const scoped = scan.rows
+      .map((r) => ({ r, norm: normForMatch(r.assigneeName), country: r.assigneeCountry ?? '' }))
+      .filter((e) => e.norm && e.r.inventorName && queuedNorms.has(e.norm)); // P1-2（先做，便宜）
+    // 盲键只对 P1-2-scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
+    const enriched = scoped.map((e) => ({ ...e, nameKey: inventorBlindKey(e.r.inventorName) }));
+
+    // P2-5：按盲键查墓碑，被擦除人绝不重物化（over-suppress 侧：宁跳过也不重建被擦除 PII）。
+    const candidateKeys = [...new Set(enriched.map((e) => e.nameKey).filter(Boolean))];
+    const tombstoned = candidateKeys.length
+      ? new Set(
+          (
+            await db.patentInventorTombstone.findMany({
+              where: { inventorNameKey: { in: candidateKeys } },
+              select: { inventorNameKey: true },
+            })
+          ).map((t) => t.inventorNameKey),
+        )
+      : new Set<string>();
+    const notErased = enriched.filter((e) => !(e.nameKey && tombstoned.has(e.nameKey)));
+
+    // P2-6：确定性排序 → 每 (assigneeNorm,country) cap 到 MAX_INVENTORS_PER_ASSIGNEE（幂等：同批每次落同一 25 位）。
+    notErased.sort(
+      (a, b) => a.norm.localeCompare(b.norm) || a.country.localeCompare(b.country) || a.r.inventorName.localeCompare(b.r.inventorName),
+    );
+    const perGroup = new Map<string, number>();
+    const toUpsert: typeof notErased = [];
+    for (const e of notErased) {
+      const gk = `${e.norm}\u0000${e.country}`;
+      const n = perGroup.get(gk) ?? 0;
+      if (n >= MAX_INVENTORS_PER_ASSIGNEE) continue;
+      perGroup.set(gk, n + 1);
+      toUpsert.push(e);
+    }
+
+    // upsert（🔴encryptPii + 盲键）——确定性密文令唯一键幂等。
     for (const e of toUpsert) {
       const encInventor = encryptPii(e.r.inventorName); // 🔴 确定性加密落盘
       await db.patentInventorCache.upsert({

@@ -1,6 +1,12 @@
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import type { GooglePatentsInput, GooglePatentsOutput } from '../../tools/source-tools';
-import { GOOGLE_PATENTS_LICENSE, PatentApplicant, PatentRecord, PatentSearchOptions } from '../../adapters/bigquery-patents';
+import {
+  GOOGLE_PATENTS_LICENSE,
+  MAX_INVENTORS_PER_ASSIGNEE as MAX_INVENTORS,
+  PatentApplicant,
+  PatentRecord,
+  PatentSearchOptions,
+} from '../../adapters/bigquery-patents';
 import {
   ContactDiscoveryAdapter,
   ContactDiscoveryContext,
@@ -15,9 +21,9 @@ const GOOGLE_PATENTS_BASE = 'https://patents.google.com/'; // 公开专利门户
 // 🔴 公司对齐门（比公司发现门 0.72 更严）：贴错公司 = 把 A 公司发明人挂到 B 公司，危害大（同 CH/EPO）。
 const ALIGN_MIN_SCORE = 0.9;
 const ALIGN_MIN_MARGIN = 0.1;
-// 过滤旋钮：近 5 年 + 每公司上限 25 位 distinct 发明人（防大公司爆量 + 数据最小化）。
+// 过滤旋钮：近 5 年 + 每公司上限 distinct 发明人（防大公司爆量 + 数据最小化）。
+// 🔴 读侧上限 = 缓存写侧上限 MAX_INVENTORS_PER_ASSIGNEE（单一来源，别名导入，绝不 desync）。
 const RECENCY_YEARS = 5;
-const MAX_INVENTORS = 25;
 
 /** 当前年（UTC）——可注入时钟测。 */
 export function currentYear(now: () => number = Date.now): number {

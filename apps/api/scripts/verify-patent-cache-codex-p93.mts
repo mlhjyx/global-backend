@@ -25,6 +25,7 @@ import {
   refreshPatentCache,
   enqueuePatentLookup,
   inventorBlindKey,
+  inventorErasureKeys,
   PATENT_PROVIDER_KEY,
   PATENT_POLICY_DOMAIN,
   type PatentRefreshDb,
@@ -39,6 +40,9 @@ for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').spl
 }
 process.env.DATABASE_URL ??= 'postgresql://global:global@localhost:5432/global_dev';
 process.env.APP_DATABASE_URL ??= 'postgresql://app_user:app_pw@localhost:5432/global_dev';
+
+const WS = 'ddddcccc-0000-4000-8000-0000000e0093'; // 测试 workspace（tombstone 无 RLS，仅令 withWorkspace 有合法 UUID）
+const ERASED_FULLNAME = 'Anna Müller'; // 被擦除人可读名（如 contact.fullName）——umlaut，测跨拼写盲键收敛
 
 let failed = 0;
 const ok = (cond: boolean, msg: string): void => {
@@ -77,7 +81,7 @@ async function setProvider(status: 'ENABLED' | 'DISABLED'): Promise<void> {
 async function cleanup(): Promise<void> {
   await ownerDb.patentInventorCache.deleteMany({ where: { assigneeNorm: { startsWith: 'codex' } } });
   await ownerDb.patentLookupRequest.deleteMany({ where: { assigneeNorm: { startsWith: 'codex' } } });
-  await ownerDb.patentInventorTombstone.deleteMany({ where: { inventorNameKey: { in: [inventorBlindKey('MUELLER, ANNA')] } } });
+  await ownerDb.patentInventorTombstone.deleteMany({ where: { inventorNameKey: { in: inventorErasureKeys(ERASED_FULLNAME) } } });
   await ownerDb.patentCacheRefreshAudit.deleteMany({ where: { detail: { contains: 'codex' } } });
 }
 
@@ -107,24 +111,28 @@ async function main() {
   // 之后各段需 provider ENABLED（模拟已签 LIA/DPIA 的生产态；末尾复位 DISABLED）
   await setProvider('ENABLED');
 
-  // ══════════ B · P2-5 墓碑 GRANT + skip ══════════
-  console.log('\n══ B · P2-5 Art.17 墓碑（app_user GRANT + 刷新跳过）══');
-  const erasedKey = inventorBlindKey('MUELLER, ANNA');
-  // 🔴 用 app_user（PrismaService）写墓碑——证 patent_inventor_tombstone 的 INSERT grant（擦除侧走 app_user tx）。
-  await prisma.patentInventorTombstone.create({ data: { inventorNameKey: erasedKey } });
-  const tomb = await ownerDb.patentInventorTombstone.findUnique({ where: { inventorNameKey: erasedKey } });
-  ok(!!tomb, 'B：app_user 成功写 tombstone（INSERT grant 生效）');
+  // ══════════ B · P2-5 墓碑（eraseSubject 同款写 + 跨拼写 skip）══════════
+  console.log('\n══ B · P2-5 Art.17 墓碑（eraseSubject 同款 app_user createMany + 跨拼写刷新跳过）══');
+  // 🔴 复刻 eraseSubject 的**确切**写墓碑调用：app_user withWorkspace 事务 + createMany(inventorErasureKeys(fullName)) +
+  //   skipDuplicates——证 patent_inventor_tombstone 的 INSERT grant + no-RLS 平台表在 withWorkspace 事务内 createMany 可行（复审 Q5）。
+  const erasureKeys = inventorErasureKeys(ERASED_FULLNAME); // = eraseSubject 的 erasureKeys 派生（over-suppress 变体集）
+  await prisma.withWorkspace(WS, (tx) =>
+    tx.patentInventorTombstone.createMany({ data: erasureKeys.map((inventorNameKey) => ({ inventorNameKey })), skipDuplicates: true }),
+  );
+  const tombCount = await ownerDb.patentInventorTombstone.count({ where: { inventorNameKey: { in: erasureKeys } } });
+  ok(tombCount === erasureKeys.length && tombCount > 0, `B：app_user withWorkspace createMany 写 ${tombCount}/${erasureKeys.length} 墓碑（INSERT grant + no-RLS tx 生效）`);
   await enqueuePatentLookup(ownerDb, { companyName: 'Codextomb GmbH', country: 'DE' });
+  // 🔴 扫描行用**不同拼写**（surname-comma + umlaut 展开 "MUELLER, ANNA"）——证跨格式盲键收敛：inventorErasureKeys('Anna Müller') ∋ inventorBlindKey('MUELLER, ANNA')。
   const scanB = mockScanner([
-    { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: 'MUELLER, ANNA' }, // 被擦除 → 跳过
+    { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: 'MUELLER, ANNA' }, // 被擦除（异拼写）→ 跳过
     { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }, // 正常 → 落
   ]);
   const rB = await refreshPatentCache({ db, bq: scanB });
   ok(rB.status === 'OK' && rB.rowCount === 1, `B：status=OK rowCount=1（实得 ${rB.status}/${rB.rowCount}）`);
   const bRows = await ownerDb.patentInventorCache.findMany({ where: { assigneeNorm: 'codextomb' } });
   const bNames = bRows.map((r) => decryptPii(r.inventorName)).sort();
-  ok(bNames.length === 1 && bNames[0] === 'SCHMIDT, HANS', `B：只 SCHMIDT 落库，MUELLER（墓碑）不重物化（实得 ${JSON.stringify(bNames)}）`);
-  ok(!bRows.some((r) => r.inventorNameKey === erasedKey), 'B：无被擦除盲键落库');
+  ok(bNames.length === 1 && bNames[0] === 'SCHMIDT, HANS', `B：只 SCHMIDT 落库，被擦除人（跨拼写 MUELLER,ANNA）不重物化（实得 ${JSON.stringify(bNames)}）`);
+  ok(!bRows.some((r) => r.inventorNameKey === inventorBlindKey('MUELLER, ANNA')), 'B：无被擦除盲键落库（跨格式命中墓碑）');
 
   // ══════════ C · P1-2 过滤 + P2-6 cap ══════════
   console.log('\n══ C · P1-2 无关 assignee 过滤 + P2-6 每 assignee cap 25 ══');

@@ -480,6 +480,18 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
     expect(db._audits.some((a) => a.status === 'RUNNING' && !a.finishedAt)).toBe(false); // 无悬挂 RUNNING
   });
+
+  it('P2-7 wrap（复审 HIGH）：墓碑 findMany 抛错（如 rolling deploy 表未及应用）→ audit FAILED，不卡 RUNNING、不重扫', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).patentInventorTombstone.findMany = async () => { throw new Error('relation "patent_inventor_tombstone" does not exist'); };
+    const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('FAILED'); // 🔴 扫描后下游抛错也 graceful FAILED（不逃逸令 Temporal 重扫）
+    expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
+    expect(db._audits.some((a) => a.status === 'RUNNING' && !a.finishedAt)).toBe(false);
+    expect(db._cache).toHaveLength(0);
+  });
 });
 
 describe('enqueuePatentLookup（Step 6 队列）', () => {
