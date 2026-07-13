@@ -316,7 +316,9 @@ async function reconcileContactSubjectEraseIds(
     where: { id: originalId },
     select: { id: true, fullName: true, companyId: true, company: { select: { dedupeKey: true } } },
   });
-  if (!original) return located.contactIds; // 已删（幂等重跑）——回退快照 id
+  // 原始件已不在：Temporal 重跑的幂等由前面 moved.count===0 早返回守（不会走到这里）；此分支守的是
+  // **并发跨主体删除**（如同公司的 company 主体擦除先删到该行）——回退快照 id（后续 deleteMany 命中 0，安全）。
+  if (!original) return located.contactIds;
 
   // 排空锚点：属主公司行 FOR UPDATE（仅锁不改状态；$queryRaw 不经读路径解密，无需 PII）
   await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${original.companyId}::uuid FOR UPDATE`;

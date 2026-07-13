@@ -27,7 +27,15 @@
 1. **排空锚点**——对属主公司行取**瞬时 `FOR UPDATE`**（与公司主体路径**同一把锁**，但**不**标 `SUPPRESSED`，故该公司发现不受影响）。并发插入 persist 的 FK `FOR KEY SHARE` / 显式 `FOR SHARE` 与 `FOR UPDATE` 互斥 → 本锁到手即建立 happens-before：**此刻所有竞态 persist 均已提交、其重物化行均已可见**。
 2. **有界对账**——同一 tx 内，删除本公司中「person-key 命中被擦除人的 `contact_key`」**且** `createdAt >= deletion_request.createdAt` 的联系人。
 
-这让**并发情形等价于创建闸已能处理的顺序情形**——无延迟、无启发式。锚点之后新起的 persist 读到已提交 `contact_key` → 创建闸跳过 → 无新行。**完整闭合。**
+这让**并发情形等价于创建闸已能处理的顺序情形**——无延迟、无启发式。锚点之后新起的 persist 读到已提交 `contact_key` → 创建闸跳过 → 无新行。**闭合「DSR 受理后插入的 create-path 重物化」窗口**（残留边界见 §2.1）。
+
+### 2.1 createdAt 语义与 tx-start 顾虑（对抗复审提出 → 实测证伪）
+
+复审提出：若 `canonical_contact.createdAt` 走 Postgres `DEFAULT CURRENT_TIMESTAMP`（= **事务开始时间**），则一条**先于 DSR 开始、于冻结后提交**的竞态 persist 会把重物化行的 `createdAt` 回填到 DSR 之前，逃过 `>= since` 过滤。
+
+**实测证伪**（探针：同一事务内相隔 600ms 的两次 `create`，`createdAt` **不同**：`…:38.720Z` vs `…:39.324Z`；若为 tx-start 则必**相等**）：Prisma `@default(now())` 在 **insert 时刻**取值（不走 DB `DEFAULT CURRENT_TIMESTAMP` 的 tx-start 语义），故 `createdAt` = **实际插入时刻**。任何 **DSR 受理后插入**的重物化行 `createdAt > 受理时` → 被对账捕获。
+
+残留仅剩「insert 于 DSR 受理**之前**、commit 于其后」的 ms 级窄缝——按插入时刻，该行创建**先于请求** = **既有重复行**语义（row-scoped DSR + name-only key 的既有局限，与创建闸同源、与被驳回 sweep 同源），非本变更引入。反向的 **freeze-snapshot** 替代（按冻结可见性而非时间戳判定）**更差**：其盲区是 `[受理, 冻结]` 窗口，因 outbox/Temporal 调度延迟可达**秒级**，远大于本方案的 ms 级窄缝；且要根治「insert-before-DSR」必须删同 person-key 的先存行 = 回到被驳回的数据丢失 sweep（name-only key 无法区分先存同名另一真人）。故 createdAt=插入时刻 的锚点在既有身份模型下**最优**。
 
 ### 为什么 `createdAt` 过滤是关键（与 PR #80 驳回的 sweep 的差异）
 
@@ -38,9 +46,12 @@ PR #80 复审驳回的是**无时间界的擦除侧 person-key 扫描删**——
 - 被 `createdAt` 过滤**界定在新建行**；
 - 在 **Art.17 法定义务**面前取舍——重物化被删自然人是法律红线，删掉一个系统身份模型本就会拒建的同名新行是可接受代价。
 
-### 已知更深残留（本方案不引入、不恶化，单独跟踪）
+### 已知更深残留（本方案不引入、不恶化，均为 name-only key / row-scoped DSR 的**既有**局限，与创建闸同源，单独跟踪）
 
-竞态窗口内若 persist 走 **merge**（并入一条**先存的**同名同事行）而非 create，则 `createdAt` 对账不覆盖（目标行先存）。但：窗口内原始被擦除件**仍在**（擦除晚于冻结），`resolvePersonIdentity` 极可能命中**原始件**（同身份）→ 并入原始件 → 随擦除级联删净；命中一个先存**不同**同名同事需该同事比原始件更优匹配（原始件共享精确身份，几无可能）；完成后创建闸先于 resolve 拦截。故此向可忽略，且是 name-based 身份模型的**既有**局限（创建闸同源），非本变更引入。
+1. **merge-into-先存同事**：竞态窗口内若 persist 走 **merge**（并入一条**先存的**同名同事行）而非 create，则 `createdAt` 对账不覆盖（目标行先存）。但：窗口内原始被擦除件**仍在**（擦除晚于冻结），`resolvePersonIdentity` 极可能命中**原始件**（同身份）→ 并入原始件 → 随擦除级联删净；命中先存**不同**同名同事需其比原始件更优匹配（原始件共享精确身份，几无可能）；完成后创建闸先于 resolve 拦截。故此向可忽略。
+2. **归一化盲区**：`contactNameKeyPart` 仅 `lowercase + 折叠空白 + trim`，**无** NFC/NFD 归一、**无**变音符折叠、对顺序敏感。故重物化写成 `Petra Wiederganger`（无变音）/ 分解 Unicode / `Wiedergänger, Petra`（"Surname, Given" 形，openFDA 等路径会产生）会算出**不同** person-key → 同时逃过**创建闸与对账**。这是两机制**同一**盲点，非本变更引入——故 §2 的「闭合」限定为「**同一归一名**下的 create-path 重物化」。根治属**待办3 强身份**（externalId/CH officer id 等）范畴。
+3. **先存重复行**（row-scoped DSR）：若被擦除人 P 在 `createdAt < 受理时` 另有一条合法行（历史 dedup 漏并），本次只删目标 + 窗口 straggler，该先存重复行留存 P 的 PII。删它需触碰先存同 person-key 行 = 数据丢失 sweep 领域，故 `createdAt` 锚点有意不及。
+4. **dedupeKey 漂移**（LOW）：若 `canonical_company.dedupeKey` 在冻结后变化（如 NEW 公司后来获得域名），冻结所写 `contact_key`（旧键）与后续创建闸的当前键计算不再匹配 → 长效 person 禁联静默失效。对账因目标与候选在同一 tx 内都用当前键、内部自洽，不受影响。属 PR #80 键稳定性既有弱点。
 
 ## 3. 实施要点
 
