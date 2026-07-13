@@ -280,10 +280,58 @@ async function main(): Promise<void> {
   const co7Left = await owner.canonicalContact.count({ where: { companyId: co7.id } });
   check('F5b.2 🔴 完成擦除后公司下 0 该人行（含真并发重物化件）', co7Left === 0);
 
+  // ═══════════ F6. 名字归一化盲区闭合——禁联闸 + 对账按**变体集**命中（去变音/语序/德语 ASCII）═══════════
+  // 被擦除人以**跨源不同拼写**重现（变音丢弃 Wiedergänger→Wiederganger / "Surname, Given" 语序），此前按单一
+  // 归一形算 contact_key → 变体逃逸；改为 contactSuppressionKeys 变体集后禁联闸与对账都命中。
+  const co8 = await owner.canonicalCompany.create({
+    data: { workspaceId: WS, name: 'Race Co Eight', domain: 'race8.example', dedupeKey: 'd:race8.example', status: 'NEW' },
+  });
+  const CANON = 'Petra Wiedergänger'; // 被擦除人（含变音 ä）
+  const c8Id = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({
+      data: { workspaceId: WS, companyId: co8.id, fullName: CANON, dedupeKey: 'e:petra.old@race8.example' },
+    });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'petra.old@race8.example' } });
+    return c.id;
+  });
+  const v8 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c8Id });
+  const in8: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: v8.id, subjectType: 'contact', subjectId: c8Id };
+  const before8 = await owner.suppressionRecord.count({ where: { workspaceId: WS, type: 'contact_key' } });
+  const loc8 = await acts.freezeSubject(in8); // 写变体禁联集（德语音译 ä→ae + 纯去音标 ä→a）
+  const after8 = await owner.suppressionRecord.count({ where: { workspaceId: WS, type: 'contact_key' } });
+  check('F6.0 冻结写 person-level 禁联键**变体集**（Δ≥2 条 contact_key）', after8 - before8 >= 2);
+
+  // — F6a 禁联闸：此人从另一源以**去变音**变体 'Petra Wiederganger' + 新邮箱重现 → 变体命中禁联集，整批不入库 —
+  const reV = await prisma.withWorkspace(WS, (tx) =>
+    persistDiscoveredContacts(tx, {
+      workspaceId: WS,
+      company: { id: co8.id, dedupeKey: co8.dedupeKey },
+      adapterKey: 'public_web',
+      contacts: [{ externalId: 'pv', fullName: 'Petra Wiederganger', email: 'petra.NEW@elsewhere.example', personalData: true }],
+      suppressedEmails: new Set(),
+    }),
+  );
+  check('F6a 🔴 去变音变体（Wiederganger）换新邮箱再现被禁联闸拦下（skipped=1, created=0）', reV.skippedSuppressed === 1 && reV.created === 0);
+
+  // — F6b 对账：受理后新建的**语序变体** 'Wiedergänger, Petra'（"Surname, Given"）重物化件 → 对账按变体集命中删净 —
+  const straggler8 = await prisma.withWorkspace(WS, async (tx) => {
+    const c = await tx.canonicalContact.create({
+      data: { workspaceId: WS, companyId: co8.id, fullName: 'Wiedergänger, Petra', dedupeKey: 'e:petra.comma@elsewhere.example' },
+    });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'petra.comma@elsewhere.example' } });
+    return c.id;
+  });
+  const counts8 = await acts.eraseSubject({ input: in8, located: loc8 });
+  check('F6b 🔴 "Surname, Given" 语序变体重物化件被对账按变体集捕获并擦除（contactsErased=2）', counts8.contactsErased === 2);
+  const stragglerGone = await owner.canonicalContact.findUnique({ where: { id: straggler8 } });
+  check('F6b.1 🔴 语序变体 straggler 被删净', stragglerGone === null);
+  const co8Left = await owner.canonicalContact.count({ where: { companyId: co8.id } });
+  check('F6b.2 🔴 擦除后公司下 0 该人行（原始 + 语序变体 straggler）', co8Left === 0);
+
   await cleanup(owner);
   await prisma.$disconnect();
   await owner.$disconnect();
-  console.log(fail === 0 ? '\n🎉 删除竞态硬化验证全绿（Codex P1/P2 on PR #63 + PR #80 残留窗口收口 F5）' : `\n💥 ${fail} 处失败`);
+  console.log(fail === 0 ? '\n🎉 删除竞态硬化验证全绿（Codex P1/P2 on PR #63 + PR #80 残留窗口收口 F5 + 名字归一化盲区闭合 F6）' : `\n💥 ${fail} 处失败`);
   process.exit(fail === 0 ? 0 : 1);
 }
 

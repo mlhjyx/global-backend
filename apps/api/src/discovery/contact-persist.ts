@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { contactIdentity, declinedContactIdentity } from './identity';
+import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
@@ -67,9 +67,12 @@ export async function persistDiscoveredContacts(
       skippedSuppressed += 1;
       continue;
     }
-    // person-level 禁联复检（公司域内、email-独立键，与冻结所写同源）：换邮箱/无邮箱再现也拦下。
-    const personKey = blindContactKey(contactIdentity({ fullName: c.fullName }, args.company.dedupeKey)).toLowerCase();
-    if (suppressedContactKeys.has(personKey)) {
+    // person-level 禁联复检（公司域内、email-独立键**变体集**，与冻结所写同源）：换邮箱/无邮箱/**跨源不同拼写**
+    //（变音丢弃/德语 ASCII/分解 Unicode/"Surname,Given" 语序）再现，任一变体命中禁联表即拦下。
+    const personKeys = contactSuppressionKeys(c.fullName, args.company.dedupeKey).map((k) =>
+      blindContactKey(k).toLowerCase(),
+    );
+    if (personKeys.some((k) => suppressedContactKeys.has(k))) {
       skippedSuppressed += 1;
       continue;
     }

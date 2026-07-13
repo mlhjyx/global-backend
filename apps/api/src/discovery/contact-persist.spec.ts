@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { persistDiscoveredContacts } from './contact-persist';
-import { contactIdentity, declinedContactIdentity } from './identity';
+import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
 import { blindContactKey } from '../compliance/pii-crypto';
 import type { ProviderContactRecord } from './provider-contract';
 
@@ -249,9 +249,9 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
   });
 
   it('person-level 禁联键命中 → 同一人换新邮箱再现也跳过（不重建被 Art.17 擦除的具名人）', async () => {
-    // 该人此前被删，冻结时写了 person-level 禁联键（email-独立）。现以**不同邮箱**被重新发现。
-    const personKey = blindContactKey(contactIdentity({ fullName: 'Klaus Löschmann' }, companyKey)).toLowerCase();
-    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: [personKey] });
+    // 该人此前被删，冻结时写了 person-level 禁联键**集**（email-独立）。现以**不同邮箱**被重新发现。
+    const personKeys = contactSuppressionKeys('Klaus Löschmann', companyKey).map((k) => blindContactKey(k).toLowerCase());
+    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: personKeys });
     const res = await persistDiscoveredContacts(tx, {
       workspaceId: 'ws-1',
       company,
@@ -264,9 +264,25 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
     expect(canonicalUpsert).not.toHaveBeenCalled();
   });
 
+  it('🔴 本 PR 核心：换**拼写变体**（变音丢弃 Wiedergänger→Wiederganger）再现也被 person-level 键拦下', async () => {
+    // 冻结按被擦除人 'Petra Wiedergänger' 写了变体禁联集；此人从另一源以去变音 'Petra Wiederganger' 重现。
+    const seeded = contactSuppressionKeys('Petra Wiedergänger', companyKey).map((k) => blindContactKey(k).toLowerCase());
+    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: seeded });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'public_web',
+      contacts: [{ externalId: 'y', fullName: 'Petra Wiederganger', email: 'p.new@other.test', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res.created).toBe(0);
+    expect(res.skippedSuppressed).toBe(1); // 去变音变体命中禁联集（跨源拼写不漏）
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+  });
+
   it('person-level 禁联键未命中 → 正常新建（正向路径不被破坏）', async () => {
-    const otherKey = blindContactKey(contactIdentity({ fullName: 'Someone Else' }, companyKey)).toLowerCase();
-    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: [otherKey] });
+    const otherKeys = contactSuppressionKeys('Someone Else', companyKey).map((k) => blindContactKey(k).toLowerCase());
+    const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: otherKeys });
     const res = await persistDiscoveredContacts(tx, {
       workspaceId: 'ws-1',
       company,
