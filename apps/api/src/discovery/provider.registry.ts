@@ -17,6 +17,7 @@ import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
 import { InpiRneContactProvider } from './providers/inpi-rne.provider';
+import { GooglePatentsInventorProvider } from './providers/bigquery-patents.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
@@ -86,6 +87,10 @@ export class DiscoveryProviderRegistry {
     // 不依赖 gateway（结构化 API，无 LLM）；FR 门外/无 broker 时 fail-safe 返空（天然 no-op）。
     // dirigeant 无 person id → 走 resolvePersonIdentity Tier 2/3 归一名并（同 EPO，非 Tier 0）。
     this.contacts.push(new InpiRneContactProvider({ broker }));
+    // BigQuery Google Patents 发明人发现（待办 3 · 替代被封 EPO OPS；官方 BigQuery 公共数据集）——contact_discovery 类。
+    // 不依赖 gateway（结构化查询，无 LLM）；无 broker/无 SA key/低置信对齐时 fail-safe 返空（天然 no-op）。
+    // 发明人无稳定 person id → 走 resolvePersonIdentity Tier 2/3 归一名并（同 EPO/INPI，非 Tier 0，见设计 §3）。
+    this.contacts.push(new GooglePatentsInventorProvider({ broker }));
     // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
@@ -294,6 +299,37 @@ export class DiscoveryProviderRegistry {
           retentionDays: 365,
           notes:
             "API Recherche d'entreprises（DINUM，开放政务网关，零鉴权；数据源 = INPI RNE + INSEE Sirene）。Licence Ouverte 2.0（Etalab）绿事实可商用但署名义务；dirigeant = 🔴 具名个人（GDPR），数据最小化（只取 nom/prenoms/qualite，不摄 DOB/国籍），触达前过 lawful-basis 门；非公示公司网关自动排除。",
+        },
+      });
+    }
+    // BigQuery Google Patents 发明人发现（待办 3 · 替代被封 EPO OPS）——官方 BigQuery 公共数据集查询。costPerCallCents=0。
+    // **默认 DISABLED**：SQL 解析目前仅对合成 fixture 校准过，真库真 BigQuery 未跑（需 GCP 服务账号 key）。
+    // 待 `scripts/verify-google-patents.mts` 真测通过后由 ops 手动/reseed 翻 ENABLED（`update:{}` 不覆盖手动改）。
+    // verify 脚本直接 new Provider 跑、不经路由，故 DISABLED 不挡真测；DISABLED 时生产 fan-out 不路由本源（无静默错采）。
+    await db.dataProvider.upsert({
+      where: { key: 'google_patents' },
+      update: {},
+      create: { key: 'google_patents', class: 'contact_discovery', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // 合规注册：官方 BigQuery 公共数据集（非爬，平台合约轨干净）；personalData=true —— inventors 是具名发明人（GDPR）。
+    // CC BY 4.0 绿事实可商用**但署名是 license 义务**（⚠️ ENABLE 前按数据集元数据核实确切文案）；
+    // 数据最小化（只 name，无 residence/国籍）在 adapter 层强制；成本护栏 maximumBytesBilled 硬顶护 1TB/月免费额度。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'bigquery.googleapis.com' },
+        update: {},
+        create: {
+          domain: 'bigquery.googleapis.com',
+          sourceType: 'patent_registry',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes:
+            'BigQuery Google Patents Public Data（bigquery.googleapis.com；patents-public-data.patents.publications，IFI CLAIMS 谐调）。服务账号鉴权 + maximumBytesBilled 成本护栏（护 1TB/月免费额度）。CC BY 4.0 绿事实可商用但署名义务（Google Patents Public Data / IFI CLAIMS，⚠️ ENABLE 前核实确切文案）；发明人 = 🔴 具名个人（GDPR），数据最小化（只 name，不摄 residence/国籍），触达前过 lawful-basis 门。',
         },
       });
     }

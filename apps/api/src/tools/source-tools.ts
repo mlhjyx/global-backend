@@ -25,6 +25,7 @@ import {
 import { queryAlgoliaExhibitors, AlgoliaFairConfig, FairExhibitor } from '../adapters/trade-fair-algolia';
 import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapters/companies-house';
 import { searchCompaniesWithDirigeants, FrCompanyHit } from '../adapters/inpi-rne';
+import { bigqueryPatents, PatentRecord } from '../adapters/bigquery-patents';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -334,6 +335,47 @@ export const inpiRneSearchTool: Tool<InpiRneInput, InpiRneOutput> = {
   }),
 };
 
+export interface GooglePatentsInput {
+  applicant: string;
+  fromYear: number;
+  toYear: number;
+  maxRows?: number;
+}
+export interface GooglePatentsOutput {
+  patents?: PatentRecord[];
+}
+
+/**
+ * google_patents.search —— BigQuery Google Patents Public Data（服务账号鉴权；发明人 = 具名技术买家）。
+ * 待办 3 · 替代被封 EPO OPS。required 治理：发明人 = 🔴 具名个人（GDPR）→ personalData=true → §8.8
+ * 用途门 fail-closed（未登记/SUSPENDED/用途不符即拒）。authRequired=true（SA key 走 env，业务码不见）。
+ * 数据最小化（只 name，无 residence/国籍）在 adapter 层强制；CC BY 4.0 署名义务由 provider 写 field_evidence.license。
+ * 成本护栏：maximumBytesBilled 硬顶护 1TB/月免费额度（adapter 层）。
+ */
+export const googlePatentsSearchTool: Tool<GooglePatentsInput, GooglePatentsOutput> = {
+  id: 'google_patents.search',
+  version: '1.0.0',
+  category: 'structured_source',
+  sourceClass: 'public_intelligence',
+  cost: { unit: 'call', estimatedCents: 0, external: true },
+  rateLimit: { rps: 1, concurrency: 1 },
+  // personalData:true —— inventors 是具名发明人（GDPR）；数据最小化（只 name）在 adapter 层强制。
+  compliance: { sourcePolicy: 'required', policyDomain: 'bigquery.googleapis.com', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: true, risk: 'low' },
+  capabilities: { produces: ['contact'], accepts: ['keywords'] },
+  idempotencyKey: (i) => `google_patents.search:${stableKey(i)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'google-patents-bigquery' }),
+  execute: async (input) => ({
+    data: {
+      patents: await bigqueryPatents.searchPatentsByAssignee(input.applicant, {
+        fromYear: input.fromYear,
+        toYear: input.toYear,
+        maxRows: input.maxRows,
+      }),
+    },
+    costCents: 0,
+  }),
+};
+
 export interface TradeFairAlgoliaInput {
   cfg: AlgoliaFairConfig;
   limit?: number;
@@ -417,5 +459,6 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(mapYourShowFetchTool as Tool);
   registry.register(companiesHouseSearchTool as Tool);
   registry.register(inpiRneSearchTool as Tool);
+  registry.register(googlePatentsSearchTool as Tool);
   return registry;
 }

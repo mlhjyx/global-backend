@@ -10,6 +10,12 @@ coverage/
 .env.local
 .env.*.local
 
+# GCP 服务账号 key（BigQuery Google Patents 发明人源）—— 🔴 绝不入库
+*-sa-key.json
+gcp-*.json
+*.gcp-key.json
+.secrets/
+
 # logs
 *.log
 npm-debug.log*
