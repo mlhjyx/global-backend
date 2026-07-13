@@ -51,6 +51,12 @@ export async function persistDiscoveredContacts(
 
   // Codex P1「Add a person-level suppression」的消费侧：被 Art.17 擦除的具名人 person-level 禁联键（email-独立），
   // 命中则跳过重建——即便该人换了邮箱/无邮箱再被发现（此前只按 email 禁联 → 换邮箱即漏）。值为盲化 HMAC，本表不存人名明文。
+  // ⚠️ 残留并发窗口（已知局限，单独跟踪）：本 findMany 在 READ COMMITTED 下是**非加锁快照读**。contact 主体删除
+  //   **不冻结/不锁公司**（公司仍 ACTIVE，故上面的 FOR SHARE 复检对 contact 主体不设防），若某并发发现事务在
+  //   freezeSubject **提交 contact_key 之前**读到空集，其后新建的该人行不会被本闸拦、亦不被 eraseSubject（只删原
+  //   contactId）捕获 → 该已擦除自然人可被重物化。**不可**用擦除侧「按 person-key 扫描删除」根治：person-key 仅按
+  //   归一人名，会误删同公司同名的**另一真人**（数据丢失，比本窗口更糟——本 PR 复审已就此驳回 sweep 思路）。
+  //   本闸已完全消除**顺序**重摄入（DSR 完成后 contact_key 已提交，任何后续 persist 必命中）——即 Codex 线程所诉场景。
   const suppressedContactKeys = new Set(
     (await tx.suppressionRecord.findMany({ where: { type: 'contact_key' } })).map((s) => s.value.toLowerCase()),
   );
