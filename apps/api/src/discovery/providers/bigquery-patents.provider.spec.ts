@@ -144,6 +144,20 @@ describe('GooglePatents · discoverContacts', () => {
     expect(res.contacts).toEqual([]);
   });
 
+  it('🔴 跨境同名防漏并：DE "Acme" 对齐后，US "Acme Inc"（同归一名）的发明人不被并进德国公司', async () => {
+    const broker = fakeBroker({
+      patents: () => [
+        patent([appl('Acme', 'DE')], ['German Eng']), // DE 独家 → 对齐锚（首个 'acme'）
+        patent([appl('Acme Inc', 'US')], ['US Eng']), // US 独家，归一同为 'acme' → 逐专利国别门弃
+      ],
+    });
+    const res = await new GooglePatentsInventorProvider({ broker, now: FIXED_NOW }).discoverContacts(
+      { name: 'Acme', country: 'DE' },
+      CTX,
+    );
+    expect(res.contacts.map((c) => c.fullName)).toEqual(['German Eng']); // US Eng 被排除（不跨境误挂）
+  });
+
   it('只留对齐 applicant 的专利（别家 applicant 的发明人被排除）', async () => {
     const broker = fakeBroker({
       patents: () => [

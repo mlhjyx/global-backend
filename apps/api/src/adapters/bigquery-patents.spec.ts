@@ -23,6 +23,11 @@ describe('BigQueryPatents · assigneeLikeAnchor（SQL 宽预筛锚）', () => {
     expect(assigneeLikeAnchor('Siemens AG')).toBe('%SIEMENS%');
     expect(assigneeLikeAnchor('Robert Bosch GmbH')).toBe('%ROBERT%'); // ROBERT(6) > BOSCH(5)
   });
+  it('🔴 剥**全拼**法人形式（否则最长 token 会选中它们→无区分度谓词漏采）', () => {
+    expect(assigneeLikeAnchor('Microsoft Corporation')).toBe('%MICROSOFT%'); // 非 %CORPORATION%
+    expect(assigneeLikeAnchor('Siemens Aktiengesellschaft')).toBe('%SIEMENS%'); // 非 %AKTIENGESELLSCHAFT%
+    expect(assigneeLikeAnchor('Acme Limited')).toBe('%ACME%'); // 非 %LIMITED%
+  });
   it('全为停用词/过短 token → null（不查）', () => {
     expect(assigneeLikeAnchor('The Co')).toBeNull();
     expect(assigneeLikeAnchor('AB')).toBeNull();

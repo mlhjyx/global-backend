@@ -138,7 +138,12 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
       const seen = new Set<string>();
       const contacts: ProviderContactRecord[] = [];
       outer: for (const p of patents) {
-        if (p.applicants.length !== 1 || normForMatch(p.applicants[0].name) !== alignedNorm) continue;
+        const sole = p.applicants[0];
+        if (p.applicants.length !== 1 || normForMatch(sole.name) !== alignedNorm) continue;
+        // 🔴 跨境同名防漏并：归一名去重只留了**首个** applicant，同归一名但不同国别的 applicant
+        //    （DE "Acme" 对齐后，US "Acme Inc" 归一同为 'acme'）其专利会溜进本循环 → 逐专利再过国别门，
+        //    把国别与本公司冲突的独家申请人专利整条弃，绝不把他国同名公司的发明人并进本公司。
+        if (countryConflicts(company.country, sole.country)) continue;
         for (const inv of p.inventors) {
           const norm = normalizePersonName(inv.name);
           if (!norm || seen.has(norm)) continue;

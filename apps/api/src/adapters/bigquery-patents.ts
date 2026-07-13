@@ -33,10 +33,18 @@ const MAX_ROWS_CEIL = 2000;
 const yearToStart = (y: number): number => y * 10000 + 101; // Jan 01
 const yearToEnd = (y: number): number => y * 10000 + 1231; // Dec 31
 
-/** assignee 归一预筛用停用词（法人后缀 + 无区分度虚词）——绝不作为锚（否则全表命中）。 */
+/**
+ * assignee 归一预筛用停用词（法人后缀 + 无区分度虚词）——绝不作为锚（否则全表命中或锚到法人形式）。
+ * 🔴 含**全拼**法人形式（Corporation/Limited/Aktiengesellschaft…）：否则「取最长 token」会选中它们
+ *    （"Microsoft Corporation"→CORPORATION、"Siemens Aktiengesellschaft"→AKTIENGESELLSCHAFT），
+ *    发出 `%CORPORATION%` 这种无区分度谓词，配合 LIMIT 可能一个发明人都返不回。
+ */
 const LEGAL_STOP = new Set([
   'GMBH', 'AG', 'INC', 'LLC', 'LTD', 'PLC', 'CORP', 'CO', 'SA', 'BV', 'OY', 'AB', 'AS', 'KG',
   'THE', 'AND', 'GROUP', 'HOLDING', 'HOLDINGS', 'COMPANY', 'INTERNATIONAL', 'SE', 'SRL', 'SPA',
+  // 全拼法人形式（多语言）——注：tokenizer 已剥标点、并滤 <3 字符 token，故只列 ≥3 字母的全拼形式。
+  'CORPORATION', 'INCORPORATED', 'LIMITED', 'AKTIENGESELLSCHAFT', 'GESELLSCHAFT', 'KABUSHIKI',
+  'KAISHA', 'AKTIEBOLAG', 'SOCIETE', 'SOCIETA', 'LLP',
 ]);
 
 export interface PatentApplicant {
