@@ -1,0 +1,49 @@
+---
+import { pageHref } from '../lib/links';
+
+interface Props {
+  headlineKey: string;
+  subheadKey?: string;
+  cta?: { labelKey: string; pageId?: string; url?: string };
+  variant?: string;
+  t: (key: string) => string;
+}
+const { headlineKey, subheadKey, cta, t } = Astro.props;
+const ctaHref = cta?.url ?? (cta?.pageId ? pageHref(cta.pageId) : '#inquiry');
+---
+
+<section class="block hero">
+  <div class="inner">
+    <h1>{t(headlineKey)}</h1>
+    {subheadKey && <p class="sub">{t(subheadKey)}</p>}
+    {cta && <a class="btn" href={ctaHref}>{t(cta.labelKey)}</a>}
+  </div>
+</section>
+
+<style>
+  .hero {
+    background: linear-gradient(135deg, var(--c-secondary), var(--c-primary));
+    color: var(--c-on-primary);
+    text-align: center;
+  }
+  .inner {
+    max-width: 820px;
+    margin: 0 auto;
+    display: grid;
+    gap: 1.25rem;
+    justify-items: center;
+    padding: clamp(1rem, 4vw, 3rem) 0;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 4.5vw, 3.2rem);
+  }
+  .sub {
+    font-size: 1.15rem;
+    opacity: 0.9;
+    max-width: 640px;
+  }
+  .hero .btn {
+    background: var(--c-surface);
+    color: var(--c-secondary);
+  }
+</style>

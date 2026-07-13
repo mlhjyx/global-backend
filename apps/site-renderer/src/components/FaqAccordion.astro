@@ -1,0 +1,47 @@
+---
+interface Props {
+  titleKey: string;
+  items: { qKey: string; aKey: string }[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, items = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="faq">
+  <h2>{t(titleKey)}</h2>
+  <div class="faq">
+    {
+      items.map((item) => (
+        <details>
+          <summary>{t(item.qKey)}</summary>
+          <p class="muted">{t(item.aKey)}</p>
+        </details>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .faq {
+    display: grid;
+    gap: 0.5rem;
+    max-width: 760px;
+  }
+  details {
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+    padding: 0.9rem 1.1rem;
+    background: var(--c-surface);
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  details p {
+    padding-top: 0.6rem;
+  }
+</style>

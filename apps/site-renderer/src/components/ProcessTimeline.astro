@@ -1,0 +1,59 @@
+---
+interface Props {
+  titleKey: string;
+  steps: { titleKey: string; bodyKey: string }[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, steps = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="process">
+  <h2>{t(titleKey)}</h2>
+  <ol class="steps">
+    {
+      steps.map((s, i) => (
+        <li>
+          <span class="num">{i + 1}</span>
+          <div>
+            <h3>{t(s.titleKey)}</h3>
+            <p class="muted">{t(s.bodyKey)}</p>
+          </div>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 2rem;
+  }
+  .steps {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 1.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .steps li {
+    display: flex;
+    gap: 0.9rem;
+    align-items: start;
+  }
+  .num {
+    flex: none;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--c-primary);
+    color: var(--c-on-primary);
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+  }
+  h3 {
+    font-size: 1.05rem;
+    margin-bottom: 0.3rem;
+  }
+</style>

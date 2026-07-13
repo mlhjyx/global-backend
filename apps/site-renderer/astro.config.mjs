@@ -1,0 +1,11 @@
+import { defineConfig } from 'astro/config';
+
+// 渲染目标由环境驱动：SITESPEC_PATH=物化 SiteSpec JSON；OUT_DIR=产物目录。
+// demo v0 activity 以子进程调用（apps/api temporal），构建容器化随 M1（06 §5）。
+export default defineConfig({
+  outDir: process.env.OUT_DIR ?? './dist',
+  // 子路径预览（M0 本地 /preview/{slug}/）必须设 base，否则 /_astro/*.css 根路径 404；
+  // 子域预览/发布（05 §1）BASE_PATH 不设=根路径。站内手写链接一律过 lib/links.withBase()。
+  base: process.env.BASE_PATH ?? '/',
+  trailingSlash: 'ignore',
+});

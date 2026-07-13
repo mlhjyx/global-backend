@@ -1,0 +1,39 @@
+---
+/**
+ * 组件分发（04 §5 封闭枚举的 M0 子集）。未知 type 按 §8 容忍：跳过不炸构建
+ * ——老渲染器遇新 minor 组件仍可出站。
+ */
+import HeroBanner from './HeroBanner.astro';
+import StatsBand from './StatsBand.astro';
+import ProductGrid from './ProductGrid.astro';
+import AboutBlock from './AboutBlock.astro';
+import CertWall from './CertWall.astro';
+import ProcessTimeline from './ProcessTimeline.astro';
+import FaqAccordion from './FaqAccordion.astro';
+import CtaBanner from './CtaBanner.astro';
+import InquiryForm from './InquiryForm.astro';
+import MapLocation from './MapLocation.astro';
+
+interface Props {
+  block: { type: string; props: Record<string, unknown> };
+  t: (key: string) => string;
+  index: number;
+}
+const { block, t, index } = Astro.props;
+const registry: Record<string, unknown> = {
+  HeroBanner,
+  StatsBand,
+  ProductGrid,
+  AboutBlock,
+  CertWall,
+  ProcessTimeline,
+  FaqAccordion,
+  CtaBanner,
+  InquiryForm,
+  MapLocation,
+};
+const Component = registry[block.type] as ((props: unknown) => unknown) | undefined;
+const alt = index % 2 === 1;
+---
+
+{Component ? <Component {...block.props} t={t} alt={alt} /> : null}

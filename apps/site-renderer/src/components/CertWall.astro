@@ -1,0 +1,35 @@
+---
+interface Props {
+  titleKey: string;
+  certs: { labelKey: string; assetId?: string }[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, certs = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="certifications">
+  <h2>{t(titleKey)}</h2>
+  <div class="wall">
+    {certs.map((c) => <span class="badge">{t(c.labelKey)}</span>)}
+  </div>
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .wall {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .badge {
+    border: 1.5px solid var(--c-primary);
+    color: var(--c-primary);
+    border-radius: 999px;
+    padding: 0.4rem 1.1rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+</style>

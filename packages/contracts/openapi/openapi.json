@@ -2874,6 +2874,352 @@
           "Compliance"
         ]
       }
+    },
+    "/api/v1/site-builder/intake": {
+      "post": {
+        "operationId": "IntakeController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IntakeResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "注册引导提交：建站档案 + 秒级触发 demo v0（无站）或转站点诊断分支（有站，M3）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites": {
+      "get": {
+        "operationId": "SitesController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SiteDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出本 workspace 站点（含预览地址）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}": {
+      "get": {
+        "operationId": "SitesController_get_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SiteDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "站点详情",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/profile": {
+      "get": {
+        "operationId": "SitesController_getProfile_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "建站向导档案（五组）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      },
+      "patch": {
+        "operationId": "SitesController_patchProfile_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "向导分步保存：组级替换（companyProfile/trustAssets/onlineAssets/brand/contact），可跳过",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/assets/presign": {
+      "post": {
+        "operationId": "AssetsController_presign_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "素材上传第 1 步：校验并签发直传 URL（15 分钟有效）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/assets/{id}/commit": {
+      "post": {
+        "operationId": "AssetsController_commit_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "素材上传第 3 步：魔数/大小/去重校验 → 归位；doc 类进 KB 队列",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/assets": {
+      "get": {
+        "operationId": "AssetsController_list_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "站点素材列表",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/assets/{id}": {
+      "delete": {
+        "operationId": "AssetsController_remove_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "删除素材（spec 引用检查随 M1 spec 物化补齐）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/kb/status": {
+      "get": {
+        "operationId": "KbController_status_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "知识库状态：文档/块计数 + 待补资料缺口（gaps 随 M1 brandProfile）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
     }
   },
   "info": {
@@ -3969,6 +4315,205 @@
         "required": [
           "subjectType",
           "subjectId"
+        ]
+      },
+      "IntakeResultDto": {
+        "type": "object",
+        "properties": {
+          "siteId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "builder",
+              "diagnosis"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "站点状态（builder 路径为 building=demo v0 生成中）"
+          }
+        },
+        "required": [
+          "siteId",
+          "mode",
+          "status"
+        ]
+      },
+      "IntakeCompanyDto": {
+        "type": "object",
+        "properties": {
+          "nameZh": {
+            "type": "string",
+            "description": "公司中文名"
+          },
+          "nameEn": {
+            "type": "object",
+            "description": "公司英文名（缺省时系统转写并让用户确认，M1）",
+            "nullable": true
+          }
+        },
+        "required": [
+          "nameZh"
+        ]
+      },
+      "IntakeDto": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/IntakeCompanyDto"
+          },
+          "industry": {
+            "type": "string",
+            "description": "所属行业（taxonomy id，级联细分）",
+            "example": "isic-2813"
+          },
+          "products": {
+            "description": "主营产品关键词 1~5 个",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetMarkets": {
+            "description": "目标市场（ISO 3166-1 alpha-2，大写）",
+            "example": [
+              "DE",
+              "US"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hasWebsite": {
+            "type": "boolean",
+            "description": "海外是否已有独立站（分支题）"
+          },
+          "websiteUrl": {
+            "type": "object",
+            "description": "hasWebsite=true 时必填",
+            "nullable": true
+          },
+          "businessEmail": {
+            "type": "string",
+            "description": "业务邮箱（兼作询盘接收缺省值）"
+          }
+        },
+        "required": [
+          "company",
+          "industry",
+          "products",
+          "targetMarkets",
+          "hasWebsite",
+          "businessEmail"
+        ]
+      },
+      "SiteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "预览子域 slug"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "builder",
+              "diagnosis"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "building",
+              "ready",
+              "published"
+            ]
+          },
+          "stylePreset": {
+            "type": "object",
+            "nullable": true
+          },
+          "locales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activeVersionId": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true
+          },
+          "previewUrl": {
+            "type": "object",
+            "nullable": true,
+            "description": "预览地址（demo 就绪后非空）"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "mode",
+          "status",
+          "locales",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "PresignDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "logo",
+              "product_image",
+              "factory_image",
+              "cert",
+              "doc",
+              "video"
+            ]
+          },
+          "filename": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number",
+            "description": "字节数"
+          },
+          "mime": {
+            "type": "string",
+            "example": "image/jpeg"
+          }
+        },
+        "required": [
+          "kind",
+          "filename",
+          "size",
+          "mime"
         ]
       }
     }

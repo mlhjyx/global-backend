@@ -1,0 +1,53 @@
+---
+/**
+ * M0 静态占位：结构/样式就绪，提交后端（询盘 API + 反垃圾，06 §6）随 M2 接线，
+ * 接线前禁用提交按钮——绝不做"看起来能发实际丢失"的假表单。
+ */
+interface Props {
+  titleKey: string;
+  subKey?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, subKey, t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="inquiry">
+  <h2>{t(titleKey)}</h2>
+  {subKey && <p class="muted">{t(subKey)}</p>}
+  <form class="inquiry" action="#" method="post">
+    <input type="text" name="name" placeholder={t('inquiry.field.name')} disabled />
+    <input type="email" name="email" placeholder={t('inquiry.field.email')} disabled />
+    <textarea name="message" rows="4" placeholder={t('inquiry.field.message')} disabled></textarea>
+    <button class="btn" type="submit" disabled>{t('inquiry.submit')}</button>
+    <p class="muted note">{t('inquiry.m0.note')}</p>
+  </form>
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 0.5rem;
+  }
+  .inquiry {
+    margin-top: 1.5rem;
+    display: grid;
+    gap: 0.9rem;
+    max-width: 560px;
+  }
+  input,
+  textarea {
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+    font: inherit;
+    background: var(--c-surface);
+    color: var(--c-on-surface);
+  }
+  .btn[disabled] {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .note {
+    font-size: 0.85rem;
+  }
+</style>

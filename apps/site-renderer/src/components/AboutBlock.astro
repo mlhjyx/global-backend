@@ -1,0 +1,52 @@
+---
+interface Props {
+  titleKey: string;
+  bodyKey: string;
+  foundedYear?: number | null;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, bodyKey, foundedYear, t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="about">
+  <div class="cols">
+    <div>
+      <h2>{t(titleKey)}</h2>
+      <p>{t(bodyKey)}</p>
+    </div>
+    {
+      foundedYear && (
+        <aside class="since">
+          <span class="muted">Since</span>
+          <strong>{foundedYear}</strong>
+        </aside>
+      )
+    }
+  </div>
+</section>
+
+<style>
+  .cols {
+    display: flex;
+    gap: 2.5rem;
+    align-items: start;
+    flex-wrap: wrap;
+  }
+  .cols > div {
+    flex: 1 1 420px;
+    display: grid;
+    gap: 1rem;
+  }
+  .since {
+    display: grid;
+    justify-items: center;
+    padding: 1.5rem 2rem;
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+  }
+  .since strong {
+    font-size: 2rem;
+    color: var(--c-primary);
+  }
+</style>

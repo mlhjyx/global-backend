@@ -1,0 +1,8 @@
+-- Codex P2（PR #94）：六张 site-builder 租户表补 FORCE ROW LEVEL SECURITY，
+-- 与 icp_domain/outbox 先例一致——owner 连接误触租户表时同样受 policy 约束。
+ALTER TABLE "site" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "site_version" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "site_build_run" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "asset" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "kb_document" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "kb_chunk" FORCE ROW LEVEL SECURITY;

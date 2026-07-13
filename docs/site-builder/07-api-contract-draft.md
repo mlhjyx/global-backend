@@ -5,7 +5,7 @@
 ## 0. 通用约定
 
 - Base：`/api/site-builder`；鉴权：`Authorization: Bearer <SaaS token>`（JWKS 验签 → workspace，RLS 隔离）。
-- 响应信封：`{ "success": bool, "data": …|null, "error": { "code", "message" }|null }`；分页 meta `{ total, page, limit }`。
+- 响应信封（与后端既有收口④定稿一致，M0 实现即此形状）：单资源 `{ "data": … }`；列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`；错误 `{ "error": { "code", "message", "details"? } }`。协议键 snake_case，资源字段 camelCase。
 - 错误码：401 未认证 / 403 越权 / 404 不存在 / 409 冲突（如构建进行中）/ 422 校验失败 / 429 配额或限流（`error.code=QUOTA_EXCEEDED` 带剩余额度信息）。
 - 幂等：`POST /builds`、`POST /publish` 支持 `Idempotency-Key` 头。
 - 时间一律 ISO 8601 UTC。

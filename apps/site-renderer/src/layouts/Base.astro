@@ -1,0 +1,128 @@
+---
+import { themeToCssVars } from '../lib/themes';
+import { pageHref, withBase } from '../lib/links';
+import type { MaterializedSpec } from '../lib/spec';
+
+interface Props {
+  spec: MaterializedSpec;
+  locale: string;
+  title: string;
+  description: string;
+  t: (key: string) => string;
+}
+const { spec, locale, title, description, t } = Astro.props;
+const vars = themeToCssVars(spec.site.theme.preset, spec.site.theme.tokenOverrides ?? {});
+const styleVars = Object.entries(vars)
+  .map(([k, v]) => `${k}:${v}`)
+  .join(';');
+const nav = spec.site.nav.map((n) => ({ label: t(n.labelKey), href: pageHref(n.pageId) }));
+const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
+---
+
+<!doctype html>
+<html lang={locale} dir={rtl ? 'rtl' : 'ltr'}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 预览产物默认 noindex；发布链路（M2）按站点开关放开 -->
+    <meta name="robots" content="noindex" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+  </head>
+  <body style={styleVars}>
+    <header class="site-header">
+      <a class="brand" href={withBase('/')}>{spec.site.seoGlobal.siteName}</a>
+      <nav>
+        {nav.map((n) => <a href={n.href}>{n.label}</a>)}
+      </nav>
+    </header>
+    <main><slot /></main>
+    <footer class="site-footer">
+      <p>© {new Date().getFullYear()} {spec.site.seoGlobal.siteName}</p>
+      <p class="muted">{t('footer.tagline')}</p>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+  }
+  body {
+    font-family: var(--font-body);
+    color: var(--c-on-surface);
+    background: var(--c-surface);
+    line-height: 1.6;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    line-height: 1.2;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .muted {
+    color: var(--c-on-surface-muted);
+  }
+  .site-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem clamp(1rem, 5vw, 4rem);
+    border-bottom: 1px solid var(--c-surface-alt);
+    position: sticky;
+    top: 0;
+    background: var(--c-surface);
+    z-index: 10;
+  }
+  .brand {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--c-secondary);
+  }
+  .site-header nav {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+  }
+  .site-header nav a:hover {
+    color: var(--c-primary);
+  }
+  .site-footer {
+    padding: 2rem clamp(1rem, 5vw, 4rem);
+    border-top: 1px solid var(--c-surface-alt);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.9rem;
+  }
+  section.block {
+    padding: clamp(2.5rem, 7vw, 5rem) clamp(1rem, 5vw, 4rem);
+  }
+  section.block.alt {
+    background: var(--c-surface-alt);
+  }
+  .btn {
+    display: inline-block;
+    background: var(--c-primary);
+    color: var(--c-on-primary);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+  }
+  .btn:hover {
+    filter: brightness(1.08);
+  }
+  .grid {
+    display: grid;
+    gap: 1.5rem;
+  }
+</style>

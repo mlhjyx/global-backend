@@ -1,0 +1,32 @@
+---
+interface Props {
+  stats: { value: string; labelKey: string }[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { stats = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'stats', { alt }]}>
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+    {
+      stats.map((s) => (
+        <div class="stat">
+          <div class="value">{s.value}</div>
+          <div class="muted">{t(s.labelKey)}</div>
+        </div>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .stat {
+    text-align: center;
+  }
+  .value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--c-primary);
+  }
+</style>

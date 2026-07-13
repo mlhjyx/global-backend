@@ -65,6 +65,62 @@ services:
       # real public IPs, so keep SSRF on there — do NOT set this in prod.
       - CRAWL4AI_ALLOW_INTERNAL_URLS=true
 
+  # Object storage for site-builder assets & build artifacts (docs/site-builder/02 §2).
+  # Tenant isolation = key prefix ws/{workspace_id}/… + presigned URLs; bucket is
+  # never public. Console at http://localhost:9001 (dev creds below, dev only).
+  minio:
+    image: minio/minio:latest
+    container_name: global-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web console (dev only)
+    environment:
+      MINIO_ROOT_USER: global
+      MINIO_ROOT_PASSWORD: global-minio-dev # dev only — never reuse in prod
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Self-hosted embeddings for the knowledge base (docs/site-builder/02 D14:
+  # BGE-M3, 1024-dim, 100+ languages; company data never leaves the host).
+  # CPU-only is fine for KB-sized batches. First boot pulls the model (~1.2GB)
+  # into the volume — healthcheck only goes green once the model is present.
+  # OpenAI-compatible endpoint: http://localhost:11434/v1/embeddings
+  embeddings:
+    image: ollama/ollama:latest
+    container_name: global-embeddings
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama serve & sleep 3 && ollama pull bge-m3 && wait"]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama ls | grep -q bge-m3"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+
+  # Document parsing for the knowledge base (docs/site-builder/02 §12: Docling —
+  # layout-aware PDF/DOCX/PPTX → markdown, tables preserved). Fully local parsing;
+  # runs in an unprivileged container (06 §2). First convert downloads layout models.
+  docling:
+    image: ghcr.io/docling-project/docling-serve:latest
+    container_name: global-docling
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - DOCLING_SERVE_ENABLE_UI=0
+
   # Self-hosted meta-search (discovery entry point for public intelligence).
   # Server-to-server only — never expose beyond localhost (limiter is off).
   searxng:
@@ -82,3 +138,5 @@ volumes:
   pgdata:
   redisdata:
   newapi-data:
+  miniodata:
+  ollamadata:

@@ -19,6 +19,11 @@ import { createBacklogActivities } from './backlog.activities';
 import { createExternalIntentActivities } from './external-intent.activities';
 import { createDeletionActivities } from './deletion.activities';
 import { createPatentsCacheActivities } from './patents-cache.activities';
+import { createSiteBuilderActivities } from './site-builder.activities';
+import { KbService } from '../site-builder/kb.service';
+import { EmbeddingsClient } from '../site-builder/embeddings.client';
+import { DoclingClient } from '../site-builder/docling.client';
+import { StorageService } from '../site-builder/storage.service';
 import { ensurePlatformSchedules } from './ensure-schedules';
 import { seedJurisdictionPolicy } from '../compliance/jurisdiction-policy.seed';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
@@ -109,6 +114,12 @@ async function main(): Promise<void> {
       ...createDeletionActivities({ prisma }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({ ownerDb }),
+      // 独立站建设 demo v0（intake 触发 demoV0Workflow；KB=注册资料入库 best-effort）
+      ...createSiteBuilderActivities({
+        prisma,
+        gateway,
+        kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),
+      }),
     },
   });
 
