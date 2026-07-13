@@ -14,8 +14,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { BuildScopeInput, REFURBISH_LAUNCHER, RefurbishLauncher } from './refurbish-launcher';
 
-/** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。 */
-const DAILY_BUILD_LIMIT = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
+/** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。配错值 fail-closed 回默认。 */
+const parsedDailyLimit = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
+const DAILY_BUILD_LIMIT =
+  Number.isFinite(parsedDailyLimit) && parsedDailyLimit > 0 ? parsedDailyLimit : 10;
 
 export interface CreateBuildInput extends BuildScopeInput {
   idempotencyKey?: string | null;
@@ -48,14 +50,19 @@ export class BuildsService {
     }
 
     const { run, replayed } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      // 单飞/配额/幂等三查须原子（Codex P2 / 复审 C3）——advisory xact lock 串行化同站请求（intake 先例）
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-${siteId}`}))`;
+
       const site = await tx.site.findUnique({ where: { id: siteId } });
       if (!site) throw new NotFoundException('site not found');
 
       if (input.idempotencyKey) {
+        // failed（含 launch 失败）不参与重放（复审 C4）：502 说 safe to retry，同 key 重试必须能真正重发
         const existing = await tx.siteBuildRun.findFirst({
           where: {
             siteId,
             scope: { path: ['idempotencyKey'], equals: input.idempotencyKey },
+            NOT: { status: 'failed' },
           },
         });
         if (existing) return { run: existing, replayed: true };
@@ -67,7 +74,7 @@ export class BuildsService {
       if (active) throw new ConflictException('a build is already in progress for this site');
 
       const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
+      startOfDay.setUTCHours(0, 0, 0, 0); // 配额窗口 UTC 化，不随进程 TZ 漂移
       const todayCount = await tx.siteBuildRun.count({
         where: { siteId, createdAt: { gte: startOfDay } },
       });
@@ -111,12 +118,16 @@ export class BuildsService {
       });
     } catch (err) {
       // 站点不动（🔴 refurbish 补偿边界）；run 落 failed，用户可直接重试。
-      const message = err instanceof Error ? err.message : String(err);
-      this.log.error(`launchRefurbish failed for run ${run.id}: ${message}`);
+      // 原始错误只进日志；落库/回给租户用泛化文案，不泄内网细节（复审 C6）
+      this.log.error(`launchRefurbish failed for run ${run.id}: ${String(err)}`);
       await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
         await tx.siteBuildRun.update({
           where: { id: run.id },
-          data: { status: 'failed', error: `launch failed: ${message}`, finishedAt: new Date() },
+          data: {
+            status: 'failed',
+            error: 'launch failed: orchestrator unavailable',
+            finishedAt: new Date(),
+          },
         });
       });
       throw new BadGatewayException('build orchestrator unavailable, safe to retry');
@@ -137,6 +148,10 @@ export class BuildsService {
     await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const run = await tx.siteBuildRun.findUnique({ where: { id: buildId } });
       if (!run) throw new NotFoundException('build not found');
+      if (run.kind !== 'refurbish') {
+        // demo_v0 秒级完成且无 site-refurbish-* workflow 可取消（复审 C2 附带）
+        throw new ConflictException(`${run.kind} runs cannot be cancelled`);
+      }
       if (TERMINAL_STATUSES.has(run.status)) {
         throw new ConflictException(`build already ${run.status}`);
       }

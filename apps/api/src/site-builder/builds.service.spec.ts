@@ -30,6 +30,7 @@ function makeService(
   };
   let seq = 0;
   const tx = {
+    $executeRaw: async () => 0, // advisory lock no-op（intake 先例同款 fake）
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         db.sites.find((s) => s.id === where.id) ?? null,
@@ -40,11 +41,13 @@ function makeService(
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
         if (where.scope && typeof where.scope === 'object' && 'path' in (where.scope as object)) {
           const want = (where.scope as { equals: string }).equals;
+          const notStatus = (where.NOT as { status?: string } | undefined)?.status;
           return (
             db.runs.find(
               (r) =>
                 r.siteId === where.siteId &&
-                (r.scope as { idempotencyKey?: string } | null)?.idempotencyKey === want,
+                (r.scope as { idempotencyKey?: string } | null)?.idempotencyKey === want &&
+                (!notStatus || r.status !== notStatus),
             ) ?? null
           );
         }
@@ -162,6 +165,26 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
     expect((err as HttpException).getStatus()).toBe(429);
   });
 
+  it('launch 失败后同 Idempotency-Key 重试 → 不命中 failed 重放，真正重发新 run（复审 C4）', async () => {
+    let failOnce = true;
+    const { service, db } = makeService({
+      launcher: {
+        launchRefurbish: async () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error('temporal down');
+          }
+        },
+      },
+    });
+    await expect(
+      service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' }),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+    const retry = await service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' });
+    expect(retry.status).toBe('queued');
+    expect(db.runs).toHaveLength(2); // failed 行留档，新 run 真正重发
+  });
+
   it('launcher 抛错 → run 标 failed + 502（站点绝不删除，可重试）', async () => {
     const { service, db } = makeService({
       launcher: {
@@ -196,7 +219,9 @@ describe('BuildsService.get / cancel（07 §5）', () => {
 
   it('cancel：queued/running → cancelled + 通知 launcher；终态 → 409', async () => {
     const { service, db, cancelled } = makeService({
-      existingRuns: [{ id: 'r1', siteId: SITE_ID, status: 'running', createdAt: new Date() }],
+      existingRuns: [
+        { id: 'r1', siteId: SITE_ID, kind: 'refurbish', status: 'running', createdAt: new Date() },
+      ],
     });
     await service.cancel(CTX, 'r1');
     expect((db.runs[0] as Record<string, unknown>).status).toBe('cancelled');
@@ -206,7 +231,9 @@ describe('BuildsService.get / cancel（07 §5）', () => {
 
   it('cancel：launcher 取消失败不影响状态落库（best-effort）', async () => {
     const { service, db } = makeService({
-      existingRuns: [{ id: 'r1', siteId: SITE_ID, status: 'queued', createdAt: new Date() }],
+      existingRuns: [
+        { id: 'r1', siteId: SITE_ID, kind: 'refurbish', status: 'queued', createdAt: new Date() },
+      ],
       launcher: {
         cancelRefurbish: async () => {
           throw new Error('handle gone');

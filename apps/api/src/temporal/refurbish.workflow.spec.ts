@@ -98,6 +98,19 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
     await expect(refurbishWorkflow(INPUT)).rejects.toThrow('astro boom');
   });
 
+  it('KB 摄入期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {
+    primeHappyPath();
+    acts.ingestPendingKb.mockRejectedValue(
+      Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' }),
+    );
+
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('workflow cancelled');
+
+    expect(acts.assembleAndBuild).not.toHaveBeenCalled();
+    expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
+    expect(acts.compensateRefurbish).toHaveBeenCalledTimes(1); // nonCancellable 作用域内
+  });
+
   it('beginRefurbishRun 抛错 → 直接补偿+上抛（run 落 failed 由补偿兜底）', async () => {
     primeHappyPath();
     acts.beginRefurbishRun.mockRejectedValue(new Error('run row missing'));

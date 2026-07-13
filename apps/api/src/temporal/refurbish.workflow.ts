@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { CancellationScope, isCancellation, proxyActivities } from '@temporalio/workflow';
 import type { createSiteBuilderActivities, RefurbishActivityInput } from './site-builder.activities';
 
 type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
@@ -24,15 +24,19 @@ export async function refurbishWorkflow(
     try {
       const r = await activities.ingestPendingKb(input);
       kb = { ...r, degraded: false };
-    } catch {
-      // fail-safe：摄入失败不阻断构建（文档留 queued，可重触发）
+    } catch (err) {
+      // 🔴 取消必须穿透（Codex P2 / 复审 C1）：吞掉=取消窗口内照样发布
+      if (isCancellation(err)) throw err;
+      // 其余失败 fail-safe：摄入失败不阻断构建（文档留 queued，可重触发）
     }
 
     const build = await activities.assembleAndBuild(input);
     return await activities.finalizeRefurbish({ ...input, kb, build });
   } catch (err) {
     try {
-      await activities.compensateRefurbish(input);
+      // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即
+      // 抛 CancelledFailure——补偿必须在不可取消作用域里跑，否则站点永久卡 building。
+      await CancellationScope.nonCancellable(() => activities.compensateRefurbish(input));
     } catch {
       // 补偿 best-effort：绝不吞换原始错误
     }

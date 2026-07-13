@@ -15,8 +15,9 @@ export interface KbIngestWorkflowInput {
 
 /**
  * KB 摄入（M1-a：assets.controller M0 fire-and-forget 挂账的 Temporal 化）。
- * 单 activity 透传：失败原样上抛交 Temporal retry；重试耗尽=文档留 queued，
- * 下次 commit 或 refurbish P1 再扫（语义与 M0 一致，多了持久重试）。
+ * 单 activity 透传：基建级失败（扫库/入口抛错）上抛交 Temporal retry，文档留 queued
+ * 可被 refurbish P1 或下次 commit 再扫；**逐文档**失败由 activity 内 fail-safe 标 failed
+ * 不触发重试（复审 C5——failed 文档的重触发端点列 M1-b fast-follow）。
  */
 export async function kbIngestWorkflow(
   input: KbIngestWorkflowInput,

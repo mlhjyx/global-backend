@@ -254,8 +254,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       await prisma.withWorkspace(workspaceId, async (tx) => {
         const site = await tx.site.findUnique({ where: { id: siteId } });
         if (!site) throw new Error(`site ${siteId} not found`);
-        await tx.siteBuildRun.update({
-          where: { id: buildRunId },
+        // 状态守卫（复审 C2）：cancelled/failed 终态不可被覆写成 running；
+        // 'running' 也可再认领=Temporal 结果丢失重试的幂等位。count=0 即进补偿路径。
+        const claimed = await tx.siteBuildRun.updateMany({
+          where: { id: buildRunId, status: { in: ['queued', 'running'] } },
           data: {
             status: 'running',
             phase: 'P1_understanding',
@@ -271,6 +273,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             ] as Prisma.InputJsonValue,
           },
         });
+        if (claimed.count === 0) {
+          throw new Error(`run ${buildRunId} not claimable (cancelled or terminal) — aborting`);
+        }
         await tx.site.update({ where: { id: siteId }, data: { status: 'building' } });
       });
     },
@@ -295,14 +300,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishActivityInput,
     ): Promise<{ previewSlug: string; versionId: string }> {
       const { workspaceId, siteId, buildRunId } = input;
-      const site = await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.siteBuildRun.update({
-          where: { id: buildRunId },
+      const { site, existing } = await prisma.withWorkspace(workspaceId, async (tx) => {
+        // cancelled 后不再推进（复审 C2）
+        const advanced = await tx.siteBuildRun.updateMany({
+          where: { id: buildRunId, status: 'running' },
           data: { phase: 'P3_assembly', progress: 0.5 },
         });
-        return tx.site.findUnique({ where: { id: siteId } });
+        if (advanced.count === 0) {
+          throw new Error(`run ${buildRunId} no longer running (cancelled?) — aborting assemble`);
+        }
+        return {
+          site: await tx.site.findUnique({ where: { id: siteId } }),
+          // Temporal 结果丢失重试的幂等位（Codex P2）：本 run 已有成功版本→复用，不再建第二个
+          existing: await tx.siteVersion.findFirst({
+            where: { buildRunId, buildStatus: 'succeeded' },
+          }),
+        };
       });
       if (!site) throw new Error(`site ${siteId} not found`);
+      if (existing) return { previewSlug: site.slug, versionId: existing.id };
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
@@ -346,12 +362,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     async finalizeRefurbish(input: RefurbishFinalizeInput): Promise<{ previewSlug: string }> {
       const { workspaceId, siteId, buildRunId, kb: kbSummary, build } = input;
       await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.site.update({
-          where: { id: siteId },
-          data: { activeVersionId: build.versionId, status: 'ready' },
-        });
-        await tx.siteBuildRun.update({
-          where: { id: buildRunId },
+        // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
+        // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
+        const published = await tx.siteBuildRun.updateMany({
+          where: { id: buildRunId, status: { in: ['running', 'succeeded'] } },
           data: {
             status: 'succeeded',
             phase: 'P5_publish',
@@ -371,6 +385,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               { key: 'quality_loop', status: 'skipped_m1f' },
             ] as Prisma.InputJsonValue,
           },
+        });
+        if (published.count === 0) {
+          throw new Error(`run ${buildRunId} not publishable (cancelled?) — pointer untouched`);
+        }
+        // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
+        await tx.site.update({
+          where: { id: siteId },
+          data: { activeVersionId: build.versionId, status: 'ready' },
         });
       });
       return { previewSlug: build.previewSlug };
