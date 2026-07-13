@@ -148,3 +148,41 @@ export function parsePersonName(raw: string): ParsedPersonName {
 export function normalizePersonName(raw: string): string {
   return parsePersonName(raw).normalizedFull;
 }
+
+/**
+ * 身份归一「纯去音标」变体（NFKD 兼容分解 + 去组合记号，**保 Unicode 字母/数字**）：与 {@link identityVariant}
+ * 的**德语标准音译**（ä→ae）互补——此变体 ä→a（丢音标形）、é→e、ñ→n…，并 NFKC/NFKD 折叠兼容字（全角/连字）。
+ * 二者并入 {@link personNameKeyVariants} 变体集，令「Müller / Mueller / Muller」等跨源拼写在 Art.17 禁联/对账上收敛。
+ * 不改 {@link normalizePersonName}（declined 键 / resolver 模糊并仍用德语形，方向偏欠并）。
+ */
+function pureStripVariant(raw: string): string {
+  const lower = (raw ?? '').toLowerCase().trim();
+  if (!lower) return '';
+  const stripped = lower.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+  return stripped.replace(/[^\p{L}\p{N}]+/gu, ''); // 保 Unicode 字母/数字（CJK/西里尔不删），仅去标点/空白/符号
+}
+
+/**
+ * 归一人名的**多变体键集**（Art.17 禁联/对账用，方向偏 **over-suppress**——宁多误禁不漏禁）。对同一自然人产出
+ * 德语标准音译（ä→ae）+ 纯去音标（ä→a）两归一全名，二者覆盖：**变音丢弃** / 德语 ASCII 拼写（Müller↔Mueller↔Muller，
+ * 变音锚定时）/ **分解 Unicode**（NFC 先归）/ **"Surname, Given" 语序** / 称谓剥离。去重、稳定排序。空/纯称谓 → []
+ *（调用方回退明文键，保留可区分性）。
+ *
+ * 🔴 与 {@link normalizePersonName}（**单值**·德语形，跨源同一人**合并**键 / resolver 模糊并用）刻意分离：合并方向偏
+ * **欠并**（信息缺失时宁欠并不误并两人），禁联方向偏 **过禁**（宁误禁同名另一人也不漏禁被擦除人——over-suppress 于
+ * Art.17 是安全侧；对账**删除**侧的同名误删另有 `deletion` 的 createdAt 有界窗口约束，不致无界数据丢失）。
+ */
+export function personNameKeyVariants(raw: string): string[] {
+  const nfc = (raw ?? '').normalize('NFC').trim();
+  if (!nfc) return [];
+  const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitles);
+  if (!parsed) return [];
+  const assemble = (variant: (s: string) => string): string =>
+    [parsed.given, ...parsed.middles, parsed.surname].map(variant).filter(Boolean).join(' ');
+  const forms = new Set<string>();
+  for (const variant of [identityVariant, pureStripVariant]) {
+    const full = assemble(variant);
+    if (full) forms.add(full);
+  }
+  return [...forms].sort();
+}
