@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Inject,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -19,7 +20,7 @@ import { RequestContext } from '../auth/request-context';
 import { Enveloped, envelope } from '../common/envelope';
 import { ASSET_KINDS } from './object-key';
 import { AssetsService } from './assets.service';
-import { KbService } from './kb.service';
+import { KB_INGEST_LAUNCHER, KbIngestLauncher } from './refurbish-launcher';
 
 class PresignDto {
   @ApiProperty({ enum: [...ASSET_KINDS] })
@@ -51,7 +52,7 @@ export class AssetsController {
 
   constructor(
     private readonly assets: AssetsService,
-    private readonly kb: KbService,
+    @Inject(KB_INGEST_LAUNCHER) private readonly kbLauncher: KbIngestLauncher,
   ) {}
 
   @Post('sites/:id/assets/presign')
@@ -73,11 +74,13 @@ export class AssetsController {
   ): Promise<Enveloped<{ assetId: string; processingStatus: string }>> {
     const row = await this.assets.commit(ctx, assetId);
     if (row.processingStatus === 'queued') {
-      // Codex P2：queued 必须有消费者。M0=同进程异步摄入（失败留 queued，可重触发）；
-      // M1 换 Temporal activity（含 Docling 长解析）。不 await——commit 响应保持秒回。
-      void this.kb.processQueued(ctx, row.siteId).catch((err) => {
-        this.log.warn(`async kb ingest failed for site ${row.siteId}: ${String(err)}`);
-      });
+      // M1-a：消费者上 Temporal（kbIngestWorkflow，workflowId 按 assetId 幂等，持久重试）。
+      // 触发失败=文档留 queued（refurbish P1 / 下次 commit 再扫），不影响 commit 秒回。
+      void this.kbLauncher
+        .launchKbIngest({ workspaceId: ctx.workspaceId, siteId: row.siteId, assetId: row.id })
+        .catch((err) => {
+          this.log.warn(`kb ingest launch failed for site ${row.siteId}: ${String(err)}`);
+        });
     }
     return envelope({ assetId: row.id, processingStatus: row.processingStatus });
   }
