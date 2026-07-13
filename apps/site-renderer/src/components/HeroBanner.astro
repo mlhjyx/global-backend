@@ -1,4 +1,6 @@
 ---
+import { pageHref } from '../lib/links';
+
 interface Props {
   headlineKey: string;
   subheadKey?: string;
@@ -7,7 +9,7 @@ interface Props {
   t: (key: string) => string;
 }
 const { headlineKey, subheadKey, cta, t } = Astro.props;
-const ctaHref = cta?.url ?? (cta?.pageId ? `/${cta.pageId === 'home' ? '' : cta.pageId}` : '#inquiry');
+const ctaHref = cta?.url ?? (cta?.pageId ? pageHref(cta.pageId) : '#inquiry');
 ---
 
 <section class="block hero">

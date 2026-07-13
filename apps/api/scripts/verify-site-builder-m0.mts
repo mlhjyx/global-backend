@@ -118,11 +118,20 @@ async function main(): Promise<void> {
   await app.listen(PREVIEW_TEST_PORT);
   const res = await fetch(`http://localhost:${PREVIEW_TEST_PORT}/preview/${previewSlug}/`);
   const body = await res.text();
-  await app.close();
   if (res.status !== 200 || !body.includes('Verify Pump Co., Ltd.')) {
     throw new Error(`preview HTTP failed: ${res.status}`);
   }
-  ok('preview', `GET /preview/${previewSlug}/ → 200 + 内容命中`);
+  // 子路径回归守卫：所有根绝对 href/src 必须带 /preview/{slug} base，且逐个可 200
+  const assetPaths = [...body.matchAll(/(?:href|src)="(\/[^"]+)"/g)].map((m) => m[1]);
+  for (const p of assetPaths) {
+    if (!p.startsWith(`/preview/${previewSlug}`)) {
+      throw new Error(`root-absolute link escapes preview base (would 404): ${p}`);
+    }
+    const r = await fetch(`http://localhost:${PREVIEW_TEST_PORT}${p}`);
+    if (r.status !== 200) throw new Error(`preview asset ${r.status}: ${p}`);
+  }
+  await app.close();
+  ok('preview', `GET /preview/${previewSlug}/ → 200；${assetPaths.length} 个站内资产/链接全部 200`);
 
   // ── ④ 素材直传 → commit 安全闸 → KB → 语义检索 ─────────────────────────
   console.log('④ 素材 + KB（真 MinIO + 真 BGE-M3）');

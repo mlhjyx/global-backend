@@ -1,5 +1,6 @@
 ---
 import { themeToCssVars } from '../lib/themes';
+import { pageHref, withBase } from '../lib/links';
 import type { MaterializedSpec } from '../lib/spec';
 
 interface Props {
@@ -14,10 +15,7 @@ const vars = themeToCssVars(spec.site.theme.preset, spec.site.theme.tokenOverrid
 const styleVars = Object.entries(vars)
   .map(([k, v]) => `${k}:${v}`)
   .join(';');
-const nav = spec.site.nav.map((n) => {
-  const page = spec.pages.find((p) => p.id === n.pageId);
-  return { label: t(n.labelKey), href: page?.path ?? '/' };
-});
+const nav = spec.site.nav.map((n) => ({ label: t(n.labelKey), href: pageHref(n.pageId) }));
 const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
 ---
 
@@ -33,7 +31,7 @@ const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
   </head>
   <body style={styleVars}>
     <header class="site-header">
-      <a class="brand" href="/">{spec.site.seoGlobal.siteName}</a>
+      <a class="brand" href={withBase('/')}>{spec.site.seoGlobal.siteName}</a>
       <nav>
         {nav.map((n) => <a href={n.href}>{n.label}</a>)}
       </nav>

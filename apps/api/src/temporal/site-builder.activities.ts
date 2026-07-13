@@ -33,6 +33,16 @@ export function previewRoot(): string {
   return process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites');
 }
 
+/** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
+export function previewBasePath(slug: string): string {
+  const pattern = process.env.PREVIEW_URL_PATTERN ?? 'http://localhost:3000/preview/{slug}/';
+  try {
+    return new URL(pattern.replace('{slug}', slug)).pathname;
+  } catch {
+    return `/preview/${slug}/`;
+  }
+}
+
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const { prisma, gateway, kb } = deps;
 
@@ -77,7 +87,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
   }
 
-  async function runAstroBuild(specPath: string, outDir: string): Promise<void> {
+  async function runAstroBuild(specPath: string, outDir: string, basePath: string): Promise<void> {
     await execFileAsync(
       'pnpm',
       ['--filter', '@global/site-renderer', 'exec', 'astro', 'build'],
@@ -86,6 +96,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           ...process.env,
           SITESPEC_PATH: specPath,
           OUT_DIR: outDir,
+          BASE_PATH: basePath, // 子路径预览必设，否则 /_astro 资产 404
           ASTRO_TELEMETRY_DISABLED: '1',
         },
         timeout: BUILD_TIMEOUT_MS,
@@ -138,7 +149,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         await writeFile(specPath, JSON.stringify(doc), 'utf8');
         const outDir = path.join(previewRoot(), site.slug);
         await mkdir(outDir, { recursive: true });
-        await runAstroBuild(specPath, outDir);
+        await runAstroBuild(specPath, outDir, previewBasePath(site.slug));
         await rm(specPath, { force: true });
 
         await prisma.withWorkspace(workspaceId, async (tx) => {
