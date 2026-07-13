@@ -119,6 +119,27 @@ function buildQuery(maxRows: number): string {
   `;
 }
 
+/** 刷新批量读一行（assignee→inventor，仅 name）。喂 PatentCacheClient 落库。 */
+export interface RefreshInventorRow {
+  assigneeName: string;
+  assigneeCountry?: string; // alpha-2 小写 或 undefined
+  inventorName: string; // 🔴 仅 name（护栏⑥）
+}
+
+/** 刷新批量查：一条 LIKE ANY 覆盖**全部**排队 anchor（一次扫，绝不按 anchor 分片成 N 查）。护栏②④⑥ 全下推 SQL。 */
+function buildRefreshQuery(): string {
+  return `
+    SELECT a.name AS assignee_name, a.country_code AS assignee_country, i.name AS inventor_name
+    FROM \`patents-public-data.patents.publications\`,
+         UNNEST(assignee_harmonized) a, UNNEST(inventor_harmonized) i
+    WHERE publication_date BETWEEN @fromDate AND @toDate
+      AND ARRAY_LENGTH(assignee_harmonized) = 1
+      AND a.name IS NOT NULL AND a.name != '' AND i.name IS NOT NULL AND i.name != ''
+      AND EXISTS (SELECT 1 FROM UNNEST(@anchors) anc WHERE UPPER(a.name) LIKE anc)
+    GROUP BY assignee_name, assignee_country, inventor_name
+  `;
+}
+
 /** BigQuery client 的最小接口（便于测试注入，不绑死 @google-cloud/bigquery 具体形状）。 */
 export interface BigQueryLike {
   query(opts: {
@@ -183,6 +204,34 @@ export class BigQueryPatentsClient {
       maximumBytesBilled: this.maxBytes(),
     });
     return (rows ?? []).map(normalizeRow);
+  }
+
+  /**
+   * 刷新批量读：给定 anchor 集，**一次扫描**拉回全部命中的 (assignee, country, inventor-name)。
+   * 🔴 护栏②(独家申请人)/④(近5年)/⑥(仅 name) 全下推 SQL；maximumBytesBilled fail-closed 兜底。
+   * 无 anchor/无 creds → 返空（天然 no-op）。查询错误向上抛，由调用方 fail-safe 兜。
+   */
+  async searchInventorsForAnchors(anchors: string[], opts: PatentSearchOptions): Promise<RefreshInventorRow[]> {
+    const uniq = [...new Set(anchors.filter((a) => a && a.trim()))];
+    if (!uniq.length) return [];
+    const client = this.getClient();
+    if (!client) return [];
+    const [rows] = await client.query({
+      query: buildRefreshQuery(),
+      params: { fromDate: yearToStart(opts.fromYear), toDate: yearToEnd(opts.toYear), anchors: uniq },
+      types: { fromDate: 'INT64', toDate: 'INT64', anchors: ['STRING'] },
+      maximumBytesBilled: this.maxBytes(),
+    });
+    return (rows ?? [])
+      .map((r) => {
+        const row = r as Record<string, unknown>;
+        return {
+          assigneeName: String(row.assignee_name ?? '').trim(),
+          assigneeCountry: normCountry(row.assignee_country),
+          inventorName: String(row.inventor_name ?? '').trim(), // 🔴 仅 name
+        };
+      })
+      .filter((r) => r.assigneeName && r.inventorName);
   }
 }
 
