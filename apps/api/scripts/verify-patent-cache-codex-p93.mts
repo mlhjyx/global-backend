@@ -42,7 +42,14 @@ process.env.DATABASE_URL ??= 'postgresql://global:global@localhost:5432/global_d
 process.env.APP_DATABASE_URL ??= 'postgresql://app_user:app_pw@localhost:5432/global_dev';
 
 const WS = 'ddddcccc-0000-4000-8000-0000000e0093'; // 测试 workspace（tombstone 无 RLS，仅令 withWorkspace 有合法 UUID）
-const ERASED_FULLNAME = 'Anna Müller'; // 被擦除人可读名（如 contact.fullName）——umlaut，测跨拼写盲键收敛
+// 🔴 复审 Thread2：**合成唯一**被擦除人名（'Zzcodexp93' 非真实名字）——绝不与真实 Art.17 擦除的盲键碰撞，
+//   故 cleanup 删本键不会误撤真实擦除的重物化阻断。umlaut 保留以测跨拼写（ü↔ue）盲键收敛。
+const ERASED_FULLNAME = 'Zzcodexp93 Testmüller';
+const ERASED_VARIANT = 'TESTMUELLER, ZZCODEXP93'; // 同人不同拼写（surname-comma + umlaut 展开）——测跨格式盲键命中
+
+// 🔴 复审 Thread1：治理开关快照（provider status + source_policy），finally 恢复——防脚本改动/中断残留污染共享环境。
+let origProviderStatus: string | undefined;
+let origPolicy: { reviewStatus: string; allowedPurpose: unknown } | undefined;
 
 let failed = 0;
 const ok = (cond: boolean, msg: string): void => {
@@ -84,10 +91,27 @@ async function cleanup(): Promise<void> {
   await ownerDb.patentInventorTombstone.deleteMany({ where: { inventorNameKey: { in: inventorErasureKeys(ERASED_FULLNAME) } } });
   await ownerDb.patentCacheRefreshAudit.deleteMany({ where: { detail: { contains: 'codex' } } });
 }
+/** 🔴 Thread1：恢复治理开关到脚本运行前的快照（幂等；main 末尾显式调 + finally 兜底防中断残留）。 */
+async function restoreGovernance(): Promise<void> {
+  if (origProviderStatus) {
+    await ownerDb.dataProvider.update({ where: { key: PATENT_PROVIDER_KEY }, data: { status: origProviderStatus } });
+  }
+  if (origPolicy) {
+    await ownerDb.sourcePolicy.update({
+      where: { domain: PATENT_POLICY_DOMAIN },
+      data: { reviewStatus: origPolicy.reviewStatus, allowedPurpose: origPolicy.allowedPurpose as never },
+    });
+  }
+}
 
 async function main() {
   console.log('\n█ Codex PR #93 复审 7 findings · 真库回归（零 BQ，mock scanner）\n');
   await new DiscoveryProviderRegistry().seed(ownerDb); // google_patents(DISABLED) + bigquery source_policy
+  // 🔴 Thread1：**mutate 前**快照原始治理态（seed 用 update:{} 不改既有行 → 快照=脚本运行前真值）。
+  const provSnap = await ownerDb.dataProvider.findUnique({ where: { key: PATENT_PROVIDER_KEY }, select: { status: true } });
+  origProviderStatus = provSnap?.status;
+  const polSnap = await ownerDb.sourcePolicy.findUnique({ where: { domain: PATENT_POLICY_DOMAIN }, select: { reviewStatus: true, allowedPurpose: true } });
+  if (polSnap) origPolicy = { reviewStatus: polSnap.reviewStatus, allowedPurpose: polSnap.allowedPurpose };
   await ownerDb.sourcePolicy.update({
     where: { domain: PATENT_POLICY_DOMAIN },
     data: { reviewStatus: 'APPROVED', allowedPurpose: ['discovery', 'enrichment'] },
@@ -122,17 +146,17 @@ async function main() {
   const tombCount = await ownerDb.patentInventorTombstone.count({ where: { inventorNameKey: { in: erasureKeys } } });
   ok(tombCount === erasureKeys.length && tombCount > 0, `B：app_user withWorkspace createMany 写 ${tombCount}/${erasureKeys.length} 墓碑（INSERT grant + no-RLS tx 生效）`);
   await enqueuePatentLookup(ownerDb, { companyName: 'Codextomb GmbH', country: 'DE' });
-  // 🔴 扫描行用**不同拼写**（surname-comma + umlaut 展开 "MUELLER, ANNA"）——证跨格式盲键收敛：inventorErasureKeys('Anna Müller') ∋ inventorBlindKey('MUELLER, ANNA')。
+  // 🔴 扫描行用**不同拼写**（surname-comma + umlaut 展开）——证跨格式盲键收敛：inventorErasureKeys(ERASED_FULLNAME) ∋ inventorBlindKey(ERASED_VARIANT)。
   const scanB = mockScanner([
-    { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: 'MUELLER, ANNA' }, // 被擦除（异拼写）→ 跳过
+    { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: ERASED_VARIANT }, // 被擦除（异拼写）→ 跳过
     { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }, // 正常 → 落
   ]);
   const rB = await refreshPatentCache({ db, bq: scanB });
   ok(rB.status === 'OK' && rB.rowCount === 1, `B：status=OK rowCount=1（实得 ${rB.status}/${rB.rowCount}）`);
   const bRows = await ownerDb.patentInventorCache.findMany({ where: { assigneeNorm: 'codextomb' } });
   const bNames = bRows.map((r) => decryptPii(r.inventorName)).sort();
-  ok(bNames.length === 1 && bNames[0] === 'SCHMIDT, HANS', `B：只 SCHMIDT 落库，被擦除人（跨拼写 MUELLER,ANNA）不重物化（实得 ${JSON.stringify(bNames)}）`);
-  ok(!bRows.some((r) => r.inventorNameKey === inventorBlindKey('MUELLER, ANNA')), 'B：无被擦除盲键落库（跨格式命中墓碑）');
+  ok(bNames.length === 1 && bNames[0] === 'SCHMIDT, HANS', `B：只 SCHMIDT 落库，被擦除人（跨拼写 ${ERASED_VARIANT}）不重物化（实得 ${JSON.stringify(bNames)}）`);
+  ok(!bRows.some((r) => r.inventorNameKey === inventorBlindKey(ERASED_VARIANT)), 'B：无被擦除盲键落库（跨格式命中墓碑）');
 
   // ══════════ C · P1-2 过滤 + P2-6 cap ══════════
   console.log('\n══ C · P1-2 无关 assignee 过滤 + P2-6 每 assignee cap 25 ══');
@@ -175,11 +199,14 @@ async function main() {
   const eQueue = await ownerDb.patentLookupRequest.findFirst({ where: { assigneeNorm: 'codexnoscan' } });
   ok(eQueue?.status === 'PENDING', `E：队列留 PENDING 不误标 EMPTY（实得 ${eQueue?.status}）`);
 
-  // ── 复位 + 清理 ──
-  await setProvider('DISABLED'); // 🔴 复位 seed 默认 DISABLED（不启用功能）
+  // ── 复位治理开关（快照恢复）+ 清理测试数据 ──
   await cleanup();
+  await restoreGovernance();
   const finalStatus = await ownerDb.dataProvider.findUnique({ where: { key: PATENT_PROVIDER_KEY }, select: { status: true } });
-  ok(finalStatus?.status === 'DISABLED', `复位：google_patents 回 DISABLED（实得 ${finalStatus?.status}）`);
+  ok(finalStatus?.status === origProviderStatus, `复位：google_patents 恢复原始态 ${origProviderStatus}（实得 ${finalStatus?.status}）`);
+  if (origProviderStatus !== 'DISABLED') {
+    console.warn(`   ⚠️ 注意：脚本运行前 google_patents 已是 ${origProviderStatus}（非默认 DISABLED）——请确认是否有会话启用了功能`);
+  }
 
   console.log(`\n${failed === 0 ? '✅ 全绿' : `❌ ${failed} 处失败`}\n`);
 }
@@ -190,6 +217,11 @@ try {
   console.error('脚本异常：', e);
   failed = 99;
 } finally {
+  try {
+    await restoreGovernance(); // 🔴 Thread1：中断/异常兜底——绝不残留改动的治理开关（含 provider 可能残留 ENABLED）
+  } catch (e) {
+    console.error('治理开关恢复失败（需人工核对）：', e);
+  }
   await prisma.$disconnect();
   await ownerDb.$disconnect();
 }

@@ -58,6 +58,28 @@ function normCountryLoose(v?: string): string {
 }
 
 /**
+ * 🔴 国别冲突（与 provider `countryConflicts` **同规则**）：a、b **都为 alpha-2 且不同** → 冲突；
+ * 任一未知（非 alpha-2/空）→ 不冲突（欠并方向）。用于 P1-2 按 (norm,country) 过滤——queued DE 的 assignee
+ * 绝不因同归一名把扫描溜进的 US 同名公司发明人一并落库（数据最小化，与读侧国别门对齐）。
+ */
+function countriesConflict(a: string, b: string): boolean {
+  const isA2 = (s: string): boolean => /^[a-z]{2}$/.test(s);
+  return isA2(a) && isA2(b) && a !== b;
+}
+
+/**
+ * 🔴 PII 密钥 preflight：不仅**存在**，还要**形态合法**（32 字节可派生）——用一次 trial derive 校验。
+ * 扫 BQ 前校验，避免密钥虽非空但畸形时扫了 BQ 才在 inventorBlindKey/encryptPii 派生处炸（浪费一次扫描）。
+ */
+function piiPreflightOk(): boolean {
+  try {
+    return piiKeyConfigured() && !!blindContactKey('__patent_cache_preflight__');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 🔴 发明人姓名**不可逆盲索引**（Art.17 擦除键）——`blindContactKey(foldedPersonNameKey(rawName))`。
  * 存**最大折叠**形（umlautFold）：归一名解析不出（罕见）→ 返 ''（该行不可按人名擦除，靠 TTL 清理；空键永不被 {@link inventorErasureKeys} 命中）。
  * 🔴 与 {@link inventorErasureKeys} 的**不变式**：foldedPersonNameKey 形恒 ∈ personNameKeyVariants → 擦除必命中（跨 umlaut 拼写收敛）。
@@ -346,13 +368,13 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   const anchorSet = new Set(anchors);
   const processed = eligible.filter((e) => anchorSet.has(e.anchor)); // 本轮真正覆盖的队列行（capped 外的不动状态）
 
-  // 4b) 🔴 P2-7 preflight：加密不可用（PII_ENCRYPTION_KEY 缺）→ 直接 FAILED，**绝不扫 BQ**——否则扫了却无法落盘，
-  //     异常逃出 audit 卡 RUNNING + Temporal 重试整活动重扫烧配额。扫描前 preflight = 省字节 + audit 忠实。
-  if (!piiKeyConfigured()) {
+  // 4b) 🔴 P2-7 preflight（复审加固）：PII 密钥不仅**存在**、还须**形态合法**（trial derive）——畸形 key 时也在扫 BQ 前
+  //     拦下（否则扫了才在派生处炸，浪费一次扫描）。派生失败 → FAILED，绝不扫。写阶段 try/catch 仍是后备兜底。
+  if (!piiPreflightOk()) {
     await db.patentCacheRefreshAudit.create({
-      data: { startedAt: nowDate, finishedAt: new Date(), anchorCount: anchors.length, rowCount: 0, status: 'FAILED', detail: 'PII_ENCRYPTION_KEY 未配置——拒绝扫描（无法加密落盘）' },
+      data: { startedAt: nowDate, finishedAt: new Date(), anchorCount: anchors.length, rowCount: 0, status: 'FAILED', detail: 'PII_ENCRYPTION_KEY 缺失或形态非法——拒绝扫描（无法加密落盘）' },
     });
-    return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0, detail: 'PII_ENCRYPTION_KEY 未配置' };
+    return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0, detail: 'PII_ENCRYPTION_KEY 缺失或形态非法' };
   }
 
   // 5) audit RUNNING。
@@ -391,11 +413,22 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   const resultKeys = new Set<string>();
   let rowCount = 0;
   try {
-    const queuedNorms = new Set(processed.map((e) => e.assigneeNorm)); // 本轮排队公司归一名集
+    // P1-2（复审加固 · 国别作用域）：按已排队 **(assigneeNorm, country)** 身份过滤——同归一名但**国别冲突**的
+    //   assignee（queued Acme/de，扫描溜进 Acme/us）不落。国别兼容规则同读侧 countryConflicts（任一未知 → 兼容，欠并）。
+    const queuedByNorm = new Map<string, string[]>();
+    for (const e of processed) {
+      const arr = queuedByNorm.get(e.assigneeNorm);
+      if (arr) arr.push(e.country ?? '');
+      else queuedByNorm.set(e.assigneeNorm, [e.country ?? '']);
+    }
     const scoped = scan.rows
       .map((r) => ({ r, norm: normForMatch(r.assigneeName), country: r.assigneeCountry ?? '' }))
-      .filter((e) => e.norm && e.r.inventorName && queuedNorms.has(e.norm)); // P1-2（先做，便宜）
-    // 盲键只对 P1-2-scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
+      .filter((e) => {
+        if (!e.norm || !e.r.inventorName) return false;
+        const qCountries = queuedByNorm.get(e.norm);
+        return !!qCountries && qCountries.some((qc) => !countriesConflict(qc, e.country));
+      });
+    // 盲键只对 scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
     const enriched = scoped.map((e) => ({ ...e, nameKey: inventorBlindKey(e.r.inventorName) }));
 
     // P2-5：按盲键查墓碑，被擦除人绝不重物化（over-suppress 侧：宁跳过也不重建被擦除 PII）。
@@ -426,7 +459,8 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
       toUpsert.push(e);
     }
 
-    // upsert（🔴encryptPii + 盲键）——确定性密文令唯一键幂等。
+    // upsert（🔴encryptPii + 盲键）+ 记录每组保留密文集（供 over-cap/陈旧行清除）。
+    const keptByGroup = new Map<string, { norm: string; country: string; enc: string[] }>();
     for (const e of toUpsert) {
       const encInventor = encryptPii(e.r.inventorName); // 🔴 确定性加密落盘
       await db.patentInventorCache.upsert({
@@ -435,7 +469,20 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
         create: { assigneeNameRaw: e.r.assigneeName, assigneeNorm: e.norm, assigneeCountry: e.country, inventorName: encInventor, inventorNameKey: e.nameKey, windowFromYear: fromYear, windowToYear: toYear, license: GOOGLE_PATENTS_LICENSE, refreshedAt: nowDate, expiresAt },
       });
       rowCount += 1;
-      resultKeys.add(`${e.norm}\u0000${e.country}`);
+      const gk = `${e.norm}\u0000${e.country}`;
+      resultKeys.add(gk);
+      const g = keptByGroup.get(gk);
+      if (g) g.enc.push(encInventor);
+      else keptByGroup.set(gk, { norm: e.norm, country: e.country, enc: [encInventor] });
+    }
+
+    // P2-6（复审加固 · over-cap 清除）：把每个**本轮真刷新的组**收敛到当前 capped 集（删不在 kept 集里的旧行）——
+    //   此前 cap 只挡新写，>25 的旧行/漂移的 cap 成员会驻留到 TTL 仍被 readPatentCache 读到，令上限不真正约束存量 PII。
+    //   now = 刷新即「用当前 capped 集替换该组缓存」，确定性密文令其幂等（同 scan 二次刷新删 0）。
+    for (const g of keptByGroup.values()) {
+      await db.patentInventorCache.deleteMany({
+        where: { assigneeNorm: g.norm, assigneeCountry: g.country, inventorName: { notIn: g.enc } },
+      });
     }
   } catch (err) {
     await db.patentCacheRefreshAudit.update({

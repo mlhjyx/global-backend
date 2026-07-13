@@ -180,10 +180,15 @@ function makeFakeRefreshDb(opts?: {
       },
       deleteMany: async ({ where }: any) => {
         let count = 0;
+        const notInKeep = where.inventorName?.notIn ? new Set<string>(where.inventorName.notIn) : null;
         for (let i = cache.length - 1; i >= 0; i--) {
           const r = cache[i];
           if (where.expiresAt?.lte && r.expiresAt <= where.expiresAt.lte) { cache.splice(i, 1); count++; continue; }
-          if (where.windowToYear?.lt != null && r.windowToYear < where.windowToYear.lt) { cache.splice(i, 1); count++; }
+          if (where.windowToYear?.lt != null && r.windowToYear < where.windowToYear.lt) { cache.splice(i, 1); count++; continue; }
+          // over-cap 清除：assigneeNorm+country 组内、密文不在 kept 集 → 删（复审 Thread3）。
+          if (notInKeep && r.assigneeNorm === where.assigneeNorm && r.assigneeCountry === where.assigneeCountry && !notInKeep.has(r.inventorName)) {
+            cache.splice(i, 1); count++;
+          }
         }
         return { count };
       },
@@ -491,6 +496,33 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
     expect(db._audits.some((a) => a.status === 'RUNNING' && !a.finishedAt)).toBe(false);
     expect(db._cache).toHaveLength(0);
+  });
+
+  it('复审 Thread0（国别作用域）：queued Acme/de → 同归一名冲突国别 Acme/us 不落库', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    const bq = fakeScanner([
+      { assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' },
+      { assigneeName: 'Acme Inc', assigneeCountry: 'us', inventorName: 'SMITH, JOHN' }, // 冲突国别、从未排队 → 不落
+    ]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    expect(db._cache).toHaveLength(1);
+    expect(db._cache[0].assigneeCountry).toBe('de');
+    expect(decryptPii(db._cache[0].inventorName)).toBe('SCHMIDT, HANS');
+  });
+
+  it('复审 Thread3（over-cap 清除）：刷新用当前 capped 集替换该组缓存，陈旧/超额行不驻留 TTL', async () => {
+    const stale = (inv: string): FakeCacheRow => ({
+      assigneeNorm: 'acme', assigneeCountry: 'de', inventorName: encryptPii(inv), inventorNameKey: inventorBlindKey(inv),
+      assigneeNameRaw: 'Acme GmbH', windowFromYear: 2021, windowToYear: 2025, license: 'CC-BY-4.0',
+      refreshedAt: new Date(NOW - 86400000), expiresAt: new Date(NOW + 90 * 86400000), // 未过期
+    });
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')], cache: [stale('OLD, ONE'), stale('OLD, TWO')] });
+    const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'FRESH, ONLY' }]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    const names = db._cache.filter((r) => r.assigneeNorm === 'acme').map((r) => decryptPii(r.inventorName)).sort();
+    expect(names).toEqual(['FRESH, ONLY']); // 🔴 旧两行被清，只余当前刷新集（cap 真正约束存量 PII）
   });
 });
 
