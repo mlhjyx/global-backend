@@ -338,18 +338,29 @@ export function createBacklogActivities(deps: {
 
       let attempted = 0;
       let matched = 0;
+      // 只 stamp 真正处理过的公司；预算耗尽的尾部保留水位、下轮重试（与 contact/fit 阶段同纪律，#51 P2）。
+      const processedIds: string[] = [];
+      let budgetExhausted = false;
+      const budget = openStageBudget('signals', args.workspaceId);
+      try {
       for (const c of companies) {
-        if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011
+        // 预算打穿（DigitalFootprint/StructuredHarvest 的 crawl4ai/http 计入 sweep:signals 账户）→ 停机：
+        // 本家及后续不处理、不 stamp。provider fail-safe 会吞 BudgetExceededError，故用 ledger 唯一真相点判。
+        if (budgetLedger.wasExhausted(budget.key)) { budgetExhausted = true; break; }
+        if (c.domain && suspended.has(c.domain.toLowerCase())) { processedIds.push(c.id); continue; } // DAT-011：跳过但已处理
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const pending = enrichers.filter((e) => {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           return !(prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS); // TTL 新鲜 → 跳过
         });
-        if (!pending.length) continue;
-        attempted += 1;
+        if (!pending.length) { processedIds.push(c.id); continue; } // TTL 全新鲜 → 无事可做，已处理
         const hits: { key: string; result: EnrichmentResult }[] = [];
-        const ctx: ExecutionContext = { workspaceId: args.workspaceId, correlationId: 'backlog-signals' };
+        // #51：信号抓取计入 sweep:signals 预算账户（runId=budget.key），否则计到裸 workspace = 无账户 = 不限额。
+        const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-signals' };
         for (const e of pending) {
+          // #82 P2：本家内**逐 enricher** 检 kill-switch——首个 enricher 打穿 sweep:signals 后（其 fail-safe 吞
+          // BudgetExceededError），后续 enricher（如 structured_harvest 的 sitemap http.get）不得再在已耗尽账户上出网。
+          if (budgetLedger.wasExhausted(budget.key)) break;
           try {
             const r = await e.enrichCompany(
               {
@@ -365,6 +376,10 @@ export function createBacklogActivities(deps: {
             /* 单信号源失败不影响其余 */
           }
         }
+        // 本家处理中打穿预算 → 本家未处理完：不 stamp、停机（下轮重试）。
+        if (budgetLedger.wasExhausted(budget.key)) { budgetExhausted = true; break; }
+        attempted += 1;
+        processedIds.push(c.id); // 本家已处理（命中/未命中信号）
         if (!hits.length) continue;
         matched += 1;
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -395,13 +410,16 @@ export function createBacklogActivities(deps: {
           }
         });
       }
-      // 水位：本批全部已处理（命中/未命中/DAT-011/TTL 新鲜跳过）→ 离开过滤集，游标吞噬存量。
-      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { lastSignalAt: now });
+      } finally {
+        budget.close();
+      }
+      // 水位：只 stamp **已处理**的公司（命中/未命中/DAT-011/TTL 新鲜跳过）；预算耗尽的尾部不 stamp、下轮重试。
+      await stampProcessed(args.workspaceId, processedIds, { lastSignalAt: now });
       return {
         scanned: companies.length,
         attempted,
         matched,
-        nextCursor: companies.length === limit ? companies[companies.length - 1].id : null,
+        nextCursor: budgetExhausted ? null : companies.length === limit ? companies[companies.length - 1].id : null,
       };
     },
 

@@ -46,7 +46,8 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
       >(
         'wikidata.sparql',
         { industryQids, countryQid, limit: Math.min(query.limit, 60) },
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        // #51：传本次调用用途，用途门按 discovery 判（否则退回"声明集任一交集"会绕过域策略仅允许 enrichment 的限制）
+        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
       );
       companies = res.data.companies ?? [];
     } catch (err) {
