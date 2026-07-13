@@ -67,6 +67,12 @@ export interface DiscoveryOptions {
   blockedDomains?: string[];
 }
 
+/**
+ * public_web 兜底生成的**非具名**"公开联系点"（总机 info@/switchboard）的占位 title——用于把它与具名/权威
+ * 联系人区分：backlog 联系人**完成条件**只认具名/权威联系人，generic 公开联系点绝不永久挡住后续决策人发现（#58 P2）。
+ */
+export const GENERIC_CONTACT_TITLE = 'switchboard';
+
 export interface ProviderContactRecord {
   externalId: string;
   fullName: string;
