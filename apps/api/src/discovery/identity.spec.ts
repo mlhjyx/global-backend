@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { companyIdentity, contactIdentity, declinedContactIdentity, normalizeCompanyName, normalizeDomain } from './identity';
+import {
+  companyIdentity,
+  contactIdentity,
+  contactSuppressionKeys,
+  declinedContactIdentity,
+  normalizeCompanyName,
+  normalizeDomain,
+} from './identity';
 
 describe('identity resolution（PRD 8.8 确定性规则）', () => {
   it('域名规范化：协议/www/路径剥离', () => {
@@ -161,5 +168,66 @@ describe('declinedContactIdentity（待办2 create 层收尾：resolve 拒并时
   it('🔴 不同名 → 不同键；同名 → 同键（floor：无可区分信息才折叠）', () => {
     expect(declinedContactIdentity({ fullName: 'Bob Jones' }, ck)).not.toBe(declinedContactIdentity({ fullName: 'Alice Roe' }, ck));
     expect(declinedContactIdentity({ fullName: 'Bob Jones' }, ck)).toBe(declinedContactIdentity({ fullName: 'bob jones' }, ck));
+  });
+});
+
+describe('contactSuppressionKeys（Art.17 person-level 禁联/对账变体键集，方向偏 over-suppress）', () => {
+  const ck = 'd:acme.com';
+  const shares = (a: string, b: string): boolean => {
+    const bs = new Set(contactSuppressionKeys(b, ck));
+    return contactSuppressionKeys(a, ck).some((k) => bs.has(k));
+  };
+
+  it('变体集含德语音译 + 纯去音标 + 旧单值形（向后兼容），稳定排序、去重', () => {
+    const keys = contactSuppressionKeys('Petra Wiedergänger', ck);
+    expect(keys).toContain('c:d:acme.com:petra wiedergaenger'); // 德语音译 ä→ae
+    expect(keys).toContain('c:d:acme.com:petra wiederganger'); // 纯去音标 ä→a
+    expect(keys.length).toBeGreaterThanOrEqual(2);
+    expect(keys).toEqual([...keys].sort()); // 稳定排序（确定性）
+    expect(new Set(keys).size).toBe(keys.length); // 去重
+  });
+
+  it('🔴 向后兼容：变体集含**旧单值形**（保变音的 contactNameKeyPart），令本改动前既有 contact_key 精确形仍命中', () => {
+    // 旧 person-level 键 = blind(contactIdentity({fullName})) = blind(c:<ck>:<contactNameKeyPart>)。旧记录明文已擦除
+    // 无法回填；把旧形留在集合里 → 既有记录仍按精确形命中（无静默失配回归）。
+    expect(contactSuppressionKeys('Petra Wiedergänger', ck)).toContain(contactIdentity({ fullName: 'Petra Wiedergänger' }, ck));
+    expect(contactSuppressionKeys('Dr. Anna Weber', ck)).toContain(contactIdentity({ fullName: 'Dr. Anna Weber' }, ck));
+  });
+
+  it('🔴 空白名 → 空集（不塌成 `c:<ck>:` 空键，MEDIUM/LOW 复审修复）', () => {
+    expect(contactSuppressionKeys('   ', ck)).toEqual([]);
+    expect(contactSuppressionKeys('', ck)).toEqual([]);
+  });
+
+  it('🔴 变音丢弃 / "Surname, Given" 语序 / 德语 ASCII 拼写变体都与原名共享 ≥1 键（禁联命中的基础）', () => {
+    expect(shares('Petra Wiedergänger', 'Petra Wiederganger')).toBe(true); // 变音丢弃
+    expect(shares('Petra Wiedergänger', 'Wiedergänger, Petra')).toBe(true); // 语序
+    expect(shares('Hans Müller', 'Hans Mueller')).toBe(true); // ü→ue
+    expect(shares('Hans Mueller', 'Hans Muller')).toBe(true); // 🔴 纯 ASCII ue↔u（无变音锚点，本轮复审 MEDIUM 修复）
+    expect(shares('Hans Muller', 'Hans Miller')).toBe(false); // 折叠不误并无关名（Miller 无 ue → 不折）
+  });
+
+  it('🔴 按公司隔离：同名不同 companyKey → 无共享键（不跨公司误禁）', () => {
+    const a = new Set(contactSuppressionKeys('Petra Wiedergänger', 'd:acme.com'));
+    expect(contactSuppressionKeys('Petra Wiedergänger', 'd:other.com').some((k) => a.has(k))).toBe(false);
+  });
+
+  it('全部命名空间 c:（与 contactIdentity 的 c 形同域——禁联/对账查的就是它，绝不撞 dx:/e:）', () => {
+    for (const k of contactSuppressionKeys('Petra Wiedergänger', ck)) {
+      expect(k.startsWith(`c:${ck}:`)).toBe(true);
+    }
+  });
+
+  it('归一为空（纯称谓）→ 回退明文键，不塌成 `c:<ck>:` 空键', () => {
+    expect(contactSuppressionKeys('Dr.', ck)).toEqual(['c:d:acme.com:dr.']);
+  });
+
+  it('确定性：同输入 → 同数组（同源再跑幂等的基石）', () => {
+    expect(contactSuppressionKeys('Petra Wiedergänger', ck)).toEqual(contactSuppressionKeys('Petra Wiedergänger', ck));
+  });
+
+  it('🔴 不同自然人 → 无共享键（不误禁无关的人）', () => {
+    const a = new Set(contactSuppressionKeys('Anna Weber', ck));
+    expect(contactSuppressionKeys('Bob Jones', ck).some((k) => a.has(k))).toBe(false);
   });
 });

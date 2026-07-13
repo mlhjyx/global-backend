@@ -2,7 +2,7 @@
  * 身份解析（PRD 8.8）：确定性规则优先 —— 域名精确匹配 > 名称+国家规范化。
  * 纯函数，可测试；匹配规则名记入 identity_link.match_rule 供审计。
  */
-import { normalizePersonName } from './person-name';
+import { normalizePersonName, personNameKeyVariants } from './person-name';
 
 const LEGAL_SUFFIXES =
   /\b(gmbh|ag|kg|co\.?|ltd\.?|llc|inc\.?|corp\.?|s\.?a\.?|s\.?r\.?l\.?|b\.?v\.?|oy|ab|as|plc|pty|limited|company|holdings?)\b|有限公司|株式会社|주식회사/gi;
@@ -78,6 +78,27 @@ function declinedNameKeyPart(fullName: string): string {
 export function contactIdentity(contact: { fullName: string; email?: string | null }, companyKey: string): string {
   if (contact.email) return `e:${contact.email.trim().toLowerCase()}`;
   return `c:${companyKey}:${contactNameKeyPart(contact.fullName)}`;
+}
+
+/**
+ * 联系人**禁联/对账**键集（GDPR Art.17 person-level）：对同一自然人产出**多归一变体**的
+ * `c:<companyKey>:<归一名变体>` 键（{@link personNameKeyVariants}：德语音译 ä→ae + 纯去音标 ä→a 两形，
+ * 覆盖变音丢弃 / 德语 ASCII 拼写 Müller↔Mueller↔Muller / 分解 Unicode / "Surname, Given" 语序 / 称谓）。
+ * 令被 Art.17 擦除的具名人以**任一拼写变体**（换邮箱 / 无邮箱 / 跨源不同拼写）重现都命中禁联而不重建、被对账删净。
+ * 归一为空（纯称谓）时回退 {@link contactNameKeyPart} 明文键，保留可区分性、不塌成 `c:<ck>:` 空键。
+ *
+ * 🔴 与 {@link contactIdentity} 的**单值 dedupe 键**分离（各司其职）：dedupe（去重 upsert）走 contactIdentity +
+ * resolver 模糊并（方向偏**欠并**，绝不误并两人）；禁联/对账走此**变体集**（方向偏**过禁**——over-suppress 于
+ * Art.17 是安全侧，宁误禁同名另一人也不漏禁被擦除人；对账**删除**侧的同名误删另受 deletion 的 createdAt 有界窗口约束）。
+ * email-独立（禁联从不按邮箱，被擦除人换邮箱也须拦），故仅取 fullName + companyKey。
+ */
+export function contactSuppressionKeys(fullName: string, companyKey: string): string[] {
+  // 变体集（德语音译 / 纯去音标 / umlaut 折叠）+ **旧单值形**（保变音/称谓/语序的 contactNameKeyPart）。
+  // 🔴 叠加旧单值形是**向后兼容**：本改动前写入的 contact_key（= blind(c:<ck>:<旧归一>))仅存盲值、明文已擦除、
+  //    无法回填——把旧形留在键集里，令这些既有记录仍按其精确形命中，杜绝「静默失配回归」（变体集只增不减匹配面）。
+  // 空/纯称谓时旧形亦为空 → filter 去空 → []（不塌成 `c:<ck>:` 空键；调用方按空集处理）。
+  const parts = [...personNameKeyVariants(fullName), contactNameKeyPart(fullName)].filter((p) => p.length > 0);
+  return [...new Set(parts.map((part) => `c:${companyKey}:${part}`))].sort();
 }
 
 /** 源侧稳定标识排序取首（确定性，不受输入顺序影响）；归一为 `scheme:value` 小写。空 → null。 */

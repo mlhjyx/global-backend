@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePersonName, parsePersonName } from './person-name';
+import { normalizePersonName, parsePersonName, personNameKeyVariants } from './person-name';
 
 describe('person-name · 称谓剥离', () => {
   it('去 Dr./Prof./Herr/Frau', () => {
@@ -120,5 +120,64 @@ describe('person-name · 空 / 单 token 边界', () => {
 
   it('单 token = 只有名', () => {
     expect(parsePersonName('Cher')).toEqual({ given: 'cher', family: '', normalizedFull: 'cher' });
+  });
+});
+
+describe('person-name · personNameKeyVariants（Art.17 禁联/对账多变体键，方向偏 over-suppress）', () => {
+  /** 两名字的变体集是否有交集（= 禁联/对账会视为同一自然人）。 */
+  const sharesKey = (a: string, b: string): boolean => {
+    const bs = new Set(personNameKeyVariants(b));
+    return personNameKeyVariants(a).some((k) => bs.has(k));
+  };
+
+  it('变音名产出「德语音译(ä→ae)」+「纯去音标(ä→a)」两归一形（去重、稳定排序）', () => {
+    expect(personNameKeyVariants('Petra Wiedergänger')).toEqual(['petra wiedergaenger', 'petra wiederganger']);
+  });
+
+  it('德语音译变体 = normalizePersonName（单值形恒在集合内，保持与 declined 键一致）', () => {
+    expect(personNameKeyVariants('Petra Wiedergänger')).toContain(normalizePersonName('Petra Wiedergänger'));
+  });
+
+  it('🔴 变音丢弃 / 分解 Unicode / "Surname, Given" 语序 三变体都与原名共享键（本 PR 核心盲区闭合）', () => {
+    const canonical = 'Petra Wiedergänger'; // 预合成 ä
+    const decomposed = 'Petra Wiedergänger'; // a + U+0308 组合变音（分解形）
+    expect(decomposed).not.toBe(canonical); // 前提：确为分解形，逐码不同
+    expect(sharesKey(canonical, 'Petra Wiederganger')).toBe(true); // 变音丢弃（ä→a）
+    expect(sharesKey(canonical, decomposed)).toBe(true); // 分解形（NFC 先归）
+    expect(sharesKey(canonical, 'Wiedergänger, Petra')).toBe(true); // "Surname, Given" 逗号语序
+    // 且三者互相之间也都共享（同一自然人）
+    expect(sharesKey('Petra Wiederganger', 'Wiedergänger, Petra')).toBe(true);
+  });
+
+  it('🔴 德语 ASCII 拼写全收敛：Müller / Mueller / Muller 两两共享键（含无变音锚点的 Mueller↔Muller）', () => {
+    expect(sharesKey('Hans Müller', 'Hans Mueller')).toBe(true); // ü→ue
+    expect(sharesKey('Hans Müller', 'Hans Muller')).toBe(true); // ü→u（去音标）
+    expect(sharesKey('Hans Mueller', 'Hans Muller')).toBe(true); // 🔴 无变音锚点 ue↔u（umlautFoldVariant，本轮复审 MEDIUM 修复）
+    expect(sharesKey('Hans Muller', 'Hans Miller')).toBe(false); // 不误并无关名（Miller 无 ue → 不折）
+  });
+
+  it('称谓剥离：Dr./Prof. 变体与无称谓同名共享键', () => {
+    expect(sharesKey('Dr. Anna Weber', 'Anna Weber')).toBe(true);
+    expect(sharesKey('Prof. Dr. Anna Weber', 'weber, anna')).toBe(true);
+  });
+
+  it('🔴 不同自然人绝不共享键（不误禁无关的人）', () => {
+    expect(sharesKey('Anna Weber', 'Bob Jones')).toBe(false);
+    expect(sharesKey('Petra Wiedergänger', 'Petra Neumann')).toBe(false);
+  });
+
+  it('🔴 CJK 不塌成一形（保 Unicode 字母，不同人不误并）', () => {
+    expect(personNameKeyVariants('张伟')).toEqual(['张伟']);
+    expect(sharesKey('张伟', '李伟')).toBe(false);
+  });
+
+  it('确定性：同输入 → 同数组（幂等基石）', () => {
+    expect(personNameKeyVariants('Petra Wiedergänger')).toEqual(personNameKeyVariants('Petra Wiedergänger'));
+  });
+
+  it('空 / 纯称谓 → 空数组（调用方回退明文键）', () => {
+    expect(personNameKeyVariants('')).toEqual([]);
+    expect(personNameKeyVariants('   ')).toEqual([]);
+    expect(personNameKeyVariants('Dr.')).toEqual([]);
   });
 });

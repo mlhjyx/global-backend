@@ -1,8 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { blindContactKey, decryptPii } from '../compliance/pii-crypto';
+import { decryptPii } from '../compliance/pii-crypto';
 import { buildSuppressionEntries, selectReconcileStragglerIds } from '../compliance/deletion-plan';
-import { contactIdentity } from '../discovery/identity';
 import {
   DELETION_RULE_VERSION,
   buildDeletionCompletedPayload,
@@ -330,13 +329,18 @@ async function reconcileContactSubjectEraseIds(
   if (!req) return [originalId];
 
   const companyKey = original.company.dedupeKey;
-  const erasedPersonKey = blindContactKey(contactIdentity({ fullName: original.fullName }, companyKey)).toLowerCase();
-  // 候选走扩展 client → fullName 读路径解密为明文（供 person-key 计算）
+  // 候选走扩展 client → fullName 读路径解密为明文（供 person-key 变体集计算）
   const candidates = await tx.canonicalContact.findMany({
     where: { companyId: original.companyId, id: { not: originalId }, createdAt: { gte: req.createdAt } },
     select: { id: true, fullName: true, createdAt: true },
   });
-  const stragglers = selectReconcileStragglerIds({ erasedPersonKey, companyKey, since: req.createdAt, candidates });
+  // 被擦除人明文名 → contactSuppressionKeys 变体集（与冻结/创建闸同构），与候选变体集有交集且 createdAt>=受理即入选。
+  const stragglers = selectReconcileStragglerIds({
+    erasedName: original.fullName,
+    companyKey,
+    since: req.createdAt,
+    candidates,
+  });
   return [originalId, ...stragglers];
 }
 
