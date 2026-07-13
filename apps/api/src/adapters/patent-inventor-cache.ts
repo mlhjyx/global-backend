@@ -24,13 +24,16 @@ import {
   RefreshScanResult,
   assigneeLikeAnchor,
   GOOGLE_PATENTS_LICENSE,
+  MAX_INVENTORS_PER_ASSIGNEE,
 } from './bigquery-patents';
 import { normForMatch } from '../discovery/name-match';
 import { foldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
-import { encryptPii, decryptPii, blindContactKey } from '../compliance/pii-crypto';
+import { encryptPii, decryptPii, blindContactKey, piiKeyConfigured } from '../compliance/pii-crypto';
 
 /** §8.8 治理域（与 googlePatentsSearchTool.compliance.policyDomain 一致）。 */
 export const PATENT_POLICY_DOMAIN = 'bigquery.googleapis.com';
+/** 🔴 kill-switch 执行点（`data_provider.key`）——seed=DISABLED，未签 LIA/DPIA 前刷新/enqueue 皆不物化 PII（P1-1）。 */
+export const PATENT_PROVIDER_KEY = 'google_patents';
 /** 刷新滚动窗口（年）——**必须镜像 provider RECENCY_YEARS=5**（缓存路径与直连路径同窗，护栏④）。 */
 export const PATENT_CACHE_WINDOW_YEARS = 5;
 /** 每轮刷新 anchor 上限（超出记 log 留 PENDING 下轮，FIFO 不饿死；judge 提出的谓词过大缓解）。 */
@@ -38,10 +41,14 @@ const MAX_ANCHORS_PER_REFRESH = 500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_TTL_DAYS = 180;
 
-/** 缓存行 TTL（天）：env `PATENT_CACHE_TTL_DAYS`（改名/退源行自然清理 + GDPR 存储限制），无效值回退 180。 */
+/**
+ * 缓存行 TTL（天）：env `PATENT_CACHE_TTL_DAYS`（改名/退源行自然清理 + GDPR 存储限制），无效值回退 180。
+ * 🔴 硬顶 180d（Codex PR #93 P2-3）：运维可设**更短**（更强隐私）但绝不允许超过 DEFAULT_TTL_DAYS——
+ * 加密发明人名保留期是承诺的合规上限（严于 source_policy.retentionDays），正值也 clamp。
+ */
 function ttlDaysFromEnv(): number {
   const v = Number(process.env.PATENT_CACHE_TTL_DAYS);
-  return Number.isFinite(v) && v > 0 ? Math.floor(v) : DEFAULT_TTL_DAYS;
+  return Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), DEFAULT_TTL_DAYS) : DEFAULT_TTL_DAYS;
 }
 
 /** 国别归一 → alpha-2 小写 或 ''（未知；令唯一键成立、欠并方向）。 */
@@ -203,12 +210,16 @@ export async function enqueuePatentLookup(
 
 // ── Step 2c 刷新编排（owner 连接；一次共享大扫落库）────────────────────────
 
-/** 刷新 DB 最小面（owner 连接：平台表写 + source_policy 门读）。 */
+/** 刷新 DB 最小面（owner 连接：平台表写 + source_policy 门读 + data_provider kill-switch 读 + 墓碑禁扫读）。 */
 export type PatentRefreshDb = {
   patentLookupRequest: Pick<PrismaClient['patentLookupRequest'], 'findMany' | 'update'>;
   patentInventorCache: Pick<PrismaClient['patentInventorCache'], 'upsert' | 'deleteMany'>;
   patentCacheRefreshAudit: Pick<PrismaClient['patentCacheRefreshAudit'], 'create' | 'update'>;
   sourcePolicy: Pick<PrismaClient['sourcePolicy'], 'findUnique'>;
+  /** 🔴 kill-switch（P1-1）：`google_patents` 非 ENABLED → 不扫 BQ、不物化 PII。 */
+  dataProvider: Pick<PrismaClient['dataProvider'], 'findUnique'>;
+  /** 🔴 Art.17 墓碑（P2-5）：刷新 upsert 前查盲键跳过，防被擦除人 PII 重物化。 */
+  patentInventorTombstone: Pick<PrismaClient['patentInventorTombstone'], 'findMany'>;
 };
 
 /** BigQuery 刷新扫描面（BigQueryPatentsClient 的子集，便于测试注入）。 */
@@ -226,7 +237,13 @@ export interface PatentRefreshDeps {
   log?: (msg: string) => void;
 }
 
-export type PatentRefreshStatus = 'OK' | 'SKIPPED_EMPTY' | 'DENIED' | 'FAILED';
+export type PatentRefreshStatus =
+  | 'OK'
+  | 'SKIPPED_EMPTY'
+  | 'SKIPPED_NOSCAN' // 🔴 P2-4：BQ 未扫（无 creds/无 anchor）——队列留 PENDING，不误标 EMPTY
+  | 'DENIED' // §8.8 用途门拒
+  | 'DISABLED' // 🔴 P1-1：data_provider.google_patents 非 ENABLED（kill-switch）——不物化 PII
+  | 'FAILED';
 
 export interface PatentRefreshSummary {
   status: PatentRefreshStatus;
@@ -244,6 +261,16 @@ async function purgeExpiredAndOutOfWindow(db: PatentRefreshDb, nowDate: Date, fr
   const expired = await db.patentInventorCache.deleteMany({ where: { expiresAt: { lte: nowDate } } });
   const outOfWindow = await db.patentInventorCache.deleteMany({ where: { windowToYear: { lt: fromYear } } });
   return expired.count + outOfWindow.count;
+}
+
+/**
+ * 🔴 P1-1 kill-switch 自守：`data_provider.google_patents` 非 ENABLED（seed=DISABLED，未签 LIA/DPIA）→ 不扫、不物化。
+ * 与 §8.8 门**正交**：§8.8 是用途/robots 合规门（source_policy），本门是 provider 运行开关（ENABLED/DISABLED）。
+ * 缺行 → fail-closed（视为 DISABLED）。此前刷新只查 §8.8（seed=APPROVED 恒过）→ DISABLED 下仍物化 PII 的漏洞根因。
+ */
+async function checkProviderEnabledGate(db: PatentRefreshDb): Promise<boolean> {
+  const provider = await db.dataProvider.findUnique({ where: { key: PATENT_PROVIDER_KEY }, select: { status: true } });
+  return provider?.status === 'ENABLED';
 }
 
 /** 🔴 §8.8 用途门自守：未登记 fail-closed / SUSPENDED / allowedPurpose 不含 discovery → 拒扫。 */
@@ -275,8 +302,17 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   const log = deps.log ?? (() => {});
   const db = deps.db;
 
-  // 1) 保留期清理恒先跑（零 BQ 成本）。
+  // 1) 保留期清理恒先跑（零 BQ 成本；即便 kill-switch 关，既有行仍按 TTL/窗口清理 = GDPR 存储限制不受影响）。
   const purged = await purgeExpiredAndOutOfWindow(db, nowDate, fromYear);
+
+  // 1b) 🔴 P1-1 kill-switch（保留期清理**之后**、扫 BQ **之前**）：provider DISABLED（未签 LIA/DPIA）→ 绝不扫
+  //     BQ / 物化 PII。这是「seed DISABLED = 不物化」不变式的执行点（此前刷新只查 §8.8 seed=APPROVED 恒过而漏）。
+  if (!(await checkProviderEnabledGate(db))) {
+    await db.patentCacheRefreshAudit.create({
+      data: { startedAt: nowDate, finishedAt: new Date(), anchorCount: 0, rowCount: 0, status: 'DISABLED', detail: `data_provider ${PATENT_PROVIDER_KEY} 非 ENABLED（kill-switch）; purged ${purged}` },
+    });
+    return { status: 'DISABLED', anchorCount: 0, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0 };
+  }
 
   // 2) 待刷队列（PENDING 或 nextRefreshAt 到期）——FIFO。**DB 侧 take 上限**（不把全量积压拉进内存，scale-safe）：
   //    取 maxAnchors×2 缓冲（容同 anchor 多国别行）→ 下面去重到 ≤maxAnchors distinct anchors；未处理行留下轮（FIFO 不饿死）。
@@ -310,6 +346,15 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   const anchorSet = new Set(anchors);
   const processed = eligible.filter((e) => anchorSet.has(e.anchor)); // 本轮真正覆盖的队列行（capped 外的不动状态）
 
+  // 4b) 🔴 P2-7 preflight：加密不可用（PII_ENCRYPTION_KEY 缺）→ 直接 FAILED，**绝不扫 BQ**——否则扫了却无法落盘，
+  //     异常逃出 audit 卡 RUNNING + Temporal 重试整活动重扫烧配额。扫描前 preflight = 省字节 + audit 忠实。
+  if (!piiKeyConfigured()) {
+    await db.patentCacheRefreshAudit.create({
+      data: { startedAt: nowDate, finishedAt: new Date(), anchorCount: anchors.length, rowCount: 0, status: 'FAILED', detail: 'PII_ENCRYPTION_KEY 未配置——拒绝扫描（无法加密落盘）' },
+    });
+    return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0, detail: 'PII_ENCRYPTION_KEY 未配置' };
+  }
+
   // 5) audit RUNNING。
   const audit = await db.patentCacheRefreshAudit.create({
     data: { startedAt: nowDate, anchorCount: anchors.length, status: 'RUNNING' },
@@ -327,22 +372,75 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
     return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0 };
   }
 
-  // 7) upsert 每行（normForMatch + 🔴encryptPii + 盲键）——确定性密文令唯一键幂等。
+  // 6b) 🔴 P2-4：BQ **未扫**（无 creds/无 anchor，scanned:false）→ 队列留 PENDING（不标 EMPTY），creds 修好下轮即重试
+  //     （否则误标 EMPTY + nextRefreshAt=+180d → 缓存冷冻数月）。区分「扫了零命中」(EMPTY) vs「没扫」(留 PENDING)。
+  if (scan.scanned === false) {
+    await db.patentCacheRefreshAudit.update({
+      where: { id: audit.id },
+      data: { finishedAt: new Date(), status: 'SKIPPED_NOSCAN', detail: 'BigQuery 未扫（无 creds/无 anchor）——队列留 PENDING' },
+    });
+    return { status: 'SKIPPED_NOSCAN', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0 };
+  }
+
+  // 7) 落库前**三重收窄**（数据最小化 + Art.17），把「广谱扫描命中」收敛成「与排队公司对齐的最小 PII 集」：
+  //    P1-2 按已排队身份过滤（宽锚 %APPLE% 溜进的无关 assignee 不落）→ P2-5 去被擦除人墓碑（不重物化）→
+  //    P2-6 每 (assigneeNorm,country) cap 到 25（对齐 provider 读侧上限，不静态化上千无用发明人 PII）。
+  const queuedNorms = new Set(processed.map((e) => e.assigneeNorm)); // 本轮排队公司归一名集
+  const scoped = scan.rows
+    .map((r) => ({ r, norm: normForMatch(r.assigneeName), country: r.assigneeCountry ?? '' }))
+    .filter((e) => e.norm && e.r.inventorName && queuedNorms.has(e.norm)); // P1-2（先做，便宜）
+  // 盲键只对 P1-2-scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
+  const enriched = scoped.map((e) => ({ ...e, nameKey: inventorBlindKey(e.r.inventorName) }));
+
+  // P2-5：按盲键查墓碑，被擦除人绝不重物化（over-suppress 侧：宁跳过也不重建被擦除 PII）。
+  const candidateKeys = [...new Set(enriched.map((e) => e.nameKey).filter(Boolean))];
+  const tombstoned = candidateKeys.length
+    ? new Set(
+        (
+          await db.patentInventorTombstone.findMany({
+            where: { inventorNameKey: { in: candidateKeys } },
+            select: { inventorNameKey: true },
+          })
+        ).map((t) => t.inventorNameKey),
+      )
+    : new Set<string>();
+  const notErased = enriched.filter((e) => !(e.nameKey && tombstoned.has(e.nameKey)));
+
+  // P2-6：确定性排序 → 每 (assigneeNorm,country) cap 到 MAX_INVENTORS_PER_ASSIGNEE（幂等：同批每次落同一 25 位）。
+  notErased.sort(
+    (a, b) => a.norm.localeCompare(b.norm) || a.country.localeCompare(b.country) || a.r.inventorName.localeCompare(b.r.inventorName),
+  );
+  const perGroup = new Map<string, number>();
+  const toUpsert: typeof notErased = [];
+  for (const e of notErased) {
+    const gk = `${e.norm}\u0000${e.country}`;
+    const n = perGroup.get(gk) ?? 0;
+    if (n >= MAX_INVENTORS_PER_ASSIGNEE) continue;
+    perGroup.set(gk, n + 1);
+    toUpsert.push(e);
+  }
+
+  // upsert（🔴encryptPii + 盲键）——确定性密文令唯一键幂等。🔴 P2-7：写阶段包 try/catch → 失败标 audit FAILED
+  //   （不逃逸令 audit 卡 RUNNING + Temporal 重扫烧配额）。preflight 已挡 key 缺失，此处兜 upsert 瞬时错。
   const resultKeys = new Set<string>();
   let rowCount = 0;
-  for (const r of scan.rows) {
-    const assigneeNorm = normForMatch(r.assigneeName);
-    const country = r.assigneeCountry ?? '';
-    if (!assigneeNorm || !r.inventorName) continue;
-    const encInventor = encryptPii(r.inventorName); // 🔴 确定性加密落盘
-    const nameKey = inventorBlindKey(r.inventorName); // 🔴 Art.17 擦除盲键
-    await db.patentInventorCache.upsert({
-      where: { assigneeNorm_assigneeCountry_inventorName: { assigneeNorm, assigneeCountry: country, inventorName: encInventor } },
-      update: { assigneeNameRaw: r.assigneeName, inventorNameKey: nameKey, windowFromYear: fromYear, windowToYear: toYear, license: GOOGLE_PATENTS_LICENSE, refreshedAt: nowDate, expiresAt },
-      create: { assigneeNameRaw: r.assigneeName, assigneeNorm, assigneeCountry: country, inventorName: encInventor, inventorNameKey: nameKey, windowFromYear: fromYear, windowToYear: toYear, license: GOOGLE_PATENTS_LICENSE, refreshedAt: nowDate, expiresAt },
+  try {
+    for (const e of toUpsert) {
+      const encInventor = encryptPii(e.r.inventorName); // 🔴 确定性加密落盘
+      await db.patentInventorCache.upsert({
+        where: { assigneeNorm_assigneeCountry_inventorName: { assigneeNorm: e.norm, assigneeCountry: e.country, inventorName: encInventor } },
+        update: { assigneeNameRaw: e.r.assigneeName, inventorNameKey: e.nameKey, windowFromYear: fromYear, windowToYear: toYear, license: GOOGLE_PATENTS_LICENSE, refreshedAt: nowDate, expiresAt },
+        create: { assigneeNameRaw: e.r.assigneeName, assigneeNorm: e.norm, assigneeCountry: e.country, inventorName: encInventor, inventorNameKey: e.nameKey, windowFromYear: fromYear, windowToYear: toYear, license: GOOGLE_PATENTS_LICENSE, refreshedAt: nowDate, expiresAt },
+      });
+      rowCount += 1;
+      resultKeys.add(`${e.norm}\u0000${e.country}`);
+    }
+  } catch (err) {
+    await db.patentCacheRefreshAudit.update({
+      where: { id: audit.id },
+      data: { finishedAt: new Date(), rowCount, status: 'FAILED', detail: `persist failed: ${String(err).slice(0, 260)}` },
     });
-    rowCount += 1;
-    resultKeys.add(`${assigneeNorm}\u0000${country}`);
+    return { status: 'FAILED', anchorCount: anchors.length, rowCount, bytesScanned: scan.bytesScanned, purged, cached: 0, empty: 0 };
   }
 
   // 8) 队列状态机：本轮覆盖行 → CACHED（有结果）/ EMPTY，nextRefreshAt=now+ttl（TTL 到期可再刷）。
