@@ -29,13 +29,15 @@ const HONORIFICS = new Set([
   'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'hon', 'rer', 'nat', 'habil',
 ]);
 
-// 身份归一"安全"称谓集：**只**含明确不会是真实姓名 token 的称谓/学位（单 token 判别用）。
-// 从 HONORIFICS 排除 ma/ba/ing/mag/med/hon/rer/nat——它们同时是真实姓氏/名（"Anna Ma"/"Erik Ing"），
-// 身份路径剥它们会把不同人塌成同一归一名（#54 P2）。email 本地部仍用全量 HONORIFICS（parseName 默认）。
-const IDENTITY_HONORIFICS = new Set([
+// 身份归一：明确的**前置**称谓/学位（单 token 即可剥；总出现在名字最前）。从 HONORIFICS 排除
+// ma/ba/ing/mag/med/hon/rer/nat——它们同时是真实姓氏/名（"Anna Ma"/"Ma Yun"），单独出现绝不剥（#54 P2）。
+const IDENTITY_TITLE_PREFIX = new Set([
   'dr', 'prof', 'dipl', 'phd', 'mba', 'bsc', 'msc',
   'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'habil',
 ]);
+// 学术**后缀**：仅当**紧跟已剥的称谓**时才剥（"Dr. med."/"Dr. rer. nat."/"Dipl. Ing." 的空格分写形；#77 P2）——
+// 独立出现（"Dr. Ma" 的 Ma、"Erik Ing" 的 Ing）绝不剥。🔴 ma/ba **不**入此集（常见真实姓氏，永不剥）。
+const IDENTITY_TITLE_SUFFIX = new Set(['med', 'rer', 'nat', 'ing', 'mag', 'hon']);
 
 // 贵族/介词前缀（归入姓；小写比对）。
 const SURNAME_PARTICLES = new Set([
@@ -49,16 +51,37 @@ function isHonorific(token: string): boolean {
   return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
 }
 
-/**
- * 身份归一称谓判定（比 email 侧保守）：多段学位串（"dipl.-ing."，含 . / -）各段皆称谓即剥；
- * 单 token 仅当属**明确**称谓集 {@link IDENTITY_HONORIFICS} 才剥——防止把真实姓名里的歧义短
- * token（Ma/Ba/Ing…）当称谓塌掉不同人（#54 P2）。方向偏欠并（宁多留 token 不误并）。
- */
-function isIdentityHonorific(token: string): boolean {
+/** 单 token 是否明确**前置**称谓（含多段学位串 "dipl.-ing."：拆 . / - 后各段皆全量 HONORIFICS 即算）。 */
+function isIdentityTitlePrefix(token: string): boolean {
   const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
   if (parts.length === 0) return false;
   if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p));
-  return IDENTITY_HONORIFICS.has(parts[0]);
+  return IDENTITY_TITLE_PREFIX.has(parts[0]);
+}
+
+/** 单 token 是否学术**后缀**（med/rer/nat/ing…）——仅供"紧跟称谓才剥"的位置判定。 */
+function isIdentityTitleSuffix(token: string): boolean {
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
+  return parts.length === 1 && IDENTITY_TITLE_SUFFIX.has(parts[0]);
+}
+
+/**
+ * 身份归一称谓剥离（**位置感知**，防误剥真实姓名 token）：从前往后剥明确前置称谓；紧跟已剥称谓的学术后缀
+ * （"Dr. med. Anna"/"Dipl. Ing. Klaus"/"Dr. rer. nat."）也剥；**一旦遇到非称谓 token，其后全部保留**——
+ * "Anna Ma" 的 Ma、"Ma Yun" 的 Ma、"Dr. Ma" 的 Ma（Ma 不在后缀集）都不剥（#54/#77 P2）。方向偏欠并。
+ */
+function stripIdentityTitles(tokens: string[]): string[] {
+  const out: string[] = [];
+  let prevStripped = false;
+  for (const t of tokens) {
+    if (isIdentityTitlePrefix(t) || (prevStripped && isIdentityTitleSuffix(t))) {
+      prevStripped = true;
+      continue;
+    }
+    out.push(t);
+    prevStripped = false;
+  }
+  return out;
 }
 
 /**
@@ -86,20 +109,27 @@ export function transliterateVariants(raw: string): string[] {
   return out;
 }
 
+/** email 侧默认称谓剥离：逐 token 剥全量 {@link HONORIFICS}（行为逐字不变）。 */
+function defaultStripHonorifics(tokens: string[]): string[] {
+  return tokens.filter((t) => !isHonorific(t));
+}
+
 /**
  * 解析全名 → 部件（strip 称谓、识别贵族前缀、拆名/姓）。空/无效返回 null。
- * `isHonorificToken` 可注入：email 本地部用默认全量 {@link isHonorific}（行为逐字不变）；
- * 身份路径用更保守的 {@link isIdentityHonorific}（不误剥真实姓名里的歧义 token，#54 P2）。
+ * `stripHonorifics` 可注入（收 token 数组返 token 数组）：email 本地部用默认 {@link defaultStripHonorifics}
+ * （逐 token 全量剥，行为逐字不变）；身份路径用位置感知的 {@link stripIdentityTitles}（不误剥真实姓名 token，#54/#77 P2）。
  */
 export function parseName(
   fullName: string,
-  isHonorificToken: (token: string) => boolean = isHonorific,
+  stripHonorifics: (tokens: string[]) => string[] = defaultStripHonorifics,
 ): ParsedName | null {
-  const tokens = fullName
-    .replace(/[,;]/g, ' ')
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t && !isHonorificToken(t));
+  const tokens = stripHonorifics(
+    fullName
+      .replace(/[,;]/g, ' ')
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean),
+  );
   if (tokens.length === 0) return null;
   if (tokens.length === 1) {
     // 只有一个 token：当作 given，姓留空（只能出 first/first-only 模式）
@@ -168,8 +198,8 @@ const EMPTY_PERSON_NAME: ParsedPersonName = { given: '', family: '', normalizedF
 export function parsePersonName(raw: string): ParsedPersonName {
   const nfc = (raw ?? '').normalize('NFC').trim();
   if (!nfc) return EMPTY_PERSON_NAME;
-  // 身份路径用保守称谓集（不误剥 Ma/Ba/Ing…）+ 保 Unicode 变体（不删 CJK/西里尔 token）。
-  const parsed = parseName(reorderSurnameComma(nfc), isIdentityHonorific);
+  // 身份路径用位置感知称谓剥离（不误剥 Ma/Ba/Ing…，但剥 "Dr. med." 空格后缀）+ 保 Unicode 变体（不删 CJK/西里尔）。
+  const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitles);
   if (!parsed) return EMPTY_PERSON_NAME;
   const given = identityVariant(parsed.given);
   const family = identityVariant(parsed.surnameCore || parsed.surname);
