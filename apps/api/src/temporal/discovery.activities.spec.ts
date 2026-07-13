@@ -166,3 +166,41 @@ describe('resolveRunStatus —— 预算截断绝不判 DONE', () => {
     expect(resolveRunStatus({ failures: 3, totalQueries: 3, budgetTruncated: false })).toBe('FAILED');
   });
 });
+
+/**
+ * P1-1 kill-switch（Codex PR #93）：专利缓存冷启动 enqueue 必须受 data_provider.google_patents ENABLED 门控。
+ * seed=DISABLED（未签 LIA/DPIA）时绝不 enqueue——不污染刷新队列（PII 物化的真正闸在 refreshPatentCache）。
+ */
+describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
+  it('provider DISABLED → 不 enqueue（candidates:0, enqueued:0），且绝不查公司表', async () => {
+    const prisma = {
+      dataProvider: { findUnique: async () => ({ status: 'DISABLED' }) },
+      withWorkspace: async () => {
+        throw new Error('DISABLED 时绝不应查公司表');
+      },
+    };
+    const deps = { prisma, providers: {}, gateway: {} } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+    const acts = createDiscoveryActivities(deps);
+    const res = await acts.enqueuePatentLookupsForRun({ workspaceId: 'ws', runId: 'run', icpId: 'icp' });
+    expect(res).toEqual({ candidates: 0, enqueued: 0 });
+  });
+
+  it('provider ENABLED → 正常 enqueue 本 run fit=match 公司', async () => {
+    const upserts: unknown[] = [];
+    const tx = {
+      rawSourceRecord: { findMany: async () => [{ id: 'raw1' }] },
+      identityLink: { findMany: async () => [{ canonicalId: 'c1' }] },
+      canonicalCompany: { findMany: async () => [{ name: 'Acme GmbH', country: 'DE' }] },
+    };
+    const prisma = {
+      dataProvider: { findUnique: async () => ({ status: 'ENABLED' }) },
+      withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> => fn(tx),
+      patentLookupRequest: { upsert: async ({ create }: { create: unknown }) => { upserts.push(create); return {}; } },
+    };
+    const deps = { prisma, providers: {}, gateway: {} } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+    const acts = createDiscoveryActivities(deps);
+    const res = await acts.enqueuePatentLookupsForRun({ workspaceId: 'ws', runId: 'run', icpId: 'icp' });
+    expect(res).toEqual({ candidates: 1, enqueued: 1 });
+    expect(upserts).toHaveLength(1);
+  });
+});

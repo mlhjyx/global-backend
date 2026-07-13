@@ -29,6 +29,13 @@ const BYTES_PER_GB = 1024 ** 3;
 const MAX_ROWS_DEFAULT = 500;
 const MAX_ROWS_CEIL = 2000;
 
+/**
+ * 🔴 每 (assigneeNorm, assigneeCountry) **缓存**发明人上限（Codex PR #93 P2-6，数据最小化）——
+ * 镜像 provider `MAX_INVENTORS=25`（读侧每对齐公司只暴露 ≤25），令缓存**存量对齐读量**：多产 assignee
+ * （Siemens/Philips 五年数千发明人）刷新只落 ≤25，不把上千无用发明人 PII 静态化到 TTL 到期。
+ */
+export const MAX_INVENTORS_PER_ASSIGNEE = 25;
+
 // publication_date 为 INT64 YYYYMMDD（如 20200115）。
 const yearToStart = (y: number): number => y * 10000 + 101; // Jan 01
 const yearToEnd = (y: number): number => y * 10000 + 1231; // Dec 31
@@ -177,6 +184,12 @@ export interface BigQueryLike {
 export interface RefreshScanResult {
   rows: RefreshInventorRow[];
   bytesScanned: number | null;
+  /**
+   * 🔴 BigQuery 是否**真的扫了**（Codex PR #93 P2-4）：无 creds/无 anchor 时是 **no-op**（返 rows:[]），
+   * 与「扫了但零命中」语义不同——刷新据此**不把队列误标 EMPTY**（留 PENDING，creds 修好下轮重试，不冷冻数月）。
+   * 省略视为已扫（向后兼容旧 mock）；仅显式 `false` 表示未扫。
+   */
+  scanned?: boolean;
 }
 
 /** BigQuery 行 → RefreshInventorRow（🔴 inventor 只留 name，护栏⑥）。 */
@@ -268,9 +281,10 @@ export class BigQueryPatentsClient {
    */
   async searchInventorsForAnchorsWithStats(anchors: string[], opts: PatentSearchOptions): Promise<RefreshScanResult> {
     const uniq = [...new Set(anchors.filter((a) => a && a.trim()))];
-    if (!uniq.length) return { rows: [], bytesScanned: null };
+    // 🔴 no-op（无 anchor / 无 creds）标 scanned:false——刷新据此留队列 PENDING，绝不误标 EMPTY（P2-4）。
+    if (!uniq.length) return { rows: [], bytesScanned: null, scanned: false };
     const client = this.getClient();
-    if (!client) return { rows: [], bytesScanned: null };
+    if (!client) return { rows: [], bytesScanned: null, scanned: false };
     const queryOpts = {
       query: buildRefreshQuery(),
       params: { fromDate: yearToStart(opts.fromYear), toDate: yearToEnd(opts.toYear), anchors: uniq },
@@ -299,7 +313,7 @@ export class BigQueryPatentsClient {
       rawRows = rows ?? [];
     }
     const rows = rawRows.map(mapRefreshRow).filter((r) => r.assigneeName && r.inventorName);
-    return { rows, bytesScanned };
+    return { rows, bytesScanned, scanned: true }; // 🔴 真扫过（即便零命中）——刷新可安全据结果标 CACHED/EMPTY（P2-4）
   }
 }
 
