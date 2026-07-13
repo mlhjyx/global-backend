@@ -76,9 +76,11 @@ export function themeToCssVars(
     'colors.secondary': '--c-secondary',
     'colors.surface': '--c-surface',
   };
+  // 颜色值严格校验（复审 LOW/M1 隐患）：token 将来用户可编辑，未校验的值会流入内联 style
+  const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
   for (const [key, value] of Object.entries(overrides)) {
     const cssVar = map[key];
-    if (cssVar) vars[cssVar] = value;
+    if (cssVar && COLOR_RE.test(value)) vars[cssVar] = value;
   }
   return vars;
 }

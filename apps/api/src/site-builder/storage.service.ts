@@ -9,6 +9,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
 
 const PRESIGN_PUT_TTL_S = 900; // 15min 完成直传
 const PRESIGN_GET_TTL_S = 300;
@@ -89,6 +91,23 @@ export class StorageService implements OnModuleInit {
     const bytes = await res.Body?.transformToByteArray();
     if (!bytes) throw new Error(`empty object body: ${key}`);
     return Buffer.from(bytes);
+  }
+
+  /** 流式 sha256 + 魔数头（Codex P2：500MB 视频整段进 Buffer 会打爆内存）。 */
+  async hashObject(key: string): Promise<{ sha256: string; head: Buffer; size: number }> {
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const stream = res.Body as Readable | undefined;
+    if (!stream) throw new Error(`empty object body: ${key}`);
+    const hash = createHash('sha256');
+    let head = Buffer.alloc(0);
+    let size = 0;
+    for await (const chunk of stream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      hash.update(buf);
+      size += buf.length;
+      if (head.length < 16) head = Buffer.concat([head, buf]).subarray(0, 16);
+    }
+    return { sha256: hash.digest('hex'), head, size };
   }
 
   async putBuffer(key: string, data: Buffer, contentType: string): Promise<void> {

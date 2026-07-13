@@ -15,6 +15,32 @@ export interface DemoCopyPolish {
   aboutBody?: string;
 }
 
+/** 模型输出里的虚构指征（Codex P2）：命中即弃该字段回退模板——宁可平淡不可造假。 */
+const FABRICATION_PATTERNS: RegExp[] = [
+  /\d+\s*\+?\s*(years?|年)/i, // 年限
+  /\bISO\s*\d{3,5}\b/i, // 认证编号
+  /\bCE\b/, // CE 标志
+  /\bFDA\b/i,
+  /\bUL\b/,
+  /\d[\d,.]*\s*(m2|m²|sqm|square meters?|employees|workers|units\b)/i, // 面积/人数/产能
+];
+const POLISH_MAX_CHARS = 500;
+
+/** 只放行"无法虚构事实"的润色文案；不合格字段静默回退确定性模板。 */
+export function sanitizePolish(polish: DemoCopyPolish | undefined): DemoCopyPolish {
+  if (!polish) return {};
+  const out: DemoCopyPolish = {};
+  for (const field of ['headline', 'subhead', 'aboutBody'] as const) {
+    const value = polish[field];
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed === '' || trimmed.length > POLISH_MAX_CHARS) continue;
+    if (FABRICATION_PATTERNS.some((re) => re.test(trimmed))) continue;
+    out[field] = trimmed;
+  }
+  return out;
+}
+
 export interface DemoSpecInput {
   siteName: string;
   intake: IntakeInput;

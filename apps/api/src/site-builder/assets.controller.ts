@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
@@ -18,6 +19,7 @@ import { RequestContext } from '../auth/request-context';
 import { Enveloped, envelope } from '../common/envelope';
 import { ASSET_KINDS } from './object-key';
 import { AssetsService } from './assets.service';
+import { KbService } from './kb.service';
 
 class PresignDto {
   @ApiProperty({ enum: [...ASSET_KINDS] })
@@ -45,7 +47,12 @@ class PresignDto {
 @Controller('site-builder')
 @UseGuards(AuthGuard)
 export class AssetsController {
-  constructor(private readonly assets: AssetsService) {}
+  private readonly log = new Logger(AssetsController.name);
+
+  constructor(
+    private readonly assets: AssetsService,
+    private readonly kb: KbService,
+  ) {}
 
   @Post('sites/:id/assets/presign')
   @HttpCode(201)
@@ -65,6 +72,13 @@ export class AssetsController {
     @Param('id', ParseUUIDPipe) assetId: string,
   ): Promise<Enveloped<{ assetId: string; processingStatus: string }>> {
     const row = await this.assets.commit(ctx, assetId);
+    if (row.processingStatus === 'queued') {
+      // Codex P2：queued 必须有消费者。M0=同进程异步摄入（失败留 queued，可重触发）；
+      // M1 换 Temporal activity（含 Docling 长解析）。不 await——commit 响应保持秒回。
+      void this.kb.processQueued(ctx, row.siteId).catch((err) => {
+        this.log.warn(`async kb ingest failed for site ${row.siteId}: ${String(err)}`);
+      });
+    }
     return envelope({ assetId: row.id, processingStatus: row.processingStatus });
   }
 

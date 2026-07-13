@@ -24,12 +24,17 @@ function makeService(opts: { existingSite?: boolean; launcher?: DemoV0Launcher }
   const db: FakeDb = { sites: [], runs: [] };
   if (opts.existingSite) db.sites.push({ id: 'existing', workspaceId: CTX.workspaceId });
   const tx = {
+    $executeRaw: async () => 0, // advisory lock no-op
     site: {
       findFirst: async () => db.sites[0] ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { id: 'site-1', ...data };
         db.sites.push(row);
         return row;
+      },
+      delete: async ({ where }: { where: { id: string } }) => {
+        const i = db.sites.findIndex((s) => s.id === where.id);
+        if (i >= 0) db.sites.splice(i, 1);
       },
     },
     siteBuildRun: {
@@ -108,7 +113,7 @@ describe('IntakeService（注册引导 → 建档 + demo v0，01 §2 / 07 §1）
     await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('launcher 抛错：run 标 failed（带错误信息）且异常上抛，不静默', async () => {
+  it('launcher 抛错：补偿回滚（site 删除，级联 run）+ 502 上抛——re-intake 可重试不撞 409', async () => {
     const failing: DemoV0Launcher = {
       launchDemoV0: async () => {
         throw new Error('temporal unreachable');
@@ -116,9 +121,10 @@ describe('IntakeService（注册引导 → 建档 + demo v0，01 §2 / 07 §1）
     };
     const { service, db } = makeService({ launcher: failing });
     await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(BadGatewayException);
-    const run = db.runs[0] as Record<string, unknown>;
-    expect(run.status).toBe('failed');
-    expect(String(run.error)).toContain('temporal unreachable');
+    expect(db.sites).toHaveLength(0); // 站点已回滚
+    // 回滚后同 workspace 再次 intake 成功（不因残留 409）
+    const ok = await service.create(CTX, BASE_INTAKE).catch(() => null);
+    expect(ok).toBeNull(); // 仍是 failing launcher → 依旧 502，但不是 Conflict
   });
 
   it('无英文名：站名用中文名，slug 退 site- 前缀', async () => {

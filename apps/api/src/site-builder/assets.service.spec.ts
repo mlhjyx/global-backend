@@ -16,6 +16,7 @@ function makeService(opts: { siteExists?: boolean } = {}) {
   const db: { assets: Record<string, unknown>[] } = { assets: [] };
   const objects = new Map<string, Buffer>();
   const ops: string[] = [];
+  const kbDeletes: string[] = [];
   const tx = {
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -44,6 +45,12 @@ function makeService(opts: { siteExists?: boolean } = {}) {
         if (i >= 0) db.assets.splice(i, 1);
       },
     },
+    kbDocument: {
+      deleteMany: async ({ where }: { where: { assetId: string } }) => {
+        kbDeletes.push(where.assetId);
+        return { count: 0 };
+      },
+    },
   };
   const prisma = {
     withWorkspace: async <T>(_ws: string, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
@@ -60,6 +67,15 @@ function makeService(opts: { siteExists?: boolean } = {}) {
       if (!buf) throw new Error('no such object');
       return buf;
     },
+    hashObject: async (key: string) => {
+      const buf = objects.get(key);
+      if (!buf) throw new Error('no such object');
+      return {
+        sha256: createHash('sha256').update(buf).digest('hex'),
+        head: buf.subarray(0, 16),
+        size: buf.length,
+      };
+    },
     copy: async (from: string, to: string) => {
       ops.push(`copy:${from}->${to}`);
       objects.set(to, objects.get(from)!);
@@ -70,7 +86,7 @@ function makeService(opts: { siteExists?: boolean } = {}) {
     },
   };
   const service = new AssetsService(prisma as never, storage as never);
-  return { service, db, objects, ops };
+  return { service, db, objects, ops, kbDeletes };
 }
 
 async function presignAndUpload(
@@ -115,6 +131,14 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
         ...base,
         kind: 'logo',
         size: 21 * 1024 * 1024,
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    // kind × mime 相容闸（Codex P2）：pdf 不得混进 product_image
+    await expect(
+      s.service.presign(CTX, SITE_ID, {
+        ...base,
+        kind: 'product_image',
+        mime: 'application/pdf',
       }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
@@ -198,7 +222,7 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(String(rowB.error)).toContain(a.assetId);
   });
 
-  it('delete：最后一个引用才删对象（内容去重后多行可指同 key 的防御）', async () => {
+  it('delete：最后一个引用才删对象，且级联清 KB 派生文档（已删资料不再可检索）', async () => {
     const s = makeService();
     const { assetId } = await presignAndUpload(s);
     await s.service.commit(CTX, assetId);
@@ -206,5 +230,6 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     await s.service.remove(CTX, assetId);
     expect(s.db.assets.find((a) => a.id === assetId)).toBeUndefined();
     expect(s.ops.filter((o) => o.startsWith('delete:')).length).toBe(before + 1);
+    expect(s.kbDeletes).toEqual([assetId]);
   });
 });

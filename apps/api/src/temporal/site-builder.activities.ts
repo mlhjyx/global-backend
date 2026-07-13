@@ -3,10 +3,16 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
-import { buildDemoSpec, DEMO_SPEC_VERSION, DemoCopyPolish } from '../site-builder/demo-spec';
+import {
+  buildDemoSpec,
+  DEMO_SPEC_VERSION,
+  DemoCopyPolish,
+  sanitizePolish,
+} from '../site-builder/demo-spec';
 import type { IntakeInput } from '../site-builder/intake.service';
 import type { KbService } from '../site-builder/kb.service';
 
@@ -45,6 +51,7 @@ export function previewBasePath(slug: string): string {
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const { prisma, gateway, kb } = deps;
+  const log = new Logger('SiteBuilderActivities');
 
   async function polishCopy(
     workspaceId: string,
@@ -81,7 +88,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           setTimeout(() => reject(new Error('demo copy polish timeout')), POLISH_TIMEOUT_MS),
         ),
       ]);
-      return result.data ?? undefined;
+      // 确定性防造假闸（Codex P2）：模型若无视提示编造年限/认证，弃字段回退模板
+      return sanitizePolish(result.data ?? undefined);
     } catch {
       return undefined; // 超时/失败=模板默认文案（fail-safe，不阻塞 demo）
     }
@@ -130,6 +138,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         });
 
         const version = await prisma.withWorkspace(workspaceId, async (tx) => {
+          // Temporal 重试的上一次尝试可能残留 building 版本行（复审 LOW）——按 runId 清理
+          await tx.siteVersion.deleteMany({ where: { buildRunId, buildStatus: 'building' } });
           const count = await tx.siteVersion.count({ where: { siteId } });
           return tx.siteVersion.create({
             data: {
@@ -180,7 +190,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               },
             );
           } catch (err) {
-            console.warn(`[site-builder] intake kb ingest failed: ${String(err)}`);
+            log.warn(`intake kb ingest failed for site ${siteId}: ${String(err)}`);
           }
         }
 
@@ -195,6 +205,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           await tx.site.update({ where: { id: siteId }, data: { status: 'draft' } });
         });
         throw err;
+      }
+    },
+
+    /**
+     * 终态失败补偿（demoV0Workflow catch 调用）：删除半成品 site（级联 run/version），
+     * 否则「每 workspace 限 1 站」让用户 re-intake 永远 409——一次构建失败=注册砖化（复审 MEDIUM）。
+     */
+    async cleanupFailedDemo(input: DemoV0ActivityInput): Promise<void> {
+      try {
+        await prisma.withWorkspace(input.workspaceId, async (tx) => {
+          await tx.site.delete({ where: { id: input.siteId } });
+        });
+        log.warn(`demo v0 terminally failed — site ${input.siteId} rolled back, intake retryable`);
+      } catch (err) {
+        log.error(`cleanupFailedDemo failed for site ${input.siteId}: ${String(err)}`);
       }
     },
   };

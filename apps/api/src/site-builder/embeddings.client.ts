@@ -47,6 +47,10 @@ export class EmbeddingsClient {
           `embedding dim mismatch at ${i}: expected ${this.dim}, got ${vec?.length ?? 'none'}`,
         );
       }
+      // 有限性守卫（复审 LOW）：NaN/Infinity 会在 ::vector cast 处炸出难读错误，前移
+      if (!vec.every(Number.isFinite)) {
+        throw new Error(`embedding contains non-finite values at ${i}`);
+      }
       return vec;
     });
   }

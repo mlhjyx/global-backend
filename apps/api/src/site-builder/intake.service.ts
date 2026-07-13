@@ -51,6 +51,8 @@ export class IntakeService {
     const nameEn = input.company.nameEn?.trim() || null;
 
     const { site, run } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      // Codex P2：advisory xact lock 关闭双请求并发窗口——「每 workspace 限 1 站」原子成立
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-intake-${ctx.workspaceId}`}))`;
       const existing = await tx.site.findFirst({
         where: { workspaceId: ctx.workspaceId },
         select: { id: true },
@@ -91,13 +93,11 @@ export class IntakeService {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.log.error(`demo v0 launch failed for site ${site.id}: ${message}`);
-        await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-          tx.siteBuildRun.update({
-            where: { id: run.id },
-            data: { status: 'failed', error: message },
-          }),
-        );
-        throw new BadGatewayException(`demo v0 launch failed: ${message}`);
+        // Codex P1：补偿回滚（site 级联删 run）——否则残留站点让重试永远撞 409，注册卡死
+        await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+          await tx.site.delete({ where: { id: site.id } });
+        });
+        throw new BadGatewayException(`demo v0 launch failed: ${message} (intake rolled back, safe to retry)`);
       }
     }
 

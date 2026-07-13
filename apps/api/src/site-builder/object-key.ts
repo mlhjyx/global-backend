@@ -36,8 +36,31 @@ const MIME_EXT: Record<string, string> = {
   'video/mp4': 'mp4',
 };
 
+/** kind × MIME 相容表（Codex P2：全局白名单不够——pdf 混进 product_image 会走错管线）。 */
+const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const DOC_MIMES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  'text/markdown',
+];
+const KIND_MIMES: Record<AssetKind, ReadonlySet<string>> = {
+  logo: new Set(IMAGE_MIMES),
+  product_image: new Set(IMAGE_MIMES),
+  factory_image: new Set(IMAGE_MIMES),
+  cert: new Set([...IMAGE_MIMES, 'application/pdf']),
+  doc: new Set(DOC_MIMES),
+  video: new Set(['video/mp4']),
+};
+
 export function isAssetKind(value: string): value is AssetKind {
   return (ASSET_KINDS as readonly string[]).includes(value);
+}
+
+export function kindAcceptsMime(kind: AssetKind, mime: string): boolean {
+  return KIND_MIMES[kind].has(mime);
 }
 
 export function extForMime(mime: string): string | null {

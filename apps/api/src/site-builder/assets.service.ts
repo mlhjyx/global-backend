@@ -5,8 +5,8 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Asset, Prisma } from '@prisma/client';
-import { createHash, randomUUID } from 'node:crypto';
+import { Asset } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import {
@@ -15,6 +15,7 @@ import {
   buildStagingKey,
   extForMime,
   isAssetKind,
+  kindAcceptsMime,
   maxBytesForKind,
   mimeMatchesSniffed,
   sniffMime,
@@ -61,6 +62,11 @@ export class AssetsService {
     }
     const ext = extForMime(input.mime);
     if (!ext) throw new UnprocessableEntityException(`unsupported mime type: ${input.mime}`);
+    if (!kindAcceptsMime(input.kind, input.mime)) {
+      throw new UnprocessableEntityException(
+        `mime ${input.mime} not allowed for kind ${input.kind}`,
+      );
+    }
     if (!Number.isFinite(input.size) || input.size <= 0) {
       throw new UnprocessableEntityException('invalid size');
     }
@@ -94,55 +100,63 @@ export class AssetsService {
     });
   }
 
+  /**
+   * commit 不再包在单个事务里（Codex P2）：拒绝态更新若与随后的 throw 同事务，
+   * 更新会被回滚而 staging 对象已删——行卡死 pending_upload。改为短事务分段，
+   * 拒绝路径先持久化再抛。
+   */
   async commit(ctx: RequestContext, assetId: string): Promise<Asset> {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const asset = await tx.asset.findUnique({ where: { id: assetId } });
-      if (!asset) throw new NotFoundException('asset not found');
-      if (asset.processingStatus !== 'pending_upload') {
-        throw new ConflictException(`asset already ${asset.processingStatus}`);
-      }
-      const stagingKey = asset.objectKey;
-      const head = await this.storage.head(stagingKey);
-      if (!head) throw new ConflictException('object not uploaded yet');
+    const asset = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.findUnique({ where: { id: assetId } }),
+    );
+    if (!asset) throw new NotFoundException('asset not found');
+    if (asset.processingStatus !== 'pending_upload') {
+      throw new ConflictException(`asset already ${asset.processingStatus}`);
+    }
+    const stagingKey = asset.objectKey;
+    const head = await this.storage.head(stagingKey);
+    if (!head) throw new ConflictException('object not uploaded yet');
 
-      const kind = asset.kind as AssetKind;
-      const max = maxBytesForKind(kind);
-      const declaredCap = asset.sizeBytes * SIZE_TOLERANCE_RATIO + SIZE_TOLERANCE_BYTES;
-      if (head.size > max || head.size > declaredCap) {
-        await this.reject(tx, assetId, stagingKey, `uploaded size ${head.size} exceeds limit`);
-        throw new UnprocessableEntityException('uploaded object exceeds declared/kind size limit');
-      }
+    const kind = asset.kind as AssetKind;
+    const max = maxBytesForKind(kind);
+    const declaredCap = asset.sizeBytes * SIZE_TOLERANCE_RATIO + SIZE_TOLERANCE_BYTES;
+    if (head.size > max || head.size > declaredCap) {
+      await this.markRejected(ctx, assetId, stagingKey, `uploaded size ${head.size} exceeds limit`);
+      throw new UnprocessableEntityException('uploaded object exceeds declared/kind size limit');
+    }
 
-      const buffer = await this.storage.getBuffer(stagingKey);
-      const sniffed = sniffMime(buffer.subarray(0, MAGIC_HEAD_BYTES));
-      if (!mimeMatchesSniffed(asset.mime, sniffed)) {
-        await this.reject(tx, assetId, stagingKey, `content does not match declared ${asset.mime}`);
-        throw new UnprocessableEntityException('file content does not match declared type');
-      }
+    // 流式哈希 + 魔数头（大文件不整段进内存）
+    const { sha256, head: magicHead } = await this.storage.hashObject(stagingKey);
+    const sniffed = sniffMime(magicHead.subarray(0, MAGIC_HEAD_BYTES));
+    if (!mimeMatchesSniffed(asset.mime, sniffed) || !kindAcceptsMime(kind, asset.mime)) {
+      await this.markRejected(
+        ctx,
+        assetId,
+        stagingKey,
+        `content does not match declared ${asset.mime}`,
+      );
+      throw new UnprocessableEntityException('file content does not match declared type');
+    }
 
-      const contentHash = createHash('sha256').update(buffer).digest('hex');
-      const ext = extForMime(asset.mime) ?? 'bin';
-      const canonicalKey = buildObjectKey(ctx.workspaceId, asset.siteId, kind, contentHash, ext);
+    const ext = extForMime(asset.mime) ?? 'bin';
+    const canonicalKey = buildObjectKey(ctx.workspaceId, asset.siteId, kind, sha256, ext);
+    const duplicate = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.findFirst({ where: { objectKey: canonicalKey }, select: { id: true } }),
+    );
+    if (duplicate) {
+      await this.markRejected(ctx, assetId, stagingKey, `duplicate content of asset ${duplicate.id}`);
+      throw new ConflictException(`duplicate content: already uploaded as asset ${duplicate.id}`);
+    }
 
-      const duplicate = await tx.asset.findFirst({
-        where: { objectKey: canonicalKey },
-        select: { id: true },
-      });
-      if (duplicate) {
-        await this.reject(tx, assetId, stagingKey, `duplicate content of asset ${duplicate.id}`);
-        throw new ConflictException(
-          `duplicate content: already uploaded as asset ${duplicate.id}`,
-        );
-      }
-
-      await this.storage.copy(stagingKey, canonicalKey);
-      await this.storage.delete(stagingKey);
-      const nextStatus = KB_QUEUED_KINDS.has(kind) ? 'queued' : 'ready';
-      return tx.asset.update({
+    await this.storage.copy(stagingKey, canonicalKey);
+    await this.storage.delete(stagingKey);
+    const nextStatus = KB_QUEUED_KINDS.has(kind) ? 'queued' : 'ready';
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.update({
         where: { id: assetId },
-        data: { objectKey: canonicalKey, contentHash, processingStatus: nextStatus, error: null },
-      });
-    });
+        data: { objectKey: canonicalKey, contentHash: sha256, processingStatus: nextStatus, error: null },
+      }),
+    );
   }
 
   async list(ctx: RequestContext, siteId: string, kind?: string): Promise<Asset[]> {
@@ -162,6 +176,9 @@ export class AssetsService {
       const others = await tx.asset.count({
         where: { objectKey: asset.objectKey, NOT: { id: assetId } },
       });
+      // Codex P2：删源素材必须连带清其 KB 派生内容（chunk 由 FK 级联），
+      // 否则用户已删资料仍被语义检索命中（分租户护栏②的删除链路）
+      await tx.kbDocument.deleteMany({ where: { assetId } });
       await tx.asset.delete({ where: { id: assetId } });
       if (others === 0) {
         try {
@@ -176,16 +193,16 @@ export class AssetsService {
     });
   }
 
-  private async reject(
-    tx: Prisma.TransactionClient,
+  /** 拒绝态独立短事务持久化（绝不与调用方的 throw 同事务），随后清 staging。 */
+  private async markRejected(
+    ctx: RequestContext,
     assetId: string,
     stagingKey: string,
     error: string,
   ): Promise<void> {
-    await tx.asset.update({
-      where: { id: assetId },
-      data: { processingStatus: 'rejected', error },
-    });
+    await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.update({ where: { id: assetId }, data: { processingStatus: 'rejected', error } }),
+    );
     try {
       await this.storage.delete(stagingKey);
     } catch (err) {
