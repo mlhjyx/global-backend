@@ -123,7 +123,20 @@ AiTask<I, O>：
 - **降级**：无硬门（findings 进质量环修复即可）。
 - **模型**：gemini-3-flash 档。
 
-## 10. 开发期 CC 工作流（内化的"生产线"）
+## 10. 研究依据与设计修订（2026-07-14 补研；修订①②③待用户确认后定稿）
+
+1. **对标 Anthropic《Building Effective Agents》**（agent 工程的业界公认基准）：它区分 workflow（预定义代码路径编排 LLM）与 agent（LLM 自主决定路径），并强调"最成功的实现不用复杂框架，用简单可组合的 pattern"。我们的设计属 workflow 系——质量环 = 其 evaluator-optimizer 模式、P2 素材并行 = parallelization 模式，两处都是被验证的正确形状。
+   - **修订①：v1 取消 planner agent（9 卡 → 8 卡 + 1 个规则模块）**。orchestrator-workers 模式适用于"子任务不可预测"的场景；建站的子任务完全可预测（页面/素材/文案是确定集合），M0/M1 用**固定 DAG + 规则判定增量范围**即可，省一次模型调用、少一个不确定源。M2+ 若出现真不可预测场景再评估引入。
+2. **业界建站产品对标**：市场三分——design-first（Framer/Webflow）、business all-in-one（Wix ADI/Durable/10Web）、code-first（v0/Lovable/Bolt）。Wix ADI 的"问卷 → 生成 → 可视化微调"与 Durable 的"30 秒出站"分别验证了我们的 intake 问答路线与 demo v0 秒出路线；我们的定位 = business all-in-one 里的 **B2B 外贸工厂询盘站细分**，暂无专精直接竞品。
+3. **修订②：SiteSpec 数据形状对标 Puck**（MIT 开源 React 可视化编辑器，JSON in/JSON out、自托管零锁定，2026 活跃）。SiteSpec 采用 Puck 兼容形状（content/zones/components+props）：(a) schema 设计被市场验证；(b) **SaaS 前端将来做"用户手动微调"编辑器可直接嵌 Puck 编辑器组件**，与我们后端数据天然互通，前端工作量骤降。渲染端仍 Astro 静态构建（数据形状兼容、渲染器自写，不引 React 运行时进客户站）。
+4. **修订③：模板不从零画**。Astro 官方主题库多款 MIT 免费商用（Astrofy/Foxi/Odyssey business/shadcn+Tailwind 4 corporate 系）——M0 选 2~3 款改造成参数化行业模板，比手搓 15~20 个 section 快一个量级，§8 组件库条目相应调整为"改造+补缺"。
+5. **框架选型确认（研究后维持自建）**：对比 Mastra（TS 原生，Replit/PayPal/Adobe 生产在用，workflows/evals/observability 一等公民）与 LangGraph.js（TS 版滞后 Python 4-8 周）。结论：**维持 Temporal + 自建薄 AiTask**——引入 Mastra 与 Temporal 双编排打架（KISS），其统一模型路由价值与 new-api 网关重叠；但**借鉴其"evals 一等公民"**思想建 eval harness（02 §11.8）。
+6. **补充建议（研究联想）**：
+   - **国内访问链路**：预览是给国内工厂用户看的（国内友好线路/SaaS 反代），发布站是给海外买家看的（海外 CDN）——两条链路受众不同，别用一套 CDN 方案；与前端/运维对齐。
+   - **每站成本单（SaaS 定价依据）**：demo v0 ≈ ¥0.5 内；精装修一轮 token ≈ ¥5-15；图片 gpt-image-2 中档 ≈ ¥0.4/张 × N；视频 ¥15/条 × N。全配一次 ≈ ¥50-60、纯图文 ≈ ¥15——SaaS 侧按次数/配额设计套餐有了底数。
+   - **狗粮灰度**：golden set 里放 2~3 家真实合作工厂资料，每个里程碑先给"自己人"全链跑通再放量。
+
+## 11. 开发期 CC 工作流（内化的"生产线"）
 
 生产运行时零 CC 依赖，但**开发这些 agent 时**我在 CC 里这样干：
 1. 模板/组件库量产：`gan-design` 循环（generator 产模板 → evaluator 按审美 rubric 打分迭代）+ `theme-factory` 出主题 token 预设包 → 人工终审入库。

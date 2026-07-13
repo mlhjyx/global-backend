@@ -166,6 +166,20 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 | D7 | 预览方式 | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属 |
 | D8 | 模型选型原则 | 按 agent 能力需求全市场选型（§6 表），定稿后用户在 new-api 接入通道；视频=火山 **Seedance 2.0** |
 | D9 | readdy 素材库 | 不联动（无开放素材接口+授权链断）；开发期作内部设计基准，生产素材走开放授权生态（§8） |
+| D10 | 发布部署 | **海外服务器**（免 ICP 备案）；静态托管=对象存储+CDN 优先（非 VPS）；预览国内友好线路/发布海外 CDN 双链路 |
+| D11 | SiteSpec 数据形状 | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认） |
+| D12 | 模板策略 | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认） |
+| D13 | v1 编排 | **无 planner agent**：固定 DAG + 规则判定增量范围；M2+ 真需要再评估（修订①，用户确认） |
+| D14 | 知识库与 embedding | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12） |
+
+## 12. 知识库详设（2026-07-14 补，02 §2 kb 表的实现规格）
+
+- **解析**：**Docling**（MIT，IBM）——Word/Excel/PPT/PDF/HTML/图片全格式，复杂表格抽取 97.9% 准度、开源基准第一（0.877）；外贸资料主流是 Word/Excel 产品表，正中其强项。中文复杂版式画册（扫描版 PDF）备选 **MinerU**（上海 AI Lab，CJK 最强 0.831），v1 不引入（KISS）。
+- **切块**：结构感知——按标题层级切、表格整块保留（Docling 输出天然带文档树）；产品 SKU 表逐行成 chunk 并带表头上下文。
+- **Embedding**：**BGE-M3 自托管**（MIT、1024 维、100+ 语言含中文），compose 加一个容器（Ollama/sentence-transformers，CPU 可跑）——沿 v3.0 D1 既定，**不接付费 embedding API**。理由：公司资料敏感（数据不出域）、KB 吞吐大（零边际成本）、且与获客侧 `entity_embedding` **同一向量空间**——未来"客户产品 ↔ 海外买家需求"跨域匹配的直接红利。
+- **存储**：`kb_chunk.embedding vector(1024)` + HNSW（halfvec cosine）+ workspace RLS；行上记 `embed_model`/`embed_version`（换模型=按版本重嵌，不混空间）。
+- **检索**：向量 + 关键词（tsvector）混合召回，agent 侧按任务取 top-k 拼 kbDigest。
+- **注意**：批量上传高峰的嵌入排队走 Temporal activity 限速，不阻塞交互路径。
 
 ## 11. 补充能力清单（2026-07-14 主动补全，纳入各里程碑）
 
