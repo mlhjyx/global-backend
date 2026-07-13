@@ -274,8 +274,12 @@ export function createExternalIntentActivities(deps: {
     }): Promise<ExternalIntentRecomputeSummary> {
       const out: ExternalIntentRecomputeSummary = { workspacesRecomputed: 0, companiesRebuilt: 0, companiesCleared: 0, truncated: 0 };
       // 逐 workspace 聚合投影面（同 workspace 多 ICP → surfaces 之并）。
+      // 🔴 解析失败（t.error）的 ICP **绝不**贡献投影面：其空码是"投影面未知"而非"真无 TED/FDA 面"——
+      // 若据此以空面复算，recomputeCompany 会把该 workspace 里 TED/FDA-derived 的 intent 当"无匹配事件"清除
+      // （一次瞬时解析抖动即抹掉整租户 Intent 维，下轮才自愈）。跳过 → 保留既有 intent 不动（复审 HIGH）。
       const byWs = new Map<string, ProjectionSurface[]>();
       for (const t of args.targets) {
+        if (t.error) continue; // 解析失败/不完整：投影面未知，不参与复算（不据空面误清）
         const surfaces = byWs.get(t.workspaceId) ?? [];
         if (t.cpvCodes.length && t.buyerCountries.length) surfaces.push({ provider: 'ted', cpvCodes: t.cpvCodes, buyerCountries: t.buyerCountries });
         if (t.fdaProductCodes.length) surfaces.push({ provider: 'openfda', productCodes: t.fdaProductCodes });
@@ -283,6 +287,9 @@ export function createExternalIntentActivities(deps: {
       }
       const maxRounds = Math.max(1, args.maxRounds ?? DEFAULT_RECOMPUTE_ROUNDS);
       for (const [workspaceId, surfaces] of byWs) {
+        // 空聚合面（本 workspace 全部 ICP 都无 CPV/FDA 面）→ 跳过：本 sweep 无 TED/FDA 收敛面可算，
+        // 绝不以空面调 recomputeWorkspace（否则同样把 TED/FDA intent 误清）。web_watch 收敛归其自身 sweep。
+        if (!surfaces.length) continue;
         out.workspacesRecomputed += 1;
         let cursor: string | undefined;
         let rounds = 0;
