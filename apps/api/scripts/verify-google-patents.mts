@@ -177,6 +177,9 @@ async function main() {
 
 try {
   await main();
+} catch (err) {
+  console.error('\n❌ main() 抛出（此前会被 finally 的 process.exit 掩盖成假通过）：', err);
+  failed++;
 } finally {
   await ownerDb.sourcePolicy
     .update({ where: { domain: GP_DOMAIN }, data: { allowedPurpose: ['discovery', 'enrichment'] } })
