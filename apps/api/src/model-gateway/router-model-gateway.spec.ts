@@ -51,6 +51,50 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     expect((provider.generateText as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
   });
 
+  it('generateStructured 预留两次上限（含校验-修复重试）→ 账户仅够一次时整体在 reserve 处被拦（#51 P2）', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 30); // maxCostCents=20 → 单次(20)够、两次(40)不够
+    const provider = fakeProvider();
+    const gw = gatewayWith(provider, budget);
+    await expect(
+      gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toThrow(BudgetExceededError);
+    // 修复预算无法预留 → 第一次模型调用也不发生（reserve 在调用前，修复不再打穿账户）
+    expect((provider.generateStructured as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it('generateStructured 预算充足（≥两次上限）→ 正常执行', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 40); // 恰够两次上限
+    const provider = fakeProvider();
+    const gw = gatewayWith(provider, budget);
+    const r = await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' });
+    expect(r.data).toEqual({});
+  });
+
+  it('generateStructured 修复重试且无 usage → settle 按**两次**调用兜底（修复不被少记、硬上界不被绕过，#82 P2）', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 40); // 恰两次上限
+    const provider = fakeProvider();
+    // 首次输出缺 x（schema 校验失败）→ 触发修复；修复补上 x（通过）。两次均**不报** usage。
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm' })
+      .mockResolvedValueOnce({ data: { x: 1 } as never, provider: 'fake', model: 'm' });
+    const gw = gatewayWith(provider, budget);
+    await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } }, { workspaceId: 'ws-1', runId: 'run-1' });
+    // 两次调用各 20¢ → settle 40¢ → 账户见底（不再留 20¢ 给下次绕过硬顶）。
+    expect(budget.remainingCents('run-1')).toBe(0);
+    expect((provider.generateStructured as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+  });
+
+  it('generateStructured 首次即通过（无修复）无 usage → settle 只按**一次**（不高估、退还预留另一半）', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 40);
+    const gw = gatewayWith(fakeProvider(), budget); // 默认 generateStructured 返回 {}，schema {} 通过 → 无修复
+    await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' });
+    expect(budget.remainingCents('run-1')).toBe(20); // 预留 40、settle 20（1 次）→ 剩 20
+  });
+
   it('provider 不上报 costUsd → 按声明上限记账（settle=est，保守上界）', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 100);

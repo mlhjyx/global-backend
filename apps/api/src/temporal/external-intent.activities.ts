@@ -9,8 +9,10 @@ import { SignalIngestService, IngestOutcome } from '../signals/signal-ingest.ser
 import { canonicalFdaSpec, canonicalTedSpec, queryFingerprint } from '../signals/signal-query';
 import { TedIntentProjectionService, ProjectTendersResult } from '../intent/ted-intent-projection.service';
 import { OpenFdaIntentProjectionService, ProjectClearancesResult } from '../intent/openfda-intent-projection.service';
+import { IntentRecomputeService, ProjectionSurface } from '../signals/intent-recompute.service';
 
 const DEFAULT_MAX_NOTICES = 100; // 单指纹有界样本（绝不 grind 全库）
+const DEFAULT_RECOMPUTE_ROUNDS = 25; // 单 workspace 单 sweep 的复算分页轮上限（25×200=5000 家/轮，防单轮无界 grind）
 const DEFAULT_MAX_RECORDS = 100;
 const TED_PROVIDER = 'ted';
 const OPENFDA_PROVIDER = 'openfda';
@@ -55,6 +57,15 @@ export interface LiveProviderState {
   openfda: boolean;
 }
 
+/** 过期后 intent 复算汇总（可观测；truncated=达轮上限未扫尽的 workspace 数，下轮 sweep 续）。 */
+export interface ExternalIntentRecomputeSummary {
+  workspacesRecomputed: number;
+  companiesRebuilt: number;
+  companiesCleared: number;
+  truncated: number;
+  error?: string;
+}
+
 /**
  * **外部源 intent sweep** 的 Temporal 活动（收口⑤重构：ingest-once + 两层投影）。
  * 旧结构「逐 ICP 各自 broker.invoke 直连 TED/openFDA + 直接 upsert」= 同一外部记录被 N 个 ICP×workspace
@@ -77,6 +88,7 @@ export function createExternalIntentActivities(deps: {
   const ingestSvc = new SignalIngestService({ prisma: deps.prisma, broker: deps.broker });
   const tedProj = new TedIntentProjectionService({ prisma: deps.prisma });
   const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma });
+  const recomputeSvc = new IntentRecomputeService({ prisma: deps.prisma });
 
   /** live kill-switch：拉取前重读 data_provider 状态（ownerDb 只读；缺失 → 全停）。 */
   async function liveEnabled(): Promise<LiveProviderState> {
@@ -244,6 +256,53 @@ export function createExternalIntentActivities(deps: {
     /** 状态机 sweep：ACTIVE 且过期 → EXPIRED（投影前跑，过期信号绝不再投）。 */
     async expireStaleSignals(): Promise<{ expired: number }> {
       return { expired: await ingestSvc.expireStale() };
+    },
+
+    /**
+     * 过期后 intent **复算收敛**（Codex #56 P2）：`expireStaleSignals` 把过期信号翻 EXPIRED 后，增量投影只**加**
+     * 事件、绝不删——已写进 `canonical.attributes.intent` 的过期事件仍被评分（评分读租户属性而非 source_signal）
+     * 直到自然衰减。故本活动从事实源（ACTIVE source_signal + web_watch）**确定性重建**受影响 workspace 的
+     * intent 投影（`IntentRecomputeService`：无匹配事件 → 清除，全过期即收敛）。
+     * 投影面 = 本 workspace 全部 ICP 的 surfaces 之并（`resolved` 逐 ICP 的 cpv/国别/FDA 码）——**必须与增量
+     * 投影同一过滤面**，否则跨 CPV/跨 ICP 他源信号会被误注入（见 IntentRecomputeService 头注）。
+     * 有界：单 workspace 分页复算至多 DEFAULT_RECOMPUTE_ROUNDS 轮（防单轮 grind 全量）；触顶记 truncated，下轮 sweep 续。
+     * 幂等：重建结果与既有实质相同 → 不写（与增量投影有公共不动点）。
+     */
+    async recomputeExpiredIntent(args: {
+      targets: ResolvedIntentTarget[];
+      maxRounds?: number;
+    }): Promise<ExternalIntentRecomputeSummary> {
+      const out: ExternalIntentRecomputeSummary = { workspacesRecomputed: 0, companiesRebuilt: 0, companiesCleared: 0, truncated: 0 };
+      // 逐 workspace 聚合投影面（同 workspace 多 ICP → surfaces 之并）。
+      // 🔴 解析失败（t.error）的 ICP **绝不**贡献投影面：其空码是"投影面未知"而非"真无 TED/FDA 面"——
+      // 若据此以空面复算，recomputeCompany 会把该 workspace 里 TED/FDA-derived 的 intent 当"无匹配事件"清除
+      // （一次瞬时解析抖动即抹掉整租户 Intent 维，下轮才自愈）。跳过 → 保留既有 intent 不动（复审 HIGH）。
+      const byWs = new Map<string, ProjectionSurface[]>();
+      for (const t of args.targets) {
+        if (t.error) continue; // 解析失败/不完整：投影面未知，不参与复算（不据空面误清）
+        const surfaces = byWs.get(t.workspaceId) ?? [];
+        if (t.cpvCodes.length && t.buyerCountries.length) surfaces.push({ provider: 'ted', cpvCodes: t.cpvCodes, buyerCountries: t.buyerCountries });
+        if (t.fdaProductCodes.length) surfaces.push({ provider: 'openfda', productCodes: t.fdaProductCodes });
+        byWs.set(t.workspaceId, surfaces);
+      }
+      const maxRounds = Math.max(1, args.maxRounds ?? DEFAULT_RECOMPUTE_ROUNDS);
+      for (const [workspaceId, surfaces] of byWs) {
+        // 空聚合面（本 workspace 全部 ICP 都无 CPV/FDA 面）→ 跳过：本 sweep 无 TED/FDA 收敛面可算，
+        // 绝不以空面调 recomputeWorkspace（否则同样把 TED/FDA intent 误清）。web_watch 收敛归其自身 sweep。
+        if (!surfaces.length) continue;
+        out.workspacesRecomputed += 1;
+        let cursor: string | undefined;
+        let rounds = 0;
+        for (; rounds < maxRounds; rounds += 1) {
+          const r = await recomputeSvc.recomputeWorkspace(workspaceId, { surfaces, cursor });
+          out.companiesRebuilt += r.companiesRebuilt;
+          out.companiesCleared += r.companiesCleared;
+          if (!r.nextCursor) break;
+          cursor = r.nextCursor;
+        }
+        if (rounds >= maxRounds) out.truncated += 1; // 未扫尽（下轮 sweep 从头续；幂等，无副作用）
+      }
+      return out;
     },
 
     /**

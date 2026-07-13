@@ -18,6 +18,8 @@ import addFormats from 'ajv-formats';
 import { OutboxRelayService } from '../src/relay/outbox-relay.service';
 import { EventsService } from '../src/events/events.service';
 import { LeadService } from '../src/lead/lead.service';
+import { DataRightsService } from '../src/compliance/data-rights.service';
+import { seedJurisdictionPolicy } from '../src/compliance/jurisdiction-policy.seed';
 
 const OWNER_URL = process.env.DATABASE_URL ?? 'postgresql://global:global@localhost:5432/global_dev';
 const APP_URL = process.env.APP_DATABASE_URL ?? 'postgresql://app_user:app_pw@localhost:5432/global_dev';
@@ -147,7 +149,12 @@ async function main() {
       queue: 'recommended',
     },
   });
-  const leadSvc = new LeadService({ withWorkspace } as never);
+  // #72 P2：LeadService 构造现需 DataRightsService（decide 存储权利判定+审计留痕）。播种法域规则 + loadRules，
+  // 否则规则空 → 引擎对 red 数据 fail-closed（DENY）令 decide(accept) 被挡。appDb 供 loadRules；logDecision 走 decide 事务 tx。
+  await seedJurisdictionPolicy(owner);
+  const dataRights = new DataRightsService(appDb as never);
+  await dataRights.loadRules();
+  const leadSvc = new LeadService({ withWorkspace } as never, dataRights);
   await leadSvc.decide(ctx, lead.id, 'accept');
   const lq = await owner.outboxEvent.findFirst({
     where: { workspaceId: WS, eventType: 'LeadQualified', aggregateId: lead.id },

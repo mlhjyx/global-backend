@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { evaluateDataRights } from './data-rights.engine';
 import { seedJurisdictionPolicy } from './jurisdiction-policy.seed';
@@ -66,37 +67,50 @@ export class DataRightsService implements OnModuleInit {
     return evaluateDataRights(ctx, this.rules);
   }
 
-  /** 判定 + 写 policy_decision_log（租户 RLS 事务，append-only）。 */
+  /** 判定 + 写 policy_decision_log（**自开**租户 RLS 事务，append-only）——预检/无外层事务的场景。 */
   async evaluateAndLog(
     workspaceId: string,
     ctx: DataRightsContext,
     meta?: PolicyDecisionMeta,
   ): Promise<DataRightsDecision> {
     const decision = this.evaluate(ctx);
-    await this.prisma.withWorkspace(workspaceId, (tx) =>
-      tx.policyDecisionLog.create({
-        data: {
-          workspaceId,
-          action: ctx.action,
-          dataClass: ctx.dataClass,
-          subjectJurisdiction: ctx.subjectJurisdiction,
-          processorJurisdiction: ctx.processorJurisdiction,
-          effect: decision.effect,
-          allowed: decision.allowed,
-          reason: decision.reason,
-          ruleId: decision.ruleId,
-          ruleVersion: decision.ruleVersion,
-          article14Required: decision.article14NoticeRequired,
-          subjectType: meta?.subjectType ?? null,
-          subjectId: meta?.subjectId ?? null,
-          // 🔴 内容最小化：只存 basis 引用（ref），绝不嵌 note/人名/邮箱明文。
-          lawfulBasisRef: meta?.lawfulBasisRef ?? ctx.lawfulBasis?.ref ?? null,
-          actorId: meta?.actorId ?? null,
-          correlationId: meta?.correlationId ?? null,
-        },
-      }),
-    );
+    await this.prisma.withWorkspace(workspaceId, (tx) => this.logDecision(tx, workspaceId, ctx, decision, meta));
     return decision;
+  }
+
+  /**
+   * 在**调用方提供的事务** tx 内写 policy_decision_log（{@link evaluateAndLog} 的同源 tx 变体）。
+   * handoff 类调用方（`LeadService.decide`）要审计留痕与业务写（LeadQualified 交棒）**同事务原子**——
+   * 日志与交棒共存亡（不会交棒无日志、也不会日志无交棒），故不另开 withWorkspace（#72 P2）。
+   */
+  async logDecision(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    ctx: DataRightsContext,
+    decision: DataRightsDecision,
+    meta?: PolicyDecisionMeta,
+  ): Promise<void> {
+    await tx.policyDecisionLog.create({
+      data: {
+        workspaceId,
+        action: ctx.action,
+        dataClass: ctx.dataClass,
+        subjectJurisdiction: ctx.subjectJurisdiction,
+        processorJurisdiction: ctx.processorJurisdiction,
+        effect: decision.effect,
+        allowed: decision.allowed,
+        reason: decision.reason,
+        ruleId: decision.ruleId,
+        ruleVersion: decision.ruleVersion,
+        article14Required: decision.article14NoticeRequired,
+        subjectType: meta?.subjectType ?? null,
+        subjectId: meta?.subjectId ?? null,
+        // 🔴 内容最小化：只存 basis 引用（ref），绝不嵌 note/人名/邮箱明文。
+        lawfulBasisRef: meta?.lawfulBasisRef ?? ctx.lawfulBasis?.ref ?? null,
+        actorId: meta?.actorId ?? null,
+        correlationId: meta?.correlationId ?? null,
+      },
+    });
   }
 }
 

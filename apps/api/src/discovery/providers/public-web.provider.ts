@@ -10,7 +10,9 @@ import {
   EmailVerdict,
   EmailVerificationAdapter,
   ExecutionContext,
+  GENERIC_CONTACT_TITLE,
   ProviderCompanyRecord,
+  ProviderContactRecord,
   SourceClass,
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
@@ -228,22 +230,7 @@ export class PublicWebDiscoveryProvider
     const found = extractPublicContacts(pages);
     const emails = found.filter((c) => c.type === 'email');
     const phones = found.filter((c) => c.type === 'phone');
-    const contacts = emails.slice(0, 5).map((e, i) => {
-      const local = e.value.split('@')[0];
-      const personal = /^[a-z]+[._-][a-z]+$/i.test(local);
-      const fullName = personal
-        ? local.split(/[._-]/).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
-        : `公开联系点 (${local}@)`;
-      return {
-        externalId: `${company.domain}:${e.value}`,
-        fullName,
-        title: personal ? undefined : 'switchboard',
-        department: personal ? undefined : 'general',
-        email: e.value,
-        phone: i === 0 ? phones[0]?.value : undefined,
-      };
-    });
-    return { contacts, costCents: 0 };
+    return { contacts: buildPublicContacts(company.domain, emails, phones[0]?.value), costCents: 0 };
   }
 
   // ── 邮箱验证（语法 + MX；诚实上限 RISKY）─────────────────────────────────
@@ -262,6 +249,36 @@ export class PublicWebDiscoveryProvider
       return { status: 'INVALID', detail: 'DNS lookup failed', costCents: 0 };
     }
   }
+}
+
+/**
+ * 从公开邮箱构造联系人记录（纯函数，可测）。`first.last@` 形反推**具名个人** → `personalData=true` +
+ * `sourcePage`（GDPR Art.4：persistDiscoveredContacts 据此写 person.profile 侧写证据）；总机/职能邮箱
+ * （info@…）非个人数据 → 不标 personalData、给通用占位 title/department（generic 公开联系点）。
+ * 只首个联系点带电话（与原行为一致）。最多 5 个。
+ */
+export function buildPublicContacts(
+  domain: string,
+  emails: { value: string }[],
+  firstPhone: string | undefined,
+): ProviderContactRecord[] {
+  return emails.slice(0, 5).map((e, i) => {
+    const local = e.value.split('@')[0];
+    const personal = /^[a-z]+[._-][a-z]+$/i.test(local);
+    const fullName = personal
+      ? local.split(/[._-]/).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
+      : `公开联系点 (${local}@)`;
+    return {
+      externalId: `${domain}:${e.value}`,
+      fullName,
+      title: personal ? undefined : GENERIC_CONTACT_TITLE,
+      department: personal ? undefined : 'general',
+      email: e.value,
+      phone: i === 0 ? firstPhone : undefined,
+      // 🔴 具名个人邮箱 = 个人数据（GDPR Art.4）：标记 → 持久化写 person.profile 证据（此前漏标，#58 P2）。
+      ...(personal ? { personalData: true, sourcePage: `https://${domain}/` } : {}),
+    };
+  });
 }
 
 /** 从计划查询构造 2 条搜索串：结构化过滤词 + 关键词的组合。 */

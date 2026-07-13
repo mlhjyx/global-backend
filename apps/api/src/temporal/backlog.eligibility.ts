@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { GENERIC_CONTACT_TITLE } from '../discovery/provider-contract';
 
 /**
  * 存量对账下游阶段的「收缩集」谓词 + 排序，与处理水位。
@@ -87,8 +88,12 @@ export interface BacklogEligibleOpts {
   now: Date;
   /** 信号/监控/联系人阶段：需有域名。 */
   requireDomain?: boolean;
-  /** 联系人阶段：仅尚无任何联系人的公司（与水位冷却叠加，覆盖不相交场景）。 */
-  requireNoContacts?: boolean;
+  /**
+   * 联系人阶段：仅尚无**具名/权威**联系人的公司（与水位冷却叠加）。generic public_web 公开联系点
+   * （总机 `switchboard`，非个人）不算"已找到决策人"——否则 CH/决策人源本轮无产出时，一条兜底总机
+   * 联系点就把公司永久挡在后续联系人 sweep 之外（#58 P2）。
+   */
+  requireNoPersonContact?: boolean;
   /** 邮箱猜测阶段：仅**有缺 email 决策人**的公司（有联系人但至少一位无 email contact_point）。 */
   requireEmaillessContact?: boolean;
 }
@@ -106,8 +111,12 @@ export function backlogEligibleWhere(opts: BacklogEligibleOpts): Prisma.Canonica
     leads: { some: { fitVerdict: 'match' } },
     status: { not: 'SUPPRESSED' },
     ...(opts.requireDomain ? { domain: { not: null } } : {}),
-    ...(opts.requireNoContacts ? { contacts: { none: {} } } : {}),
-    // 有联系人但至少一位缺 email contact_point → 邮箱猜测的补全对象（与 requireNoContacts 互斥语义）。
+    // 具名/权威联系人 = 任何非 generic switchboard 占位（含 title 为空的具名董事）；仅有 generic
+    // public_web 公开联系点（title=switchboard）的公司**仍**算"无决策人"→ 继续被联系人 sweep 捞（#58 P2）。
+    ...(opts.requireNoPersonContact
+      ? { contacts: { none: { OR: [{ title: null }, { title: { not: GENERIC_CONTACT_TITLE } }] } } }
+      : {}),
+    // 有联系人但至少一位缺 email contact_point → 邮箱猜测的补全对象（与 requireNoPersonContact 互斥语义）。
     ...(opts.requireEmaillessContact
       ? { contacts: { some: { contactPoints: { none: { type: 'email' } } } } }
       : {}),

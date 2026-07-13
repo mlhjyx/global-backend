@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GENERIC_CONTACT_TITLE } from '../discovery/provider-contract';
 import {
   BACKLOG_WATERMARK_TTL_MS,
   backlogEligibleWhere,
@@ -81,14 +82,18 @@ describe('backlogEligibleWhere（存量下游阶段收缩集谓词）', () => {
     expect('domain' in withoutDomain).toBe(false);
   });
 
-  it('requireNoContacts → contacts none（联系人阶段，与结果依赖谓词叠加）；缺省不加', () => {
-    const withNoContacts = backlogEligibleWhere({
+  it('requireNoPersonContact → contacts none 具名/权威联系人（generic switchboard 不算完成，#58 P2）；缺省不加', () => {
+    const withNoPerson = backlogEligibleWhere({
       watermarkField: 'contactDiscoveryAttemptedAt',
       now: NOW,
       requireDomain: true,
-      requireNoContacts: true,
+      requireNoPersonContact: true,
     });
-    expect(withNoContacts.contacts).toEqual({ none: {} });
+    // 具名/权威联系人 = 任何非 'switchboard' 占位（含 title 为空的具名董事）；只有 generic public_web
+    // 公开联系点（title='switchboard'）的公司仍可继续找决策人（不被永久挡住）。
+    expect(withNoPerson.contacts).toEqual({
+      none: { OR: [{ title: null }, { title: { not: GENERIC_CONTACT_TITLE } }] },
+    });
     const withoutFlag = backlogEligibleWhere({ watermarkField: 'lastEnrichedAt', now: NOW });
     expect('contacts' in withoutFlag).toBe(false);
   });

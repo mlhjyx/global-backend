@@ -100,4 +100,29 @@ describe('DataRightsService', () => {
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe('unregistered_red');
   });
+
+  it('logDecision 在**调用方提供的 tx** 内写 policy_decision_log（同事务原子，不另开 withWorkspace，#72 P2）', async () => {
+    const fake = new FakePrisma();
+    const s = svc(fake);
+    await s.loadRules();
+    const ctx: DataRightsContext = {
+      action: 'STORE', dataClass: 'red', subjectJurisdiction: 'EU', processorJurisdiction: 'EU',
+      lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-7', note: 'private note' },
+    };
+    const decision = s.evaluate(ctx);
+    // 调用方（如 LeadService.decide 的交棒事务）提供的 tx——同事务原子写。
+    const rows: LoggedRow[] = [];
+    const tx = { policyDecisionLog: { create: async ({ data }: { data: LoggedRow }) => { rows.push(data); return data; } } };
+    await s.logDecision(tx as never, WS, ctx, decision, { subjectType: 'lead', subjectId: 'lead-1', actorId: 'user-1' });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      workspaceId: WS, action: 'STORE', effect: decision.effect, allowed: decision.allowed,
+      ruleId: decision.ruleId, article14Required: decision.article14NoticeRequired,
+      subjectType: 'lead', subjectId: 'lead-1', actorId: 'user-1', lawfulBasisRef: 'LIA-7',
+    });
+    expect(JSON.stringify(rows[0])).not.toContain('private note'); // 内容最小化：只落 ref
+    // 关键：走**调用方 tx**，不经 this.prisma.withWorkspace 另开事务（与 evaluateAndLog 的区别）。
+    expect(fake.createdLogs).toHaveLength(0);
+  });
 });

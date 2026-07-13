@@ -37,6 +37,19 @@ export function proxyActivities<T>(_opts?: unknown): T {
   return acts as unknown as T;
 }
 
+/**
+ * 模拟 `@temporalio/workflow` 的 `patched`（版本化闸）：默认返回 true（走**新**代码路径，
+ * 对应新执行/新历史）。测试可 {@link setPatched} 覆盖为 false（模拟飞行中旧历史的 replay：无此 patch
+ * 标记 → 旧命令序列）以验证版本化守卫两侧分支。`resetActivities` 复位默认。
+ */
+let patchedFn: (patchId: string) => boolean = () => true;
+export function patched(patchId: string): boolean {
+  return patchedFn(patchId);
+}
+export function setPatched(fn: (patchId: string) => boolean): void {
+  patchedFn = fn;
+}
+
 /** 模拟 `@temporalio/workflow` 的 workflow logger（编排里 `log.warn(...)` 等）：无副作用 spy。 */
 export const log = {
   debug: vi.fn(),
@@ -48,6 +61,7 @@ export const log = {
 /** `beforeEach` 调用：清空注册表 + logger，杜绝跨用例 spy 状态泄漏。 */
 export function resetActivities(): void {
   for (const key of Object.keys(registry)) delete registry[key];
+  patchedFn = () => true;
   log.debug.mockReset();
   log.info.mockReset();
   log.warn.mockReset();
