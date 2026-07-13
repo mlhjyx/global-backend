@@ -1,0 +1,89 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiHeader, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
+import { AuthGuard } from '../auth/auth.guard';
+import { Ctx } from '../auth/ctx.decorator';
+import { RequestContext } from '../auth/request-context';
+import { Enveloped, envelope } from '../common/envelope';
+import { BuildsService } from './builds.service';
+import type { BuildOptionsInput } from './refurbish-launcher';
+
+class CreateBuildDto {
+  @ApiProperty({ enum: ['site', 'page', 'section'] })
+  @IsIn(['site', 'page', 'section'])
+  scope!: 'site' | 'page' | 'section';
+
+  @ApiProperty({ required: false, description: 'scope=page/section 时的目标 id' })
+  @IsOptional()
+  @IsUUID()
+  targetId?: string;
+
+  @ApiProperty({ required: false, description: '{ stylePreset?, pages?, locales? }' })
+  @IsOptional()
+  @IsObject()
+  options?: BuildOptionsInput;
+}
+
+@ApiTags('SiteBuilder')
+@ApiBearerAuth()
+@Controller('site-builder')
+@UseGuards(AuthGuard)
+export class BuildsController {
+  constructor(private readonly builds: BuildsService) {}
+
+  @Post('sites/:id/builds')
+  @HttpCode(201)
+  @ApiOperation({ summary: '触发精装修构建（07 §5；409=进行中，429=当日配额）' })
+  @ApiHeader({ name: 'Idempotency-Key', required: false })
+  async create(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) siteId: string,
+    @Body() dto: CreateBuildDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<Enveloped<{ buildId: string; status: string }>> {
+    return envelope(
+      await this.builds.create(ctx, siteId, { ...dto, idempotencyKey: idempotencyKey ?? null }),
+    );
+  }
+
+  @Get('builds/:id')
+  @ApiOperation({ summary: '构建进度（轮询；SSE 事件流按 07 §5 后置）' })
+  async get(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) buildId: string,
+  ): Promise<Enveloped<Record<string, unknown>>> {
+    const run = await this.builds.get(ctx, buildId);
+    return envelope({
+      buildId: run.id,
+      kind: run.kind,
+      status: run.status,
+      phase: run.phase,
+      progress: run.progress,
+      steps: run.steps,
+      costSummary: run.costSummary,
+      error: run.error,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+    });
+  }
+
+  @Post('builds/:id/cancel')
+  @HttpCode(200)
+  @ApiOperation({ summary: '取消构建（终态 409）' })
+  async cancel(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) buildId: string,
+  ): Promise<Enveloped<{ buildId: string; status: string }>> {
+    return envelope(await this.builds.cancel(ctx, buildId));
+  }
+}

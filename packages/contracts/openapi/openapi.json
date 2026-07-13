@@ -3220,6 +3220,119 @@
           "SiteBuilder"
         ]
       }
+    },
+    "/api/v1/site-builder/sites/{id}/builds": {
+      "post": {
+        "operationId": "BuildsController_create_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBuildDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "触发精装修构建（07 §5；409=进行中，429=当日配额）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/builds/{id}": {
+      "get": {
+        "operationId": "BuildsController_get_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "构建进度（轮询；SSE 事件流按 07 §5 后置）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/builds/{id}/cancel": {
+      "post": {
+        "operationId": "BuildsController_cancel_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "取消构建（终态 409）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
     }
   },
   "info": {
@@ -4514,6 +4627,30 @@
           "filename",
           "size",
           "mime"
+        ]
+      },
+      "CreateBuildDto": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "site",
+              "page",
+              "section"
+            ]
+          },
+          "targetId": {
+            "type": "string",
+            "description": "scope=page/section 时的目标 id"
+          },
+          "options": {
+            "type": "object",
+            "description": "{ stylePreset?, pages?, locales? }"
+          }
+        },
+        "required": [
+          "scope"
         ]
       }
     }

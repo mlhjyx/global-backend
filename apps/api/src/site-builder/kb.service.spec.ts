@@ -34,6 +34,21 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
         db.assets.filter(
           (a) => a.siteId === (where.siteId as string) && a.processingStatus === 'queued',
         ),
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { id: string; processingStatus?: string };
+        data: Record<string, unknown>;
+      }) => {
+        const rows = db.assets.filter(
+          (a) =>
+            a.id === where.id &&
+            (!where.processingStatus || a.processingStatus === where.processingStatus),
+        );
+        rows.forEach((r) => Object.assign(r, data));
+        return { count: rows.length };
+      },
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = db.assets.find((a) => a.id === where.id);
         if (row) Object.assign(row, data);

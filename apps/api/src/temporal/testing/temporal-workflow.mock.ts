@@ -50,6 +50,19 @@ export function setPatched(fn: (patchId: string) => boolean): void {
   patchedFn = fn;
 }
 
+/**
+ * 模拟 `@temporalio/workflow` 的 `isCancellation`：按错误名判定（测试用
+ * `Object.assign(new Error('…'), { name: 'CancelledFailure' })` 构造取消）。
+ */
+export function isCancellation(err: unknown): boolean {
+  return err instanceof Error && err.name === 'CancelledFailure';
+}
+
+/** 模拟 `CancellationScope`：单测无取消语义，nonCancellable 直接执行回调。 */
+export const CancellationScope = {
+  nonCancellable: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+};
+
 /** 模拟 `@temporalio/workflow` 的 workflow logger（编排里 `log.warn(...)` 等）：无副作用 spy。 */
 export const log = {
   debug: vi.fn(),

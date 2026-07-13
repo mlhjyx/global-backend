@@ -3,8 +3,12 @@ import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AssetsController } from './assets.controller';
 import { AssetsService } from './assets.service';
+import { BuildsController } from './builds.controller';
+import { BuildsService } from './builds.service';
 import { DEMO_V0_LAUNCHER } from './demo-launcher';
+import { KB_INGEST_LAUNCHER, REFURBISH_LAUNCHER } from './refurbish-launcher';
 import { TemporalDemoV0Launcher } from './temporal-demo-launcher';
+import { TemporalKbIngestLauncher, TemporalRefurbishLauncher } from './temporal-refurbish-launcher';
 import { DoclingClient } from './docling.client';
 import { EmbeddingsClient } from './embeddings.client';
 import { IntakeController } from './intake.controller';
@@ -21,17 +25,26 @@ import { StorageService } from './storage.service';
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [IntakeController, SitesController, AssetsController, KbController],
+  controllers: [
+    IntakeController,
+    SitesController,
+    AssetsController,
+    KbController,
+    BuildsController,
+  ],
   providers: [
     IntakeService,
     SitesService,
     AssetsService,
+    BuildsService,
     KbService,
     StorageService,
     EmbeddingsClient,
     DoclingClient,
     { provide: DEMO_V0_LAUNCHER, useClass: TemporalDemoV0Launcher },
+    { provide: REFURBISH_LAUNCHER, useClass: TemporalRefurbishLauncher },
+    { provide: KB_INGEST_LAUNCHER, useClass: TemporalKbIngestLauncher },
   ],
-  exports: [IntakeService, SitesService, AssetsService, KbService, StorageService],
+  exports: [IntakeService, SitesService, AssetsService, BuildsService, KbService, StorageService],
 })
 export class SiteBuilderModule {}
