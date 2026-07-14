@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ToolRegistry } from './tool-registry';
-import { registerBuiltinTools, smtpRcptProbeTool, SmtpProbeInput, SmtpProbeOutput } from './builtin-tools';
+import {
+  registerBuiltinTools,
+  searxngSearchTool,
+  crawl4aiFetchTool,
+  smtpRcptProbeTool,
+  SmtpProbeInput,
+  SmtpProbeOutput,
+} from './builtin-tools';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger } from './budget';
 import { RateLimiter } from './rate-limiter';
@@ -16,6 +23,37 @@ function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean
     now: () => 1_000_000,
   });
 }
+
+/**
+ * M1-b fast-follow 改动 4：品牌研究（site_builder.brand_profile）借 searxng/crawl4ai 出网，
+ * 需以 purpose=['site_builder'] 调用。crawl4ai 是 advisory 门（effective = 调用purpose ∩ 工具allowedPurpose，
+ * 空集即拒），故必须声明 site_builder；searxng 是 none（短路放行），加是语义一致/前瞻。
+ */
+describe('site_builder 用途门 · searxng/crawl4ai allowedPurpose', () => {
+  it('searxng.search.allowedPurpose 含 site_builder（与 discovery 并列）', () => {
+    expect(searxngSearchTool.compliance.allowedPurpose).toEqual(['discovery', 'site_builder']);
+  });
+
+  it('crawl4ai.fetch.allowedPurpose 含 site_builder（advisory 门功能必需）', () => {
+    expect(crawl4aiFetchTool.compliance.allowedPurpose).toEqual([
+      'discovery',
+      'enrichment',
+      'site_builder',
+    ]);
+  });
+
+  it('crawl4ai advisory：purpose=[site_builder] 且域策略允许 site_builder → 放行（不误拒）', async () => {
+    const b = broker(async () => ({ suspended: false, allowedPurpose: ['site_builder'] }));
+    const chk = await b.checkSourcePolicy('crawl4ai.fetch', 'acme.example', ['site_builder']);
+    expect(chk.allowed).toBe(true);
+  });
+
+  it('crawl4ai advisory：purpose=[site_builder] 但工具未声明会拒——声明后不再拒（回归守卫）', async () => {
+    const b = broker(async () => null); // 未登记域，advisory 放行；用途门只看工具声明集
+    const chk = await b.checkSourcePolicy('crawl4ai.fetch', 'acme.example', ['site_builder']);
+    expect(chk.allowed).toBe(true); // 工具已声明 site_builder → 交集非空 → 放行
+  });
+});
 
 describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
   it('已注册为 verify/email_verification，sourcePolicy=advisory + personalData（登记即强制、标个人数据）', () => {

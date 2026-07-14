@@ -69,8 +69,9 @@ export async function researchBrand(
     runId: args.runId,
     taskContractId: TASK_CONTRACT_ID,
     correlationId: args.runId,
-    // searxng 声明 ['discovery']、crawl4ai 声明 ['discovery','enrichment']——多值=任一允许即放行
-    purpose: ['discovery', 'enrichment'],
+    // 改动 4：本次出网用途=站点建设。searxng/crawl4ai 均已声明 site_builder（crawl4ai 是 advisory 门，
+    // effective = 调用purpose ∩ 工具allowedPurpose，故必须声明；searxng 是 sourcePolicy=none 短路放行）。
+    purpose: ['site_builder'],
   };
   const sources: ResearchSource[] = [];
   let degraded = false;

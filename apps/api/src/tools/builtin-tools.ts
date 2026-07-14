@@ -23,7 +23,9 @@ export const searxngSearchTool: Tool<
   sourceClass: 'public_intelligence',
   cost: { unit: 'request', estimatedCents: 0, external: false },
   rateLimit: { rps: 3, concurrency: 3 },
-  compliance: { sourcePolicy: 'none', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
+  // site_builder：品牌研究（site_builder.brand_profile）复用元搜索。sourcePolicy=none 下用途门被短路，
+  // 声明为语义一致/前瞻（若日后转 advisory 亦不误拒 site_builder 调用）。
+  compliance: { sourcePolicy: 'none', respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'site_builder'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['domain'], accepts: ['keywords'] },
   idempotencyKey: (i) => `searxng.search:${stableKey(i)}`,
   healthCheck: async () => {
@@ -53,7 +55,8 @@ export const crawl4aiFetchTool: Tool<{ url: string; maxChars?: number }, { url: 
   cost: { unit: 'page', estimatedCents: 1, external: false },
   rateLimit: { rps: 2, concurrency: 3, perDomainCrawlDelayMs: 2000 },
   // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
-  compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  // site_builder：品牌研究抓站主自有官网——advisory 用途门下必须声明，否则 purpose=['site_builder'] 空集被拒。
+  compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment', 'site_builder'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['company', 'domain', 'contact'], accepts: ['domain'] },
   idempotencyKey: (i) => `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}`,
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),

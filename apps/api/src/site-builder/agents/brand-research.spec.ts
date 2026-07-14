@@ -73,6 +73,19 @@ describe('researchBrand — 正常链路', () => {
     }
   });
 
+  it('🔴 改动 4：出网用途=[site_builder]（两工具均已声明 site_builder，advisory crawl4ai 门放行）', async () => {
+    const { broker, invocations } = brokerWith(async (toolId) =>
+      toolId === 'searxng.search'
+        ? { data: SEARCH_RESULTS }
+        : { data: { url: 'https://acme.example', text: 'pumps', contentHash: 'h' } },
+    );
+    await researchBrand({ broker }, ARGS);
+    expect(invocations.length).toBeGreaterThan(0);
+    for (const call of invocations) {
+      expect(call.ctx.purpose).toEqual(['site_builder']);
+    }
+  });
+
   it('robots 禁抓（工具返回空文本）→ storefront 源缺席，不算失败', async () => {
     const { broker } = brokerWith(async (toolId) =>
       toolId === 'searxng.search'
