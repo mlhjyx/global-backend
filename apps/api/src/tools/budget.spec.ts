@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { BudgetLedger, BudgetExceededError } from './budget';
+import { afterEach, describe, expect, it } from 'vitest';
+import { BudgetLedger, BudgetExceededError, siteBuildBudgetCents } from './budget';
 
 /**
  * BudgetLedger.wasExhausted 生命周期单测（Codex PR #51 P1 根治）：预算打穿的**唯一真相点**在 reserve。
@@ -60,5 +60,35 @@ describe('BudgetLedger.wasExhausted', () => {
     l.close('run-1');
     l.open('run-1', 100); // 复用同键
     expect(l.wasExhausted('run-1')).toBe(false); // 不带旧打标
+  });
+});
+
+/**
+ * siteBuildBudgetCents（M1-b fast-follow）：refurbish run 级预算上限，读 SITE_BUILD_BUDGET_CENTS，
+ * 默认 500¢（$5，约 6× brand_profile 峰值 reserve 80¢ + tools）。镜像 runBudgetCents/sweepBudgetCents
+ * 的 intFromEnv 语义（非法/非正 → 回退默认）。
+ */
+describe('siteBuildBudgetCents', () => {
+  afterEach(() => {
+    delete process.env.SITE_BUILD_BUDGET_CENTS;
+  });
+
+  it('未设 env → 默认 500¢', () => {
+    delete process.env.SITE_BUILD_BUDGET_CENTS;
+    expect(siteBuildBudgetCents()).toBe(500);
+  });
+
+  it('设合法正整数 → 取该值', () => {
+    process.env.SITE_BUILD_BUDGET_CENTS = '1200';
+    expect(siteBuildBudgetCents()).toBe(1200);
+  });
+
+  it('非法/非正值 → 回退默认 500¢', () => {
+    process.env.SITE_BUILD_BUDGET_CENTS = 'not-a-number';
+    expect(siteBuildBudgetCents()).toBe(500);
+    process.env.SITE_BUILD_BUDGET_CENTS = '0';
+    expect(siteBuildBudgetCents()).toBe(500);
+    process.env.SITE_BUILD_BUDGET_CENTS = '-50';
+    expect(siteBuildBudgetCents()).toBe(500);
   });
 });

@@ -32,8 +32,45 @@ import {
 import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
 import { buildKbDigest } from '../site-builder/agents/kb-digest';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 
 const execFileAsync = promisify(execFile);
+
+/** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
+const REFURBISH_STEP_KEYS = [
+  'kb_ingest',
+  'brand_profile',
+  'image_pipeline',
+  'copy',
+  'assemble_build',
+  'quality_loop',
+] as const;
+
+/** 已完成态：补偿回填时原样保留（不误抹为 aborted）。 */
+const COMPLETED_STEP_STATUSES = new Set(['done', 'degraded']);
+
+/**
+ * 补偿路径 steps 回填（改动 3，观测性）：run 转 failed 时给出「哪些步骤跑过/中止」。
+ * - brand_profile：由 compensate 按 DB 探测传入 done/aborted（BrandProfile 无 buildRunId 列，
+ *   靠 createdAt>=startedAt 归属）；
+ * - 其余步骤：已完成（done/degraded）原样保留，未完成一律 aborted；
+ * - 键序恒为 REFURBISH_STEP_KEYS（与 begin/finalize 一致）。
+ */
+export function buildCompensatedSteps(
+  existing: unknown,
+  brandProfileDone: boolean,
+): { key: string; status: string }[] {
+  const prior = Array.isArray(existing) ? (existing as { key?: string; status?: string }[]) : [];
+  const priorByKey = new Map(prior.filter((s) => s?.key).map((s) => [s.key as string, s]));
+  return REFURBISH_STEP_KEYS.map((key) => {
+    if (key === 'brand_profile') return { key, status: brandProfileDone ? 'done' : 'aborted' };
+    const prev = priorByKey.get(key);
+    if (prev?.status && COMPLETED_STEP_STATUSES.has(prev.status)) {
+      return { key, status: prev.status };
+    }
+    return { key, status: 'aborted' };
+  });
+}
 
 const POLISH_TIMEOUT_MS = 8_000; // 02 §4：轻文案调用超时即用模板默认文案
 const BUILD_TIMEOUT_MS = 180_000;
@@ -310,6 +347,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         }
         await tx.site.update({ where: { id: siteId }, data: { status: 'building' } });
       });
+      // 预算门真接线（改动 1）：认领成功后才开账（失败 claim 上一步已抛）。close-then-open 清跨-retry
+      // 残留账户 + wasExhausted 打标（镜像 discovery resetRunBudget，ledger 进程内无 GC，重试从干净态起）。
+      // ⚠️ 只能在活动里（worker 进程持有 ledger 单例）；workflow sandbox 不可触碰。
+      budgetLedger.close(buildRunId, { force: true });
+      budgetLedger.open(buildRunId, siteBuildBudgetCents());
     },
 
     /** P1：消化该站 queued KB 文档（fail-safe：workflow 侧降级不阻断构建）。 */
@@ -605,6 +647,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           data: { activeVersionId: build.versionId, status: 'ready' },
         });
       });
+      // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
+      budgetLedger.close(buildRunId, { force: true });
       return { previewSlug: build.previewSlug };
     },
 
@@ -630,12 +674,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }
           const run = await tx.siteBuildRun.findUnique({ where: { id: buildRunId } });
           if (run && run.status !== 'succeeded' && run.status !== 'cancelled') {
+            // 改动 3：转 failed 时补写 steps（观测性）——否则 API 显示「failed 但六步全 pending」。
+            // brand_profile 落库无 buildRunId 列，用 createdAt>=startedAt 归属探测（单站单活跃 run，claim 守卫）；
+            // startedAt 缺失（无从归属）→ 不查，保守判 aborted（不误认领旧版本）。
+            const brandProfileDone = run.startedAt
+              ? !!(await tx.brandProfile.findFirst({
+                  where: { siteId, createdAt: { gte: run.startedAt } },
+                }))
+              : false;
             await tx.siteBuildRun.update({
               where: { id: buildRunId },
               data: {
                 status: 'failed',
                 error: run.error ?? 'refurbish failed (compensated)',
                 finishedAt: run.finishedAt ?? new Date(),
+                steps: buildCompensatedSteps(run.steps, brandProfileDone) as Prisma.InputJsonValue,
               },
             });
           }
@@ -643,6 +696,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         log.warn(`refurbish ${buildRunId} compensated — site ${siteId} preserved`);
       } catch (err) {
         log.error(`compensateRefurbish failed for run ${buildRunId}: ${String(err)}`);
+      } finally {
+        // 预算门收尾（改动 1）：run 终点强制关账，即便补偿 DB 工作失败也释放账户（force 无视 refs）。
+        budgetLedger.close(buildRunId, { force: true });
       }
     },
   };
