@@ -30,6 +30,7 @@ import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
+import { budgetLedger, siteBuildBudgetCents } from '../src/tools/budget';
 
 function ok(section: string, message: string): void {
   console.log(`  ✅ ${section} ${message}`);
@@ -191,6 +192,33 @@ async function main(): Promise<void> {
   const versions = await prisma.withWorkspace(ws, (tx) => tx.brandProfile.count({ where: { siteId } }));
   if (versions !== 2) throw new Error(`守卫应阻止写版本，期望 2 版实得 ${versions}`);
   ok('守卫', `cancelled run 早停被拒（不烧模型），版本数仍 ${versions}`);
+
+  // ── ⑥ 预算门（改动 1 + FIX A/B）：真 ledger + 真活动 ─────────────────────
+  console.log('⑥ 预算门（默认 cap 真结算不打穿；小 cap → buildBrandProfile 打穿 → wasExhausted）');
+  // (a) 反证：③ 的 runId 账户经 ensureRunBudget(默认 cap) 真跑——未误打穿，且真实结算令 remaining 下降
+  if (budgetLedger.wasExhausted(runId)) throw new Error('预算门 false-trip：默认 cap 误判打穿');
+  const remainingAfterRun = budgetLedger.remainingCents(runId);
+  if (!(remainingAfterRun < siteBuildBudgetCents())) {
+    throw new Error(`未见真实结算：remaining=${remainingAfterRun} 应 < cap ${siteBuildBudgetCents()}`);
+  }
+  budgetLedger.close(runId, { force: true });
+  // (b) 打穿：SITE_BUILD_BUDGET_CENTS=1（buildBrandProfile 内 ensureRunBudget 立此 cap）→
+  //     brand_profile LLM reserve(80¢) 必打穿；wasExhausted 须在 close 前查（close 清打穿标记）。
+  const prevCap = process.env.SITE_BUILD_BUDGET_CENTS;
+  process.env.SITE_BUILD_BUDGET_CENTS = '1';
+  const tinyRunId = await mkRunningRun();
+  budgetLedger.close(tinyRunId, { force: true }); // 干净起点（防残留账户）
+  try {
+    await acts.buildBrandProfile({ workspaceId: ws, siteId, buildRunId: tinyRunId });
+  } catch {
+    // 打穿→runAiTask 全模型被拒→抛错；生产由 workflow fail-safe 兜，此处直调捕获即可
+  }
+  const tinyExhausted = budgetLedger.wasExhausted(tinyRunId);
+  budgetLedger.close(tinyRunId, { force: true });
+  if (prevCap === undefined) delete process.env.SITE_BUILD_BUDGET_CENTS;
+  else process.env.SITE_BUILD_BUDGET_CENTS = prevCap;
+  if (!tinyExhausted) throw new Error('预算门失守：小 cap 未打穿（wasExhausted=false）');
+  ok('预算门', `默认 cap remaining=${remainingAfterRun}¢ 真结算不打穿；小 cap(1¢) 真打穿 wasExhausted=true`);
 
   console.log('\n🎉 verify-site-builder-m1b 全绿');
   await prisma.$disconnect();
