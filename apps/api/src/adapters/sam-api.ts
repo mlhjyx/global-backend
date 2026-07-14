@@ -16,7 +16,7 @@ const SAM_CSV_URL =
 const SOURCES_SOUGHT_TYPE = 'Sources Sought';
 const DEFAULT_SINCE_DAYS = 120;
 const DEFAULT_MAX_RECORDS = 500;
-const FETCH_TIMEOUT_MS = 180_000; // 全量 CSV 大，宽超时
+const FETCH_TIMEOUT_MS = 240_000; // 全量 CSV 大（~100MB+），宽超时；超时/网络错误经下方 fail-safe 抛给调用方（不崩进程）
 const MAX_MATCHED_SCAN = 20_000; // 内存护栏：匹配行硬顶（远超真实 Sources Sought 量），触顶停扫 + 告警
 const DAY_MS = 86_400_000;
 const UA = 'Mozilla/5.0 (compatible; GlobalBot/1.0)';
@@ -41,18 +41,36 @@ export interface SamSearchParams {
 }
 
 /**
- * SAM 日期 → ISO（§8.6 防 Date.parse NaN 静默 0 分）。SAM 抽取常见 'YYYY-MM-DD[ HH:mm:ss...]' 或 'MM/DD/YYYY'；
- * 无法解析 → null（调用方按缺时机跳过，绝不落非法时间）。
+ * SAM 日期 → ISO（§8.6：防 Date.parse NaN 静默 0 分 + **防本地时区错位**）。
+ * 🔴 纪律同 tedDateToIso/fdaDateToIso：**绝不**把无时区字面量丢给 `new Date()`、**绝不**用本地分量构造器
+ * （`new Date(y,m,d)`）——两者都按运行时时区解释，在正 UTC 偏移环境（如 Asia/Shanghai）会把纯日期整体拨回前一天。
+ * 一律**先把时区显式化为 Z（当 UTC）** 再解析。SAM 抽取常见：ISO 带 Z/offset（真实主路）/ 'MM/DD/YYYY[ HH:mm]' /
+ * 空格分隔 'YYYY-MM-DD HH:mm:ss'（无时区）。无法可靠归一 → null（调用方按缺时机跳过，绝不落误解析日期）。
  */
 export function samDateToIso(raw: string | undefined | null): string | null {
   const s = (raw ?? '').trim();
   if (!s) return null;
-  const direct = new Date(s);
-  if (Number.isFinite(direct.getTime())) return direct.toISOString();
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // MM/DD/YYYY
+  // MM/DD/YYYY[ HH:mm[:ss]]（tz-less）→ 显式 UTC 构造（Date.UTC，绝不经本地时区）
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (us) {
+    const ms = Date.UTC(Number(us[3]), Number(us[1]) - 1, Number(us[2]), Number(us[4] ?? 0), Number(us[5] ?? 0), Number(us[6] ?? 0));
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  // ISO 日期[时间][时区]：T 或**空格**分隔；时区 = Z / ±HH / ±HHMM / ±HH:MM（SAM 真实：PostedDate
+  //   '2026-07-13 23:28:13.676-04'（空格+裸 -04）、ResponseDeadLine '…T18:00:00-05:00'）。
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)(Z|[+-]\d{2}(?::?\d{2})?)?)?$/);
   if (m) {
-    const dt = new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]));
-    if (Number.isFinite(dt.getTime())) return dt.toISOString();
+    const date = m[1];
+    const time = m[2] ?? '00:00:00';
+    let tz = m[3];
+    // 有显式时区 → 归一到 ±HH:MM（兜 SAM 裸 '-04' / '-0500' → 无歧义、跨引擎一致）；无时区 → 当 UTC（绝不经本地时区）
+    if (!tz) tz = 'Z';
+    else if (tz !== 'Z') {
+      const digits = tz.slice(1).replace(':', '');
+      tz = `${tz[0]}${digits.slice(0, 2)}:${digits.slice(2, 4) || '00'}`;
+    }
+    const t = Date.parse(`${date}T${time}${tz}`);
+    return Number.isNaN(t) ? null : new Date(t).toISOString();
   }
   return null;
 }
@@ -98,25 +116,40 @@ export async function fetchSourcesSought(params?: SamSearchParams): Promise<SamS
     bom: true,
   });
   const nodeStream = Readable.fromWeb(res.body as unknown as NodeWebReadableStream);
+  // 🔴 源流错误（fetch abort/超时/网络重置）默认**不经 pipe 转发**到 parser → 会成未捕获 'error' 事件**崩进程**
+  // （在 worker 里=整进程挂）。显式转发给 parser，令下面 for-await 抛出 → 由本函数 catch 归一为普通 Error →
+  // 调用方（tool→broker→ingest）fail-safe 处置。契约：网络/解析失败**抛给调用方**，绝不崩进程。
+  nodeStream.on('error', (e) => parser.destroy(e instanceof Error ? e : new Error(String(e))));
   nodeStream.pipe(parser);
 
   const matched: SamSourcesSought[] = [];
   let truncated = false;
-  for await (const row of parser as AsyncIterable<Record<string, string>>) {
-    if ((row['Type'] ?? '').trim() !== SOURCES_SOUGHT_TYPE) continue;
-    const mapped = mapSamRow(row);
-    // 窗口过滤：能解析发布日且在窗外 → 跳（无法解析日期的保留，交下游 mapper 按缺时机处置）
-    if (mapped.postedDateIso && new Date(mapped.postedDateIso).getTime() < cutoffMs) continue;
-    matched.push(mapped);
-    if (matched.length >= MAX_MATCHED_SCAN) {
-      truncated = true;
-      break;
+  try {
+    for await (const row of parser as AsyncIterable<Record<string, string>>) {
+      if ((row['Type'] ?? '').trim() !== SOURCES_SOUGHT_TYPE) continue;
+      const mapped = mapSamRow(row);
+      // 窗口过滤：能解析发布日且在窗外 → 跳（无法解析日期的保留，交下游 mapper 按缺时机处置）
+      if (mapped.postedDateIso && new Date(mapped.postedDateIso).getTime() < cutoffMs) continue;
+      matched.push(mapped);
+      if (matched.length >= MAX_MATCHED_SCAN) {
+        truncated = true;
+        break;
+      }
     }
+  } catch (e) {
+    throw new Error(`sam.gov CSV 下载/解析失败: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    nodeStream.destroy(); // 早退（触顶 break）/异常都收尾，绝不悬挂源流
   }
   if (truncated) {
     console.warn(`[sam-api] 匹配 Sources Sought 触内存护栏上限(${MAX_MATCHED_SCAN})，停扫——更旧的可能被截断（记档：改走每日 delta）`);
   }
-  // 按发布日降序取有界样本（最新优先）
-  matched.sort((a, b) => (b.postedDateIso ?? '').localeCompare(a.postedDateIso ?? ''));
+  // 按发布日降序取有界样本（最新优先）。纯字符串比较（ISO 定长补零=字典序即时序），
+  // 不用 localeCompare——与 intent-projection mergeIntent 比较器一致性纪律对齐（避免运行时 locale 依赖）。
+  matched.sort((a, b) => {
+    const x = a.postedDateIso ?? '';
+    const y = b.postedDateIso ?? '';
+    return x < y ? 1 : x > y ? -1 : 0;
+  });
   return matched.slice(0, maxRecords);
 }

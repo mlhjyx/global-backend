@@ -2,16 +2,35 @@ import { describe, expect, it } from 'vitest';
 import { samDateToIso, mapSamRow } from './sam-api';
 
 describe('samDateToIso —— SAM 日期归一 ISO（§8.6 防 NaN 静默）', () => {
-  it('YYYY-MM-DD → ISO', () => {
-    expect(samDateToIso('2026-01-08')).toMatch(/^2026-01-08T/);
+  // 🔴 精确 UTC 断言（非仅前缀/年）——无时区字面量一律当 UTC，绝不经运行时本地时区。
+  // 旧实现在正 UTC 偏移环境（如 Asia/Shanghai）会把这些整体拨回前一天；这些用例锁定契约、防回归。
+  it('YYYY-MM-DD → UTC 午夜（当 UTC，不经本地时区）', () => {
+    expect(samDateToIso('2026-01-08')).toBe('2026-01-08T00:00:00.000Z');
   });
-  it('YYYY-MM-DD HH:mm:ss → ISO', () => {
-    expect(samDateToIso('2026-01-08 15:30:00')).toMatch(/^2026-01-08T/);
+  it('YYYY-MM-DD HH:mm:ss（无时区）→ 当 UTC（不按本地时区偏移）', () => {
+    expect(samDateToIso('2026-01-08 15:30:00')).toBe('2026-01-08T15:30:00.000Z');
   });
-  it('MM/DD/YYYY → ISO', () => {
-    const iso = samDateToIso('01/08/2026');
-    expect(iso).not.toBeNull();
-    expect(new Date(iso as string).getUTCFullYear()).toBe(2026);
+  it('🔴 午夜无时区串不跨日错位（旧 bug：Asia/Shanghai 会变 01-07）', () => {
+    expect(samDateToIso('2026-01-08 00:00:00')).toBe('2026-01-08T00:00:00.000Z');
+  });
+  it('MM/DD/YYYY → UTC 午夜同一日历日（旧 bug：本地构造 → 01-07）', () => {
+    expect(samDateToIso('01/08/2026')).toBe('2026-01-08T00:00:00.000Z');
+  });
+  it('MM/DD/YYYY HH:mm（带时间）→ 当 UTC', () => {
+    expect(samDateToIso('01/08/2026 09:30')).toBe('2026-01-08T09:30:00.000Z');
+  });
+  it('ISO 带 Z → 原样归一（真实 SAM 主路，保持不变）', () => {
+    expect(samDateToIso('2026-07-12T23:28:27.462Z')).toBe('2026-07-12T23:28:27.462Z');
+  });
+  it('ISO 带 ±offset → 正确换算 UTC', () => {
+    expect(samDateToIso('2026-07-12T23:28:27-04:00')).toBe('2026-07-13T03:28:27.000Z');
+  });
+  // 🔴 SAM 真实格式（curl 实探）——PostedDate=空格分隔+裸 -04；ResponseDeadLine=T+-05:00。都带显式 offset。
+  it('SAM 真实 PostedDate：空格分隔 + 裸 -04 offset → 正确 UTC', () => {
+    expect(samDateToIso('2026-07-13 23:28:13.676-04')).toBe('2026-07-14T03:28:13.676Z');
+  });
+  it('SAM 真实 ResponseDeadLine：T + -05:00 offset → 正确 UTC', () => {
+    expect(samDateToIso('2026-07-14T18:00:00-05:00')).toBe('2026-07-14T23:00:00.000Z');
   });
   it('空/undefined/非法 → null', () => {
     expect(samDateToIso('')).toBeNull();

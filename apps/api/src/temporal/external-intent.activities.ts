@@ -235,7 +235,7 @@ export function createExternalIntentActivities(deps: {
       }
       // SAM = **NAICS 无关**：整包 CSV 无服务端过滤 → 全部有 NAICS 面的 ICP 收敛成**每窗口一次下载**
       //（指纹只含窗参数，ingest-once 账本天然去重）。任一 ICP 有 NAICS → 建单一 SAM 拉取。
-      const samParams = args.samgovEnabled && args.targets.some((t) => t.naicsCodes.length)
+      const samParams = args.samgovEnabled && args.targets.some((t) => t.naicsCodes?.length)
         ? { maxRecords: args.maxRecords }
         : null;
       summary.tedSpecs = tedByFp.size;
@@ -363,7 +363,7 @@ export function createExternalIntentActivities(deps: {
     }): Promise<ExternalIntentIcpResult> {
       const out: ExternalIntentIcpResult = {
         workspaceId: args.workspaceId, icpId: args.icpId,
-        cpvCodes: args.cpvCodes.length, fdaProductCodes: args.fdaProductCodes.length, naicsCodes: args.naicsCodes.length,
+        cpvCodes: args.cpvCodes.length, fdaProductCodes: args.fdaProductCodes.length, naicsCodes: args.naicsCodes?.length ?? 0,
         ...(args.error ? { error: args.error } : {}),
       };
 
@@ -401,7 +401,7 @@ export function createExternalIntentActivities(deps: {
         }
       }
 
-      if (samOn && args.naicsCodes.length) {
+      if (samOn && args.naicsCodes?.length) {
         try {
           out.sourcesSought = await samProj.projectSourcesSought(args.workspaceId, {
             naicsCodes: args.naicsCodes,
