@@ -560,11 +560,23 @@ model PatentCacheRefreshAudit {
   anchorCount  Int       @default(0) @map("anchor_count")
   rowCount     Int       @default(0) @map("row_count")
   bytesScanned BigInt?   @map("bytes_scanned")
-  status       String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | DENIED | FAILED
+  status       String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | SKIPPED_NOSCAN | DENIED | DISABLED | FAILED
   detail       String?   @map("detail")
 
   @@index([startedAt])
   @@map("patent_cache_refresh_audit")
+}
+
+/// 🔴 Art.17 擦除墓碑（scale-safe #89 fast-follow · Codex PR #93 P2-5）：按发明人**盲键**（不可逆，无明文名）
+/// 持久记录已擦除主体，令周更刷新 upsert 前跳过——防 DSR 完成后同一 assignee 从 BigQuery 再拉回被擦除人 PII
+/// 重物化（擦除即删当前缓存行只是一次性，刷新不查任何禁扫集则 Art.17 不持久）。平台级共享表（无 RLS，镜像 patent_inventor_cache）。
+/// 🔴 墓碑本身即 PII 最小化：只存不可逆盲键 inventor_name_key（= inventorBlindKey 形），绝无明文名。
+model PatentInventorTombstone {
+  id              String   @id @default(uuid()) @db.Uuid
+  inventorNameKey String   @unique @map("inventor_name_key") // 🔴 盲键（blindContactKey(foldedPersonNameKey)），与 patent_inventor_cache.inventor_name_key 同规范
+  erasedAt        DateTime @default(now()) @map("erased_at")
+
+  @@map("patent_inventor_tombstone")
 }
 
 /// ingest-once 账本（收口⑤验收：同一外部源同一时间窗**跨 workspace 只拉取一次**）。
@@ -1152,10 +1164,11 @@ model Site {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  versions  SiteVersion[]
-  buildRuns SiteBuildRun[]
-  assets    Asset[]
-  documents KbDocument[]
+  versions      SiteVersion[]
+  buildRuns     SiteBuildRun[]
+  assets        Asset[]
+  documents     KbDocument[]
+  brandProfiles BrandProfile[]
 
   @@unique([slug])
   @@index([workspaceId])
@@ -1273,4 +1286,29 @@ model KbChunk {
   @@unique([documentId, seq])
   @@index([workspaceId])
   @@map("kb_chunk")
+}
+
+/// P1 理解产物（09 §2.1，M1）：品牌事实/语调/术语，版本化追加不覆盖。
+/// 🔴 factSheet 每项 {value, evidence:{sourceType, url?, fetchedAt?}}——无 evidence 的事实进 gaps，绝不虚构。
+model BrandProfile {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  siteId           String   @map("site_id") @db.Uuid
+  version          Int // 站内递增（brandProfile 每次重跑追加新版本）
+  valueProps       Json?    @map("value_props")
+  tone             Json?
+  glossary         Json?
+  keywords         Json?
+  differentiators  Json?
+  competitors      Json?
+  factSheet        Json?    @map("fact_sheet")
+  gaps             Json? // 待补资料清单 → GET /sites/{id}/kb/status
+  researchDegraded Boolean  @default(false) @map("research_degraded") // web 研究失败仅 KB 出 Brief
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, version])
+  @@index([workspaceId])
+  @@map("brand_profile")
 }

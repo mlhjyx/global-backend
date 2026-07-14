@@ -144,6 +144,14 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         //   缓存键仅按人名（无公司绑定），故同名不同公司行也一并删——Art.17 安全侧。fullName 经 PII 扩展读路径已解密。
         const erasureKeys = [...new Set(eraseContacts.flatMap((c) => inventorErasureKeys(c.fullName)))];
         if (erasureKeys.length) {
+          // 🔴 P2-5（Codex PR #93）：**先写持久墓碑**（按盲键，over-suppress 变体集同 delete）——令周更刷新
+          //   upsert 前查墓碑跳过，防 DSR 完成后同一 assignee 从 BigQuery 再拉回被擦除人 PII 重物化（Art.17 持久性）。
+          //   即便当前无缓存行（下面 deleteMany count=0），墓碑仍挡**未来**的重物化。skipDuplicates 幂等（唯一盲键）。
+          //   🔴 墓碑只存不可逆盲键，绝无明文名（PII 最小化）。平台表无 RLS，app_user 有 INSERT（迁移 GRANT）。
+          await tx.patentInventorTombstone.createMany({
+            data: erasureKeys.map((inventorNameKey) => ({ inventorNameKey })),
+            skipDuplicates: true,
+          });
           const pc = await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } } });
           patentCacheErased = pc.count;
         }

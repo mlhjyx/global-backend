@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   buildSyntheticRecords,
   readPatentCache,
@@ -10,7 +10,7 @@ import {
   type CacheInventorRow,
   type PatentRefreshDb,
 } from './patent-inventor-cache';
-import type { RefreshScanResult } from './bigquery-patents';
+import { MAX_INVENTORS_PER_ASSIGNEE, type RefreshScanResult } from './bigquery-patents';
 import { encryptPii, decryptPii } from '../compliance/pii-crypto';
 import { toReadableName } from '../discovery/providers/bigquery-patents.provider';
 
@@ -142,12 +142,21 @@ type FakeRefreshDb = PatentRefreshDb & {
   _cache: FakeCacheRow[];
   _queue: FakeQueueRow[];
   _audits: Array<Record<string, unknown>>;
+  _tombstone: string[];
 };
 
-function makeFakeRefreshDb(opts?: { policy?: unknown; queue?: FakeQueueRow[]; cache?: FakeCacheRow[] }): FakeRefreshDb {
+function makeFakeRefreshDb(opts?: {
+  policy?: unknown;
+  queue?: FakeQueueRow[];
+  cache?: FakeCacheRow[];
+  providerStatus?: string; // P1-1 kill-switch：默认 ENABLED（不破坏既有 refresh 测试）
+  tombstone?: string[]; // P2-5：已擦除盲键集
+}): FakeRefreshDb {
   const cache: FakeCacheRow[] = opts?.cache ?? [];
   const queue: FakeQueueRow[] = opts?.queue ?? [];
   const audits: Array<Record<string, unknown>> = [];
+  const tombstone: string[] = opts?.tombstone ?? [];
+  const providerStatus = opts?.providerStatus ?? 'ENABLED';
   const policy: unknown =
     opts?.policy === undefined
       ? { domain: PATENT_POLICY_DOMAIN, reviewStatus: 'APPROVED', allowedPurpose: ['discovery', 'enrichment'] }
@@ -158,6 +167,7 @@ function makeFakeRefreshDb(opts?: { policy?: unknown; queue?: FakeQueueRow[]; ca
     _cache: cache,
     _queue: queue,
     _audits: audits,
+    _tombstone: tombstone,
     patentInventorCache: {
       upsert: async ({ where, update, create }: any) => {
         const w = where.assigneeNorm_assigneeCountry_inventorName;
@@ -170,10 +180,15 @@ function makeFakeRefreshDb(opts?: { policy?: unknown; queue?: FakeQueueRow[]; ca
       },
       deleteMany: async ({ where }: any) => {
         let count = 0;
+        const notInKeep = where.inventorName?.notIn ? new Set<string>(where.inventorName.notIn) : null;
         for (let i = cache.length - 1; i >= 0; i--) {
           const r = cache[i];
           if (where.expiresAt?.lte && r.expiresAt <= where.expiresAt.lte) { cache.splice(i, 1); count++; continue; }
-          if (where.windowToYear?.lt != null && r.windowToYear < where.windowToYear.lt) { cache.splice(i, 1); count++; }
+          if (where.windowToYear?.lt != null && r.windowToYear < where.windowToYear.lt) { cache.splice(i, 1); count++; continue; }
+          // over-cap 清除：assigneeNorm+country 组内、密文不在 kept 集 → 删（复审 Thread3）。
+          if (notInKeep && r.assigneeNorm === where.assigneeNorm && r.assigneeCountry === where.assigneeCountry && !notInKeep.has(r.inventorName)) {
+            cache.splice(i, 1); count++;
+          }
         }
         return { count };
       },
@@ -215,6 +230,17 @@ function makeFakeRefreshDb(opts?: { policy?: unknown; queue?: FakeQueueRow[]; ca
       findUnique: async ({ where }: any) => {
         const p = policy as { domain?: string } | null;
         return p && p.domain === where.domain ? p : null;
+      },
+    },
+    // P1-1 kill-switch：google_patents 运行状态（默认 ENABLED）。
+    dataProvider: {
+      findUnique: async () => ({ status: providerStatus }),
+    },
+    // P2-5 墓碑：按盲键返回已擦除集与请求集的交集。
+    patentInventorTombstone: {
+      findMany: async ({ where }: any) => {
+        const wanted: string[] = where?.inventorNameKey?.in ?? [];
+        return tombstone.filter((k) => wanted.includes(k)).map((inventorNameKey) => ({ inventorNameKey }));
       },
     },
   };
@@ -352,6 +378,151 @@ describe('refreshPatentCache（Step 2c 编排）', () => {
     const res = await refreshPatentCache({ db, bq, now: () => NOW });
     expect(res.status).toBe('FAILED');
     expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
+  });
+});
+
+// ── Codex PR #93 复审 7 findings 回归 ──────────────────────────────────────
+describe('refreshPatentCache · Codex PR #93 复审加固', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('P1-1 kill-switch：provider DISABLED → DISABLED，绝不扫 BQ，但保留期清理照跑、队列不动', async () => {
+    const expired: FakeCacheRow = {
+      assigneeNorm: 'old', assigneeCountry: 'de', inventorName: encryptPii('X'), inventorNameKey: 'k',
+      assigneeNameRaw: 'Old', windowFromYear: 2015, windowToYear: 2019, license: 'CC-BY-4.0',
+      refreshedAt: new Date(NOW - 10 * 86400000), expiresAt: new Date(NOW - 86400000), // 已过期
+    };
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')], cache: [expired], providerStatus: 'DISABLED' });
+    let scanned = false;
+    const bq = { searchInventorsForAnchorsWithStats: async () => { scanned = true; return { rows: [], bytesScanned: 0, scanned: true }; } };
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('DISABLED');
+    expect(scanned).toBe(false); // 🔴 未签 LIA/DPIA 绝不物化 PII
+    expect(res.purged).toBe(1); // 保留期清理不受 kill-switch 影响（GDPR 存储限制）
+    expect(db._queue[0].status).toBe('PENDING'); // 队列状态不动
+    expect(db._audits.some((a) => a.status === 'DISABLED')).toBe(true);
+  });
+
+  it('P1-2：宽锚 %APPLE% 溜进的无关 assignee（Pineapple/Applegate）不落库，只存排队身份 apple', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'apple', 'us', '%APPLE%')] });
+    const bq = fakeScanner([
+      { assigneeName: 'Apple Inc', assigneeCountry: 'us', inventorName: 'SMITH, JOHN' },
+      { assigneeName: 'Pineapple Foods Ltd', assigneeCountry: 'us', inventorName: 'DOE, JANE' },
+      { assigneeName: 'Applegate LLC', assigneeCountry: 'us', inventorName: 'ROE, RICH' },
+    ]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    expect(res.rowCount).toBe(1);
+    expect(db._cache).toHaveLength(1);
+    expect(db._cache[0].assigneeNorm).toBe('apple');
+    expect(decryptPii(db._cache[0].inventorName)).toBe('SMITH, JOHN');
+  });
+
+  it('P2-3：PATENT_CACHE_TTL_DAYS>180 → expiresAt 夹到 180d 硬顶（不超期保留 PII）', async () => {
+    vi.stubEnv('PATENT_CACHE_TTL_DAYS', '365');
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    expect(db._cache[0].expiresAt.getTime()).toBe(NOW + 180 * 86400000); // 180d，非 365d
+  });
+
+  it('P2-4：BQ 未扫（scanned:false）→ SKIPPED_NOSCAN，队列留 PENDING（不误标 EMPTY 冷冻数月）', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    const bq = { searchInventorsForAnchorsWithStats: async () => ({ rows: [], bytesScanned: null, scanned: false }) };
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('SKIPPED_NOSCAN');
+    expect(db._queue[0].status).toBe('PENDING'); // 🔴 不标 EMPTY
+    expect(db._cache).toHaveLength(0);
+    expect(db._audits.some((a) => a.status === 'SKIPPED_NOSCAN')).toBe(true);
+  });
+
+  it('P2-5 Art.17 墓碑：被擦除人（墓碑命中）绝不重物化，同 assignee 其余发明人照落', async () => {
+    const erasedKey = inventorBlindKey('MUELLER, ANNA'); // 被擦除人盲键
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')], tombstone: [erasedKey] });
+    const bq = fakeScanner([
+      { assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'MUELLER, ANNA' }, // 被擦除 → 跳过
+      { assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }, // 正常 → 落
+    ]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    expect(res.rowCount).toBe(1);
+    expect(db._cache).toHaveLength(1);
+    expect(decryptPii(db._cache[0].inventorName)).toBe('SCHMIDT, HANS');
+    expect(db._cache.some((r) => r.inventorNameKey === erasedKey)).toBe(false);
+  });
+
+  it('P2-6：每 (assigneeNorm,country) cap 到 MAX_INVENTORS_PER_ASSIGNEE（多产 assignee 不超存 PII）', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    const rows = Array.from({ length: MAX_INVENTORS_PER_ASSIGNEE + 10 }, (_, i) => ({
+      assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: `INV, NR${String(i).padStart(3, '0')}`,
+    }));
+    const res = await refreshPatentCache({ db, bq: fakeScanner(rows), now: () => NOW });
+    expect(res.status).toBe('OK');
+    expect(res.rowCount).toBe(MAX_INVENTORS_PER_ASSIGNEE);
+    expect(db._cache).toHaveLength(MAX_INVENTORS_PER_ASSIGNEE);
+  });
+
+  it('P2-7 preflight：PII_ENCRYPTION_KEY 缺 → FAILED，扫描前拦下（绝不扫 BQ 烧配额）', async () => {
+    vi.stubEnv('PII_ENCRYPTION_KEY', '');
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    let scanned = false;
+    const bq = { searchInventorsForAnchorsWithStats: async () => { scanned = true; return { rows: [], bytesScanned: 0, scanned: true }; } };
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('FAILED');
+    expect(scanned).toBe(false);
+    expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
+  });
+
+  it('P2-7 wrap：扫描成功但 upsert 抛错 → audit FAILED（不卡 RUNNING、不留悬挂）', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).patentInventorCache.upsert = async () => { throw new Error('boom'); };
+    const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('FAILED');
+    expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
+    expect(db._audits.some((a) => a.status === 'RUNNING' && !a.finishedAt)).toBe(false); // 无悬挂 RUNNING
+  });
+
+  it('P2-7 wrap（复审 HIGH）：墓碑 findMany 抛错（如 rolling deploy 表未及应用）→ audit FAILED，不卡 RUNNING、不重扫', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).patentInventorTombstone.findMany = async () => { throw new Error('relation "patent_inventor_tombstone" does not exist'); };
+    const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('FAILED'); // 🔴 扫描后下游抛错也 graceful FAILED（不逃逸令 Temporal 重扫）
+    expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
+    expect(db._audits.some((a) => a.status === 'RUNNING' && !a.finishedAt)).toBe(false);
+    expect(db._cache).toHaveLength(0);
+  });
+
+  it('复审 Thread0（国别作用域）：queued Acme/de → 同归一名冲突国别 Acme/us 不落库', async () => {
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
+    const bq = fakeScanner([
+      { assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' },
+      { assigneeName: 'Acme Inc', assigneeCountry: 'us', inventorName: 'SMITH, JOHN' }, // 冲突国别、从未排队 → 不落
+    ]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    expect(db._cache).toHaveLength(1);
+    expect(db._cache[0].assigneeCountry).toBe('de');
+    expect(decryptPii(db._cache[0].inventorName)).toBe('SCHMIDT, HANS');
+  });
+
+  it('复审 Thread3（over-cap 清除）：刷新用当前 capped 集替换该组缓存，陈旧/超额行不驻留 TTL', async () => {
+    const stale = (inv: string): FakeCacheRow => ({
+      assigneeNorm: 'acme', assigneeCountry: 'de', inventorName: encryptPii(inv), inventorNameKey: inventorBlindKey(inv),
+      assigneeNameRaw: 'Acme GmbH', windowFromYear: 2021, windowToYear: 2025, license: 'CC-BY-4.0',
+      refreshedAt: new Date(NOW - 86400000), expiresAt: new Date(NOW + 90 * 86400000), // 未过期
+    });
+    const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')], cache: [stale('OLD, ONE'), stale('OLD, TWO')] });
+    const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'FRESH, ONLY' }]);
+    const res = await refreshPatentCache({ db, bq, now: () => NOW });
+    expect(res.status).toBe('OK');
+    const names = db._cache.filter((r) => r.assigneeNorm === 'acme').map((r) => decryptPii(r.inventorName)).sort();
+    expect(names).toEqual(['FRESH, ONLY']); // 🔴 旧两行被清，只余当前刷新集（cap 真正约束存量 PII）
   });
 });
 

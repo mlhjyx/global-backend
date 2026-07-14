@@ -85,6 +85,15 @@ export class KbService {
     let processed = 0;
     let failed = 0;
     for (const asset of queued) {
+      // CAS 认领（Codex P2）：commit 触发的 kbIngestWorkflow 与 refurbish P1 可能并发扫同站——
+      // queued→processing 原子翻转，翻不动=已被别处认领，跳过（防重复解析/重复入库）。
+      const claimed = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+        tx.asset.updateMany({
+          where: { id: asset.id, processingStatus: 'queued' },
+          data: { processingStatus: 'processing' },
+        }),
+      );
+      if (claimed.count === 0) continue;
       try {
         const buffer = await this.storage.getBuffer(asset.objectKey);
         const markdown = TEXT_MIMES.has(asset.mime)

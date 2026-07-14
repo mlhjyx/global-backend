@@ -8,7 +8,7 @@ import { companyIdentity } from '../discovery/identity';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
-import { enqueuePatentLookup } from '../adapters/patent-inventor-cache';
+import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import { BudgetExceededError, budgetLedger, runBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
 
@@ -654,6 +654,14 @@ export function createDiscoveryActivities(deps: {
      * 冷启动时序（首次 contact discovery 早于首刷）由 Step 10 灰度启用的**手跑刷新预热**兜（见设计文档）。
      */
     async enqueuePatentLookupsForRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{ candidates: number; enqueued: number }> {
+      // 🔴 P1-1 kill-switch（Codex PR #93）：google_patents 非 ENABLED（seed=DISABLED，未签 LIA/DPIA）→ 不 enqueue。
+      // PII 物化的真正闸在 refreshPatentCache（DISABLED 时不扫）；此处止住队列积压——「DISABLED=不物化」不变式
+      // 的前哨（也免翻 ENABLED 瞬间冷启动把历史积压一次性全扫）。data_provider 平台表无 RLS，app_user 有 SELECT。
+      const provider = await deps.prisma.dataProvider.findUnique({
+        where: { key: PATENT_PROVIDER_KEY },
+        select: { status: true },
+      });
+      if (provider?.status !== 'ENABLED') return { candidates: 0, enqueued: 0 };
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = await tx.rawSourceRecord.findMany({ where: { runId: args.runId }, select: { id: true } });
         const links = await tx.identityLink.findMany({
