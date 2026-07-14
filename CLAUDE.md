@@ -36,7 +36,7 @@ cd apps/api && pnpm test               # vitest
 ```
 data_provider 源（gleif/directory/trade_fair/wikidata/…）在 **API/relay 启动时自动 seed**。
 
-**开发环境**（同步到 git `global-backend` 私有仓库）：本地 Mac `/Users/xin/Documents/Global`（gh 已授权）。~~远端 WSL~~ 已于 2026-07-14 取消，不再使用。
+**开发环境**（同步到 git `global-backend` 私有仓库）：**Ubuntu 26.04 服务器**（2026-07-15 迁入）——Tailscale `100.88.153.74`（tailnet 主机 `xin`，**root**，代码 `/global/backend`，外挂 **8T 盘挂 `/data`**、Docker data-root 落 8T），经 **CC SSH 远程开发**（Mac `~/.ssh/config` 的 `global-dev` 主机；Mac 现为瘦客户端，Docker Desktop 可关）。墙内网络经桌面用户 xin 的 **mihomo 代理 `127.0.0.1:7897`** + `mirrors.aliyun.com` apt 镜像(HTTPS) + daocloud docker registry 镜像打通（ghcr.io 只能走慢代理）。`docker compose` 一律带 `-p global`；Temporal 走 systemd `temporal-dev.service`。~~本地 Mac~~ / ~~远端 WSL（2026-07-14 取消）~~ 已退居。详见 memory `ubuntu-server-migration`（build + 1239 测试在 Ubuntu 上全绿）。
 
 ## 4. 已落地子系统（真实数据、已实测）
 
