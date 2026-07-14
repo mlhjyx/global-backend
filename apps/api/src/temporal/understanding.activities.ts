@@ -55,7 +55,14 @@ export function createUnderstandingActivities(deps: {
     const r = await deps.broker.invoke<{ url: string }, CrawlResult>(
       'crawl4ai.fetch',
       { url },
-      { workspaceId, taskContractId: 'company_understanding.extract_claims', correlationId: url },
+      // FIX C（Codex P1）：显式声明 discovery/enrichment 用途——crawl4ai.fetch 追加 site_builder 后，
+      // 不带 purpose 会 fallback 到扩宽全集，令仅授权 site_builder 的域连带放行；显式声明精确复现变更前有效集。
+      {
+        workspaceId,
+        taskContractId: 'company_understanding.extract_claims',
+        correlationId: url,
+        purpose: ['discovery', 'enrichment'],
+      },
     );
     return r.data.text;
   };

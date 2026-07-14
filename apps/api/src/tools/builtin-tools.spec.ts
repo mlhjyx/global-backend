@@ -55,6 +55,33 @@ describe('site_builder 用途门 · searxng/crawl4ai allowedPurpose', () => {
   });
 });
 
+/**
+ * FIX C（Codex P1）：把 site_builder 加进共享 crawl4ai.fetch.allowedPurpose 后，**不带 purpose**
+ * 的既有调用者会 fallback 到扩宽全集，令仅授权 site_builder 的域连带放行发现/富集抓取。调用者显式声明
+ * purpose:['discovery','enrichment'] 关闭此扩宽（effective = 调用purpose ∩ 工具allowedPurpose）。
+ * 本组是「扩宽已关闭」的语义护栏 + 「品牌研究不受影响」「[discovery] 域行为不变」的回归守卫。
+ */
+describe('crawl4ai 用途扩宽已关闭 · 显式 [discovery,enrichment] 用途（FIX C）', () => {
+  it('purpose=[discovery,enrichment] 对仅 site_builder 域策略 → DENIED（扩宽已关闭）', async () => {
+    const b = broker(async () => ({ suspended: false, allowedPurpose: ['site_builder'] }));
+    const chk = await b.checkSourcePolicy('crawl4ai.fetch', 'acme.example', ['discovery', 'enrichment']);
+    expect(chk.allowed).toBe(false);
+    expect(chk.reason).toBe('purpose_not_allowed');
+  });
+
+  it('purpose=[site_builder] 对同域仍放行（品牌研究不受影响）', async () => {
+    const b = broker(async () => ({ suspended: false, allowedPurpose: ['site_builder'] }));
+    const chk = await b.checkSourcePolicy('crawl4ai.fetch', 'acme.example', ['site_builder']);
+    expect(chk.allowed).toBe(true);
+  });
+
+  it('purpose=[discovery,enrichment] 对 [discovery] 域策略仍放行（行为保持）', async () => {
+    const b = broker(async () => ({ suspended: false, allowedPurpose: ['discovery'] }));
+    const chk = await b.checkSourcePolicy('crawl4ai.fetch', 'acme.example', ['discovery', 'enrichment']);
+    expect(chk.allowed).toBe(true);
+  });
+});
+
 describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
   it('已注册为 verify/email_verification，sourcePolicy=advisory + personalData（登记即强制、标个人数据）', () => {
     expect(smtpRcptProbeTool.id).toBe('smtp.rcpt_probe');
