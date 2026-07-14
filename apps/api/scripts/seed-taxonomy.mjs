@@ -117,6 +117,41 @@ async function seedFda() {
   return { nodes: n, aliases: a };
 }
 
+// NAICS 子树种子（§2.3 SAM.gov·有界·手工核验·frozen source='seed'，非全 ~1000 码树，同 CPV/FDA 子树哲学）。
+// NAICS = 数字前缀层级（2→6 位，无 CPV 尾零占位）；parentCode 自引用（前缀嵌套）。
+// 供 ISIC.crosswalks.naics 锚定的**产品精修**：resolveNaicsForProduct 先查 TermAlias 确定性命中——
+// Temporal Schedule 走 allowLlm:false，产品→窄码全靠这些 seed 别名（无别名则只落宽锚码，仍正确只是宽）。
+// 🔴 别名只挂**已核验窄码**（333914/334517/339112），绝不给宽码（333/334/3391）贴产品词——否则宽子树误吞。
+const NAICS_SEED = [
+  // 机械制造子树：ICP「pumps」经 ISIC 28→333 锚 → 产品精修落 333914（Measuring/Dispensing/Pumping Equipment）
+  { code: '333', parent: null, en: 'Machinery manufacturing', zh: '机械制造', de: 'Maschinenbau' },
+  { code: '3339', parent: '333', en: 'Other general purpose machinery manufacturing', zh: '其他通用设备制造', de: 'Sonstige allgemeine Maschinen' },
+  { code: '333914', parent: '3339', en: 'Measuring, dispensing, and other pumping equipment manufacturing', zh: '泵与计量分配设备制造', de: 'Pumpen- und Dosiertechnik',
+    aliases: ['pump', 'pumps', '泵', 'water pump', 'water pumps', 'pumping equipment', 'dosing pump'] },
+  // 电子/测量/放射子树：放射设备 334517 归 334（非医疗 3391）；ICP「electronics」经 ISIC 26→334 可达
+  { code: '334', parent: null, en: 'Computer and electronic product manufacturing', zh: '计算机与电子产品制造', de: 'Elektronik' },
+  { code: '3345', parent: '334', en: 'Navigational, measuring, electromedical, and control instruments manufacturing', zh: '导航测量电子医疗与控制仪器制造', de: 'Mess- und Kontrolltechnik',
+    aliases: ['measuring instruments', 'measurement instruments', '测量仪器', 'control instruments', 'metrology'] },
+  { code: '334517', parent: '3345', en: 'Irradiation apparatus manufacturing', zh: '辐照设备制造（X 光/CT/放疗）', de: 'Bestrahlungsgeräte',
+    aliases: ['x-ray', 'ct scanner', 'irradiation apparatus', 'radiation therapy', '放射设备', 'radiological imaging', 'irradiation'] },
+  // 医疗器械子树：ICP「radiology/medical device」经 ISIC 325→3391 锚 → 产品精修落 339112
+  { code: '3391', parent: null, en: 'Medical equipment and supplies manufacturing', zh: '医疗设备与耗材制造', de: 'Medizintechnik' },
+  { code: '339112', parent: '3391', en: 'Surgical and medical instrument manufacturing', zh: '外科与医疗器械制造', de: 'Chirurgische und medizinische Instrumente',
+    aliases: ['surgical instruments', 'medical instruments', '手术器械', '外科器械', 'medical device instruments'] },
+  // 金属制品子树：ICP「metal fabrication」经 ISIC 25→332 锚
+  { code: '332', parent: null, en: 'Fabricated metal product manufacturing', zh: '金属制品制造', de: 'Metallerzeugnisse' },
+];
+async function seedNaics() {
+  let n = 0, a = 0;
+  for (const c of NAICS_SEED) {
+    await upsertNode('naics', 'NAICS', c.code, { parentCode: c.parent, labelEn: c.en, labels: { zh: c.zh, de: c.de } });
+    n++;
+    const aliases = new Set([c.en, c.zh, c.de, c.code, ...(c.aliases ?? [])]);
+    for (const al of aliases) { if (al) { await upsertAlias('naics', al, c.code, 'seed'); a++; } }
+  }
+  return { nodes: n, aliases: a };
+}
+
 async function seedIndustries() {
   let n = 0, a = 0;
   for (const node of ISIC_SEED) {
@@ -139,10 +174,12 @@ const cty = await seedCountries();
 const ind = await seedIndustries();
 const cpv = await seedCpv();
 const fda = await seedFda();
+const naics = await seedNaics();
 console.log(`countries: ${cty.nodes} nodes, ${cty.aliases} aliases`);
 console.log(`industries: ${ind.nodes} nodes, ${ind.aliases} aliases`);
 console.log(`cpv: ${cpv.nodes} nodes, ${cpv.aliases} aliases`);
 console.log(`fda: ${fda.nodes} nodes, ${fda.aliases} aliases`);
+console.log(`naics: ${naics.nodes} nodes, ${naics.aliases} aliases`);
 const totalAlias = await db.termAlias.count();
 const totalNode = await db.canonicalTaxonomy.count();
 console.log(`TOTAL: ${totalNode} canonical nodes, ${totalAlias} aliases`);

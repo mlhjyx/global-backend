@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { TedContractNotice } from '../adapters/ted-api';
 import { OPENFDA_LICENSE, type Fda510kClearance } from '../adapters/openfda-api';
 import { companyIdentity } from '../discovery/identity';
+import type { SamSourcesSought } from '../adapters/sam-api';
 import {
   FDA_PAYLOAD_KEYS,
+  SAM_PAYLOAD_KEYS,
+  SOURCES_SOUGHT_STRENGTH,
   TED_PAYLOAD_KEYS,
+  US_FED_SOURCES_SOUGHT,
   clearanceTtlDays,
   mapFdaClearance,
+  mapSamSourcesSought,
   mapTedNotice,
   tenderTtlDays,
 } from './signal-mappers';
@@ -111,5 +116,63 @@ describe('mapFdaClearance —— 510(k) 清关 → 一等 Signal 行', () => {
     expect(Object.keys(row.payload).every((k) => (FDA_PAYLOAD_KEYS as readonly string[]).includes(k))).toBe(true);
     expect(JSON.stringify(row.payload)).not.toContain('jane@agent.example');
     expect(JSON.stringify(row.payload)).not.toContain('John Smith');
+  });
+});
+
+describe('mapSamSourcesSought —— SAM Sources Sought → signal 行（🔴 PII 白名单 + US 恒定）', () => {
+  const OBSERVED = new Date('2026-01-10T00:00:00Z');
+  const notice = (over: Partial<SamSourcesSought> = {}): SamSourcesSought => ({
+    noticeId: 'ss-abc123',
+    title: 'Pump maintenance services',
+    department: 'VETERANS AFFAIRS, DEPARTMENT OF',
+    subTier: 'VETERANS HEALTH ADMINISTRATION',
+    office: 'NCO 1',
+    postedDateIso: '2026-01-08T09:00:00.000Z',
+    naicsCode: '333914',
+    responseDeadlineIso: '2026-02-08T17:00:00.000Z',
+    popCountry: 'USA',
+    link: 'https://sam.gov/opp/ss-abc123',
+    ...over,
+  });
+
+  it('机构买方 → signal 行（US 恒定 + naics 分类键 + SOURCES_SOUGHT_STRENGTH）', () => {
+    const row = mapSamSourcesSought(notice(), OBSERVED).row!;
+    expect(row.providerKey).toBe('samgov');
+    expect(row.signalType).toBe(US_FED_SOURCES_SOUGHT);
+    expect(row.subjectCountry).toBe('US');
+    expect(row.subjectName).toBe('VETERANS AFFAIRS, DEPARTMENT OF — VETERANS HEALTH ADMINISTRATION');
+    expect(row.subjectKey).toBe(companyIdentity({ name: row.subjectName, country: 'US' }).dedupeKey);
+    expect(row.taxonomyKeys).toEqual(['naics:333914']);
+    expect(row.strength).toBe(SOURCES_SOUGHT_STRENGTH);
+    expect(row.jurisdiction).toBe('US');
+    expect(row.license).toContain('Public Domain');
+    // TTL：occurredAt + 120d（默认）
+    expect(row.expiresAt.getTime()).toBe(new Date('2026-01-08T09:00:00.000Z').getTime() + 120 * 86_400_000);
+  });
+
+  it('Sub-Tier 缺 → 退 Department；都缺 → no_buyer', () => {
+    expect(mapSamSourcesSought(notice({ subTier: '' }), OBSERVED).row!.subjectName).toBe('VETERANS AFFAIRS, DEPARTMENT OF');
+    expect(mapSamSourcesSought(notice({ department: '', subTier: '' }), OBSERVED).skip).toBe('no_buyer');
+  });
+
+  it('Department==Sub-Tier（部级机构两列同名）→ 折叠单值，不产生 "X — X" 冗余身份', () => {
+    const row = mapSamSourcesSought(notice({ department: 'VETERANS AFFAIRS, DEPARTMENT OF', subTier: 'VETERANS AFFAIRS, DEPARTMENT OF' }), OBSERVED).row!;
+    expect(row.subjectName).toBe('VETERANS AFFAIRS, DEPARTMENT OF');
+  });
+
+  it('缺 noticeId/缺发布日/缺 naics → 各自跳过', () => {
+    expect(mapSamSourcesSought(notice({ noticeId: '' }), OBSERVED).skip).toBe('no_external_id');
+    expect(mapSamSourcesSought(notice({ postedDateIso: null }), OBSERVED).skip).toBe('no_date');
+    expect(mapSamSourcesSought(notice({ naicsCode: '' }), OBSERVED).skip).toBe('no_taxonomy');
+  });
+
+  it('🔴 GDPR 白名单：payload 只含 SAM_PAYLOAD_KEYS（联系官/中标方绝不入平台绿库）', () => {
+    // 敌意注入：即便上游塞了联系官字段，mapper 手工构造 payload 只取白名单键
+    const hostile = { ...notice(), primaryContactFullname: 'Jane Doe', primaryContactEmail: 'jane@va.gov' } as unknown as SamSourcesSought;
+    const row = mapSamSourcesSought(hostile, OBSERVED).row!;
+    expect(Object.keys(row.payload).every((k) => (SAM_PAYLOAD_KEYS as readonly string[]).includes(k))).toBe(true);
+    const dumped = JSON.stringify(row.payload).toLowerCase();
+    expect(dumped).not.toContain('jane');
+    expect(dumped).not.toContain('@va.gov');
   });
 });

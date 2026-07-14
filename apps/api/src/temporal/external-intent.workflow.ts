@@ -17,6 +17,8 @@ export interface ExternalIntentSweepResult {
   tenderEvents: number;
   clearanceCompaniesTouched: number;
   clearanceEvents: number;
+  samCompaniesTouched: number;
+  samEvents: number;
   results: ExternalIntentIcpResult[];
 }
 
@@ -33,14 +35,14 @@ export async function externalIntentSweepWorkflow(
   input?: { limit?: number; liveRefreshEvery?: number },
 ): Promise<ExternalIntentSweepResult> {
   // 默认不传 limit → 枚举全部 ACTIVE ICP（无静默截断/不饿死旧 ICP）；调用方可显式传 limit 做有界跑。
-  const { targets, tedEnabled, openfdaEnabled } = await acts.listExternalIntentTargets(
+  const { targets, tedEnabled, openfdaEnabled, samgovEnabled } = await acts.listExternalIntentTargets(
     input?.limit ? { limit: input.limit } : {},
   );
 
   const agg: ExternalIntentSweepResult = {
-    swept: 0, expiredSignals: 0, tenderCompaniesTouched: 0, tenderEvents: 0, clearanceCompaniesTouched: 0, clearanceEvents: 0, results: [],
+    swept: 0, expiredSignals: 0, tenderCompaniesTouched: 0, tenderEvents: 0, clearanceCompaniesTouched: 0, clearanceEvents: 0, samCompaniesTouched: 0, samEvents: 0, results: [],
   };
-  if (!tedEnabled && !openfdaEnabled) return agg; // 两 provider 全停 → 不跑
+  if (!tedEnabled && !openfdaEnabled && !samgovEnabled) return agg; // 三 provider 全停 → 不跑
 
   // 状态机先行：过期信号翻 EXPIRED，本轮投影绝不吃过期需求。
   agg.expiredSignals = (await acts.expireStaleSignals()).expired;
@@ -51,16 +53,16 @@ export async function externalIntentSweepWorkflow(
     try {
       resolved.push(await acts.resolveExternalIntentTarget(t));
     } catch (err) {
-      resolved.push({ ...t, cpvCodes: [], buyerCountries: [], fdaProductCodes: [], error: String(err).slice(0, 200) });
+      resolved.push({ ...t, cpvCodes: [], buyerCountries: [], fdaProductCodes: [], naicsCodes: [], error: String(err).slice(0, 200) });
     }
   }
 
   // 平台层摄取一次（指纹全局去重 → 跨 workspace 共享拉取）。
   try {
-    agg.ingest = await acts.ingestExternalSignals({ targets: resolved, tedEnabled, openfdaEnabled });
+    agg.ingest = await acts.ingestExternalSignals({ targets: resolved, tedEnabled, openfdaEnabled, samgovEnabled });
   } catch (err) {
     // 摄取整体失败 fail-safe：投影仍可吃此前窗口已落库的信号。
-    agg.ingest = { tedSpecs: 0, fdaSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
+    agg.ingest = { tedSpecs: 0, fdaSpecs: 0, samSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
   }
 
   // 过期后 intent **复算收敛**（#56 P2）：expireStaleSignals 只翻转信号状态，增量投影只加不删——已写进
@@ -95,9 +97,9 @@ export async function externalIntentSweepWorkflow(
     }
     let r: ExternalIntentIcpResult;
     try {
-      r = await acts.projectExternalIntentForIcp({ ...t, tedEnabled, openfdaEnabled, live });
+      r = await acts.projectExternalIntentForIcp({ ...t, tedEnabled, openfdaEnabled, samgovEnabled, live });
     } catch (err) {
-      r = { workspaceId: t.workspaceId, icpId: t.icpId, cpvCodes: 0, fdaProductCodes: 0, error: String(err).slice(0, 200) };
+      r = { workspaceId: t.workspaceId, icpId: t.icpId, cpvCodes: 0, fdaProductCodes: 0, naicsCodes: 0, error: String(err).slice(0, 200) };
     }
     agg.results.push(r);
     agg.swept += 1;
@@ -105,6 +107,8 @@ export async function externalIntentSweepWorkflow(
     agg.tenderEvents += r.tenders?.eventsProjected ?? 0;
     agg.clearanceCompaniesTouched += r.clearances?.companiesTouched ?? 0;
     agg.clearanceEvents += r.clearances?.eventsProjected ?? 0;
+    agg.samCompaniesTouched += r.sourcesSought?.companiesTouched ?? 0;
+    agg.samEvents += r.sourcesSought?.eventsProjected ?? 0;
   }
   return agg;
 }

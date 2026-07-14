@@ -209,6 +209,70 @@ export class TaxonomyResolver {
   }
 
   /**
+   * §2.3（SAM.gov）冷路径：把产品自由词精修到 crosswalk 子树内的某个 NAICS 码。
+   * NAICS 是**数字前缀层级**（2→6 位，无 CPV 尾零占位）→ 子树前缀 = 锚码本身（startsWith）。
+   * 枚举永远限于子树前缀命中的 NAICS 码（≤ 数百），绝不整表。先查缓存；miss + allowLlm 才请求 LLM（enum 约束）。
+   */
+  async resolveNaicsForProduct(
+    product: string,
+    subtreePrefixes: string[],
+    opts?: { workspaceId?: string; allowLlm?: boolean },
+  ): Promise<string | null> {
+    const term = norm(product);
+    if (!term || !subtreePrefixes.length) return null;
+    const prefixes = subtreePrefixes.map((p) => p.trim()).filter(Boolean);
+    if (!prefixes.length) return null;
+
+    const alias = await this.prisma.termAlias.findUnique({ where: { kind_term: { kind: 'naics', term } } });
+    // 缓存命中须落在**当前子树**内（别名按 (kind,term) 全局缓存、不按子树，跨 ICP 不同行业子树同产品词不可串用）。
+    if (alias && prefixes.some((p) => alias.code.startsWith(p))) return alias.code;
+    if (opts?.allowLlm === false) return null;
+    // 收口②：无真实租户上下文不走 LLM（伪 workspace 会令 ai_trace 记账静默失败）
+    if (!opts?.workspaceId) return null;
+
+    const rows = await this.prisma.canonicalTaxonomy.findMany({
+      where: { kind: 'naics', OR: prefixes.map((p) => ({ code: { startsWith: p } })) },
+      select: { code: true, labelEn: true, labels: true },
+      take: 500,
+    });
+    if (!rows.length) return null;
+
+    const contract = getTask('taxonomy.normalize');
+    if (!contract) return null;
+    const catalog = rows.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
+    const schema = {
+      type: 'object',
+      required: ['code'],
+      properties: {
+        code: { type: ['string', 'null'], enum: [...rows.map((n) => n.code), null], description: '子树内最匹配的 NAICS 码；无则 null' },
+      },
+    };
+    try {
+      const result = await this.gateway.generateStructured<{ code: string | null }>(
+        {
+          task: contract.id,
+          system: contract.description,
+          model: contract.model,
+          schema,
+          prompt: `把产品「${product}」精修到下面 NAICS 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
+        },
+        { workspaceId: opts.workspaceId },
+      );
+      const code = result.data?.code;
+      if (!code) return null;
+      const node = await this.node('naics', code); // 校验 code 真实存在
+      if (!node) return null;
+      await this.prisma.termAlias
+        .upsert({ where: { kind_term: { kind: 'naics', term } }, update: { code, source: 'llm' }, create: { kind: 'naics', term, code, source: 'llm' } })
+        .catch((e) => this.logger.warn(`naics alias sediment failed: ${String(e).slice(0, 120)}`));
+      return code;
+    } catch (e) {
+      this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
+      return null;
+    }
+  }
+
+  /**
    * §2.3（openFDA）冷路径：把产品自由词精修到 **panel 子树内**的某个 FDA product code。
    * FDA product code 是**不透明 3 字母、无前缀层级**（与 CPV 数字前缀嵌套不同）→ 枚举靠 `parentCode ∈ panelCodes`
    * 显式父维圈定（≤ 单 panel 数百），**绝不 `resolve('fda_product_code', term)` 打全 ~6000 表**（llmResolve 整表 slice 截断陷阱）。

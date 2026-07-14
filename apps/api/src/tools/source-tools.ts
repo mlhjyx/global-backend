@@ -26,6 +26,7 @@ import { queryAlgoliaExhibitors, AlgoliaFairConfig, FairExhibitor } from '../ada
 import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapters/companies-house';
 import { searchCompaniesWithDirigeants, FrCompanyHit } from '../adapters/inpi-rne';
 import { bigqueryPatents, PatentRecord } from '../adapters/bigquery-patents';
+import { fetchSourcesSought, SamSourcesSought, SamSearchParams } from '../adapters/sam-api';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -447,6 +448,34 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
   },
 };
 
+export interface SamSearchInput {
+  params: SamSearchParams;
+}
+export interface SamSearchOutput {
+  notices?: SamSourcesSought[];
+}
+
+/**
+ * samgov.search —— SAM.gov Sources Sought 公开数据抽取（keyless CSV `datagov` 分区）；招标前**联邦意图**（P4）。
+ * required 治理：源含联系官具名字段（adapter 层已结构性剔除，不入绿库）→ personalData=true → §8.8 用途门 fail-closed
+ * （未登记/SUSPENDED/用途不符即拒）。**keyless 无鉴权**（authRequired=false）。美国政府作品公共领域（署名非义务）。
+ * 'intent'：Sources Sought intent 投影（US_FED_SOURCES_SOUGHT）以该用途经本工具。
+ */
+export const samgovSearchTool: Tool<SamSearchInput, SamSearchOutput> = {
+  id: 'samgov.search',
+  version: '1.0.0',
+  category: 'structured_source',
+  sourceClass: 'public_intelligence',
+  cost: { unit: 'call', estimatedCents: 0, external: true },
+  rateLimit: { rps: 1, concurrency: 1 },
+  // personalData:true —— 上游 CSV 含联系官具名字段（adapter 层结构性剔除，绿库红线；元数据仍如实标注）。
+  compliance: { sourcePolicy: 'required', policyDomain: 'sam.gov', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment', 'intent'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['company'], accepts: ['keywords'] },
+  idempotencyKey: (i) => `samgov.search:${stableKey(i)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'samgov' }),
+  execute: async (input) => ({ data: { notices: await fetchSourcesSought(input.params) }, costCents: 0 }),
+};
+
 /** 注册全部数据源工具（启动期，与 registerBuiltinTools 同点调用）。 */
 export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(crawl4aiRenderTool as Tool);
@@ -460,5 +489,6 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(companiesHouseSearchTool as Tool);
   registry.register(inpiRneSearchTool as Tool);
   registry.register(googlePatentsSearchTool as Tool);
+  registry.register(samgovSearchTool as Tool);
   return registry;
 }
