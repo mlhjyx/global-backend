@@ -46,28 +46,24 @@ const REFURBISH_STEP_KEYS = [
   'quality_loop',
 ] as const;
 
-/** 已完成态：补偿回填时原样保留（不误抹为 aborted）。 */
-const COMPLETED_STEP_STATUSES = new Set(['done', 'degraded']);
-
 /**
  * 补偿路径 steps 回填（改动 3，观测性）：run 转 failed 时给出「哪些步骤跑过/中止」。
- * - brand_profile：由 compensate 按 DB 探测传入 done/aborted（BrandProfile 无 buildRunId 列，
+ * 只报**DB 可核验的完成位**——没有活动在 run 中途把 done/degraded 写进 siteBuildRun.steps
+ * （begin 全写 pending、只有 finalize 写终态），故不再臆测「原样保留」不存在的完成态。
+ * - brand_profile：由 compensate 按 brandProfile 行探测传入 done/aborted（无 buildRunId 列，
  *   靠 createdAt>=startedAt 归属）；
- * - 其余步骤：已完成（done/degraded）原样保留，未完成一律 aborted；
+ * - assemble_build：由 compensate 按 siteVersion(buildRunId, succeeded) 行探测传入 done/aborted
+ *   （buildRunId 唯一定位本 run 的成功版本，无需 startedAt）；
+ * - 其余步骤：DB 无从核验完成，一律 aborted；
  * - 键序恒为 REFURBISH_STEP_KEYS（与 begin/finalize 一致）。
  */
 export function buildCompensatedSteps(
-  existing: unknown,
   brandProfileDone: boolean,
+  assembleBuildDone: boolean,
 ): { key: string; status: string }[] {
-  const prior = Array.isArray(existing) ? (existing as { key?: string; status?: string }[]) : [];
-  const priorByKey = new Map(prior.filter((s) => s?.key).map((s) => [s.key as string, s]));
   return REFURBISH_STEP_KEYS.map((key) => {
     if (key === 'brand_profile') return { key, status: brandProfileDone ? 'done' : 'aborted' };
-    const prev = priorByKey.get(key);
-    if (prev?.status && COMPLETED_STEP_STATUSES.has(prev.status)) {
-      return { key, status: prev.status };
-    }
+    if (key === 'assemble_build') return { key, status: assembleBuildDone ? 'done' : 'aborted' };
     return { key, status: 'aborted' };
   });
 }
@@ -682,13 +678,18 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   where: { siteId, createdAt: { gte: run.startedAt } },
                 }))
               : false;
+            // assemble_build 完成靠 siteVersion 行核验（FIX 2）：assembleAndBuild 真成功即留一条
+            // succeeded 版本行，buildRunId 唯一定位本 run，无需 startedAt；缺则保守判 aborted。
+            const assembleBuildDone = !!(await tx.siteVersion.findFirst({
+              where: { buildRunId, buildStatus: 'succeeded' },
+            }));
             await tx.siteBuildRun.update({
               where: { id: buildRunId },
               data: {
                 status: 'failed',
                 error: run.error ?? 'refurbish failed (compensated)',
                 finishedAt: run.finishedAt ?? new Date(),
-                steps: buildCompensatedSteps(run.steps, brandProfileDone) as Prisma.InputJsonValue,
+                steps: buildCompensatedSteps(brandProfileDone, assembleBuildDone) as Prisma.InputJsonValue,
               },
             });
           }
