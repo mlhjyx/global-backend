@@ -16,11 +16,14 @@
 POST /intake        ← 建议 SaaS 服务端代理转发（注册时用户尚无 token，见 §12 对齐项）
 req : { "company": {"nameZh": "…", "nameEn": "…"?}, "industry": "<taxonomyId>",
         "products": ["pump", …](1-5), "targetMarkets": ["DE","US"],
-        "hasWebsite": false, "websiteUrl": null, "businessEmail": "a@b.com" }
-resp: { "siteId": "st_…", "mode": "builder",          // hasWebsite=true → "diagnosis"（M3+）
+        "hasWebsite": false, "websiteUrl": null,      // 仅作背景知识喂品牌定位，【不分叉流程/栏目】
+        "businessEmail": "a@b.com" }
+resp: { "siteId": "st_…", "buildId": "bld_…",         // 注册即【无条件】触发 demo v0（不论 hasWebsite）
         "status": "generating_demo" }
 ```
 demo v0 完成后 `GET /sites/{id}` 的 `status=ready` 且 `previewUrl` 就绪（前端轮询或订阅事件 §11）。
+
+**引导流程与状态 = 前端全权（本仓不管）**：后端只提供**已有的预览链接**（`GET /sites/{id}` / `GET /builds/{id}` 的 `previewUrl`）——卡片点击凭该链接跳转预览。build 状态、资料缺口 `gaps`（`GET /sites/{id}/kb/status`，§4）、向导保存 `PATCH /sites/{id}/profile`（§2）等**既有端点**前端自取自用；**后端不为引导新增编排/状态端点**。
 
 ## 2. 站点与建站向导
 

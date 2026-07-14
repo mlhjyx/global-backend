@@ -46,7 +46,7 @@ apps/api/src/site-builder/
 ## 3. API 面（code-first OpenAPI，交 SaaS 前端）
 
 ```
-POST /site-builder/intake                     # 注册引导提交 → 建档 + 触发 demo v0
+POST /site-builder/intake                     # 注册引导提交 → 建档 + 【无条件】触发 demo v0（不论有无既有站）
 GET  /site-builder/sites /sites/{id}          # 列表/详情（含预览 URL）
 POST /sites/{id}/assets/presign               # 上传三步：presign → PUT 直传 → commit
 POST /assets/{id}/commit                      # 触发素材处理管线
@@ -165,7 +165,7 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 | D2 | 视频方案 | 付费开闸：Seedance（火山）；动效保底降级 |
 | D3 | 模型接入 | 全部统一走 new-api 网关 |
 | D4 | 生产 agent 运行时 | 自建有界 AI Task（L2 续用），不引入 Claude Agent SDK——网关是 OpenAI 兼容协议，SDK 绑 Anthropic 协议且自主漫游不可控；详见对话记录 |
-| D5 | SEO 诊断分支 | 后置 M3+ |
+| D5 | 站点诊断 | 「独立站管理」二级栏目（**非注册分支**，修订④）；已有站用户 SEO 体检，后置 M3+ |
 | D6 | 多租户隔离 | RLS + 对象存储前缀 + 签名 URL（§7） |
 | D7 | 预览方式 | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属 |
 | D8 | 模型选型原则 | 按 agent 能力需求全市场选型；**2026-07-14 终版定档**（§6 表=唯一真值：实测评比+用户三轮拍板，依据见 10 号文档）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档） |
@@ -177,6 +177,7 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 | D14 | 知识库与 embedding | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12）；embedding 自托管 day1 起（换模型=全量重嵌，切换成本决定不走"先 API 后自托管"） |
 | D15 | 富文本 | v1 即开（用户拍板）：受限 ProseMirror JSON、不存 HTML（04 §5） |
 | D16 | 交互地图 | Google Maps **Embed API**（免费无限量）+ 两步加载 GDPR 方案；Geocoding 建站期一次缓存（04 §10 申请清单） |
+| D17 | 注册去分支 + 引导式 onboarding | **修订④（2026-07-14 用户确认）**：注册「有无海外独立站」**只作背景知识、不分叉栏目**；后台统一一级「独立站管理」下挂**独立站建设 + 站点诊断**两个二级栏目；注册即**无条件**生成 demo（不论有无既有站）；进后台的引导（消息卡片→跳转预览→引导填向导）**流程与状态全在前端**（本仓不管），后端只提供**已有的预览链接**（`previewUrl`）供卡片跳转、**不为引导新增编排/状态端点** |
 
 ## 12. 知识库详设（2026-07-14 补，02 §2 kb 表的实现规格）
 
