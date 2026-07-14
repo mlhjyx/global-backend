@@ -16,11 +16,14 @@
 POST /intake        ← 建议 SaaS 服务端代理转发（注册时用户尚无 token，见 §12 对齐项）
 req : { "company": {"nameZh": "…", "nameEn": "…"?}, "industry": "<taxonomyId>",
         "products": ["pump", …](1-5), "targetMarkets": ["DE","US"],
-        "hasWebsite": false, "websiteUrl": null, "businessEmail": "a@b.com" }
-resp: { "siteId": "st_…", "mode": "builder",          // hasWebsite=true → "diagnosis"（M3+）
+        "hasWebsite": false, "websiteUrl": null,      // 仅作背景知识喂品牌定位，【不分叉流程/栏目】
+        "businessEmail": "a@b.com" }
+resp: { "siteId": "st_…", "buildId": "bld_…",         // 注册即【无条件】触发 demo v0（不论 hasWebsite）
         "status": "generating_demo" }
 ```
 demo v0 完成后 `GET /sites/{id}` 的 `status=ready` 且 `previewUrl` 就绪（前端轮询或订阅事件 §11）。
+
+**引导式 onboarding 的后端信号**（消息卡片 / 栏目导航 / 跳转 UI = 前端，非本仓）：① **demo 就绪** → 轮询 `GET /builds/{id}`（生成中显进度；`GET /sites/{id}` 的 `status=ready`+`previewUrl` 就绪）→ 驱动卡片「demo 已生成，点此预览」；② **补料引导** → `GET /sites/{id}/kb/status` 的 `gaps[]`（brandProfile 产出的待补资料，见 §4）→ 驱动卡片「补齐资料让它更专业」→ 建站向导 `PATCH /sites/{id}/profile`（§2）。后端不拥有卡片顺序，只保证信号齐全可轮询。
 
 ## 2. 站点与建站向导
 
