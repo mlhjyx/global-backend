@@ -1,7 +1,7 @@
 # Site Builder Agent 详细设计 v1
 
-> 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型终选）。本文件是 9 个 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。
-> ⚠️ **卡内出现的模型名一律以 02 §6「2026-07-14 终版定档」为准**（实测评比+用户拍板，依据见 [10-model-selection-study.md](10-model-selection-study.md)）；卡片写作早于定档，模型标注是初稿参考。另：卡 1 planner 已被 D13 砍（v1 固定 DAG），保留仅作历史记录。
+> 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型终选）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent。**
+> ⚠️ **卡内出现的模型名一律以 02 §6「2026-07-14 终版定档」为准**（实测评比+用户拍板，依据见 [10-model-selection-study.md](10-model-selection-study.md)）；卡片写作早于定档，模型标注是初稿参考。另：**卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
 
 ## 0. 统一运行时契约（AiTask 基类，所有 agent 共用）
 
@@ -19,7 +19,9 @@ AiTask<I, O>：
 - **Prompt 管理**：每个 agent 的 system prompt + rubric 是**版本化代码资产**（`agents/<name>/prompt.ts`），从 CC skills 方法论内化固化（各卡注明来源）；改 prompt 必须过 eval harness 回归（02 §11.8）。
 - **工具原则**：库内化优先（进程内直接调），MCP 只在确需外部服务时作传输（续 ADR「MCP=传输非授权」）。
 
-## 1. planner —— 规划
+## 1. planner —— 规划　❌ 已砍（D13，v1 不实现，仅历史记录）
+
+> **本卡 v1 不实现**。按 D13（修订①，2026-07-14 用户确认）取消独立 planner agent——原职责**拆分归位**而非删除：**编排/预算取舍/增量范围** → 「编排/增量规划」确定性零模型（固定 DAG + 规则判定，见 02 §6）；**"该有哪些页 / 每页什么结构"的设计智能** → 卡 6 designSpec（未砍）；**用户口语化自由改站的意图 → 计划** → M2 工作台再引入（02 §6 已留槽）。以下内容保留仅作历史与 M2 复活参考。
 
 - **职责/触发**：每次 build run 开头；把「站点档案+资料清单+用户选项」翻译成本次要执行的任务清单与参数。
 - **输入 → 输出**：`{siteProfile, assetInventory, userOptions(风格/页面开关/语言/scope), lastBuildSummary?}` → `BuildPlan{tasks:[{type, params, priority}], estimatedCost, skipReasons[]}`。
