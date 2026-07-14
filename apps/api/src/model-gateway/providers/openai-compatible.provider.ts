@@ -75,6 +75,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (finishReason === 'length') {
         throw new Error(
           `${this.id} ${model}: output truncated at max_tokens (finish_reason=length), JSON incomplete — raise maxTokens`,
+          { cause: err },
         );
       }
       throw err;
