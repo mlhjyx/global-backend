@@ -19,7 +19,7 @@ apps/api/src/site-builder/
   assets/        # 素材：presigned 上传、处理管线状态机、多尺寸导出
   spec/          # SiteSpec zod schema + 校验器 + 主题 token 预设
   render/        # SiteSpec → Astro 构建（容器）→ 产物上传 → 预览
-  agents/        # 各 AI Task（本文件 §5 的 9 张卡）
+  agents/        # 各 AI Task（§5：8 张生产 agent，原卡 1 planner 已砍）
   temporal/      # siteBuilderWorkflow + activities
   preview/       # 预览签名 URL / 发布
   events/        # outbox: SiteDemoReady / SiteBuildProgress / SiteBuildFailed / InquiryReceived(M2)
@@ -80,13 +80,13 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 - **失败策略**：单素材失败不阻断整站（占位图+标记，fail-safe 照旧）；phase 级 Temporal 重试；预算超限 → 暂停 + `SiteBuildFailed(reason=budget)` 事件，绝不静默。
 - **并发**：同 site 同时只允许一个 build run（Temporal workflow id = site id 派生，天然去重）。
 
-## 5. Agent 架构卡（9 张）
+## 5. Agent 架构卡（原 9 卡；卡 1「规划 planner」已按 D13 砍 → 职责拆入「编排/增量规划」确定性零模型 + designSpec，余 8 张生产 agent）
 
 统一契约：`输入 schema → prompt（用户资料只进模板变量，防注入）→ 网关调用 → 输出 zod 校验（不过=带错误重试 ≤2）→ trace + 成本落 run`。
 
 | # | Agent | 职责 | 输入 → 输出 | 模型（首选） | 工具/护栏 |
 |---|---|---|---|---|---|
-| 1 | 规划 planner | 按站点档案产出本次 BuildPlan（要跑哪些任务、参数） | 站点档案+资料清单+用户选项 → BuildPlan | deepseek-v4-pro | 只能从任务类型白名单里选；预算预估 |
+| ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
 | 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-reasoner（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构** |
 | 3 | 图片管线 imagePipeline | 产品/工厂图变"专业站点图" | 原图 → 多尺寸 webp/avif 产物 | gpt-image 系（编辑）+ gemini-2.5-pro（质检） | 确定性步骤：EXIF 剥离→**rembg 主体分割出 mask**→质量评估→生成式仅重绘 mask 外（背景/打光/白底）→超分→导出。**主体保护双保险：mask 锁定 + 生成后主体 pHash/embedding 相似度校验，主体变形=丢弃重试**；人物照默认不做生成改动 |
 | 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | gemini-2.5-pro（多语言） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
