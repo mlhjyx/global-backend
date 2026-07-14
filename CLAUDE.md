@@ -21,8 +21,8 @@
 
 ## 3. 开发环境
 
-**Docker 服务**（`docker compose up -d`）：postgres `:5432`(pgvector/pg16, global/global/global_dev) · redis `:6379` · **new-api** `:3001`(模型网关，key 在 `apps/api/.env`) · **crawl4ai** `:11235`(token 在 .env) · **searxng** `:8081`(配置 `infra/searxng/settings.yml`)。
-**Temporal** 不在 compose，是独立 CLI：`~/.temporalio/bin/temporal server start-dev --db-filename ~/temporal.db &`（`:7233`）。
+**Docker 服务**（`docker compose -p global up -d`，共 8 个，容器名 `global-*`）：postgres `:5432`(pgvector/pg16, global/global/global_dev) · redis `:6379` · **new-api** `:3001`(模型网关，key 在 `apps/api/.env`) · **crawl4ai** `:11235`(token 在 .env) · **searxng** `:8081`(配置 `infra/searxng/settings.yml`) · **minio** `:9000/9001` · **embeddings**(ollama `:11434`，`bge-m3` 1024 维) · **docling** `:5001`。
+**Temporal** 不在 compose，跑成 systemd 服务 `temporal-dev.service`（开机自启、`:7233`）——`systemctl status/restart temporal-dev`，不再手动 CLI。
 
 **跑起来**：
 ```bash
