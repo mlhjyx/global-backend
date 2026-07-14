@@ -6,9 +6,16 @@ const SITE_ID = '22222222-2222-4222-8222-222222222222';
 
 function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
   const dim = opts.embedDim ?? 1024;
-  const db: { docs: Record<string, unknown>[]; assets: Record<string, unknown>[] } = {
+  const db: {
+    docs: Record<string, unknown>[];
+    assets: Record<string, unknown>[];
+    profiles: Record<string, unknown>[];
+    chunks: Record<string, unknown>[];
+  } = {
     docs: [],
     assets: [],
+    profiles: [],
+    chunks: [],
   };
   const rawInserts: unknown[][] = [];
   const embedCalls: string[][] = [];
@@ -24,8 +31,25 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
         if (row) Object.assign(row, data);
         return row;
       },
-      findMany: async ({ where }: { where: { siteId: string } }) =>
-        db.docs.filter((d) => d.siteId === where.siteId),
+      findMany: async ({
+        where,
+        orderBy,
+        take,
+      }: {
+        where: { siteId: string; status?: string };
+        orderBy?: { createdAt?: 'desc' | 'asc' };
+        take?: number;
+      }) => {
+        let rows = db.docs.filter(
+          (d) => d.siteId === where.siteId && (!where.status || d.status === where.status),
+        );
+        if (orderBy?.createdAt === 'desc') {
+          rows = [...rows].sort(
+            (a, b) => new Date(b.createdAt as Date).getTime() - new Date(a.createdAt as Date).getTime(),
+          );
+        }
+        return take != null ? rows.slice(0, take) : rows;
+      },
       count: async ({ where }: { where: { siteId: string } }) =>
         db.docs.filter((d) => d.siteId === where.siteId).length,
     },
@@ -54,6 +78,27 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
         if (row) Object.assign(row, data);
         return row;
       },
+    },
+    brandProfile: {
+      findFirst: async ({ where }: { where: { siteId: string } }) => {
+        const rows = db.profiles
+          .filter((p) => p.siteId === where.siteId)
+          .sort((a, b) => (b.version as number) - (a.version as number));
+        return rows[0] ?? null;
+      },
+    },
+    kbChunk: {
+      findMany: async ({
+        where,
+        take,
+      }: {
+        where: { documentId: string };
+        take?: number;
+      }) =>
+        db.chunks
+          .filter((c) => c.documentId === where.documentId)
+          .sort((a, b) => (a.seq as number) - (b.seq as number))
+          .slice(0, take ?? undefined),
     },
     $executeRaw: vi.fn(async (...args: unknown[]) => {
       rawInserts.push(args);
@@ -185,12 +230,40 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(ok?.processingStatus).toBe('ready');
   });
 
-  it('status：文档数 + chunk 总数（gaps 空数组占位，M1 brandProfile 补）', async () => {
+  it('status：文档数 + chunk 总数（未构建过 brand_profile 时 gaps=[]）', async () => {
     const { service, db } = makeService();
     db.docs.push(
       { id: 'd1', siteId: SITE_ID, chunkCount: 3 },
       { id: 'd2', siteId: SITE_ID, chunkCount: 2 },
     );
     expect(await service.status(CTX, SITE_ID)).toEqual({ documents: 2, chunks: 5, gaps: [] });
+  });
+
+  it('status：gaps 从最新 brand_profile 版本回填（M1-b，kb.service:116 挂账收口）', async () => {
+    const { service, db } = makeService();
+    const gap = { field: 'certifications', reason: 'needs_input', hint: '请上传证书文件' };
+    db.profiles.push(
+      { siteId: SITE_ID, version: 1, gaps: [{ field: 'old', reason: 'needs_input', hint: '旧版' }] },
+      { siteId: SITE_ID, version: 2, gaps: [gap] },
+    );
+    const status = await service.status(CTX, SITE_ID);
+    expect(status.gaps).toEqual([gap]); // 恒取最新版本，不混老版本
+  });
+
+  it('digestSources：只取 ready 文档、每文档按 seq 取前 N 块拼正文', async () => {
+    const { service, db } = makeService();
+    db.docs.push(
+      { id: 'd1', siteId: SITE_ID, source: 'upload', title: 'catalog.pdf', status: 'ready', createdAt: new Date('2026-07-02') },
+      { id: 'd2', siteId: SITE_ID, source: 'intake', title: '注册资料', status: 'queued', createdAt: new Date('2026-07-03') },
+    );
+    db.chunks.push(
+      { documentId: 'd1', seq: 1, text: 'second' },
+      { documentId: 'd1', seq: 0, text: 'first' },
+      { documentId: 'd1', seq: 2, text: 'third' },
+    );
+    const sources = await service.digestSources(CTX, SITE_ID, { chunksPerDoc: 2 });
+    expect(sources).toEqual([
+      { source: 'upload', title: 'catalog.pdf', text: 'first\nsecond' }, // queued 的 d2 不参与
+    ]);
   });
 });

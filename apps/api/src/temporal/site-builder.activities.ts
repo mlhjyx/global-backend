@@ -17,6 +17,21 @@ import type { IntakeInput } from '../site-builder/intake.service';
 import type { KbService } from '../site-builder/kb.service';
 import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
 import { allocateNextSiteVersion } from '../site-builder/version-alloc';
+import { runAiTask } from '../site-builder/agents/ai-task';
+import {
+  BRAND_PROFILE_TASK,
+  BrandProfileOutput,
+  canonicalUrl,
+  enforceEvidenceGate,
+  EvidenceCorpus,
+  GapItem,
+  RawFactItem,
+  sanitizeProfileForPrompt,
+  scrubPii,
+} from '../site-builder/agents/brand-profile';
+import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
+import { buildKbDigest } from '../site-builder/agents/kb-digest';
+import type { ExecutionBroker } from '../tools/tool-contract';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,8 +47,14 @@ export interface DemoV0ActivityInput {
 export interface SiteBuilderActivityDeps {
   prisma: PrismaService;
   gateway?: ModelGateway;
-  /** KB 服务（intake 资料入库 + queued 文档消化）；worker 装配 KbService，测试可注 stub。 */
-  kb?: { ingestText: KbService['ingestText']; processQueued: KbService['processQueued'] };
+  /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
+  kb?: {
+    ingestText: KbService['ingestText'];
+    processQueued: KbService['processQueued'];
+    digestSources?: KbService['digestSources'];
+  };
+  /** 品牌 web 研究的唯一出网闸门（缺省=研究降级 researchDegraded，不裸出网）。 */
+  broker?: ExecutionBroker;
 }
 
 export interface RefurbishActivityInput {
@@ -43,8 +64,19 @@ export interface RefurbishActivityInput {
   scope?: BuildScopeInput;
 }
 
+/** buildBrandProfile 活动的返回（workflow 汇总进 finalize steps）。 */
+export interface BrandProfileSummary {
+  version: number;
+  factCount: number;
+  gapsCount: number;
+  researchDegraded: boolean;
+  model: string;
+}
+
 export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   kb: { processed: number; failed: number; degraded: boolean };
+  /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
+  profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
   build: { previewSlug: string; versionId: string };
 }
 
@@ -64,7 +96,7 @@ export function previewBasePath(slug: string): string {
 }
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
-  const { prisma, gateway, kb } = deps;
+  const { prisma, gateway, kb, broker } = deps;
   const log = new Logger('SiteBuilderActivities');
 
   async function polishCopy(
@@ -265,7 +297,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             startedAt: new Date(),
             steps: [
               { key: 'kb_ingest', status: 'pending' },
-              { key: 'brand_profile', status: 'pending_m1b' },
+              { key: 'brand_profile', status: 'pending' },
               { key: 'image_pipeline', status: 'pending_m1c' },
               { key: 'copy', status: 'pending_m1d' },
               { key: 'assemble_build', status: 'pending' },
@@ -293,6 +325,184 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       siteId: string;
     }): Promise<{ processed: number; failed: number }> {
       return processQueuedForSite(input.workspaceId, input.siteId);
+    },
+
+    /**
+     * P1：品牌档案（M1-b，09 §2.4）。KB digest + 站主档案 + web 研究 → 模型综合 →
+     * 确定性 evidence 闸（D1/D2）→ brand_profile 追加新版本（版本化不覆盖）。
+     * - web 研究失败=独立降级位 researchDegraded（仅凭 KB 出 Brief），不整体失败；
+     * - 模型全链失败=活动抛错，workflow 侧 fail-safe（构建继续，步骤标 failed）；
+     * - Temporal 结果丢失重试会追加新版本行——append-only 设计下无害（读侧恒取最新版）。
+     */
+    async buildBrandProfile(input: RefurbishActivityInput): Promise<BrandProfileSummary> {
+      const { workspaceId, siteId, buildRunId } = input;
+      if (!gateway) throw new Error('brand profile: model gateway unavailable');
+
+      // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
+      // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
+      const { site, run } = await prisma.withWorkspace(workspaceId, async (tx) => ({
+        site: await tx.site.findUnique({ where: { id: siteId } }),
+        run: await tx.siteBuildRun.findUnique({
+          where: { id: buildRunId },
+          select: { status: true },
+        }),
+      }));
+      if (!site) throw new Error(`site ${siteId} not found`);
+      if (!run || run.status !== 'running') {
+        throw new Error(`run ${buildRunId} not running (cancelled?) — skip brand profile`);
+      }
+      const intake = site.intake as unknown as IntakeInput;
+      const profile = sanitizeProfileForPrompt(
+        (site.profile as Record<string, unknown> | null) ?? undefined,
+      );
+
+      const digestDocs = kb?.digestSources
+        ? await kb.digestSources({ userId: 'system', workspaceId, roles: [] }, siteId)
+        : [];
+      const kbDigest = buildKbDigest(digestDocs);
+
+      let research: { sources: ResearchSource[]; degraded: boolean } = {
+        sources: [],
+        degraded: true, // broker 缺席=研究能力缺失，诚实标记降级（不裸出网硬顶）
+      };
+      if (broker) {
+        research = await researchBrand(
+          { broker },
+          {
+            workspaceId,
+            runId: buildRunId,
+            companyName: intake.company.nameEn ?? intake.company.nameZh,
+            industry: intake.industry,
+            websiteUrl: intake.websiteUrl ?? undefined,
+          },
+        );
+      }
+
+      const result = await runAiTask<
+        Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+        BrandProfileOutput
+      >(
+        BRAND_PROFILE_TASK,
+        {
+          companyName: intake.company.nameEn ?? intake.company.nameZh,
+          industry: intake.industry,
+          products: intake.products ?? [],
+          targetMarkets: intake.targetMarkets ?? [],
+          profile,
+          kbDigest,
+          research: research.sources,
+        },
+        { gateway, ctx: { workspaceId, runId: buildRunId } },
+      );
+
+      // D1/D2 确定性出口闸（复审 F1）：闸执行时活动内有全部原文——按来源做 quote 核验。
+      // intakeText 剔 contact 且不含 businessEmail（数据最小化）；urlText 用 canonical(url) 防尾斜杠误降。
+      const urlText = new Map<string, string>();
+      for (const s of research.sources) {
+        const c = canonicalUrl(s.url);
+        if (c) urlText.set(c, s.content);
+      }
+      const corpus: EvidenceCorpus = {
+        intakeText: [
+          intake.company.nameEn ?? '',
+          intake.company.nameZh,
+          intake.industry ?? '',
+          (intake.products ?? []).join(' '),
+          (intake.targetMarkets ?? []).join(' '),
+          profile ? JSON.stringify(profile) : '',
+        ].join(' '),
+        kbText: kbDigest,
+        urlText,
+      };
+      const gated = enforceEvidenceGate(result.data.factSheet ?? [], { corpus });
+      const gaps: GapItem[] = [
+        ...gated.gaps,
+        ...(result.data.gaps ?? []).map((g) => ({
+          field: g.field,
+          reason: 'needs_input' as const,
+          hint: scrubPii(g.question),
+        })),
+      ];
+
+      // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
+      const scrubFact = (f: RawFactItem): RawFactItem => ({
+        ...f,
+        value: scrubPii(f.value),
+        evidence: f.evidence
+          ? { ...f.evidence, quote: f.evidence.quote ? scrubPii(f.evidence.quote) : undefined }
+          : undefined,
+      });
+      const clean = {
+        valueProps: (result.data.valueProps ?? []).map(scrubPii),
+        tone: result.data.tone
+          ? { voice: scrubPii(result.data.tone.voice), style: (result.data.tone.style ?? []).map(scrubPii) }
+          : null,
+        glossary: (result.data.glossary ?? []).map((g) => ({
+          term: scrubPii(g.term),
+          definition: scrubPii(g.definition),
+        })),
+        keywords: (result.data.keywords ?? []).map(scrubPii),
+        differentiators: (result.data.differentiators ?? []).map(scrubPii),
+        competitors: (result.data.competitors ?? []).map((c) => ({
+          name: scrubPii(c.name),
+          positioning: scrubPii(c.positioning),
+        })),
+        factSheet: gated.factSheet.map(scrubFact),
+        gaps: gaps.map((g) => ({ ...g, hint: scrubPii(g.hint) })),
+      };
+
+      // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
+      // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
+      let version = 0;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          version = await prisma.withWorkspace(workspaceId, async (tx) => {
+            const live = await tx.siteBuildRun.findUnique({
+              where: { id: buildRunId },
+              select: { status: true },
+            });
+            if (!live || live.status !== 'running') {
+              throw new Error(`run ${buildRunId} no longer running — skip brand profile write`);
+            }
+            const agg = await tx.brandProfile.aggregate({ where: { siteId }, _max: { version: true } });
+            const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
+            await tx.brandProfile.create({
+              data: {
+                workspaceId,
+                siteId,
+                version: next,
+                valueProps: clean.valueProps as Prisma.InputJsonValue,
+                tone: (clean.tone ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+                glossary: clean.glossary as Prisma.InputJsonValue,
+                keywords: clean.keywords as Prisma.InputJsonValue,
+                differentiators: clean.differentiators as Prisma.InputJsonValue,
+                competitors: clean.competitors as Prisma.InputJsonValue,
+                factSheet: clean.factSheet as unknown as Prisma.InputJsonValue,
+                gaps: clean.gaps as unknown as Prisma.InputJsonValue,
+                researchDegraded: research.degraded,
+              },
+            });
+            return next;
+          });
+          break;
+        } catch (err) {
+          const isVersionClash =
+            err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+          if (isVersionClash && attempt < 4) continue; // 并发撞版本→重算，不让整活动 attempt 重跑
+          throw err;
+        }
+      }
+
+      log.log(
+        `brand profile v${version} for site ${siteId}: ${clean.factSheet.length} facts, ${gaps.length} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+      );
+      return {
+        version,
+        factCount: clean.factSheet.length,
+        gapsCount: gaps.length,
+        researchDegraded: research.degraded,
+        model: result.model,
+      };
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
@@ -358,9 +568,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       return { previewSlug: site.slug, versionId: version.id };
     },
 
-    /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb 降级与骨架跳过项）。 */
+    /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb/profile 实况与骨架跳过项）。 */
     async finalizeRefurbish(input: RefurbishFinalizeInput): Promise<{ previewSlug: string }> {
-      const { workspaceId, siteId, buildRunId, kb: kbSummary, build } = input;
+      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, build } = input;
       await prisma.withWorkspace(workspaceId, async (tx) => {
         // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
         // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
@@ -378,7 +588,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 processed: kbSummary.processed,
                 failed: kbSummary.failed,
               },
-              { key: 'brand_profile', status: 'skipped_m1b' },
+              { key: 'brand_profile', status: profile.status, gaps: profile.gaps },
               { key: 'image_pipeline', status: 'skipped_m1c' },
               { key: 'copy', status: 'skipped_m1d' },
               { key: 'assemble_build', status: 'done' },

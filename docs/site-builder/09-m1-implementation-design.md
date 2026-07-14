@@ -66,15 +66,17 @@
 
 **per-task 路由表（配置驱动，`agents/task-registry`；「现在」列 = 今天就能真测的默认值，「终选」列 = 用户接通道后翻配置，02 §6 唯一真值）**：
 
-| task | 现在（已实测活） | 终选（待通道） | 未就绪行为 |
+> **2026-07-14 终版定档**（真实评测 + 用户三轮拍板；唯一真值=02 §6 与 10 号文档，下表为施工执行版）：
+
+| task | 现役主选（已实测活） | 回退链 | 升级位（待通道） |
 |---|---|---|---|
-| site_builder.brand_profile | deepseek-v4-pro | gemini-3.1-pro（备 opus-4-8） | 文本可跑，web 研究独立降级位 `researchDegraded` |
-| site_builder.copy | deepseek-v4-pro | gemini-3.1-pro（备 sonnet-5） | 可跑 |
-| site_builder.design_spec | deepseek-v4-flash | gemini-3.1-pro | 可跑（无视觉输入时纯 token 选型） |
-| site_builder.assemble / fix | deepseek-v4-pro | claude-sonnet-5（备 gpt-5.x） | 可跑 |
-| site_builder.qa_summarize / seo_review | deepseek-v4-flash | gemini-3-flash 档 | 可跑（主体本就确定性） |
-| site_builder.image_qc / image_edit | — | gemini-3.1-pro / gpt-image-2 `images/edits` | **显式跳过**：`enhanceSkipped`，只走确定性步 |
-| site_builder.aesthetic_review | — | gemini-3.1-pro（视觉） | **该维弃权**（03 卡6 降级语义），不阻断出环 |
+| site_builder.brand_profile | deepseek-v4-pro（或 minimax-m3，评测并列） | glm-5.2；web 研究失败独立降级位 `researchDegraded` | gemini-3.1-pro / GPT-5.6 Terra |
+| site_builder.copy | deepseek-v4-pro（🔴 护栏：`reasoning_effort:"low"`+长度裁剪+factSheet 白名单后校验） | glm-5.2 → doubao-seed-2.0-pro | GPT-5.6 Luna / gemini-3.1-pro |
+| site_builder.design_spec | minimax-m3（与审美评审同档，多模态） | doubao-seed-2.0-pro | gemini-3.1-pro / GPT-5.6 Terra |
+| site_builder.assemble / fix | **glm-5.2**（超时预算 180s） | 三重门校验→超时/违规自动回退 deepseek-v4-pro；批量档 doubao-seed-2.0-code | GPT-5.6 Terra / claude-sonnet-5 |
+| site_builder.qa_summarize / seo_review | deepseek-v4-flash | doubao-seed-2.0-lite | gemini-3-flash |
+| site_builder.image_qc / image_edit | seedream-5.0-lite（方舟已接真出图；图生图同端点，mask 保主体语义 M1-c 真探） | 确定性步兜底（`enhanceSkipped`） | gpt-image-2 `images/edits`（贵精档） |
+| site_builder.aesthetic_review | minimax-m3（plan 端点收图与否 M1-f 真探） | **该维弃权**（03 卡6 降级语义），不阻断出环 | gemini-3.1-pro / GPT-5.6 Terra |
 
 原则：**文本任务 = 配置默认 deepseek 双档（合法路由，非静默降级）；能力缺失任务（视觉/图编）= 显式跳过并落标记，绝不拿文本模型硬顶**。通道接入后翻 registry 配置 + 重启 worker 即切换（获客侧 #35 先例：旧进程持旧注册表须重启）。豆包视频中转坑（issue #2174/方案 B 直连方舟）与 M1 无关（视频=M3），仅在契约留降级位。
 

@@ -102,28 +102,32 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 >
 > **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，CC 生态是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← seo-specialist 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（Playwright/Lighthouse/sharp/rembg 直接进 activity），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
 
-## 6. 模型选型（按能力全市场选型，2026-07-14 web 调研；定稿后由用户在 new-api 网关接入对应通道）
+## 6. 模型选型（**终版定档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
 
-原则（用户指示）：按每个 agent 的**能力需求**选市面最优模型，不迁就网关现有模型；网关接入清单见表末。
+> 本表为**唯一真值**。定档方法：三个任务形状在本地网关对活模型真实调用评测（确定性判分+延迟实测）+ 外部信源研究 + 用户拍板。「现役」列今天即可真跑（方舟 agent plan 10 文本模型 + seedream 已接通实测，deepseek 直连双档已接）；「升级位」待对应通道接入后按同套评测题复测再切。初稿的 web 调研表已被本表取代。
 
-| Agent/用途 | 首选 | 备选 | 选型理由（2026-07 行情） |
+| Agent/用途 | 现役主选（实测背书） | 回退链 | 升级位（通道待接） |
 |---|---|---|---|
-| 规划 planner | claude-sonnet-5 | gpt-5.x | 结构化输出+指令遵循一线，$3/$15 性价比档 |
-| 品牌定位（研究综合） | gemini-3.1-pro | claude-opus-4-8 | 长上下文+综合写作最强档（Arena 写作 Elo 最高），$2/$12 |
-| 多语言文案 | gemini-3.1-pro | claude-sonnet-5 | 多语言/创意写作质量-成本最优；小语种原生感 |
-| 站点组装/修复 | claude-sonnet-5 | gpt-5.x | 代码/结构化 spec 生成最稳（SWE-bench 85%+ 档且价格仅 Opus 档 1/5），质量环多轮调用扛得住 |
-| 视觉评审（审美/图片质检） | gemini-3.1-pro | gpt-5.x（视觉） | 原生多模态看整页截图 |
-| 轻量汇总/demo v0 文案 | gemini-3-flash 档 | deepseek-v4-flash（网关已有）/ claude-haiku-4.5 | 便宜快，秒级路径专用 |
-| 图像编辑/生成 | **gpt-image-2**（2026-04-21 发布，已拍板） | seedream 最新版（火山同渠道）；nano-banana-2（主体跨姿态稳定性公认最强，特例图用） | `images/edits` 支持 **mask 局部重绘** = 保主体的关键能力；≤16 参考图；任意分辨率至 4K；per-token 计费（1024² 中档 ≈ $0.053/张） |
-| 视频生成 | **doubao-seedance-2-0-260128**（标准版；fast 版 `-fast-260128`，已拍板 Seed 2.0） | — | 2026-04-14 全面开放 API：文/图/音/视四模态输入、4~15s、480p/720p/1080p、6 比例、默认带音频；约 1 元/秒（15s ≈ 15 元） |
+| 编排/增量规划（原 planner 卡1） | **确定性零模型**（D13：固定 DAG + scope 参数 + content_hash 幂等判定——结构化输入下用模型规划=花钱买不可复现）；「站点该有哪些页面/每页什么结构」的规划智能在 **designSpec 行**（未砍，见下） | —（Temporal workflow 即规划器，可回放可审计） | M2+ 自由意图规划（工作台口语化改站需求→任务计划）：GPT-5.6 Terra / deepseek-v4-pro 预留 |
+| 品牌研究综合 brandProfile | **deepseek-v4-pro** 或 **minimax-m3**（评测并列 99/100；竞品认证陷阱零踩、引文逐字核验零虚构） | glm-5.2（唯二主动消歧，审计留痕最佳） | gemini-3.1-pro（长文档检索王）/ GPT-5.6 Terra |
+| 多语言文案 copy | **deepseek-v4-pro**（德语原生度评测最佳；🔴 必配护栏：`reasoning_effort:"low"` + 长度超限裁剪重写 + factSheet 白名单后校验） | glm-5.2（约束遵循最佳、零 reasoning 税）→ doubao-seed-2.0-pro | GPT-5.6 Luna / gemini-3.1-pro（claude-sonnet-5 营销语气口碑第一，8/31 前介绍价 $2/$10） |
+| 站点组装/修复 siteAssembly/Fix | **glm-5.2**（应答质量满分；超时预算 180s 吸收其延迟尾部） | 三重门校验 → 超时/违规**自动回退 deepseek-v4-pro**（加压评测全满分+跨 run 同构）；低成本批量档 doubao-seed-2.0-code（须配校验重试链） | GPT-5.6 Terra / claude-sonnet-5（唯二官方 Structured Outputs） |
+| 视觉评审（审美/图片质检） | **minimax-m3**（网关内唯一原生图像输入；plan 端点收图与否 M1-f 真探，不通则该维弃权降级） | doubao-seed-2.0-pro（多模态） | gemini-3.1-pro / GPT-5.6 Terra |
+| qa/seo 汇总、demo v0 轻文案 | **deepseek-v4-flash**（$0.14/$0.28 全场最低价） | doubao-seed-2.0-lite | gemini-3-flash |
+| 图像生成/编辑 | **doubao-seedream-5.0-lite**（方舟套餐已接通、网关真出图实测；双语文字渲染强、低成本；用户拍板暂用） | — | **gpt-image-2**（文字渲染 Elo 第一 + `images/edits` mask 局部重绘=保主体关键能力；接通后组"贵精/便宜快"双轨，含长文字图必用） |
+| 视频生成（M3） | doubao-seedance-2.0（标准/fast/mini）——🔴 **需方舟 Large 档**（现档位实测不含，用户已确认后期升 Large） | 动效预设降级（确定性零模型，M1 即有） | — |
+| 知识库 embedding | **BGE-M3 自托管**（Ollama 容器，1024 维；M0 已落地实测） | —（🔴 D14 合规红线：公司资料不出域，**故意不走网关**，配置层禁自由 URL） | 无升级位（换模型=按 embed_version 全量重嵌，非通道问题） |
 
-**网关接入清单（用户操作项，接入后我实测）**：
-1. Anthropic 通道 → claude-sonnet-5（组装/规划主力）
-2. Google 通道 → gemini-3.1-pro + gemini-3-flash（文案/视觉/轻量）
-3. OpenAI 通道 → gpt-image-2（须确认 `images/edits` 端点转发）
-4. 火山方舟通道 → doubao-seedance-2-0（视频任务）+ seedream（图像备选）
+🔴 评测出的工程硬约束（AiTask 基类内建，全模型适用）：现役全员是 reasoning 模型——`finish_reason=length && content 空`=显式失败必检（换预算/换模型重试，绝不静默）；kimi/minimax 无视 `reasoning_effort` 参数；doubao 不严守 max_tokens（预算按实际用量 settle）；kimi 双档最大输出仅 32k 不选长产出。
 
-⚠️ **已知坑**：new-api 对豆包视频任务中转有失败案例（[QuantumNous/new-api issue #2174](https://github.com/QuantumNous/new-api/issues/2174)）——接入时先升级 new-api 最新版实测；中转不稳则**方案 B**：视频 activity 后端直连火山方舟 v3 任务接口（`POST /api/v3/contents/generations/tasks`，异步轮询），key 集中配置，成本照记 `site_build_run.cost_summary`，其余模型不受影响仍统一网关。
+**网关通道现状与待接清单**：
+1. ✅ **火山方舟 agent plan**（已接，2026-07-14 实测）：10 文本模型（doubao-seed-2.0 全家/kimi 双档/glm-5.2/minimax 双档）+ seedream-5.0-lite 图像；plan 专属路径 `/api/plan/*`（文本 OpenAI 型通道、图像 Custom 型完整 URL——type 45 火山适配器与 plan 路径不兼容）
+2. ✅ **DeepSeek 直连**（既有）：deepseek-v4-flash/pro 双档（plan 内同名双档为尝鲜限流版，不绑避免分流）
+3. ⬜ OpenAI 通道 → **GPT-5.6 Terra/Luna**（勿接 5.5，已被 5.6 三档取代）+ gpt-image-2（须确认 `images/edits` 端点转发）
+4. ⬜ Google 通道 → gemini-3.1-pro + gemini-3-flash（现 Gemini 通道额度耗尽 429）
+5. ⬜ Anthropic 通道 → claude-sonnet-5（可选；8/31 前介绍价窗口）
+
+⚠️ **视频已知坑**（M3 前置）：new-api 对豆包视频任务中转有失败案例（[QuantumNous/new-api issue #2174](https://github.com/QuantumNous/new-api/issues/2174)）——接入时先升级 new-api 最新版实测；中转不稳则**方案 B**：视频 activity 后端直连火山方舟任务接口（异步轮询），key 集中配置，成本照记 `site_build_run.cost_summary`，其余模型不受影响仍统一网关。且 seedance 在 agent plan 中仅 Large/Max 档可用（已实测现档位 UnsupportedModel）。
 
 ## 7. 权限与安全（用户点名）
 
@@ -164,11 +168,11 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 | D5 | SEO 诊断分支 | 后置 M3+ |
 | D6 | 多租户隔离 | RLS + 对象存储前缀 + 签名 URL（§7） |
 | D7 | 预览方式 | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属 |
-| D8 | 模型选型原则 | 按 agent 能力需求全市场选型（§6 表），定稿后用户在 new-api 接入通道；视频=火山 **Seedance 2.0** |
-| D9 | readdy 素材库 | 不联动（无开放素材接口+授权链断）；开发期作内部设计基准，生产素材走开放授权生态（§8） |
+| D8 | 模型选型原则 | 按 agent 能力需求全市场选型；**2026-07-14 终版定档**（§6 表=唯一真值：实测评比+用户三轮拍板，依据见 10 号文档）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档） |
+| D9 | readdy 定位 | **修订（2026-07-14 用户拍板）：仅设计基准 → 开发期设计源**——自己账号生成→产品内导出 React/Figma→固定工序改造成 Astro 组件入封闭库（工序与 ToS 边界见 11 号文档）；运行时逐站生成否决（无公开 API+撞 D1+数据出境）；生产素材仍走开放授权生态（§8） |
 | D10 | 发布部署 | **海外服务器**（免 ICP 备案）；静态托管=对象存储+CDN 优先（非 VPS）；预览国内友好线路/发布海外 CDN 双链路 |
 | D11 | SiteSpec 数据形状 | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认） |
-| D12 | 模板策略 | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认） |
+| D12 | 模板策略 | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认）；**组件库 v1 扩容 17→26 型**（2026-07-14 用户拍板，readdy demo 缺口实证见 11 号文档：9 个小难度缺口并入 M1-e，中难度 3 个 v1.5，沉浸叙事类不进封闭库） |
 | D13 | v1 编排 | **无 planner agent**：固定 DAG + 规则判定增量范围；M2+ 真需要再评估（修订①，用户确认） |
 | D14 | 知识库与 embedding | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12）；embedding 自托管 day1 起（换模型=全量重嵌，切换成本决定不走"先 API 后自托管"） |
 | D15 | 富文本 | v1 即开（用户拍板）：受限 ProseMirror JSON、不存 HTML（04 §5） |
