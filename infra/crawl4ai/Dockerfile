@@ -30,3 +30,7 @@ RUN sed -i 's|command=/usr/bin/redis-server |command=/usr/bin/redis-server --sav
 
 # Restore the non-root runtime user the base image expects.
 USER appuser
+
+# Fix (2026-07-15): upstream :latest 的 playwright 与内置 chromium 版本不匹配、缺 chromium-headless-shell。
+# 显式装匹配浏览器到 appuser cache，一劳永逸修 unhealthy。
+RUN python -m playwright install chromium chromium-headless-shell
