@@ -44,7 +44,9 @@ export class BuildsController {
   @Post('sites/:id/builds')
   @HttpCode(201)
   @ApiOperation({ summary: '触发精装修构建（07 §5；409=进行中，429=当日配额）' })
-  @ApiHeader({ name: 'Idempotency-Key', required: false })
+  // name 必须与 @Headers('idempotency-key') 推断名精确一致（含大小写）才会合并成单个 required:false 参数；
+  // 大小写不一致会生成两个仅大小写不同的 header 参数，令 oasdiff 把契约与自身误判为破坏性变更（见 company.controller 同款约定）
+  @ApiHeader({ name: 'idempotency-key', required: false, description: '幂等键（客户端生成，如 uuid）' })
   async create(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) siteId: string,

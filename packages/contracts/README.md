@@ -61,4 +61,5 @@ packages/contracts/
   1. **drift**：重导出后 `git diff --exit-code openapi/openapi.json`——提交的契约必须与代码一致（改了装饰器忘了重导出 → CI 红）。
   2. **lint**：`spectral lint`（规则 `.spectral.yaml`），error 级即失败。
   3. **breaking**：`oasdiff` 对比 PR base 分支的契约，破坏性变更（删字段/改类型/改必填）默认拦截；确需破坏（升主版本+迁移说明）给 PR 打 `breaking-change-approved` label 放行。
+- 🔴 **header 参数大小写陷阱**：HTTP header 名大小写不敏感，`oasdiff` 亦归一。若同一操作出现两个仅大小写不同的 header 参数（如 `@Headers('idempotency-key')` 推断的 `idempotency-key` + `@ApiHeader({ name: 'Idempotency-Key' })` 显式声明的 `Idempotency-Key`），`oasdiff` 会把契约**与其自身**误判为破坏性变更，令所有「未改契约」的 PR 无端翻红。修法：`@ApiHeader` 的 `name` 必须与 `@Headers('…')` 推断名**精确一致（含大小写）**，二者才合并成单参数。`apps/api/src/common/openapi-header-params.spec.ts` 单测守此不变式。
 - 本地重导出：`pnpm --filter @global/api build && node apps/api/dist/main.js --export-openapi`（无需 DB/Temporal，假 `DATABASE_URL` 即可）。
