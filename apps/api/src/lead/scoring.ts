@@ -35,7 +35,8 @@ export interface IcpForScoring {
 }
 
 export interface LeadScoreResult {
-  queue: 'recommended' | 'needs_review' | 'rejected' | 'suppressed';
+  // 'sanctions_hold'（第五门制裁命中）= 独立隔离队列，压过一切（人工复核前不交付）。
+  queue: 'recommended' | 'needs_review' | 'rejected' | 'suppressed' | 'sanctions_hold';
   totalScore: number;
   scores: {
     fit: number;
@@ -94,6 +95,12 @@ export interface ScoreLeadOpts {
    * 都没有（联系不上的"推荐"），其余五维形同虚设。词表归一落地后此覆盖退化为一致性校验。
    */
   authoritativeFit?: 'match' | 'weak' | 'mismatch' | null;
+  /**
+   * 制裁筛查命中（qualify 第五门）：有未决命中（potential_match/confirmed_true_hit）→ `sanctionsHold=true`
+   * → queue 强制 `'sanctions_hold'`（隔离队列，**压过一切**——含 exclude/权威 match/阈值）。命中≠低分而是合规硬停，
+   * 故不进六维总分；decide(accept) 另有硬拦（绝不交付）。fail-open：未启用/清白 → false（不影响队列）。
+   */
+  sanctionsHold?: boolean;
 }
 
 /** 权威 Fit 判定 → Fit 维分值（match 高带、weak 复核带、mismatch 零）。 */
@@ -185,7 +192,11 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const reachable = reachability > 0;
   const canRecommend = totalScore >= RECOMMEND_THRESHOLD && reachable;
   let queue: LeadScoreResult['queue'];
-  if (company.status === 'SUPPRESSED') queue = 'suppressed';
+  // 第五门制裁命中 = 最高优先隔离，压过一切（含硬排除/权威 match/阈值）。合规硬停，人工复核前绝不交付。
+  if (opts?.sanctionsHold) {
+    queue = 'sanctions_hold';
+    notes.push('制裁筛查命中 —— 进隔离队列（sanctions_hold），人工复核前不交付（第五门）');
+  } else if (company.status === 'SUPPRESSED') queue = 'suppressed';
   else if (fitResult.verdict === 'exclude') queue = 'rejected';
   else if (authoritative === 'mismatch') queue = 'rejected';
   else if (authoritative === 'weak') queue = 'needs_review';

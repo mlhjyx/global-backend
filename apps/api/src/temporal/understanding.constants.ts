@@ -16,5 +16,8 @@ export const EXTERNAL_INTENT_SWEEP_SCHEDULE_ID = 'external-intent-sweep';
 // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule）：一次共享大扫落 postgres → 逐公司零 BQ 字节读缓存
 export const PATENTS_CACHE_REFRESH_WORKFLOW = 'patentsCacheRefreshWorkflow';
 export const PATENTS_CACHE_REFRESH_SCHEDULE_ID = 'patents-cache-refresh';
+// 制裁名单筛查（Qualify 第五门，第 6 个周期 Schedule）：每日刷新 OFAC/EU 名单 → sanctions_entity + 重建索引
+export const SANCTIONS_REFRESH_WORKFLOW = 'sanctionsRefreshWorkflow';
+export const SANCTIONS_REFRESH_SCHEDULE_ID = 'sanctions-refresh';
 // 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
 export const DELETION_WORKFLOW = 'deletionWorkflow';

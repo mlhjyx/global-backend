@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   buildSanctionsIndex,
@@ -25,15 +25,27 @@ export interface ScreenResult {
 }
 
 @Injectable()
-export class SanctionsScreeningService implements OnModuleInit {
+export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SanctionsScreeningService.name);
   private index: IndexedSanctionsEntity[] = [];
   private listVersions: Record<string, string> = {};
   private active = false;
+  private timer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit(): Promise<void> {
+    await this.rebuildIndexSafe();
+    // 周期性重建：API 长驻进程与每日名单刷新之间保持新鲜（decide 硬门读同一索引；默认 1h，env 可调）。
+    this.timer = setInterval(() => void this.rebuildIndexSafe(), rebuildIntervalMs());
+    if (typeof this.timer.unref === 'function') this.timer.unref(); // 不阻止进程退出
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  private async rebuildIndexSafe(): Promise<void> {
     try {
       await this.rebuildIndex();
     } catch (err) {
@@ -100,4 +112,43 @@ export class SanctionsScreeningService implements OnModuleInit {
 function envThreshold(): number {
   const raw = Number(process.env.SANCTIONS_MATCH_THRESHOLD);
   return Number.isFinite(raw) && raw > 0 && raw <= 1 ? raw : DEFAULT_MATCH_THRESHOLD;
+}
+
+/** 索引重建周期（ms，默认 1h，下限 60s）。 */
+function rebuildIntervalMs(): number {
+  const raw = Number(process.env.SANCTIONS_INDEX_REBUILD_MS);
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : 3_600_000;
+}
+
+/** 命中抑制键 = 名单源:条目 id（re-screen 时判「是否同一条已清命中」）。 */
+export function screenMatchKey(m: { sourceKey: string; externalId: string }): string {
+  return `${m.sourceKey}:${m.externalId}`;
+}
+
+/** Prisma matches Json → reconcile 输入的最小形状（sourceKey/externalId）。qualify/decide 共用。 */
+export function matchesFromJson(raw: unknown): { sourceKey: string; externalId: string }[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as { sourceKey?: unknown; externalId?: unknown }[])
+    .filter((m) => typeof m?.sourceKey === 'string' && typeof m?.externalId === 'string')
+    .map((m) => ({ sourceKey: m.sourceKey as string, externalId: m.externalId as string }));
+}
+
+/**
+ * 复核态对账（re-screen 时，纯函数）：
+ *  - confirmed_true_hit 恒留（真命中，永远隔离）；
+ *  - cleared_false_positive **仅当新命中 ⊆ 已清命中**才保留（prior-cleared-match 抑制，防复核疲劳）；
+ *    出现**任一新条目** → 重开 'open'（名单新增了新的疑似命中，须重新人审）；
+ *  - 其余（含无既有记录）→ 'open'。
+ */
+export function reconcileReviewState(
+  existing: { reviewState: string; matches: { sourceKey: string; externalId: string }[] } | null,
+  newMatches: readonly { sourceKey: string; externalId: string }[],
+): 'open' | 'cleared_false_positive' | 'confirmed_true_hit' {
+  if (!existing) return 'open';
+  if (existing.reviewState === 'confirmed_true_hit') return 'confirmed_true_hit';
+  if (existing.reviewState === 'cleared_false_positive') {
+    const cleared = new Set(existing.matches.map(screenMatchKey));
+    return newMatches.every((m) => cleared.has(screenMatchKey(m))) ? 'cleared_false_positive' : 'open';
+  }
+  return 'open';
 }

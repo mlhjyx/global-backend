@@ -31,6 +31,20 @@ describe('scoreLead', () => {
     expect(scoreLead(company({ status: 'SUPPRESSED' }), icp).queue).toBe('suppressed');
   });
 
+  it('🔴 制裁命中 sanctionsHold → sanctions_hold 队列，压过一切（含 SUPPRESSED/排除/权威 match）', () => {
+    expect(scoreLead(company({}), icp, { sanctionsHold: true }).queue).toBe('sanctions_hold');
+    // 压过 SUPPRESSED
+    expect(scoreLead(company({ status: 'SUPPRESSED' }), icp, { sanctionsHold: true }).queue).toBe('sanctions_hold');
+    // 压过硬排除
+    expect(scoreLead(company({ country: 'XX' }), icp, { sanctionsHold: true }).queue).toBe('sanctions_hold');
+    // 压过权威 match（否则本会进 recommended/needs_review）
+    expect(scoreLead(company({}), icp, { sanctionsHold: true, authoritativeFit: 'match' }).queue).toBe('sanctions_hold');
+  });
+
+  it('sanctionsHold=false/缺省 → 不影响队列（fail-open）', () => {
+    expect(scoreLead(company({ status: 'SUPPRESSED' }), icp, { sanctionsHold: false }).queue).toBe('suppressed');
+  });
+
   it('排除命中 → rejected 队列', () => {
     expect(scoreLead(company({ country: 'XX' }), icp).queue).toBe('rejected');
   });

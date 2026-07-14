@@ -2413,6 +2413,68 @@
         ]
       }
     },
+    "/api/v1/leads/{leadId}/sanctions-review": {
+      "post": {
+        "operationId": "LeadController_sanctionsReview_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionsReviewDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "leadId": {
+                          "type": "string"
+                        },
+                        "reviewState": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付",
+        "tags": [
+          "Leads"
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "operationId": "EventsController_list_v1",
@@ -4368,6 +4430,26 @@
             "description": "拒绝原因（回流做评分质量反馈）"
           }
         }
+      },
+      "SanctionsReviewDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "cleared_false_positive",
+              "confirmed_true_hit"
+            ],
+            "description": "复核裁决：误报清白（回落队列，抑制复发）/ 真命中确认（留隔离，永不交付）"
+          },
+          "note": {
+            "type": "string",
+            "description": "复核备注（留痕）"
+          }
+        },
+        "required": [
+          "decision"
+        ]
       },
       "AckEventsDto": {
         "type": "object",

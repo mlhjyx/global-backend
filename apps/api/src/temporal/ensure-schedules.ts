@@ -13,6 +13,8 @@ import {
   INTENT_SWEEP_WORKFLOW,
   PATENTS_CACHE_REFRESH_SCHEDULE_ID,
   PATENTS_CACHE_REFRESH_WORKFLOW,
+  SANCTIONS_REFRESH_SCHEDULE_ID,
+  SANCTIONS_REFRESH_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
 } from './understanding.constants';
 
@@ -32,6 +34,8 @@ const SPECS = [
   // 专利发明人缓存刷新（scale-safe #89）：一次共享大扫 → postgres 缓存。周更（BQ 扫数十 GB → 节制，稳在 1TB/月内）。
   // 注：env 名沿用兄弟 Schedule 的 `*_EVERY` 时长串约定（设计文档暂拟 _MS，实际机制用 Duration 串如 '7d'，故用 _EVERY）。
   { id: PATENTS_CACHE_REFRESH_SCHEDULE_ID, workflowType: PATENTS_CACHE_REFRESH_WORKFLOW, everyEnv: 'PATENT_CACHE_REFRESH_EVERY', everyDefault: '7d' },
+  // 制裁名单刷新（Qualify 第五门）：OFAC 日更 → 每日足够；DISABLED 源零动作（refreshAll 只取 ENABLED）。
+  { id: SANCTIONS_REFRESH_SCHEDULE_ID, workflowType: SANCTIONS_REFRESH_WORKFLOW, everyEnv: 'SANCTIONS_REFRESH_EVERY', everyDefault: '24h' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {

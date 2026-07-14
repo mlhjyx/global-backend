@@ -9,8 +9,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
@@ -33,6 +33,20 @@ class AcceptLeadDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+class SanctionsReviewDto {
+  @ApiProperty({
+    enum: ['cleared_false_positive', 'confirmed_true_hit'],
+    description: '复核裁决：误报清白（回落队列，抑制复发）/ 真命中确认（留隔离，永不交付）',
+  })
+  @IsIn(['cleared_false_positive', 'confirmed_true_hit'])
+  decision!: 'cleared_false_positive' | 'confirmed_true_hit';
+
+  @ApiPropertyOptional({ description: '复核备注（留痕）' })
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 @ApiTags('Leads')
@@ -127,5 +141,22 @@ export class LeadController {
     @Body() dto: RejectLeadDto,
   ) {
     return envelope(await this.leads.decide(ctx, leadId, 'reject', dto.reason));
+  }
+
+  @Post('leads/:leadId/sanctions-review')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付',
+  })
+  @ApiEnvelope({
+    type: 'object',
+    properties: { leadId: { type: 'string' }, reviewState: { type: 'string' } },
+  })
+  async sanctionsReview(
+    @Ctx() ctx: RequestContext,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Body() dto: SanctionsReviewDto,
+  ) {
+    return envelope(await this.leads.reviewSanctions(ctx, leadId, dto.decision, dto.note));
   }
 }

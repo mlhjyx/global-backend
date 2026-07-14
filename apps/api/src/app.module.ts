@@ -18,6 +18,7 @@ import { DiscoveryModule } from './discovery/discovery.module';
 import { LeadModule } from './lead/lead.module';
 import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
+import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 
 /**
@@ -52,6 +53,7 @@ import { SiteBuilderModule } from './site-builder/site-builder.module';
     LeadModule,
     EventsModule,
     ComplianceModule,
+    SanctionsModule,
     SiteBuilderModule,
   ],
   controllers: [HealthController, WhoamiController],

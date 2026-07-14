@@ -295,8 +295,10 @@ function makeDecideService(tx: unknown, rights: { effect: string; allowed: boole
     evaluate: () => ({ reason: 'test', ruleId: null, ruleVersion: 'v1', requiresLawfulBasis: false, article14NoticeRequired: false, ...rights }),
     logDecision: vi.fn(async () => {}),
   };
+  // 制裁筛查桩：这些用例不测第五门 → 返回 not_screened（fail-open，decide 正常交棒；快照标 not_screened）。
+  const sanctions = { screen: () => ({ status: 'not_screened' as const, matches: [], listVersions: {} }) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = new LeadService(prisma as any, dataRights as any);
+  const svc = new LeadService(prisma as any, dataRights as any, sanctions as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (svc as any).__logDecision = dataRights.logDecision;
   return svc;

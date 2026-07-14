@@ -21,7 +21,8 @@
     "personal_data_class",
     "suppression_state",
     "recommended_action",
-    "valid_until"
+    "valid_until",
+    "sanctions_screening"
   ],
   "properties": {
     "snapshot_version": { "type": "integer", "const": 1 },
@@ -96,6 +97,17 @@
     "personal_data_class": { "type": "string", "enum": ["named_person_refs", "company_facts_only"] },
     "suppression_state": { "type": "string", "enum": ["none", "suppressed"] },
     "recommended_action": { "type": "string", "examples": ["handoff_to_campaign"] },
-    "valid_until": { "type": ["string", "null"], "format": "date-time", "description": "Earliest expiry of the facts backing this lead = min(evidence.fetchedAt + per-class TTL, latest intent event.at + timing window). null when no freshness basis (no evidence, no intent). Past value => backing data already stale, re-qualify before outreach." }
+    "valid_until": { "type": ["string", "null"], "format": "date-time", "description": "Earliest expiry of the facts backing this lead = min(evidence.fetchedAt + per-class TTL, latest intent event.at + timing window). null when no freshness basis (no evidence, no intent). Past value => backing data already stale, re-qualify before outreach." },
+    "sanctions_screening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "screened_at", "list_versions"],
+      "description": "Fifth-gate sanctions screening verdict (OFAC/EU). 'hold' matches never reach a delivered snapshot — decide(accept) throws SANCTIONS_HOLD_UNRESOLVED. 'not_screened' means the gate is DISABLED; SaaS MUST NOT do outreach on a not_screened package.",
+      "properties": {
+        "status": { "type": "string", "enum": ["clear", "not_screened"] },
+        "screened_at": { "type": ["string", "null"], "format": "date-time" },
+        "list_versions": { "type": "object", "additionalProperties": { "type": "string" }, "description": "sourceKey -> list publish date (ISO), e.g. { ofac_sdn: '2026-07-13' }." }
+      }
+    }
   }
 }

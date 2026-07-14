@@ -10,6 +10,7 @@ import {
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
+import { seedSanctions } from '../sanctions/sanctions-seed';
 import {
   INTEGRATION_EVENTS,
   INTERNAL_COMMANDS,
@@ -94,6 +95,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
     await new DiscoveryProviderRegistry().seed(this.db).catch((err) => {
       this.logger.error(`provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`);
+    });
+    // 制裁名单源 + source_policy seed（第五门，DISABLED；API-only 部署也需登记 source_policy 供 broker 门）。
+    await seedSanctions(this.db).catch((err) => {
+      this.logger.error(`sanctions seed FAILED — refresh/screening may be misconfigured: ${String(err)}`);
     });
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。

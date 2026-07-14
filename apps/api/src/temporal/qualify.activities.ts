@@ -2,6 +2,12 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scoreLead } from '../lead/scoring';
 import { RuleLike } from '../icp/rule-engine';
+import {
+  SanctionsScreeningService,
+  reconcileReviewState,
+  matchesFromJson,
+} from '../sanctions/sanctions-screening.service';
+import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -12,7 +18,7 @@ export interface QualifyRunInput {
  * Qualify 处理链（PRD 5.6）：canonical 候选 → 确定性评分 → Lead + 四队列。
  * 幂等：lead 按 (workspace, icp, company) upsert，重跑刷新分数不重复建。
  */
-export function createQualifyActivities(deps: { prisma: PrismaService }) {
+export function createQualifyActivities(deps: { prisma: PrismaService; sanctionsScreening?: SanctionsScreeningService }) {
   return {
     async scoreCandidates(args: QualifyRunInput & { batchSize?: number }): Promise<{
       scored: number;
@@ -44,9 +50,13 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
         };
       });
 
+      // 第五门：每 qualify run 重建一次制裁索引（worker 长驻进程与每日名单刷新间保持新鲜；
+      // DISABLED 时空索引→screen 恒 not_screened→no-op，不阻断）。
+      await deps.sanctionsScreening?.rebuildIndex().catch(() => undefined);
+
       let cursor: string | undefined;
       let scored = 0;
-      const queues: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0 };
+      const queues: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0, sanctions_hold: 0 };
       for (;;) {
         const done = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const companies = await tx.canonicalCompany.findMany({
@@ -70,6 +80,30 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
               select: { id: true, status: true, fitVerdict: true },
             });
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
+
+            // 第五门制裁筛查（召回优先，内存索引）：命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。
+            // DISABLED/清白 → not_screened/clear → sanctionsHold=false（fail-open，不影响队列）。
+            const screen = deps.sanctionsScreening?.screen(c.name, c.country);
+            let sanctionsHold = false;
+            let screenMatches: ScreenMatch[] = [];
+            let screenReviewState: 'open' | 'cleared_false_positive' | 'confirmed_true_hit' = 'open';
+            let screenListVersions: Record<string, string> = {};
+            if (screen && screen.status === 'potential_match') {
+              screenMatches = screen.matches;
+              screenListVersions = screen.listVersions;
+              const prior = await tx.sanctionsScreeningResult.findFirst({
+                where: { canonicalCompanyId: c.id },
+                orderBy: { screenedAt: 'desc' },
+                select: { reviewState: true, matches: true },
+              });
+              screenReviewState = reconcileReviewState(
+                prior ? { reviewState: prior.reviewState, matches: matchesFromJson(prior.matches) } : null,
+                screen.matches,
+              );
+              // 已清(无新命中) → 不 hold（尊重人工 false-positive 判定，抑制复发）；open/confirmed → hold。
+              sanctionsHold = screenReviewState !== 'cleared_false_positive';
+            }
+
             const result = scoreLead(
               {
                 name: c.name,
@@ -89,7 +123,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
               icpForScoring,
               // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
               // Reachability 硬底决定（此前 match 直接盖整个队列 → 推荐里大半联系不上）。
-              { authoritativeFit },
+              { authoritativeFit, sanctionsHold },
             );
             const queue = result.queue;
             const status =
@@ -124,7 +158,28 @@ export function createQualifyActivities(deps: { prisma: PrismaService }) {
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
               },
             });
-            queues[queue] += 1;
+            // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。
+            if (screenMatches.length) {
+              const priorRow = await tx.sanctionsScreeningResult.findFirst({
+                where: { canonicalCompanyId: c.id },
+                orderBy: { screenedAt: 'desc' },
+                select: { id: true },
+              });
+              const data = {
+                workspaceId: args.workspaceId,
+                canonicalCompanyId: c.id,
+                screenedName: c.name,
+                status: 'potential_match',
+                matches: screenMatches as unknown as Prisma.InputJsonValue,
+                topScore: screenMatches[0]?.score ?? null,
+                reviewState: screenReviewState,
+                listVersions: screenListVersions as unknown as Prisma.InputJsonValue,
+                screenedAt: new Date(),
+              };
+              if (priorRow) await tx.sanctionsScreeningResult.update({ where: { id: priorRow.id }, data });
+              else await tx.sanctionsScreeningResult.create({ data });
+            }
+            queues[queue] = (queues[queue] ?? 0) + 1;
             scored += 1;
           }
           cursor = companies[companies.length - 1].id;
