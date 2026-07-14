@@ -26,7 +26,7 @@ jobs:
         with:
           fetch-depth: 0 # 全历史，扫到被后续提交"覆盖"的历史泄漏
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 个人账户仓库免费；若转组织私有库需在 secrets 配 GITLEAKS_LICENSE
