@@ -508,6 +508,86 @@ model SourceSignal {
   @@map("source_signal")
 }
 
+// ── 制裁名单筛查（Qualify 第五门，出口管制合规硬门）────────────────────────────
+// 设计：docs/roadmap/sanctions-screening-design.md。落地 ADR-010「制裁名单筛查作 qualify 第五门」。
+// 镜像采集层 + qualify 门两套模式（非 intent 管线）。sanctions_source/sanctions_entity 为平台级
+// 参考数据（无 RLS，同 data_provider/monitored_source；owner 连接写、app_user 只读 GRANT SELECT）；
+// sanctions_screening_result 是租户级筛查结果（RLS）。Phase 1 仅公司/实体，Individual 摄取层剔除。
+
+/// 制裁名单源注册（平台级，无 RLS）。每个官方名单一行：OFAC SDN / OFAC Consolidated / EU FSF。
+/// status=Kill-Switch（DISABLED→不筛查、不路由；真测绿后 ops 翻 ENABLED）；刷新审计列。
+model SanctionsSource {
+  id              String    @id @default(uuid()) @db.Uuid
+  key             String    @unique // ofac_sdn | ofac_consolidated | eu_fsf
+  label           String
+  url             String
+  format          String // ofac_sdn_xml | eu_fsf_xml
+  license         String // 'Public Domain (U.S. Government Work)' | 'CC BY 4.0' ...
+  status          String    @default("DISABLED") // ENABLED | DISABLED（Kill-Switch）
+  publishDate     DateTime? @map("publish_date") // 名单侧发布日（=listVersion 锚）
+  recordCount     Int?      @map("record_count") // 本源 Entity 落库条数
+  lastRefreshedAt DateTime? @map("last_refreshed_at")
+  lastFetchStatus String?   @map("last_fetch_status") // DONE | PARTIAL | FAILED
+  config          Json? // 源特定（EU token 在 url；OFAC User-Agent）
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  entities SanctionsEntity[]
+
+  @@map("sanctions_source")
+}
+
+/// 一条被制裁的**实体**（Phase 1 仅 sdnType=Entity；Individual 摄取层结构性剔除，天然满足个人隔离红线）。
+/// 平台级参考数据（无 RLS）。normalizedName（normForMatch 归一）供进程内索引召回匹配。
+model SanctionsEntity {
+  id             String    @id @default(uuid()) @db.Uuid
+  sourceId       String    @map("source_id") @db.Uuid
+  externalId     String    @map("external_id") // 源侧稳定 id（OFAC uid / EU logicalId）
+  primaryName    String    @map("primary_name")
+  normalizedName String    @map("normalized_name") // normForMatch(primaryName)，索引召回用
+  country        String? // 主地址国别 alpha-2（佐证，非硬键）
+  programs       Json // string[] 制裁项目/regime（'CUBA' …）
+  aliases        Json // [{ name, normalizedName, quality:'strong'|'weak' }]——弱别名不 originate 命中
+  rawFeatures    Json?     @map("raw_features") // 仅绿字段（地址国别/机构 ID），🔴 无 person PII
+  listVersion    String    @map("list_version") // 名单版本（=publishDate ISO），审计/backtest 用
+  contentHash    String    @map("content_hash") // diff 用
+  firstSeenAt    DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at")
+  withdrawnAt    DateTime? @map("withdrawn_at") // 非空=已从名单移除
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  source SanctionsSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, externalId])
+  @@index([normalizedName])
+  @@index([sourceId, withdrawnAt])
+  @@map("sanctions_entity")
+}
+
+/// 一次公司筛查结果（**租户级，RLS**）：clear 或 potential_match（命中）+ 人工复核状态机。
+/// 命中 → Lead.queue='sanctions_hold' + decide(accept) 硬拦。审计件只留名单/条目 ref/版本/分数（非个人传记）。
+/// 无 Prisma 关系（同 field_evidence 惯例，按 canonicalCompanyId 存），workspace RLS 隔离。
+model SanctionsScreeningResult {
+  id                 String   @id @default(uuid()) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  canonicalCompanyId String   @map("canonical_company_id") @db.Uuid
+  screenedName       String   @map("screened_name") // 被筛的公司名
+  status             String // clear | potential_match
+  matches            Json // [{ sourceKey, externalId, listVersion, matchedName, aliasQuality, score, entityCountry }]
+  topScore           Float?   @map("top_score")
+  reviewState        String   @default("open") @map("review_state") // open | cleared_false_positive | confirmed_true_hit
+  reviewedBy         String?  @map("reviewed_by")
+  reviewNote         String?  @map("review_note")
+  listVersions       Json     @map("list_versions") // { ofac_sdn:'2026-07-13', … } 本次筛覆盖的名单版本
+  screenedAt         DateTime @default(now()) @map("screened_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId, canonicalCompanyId])
+  @@index([workspaceId, reviewState])
+  @@map("sanctions_screening_result")
+}
+
 /// 待办3 · 专利发明人缓存（scale-safe #89 fast-follow）。平台级共享、**无 workspace_id、无 RLS**（镜像 source_signal）。
 /// 机制：一次共享大扫（Job User 只读）把「近5年·独家申请人·仅 name」的 assignee→inventor 拉回本表 →
 ///       逐公司发现时只读本表（零 BQ 字节）。一行 = 一个 (assignee 归一名, 公司国别, 发明人名)。

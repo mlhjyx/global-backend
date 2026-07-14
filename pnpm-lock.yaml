@@ -101,6 +101,9 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      fast-xml-parser:
+        specifier: ^4.5.0
+        version: 4.5.7
       helmet:
         specifier: ^8.2.0
         version: 8.2.0
@@ -3540,6 +3543,10 @@ packages:
   fast-xml-builder@1.2.1:
     resolution: {integrity: sha512-tPb5TTWfgfVx5BNSi2xV0eLr89POeXXn0dXIsCJ9m1narrWxeIyx6je9d7Rce/3NyXLbvuQmLkxq+RuxMWejvw==}
 
+  fast-xml-parser@4.5.7:
+    resolution: {integrity: sha512-a6Qh1RMCNbSrU1+sAyAAZH3rTe+OaWJbNZIq0S+ifZciUUOQtlVxBJwoTUE2bYhysmG/RYyI5WJFIKdBahJdrQ==}
+    hasBin: true
+
   fast-xml-parser@5.9.3:
     resolution: {integrity: sha512-brCNCeScma/kqa54J4PIDriSSSLssRkuYaUCpvHJulGc3HGI/xxKUCTDcYkAdqJsyb//ydpbxecjC3hB9+tb/g==}
     hasBin: true
@@ -5788,6 +5795,9 @@ packages:
   strip-bom@3.0.0:
     resolution: {integrity: sha512-vavAMRXOgBVNF6nyEEmL3DBK19iRpDcoIwW+swQ+CbGiu7lju6t+JklA1MHweoWtadgt4ISVUsXLyDq34ddcwA==}
     engines: {node: '>=4'}
+
+  strnum@1.1.2:
+    resolution: {integrity: sha512-vrN+B7DBIoTTZjnPNewwhx6cBA/H+IS7rfW68n7XxC1y7uoiGQBxaKzqucGUgavX15dJgiGztLJ8vxuEzwqBdA==}
 
   strnum@2.4.1:
     resolution: {integrity: sha512-M9eUSMT2dCB2cTNPG7UYj6KuK7RJR2SN2+yCV/fTW3xzTCS6EaGZ5pSMgDIjB7r8zSfTGk+dvvn9rTjpVS9Mwg==}
@@ -10545,6 +10555,10 @@ snapshots:
       path-expression-matcher: 1.6.1
       xml-naming: 0.1.0
 
+  fast-xml-parser@4.5.7:
+    dependencies:
+      strnum: 1.1.2
+
   fast-xml-parser@5.9.3:
     dependencies:
       '@nodable/entities': 2.2.0
@@ -13343,6 +13357,8 @@ snapshots:
       ansi-regex: 6.2.2
 
   strip-bom@3.0.0: {}
+
+  strnum@1.1.2: {}
 
   strnum@2.4.1:
     dependencies:
