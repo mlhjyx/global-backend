@@ -1,6 +1,7 @@
 # Site Builder Agent 详细设计 v1
 
 > 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型终选）。本文件是 9 个 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。
+> ⚠️ **卡内出现的模型名一律以 02 §6「2026-07-14 终版定档」为准**（实测评比+用户拍板，依据见 [10-model-selection-study.md](10-model-selection-study.md)）；卡片写作早于定档，模型标注是初稿参考。另：卡 1 planner 已被 D13 砍（v1 固定 DAG），保留仅作历史记录。
 
 ## 0. 统一运行时契约（AiTask 基类，所有 agent 共用）
 
