@@ -21,8 +21,8 @@
 
 ## 3. 开发环境
 
-**Docker 服务**（`docker compose up -d`）：postgres `:5432`(pgvector/pg16, global/global/global_dev) · redis `:6379` · **new-api** `:3001`(模型网关，key 在 `apps/api/.env`) · **crawl4ai** `:11235`(token 在 .env) · **searxng** `:8081`(配置 `infra/searxng/settings.yml`)。
-**Temporal** 不在 compose，是独立 CLI：`~/.temporalio/bin/temporal server start-dev --db-filename ~/temporal.db &`（`:7233`）。
+**Docker 服务**（`docker compose -p global up -d`，data-root 落 8T 盘 `/data/docker`）：postgres `:5432`(pgvector/pg16, global/global/global_dev) · redis `:6379` · **new-api** `:3001`(模型网关，key 在 `apps/api/.env`) · **crawl4ai** `:11235`(token 在 .env) · **searxng** `:8081`(配置 `infra/searxng/settings.yml`) · **minio** `:9000/9001` · **embeddings**(ollama `:11434`，模型 `bge-m3` 1024 维) · **docling** `:5001`。共 8 个，容器名 `global-*`。
+**Temporal** 不在 compose：Ubuntu 上跑成 systemd 服务 `temporal-dev.service`（开机自启、`:7233`）——用 `systemctl status/restart temporal-dev` 管，不再手动 CLI。
 
 **跑起来**：
 ```bash
@@ -36,7 +36,7 @@ cd apps/api && pnpm test               # vitest
 ```
 data_provider 源（gleif/directory/trade_fair/wikidata/…）在 **API/relay 启动时自动 seed**。
 
-**开发环境**（同步到 git `global-backend` 私有仓库）：本地 Mac `/Users/xin/Documents/Global`（gh 已授权）。~~远端 WSL~~ 已于 2026-07-14 取消，不再使用。
+**开发环境**（同步到 git `global-backend` 私有仓库）：**Ubuntu 26.04 服务器**（Tailscale 内网 `100.88.153.74`，root，63G/4 核 + 外挂 8T `/data`），代码在 **`/global/backend`**，开发模式 = **CC SSH 远程**；Mac 现为瘦客户端。迁移细节见 memory `ubuntu-server-migration`。~~本地 Mac `/Users/xin/Documents/Global`~~（2026-07-15 迁走）、~~远端 WSL~~（2026-07-14 取消）均已弃用。
 
 ## 4. 已落地子系统（真实数据、已实测）
 
