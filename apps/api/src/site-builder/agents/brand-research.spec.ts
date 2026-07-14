@@ -84,6 +84,25 @@ describe('researchBrand — 正常链路', () => {
     expect(out.sources.some((s) => s.sourceType === 'storefront')).toBe(false);
   });
 
+  it('🔴 Codex #5 自域名归一化：官网 www.acme.example，搜索命中 acme.example 变体 → 仍剔除（不误当外部源）', async () => {
+    const { broker } = brokerWith(async (toolId) =>
+      toolId === 'searxng.search'
+        ? {
+            data: {
+              results: [
+                { title: 'bare domain variant', url: 'https://acme.example/products', content: 'own site no-www' },
+                { title: 'subdomain', url: 'https://shop.acme.example/x', content: 'own subdomain' },
+                { title: 'real external', url: 'https://directory.example/acme', content: 'external' },
+              ],
+            },
+          }
+        : { data: { url: 'https://www.acme.example', text: 'pumps', contentHash: 'h' } },
+    );
+    const out = await researchBrand({ broker }, { ...ARGS, websiteUrl: 'https://www.acme.example' });
+    const webUrls = out.sources.filter((s) => s.sourceType === 'web_research').map((s) => s.url);
+    expect(webUrls).toEqual(['https://directory.example/acme']); // 两个自域名变体都被剔除
+  });
+
   it('无 websiteUrl → 只搜索不 crawl', async () => {
     const { broker, invocations } = brokerWith(async () => ({ data: SEARCH_RESULTS }));
     const out = await researchBrand({ broker }, { ...ARGS, websiteUrl: undefined });

@@ -49,6 +49,17 @@ function hostOf(url: string | undefined): string | null {
   }
 }
 
+/** 去 www. 前缀（自域名判定用；www.acme.com 与 acme.com 视为同一站，Codex #5）。 */
+const baseHost = (host: string | null): string | null => host?.replace(/^www\./, '') ?? null;
+
+/** 两个 host 是否属同一公司站点（含 www 变体与子域）——防站主自有域被误当外部研究源。 */
+function isSameSite(a: string | null, b: string | null): boolean {
+  const na = baseHost(a);
+  const nb = baseHost(b);
+  if (!na || !nb) return false;
+  return na === nb || na.endsWith(`.${nb}`) || nb.endsWith(`.${na}`);
+}
+
 export async function researchBrand(
   deps: { broker: ExecutionBroker },
   args: BrandResearchArgs,
@@ -98,7 +109,9 @@ export async function researchBrand(
     const external = (r.data.results ?? [])
       .filter((item) => {
         const host = hostOf(item.url);
-        return host !== null && (ownHost === null || host !== ownHost);
+        // 剔除站主自有域（含 www 变体/子域，Codex #5）——否则自站被误当外部 web_research 源，
+        // 且认证类断言的门槛 storefront≠web_research，分类错误会误伤。
+        return host !== null && !isSameSite(host, ownHost);
       })
       .slice(0, MAX_WEB_RESULTS);
     for (const item of external) {
