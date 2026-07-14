@@ -7,6 +7,7 @@ import {
   RefurbishFinalizeInput,
 } from './site-builder.activities';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
+import type { ModelGateway } from '../model-gateway/model-gateway';
 
 /**
  * M1-b fast-follow 改动 1（预算门接线）+ 改动 3（补偿路径 steps 回填）。
@@ -94,6 +95,83 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
     };
     await acts.finalizeRefurbish(input);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+});
+
+// FIX A/B 用最小 intake（buildDemoSpec/polishCopy 只取 company/products/targetMarkets）。
+const INTAKE = {
+  company: { nameZh: '安可', nameEn: 'Acme' },
+  industry: 'pumps',
+  products: ['pumps'],
+  targetMarkets: ['DE'],
+  hasWebsite: false,
+  businessEmail: 'sales@acme.com',
+};
+
+/** gateway 桩：generateStructured 记录调用 ctx，返回合法 polish（供 sanitizePolish 透传）。 */
+function fakeGateway() {
+  const generateStructured = vi.fn(async (_input: unknown, _ctx: unknown) => ({
+    data: { headline: 'H', subhead: 'S', aboutBody: 'A' },
+    model: 'stub',
+  }));
+  return { gateway: { generateStructured } as unknown as ModelGateway, generateStructured };
+}
+
+/** assembleAndBuild 用 prisma 桩：首个 withWorkspace 返回站点（existing=null），
+ *  第二个（写版本行）抛错——停在 runAstroBuild 之前，令用例只覆盖 polishCopy/入口逻辑。 */
+function assembleStopAfterPolishPrisma(site: unknown): PrismaService {
+  let call = 0;
+  return {
+    withWorkspace: vi.fn(async (_ws: string, fn: (t: unknown) => unknown) => {
+      call += 1;
+      if (call === 1) {
+        return fn({
+          siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
+          site: { findUnique: vi.fn(async () => site) },
+          siteVersion: { findFirst: vi.fn(async () => null) },
+        });
+      }
+      throw new Error('stop-after-polish');
+    }),
+  } as unknown as PrismaService;
+}
+
+describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
+  it('assembleAndBuild 调 polishCopy → gateway ctx.runId=buildRunId（refurbish demo_copy 计账）', async () => {
+    spyBudget(); // 隔离真实 ledger（本用例只验 gateway ctx）
+    const { gateway, generateStructured } = fakeGateway();
+    const site = { id: 'site-1', name: 'Acme', slug: 'acme', stylePreset: 'clean', intake: INTAKE };
+    const acts = createSiteBuilderActivities({ prisma: assembleStopAfterPolishPrisma(site), gateway });
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop-after-polish');
+    expect(generateStructured).toHaveBeenCalledTimes(1);
+    const ctxArg = generateStructured.mock.calls[0][1] as { workspaceId: string; runId?: string };
+    expect(ctxArg.runId).toBe('run-1'); // 归账键：refurbish demo_copy 计入 buildRunId 上限
+    expect(ctxArg.workspaceId).toBe('ws-1');
+  });
+});
+
+describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁棒）', () => {
+  // 用真实 budgetLedger 观测（不 mock open/close）：begin 只在 beginRefurbishRun 开账，
+  // 换 worker/重启后的后续活动会发现无账户 → reserve 返回不限额 → 预算门被绕过。故每个耗费活动入口须幂等 open。
+  it('assembleAndBuild 账户未预开 → 进入活动即立账（remaining=cap，非 Infinity）', async () => {
+    expect(budgetLedger.remainingCents('run-1')).toBe(Infinity); // 前置：无账户
+    const prisma = {
+      withWorkspace: vi.fn(async () => {
+        throw new Error('stop');
+      }),
+    } as unknown as PrismaService;
+    const acts = createSiteBuilderActivities({ prisma });
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop');
+    expect(budgetLedger.remainingCents('run-1')).toBe(siteBuildBudgetCents()); // 入口已 open
+    budgetLedger.close('run-1', { force: true }); // 清理，避免跨用例泄漏
+  });
+
+  it('buildBrandProfile 账户未预开 → 入口立账（即便随后 gateway 缺席抛错）', async () => {
+    expect(budgetLedger.remainingCents('run-1')).toBe(Infinity);
+    const acts = createSiteBuilderActivities({ prisma: {} as PrismaService }); // 无 gateway
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(/gateway unavailable/);
+    expect(budgetLedger.remainingCents('run-1')).toBe(siteBuildBudgetCents());
+    budgetLedger.close('run-1', { force: true });
   });
 });
 

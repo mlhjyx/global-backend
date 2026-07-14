@@ -132,9 +132,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const { prisma, gateway, kb, broker } = deps;
   const log = new Logger('SiteBuilderActivities');
 
+  // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
+  // 重复无害）。budgetLedger 是进程内单例、无 GC——若只在 beginRefurbishRun 开账，换 worker 或
+  // 重启后（Temporal 把 begin 当已完成缓存、不重放）后续活动会发现无账户 → reserve 返回不限额 →
+  // 预算门被绕过。故镜像 discovery.activities 的 ensureRunBudget，在每个耗费活动入口重新立账。
+  // finalize/compensate 的 close(force) 无视引用计数，仍能完全关账。
+  const ensureRunBudget = (runId: string): void => budgetLedger.open(runId, siteBuildBudgetCents());
+
   async function polishCopy(
     workspaceId: string,
     intake: IntakeInput,
+    runId?: string,
   ): Promise<DemoCopyPolish | undefined> {
     if (!gateway) return undefined;
     try {
@@ -161,7 +169,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             },
             maxTokens: 400,
           },
-          { workspaceId },
+          // FIX A（Codex P2）：带 runId 归账——refurbish 路径 assembleAndBuild→polishCopy 的
+          // demo_copy 调用必须计入 buildRunId 上限（gateway 按 ctx.runId ?? ctx.workspaceId 归账）；
+          // demo_v0 路径未开账户，gateway 命中未开账户=不限额，行为不变。
+          { workspaceId, runId },
         ),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('demo copy polish timeout')), POLISH_TIMEOUT_MS),
@@ -217,7 +228,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       try {
         const intake = site.intake as unknown as IntakeInput;
-        const polish = await polishCopy(workspaceId, intake);
+        const polish = await polishCopy(workspaceId, intake, buildRunId);
         const doc = buildDemoSpec({
           siteName: site.name,
           intake,
@@ -374,6 +385,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      */
     async buildBrandProfile(input: RefurbishActivityInput): Promise<BrandProfileSummary> {
       const { workspaceId, siteId, buildRunId } = input;
+      ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       if (!gateway) throw new Error('brand profile: model gateway unavailable');
 
       // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
@@ -548,6 +560,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishActivityInput,
     ): Promise<{ previewSlug: string; versionId: string }> {
       const { workspaceId, siteId, buildRunId } = input;
+      ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       const { site, existing } = await prisma.withWorkspace(workspaceId, async (tx) => {
         // cancelled 后不再推进（复审 C2）
         const advanced = await tx.siteBuildRun.updateMany({
@@ -570,7 +583,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
-      const polish = await polishCopy(workspaceId, intake);
+      const polish = await polishCopy(workspaceId, intake, buildRunId);
       const doc = buildDemoSpec({ siteName: site.name, intake, stylePreset, polish });
 
       const version = await prisma.withWorkspace(workspaceId, async (tx) => {
