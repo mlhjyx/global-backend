@@ -476,6 +476,50 @@ export const samgovSearchTool: Tool<SamSearchInput, SamSearchOutput> = {
   execute: async (input) => ({ data: { notices: await fetchSourcesSought(input.params) }, costCents: 0 }),
 };
 
+/**
+ * sanctions.download —— 官方制裁名单原始文件下载（OFAC SDN/Consolidated XML、EU FSF XML）。
+ * required 治理：**无固定 policyDomain**（多域）→ Broker 按 `input.url` 主机名查 source_policy（OFAC/EU 各登记，
+ * fail-closed + SUSPENDED kill-switch）。**personalData=true**——原始名单含个人条目（Individual），
+ * 摄取层 `parseOfacXml` 结构性剔除、绝不入绿库。allowedPurpose=['sanctions_screening']（专用途门）。
+ * OFAC **必带 User-Agent**（无 UA→403）+ 跟 302 重定向。URL 来自 seed 的 sanctions_source.config（非用户输入，SSRF 由
+ * source_policy 白名单域界定）。公共领域/CC-BY（署名见 sanctions_source.license）。
+ */
+export interface SanctionsDownloadInput {
+  url: string;
+  userAgent?: string;
+}
+export interface SanctionsDownloadOutput {
+  body: string;
+  contentType: string | null;
+  lastModified: string | null;
+}
+export const DEFAULT_SANCTIONS_UA = 'GlobalGrowthBackend/1.0 (+sanctions-screening)';
+export const sanctionsDownloadTool: Tool<SanctionsDownloadInput, SanctionsDownloadOutput> = {
+  id: 'sanctions.download',
+  version: '1.0.0',
+  category: 'fetch',
+  sourceClass: 'public_intelligence',
+  cost: { unit: 'call', estimatedCents: 0, external: true },
+  rateLimit: { rps: 1, concurrency: 1 },
+  compliance: { sourcePolicy: 'required', respectsRobots: false, personalData: true, allowedPurpose: ['sanctions_screening'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['company'], accepts: ['keywords'] },
+  idempotencyKey: (i) => `sanctions.download:${hash(i.url)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'sanctions' }),
+  execute: async (input) => {
+    const res = await fetch(input.url, {
+      redirect: 'follow',
+      headers: { 'user-agent': input.userAgent ?? DEFAULT_SANCTIONS_UA },
+    });
+    if (!res.ok) throw new Error(`sanctions.download HTTP ${res.status} for ${input.url}`);
+    const body = await res.text();
+    return {
+      data: { body, contentType: res.headers.get('content-type'), lastModified: res.headers.get('last-modified') },
+      costCents: 0,
+      provenance: { sourceUrl: input.url, fetchedAt: new Date().toISOString(), contentHash: hash(body), parserVersion: 'sanctions-download/1' },
+    };
+  },
+};
+
 /** 注册全部数据源工具（启动期，与 registerBuiltinTools 同点调用）。 */
 export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(crawl4aiRenderTool as Tool);
@@ -490,5 +534,6 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(inpiRneSearchTool as Tool);
   registry.register(googlePatentsSearchTool as Tool);
   registry.register(samgovSearchTool as Tool);
+  registry.register(sanctionsDownloadTool as Tool);
   return registry;
 }
