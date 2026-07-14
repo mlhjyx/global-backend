@@ -119,7 +119,17 @@ async function main(): Promise<void> {
   });
 
   const acts = createSiteBuilderActivities({ prisma, gateway, broker, kb });
-  const runId = randomUUID();
+  // 生产路径由 beginRefurbishRun 置 running；脚本模拟这个前置（run 守卫要求 running）
+  const mkRunningRun = async (): Promise<string> => {
+    const id = randomUUID();
+    await prisma.withWorkspace(ws, (tx) =>
+      tx.siteBuildRun.create({
+        data: { id, workspaceId: ws, siteId, kind: 'refurbish', status: 'running' },
+      }),
+    );
+    return id;
+  };
+  const runId = await mkRunningRun();
   const summary = await acts.buildBrandProfile({ workspaceId: ws, siteId, buildRunId: runId });
   console.log(
     `    v${summary.version}: facts=${summary.factCount} gaps=${summary.gapsCount} model=${summary.model} researchDegraded=${summary.researchDegraded}`,
@@ -159,9 +169,28 @@ async function main(): Promise<void> {
   if (JSON.stringify(status.gaps) !== JSON.stringify(gaps)) {
     throw new Error('kb/status gaps 未回填最新 brand_profile');
   }
-  const rerun = await acts.buildBrandProfile({ workspaceId: ws, siteId, buildRunId: randomUUID() });
+  const rerun = await acts.buildBrandProfile({ workspaceId: ws, siteId, buildRunId: await mkRunningRun() });
   if (rerun.version !== 2) throw new Error('重跑应追加 v2（append-only）');
   ok('回填', `kb/status gaps=${status.gaps.length} 命中；重跑 v${rerun.version} 追加不覆盖`);
+
+  // ── ⑤ run 状态守卫（复审 Temporal F2）──────────────────────────────────
+  console.log('⑤ run 守卫（cancelled → buildBrandProfile 早停拒绝，不写版本）');
+  const cancelledRunId = randomUUID();
+  await prisma.withWorkspace(ws, (tx) =>
+    tx.siteBuildRun.create({
+      data: { id: cancelledRunId, workspaceId: ws, siteId, kind: 'refurbish', status: 'cancelled' },
+    }),
+  );
+  let guarded = false;
+  try {
+    await acts.buildBrandProfile({ workspaceId: ws, siteId, buildRunId: cancelledRunId });
+  } catch (err) {
+    guarded = /not running/.test(String(err));
+  }
+  if (!guarded) throw new Error('run 守卫失守：cancelled run 仍产出 brand profile');
+  const versions = await prisma.withWorkspace(ws, (tx) => tx.brandProfile.count({ where: { siteId } }));
+  if (versions !== 2) throw new Error(`守卫应阻止写版本，期望 2 版实得 ${versions}`);
+  ok('守卫', `cancelled run 早停被拒（不烧模型），版本数仍 ${versions}`);
 
   console.log('\n🎉 verify-site-builder-m1b 全绿');
   await prisma.$disconnect();

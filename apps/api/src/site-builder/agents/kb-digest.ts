@@ -39,6 +39,9 @@ export function buildKbDigest(sources: DigestSource[], opts: DigestOptions = {})
     included += 1;
   }
 
+  // included=0（首块即超 total）→ 返回空串走「无知识库资料」语义（复审 F4：
+  // 否则模型看到一份「声称有省略却零内容」的孤行摘要）。
+  if (included === 0) return '';
   const dropped = sources.length - included;
   if (dropped > 0) blocks.push(`（其余 ${dropped} 份文档未纳入本摘要）`);
   return blocks.join('\n\n');

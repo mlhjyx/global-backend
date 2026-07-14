@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OpenAICompatibleProvider } from './openai-compatible.provider';
+import { OpenAICompatibleProvider, stripJsonFence } from './openai-compatible.provider';
 
 /**
  * M1-b 网关增量（09 §2.4 AiTask 工程护栏的 provider 侧）：
@@ -100,5 +100,26 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     await expect(
       provider.generateStructured({ task: 't', prompt: 'p', schema: {} }),
     ).rejects.toThrow(SyntaxError);
+  });
+
+  it('🔴 markdown 围栏包裹的 JSON（真机实证：glm-5.2 偶发 ```json）→ 剥壳后正常解析', async () => {
+    mockChatResponse({
+      choices: [{ message: { content: '```json\n{"ok":true}\n```' }, finish_reason: 'stop' }],
+      usage: {},
+    });
+    const r = await provider.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {} });
+    expect(r.data.ok).toBe(true);
+  });
+});
+
+describe('stripJsonFence', () => {
+  it('剥 ```json 围栏', () => {
+    expect(stripJsonFence('```json\n{"a":1}\n```')).toBe('{"a":1}');
+  });
+  it('剥无语言标签的 ``` 围栏', () => {
+    expect(stripJsonFence('```\n{"a":1}\n```')).toBe('{"a":1}');
+  });
+  it('无围栏原样返回（trim）', () => {
+    expect(stripJsonFence('  {"a":1}  ')).toBe('{"a":1}');
   });
 });

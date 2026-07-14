@@ -33,6 +33,8 @@ export interface GenerateTextInput {
   temperature?: number;
   /** reasoning 模型的思考预算（OpenAI 兼容 reasoning_effort）。copy 类任务 🔴 必配 low（02 §6）。 */
   reasoningEffort?: 'low' | 'medium' | 'high';
+  /** 调用方超时/取消信号，透传到底层 fetch——超时即真 abort，不留后台弃单继续烧钱。 */
+  signal?: AbortSignal;
 }
 
 export interface GenerateStructuredInput {
@@ -43,6 +45,8 @@ export interface GenerateStructuredInput {
   schema: Record<string, unknown>; // JSON Schema the output must satisfy
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
+  /** 调用方超时/取消信号，透传到底层 fetch（含网关内修复重试的两次调用）。 */
+  signal?: AbortSignal;
 }
 
 export interface EmbedInput {

@@ -10,7 +10,9 @@ import { resolveTaskRoute, SiteBuilderTaskId, TaskRoute } from './task-routes';
  * - 本层：输入 JSON Schema fail-fast → 固化 prompt（用户数据只进模板变量位，C2 结构性保证）
  *   → 按 task 路由（模型/预算/超时/effort）→ 模型回退链 → 🔴 stub 拒绝（假数据绝不充真，
  *   fit-judge 先例）→ 用量聚合 → 可诊断聚合错误。
- * - 网关内：输出 JSON Schema 校验 + 一次修复重试（PRD 9.6）、预算 reserve-settle、trace。
+ * - 网关内：输出 JSON Schema 校验 + 一次修复重试（PRD 9.6）、trace；预算 reserve-settle
+ *   仅对已 `budgetLedger.open` 的账户生效——refurbish 尚未 open（M1 单 run 成本结构上有界，
+ *   无 runaway），预算门真接线 + 截断路径 usage 结算见 fast-follow。
  * - 任务模块内：业务出口闸（如 brandProfile 的 evidence 闸）——确定性纯函数，不进本层。
  */
 
@@ -40,7 +42,10 @@ export class AiTaskError extends Error {
   ) {
     super(
       `AI task ${taskId} failed on all models: ` +
-        attempts.map((a) => `${a.model}: ${a.error}`).join(' | '),
+        attempts.map((a) => `${a.model}: ${a.error}`).join(' | ') +
+        // 复审 F3：dev 链 [gateway, stub] 下网关失败会落 stub→被拒，聚合错误全是「stub refused」；
+        // 真实根因（503/截断/schema）只在 ai_trace，提示排障者去查。
+        ' — (dev: stub fallback ⇒ 上游网关本次失败，真实根因见 ai_trace)',
     );
     this.name = 'AiTaskError';
   }
@@ -55,21 +60,6 @@ export interface AiTaskDeps {
 
 const sum = (usage: ModelUsage | undefined, field: 'inputTokens' | 'outputTokens'): number =>
   usage?.[field] ?? 0;
-
-/** 有界等待：超时即抛（网关 provider 另有自身 AbortSignal，这里守的是 per-task 预算）。 */
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 export async function runAiTask<TIn, TOut>(
   def: SiteBuilderTaskDefinition<TIn, TOut>,
@@ -87,8 +77,19 @@ export async function runAiTask<TIn, TOut>(
   let usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 
   for (const model of [route.primary, ...route.fallbacks]) {
+    // per-task 超时（复审 Temporal F1）：既 abort signal（真取消底层 fetch，含网关内修复重试的
+    // 两次调用，不留后台弃单烧钱）——又 race 一个 reject 让本层立即换模型，不干等底层响应 abort。
+    const controller = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const e = new Error(`${def.id}@${model} timed out after ${route.timeoutMs}ms`);
+        controller.abort(e);
+        reject(e);
+      }, route.timeoutMs);
+    });
     try {
-      const result: ModelResult<TOut> = await withTimeout(
+      const result: ModelResult<TOut> = await Promise.race([
         deps.gateway.generateStructured<TOut>(
           {
             task: def.id,
@@ -98,12 +99,12 @@ export async function runAiTask<TIn, TOut>(
             model,
             maxTokens: route.maxTokens,
             reasoningEffort: route.reasoningEffort,
+            signal: controller.signal,
           },
           deps.ctx,
         ),
-        route.timeoutMs,
-        `${def.id}@${model}`,
-      );
+        timeout,
+      ]);
       usage = {
         inputTokens: usage.inputTokens + sum(result.usage, 'inputTokens'),
         outputTokens: usage.outputTokens + sum(result.usage, 'outputTokens'),
@@ -116,6 +117,8 @@ export async function runAiTask<TIn, TOut>(
       return { data: result.data, model: result.model, usage };
     } catch (err) {
       attempts.push({ model, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      clearTimeout(timer);
     }
   }
 

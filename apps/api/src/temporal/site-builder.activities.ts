@@ -21,8 +21,13 @@ import { runAiTask } from '../site-builder/agents/ai-task';
 import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
+  canonicalUrl,
   enforceEvidenceGate,
+  EvidenceCorpus,
   GapItem,
+  RawFactItem,
+  sanitizeProfileForPrompt,
+  scrubPii,
 } from '../site-builder/agents/brand-profile';
 import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
 import { buildKbDigest } from '../site-builder/agents/kb-digest';
@@ -333,11 +338,23 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       if (!gateway) throw new Error('brand profile: model gateway unavailable');
 
-      const site = await prisma.withWorkspace(workspaceId, (tx) =>
-        tx.site.findUnique({ where: { id: siteId } }),
-      );
+      // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
+      // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
+      const { site, run } = await prisma.withWorkspace(workspaceId, async (tx) => ({
+        site: await tx.site.findUnique({ where: { id: siteId } }),
+        run: await tx.siteBuildRun.findUnique({
+          where: { id: buildRunId },
+          select: { status: true },
+        }),
+      }));
       if (!site) throw new Error(`site ${siteId} not found`);
+      if (!run || run.status !== 'running') {
+        throw new Error(`run ${buildRunId} not running (cancelled?) — skip brand profile`);
+      }
       const intake = site.intake as unknown as IntakeInput;
+      const profile = sanitizeProfileForPrompt(
+        (site.profile as Record<string, unknown> | null) ?? undefined,
+      );
 
       const digestDocs = kb?.digestSources
         ? await kb.digestSources({ userId: 'system', workspaceId, roles: [] }, siteId)
@@ -371,53 +388,117 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           industry: intake.industry,
           products: intake.products ?? [],
           targetMarkets: intake.targetMarkets ?? [],
-          profile: (site.profile as Record<string, unknown> | null) ?? undefined,
+          profile,
           kbDigest,
           research: research.sources,
         },
         { gateway, ctx: { workspaceId, runId: buildRunId } },
       );
 
-      // D1/D2 确定性出口闸：证据不合格项降 gaps；模型自报缺口并入（reason=needs_input）
-      const knownUrls = new Set(research.sources.map((s) => s.url));
-      const gated = enforceEvidenceGate(result.data.factSheet ?? [], { knownUrls });
+      // D1/D2 确定性出口闸（复审 F1）：闸执行时活动内有全部原文——按来源做 quote 核验。
+      // intakeText 剔 contact 且不含 businessEmail（数据最小化）；urlText 用 canonical(url) 防尾斜杠误降。
+      const urlText = new Map<string, string>();
+      for (const s of research.sources) {
+        const c = canonicalUrl(s.url);
+        if (c) urlText.set(c, s.content);
+      }
+      const corpus: EvidenceCorpus = {
+        intakeText: [
+          intake.company.nameEn ?? '',
+          intake.company.nameZh,
+          intake.industry ?? '',
+          (intake.products ?? []).join(' '),
+          (intake.targetMarkets ?? []).join(' '),
+          profile ? JSON.stringify(profile) : '',
+        ].join(' '),
+        kbText: kbDigest,
+        urlText,
+      };
+      const gated = enforceEvidenceGate(result.data.factSheet ?? [], { corpus });
       const gaps: GapItem[] = [
         ...gated.gaps,
         ...(result.data.gaps ?? []).map((g) => ({
           field: g.field,
           reason: 'needs_input' as const,
-          hint: g.question,
+          hint: scrubPii(g.question),
         })),
       ];
 
-      const version = await prisma.withWorkspace(workspaceId, async (tx) => {
-        const agg = await tx.brandProfile.aggregate({ where: { siteId }, _max: { version: true } });
-        const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
-        await tx.brandProfile.create({
-          data: {
-            workspaceId,
-            siteId,
-            version: next,
-            valueProps: (result.data.valueProps ?? []) as Prisma.InputJsonValue,
-            tone: (result.data.tone ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-            glossary: (result.data.glossary ?? []) as Prisma.InputJsonValue,
-            keywords: (result.data.keywords ?? []) as Prisma.InputJsonValue,
-            differentiators: (result.data.differentiators ?? []) as Prisma.InputJsonValue,
-            competitors: (result.data.competitors ?? []) as Prisma.InputJsonValue,
-            factSheet: gated.factSheet as unknown as Prisma.InputJsonValue,
-            gaps: gaps as unknown as Prisma.InputJsonValue,
-            researchDegraded: research.degraded,
-          },
-        });
-        return next;
+      // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
+      const scrubFact = (f: RawFactItem): RawFactItem => ({
+        ...f,
+        value: scrubPii(f.value),
+        evidence: f.evidence
+          ? { ...f.evidence, quote: f.evidence.quote ? scrubPii(f.evidence.quote) : undefined }
+          : undefined,
       });
+      const clean = {
+        valueProps: (result.data.valueProps ?? []).map(scrubPii),
+        tone: result.data.tone
+          ? { voice: scrubPii(result.data.tone.voice), style: (result.data.tone.style ?? []).map(scrubPii) }
+          : null,
+        glossary: (result.data.glossary ?? []).map((g) => ({
+          term: scrubPii(g.term),
+          definition: scrubPii(g.definition),
+        })),
+        keywords: (result.data.keywords ?? []).map(scrubPii),
+        differentiators: (result.data.differentiators ?? []).map(scrubPii),
+        competitors: (result.data.competitors ?? []).map((c) => ({
+          name: scrubPii(c.name),
+          positioning: scrubPii(c.positioning),
+        })),
+        factSheet: gated.factSheet.map(scrubFact),
+        gaps: gaps.map((g) => ({ ...g, hint: scrubPii(g.hint) })),
+      };
+
+      // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
+      // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
+      let version = 0;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          version = await prisma.withWorkspace(workspaceId, async (tx) => {
+            const live = await tx.siteBuildRun.findUnique({
+              where: { id: buildRunId },
+              select: { status: true },
+            });
+            if (!live || live.status !== 'running') {
+              throw new Error(`run ${buildRunId} no longer running — skip brand profile write`);
+            }
+            const agg = await tx.brandProfile.aggregate({ where: { siteId }, _max: { version: true } });
+            const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
+            await tx.brandProfile.create({
+              data: {
+                workspaceId,
+                siteId,
+                version: next,
+                valueProps: clean.valueProps as Prisma.InputJsonValue,
+                tone: (clean.tone ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+                glossary: clean.glossary as Prisma.InputJsonValue,
+                keywords: clean.keywords as Prisma.InputJsonValue,
+                differentiators: clean.differentiators as Prisma.InputJsonValue,
+                competitors: clean.competitors as Prisma.InputJsonValue,
+                factSheet: clean.factSheet as unknown as Prisma.InputJsonValue,
+                gaps: clean.gaps as unknown as Prisma.InputJsonValue,
+                researchDegraded: research.degraded,
+              },
+            });
+            return next;
+          });
+          break;
+        } catch (err) {
+          const isVersionClash =
+            err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+          if (isVersionClash && attempt < 4) continue; // 并发撞版本→重算，不让整活动 attempt 重跑
+          throw err;
+        }
+      }
 
       log.log(
-        `brand profile v${version} for site ${siteId}: ${gated.factSheet.length} facts, ${gaps.length} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+        `brand profile v${version} for site ${siteId}: ${clean.factSheet.length} facts, ${gaps.length} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
       );
       return {
         version,
-        factCount: gated.factSheet.length,
+        factCount: clean.factSheet.length,
         gapsCount: gaps.length,
         researchDegraded: research.degraded,
         model: result.model,
