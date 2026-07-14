@@ -1,0 +1,23 @@
+[Unit]
+Description=Global backend API (NestJS, dist/main.js)
+Documentation=https://github.com/mlhjyx/global-backend
+After=network-online.target docker.service temporal-dev.service
+Wants=network-online.target
+Requires=docker.service
+# boot 时 DB/Temporal 容器可能还没就绪 → 允许无限次崩溃重试直到依赖起来
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/global/backend/apps/api
+# dist/main.js 顶部 `import 'dotenv/config'` 会从 cwd(=apps/api) 载 .env
+ExecStart=/root/.fnm/aliases/default/bin/node dist/main.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=global-api
+
+[Install]
+WantedBy=multi-user.target
