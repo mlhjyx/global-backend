@@ -17,6 +17,16 @@ import type { IntakeInput } from '../site-builder/intake.service';
 import type { KbService } from '../site-builder/kb.service';
 import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
 import { allocateNextSiteVersion } from '../site-builder/version-alloc';
+import { runAiTask } from '../site-builder/agents/ai-task';
+import {
+  BRAND_PROFILE_TASK,
+  BrandProfileOutput,
+  enforceEvidenceGate,
+  GapItem,
+} from '../site-builder/agents/brand-profile';
+import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
+import { buildKbDigest } from '../site-builder/agents/kb-digest';
+import type { ExecutionBroker } from '../tools/tool-contract';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,8 +42,14 @@ export interface DemoV0ActivityInput {
 export interface SiteBuilderActivityDeps {
   prisma: PrismaService;
   gateway?: ModelGateway;
-  /** KB 服务（intake 资料入库 + queued 文档消化）；worker 装配 KbService，测试可注 stub。 */
-  kb?: { ingestText: KbService['ingestText']; processQueued: KbService['processQueued'] };
+  /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
+  kb?: {
+    ingestText: KbService['ingestText'];
+    processQueued: KbService['processQueued'];
+    digestSources?: KbService['digestSources'];
+  };
+  /** 品牌 web 研究的唯一出网闸门（缺省=研究降级 researchDegraded，不裸出网）。 */
+  broker?: ExecutionBroker;
 }
 
 export interface RefurbishActivityInput {
@@ -43,8 +59,19 @@ export interface RefurbishActivityInput {
   scope?: BuildScopeInput;
 }
 
+/** buildBrandProfile 活动的返回（workflow 汇总进 finalize steps）。 */
+export interface BrandProfileSummary {
+  version: number;
+  factCount: number;
+  gapsCount: number;
+  researchDegraded: boolean;
+  model: string;
+}
+
 export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   kb: { processed: number; failed: number; degraded: boolean };
+  /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
+  profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
   build: { previewSlug: string; versionId: string };
 }
 
@@ -64,7 +91,7 @@ export function previewBasePath(slug: string): string {
 }
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
-  const { prisma, gateway, kb } = deps;
+  const { prisma, gateway, kb, broker } = deps;
   const log = new Logger('SiteBuilderActivities');
 
   async function polishCopy(
@@ -265,7 +292,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             startedAt: new Date(),
             steps: [
               { key: 'kb_ingest', status: 'pending' },
-              { key: 'brand_profile', status: 'pending_m1b' },
+              { key: 'brand_profile', status: 'pending' },
               { key: 'image_pipeline', status: 'pending_m1c' },
               { key: 'copy', status: 'pending_m1d' },
               { key: 'assemble_build', status: 'pending' },
@@ -293,6 +320,108 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       siteId: string;
     }): Promise<{ processed: number; failed: number }> {
       return processQueuedForSite(input.workspaceId, input.siteId);
+    },
+
+    /**
+     * P1：品牌档案（M1-b，09 §2.4）。KB digest + 站主档案 + web 研究 → 模型综合 →
+     * 确定性 evidence 闸（D1/D2）→ brand_profile 追加新版本（版本化不覆盖）。
+     * - web 研究失败=独立降级位 researchDegraded（仅凭 KB 出 Brief），不整体失败；
+     * - 模型全链失败=活动抛错，workflow 侧 fail-safe（构建继续，步骤标 failed）；
+     * - Temporal 结果丢失重试会追加新版本行——append-only 设计下无害（读侧恒取最新版）。
+     */
+    async buildBrandProfile(input: RefurbishActivityInput): Promise<BrandProfileSummary> {
+      const { workspaceId, siteId, buildRunId } = input;
+      if (!gateway) throw new Error('brand profile: model gateway unavailable');
+
+      const site = await prisma.withWorkspace(workspaceId, (tx) =>
+        tx.site.findUnique({ where: { id: siteId } }),
+      );
+      if (!site) throw new Error(`site ${siteId} not found`);
+      const intake = site.intake as unknown as IntakeInput;
+
+      const digestDocs = kb?.digestSources
+        ? await kb.digestSources({ userId: 'system', workspaceId, roles: [] }, siteId)
+        : [];
+      const kbDigest = buildKbDigest(digestDocs);
+
+      let research: { sources: ResearchSource[]; degraded: boolean } = {
+        sources: [],
+        degraded: true, // broker 缺席=研究能力缺失，诚实标记降级（不裸出网硬顶）
+      };
+      if (broker) {
+        research = await researchBrand(
+          { broker },
+          {
+            workspaceId,
+            runId: buildRunId,
+            companyName: intake.company.nameEn ?? intake.company.nameZh,
+            industry: intake.industry,
+            websiteUrl: intake.websiteUrl ?? undefined,
+          },
+        );
+      }
+
+      const result = await runAiTask<
+        Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+        BrandProfileOutput
+      >(
+        BRAND_PROFILE_TASK,
+        {
+          companyName: intake.company.nameEn ?? intake.company.nameZh,
+          industry: intake.industry,
+          products: intake.products ?? [],
+          targetMarkets: intake.targetMarkets ?? [],
+          profile: (site.profile as Record<string, unknown> | null) ?? undefined,
+          kbDigest,
+          research: research.sources,
+        },
+        { gateway, ctx: { workspaceId, runId: buildRunId } },
+      );
+
+      // D1/D2 确定性出口闸：证据不合格项降 gaps；模型自报缺口并入（reason=needs_input）
+      const knownUrls = new Set(research.sources.map((s) => s.url));
+      const gated = enforceEvidenceGate(result.data.factSheet ?? [], { knownUrls });
+      const gaps: GapItem[] = [
+        ...gated.gaps,
+        ...(result.data.gaps ?? []).map((g) => ({
+          field: g.field,
+          reason: 'needs_input' as const,
+          hint: g.question,
+        })),
+      ];
+
+      const version = await prisma.withWorkspace(workspaceId, async (tx) => {
+        const agg = await tx.brandProfile.aggregate({ where: { siteId }, _max: { version: true } });
+        const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
+        await tx.brandProfile.create({
+          data: {
+            workspaceId,
+            siteId,
+            version: next,
+            valueProps: (result.data.valueProps ?? []) as Prisma.InputJsonValue,
+            tone: (result.data.tone ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            glossary: (result.data.glossary ?? []) as Prisma.InputJsonValue,
+            keywords: (result.data.keywords ?? []) as Prisma.InputJsonValue,
+            differentiators: (result.data.differentiators ?? []) as Prisma.InputJsonValue,
+            competitors: (result.data.competitors ?? []) as Prisma.InputJsonValue,
+            factSheet: gated.factSheet as unknown as Prisma.InputJsonValue,
+            gaps: gaps as unknown as Prisma.InputJsonValue,
+            researchDegraded: research.degraded,
+          },
+        });
+        return next;
+      });
+
+      log.log(
+        `brand profile v${version} for site ${siteId}: ${gated.factSheet.length} facts, ${gaps.length} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+      );
+      return {
+        version,
+        factCount: gated.factSheet.length,
+        gapsCount: gaps.length,
+        researchDegraded: research.degraded,
+        model: result.model,
+      };
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
@@ -358,9 +487,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       return { previewSlug: site.slug, versionId: version.id };
     },
 
-    /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb 降级与骨架跳过项）。 */
+    /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb/profile 实况与骨架跳过项）。 */
     async finalizeRefurbish(input: RefurbishFinalizeInput): Promise<{ previewSlug: string }> {
-      const { workspaceId, siteId, buildRunId, kb: kbSummary, build } = input;
+      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, build } = input;
       await prisma.withWorkspace(workspaceId, async (tx) => {
         // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
         // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
@@ -378,7 +507,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 processed: kbSummary.processed,
                 failed: kbSummary.failed,
               },
-              { key: 'brand_profile', status: 'skipped_m1b' },
+              { key: 'brand_profile', status: profile.status, gaps: profile.gaps },
               { key: 'image_pipeline', status: 'skipped_m1c' },
               { key: 'copy', status: 'skipped_m1d' },
               { key: 'assemble_build', status: 'done' },

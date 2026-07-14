@@ -31,6 +31,8 @@ export interface GenerateTextInput {
   model?: string; // model name for the 中转站 to resolve; omit → provider default
   maxTokens?: number;
   temperature?: number;
+  /** reasoning 模型的思考预算（OpenAI 兼容 reasoning_effort）。copy 类任务 🔴 必配 low（02 §6）。 */
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export interface GenerateStructuredInput {
@@ -40,6 +42,7 @@ export interface GenerateStructuredInput {
   model?: string;
   schema: Record<string, unknown>; // JSON Schema the output must satisfy
   maxTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export interface EmbedInput {

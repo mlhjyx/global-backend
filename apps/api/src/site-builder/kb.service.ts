@@ -25,7 +25,8 @@ export interface IngestTextInput {
 export interface KbStatus {
   documents: number;
   chunks: number;
-  gaps: { field: string; hintKey: string }[];
+  /** 待补资料清单（最新 brand_profile 版本回填；见 agents/brand-profile.ts GapItem）。 */
+  gaps: { field: string; reason: string; hint: string }[];
 }
 
 export interface SearchHit {
@@ -122,8 +123,49 @@ export class KbService {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const docs = await tx.kbDocument.findMany({ where: { siteId } });
       const chunks = docs.reduce((sum, d) => sum + (d.chunkCount ?? 0), 0);
-      // gaps 由 M1 brandProfile 产出「待补资料」清单；M0 恒空
-      return { documents: docs.length, chunks, gaps: [] };
+      // gaps 从最新 brand_profile 版本回填（M1-b；构建过一次才有，未构建=[]）
+      const latest = await tx.brandProfile.findFirst({
+        where: { siteId },
+        orderBy: { version: 'desc' },
+        select: { gaps: true },
+      });
+      const gaps = (latest?.gaps as KbStatus['gaps'] | null) ?? [];
+      return { documents: docs.length, chunks, gaps };
+    });
+  }
+
+  /**
+   * brandProfile 的 KB digest 取材（M1-b）：按最新文档取前若干块拼正文。
+   * 只取 ready 文档；截断策略在 agents/kb-digest.ts（本方法只管取数）。
+   */
+  async digestSources(
+    ctx: RequestContext,
+    siteId: string,
+    opts: { maxDocs?: number; chunksPerDoc?: number } = {},
+  ): Promise<{ source: string; title: string; text: string }[]> {
+    const maxDocs = opts.maxDocs ?? 12;
+    const chunksPerDoc = opts.chunksPerDoc ?? 4;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const docs = await tx.kbDocument.findMany({
+        where: { siteId, status: 'ready' },
+        orderBy: { createdAt: 'desc' },
+        take: maxDocs,
+      });
+      const out: { source: string; title: string; text: string }[] = [];
+      for (const doc of docs) {
+        const chunks = await tx.kbChunk.findMany({
+          where: { documentId: doc.id },
+          orderBy: { seq: 'asc' },
+          take: chunksPerDoc,
+          select: { text: true },
+        });
+        out.push({
+          source: doc.source,
+          title: doc.title,
+          text: chunks.map((c) => c.text).join('\n'),
+        });
+      }
+      return out;
     });
   }
 

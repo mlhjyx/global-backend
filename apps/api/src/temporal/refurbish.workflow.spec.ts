@@ -18,6 +18,13 @@ const INPUT = { workspaceId: 'ws-1', siteId: 'site-1', buildRunId: 'run-1' };
 function primeHappyPath() {
   acts.beginRefurbishRun.mockResolvedValue(undefined);
   acts.ingestPendingKb.mockResolvedValue({ processed: 2, failed: 0 });
+  acts.buildBrandProfile.mockResolvedValue({
+    version: 1,
+    factCount: 5,
+    gapsCount: 2,
+    researchDegraded: false,
+    model: 'deepseek-v4-pro',
+  });
   acts.assembleAndBuild.mockResolvedValue({ previewSlug: 'acme-abc123', versionId: 'ver-1' });
   acts.finalizeRefurbish.mockImplementation(async (arg: Record<string, unknown>) => ({
     previewSlug: (arg.build as { previewSlug: string }).previewSlug,
@@ -30,27 +37,44 @@ const firstOrder = (m: Mock): number => m.mock.invocationCallOrder[0];
 beforeEach(() => resetActivities());
 
 describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
-  it('顺序 begin < ingest < assemble < finalize；不触发补偿；返回 finalize 结果', async () => {
+  it('顺序 begin < ingest < brandProfile < assemble < finalize（🔴 digest 必须看到刚摄入的文档=顺序非并行）；不触发补偿', async () => {
     primeHappyPath();
 
     const out = await refurbishWorkflow(INPUT);
 
     expect(firstOrder(acts.beginRefurbishRun)).toBeLessThan(firstOrder(acts.ingestPendingKb));
-    expect(firstOrder(acts.ingestPendingKb)).toBeLessThan(firstOrder(acts.assembleAndBuild));
+    expect(firstOrder(acts.ingestPendingKb)).toBeLessThan(firstOrder(acts.buildBrandProfile));
+    expect(firstOrder(acts.buildBrandProfile)).toBeLessThan(firstOrder(acts.assembleAndBuild));
     expect(firstOrder(acts.assembleAndBuild)).toBeLessThan(firstOrder(acts.finalizeRefurbish));
     expect(acts.compensateRefurbish).not.toHaveBeenCalled();
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
   });
 
-  it('finalize 收到 kb 摘要（degraded=false）与 build 产物', async () => {
+  it('finalize 收到 kb 摘要（degraded=false）、profile 摘要（done+gaps）与 build 产物', async () => {
     primeHappyPath();
     await refurbishWorkflow(INPUT);
     expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
       expect.objectContaining({
         ...INPUT,
         kb: { processed: 2, failed: 0, degraded: false },
+        profile: { status: 'done', gaps: 2 },
         build: { previewSlug: 'acme-abc123', versionId: 'ver-1' },
       }),
+    );
+  });
+
+  it('研究降级（researchDegraded=true）→ profile.status=degraded（仅凭 KB 出 Brief 的诚实标记）', async () => {
+    primeHappyPath();
+    acts.buildBrandProfile.mockResolvedValue({
+      version: 1,
+      factCount: 3,
+      gapsCount: 4,
+      researchDegraded: true,
+      model: 'deepseek-v4-pro',
+    });
+    await refurbishWorkflow(INPUT);
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: { status: 'degraded', gaps: 4 } }),
     );
   });
 
@@ -75,6 +99,33 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
       expect.objectContaining({ kb: { processed: 0, failed: 0, degraded: true } }),
     );
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
+  });
+
+  it('buildBrandProfile 抛错（模型全链失败）→ fail-safe：profile.status=failed，构建照常完成', async () => {
+    primeHappyPath();
+    acts.buildBrandProfile.mockRejectedValue(new Error('all models down'));
+
+    const out = await refurbishWorkflow(INPUT);
+
+    expect(acts.assembleAndBuild).toHaveBeenCalledTimes(1);
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({ profile: { status: 'failed', gaps: 0 } }),
+    );
+    expect(acts.compensateRefurbish).not.toHaveBeenCalled();
+    expect(out).toEqual({ previewSlug: 'acme-abc123' });
+  });
+
+  it('brandProfile 期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {
+    primeHappyPath();
+    acts.buildBrandProfile.mockRejectedValue(
+      Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' }),
+    );
+
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('workflow cancelled');
+
+    expect(acts.assembleAndBuild).not.toHaveBeenCalled();
+    expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
+    expect(acts.compensateRefurbish).toHaveBeenCalledTimes(1);
   });
 
   it('assembleAndBuild 抛错 → compensateRefurbish 恰一次 + 原错误上抛；finalize 不调', async () => {

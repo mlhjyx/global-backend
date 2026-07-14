@@ -114,10 +114,11 @@ async function main(): Promise<void> {
       ...createDeletionActivities({ prisma }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({ ownerDb }),
-      // 独立站建设 demo v0（intake 触发 demoV0Workflow；KB=注册资料入库 best-effort）
+      // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
         prisma,
         gateway,
+        broker,
         kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),
       }),
     },
