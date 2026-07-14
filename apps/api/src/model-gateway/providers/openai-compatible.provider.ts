@@ -1,4 +1,5 @@
 import { ModelProvider } from '../model-provider';
+import { ProviderOutputError } from './provider-output-error';
 import {
   EmbedInput,
   GenerateStructuredInput,
@@ -70,8 +71,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (!content.trim()) {
       // 显式空输出失败（M1 评测实证）：reasoning 模型 max_tokens 过小时思考吃光预算，
       // finish_reason=length 且 content 为空——给可诊断错误，而非 JSON.parse('') 的 SyntaxError。
-      throw new Error(
+      // 🔴 改动 2：携带 usage——空输出仍消耗了 token，网关 catch 据此结算（否则绕过硬预算上界）。
+      throw new ProviderOutputError(
         `${this.id} ${model}: empty content (finish_reason=${finishReason ?? 'unknown'}) — reasoning 预算耗尽或输出被截断，检查 maxTokens/reasoning_effort`,
+        usage,
       );
     }
     // 剥 markdown 围栏（真机实证：glm-5.2 在 json_object 模式下仍偶发 ```json…``` 包裹）。
@@ -79,15 +82,22 @@ export class OpenAICompatibleProvider implements ModelProvider {
     try {
       return { data: JSON.parse(payload) as T, provider: this.id, model, usage };
     } catch (err) {
-      // JSON 解析失败 + finish_reason=length = 输出中途截断（M1-b 真机实证：v4-pro
-      // 「Unterminated string」）——显式指向 maxTokens，而非裸 SyntaxError。完整 JSON 不受影响。
+      // JSON 解析失败三种同根因（都花了 token → 均带 usage 供网关结算，改动 2）：
+      // ① finish_reason=length = 输出中途截断（真机实证：v4-pro「Unterminated string」）——显式指向 maxTokens。
       if (finishReason === 'length') {
-        throw new Error(
+        throw new ProviderOutputError(
           `${this.id} ${model}: output truncated at max_tokens (finish_reason=length), JSON incomplete — raise maxTokens`,
+          usage,
           { cause: err },
         );
       }
-      throw err;
+      // ② 非截断的解析失败（模型返回非 JSON 文本）——保留原始 SyntaxError 为 cause，不误报截断。
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new ProviderOutputError(
+        `${this.id} ${model}: structured output is not valid JSON — ${detail}`,
+        usage,
+        { cause: err },
+      );
     }
   }
 

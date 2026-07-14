@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
+import { ProviderOutputError } from './providers/provider-output-error';
 import { BudgetLedger, BudgetExceededError } from '../tools/budget';
 import { ModelResult } from './types';
 
@@ -135,5 +136,80 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const gw = gatewayWith(fakeProvider(), budget);
     await gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1' });
     expect(budget.remainingCents('ws-1')).toBe(80);
+  });
+});
+
+/**
+ * M1-b fast-follow 改动 2：provider 消费 token 却结构化输出失败（空/截断/非 JSON）时抛
+ * ProviderOutputError 携 usage——网关 catch 在 trace 前按 centsFromTokens 结算，否则「花了 token 却
+ * 失败」的调用绕过硬预算上界（全链失败 finally settle(0) 会把真实消耗记 0¢）。单次 settle 语义不变。
+ */
+describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动 2）', () => {
+  it('provider 抛 ProviderOutputError{usage} 且账户已 open → 按 token 结算（非 0），错误上抛', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const gw = gatewayWith(
+      fakeProvider(async () => {
+        throw new ProviderOutputError('truncated', { outputTokens: 1_000_000 });
+      }),
+      budget,
+    );
+    await expect(
+      gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+    // 1e6 token × 100¢/Mtok（默认价）= 100¢ 结算 → 剩 400（旧行为 settle(0) 会剩 500 绕过硬顶）
+    expect(budget.remainingCents('run-1')).toBe(400);
+  });
+
+  it('[real 抛 ProviderOutputError, stub 成功] → 只记 real 的真实消耗，stub 成功 settle no-op', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const real = fakeProvider(async () => {
+      throw new ProviderOutputError('empty', { outputTokens: 1_000_000 });
+    });
+    const stub = fakeProvider(async () => ({
+      data: 'ok',
+      provider: 'stub',
+      model: 'm',
+      usage: { outputTokens: 1_000_000 },
+    }));
+    (stub as { id: string }).id = 'stub';
+    const router = { route: () => [real, stub] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router);
+    gw.budget = budget;
+    const r = await gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' });
+    expect(r.data).toBe('ok'); // 回退到 stub
+    // 单次 settle：只记 real 的 100¢，stub 的 100¢ 不叠加（settled 标志维持）
+    expect(budget.remainingCents('run-1')).toBe(400);
+  });
+
+  it('ProviderOutputError 但无 usage（0 token）→ 不结算，全链失败留 finally settle(0)', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const gw = gatewayWith(
+      fakeProvider(async () => {
+        throw new ProviderOutputError('empty no-usage');
+      }),
+      budget,
+    );
+    await expect(
+      gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+    expect(budget.remainingCents('run-1')).toBe(500); // centsFromTokens=null → 不 settle
+  });
+
+  it('普通 Error（非 ProviderOutputError）→ 维持旧行为不计费（全额退还）', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const gw = gatewayWith(
+      fakeProvider(async () => {
+        throw new Error('model down');
+      }),
+      budget,
+    );
+    await expect(
+      gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toThrow('model down');
+    expect(budget.remainingCents('run-1')).toBe(500);
   });
 });

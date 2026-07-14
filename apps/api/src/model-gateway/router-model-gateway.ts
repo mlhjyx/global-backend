@@ -5,6 +5,7 @@ import { ModelProvider } from './model-provider';
 import { AiTraceSink } from './ai-trace.sink';
 import { checkAgainstSchema } from './schema-validate';
 import { BudgetLedger, BudgetExceededError, budgetLedger, DEFAULT_LLM_EST_CENTS } from '../tools/budget';
+import { ProviderOutputError } from './providers/provider-output-error';
 import { getTask } from '../ai-tasks/task-registry';
 
 /**
@@ -161,6 +162,11 @@ export class RouterModelGateway extends ModelGateway {
           });
           return result;
         } catch (err) {
+          // 改动 2：provider 消费了 token 却输出不可用（空/截断/非 JSON）→ 结算真实消耗，
+          // 否则全链失败 finally settle(0) 会把真实 token 记 0¢、绕过硬预算上界。单次 settle 语义不变
+          // （[real 抛带 usage, stub 成功]：real 先 settle → settled 置位 → stub 成功 settle no-op，只记 real）。
+          const c = err instanceof ProviderOutputError ? centsFromTokens(err.usage) : null;
+          if (c != null) settle(c);
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,
