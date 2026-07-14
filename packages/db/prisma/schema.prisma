@@ -583,7 +583,9 @@ model SanctionsScreeningResult {
   screenedAt         DateTime @default(now()) @map("screened_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  @@index([workspaceId, canonicalCompanyId])
+  // 一公司一结果（复审 M1）：并发多 ICP qualify 对同公司 find-then-create 会产双行 + 「最新」非确定 →
+  // 人工清白可能被 open 兄弟行遮蔽。唯一键 → upsert 原子收敛。
+  @@unique([workspaceId, canonicalCompanyId])
   @@index([workspaceId, reviewState])
   @@map("sanctions_screening_result")
 }

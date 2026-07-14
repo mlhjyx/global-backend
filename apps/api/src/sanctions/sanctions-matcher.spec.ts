@@ -69,6 +69,12 @@ describe('screenName（召回优先匹配）', () => {
     expect(screenName('TOTALLY UNRELATED CO', null, [idx('36', 'AEROCARIBBEAN AIRLINES')])).toEqual([]);
   });
 
+  it('🔴 M3a 双向召回：实体短名 ⊆ 公司全名（Tinkoff vs "Tinkoff Bank JSC"）也命中（单向会漏）', () => {
+    const m = screenName('Tinkoff Bank JSC', null, [idx('7', 'Tinkoff')]);
+    expect(m.length).toBeGreaterThan(0);
+    expect(m[0].externalId).toBe('7');
+  });
+
   it('国别一致 → 展示分加成；背离 → 降展示分但仍是候选（不自动清）', () => {
     const ent = idx('36', 'AEROCARIBBEAN AIRLINES', { country: 'CU' });
     const same = screenName('AEROCARIBBEAN AIRLINES', 'CU', [ent])[0];

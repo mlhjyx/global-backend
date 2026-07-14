@@ -29,7 +29,15 @@ function buildCountryMap(): Map<string, string> {
 }
 export function countryToAlpha2(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  return NAME_TO_ALPHA2.get(raw.trim().toLowerCase()) ?? null;
+  const k = raw.trim().toLowerCase();
+  const direct = NAME_TO_ALPHA2.get(k);
+  if (direct) return direct;
+  // OFAC 逗号形态 "Korea, North" → "North Korea"（复审 L1；仅影响国别 triage 加成，非候选资格）。
+  if (k.includes(',')) {
+    const flipped = k.split(',').map((s) => s.trim()).filter(Boolean).reverse().join(' ');
+    return NAME_TO_ALPHA2.get(flipped) ?? null;
+  }
+  return null;
 }
 
 const PARSERS: Record<string, (xml: string) => ParsedSanctionsList> = {
@@ -50,14 +58,17 @@ export interface DesiredSanctionsEntity {
   contentHash: string;
 }
 
-/** 解析实体 → 目标行（纯函数，可测）。contentHash 覆盖决定「变没变」的字段。 */
+/**
+ * 解析实体 → 目标行（纯函数，可测）。contentHash 覆盖决定「变没变」的字段。
+ * 🔴 H1：**contentHash 不含 listVersion**——listVersion 每次发布都变且全表一致，若入 hash 则每次发版全表判「变」
+ * → 全表逐行 UPDATE（慢、撞 15min activity 超时）。listVersion 走「seen 批量 updateMany」廉价更新（见 refreshSource）。
+ */
 export function toDesiredEntity(e: ParsedSanctionsEntity, listVersion: string): DesiredSanctionsEntity {
   const canon = JSON.stringify({
     n: e.primaryName,
     c: e.country,
     p: [...e.programs].sort(),
     a: [...e.aliases].map((x) => `${x.quality}:${x.name}`).sort(),
-    v: listVersion,
   });
   return {
     externalId: e.externalId,
@@ -82,7 +93,8 @@ export interface SanctionsDiff {
   toCreate: DesiredSanctionsEntity[];
   toUpdate: DesiredSanctionsEntity[]; // contentHash 变了 或 之前被撤下现又出现
   toWithdrawExternalIds: string[]; // 本次未出现且尚未撤下
-  unchanged: number;
+  unchangedExternalIds: string[]; // 内容未变（H1：仅廉价批量更 listVersion/lastSeenAt，不逐行 UPDATE）
+  get unchanged(): number;
 }
 
 /** diff：现有行 vs 目标行 → 增/改/撤/不变（纯函数，可测）。 */
@@ -94,16 +106,24 @@ export function diffSanctionsEntities(
   const seen = new Set<string>();
   const toCreate: DesiredSanctionsEntity[] = [];
   const toUpdate: DesiredSanctionsEntity[] = [];
-  let unchanged = 0;
+  const unchangedExternalIds: string[] = [];
   for (const d of desired) {
     seen.add(d.externalId);
     const prior = priorByExt.get(d.externalId);
     if (!prior) toCreate.push(d);
     else if (prior.contentHash !== d.contentHash || prior.withdrawnAt) toUpdate.push(d);
-    else unchanged++;
+    else unchangedExternalIds.push(d.externalId);
   }
   const toWithdrawExternalIds = existing.filter((e) => !seen.has(e.externalId) && !e.withdrawnAt).map((e) => e.externalId);
-  return { toCreate, toUpdate, toWithdrawExternalIds, unchanged };
+  return {
+    toCreate,
+    toUpdate,
+    toWithdrawExternalIds,
+    unchangedExternalIds,
+    get unchanged() {
+      return this.unchangedExternalIds.length;
+    },
+  };
 }
 
 export interface SanctionsRefreshSummary {
@@ -124,6 +144,8 @@ export interface SanctionsRefreshDeps {
 }
 
 const CHUNK = 1000;
+// C1：本次解析活跃数 < 现有活跃数 × 此比例 → 判异常（坏下载/截断/schema 漂移），拒撤全表、保留上次好数据。
+const SHRINK_GUARD = 0.5;
 function chunks<T>(arr: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -171,6 +193,16 @@ export class SanctionsRefreshService {
       where: { sourceId },
       select: { externalId: true, contentHash: true, withdrawnAt: true },
     });
+    const existingActive = existing.filter((e) => !e.withdrawnAt).length;
+    // 🔴 C1：空/暴跌解析（坏下载/HTML/截断/schema 漂移——两解析器 fail-safe 返 []）**绝不撤下整表**——
+    // 否则索引清空 → screen 全 not_screened → 门 fail-open。判 FAILED、保留上次好数据、上抛（refreshAll 记 FAILED）。
+    if (desired.length === 0 || (existingActive > 0 && desired.length < existingActive * SHRINK_GUARD)) {
+      await this.deps.ownerDb.sanctionsSource.update({
+        where: { id: sourceId },
+        data: { lastRefreshedAt: new Date(), lastFetchStatus: 'FAILED' },
+      });
+      throw new Error(`sanctions refresh abort (shrink guard): parsed ${desired.length} vs existing active ${existingActive} — kept prior data`);
+    }
     const diff = diffSanctionsEntities(existing, desired);
 
     const now = new Date();
@@ -184,6 +216,13 @@ export class SanctionsRefreshService {
       await this.deps.ownerDb.sanctionsEntity.update({
         where: { sourceId_externalId: { sourceId, externalId: d.externalId } },
         data: { ...toRow(d), lastSeenAt: now, withdrawnAt: null },
+      });
+    }
+    // H1：未变实体仅廉价批量更 listVersion + lastSeenAt（不逐行 UPDATE，防发版全表逐行改）。
+    for (const chunk of chunks(diff.unchangedExternalIds, CHUNK)) {
+      await this.deps.ownerDb.sanctionsEntity.updateMany({
+        where: { sourceId, externalId: { in: chunk } },
+        data: { listVersion, lastSeenAt: now },
       });
     }
     for (const chunk of chunks(diff.toWithdrawExternalIds, CHUNK)) {

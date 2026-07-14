@@ -283,6 +283,8 @@ function makeDecideTx(
         return [...minByClass].map(([dataClass, fetchedAt]) => ({ dataClass, _min: { fetchedAt } }));
       },
     },
+    // 第五门：这些用例不测制裁，无历史命中 → decide 的持久化命中读返回 null（不拦，走 clear/not_screened）。
+    sanctionsScreeningResult: { findFirst: async () => null },
     outboxEvent: { create: outboxCreate },
   };
 }

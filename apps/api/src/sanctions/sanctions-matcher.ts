@@ -55,6 +55,15 @@ function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 
+/**
+ * 双向 token 相似度（召回优先）：max(q⊆n 加权, n⊆q 加权)。
+ * `nameScore` 只对「查询 ⊆ 候选」加权；制裁常见形态是**实体短名 ⊆ 公司全名**（如实体 "Tinkoff" vs
+ * 公司 "Tinkoff Bank JSC"），单向会漏（复审 M3a）。取两向最大 → 两种子集关系都被召回。
+ */
+function bidirNameScore(q: string, qTokens: Set<string>, n: string, nTokens: Set<string>): number {
+  return Math.max(nameScore(q, qTokens, n, nTokens), nameScore(n, nTokens, q, qTokens));
+}
+
 /** 预归一：把名字转成 (normalized, tokens)。screening service 建索引时对实体侧同法预处理。 */
 export function prepareName(name: string): { normalized: string; tokens: Set<string> } {
   const normalized = normForMatch(name);
@@ -123,10 +132,10 @@ export function screenName(
     // ① originate：只用 primaryName + 强别名（弱别名不 originate）
     let bestName = ent.primaryName;
     let bestQuality: ScreenMatch['aliasQuality'] = 'primary';
-    let best = ent.primaryTokens.size ? nameScore(q, qTokens, ent.normalizedPrimary, ent.primaryTokens) : 0;
+    let best = ent.primaryTokens.size ? bidirNameScore(q, qTokens, ent.normalizedPrimary, ent.primaryTokens) : 0;
     for (const a of ent.aliases) {
       if (a.quality !== 'strong' || !a.tokens.size) continue;
-      const s = nameScore(q, qTokens, a.normalized, a.tokens);
+      const s = bidirNameScore(q, qTokens, a.normalized, a.tokens);
       if (s > best) {
         best = s;
         bestName = a.name;
@@ -138,7 +147,7 @@ export function screenName(
     // ② 弱别名只用于**升高**已 originate 的候选（不能凭空建候选）
     for (const a of ent.aliases) {
       if (a.quality !== 'weak' || !a.tokens.size) continue;
-      const s = nameScore(q, qTokens, a.normalized, a.tokens);
+      const s = bidirNameScore(q, qTokens, a.normalized, a.tokens);
       if (s > best) {
         best = s;
         bestName = a.name;

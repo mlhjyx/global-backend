@@ -188,3 +188,17 @@
 
 **质量**：`db generate`（迁移已 apply）→ `api build`（tsc 绿）→ `api test`（vitest **1200 全绿**，110 文件；含 OFAC/EU 解析 · 召回匹配 · reconcile · 刷新 diff · scoring sanctions_hold）→ openapi 56 路径（新增 `/leads/:id/sanctions-review`）→ 真测七段全绿。翻 `sanctions_source.*` ENABLED **免 LIA/DPIA**（不物化 person PII，同 SAM/openFDA 档）——ops 显式动作。
 ⚠️ **快照契约 `sanctions_screening` 字段需 B/A 评审**（product-scope §6，PR 已标注）。EU FSF 解析器已建+单测，真测本次只覆盖 OFAC（EU 端点已一手拉取证实、许可待核，翻 ENABLED 前补真测）。
+
+**对抗复审（2 维·独立 agent·逐条核验）→ 已修 8 条**：
+- 🔴 **decide fail-open（复审最重）**：API 索引空/陈旧返 not_screened 时，旧 decide 跳过持久化命中检查 → 交付 qualify 已标记的被制裁公司。**修**：decide 现**独立于 live 索引**读持久化命中（open/confirmed 未清）硬拦，闭合跨进程陈旧窗口。
+- 🔴 **C1 空/暴跌下载撤全表→门 fail-open**：坏下载（HTML/截断）解析空 → 撤下整表 → 索引空 → 门失效。**修**：SHRINK_GUARD（解析活跃数 < 现有×0.5 或空 → 判 FAILED、保留上次好数据）。
+- **H1 contentHash 含 listVersion → 发版全表逐行 UPDATE 撞 15min 超时**：**修**：hash 去 listVersion，未变实体走批量 updateMany 廉价更新。
+- **M1 无唯一键→并发多 ICP qualify 产双行/遮蔽人工清白**：**修**：`@@unique(workspace, company)` + upsert。
+- **M3a 匹配单向欠召回**（实体短名 ⊆ 公司全名如 Tinkoff vs "Tinkoff Bank JSC" 漏）：**修**：双向 `bidirNameScore`。
+- **快照虚报覆盖**：ENABLED 但零实体的源不进 listVersions（不虚报未筛名单）。
+- **confirmed 可翻 cleared**：review 端点禁 confirmed_true_hit→cleared（真命中不可轻易解除）。
+- **L1 countryToAlpha2 漏逗号形态**（"Korea, North"）：**修**（仅国别 triage）。
+
+**记档（Phase 1.5，非阻塞）**：M3b 泛词单 token 实体名 flooding（阈值可调，Phase 1.5 停用词表）· redirect 每跳 SSRF 硬化（现固定 gov 域+初跳 policy 门，解析层已 drop PII）· review 端点角色门（ADR-011 归 B 层）· 已交付线索名单变更再监控（Phase 1.5 delta 复筛+SanctionsStatusChanged）· EU 许可核实。
+
+复审确认**牢固**：person PII 隔离（两解析器 fail-safe drop 非公司 + rawFeatures 仅绿 + 日志仅计数 + trace 用 hash URL）· RLS 布局（平台表 GRANT SELECT 无 RLS / 租户表 FORCE RLS）· broker fail-closed（未登记/SUSPENDED/用途门全拒）· decide 顺序与事务回滚。

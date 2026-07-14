@@ -84,8 +84,13 @@ export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy 
       aliases: e.aliases,
     }));
     this.index = buildSanctionsIndex(rows);
+    // 复审 #2：只对索引里**真有实体**的源声明覆盖——ENABLED 但零实体（刷新失败/全撤下）的源不进 listVersions，
+    // 否则「clear」快照会虚报未实际筛过的名单覆盖（快照诚实红线）。
+    const presentKeys = new Set(this.index.map((e) => e.sourceKey));
     this.listVersions = Object.fromEntries(
-      sources.map((s) => [s.key, s.publishDate ? s.publishDate.toISOString().slice(0, 10) : '']),
+      sources
+        .filter((s) => presentKeys.has(s.key))
+        .map((s) => [s.key, s.publishDate ? s.publishDate.toISOString().slice(0, 10) : '']),
     );
     this.active = this.index.length > 0;
     this.logger.log(`sanctions index built: ${this.index.length} entities from ${sources.length} enabled source(s)`);

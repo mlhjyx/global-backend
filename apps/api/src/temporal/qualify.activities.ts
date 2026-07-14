@@ -160,14 +160,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             });
             // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。
             if (screenMatches.length) {
-              const priorRow = await tx.sanctionsScreeningResult.findFirst({
-                where: { canonicalCompanyId: c.id },
-                orderBy: { screenedAt: 'desc' },
-                select: { id: true },
-              });
               const data = {
-                workspaceId: args.workspaceId,
-                canonicalCompanyId: c.id,
                 screenedName: c.name,
                 status: 'potential_match',
                 matches: screenMatches as unknown as Prisma.InputJsonValue,
@@ -176,8 +169,12 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 listVersions: screenListVersions as unknown as Prisma.InputJsonValue,
                 screenedAt: new Date(),
               };
-              if (priorRow) await tx.sanctionsScreeningResult.update({ where: { id: priorRow.id }, data });
-              else await tx.sanctionsScreeningResult.create({ data });
+              // upsert（复审 M1）：唯一键 (workspace, company) 原子收敛，并发多 ICP 不产双行/不遮蔽人工清白。
+              await tx.sanctionsScreeningResult.upsert({
+                where: { workspaceId_canonicalCompanyId: { workspaceId: args.workspaceId, canonicalCompanyId: c.id } },
+                update: data,
+                create: { workspaceId: args.workspaceId, canonicalCompanyId: c.id, ...data },
+              });
             }
             queues[queue] = (queues[queue] ?? 0) + 1;
             scored += 1;
