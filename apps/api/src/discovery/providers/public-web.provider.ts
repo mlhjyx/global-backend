@@ -142,7 +142,9 @@ export class PublicWebDiscoveryProvider
       const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
         'crawl4ai.fetch',
         { url: homeUrl },
-        this.toolCtx(ctx, 'discovery.extract_company'),
+        // FIX C（Codex P1）：仅在 crawl4ai.fetch 处显式声明用途（toolCtx 与 searxng.search 共享，
+        // searxng 是 sourcePolicy=none 短路放行，不在此加）；精确复现 site_builder 扩宽前的有效集。
+        { ...this.toolCtx(ctx, 'discovery.extract_company'), purpose: ['discovery', 'enrichment'] },
       );
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
@@ -207,7 +209,11 @@ export class PublicWebDiscoveryProvider
     const base = `https://${company.domain}/`;
     if (!(await isAllowedByRobots(base))) return { contacts: [], costCents: 0 };
     const crawl = (url: string) =>
-      this.deps.broker!.invoke<{ url: string }, CrawlResult>('crawl4ai.fetch', { url }, this.toolCtx(ctx, 'contact.find_decision_makers'));
+      this.deps.broker!.invoke<{ url: string }, CrawlResult>('crawl4ai.fetch', { url }, {
+        // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及本发现抓取。
+        ...this.toolCtx(ctx, 'contact.find_decision_makers'),
+        purpose: ['discovery', 'enrichment'],
+      });
     const pages: { url: string; text: string }[] = [];
     try {
       const home = await crawl(base);

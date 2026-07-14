@@ -5,6 +5,7 @@ import { ModelProvider } from './model-provider';
 import { AiTraceSink } from './ai-trace.sink';
 import { checkAgainstSchema } from './schema-validate';
 import { BudgetLedger, BudgetExceededError, budgetLedger, DEFAULT_LLM_EST_CENTS } from '../tools/budget';
+import { ProviderOutputError } from './providers/provider-output-error';
 import { getTask } from '../ai-tasks/task-registry';
 
 /**
@@ -19,6 +20,21 @@ function centsFromTokens(usage?: { inputTokens?: number; outputTokens?: number }
   const env = Number(process.env.LLM_CENTS_PER_MTOK);
   const perMtok = Number.isFinite(env) && env > 0 ? env : 100;
   return Math.max(1, Math.ceil((tokens * perMtok) / 1_000_000));
+}
+
+/**
+ * 合并首调 + 修复重试的 usage（FIX 1）：校验-修复路径无论成功还是失败，都要把两次已消耗 token 汇总，
+ * 让网关 catch 按 centsFromTokens 结算真实消耗——否则修复抛错只带修复 usage（漏首调）、recheck 失败
+ * 抛裸 Error（记 0¢），都绕过改动 2 的硬预算上界「凡消耗 token 的调用都不该 settle 0¢」。
+ */
+function mergeStructuredUsage(
+  a?: { inputTokens?: number; outputTokens?: number },
+  b?: { inputTokens?: number; outputTokens?: number },
+): { inputTokens: number; outputTokens: number } {
+  return {
+    inputTokens: (a?.inputTokens ?? 0) + (b?.inputTokens ?? 0),
+    outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
+  };
 }
 import {
   AiContext,
@@ -65,27 +81,37 @@ export class RouterModelGateway extends ModelGateway {
       const check = checkAgainstSchema(input.schema, first.data);
       if (check.valid) return first;
       // 修复重试：把校验错误反馈给模型，仅一次（PRD 9.6 校验-修复循环）。
-      const repair = await p.generateStructured<T>(
-        {
-          ...input,
-          prompt: `${input.prompt}\n\n上一次输出未通过 JSON Schema 校验，错误：\n${(check.errors ?? []).join('\n')}\n请修正后重新只输出合法 JSON。`,
-        },
-        ctx,
-      );
+      let repair: ModelResult<T>;
+      try {
+        repair = await p.generateStructured<T>(
+          {
+            ...input,
+            prompt: `${input.prompt}\n\n上一次输出未通过 JSON Schema 校验，错误：\n${(check.errors ?? []).join('\n')}\n请修正后重新只输出合法 JSON。`,
+          },
+          ctx,
+        );
+      } catch (err) {
+        // FIX 1：修复调用抛错也要带上首调已消耗的 token（否则网关 catch 只结算修复那次、漏首调，少记绕硬顶）。
+        throw new ProviderOutputError(
+          `repair call failed: ${String(err)}`,
+          mergeStructuredUsage(first.usage, err instanceof ProviderOutputError ? err.usage : undefined),
+          { cause: err },
+        );
+      }
       const recheck = checkAgainstSchema(input.schema, repair.data);
       if (!recheck.valid) {
-        throw new Error(
+        // FIX 1：修复后仍不过 schema → 抛 ProviderOutputError 携首调+修复合并 usage（原为裸 Error →
+        // 网关 catch 记 0¢，两次调用白烧、绕过硬预算上界）。
+        throw new ProviderOutputError(
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join('; ')}`,
+          mergeStructuredUsage(first.usage, repair.usage),
         );
       }
       // usage 合并：重试消耗也要入账。callCount=2 → 无 usage 上报时 settle 按**两次**兜底（否则少记一次、
       // 退还预留的另一半，40¢ 上限跑一个修复过的 20¢ 任务仍剩 20¢，硬上界失效，#82 P2）。
       return {
         ...repair,
-        usage: {
-          inputTokens: (first.usage?.inputTokens ?? 0) + (repair.usage?.inputTokens ?? 0),
-          outputTokens: (first.usage?.outputTokens ?? 0) + (repair.usage?.outputTokens ?? 0),
-        },
+        usage: mergeStructuredUsage(first.usage, repair.usage),
         callCount: 2,
       };
     });
@@ -161,6 +187,11 @@ export class RouterModelGateway extends ModelGateway {
           });
           return result;
         } catch (err) {
+          // 改动 2：provider 消费了 token 却输出不可用（空/截断/非 JSON）→ 结算真实消耗，
+          // 否则全链失败 finally settle(0) 会把真实 token 记 0¢、绕过硬预算上界。单次 settle 语义不变
+          // （[real 抛带 usage, stub 成功]：real 先 settle → settled 置位 → stub 成功 settle no-op，只记 real）。
+          const c = err instanceof ProviderOutputError ? centsFromTokens(err.usage) : null;
+          if (c != null) settle(c);
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,

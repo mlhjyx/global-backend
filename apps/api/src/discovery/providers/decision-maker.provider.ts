@@ -120,7 +120,8 @@ export class DecisionMakerProvider {
         const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
           'crawl4ai.fetch',
           { url },
-          this.toolCtx(ctx, 'contact.find_decision_makers'),
+          // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及决策人抓取（复现变更前有效集）。
+          { ...this.toolCtx(ctx, 'contact.find_decision_makers'), purpose: ['discovery', 'enrichment'] },
         );
         text = crawled.data.text.slice(0, 30_000);
       } catch {
@@ -167,7 +168,8 @@ export class DecisionMakerProvider {
       const home = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
         'crawl4ai.fetch',
         { url: base },
-        this.toolCtx(ctx, 'contact.find_decision_makers'),
+        // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及决策人抓取（复现变更前有效集）。
+        { ...this.toolCtx(ctx, 'contact.find_decision_makers'), purpose: ['discovery', 'enrichment'] },
       );
       const links = extractSameSiteLinks(home.data.text, base);
       const scored = links

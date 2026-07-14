@@ -136,7 +136,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           'crawl4ai.fetch',
           // maxChars=60k：名录列表页单页数百家公司，工具默认 40k 会静默砍掉尾部 1/3 条目（复审 medium）
           { url: pageUrl, maxChars: 60_000 },
-          this.toolCtx(ctx, 'discovery.extract_list'),
+          // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及本发现抓取（复现变更前有效集）。
+          { ...this.toolCtx(ctx, 'discovery.extract_list'), purpose: ['discovery', 'enrichment'] },
         );
         text = crawled.data.text.slice(0, 60_000);
       } catch (err) {

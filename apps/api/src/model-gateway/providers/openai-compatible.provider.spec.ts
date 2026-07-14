@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAICompatibleProvider, stripJsonFence } from './openai-compatible.provider';
+import { ProviderOutputError } from './provider-output-error';
 
 /**
  * M1-b 网关增量（09 §2.4 AiTask 工程护栏的 provider 侧）：
@@ -59,14 +60,19 @@ describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
 });
 
 describe('OpenAICompatibleProvider — 空输出显式失败', () => {
-  it('content 为空 + finish_reason=length → 抛可诊断错误（含 finish_reason 与模型名）', async () => {
+  it('content 为空 + finish_reason=length → 抛 ProviderOutputError（含 finish_reason/模型名，携带 usage）', async () => {
     mockChatResponse({
       choices: [{ message: { content: '' }, finish_reason: 'length' }],
-      usage: { completion_tokens: 2000 },
+      usage: { prompt_tokens: 300, completion_tokens: 2000 },
     });
-    await expect(
-      provider.generateStructured({ task: 't', prompt: 'p', schema: {}, model: 'deepseek-v4-pro' }),
-    ).rejects.toThrow(/empty content.*finish_reason=length/s);
+    const err = await provider
+      .generateStructured({ task: 't', prompt: 'p', schema: {}, model: 'deepseek-v4-pro' })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProviderOutputError);
+    expect((err as Error).message).toMatch(/empty content.*finish_reason=length/s);
+    // 🔴 改动 2：花了 token 却失败必须带 usage，供网关 catch 结算（否则绕过硬预算上界）
+    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 300, outputTokens: 2000 });
   });
 
   it('content 正常 → 照常解析', async () => {
@@ -82,24 +88,34 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     expect(r.data.ok).toBe(true);
   });
 
-  it('JSON 中途截断 + finish_reason=length → 显式 truncated 错误（真机实证：v4-pro Unterminated string）', async () => {
+  it('JSON 中途截断 + finish_reason=length → 抛 ProviderOutputError（truncated 语义，带 cause+usage）', async () => {
     mockChatResponse({
       choices: [{ message: { content: '{"facts": ["pump' }, finish_reason: 'length' }],
-      usage: {},
+      usage: { prompt_tokens: 120, completion_tokens: 800 },
     });
-    await expect(
-      provider.generateStructured({ task: 't', prompt: 'p', schema: {} }),
-    ).rejects.toThrow(/output truncated at max_tokens/);
+    const err = await provider
+      .generateStructured({ task: 't', prompt: 'p', schema: {} })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProviderOutputError);
+    expect((err as Error).message).toMatch(/output truncated at max_tokens/);
+    expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 保留原始解析错
+    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 120, outputTokens: 800 });
   });
 
-  it('JSON 不合法但 finish_reason=stop → 保留原始 SyntaxError（不误报截断）', async () => {
+  it('JSON 不合法但 finish_reason=stop → 抛 ProviderOutputError（非截断语义，保留 SyntaxError 为 cause，带 usage）', async () => {
     mockChatResponse({
       choices: [{ message: { content: 'not json' }, finish_reason: 'stop' }],
-      usage: {},
+      usage: { prompt_tokens: 50, completion_tokens: 10 },
     });
-    await expect(
-      provider.generateStructured({ task: 't', prompt: 'p', schema: {} }),
-    ).rejects.toThrow(SyntaxError);
+    const err = await provider
+      .generateStructured({ task: 't', prompt: 'p', schema: {} })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProviderOutputError);
+    expect((err as Error).message).not.toMatch(/truncated/); // 不误报截断
+    expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 原始解析错保留在 cause
+    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 50, outputTokens: 10 });
   });
 
   it('🔴 markdown 围栏包裹的 JSON（真机实证：glm-5.2 偶发 ```json）→ 剥壳后正常解析', async () => {
