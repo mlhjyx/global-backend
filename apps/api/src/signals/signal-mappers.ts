@@ -187,11 +187,12 @@ export function mapSamSourcesSought(n: SamSourcesSought, observedAt: Date): MapO
   };
 }
 
-/** SAM 买方身份名：`Department — Sub-Tier`（Sub-Tier 缺则退 Department；都缺 → 空跳过）。 */
+/** SAM 买方身份名：`Department — Sub-Tier`（Sub-Tier 缺则退 Department；都缺 → 空跳过）。
+ *  Department==Sub-Tier（SAM 常把部级机构在两列同名，如 "VA — VA"）→ 折叠单值，避免冗余身份与 dedupeKey 抖动。 */
 function samBuyerName(n: SamSourcesSought): string {
   const dept = n.department?.trim();
   const sub = n.subTier?.trim();
-  if (dept && sub) return `${dept} — ${sub}`;
+  if (dept && sub) return dept.toLowerCase() === sub.toLowerCase() ? dept : `${dept} — ${sub}`;
   return sub || dept || '';
 }
 

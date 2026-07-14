@@ -1,5 +1,5 @@
 import { qualify, QualifyResult, RuleLike } from '../icp/rule-engine';
-import { TENDER_PUBLISHED } from '../signals/signal-mappers';
+import { TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT } from '../signals/signal-mappers';
 
 /**
  * 六维评分（LED-006, PRD 5.6/7.5）—— 全部确定性计算，AI 不参与打分：
@@ -65,8 +65,9 @@ export interface LeadScoreResult {
 
 // 加法六维权重（不含 demandProof——观测维不进总分，乘法门待 R2 backtest；见 LeadScoreResult.scores 注）。
 const WEIGHTS = { fit: 0.35, role: 0.15, intent: 0.15, dataQuality: 0.15, reachability: 0.15, engagement: 0.05 };
-/** 需求证据类事件（收口⑤拍板）：买方公开采购 + 供应商招募页开放；FDA_CLEARANCE 属上市时机留 Intent 维。 */
-const DEMAND_PROOF_EVENT_TYPES = new Set<string>([TENDER_PUBLISHED, 'SOURCING_OPENED']);
+// 需求证据类事件（收口⑤拍板 + P4 扩）：买方公开采购（TED 招标 / SAM Sources Sought——皆买方侧需求，
+// Sources Sought 为招标前市场调研=最早的买方需求证据）+ 供应商招募页开放；FDA_CLEARANCE 属**卖方侧**上市时机，留 Intent 维不进需求证据。
+const DEMAND_PROOF_EVENT_TYPES = new Set<string>([TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT, 'SOURCING_OPENED']);
 const RECOMMEND_THRESHOLD = 0.55;
 const INTENT_HALFLIFE_DAYS = 60; // 意向信号半衰期：B2B 买家信号约 2 月衰减一半（越久越弱，防陈旧信号长期占分）
 const DAY_MS = 86_400_000;

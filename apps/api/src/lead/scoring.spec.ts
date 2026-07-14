@@ -300,6 +300,12 @@ describe('scoreLead — DemandProof 观测维（收口⑤：一等 Signal 需求
     expect(sourcing.scores.demandProof).toBeGreaterThan(0.95);
   });
 
+  it('US_FED_SOURCES_SOUGHT（SAM 招标前市场调研）→ demandProof>0（买方侧需求，同 TED 招标类，P4）', () => {
+    const sam = scoreLead(withEvents([{ type: 'US_FED_SOURCES_SOUGHT', at: daysAgo(3), strength: 0.7, evidence: { naics: ['333914'], notice: 'SS-1', source: 'samgov' } }]), icp, { nowMs: NOW });
+    expect(sam.scores.demandProof).toBeGreaterThan(0.6); // 0.7 × 3d 衰减 ≈ 0.68
+    expect(sam.scores.intent).toBeGreaterThan(0); // 同时驱动 Intent 维（通用 events 遍历）
+  });
+
   it('FDA_CLEARANCE 属上市时机 → 动 Intent 维但 demandProof=0（维度切分拍板）', () => {
     const r = scoreLead(withEvents([{ type: 'FDA_CLEARANCE', at: daysAgo(3), strength: 0.85 }]), icp, { nowMs: NOW });
     expect(r.scores.intent).toBeGreaterThan(0.8);

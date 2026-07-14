@@ -155,6 +155,11 @@ describe('mapSamSourcesSought —— SAM Sources Sought → signal 行（🔴 PI
     expect(mapSamSourcesSought(notice({ department: '', subTier: '' }), OBSERVED).skip).toBe('no_buyer');
   });
 
+  it('Department==Sub-Tier（部级机构两列同名）→ 折叠单值，不产生 "X — X" 冗余身份', () => {
+    const row = mapSamSourcesSought(notice({ department: 'VETERANS AFFAIRS, DEPARTMENT OF', subTier: 'VETERANS AFFAIRS, DEPARTMENT OF' }), OBSERVED).row!;
+    expect(row.subjectName).toBe('VETERANS AFFAIRS, DEPARTMENT OF');
+  });
+
   it('缺 noticeId/缺发布日/缺 naics → 各自跳过', () => {
     expect(mapSamSourcesSought(notice({ noticeId: '' }), OBSERVED).skip).toBe('no_external_id');
     expect(mapSamSourcesSought(notice({ postedDateIso: null }), OBSERVED).skip).toBe('no_date');

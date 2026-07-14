@@ -135,3 +135,22 @@ sweep ─┬─ ingestSam（每 window 一次）: CSV 303→S3 →流式 filter 
 - 是买家智能 P1「免费外部源」里 **TED v3 线的 P4 = SAM.gov Sources Sought**（CLAUDE.md §6）——早于 TED 招标/openFDA 清关的**招标前**意图。
 - 复用管线**零新 SourceClass**（归 `public_intelligence`），零 schema 迁移，纯增量。
 - 后续：P4.x Award notice（中标 prime=可成单客户，走个体户拒收）· PSC 精修 · 品类市场意图聚合层（§7.2）。
+
+---
+
+## 10. 实测记录（2026-07-14，真库真 CSV，无 sandbox）—— ✅ 全绿
+
+§8 步骤 0-9 全落地。`verify-sam-sources-sought.mts` 六段全过（真 keyless CSV 下载）：
+
+- **Tier 0 词表+RLS**：RLS 连接非 superuser（withWorkspace 真生效）；泵 ICP→广锚 `333`；`resolveNaicsForProduct('pumps',['333'],allowLlm:false)`→`333914`（seed 别名**确定性**精修，零 LLM）；EU-only ICP→零 NAICS（US 市场门）。
+- **Tier 1 真 CSV**：近 120 天取最新 300 条 Sources Sought（真机构：Air Force / VA / Navy / DoD / NIST）；每条发布日 ISO 合法；🔴 序列化**零邮箱、零 PrimaryContact/SecondaryContact**（adapter 只读绿列，结构性隔离）。实测 NAICS 2 位前缀 top1 = `33`（制造）——联邦 Sources Sought 制造品类不稀疏，放宽兜底未触发。
+- **Tier 2 摄取+投影**：ingest 300→262 signal（38 条无 NAICS 显性 `no_taxonomy` 跳过，不静默丢）；制造 ICP `[333,334,3391,332]` 投影匹配 78 signal→**12 家联邦机构买方 canonical**（VA/NIST/DLA/Army/Indian Health Service）；全 `country=US`、`government_buyer`、`sam_market_signal`、`sam_disclaimer`；event `US_FED_SOURCES_SOUGHT` strength 0.7；field_evidence `license='Public Domain (U.S. Government Work)'`（署名非义务）、无邮箱。
+- **Tier 2b 幂等**：同参再投影 companiesTouched=0/eventsProjected=0，field_evidence 24→24（不堆行、evidence 形状 projectOne↔recompute 一致）。
+- **Tier 3 评分**：Intent 维 0→0.683、**demandProof 0→0.683**、intentSignals 含 `US_FED_SOURCES_SOUGHT`、总分 0.1425→0.245。
+- **Tier 4 §8.8 负向门**：`sam.gov` policy SUSPENDED → `ingestSam` fail-closed（`ToolPolicyDenied`，零落库、不发请求）。
+
+**实现期两处主动精修**（真测/复审发现，非原设计）：
+1. **`US_FED_SOURCES_SOUGHT` 接进 `DEMAND_PROOF_EVENT_TYPES`**（`lead/scoring.ts`）：Sources Sought = **买方侧**需求（招标前市场调研=最早需求证据），与 TED `TENDER_PUBLISHED` 同类，应驱动 demandProof 观测维（`FDA_CLEARANCE` 属卖方侧上市时机，仍只留 Intent 维）。demandProof 不进 totalScore（观测维零权重）→ 六维总分不变，仅快照预留槽填数值。
+2. **`samBuyerName` 折叠 Department==Sub-Tier**（`signal-mappers.ts`）：SAM 常把部级机构两列同名（"VA — VA"）→ 折叠单值，避免冗余身份与 dedupeKey 抖动。
+
+**质量**：`db generate`（零迁移）→ `api build`（tsc）→ `api test`（vitest **1048 全绿**，94 文件）→ 真测六段全绿。翻 `data_provider.samgov` ENABLED 免 LIA/DPIA（**不物化 PII**，同 TED/openFDA 档）——ops 显式动作。
