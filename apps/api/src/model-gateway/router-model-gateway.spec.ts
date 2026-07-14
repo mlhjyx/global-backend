@@ -213,3 +213,49 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     expect(budget.remainingCents('run-1')).toBe(500);
   });
 });
+
+/**
+ * FIX 1（复审 HIGH）：generateStructured 校验-修复路径失败时也要结算「首调+修复」合并 token。
+ * 此前两条分支都少记：修复调用抛错只带修复 usage（漏首调），recheck 失败抛裸 Error（网关记 0¢）——
+ * 都绕过改动 2 的硬预算上界「凡消耗 token 的调用都不该 settle 0¢」。
+ */
+describe('RouterModelGateway — generateStructured 修复路径结算合并 token（FIX 1）', () => {
+  it('首调 schema 不过 + 修复调用抛错 → settle=(首调+修复)合并 token（非仅修复、非 0），错误上抛', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      // 首调缺 x（schema 校验失败）→ 触发修复；带 sizable usage（1e6 token）
+      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm', usage: { inputTokens: 1_000_000 } })
+      // 修复调用抛错（只携修复自身的小 usage 5e4）
+      .mockRejectedValueOnce(new ProviderOutputError('repair truncated', { inputTokens: 50_000 }));
+    const gw = gatewayWith(provider, budget);
+    await expect(
+      gw.generateStructured(
+        { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+    // 合并 1_050_000 token × 100¢/Mtok = 105¢（仅修复=5¢会漏首调、0¢=全不记）→ 剩 395
+    expect(budget.remainingCents('run-1')).toBe(395);
+  });
+
+  it('首调 + 修复均 schema 不过（recheck 失败）→ 抛 ProviderOutputError 且 settle=合并 token（非 0）', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm', usage: { inputTokens: 1_000_000 } })
+      // 修复后仍缺 x → recheck 失败
+      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm', usage: { inputTokens: 50_000 } });
+    const gw = gatewayWith(provider, budget);
+    await expect(
+      gw.generateStructured(
+        { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+    // 合并 1_050_000 token = 105¢（旧行为裸 Error → 网关记 0¢ 剩 500，两次调用白烧）→ 剩 395
+    expect(budget.remainingCents('run-1')).toBe(395);
+  });
+});
