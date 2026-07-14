@@ -175,6 +175,16 @@
 
 ---
 
-## 10. 实测记录（实现后填，2026-XX-XX，真库真 OFAC，无 sandbox）
+## 10. 实测记录（2026-07-14，真库真 OFAC，无 sandbox）—— ✅ 全绿
 
-_（TDD + 真测 + 对抗复审完成后追加：各段实测结果、质量数据、翻 ENABLED 条件。）_
+`scripts/verify-sanctions-screening.mts` 七段全过（真拉 OFAC SDN.XML，app_user 非 superuser guard）：
+
+- **Tier 1 真 OFAC 刷新**：`refreshSource` 经 broker 真下载 SDN.XML → 解析 → 落库 `status=DONE, total=9810, publishDate=2026-07-13`。🔴 **Entity total=9810 落 [8000,12000]（非 ~19156 → 7505 个人结构性剔除、未泄漏）**；活跃行 9810 与 total 一致。
+- **Tier 2 真筛查**：`rebuildIndex` → 索引 9810 实体 active；真实被制裁实体「INVERSIONES MACARNIC PATINO Y CIA S.C.S.」(CO, uid 10001) → `potential_match`（命中自身 externalId）+ listVersions 含 `ofac_sdn=2026-07-13`；清白无关名 → `clear`；`scoreLead(sanctionsHold)` → `queue=sanctions_hold`。
+- **Tier 3 decide 硬门**：公司名=真实被制裁实体 → `decide(accept)` 抛 `SANCTIONS_HOLD_UNRESOLVED`、**零 LeadQualified 事件（快照未建，绝不交付）**。
+- **Tier 4 人审清白**：写命中审计件 → `reviewSanctions(cleared_false_positive)` → decide 再跑**成功**（reconcile 抑制、尊重人审）+ 快照 `sanctions_screening.status=clear`。
+- **Tier 5 清白公司**：无关名公司 → decide → `QUALIFIED` + 快照 `sanctions_screening.status=clear`、`list_versions.ofac_sdn` 有值（可审计）。
+- **Tier 6 §8.8 SUSPENDED fail-closed**：`source_policy` SUSPENDED → broker `DENIED sanctions.download`、`refreshSource FAILED`、零新增落库。
+
+**质量**：`db generate`（迁移已 apply）→ `api build`（tsc 绿）→ `api test`（vitest **1200 全绿**，110 文件；含 OFAC/EU 解析 · 召回匹配 · reconcile · 刷新 diff · scoring sanctions_hold）→ openapi 56 路径（新增 `/leads/:id/sanctions-review`）→ 真测七段全绿。翻 `sanctions_source.*` ENABLED **免 LIA/DPIA**（不物化 person PII，同 SAM/openFDA 档）——ops 显式动作。
+⚠️ **快照契约 `sanctions_screening` 字段需 B/A 评审**（product-scope §6，PR 已标注）。EU FSF 解析器已建+单测，真测本次只覆盖 OFAC（EU 端点已一手拉取证实、许可待核，翻 ENABLED 前补真测）。
