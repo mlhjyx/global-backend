@@ -108,9 +108,9 @@ async function main() {
   const isSuper = superRow[0]?.is_super ?? true;
   ok(isSuper === false, `RLS 连接非 superuser（current_user=${superRow[0]?.current_user ?? '?'}）——withWorkspace RLS 真生效（否则证明失效）`);
 
-  const pumpBroad = await resolveIcpToNaics(taxonomy, { industryTerms: ['pumps'], product: 'pumps', targetCountries: ['US'] }, { allowLlm: false });
-  console.log(`   泵 ICP(US) → NAICS 广锚 = [${pumpBroad.naicsCodes.join(',')}]（Schedule 确定性路径，产品精修在 allowLlm:false 下跳过）`);
-  ok(pumpBroad.naicsCodes.includes('333'), 'resolveIcpToNaics 泵 ICP → 含机械广锚 333（ISIC 28 crosswalk.naics 确定性）');
+  const pumpResolved = await resolveIcpToNaics(taxonomy, { industryTerms: ['pumps'], product: 'pumps', targetCountries: ['US'] }, { allowLlm: false });
+  console.log(`   泵 ICP(US, allowLlm:false) → NAICS = [${pumpResolved.naicsCodes.join(',')}]（Codex #1：sweep 确定性路径亦享 seed 别名精修 → 窄码，不再停在广码 333）`);
+  ok(pumpResolved.naicsCodes.includes('333914'), 'resolveIcpToNaics 泵 ICP(allowLlm:false) → 确定性精修到窄码 333914（Codex #1，非广码 333）');
 
   const pumpNarrow = await taxonomy.resolveNaicsForProduct('pumps', ['333'], { allowLlm: false });
   console.log(`   resolveNaicsForProduct('pumps',['333']) = ${pumpNarrow}（seed 别名确定性精修，零 LLM 零成本）`);
@@ -154,7 +154,12 @@ async function main() {
   console.log('\n══ Tier 2 · 真摄取+投影：seed source_policy(APPROVED) → ingestSam → source_signal → projectSourcesSought ══');
   await new DiscoveryProviderRegistry().seed(ownerDb); // 幂等 upsert：data_provider samgov(DISABLED) + source_policy sam.gov(APPROVED)
   await ownerDb.sourcePolicy.update({ where: { domain: SAM_DOMAIN }, data: { reviewStatus: 'APPROVED' } }).catch(() => {}); // 复位以防上次 Tier 4 遗留
-  const ingested = await ingest.ingestSam({ sinceDays: SINCE_DAYS, maxRecords: MAX_RECORDS });
+  // ~100MB 整包 CSV 瞬时网络超时约半数 → 重试（新时间窗避账本命中，绝不因单次网络抖动误判管线）。生产 sweep 6h 一次无此压力。
+  let ingested = await ingest.ingestSam({ sinceDays: SINCE_DAYS, maxRecords: MAX_RECORDS });
+  for (let attempt = 1; ingested.error?.includes('timeout') && attempt <= 3; attempt++) {
+    console.log(`   ⚠️ 摄取下载超时（大 CSV 瞬时网络），第 ${attempt} 次重试（新窗避账本）…`);
+    ingested = await ingest.ingestSam({ sinceDays: SINCE_DAYS, maxRecords: MAX_RECORDS }, { nowMs: Date.now() + attempt * ingestWindowMs() });
+  }
   console.log(`   ingest: recordsFetched=${ingested.recordsFetched} signalsUpserted=${ingested.signalsUpserted} ledgerHit=${ingested.ledgerHit} window=${ingested.windowKey} skipped=${JSON.stringify(ingested.skipped)}`);
   ok(!ingested.error, `摄取无错（error=${ingested.error ?? '—'}）`);
   ok(ingested.recordsFetched > 0, `摄取层真拉 ${ingested.recordsFetched} 条 Sources Sought → source_signal（ledgerHit=${ingested.ledgerHit}）`);

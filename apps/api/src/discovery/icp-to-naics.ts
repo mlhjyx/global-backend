@@ -53,9 +53,13 @@ export async function resolveIcpToNaics(
   const industryNodes = industryTerms.length ? await taxonomy.resolveMany('industry', industryTerms, opts) : [];
   const candidates = uniq(industryNodes.flatMap((n) => n.crosswalks?.naics ?? []));
 
-  // (b) 产品精修（可选，枚举限子树）；未命中回退宽网候选
+  // (b) 产品精修（枚举限子树）；未命中回退宽网候选。
+  // 🔴 不用 allowLlm 门包裹调用：resolveNaicsForProduct 内部**自压 LLM**（allowLlm:false 时只走确定性
+  // TermAlias/seed 别名命中、零 LLM）。若这里加 allowLlm!==false 门，sweep（allowLlm:false）会连确定性精修
+  // 一起跳过 → 泵 ICP 停在广码 333 → NAICS 前缀 overlap 匹配所有 333… 机械公告（噪声、demand proof 虚高）。
+  // 让确定性精修在 sweep 也生效：pumps→333914（seed 别名），零成本。
   let naicsCodes = candidates;
-  if (input.product?.trim() && candidates.length && opts?.allowLlm !== false) {
+  if (input.product?.trim() && candidates.length) {
     const refined = await taxonomy.resolveNaicsForProduct(input.product.trim(), candidates, opts);
     if (refined) naicsCodes = [refined];
   }

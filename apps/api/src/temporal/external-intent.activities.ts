@@ -16,6 +16,10 @@ import { IntentRecomputeService, ProjectionSurface } from '../signals/intent-rec
 const DEFAULT_MAX_NOTICES = 100; // 单指纹有界样本（绝不 grind 全库）
 const DEFAULT_RECOMPUTE_ROUNDS = 25; // 单 workspace 单 sweep 的复算分页轮上限（25×200=5000 家/轮，防单轮无界 grind）
 const DEFAULT_MAX_RECORDS = 100;
+// SAM 下载一次=全 ICP 共享一份 CSV，切片**在 NAICS 过滤之前**（指纹 NAICS 无关）。故 sweep 摄取须覆盖**整窗口**
+// （非 per-query 的 100/500）——否则稀疏品类的旧公告落在全局 newest-N 截断之外被丢（Codex P2 #4）。取远高于
+// 联邦 120d Sources Sought 真实量、又低于 adapter 内存护栏(MAX_MATCHED_SCAN=20000)的上限；投影层 maxCompanies 限 per-ICP 产出。
+const SAM_SWEEP_MAX_RECORDS = 10_000;
 const TED_PROVIDER = 'ted';
 const OPENFDA_PROVIDER = 'openfda';
 const SAMGOV_PROVIDER = 'samgov';
@@ -236,7 +240,7 @@ export function createExternalIntentActivities(deps: {
       // SAM = **NAICS 无关**：整包 CSV 无服务端过滤 → 全部有 NAICS 面的 ICP 收敛成**每窗口一次下载**
       //（指纹只含窗参数，ingest-once 账本天然去重）。任一 ICP 有 NAICS → 建单一 SAM 拉取。
       const samParams = args.samgovEnabled && args.targets.some((t) => t.naicsCodes?.length)
-        ? { maxRecords: args.maxRecords }
+        ? { maxRecords: SAM_SWEEP_MAX_RECORDS } // 覆盖整窗口（Codex P2 #4），不用 per-query 小上限截断稀疏品类
         : null;
       summary.tedSpecs = tedByFp.size;
       summary.fdaSpecs = fdaByFp.size;
@@ -318,7 +322,12 @@ export function createExternalIntentActivities(deps: {
         const surfaces = byWs.get(t.workspaceId) ?? [];
         if (t.cpvCodes.length && t.buyerCountries.length) surfaces.push({ provider: 'ted', cpvCodes: t.cpvCodes, buyerCountries: t.buyerCountries });
         if (t.fdaProductCodes.length) surfaces.push({ provider: 'openfda', productCodes: t.fdaProductCodes });
-        if (t.naicsCodes?.length) surfaces.push({ provider: 'samgov', naicsCodes: t.naicsCodes }); // ?.：生产 resolve 恒设，防御 malformed target
+        // 🔴 SAM **不进 recompute 面**（Codex P2 #2/#5）：recompute 不带 provider kill-switch flag，若在此重放缓存
+        // samgov 信号会（a）绕过 samgovEnabled 停用闸（DISABLED 仍复活缓存 Sources Sought intent）、
+        // （b）先于 projectSourcesSought 建好 intent 事件→投影幂等跳过→漏写 sam_disclaimer/marker/provenance
+        // （合规红线：市场信号免责声明缺失）。SAM 投影（projectSourcesSought）幂等、每 sweep 跑、恒写 marker+
+        // disclaimer+evidence 且受 samgovEnabled 门——是**唯一权威写入者**。代价：过期 SAM 事件不经 recompute 剪除
+        // （评分 60d 半衰期已衰减到≈0；SAM=非 PII 机构事实，存储限制不急）——记档 fast-follow 若需专门过期收敛。
         byWs.set(t.workspaceId, surfaces);
       }
       const maxRounds = Math.max(1, args.maxRounds ?? DEFAULT_RECOMPUTE_ROUNDS);

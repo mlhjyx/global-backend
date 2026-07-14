@@ -171,14 +171,17 @@ export class SamIntentProjectionService {
         select: { id: true },
       });
 
-      // 🟢 intent 事实证据（美国政府作品公共领域，署名非义务；买方=机构，不落具名联系人）
+      // 🟢 intent 事实证据（美国政府作品公共领域，署名非义务；买方=机构，不落具名联系人）。
+      // 🔴 只存 **SAM 事件子集**（非合并后 intent）：company.attributes.intent 保留跨源合并结果，但本证据行
+      // providerKey='samgov'/license=公共领域，若塞进 TED(CC BY)/FDA 事件=把他源信号误挂 SAM 署名/许可（Codex P2 #3）。
+      const samEvents = intent.events.filter((e) => e.type === US_FED_SOURCES_SOUGHT);
       await tx.fieldEvidence.create({
         data: {
           workspaceId,
           entityType: 'company',
           entityId: saved.id,
           field: 'intent.sources_sought',
-          value: intent as unknown as Prisma.InputJsonValue,
+          value: { events: samEvents } as unknown as Prisma.InputJsonValue,
           providerKey: 'samgov',
           confidence: 1,
           license: SAM_LICENSE,

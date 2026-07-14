@@ -137,7 +137,7 @@ export async function fetchSourcesSought(params?: SamSearchParams): Promise<SamS
       }
     }
   } catch (e) {
-    throw new Error(`sam.gov CSV 下载/解析失败: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`sam.gov CSV 下载/解析失败: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
   } finally {
     nodeStream.destroy(); // 早退（触顶 break）/异常都收尾，绝不悬挂源流
   }
