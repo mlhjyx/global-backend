@@ -19,7 +19,10 @@ import { createBacklogActivities } from './backlog.activities';
 import { createExternalIntentActivities } from './external-intent.activities';
 import { createDeletionActivities } from './deletion.activities';
 import { createPatentsCacheActivities } from './patents-cache.activities';
+import { createSanctionsRefreshActivities } from './sanctions-refresh.activities';
 import { createSiteBuilderActivities } from './site-builder.activities';
+import { seedSanctions } from '../sanctions/sanctions-seed';
+import { SanctionsScreeningService } from '../sanctions/sanctions-screening.service';
 import { KbService } from '../site-builder/kb.service';
 import { EmbeddingsClient } from '../site-builder/embeddings.client';
 import { DoclingClient } from '../site-builder/docling.client';
@@ -65,6 +68,14 @@ async function main(): Promise<void> {
     console.error(`[worker] jurisdiction_policy seed FAILED — DataRights fail-closed for red data: ${String(err)}`);
   }
 
+  // 制裁名单源 + source_policy seed（第五门，owner 写平台表；全 DISABLED，真测绿后 ops 翻 ENABLED）。
+  try {
+    await seedSanctions(ownerDb);
+    console.log('[worker] sanctions source/policy seed ok (DISABLED until ops enables)');
+  } catch (err) {
+    console.error(`[worker] sanctions seed FAILED — refresh/screening may be misconfigured: ${String(err)}`);
+  }
+
   // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
   try {
     await ensurePlatformSchedules();
@@ -87,6 +98,12 @@ async function main(): Promise<void> {
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
   const broker = buildToolBroker({ sourcePolicyReader });
   const taxonomy = new TaxonomyResolver(prisma, gateway); // discovery + external-intent sweep 共享一实例
+  // 第五门制裁筛查引擎（worker 侧）：qualify 活动 screen 公司名 + 刷新活动重建索引。手工构造（非 Nest DI）；
+  // 平台表无 RLS、app_user 只读 → prisma 读即可。DISABLED（Phase 1 默认）→ 空索引 → not_screened，no-op。
+  const sanctionsScreening = new SanctionsScreeningService(prisma);
+  await sanctionsScreening.rebuildIndex().catch((err) =>
+    console.error(`[worker] sanctions index build FAILED (fail-open, gate=not_screened): ${String(err)}`),
+  );
   // prisma（app_user）给专利缓存读/enqueue 闭包（平台表无 RLS）——PATENT_SOURCE_MODE=cache 时零 BQ 字节读缓存。
   const providers = new DiscoveryProviderRegistry({ gateway, broker, prisma });
 
@@ -104,7 +121,7 @@ async function main(): Promise<void> {
         taxonomy,
         broker,
       }),
-      ...createQualifyActivities({ prisma }),
+      ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createAcquisitionActivities({ prisma, registry: buildSourceAdapterRegistry(broker) }),
       ...createIntentActivities({ prisma, fetcher: new Crawl4aiPageFetcher(broker), ownerDb, broker }),
       ...createBacklogActivities({ prisma, providers, gateway, ownerDb, broker }),
@@ -114,6 +131,8 @@ async function main(): Promise<void> {
       ...createDeletionActivities({ prisma }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({ ownerDb }),
+      // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
+      ...createSanctionsRefreshActivities({ ownerDb, broker, sanctionsScreening }),
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
         prisma,

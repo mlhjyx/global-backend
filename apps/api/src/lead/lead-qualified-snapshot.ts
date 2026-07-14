@@ -64,6 +64,15 @@ export interface LeadQualifiedSnapshotV1 {
   storage_rights_decision: string | null;
   personal_data_class: 'named_person_refs' | 'company_facts_only';
   suppression_state: 'none' | 'suppressed';
+  /**
+   * 制裁筛查合规结论（第五门）：交付的包断言「已对 OFAC/EU 筛查」。命中(hold)绝不到此——decide(accept) 硬拦。
+   * `not_screened`=门未启用（DISABLED），SaaS 侧不得据此对外触达（诚实标注，见设计 §7.1）。**追加非破坏字段**。
+   */
+  sanctions_screening: {
+    status: 'clear' | 'not_screened';
+    screened_at: string | null;
+    list_versions: Record<string, string>; // { ofac_sdn:'2026-07-13', … } 本次筛覆盖的名单版本
+  };
   recommended_action: string;
   valid_until: string | null;
 }
@@ -93,6 +102,16 @@ export interface LeadQualifiedSnapshotInput {
    *（旧调用方/测试 → valid_until 仅由 intent 事件驱动或 null，非破坏）。
    */
   evidence?: readonly EvidenceFreshness[];
+  /**
+   * 制裁筛查结论（第五门）：调用方（lead.service.decide）在 accept 时对公司 screen 后传入。
+   * status=clear（无命中）| not_screened（门未启用）。命中(potential_match)时 decide 已抛 SANCTIONS_HOLD_UNRESOLVED、
+   * 根本到不了这里。缺省 not_screened（旧调用方/测试非破坏）。
+   */
+  sanctionsScreening?: {
+    status: 'clear' | 'not_screened';
+    screenedAt: string | null;
+    listVersions: Record<string, string>;
+  };
   company: {
     id: string;
     name: string;
@@ -241,6 +260,13 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
     storage_rights_decision: input.storageRightsDecision ?? null, // 收口⑥：DataRightsService STORE 判定（调用方传入）
     personal_data_class: contactRefs.length ? 'named_person_refs' : 'company_facts_only',
     suppression_state: company.status === 'SUPPRESSED' ? 'suppressed' : 'none',
+    sanctions_screening: input.sanctionsScreening
+      ? {
+          status: input.sanctionsScreening.status,
+          screened_at: input.sanctionsScreening.screenedAt,
+          list_versions: input.sanctionsScreening.listVersions,
+        }
+      : { status: 'not_screened', screened_at: null, list_versions: {} },
     recommended_action: 'handoff_to_campaign',
     // 鲜度 v2：min(evidence.fetchedAt + 分级TTL, 最新 intent.at + 时机窗)；无鲜度依据 → null。
     valid_until: computeValidUntil(input.evidence ?? [], company.attributes),

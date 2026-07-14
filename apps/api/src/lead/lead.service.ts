@@ -9,12 +9,14 @@ import {
 } from './lead-qualified-snapshot';
 import { DataRightsService } from '../compliance/data-rights.service';
 import { storageRightsContextForLead } from '../compliance/data-rights.context';
+import { SanctionsScreeningService, reconcileReviewState, matchesFromJson } from '../sanctions/sanctions-screening.service';
 
 @Injectable()
 export class LeadService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dataRights: DataRightsService,
+    private readonly sanctions: SanctionsScreeningService,
   ) {}
 
   /** 触发对某 ACTIVE ICP 的评分（异步，Temporal）。 */
@@ -151,6 +153,45 @@ export class LeadService {
         if (!company) {
           throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'canonical company not found' } });
         }
+        // 🔴 第五门制裁筛查硬 re-check（decide 不可绕的终极安全网）：live 重筛（catch 名单自 qualify 后的更新）
+        // + reconcile 既有复核态。命中且未被人工清（open/confirmed）→ 抛 SANCTIONS_HOLD_UNRESOLVED，
+        // **回滚整个 decide、绝不建/发快照**（绝不把被制裁公司交付客户）。未启用(DISABLED)→ not_screened、不拦。
+        const screen = this.sanctions.screen(company.name, company.country);
+        // 🔴 持久化命中（qualify 写）**独立于 live 索引新鲜度**读取——闭合跨进程 fail-open 窗口（复审 #1）：
+        // 即便 live screen 因 API 索引空/陈旧/构建失败返 not_screened，只要库里有未清的命中就硬拦。
+        const prior = await tx.sanctionsScreeningResult.findFirst({
+          where: { canonicalCompanyId: company.id },
+          orderBy: { screenedAt: 'desc' },
+          select: { status: true, reviewState: true, matches: true, listVersions: true },
+        });
+        const priorBlocking = !!prior && prior.status === 'potential_match' && prior.reviewState !== 'cleared_false_positive';
+        let liveBlocking = false;
+        if (screen.status === 'potential_match') {
+          const reviewState = reconcileReviewState(
+            prior ? { reviewState: prior.reviewState, matches: matchesFromJson(prior.matches) } : null,
+            screen.matches,
+          );
+          liveBlocking = reviewState !== 'cleared_false_positive';
+        }
+        if (priorBlocking || liveBlocking) {
+          throw new ConflictException({
+            error: {
+              code: 'SANCTIONS_HOLD_UNRESOLVED',
+              message: 'sanctions screening hit — handoff blocked pending human review (fifth gate)',
+            },
+          });
+        }
+        // 未拦 → 合规结论（诚实）：曾被真实筛过（live 索引 active，或 qualify 已筛并留有记录）→ clear；
+        // 从未筛过（门 DISABLED 且无历史记录）→ not_screened（SaaS 不得据此对外触达）。
+        const wasScreened = screen.status !== 'not_screened' || !!prior;
+        const sanctionsScreening: { status: 'clear' | 'not_screened'; screenedAt: string; listVersions: Record<string, string> } = {
+          status: wasScreened ? 'clear' : 'not_screened',
+          screenedAt: new Date().toISOString(),
+          listVersions:
+            screen.status !== 'not_screened'
+              ? screen.listVersions
+              : ((prior?.listVersions as Record<string, string> | null) ?? {}),
+        };
         const icp = await tx.icpDefinition.findUnique({
           where: { id: lead.icpId },
           select: { version: true },
@@ -201,6 +242,7 @@ export class LeadService {
           icpVersion: icp?.version ?? null,
           storageRightsDecision: rights.effect,
           evidence,
+          sanctionsScreening, // 第五门合规结论（clear/not_screened；命中 hold 上方已 throw 到不了这里）
         });
         await tx.outboxEvent.create({
           data: {
@@ -229,9 +271,51 @@ export class LeadService {
         where: { icpId },
         _count: { _all: true },
       });
-      const summary: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0 };
+      const summary: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0, sanctions_hold: 0 };
       for (const r of rows) summary[r.queue] = r._count._all;
       return summary;
+    });
+  }
+
+  /**
+   * 制裁筛查复核裁决（第五门人审）：`cleared_false_positive`（误报——回落正常队列，reconcile 抑制复发）
+   * 或 `confirmed_true_hit`（真命中——留 sanctions_hold，永不交付）。按 lead 找公司最新筛查结果更新复核态。
+   * 误报清白 → 该公司**全部**被 hold 的 lead 回落 needs_review（下次 qualify 重评据 reconcile 不再 hold）。
+   */
+  async reviewSanctions(
+    ctx: RequestContext,
+    leadId: string,
+    decision: 'cleared_false_positive' | 'confirmed_true_hit',
+    note?: string,
+  ) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const lead = await tx.lead.findUnique({ where: { id: leadId }, select: { id: true, canonicalCompanyId: true } });
+      if (!lead) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'lead not found' } });
+      const result = await tx.sanctionsScreeningResult.findFirst({
+        where: { canonicalCompanyId: lead.canonicalCompanyId },
+        orderBy: { screenedAt: 'desc' },
+        select: { id: true, reviewState: true },
+      });
+      if (!result) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'no sanctions screening result for this lead' } });
+      }
+      // 🔴 复审 #3：confirmed_true_hit 不可经本端点翻成 cleared——真命中不可轻易解除（需更高流程/人，非单次 API 调用）。
+      if (result.reviewState === 'confirmed_true_hit' && decision === 'cleared_false_positive') {
+        throw new ConflictException({
+          error: { code: 'SANCTIONS_CONFIRMED_IMMUTABLE', message: 'a confirmed sanctions hit cannot be cleared via this endpoint' },
+        });
+      }
+      await tx.sanctionsScreeningResult.update({
+        where: { id: result.id },
+        data: { reviewState: decision, reviewedBy: ctx.userId, reviewNote: note ?? null },
+      });
+      if (decision === 'cleared_false_positive') {
+        await tx.lead.updateMany({
+          where: { canonicalCompanyId: lead.canonicalCompanyId, queue: 'sanctions_hold' },
+          data: { queue: 'needs_review' },
+        });
+      }
+      return { leadId, reviewState: decision };
     });
   }
 }
