@@ -30,6 +30,9 @@ pnpm-debug.log*
 # generated contract artifacts
 packages/contracts/src/generated/
 packages/contracts/dist/
+# 游离编译产物：在 src 内直跑 tsc（缺 outDir）会就地 emit .js/.d.ts；只忽略产物、不碰 .ts 源
+packages/contracts/src/**/*.js
+packages/contracts/src/**/*.d.ts
 
 # tmp
 tmp/
