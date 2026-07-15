@@ -36,6 +36,18 @@ cd apps/api && node --import tsx scripts/verify-*.mts
 - **代码审查**：仓库启用了 Codex 自动审查（开 PR / 标 ready / 评论 `@codex review` 触发）。处置每条 inline 意见后在该线程回复并 resolve。
 - CI 只跑**纯单测**（无 DB/网络）；需要 DB/真源的验证走本地 `verify-*` 脚本，不进 CI。
 
+## PR 粒度分级（双人协同）
+
+一个**逻辑改动 = 一个 PR**，不碎片化；琐碎改动搭车不单开。按风险决定是否人审：
+
+| 级别 | 例子 | 处理 |
+|---|---|---|
+| 琐碎 | 错别字、注释、单行配置、文档措辞 | **不单独发 PR**——搭下一个功能 PR，或攒成一个滚动 `chore:` PR；CI 绿 auto-merge |
+| 小改 | 一个 bug 修复、小功能、一份文档 | 独立 PR（一个逻辑单元一起，别拆）；低风险 auto-merge |
+| 实质 | schema/RLS/鉴权/迁移/对外抓取/大量删除/合规 | 独立 PR + **人审**（merge-judge 升级到人），不 auto-merge |
+
+三条硬规矩：① 一逻辑改动一 PR（不碎）；② 琐碎搭车不单开；③ 风险类永远人审。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
+
 ## 合规红线（涉数据源/联系人）
 
 数据分级 🟢公司事实(可商用) / 🟡职能邮箱(ePrivacy) / 🔴人名·联系人(默认隔离 + LIA)。
