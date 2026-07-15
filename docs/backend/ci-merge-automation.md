@@ -27,6 +27,22 @@
 
 **HOLD**：任一必需检查未绿、或有未 resolved 审查线程 → 不合，等修复。
 
+### 自动升级规则（路径/关键词触发，判官必守）
+
+风险分级不能靠"感觉"。判官（人或 CI）拿到 `git diff origin/main...HEAD --name-only` 后，**只要命中下表任一路径 glob 或关键词，一律强制 `needs-human` + 关闭 auto-merge**（即便 CI 全绿）——这是机械底线，不容判官酌情放行。命不中才进入低危自动合通道。
+
+| 触发（路径 glob / 关键词） | 命中即 | 对应 CONTRIBUTING 级别 |
+|---|---|---|
+| `packages/db/prisma/schema.prisma`、`packages/db/prisma/migrations/**` | `needs-human` | 实质 |
+| diff 含 `RLS`、`current_workspace_id`、`set_config`、`app_user`、`policy`（鉴权/租户隔离） | `needs-human` | 实质 |
+| diff 含 `JWKS`、`token`、`auth`、`role`、`workspace` 逻辑改动 | `needs-human` | 实质 |
+| diff 含 `personalData`、`lawful`、`suppression`、`GDPR`、`Art.17`、`LIA`、`DPIA`（合规红线） | `needs-human` | 实质 |
+| `source_policy`、`ToolBroker`、`SSRF`、`robots`、对外抓取适配器新增/改动 | `needs-human` | 实质 |
+| 单 PR 删除 > 200 行、或删除/禁用测试文件 | `needs-human` | 实质 |
+| `packages/contracts/**`（跨 app 共享契约，改一处两端受影响） | `needs-human` | 实质 |
+
+**落地方式**：C 方案（会话判官）按上表 `--name-only` + `git diff` 关键词扫；B 方案（CI 判官）把上表写进 judge prompt 的 hard-rule 段。命中即打 GitHub label `needs-human` 并**不**执行 `gh pr merge --auto`。上表与 [CONTRIBUTING.md](../../CONTRIBUTING.md) 的「PR 粒度分级」实质级对齐——两处改动需同步。
+
 > 判官**只判断、只评论/批准，从不自己 merge**；合并由 L3 的 auto-merge（低危）或人（高危）完成。
 
 ## 实现选项
