@@ -1,0 +1,48 @@
+---
+/**
+ * GalleryGrid（doc 11 缺口）：通用图库网格--FactoryShowcase 的泛化（车间/设备/产品/案例图）。
+ * 图片走 assetId -> M1-c 图片管线（随 M1-c 落地）；此刻无图用占位。
+ */
+interface Props {
+  titleKey?: string;
+  images?: { assetId?: string; labelKey?: string }[];
+  columns?: number;
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, images = [], t, alt } = Astro.props;
+const cards = images.length > 0 ? images : [{}, {}, {}, {}, {}, {}];
+---
+
+<section class:list={['block', 'gallery', { alt }]}>
+  {titleKey && <h2>{t(titleKey)}</h2>}
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+    {
+      cards.map((img) => (
+        <figure class="photo">
+          <div class="placeholder">{img.labelKey ? t(img.labelKey) : 'Gallery'}</div>
+        </figure>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .photo {
+    margin: 0;
+  }
+  .placeholder {
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius);
+    background: var(--c-surface-alt);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--c-on-surface-muted);
+    font-size: 0.85rem;
+  }
+</style>

@@ -1,0 +1,48 @@
+---
+/**
+ * Picture（M1-c 图片渲染雏形，04 §4 资产引用约定）。
+ * - demo 期：src 直链（Unsplash 图，仅视觉演示；🔴 客户站禁外链直嵌，见 06 §2/04 §4）。
+ * - 客户站（M1-c 接通后）：组件取 assetId -> 渲染器按 spec.assets manifest 解析 derivedKeys
+ *   （多尺寸 webp/avif presigned URL）-> 经此同一 <img> 渲染。src 字段届时移除。
+ * 无图时渲染设计感占位（渐变 + 标签），不破版。
+ */
+interface Props {
+  src?: string;
+  alt?: string;
+  label?: string;
+  ratio?: string;
+  circle?: boolean;
+}
+const { src, alt = '', label = 'Image', ratio = '4 / 3', circle = false } = Astro.props;
+---
+
+<div class:list={['frame', { circle }]} style={`aspect-ratio: ${ratio};`}>
+  {src ? <img src={src} alt={alt} loading="lazy" /> : <span class="label">{label}</span>}
+</div>
+
+<style>
+  .frame {
+    width: 100%;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--c-surface-alt), var(--c-surface));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .frame.circle {
+    border-radius: 50%;
+  }
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .label {
+    color: var(--c-on-surface-muted);
+    font-size: 0.85rem;
+    padding: 0.5rem;
+    text-align: center;
+  }
+</style>

@@ -1,0 +1,53 @@
+---
+/**
+ * MarqueeStrip（doc 11 缺口）：滚动横幅--纯 CSS keyframes，logo/口号带。
+ * 🔴 必须补 prefers-reduced-motion（doc 11 实证 readdy 5 站全缺）。
+ */
+interface Props {
+  items: { labelKey: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { items = [], t, alt } = Astro.props;
+const labels = items.length > 0 ? [...items, ...items] : [];
+---
+
+<section class:list={['block', 'marquee', { alt }]} aria-hidden={items.length > 0}>
+  {labels.length > 0 && (
+    <div class="track">
+      {labels.map((it) => <span class="item">{t(it.labelKey)}</span>)}
+    </div>
+  )}
+</section>
+
+<style>
+  .marquee {
+    overflow: hidden;
+    padding: 1.25rem 0;
+    border-top: 1px solid var(--c-surface-alt);
+    border-bottom: 1px solid var(--c-surface-alt);
+  }
+  .track {
+    display: flex;
+    gap: 3rem;
+    width: max-content;
+    animation: marquee 28s linear infinite;
+  }
+  .item {
+    color: var(--c-on-surface-muted);
+    font-weight: 600;
+    font-size: 1.05rem;
+    white-space: nowrap;
+  }
+  @keyframes marquee {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .track {
+      animation: none;
+    }
+  }
+</style>

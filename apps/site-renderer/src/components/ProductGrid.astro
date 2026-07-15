@@ -1,8 +1,10 @@
 ---
+import Picture from './Picture.astro';
+
 interface ProductCard {
   nameKey: string;
   blurbKey?: string;
-  image?: { assetId: string } | null;
+  image?: { assetId?: string; src?: string } | null;
 }
 interface Props {
   titleKey: string;
@@ -28,9 +30,7 @@ const initials = (name: string) =>
         const name = t(p.nameKey);
         return (
           <article class="card">
-            <div class="thumb" aria-hidden="true">
-              {initials(name)}
-            </div>
+            <Picture src={p.image?.src} label={initials(name)} ratio="3 / 2" />
             <h3>{name}</h3>
             {p.blurbKey && <p class="muted">{t(p.blurbKey)}</p>}
           </article>

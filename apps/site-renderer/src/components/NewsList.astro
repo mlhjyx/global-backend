@@ -1,0 +1,62 @@
+---
+/**
+ * NewsList（04 §5，M2 标注但 B2B 站刚需--tecloman/trumpf 都有 Newsroom）：新闻/展会列表。
+ * items 由新闻数据源在 M1-e+ 注入；无数据时渲染诚实占位（不虚构新闻）。
+ */
+interface Props {
+  titleKey: string;
+  items: { titleKey: string; dateKey?: string; url?: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, items = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'news', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {
+    items.length > 0 ? (
+      <ul class="list">
+        {items.map((n) => (
+          <li>
+            {n.dateKey && <time class="date">{t(n.dateKey)}</time>}
+            <span class="title">{n.url ? <a href={n.url}>{t(n.titleKey)}</a> : t(n.titleKey)}</span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="muted empty">News and exhibition updates will appear here.</p>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .list li {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+  }
+  .date {
+    color: var(--c-primary);
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+  .title a:hover {
+    color: var(--c-primary);
+  }
+  .empty {
+    font-style: italic;
+  }
+</style>

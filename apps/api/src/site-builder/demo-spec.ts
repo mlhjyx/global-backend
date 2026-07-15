@@ -75,9 +75,26 @@ export interface MaterializedDemoDoc {
 const PRECISION_KEYWORDS =
   /electro|electronic|medical|device|instrument|precision|optic|sensor|diagnostic|ultrasound|pcb|semiconductor|pharma|lab/i;
 
+/** 制造/工业类关键词（distill 自 trumpf+tecloman，目标客户=出海制造工厂）。 */
+const MANUFACTURING_KEYWORDS =
+  /manufact|machine|machiner|cnc|laser|metal|steel|industrial|factory|manufacturer|mechanical|mold|mould|cast|forg|fabricat|machining|tooling|pump|valve|bear|gear|motor|engine|weld|pipe|fitting/i;
+
+/** 能源/储能子类（-> tecloman 风绿蓝；其余制造 -> trumpf 风企业蓝）。 */
+const ENERGY_KEYWORDS =
+  /energ|storage|batter|solar|wind|power|bess|photovoltaic|grid|renewable|inverter|charge|cell/i;
+
 export function pickPreset(intake: IntakeInput): string {
   const haystack = [intake.industry, ...intake.products].join(' ');
+  if (MANUFACTURING_KEYWORDS.test(haystack) || ENERGY_KEYWORDS.test(haystack)) {
+    return ENERGY_KEYWORDS.test(haystack) ? 'industrial-tecloman' : 'industrial-trumpf';
+  }
   return PRECISION_KEYWORDS.test(haystack) ? 'precision-light' : 'modern-industrial';
+}
+
+/** 模板选择：制造类 -> industrial 模板（B2B 工业骨架），其余 -> demo。 */
+export function pickTemplate(intake: IntakeInput): 'demo' | 'industrial' {
+  const haystack = [intake.industry, ...intake.products].join(' ');
+  return MANUFACTURING_KEYWORDS.test(haystack) || ENERGY_KEYWORDS.test(haystack) ? 'industrial' : 'demo';
 }
 
 function titleCase(words: string): string {
@@ -262,6 +279,265 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     assets: {},
     copyBundles: { en },
   };
+}
+
+/**
+ * B2B 工业/制造行业模板（distill 自 trumpf+tecloman；09 M1-e 模板生产）。
+ * home: Hero -> StatsBand(工厂数字带) -> ProductGrid -> AboutBlock -> Process -> FAQ -> CTA
+ * products: ProductGrid -> FAQ ; contact: InquiryForm
+ * 🔴 零虚构红线（08 硬门）：StatsBand 只用 intake 可派生事实（产品线数/出口市场数）；
+ *    真实工厂数字（面积/年限/产能）+ CertWall 认证 + MapLocation 地址由 brandProfile
+ *    factSheet（M1-b 已落地）在 M1-e siteAssembly 阶段注入，此处不编造。
+ *    FactoryShowcase/CaseStudies/NewsList 等缺口组件随 M1-e 扩库后插入（留位）。
+ */
+export function buildIndustrialSpec(input: DemoSpecInput): MaterializedDemoDoc {
+  const { siteName, intake, polish } = input;
+  const preset = input.stylePreset ?? pickPreset(intake);
+  const products = intake.products;
+  const marketNames = intake.targetMarkets.map(regionName);
+  const primaryProduct = titleCase(products[0] ?? 'products');
+
+  const en: Record<string, string> = {
+    'nav.home': 'Home',
+    'nav.products': 'Products',
+    'nav.contact': 'Contact',
+    'footer.tagline': `${primaryProduct} manufacturer. Engineered, exported, trusted worldwide.`,
+    'seo.home.title': `${siteName} - ${primaryProduct} Manufacturer & Exporter`,
+    'seo.home.desc': `${siteName} manufactures ${listJoin(products)} for industrial customers in ${listJoin(marketNames)}.`,
+    'seo.products.title': `Products - ${siteName}`,
+    'seo.products.desc': `Explore ${listJoin(products)} from ${siteName}.`,
+    'seo.contact.title': `Contact - ${siteName}`,
+    'seo.contact.desc': `Send an inquiry to ${siteName}.`,
+    'home.hero.headline': polish?.headline ?? `${siteName} - Industrial ${primaryProduct} Manufacturing`,
+    'home.hero.subhead':
+      polish?.subhead ??
+      `We engineer ${listJoin(products)} for industrial customers in ${listJoin(marketNames)}. Custom specifications, export-ready.`,
+    'home.hero.cta': 'Request a Quote',
+    'stats.products': 'Product Lines',
+    'stats.markets': 'Export Markets',
+    'products.title': 'Our Products',
+    'factory.title': 'Our Factory',
+    'cases.title': 'Customer Success Stories',
+    'news.title': 'Newsroom',
+    'trust.title': 'Trusted by',
+    'testimonials.title': 'What Customers Say',
+    'regions.title': 'Our Export Markets',
+    'products.header.title': 'Products & Solutions',
+    'products.header.sub': 'Explore our manufacturing capability.',
+    'contact.header.title': 'Contact Us',
+    'contact.header.sub': 'Send us your requirements and our team will reply with a tailored proposal.',
+    'about.title': `About ${siteName}`,
+    'about.body':
+      polish?.aboutBody ??
+      `${siteName} is an industrial manufacturer of ${listJoin(products)}, serving customers in ${listJoin(marketNames)}. Send us your specifications and our engineering team will respond with a tailored proposal, samples, and quotation.`,
+    'process.title': 'How We Work',
+    'process.s1.title': 'Engineering Review',
+    'process.s1.body': 'Share your specifications; our engineers confirm feasibility and details.',
+    'process.s2.title': 'Manufacturing & QC',
+    'process.s2.body': 'Your order is manufactured and inspected against the agreed specification.',
+    'process.s3.title': 'Export & Support',
+    'process.s3.body': 'Export packaging, shipping documents, and responsive after-sales support.',
+    'faq.title': 'Frequently Asked Questions',
+    'faq.q1': 'Which markets do you serve?',
+    'faq.a1': `We currently focus on customers in ${listJoin(marketNames)}.`,
+    'faq.q2': 'How can I get a quotation?',
+    'faq.a2': 'Send your requirements via the inquiry form and we will reply with details.',
+    'cta.headline': 'Tell us about your project',
+    'cta.label': 'Get in touch',
+    'inquiry.title': 'Send an Inquiry',
+    'inquiry.sub': 'We reply as soon as possible.',
+    'inquiry.field.name': 'Your name',
+    'inquiry.field.email': 'Work email',
+    'inquiry.field.message': 'Tell us about your requirements',
+    'inquiry.submit': 'Send inquiry',
+    'inquiry.m0.note': 'The inquiry form goes live when your site is published.',
+  };
+
+  for (let i = 0; i < products.length; i += 1) {
+    en[`products.p${i + 1}.name`] = titleCase(products[i]);
+    en[`products.p${i + 1}.blurb`] = `Industrial ${products[i]} - specifications and datasheets available on request.`;
+  }
+
+  const productCards = products.map((_, i) => ({
+    nameKey: `products.p${i + 1}.name`,
+    blurbKey: `products.p${i + 1}.blurb`,
+  }));
+
+  const productGrid = (n: number): Block => ({
+    type: 'ProductGrid',
+    props: { id: `ProductGrid-ind-${n}`, titleKey: 'products.title', products: productCards },
+  });
+
+  // 出口市场（intake 派生，零虚构）-> RegionsGrid + region 名入 bundle
+  const regions = intake.targetMarkets.map((m) => ({ code: m, nameKey: `region.${m}` }));
+  for (const m of intake.targetMarkets) {
+    en[`region.${m}`] = regionName(m);
+  }
+
+  return {
+    specVersion: DEMO_SPEC_VERSION,
+    site: {
+      defaultLocale: 'en',
+      locales: ['en'],
+      theme: { preset },
+      nav: [
+        { labelKey: 'nav.home', pageId: 'home' },
+        { labelKey: 'nav.products', pageId: 'products' },
+        { labelKey: 'nav.contact', pageId: 'contact' },
+      ],
+      seoGlobal: { siteName },
+    },
+    pages: [
+      {
+        id: 'home',
+        path: '/',
+        seo: { titleKey: 'seo.home.title', descriptionKey: 'seo.home.desc' },
+        puck: {
+          root: { props: {} },
+          content: [
+            {
+              type: 'HeroBanner',
+              props: {
+                id: 'HeroBanner-ind-1',
+                headlineKey: 'home.hero.headline',
+                subheadKey: 'home.hero.subhead',
+                cta: { labelKey: 'home.hero.cta', pageId: 'contact' },
+              },
+            },
+            {
+              type: 'TrustBar',
+              props: { id: 'TrustBar-ind-1', titleKey: 'trust.title', logos: [] },
+            },
+            {
+              type: 'StatsBand',
+              props: {
+                id: 'StatsBand-ind-1',
+                stats: [
+                  { value: String(products.length || 1), labelKey: 'stats.products' },
+                  { value: String(intake.targetMarkets.length || 1), labelKey: 'stats.markets' },
+                ],
+              },
+            },
+            productGrid(1),
+            {
+              type: 'FactoryShowcase',
+              props: { id: 'FactoryShowcase-ind-1', titleKey: 'factory.title' },
+            },
+            {
+              type: 'CaseStudies',
+              props: { id: 'CaseStudies-ind-1', titleKey: 'cases.title', cases: [] },
+            },
+            {
+              type: 'Testimonials',
+              props: { id: 'Testimonials-ind-1', titleKey: 'testimonials.title', items: [] },
+            },
+            {
+              type: 'AboutBlock',
+              props: { id: 'AboutBlock-ind-1', titleKey: 'about.title', bodyKey: 'about.body' },
+            },
+            {
+              type: 'ProcessTimeline',
+              props: {
+                id: 'ProcessTimeline-ind-1',
+                titleKey: 'process.title',
+                steps: [
+                  { titleKey: 'process.s1.title', bodyKey: 'process.s1.body' },
+                  { titleKey: 'process.s2.title', bodyKey: 'process.s2.body' },
+                  { titleKey: 'process.s3.title', bodyKey: 'process.s3.body' },
+                ],
+              },
+            },
+            {
+              type: 'RegionsGrid',
+              props: { id: 'RegionsGrid-ind-1', titleKey: 'regions.title', regions },
+            },
+            {
+              type: 'NewsList',
+              props: { id: 'NewsList-ind-1', titleKey: 'news.title', items: [] },
+            },
+            {
+              type: 'FaqAccordion',
+              props: {
+                id: 'FaqAccordion-ind-1',
+                titleKey: 'faq.title',
+                items: [
+                  { qKey: 'faq.q1', aKey: 'faq.a1' },
+                  { qKey: 'faq.q2', aKey: 'faq.a2' },
+                ],
+              },
+            },
+            {
+              type: 'CtaBanner',
+              props: {
+                id: 'CtaBanner-ind-1',
+                headlineKey: 'cta.headline',
+                cta: { labelKey: 'cta.label', pageId: 'contact' },
+              },
+            },
+          ],
+        },
+      },
+      {
+        id: 'products',
+        path: '/products',
+        seo: { titleKey: 'seo.products.title', descriptionKey: 'seo.products.desc' },
+        puck: {
+          root: { props: {} },
+          content: [
+            {
+              type: 'PageHeader',
+              props: {
+                id: 'PageHeader-products',
+                titleKey: 'products.header.title',
+                subtitleKey: 'products.header.sub',
+              },
+            },
+            productGrid(2),
+            {
+              type: 'FaqAccordion',
+              props: {
+                id: 'FaqAccordion-ind-2',
+                titleKey: 'faq.title',
+                items: [
+                  { qKey: 'faq.q1', aKey: 'faq.a1' },
+                  { qKey: 'faq.q2', aKey: 'faq.a2' },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      {
+        id: 'contact',
+        path: '/contact',
+        seo: { titleKey: 'seo.contact.title', descriptionKey: 'seo.contact.desc' },
+        puck: {
+          root: { props: {} },
+          content: [
+            {
+              type: 'PageHeader',
+              props: {
+                id: 'PageHeader-contact',
+                titleKey: 'contact.header.title',
+                subtitleKey: 'contact.header.sub',
+              },
+            },
+            {
+              type: 'InquiryForm',
+              props: { id: 'InquiryForm-ind-1', titleKey: 'inquiry.title', subKey: 'inquiry.sub' },
+            },
+          ],
+        },
+      },
+    ],
+    assets: {},
+    copyBundles: { en },
+  };
+}
+
+/** 模板分发：制造类行业 -> industrial 模板，其余 -> demo。活动层统一调它。 */
+export function buildSiteSpec(input: DemoSpecInput): MaterializedDemoDoc {
+  return pickTemplate(input.intake) === 'industrial' ? buildIndustrialSpec(input) : buildDemoSpec(input);
 }
 
 /** InquiryForm 组件内建 key（渲染器直接 t() 这些 key，生成器必须供给）。 */

@@ -13,6 +13,17 @@ import FaqAccordion from './FaqAccordion.astro';
 import CtaBanner from './CtaBanner.astro';
 import InquiryForm from './InquiryForm.astro';
 import MapLocation from './MapLocation.astro';
+import FactoryShowcase from './FactoryShowcase.astro';
+import CaseStudies from './CaseStudies.astro';
+import NewsList from './NewsList.astro';
+import Testimonials from './Testimonials.astro';
+import TrustBar from './TrustBar.astro';
+import RegionsGrid from './RegionsGrid.astro';
+import PageHeader from './PageHeader.astro';
+import MarqueeStrip from './MarqueeStrip.astro';
+import HistoryTimeline from './HistoryTimeline.astro';
+import GalleryGrid from './GalleryGrid.astro';
+import TeamGrid from './TeamGrid.astro';
 
 interface Props {
   block: { type: string; props: Record<string, unknown> };
@@ -31,6 +42,17 @@ const registry: Record<string, unknown> = {
   CtaBanner,
   InquiryForm,
   MapLocation,
+  FactoryShowcase,
+  CaseStudies,
+  NewsList,
+  Testimonials,
+  TrustBar,
+  RegionsGrid,
+  PageHeader,
+  MarqueeStrip,
+  HistoryTimeline,
+  GalleryGrid,
+  TeamGrid,
 };
 const Component = registry[block.type] as ((props: unknown) => unknown) | undefined;
 const alt = index % 2 === 1;

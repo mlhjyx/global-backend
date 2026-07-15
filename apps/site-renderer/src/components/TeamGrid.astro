@@ -1,0 +1,73 @@
+---
+/**
+ * TeamGrid（doc 11 缺口）：团队成员--头像 + 姓名 + 职务。
+ * 🔴 人像=个人数据：成员照片 asset 须标 hasPerson（M1-c 图片管线人物照分支只裁剪调色，
+ * 不做生成改动）；具名成员由用户显式上传，brandProfile 不自动抓第三方页面具名人。
+ * 无数据诚实占位（不虚构姓名/职务）。
+ */
+import Picture from './Picture.astro';
+
+interface Props {
+  titleKey: string;
+  members: { nameKey: string; roleKey?: string; image?: { assetId?: string; src?: string } }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, members = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'team', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {
+    members.length > 0 ? (
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+        {members.map((m) => (
+          <div class="member">
+            <div class="avatar">
+              {m.image?.src ? (
+                <Picture src={m.image.src} label="" ratio="1 / 1" circle />
+              ) : (
+                <span aria-hidden="true">👤</span>
+              )}
+            </div>
+            <h3>{t(m.nameKey)}</h3>
+            {m.roleKey && <p class="muted role">{t(m.roleKey)}</p>}
+          </div>
+        ))}
+      </div>
+    ) : (
+      <p class="muted empty">Team members will appear here.</p>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .member {
+    text-align: center;
+  }
+  .avatar {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 0.75rem;
+    border-radius: 50%;
+    background: var(--c-surface-alt);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+  }
+  .member h3 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+  }
+  .role {
+    font-size: 0.9rem;
+  }
+  .empty {
+    font-style: italic;
+  }
+</style>

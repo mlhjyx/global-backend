@@ -1,0 +1,66 @@
+---
+/**
+ * Testimonials（doc 11 缺口，跨站高频）：客户评价--quote + author/role/company。
+ * 数据由 brandProfile + 用户案例在 M1-e 注入；无数据渲染诚实占位（不虚构客户证言）。
+ */
+interface Props {
+  titleKey: string;
+  items: { quoteKey: string; authorKey?: string; roleKey?: string; companyKey?: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, items = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'testimonials', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {
+    items.length > 0 ? (
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+        {items.map((it) => (
+          <figure class="quote">
+            <blockquote>{t(it.quoteKey)}</blockquote>
+            <figcaption class="muted">
+              {it.authorKey && <span class="author">{t(it.authorKey)}</span>}
+              {it.roleKey && <span class="role">{t(it.roleKey)}</span>}
+              {it.companyKey && <span class="company">{t(it.companyKey)}</span>}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    ) : (
+      <p class="muted empty">Customer testimonials will appear here. Add yours from the workspace.</p>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .quote {
+    margin: 0;
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+  }
+  blockquote {
+    margin: 0 0 1rem;
+    font-size: 1.05rem;
+    line-height: 1.6;
+  }
+  figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    font-size: 0.9rem;
+  }
+  .author {
+    font-weight: 600;
+    color: var(--c-on-surface);
+  }
+  .empty {
+    font-style: italic;
+  }
+</style>

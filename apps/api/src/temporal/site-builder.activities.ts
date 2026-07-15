@@ -8,7 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import {
-  buildDemoSpec,
+  buildSiteSpec,
   DEMO_SPEC_VERSION,
   DemoCopyPolish,
   sanitizePolish,
@@ -229,7 +229,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       try {
         const intake = site.intake as unknown as IntakeInput;
         const polish = await polishCopy(workspaceId, intake, buildRunId);
-        const doc = buildDemoSpec({
+        const doc = buildSiteSpec({
           siteName: site.name,
           intake,
           stylePreset: site.stylePreset,
@@ -584,7 +584,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
       const polish = await polishCopy(workspaceId, intake, buildRunId);
-      const doc = buildDemoSpec({ siteName: site.name, intake, stylePreset, polish });
+      const doc = buildSiteSpec({ siteName: site.name, intake, stylePreset, polish });
 
       const version = await prisma.withWorkspace(workspaceId, async (tx) => {
         await tx.siteVersion.deleteMany({ where: { buildRunId, buildStatus: 'building' } });

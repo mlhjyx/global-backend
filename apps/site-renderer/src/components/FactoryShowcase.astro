@@ -1,0 +1,76 @@
+---
+/**
+ * FactoryShowcase（04 §5 v1 封闭组件）：工厂实力--车间/设备图 + 可选工厂数字。
+ * distill 自 tecloman(60,000m² 数字带) + trumpf(工厂图网格)。图片走 assetId -> M1-c
+ * 图片管线 `<picture>`（随 M1-c 落地）；此刻无图用占位（不虚构，提示用户上传）。
+ */
+import Picture from './Picture.astro';
+
+interface Props {
+  titleKey: string;
+  bodyKey?: string;
+  images?: { assetId?: string; labelKey?: string; src?: string }[];
+  stats?: { value: string; labelKey: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, bodyKey, images = [], stats = [], t, alt } = Astro.props;
+const cards = images.length > 0 ? images : [{}, {}, {}];
+---
+
+<section class:list={['block', 'factory', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {bodyKey && <p class="muted body">{t(bodyKey)}</p>}
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+    {
+      cards.map((img) => (
+        <figure class="photo">
+          <Picture src={img.src} label={img.labelKey ? t(img.labelKey) : 'Factory photo'} ratio="4 / 3" />
+        </figure>
+      ))
+    }
+  </div>
+  {
+    stats.length > 0 && (
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-top: 1.5rem;">
+        {stats.map((s) => (
+          <div class="stat">
+            <div class="value">{s.value}</div>
+            <div class="muted">{t(s.labelKey)}</div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 0.5rem;
+  }
+  .body {
+    margin-bottom: 1.5rem;
+  }
+  .photo {
+    margin: 0;
+  }
+  .placeholder {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius);
+    background: var(--c-surface-alt);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--c-on-surface-muted);
+    font-size: 0.9rem;
+  }
+  .stat {
+    text-align: center;
+  }
+  .value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--c-primary);
+  }
+</style>

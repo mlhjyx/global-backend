@@ -1,0 +1,66 @@
+---
+/**
+ * HistoryTimeline（doc 11 缺口）：企业历程--年份 + 标题 + 描述。
+ * distill 自 envision(/milestone) + trumpf(since 1923)。milestones 由 brandProfile
+ * factSheet 注入（零虚构--不编造成立年份/大事件）；无数据诚实占位。
+ */
+interface Props {
+  titleKey: string;
+  milestones: { year: string; titleKey: string; bodyKey: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, milestones = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'history', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {
+    milestones.length > 0 ? (
+      <ol class="timeline">
+        {milestones.map((m) => (
+          <li>
+            <span class="year">{m.year}</span>
+            <div class="content">
+              <h3>{t(m.titleKey)}</h3>
+              <p class="muted">{t(m.bodyKey)}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    ) : (
+      <p class="muted empty">Company milestones will appear here.</p>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .timeline {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 1.25rem;
+  }
+  .timeline li {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 1.25rem;
+    align-items: baseline;
+  }
+  .year {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--c-primary);
+  }
+  .content h3 {
+    margin-bottom: 0.25rem;
+  }
+  .empty {
+    font-style: italic;
+  }
+</style>

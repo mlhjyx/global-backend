@@ -1,0 +1,61 @@
+---
+/**
+ * CaseStudies（04 §5 v1 封闭组件）：客户成功案例--trumpf 实证（5 个客户故事）。
+ * cases 由 brandProfile factSheet（M1-b）+ 用户案例在 M1-e siteAssembly 注入；
+ * 无数据时渲染诚实占位提示（绝不虚构客户名/结果，零虚构红线）。
+ */
+import Picture from './Picture.astro';
+
+interface Props {
+  titleKey: string;
+  cases: { titleKey: string; bodyKey: string; countryCode?: string; image?: { assetId?: string; src?: string } }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, cases = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'cases', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {
+    cases.length > 0 ? (
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
+        {cases.map((c) => (
+          <article class="case">
+            {c.image?.src && <Picture src={c.image.src} label="" ratio="16 / 9" />}
+            {c.countryCode && <span class="country">{c.countryCode}</span>}
+            <h3>{t(c.titleKey)}</h3>
+            <p class="muted">{t(c.bodyKey)}</p>
+          </article>
+        ))}
+      </div>
+    ) : (
+      <p class="muted empty">Customer success stories will appear here. Add yours from the workspace.</p>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .case {
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+  }
+  .country {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--c-primary);
+    margin-bottom: 0.5rem;
+  }
+  .case h3 {
+    margin-bottom: 0.5rem;
+  }
+  .empty {
+    font-style: italic;
+  }
+</style>

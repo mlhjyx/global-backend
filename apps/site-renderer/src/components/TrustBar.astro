@@ -1,0 +1,54 @@
+---
+/**
+ * TrustBar（04 §5 + 外贸差异化）：客户/合作 logo 带--B2B 信任要素。
+ * logos 走 assetId（用户上传客户 logo）；无数据渲染诚实占位（不虚构客户名）。
+ */
+interface Props {
+  titleKey?: string;
+  logos: { assetId?: string; labelKey?: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, logos = [], t, alt } = Astro.props;
+const cards = logos.length > 0 ? logos : [{}, {}, {}, {}];
+---
+
+<section class:list={['block', 'trust', { alt }]}>
+  {titleKey && <h2 class="title">{t(titleKey)}</h2>}
+  <div class="logos">
+    {
+      cards.map((l) => (
+        <span class="logo">{l.labelKey ? t(l.labelKey) : 'Client logo'}</span>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .title {
+    text-align: center;
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+    color: var(--c-on-surface-muted);
+  }
+  .logos {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+  }
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
+    padding: 0.75rem 1.25rem;
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+    color: var(--c-on-surface-muted);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+</style>

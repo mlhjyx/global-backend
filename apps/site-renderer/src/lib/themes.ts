@@ -6,6 +6,9 @@
 export interface ThemeTokens {
   colors: {
     primary: string;
+    /** 信号强调色（CTA 高亮/点缀），可选。distill 发现 B2B 多用"中性主色+一个信号色"
+     *  （trumpf 柠檬绿 #bbd03a / tecloman 生态绿 #70e28a），作为品牌签名色。 */
+    accent?: string;
     secondary: string;
     surface: string;
     surfaceAlt: string;
@@ -51,6 +54,40 @@ export const THEME_PRESETS: Record<string, ThemeTokens> = {
     radius: '10px',
     motionIntensity: 'subtle',
   },
+  // 企业蓝 + 标志柠檬绿点缀 + 方正圆角：distill 自 trumpf.com（德国激光/机床制造）。
+  // Frutiger 品牌字随 M1-d fontsource 自托管落地（暂用系统无衬线）。
+  'industrial-trumpf': {
+    colors: {
+      primary: '#285172',
+      accent: '#bbd03a', // 信号色：CTA 高亮/绿方块签名
+      secondary: '#131313',
+      surface: '#FFFFFF',
+      surfaceAlt: '#EFF0F4',
+      onSurface: '#131313',
+      onSurfaceMuted: '#727272',
+      onPrimary: '#FFFFFF',
+    },
+    typography: { fontBody: SANS, fontHeading: SANS, scale: 1.2 },
+    radius: '0px', // 方正工业感（distill 实证 trumpf 圆角≈0）
+    motionIntensity: 'subtle',
+  },
+  // 电光蓝 + 生态绿点缀：distill 自 tecloman.com（B2B 储能工厂）。
+  // Plus Jakarta Sans 品牌字随 M1-d fontsource 自托管落地（暂用系统无衬线）。
+  'industrial-tecloman': {
+    colors: {
+      primary: '#00B3F2',
+      accent: '#70E28A', // 信号色：eco/能源绿
+      secondary: '#121926',
+      surface: '#FFFFFF',
+      surfaceAlt: '#F2F7FB',
+      onSurface: '#121926',
+      onSurfaceMuted: '#9C9C9C',
+      onPrimary: '#FFFFFF',
+    },
+    typography: { fontBody: SANS, fontHeading: SANS, scale: 1.2 },
+    radius: '8px',
+    motionIntensity: 'subtle',
+  },
 };
 
 /** preset + tokenOverrides（如 colors.primary）→ CSS 自定义属性表。 */
@@ -71,6 +108,7 @@ export function themeToCssVars(
     '--font-heading': tokens.typography.fontHeading,
     '--radius': tokens.radius,
   };
+  if (tokens.colors.accent) vars['--c-accent'] = tokens.colors.accent;
   const map: Record<string, string> = {
     'colors.primary': '--c-primary',
     'colors.secondary': '--c-secondary',

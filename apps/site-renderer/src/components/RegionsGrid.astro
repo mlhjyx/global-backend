@@ -1,0 +1,60 @@
+---
+/**
+ * RegionsGrid（doc 11 缺口，envision+trumpf 印证）：出口市场/全球布局--"We export to"。
+ * regions 用 ISO alpha-2 + 名称；intake.targetMarkets 可直接派生（零虚构）。
+ */
+interface Props {
+  titleKey: string;
+  regions: { code: string; nameKey: string }[];
+  variant?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { titleKey, regions = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'regions', { alt }]}>
+  <h2>{t(titleKey)}</h2>
+  {
+    regions.length > 0 ? (
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+        {regions.map((r) => (
+          <div class="region">
+            <span class="code">{r.code}</span>
+            <span class="name">{t(r.nameKey)}</span>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <p class="muted empty">Your export markets will appear here.</p>
+    )
+  }
+</section>
+
+<style>
+  h2 {
+    margin-bottom: 1.5rem;
+  }
+  .region {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 1rem;
+    border: 1px solid var(--c-surface-alt);
+    border-radius: var(--radius);
+  }
+  .code {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--c-primary);
+    letter-spacing: 0.05em;
+  }
+  .name {
+    color: var(--c-on-surface-muted);
+    font-size: 0.95rem;
+  }
+  .empty {
+    font-style: italic;
+  }
+</style>

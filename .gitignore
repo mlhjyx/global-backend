@@ -25,6 +25,7 @@ pnpm-debug.log*
 .DS_Store
 .idea/
 .vscode/*
+.claude/
 !.vscode/extensions.json
 
 # generated contract artifacts

@@ -1,18 +1,50 @@
 ---
 import { pageHref } from '../lib/links';
+import Picture from './Picture.astro';
 
+/**
+ * HeroBanner（04 §5，3 变体：大图/分栏/视频底）。
+ * - bgVideo：视频底（04 §5 第三变体）--autoplay/muted/loop/playsinline + 暗色遮罩 + 白字。
+ *   视频自托管（客户上传或 M3 Seedance 产物），🔴 禁外链直嵌；reduced-motion 时隐藏视频退化为遮罩。
+ * - bgImage：大图底（Picture 渲染，M1-c 派生图）。
+ * - 都无：渐变底（M0 默认）。
+ */
 interface Props {
   headlineKey: string;
   subheadKey?: string;
   cta?: { labelKey: string; pageId?: string; url?: string };
+  bgImage?: { src?: string } | null;
+  bgVideo?: { src: string; poster?: string } | null;
   variant?: string;
   t: (key: string) => string;
 }
-const { headlineKey, subheadKey, cta, t } = Astro.props;
+const { headlineKey, subheadKey, cta, bgImage, bgVideo, t } = Astro.props;
 const ctaHref = cta?.url ?? (cta?.pageId ? pageHref(cta.pageId) : '#inquiry');
+const hasMedia = !!(bgVideo || bgImage?.src);
 ---
 
-<section class="block hero">
+<section class:list={['block', 'hero', { 'hero--media': hasMedia }]}>
+  {
+    bgVideo ? (
+      <video
+        class="bgvid"
+        aria-hidden="true"
+        autoplay
+        muted
+        loop
+        playsinline
+        preload="auto"
+        poster={bgVideo.poster}
+      >
+        <source src={bgVideo.src} type="video/mp4" />
+      </video>
+    ) : bgImage?.src ? (
+      <div class="bgimg">
+        <Picture src={bgImage.src} label="" ratio="21 / 9" />
+      </div>
+    ) : null
+  }
+  {hasMedia && <div class="overlay" />}
   <div class="inner">
     <h1>{t(headlineKey)}</h1>
     {subheadKey && <p class="sub">{t(subheadKey)}</p>}
@@ -22,28 +54,75 @@ const ctaHref = cta?.url ?? (cta?.pageId ? pageHref(cta.pageId) : '#inquiry');
 
 <style>
   .hero {
-    background: linear-gradient(135deg, var(--c-secondary), var(--c-primary));
+    position: relative;
     color: var(--c-on-primary);
     text-align: center;
+    overflow: hidden;
+  }
+  /* 无媒体：渐变底（M0 默认）*/
+  .hero:not(.hero--media) {
+    background: linear-gradient(135deg, var(--c-secondary), var(--c-primary));
+  }
+  /* 有媒体：视频/大图底，更高冲击力 */
+  .hero--media {
+    min-height: 72vh;
+    display: flex;
+    align-items: center;
+  }
+  .bgvid,
+  .bgimg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+  }
+  .bgvid {
+    object-fit: cover;
+  }
+  .bgimg :global(img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.6));
   }
   .inner {
-    max-width: 820px;
+    position: relative;
+    z-index: 2;
+    max-width: 860px;
     margin: 0 auto;
     display: grid;
     gap: 1.25rem;
     justify-items: center;
-    padding: clamp(1rem, 4vw, 3rem) 0;
+    padding: clamp(3rem, 8vw, 6rem) 1.5rem;
   }
   h1 {
-    font-size: clamp(1.9rem, 4.5vw, 3.2rem);
+    font-size: clamp(2rem, 5vw, 3.6rem);
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   }
   .sub {
-    font-size: 1.15rem;
-    opacity: 0.9;
-    max-width: 640px;
+    font-size: 1.2rem;
+    opacity: 0.95;
+    max-width: 680px;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
   }
   .hero .btn {
     background: var(--c-surface);
     color: var(--c-secondary);
+    font-size: 1.05rem;
+    padding: 0.9rem 1.8rem;
+  }
+  .hero .btn:hover {
+    filter: brightness(1.05);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bgvid {
+      display: none;
+    }
   }
 </style>
