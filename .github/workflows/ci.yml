@@ -40,6 +40,9 @@ jobs:
       - name: Lint（eslint flat config，typescript-eslint）
         run: pnpm --filter @global/api lint
 
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        run: pnpm --filter @global/contracts build
+
       - name: Build（nest build = tsc 全量类型检查）
         run: pnpm --filter @global/api build
 
@@ -64,6 +67,9 @@ jobs:
 
       - name: Prisma generate
         run: pnpm --filter @global/db generate
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        run: pnpm --filter @global/contracts build
 
       - name: Build API
         run: pnpm --filter @global/api build

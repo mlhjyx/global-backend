@@ -2,9 +2,10 @@
   "name": "@global/contracts",
   "version": "0.0.1",
   "private": true,
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "lint": "spectral lint openapi/openapi.json",
     "bundle": "redocly bundle openapi/openapi.json -o dist/openapi.bundled.yaml",
     "docs": "redocly build-docs openapi/openapi.json -o dist/docs.html",

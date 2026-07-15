@@ -9,6 +9,7 @@
     "dev": "astro dev"
   },
   "dependencies": {
+    "@global/contracts": "workspace:*",
     "astro": "^5.7.0"
   }
 }

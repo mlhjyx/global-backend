@@ -1,24 +1,12 @@
 import { readFileSync } from 'node:fs';
+import type { SiteSpec } from '@global/contracts';
 
-/** 物化 SiteSpec（04 契约顶层信封 + per-locale CopyBundle）。 */
-export interface MaterializedSpec {
-  specVersion: string;
-  site: {
-    defaultLocale: string;
-    locales: string[];
-    theme: { preset: string; tokenOverrides?: Record<string, string> };
-    nav: { labelKey: string; pageId: string }[];
-    seoGlobal: { siteName: string };
-  };
-  pages: {
-    id: string;
-    path: string;
-    puck: { content: { type: string; props: Record<string, unknown> }[]; root: { props?: Record<string, unknown> } };
-    seo: { titleKey: string; descriptionKey: string };
-  }[];
-  assets: Record<string, { kind: string; hash: string }>;
-  copyBundles: Record<string, Record<string, string>>;
-}
+/**
+ * 物化 SiteSpec（04 契约顶层信封 + per-locale CopyBundle）。
+ * DQ-1：类型真值在 `@global/contracts`；保留 `MaterializedSpec` 别名以不惊动 .astro 引用。
+ * 运行时校验（04 §7 三重门）将在 `loadSpec` 处以 Zod 叠加（DQ-1 follow-up）。
+ */
+export type MaterializedSpec = SiteSpec;
 
 let cached: MaterializedSpec | null = null;
 

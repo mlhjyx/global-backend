@@ -16,7 +16,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@global/contracts": ["packages/contracts/src/index.ts"]
+      "@global/contracts": ["packages/contracts/dist/index.d.ts"]
     }
   },
   "exclude": ["node_modules", "dist"]

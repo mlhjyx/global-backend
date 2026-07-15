@@ -1,3 +1,4 @@
+import type { SiteSpec } from '@global/contracts';
 import type { IntakeInput } from './intake.service';
 
 /**
@@ -53,24 +54,12 @@ interface Block {
   props: Record<string, unknown>;
 }
 
-export interface MaterializedDemoDoc {
-  specVersion: string;
-  site: {
-    defaultLocale: string;
-    locales: string[];
-    theme: { preset: string };
-    nav: { labelKey: string; pageId: string }[];
-    seoGlobal: { siteName: string };
-  };
-  pages: {
-    id: string;
-    path: string;
-    puck: { content: Block[]; root: { props: Record<string, unknown> } };
-    seo: { titleKey: string; descriptionKey: string };
-  }[];
-  assets: Record<string, never>;
-  copyBundles: Record<string, Record<string, string>>;
-}
+/**
+ * demo 物化文档 = SiteSpec（DQ-1：契约唯一真值在 `@global/contracts`）。
+ * 保留 `MaterializedDemoDoc` 别名以不惊动既有 import；本 demo 产出恒不含资产
+ * （`assets` 为空对象，SiteSpec 的 `Record<string, AssetRef>` 允许零条目）。
+ */
+export type MaterializedDemoDoc = SiteSpec;
 
 const PRECISION_KEYWORDS =
   /electro|electronic|medical|device|instrument|precision|optic|sensor|diagnostic|ultrasound|pcb|semiconductor|pharma|lab/i;

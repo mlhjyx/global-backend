@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildDemoSpec, collectTextKeys, pickPreset, sanitizePolish } from './demo-spec';
+import { SITE_SPEC_VERSION, type SiteSpec } from '@global/contracts';
+import {
+  buildDemoSpec,
+  collectTextKeys,
+  DEMO_SPEC_VERSION,
+  pickPreset,
+  sanitizePolish,
+} from './demo-spec';
 import type { IntakeInput } from './intake.service';
 
 const INTAKE: IntakeInput = {
@@ -11,6 +18,26 @@ const INTAKE: IntakeInput = {
   websiteUrl: null,
   businessEmail: 'sales@acmepump.com',
 };
+
+describe('DQ-1 契约守卫：demo 生产端符合 @global/contracts 的 SiteSpec 信封', () => {
+  it('版本一致：DEMO_SPEC_VERSION 等于契约 SITE_SPEC_VERSION（demo 恒发当前契约版本）', () => {
+    expect(DEMO_SPEC_VERSION).toBe(SITE_SPEC_VERSION);
+  });
+
+  it('信封形状：产出可赋给 SiteSpec，顶层字段齐备（编译期赋值 + 运行期断言双守）', () => {
+    // 编译期：若生产端漂移出契约，此赋值即类型报错——这正是 DQ-1 单一真值的意义。
+    const doc: SiteSpec = buildDemoSpec({ siteName: 'Acme Pump Co., Ltd.', intake: INTAKE });
+    expect(typeof doc.specVersion).toBe('string');
+    expect(typeof doc.site.defaultLocale).toBe('string');
+    expect(Array.isArray(doc.site.locales)).toBe(true);
+    expect(typeof doc.site.theme.preset).toBe('string');
+    expect(Array.isArray(doc.site.nav)).toBe(true);
+    expect(typeof doc.site.seoGlobal.siteName).toBe('string');
+    expect(Array.isArray(doc.pages)).toBe(true);
+    expect(typeof doc.assets).toBe('object');
+    expect(typeof doc.copyBundles).toBe('object');
+  });
+});
 
 describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 快速通道）', () => {
   it('结构：home/products/contact 三页，home 首块 HeroBanner，contact 含 InquiryForm，nav 指向存在页面', () => {
