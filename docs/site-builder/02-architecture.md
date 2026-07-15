@@ -10,6 +10,29 @@
 4. **每个 agent = 有界 AI Task**：输入/输出 zod schema 严校验、失败重试带错误反馈、预算 reserve-settle、全链 trace。
 5. **模型统一走 new-api 网关**（已拍板，付费开闸）：所有 agent 的文本/图像/视频调用集中网关记账，key 不散落。
 
+> **补充架构原则（v3.2 §4.1 回写，与上五条并列的工程不变量）**：
+> 6. **AI 只做开放性理解 / 生成 / 审美判断**；安全、结构、引用完整性、预算、发布与回滚一律由**确定性代码**决定，模型输出无权改这些。
+> 7. **Agent 只交换版本化结构化工件**（schema 化 JSON），不做自由聊天、不产任意代码。
+> 8. **SiteSpec 是渲染合同，不是事实数据库**——事实真相源是公共 `Company/Offering/Claim/Evidence`（§9），站点只保存**渠道投影 + 不可变 Release**。
+> 9. **所有 AI/媒体任务可重试、取消、追踪、计费、降级、回放**（AiTask 基类内建，§4.4/§6）。
+> 10. **Preview 与 Publish 用同一 Release 产物**，切换只动可见指针与域名，绝不二次构建（§4.6、§7）。
+
+### 0.1 运行时硬约束（v3.2 §0.1 回写，护 D1/D13）
+
+- **不让运行时 Agent 自由写 React/Astro/CSS 或任意组件**——只能从**已批准封闭组件库**（ADR-015，26 型为 v1 target）选择组合，产出 SiteSpec/DesignBrief。
+- **不新增 planner Agent**——固定 DAG + 规则选择 + 现有 Temporal 编排是**唯一调度**（D13 / ADR-013）。
+- **不把"再写一个更长的 prompt"当成设计方案**——设计智能靠开发期工厂沉淀的语料/组件/规则，不靠运行时长 prompt 即兴发挥。
+
+### 0.2 两平面：开发期设计智能工厂 vs 生产期受控组装（v3.2 §0.2/§12 回写，target）
+
+把 01 号"两主题预设 + 固定页面结构"升级为**两层**：
+
+- **开发期平面**（CC/开发 Agent 工作区，**非用户建站时运行**）：研究多源参考 → 临时分析压成 `DesignObservation` → 只把**聚合规则 / 许可代码 / 原创资产**提升为可运行语料 → 生成内部组件变体、构建 TemplateFamily → 跑合规/截图/性能/原创性评测 → **经 PR 发布版本化 DesignCatalog**。
+- **生产期平面**（**本仓 as-built 基底** = API/Temporal/AiTask/SiteSpec/Astro Renderer）：按企业资料选**已批准** TemplateFamily+Blueprint → 按素材/文案/事实证据**受控组合** → 输出 DesignBrief/CopyBundle/SiteSpec/Findings。**运行时硬约束**：不抓 Readdy（ADR-019）、不读原始参考页/模板源码、不生成任意前端代码（护 D1）。
+- **两平面不可混合的四条理由**：① 设计研究需大量截图迭代，不适合 Demo 低延迟路径；② 来源许可有边界，不可在生产数据路径动态取用；③ 开发期靠**人工批准 PR**，生产期须**可重放/可计费/可降级**；④ 运行时自由设计会破坏 SiteSpec 白名单 / 缓存 / 可回归性。
+
+> 开发期工厂的详设归 14 号文档；本 02 只承载**生产期平面**的 as-built 架构，两平面通过版本化 `DesignCatalog` 单向对接。v3.2 吸收 v2 全部合同并新增四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / CC 从 M1-c 起哪些立即改哪些延后）——详见 14 号与 09 号。
+
 ## 1. 模块与目录
 
 ```
@@ -29,6 +52,11 @@ apps/api/src/site-builder/
 
 新增基建：**MinIO**（compose，对象存储）、**Astro 构建容器**（渲染器）、网关新模型通道（§6）。
 
+> **目标态新增/修改目录（v3.2 §25.2/§25.3 回写，target，随 M1-c~g 落地）**：
+> - API 侧新增 `design/{catalog,resolver,rules,demo-visual-packs,design-lint,families/,blueprints/}`、`agents/{design-spec,aesthetic-review,model-profiles,model-policy.registry,model-capabilities,model-capability-probe,model-promotion.service}`、`media-gateway/`、`releases/`；修改 `demo-spec`/`task-routes`/`refurbish.workflow`/`site-builder.activities`/`schema.prisma`/迁移。
+> - Renderer 侧新增 `components/variants/`、`lib/{design-catalog,design-tokens,picture}`、`fixtures/design/`、`tests/visual/`。
+> - 🔴 **Renderer fail-closed（v3.2 §25.3，收敛 as-built）**：`Section.astro` 当前对未知组件**静默返回 null**（ADR-015 as-built，10 组件已注册）；目标改为**开发显错误块 + 测试/生产对未知组件 fail-closed**（不再静默）；`themes.ts` 从"两主题换皮"迁**版本化 StylePreset**；`spec.ts` 已迁共享契约（#117）删重复；locale 路由在 M1-e/M1-g 补完整验证（当前 `[...slug].astro` 只渲染默认 locale）。
+
 ## 2. 数据模型（Prisma 新表，全部 `workspace_id` + RLS policy）
 
 | 表 | 关键字段 | 说明 |
@@ -42,6 +70,8 @@ apps/api/src/site-builder/
 | `inquiry`(M2) | form_data, source_page, status | 询盘回流（未来接获客管线） |
 
 对象存储 key 约定：`ws/{workspace_id}/{site_id}/{kind}/{content_hash}.{ext}`；owner 凭证只在后端，外部一律短时 presigned URL。
+
+> **Asset/KB 正确性状态机（v3.2 §26 R2-A 回写，target·failure-semantics）**：素材与知识库落库须做成**可重放正确性状态机**——内容寻址存储(CAS) + canonical copy + tombstone + Outbox + KB lease+retry + `assetId` 唯一 + profile patch schema 校验与并发合并。验收场景（全部须可重放且**绝不留指向已丢失对象的 ready 行**）：重复 commit、`P2002` 唯一冲突、对象删除失败、worker 崩溃、瞬时 embedding 失败、并发 patch。此为 §2/§12 素材与知识库表的**正确性合同**，非新表。
 
 ## 3. API 面（code-first OpenAPI，交 SaaS 前端）
 
@@ -64,30 +94,132 @@ POST /sites/{id}/publish                      # 发布（M2）
 
 ## 4. 编排（siteBuilderWorkflow）
 
-**快速通道**：`demoV0Activity` —— 行业模板选择（taxonomy 匹配）+ 注册信息填充 + 一次轻文案调用（deepseek-v4-flash，超时即用模板默认文案），P95 < 10s，同步返回。
+> Temporal 是**唯一**工作流编排器（ADR-013，无第二条 Agent 流程、无 Planner）。下分**两条构建通道**：Fast Demo（秒级、确定性）与 Refurbish（分钟级、异步精装修）。数据流：
 
-**精装修管线**（异步，触发=用户补资料/选风格/点重新生成）：
+```mermaid
+flowchart TD
+    A["企业真相\nCompany / Offering / Claim / Evidence"] --> B["渠道快照\nBrand / Catalog / Packs"]
+    B --> C["有界 AI Tasks\n内容 / 视觉 / 组装"]
+    C --> D["SiteSpec + Copy + Media refs"]
+    D --> E["确定性校验 + Astro"]
+    E --> F["Immutable Release"]
+    F --> G["Preview / Publish / Rollback"]
+    H["Temporal / Budget / Audit"] --> C
+    H --> E
+```
+
+### 4.1 Fast Demo 通道（P95 < 10s，v3.2 §4.2/§18.2 回写）
+
+`demoV0Activity` —— 8 阶段确定性快路径：**注册资料 → 规则识别 Archetype → Family/Blueprint 规则打分排序 → 安全 DemoVisualPack → 确定性 SiteSpec → 可选轻文案润色 → Astro 构建 → 快速 lint + 发布预览**。硬约束：
+
+- **关键路径不调视觉模型**：Family/Blueprint 用**规则打分**，不在 10s 预算内调多模态模型（保确定性）。
+- **文案润色可取消、非依赖**：一次异步轻文案调用（deepseek-v4-flash）为锦上添花；硬超时即用模板默认文案，Demo 成功不依赖它。
+- **只用注册明确事实**（ADR-017 禁虚构身份）；preview-only ≠ 可公开发布。
+- **不跑**图片生成 / 视频 / 全页多模态 QA / 网络研究。
+- **DemoVisualPack 素材约束**：必须为平台原创、明确许可或程序化生成的**非事实性**素材；推荐三类来源=①平台自制抽象 SVG/网格/渐变/技术纹理；②明确可商用并本地化的图片；③后期由已批准图片模型生成的非事实性场景（不进 M1 Demo 必选路径）。
+- as-built 现状：`demo-spec.ts` 仍是 home/products/contact 三页确定性 Demo；`themes.ts` 仅两主题（颜色/系统字体/圆角/motionIntensity）=换皮而非完整设计语言。
+
+### 4.2 Refurbish 精装修管线（异步，触发=用户补资料/选风格/点重新生成）
+
+as-built：`refurbish.workflow.ts` 当前从 P1 直接进 `assembleAndBuild`，`site-builder.activities.ts` 里 `assemble` 仍调 `buildDemoSpec`、image/copy/quality 是**步骤位**——**设计升级落现有步骤位，不另建第二条工作流**。目标态六阶段产物与失败语义（v3.2 §4.2 回写）：
+
+| 阶段 | 产物 | 失败语义 |
+|---|---|---|
+| P0 Prepare | BuildContext、预算、基准 Release、locks、ResolvedPackSnapshot | 阻断 |
+| P1 Understand | BrandProjection、ClaimSnapshot、Gaps | 研究可降级；无可信事实走安全模板 |
+| P2 Media+Copy | AssetVariant、MediaJob、CopyBundle | 可选素材/非默认 locale 可降级；必需项阻断 |
+| P3 Design+Assemble | DesignBrief、DesignSpec、SiteSpec、BuildArtifact | 有限修复，仍失败**不切指针** |
+| P4 Quality | QA/SEO/Aesthetic/Safety Report、FixPatch | 最多三轮；硬门不过不 publishable |
+| P5 Release | SiteReleaseManifest、preview URL、Outbox | 原子提交；失败**保留旧 Release** |
+
+原 ASCII 管线是同一意图的粗粒度视图：
 
 ```
 P1 理解     资料解析入库向量化 ‖ brandProfileTask（全网研究）→ Brand Brief
 P2 素材     并行 fan-out：imagePipeline(每图) ‖ copyTask(每语种) ‖ motionAssetTask ‖ videoTask(M3)
 P3 组装     designSpecTask → siteAssemblyTask → SiteSpec 校验 → Astro 构建 → 预览部署
 P4 质量环   ≤3 轮：qaTask ‖ seoTask ‖ aestheticReviewTask → findings → assemblyFixTask → 重构建
-P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
+P5 发布     outbox: SiteReleaseCreated / SitePublished → SaaS 前端刷新预览
 ```
 
-- **增量再生成**：scope 参数决定只重跑受影响 phase；素材处理按 content_hash 幂等跳过。
-- **失败策略**：单素材失败不阻断整站（占位图+标记，fail-safe 照旧）；phase 级 Temporal 重试；预算超限 → 暂停 + `SiteBuildFailed(reason=budget)` 事件，绝不静默。
-- **并发**：同 site 同时只允许一个 build run（Temporal workflow id = site id 派生，天然去重）。
+**阶段职责 I/O（v3.2 §19.1 回写，逻辑 agent → 产物）**：
+
+| 阶段 | 输入 | 输出 | 设计相关变化 |
+|---|---|---|---|
+| P1 brandProfile | intake、资料、研究 | BrandProfile | 不改 |
+| P2 imagePipeline | 用户资产 | 派生图片 + 能力摘要 | M1-c 纯 Sharp，不加设计模型（ADR-018） |
+| P3 copy | BrandProfile + DesignBrief 内容预算 | CopyBundle | M1-d 增槽位长度 + 证据要求 |
+| P3 designSpec | BrandProfile + Catalog + AssetCapabilitySummary | DesignBrief | M1-e 新增 Family/Blueprint/variant 决策 |
+| P3 assembly | DesignBrief + CopyBundle + AssetManifest | SiteSpec | 只引批准组件 + 变体 |
+| P4 quality | 构建产物 + 三断点截图 | Findings + Patch | M1-f 新增审美 + 通用感 |
+
+### 4.3 增量构建（scope 语义，v3.2 §4.3 回写）
+
+- `scope=site`：全站新快照；`scope=page`：仅重写目标页，但 **Release 仍是全站不可变快照**；`scope=section`：仅重写目标组件，保留 lock/人工编辑/未受影响引用。
+- 素材变化由 **AssetUsage 反查**受影响组件；处理按 `content_hash` 幂等跳过。
+- Claim 过期/撤销、Offering 更新、Asset 撤权**只创建 `SiteMaintenanceTask`，绝不静默改已发布页**。
+- **每次 build 冻结** Pack/Catalog/Prompt/Schema/RoutePolicy/Renderer/ComponentLibrary 版本（可重放地基）。
+
+### 4.4 失败语义与可恢复状态（v3.2 §4.4 回写）
+
+`SiteBuildRun.steps JSON` 只做读模型；一等记录用 `SiteBuildStep(buildRunId,key,itemKey,attempt,status,progress,degraded,errorCode,costCents,artifactRefs,…)`，唯一键 `(buildRunId,key,itemKey,attempt)`。关键失败处理表：
+
+| 场景 | 处理 |
+|---|---|
+| KB 摄入失败 | 沿用 ready 文档并 degraded |
+| Brand 全路由失败 | 用上一版 BrandProjection；无上一版走安全模板 |
+| 可选图片失败 | 原图优化 Variant 或占位（fail-safe，不阻断整站） |
+| Logo/Hero 必需素材不可用 | 返回明确 gap 并阻断 |
+| 非默认 locale 失败 | 本 Release 不含该 locale；**默认 locale 失败阻断** |
+| 预算耗尽 | 停发新调用、结算已完成、状态 `resumable` + `SiteBuildFailed(reason=budget)`，绝不静默 |
+| 取消 | 停新任务、执行不可取消补偿、**不改旧 Release** |
+| 模型通道异常 | 按 registry fallback；**不能用无媒体能力的文本模型硬顶**媒体任务 |
+
+- phase 级 Temporal 重试；**并发**：同 site 同时只允许一个 build run（Temporal workflow id = site id 派生，天然去重）。
+
+### 4.5 DesignBrief 可重放/确定性（v3.2 §15.4 回写，target）
+
+- `catalogVersion`/`familyVersion`/`variationSeed` 必须落入构建工件，**保证可重放**。
+- 同一 `SiteBuildRun` 内 DesignBrief **不因重试随机漂移**。
+- SiteSpec **只引用已批准**的 component+variant（ADR-014/015）。
+
+### 4.6 不可变 Release 与原子发布（v3.2 §7.1 回写，引 ADR-013）
+
+每次发布产出**不可变 Release**（内容寻址、可回放、可回滚），**异步失败绝不删除用户现有 Site**（ADR-013）。
+
+- **对象前缀固定** `sites/{siteId}/releases/{releaseId}/...`，禁按 slug 覆盖历史目录。
+- **ReleaseManifest 快照**冻结：SiteSpec + 各 locale CopyBundle hash、ClaimSnapshot/CatalogSnapshot、Asset/Variant hash+权利+来源、Pack/DesignCatalog/Family/variationSeed、component/renderer/prompt/schema/route policy/model snapshot、QA/SEO/Aesthetic/Safety/PublishReview 报告、artifact 清单 + digest。
+- **原子指针**：DB 事务切 `previewReleaseId`/`publishedReleaseId` 同时写 Outbox；失败/取消/未过硬门**都不改当前指针**；回滚=切**完整 Release**，非只切 SiteSpec JSON。
+- **Preview 与 Publish 同一 artifact**，禁二次构建导致漂移（详见 §7 域名/证书/tombstone）。
+- **公共 Outbox 事件（不建第二消息系统，v3.2 §3.6）**：`SiteIntakeCompleted` / `SiteDemoReady` / `SiteDemoFailed` / `SiteBuildStarted` / `SiteBuildStepChanged` / `SiteBuildCompleted` / `AssetProcessed` / `MediaJobCompleted` / `SiteReleaseCreated` / `SitePublished` / `SiteRolledBack` / `InquirySubmitted` / `SiteMaintenanceRequired`。
 
 ## 5. Agent 架构卡（原 9 卡；卡 1「规划 planner」已按 D13 砍 → 职责拆入「编排/增量规划」确定性零模型 + designSpec，余 8 张生产 agent）
 
-统一契约：`输入 schema → prompt（用户资料只进模板变量，防注入）→ 网关调用 → 输出 zod 校验（不过=带错误重试 ≤2）→ trace + 成本落 run`。
+统一契约：`输入 schema → prompt（用户资料只进模板变量，防注入）→ 网关调用 → 输出 zod 校验（不过=带错误重试 ≤2）→ trace + 成本落 run`。每个 AiTask 须声明：`taskId`/owner/input+output schema version/prompt version/rubric version、`modelProfile`/allowed capabilities+tools/timeout/maxTokens/maxCost、fallback+degrade policy/deterministic post-checks/PII+data-region policy（v3.2 §5.3）。
+
+### 5.1 四逻辑 Agent（设计视图）↔ 7 物理 AiTask（as-built）映射（v3.2 §5.1/§1.6 回写）
+
+as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`）。下表**不做命名重构**，只在文档/owner/trace 上把它们（含 M1 目标新增 task）归成**四个逻辑 Agent**，明确责任与禁止边界：
+
+| 逻辑 Agent | AiTask（含目标 *） | 责任 | 禁止 |
+|---|---|---|---|
+| Brand & Evidence | `brand_profile`、claim_projection* | 品牌、术语、引用、gaps | 不批准 Claim；不输出具名个人 |
+| Content & SEO | `copy`、localize*、`seo_review` | 多语言文案、FAQ、metadata、Schema 文本 | 只消费允许公开的 ClaimSnapshot |
+| Visual Media Director | image_select/qc/edit*、video_storyboard/qc*、aesthetic_review* | 媒体用途、编辑 brief、多模态质检 | 不改原件；证书/人像/Logo 禁生成式改造 |
+| Site Composer & Fixer | `design_spec`、`assemble`、`assembly_fix` | Archetype/Family、组件、SiteSpec、受限 JSON Patch | 不生成代码；不绕过白名单 |
+
+（* = M1-d/e/f 目标 task，尚未落地；下方 §5.2 的 8 卡是**能力设计视图**，与 7 as-built task 非一一对应——planner 卡已按 D13 砍。）
+
+**确定性服务不是 Agent（v3.2 §5.2）**：Workflow Orchestrator、Budget Guard、SiteSpec Validator、Asset Processor、Safety/License Gate、A11y/Performance Scanner、Release Manager、Publisher/Domain Manager、Analytics/Event Collector 均为**确定性服务**——无人格、无模型自由度、无自主规划权。
+
+**不设 Planner，保留审核三角（v3.2 §5.4 / D13 / ADR-013）**：固定建站由 DAG+scope+规则选择；M2 自由语言改站只增 `edit_intent` → 受限 PatchPlan，不获任意编排/代码生成权。QA/SEO/Aesthetic 是三个独立视角，生成者不得给自己打最终分；修复者只消费冻结 finding，输出 allowlist JSON Patch，每轮硬门须单调改善，最多三轮。
+
+### 5.2 能力设计视图（8 卡；模型列见 §6 四态路由，非终选）
 
 | # | Agent | 职责 | 输入 → 输出 | 模型（首选） | 工具/护栏 |
 |---|---|---|---|---|---|
 | ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
-| 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-reasoner（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构** |
+| 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-v4-pro（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
 | 3 | 图片管线 imagePipeline | 产品/工厂图变"专业站点图" | 原图 → 多尺寸 webp/avif 产物 | gpt-image 系（编辑）+ gemini-2.5-pro（质检） | 确定性步骤：EXIF 剥离→**rembg 主体分割出 mask**→质量评估→生成式仅重绘 mask 外（背景/打光/白底）→超分→导出。**主体保护双保险：mask 锁定 + 生成后主体 pHash/embedding 相似度校验，主体变形=丢弃重试**；人物照默认不做生成改动 |
 | 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | gemini-2.5-pro（多语言） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
 | 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 Seedance 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | Seedance（火山，异步任务轮询） | 每站视频条数配额；视频失败自动降级动效 |
@@ -98,13 +230,13 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 
 > 评审三人组（8/9/6 评审面）= GAN 式生成-评审循环（生成者改，评审者挑），有界 ≤3 轮防死循环；单维不过阈值出 findings，全过或轮数用尽即出环。
 >
-> ⚠️ 上表"模型（首选）"列为初稿；**终选以 §6 为准**（2026-07-14 已按能力全市场重选）。
+> ⚠️ 上表"模型（首选）"列为初稿；**以 §6 四态路由为准**（ADR-016：currentRoute 现役 as-built，候选只经评测晋级，非终选/非采购承诺）。
 >
 > **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，CC 生态是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← seo-specialist 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（Playwright/Lighthouse/sharp/rembg 直接进 activity），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
 
-## 6. 模型选型（**终版定档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
+## 6. 模型选型（**四态路由现役档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
 
-> 本表为**唯一真值**。定档方法：三个任务形状在本地网关对活模型真实调用评测（确定性判分+延迟实测）+ 外部信源研究 + 用户拍板。「现役」列今天即可真跑（方舟 agent plan 10 文本模型 + seedream 已接通实测，deepseek 直连双档已接）；「升级位」待对应通道接入后按同套评测题复测再切。初稿的 web 调研表已被本表取代。
+> 本表是**当前路由（currentRoute，as-built）**，不是永久终选——ADR-016 四态路由：`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + `deterministicFallback`。「推荐 ≠ 代码已切换」，候选**只经 Golden Set 回归 + 成本/质量门**晋级，非采购承诺。Agent 卡只绑 **ModelProfile 语义档**（能力/成本/延迟约束），不硬编码型号；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 供历史重放。定档方法：三任务形状本地网关真实调用评测（确定性判分+延迟实测）+ 外部信源 + 用户拍板。「现役」列今天即可真跑（方舟 agent plan 10 文本模型 + seedream 已接通实测，deepseek 直连双档已接）；「升级位」待通道接入后按同套评测题复测再切。
 
 | Agent/用途 | 现役主选（实测背书） | 回退链 | 升级位（通道待接） |
 |---|---|---|---|
@@ -120,6 +252,13 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 
 🔴 评测出的工程硬约束（AiTask 基类内建，全模型适用）：现役全员是 reasoning 模型——`finish_reason=length && content 空`=显式失败必检（换预算/换模型重试，绝不静默）；kimi/minimax 无视 `reasoning_effort` 参数；doubao 不严守 max_tokens（预算按实际用量 settle）；kimi 双档最大输出仅 32k 不选长产出。
 
+**路由工程门与可观测性（v3.2 §23.7 回写，ADR-016）**：
+- 每个 task 固定 `maxTokens`/`timeout`/`reasoningEffort`/`maxCost`/fallback policy（as-built：`task-routes.ts` 已按 task 配齐，回退链=合法路由非静默降级）。
+- **显式错误码**：`finish_reason=length`、空 content、schema 不合、capability 不符**必须**是显式错误码，绝不静默。
+- **模型原始输出不直接进数据库或 Renderer**——先过 schema → 事实 → 引用 → 安全四门。
+- **可观测性记录字段集**：`profile`、`policyVersion`、`channel/provider/model/modelSnapshot`、`fallbackIndex`、`prompt/schema/rubric`、`token/latency/cost`、`finish/fallback/rollback reason`。
+- Judge 尽量不与 candidate 同 provider；先跑确定性门再盲评，防高文风掩盖事实错误。
+
 **网关通道现状与待接清单**：
 1. ✅ **火山方舟 agent plan**（已接，2026-07-14 实测）：10 文本模型（doubao-seed-2.0 全家/kimi 双档/glm-5.2/minimax 双档）+ seedream-5.0-lite 图像；plan 专属路径 `/api/plan/*`（文本 OpenAI 型通道、图像 Custom 型完整 URL——type 45 火山适配器与 plan 路径不兼容）
 2. ✅ **DeepSeek 直连**（既有）：deepseek-v4-flash/pro 双档（plan 内同名双档为尝鲜限流版，不绑避免分流）
@@ -127,9 +266,9 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 4. ⬜ Google 通道 → gemini-3.1-pro + gemini-3-flash（现 Gemini 通道额度耗尽 429）
 5. ⬜ Anthropic 通道 → claude-sonnet-5（可选；8/31 前介绍价窗口）
 
-⚠️ **视频已知坑**（M3 前置）：new-api 对豆包视频任务中转有失败案例（[QuantumNous/new-api issue #2174](https://github.com/QuantumNous/new-api/issues/2174)）——接入时先升级 new-api 最新版实测；中转不稳则**方案 B**：视频 activity 后端直连火山方舟任务接口（异步轮询），key 集中配置，成本照记 `site_build_run.cost_summary`，其余模型不受影响仍统一网关。且 seedance 在 agent plan 中仅 Large/Max 档可用（已实测现档位 UnsupportedModel）。
+⚠️ **视频已知坑**（M3 前置）：new-api 对豆包视频任务中转有失败案例（[QuantumNous/new-api issue #2174](https://github.com/QuantumNous/new-api/issues/2174)）——接入时先升级 new-api 最新版实测；中转不稳则**方案 B**：视频 activity 后端直连火山方舟任务接口（异步轮询），key 集中配置，成本照记 `site_build_run.cost_summary`，其余模型不受影响仍统一网关。且 seedance 在 agent plan 中仅 Large/Max 档可用（已实测现档位 UnsupportedModel）。🔴 **视频不得进入 Demo v0 10s 路径**（§4.1）；C2PA/Content Credentials 可后续记录，但**不作 M1 阻断项**（v3.2 §21.3）。
 
-## 7. 权限与安全（用户点名）
+## 7. 权限与安全
 
 - **RLS**：§2 全部新表 workspace policy；worker 写走 `withWorkspace`；本功能无跨租户扫描场景（比获客侧更简单——没有平台级 ownerDb 路径）。
 - **对象存储**：key 前缀隔离 + 短时 presigned URL（上传/下载都是）；禁公共桶；构建产物同样按 workspace 前缀。
@@ -153,11 +292,23 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 
 ## 9. 与获客后端的闭环（未来）
 
+### 9.0 复用现有公共对象（不复制，v3.2 §9.1/§9.3 回写）
+
+独立站**消费**仓库已有公共对象、不复制：`CompanyProfile`、`Offering`、`KnowledgeSource`、`Claim`/`Evidence`/`KnowledgeConflict`、`AiTrace`、`UsageLedger`、`OutboxEvent`。
+
+- Site 关联 `companyProfileId`（旧行 additive 回填后再改必填）；`BrandProfile` 是站点**渠道投影**，存 tone/valueProps/glossary/keywords/differentiators/claimRefs/gaps/research summary + 生成版本。
+- 公共 `Company/Offering/Claim/Evidence` 是**事实真相源**；文案只消费 evidence gate 过的 `PublishableClaimSnapshot`（认证/数字/客户案例/性能结论须 APPROVED）——ADR-017 禁虚构身份的存储侧对应。
+- 构建开始解析 **`ResolvedPackSnapshot`**（IndustryPack 术语+证据要求+推荐组件 / MarketPack locale+法务+单位+SEO+consent / GrowthMotionPack CTA+询盘字段+实验），本 run **不读变化中的 latest**；Pack 更新只建维护建议或新 build，不改旧 Release（§4.3/§4.6 冻结语义）。
+
+### 9.1 增长闭环回流
+
 - 询盘表单 → `inquiry` → outbox 事件 →（恢复获客开发后）线索进获客管线评分。
 - `brand_profile`/公司事实反哺获客 ICP 配置。
 - 站点分析（流量/询盘转化）作为 intent 信号回流。
 
 ## 10. 决策记录（本轮拍板）
+
+> 站建承重决策已于 2026-07-16 收口为 **ADR-013~019**（`docs/adr/registry.md`，唯一决策真值：SCOPE/SiteSpec/封闭组件库/模型档路由/禁虚构身份/媒体地基/Readdy 参考）；下表 D1-D17 为本轮拍板原文，与 ADR 的对应见各 ADR「出处」列。
 
 | # | 决策 | 结论 |
 |---|---|---|
@@ -168,7 +319,7 @@ P5 发布     outbox: SiteDemoReady → SaaS 前端刷新预览
 | D5 | 站点诊断 | 「独立站管理」二级栏目（**非注册分支**，修订④）；已有站用户 SEO 体检，后置 M3+ |
 | D6 | 多租户隔离 | RLS + 对象存储前缀 + 签名 URL（§7） |
 | D7 | 预览方式 | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属 |
-| D8 | 模型选型原则 | 按 agent 能力需求全市场选型；**2026-07-14 终版定档**（§6 表=唯一真值：实测评比+用户三轮拍板，依据见 10 号文档）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档） |
+| D8 | 模型选型原则 | 按 agent 能力需求全市场选型；**2026-07-14 现役档定档**（§6 表=currentRoute as-built：实测评比+用户三轮拍板，依据见 10 号文档；ADR-016 四态路由，候选经评测晋级非终选）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档） |
 | D9 | readdy 定位 | **修订（2026-07-14 用户拍板）：仅设计基准 → 开发期设计源**——自己账号生成→产品内导出 React/Figma→固定工序改造成 Astro 组件入封闭库（工序与 ToS 边界见 11 号文档）；运行时逐站生成否决（无公开 API+撞 D1+数据出境）；生产素材仍走开放授权生态（§8） |
 | D10 | 发布部署 | **海外服务器**（免 ICP 备案）；静态托管=对象存储+CDN 优先（非 VPS）；预览国内友好线路/发布海外 CDN 双链路 |
 | D11 | SiteSpec 数据形状 | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认） |
