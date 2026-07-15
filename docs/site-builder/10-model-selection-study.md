@@ -1,20 +1,24 @@
 # 10 · M1 模型选型研究（外部研究 + 网关活模型真实评测）
 
 > 2026-07-14。方法：①外部信源研究（官方发布/榜单/独立评测，禁编造分数）②三个 M1 任务形状在本地 new-api 网关上对活模型**真实调用评测**（确定性 python 判分 + 延迟实测）。结论用于 09 施工图 §3 路由表；换档（通道接入）时用同套题复测对比。
+>
+> 🔴 **治理定位**：模型选型分状态治理见 §0.2（四态路由 + Agent 绑定 ModelProfile，决策见 ADR-016）。本文的"主力/首选/升级位"是**评测队列候选或已接通 currentRoute，非生产终选**；晋级只经评测（Golden Set 回归 + 成本/质量门），非采购承诺或永久定档。
 
 ## 0. 结论：按任务路由（实测+外部证据合成）
 
-| M1 任务 | 现在主力（实测背书） | 回退/降本 | 通道接入后升级位（外部证据） |
+> **列即状态**（ADR-016，详见 §0.2）：「现在主力」= **currentRoute**（as-built，核对 `task-routes.ts`）；「回退/降本」= **deterministicFallback / 降本回退**；「升级位」= **evaluatedCandidate / targetCandidate**（评测队列候选，**未接通≠已定**）。本表非"终选"，晋级只经评测。
+
+| site_builder task | currentRoute（as-built 代码事实） | deterministicFallback / 降本回退 | evaluatedCandidate / targetCandidate（评测队列，未接通） |
 |---|---|---|---|
 | brandProfile 研究综合 | **deepseek-v4-pro**（99/100，最省 token）或 **minimax-m3**（100/100，粒度最细） | glm-5.2（唯二主动消歧竞品认证，审计留痕最佳） | gemini-3.1-pro（MRCR 长文档王）/ claude-sonnet-5 |
-| copy 多语种文案 | **deepseek-v4-pro**（用户 7/14 终版拍板；评测德语原生度 4.5 全场最佳；🔴 工程护栏必配：`reasoning_effort:"low"` + 长度超限自动裁剪重写 + factSheet 白名单后校验） | glm-5.2（约束遵循最佳零 reasoning 税）→ doubao-seed-2.0-pro | GPT-5.6 Luna / gemini-3.1-pro（claude-sonnet-5 仍是营销语气口碑第一，8/31 前介绍价） |
-| siteAssembly / assemblyFix | **glm-5.2**（用户 7/14 拍板；应答质量满分，弱点=延迟尾部→超时预算 180s）→ 超时/校验违规**自动回退 deepseek-v4-pro**（加压全满分+跨 run 同构） | doubao-seed-2.0-code（快 3-6×省 4-9×，1/4 违规须配校验+重试升级链） | claude-sonnet-5 / GPT-5.6（唯二官方 Structured Outputs） |
+| copy 多语种文案 | **deepseek-v4-pro**（currentRoute，用户 7/14 定，as-built 非永久终选；评测德语原生度 4.5 全场最佳；🔴 工程护栏必配：`reasoning_effort:"low"` + 长度超限自动裁剪重写 + factSheet 白名单后校验） | glm-5.2（约束遵循最佳零 reasoning 税）→ doubao-seed-2.0-pro | GPT-5.6 Luna / gemini-3.1-pro（claude-sonnet-5 仍是营销语气口碑第一，8/31 前介绍价） |
+| siteAssembly / assemblyFix | **glm-5.2**（currentRoute，用户 7/14 定；应答质量满分，弱点=延迟尾部→超时预算 180s）→ 超时/校验违规**自动回退 deepseek-v4-pro**（加压全满分+跨 run 同构） | doubao-seed-2.0-code（快 3-6×省 4-9×，1/4 违规须配校验+重试升级链） | claude-sonnet-5 / GPT-5.6（唯二官方 Structured Outputs） |
 | qa / seo 汇总 | **deepseek-v4-flash**（$0.14/$0.28 全场最低） | doubao-seed-2.0-lite | gemini-3-flash |
 | designSpec / 审美视觉评审 | **minimax-m3**（网关内唯一原生图像输入——P4 审美维可能不必等 Google，待 M1-f 真探图像输入经 plan 端点是否可用） | doubao-seed-2.0-pro（VideoMME 89.5） | gemini-3.1-pro / claude-sonnet-5 |
 | 图像生成/编辑 | **seedream-5.0-lite**（已接通实测出图；用户已定暂用） | — | **gpt-image-2**（文字渲染 Elo 第一；含长文字图必用；与 seedream 组"贵精/便宜快"双轨） |
 | video（M3） | — | — | Seedance 直连方案 B（key 已在手） |
 
-**与用户 7/14 调整表的对齐记录**：①组装维持用户拍板的 **glm-5.2 主选**——初版评测 90s 内 50% 超时是评测口径非生产约束（Temporal 预算 10min），生产给 180s + 三重门校验 + 超时/违规自动回退 deepseek-v4-pro；M1-g golden set 按生产口径双模型对比终审。**架构澄清（D1）**：组装 agent 不写前端代码——组件库是仓内手写 Astro，agent 只产 SiteSpec JSON，该任务考 schema 纪律非编码力；将来真出现代码生成任务（M2+ 自定义组件）glm-5.2 是无争议首选。②GLM-5.2 同时是 **copy 主选**（唯一零 reasoning 开销、约束全过）。③GPT-5.5 已被 GPT-5.6 三档取代（Terra $2.5/$15 同能力更便宜）——接 OpenAI 通道建议直接 5.6。④用户档位后期升 **Large**（seedance 解锁，供 M3 视频）。⑤用户 7/14 终版第三轮调整：**copy 主力对调为 deepseek-v4-pro**（glm-5.2 转回退）；各任务升级位统一指向 **GPT-5.6 Terra/Luna + gemini-3.1-pro**（组装升级 Terra、copy 升级 Luna、研究/视觉/qa 升级 gemini-3.1 系）。
+**与用户 7/14 调整表的对齐记录**：①组装维持用户拍板的 **glm-5.2 主选**——初版评测 90s 内 50% 超时是评测口径非生产约束（Temporal 预算 10min），生产给 180s + 三重门校验 + 超时/违规自动回退 deepseek-v4-pro；M1-g golden set 按生产口径双模型对比终审。**架构澄清（D1）**：组装 agent 不写前端代码——组件库是仓内手写 Astro，agent 只产 SiteSpec JSON，该任务考 schema 纪律非编码力；将来真出现代码生成任务（M2+ 自定义组件）glm-5.2 是无争议首选。②GLM-5.2 同时是 **copy 主选**（唯一零 reasoning 开销、约束全过）。③GPT-5.5 已被 GPT-5.6 三档取代（Terra $2.5/$15 同能力更便宜）——接 OpenAI 通道建议直接 5.6。④用户档位后期升 **Large**（seedance 解锁，供 M3 视频）。⑤用户 7/14 第三轮调整定 currentRoute：**copy 现役对调为 deepseek-v4-pro**（glm-5.2 转 fallback；注：本文附录 C 实验建议仍是 glm-5.2，evidence 与 currentRoute 分栏记录，见 §0.2.2）；各任务升级位统一指向 **GPT-5.6 Terra/Luna + gemini-3.1-pro**（组装升级 Terra、copy 升级 Luna、研究/视觉/qa 升级 gemini-3.1 系）——均为 targetCandidate（未接通未评测），非终选。
 
 ## 0.1 评测暴露的工程硬教训（M1-b AiTask 基类必须内建）
 
@@ -25,6 +29,102 @@
 
 ---
 
+## 0.2 模型治理：四态路由 + Agent 绑定 ModelProfile（v3.2 §23 回写；决策见 ADR-016）
+
+> 🔴 **本研究是"评测证据"，不是"终选定档"。** 上表 §0 与附录 A–D 里所有"主力/首选/升级位"都是**评测队列里的候选或已接通路由**，不因为写进本文档就自动成为生产终选或采购承诺。模型选型的真值分两处：**代码 `task-routes.ts` 的 `currentRoute` = as-built 唯一真值**；**候选晋升为默认生产路由只经评测（Golden Set 回归 + 成本/质量硬门）后写 ModelRegistry**。02/10 的实测只作 evidence——**推荐 ≠ 代码已切换**。
+
+### 0.2.1 四态路由分类法（+ deterministicFallback）
+
+v3.0/v3.1 的错误不是列了新模型，而是把"官方看起来合适"直接命名成 `targetRoute` 终选。模型选型必须分状态（ADR-016）：
+
+| 状态 | 含义 | 谁能进 |
+|---|---|---|
+| **currentRoute** | 代码 + 真实 endpoint 已接通的 as-built 路由 | 只有 `task-routes.ts` 里现役的型号 |
+| **evaluatedCandidate** | 已用本项目 task shape 在网关上跑过能力/质量/成本/延迟评测，但未默认 | 附录 A–D 已在网关实测的活模型（glm-5.2、minimax-m3、doubao 系、deepseek-v4-\*） |
+| **targetCandidate** | 官方能力值得接入测试、但**未接通未评测**的候选 | 待接通道的外部证据模型（Claude Sonnet 5、GPT-5.6 系、gemini-3.1-pro、gpt-image-2、Veo/Seedance/TTS…） |
+| **promotedRoute** | 过硬门 + 获批准 + 写 ModelRegistry 的默认生产路由 | 经 MODEL-1/2 晋级判定的候选 |
+| **deterministicFallback** | 模型不可用时仍产事实安全结果的代码路径 | 回退链末端 / 弃权分支 |
+
+`shadow / canary` 是**流量模式，不是真值状态**，只能作用于 evaluatedCandidate/promotedRoute。**禁止**把任何"榜单第一 / 官方看起来强"的型号直接写成 targetRoute 终选。**Agent 卡只绑 ModelProfile 语义档（能力/成本/延迟约束），不硬编码型号字符串**（ADR-016）。
+
+### 0.2.2 as-built currentRoute 登记（核对 `task-routes.ts`，PR #114）
+
+7 个 task 全部为已接通 currentRoute；DeepSeek 已切显式 `v4-pro`/`v4-flash`（旧别名 `deepseek-chat`/`deepseek-reasoner` 官方 2026-07-24 关停，禁再用）。回退链语义 = 合法路由（AiTask 基类逐模型尝试），**非静默降级**：
+
+| task id | currentRoute primary | fallback | maxTokens | timeout | 备注 |
+|---|---|---|---|---|---|
+| `brand_profile` | deepseek-v4-pro | glm-5.2 | 12000 | 150s | 12000=真机校准（6000 时 v4-pro 两跑截断落回退） |
+| `copy` | deepseek-v4-pro | glm-5.2 → doubao-seed-2.0-pro | 4000 | 120s | 🔴 `reasoningEffort: low`（reasoning 护栏） |
+| `design_spec` | minimax-m3 | doubao-seed-2.0-pro | 4000 | 120s | 网关内唯一原生图像输入 |
+| `assemble` | glm-5.2 | deepseek-v4-pro | 16000 | 180s | 宁慢勿错，超时/违规走回退链 |
+| `assembly_fix` | glm-5.2 | deepseek-v4-pro | 8000 | 180s | |
+| `qa_summarize` | deepseek-v4-flash | doubao-seed-2.0-lite | 3000 | 90s | 全场最低价 |
+| `seo_review` | deepseek-v4-flash | doubao-seed-2.0-lite | 3000 | 90s | |
+
+即 currentRoute = **deepseek-v4-pro**（brand/copy）+ **minimax-m3**（design）+ **glm-5.2**（assemble/fix）+ **deepseek-v4-flash**（qa/seo），fallback 落 glm-5.2 / doubao-seed-2.0-pro/lite / deepseek-v4-pro。
+
+🔴 **代码事实与实验建议分栏**：本文附录 C（copy 形状实测）**推荐 glm-5.2**，但 copy 的 currentRoute 是 **deepseek-v4-pro**（用户 7/14 第三轮定为现役）。二者必须分别记录、不能互相改写：**附录是 evidence，`task-routes.ts` 是 as-built**；MODEL-0 先把 as-built 完整登记，MODEL-1 再真探候选。
+
+### 0.2.3 ModelProfile 能力档矩阵（评测队列，非采购承诺 / 永久终选）
+
+下表是 v3.2 的评测队列，不是采购承诺或终选。目标态实现文件（MODEL-0 落地）：`model-profiles.ts`（profile/capability 类型）、`model-policy.registry.ts`（current/evaluated/target/promoted + 流量模式/健康度/区域/价格/生命周期）、`model-capabilities.ts`、`model-capability-probe.ts`、`model-promotion.service.ts`（MODEL-2 才建全）。`task-routes.ts` 目标态从 `task → model string` 演进为 `task → profile + task budget`，保留 `SITE_BUILDER_MODEL_*` 作紧急 override，新增 `SITE_BUILDER_PROFILE_*`。
+
+| ModelProfile | 任务 | currentRoute（代码事实） | evaluated / target candidates | 晋级前提 |
+|---|---|---|---|---|
+| deterministic | 编排、Demo、Schema/SEO/安全硬门 | 代码 | 代码 | 可复算规则，不用模型 |
+| structured.default | BrandProfile、DesignBrief、SiteSpec assembly/fix | Brand=deepseek-v4-pro；Design=minimax-m3；Assembly=glm-5.2 | GPT-5.6 Terra、Claude Sonnet 5、glm-5.2 | schema、事实、稳定性、accepted cost 综合最优 |
+| reasoning.high | 两次修复失败后的复杂组装 | glm-5.2 / deepseek-v4-pro | GPT-5.6 Sol、Claude Sonnet 5 | 只作升级位；须证明增益覆盖额外成本/尾延迟 |
+| copy.premium | 英文/德文首页与高价值产品页 | deepseek-v4-pro | Claude Sonnet 5、GPT-5.6 Terra、glm-5.2 | 事实零违规、术语正确、目标市场偏好胜出 |
+| text.bulk | 批量本地化、标签、低风险改写 | deepseek-v4-flash / doubao-seed-2.0-lite | Gemini 3.1 Flash-Lite、GPT-5.6 Luna | 满足质量门的最低 accepted-artifact 成本 |
+| multimodal.review | 截图审美与图片/视频 QA | 现路由须**重新验证视觉输入** | Gemini 3.5 Flash、GPT-5.6 Terra 及可用国产多模态档 | 图像/视频 capability 真探、漏检率、成本/延迟 |
+| text.summary | finding 归并和解释 | deepseek-v4-flash | GPT-5.6 Luna、Gemini 3.1 Flash-Lite | 只摘要；硬门仍由代码执行 |
+| image.precise_edit | 产品主体敏感的 mask 外编辑 | **无 as-built 生成路由** | GPT Image 2、其他支持 mask/edit 档 | OCR、几何、Logo/标签、主体身份零破坏 |
+| image.bulk.creative | 非事实 Hero 背景与抽象场景 | seedream-5.0-lite | Gemini 3.1 Flash Image、Seedream | 权利/事实门后，以合格图单位成本晋级 |
+| image.premium.design | 少量高价值合成 | seedream-5.0-lite | Gemini 3 Pro Image、GPT Image 2 | 只在高价值页面证明增益后使用 |
+| video.primary | 5–10 秒参考镜头 | Seedance 2.0 Ark 能力路径（须真探） | Seedance 2.0 官方 Ark API | provider 真探、主体/时序 QA、成本上限 |
+| video.premium | 少量复杂镜头 | **无** | Veo 3.1 preview、其他受支持候选 | Preview 不能是唯一依赖；静态降级必须成立 |
+| speech.production | M3 旁白 | **无** | 仍受支持的 OpenAI/Google/provider TTS + 人工授权旁白 | 生命周期、语言、品牌词回听、授权与成本 |
+| transcription | 字幕与旁白质检 | **无** | GPT-4o Transcribe/mini 或当时受支持等价档 | 真探后选；转写须与品牌词/数字比对 |
+| moderation.media | 文本与图片内容安全 | 现有规则/provider safety | omni-moderation-latest + 本地规则或等价档 | 不替代权利、事实和行业政策门 |
+| embedding.private | 企业 KB 多语言检索 | BGE-M3 self-hosted | BGE-M3 self-hosted | 无明确召回收益不换向量空间 |
+
+官方目录只用于**生成候选池与生命周期信号**，不代替内部证据；任何型号**开工当天必须重新核对** GA/Preview/Deprecated、区域、价格与租户可用性（链接见 §35 与附录 A 信源）。
+
+### 0.2.4 明确不选 / 不直接上线（§23.3）
+
+- **Gemini 3.1 Pro Preview**：可 shadow 研究，Preview 不作默认生产主路由。
+- **已关闭的 Gemini 3 Pro Preview**：不进入任何新配置。
+- **Veo 3.1 Preview**：只 premium/shadow，不替代 Seedance 生产主路由。
+- **Sora 2 / Sora 2 Pro**：官方目录标 deprecated，不接新生产功能。
+- **Gemini 3.1 Flash TTS Preview**：保留表达力实验，不作唯一旁白路由。
+- **GPT-4o mini TTS**：官方目录出现弃用信号，不得新锁为 production target；先核对迁移窗口和替代型号。
+- **`deepseek-chat` / `deepseek-reasoner` 旧别名**：一律迁显式 DeepSeek `v4-pro`/`v4-flash`，避免弃用窗口造成隐式漂移。
+- **任何"榜单第一"模型**：没有 task-shaped Golden Set、结构化能力探针、数据区域和成本证据，不进入 canary。
+
+### 0.2.5 媒体档治理（image / video / audio；§20.6 / §21.3 / §21.5 回写）
+
+- **图像**：currentRoute = `seedream-5.0-lite`（已接通实测出图，image.bulk.creative）；`image.precise_edit` **无 as-built 生成路由**，候选 **GPT Image 2**（文字渲染 Elo 第一，含长文字图必用）。GPT Image 2 / Gemini 图像档 / Seedream **都是按任务评测的候选或 currentRoute，不因写进设计文档自动成生产终选**——capability/成本/OCR/主体保护样本集通过前不接生产流量。
+- **视频**（M3）：`video.primary` 首选 **Seedance 2.0 Ark**（现有优先接通路径的 evaluatedCandidate，**须先 provider 真探** + 主体/时序/成本门，过 M3 门才写 promotedRoute）；`video.premium` **无 as-built**，候选 **Veo 3.1** 仅 shadow/premium（当前 Preview，不能是无 fallback 的唯一依赖，静态降级必须成立）；**Sora 2 / Sora 2 Pro 不接新功能**（官方目录 deprecated）。产品/工厂优先 **image-to-video**，减少主体漂移。方舟套餐需 Large 档才可用 Seedance；new-api 视频中转不稳时按 02 方案 B 后端直连方舟异步任务。
+- **旁白 / 字幕**（M3）：`speech.production` **无 as-built**，MODEL-1 比较**仍受支持的 OpenAI TTS / Gemini TTS / 现有 provider + 人工授权旁白**，把 **provider 生命周期作硬门**，不做未授权声音克隆；**GPT-4o mini TTS 因弃用信号只留迁移观察位**，Gemini 3.1 Flash TTS Preview 只 shadow 表达控制。`transcription` 主选 **GPT-4o Transcribe**，批量低风险回退 **GPT-4o mini Transcribe**，输出 WebVTT/SRT Variant；转写须与品牌词/数字比对。
+
+### 0.2.6 分阶段晋级（MODEL-0/1/2）与晋级判定（§27.8）
+
+**MODEL-0（现在做）**：把 7 个 task 的真实 primary/fallback 登记为 currentRoute，保持 #114 行为不变；每 profile 固定 task budget / 数据区域 / 最大单次成本 / capability / deterministicFallback；02/10 历史实验记为 evidence，**不自动晋级为 current/promoted**。
+
+**MODEL-1（候选接通时做，依赖 MODEL-0 + EVAL-bootstrap）**：每候选先在真实 endpoint 跑 **capability probe**（失败即停，不把官方规格当租户可用事实）→ 每 task 用 **6–12 个代表样本 × 2 次** + accepted-artifact 成本，先判 schema/事实/身份/延迟/成本再做偏好比较 → 通过者成 **evaluatedCandidate 报告，不自动切生产**。
+
+**MODEL-2（有真实流量或高风险切换前做）**：扩到 ≥30 样本 × 3 次 + 100% shadow → 批准后 5%→25%→100% canary（各档样本/时间门写进 ADR）→ 任一事实/身份硬失败、P95、provider error、accepted-cost regression 触发**自动回 promotedRoute**；Preview 不得是无 fallback 的唯一依赖，Deprecated 须在截止日前迁移。
+
+**晋级判定（evaluatedCandidate → promotedRoute，§27.8）**：① 永久硬门全过（事实/引用违规 0、结构化输出一次 repair 后合法、关键 QA 漏检不超阶段门、产品身份破坏 0、P95 不超预算、accepted-artifact 成本可核对）；② 质量显著优于现路由 **或** 非劣且 accepted 成本更低 **或** 解锁必要 capability；③ 开工 ADR 明确样本量/成本预算/流量档/回退阈值/owner；④ 报告按 task/locale/archetype/资料完整度/provider failure 切片，不用总平均掩盖高风险子集。**"最贵/最新"不是晋级理由；默认选满足质量门的最低 accepted-artifact 成本。** 启动集只能标 evaluatedCandidate，**不能宣称统计显著或永久终选**。
+
+### 0.2.7 路由工程门与可观测性（§23.7）
+
+- 每 task 固定 maxTokens、timeout、reasoning effort、maxCost 和 fallback policy。
+- `finish_reason=length`、空 content、schema 不合、capability 不符**必须是显式错误码**（不静默降级/静默失败——见 §0.1 硬教训）。
+- 模型原始输出**不直接进数据库或 Renderer**；先过 schema/事实/引用/安全门。
+- 记录 profile、policyVersion、channel/provider/model/modelSnapshot、fallbackIndex、prompt/schema/rubric、token/latency/cost、finish/fallback/rollback reason。
+- **Judge 尽量不与 candidate 同 provider**；先跑确定性门再盲评，避免高文风掩盖事实错误。
+- 所有 alias 运行时解析到 snapshot；ReleaseManifest 保存 snapshot 供历史重放与回归定位。
 
 ---
 

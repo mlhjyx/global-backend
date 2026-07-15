@@ -2,6 +2,7 @@
 
 > 状态：设计中（2026-07-13 需求口述 + 拍板：SiteSpec+组件库路线 ✅ / 付费模型统一走 new-api 网关 ✅ / 站点诊断（二级栏目）后置 ✅ / 预览=独立预览域名 ✅ D7）。
 > 架构详设见 [02-architecture.md](02-architecture.md)。获客侧开发已冻结（用户指示，另行通知恢复）。
+> Reviewed against 12 号 v3.2（2026-07-16 回写：真实北极星 + 五结果、四层模板分层、Demo v0 不变量/页面结构、M0–M3 细化、Release/维护/媒体、明确不做）。站建承重决策以 [docs/adr/registry.md](../adr/registry.md) **ADR-013~019** 为准，本 PRD 相关处按 ID 引用不复述。
 
 ## 0. 一句话
 
@@ -10,8 +11,10 @@
 ## 1. 背景 / 北极星 / 边界
 
 - **解决的问题**：出海工厂型企业普遍没有海外独立站、或有站不运营，错失海外自主获客渠道。
-- **北极星指标**：注册→demo 预览打开率；demo→资料补充完成率；站点发布率；**站点询盘数**（终局与获客后端闭环）。
-- **边界（照旧）**：本仓库只做后端 + code-first OpenAPI 契约；注册引导 UI、建站工作台 UI、**引导消息卡片 / 栏目导航 / 页面跳转（及其流程与状态）**均由 SaaS 前端开发者实现；后端只提供已有的预览链接与数据端点（预览 URL、build 状态、`gaps`），**不为引导新增编排**；不做身份系统（JWKS 验签出 workspace）。
+- **产品定位（v3.2 §3.1 回写）**：独立站不是"一次生成几个网页"，而是**企业公共内容的第一个增长渠道**。系统须同时提供：① 注册后 10 秒级事实安全 Demo；② 补充资料后 15 分钟内可发布的多语言预览；③ 图片/视频/文案/SEO/询盘/域名/发布/回滚/持续维护全链；④ 公开事实的来源、审批状态、有效期与发布快照；⑤ 人工编辑、锁定与增量重建（**AI 不得覆盖用户锁定内容**）。总目标 = 建立 **Agent 驱动、可审计、可回归、可进化**的海外独立站系统，同时解决 Demo 效果 / 事实可信 / 媒体生产 / 模型治理 / 发布回滚 / 既有代码迁移。
+- **北极星（真实定义，v3.2 §3.1 回写）**：不是 `build succeeded`，而是"**可信站点被用户查看、补全、发布并带来有效询盘**"。对应五个结果——**Demo 快 · 事实可解释 · 站点可维护 · 发布可回滚 · 访问可转化**。
+- **北极星代理指标**：注册→demo 预览打开率；demo→资料补充完成率；站点发布率；**站点询盘数**（终局与获客后端闭环）。
+- **边界（照旧）**：本仓库只做后端 + code-first OpenAPI 契约；注册引导 UI、建站工作台 UI、**引导消息卡片 / 栏目导航 / 页面跳转（及其流程与状态）**均由 SaaS 前端开发者实现；后端只提供已有的预览链接与数据端点（预览 URL、build 状态、`gaps`），**不为引导新增编排**；不做身份系统（JWKS 验签出 workspace）。子系统止于建站与发布，运营/成交归 SaaS（ADR-013）。**明确不做的范围排除见 §10。**
 
 ## 2. 用户主流程
 
@@ -29,6 +32,32 @@
 **两段式生成**（关键产品决策）：注册流程绝不等分钟级管线——先秒出能看的 v0（用户立刻看到印着自己公司名的站），资料补充后异步"精装修"。先看到东西，再看着它变好。
 
 > **引导流程与状态 = 前端全权，后端不管**（消息卡片/栏目/跳转皆前端做）：后端只提供**已有的预览链接**（`GET /sites/{id}` / `GET /builds/{id}` 的 `previewUrl`）——卡片点击即凭该链接跳转预览。build 状态、资料缺口 `gaps`（`GET /sites/{id}/kb/status`）等**既有端点**前端可自行取用；**后端不为引导新增任何编排/状态**。
+
+**Onboarding 分支口径（v3.2 §3.2 回写）**：`hasWebsite` / `websiteUrl` **只作品牌理解背景，不控制 builder / diagnosis 分支**；注册后**无条件**创建 `Site + demo_v0 BuildRun`；诊断是 M3 capability，不是注册入口分叉。后端返回 `siteId` / `buildId` / `status`，前端拥有卡片顺序与展示状态。intake 支持 `Idempotency-Key`，重放返回第一次结果。
+
+### 2.1 Demo v0 不变量与目标（v3.2 §18.1 / §26 DV-0 回写）
+
+注册后立即生成的 Demo 不是最终站，但必须让用户相信"**这套系统能做出有效果的海外站**"。硬不变量：
+
+- **无条件生成**：不论此前有无既有站，注册完成即创建 `Site + demo_v0 BuildRun`。
+- **不等待上传**：只用注册时已明确输入的信息。
+- **不要求付费模型成功**：copy polish 等失败即回退 deterministic copy；Family/Blueprint 用规则打分，**不在关键路径调用视觉模型**。
+- **P95 < 10 秒**（DV-0 目标 5–6 秒）。
+- **失败回退**到当前 deterministic demo。
+- **事实安全（🔴 ADR-017 禁虚构身份）**：无证据不伪造工厂、客户 logo、认证、团队、评论、销量或统计数字；未知信息**留空 + 提示补录**，绝不补写。DemoVisualPack 必须为平台原创、明确许可或程序化生成的**非事实性**素材。地图默认不启用（除非注册地址明确且可安全一次性 Geocode）。
+
+DV-0 落地要点：预编译 DemoVisualPack + 行业 archetype + **确定性 family resolver**。
+
+### 2.2 Demo 页面结构（不再固定三页，最多四页，v3.2 §18.4 回写）
+
+Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
+
+- **home**（必有）：Hero、Value/Capability、Product/Service、CTA；其余板块按事实与素材裁定。
+- **products 或 services**：按业务类型二选一。
+- **about 或 capabilities**：工厂型优先 capabilities，品牌型优先 about。
+- **contact**：统一保留。
+
+为守住 10 秒预算，Demo 首批**最多四页**。
 
 ## 3. 注册引导信息清单（补全版）
 
@@ -88,16 +117,49 @@
 
 ## 7. 阶段划分
 
-| 阶段 | 内容 |
-|---|---|
-| M0 | intake API + 知识库 + MinIO + workflow 骨架 + 2 个行业模板 + demo v0 秒出 |
-| M1 | 精装修管线全链（品牌定位/图片管线/多语言文案/组装）+ 工作台资料中心接口 |
-| M2 | 质量环（审核/SEO/审美）+ 动效素材 + 询盘表单与回流 + 发布 |
-| M3 | Seedance 视频 + 店铺导入 + 站点诊断（「独立站管理」二级栏目，已有站用户 SEO 体检） |
+> **口径对齐（2026-07-14 拍板 D-M1-1，见 [09-m1-implementation-design.md](09-m1-implementation-design.md)）**：本 PRD 早前把「质量环（审核/SEO/审美）」列在 M2，与 02 架构把 P4 定义在精装修管线内相冲突。**已裁决：质量环骨架进 M1（M1-f），"确定性优先"**——qa（Playwright+Lighthouse）与 seo（确定性检查表）立即激活；**审美复核需视觉模型，在 Google 通道接入前自带"评审失败→该维弃权"降级（03 卡6），不阻断出环，通道就绪后零改码激活**。管线形状一次成型，避免 M2 再动编排，也不把 M2 的模型评审成本提前。M0-M3 细化如下（v3.2 §3.4 回写）：
+
+| 里程碑 | 目标 | 范围 |
+|---|---|---|
+| M0 | 无条件快速 Demo | intake API + 知识库 + MinIO + workflow 骨架 + 行业模板 + demo v0 秒出（P95<10s，安全三/四页结构） |
+| M1-a | 精装修地基 | build API、Temporal、版本、KB、取消与补偿 |
+| M1-b | 企业理解 | BrandProjection、联网研究、evidence gate、预算、currentRoute |
+| M1-c | 图片管线 | 原图保留、确定性优化、AssetVariant、active SiteSpec 引用删除保护、图片 QA；生成式默认关闭；MediaJob/AssetUsage 待真实消费者出现再补（ADR-018 MF-0 薄版） |
+| M1-d | 内容与多语言 | PublishableClaimSnapshot、CopyBundle、受限富文本、en/de、RTL 合同、字体自托管 |
+| M1-e | 设计与组装 | 封闭组件库（v1 目标 **26 型**，见 ADR-015；渲染器 as-built 已注册 10 型）、DesignCatalog、DesignBrief、SiteSpec、可复现构建 |
+| M1-f | 质量闭环 | QA、SEO、审美复核（capability-gated 弃权）、有限 Patch 修复、PublishReview 前置数据 |
+| M1-g | 评测收口 | 6 样本启动集 → 12 视觉子集、用户偏好比较、模型候选报告、成本/延迟基线、文档同步；30+ 成熟系统集分期建设 |
+| M2 | 工作台与公开发布 | Puck 编辑、最小询盘持久化 + Outbox、域名、发布审核（PublishReview）、**不可变 Release / 原子发布 / 回滚**（ADR-013）、媒体披露、分析、实验、持续维护 |
+| M3 | 高级媒体与导入 | Seedance 视频、音频/字幕、店铺导入、站点诊断（「独立站管理」二级栏目，已有站 SEO 体检）、产品同步 |
+
+> **发布前置（v3.2 §1.5 裁决回写）**：视觉/设计智能建设**不降级**，但**首次公开发布前必补最小询盘闭环**（表单 + consent + anti-abuse + Outbox 持久化，落在 M2）——询盘是北极星"访问可转化"的落点，不因视觉建设挤压而省略。
 
 ## 8. 开放问题 / 待拍板
 
 1. ~~readdy 素材库联动~~ → 已研究定案 D9：不联动，开发期作设计基准（架构 §8）。
-2. ~~模型终选~~ → 已定案 D8（架构 §6 表）；**用户操作项：在 new-api 接入 Anthropic/Google/OpenAI/火山方舟四通道**，接入后我实测。
+2. ~~模型终选~~ → **不称"终选"**：模型走**四态路由**（`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + deterministicFallback，见 ADR-016 / 架构 §6 表 D8），"推荐不等于代码已切换"、候选晋升只经评测、非采购承诺或永久终选。M1 文本任务先用 deepseek 双档（显式 `v4-flash` / `v4-pro`）跑通全链，registry 配置化、通道就绪后翻配置 + 重启即切换。**用户操作项：在 new-api 接入 Anthropic/Google/OpenAI/火山方舟四通道**，接入一条我实测一条。
 3. 预览/发布域名与 DNS、泛证书的运维归属（本后端 or SaaS 侧）——M0 开工前对齐，用户告知平台域名。
 4. 店铺导入的用户授权勾选文案（提请 SaaS 侧 ToS 一并加素材权属条款）。
+
+## 9. 模板分层：四层不是一套"模板"（v3.2 §3.3 回写）
+
+产品语境里"模板"是**四个正交层**，绝不能混为一谈——颜色或字体变化**不能**再被称作"另一套业务模板"：
+
+| 层 | 责任 | 例子 |
+|---|---|---|
+| **BusinessArchetype** | 页面与信息结构（"说什么、按什么顺序"） | industrial-manufacturer、custom-oem、equipment-supplier、ingredient-exporter、b2b-service |
+| **IndustryPack** | 行业术语、证据要求、推荐模块 | pumps、electronics、medical-device、food-ingredient |
+| **MarketPack** | locale、法务、单位、区域 SEO、consent | US、DE、EU、GCC |
+| **TemplateFamily + StylePreset** | 构图、节奏、视觉语法与 token（"如何形成整站视觉"；StylePreset 只负责可覆盖 token） | industrial-authority、precision-engineering、editorial-tech |
+
+`BusinessArchetype` 决定"说什么、按什么顺序"，`TemplateFamily` 决定"如何形成整站视觉"。早前 PRD/M0 提"2 个行业模板"是简写；实际行业 demo = **Archetype × Family × Style 的确定性组合**，M1 起按上表分层扩展。分层的领域模型、组件目录与封闭组件库详设见 [02-architecture.md](02-architecture.md) 与 ADR-015。
+
+## 10. 明确不做（范围排除，v3.2 §3.5 回写）
+
+- 不生成任意 React/HTML 代码作为生产站点（走封闭组件库 + SiteSpec，ADR-013/ADR-015）。
+- 不让多个 Agent 自由对话、自由调用网络或直接写数据库（有界 AiTask 合同、无 Planner，ADR-013）。
+- 不在运行时依赖 Readdy、Relume 或未知模板服务（仅开发期作设计基准，ADR-019 / D9）。
+- 不公开未批准的认证、数字、客户名、案例与性能承诺（ADR-017）。
+- 不在 M1 建复杂订单、支付、库存或通用 3D/沉浸式生成器。
+- 不把 GA4、广告像素、聊天脚本或第三方表单**默认**装进站点。
+- 不因独立站优先而删除 AI 获客代码；只**冻结其新增功能与共享资源竞争**。

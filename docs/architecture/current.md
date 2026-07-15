@@ -1,6 +1,7 @@
 # architecture/current —— 本仓顶层架构（as-built + 目标收敛 · L1/L4）
 
 > 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../roadmap/release-plan.md](../roadmap/release-plan.md)。
+> **2026-07-16 补**：本文描述**获客后端**（C 核心）as-built 架构。自 2026-07-13 起主线转为**独立站建设子系统（Site Builder）**——同一 NestJS 单体内的独立 bounded context（建站有界 AI Task + Astro 渲染器 + 固定 DAG Temporal 编排 + SiteSpec 契约，无 Planner），其 as-built 架构与承重决策见 [../site-builder/02-architecture.md](../site-builder/02-architecture.md) + [../adr/registry.md](../adr/registry.md) **ADR-013~019**。以下九上下文为获客侧真值（暂停非取消）。
 
 ## 1. 顶层运行架构
 

@@ -1,7 +1,8 @@
 # Site Builder Agent 详细设计 v1
 
-> 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型终选）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent。**
-> ⚠️ **卡内出现的模型名一律以 02 §6「2026-07-14 终版定档」为准**（实测评比+用户拍板，依据见 [10-model-selection-study.md](10-model-selection-study.md)）；卡片写作早于定档，模型标注是初稿参考。另：**卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
+> 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型路由）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent（对应 as-built 7 个 task id，见 §0.4）。**
+> ⚠️ **卡内出现的具体型号名是初稿参考、非权威**（卡片写作早于路由定档）。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 `currentRoute` 为准（见 §0.4 路由表）；路由是**四态治理（current / evaluatedCandidate / targetCandidate / promoted）非永久"终选"**（引 ADR-016、v3.2 §23.1 回写，依据 [10-model-selection-study.md](10-model-selection-study.md) 仅作 evidence 不自动写成 promoted）。目标态**型号移出卡片、每 task 只绑 `modelProfile`**，由 ModelPolicyRegistry 解析（§0.2、v3.2 §5.3/§23.4 回写）。deepseek 一律用显式 `v4-pro`/`v4-flash`（旧别名 `deepseek-chat`/`deepseek-reasoner` 已于 2026-07-24 关停）。
+> **卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
 
 ## 0. 统一运行时契约（AiTask 基类，所有 agent 共用）
 
@@ -18,6 +19,56 @@ AiTask<I, O>：
 - **通信模型**：agent 之间不对话，只传**结构化工件**（BuildPlan / BrandBrief / DesignSpec / SiteSpec / Findings），全部落库可追溯——总控（Temporal workflow）是唯一的调度者。
 - **Prompt 管理**：每个 agent 的 system prompt + rubric 是**版本化代码资产**（`agents/<name>/prompt.ts`），从 CC skills 方法论内化固化（各卡注明来源）；改 prompt 必须过 eval harness 回归（02 §11.8）。
 - **工具原则**：库内化优先（进程内直接调），MCP 只在确需外部服务时作传输（续 ADR「MCP=传输非授权」）。
+
+### 0.1 每 task 声明合同（v3.2 §5.3 回写）
+
+每个 AiTask 除运行时基类外，须**版本化声明**下列元数据（缺项不得上线）：
+
+- `taskId`、`owner`（负责的逻辑 Agent，见 §0.5）、input/output **schema version**、**prompt version**、**rubric version**。
+- `modelProfile`、allowed capabilities/tools、`timeout`、`maxTokens`、`maxCost`。
+- `fallback`/降级策略、**确定性 post-checks**、PII/数据区域策略。
+- `currentRoute` / `candidate` / `promotedRoute` **只由 ModelPolicyRegistry 解析**，Agent 卡**不写供应商型号**。
+
+### 0.2 型号绑 profile，不绑型号（v3.2 §1.6/§5.3/§23.4 回写，引 ADR-016）
+
+各卡「模型」行是初稿参考。目标态 task 只引用稳定的 **`modelProfile`**（15 档：`structured.default` / `reasoning.high` / `copy.premium` / `text.bulk` / `multimodal.review` / `text.summary` / `image.precise_edit` / `image.bulk.creative` / `image.premium.design` / `video.primary` / `video.premium` / `speech.production` / `transcription` / `moderation.media` / `embedding.private`），由 registry 映射到当下 snapshot。换型号不改 Agent 卡；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 以支持历史重放与回归定位。
+
+### 0.3 每次执行记录（可观测，v3.2 §5.3 回写）
+
+每次 task 执行落库：run/workspace/site、routePolicy/provider/model/**modelSnapshot**/fallbackIndex、prompt/schema/rubric 版本、input/output **hash**、tokens/latency/cost/finishReason/providerRequestId、状态/错误、artifact ids。**模型原始输出先过 schema/事实/引用/安全门再入库或进 Renderer**；`finish_reason=length`、空 content、schema 不合、capability 不符必须是显式错误码（非静默降级）。
+
+### 0.4 as-built 路由表与新增 task 边界（v3.2 §2.1/§23.5 回写）
+
+**as-built（`task-routes.ts`，7 个 task id，`currentRoute`，非永久终选）**：
+
+| task id | 对应卡 | current primary | fallbacks | maxTokens / timeout |
+|---|---|---|---|---|
+| `site_builder.brand_profile` | 卡2 | deepseek-v4-pro | glm-5.2 | 12k / 150s |
+| `site_builder.copy` | 卡4 | deepseek-v4-pro（reasoning low） | glm-5.2, doubao-seed-2.0-pro | 4k / 120s |
+| `site_builder.design_spec` | 卡6（生成） | minimax-m3 | doubao-seed-2.0-pro | 4k / 120s |
+| `site_builder.assemble` | 卡7（组装） | glm-5.2 | deepseek-v4-pro | 16k / 180s |
+| `site_builder.assembly_fix` | 卡7（修复） | glm-5.2 | deepseek-v4-pro | 8k / 180s |
+| `site_builder.qa_summarize` | 卡8 | deepseek-v4-flash | doubao-seed-2.0-lite | 3k / 90s |
+| `site_builder.seo_review` | 卡9 | deepseek-v4-flash | doubao-seed-2.0-lite | 3k / 90s |
+
+- **卡片旧标注（gemini-3.1-pro / claude-sonnet-5 / gpt-image-2 等）与 as-built 路由不一致**：以本表为准；回退链=合法路由（AiTask 基类逐模型尝试），非静默降级。
+- **未落地为 task 的卡**：卡3 imagePipeline（M1-c 纯 Sharp 确定性，无模型 task；生成式媒体 task 进 M1-c2/M3，引 ADR-018）、卡5 motionVideo（M3）、卡6 的 **aestheticReview 目前无独立路由**——`site_builder.aesthetic_review` 到 M1-f 才增（v3.2 §2.1）。
+- **新增 task 复用 AiTask/MediaGateway，不新增自治框架**（v3.2 §23.5）：M1-f 增 `site_builder.aesthetic_review`；M1-d 可增 `site_builder.localize`；媒体 image/video/audio task 进 M1-c2/M3。均走同一 AiTask 基类 + MediaGateway，**不另建 Agent runtime**。
+
+### 0.5 逻辑 Agent 归组、确定性服务与审核三角（v3.2 §5.1/§5.2/§5.4 回写）
+
+现有 task id **不重命名**，只在文档 / owner / trace 上归为 4 个逻辑 Agent：
+
+| 逻辑 Agent | 含 AiTask | 责任 | 禁止 |
+|---|---|---|---|
+| Brand & Evidence | brand_profile、claim_projection（目标） | 品牌、术语、引用、gaps | 不批准 Claim；不输出具名个人 |
+| Content & SEO | copy、localize（目标）、seo_review | 多语言文案、FAQ、metadata、Schema 文本 | 只消费允许公开的 ClaimSnapshot |
+| Visual Media Director | image_*（选/质检/编辑）、video_*、aesthetic_review（目标） | 媒体用途、编辑 brief、多模态质检 | 不改原件；证书/人像/Logo 禁生成式改造 |
+| Site Composer & Fixer | design_spec、assemble、assembly_fix | Archetype/Family、组件、SiteSpec、受限 JSON Patch | 不生成代码；不绕过白名单 |
+
+**确定性服务（非 Agent，无人格 / 模型自由度 / 自主规划权）**：Workflow Orchestrator、Budget Guard、SiteSpec Validator、Asset Processor、Safety/License Gate、Accessibility/Performance Scanner、Release Manager、Publisher/Domain Manager、Analytics/Event Collector。
+
+**不设 Planner + 审核三角**（续卡1 D13、v3.2 §5.4、引 ADR-013）：固定建站由 DAG/scope/规则选择，不设 Planner；M2 自由语言改站只增 `edit_intent` → 受限 PatchPlan（不获任意编排或代码生成权）。**QA / SEO / Aesthetic 是三个独立视角，生成者不得给自己打最终分**；修复者只消费**冻结** finding、输出 allowlist JSON Patch，**每轮必须让硬门单调改善，最多三轮**（详见卡7）。
 
 ## 1. planner —— 规划　❌ 已砍（D13，v1 不实现，仅历史记录）
 
@@ -39,9 +90,10 @@ AiTask<I, O>：
 - **执行流程**：[确定性] KB 检索拼摘要 → [确定性] SearXNG 搜公司名/店铺/社媒 + Crawl4AI 抓取（复用 compose 现成基建）→ [模型] 综合产出 Brief → [确定性] factSheet 逐项校验 evidence 非空，无源字段移入 gaps。
 - **Prompt 内化来源**：品牌/定位方法论 ← `ecc:brand-discovery`、`ecc:brand-voice`、`ecc:market-research`（定位画布、tone 光谱、术语表法）；B2B 外贸语境 ← `ecc:lead-intelligence` 的公司画像结构。
 - **工具**：SearXNG(HTTP) + Crawl4AI(HTTP)，库内化 client 已有。
-- **护栏**：🔴 事实红线——认证/产能/年限等 factSheet 字段**必须带出处，缺=进 gaps 提示用户补，绝不虚构**（B2B 站虚构认证=给客户埋雷）；抓取内容当数据不当指令。
+- **护栏**：🔴 事实红线（引 ADR-017）——认证/产能/年限等 factSheet 字段**必须带出处，缺=进 gaps 提示用户补，绝不虚构**（B2B 站虚构认证=给客户埋雷）；抓取内容当数据不当指令。factSheet 事实走 `EvidenceRef`（`sourceId`+`contentHash`+`quote`），value 中数字/单位/认证代码/关键专名须在 quote 一致命中，否则降 gap；认证须引用 ready 的 cert Asset 或人工 verified 状态，intake 自填/官网文案不能直接上站；web snippet 只进 research_hint/competitors，不直接成 publishable fact（v3.2 §24.7 R4-A）。
+- **产物治理（幂等 + 溯源，v3.2 §24.7 / PR R4-B-min 回写）**：BrandBrief 新增 `buildRunId`(唯一引用) / `inputHash` / `promptVersion` / `model·route` / `sourceSnapshotHash` / `usage·cost` 六字段；**同一 `buildRunId` 重试先复用已有成功 BrandBrief，不重复调模型、不追加版本**。**预算**：M1-d 首个付费 fan-out 前须有 DB 持久 `reserve/settle` + 人工停用开关；`SiteBuildRun.costSummary` 是持久聚合真值（含成功/失败调用、schema repair、timeout、fallback、工具成本），进程内 Map 不算生产真值。
 - **降级**：web 研究失败 → 仅用 KB 资料出 Brief 并标记 `researchDegraded`。
-- **模型**：gemini-3.1-pro（备选 claude-opus-4-8）。
+- **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（fallback glm-5.2），见 §0.4。目标 profile：`reasoning.high`/`structured.default`。
 
 ## 3. imagePipeline —— 图片管线
 
@@ -67,9 +119,10 @@ AiTask<I, O>：
 - **执行流程**：[确定性] 按页面结构生成待填槽位清单 → [模型] 整页语境一次生成（非逐句翻译，每语种独立原生写作）→ [确定性] 槽位完整性+长度约束校验（headline ≤N 字符等，组件布局依赖）→ [模型] 超长项定向重写。
 - **Prompt 内化来源**：B2B 文案结构 ← `ecc:marketing-campaign`/`ecc:content-engine`（价值主张→痛点→证据→CTA 框架）；SEO 写法 ← `ecc:seo` skill 的 title/desc 规范；多语言 tone ← brandBrief.tone + 目标市场文化禁忌 checklist（固化为 per-market 附录）。
 - **工具**：无外部工具。
-- **护栏**：术语表强一致（glossary 注入）；禁绝对化宣称（"best/No.1"类）与虚构事实（只能引用 factSheet）；每语种输出过字符集/方向 sanity（阿语 RTL 标记）。
-- **降级**：某语种失败 → 该语种缺席本轮（站点先上已成语种），标记待重跑。
-- **模型**：gemini-3.1-pro（备选 claude-sonnet-5）。
+- **护栏**：术语表强一致（glossary 注入）；禁绝对化宣称（"best/No.1"类）与虚构事实（只能引用 factSheet，引 ADR-017）；每语种输出过字符集/方向 sanity（阿语 RTL 标记）。
+- **内容预算与最小询盘合同（M1-d，v3.2 §26 回写）**：Copy 按 **slot / locale / Claim refs** 生成，**先过事实门再文风**（valueProps/differentiators/tone 只能从已通过 FactSheet 推导，不得把未闸门的自由结论当事实）；槽位长度=组件内容预算硬约束（超预算优先换变体/定向重写，禁 CSS 缩到不可读，见卡7兼容矩阵）。M1-d 同步定义**最小 inquiry / consent / outbox 合同**（实际公开接收随 M2）。依赖 R4-A/B-min、DI-0。
+- **降级**：某语种失败 → 该语种缺席本轮（站点先上已成语种），标记待重跑；**Demo 快路径 copy polish 失败 → 直接用 deterministic copy，不阻断 Demo 生成**（v3.2 §18.2）。
+- **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（reasoning low，fallback glm-5.2 / doubao-seed-2.0-pro），见 §0.4。目标 profile：`copy.premium`/`text.bulk`。
 
 ## 5. motionVideo —— 动效与视频
 
@@ -90,19 +143,23 @@ AiTask<I, O>：
 - **Prompt 内化来源**：设计方向法 ← `ecc:frontend-design-direction`（direction→tokens 流程）；token 体系 ← `ecc:design-system`、`anthropic-skills:theme-factory`；评审 rubric ← `ecc:taste` + `dataviz` 对比度/层次原则（视觉层次/一致性/留白/对齐/CTA 显著度五维，各 0-20）。
 - **工具**：Playwright（库内化截图；开发期可用 Chrome DevTools MCP 调试，生产不依赖 MCP）。
 - **护栏**：只能在预设 token 空间内选择（保风格体系一致）；score ≥85 过，findings 必须落到具体 section（不许"整体感觉不好"式空评）。
+- **DesignSpec 职责边界（v3.2 §19.2 回写，引 ADR-015/ADR-019）**：DesignSpec **只**从候选 Family 中选 Blueprint / StylePreset / 组件变体，按素材/事实/文案长度取舍并**解释选择原因与风险**。**禁**：写 JSX/Astro/CSS、发明组件类型、生成无证据支撑的 section、更改工作流、自己抓取 Readdy。
+- **受控差异化 7 来源（v3.2 §17.3 回写）**：每次生成的差异**只**来自 ① BusinessArchetype ② TemplateFamily ③ Blueprint ④ StylePreset ⑤ 组件 variant ⑥ 素材完整度 ⑦ `variationSeed`。**`variationSeed` 只能在合法候选中做确定性选择，不能改变事实和组件契约**（反"换皮同版式"通用感；配套 M1-f genericness 检查见 02/08）。
+- **审美评审隔离（aestheticReview，v3.2 §23.5 回写）**：评审与生成**必须隔离**——不同 prompt/rubric，**最好不同 provider**；评审**只看冻结截图 + DesignBrief + 事实摘要 + deterministic findings**，输出 `DesignEvaluation` + 结构化 Findings（禁"好看/不好看"自由文本）。**多模态能力探针失败**时审美维**弃权**、确定性 QA 继续、Release 标 `aesthetic_review_unavailable`（不阻断发布门其余维度）。
 - **降级**：评审失败 → 该维弃权（不阻断质量环其余维度）。
-- **模型**：gemini-3.1-pro（视觉）。
+- **模型**：初稿参考 gemini-3.1-pro（视觉）；as-built = design_spec 生成走 minimax-m3（fallback doubao-seed-2.0-pro），aestheticReview 到 M1-f 才增 `site_builder.aesthetic_review` 路由（见 §0.4）。目标 profile：生成 `structured.default` / 评审 `multimodal.review`。
 
 ## 7. siteAssembly + assemblyFix —— 站点组装（生成+修复双模式）
 
 - **职责/触发**：P3 产出 SiteSpec；P4 质量环内按 findings 出 patch。
 - **输入 → 输出**：组装 `{designSpec, copyBundles, assetManifest, pageStructure}` → `SiteSpec`（完整 JSON）；修复 `{siteSpec, findings[]}` → `SiteSpecPatch`（JSON Patch，最小变更）。
-- **执行流程**：[模型] 生成 SiteSpec/Patch → [确定性] 三重校验：zod schema、素材引用存在性（assetManifest 对账）、内链有效性 → 不过=带错误重试 → [确定性] Astro 构建（构建失败的编译错误也回填重试）。
+- **执行流程（八道校验门顺序，v3.2 §19.3 回写，引 ADR-014/ADR-015）**：[模型] 生成 SiteSpec/Patch → [确定性] 依次过 **① Zod / JSON Schema → ② 组件 + variant 白名单 → ③ 素材引用存在性（assetManifest 对账）→ ④ copy key 完整性 → ⑤ 内链 + locale 完整性 → ⑥ 证据门 → ⑦ 兼容矩阵（见下）→ ⑧ Astro 构建**；任一门不过=带结构化错误回填重试（构建期编译错误同样回填）。
+- **兼容矩阵（Assembler 调模型/写 SiteSpec 前必过的 11 条硬约束，v3.2 §17.2 回写）**：① full_bleed Hero 后不接另一个 full_bleed ImageText；② 禁连续三个 card-grid；③ 深色大区块连续最多两个；④ StatsBand 需 ≥2 个有证据数值否则删；⑤ Testimonials 需用户可验证引用否则删；⑥ TeamGrid 需明确授权人物资料否则删；⑦ Certificates/CertWall 需资产或事实证据否则删；⑧ MapLocation 需可验证地址，否则只显地址文本；⑨ 产品 <3 不用 dense ProductGrid；⑩ 缺宽图不选 full_bleed Hero；⑪ 文案超预算优先换变体/定向重写，禁 CSS 缩到不可读。（无证据的 section 一律删，不留空壳。）
 - **Prompt 内化来源**：组件组装约束 ← 我们自建组件库的 section 目录文档（prompt 里给组件清单+props 契约，"菜单点菜"式）；修复模式 ← `ecc:build-error-resolver` 的最小 diff 原则（只改 findings 涉及的节点）。
 - **工具**：SiteSpec 校验器、Astro 构建器（库内化）。
-- **护栏**：修复模式**只许输出 JSON Patch**（防重写全 spec 引入回归）；每轮 patch 后 diff 记录进 run steps（可审计谁改了什么）。
-- **降级**：重试用尽 → 保留上一可构建版本，run 标记 partial，findings 转人工。
-- **模型**：claude-sonnet-5（备选 gpt-5.x）。
+- **护栏**：修复模式**只接受结构化 Findings、只许输出 JSON Patch 或受限 SiteSpec Patch**（防重写全 spec 引入回归）；每轮 patch 后 diff 记录进 run steps（可审计谁改了什么）；**每轮必须让硬门单调改善**。
+- **降级（assemblyFix 三轮修补失败语义，v3.2 §19.3 回写，引 ADR-013）**：assemblyFix **最多三轮**；三轮仍失败则——**保留最近一次可构建版本** + 标 `quality_degraded` + **回退到同 Family 的安全 Blueprint** + **绝不删除用户现有站点**（ADR-013：异步失败绝不删除用户现有 Site）。run 标记 partial、findings 转人工。
+- **模型**：初稿参考 claude-sonnet-5；as-built = assemble/assembly_fix 均走 glm-5.2（fallback deepseek-v4-pro），见 §0.4。目标 profile：`structured.default`。
 
 ## 8. qa —— 审核
 
@@ -146,3 +203,21 @@ AiTask<I, O>：
 2. Rubric 提炼：跑 `seo-specialist`/`frontend-design-direction`/`accessibility` skills 输出 → 固化成各 agent 的 prompt 常量与确定性检查表。
 3. Eval harness：golden set 企业资料 → 全管线跑分基线；此后每次改 prompt/模型在 CC 里跑回归再合并（02 §11.8）。
 4. 联调验证：真库真网关 verify 脚本（§5 硬规矩同获客侧），Chrome DevTools MCP/Playwright 现场看渲染结果。
+
+### 11.1 开发期 8 个 CC 设计角色分工（v3.2 §14.1 回写）
+
+这些是**开发期 CC 角色，不是新增的生产 Agent 卡、也不常驻服务**（生产运行时零 CC 依赖）。生成与评审严格分开：生成角色不给自己产物打最终分；评审 prompt 不得看到"这是 Readdy 风格应高分"之类诱导；确定性工具结果优先于模型主观判断。
+
+| 角色 | 输入 | 输出 | 禁止 |
+|---|---|---|---|
+| Reference Curator | 候选 URL、截图、许可证 | DesignSourceManifest、来源层级、保留/训练策略 | 未核许可就下载进模板库或训练集 |
+| Design Decomposer | 已登记的许可资产或临时视觉参考 | DesignObservation、Reference Card | 复制原文案/素材/独特代码，或保存可还原页面的坐标集 |
+| Pattern Aggregator | 多个 DesignObservation + 平台原创实验 | 跨来源 DesignRule、证据来源数 | 让单一 Readdy 页面决定正式规则 |
+| Component Mapper | DesignDNA + 现有组件库 | 映射表、缺口表、变体建议 | 为单一参考无限增组件 |
+| Blueprint Synthesizer | 获准 DesignRule + 行业需求（**不可见原始来源页面**） | TemplateFamily、Blueprint | 输出任意运行时代码或来源特定克隆 |
+| Compliance Rewriter | 授权源码或内部草稿 | 自托管 Astro 变体 | 保留 CDN、追踪、托管表单 |
+| Visual Evaluator | 三断点截图 + rubric | DesignEvaluation、结构化 Findings | 只给"好看/不好看"的自由文本 |
+| Originality Reviewer | 来源截图 + 生成截图 | 相似性风险、差异说明 | 把像素差当作唯一版权结论 |
+
+> 组件库口径：Component Mapper 映射进的**封闭组件库 v1 目标 26 型**（ADR-015/D12）；main 现注册 10 型（见 §0.4、02/04），扩库=显式加注册 + 版本 minor。
+> 干净室边界（引 ADR-019）：Pattern Aggregator 至少综合 5 个独立来源/原创实验才形成 DesignRule；Blueprint Synthesizer 只读聚合规则、不读来源页面；运行时不读原始 Readdy 页面（详见 11-Readdy 边界文档、02 开发/生产两平面）。
