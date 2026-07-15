@@ -15,7 +15,8 @@ export function buildGatewayProvider(env: NodeJS.ProcessEnv = process.env): Mode
     id: 'gateway',
     baseUrl,
     apiKey,
-    model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-chat',
+    // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
+    model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',
   });
 }
 

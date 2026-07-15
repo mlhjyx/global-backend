@@ -334,7 +334,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     },
     // 资格判别要准（评测显示 flash 召回过宽）→ 用 pro 档。原 gemini-2.5-pro；2026-07-09 网关 Gemini
     // 额度耗尽（429）→ 改 deepseek-v4-pro（同为 pro 档强推理，已用于 icp.design/query_plan）。
-    // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：本网关上二者都别名到 deepseek-v4-flash，会重蹈 flash 召回过宽。
+    // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：官方已宣布 2026-07-24 彻底关停二别名（过渡期透传 v4-flash），
+    // 用了既撞关停又重蹈 flash 召回过宽。全仓一律显式 deepseek-v4-pro / deepseek-v4-flash。
     // 额度恢复后可切回 gemini-2.5-pro。
     model: 'deepseek-v4-pro',
     risk: 'low',
