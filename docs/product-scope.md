@@ -2,6 +2,7 @@
 
 > 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001~012/OD-01~06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [roadmap/release-plan.md](roadmap/release-plan.md)。
+> **2026-07-16 补**：本文定义**获客后端**产品范围（止于 LeadQualifiedPackage）。自 2026-07-13 起当前主线为**独立站建设（Site Builder）**——为出海企业一键生成/精装修独立站的第二产品面；其范围/边界/决策见 [status/current.md](status/current.md) 「当前主线」节 + [site-builder/](site-builder/) 00-14 + [adr/registry.md](adr/registry.md) **ADR-013~019**。获客侧范围本文以下不变（暂停非取消）。
 
 ## 0. 术语表
 

@@ -1,6 +1,7 @@
 # roadmap/release-plan —— 六项收口 + R0-R3 交付路线（L2）
 
 > 2026-07-10 v2（合流定稿）。历史实施日志见 [changelog.md](changelog.md)。**最高优先=六项工程收口，替代「继续加 provider」（先不加 SAM/专利/提单/新源）。**
+> **2026-07-16 补**：六项收口（下 ✅①~⑥）已全部完成。自 2026-07-13 起主线转**独立站建设**，获客 R1-R3 暂停（非取消）。站建路线：M0 建站快路径 + DQ-1 SiteSpec 契约（#117）已落地 → **DOC-12 设计文档去漂移（2026-07-16，本轮）** → R0 生产化修正（demo-spec 去虚构身份等）→ M1 精装修管线（[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md)）。站建里程碑门见 [site-builder/08](../site-builder/08-eval-testing.md) 里程碑节 + [05](../site-builder/05-deployment-hosting.md) §10。
 
 ## 1. 六项工程收口（owner=C+Claude）
 
