@@ -27,6 +27,7 @@ export interface PublicIpResolution {
   safe: boolean;
   ip?: string;
   family?: 4 | 6;
+  addresses?: ResolvedAddress[];
   reason?: string;
 }
 
@@ -140,9 +141,25 @@ export async function resolvePublicIp(
   }
 
   if (!answers.length) return { safe: false, reason: 'no_address' };
-  if (answers.some((answer) => isPrivateIp(answer.address))) {
-    return { safe: false, reason: 'non_global_address' };
+  const validated: ResolvedAddress[] = [];
+  const seen = new Set<string>();
+  for (const answer of answers) {
+    const family = isIP(answer.address);
+    if ((family !== 4 && family !== 6) || family !== answer.family || isPrivateIp(answer.address)) {
+      return { safe: false, reason: 'non_global_address' };
+    }
+    const key = `${family}:${answer.address}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      validated.push({ address: answer.address, family });
+    }
   }
-  const first = answers[0];
-  return { safe: true, ip: first.address, family: first.family };
+  if (!validated.length) return { safe: false, reason: 'no_address' };
+  const first = validated[0];
+  return {
+    safe: true,
+    ip: first.address,
+    family: first.family,
+    addresses: validated,
+  };
 }

@@ -35,8 +35,12 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
 
     const resolver: PublicUrlResolver = vi.fn(async (raw): Promise<PinnedPublicUrl> => ({
       url: new URL(raw),
-      ip: '127.0.0.1', // test-only dependency injection; production resolver rejects it
-      family: 4,
+      ip: '::1', // test-only：首个已验证 pin 不可达时只回退到第二个已验证 pin
+      family: 6,
+      addresses: [
+        { address: '::1', family: 6 },
+        { address: '127.0.0.1', family: 4 },
+      ],
     }));
     const response = await requestPublicHttp(
       `http://rebind.example:${address.port}/probe`,
@@ -52,7 +56,12 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
   it('重定向每一跳重新校验；跳向 metadata 时不发起第二次请求', async () => {
     const resolver: PublicUrlResolver = vi.fn(async (raw) => {
       if (raw.includes('public.example')) {
-        return { url: new URL(raw), ip: '93.184.216.34', family: 4 };
+        return {
+          url: new URL(raw),
+          ip: '93.184.216.34',
+          family: 4,
+          addresses: [{ address: '93.184.216.34', family: 4 }],
+        };
       }
       throw new EgressBlockedError('non_global_address');
     });
@@ -90,6 +99,7 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
       url: new URL(raw),
       ip: '127.0.0.1',
       family: 4,
+      addresses: [{ address: '127.0.0.1', family: 4 }],
     });
 
     await expect(
@@ -112,6 +122,7 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
       url: new URL(raw),
       ip: '127.0.0.1',
       family: 4,
+      addresses: [{ address: '127.0.0.1', family: 4 }],
     });
 
     await expect(
@@ -124,6 +135,7 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
       url: new URL(raw),
       ip: '93.184.216.34',
       family: 4,
+      addresses: [{ address: '93.184.216.34', family: 4 }],
     });
     const executePinned = vi
       .fn()

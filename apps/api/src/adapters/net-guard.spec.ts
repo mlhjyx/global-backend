@@ -58,8 +58,30 @@ describe('SSRF 出网护栏', () => {
 
     const result = await resolvePublicIp('example.com', { systemLookup, dohLookup });
 
-    expect(result).toMatchObject({ safe: true, ip: '104.20.23.154', family: 4 });
+    expect(result).toMatchObject({
+      safe: true,
+      ip: '104.20.23.154',
+      family: 4,
+      addresses: [
+        { address: '104.20.23.154', family: 4 },
+        { address: '2606:4700:10::6814:179a', family: 6 },
+      ],
+    });
     expect(dohLookup).toHaveBeenCalledOnce();
+  });
+
+  it('保留全部已验证的双栈地址供连接层安全回退', async () => {
+    const result = await resolvePublicIp('dual-stack.example', {
+      systemLookup: async () => [
+        { address: '2606:4700:10::6814:179a', family: 6 },
+        { address: '104.20.23.154', family: 4 },
+      ],
+    });
+
+    expect(result.addresses).toEqual([
+      { address: '2606:4700:10::6814:179a', family: 6 },
+      { address: '104.20.23.154', family: 4 },
+    ]);
   });
 
   it('真实私网或公私混合答案不借 DoH 洗白，直接 fail-closed', async () => {

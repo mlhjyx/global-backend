@@ -34,6 +34,13 @@ interface PinnedHttpResult {
   text: string;
 }
 
+// Node 22 http.request forwards these net connection options at runtime；当前仓库的
+// @types/node 版本尚未把它们暴露在 RequestOptions 上，故在本地交叉类型补齐。
+type HappyEyeballsRequestOptions = RequestOptions & {
+  autoSelectFamily: boolean;
+  autoSelectFamilyAttemptTimeout: number;
+};
+
 export type PinnedHttpExecutor = (
   target: PinnedPublicUrl,
   options: Required<Omit<PublicHttpRequestOptions, 'headers'>> & {
@@ -80,7 +87,7 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       if (deadline) clearTimeout(deadline);
       resolve(value);
     };
-    const requestOptions: RequestOptions = {
+    const requestOptions: HappyEyeballsRequestOptions = {
       protocol: target.url.protocol,
       hostname: target.url.hostname,
       port: target.url.port || undefined,
@@ -88,6 +95,9 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       method: options.method,
       headers: options.headers,
       agent: false,
+      // 强制 Node 取回完整的已验证地址集并做 Happy Eyeballs；不会回到系统 DNS。
+      autoSelectFamily: true,
+      autoSelectFamilyAttemptTimeout: 250,
       // Host/SNI 保持原域名，但 socket 只连接守卫返回的 pin，关闭 DNS rebinding/TOCTOU。
       lookup: (_hostname, lookupOptions, callback) => {
         // Node 22 的 autoSelectFamily 会以 all=true 请求地址数组；两种 callback 形状都必须
@@ -97,7 +107,7 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
             error: NodeJS.ErrnoException | null,
             addresses: { address: string; family: number }[],
           ) => void;
-          callbackAll(null, [{ address: target.ip, family: target.family }]);
+          callbackAll(null, target.addresses);
           return;
         }
         const callbackOne = callback as unknown as (

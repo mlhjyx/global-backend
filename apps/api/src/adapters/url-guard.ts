@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { resolvePublicIp, type ResolvePublicIpOptions } from './net-guard';
+import {
+  resolvePublicIp,
+  type ResolvedAddress,
+  type ResolvePublicIpOptions,
+} from './net-guard';
 
 export class EgressBlockedError extends Error {
   constructor(public readonly code: string) {
@@ -12,6 +16,7 @@ export interface PinnedPublicUrl {
   url: URL;
   ip: string;
   family: 4 | 6;
+  addresses: ResolvedAddress[];
 }
 
 export type PublicUrlResolver = (
@@ -34,10 +39,20 @@ export const resolvePublicHttpUrl: PublicUrlResolver = async (raw, options = {})
   if (url.username || url.password) throw new EgressBlockedError('url_credentials_forbidden');
 
   const resolution = await resolvePublicIp(url.hostname, options);
-  if (!resolution.safe || !resolution.ip || !resolution.family) {
+  if (
+    !resolution.safe ||
+    !resolution.ip ||
+    !resolution.family ||
+    !resolution.addresses?.length
+  ) {
     throw new EgressBlockedError(resolution.reason ?? 'url_blocked');
   }
-  return { url, ip: resolution.ip, family: resolution.family };
+  return {
+    url,
+    ip: resolution.ip,
+    family: resolution.family,
+    addresses: resolution.addresses,
+  };
 };
 
 /** Controller/service 输入校验兼容层：不泄露解析地址，只返回稳定 INVALID_URL 信封。 */

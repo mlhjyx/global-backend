@@ -29,6 +29,7 @@ describe('robots 合规与 SSRF 入口', () => {
       url: new URL(raw),
       ip: '93.184.216.34',
       family: 4 as const,
+      addresses: [{ address: '93.184.216.34', family: 4 as const }],
     }));
 
     await expect(
