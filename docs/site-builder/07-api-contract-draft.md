@@ -54,7 +54,9 @@ GET  /sites/{id}/profile
 
 **R2-A3 Profile 合同**：GET/PATCH 成功均返回完整五组加 `versionId`，并带强校验器 `ETag: "profile:<versionId>"` 与 `Cache-Control: private, no-cache`。PATCH 必须至少提交一个组，并至少携带 `If-Match` 或 `baseVersionId`；两者同时存在时必须相同。`If-Match` 只接受本 API 生成的单个、带引号强 ETag，拒绝 `W/`、`*`、裸值和列表。缺判据返回 `428 PRECONDITION_REQUIRED`；body 判据落后返回 `409 SPEC_VERSION_CONFLICT`；header 判据落后（含两判据相同）返回 `412 SPEC_VERSION_CONFLICT`。失败方必须 re-GET、合并意图后重试，后端不自动重放成隐式 last-write-wins。
 
-五组均为 `additionalProperties:false` 的有界 schema；未知顶层/嵌套字段、非法关系/数量/字符串/URL/Asset 引用返回 `422 PROFILE_VALIDATION_FAILED`。请求与合并后的完整 Profile 均不超过 64 KiB；组上限分别为 company 8 / trust 24 / online 12 / brand 8 / contact 8 KiB。URL 只存规范化 `http/https`，PATCH 不做 DNS/HTTP、抓取、模型、Temporal 或 build；真正消费 URL 时仍须重新过 SSRF/redirect/pinning 门。`contact` 继续禁止进入 KB、embedding、Brand Prompt 与 Trace。Profile 使用独立 UUID CAS token，不复用 `updatedAt`、`SiteVersion` 或活动发布指针。
+历史 M0 曾允许任意组内 JSON。GET 在返回前对存量值执行同一严格 schema；不合格时 fail-closed 为 `409 PROFILE_MIGRATION_REQUIRED`，仅返回无值的 `path/group/action=REPLACE_INVALID_GROUP` 诊断和当前 ETag，不把旧 JSON 冒充 200 响应，也不自动猜映射或静默删字段。当前 Ubuntu 开发库没有非空 Profile；未来任何环境升级前仍须先审计并显式替换不合格组。
+
+五组均为 `additionalProperties:false` 的有界 schema；未知顶层/嵌套字段、非法关系/数量/字符串/URL/Asset 引用返回 `422 PROFILE_VALIDATION_FAILED`。请求与合并后的完整 Profile 均不超过 64 KiB；组上限分别为 company 8 / trust 24 / online 12 / brand 8 / contact 8 KiB。URL 只存规范化 `http/https`，PATCH 不做 DNS/HTTP、抓取、模型、Temporal 或 build；真正消费 URL 时仍须重新过 SSRF/redirect/pinning 门。`contact` 继续禁止进入 KB、embedding、Brand Prompt 与 Trace；其余自由文本在进入 Brand Prompt/证据语料前递归遮蔽 ASCII、SMTPUTF8、IDN/punycode 邮箱与电话号码。Profile 使用独立 UUID CAS token，不复用 `updatedAt`、`SiteVersion` 或活动发布指针。
 
 ## 3. 素材（Asset）〔🟢 M0 端点 + ✅ R2-A1 状态机 · 🎯 M1-c：process/select-variant〕
 
@@ -210,6 +212,7 @@ outbox 事件：`SiteDemoReady / SiteBuildProgress / SiteBuildFailed / SitePubli
 | `SPEC_VERSION_CONFLICT`        | 409（`If-Match`→412） | spec/profile 基版本落后，禁 last-write-wins；客户端 re-GET 合并重试                                           | §6 PATCH spec / §2 profile                                    |
 | `PRECONDITION_REQUIRED`        | 428                   | Profile PATCH 同时缺少 `If-Match` 与 `baseVersionId`，拒绝无条件写                                            | §2 profile                                                    |
 | `PROFILE_VALIDATION_FAILED`    | 422                   | Profile 五组 schema、数量、关系、URL、Asset 引用或 64 KiB 总量不合格                                          | §2 profile                                                    |
+| `PROFILE_MIGRATION_REQUIRED`   | 409                   | 历史 Profile 不符合当前严格 schema；不回显旧值，须按诊断显式替换无效组                                        | §2 profile                                                    |
 | `UNKNOWN_COMPONENT`            | 422                   | SiteSpec 引用未在**封闭组件库**注册的 type/variant（fail-closed，不静默丢块）                                 | §6 PATCH / §5 build · ADR-015                                 |
 | `MISSING_COPY_KEY`             | 422                   | 结构引用的 `textKey` 在 `CopyBundle[locale]` 缺失（i18n 键间接层断链）                                        | §6 PATCH / §5 build · [04](04-sitespec-contract.md) · ADR-014 |
 | `UNAPPROVED_CLAIM`             | 422                   | 引用未 **APPROVED** 的 L2 事实（认证/数字/客户/性能承诺），拒绝上站                                           | §5 build / §9 publish · ADR-017 · 03 evidence gate            |

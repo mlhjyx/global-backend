@@ -11,7 +11,7 @@
 - DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
 - #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
 - #126 已完成 R0 contract closeout：intake 幂等、`buildId`、去 `mode`、稳定错误码、Temporal 启动证据与 OpenAPI 同步均已落地并验证。
-- R1-safety、R2-A1 Asset、R2-A2 KB 与 R2-A3 Profile 正确性门已于 2026-07-17 完成。Profile 已具备五组严格有界 schema、独立 UUID ETag/CAS、稳定 428/409/412、同站 Asset 引用门；开发环境真 app_user/FORCE RLS 双连接并发与空库 38 migration/schema diff 全绿。KB 已具备单素材 lease/fencing、typed retry、原子文档完成、确定性历史 reconciliation、周期 recovery 与人工 redrive。
+- R1-safety、R2-A1 Asset、R2-A2 KB 与 R2-A3 Profile 正确性门已于 2026-07-17 完成。Profile 已具备五组严格有界 schema、独立 UUID ETag/CAS、稳定 428/409/412、同站 Asset 引用门；旧脏 JSON 读路径以 `PROFILE_MIGRATION_REQUIRED` fail-closed，Prompt/证据入口覆盖 SMTPUTF8/IDN 邮箱与电话净化。开发环境真 app_user/FORCE RLS 双连接并发与空库 38 migration/schema diff 全绿。KB 已具备单素材 lease/fencing、typed retry、原子文档完成、确定性历史 reconciliation、周期 recovery 与人工 redrive。
 
 ### 当前关键路径与退出门
 

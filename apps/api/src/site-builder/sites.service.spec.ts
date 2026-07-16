@@ -132,6 +132,43 @@ describe("SitesService（站点列表/详情/向导档案，07 §2）", () => {
     expect(await service.getProfile(CTX, SITE_ID)).toEqual({ versionId: V0 });
   });
 
+  it("legacy Profile GET fails closed without returning values or mutating the row", async () => {
+    const legacy = {
+      brand: { legacyTone: "professional-secret@example.com" },
+    };
+    const { service, db } = makeService([{ ...SITE_ROW, profile: legacy }]);
+    const before = structuredClone(db.sites[0]);
+
+    const error = await service
+      .getProfile(CTX, SITE_ID)
+      .catch((reason) => reason);
+
+    expect(error).toMatchObject({
+      status: 409,
+      response: {
+        error: {
+          code: "PROFILE_MIGRATION_REQUIRED",
+          details: {
+            path: "/brand/legacyTone",
+            group: "brand",
+            action: "REPLACE_INVALID_GROUP",
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(error.getResponse())).not.toContain(
+      "professional-secret@example.com",
+    );
+    expect(db.sites[0]).toEqual(before);
+  });
+
+  it("getProfile preserves tenant-hidden 404 precedence over migration diagnostics", async () => {
+    const { service } = makeService([]);
+    await expect(service.getProfile(CTX, SITE_ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
   it("stale body token returns stable 409 and does not write", async () => {
     const { service, db } = makeService([SITE_ROW]);
     const stale: ProfilePrecondition = {

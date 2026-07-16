@@ -259,6 +259,30 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
       'reach us at [redacted-email] or [redacted-phone]',
     );
   });
+  it.each([
+    ['请联系 用户@例子.公司 获取报价', '请联系 [redacted-email] 获取报价'],
+    [
+      'IDN domain: sales@例子.公司',
+      'IDN domain: [redacted-email]',
+    ],
+    [
+      'SMTPUTF8 + punycode: 采购@xn--fsqu00a.xn--55qx5d',
+      'SMTPUTF8 + punycode: [redacted-email]',
+    ],
+    [
+      'Combining local/domain: u\u0308ser@exa\u0308mple.de',
+      'Combining local/domain: [redacted-email]',
+    ],
+  ])('遮蔽国际化邮箱且保留周边文本：%s', (input, expected) => {
+    expect(scrubPii(input)).toBe(expected);
+  });
+  it.each([
+    '主营精密泵阀，面向德国市场，支持小批量定制。',
+    '关注@环球泵业 获取更新',
+    '工艺温度为 80℃，不含邮箱或电话。',
+  ])('不误删普通中文或无合法域名的 @ 文本：%s', (input) => {
+    expect(scrubPii(input)).toBe(input);
+  });
 });
 
 describe('BRAND_PROFILE_OUTPUT_SCHEMA — C4 结构性排除个人字段', () => {

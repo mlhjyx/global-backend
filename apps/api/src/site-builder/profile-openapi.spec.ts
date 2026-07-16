@@ -35,6 +35,8 @@ describe('R2-A3 generated OpenAPI contract', () => {
     const patch = path?.patch;
     expect(get?.responses?.['200']?.headers).toHaveProperty('ETag');
     expect(get?.responses?.['200']?.headers).toHaveProperty('Cache-Control');
+    expect(get?.responses?.['409']?.headers).toHaveProperty('ETag');
+    expect(get?.responses?.['409']?.headers).toHaveProperty('Cache-Control');
 
     const ifMatch = patch?.parameters?.filter(
       (parameter) => parameter.in === 'header' && parameter.name === 'if-match',

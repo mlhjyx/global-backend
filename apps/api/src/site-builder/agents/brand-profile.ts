@@ -408,8 +408,20 @@ export function sanitizeProfileForPrompt(
   return scrubProfileValue(out) as Record<string, unknown>;
 }
 
-/** 落库前 PII 清洗（复审 F2）：自由文本里的邮箱/电话遮蔽（人名残余风险靠 prompt+人审）。 */
-const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+/**
+ * 落库前 PII 清洗（复审 F2）：邮箱覆盖 ASCII 与 SMTPUTF8/IDN。
+ *
+ * 这里刻意不用 `\S+@\S+` 这种宽网：它会把普通中文及邻近标点一起吞掉。
+ * 候选必须同时满足：
+ * - local-part 是一个或多个 Unicode atom（支持 combining marks）；
+ * - 域名至少两个 label，label 只含 Unicode 字母/数字/组合符/连字符；
+ * - TLD 至少两个 code point，因此 `@环球泵业` 这类社媒 mention 不会被误删。
+ *
+ * `xn--...` 天然落在上述 label 字符集内；Unicode 域名无需先转 punycode
+ * 便能 fail-safe 遮蔽。人名残余风险仍靠 prompt+人审。
+ */
+const EMAIL_RE =
+  /(?<![\p{L}\p{N}\p{M}!#$%&'*+/=?^_`{|}~.-])[\p{L}\p{N}\p{M}!#$%&'*+/=?^_`{|}~-]+(?:\.[\p{L}\p{N}\p{M}!#$%&'*+/=?^_`{|}~-]+)*@[\p{L}\p{N}\p{M}](?:[\p{L}\p{N}\p{M}-]{0,61}[\p{L}\p{N}\p{M}])?(?:\.[\p{L}\p{N}\p{M}](?:[\p{L}\p{N}\p{M}-]{0,61}[\p{L}\p{N}\p{M}])?)*\.[\p{L}\p{N}\p{M}](?:[\p{L}\p{N}\p{M}-]{0,61}[\p{L}\p{N}\p{M}])(?![\p{L}\p{N}\p{M}-])/giu;
 const PHONE_RE = /(?:\+?\d[\d\s().-]{7,}\d)/g;
 export function scrubPii(text: string): string {
   return text

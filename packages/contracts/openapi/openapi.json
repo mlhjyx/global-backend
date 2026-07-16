@@ -3697,6 +3697,55 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "历史 Profile 不符合当前严格 schema，须显式替换无效组",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [

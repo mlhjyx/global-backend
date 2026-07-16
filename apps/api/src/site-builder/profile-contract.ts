@@ -247,6 +247,12 @@ export interface ProfilePrecondition {
 
 export type ProfileResult = Profile & { versionId: string };
 
+export interface ProfileMigrationDiagnostic extends Record<string, unknown> {
+  path?: string;
+  group?: (typeof PROFILE_GROUPS)[number];
+  action: 'REPLACE_INVALID_GROUP';
+}
+
 function errorBody(
   code: string,
   message: string,
@@ -485,6 +491,64 @@ export function assertValidProfileState(profile: Profile): void {
   assertProfileSize(profile);
 }
 
+function migrationDiagnostic(error: unknown): ProfileMigrationDiagnostic {
+  const response =
+    error instanceof HttpException ? error.getResponse() : undefined;
+  const details =
+    response && typeof response === 'object'
+      ? (response as { error?: { details?: Record<string, unknown> } }).error
+          ?.details
+      : undefined;
+  const params =
+    details?.params && typeof details.params === 'object'
+      ? (details.params as Record<string, unknown>)
+      : undefined;
+  const additionalProperty =
+    typeof params?.additionalProperty === 'string'
+      ? params.additionalProperty
+      : undefined;
+  let path = typeof details?.path === 'string' ? details.path : undefined;
+  if (additionalProperty) {
+    path = `${path && path !== '/' ? path : ''}/${additionalProperty}`;
+  }
+  const explicitGroup =
+    typeof details?.group === 'string' &&
+    PROFILE_GROUPS.includes(details.group as (typeof PROFILE_GROUPS)[number])
+      ? (details.group as (typeof PROFILE_GROUPS)[number])
+      : undefined;
+  const pathGroup = path?.split('/').filter(Boolean)[0];
+  const group =
+    explicitGroup ??
+    (pathGroup &&
+    PROFILE_GROUPS.includes(pathGroup as (typeof PROFILE_GROUPS)[number])
+      ? (pathGroup as (typeof PROFILE_GROUPS)[number])
+      : undefined);
+  return {
+    ...(path ? { path } : {}),
+    ...(group ? { group } : {}),
+    action: 'REPLACE_INVALID_GROUP',
+  };
+}
+
+/**
+ * Historical M0 accepted arbitrary nested JSON. Never emit that JSON against the
+ * new strict response schema, and never silently strip or guess-map owner data.
+ */
+export function assertReadableProfileState(
+  profile: Profile,
+  versionId: string,
+): void {
+  try {
+    assertValidProfileState(profile);
+  } catch (error) {
+    if (!(error instanceof HttpException)) throw error;
+    throw new ProfileMigrationRequiredException(
+      versionId,
+      migrationDiagnostic(error),
+    );
+  }
+}
+
 export function validateProfilePatch(input: unknown): ValidatedProfilePatch {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     profileValidation('profile patch must be an object');
@@ -601,6 +665,22 @@ export class ProfileVersionConflictException extends HttpException {
       precondition.source === 'if-match'
         ? HttpStatus.PRECONDITION_FAILED
         : HttpStatus.CONFLICT,
+    );
+  }
+}
+
+export class ProfileMigrationRequiredException extends HttpException {
+  constructor(
+    readonly currentVersionId: string,
+    diagnostic: ProfileMigrationDiagnostic,
+  ) {
+    super(
+      errorBody(
+        'PROFILE_MIGRATION_REQUIRED',
+        'stored profile must be replaced using the current schema',
+        diagnostic,
+      ),
+      HttpStatus.CONFLICT,
     );
   }
 }

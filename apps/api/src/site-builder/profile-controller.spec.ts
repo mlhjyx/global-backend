@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ProfileVersionConflictException } from './profile-contract';
+import {
+  ProfileMigrationRequiredException,
+  ProfileVersionConflictException,
+} from './profile-contract';
 import { SitesController } from './sites.controller';
 
 const CTX = {
@@ -77,5 +80,25 @@ describe('R2-A3 Profile HTTP headers', () => {
       ),
     ).rejects.toBe(conflict);
     expect(response.setHeader).toHaveBeenCalledWith('ETag', `"profile:${V1}"`);
+  });
+
+  it('legacy GET failure exposes only the current ETag and private cache policy', async () => {
+    const migration = new ProfileMigrationRequiredException(V0, {
+      path: '/brand/legacyTone',
+      group: 'brand',
+      action: 'REPLACE_INVALID_GROUP',
+    });
+    const sites = { getProfile: vi.fn().mockRejectedValue(migration) };
+    const controller = new SitesController(sites as never);
+    const response = fakeResponse();
+
+    await expect(
+      controller.getProfile(CTX, SITE_ID, response as never),
+    ).rejects.toBe(migration);
+    expect(response.setHeader).toHaveBeenCalledWith('ETag', `"profile:${V0}"`);
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Cache-Control',
+      'private, no-cache',
+    );
   });
 });

@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { mergeProfile, Profile } from './profile-merge';
 import {
+  assertReadableProfileState,
   assertValidProfileState,
   nextProfileVersionId,
   ProfilePrecondition,
@@ -39,8 +40,10 @@ export class SitesService {
     siteId: string,
   ): Promise<ProfileResult> {
     const site = await this.get(ctx, siteId);
+    const profile = ((site.profile as Profile | null) ?? {}) as Profile;
+    assertReadableProfileState(profile, site.profileVersionId);
     return {
-      ...(((site.profile as Profile | null) ?? {}) as Profile),
+      ...profile,
       versionId: site.profileVersionId,
     };
   }

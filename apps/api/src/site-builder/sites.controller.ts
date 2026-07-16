@@ -28,6 +28,7 @@ import { previewUrlFor } from './preview-url';
 import {
   PROFILE_PATCH_SCHEMA,
   PROFILE_RESPONSE_SCHEMA,
+  ProfileMigrationRequiredException,
   ProfilePatchPipe,
   ProfileResult,
   ProfileVersionConflictException,
@@ -93,14 +94,27 @@ export class SitesController {
   @Get('sites/:id/profile')
   @ApiOperation({ summary: '建站向导档案（五组）' })
   @ApiEnvelope(PROFILE_RESPONSE_SCHEMA, { headers: PROFILE_RESPONSE_HEADERS })
+  @ApiResponse({
+    status: 409,
+    description: '历史 Profile 不符合当前严格 schema，须显式替换无效组',
+    schema: PROFILE_ERROR_SCHEMA,
+    headers: PROFILE_RESPONSE_HEADERS,
+  })
   async getProfile(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) response: Response,
   ): Promise<Enveloped<ProfileResult>> {
-    const profile = await this.sites.getProfile(ctx, id);
-    this.setProfileHeaders(response, profile.versionId);
-    return envelope(profile);
+    try {
+      const profile = await this.sites.getProfile(ctx, id);
+      this.setProfileHeaders(response, profile.versionId);
+      return envelope(profile);
+    } catch (error) {
+      if (error instanceof ProfileMigrationRequiredException) {
+        this.setProfileHeaders(response, error.currentVersionId);
+      }
+      throw error;
+    }
   }
 
   @Patch('sites/:id/profile')
