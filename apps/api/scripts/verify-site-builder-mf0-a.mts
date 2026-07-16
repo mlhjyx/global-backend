@@ -338,6 +338,51 @@ async function main(): Promise<void> {
       (await app.withWorkspace(wsA, (tx) => tx.assetVariant.count())) === 2,
       "workspace A can create and read its variants, including same-Asset provenance",
     );
+    const processingSource = await app.withWorkspace(wsA, (tx) =>
+      tx.assetVariant.create({
+        data: {
+          ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA2 }),
+          status: "processing",
+          contentHash: null,
+          sizeBytes: null,
+        },
+      }),
+    );
+    const failedSource = await app.withWorkspace(wsA, (tx) =>
+      tx.assetVariant.create({
+        data: {
+          ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA2 }),
+          status: "failed",
+          contentHash: null,
+          sizeBytes: null,
+          error: "verifier source failure",
+        },
+      }),
+    );
+    for (const [status, nonReadySource] of [
+      ["processing", processingSource],
+      ["failed", failedSource],
+    ] as const) {
+      await rejectsDb(
+        `${status} source Variant cannot authorize a derivative`,
+        () =>
+          app.withWorkspace(wsA, (tx) =>
+            tx.assetVariant.create({
+              data: readyVariant({
+                workspaceId: wsA,
+                siteId: siteA,
+                assetId: assetA2,
+                sourceVariantId: nonReadySource.id,
+              }),
+            }),
+          ),
+        {
+          codes: ["P2004", "23514"],
+          evidence:
+            /asset_variant_source_ready_check|AssetVariant source must be ready and checksummed/,
+        },
+      );
+    }
     check(
       (await app.withWorkspace(wsB, (tx) => tx.assetVariant.count())) === 0,
       "workspace B cannot read workspace A variants",
