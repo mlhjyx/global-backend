@@ -52,27 +52,30 @@ export class IntakeService {
     const status = 'building';
     const nameEn = input.company.nameEn?.trim() || null;
 
-    const { site, run } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    const { site, run, wasCreated } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       // Codex P2：advisory xact lock 关闭双请求并发窗口——「每 workspace 限 1 站」原子成立
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-intake-${ctx.workspaceId}`}))`;
       const existing = await tx.site.findFirst({
         where: { workspaceId: ctx.workspaceId },
-        select: { id: true },
+        select: { id: true, status: true },
       });
-      if (existing) {
+      // R0-6：既有 setup_failed 站 = 上次 demo 终态失败留痕（cleanupFailedDemo 不再删站）→ **原地重试**
+      // （复用同 site，保留 id/slug 稳定预览 URL，刷新 intake + 回 building）；其余状态仍守「限 1 站」。
+      if (existing && existing.status !== 'setup_failed') {
         throw new ConflictException('workspace already has a site (v1 limit: 1 per workspace)');
       }
-      const createdSite = await tx.site.create({
-        data: {
-          workspaceId: ctx.workspaceId,
-          name: nameEn ?? input.company.nameZh,
-          slug: makeSlug(nameEn),
-          mode,
-          status,
-          locales: ['en'] satisfies string[] as unknown as Prisma.InputJsonValue,
-          intake: input as unknown as Prisma.InputJsonValue,
-        },
-      });
+      const shared = {
+        name: nameEn ?? input.company.nameZh,
+        mode,
+        status,
+        locales: ['en'] satisfies string[] as unknown as Prisma.InputJsonValue,
+        intake: input as unknown as Prisma.InputJsonValue,
+      };
+      const createdSite = existing
+        ? await tx.site.update({ where: { id: existing.id }, data: shared })
+        : await tx.site.create({
+            data: { workspaceId: ctx.workspaceId, slug: makeSlug(nameEn), ...shared },
+          });
       const createdRun = await tx.siteBuildRun.create({
         data: {
           workspaceId: ctx.workspaceId,
@@ -81,7 +84,7 @@ export class IntakeService {
           status: 'queued',
         },
       });
-      return { site: createdSite, run: createdRun };
+      return { site: createdSite, run: createdRun, wasCreated: !existing };
     });
 
     if (run) {
@@ -94,11 +97,22 @@ export class IntakeService {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.log.error(`demo v0 launch failed for site ${site.id}: ${message}`);
-        // Codex P1：补偿回滚（site 级联删 run）——否则残留站点让重试永远撞 409，注册卡死
+        // R0-6：区分新建 vs 复用——
+        //  · 新建站的同步 launch 失败（201 未返回、无既有用户数据）→ 整笔回滚删站（Codex P1：否则残留站撞 409）；
+        //  · 复用的 setup_failed 站（用户数据已存在）→ **绝不删**，回置 setup_failed + run failed，待再次 re-intake。
         await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-          await tx.site.delete({ where: { id: site.id } });
+          if (wasCreated) {
+            await tx.site.delete({ where: { id: site.id } });
+          } else {
+            await tx.site.update({ where: { id: site.id }, data: { status: 'setup_failed' } });
+            await tx.siteBuildRun.update({
+              where: { id: run.id },
+              data: { status: 'failed', error: message, finishedAt: new Date() },
+            });
+          }
         });
-        throw new BadGatewayException(`demo v0 launch failed: ${message} (intake rolled back, safe to retry)`);
+        const disposition = wasCreated ? 'intake rolled back' : 'site kept as setup_failed';
+        throw new BadGatewayException(`demo v0 launch failed: ${message} (${disposition}, safe to retry)`);
       }
     }
 

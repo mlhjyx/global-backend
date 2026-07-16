@@ -68,7 +68,7 @@ export function buildCompensatedSteps(
   });
 }
 
-const POLISH_TIMEOUT_MS = 8_000; // 02 §4：轻文案调用超时即用模板默认文案
+const POLISH_TIMEOUT_MS = 2_000; // R0-5：硬超时压到 2s 内不破 Demo 10s P95；超时即 abort 底层 fetch，不烧钱
 const BUILD_TIMEOUT_MS = 180_000;
 
 export interface DemoV0ActivityInput {
@@ -146,38 +146,37 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   ): Promise<DemoCopyPolish | undefined> {
     if (!gateway) return undefined;
     try {
-      const result = await Promise.race([
-        gateway.generateStructured<DemoCopyPolish>(
-          {
-            task: 'site_builder.demo_copy',
-            prompt: [
-              'Write concise English website copy for a B2B supplier landing page.',
-              `Company: ${intake.company.nameEn ?? intake.company.nameZh}`,
-              `Products: ${intake.products.join(', ')}`,
-              `Target markets (ISO country codes): ${intake.targetMarkets.join(', ')}`,
-              'Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).',
-              'Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.',
-            ].join('\n'),
-            schema: {
-              type: 'object',
-              properties: {
-                headline: { type: 'string' },
-                subhead: { type: 'string' },
-                aboutBody: { type: 'string' },
-              },
-              additionalProperties: false,
+      // R0-5：真 AbortSignal 硬超时取代 setTimeout race——超时即 abort 底层 fetch（不留后台弃单继续
+      // 烧钱），signal 由网关合并进 AbortSignal.any 透传到 fetch。失败/超时/abort 一律回退确定性模板。
+      const result = await gateway.generateStructured<DemoCopyPolish>(
+        {
+          task: 'site_builder.demo_copy',
+          prompt: [
+            'Write concise English website copy for a B2B supplier landing page.',
+            `Company: ${intake.company.nameEn ?? intake.company.nameZh}`,
+            `Products: ${intake.products.join(', ')}`,
+            `Target markets (ISO country codes): ${intake.targetMarkets.join(', ')}`,
+            'Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).',
+            'Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.',
+          ].join('\n'),
+          schema: {
+            type: 'object',
+            properties: {
+              headline: { type: 'string' },
+              subhead: { type: 'string' },
+              aboutBody: { type: 'string' },
             },
-            maxTokens: 400,
+            additionalProperties: false,
           },
-          // FIX A（Codex P2）：带 runId 归账——refurbish 路径 assembleAndBuild→polishCopy 的
-          // demo_copy 调用必须计入 buildRunId 上限（gateway 按 ctx.runId ?? ctx.workspaceId 归账）；
-          // demo_v0 路径未开账户，gateway 命中未开账户=不限额，行为不变。
-          { workspaceId, runId },
-        ),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('demo copy polish timeout')), POLISH_TIMEOUT_MS),
-        ),
-      ]);
+          maxTokens: 400,
+          // R0-5：真 abort 硬超时——超时即断底层 fetch（不留后台弃单烧钱），压在 Demo 10s P95 内
+          signal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
+        },
+        // FIX A（Codex P2）：带 runId 归账——refurbish 路径 assembleAndBuild→polishCopy 的
+        // demo_copy 调用必须计入 buildRunId 上限（gateway 按 ctx.runId ?? ctx.workspaceId 归账）；
+        // demo_v0 路径未开账户，gateway 命中未开账户=不限额，行为不变。
+        { workspaceId, runId },
+      );
       // 确定性防造假闸（Codex P2）：模型若无视提示编造年限/认证，弃字段回退模板
       return sanitizePolish(result.data ?? undefined);
     } catch {
@@ -308,15 +307,18 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     },
 
     /**
-     * 终态失败补偿（demoV0Workflow catch 调用）：删除半成品 site（级联 run/version），
-     * 否则「每 workspace 限 1 站」让用户 re-intake 永远 409——一次构建失败=注册砖化（复审 MEDIUM）。
+     * 终态失败补偿（demoV0Workflow catch 调用）——R0-6：**不再删站**。旧版删除半成品 site 会把用户
+     * 已接受的 intake 静默丢弃（201 后站点凭空消失、无法原地重试）。改为置 `setup_failed` 保留 Site +
+     * 全部 intake；「每 workspace 限 1 站」的 409 由 intake 对 setup_failed 站放行（原地重试）解决。
      */
     async cleanupFailedDemo(input: DemoV0ActivityInput): Promise<void> {
       try {
         await prisma.withWorkspace(input.workspaceId, async (tx) => {
-          await tx.site.delete({ where: { id: input.siteId } });
+          await tx.site.update({ where: { id: input.siteId }, data: { status: 'setup_failed' } });
         });
-        log.warn(`demo v0 terminally failed — site ${input.siteId} rolled back, intake retryable`);
+        log.warn(
+          `demo v0 terminally failed — site ${input.siteId} kept as setup_failed, retryable via re-intake`,
+        );
       } catch (err) {
         log.error(`cleanupFailedDemo failed for site ${input.siteId}: ${String(err)}`);
       }
@@ -727,7 +729,8 @@ export function intakeToMarkdown(intake: IntakeInput): string {
     `Industry: ${intake.industry}`,
     `Main products: ${intake.products.join(', ')}`,
     `Target markets: ${intake.targetMarkets.join(', ')}`,
-    `Business email: ${intake.businessEmail}`,
+    // R0-4（隐私红线，与 ADR-010 存储侧同源）：businessEmail 是联系信息，绝不进 KB embedding / 品牌 Prompt；
+    // 留在受控结构化区 Site.intake（Copy 的 contact 槽按用途读取），不入通用检索语料。
     intake.websiteUrl ? `Existing website: ${intake.websiteUrl}` : '',
   ]
     .filter(Boolean)

@@ -20,9 +20,17 @@ interface FakeDb {
   runs: Record<string, unknown>[];
 }
 
-function makeService(opts: { existingSite?: boolean; launcher?: DemoV0Launcher } = {}) {
+function makeService(
+  opts: { existingSite?: boolean; existingStatus?: string; launcher?: DemoV0Launcher } = {},
+) {
   const db: FakeDb = { sites: [], runs: [] };
-  if (opts.existingSite) db.sites.push({ id: 'existing', workspaceId: CTX.workspaceId });
+  if (opts.existingSite)
+    db.sites.push({
+      id: 'existing',
+      workspaceId: CTX.workspaceId,
+      slug: 'existing-slug',
+      status: opts.existingStatus ?? 'ready',
+    });
   const tx = {
     $executeRaw: async () => 0, // advisory lock no-op
     site: {
@@ -30,6 +38,11 @@ function makeService(opts: { existingSite?: boolean; launcher?: DemoV0Launcher }
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { id: 'site-1', ...data };
         db.sites.push(row);
+        return row;
+      },
+      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        const row = db.sites.find((s) => s.id === where.id);
+        if (row) Object.assign(row, data);
         return row;
       },
       delete: async ({ where }: { where: { id: string } }) => {
@@ -141,5 +154,36 @@ describe('IntakeService（注册引导 → 建档 + demo v0，01 §2 / 07 §1）
     const site = db.sites[0] as Record<string, unknown>;
     expect(site.name).toBe('杭州泵业');
     expect(site.slug).toMatch(/^site-[a-z0-9]{6}$/);
+  });
+
+  it('R0-6 原地重试：已有 setup_failed 站 → 复用同 site 重建 demo（不 409、回 building）', async () => {
+    const { service, db, launched } = makeService({ existingSite: true, existingStatus: 'setup_failed' });
+    const res = await service.create(CTX, BASE_INTAKE);
+    expect(res).toEqual({ siteId: 'existing', mode: 'builder', status: 'building' });
+    expect(db.sites).toHaveLength(1); // 复用同 site，不新建
+    expect((db.sites[0] as Record<string, unknown>).status).toBe('building'); // 回 building 重试
+    expect(db.runs).toHaveLength(1); // 新 demo_v0 run
+    expect(launched).toEqual(['existing']);
+  });
+
+  it('R0-6：非 setup_failed 的既有站仍 Conflict（v1 每 workspace 限 1 站照旧）', async () => {
+    const { service } = makeService({ existingSite: true, existingStatus: 'ready' });
+    await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('R0-6：复用 setup_failed 站的同步 launch 失败 → 保留 setup_failed（不删用户数据）+ 502', async () => {
+    const failing: DemoV0Launcher = {
+      launchDemoV0: async () => {
+        throw new Error('temporal unreachable');
+      },
+    };
+    const { service, db } = makeService({
+      existingSite: true,
+      existingStatus: 'setup_failed',
+      launcher: failing,
+    });
+    await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(BadGatewayException);
+    expect(db.sites).toHaveLength(1); // 保留，绝不删
+    expect((db.sites[0] as Record<string, unknown>).status).toBe('setup_failed');
   });
 });

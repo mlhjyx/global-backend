@@ -3,6 +3,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import {
   createSiteBuilderActivities,
   buildCompensatedSteps,
+  intakeToMarkdown,
   RefurbishActivityInput,
   RefurbishFinalizeInput,
 } from './site-builder.activities';
@@ -321,5 +322,49 @@ describe('buildCompensatedSteps — 纯函数（两个 DB 可核验完成位）'
     const steps = buildCompensatedSteps(false, false);
     expect(steps.map((s) => s.key)).toEqual(REFURBISH_KEYS);
     expect(steps.every((s) => s.status === 'aborted')).toBe(true);
+  });
+});
+
+describe('R0-4 intakeToMarkdown — businessEmail 不进 KB（隐私红线，与 ADR-010 存储侧同源）', () => {
+  const intake = {
+    company: { nameZh: '安可', nameEn: 'Acme' },
+    industry: 'pumps',
+    products: ['pumps'],
+    targetMarkets: ['DE'],
+    hasWebsite: false,
+    websiteUrl: null,
+    businessEmail: 'sales@acme.com',
+  };
+  it('KB markdown 不含 businessEmail / email 字样，但保留公司名/产品/市场事实', () => {
+    const md = intakeToMarkdown(intake as never);
+    expect(md).not.toContain('sales@acme.com');
+    expect(md.toLowerCase()).not.toContain('email');
+    // 去联系信息 ≠ 去事实
+    expect(md).toContain('Acme');
+    expect(md).toContain('pumps');
+    expect(md).toContain('DE');
+  });
+});
+
+describe('R0-5 polishCopy — 传真 AbortSignal（超时即 abort 底层 fetch，不留后台烧钱）', () => {
+  it('generateStructured 调用带 input.signal:AbortSignal（透传网关→fetch）', async () => {
+    spyBudget();
+    const { gateway, generateStructured } = fakeGateway();
+    const site = { id: 'site-1', name: 'Acme', slug: 'acme', stylePreset: 'clean', intake: INTAKE };
+    const acts = createSiteBuilderActivities({ prisma: assembleStopAfterPolishPrisma(site), gateway });
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop-after-polish');
+    const inputArg = generateStructured.mock.calls[0][0] as { signal?: unknown };
+    expect(inputArg.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe('cleanupFailedDemo — R0-6 不删站、置 setup_failed（保留用户数据、可原地重试）', () => {
+  it('终态失败保留 site，status=setup_failed，绝不 site.delete', async () => {
+    const del = vi.fn(async () => ({}));
+    const update = vi.fn(async () => ({}));
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma({ site: { delete: del, update } }) });
+    await acts.cleanupFailedDemo(INPUT);
+    expect(del).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({ where: { id: 'site-1' }, data: { status: 'setup_failed' } });
   });
 });
