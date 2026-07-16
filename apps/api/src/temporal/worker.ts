@@ -21,6 +21,7 @@ import { createDeletionActivities } from './deletion.activities';
 import { createPatentsCacheActivities } from './patents-cache.activities';
 import { createSanctionsRefreshActivities } from './sanctions-refresh.activities';
 import { createSiteBuilderActivities } from './site-builder.activities';
+import { createAssetCleanupActivities } from './asset-cleanup.activities';
 import { seedSanctions } from '../sanctions/sanctions-seed';
 import { SanctionsScreeningService } from '../sanctions/sanctions-screening.service';
 import { KbService } from '../site-builder/kb.service';
@@ -141,6 +142,7 @@ async function main(): Promise<void> {
         broker,
         kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),
       }),
+      ...createAssetCleanupActivities({ prisma, storage: new StorageService() }),
     },
   });
 

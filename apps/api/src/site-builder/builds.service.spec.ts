@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BadGatewayException,
   BadRequestException,
-  ConflictException,
   HttpException,
   NotFoundException,
 } from '@nestjs/common';
@@ -22,6 +20,7 @@ function makeService(
     siteExists?: boolean;
     existingRuns?: Record<string, unknown>[];
     launcher?: Partial<RefurbishLauncher>;
+    beforeCancelCas?: (run: Record<string, unknown>, data: Record<string, unknown>) => void;
   } = {},
 ) {
   const db: FakeDb = {
@@ -75,6 +74,21 @@ function makeService(
         Object.assign(row, data);
         return row;
       },
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { id: string; kind?: string; status?: { in: string[] } };
+        data: Record<string, unknown>;
+      }) => {
+        const row = db.runs.find((r) => r.id === where.id);
+        if (!row) return { count: 0 };
+        opts.beforeCancelCas?.(row, data);
+        if (where.kind && row.kind !== where.kind) return { count: 0 };
+        if (where.status?.in && !where.status.in.includes(row.status as string)) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      },
     },
   };
   const prisma = {
@@ -122,9 +136,8 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
     const running = makeService({
       existingRuns: [{ id: 'r0', siteId: SITE_ID, status: 'running', createdAt: new Date() }],
     });
-    await expect(running.service.create(CTX, SITE_ID, BASE)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    const err = await running.service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
+    expect(errorContract(err)).toMatchObject({ status: 409, code: 'BUILD_IN_PROGRESS' });
     const done = makeService({
       existingRuns: [{ id: 'r0', siteId: SITE_ID, status: 'succeeded', createdAt: new Date() }],
     });
@@ -162,7 +175,11 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
     const { service } = makeService({ existingRuns: runs });
     const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpException);
-    expect((err as HttpException).getStatus()).toBe(429);
+    expect(errorContract(err)).toEqual({
+      status: 429,
+      code: 'QUOTA_EXCEEDED',
+      details: { remaining: 0 },
+    });
   });
 
   it('launch 失败后同 Idempotency-Key 重试 → 不命中 failed 重放，真正重发新 run（复审 C4）', async () => {
@@ -177,9 +194,10 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
         },
       },
     });
-    await expect(
-      service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' }),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+    const firstError = await service
+      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' })
+      .catch((e: unknown) => e);
+    expect(errorContract(firstError).code).toBe('BUILD_LAUNCH_UNAVAILABLE');
     const retry = await service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' });
     expect(retry.status).toBe('queued');
     expect(db.runs).toHaveLength(2); // failed 行留档，新 run 真正重发
@@ -193,9 +211,31 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
         },
       },
     });
-    await expect(service.create(CTX, SITE_ID, BASE)).rejects.toBeInstanceOf(BadGatewayException);
+    const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
+    expect(errorContract(err)).toMatchObject({ status: 502, code: 'BUILD_LAUNCH_UNAVAILABLE' });
     expect(db.sites).toHaveLength(1); // 🔴 refurbish 失败不删用户站（与 demo_v0 补偿相反）
     expect((db.runs[0] as Record<string, unknown>).status).toBe('failed');
+  });
+
+  it('launch failure CAS：不把并发 cancelled/worker terminal 反向覆盖成 failed', async () => {
+    const { service, db } = makeService({
+      launcher: {
+        launchRefurbish: async () => {
+          throw new Error('simulated ACK loss');
+        },
+      },
+      beforeCancelCas: (row, data) => {
+        if (data.status === 'failed') {
+          row.status = 'cancelled';
+          row.finishedAt = new Date('2026-07-17T00:00:00.000Z');
+        }
+      },
+    });
+
+    const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
+
+    expect(errorContract(err)).toMatchObject({ status: 502, code: 'BUILD_LAUNCH_UNAVAILABLE' });
+    expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
   });
 });
 
@@ -226,7 +266,41 @@ describe('BuildsService.get / cancel（07 §5）', () => {
     await service.cancel(CTX, 'r1');
     expect((db.runs[0] as Record<string, unknown>).status).toBe('cancelled');
     expect(cancelled).toEqual(['r1']);
-    await expect(service.cancel(CTX, 'r1')).rejects.toBeInstanceOf(ConflictException);
+    const err = await service.cancel(CTX, 'r1').catch((e: unknown) => e);
+    expect(errorContract(err)).toMatchObject({ status: 409, code: 'BUILD_ALREADY_TERMINAL' });
+  });
+
+  it('cancel：demo_v0 等不可取消类型 → 409 BUILD_NOT_CANCELLABLE', async () => {
+    const { service, cancelled } = makeService({
+      existingRuns: [
+        { id: 'r1', siteId: SITE_ID, kind: 'demo_v0', status: 'running', createdAt: new Date() },
+      ],
+    });
+    const err = await service.cancel(CTX, 'r1').catch((e: unknown) => e);
+    expect(errorContract(err)).toMatchObject({ status: 409, code: 'BUILD_NOT_CANCELLABLE' });
+    expect(cancelled).toEqual([]);
+  });
+
+  it('cancel CAS：读后并发成功时不覆盖 terminal，也不通知 launcher', async () => {
+    const { service, db, cancelled } = makeService({
+      existingRuns: [
+        { id: 'r1', siteId: SITE_ID, kind: 'refurbish', status: 'running', createdAt: new Date() },
+      ],
+      beforeCancelCas: (row) => {
+        row.status = 'succeeded';
+        row.finishedAt = new Date('2026-07-17T00:00:00.000Z');
+      },
+    });
+
+    const err = await service.cancel(CTX, 'r1').catch((e: unknown) => e);
+
+    expect(errorContract(err)).toMatchObject({
+      status: 409,
+      code: 'BUILD_ALREADY_TERMINAL',
+      details: { status: 'succeeded' },
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'succeeded' });
+    expect(cancelled).toEqual([]);
   });
 
   it('cancel：launcher 取消失败不影响状态落库（best-effort）', async () => {
@@ -244,3 +318,19 @@ describe('BuildsService.get / cancel（07 §5）', () => {
     expect((db.runs[0] as Record<string, unknown>).status).toBe('cancelled');
   });
 });
+
+function errorContract(err: unknown): {
+  status?: number;
+  code?: string;
+  details?: Record<string, unknown>;
+} {
+  if (!(err instanceof HttpException)) return {};
+  const body = err.getResponse() as {
+    error?: { code?: string; details?: Record<string, unknown> };
+  };
+  return {
+    status: err.getStatus(),
+    code: body.error?.code,
+    ...(body.error?.details ? { details: body.error.details } : {}),
+  };
+}

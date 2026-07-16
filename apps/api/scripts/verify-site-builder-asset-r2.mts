@@ -3,14 +3,15 @@
  *
  * 依赖：PostgreSQL + MinIO；使用真实 app_user/RLS、真实 presigned PUT、真实 copy/delete。
  * 可控 gate 只负责冻结第一次 head 的时序，以确定性制造并发窗口；存储操作仍落真实 MinIO。
- * R2-A4 Temporal cleanup 尚未实现，因此本脚本只验证 parked Outbox 真值，不消费它。
+ * R2-A4 后本脚本验证 cleanup intent 真值与「不提前删除」；Temporal 真链由
+ * verify-site-builder-cleanup-r2.mts 独立验证。
  *
  * 跑法（Ubuntu 开发环境）：
  *   cd apps/api
  *   node --import tsx scripts/verify-site-builder-asset-r2.mts
  */
 import 'dotenv/config';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -149,8 +150,8 @@ async function main(): Promise<void> {
     touchedKeys.add(ready.objectKey);
     if (ready.processingStatus !== 'ready')
       throw new Error(`commit ended ${ready.processingStatus}`);
-    if (await storage.head(staging.objectKey))
-      throw new Error('staging object survived successful commit');
+    if (!(await storage.head(staging.objectKey)))
+      throw new Error('staging object was deleted before the presigned PUT expiry gate');
     if (!(await storage.head(ready.objectKey)))
       throw new Error('canonical object missing after commit');
     ok('CAS/fencing', 'commit/delete losers blocked; canonical committed before staging cleanup');
@@ -165,10 +166,14 @@ async function main(): Promise<void> {
       }),
     );
     const stagingPayload = stagingIntent?.payload as Record<string, unknown> | undefined;
-    if (!stagingIntent?.parkedAt || stagingPayload?.objectClass !== 'staging') {
-      throw new Error('durable parked staging cleanup intent missing');
+    if (
+      stagingIntent?.parkedAt ||
+      stagingPayload?.objectClass !== 'staging' ||
+      typeof stagingPayload?.notBefore !== 'string'
+    ) {
+      throw new Error('durable routable staging cleanup intent missing');
     }
-    ok('Outbox', `staging cleanup intent parked as event ${stagingIntent.eventId}`);
+    ok('Outbox', `staging cleanup intent routed after notBefore as event ${stagingIntent.eventId}`);
 
     // 同内容第二个 staging：真实 partial unique 最终收敛为 duplicate，绝不悬空 committing。
     const duplicateSigned = await baseAssets.presign(ctx, siteId, {
@@ -194,9 +199,9 @@ async function main(): Promise<void> {
     if (duplicate.processingStatus !== 'duplicate' || duplicate.leaseToken) {
       throw new Error(`duplicate did not reconcile: ${JSON.stringify(duplicate)}`);
     }
-    if (await storage.head(duplicateStaging.objectKey))
-      throw new Error('duplicate staging not cleaned');
-    ok('duplicate', `second asset reconciled to duplicate of ${signed.assetId}`);
+    if (!(await storage.head(duplicateStaging.objectKey)))
+      throw new Error('duplicate staging was deleted before its upload URL expired');
+    ok('duplicate', `second asset reconciled; staging retained until durable cleanup gate`);
 
     // 真 MinIO copy 的可恢复失败：第一次人工注入瞬时错误，只改变适配器返回；staging 仍是真对象。
     const retrySigned = await baseAssets.presign(ctx, siteId, {
@@ -245,11 +250,11 @@ async function main(): Promise<void> {
     if (retried.processingStatus !== 'ready' || retried.processingAttempt !== 2) {
       throw new Error(`retry did not re-claim/finalize: ${JSON.stringify(retried)}`);
     }
-    if (await storage.head(retryStaging.objectKey))
-      throw new Error('retry staging survived success');
+    if (!(await storage.head(retryStaging.objectKey)))
+      throw new Error('retry staging was deleted before its upload URL expired');
     ok('retry', 'transient failure retained staging; second fenced attempt finalized safely');
 
-    // 删除 ready 资产：DB/Kb 面先 tombstone，canonical 保留，命令 parked 等 MF-0 + R2-A4。
+    // 删除 ready 资产：DB/Kb 面先 tombstone，canonical 保留，命令 parked 等 MF-0。
     await baseAssets.remove(ctx, signed.assetId);
     const tombstone = await appDb.withWorkspace(workspaceId, (tx) =>
       tx.asset.findUniqueOrThrow({ where: { id: signed.assetId } }),
@@ -282,12 +287,16 @@ async function main(): Promise<void> {
     }
     ok('tombstone', 'canonical retained; cleanup parked behind SiteSpec reference scanner');
 
-    const otherTenantAssets = await baseAssets.list(otherCtx, siteId);
-    if (otherTenantAssets.length !== 0) throw new Error('tenant B can see tenant A assets');
-    ok('tenant isolation', 'other workspace cannot list the site assets');
+    try {
+      await baseAssets.list(otherCtx, siteId);
+      throw new Error('tenant B unexpectedly resolved tenant A site');
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+    }
+    ok('tenant isolation', 'other workspace receives the same hidden-site 404');
 
     console.log(
-      '\n🎉 R2-A1 开发环境真服务验证全绿（PostgreSQL/RLS + MinIO；Temporal cleanup 留待 R2-A4）。',
+      '\n🎉 R2-A1 开发环境真服务验证全绿（PostgreSQL/RLS + MinIO；A4 cleanup 另验）。',
     );
   } finally {
     // verifier-only cleanup：生产路径仍遵守 tombstone/outbox，不调用这里的 owner/直接对象清理。

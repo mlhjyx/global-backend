@@ -1,7 +1,5 @@
 import {
-  BadGatewayException,
   BadRequestException,
-  ConflictException,
   HttpException,
   HttpStatus,
   Inject,
@@ -25,6 +23,31 @@ export interface CreateBuildInput extends BuildScopeInput {
 
 const ACTIVE_STATUSES = ['queued', 'running'];
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
+
+type BuildErrorCode =
+  | 'BUILD_IN_PROGRESS'
+  | 'BUILD_NOT_CANCELLABLE'
+  | 'BUILD_ALREADY_TERMINAL'
+  | 'BUILD_LAUNCH_UNAVAILABLE'
+  | 'QUOTA_EXCEEDED';
+
+function buildHttpError(
+  status: HttpStatus,
+  code: BuildErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+): HttpException {
+  return new HttpException(
+    {
+      error: {
+        code,
+        message,
+        ...(details ? { details } : {}),
+      },
+    },
+    status,
+  );
+}
 
 /**
  * 精装修构建 run（07 §5 / 09 §2.2）。同 site 单飞（02 §4）+ 当日配额 +
@@ -71,7 +94,14 @@ export class BuildsService {
       const active = await tx.siteBuildRun.findFirst({
         where: { siteId, status: { in: ACTIVE_STATUSES } },
       });
-      if (active) throw new ConflictException('a build is already in progress for this site');
+      if (active) {
+        throw buildHttpError(
+          HttpStatus.CONFLICT,
+          'BUILD_IN_PROGRESS',
+          'a build is already in progress for this site',
+          { buildId: active.id, status: active.status },
+        );
+      }
 
       const startOfDay = new Date();
       startOfDay.setUTCHours(0, 0, 0, 0); // 配额窗口 UTC 化，不随进程 TZ 漂移
@@ -79,14 +109,11 @@ export class BuildsService {
         where: { siteId, createdAt: { gte: startOfDay } },
       });
       if (todayCount >= DAILY_BUILD_LIMIT) {
-        throw new HttpException(
-          {
-            error: {
-              code: 'QUOTA_EXCEEDED',
-              message: `daily build quota reached (${DAILY_BUILD_LIMIT}/day)`,
-            },
-          },
+        throw buildHttpError(
           HttpStatus.TOO_MANY_REQUESTS,
+          'QUOTA_EXCEEDED',
+          `daily build quota reached (${DAILY_BUILD_LIMIT}/day)`,
+          { remaining: Math.max(0, DAILY_BUILD_LIMIT - todayCount) },
         );
       }
 
@@ -116,13 +143,14 @@ export class BuildsService {
         buildRunId: run.id,
         scope: { scope: input.scope, targetId: input.targetId ?? null, options: input.options },
       });
-    } catch (err) {
+    } catch {
       // 站点不动（🔴 refurbish 补偿边界）；run 落 failed，用户可直接重试。
       // 原始错误只进日志；落库/回给租户用泛化文案，不泄内网细节（复审 C6）
-      this.log.error(`launchRefurbish failed for run ${run.id}: ${String(err)}`);
+      this.log.error(`launchRefurbish failed for run ${run.id}: BUILD_LAUNCH_UNAVAILABLE`);
       await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-        await tx.siteBuildRun.update({
-          where: { id: run.id },
+        // launch failure must not reverse a concurrent cancel or a worker terminal write.
+        await tx.siteBuildRun.updateMany({
+          where: { id: run.id, status: { in: ['queued'] } },
           data: {
             status: 'failed',
             error: 'launch failed: orchestrator unavailable',
@@ -130,7 +158,11 @@ export class BuildsService {
           },
         });
       });
-      throw new BadGatewayException('build orchestrator unavailable, safe to retry');
+      throw buildHttpError(
+        HttpStatus.BAD_GATEWAY,
+        'BUILD_LAUNCH_UNAVAILABLE',
+        'build orchestrator unavailable, safe to retry',
+      );
     }
 
     return { buildId: run.id, status: run.status };
@@ -150,20 +182,48 @@ export class BuildsService {
       if (!run) throw new NotFoundException('build not found');
       if (run.kind !== 'refurbish') {
         // demo_v0 秒级完成且无 site-refurbish-* workflow 可取消（复审 C2 附带）
-        throw new ConflictException(`${run.kind} runs cannot be cancelled`);
+        throw buildHttpError(
+          HttpStatus.CONFLICT,
+          'BUILD_NOT_CANCELLABLE',
+          'this build type cannot be cancelled',
+          { kind: run.kind },
+        );
       }
       if (TERMINAL_STATUSES.has(run.status)) {
-        throw new ConflictException(`build already ${run.status}`);
+        throw buildHttpError(
+          HttpStatus.CONFLICT,
+          'BUILD_ALREADY_TERMINAL',
+          'build is already terminal',
+          { status: run.status },
+        );
       }
-      await tx.siteBuildRun.update({
-        where: { id: buildId },
+      const cancelled = await tx.siteBuildRun.updateMany({
+        where: { id: buildId, kind: 'refurbish', status: { in: ACTIVE_STATUSES } },
         data: { status: 'cancelled', finishedAt: new Date() },
       });
+      if (cancelled.count === 1) return;
+
+      // 读后到 CAS 之间 workflow 可能已经落终态；必须忠实返回终态，不能覆盖。
+      const current = await tx.siteBuildRun.findUnique({ where: { id: buildId } });
+      if (current && TERMINAL_STATUSES.has(current.status)) {
+        throw buildHttpError(
+          HttpStatus.CONFLICT,
+          'BUILD_ALREADY_TERMINAL',
+          'build became terminal before cancellation',
+          { status: current.status },
+        );
+      }
+      throw buildHttpError(
+        HttpStatus.CONFLICT,
+        'BUILD_NOT_CANCELLABLE',
+        'build is not cancellable in its current state',
+        { status: current?.status ?? 'unknown' },
+      );
     });
     try {
       await this.launcher.cancelRefurbish(buildId);
-    } catch (err) {
-      this.log.warn(`cancelRefurbish best-effort failed for ${buildId}: ${String(err)}`);
+    } catch {
+      this.log.warn(`cancelRefurbish best-effort failed for ${buildId}: BUILD_CANCEL_UNAVAILABLE`);
     }
     return { buildId, status: 'cancelled' };
   }

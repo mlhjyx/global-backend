@@ -5,10 +5,15 @@ import { TemporalClient } from '../temporal/temporal.client';
 import {
   DELETION_WORKFLOW,
   DISCOVERY_WORKFLOW,
+  ASSET_OBJECT_CLEANUP_WORKFLOW,
   QUALIFY_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
+import {
+  matchesAssetCleanupPayload,
+  parseAssetCleanupCommand,
+} from '../temporal/asset-cleanup.contract';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { seedSanctions } from '../sanctions/sanctions-seed';
 import {
@@ -347,6 +352,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatch(ev: {
+    eventId: string;
     eventType: string;
     workspaceId: string;
     aggregateId: string;
@@ -415,6 +421,34 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `deletion workflow for request ${ev.aggregateId}`,
+      );
+    }
+    if (ev.eventType === 'AssetObjectCleanupRequested') {
+      const payload = (ev.payload ?? {}) as Record<string, unknown>;
+      if (payload.assetId !== ev.aggregateId) {
+        throw new Error('cleanup payload assetId must match Outbox aggregateId');
+      }
+      const command = parseAssetCleanupCommand({
+        eventId: ev.eventId,
+        workspaceId: ev.workspaceId,
+        assetId: ev.aggregateId,
+        siteId: payload.siteId,
+        objectKey: payload.objectKey,
+        objectClass: payload.objectClass,
+        reason: payload.reason,
+        notBefore: payload.notBefore,
+      });
+      if (!matchesAssetCleanupPayload(payload, command)) {
+        throw new Error('cleanup Outbox payload contains unknown or mismatched fields');
+      }
+      await this.startWorkflowIdempotent(
+        ASSET_OBJECT_CLEANUP_WORKFLOW,
+        {
+          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          workflowId: ev.eventId,
+          args: [command],
+        },
+        `asset staging cleanup for event ${ev.eventId}`,
       );
     }
   }

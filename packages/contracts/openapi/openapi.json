@@ -5070,7 +5070,202 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PresignAssetResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "UUID 或请求体格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "素材类型、MIME 或大小不合格",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "对象存储暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5099,7 +5294,292 @@
         ],
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CommitAssetResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Asset UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "未上传、重复、忙或状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "素材内容校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "对象存储暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "提交持久化暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5130,13 +5610,174 @@
             "required": false,
             "in": "query",
             "schema": {
+              "enum": [
+                "logo",
+                "product_image",
+                "factory_image",
+                "cert",
+                "doc",
+                "video"
+              ],
               "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AssetListItemDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Site UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "未知素材 kind",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5165,7 +5806,142 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Asset 已 tombstone"
+          },
+          "400": {
+            "description": "Asset UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Asset 正由 commit/KB worker 持有",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5194,7 +5970,125 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "documents",
+                        "chunks",
+                        "gaps"
+                      ],
+                      "properties": {
+                        "documents": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "chunks": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "gaps": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "field",
+                              "reason",
+                              "hint"
+                            ],
+                            "properties": {
+                              "field": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "hint": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Site UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5242,7 +6136,237 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BuildActionResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "UUID 或 build scope 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BUILD_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "QUOTA_EXCEEDED；details.remaining 为剩余额度",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "BUILD_LAUNCH_UNAVAILABLE；可安全重试",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5271,7 +6395,108 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BuildStatusResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Build UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Build",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5300,7 +6525,151 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BuildActionResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Build UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Build",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -6599,6 +7968,28 @@
           "updatedAt"
         ]
       },
+      "PresignAssetResponseDto": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "assetId",
+          "uploadUrl",
+          "expiresAt"
+        ]
+      },
       "PresignDto": {
         "type": "object",
         "properties": {
@@ -6632,6 +8023,100 @@
           "mime"
         ]
       },
+      "CommitAssetResponseDto": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "processingStatus": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "ready"
+            ]
+          }
+        },
+        "required": [
+          "assetId",
+          "processingStatus"
+        ]
+      },
+      "AssetListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "logo",
+              "product_image",
+              "factory_image",
+              "cert",
+              "doc",
+              "video"
+            ]
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "number"
+          },
+          "processingStatus": {
+            "type": "string"
+          },
+          "contentHash": {
+            "type": "object",
+            "nullable": true
+          },
+          "processingErrorCode": {
+            "type": "object",
+            "nullable": true
+          },
+          "error": {
+            "type": "object",
+            "nullable": true,
+            "description": "泛化错误；不含内部依赖诊断"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "filename",
+          "mime",
+          "sizeBytes",
+          "processingStatus",
+          "createdAt"
+        ]
+      },
+      "BuildActionResponseDto": {
+        "type": "object",
+        "properties": {
+          "buildId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "buildId",
+          "status"
+        ]
+      },
       "CreateBuildDto": {
         "type": "object",
         "properties": {
@@ -6654,6 +8139,98 @@
         },
         "required": [
           "scope"
+        ]
+      },
+      "BuildStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "buildId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "nullable": true
+          },
+          "progress": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "status"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "finishedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "error": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "costSummary": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true,
+            "description": "泛化错误；不含 worker/provider 诊断"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "buildId",
+          "kind",
+          "status",
+          "phase",
+          "progress",
+          "steps",
+          "costSummary",
+          "error",
+          "startedAt",
+          "finishedAt"
         ]
       }
     }
