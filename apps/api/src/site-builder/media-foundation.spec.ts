@@ -15,9 +15,8 @@ function recipe(
   return {
     pipelineVersion: "sharp-v1",
     source: {
-      contentHash: SOURCE_HASH,
-      variantId: null,
-      variantContentHash: null,
+      assetContentHash: SOURCE_HASH,
+      variant: null,
     },
     output: {
       role: "hero",
@@ -67,9 +66,8 @@ describe("AssetVariant recipe hash", () => {
         role: "hero" as const,
       },
       source: {
-        variantContentHash: null,
-        variantId: null,
-        contentHash: SOURCE_HASH,
+        variant: null,
+        assetContentHash: SOURCE_HASH,
       },
       pipelineVersion: "sharp-v1",
     } satisfies AssetVariantRecipe;
@@ -86,9 +84,8 @@ describe("AssetVariant recipe hash", () => {
       "source hash",
       recipe({
         source: {
-          contentHash: "d".repeat(64),
-          variantId: null,
-          variantContentHash: null,
+          assetContentHash: "d".repeat(64),
+          variant: null,
         },
       }),
     ],
@@ -96,9 +93,11 @@ describe("AssetVariant recipe hash", () => {
       "source variant",
       recipe({
         source: {
-          contentHash: SOURCE_HASH,
-          variantId: "00000000-0000-4000-8000-000000000099",
-          variantContentHash: "e".repeat(64),
+          assetContentHash: SOURCE_HASH,
+          variant: {
+            id: "00000000-0000-4000-8000-000000000099",
+            contentHash: "e".repeat(64),
+          },
         },
       }),
     ],
@@ -119,6 +118,42 @@ describe("AssetVariant recipe hash", () => {
     expect(buildAssetVariantRecipeHash(changed)).not.toBe(
       buildAssetVariantRecipeHash(recipe()),
     );
+  });
+
+  it("distinguishes concrete JPEG and PNG fallback encoders", () => {
+    const jpeg = recipe({ output: { ...recipe().output, format: "jpeg" } });
+    const png = recipe({ output: { ...recipe().output, format: "png" } });
+
+    expect(buildAssetVariantRecipeHash(jpeg)).not.toBe(
+      buildAssetVariantRecipeHash(png),
+    );
+  });
+
+  it.each([
+    ["role", { ...recipe(), output: { ...recipe().output, role: "heor" } }],
+    [
+      "format alias",
+      { ...recipe(), output: { ...recipe().output, format: "fallback" } },
+    ],
+    ["fit", { ...recipe(), output: { ...recipe().output, fit: "explode" } }],
+    [
+      "position",
+      { ...recipe(), output: { ...recipe().output, position: "center" } },
+    ],
+    [
+      "source variant UUID",
+      {
+        ...recipe(),
+        source: {
+          assetContentHash: SOURCE_HASH,
+          variant: { id: "not-a-uuid", contentHash: "e".repeat(64) },
+        },
+      },
+    ],
+  ])("rejects a non-canonical %s", (_label, invalid) => {
+    expect(() =>
+      buildAssetVariantRecipeHash(invalid as AssetVariantRecipe),
+    ).toThrow();
   });
 });
 
@@ -162,32 +197,38 @@ describe("derivedKeys compatibility projection", () => {
       sourceHash: SOURCE_HASH,
       variants: {
         hero: {
-          avif: {
-            key: "ws/w/s/generated/hero-1440.avif",
-            width: 1440,
-            height: 810,
-            bytes: 120_000,
-          },
-          webp: {
-            key: "ws/w/s/generated/hero-1440.webp",
-            width: 1440,
-            height: 810,
-            bytes: 135_000,
-          },
+          avif: [
+            {
+              key: "ws/w/s/generated/hero-1440.avif",
+              width: 1440,
+              height: 810,
+              bytes: 120_000,
+            },
+          ],
+          webp: [
+            {
+              key: "ws/w/s/generated/hero-1440.webp",
+              width: 1440,
+              height: 810,
+              bytes: 135_000,
+            },
+          ],
         },
         logo: {
-          fallback: {
-            key: "ws/w/s/generated/logo-640.png",
-            width: 640,
-            height: 320,
-            bytes: 90_000,
-          },
+          fallback: [
+            {
+              key: "ws/w/s/generated/logo-640.png",
+              width: 640,
+              height: 320,
+              bytes: 90_000,
+            },
+          ],
         },
       },
     });
   });
 
-  it("is deterministic, does not mutate input, and chooses one largest output per role/format", () => {
+  it("is deterministic, does not mutate input, and preserves responsive widths in ascending order", () => {
     const smaller = variant({
       id: "00000000-0000-4000-8000-000000000010",
       width: 640,
@@ -217,17 +258,32 @@ describe("derivedKeys compatibility projection", () => {
     });
 
     expect(forward).toEqual(reverse);
-    expect(forward.variants.hero?.avif?.key).toContain("hero-1920.avif");
+    expect(forward.variants.hero?.avif?.map((item) => item.width)).toEqual([
+      640, 1920,
+    ]);
     expect(rows).toEqual(before);
   });
 
-  it("rejects rows from another pipeline instead of mixing generations", () => {
-    expect(() =>
+  it("ignores historical pipelines while projecting the selected generation", () => {
+    expect(
       projectDerivedImageManifest({
-        pipelineVersion: "sharp-v1",
+        pipelineVersion: "sharp-v2",
         sourceHash: SOURCE_HASH,
-        variants: [variant({ pipelineVersion: "sharp-v2" })],
-      }),
-    ).toThrow(/pipeline/i);
+        variants: [
+          variant({ pipelineVersion: "sharp-v1" }),
+          variant({
+            pipelineVersion: "sharp-v2",
+            objectKey: "ws/w/s/generated/hero-v2.avif",
+          }),
+        ],
+      }).variants.hero?.avif,
+    ).toEqual([
+      {
+        key: "ws/w/s/generated/hero-v2.avif",
+        width: 1440,
+        height: 810,
+        bytes: 120_000,
+      },
+    ]);
   });
 });
