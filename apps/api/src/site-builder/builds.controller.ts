@@ -50,6 +50,64 @@ class BuildActionResponseDto {
   status!: string;
 }
 
+class BuildStatusResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  buildId!: string;
+
+  @ApiProperty()
+  kind!: string;
+
+  @ApiProperty()
+  status!: string;
+
+  @ApiProperty({ nullable: true })
+  phase!: string | null;
+
+  @ApiProperty()
+  progress!: number;
+
+  @ApiProperty({ type: 'object', nullable: true, additionalProperties: true })
+  steps!: Record<string, unknown> | null;
+
+  @ApiProperty({ type: 'object', nullable: true, additionalProperties: true })
+  costSummary!: Record<string, unknown> | null;
+
+  @ApiProperty({ nullable: true, description: '泛化错误；不含 worker/provider 诊断' })
+  error!: string | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  startedAt!: Date | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  finishedAt!: Date | null;
+}
+
+const BUILD_ERROR_CODES = [
+  'VALIDATION_ERROR',
+  'NOT_FOUND',
+  'BUILD_IN_PROGRESS',
+  'BUILD_NOT_CANCELLABLE',
+  'BUILD_ALREADY_TERMINAL',
+  'BUILD_LAUNCH_UNAVAILABLE',
+  'QUOTA_EXCEEDED',
+] as const;
+
+const BUILD_ERROR_SCHEMA = {
+  type: 'object',
+  required: ['error'],
+  properties: {
+    error: {
+      type: 'object',
+      required: ['code', 'message'],
+      properties: {
+        code: { type: 'string', enum: [...BUILD_ERROR_CODES] },
+        message: { type: 'string' },
+        details: { type: 'object', additionalProperties: true },
+      },
+    },
+  },
+};
+
 @ApiTags('SiteBuilder')
 @ApiBearerAuth()
 @Controller('site-builder')
@@ -61,9 +119,11 @@ export class BuildsController {
   @HttpCode(201)
   @ApiOperation({ summary: '触发精装修构建（07 §5；409=进行中，429=当日配额）' })
   @ApiEnvelope(BuildActionResponseDto, { status: 201 })
-  @ApiResponse({ status: 409, description: 'BUILD_IN_PROGRESS' })
-  @ApiResponse({ status: 429, description: 'QUOTA_EXCEEDED；details.remaining 为剩余额度' })
-  @ApiResponse({ status: 502, description: 'BUILD_LAUNCH_UNAVAILABLE；可安全重试' })
+  @ApiResponse({ status: 400, description: 'UUID 或 build scope 校验失败', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 Site', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({ status: 409, description: 'BUILD_IN_PROGRESS', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({ status: 429, description: 'QUOTA_EXCEEDED；details.remaining 为剩余额度', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({ status: 502, description: 'BUILD_LAUNCH_UNAVAILABLE；可安全重试', schema: BUILD_ERROR_SCHEMA })
   // name 必须与 @Headers('idempotency-key') 推断名精确一致（含大小写）才会合并成单个 required:false 参数；
   // 大小写不一致会生成两个仅大小写不同的 header 参数，令 oasdiff 把契约与自身误判为破坏性变更（见 company.controller 同款约定）
   @ApiHeader({ name: 'idempotency-key', required: false, description: '幂等键（客户端生成，如 uuid）' })
@@ -80,6 +140,9 @@ export class BuildsController {
 
   @Get('builds/:id')
   @ApiOperation({ summary: '构建进度（轮询；SSE 事件流按 07 §5 后置）' })
+  @ApiEnvelope(BuildStatusResponseDto)
+  @ApiResponse({ status: 400, description: 'Build UUID 格式错误', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 Build', schema: BUILD_ERROR_SCHEMA })
   async get(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) buildId: string,
@@ -104,9 +167,12 @@ export class BuildsController {
   @HttpCode(200)
   @ApiOperation({ summary: '取消构建（终态 409）' })
   @ApiEnvelope(BuildActionResponseDto)
+  @ApiResponse({ status: 400, description: 'Build UUID 格式错误', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 Build', schema: BUILD_ERROR_SCHEMA })
   @ApiResponse({
     status: 409,
     description: 'BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL',
+    schema: BUILD_ERROR_SCHEMA,
   })
   async cancel(
     @Ctx() ctx: RequestContext,

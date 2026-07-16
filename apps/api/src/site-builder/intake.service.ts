@@ -216,6 +216,20 @@ export class IntakeService {
           where: { workspaceId: ctx.workspaceId },
           select: { id: true, status: true },
         });
+        if (existing) {
+          // Share the same per-site lock as POST /sites/:id/builds. A setup_failed re-intake
+          // must not race a refurbish request into two active runs for one Site.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-${existing.id}`}))`;
+          const active = await tx.siteBuildRun.findFirst({
+            where: { siteId: existing.id, status: { in: ['queued', 'running'] } },
+            select: { id: true },
+          });
+          if (active) {
+            throw new ConflictException(
+              structuredError('SITE_LIMIT_REACHED', 'workspace site already has an active build'),
+            );
+          }
+        }
         // setup_failed 是异步终态失败留痕；新请求（通常新 key）在同一 Site 上重建 run。
         if (existing && existing.status !== "setup_failed") {
           throw new ConflictException(
@@ -293,9 +307,9 @@ export class IntakeService {
           recovered.firstExecutionRunId,
         );
         return prepared.response;
-      } catch (error) {
+      } catch {
         this.log.error(
-          `demo v0 ACK recovery failed for build ${prepared.response.buildId}: ${String(error)}`,
+          `demo v0 ACK recovery failed for build ${prepared.response.buildId}: DEMO_ACK_RECOVERY_UNAVAILABLE`,
         );
         throw this.unavailable(Boolean(idempotencyKey));
       }
@@ -304,9 +318,9 @@ export class IntakeService {
     let launch: { firstExecutionRunId: string };
     try {
       launch = await this.demoLauncher.launchDemoV0(launchInput);
-    } catch (error) {
+    } catch {
       this.log.error(
-        `demo v0 launch failed for build ${prepared.response.buildId}: ${String(error)}`,
+        `demo v0 launch failed for build ${prepared.response.buildId}: DEMO_LAUNCH_UNAVAILABLE`,
       );
 
       if (idempotencyKey) {
@@ -348,9 +362,9 @@ export class IntakeService {
         launch.firstExecutionRunId,
       );
       return prepared.response;
-    } catch (error) {
+    } catch {
       this.log.error(
-        `demo v0 ACK persistence failed for build ${prepared.response.buildId}: ${String(error)}`,
+        `demo v0 ACK persistence failed for build ${prepared.response.buildId}: DEMO_ACK_PERSIST_UNAVAILABLE`,
       );
       throw this.unavailable(Boolean(idempotencyKey));
     }

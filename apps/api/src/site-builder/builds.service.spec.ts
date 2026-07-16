@@ -20,7 +20,7 @@ function makeService(
     siteExists?: boolean;
     existingRuns?: Record<string, unknown>[];
     launcher?: Partial<RefurbishLauncher>;
-    beforeCancelCas?: (run: Record<string, unknown>) => void;
+    beforeCancelCas?: (run: Record<string, unknown>, data: Record<string, unknown>) => void;
   } = {},
 ) {
   const db: FakeDb = {
@@ -83,7 +83,7 @@ function makeService(
       }) => {
         const row = db.runs.find((r) => r.id === where.id);
         if (!row) return { count: 0 };
-        opts.beforeCancelCas?.(row);
+        opts.beforeCancelCas?.(row, data);
         if (where.kind && row.kind !== where.kind) return { count: 0 };
         if (where.status?.in && !where.status.in.includes(row.status as string)) return { count: 0 };
         Object.assign(row, data);
@@ -215,6 +215,27 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
     expect(errorContract(err)).toMatchObject({ status: 502, code: 'BUILD_LAUNCH_UNAVAILABLE' });
     expect(db.sites).toHaveLength(1); // 🔴 refurbish 失败不删用户站（与 demo_v0 补偿相反）
     expect((db.runs[0] as Record<string, unknown>).status).toBe('failed');
+  });
+
+  it('launch failure CAS：不把并发 cancelled/worker terminal 反向覆盖成 failed', async () => {
+    const { service, db } = makeService({
+      launcher: {
+        launchRefurbish: async () => {
+          throw new Error('simulated ACK loss');
+        },
+      },
+      beforeCancelCas: (row, data) => {
+        if (data.status === 'failed') {
+          row.status = 'cancelled';
+          row.finishedAt = new Date('2026-07-17T00:00:00.000Z');
+        }
+      },
+    });
+
+    const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
+
+    expect(errorContract(err)).toMatchObject({ status: 502, code: 'BUILD_LAUNCH_UNAVAILABLE' });
+    expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
   });
 });
 

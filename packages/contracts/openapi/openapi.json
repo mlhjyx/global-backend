@@ -6153,14 +6153,220 @@
               }
             }
           },
+          "400": {
+            "description": "UUID 或 build scope 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "409": {
-            "description": "BUILD_IN_PROGRESS"
+            "description": "BUILD_IN_PROGRESS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "429": {
-            "description": "QUOTA_EXCEEDED；details.remaining 为剩余额度"
+            "description": "QUOTA_EXCEEDED；details.remaining 为剩余额度",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "502": {
-            "description": "BUILD_LAUNCH_UNAVAILABLE；可安全重试"
+            "description": "BUILD_LAUNCH_UNAVAILABLE；可安全重试",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -6189,7 +6395,108 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BuildStatusResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Build UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Build",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -6235,8 +6542,134 @@
               }
             }
           },
+          "400": {
+            "description": "Build UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Build",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "409": {
-            "description": "BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL"
+            "description": "BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -7706,6 +8139,65 @@
         },
         "required": [
           "scope"
+        ]
+      },
+      "BuildStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "buildId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "object",
+            "nullable": true
+          },
+          "progress": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "costSummary": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "nullable": true,
+            "description": "泛化错误；不含 worker/provider 诊断"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "buildId",
+          "kind",
+          "status",
+          "phase",
+          "progress",
+          "steps",
+          "costSummary",
+          "error",
+          "startedAt",
+          "finishedAt"
         ]
       }
     }

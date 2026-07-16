@@ -192,8 +192,8 @@ export class AssetsController {
       // 触发失败=文档留 queued（refurbish P1 / 下次 commit 再扫），不影响 commit 秒回。
       void this.kbLauncher
         .launchKbIngest({ workspaceId: ctx.workspaceId, siteId: row.siteId, assetId: row.id })
-        .catch((err) => {
-          this.log.warn(`kb ingest launch failed for site ${row.siteId}: ${String(err)}`);
+        .catch(() => {
+          this.log.warn(`kb ingest launch failed for site ${row.siteId}: KB_LAUNCH_UNAVAILABLE`);
         });
     }
     return envelope({ assetId: row.id, processingStatus: row.processingStatus });

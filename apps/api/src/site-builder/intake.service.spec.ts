@@ -114,6 +114,10 @@ function makeService(
     siteBuildRun: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         db.runs.find((run) => run.id === where.id) ?? null,
+      findFirst: async ({ where }: { where: { siteId: string; status: { in: string[] } } }) =>
+        db.runs.find(
+          (run) => run.siteId === where.siteId && where.status.in.includes(String(run.status)),
+        ) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { id: `run-${++runSeq}`, temporalRunId: null, ...data };
         db.runs.push(row);
@@ -414,6 +418,23 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     );
     expect(db.runs).toHaveLength(0);
     expect(db.keys).toHaveLength(0);
+  });
+
+  it('setup_failed Site 上已有 active refurbish 时拒绝 re-intake，保持全站单飞', async () => {
+    const { service, db } = makeService({ existingSite: true, existingStatus: 'setup_failed' });
+    db.runs.push({
+      id: 'refurbish-running',
+      siteId: 'site-existing',
+      kind: 'refurbish',
+      status: 'running',
+    });
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, 'new-intake-key'),
+      HttpStatus.CONFLICT,
+      'SITE_LIMIT_REACHED',
+    );
+    expect(db.runs).toHaveLength(1);
   });
 
   it("有 key 的 launch 首次不确定失败：502 稳定码且保留账本；同 key 重试同一 build 并补写 ACK", async () => {

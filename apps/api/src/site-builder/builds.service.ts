@@ -143,13 +143,14 @@ export class BuildsService {
         buildRunId: run.id,
         scope: { scope: input.scope, targetId: input.targetId ?? null, options: input.options },
       });
-    } catch (err) {
+    } catch {
       // 站点不动（🔴 refurbish 补偿边界）；run 落 failed，用户可直接重试。
       // 原始错误只进日志；落库/回给租户用泛化文案，不泄内网细节（复审 C6）
-      this.log.error(`launchRefurbish failed for run ${run.id}: ${String(err)}`);
+      this.log.error(`launchRefurbish failed for run ${run.id}: BUILD_LAUNCH_UNAVAILABLE`);
       await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-        await tx.siteBuildRun.update({
-          where: { id: run.id },
+        // launch failure must not reverse a concurrent cancel or a worker terminal write.
+        await tx.siteBuildRun.updateMany({
+          where: { id: run.id, status: { in: ['queued'] } },
           data: {
             status: 'failed',
             error: 'launch failed: orchestrator unavailable',
@@ -221,8 +222,8 @@ export class BuildsService {
     });
     try {
       await this.launcher.cancelRefurbish(buildId);
-    } catch (err) {
-      this.log.warn(`cancelRefurbish best-effort failed for ${buildId}: ${String(err)}`);
+    } catch {
+      this.log.warn(`cancelRefurbish best-effort failed for ${buildId}: BUILD_CANCEL_UNAVAILABLE`);
     }
     return { buildId, status: 'cancelled' };
   }
