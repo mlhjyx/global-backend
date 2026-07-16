@@ -1,11 +1,11 @@
 # 贡献指南（团队协作流程）
 
-> 面向团队成员与 Claude Code 会话。权威简版另见 [CLAUDE.md §8](CLAUDE.md)。
+> 面向团队成员与 Codex 会话。权威简版另见 [AGENTS.md §8](AGENTS.md)。
 
 ## 分支
 
 - **不在 `main` 上直接提交**。`main` 受保护，只经 PR 合入。
-- 功能分支：`feat/<topic>`、修复 `fix/<topic>`、文档 `docs/<topic>`，从最新 `main` 切出。
+- Codex 开发分支统一使用 `codex/<topic>`，从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
 
 ## 提交信息（Conventional Commits）
 
@@ -21,10 +21,10 @@ pnpm --filter @global/api build            # nest build = tsc 全量类型检查
 pnpm --filter @global/api test             # vitest
 ```
 
-**provider / 采集 / 富集类改动**：另需**真实数据实测**（无 sandbox，见 [CLAUDE.md §5](CLAUDE.md)）：
+**provider / 采集 / 富集类改动**：另需**真实数据实测**（无 sandbox，见 [AGENTS.md §5](AGENTS.md)）：
 
 ```bash
-cd apps/api && node --import tsx scripts/verify-*.mts
+cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts
 ```
 
 ## Pull Request
@@ -42,11 +42,11 @@ cd apps/api && node --import tsx scripts/verify-*.mts
 
 | 级别 | 例子 | 处理 |
 |---|---|---|
-| 琐碎 | 错别字、注释、单行配置、文档措辞 | **不单独发 PR**——搭下一个功能 PR，或攒成一个滚动 `chore:` PR；CI 绿 auto-merge |
-| 小改 | 一个 bug 修复、小功能、一份文档 | 独立 PR（一个逻辑单元一起，别拆）；低风险 auto-merge |
-| 实质 | schema/RLS/鉴权/迁移/对外抓取/大量删除/合规 | 独立 PR + **人审**（merge-judge 升级到人），不 auto-merge |
+| 琐碎 | 错别字、注释、单行配置、文档措辞 | **不单独发 PR**——搭下一个功能 PR，或攒成一个滚动 `chore:` PR；仍须 CI/审查绿 + 用户确认 |
+| 小改 | 一个 bug 修复、小功能、一份文档 | 独立 PR（一个逻辑单元一起，别拆）；CI/审查绿 + 用户确认 |
+| 实质 | schema/RLS/鉴权/迁移/对外抓取/大量删除/合规 | 独立 PR + **Codex 专项复核 + 用户明确确认**，不自动合并 |
 
-三条硬规矩：① 一逻辑改动一 PR（不碎）；② 琐碎搭车不单开；③ 风险类永远人审。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
+三条硬规矩：① 一逻辑改动一 PR（不碎）；② 琐碎搭车不单开；③ Codex 不得自行合并，所有 PR 都须用户明确确认，风险类另加专项人审。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
 
 ## 合规红线（涉数据源/联系人）
 

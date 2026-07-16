@@ -1,5 +1,5 @@
 /**
- * openFDA P1 器械注册发现 —— 真实数据端到端（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * openFDA P1 器械注册发现 —— 真实数据端到端（真库真 API，无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑；new-api 网关在跑（fit 门用）。真 ICP：放射影像器械，找**美国进口商**（渠道侧）
  * → product code LLZ + `initial_importer_flag:Y`。
  *

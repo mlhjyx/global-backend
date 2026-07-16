@@ -8,8 +8,8 @@
  *    → brand_profile v1 落库、factSheet 全带合法 evidence、gaps 结构合规
  * ④ kb/status gaps 回填 + 重跑版本追加（v2，append-only）
  *
- * 依赖：docker compose up -d postgres minio embeddings docling searxng crawl4ai new-api
- * 跑：cd apps/api && node --import tsx scripts/verify-site-builder-m1b.mts
+ * 依赖：docker compose -p global up -d postgres minio embeddings docling searxng crawl4ai new-api
+ * 跑：cd /global/backend/apps/api && node --import tsx scripts/verify-site-builder-m1b.mts
  */
 import 'dotenv/config';
 import 'reflect-metadata';

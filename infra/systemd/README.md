@@ -1,6 +1,6 @@
 # systemd units — 开机自启 API + Temporal worker
 
-Ubuntu 服务器（见 [CLAUDE.md §3](../../CLAUDE.md)）上让**后端 API 与 Temporal worker 开机自启、崩溃自愈**的两个 systemd 单元。跑**构建产物**（`node dist/*.js`，非 watch），由 systemd 托管；配合 docker 整栈 + `temporal-dev.service`，重启后整栈自恢复。
+Ubuntu 服务器（见 [AGENTS.md §3](../../AGENTS.md)）上让**后端 API 与 Temporal worker 开机自启、崩溃自愈**的两个 systemd 单元。跑**构建产物**（`node dist/*.js`，非 watch），由 systemd 托管；配合 docker 整栈 + `temporal-dev.service`，重启后整栈自恢复。
 
 | 单元 | 进程 | 端口/职责 |
 |---|---|---|
@@ -17,6 +17,7 @@ Ubuntu 服务器（见 [CLAUDE.md §3](../../CLAUDE.md)）上让**后端 API 与
 ## 安装
 
 ```bash
+cd /global/backend
 # 1) 建 symlink（改了本仓文件即生效，比 cp 好）
 sudo ln -sf /global/backend/infra/systemd/global-api.service    /etc/systemd/system/global-api.service
 sudo ln -sf /global/backend/infra/systemd/global-worker.service /etc/systemd/system/global-worker.service

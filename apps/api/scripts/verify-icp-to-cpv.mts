@@ -1,5 +1,5 @@
 /**
- * P2 ICP→CPV 映射 —— 真库 + 真 API 端到端（无 sandbox，CLAUDE.md §5）。
+ * P2 ICP→CPV 映射 —— 真库 + 真 API 端到端（无 sandbox，AGENTS.md §5）。
  * **前置**：先跑 `node --import tsx scripts/seed-taxonomy.mjs`（写入 CPV 子树 + node 28 crosswalk）。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \

@@ -44,7 +44,8 @@ Temporal 固定 DAG → 有界 AI Task / Docling / BGE-M3 → SiteSpec 1.0.0
 
 - 类型边界：`@global/contracts` 的 `SiteSpec` 1.0.0 是 API 生产端与 Astro 消费端唯一共享类型（DQ-1/#117）；运行时 Zod 门与 1.1.0 目标字段尚未落地，不得写成 as-built。
 - truth-sync 审计基线（合并前）为 `main@a306ffa`（#124）。#121 已去 intake **行为分叉**，#123/#124 已落事实安全、隐私、可取消超时和失败保站；但 intake OpenAPI 仍无 `Idempotency-Key`，返回 DTO 仍有 `mode` 且无 `buildId`，Swagger 仍写旧诊断分支。当前 renderer 产物键仍是 `local:` 路径；不可变 Release 尚属目标态。
-- 当前关键路径：R0 contract closeout → R1-safety → R2-A（Asset/KB/Profile 分拆）→ MF-0-thin（含引用扫描器与删除 409）→ M1-c（纯 Sharp）。在引用扫描器落地前，不得把 canonical object 自动清理写成安全能力。
+- 当前关键路径：R0 contract closeout → R1-safety（临时/子进程隔离 + Crawl/robots 全链 egress/SSRF）→ R2-A（Asset/KB/Profile 分拆）→ MF-0-thin（含引用扫描器与删除 409）→ M1-c（纯 Sharp）。在引用扫描器落地前，不得把 canonical object 自动清理写成安全能力。
+- 🔴 **开发环境 egress 例外**：当前 Ubuntu mihomo fake-IP 将公网域名解析到 `198.18.0.0/16`；本地 Compose 为保持真源验证暂开 `CRAWL4AI_ALLOW_INTERNAL_URLS=true`，并将 `:11235` 收口到 loopback。该开关关闭 Crawl4AI 原生目的地址守卫；`websiteUrl` 可经 API/brand research 驱动 Crawl4AI，`robots.txt` 又有独立直连，所以 loopback 只减少直连暴露，不能作为 SSRF 已闭环的证据。这是 R1-safety 立即项：未收口前本地仅允许开发者核验的公网 URL；安全/infra 子 PR 须改为真实 DNS/可校验 egress 或逐跳 URL guard，覆盖 Crawl4AI + robots，关闭例外并完成公网正例 + private/loopback/metadata/DNS-rebinding/redirect 反例。
 
 ## 2. Bounded Contexts（9 个）
 

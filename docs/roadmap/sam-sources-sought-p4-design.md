@@ -132,7 +132,7 @@ sweep ─┬─ ingestSam（每 window 一次）: CSV 303→S3 →流式 filter 
 
 ## 9. 与既有线的关系
 
-- 是买家智能 P1「免费外部源」里 **TED v3 线的 P4 = SAM.gov Sources Sought**（CLAUDE.md §6）——早于 TED 招标/openFDA 清关的**招标前**意图。
+- 是买家智能 P1「免费外部源」里 **TED v3 线的 P4 = SAM.gov Sources Sought**（AGENTS.md §6）——早于 TED 招标/openFDA 清关的**招标前**意图。
 - 复用管线**零新 SourceClass**（归 `public_intelligence`），零 schema 迁移，纯增量。
 - 后续：P4.x Award notice（中标 prime=可成单客户，走个体户拒收）· PSC 精修 · 品类市场意图聚合层（§7.2）。
 

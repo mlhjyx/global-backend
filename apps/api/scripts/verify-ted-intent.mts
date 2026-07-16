@@ -1,5 +1,5 @@
 /**
- * TED P3 招标公告 → Intent 投影 —— 真实数据端到端（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * TED P3 招标公告 → Intent 投影 —— 真实数据端到端（真库真 API，无 sandbox，AGENTS.md §5）。
  * 收口⑤两层架构：**平台摄取**（SignalIngestService → source_signal 一等事实 + signal_ingest 账本，
  * ingest-once）+ **投影只读平台表**（TedIntentProjectionService 不再出网）。
  * 需 postgres 在跑（gateway 不需要——本链路不过 fit 门，Intent 维为确定性计算）。

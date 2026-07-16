@@ -6,8 +6,8 @@
  * ④素材直传→commit 安全闸→KB 摄入（真 MinIO + 真 BGE-M3 1024 维）→语义检索命中
  * ⑤RLS 隔离证明（app_user + is_superuser guard；B 租户看不见 A 的一切）。
  *
- * 依赖：docker compose up -d postgres minio embeddings（docling 可选，§4 软检查）。
- * 跑：cd apps/api && node --import tsx scripts/verify-site-builder-m0.mts
+ * 依赖：docker compose -p global up -d postgres minio embeddings（docling 可选，§4 软检查）。
+ * 跑：cd /global/backend/apps/api && node --import tsx scripts/verify-site-builder-m0.mts
  */
 import 'dotenv/config';
 import 'reflect-metadata';

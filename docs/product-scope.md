@@ -72,7 +72,7 @@ Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost /
 - **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
 - **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
 - **truth-sync 审计基线 as-built（合并前 `main@a306ffa`，#124）**：M0 快路径、Astro 渲染器、DQ-1 SiteSpec 1.0.0、素材/KB/构建端点已存在；#121 已实现 intake 无条件触发 demo 的行为，#123/#124 已完成禁虚构身份、businessEmail 隔离、可取消超时和失败保站。
-- **尚未完成**：#121 没有同步完成 intake 目标契约；`Idempotency-Key`、响应 `buildId`、去 `mode` 和 Swagger/OpenAPI 更正仍是 R0 contract closeout。之后关键路径为 R1-safety → 拆分后的 R2-A → MF-0-thin → M1-c 纯 Sharp。
+- **尚未完成**：#121 没有同步完成 intake 目标契约；`Idempotency-Key`、响应 `buildId`、去 `mode` 和 Swagger/OpenAPI 更正仍是 R0 contract closeout。之后关键路径为 R1-safety（临时/子进程隔离 + Crawl/robots 全链 egress/SSRF）→ 拆分后的 R2-A → MF-0-thin → M1-c 纯 Sharp。
 - **权威规则**：承重决策只进 ADR-013~019；具体产品/施工真值在 Site Builder 00–14。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
 
 ## 5. 业务层级四层（PDR-002，已收敛=交付包 TA-003，待 A/B 会签）

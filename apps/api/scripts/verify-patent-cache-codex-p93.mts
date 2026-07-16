@@ -1,5 +1,5 @@
 /**
- * Codex PR #93 复审 7 findings 真库回归（无 sandbox，CLAUDE.md §5）——**零 BigQuery 成本**：
+ * Codex PR #93 复审 7 findings 真库回归（无 sandbox，AGENTS.md §5）——**零 BigQuery 成本**：
  * 注入确定性 mock scanner 到 refreshPatentCache（实现 searchInventorsForAnchorsWithStats），
  * 证明 DB 层修复（真 prisma client + 真 grants + 真 dataProvider kill-switch + 真墓碑 upsert/skip），BQ 一次不打。
  *

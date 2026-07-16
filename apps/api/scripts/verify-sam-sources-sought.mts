@@ -1,5 +1,5 @@
 /**
- * SAM.gov Sources Sought P4 → Intent 投影 —— 真实数据端到端（真库真 CSV，无 sandbox，CLAUDE.md §5）。
+ * SAM.gov Sources Sought P4 → Intent 投影 —— 真实数据端到端（真库真 CSV，无 sandbox，AGENTS.md §5）。
  * 镜像 TED P3 五段证明，但落 SAM 特性：
  *   - 摄取「下载一次」：指纹 NAICS 无关（仅 sinceDays+maxRecords）→ 全 ICP 收敛到一次 CSV 下载；投影层按 NAICS 子树过滤。
  *   - 美国联邦市场：投影无 alpha-2 国别过滤；买方国别恒 US。

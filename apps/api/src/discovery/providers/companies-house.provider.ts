@@ -125,7 +125,7 @@ export class CompaniesHouseContactProvider implements ContactDiscoveryAdapter {
       this.log(`✓ ${company.name} → ${best.item.companyNumber} (${best.score.toFixed(2)}): ${contacts.length} active directors`);
       return { contacts, costCents: 0 };
     } catch (err) {
-      // fail-safe：单源失败/闸门拒绝不阻断其余源（CLAUDE.md §5）；拒绝原因已入 Broker DENIED trace。
+      // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
       this.log(`discover failed: ${String(err).slice(0, 150)}`);
       return { contacts: [], costCents: 0 };
     }

@@ -14,7 +14,7 @@
 ### 当前关键路径与退出门
 
 1. **R0 contract closeout**：intake 支持 `Idempotency-Key`，返回 `{siteId, buildId, status}`，移除 `mode`，同步 Swagger/OpenAPI 与稳定错误码。#121 没做这些，R0 不能整体标完成。
-2. **R1-safety**：先落临时/构建文件 `finally` 清理与 renderer 子进程 env allowlist；R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可并行，但必须在 M1-e 可见预览前完成。
+2. **R1-safety**：这是 R0 后立即执行的安全收口，可拆成两个小 PR：(a) 临时/构建文件 `finally` 清理 + renderer 子进程 env allowlist；(b) 安全/infra PR 替换 Ubuntu fake-IP 开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 例外。(b) 必须覆盖 `IntakeDto.websiteUrl → brand research → crawl4ai` 和 `robots.txt` 直连两类入口，使用真实 DNS/可校验 egress 或逐跳 URL guard，关闭例外，并通过公网正例与 private/loopback/metadata/DNS-rebinding/redirect 反例。未通过前本地仅接受开发者核验的公网 URL，不得开放不可信租户输入或生产抓取。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可并行，但必须在 M1-e 可见预览前完成。
 3. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset 状态机/CAS/fencing；R2-A2 KB lease/fencing/retry/幂等；R2-A3 Profile schema/乐观并发；R2-A4 Outbox/Temporal cleanup、redrive 与真实集成验证。禁止合成一个 migration/API/状态机 mega PR。
 4. **MF-0-thin**：`AssetVariant` + RLS/FORCE RLS、recipe/checksum/provenance、SiteSpec 引用扫描器、删除 409、`derivedKeys` 兼容投影。在引用扫描器落地前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
 5. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。

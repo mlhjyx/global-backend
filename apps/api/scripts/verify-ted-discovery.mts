@@ -1,5 +1,5 @@
 /**
- * TED P1 中标发现 —— 真实数据端到端（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * TED P1 中标发现 —— 真实数据端到端（真库真 API，无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑；new-api 网关在跑（fit 门用）。一个真 ICP：泵 + 德国 → CPV 42120000 + DEU。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \

@@ -1,6 +1,6 @@
 /**
  * 收口⑥ PR-B 竞态硬化真库验证（无 sandbox）——Codex P1/P2 on PR #63 的四条 race/计数修复。
- * 运行：cd apps/api && node --import tsx scripts/verify-deletion-race-hardening.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-deletion-race-hardening.mts
  *
  * 覆盖：
  *   F1 Recompute counts — company 删除：冻结后新增漏网联系人 → 擦除计数/回执取**真实擦除面**（非冻结快照）。

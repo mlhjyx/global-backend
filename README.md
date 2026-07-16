@@ -20,7 +20,7 @@ truth-sync 审计基线（合并前）为 `main@a306ffa`（#124）：#121 已落
 | 全平台顶层基底（L0/L1） | [docs/platform/](docs/platform/) 交付包（待批准评审稿） |
 | 研究归档 | [docs/research/](docs/research/)（含冻结的 v3.0 相关研究；两份 v3.0 Word 评审稿=研究综合稿，不再是权威基线） |
 
-> 跨会话工程上下文：[CLAUDE.md](CLAUDE.md)（Claude）/ [AGENTS.md](AGENTS.md)（Codex）。
+> 跨会话工程上下文与现行规则只读 [AGENTS.md](AGENTS.md)；[CLAUDE.md](CLAUDE.md) 仅为旧 Claude Code 入口兼容。
 
 ## 技术栈（as-built）
 
@@ -42,19 +42,20 @@ docker-compose.yml   8 服务：PG/Redis/new-api/crawl4ai/MinIO/embeddings/Docli
 ## 本地起步
 
 ```bash
+cd /global/backend
 pnpm install
 docker compose -p global up -d             # 8 个 global-* 服务
-cd packages/db && DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \
-  pnpm exec prisma migrate deploy && pnpm exec prisma generate
-DATABASE_URL=... node apps/api/scripts/seed-taxonomy.mjs   # 词表种子（先 build）
+DATABASE_URL=postgresql://global:global@localhost:5432/global_dev pnpm --filter @global/db exec prisma migrate deploy
+pnpm --filter @global/db generate
 systemctl status temporal-dev              # Ubuntu 26.04：Temporal :7233 由 systemd 托管
 pnpm --filter @global/contracts build
 pnpm --filter @global/api build
+DATABASE_URL=postgresql://global:global@localhost:5432/global_dev node apps/api/scripts/seed-taxonomy.mjs
 pnpm --filter @global/api start:dev        # API（含 Outbox relay），门户 /api/portal
 pnpm --filter @global/api worker           # Temporal worker（启动时幂等 seed + ensure 4 个 Schedule）
-cd apps/api && pnpm test                   # vitest；以本次命令输出为准，不在 README 固化计数
+pnpm --filter @global/api test             # vitest；以本次命令输出为准，不在 README 固化计数
 ```
 
-Provider/采集/富集类改动**必须真实数据实测**（`node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 CLAUDE.md §8。
+Provider/采集/富集类改动**必须真实数据实测**（`cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md §8](AGENTS.md)。
 
 > 当前施工环境为 Ubuntu 26.04 `/global/backend`。需要 Node ≥ 20、pnpm、Docker；Temporal 开发服务由 `temporal-dev.service` 管理。

@@ -3,7 +3,7 @@
  *  ① PrismaService（扩展 client）写联系人 → 读回得**明文**（解密）；
  *  ② owner 裸 client 读同一行 → full_name / contact_point.value 是**密文**（enc:v1:）；
  *  ③ 同 email 重 upsert 幂等（确定性密文使唯一键成立，不产生重复行）。
- * 运行：cd apps/api && node --import tsx scripts/verify-pii-smoke.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-pii-smoke.mts
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';

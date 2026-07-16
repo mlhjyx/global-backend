@@ -51,7 +51,7 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
       );
       companies = res.data.companies ?? [];
     } catch (err) {
-      // fail-safe：单源失败/闸门拒绝不阻断其余源（CLAUDE.md §5）；拒绝原因已入 Broker DENIED trace
+      // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
        
       console.warn(`[wikidata] discover failed: ${String(err).slice(0, 150)}`);
       return { records: [], costCents: 0 };

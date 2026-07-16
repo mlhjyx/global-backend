@@ -2,7 +2,7 @@ name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
 # 绿了才合。测试是纯单测（解析器/评分/身份解析等纯函数，无 DB/网络），故 CI 不需要 Postgres/服务。
-# 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 CLAUDE.md §5「真实数据不用 sandbox」），不进 CI。
+# 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 AGENTS.md §5「真实数据不用 sandbox」），不进 CI。
 # contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
 # pull_request 加 labeled/unlabeled：打/摘 `breaking-change-approved` label 要重估 breaking 门。
 

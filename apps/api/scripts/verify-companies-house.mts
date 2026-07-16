@@ -1,5 +1,5 @@
 /**
- * 待办 3 · UK Companies House 身份源 —— 真库真 API 端到端（无 sandbox，CLAUDE.md §5）。
+ * 待办 3 · UK Companies House 身份源 —— 真库真 API 端到端（无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑；COMPANIES_HOUSE_API_KEY 在 .env。真英国公司 = AstraZeneca（GB）。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \

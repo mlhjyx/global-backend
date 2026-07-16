@@ -1,5 +1,5 @@
 /**
- * 待办 3 · 法国 dirigeants 身份源（INPI RNE 经开放政务网关）—— 真库真 API 端到端（无 sandbox，CLAUDE.md §5）。
+ * 待办 3 · 法国 dirigeants 身份源（INPI RNE 经开放政务网关）—— 真库真 API 端到端（无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑；**无 API key**（开放 API）。真法国公司 = WILO FRANCE（FR，泵企，clean align）。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \
