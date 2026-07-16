@@ -15,6 +15,8 @@ const hardeningMigrationPath =
   "packages/db/prisma/migrations/20260717041000_site_builder_asset_variant_provenance_hardening/migration.sql";
 const ledgerIdentityMigrationPath =
   "packages/db/prisma/migrations/20260717042000_site_builder_asset_variant_ledger_identity/migration.sql";
+const sourceReadinessMigrationPath =
+  "packages/db/prisma/migrations/20260717043000_site_builder_asset_variant_source_readiness/migration.sql";
 
 describe("MF0-A AssetVariant migration integrity", () => {
   it("adds the tenant-scoped materialized variant and its complete provenance", () => {
@@ -130,5 +132,14 @@ describe("MF0-A AssetVariant migration integrity", () => {
     expect(sql).toMatch(/NEW\."id"[\s\S]+OLD\."id"/);
     expect(sql).toMatch(/NEW\."created_at"[\s\S]+OLD\."created_at"/);
     expect(sql).toContain("AssetVariant ledger identity is immutable after insert");
+  });
+
+  it("requires every derived Variant source to be ready and checksummed", () => {
+    const sql = repositoryFile(sourceReadinessMigrationPath);
+
+    expect(sql).toMatch(/source_variant_id[\s\S]+status[\s\S]+ready/i);
+    expect(sql).toMatch(/source_variant_id[\s\S]+content_hash[\s\S]+IS NOT NULL/i);
+    expect(sql).toMatch(/BEFORE INSERT OR UPDATE ON "asset_variant"/i);
+    expect(sql).toContain("AssetVariant source must be ready and checksummed");
   });
 });
