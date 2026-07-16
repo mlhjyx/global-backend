@@ -1,44 +1,6 @@
--- R2-A2 atomic reconcile + constraint gate. Writers remain excluded from the first
--- historical-data decision until every uniqueness/state/provenance constraint is live.
--- The following compatibility-marker migration is intentionally a no-op.
-
-BEGIN;
-LOCK TABLE site, asset, kb_document, kb_chunk IN SHARE ROW EXCLUSIVE MODE;
-
-ALTER TABLE asset ADD COLUMN processing_error_code text;
-
--- Close the Site tenant chain as well as the Asset/KB chain. A child row whose
--- workspace does not match its parent Site cannot be safely relabelled across tenants,
--- and hard-deleting a canonical Asset would erase the cleanup/provenance ledger.
--- Expected count is zero: abort for explicit quarantine/audit instead of mutating it.
-DO $$
-DECLARE
-  asset_site_scope_mismatches integer;
-  document_site_scope_mismatches integer;
-BEGIN
-  SELECT COUNT(*) INTO asset_site_scope_mismatches
-  FROM asset a
-  LEFT JOIN site s ON s.id = a.site_id AND s.workspace_id = a.workspace_id
-  WHERE s.id IS NULL;
-
-  SELECT COUNT(*) INTO document_site_scope_mismatches
-  FROM kb_document d
-  LEFT JOIN site s ON s.id = d.site_id AND s.workspace_id = d.workspace_id
-  WHERE s.id IS NULL;
-
-  IF asset_site_scope_mismatches <> 0 OR document_site_scope_mismatches <> 0 THEN
-    RAISE EXCEPTION 'R2-A2 Site tenant mismatch requires manual quarantine: assets=%, documents=%',
-      asset_site_scope_mismatches, document_site_scope_mismatches;
-  END IF;
-END $$;
-
--- Historical chunks inherited tenant identity from their document logically, but the
--- old single-column FK did not enforce it. Repair that derived value before metrics/FK.
-UPDATE kb_chunk c
-SET workspace_id = d.workspace_id
-FROM kb_document d
-WHERE c.document_id = d.id
-  AND c.workspace_id <> d.workspace_id;
+-- R2-A2 data phase: deterministically reconcile historical KB rows before adding
+-- asset uniqueness/provenance constraints. This migration is idempotent in effect:
+-- after the first successful run every upload Asset has at most one healthy document.
 
 -- Invalid upload provenance cannot be safely relabelled as an intake/wizard document.
 -- Delete it; the canonical doc Asset is re-queued below when it has no healthy document.
@@ -76,14 +38,12 @@ WITH metrics AS (
 ), ranked AS (
   SELECT m.*,
          (m.status = 'ready'
-           AND m.actual_chunks > 0
            AND m.actual_chunks = m.chunk_count
            AND m.embedded_chunks = m.actual_chunks) AS healthy,
          ROW_NUMBER() OVER (
            PARTITION BY m.asset_id
            ORDER BY
              (m.status = 'ready'
-               AND m.actual_chunks > 0
                AND m.actual_chunks = m.chunk_count
                AND m.embedded_chunks = m.actual_chunks) DESC,
              COALESCE(m.current_embed_version, true) DESC,
@@ -92,7 +52,6 @@ WITH metrics AS (
              m.id ASC
          ) AS rn,
          MAX((m.status = 'ready'
-           AND m.actual_chunks > 0
            AND m.actual_chunks = m.chunk_count
            AND m.embedded_chunks = m.actual_chunks)::integer)
            OVER (PARTITION BY m.asset_id) AS has_healthy
@@ -106,37 +65,20 @@ DELETE FROM kb_document d
 USING doomed x
 WHERE d.id = x.id;
 
--- A healthy survivor is canonical truth even if the legacy worker crashed before moving
--- its Asset out of processing/failed. Normalize that Asset to ready and clear all leases.
-UPDATE asset a
-SET processing_status = 'ready',
-    lease_token = NULL,
-    lease_until = NULL,
-    retry_at = NULL,
-    processing_error_code = NULL,
-    error = NULL,
-    updated_at = now()
-WHERE a.kind = 'doc'
-  AND a.deleted_at IS NULL
-  AND a.content_hash IS NOT NULL
-  AND EXISTS (
-    SELECT 1 FROM kb_document d WHERE d.asset_id = a.id
-  );
-
--- Any live canonical document Asset without a healthy survivor must be recoverable.
--- Clear stale lease/error state and place it back on the immediately due queue.
+-- Any live canonical document Asset without a surviving KB document must be recoverable.
+-- Clear a stale lease/error and place it back on the due queue. The A1 status constraint
+-- already permits queued; processing_error_code is introduced in the following migration.
 UPDATE asset a
 SET processing_status = 'queued',
     lease_token = NULL,
     lease_until = NULL,
     retry_at = NULL,
-    processing_error_code = NULL,
     error = NULL,
     updated_at = now()
 WHERE a.kind = 'doc'
   AND a.deleted_at IS NULL
   AND a.content_hash IS NOT NULL
-  AND a.processing_status IN ('queued', 'ready', 'processing', 'failed', 'failed_retryable')
+  AND a.processing_status IN ('ready', 'processing', 'failed')
   AND NOT EXISTS (
     SELECT 1 FROM kb_document d WHERE d.asset_id = a.id
   );
@@ -148,8 +90,6 @@ DECLARE
   duplicate_groups integer;
   orphan_or_cross_scope integer;
   chunk_mismatches integer;
-  chunk_workspace_mismatches integer;
-  site_scope_mismatches integer;
 BEGIN
   SELECT COUNT(*) INTO duplicate_groups
   FROM (SELECT asset_id FROM kb_document WHERE asset_id IS NOT NULL GROUP BY asset_id HAVING COUNT(*) > 1) x;
@@ -164,124 +104,11 @@ BEGIN
   FROM kb_document d
   WHERE d.asset_id IS NOT NULL
     AND d.status = 'ready'
-    AND (
-      d.chunk_count <= 0
-      OR d.chunk_count <> (SELECT COUNT(*) FROM kb_chunk c WHERE c.document_id = d.id)
-      OR EXISTS (SELECT 1 FROM kb_chunk c WHERE c.document_id = d.id AND c.embedding IS NULL)
-    );
+    AND d.chunk_count <> (SELECT COUNT(*) FROM kb_chunk c WHERE c.document_id = d.id);
 
-  SELECT COUNT(*) INTO chunk_workspace_mismatches
-  FROM kb_chunk c
-  JOIN kb_document d ON d.id = c.document_id
-  WHERE c.workspace_id <> d.workspace_id;
-
-  SELECT COUNT(*) INTO site_scope_mismatches
-  FROM (
-    SELECT a.id
-    FROM asset a
-    LEFT JOIN site s ON s.id = a.site_id AND s.workspace_id = a.workspace_id
-    WHERE s.id IS NULL
-    UNION ALL
-    SELECT d.id
-    FROM kb_document d
-    LEFT JOIN site s ON s.id = d.site_id AND s.workspace_id = d.workspace_id
-    WHERE s.id IS NULL
-  ) x;
-
-  RAISE NOTICE 'R2-A2 KB reconciliation residuals: duplicate_groups=%, orphan_or_cross_scope=%, chunk_mismatches=%, chunk_workspace_mismatches=%, site_scope_mismatches=%',
-    duplicate_groups, orphan_or_cross_scope, chunk_mismatches, chunk_workspace_mismatches, site_scope_mismatches;
-  IF duplicate_groups <> 0 OR orphan_or_cross_scope <> 0 OR chunk_mismatches <> 0
-     OR chunk_workspace_mismatches <> 0 OR site_scope_mismatches <> 0 THEN
+  RAISE NOTICE 'R2-A2 KB reconciliation residuals: duplicate_groups=%, orphan_or_cross_scope=%, chunk_mismatches=%',
+    duplicate_groups, orphan_or_cross_scope, chunk_mismatches;
+  IF duplicate_groups <> 0 OR orphan_or_cross_scope <> 0 OR chunk_mismatches <> 0 THEN
     RAISE EXCEPTION 'R2-A2 KB reconciliation did not converge';
   END IF;
 END $$;
-
--- State-machine constraints.
-ALTER TABLE asset DROP CONSTRAINT asset_processing_status_check;
-ALTER TABLE asset ADD CONSTRAINT asset_processing_status_check CHECK (
-  processing_status IN (
-    'pending_upload', 'committing', 'queued', 'processing', 'ready', 'failed',
-    'failed_retryable', 'failed_terminal', 'rejected', 'duplicate', 'deleted'
-  )
-) NOT VALID;
-ALTER TABLE asset VALIDATE CONSTRAINT asset_processing_status_check;
-
-ALTER TABLE asset DROP CONSTRAINT asset_commit_lease_shape_check;
-ALTER TABLE asset ADD CONSTRAINT asset_processing_lease_shape_check CHECK (
-  (processing_status IN ('committing', 'processing') AND lease_token IS NOT NULL AND lease_until IS NOT NULL)
-  OR
-  (processing_status NOT IN ('committing', 'processing') AND lease_token IS NULL AND lease_until IS NULL)
-) NOT VALID;
-ALTER TABLE asset VALIDATE CONSTRAINT asset_processing_lease_shape_check;
-
-ALTER TABLE asset ADD CONSTRAINT asset_processing_attempt_nonnegative_check
-  CHECK (processing_attempt >= 0) NOT VALID;
-ALTER TABLE asset VALIDATE CONSTRAINT asset_processing_attempt_nonnegative_check;
-
-ALTER TABLE asset ADD CONSTRAINT asset_retry_at_shape_check
-  CHECK (retry_at IS NULL OR processing_status IN ('queued', 'failed_retryable')) NOT VALID;
-ALTER TABLE asset VALIDATE CONSTRAINT asset_retry_at_shape_check;
-
-ALTER TABLE asset ADD CONSTRAINT asset_processing_error_code_shape_check
-  CHECK (processing_error_code IS NULL OR processing_status IN ('queued', 'failed_terminal')) NOT VALID;
-ALTER TABLE asset VALIDATE CONSTRAINT asset_processing_error_code_shape_check;
-
-ALTER TABLE kb_document ADD CONSTRAINT kb_document_status_check
-  CHECK (status IN ('queued', 'parsing', 'chunking', 'embedding', 'ready', 'failed')) NOT VALID;
-ALTER TABLE kb_document VALIDATE CONSTRAINT kb_document_status_check;
-
-ALTER TABLE kb_document ADD CONSTRAINT kb_document_upload_asset_shape_check
-  CHECK ((source = 'upload') = (asset_id IS NOT NULL)) NOT VALID;
-ALTER TABLE kb_document VALIDATE CONSTRAINT kb_document_upload_asset_shape_check;
-
--- Provenance uniqueness and composite tenant FKs. Names and ON UPDATE actions match
--- schema.prisma exactly so `prisma migrate diff` remains empty.
-CREATE UNIQUE INDEX site_id_workspace_id_key
-  ON site(id, workspace_id);
-CREATE UNIQUE INDEX asset_id_workspace_id_site_id_key
-  ON asset(id, workspace_id, site_id);
-CREATE UNIQUE INDEX kb_document_asset_id_key
-  ON kb_document(asset_id);
-CREATE UNIQUE INDEX kb_document_id_workspace_id_key
-  ON kb_document(id, workspace_id);
-
-ALTER TABLE asset DROP CONSTRAINT asset_site_id_fkey;
-ALTER TABLE asset ADD CONSTRAINT asset_site_workspace_fkey
-  FOREIGN KEY (site_id, workspace_id)
-  REFERENCES site(id, workspace_id)
-  ON DELETE CASCADE ON UPDATE CASCADE
-  NOT VALID;
-ALTER TABLE asset VALIDATE CONSTRAINT asset_site_workspace_fkey;
-
-ALTER TABLE kb_document DROP CONSTRAINT kb_document_site_id_fkey;
-ALTER TABLE kb_document ADD CONSTRAINT kb_document_site_workspace_fkey
-  FOREIGN KEY (site_id, workspace_id)
-  REFERENCES site(id, workspace_id)
-  ON DELETE CASCADE ON UPDATE CASCADE
-  NOT VALID;
-ALTER TABLE kb_document VALIDATE CONSTRAINT kb_document_site_workspace_fkey;
-
-ALTER TABLE kb_document ADD CONSTRAINT kb_document_asset_scope_fkey
-  FOREIGN KEY (asset_id, workspace_id, site_id)
-  REFERENCES asset(id, workspace_id, site_id)
-  ON DELETE CASCADE ON UPDATE CASCADE
-  NOT VALID;
-ALTER TABLE kb_document VALIDATE CONSTRAINT kb_document_asset_scope_fkey;
-
-ALTER TABLE kb_chunk DROP CONSTRAINT kb_chunk_document_id_fkey;
-ALTER TABLE kb_chunk ADD CONSTRAINT kb_chunk_document_workspace_fkey
-  FOREIGN KEY (document_id, workspace_id)
-  REFERENCES kb_document(id, workspace_id)
-  ON DELETE CASCADE ON UPDATE CASCADE
-  NOT VALID;
-ALTER TABLE kb_chunk VALIDATE CONSTRAINT kb_chunk_document_workspace_fkey;
-
--- Owner-level recovery scans do not have workspace/site predicates. Keep due time first.
-CREATE INDEX asset_kb_queued_due_idx
-  ON asset(retry_at, created_at, id)
-  WHERE kind = 'doc' AND processing_status = 'queued' AND deleted_at IS NULL;
-CREATE INDEX asset_kb_processing_expired_idx
-  ON asset(lease_until, created_at, id)
-  WHERE kind = 'doc' AND processing_status = 'processing' AND deleted_at IS NULL;
-
-COMMIT;

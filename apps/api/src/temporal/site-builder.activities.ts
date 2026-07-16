@@ -467,7 +467,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             { processingStatus: 'processing', leaseUntil: { lte: now } },
           ],
         },
-        orderBy: [{ retryAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        orderBy: [
+          // `processing` sorts before `queued`, so an expired worker lease cannot be
+          // starved forever by a sustained queued backlog before `take` is applied.
+          { processingStatus: 'asc' },
+          { leaseUntil: { sort: 'asc', nulls: 'last' } },
+          { retryAt: { sort: 'asc', nulls: 'first' } },
+          { createdAt: 'asc' },
+          { id: 'asc' },
+        ],
         take: limit,
         select: {
           id: true,
