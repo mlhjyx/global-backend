@@ -313,3 +313,45 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 1. 真实工厂资料进 Golden Set 的**授权方式**（2~3 家合作工厂：口头授权+书面记录 or 简单授权书模板）。
 2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。当前网关可用模型 = `deepseek-v4-pro`/`v4-flash` + `gemini-2.5-pro`/`gemini-2.5-flash`；建议主 Judge 用 `gemini-2.5-pro`（多模态审美评审）、文案/事实类交叉校验用 `deepseek-v4-pro`（跨 provider）——具体 snapshot 由 MODEL-1 校准后写入 ADR。
 3. Bootstrap 6 fixture 的 sparse/rich 素材与期望锚点**由谁产出、何时冻结**（EVAL-bootstrap PR 前置）。
+
+---
+
+## 完成定义（DoD）— M0-M3 分层验收门（v3.2 §33 回写 · DOC-12 补漏）
+
+> **只有分层全部满足才能说 M1 完成**——"页面看起来不错"不能替代可靠性、安全与发布合同。本节是**跨里程碑的正式验收契约**（此前散在 v3.2 §33、未分发，completeness-critic 查漏后补回）。多数条目的**机制真值在他处**（R0 审计见 [09 §10](09-m1-implementation-design.md)、MF-0 见 [14](14-media-foundation-mf0.md)、组件/契约见 [04](04-sitespec-contract.md)、模型门见 [10](10-model-selection-study.md)、发布治理见 [06](06-security-abuse.md)/[05](05-deployment-hosting.md)）；本清单是**统一的"是否可发布"门**，按 ID 引 ADR。
+
+### DoD-1 M0~M1-b 回补
+- [ ] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2）
+- [ ] Demo 不虚构企业类型/工厂/团队/认证/年限/客户/数字；P95 < 10s。（🔴 ADR-017 / R0-3）
+- [ ] active preview 不被失败/取消/未发布 build 覆盖；Release/版本分配并发安全。（ADR-013）
+- [ ] businessEmail 不进通用 KB/embedding/品牌 Prompt；存量 chunk 已重建清理。（R0-4 隐私）
+- [ ] Asset/KB 在重复 commit/duplicate race/worker 崩溃/存储故障下可恢复。
+- [ ] BrandProfile 同 buildRun 幂等；事实有冻结 quote；snippet 不洗白；认证强引 cert Asset/人工批准。（ADR-017）
+- [ ] 首个付费 fan-out 前预算 reserve/settle、AiTrace、costSummary 可持久对账。
+
+### DoD-2 M1-c 媒体基础与图片
+- [ ] AssetVariant additive migration/RLS/recipe 幂等/derivedKeys 兼容/回滚通过；M1-c 不预建 MediaJob/AssetUsage。（ADR-018 / 14）
+- [ ] M1-c 纯 Sharp；原图 immutable；EXIF/GPS/方向/色彩/响应式格式真测。
+- [ ] active SiteSpec 引用素材不可删（→409）；对象/DB/checksum 可对账；MF-1 后无感切 AssetUsage。
+- [ ] video/audio/poster/caption 演进方向已记录，但 M1 不调 video/TTS provider。
+
+### DoD-3 M1-d~g 内容、设计与质量
+- [ ] 6 Family 各 ≥2 首页 + 2 内页 Blueprint，差异可解释；26 组件 schema/Astro/fixture/a11y/content budget/visual test 一致。（04 / 13）
+- [ ] Demo 无模型也有视觉锚点；sparse 不虚构、rich 正确利用产品/工厂/证书/地址。
+- [ ] Copy 只消费 PublishableClaimSnapshot；人工锁定 + locale 降级语义通过。
+- [ ] SiteSpec 三重门 / Renderer compatibility / 三断点 / Lighthouse / WCAG / 外呼域进 CI。
+- [ ] aesthetic review 不可用有显式降级；修复 ≤3 轮；安全 Family fallback 可重放。（ADR-013）
+- [ ] SiteReleaseManifest 可重建相同 artifact digest；回滚恢复完整文案/素材/代码/配置。
+- [ ] 6 Bootstrap fixture ≥4/6 成对偏好胜出，性能/事实/a11y 无回退；扩 12 后设多人盲测门。
+
+### DoD-4 模型、运维与公开发布前门
+- [ ] MODEL-0 保持 currentRoute；Agent 卡不散落型号。（ADR-016）
+- [ ] MODEL-1 候选完成 capability probe + 6-12 样本报告；仅 evaluatedCandidate 可申请 30×3/shadow/canary，未批不改 promotedRoute。
+- [ ] 每 Release 可追溯 model snapshot/routePolicy/prompt/schema/rubric/accepted-artifact cost。
+- [ ] PublishReview / 域名 ownership+tombstone / 询盘隐私+滥用 / Claim 过期维护 / taken-down+appeal 在首次公开发布前可用。（06）
+- [ ] Readdy/字体/图标/图片/视频/音乐许可来源撤权可审计；Tier B 原始输出不入生产 RAG/训练。（ADR-019）
+
+### DoD-5 M3 媒体门（不阻断 M1）
+- [ ] MF-1 MediaJob/AssetUsage 由视频真实消费者驱动落地；Seedance Shot job/取消/重试/成本/QA/静态降级可用，Veo 仅 policy 进 premium/shadow。
+- [ ] 旁白/转写/字幕/poster/reduced-motion/移动端码率完整；无声音克隆。
+- [ ] 产品/Logo/人物/文字时序 QA 通过；失败只重做 Shot，回滚恢复整套媒体。
