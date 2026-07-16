@@ -27,11 +27,11 @@
 
 把 01 号"两主题预设 + 固定页面结构"升级为**两层**：
 
-- **开发期平面**（CC/开发 Agent 工作区，**非用户建站时运行**）：研究多源参考 → 临时分析压成 `DesignObservation` → 只把**聚合规则 / 许可代码 / 原创资产**提升为可运行语料 → 生成内部组件变体、构建 TemplateFamily → 跑合规/截图/性能/原创性评测 → **经 PR 发布版本化 DesignCatalog**。
+- **开发期平面**（Codex/开发 Agent 工作区，**非用户建站时运行**）：研究多源参考 → 临时分析压成 `DesignObservation` → 只把**聚合规则 / 许可代码 / 原创资产**提升为可运行语料 → 生成内部组件变体、构建 TemplateFamily → 跑合规/截图/性能/原创性评测 → **经 PR 发布版本化 DesignCatalog**。
 - **生产期平面**：**当前 as-built 基底仅有** API / Temporal / AiTask / SiteSpec / Astro Renderer，Demo 仍由现有确定性 spec/模板路径生成，**尚无**运行时 DesignCatalog、TemplateFamily/Blueprint 选择或 DesignBrief 消费。**目标（DI-0 → M1-e）**才是按企业资料选择已批准 Family+Blueprint → 按素材/文案/事实证据受控组合 → 输出 DesignBrief/CopyBundle/SiteSpec/Findings。两阶段共同硬约束：不抓 Readdy（ADR-019）、不读原始参考页/模板源码、不生成任意前端代码（护 D1）。
 - **两平面不可混合的四条理由**：① 设计研究需大量截图迭代，不适合 Demo 低延迟路径；② 来源许可有边界，不可在生产数据路径动态取用；③ 开发期靠**人工批准 PR**，生产期须**可重放/可计费/可降级**；④ 运行时自由设计会破坏 SiteSpec 白名单 / 缓存 / 可回归性。
 
-> 开发期设计智能工厂的详设归 [13 号领域模型](13-design-domain-model.md)；[14 号](14-media-foundation-mf0.md)只承载媒体地基。本 02 的 as-built 只到上述 API/Temporal/AiTask/SiteSpec/Astro 基底；**两平面的版本化 `DesignCatalog` 单向接缝尚未实现**，属于 DI-0 契约 + M1-e 消费目标，不得被当前代码假定可用。v3.2 吸收 v2 合同并提出四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / CC 从 M1-c 起哪些立即改哪些延后）——施工状态以 09、13、14 号为准。
+> 开发期设计智能工厂的详设归 [13 号领域模型](13-design-domain-model.md)；[14 号](14-media-foundation-mf0.md)只承载媒体地基。本 02 的 as-built 只到上述 API/Temporal/AiTask/SiteSpec/Astro 基底；**两平面的版本化 `DesignCatalog` 单向接缝尚未实现**，属于 DI-0 契约 + M1-e 消费目标，不得被当前代码假定可用。v3.2 吸收 v2 合同并提出四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / Codex 从 M1-c 起哪些立即改哪些延后）——施工状态以 09、13、14 号为准。
 
 ## 1. 模块与目录
 
@@ -49,6 +49,8 @@ apps/api/src/site-builder/
 ```
 
 复用现有：JWKS 鉴权、RLS 基建、Transactional Outbox、模型网关 client、SearXNG+Crawl4AI（品牌研究）、taxonomy 词表（行业级联）、预算 reserve-settle 思路（ToolBroker 同款）。
+
+> **环境与安全边界（2026-07-16 Ubuntu as-built）**：这里的“复用 Crawl4AI”只表示本地开发容器与 client 可用，不代表生产 SSRF 闸门已经闭环。`websiteUrl` 会驱动抓取，容器端口绑定 loopback 不能阻止 API 驱动的 SSRF；Ubuntu mihomo fake-IP 环境下，本地开发暂以 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 维持公开站抓取，因此只允许开发者可信的公开 URL。**R1-safety 必须同时覆盖 Crawl4AI 路径和 robots 直连路径**，落实解析后 IP、redirect 逐跳、metadata/内网/loopback、DNS rebinding 与响应上限等 egress 校验，完成前不得接收不可信 URL 或用于生产。
 
 新增基建：**MinIO**（compose，对象存储）、**Astro 构建容器**（渲染器）、网关新模型通道（§6）。
 
@@ -236,7 +238,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 >
 > ⚠️ 上表"模型（首选）"列为初稿；**以 §6 四态路由为准**（ADR-016：currentRoute 现役 as-built，候选只经评测晋级，非终选/非采购承诺）。
 >
-> **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，CC 生态是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← seo-specialist 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（M1 先落 Playwright/Lighthouse/Sharp；rembg 等只有真实消费者出现后才评估），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
+> **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，Codex 与已安装的 ECC/Superpowers skills 是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← SEO 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（M1 先落 Playwright/Lighthouse/Sharp；rembg 等只有真实消费者出现后才评估），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
 
 ## 6. 模型选型（**四态路由现役档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
 
@@ -356,7 +358,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 6. **询盘通知邮件**：发信域 SPF/DKIM/DMARC（M2）。
 7. **发布 CDN**：发布站挂 CDN（Cloudflare 免费档起步）+ 图片按需变换（M2+）。
 8. **质量评测基线（eval harness）**：golden set（N 家真实企业脱敏资料）+ rubric 自动打分回归——每次改 prompt/换模型跑回归防退化；**AI 产品工程化的关键一环**（M1 起建）。
-9. **模板冷启动**：开发期用 CC 的 GAN 设计循环（gan-design/theme-factory）批量产行业模板+人工终审——模板质量决定 demo v0 第一印象（M0 的核心工作量）。
+9. **模板冷启动**：开发期由 Codex 使用生成/评审分离的 GAN 设计循环方法批量产行业模板，再经人工终审——模板质量决定 demo v0 第一印象（M0 的核心工作量）。
 10. **内容安全审核**：用户上传图+生成文案过安全审核后才上站（M1）。
 11. **SiteSpec 版本化**：`specVersion` 字段+迁移器，保老站向后兼容（M0 起）。
 12. **观测**：build 成功率/时长/单站成本 dashboard（M1）。

@@ -5,6 +5,8 @@
 > **明确禁止**：逆向 Readdy、抓取/利用 sourcemap 或 `sourcesContent`、猜测内部 API/鉴权、复制其源码/文案/素材/页面、把原始截图或输出放入生产 RAG/训练集，以及让生产运行时调用/依赖 Readdy。即使是我方账号的导出物，也只有取得覆盖 AI 建站产品、衍生与商业分发的书面授权并登记为 `owned_export_authorized` 后，才可按授权边界另行评审；不能沿用本文旧的“导出后人工改造即可”结论。
 >
 > 下文凡出现“推荐”“可行”“窗口期”“直接拿到 TSX”“批量采样”“开发期设计源”等措辞，均是 **2026-07-14 的历史判断，现已失效**；保留原文仅为 provenance，不构成许可、授权或实施建议。
+>
+> **环境迁移说明（2026-07-16）**：原研究产生于旧 Mac/Claude 临时 worktree；相关 `/private/tmp/...`、`/Users/.../.claude/worktrees/...` 证据目录已清理，既不是 Ubuntu 当前路径，也不可复现。当前仓库根为 `/global/backend`；任何 Readdy key 只能经 `/global/backend/apps/api/.env`（本地开发）或部署密钥管理注入，本文不记录、也不证明该 key 当前存在。
 
 > 2026-07-14。回答两个问题：①「组件不够怎么办」②readdy API 怎么用/怎么联动。
 > 方法：官方文档全量检索 + API key 只读真探（ToS §5.3.4 边界内）+ 5 个 demo 经公开 sourcemap 逆向出完整 TSX 源码逐一分析。
@@ -121,10 +123,10 @@
 
 **采纳姿势 (a) + 用 (c) 兜底，明确排除 (b)**：把 Readdy 定位成「**开发期扩组件时的设计/版式供给**」——产品内生成、导出 React/Tailwind 或 Figma 稿、**人工重写为 Astro 组件入封闭库**。这既补齐「组件不够」的缺口，又不动 D1 架构、不碰合规红线、不产生运行时依赖。**不要**把它接进后端做运行时逐站生成（无 API + 架构冲突 + 数据出境）。那把 key 暂时留着无用，除非向官方拿到 API 文档。
 
-相关文件（绝对路径，均为本次临时分析产物，可删）：
-- `/private/tmp/claude-501/-Users-xin-Documents-Global/43c9deda-5f28-41bd-a6f9-6b55b9e734c7/scratchpad/index.js`（Readdy SPA 主包，用于提取端点清单）
-- `/private/tmp/claude-501/-Users-xin-Documents-Global/43c9deda-5f28-41bd-a6f9-6b55b9e734c7/scratchpad/apikey-page.js`（api-key 页面 chunk）
-- key 本体在 `/Users/xin/Documents/Global/.claude/worktrees/site-builder-m0/apps/api/.env` 的 `READDY_API_KEY`（未在本输出明文出现）
+相关文件（历史临时分析产物，旧 Mac 临时目录已清理、Ubuntu 不存在）：
+- `scratchpad/index.js`（当时的 Readdy SPA 主包，用于提取端点清单）
+- `scratchpad/apikey-page.js`（当时的 api-key 页面 chunk）
+- 旧记录中的 key 路径已失效；当前若获授权使用，只能通过 `/global/backend/apps/api/.env` 或部署密钥管理注入，禁止把 key 写进文档或 git
 
 Sources:
 - [Readdy Docs — Welcome / llms.txt 索引](https://docs.readdy.ai/welcome)
@@ -143,7 +145,7 @@ Sources:
 
 # readdy 5 demo 逆向分析报告（任务 B）
 
-**方法**：5 个预览链接全部 curl 抓取成功（HTTP 200）。关键突破：readdy 预览产物**公开发布了 sourcemap（含 `sourcesContent` 完整原始 TSX 源码）**，本次分析基于逆向还原出的 5 套完整源码树（存于 `/private/tmp/claude-501/-Users-xin-Documents-Global/43c9deda-5f28-41bd-a6f9-6b55b9e734c7/scratchpad/d1_src…d5_src`），非仅 DOM 猜测，结论置信度高。
+**方法（历史记录，现行 ADR-019 明确禁止复现）**：当时 5 个预览链接全部 curl 抓取成功（HTTP 200），并在已清理的旧 Mac 临时目录保存过 5 套还原源码树。该证据目录现已不存在；此段只解释历史判断，不授权重新抓取、逆向或恢复源码。
 
 ## 0. 总体指纹（5 个 demo 完全同构的工程骨架）
 

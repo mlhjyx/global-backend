@@ -1,9 +1,10 @@
-> 【Implementation Record 2026-07-10】P1 中标发现 / P2 ICP→CPV / P3 招标 intent / P5 Schedule 已完成（PR #30/#31/#33/#38）；剩余 P4 SAM.gov Sources Sought。规格正文以「§8 审查修正」+ 现有代码为准，不再是 build-ready 待实施稿。
+> 【Implementation Record 2026-07-16】P1 中标发现 / P2 ICP→CPV / P3 招标 intent / P5 Schedule 已完成（PR #30/#31/#33/#38）；SAM.gov Sources Sought P4 后续也已由 PR #99 落地、默认 DISABLED，获客线当前冻结。规格正文以「§8 审查修正」+ 现有代码为准，不再是 build-ready 待实施稿。
+> 【现行流程覆盖】正文中旧的 `docs/feat` 分支、自审、自合并等表述只记录当时过程；当前统一使用 `codex/<topic>` + PR + CI/Codex 审查，合并须用户明确确认，权威规则见 [../../AGENTS.md](../../AGENTS.md) §8。
 
 # TED v3 招投标 Provider — 落地规格（build-ready）
 
 > 2026-07-08 定。给**下一个开工会话**的权威实施规格。API 事实**均为当日活体实测 + 独立对抗复验**(4 agent research→verify),用哪个数字/字段直接照抄本文。
-> 上游：[buyer-intelligence-v3.md](buyer-intelligence-v3.md)（P1 需求证据源，§10.6 排 TED 第一）· [positioning-and-acquisition-backlog.md](positioning-and-acquisition-backlog.md) §5 #2 · AGENTS.md §6。
+> 上游：[buyer-intelligence-v3.md](../research/buyer-intelligence-v3.md)（P1 需求证据源，§10.6 排 TED 第一）· [positioning-and-acquisition-backlog.md](../research/positioning-and-acquisition-backlog.md) §5 #2 · [AGENTS.md](../../AGENTS.md) §6。
 > 硬规矩：真实数据、无 sandbox（§5）；多租户、**绝不硬编码行业/国家**（§3）；合规红线（§5）。
 
 ---

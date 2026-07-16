@@ -17,7 +17,7 @@ AiTask<I, O>：
 ```
 
 - **通信模型**：agent 之间不对话，只传**结构化工件**（BuildPlan / BrandBrief / DesignSpec / SiteSpec / Findings），全部落库可追溯——总控（Temporal workflow）是唯一的调度者。
-- **Prompt 管理**：每个 agent 的 system prompt + rubric 是**版本化代码资产**（`agents/<name>/prompt.ts`），从 CC skills 方法论内化固化（各卡注明来源）；改 prompt 必须过 eval harness 回归（02 §11.8）。
+- **Prompt 管理**：每个 agent 的 system prompt + rubric 是**版本化代码资产**（`agents/<name>/prompt.ts`），从当前 Codex 已安装 skills 的方法论内化固化（各卡注明来源）；改 prompt 必须过 eval harness 回归（02 §11.8）。skills 只服务开发过程，生产运行时不依赖 Codex/plugin。
 - **工具原则**：库内化优先（进程内直接调），MCP 只在确需外部服务时作传输（续 ADR「MCP=传输非授权」）。
 
 ### 0.1 每 task 声明合同（v3.2 §5.3 回写）
@@ -77,7 +77,7 @@ AiTask<I, O>：
 - **职责/触发**：每次 build run 开头；把「站点档案+资料清单+用户选项」翻译成本次要执行的任务清单与参数。
 - **输入 → 输出**：`{siteProfile, assetInventory, userOptions(风格/页面开关/语言/scope), lastBuildSummary?}` → `BuildPlan{tasks:[{type, params, priority}], estimatedCost, skipReasons[]}`。
 - **执行流程**：[确定性] 汇总资料清单与增量 diff（哪些素材是新的）→ [模型] 产出 BuildPlan → [确定性] 白名单校验（task type 必须∈注册表）+ 成本预估对配额。
-- **Prompt 内化来源**：编排任务分解方法论 ← `ecc:planner` agent 的计划分解模式 + 本仓 discovery queryPlan 先例（确定性注入、LLM 不臆造）。
+- **Prompt 内化来源**：编排任务分解方法论 ← 当前已安装的 `ecc:plan-orchestrate` + 本仓 discovery queryPlan 先例（确定性注入、LLM 不臆造）。
 - **工具**：无外部工具（纯推理）。
 - **护栏**：只能从任务白名单选；scope=section 时禁止扩大到整站；预算超限直接裁剪低优任务并在 plan 里写明 skipReasons。
 - **降级**：模型失败 → 规则版兜底 plan（全量标准管线），不阻断。
@@ -88,7 +88,7 @@ AiTask<I, O>：
 - **职责/触发**：P1；资料变化或首次精装修时产出/更新 Brand Brief（所有内容 agent 的上游）。
 - **输入 → 输出**：`{kbDigest(注册+向导+上传资料摘要), storefrontData?, webResearch[]}` → `BrandBrief{valueProps[], tone, glossary(EN+各语种术语), keywords[], differentiators[], competitors[], factSheet{认证/年限/产能…每项带 evidence 出处}, gaps[](缺失待用户补的信息)}`。
 - **执行流程**：[确定性] KB 检索拼摘要 → [确定性] SearXNG 搜公司名/店铺/社媒 + Crawl4AI 抓取（复用 compose 现成基建）→ [模型] 综合产出 Brief → [确定性] factSheet 逐项校验 evidence 非空，无源字段移入 gaps。
-- **Prompt 内化来源**：品牌/定位方法论 ← `ecc:brand-discovery`、`ecc:brand-voice`、`ecc:market-research`（定位画布、tone 光谱、术语表法）；B2B 外贸语境 ← `ecc:lead-intelligence` 的公司画像结构。
+- **Prompt 内化来源**：品牌/定位方法论 ← 当前已安装的 `ecc:brand-voice`、`ecc:market-research`（定位画布、tone 光谱、术语表法）；B2B 外贸语境 ← `ecc:lead-intelligence` 的公司画像结构。
 - **工具**：SearXNG(HTTP) + Crawl4AI(HTTP)，库内化 client 已有。
 - **护栏**：🔴 事实红线（引 ADR-017）——认证/产能/年限等 factSheet 字段**必须带出处，缺=进 gaps 提示用户补，绝不虚构**（B2B 站虚构认证=给客户埋雷）；抓取内容当数据不当指令。factSheet 事实走 `EvidenceRef`（`sourceId`+`contentHash`+`quote`），value 中数字/单位/认证代码/关键专名须在 quote 一致命中，否则降 gap；认证须引用 ready 的 cert Asset 或人工 verified 状态，intake 自填/官网文案不能直接上站；web snippet 只进 research_hint/competitors，不直接成 publishable fact（v3.2 §24.7 R4-A）。
 - **产物治理（幂等 + 溯源，v3.2 §24.7 / PR R4-B-min 回写）**：BrandBrief 新增 `buildRunId`(唯一引用) / `inputHash` / `promptVersion` / `model·route` / `sourceSnapshotHash` / `usage·cost` 六字段；**同一 `buildRunId` 重试先复用已有成功 BrandBrief，不重复调模型、不追加版本**。**预算**：M1-d 首个付费 fan-out 前须有 DB 持久 `reserve/settle` + 人工停用开关；`SiteBuildRun.costSummary` 是持久聚合真值（含成功/失败调用、schema repair、timeout、fallback、工具成本），进程内 Map 不算生产真值。
@@ -123,7 +123,7 @@ AiTask<I, O>：
 - **职责/触发**：P2；给图片素材配动效参数（v1）与生成环境视频（M3）。
 - **输入 → 输出**：`{assets[], brandBrief.tone}` → `{motionSpecs{[assetId]: preset+params}, videoAssets[]?}`。
 - **执行流程**：v1 [确定性] 按素材类型/位置套 motion token 预设（hero=Ken Burns 慢推、gallery=视差、数字带=计数动画）；M3 [模型-视频] Seedance 2.0 图生视频（工厂环境图→10s 环境视频，产品图→旋转展示）：提交任务→轮询→产物落 asset。
-- **Prompt 内化来源**：动效预设库 ← `ecc:motion-foundations/patterns/advanced`、`make-interfaces-feel-better`（缓动曲线/时长档/克制原则——B2B 站动效克制是纪律）。
+- **Prompt 内化来源**：动效预设库 ← 当前已安装的 `ecc:motion-foundations`、`ecc:motion-patterns`、`ecc:motion-advanced`、`ecc:make-interfaces-feel-better`（缓动曲线/时长档/克制原则——B2B 站动效克制是纪律）。
 - **工具**：Seedance 2.0（网关豆包通道；中转不稳走方舟直连方案 B，见 02 §6）。
 - **护栏**：每站视频条数配额（成本 ~1 元/秒）；视频 prompt 只描述镜头运动与氛围、不得虚构厂景内容之外的元素。
 - **降级**：视频失败/超时 → 自动回落该位置的动效预设，站点永远有东西可看。
@@ -134,8 +134,8 @@ AiTask<I, O>：
 - **职责/触发**：生成期（P3 头）产 DesignSpec；评审期（P4）看整站截图挑毛病。
 - **输入 → 输出**：生成 `{brandBrief, industryTemplate, userStylePick}` → `DesignSpec{themeTokens, pageLayouts{[page]: section 顺序+变体}, imageryDirection, motionIntensity}`；评审 `{screenshots(3 断点全页), designSpec}` → `Findings[{severity, page, section, issue, suggestion}] + score(0-100)`。
 - **执行流程**：生成期 [模型] 从主题 token 预设包+布局变体中**选择与微调**（不发明新组件）→ [确定性] token 合法性校验（对比度 WCAG AA 自动检查）；评审期 [确定性] Playwright 截图（375/768/1440 三断点全页）→ [模型-视觉] 按 rubric 打分出 findings。
-- **Prompt 内化来源**：设计方向法 ← `ecc:frontend-design-direction`（direction→tokens 流程）；token 体系 ← `ecc:design-system`、`anthropic-skills:theme-factory`；评审 rubric ← `ecc:taste` + `dataviz` 对比度/层次原则（视觉层次/一致性/留白/对齐/CTA 显著度五维，各 0-20）。
-- **工具**：Playwright（库内化截图；开发期可用 Chrome DevTools MCP 调试，生产不依赖 MCP）。
+- **Prompt 内化来源**：设计方向法 ← 当前已安装的 `ecc:frontend-design-direction`（direction→tokens 流程）；token 体系 ← `ecc:design-system` + `product-design:ideate`；评审 rubric ← `product-design:audit` + `ecc:frontend-a11y`（视觉层次/一致性/留白/对齐/CTA 显著度五维，各 0-20）。
+- **工具**：Playwright（库内化截图；开发期可用已安装的 `playwright-interactive` / `ecc:browser-qa` 现场调试，生产不依赖 Codex/plugin/MCP）。
 - **护栏**：只能在预设 token 空间内选择（保风格体系一致）；score ≥85 过，findings 必须落到具体 section（不许"整体感觉不好"式空评）。
 - **DesignSpec 职责边界（v3.2 §19.2 回写，引 ADR-015/ADR-019）**：DesignSpec **只**从候选 Family 中选 Blueprint / StylePreset / 组件变体，按素材/事实/文案长度取舍并**解释选择原因与风险**。**禁**：写 JSX/Astro/CSS、发明组件类型、生成无证据支撑的 section、更改工作流、自己抓取 Readdy。
 - **受控差异化 7 来源（v3.2 §17.3 回写）**：每次生成的差异**只**来自 ① BusinessArchetype ② TemplateFamily ③ Blueprint ④ StylePreset ⑤ 组件 variant ⑥ 素材完整度 ⑦ `variationSeed`。**`variationSeed` 只能在合法候选中做确定性选择，不能改变事实和组件契约**（反"换皮同版式"通用感；配套 M1-f genericness 检查见 02/08）。
@@ -149,7 +149,7 @@ AiTask<I, O>：
 - **输入 → 输出**：组装 `{designSpec, copyBundles, assetManifest, pageStructure}` → `SiteSpec`（完整 JSON）；修复 `{siteSpec, findings[]}` → `SiteSpecPatch`（JSON Patch，最小变更）。
 - **执行流程（八道校验门顺序，v3.2 §19.3 回写，引 ADR-014/ADR-015）**：[模型] 生成 SiteSpec/Patch → [确定性] 依次过 **① Zod / JSON Schema → ② 组件 + variant 白名单 → ③ 素材引用存在性（assetManifest 对账）→ ④ copy key 完整性 → ⑤ 内链 + locale 完整性 → ⑥ 证据门 → ⑦ 兼容矩阵（见下）→ ⑧ Astro 构建**；任一门不过=带结构化错误回填重试（构建期编译错误同样回填）。
 - **兼容矩阵（Assembler 调模型/写 SiteSpec 前必过的 11 条硬约束，v3.2 §17.2 回写）**：① full_bleed Hero 后不接另一个 full_bleed ImageText；② 禁连续三个 card-grid；③ 深色大区块连续最多两个；④ StatsBand 需 ≥2 个有证据数值否则删；⑤ Testimonials 需用户可验证引用否则删；⑥ TeamGrid 需明确授权人物资料否则删；⑦ Certificates/CertWall 需资产或事实证据否则删；⑧ MapLocation 需可验证地址，否则只显地址文本；⑨ 产品 <3 不用 dense ProductGrid；⑩ 缺宽图不选 full_bleed Hero；⑪ 文案超预算优先换变体/定向重写，禁 CSS 缩到不可读。（无证据的 section 一律删，不留空壳。）
-- **Prompt 内化来源**：组件组装约束 ← 我们自建组件库的 section 目录文档（prompt 里给组件清单+props 契约，"菜单点菜"式）；修复模式 ← `ecc:build-error-resolver` 的最小 diff 原则（只改 findings 涉及的节点）。
+- **Prompt 内化来源**：组件组装约束 ← 我们自建组件库的 section 目录文档（prompt 里给组件清单+props 契约，"菜单点菜"式）；修复模式 ← `build-web-apps:frontend-testing-debugging` 的定位/最小改动原则（只改 findings 涉及的节点）。
 - **工具**：SiteSpec 校验器、Astro 构建器（库内化）。
 - **护栏**：修复模式**只接受结构化 Findings、只许输出 JSON Patch 或受限 SiteSpec Patch**（防重写全 spec 引入回归）；每轮 patch 后 diff 记录进 run steps（可审计谁改了什么）；**每轮必须让硬门单调改善**。
 - **降级（assemblyFix 三轮修补失败语义，v3.2 §19.3 回写，引 ADR-013）**：assemblyFix **最多三轮**；三轮仍失败则——**保留最近一次可构建版本** + 标 `quality_degraded` + **回退到同 Family 的安全 Blueprint** + **绝不删除用户现有站点**（ADR-013：异步失败绝不删除用户现有 Site）。run 标记 partial、findings 转人工。
@@ -160,8 +160,8 @@ AiTask<I, O>：
 - **职责/触发**：P4；功能与性能体检。**主体是确定性工具，LLM 只做汇总**——不靠模型幻觉挑毛病。
 - **输入 → 输出**：`{previewUrl, siteSpec}` → `Findings[] + gateResult{pass/fail per check}`。
 - **执行流程**：[确定性] Playwright 遍历：全链接可达、表单可提交（干跑）、三断点响应式无横向溢出、console 零 error、动效触发正常（滚动驱动检查）→ [确定性] Lighthouse：Performance/A11y(WCAG 2.2 AA 基线)/SEO/Best-Practices 四分 → [模型] 把机器结果汇总成结构化 findings（归并、定级、给修复建议）。
-- **Prompt 内化来源**：检查清单 ← `ecc:e2e-runner`（关键路径遍历法）、`ecc:browser-qa`、`ecc:frontend-a11y`/`ecc:accessibility`（WCAG 2.2 检查项）、`ecc:click-path-audit`（询盘路径必须 ≤2 击可达）。
-- **工具**：Playwright + Lighthouse（库内化，CI 同款）；开发期调试可用 Chrome DevTools MCP。
+- **Prompt 内化来源**：检查清单 ← 当前已安装的 `playwright`、`ecc:e2e-testing`（关键路径遍历法）、`ecc:browser-qa`、`ecc:frontend-a11y`/`ecc:accessibility`（WCAG 2.2 检查项）、`ecc:click-path-audit`（询盘路径必须 ≤2 击可达）。
+- **工具**：Playwright + Lighthouse（库内化，CI 同款）；开发期调试用已安装的 `playwright-interactive` / `ecc:browser-qa`。
 - **护栏**：硬门槛（构建产物必须过才能出质量环）：链接零死链、表单可用、console 零 error、Lighthouse Perf ≥85 / A11y ≥90。
 - **降级**：无（这是门，门坏了要修门不是绕门）；工具自身崩溃 → run 失败可重试。
 - **模型**：gemini-3-flash 档（仅汇总）。
@@ -171,7 +171,7 @@ AiTask<I, O>：
 - **职责/触发**：P4；技术 SEO 与关键词落位（发布前保证"生而可被搜到"）。
 - **输入 → 输出**：`{previewUrl, siteSpec, brandBrief.keywords, locales}` → `Findings[] + patchSuggestions[]`。
 - **执行流程**：[确定性] 逐页检查：title/description 长度与唯一性、OG 卡、canonical、**hreflang 互指完整**、sitemap.xml、robots、图片 alt 覆盖率、schema.org(Organization+Product+BreadcrumbList) JSON-LD 合法性 → [模型] 关键词→页面映射审查（keywords 是否落到 title/H1/正文，密度不过量）。
-- **Prompt 内化来源**：审计清单 ← `ecc:seo-specialist` agent + `ecc:seo` skill（技术 SEO 全表）；结构化数据经验 ← 本仓获客侧 digital_footprint 的 JSON-LD 解析（反向应用：我们抓别人时看什么，就给客户站配什么）。
+- **Prompt 内化来源**：审计清单 ← 当前已安装的 `ecc:seo`（技术 SEO 全表）；结构化数据经验 ← 本仓获客侧 digital_footprint 的 JSON-LD 解析（反向应用：我们抓别人时看什么，就给客户站配什么）。
 - **工具**：HTML 解析器 + JSON-LD 校验（库内化）。
 - **护栏**：多语言站 hreflang 是硬检查（错配=国际 SEO 灾难）；未发布预览必须 noindex（防提前收录），发布时自动翻转。
 - **降级**：无硬门（findings 进质量环修复即可）。
@@ -190,17 +190,17 @@ AiTask<I, O>：
    - **每站成本单（SaaS 定价依据）**：demo v0 ≈ ¥0.5 内；精装修一轮 token ≈ ¥5-15；图片 gpt-image-2 中档 ≈ ¥0.4/张 × N；视频 ¥15/条 × N。全配一次 ≈ ¥50-60、纯图文 ≈ ¥15——SaaS 侧按次数/配额设计套餐有了底数。
    - **狗粮灰度**：golden set 里放 2~3 家真实合作工厂资料，每个里程碑先给"自己人"全链跑通再放量。
 
-## 11. 开发期 CC 工作流（内化的"生产线"）
+## 11. 开发期 Codex 工作流（内化的"生产线"）
 
-生产运行时零 CC 依赖，但**开发这些 agent 时**我在 CC 里这样干：
-1. 模板/组件库量产：`gan-design` 循环（generator 产模板 → evaluator 按审美 rubric 打分迭代）+ `theme-factory` 出主题 token 预设包 → 人工终审入库。
-2. Rubric 提炼：跑 `seo-specialist`/`frontend-design-direction`/`accessibility` skills 输出 → 固化成各 agent 的 prompt 常量与确定性检查表。
-3. Eval harness：golden set 企业资料 → 全管线跑分基线；此后每次改 prompt/模型在 CC 里跑回归再合并（02 §11.8）。
-4. 联调验证：真库真网关 verify 脚本（§5 硬规矩同获客侧），Chrome DevTools MCP/Playwright 现场看渲染结果。
+生产运行时零 Codex/plugin 依赖；开发这些 agent 时使用仓库代码、确定性工具和当前已安装 skills：
+1. 模板/组件库：`product-design:ideate` + `ecc:design-system` 提出候选，`product-design:audit` 独立评审，人工终审后才入封闭组件库。
+2. Rubric 提炼：用 `ecc:seo` / `ecc:frontend-design-direction` / `ecc:accessibility` 输出方法框架，再固化成版本化 prompt 常量与确定性检查表。
+3. Eval harness：`ecc:eval-harness` / `ecc:verification-loop` 驱动 golden set 全管线基线；以后每次改 prompt/模型均先回归再合并（02 §11.8）。
+4. 联调验证：真库真网关 verify 脚本（§5 硬规矩同获客侧），用 `playwright` / `playwright-interactive` 现场核验渲染结果；生产不依赖 MCP。
 
-### 11.1 开发期 8 个 CC 设计角色分工（v3.2 §14.1 回写）
+### 11.1 开发期 8 个 Codex 设计角色分工（v3.2 §14.1 回写）
 
-这些是**开发期 CC 角色，不是新增的生产 Agent 卡、也不常驻服务**（生产运行时零 CC 依赖）。生成与评审严格分开：生成角色不给自己产物打最终分；评审 prompt 不得看到"这是 Readdy 风格应高分"之类诱导；确定性工具结果优先于模型主观判断。
+这些是**开发期 Codex 逻辑角色，不是新增的生产 Agent 卡、也不常驻服务**（生产运行时零 Codex/plugin 依赖）。生成与评审严格分开：生成角色不给自己产物打最终分；评审 prompt 不得看到"这是 Readdy 风格应高分"之类诱导；确定性工具结果优先于模型主观判断。
 
 | 角色 | 输入 | 输出 | 禁止 |
 |---|---|---|---|

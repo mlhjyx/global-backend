@@ -45,7 +45,7 @@
 
 ## 2. 上传与素材安全（T2）
 
-MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 ≤20MB/文档 ≤50MB/视频 ≤500MB）；图片一律 sharp 解码重编码（消 payload+剥 **EXIF/GPS**）；文档解析（Docling）跑**非特权无网络容器**；素材总量走 workspace 配额（02 §12）。**原件对象私有、不公开直链**（访问走签名 URL），对外展示/导出只用去元数据的派生件（版权链与稳定性=ADR-014 禁外链直嵌，媒体权利详见 §8）。
+MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 ≤20MB/文档 ≤50MB/视频 ≤500MB）；图片一律 sharp 解码重编码（消 payload+剥 **EXIF/GPS**）；文档解析（Docling）目标跑**非特权无网络容器**，但当前开发 compose 仍保留模型下载所需出站，生产需预烘模型后断网；素材总量走 workspace 配额（02 §12）。**原件对象私有、不公开直链**（访问走签名 URL），对外展示/导出只用去元数据的派生件（版权链与稳定性=ADR-014 禁外链直嵌，媒体权利详见 §8）。
 
 ## 3. Prompt 注入防线（T3）
 
@@ -58,7 +58,9 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 
 ## 4. SSRF 防线（T4）
 
-复用获客侧 crawl4ai SSRF 守卫先例：仅 https、禁内网/链路本地/云 metadata IP 段、**DNS 解析后按 IP 校验再连接**（防重绑定）、redirect 逐跳同校验、超时与响应大小限额。适用：店铺导入、参考网站、品牌 web 研究。Research/参考 URL 另过 **robots、域策略（allow/deny 名单）、MIME 校验**，抓取内容体积与超时按 L0 限额（v3.2 §8.2）。
+**上线目标门（当前尚未闭环）**：仅 https、禁内网/链路本地/云 metadata IP 段、**DNS 解析后按 IP 校验再连接**（防重绑定）、redirect 逐跳同校验、超时与响应大小限额。适用：店铺导入、参考网站、品牌 web 研究；Research/参考 URL 还须经过 **robots、域策略（allow/deny 名单）、MIME 校验**，抓取内容体积与超时按 L0 限额（v3.2 §8.2）。
+
+Ubuntu 本地 mihomo fake-IP 会把公开域解析到 `198.18.0.0/16`，而 Crawl4AI 只有 broad `CRAWL4AI_ALLOW_INTERNAL_URLS` 开关；当前开发 compose 为维持公开站抓取临时开启该开关，并把端口限制在 loopback。**loopback 不能阻止 API 驱动 SSRF**，所以完成 R1-safety 前只允许开发者可信的公开 URL，绝不接收不可信输入或用于生产。R1-safety 必须同时封住 Crawl4AI 与 robots 直连路径，并以公开 URL 正向、private/loopback/metadata/DNS rebinding/redirect 负向用例验收。
 
 ## 5. 构建沙箱（T5）
 

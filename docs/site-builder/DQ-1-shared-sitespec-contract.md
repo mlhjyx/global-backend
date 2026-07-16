@@ -18,7 +18,7 @@
 | `pages[].puck.root.props` | 必填 | 可选 | 契约松紧不一致 |
 | `assets` 值形状 | `Record<string, never>`（永远空） | `Record<string, { kind, hash }>` | 同名字段两种形状 |
 
-任一端改动无编译期护栏 → 漂移只在运行时暴露。这是双人协同的头号地基风险。
+任一端改动无编译期护栏 → 漂移只在运行时暴露。这是跨应用共享契约的头号地基风险。
 
 ## 2. 决策
 
@@ -65,4 +65,4 @@
 
 ## 7. 风险分级
 
-`packages/contracts/**` + CI + 跨两 app → **实质级**（[CONTRIBUTING.md](../../CONTRIBUTING.md)「PR 粒度分级」/ [ci-merge-automation.md](../backend/ci-merge-automation.md) 自动升级规则）→ **人审、不 auto-merge**。
+`packages/contracts/**` + CI + 跨两 app → **实质级**（[CONTRIBUTING.md](../../CONTRIBUTING.md)「PR 粒度与风险分级」/ [ci-merge-automation.md](../backend/ci-merge-automation.md) 风险规则）→ **专项复核，用户明确确认后才合并**。

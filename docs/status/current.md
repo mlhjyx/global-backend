@@ -38,7 +38,7 @@ new-api 替代 LiteLLM · 全 TS 无 Python worker · 不用 BullMQ · 自建 ai
 
 1. ~~制裁名单筛查立项~~ **✅ 已落地（#104，2026-07-14）**——OFAC(SDN+Consolidated)/EU FSF 公司实体筛查作 qualify 第五门，命中→`sanctions_hold` + decide 硬拦，默认 DISABLED（翻 ENABLED 免 LIA=不物化 PII）。ADR-010 已更新记档。
 2. **DLP 提单前提核实**——「海关提单」免费方案的前提（DLP FOIA 数据集可再分发）疑似 2023-04 已被拒。需人工上 data-liberation-project.org 核实（10 分钟），结论记入本文件。R3 排期前完成。
-3. **两份 v3.0 Word 最小整改**——修撞号/损坏标题/声明重复章节以 PRD 为准/裁决 M2 口径（QGO vs SAO）。1-2 天，建议 C+Claude 做、用户验收。与交付包「冻结 v3.0」不冲突（只修结构便于迁移引用）。
+3. **两份 v3.0 Word 最小整改**——修撞号/损坏标题/声明重复章节以 PRD 为准/裁决 M2 口径（QGO vs SAO）。预计 1-2 天；**当前随获客侧一起暂停，不分配执行 owner**，用户明确恢复后再由 Codex 实施、用户验收。与交付包「冻结 v3.0」不冲突（只修结构便于迁移引用）。
 4. **首发 Job 二选一**——进口商/采购商发现 vs 经销商招募。现有数据源覆盖明显偏向前者（TED/openFDA/提单/web_watch 求供应商页）。建议：**首发「进口商/采购商发现」**，经销商招募 R3 用 Pack 加入。
 
 **需 A/B 会签（用户方向已认）**：PDR-001 对象词典 / PDR-002 业务层级（GrowthInitiative）/ 三接缝契约 / 对象级 RACI。

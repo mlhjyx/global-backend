@@ -14,7 +14,7 @@
  * ⚠️ 前置：迁移 `add_email_guess_watermark` 必须先 apply（`pnpm --filter @global/db exec prisma migrate deploy`），
  *    否则 canonical_company.email_guess_attempted_at 列不存在、活动查询报错。
  * ⚠️ 必须以 app_user（非 superuser）连接跑，否则 RLS 被绕、证明无意义（开头硬 guard）。
- * ⚠️ Mac 端口25 常封 → SMTP 不可达 → 猜测多为 unverified(RISKY)：落库为 RISKY（无 outreach），诚实不谎报 VALID。
+ * ⚠️ 部分本地/云网络封出网 25 端口 → SMTP 不可达 → 猜测多为 unverified(RISKY)：落库为 RISKY（无 outreach），诚实不谎报 VALID。
  */
 import { readFileSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';

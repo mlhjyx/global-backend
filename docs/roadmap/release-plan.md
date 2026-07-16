@@ -25,7 +25,7 @@
 
 以下为**冻结的获客路线**，保留作为恢复开发时的历史计划。
 
-## 1. 六项工程收口（owner=C+Claude）
+## 1. 六项工程收口（历史已完成；当前暂停、无执行 owner）
 
 | # | 收口 | 做什么 | 验收 |
 |---|---|---|---|
@@ -50,7 +50,7 @@
 
 ## 2. R0-R3 路线（与交付包 R0-R5 映射：其 R0=本 R0，R1 获客 Pilot=本 R0/R1 封版，R2 Campaign=本 R1 SaaS 侧，R3 QGO Pilot=本 R1 末~R2，R4/R5=本 R3+）
 
-| 阶段 | 本仓 C+Claude | B | A / SaaS 侧 | 退出条件（标注归属） |
+| 阶段 | 本仓领域层（历史计划） | B | A / SaaS 侧 | 退出条件（标注归属） |
 |---|---|---|---|---|
 | **R0 握手+收口**（2-4 周） | 收口①-④ + 删除编排启动 + 文档迁移；保持 sweep 运转 | 读路径 OpenAPI（套统一信封）+ `GET /events` + roles→scopes 映射 | JWKS+claim；登录/Workspace；Lead 队列查看页 | A 真 token 经 B 读到真实 lead（A+B+C）；LeadQualified 可被拉取并 ACK（B+C） |
 | **R1 单渠道最小闭环**（6-8 周） | 收口⑤⑥完成；QualificationDecision 定版；快照 scores 升 v2 | 写路径 API + 审批校验最小版 | **Campaign 最小对象 + 邮件受控发送 + 收件箱 + QGO 手工确认**（SaaS 侧建设，参照 product-scope 附录 A） | 内部账号全链走通一次（发送段=A/SaaS，供给段=C）；0 未授权动作（A+C）；**删除编排（C）先于发送（A）上线**（联合时序门） |

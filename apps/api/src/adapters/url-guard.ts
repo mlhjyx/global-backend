@@ -5,7 +5,11 @@ import { BadRequestException } from '@nestjs/common';
 /**
  * PRD 10.7.3: 不得把任意用户 URL 原样交给浏览器服务。API 侧先行校验：
  * scheme 白名单 + 公网地址（拒内网/loopback/link-local/metadata），
- * Crawl4AI 自身的 egress 防护是第二道，不是唯一一道。
+ * Crawl4AI 自身的 egress 防护应是第二道，不是唯一一道。
+ *
+ * 注意：该 helper 当前只覆盖显式调用它的 CompanyService 路径；Site Builder intake、
+ * robots 直连及 Crawl4AI redirect 的统一 egress gate 仍属于 R1-safety。Ubuntu mihomo
+ * fake-IP 开发环境也不能用 broad allow-internal 代替生产校验。
  */
 
 function isPrivateIPv4(ip: string): boolean {
@@ -59,7 +63,7 @@ export async function assertPublicHttpUrl(raw: string): Promise<URL> {
     if (isPrivateIp(host)) reject('不允许内网/保留地址');
     return url;
   }
-  // DEV 例外：本地联调允许 localhost 显式开关
+  // DEV 例外：仅限开发者可信 URL；不得在生产或不可信输入路径启用。
   if (process.env.CRAWLER_ALLOW_PRIVATE === 'true') return url;
   try {
     const addrs = await lookup(host, { all: true });

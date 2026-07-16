@@ -1,9 +1,10 @@
-> 【定位职能已移交 2026-07-10】本文件的「定位/边界/分工」职能已由 [../product-scope.md](../product-scope.md) 取代（其中团队分工事实仍有效）；backlog 状态表已过时（TED/openFDA/水位修复等已完成，见 [../status/current.md](../status/current.md)）。保留作历史。
+> 【定位职能已移交 2026-07-10】本文件的「定位/边界/分工」职能已由 [../product-scope.md](../product-scope.md) 取代；backlog 状态表已过时（TED/openFDA/水位修复等已完成，见 [../status/current.md](../status/current.md)）。**2026-07-16 起本仓当前开发主体改为 Codex**；下文旧分工只保留背景，当前 ownership 以 product-scope/AGENTS 为准。
+> 文中的“C+Claude / 未来 Claude 会话”只记录当时分工；获客开发仍按当前状态冻结，不得据历史 owner 自动开工。
 
 # 定位、现阶段范围与获客 Backlog（权威梳理）
 
-> 2026-07-08 定。给团队和未来 Claude 会话的**唯一权威「我们是谁、现在做什么、还剩什么、谁的活」**。
-> 上游研究：[buyer-intelligence-v3.md](buyer-intelligence-v3.md)（10 支柱深研）· [roadmap-ai-acquisition.md](roadmap-ai-acquisition.md)（进度）。PRD：`docs/*.docx`（v2.0 母本 / v3.0 评审稿）。
+> 2026-07-08 定。给团队和未来 Claude 会话的**唯一权威「我们是谁、现在做什么、还剩什么、谁的活」**。（历史原文；现已被顶部所列权威层取代。）
+> 上游研究：[buyer-intelligence-v3.md](buyer-intelligence-v3.md)（10 支柱深研）· [roadmap/changelog.md](../roadmap/changelog.md)（历史进度）。PRD：`docs/*.docx`（v2.0 母本 / v3.0 评审稿）。
 
 ## 1. 定位（三层）
 
@@ -59,7 +60,7 @@
 | # | 做什么 | 价值 | 依赖 | 状态 |
 |---|---|---|---|---|
 | 1 | **backlog 下游游标饿死修复**（加 schema 水位列） | 让存量公司真进漏斗（尾部现永久饿死） | 需 migration（高风险自审） | 🟢 进行中（另一会话） |
-| 2 | **TED v3 招投标 + openFDA 认证库** | 最快见效的「需求证据+时机」，**零鉴权/免 key**，当天可验证 | 需 ICP→CPV / FDA 产品码映射 | 📋 **两份规格均就绪** → [ted-provider-spec.md](ted-provider-spec.md)（招投标）+ [openfda-provider-spec.md](openfda-provider-spec.md)（FDA 认证注册）；均含活 API 实测契约 + ICP→码映射 + 合规分级 + 集成接缝 + 实施顺序 |
+| 2 | **TED v3 招投标 + openFDA 认证库** | 最快见效的「需求证据+时机」，**零鉴权/免 key**，当天可验证 | 需 ICP→CPV / FDA 产品码映射 | 📋 **两份规格均就绪** → [ted-provider-spec.md](../implementation-records/ted-provider-spec.md)（招投标）+ [openfda-provider-spec.md](../implementation-records/openfda-provider-spec.md)（FDA 认证注册）；均含活 API 实测契约 + ICP→码映射 + 合规分级 + 集成接缝 + 实施顺序 |
 | 3 | **GDPR 删除编排**（DSR/删除依赖图/Temporal 删除流） | 我们在存决策人个人数据却无法删=Art.17 暴露；触达上线前必做 | 无 | ⬜🔴 |
 | 4 | **专利 inventor + 自有 ATS 招聘 JSON + 提单 FOIA 基线** | 继续补免费需求/时机/决策人源（§10.6 排序） | 无 | ⬜ |
 | 5 | **六维 加法→乘法门** `Fit^a×(1+Intent)×Reachability×(1+DemandProof)` | 让联系不上/无需求的不占推荐位 | **必须等 #1 修完**（否则饿死致 Reachability=0，乘法门误杀+校准基线脏） | ⬜ |

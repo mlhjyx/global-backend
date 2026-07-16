@@ -3,8 +3,9 @@ import type { ExecutionBroker } from '../../tools/tool-contract';
 /**
  * 品牌 web 研究（09 §2.4 / 合规 C1-C4）：站主自身公司的联网画像补充。
  * - 一切出网经 ToolBroker（allowedTools 白名单绑定 site_builder.brand_profile 契约）：
- *   SSRF（crawl4ai 容器 + net-guard）/ robots（crawl4ai.fetch execute 内强制）/
- *   限流 / 预算 / trace 全部复用，本模块零裸出网（C1/C3）。
+ *   robots（crawl4ai.fetch execute 内强制）/ 限流 / 预算 / trace 全部复用，本模块零裸出网（C1/C3）。
+ *   SSRF 仍需 R1-safety 的 API+crawler 完整 egress gate；当前 Ubuntu dev broad
+ *   allow-internal 下只允许开发者可信的公开 websiteUrl，不能视为生产防护。
  * - 搜索结果只取 title/snippet（第三方页面不搬运正文，竞品只做定位参考，C3）；
  *   自有官网整页抓取归 storefront 级证据。
  * - fail-safe：任一步失败 → degraded=true 返回已有内容，绝不阻断 brandProfile

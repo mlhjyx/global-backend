@@ -3,7 +3,10 @@
  * ADR-013). Activity/business code depends only on this contract, never on
  * Crawl4AI internals (OSG-003). Swapping to Firecrawl = reimplement this file.
  *
- * Crawl4AI provides SSRF protection (egress pinning) itself, so we don't.
+ * Production requires two layers of egress validation: API-side URL/redirect checks and
+ * crawler-side pinning. The current Ubuntu dev stack temporarily enables Crawl4AI's broad
+ * allow-internal switch because mihomo fake-IP maps public domains into 198.18/16; that is
+ * only acceptable for developer-trusted URLs and is not a production SSRF control.
  */
 export interface CrawlResult {
   url: string;

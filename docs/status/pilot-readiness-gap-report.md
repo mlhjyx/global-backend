@@ -1,6 +1,7 @@
 # 商业试点就绪度 · 封版⑦ 差距报告（活文档）
 
 > 2026-07-11。回应 `release-plan.md` §1.5 封版定义 ⑦「真实企业样本 E2E/UAT」——对全漏斗做端到端就绪度评估，出诚实差距报告 + 试点最短路径。
+> **责任迁移（2026-07-16）**：下表已完成项中的 `C+Claude` 保留为历史交付归属；未完成/暂停项当前无获客开发 owner，待用户解除冻结后由 Codex 重新排期，不能据旧 owner 自动开工。
 > **方法与口径（透明）**：本报告基于**三类真实证据**综合，**未**重跑一次全新昂贵全漏斗（成本考量 + 各阶段已有真实数据验证）：① 输出契约代码（`lead-qualified-snapshot.ts` 等，SaaS 真实消费的合同）；② 仓内 **~30 个 `verify-*.mts` 真库真源逐阶段验证**（每个阶段已在真实数据上证明）；③ `status/current.md` + `release-plan.md` 权威真值。下次真实 UAT 需 A/SaaS 侧 UI + design partner 到位（见 ⑦⑧）。
 
 ## 0. 一句话结论
@@ -30,11 +31,11 @@
 
 | 优先 | 动作 | 归属 | 量级 |
 |---|---|---|---|
-| ~~P0~~ ✅ | ~~把 `storage_rights_decision` 接进快照~~ **已交付（PR #72）**：接 `DataRightsService` STORE 判定 + `decide` `!allowed` 强制不交棒 + `DATA_PROCESSOR_JURISDICTION` 配置。对抗复审 2 HIGH 全修。 | C+Claude | ✅ 完成 |
-| ~~P0~~ ◑ | ~~快照补 `valid_until`~~ **已交付（PR #76）** evidence 鲜度模型；**余 成本**（`usage_ledger` 需加 per-lead/run 归集，需 schema）→ 封版② 余 1 硬缺 | C+Claude | cost 需 schema 设计 |
-| P1 | 闭「对的人→联系得上」环：具名决策人→按需 `guessEmailsForCompany`→补可用邮箱→进 Reachability（让身份源真出价值）；自动路径待 per-tenant LIA | C+Claude | 中 |
-| ~~P1~~ ✅ | ~~一个真·全漏斗 E2E 验收脚本~~ **已交付** `verify-e2e-acquisition-funnel.mts`（评分→补全→重评→快照全链，断言可达性闭环把 `needs_review`→`recommended`）——补 ⑦ 机测半 | C+Claude | ✅ 完成 |
-| P2 | 缺口#8 游标公平根治（R2）+ SLO 定义/监控（⑥）| C+Claude | R2 |
+| ~~P0~~ ✅ | ~~把 `storage_rights_decision` 接进快照~~ **已交付（PR #72）**：接 `DataRightsService` STORE 判定 + `decide` `!allowed` 强制不交棒 + `DATA_PROCESSOR_JURISDICTION` 配置。对抗复审 2 HIGH 全修。 | C+Claude（历史） | ✅ 完成 |
+| ~~P0~~ ◑ | ~~快照补 `valid_until`~~ **已交付（PR #76）** evidence 鲜度模型；**余 成本**（`usage_ledger` 需加 per-lead/run 归集，需 schema）→ 封版② 余 1 硬缺 | 历史 C+Claude；余项暂停 | cost 需 schema 设计 |
+| P1 | 闭「对的人→联系得上」环：具名决策人→按需 `guessEmailsForCompany`→补可用邮箱→进 Reachability（让身份源真出价值）；自动路径待 per-tenant LIA | 暂停 / 未排期 | 中 |
+| ~~P1~~ ✅ | ~~一个真·全漏斗 E2E 验收脚本~~ **已交付** `verify-e2e-acquisition-funnel.mts`（评分→补全→重评→快照全链，断言可达性闭环把 `needs_review`→`recommended`）——补 ⑦ 机测半 | C+Claude（历史） | ✅ 完成 |
+| P2 | 缺口#8 游标公平根治（R2）+ SLO 定义/监控（⑥）| 暂停 / 未排期 | R2 |
 | **门（非本仓）** | **⑧ SaaS Campaign 消费 LeadQualified + ⑦ design partner UAT**——试点真正的门 | A / SaaS | R0/R1 依赖主干 |
 
 ## 4. 诚实裁决

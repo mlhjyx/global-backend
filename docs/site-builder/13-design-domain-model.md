@@ -51,7 +51,7 @@
 
 - **`owned_export_authorized` 条件字段**：`ownerAuthorization`（`evidencePath` + `covers.aiSiteBuilder=true` + `covers.derivativeComponents=true` + `covers.commercialDistribution=true` + `covers.training?` + `territories[]` + `validity:{kind:perpetual}|{kind:expires,expiresAt}` + `revocationTerms` + `redistribution:{kind:allowed|prohibited}|{kind:conditional,conditions}` + `recordedAt`）与 `approvedAt` **同时必填**；其他 sourceClass 禁带 `ownerAuthorization`。
 - **状态硬门**：`approvedAt` 单独存在不代表授权生效。validator 必须核实授权证据非空、三项范围为真、`validity` 显式且未过期、地域非空、撤回/再分发权已登记；训练还须 `covers.training=true`。缺任一项 fail-closed，既不转换也不训练；不得自动降级绕过。`visual_research_only` 在类型层固定 `trainingPolicy=prohibited`、排除 `code_transformation` 与 `licensed_archive`，外部素材只能 remove/replace；运行时 validator 重复同一组断言，防未类型化 JSON 绕过。
-- **生产方**：Reference Curator（CC 开发角色，非生产 Agent）。**消费方**：Design Decomposer、Pattern Aggregator、整条固定工序（§8）。
+- **生产方**：Reference Curator（Codex 开发期逻辑角色，非生产 Agent）。**消费方**：Design Decomposer、Pattern Aggregator、整条固定工序（§8）。
 
 ### 2.3 外部观察提升为平台 `DesignRule` 的 4 条件
 
@@ -212,14 +212,14 @@
 
 ## 8. 设计智能工厂固定工序（10 步）
 
-> v3.2 §14.2 回写。这是**开发期**把设计参考炼成平台自有设计知识的固定管线（CC 开发角色执行，非生产 Agent、非常驻服务）。失败的家族**不进运行时或训练语料**。
+> v3.2 §14.2 回写。这是**开发期**把设计参考炼成平台自有设计知识的固定管线（Codex 开发期逻辑角色执行，非生产 Agent、非常驻服务）。失败的家族**不进运行时或训练语料**。
 
 1. **登记来源和权利** → `DesignSourceManifest`（§2.2）。
 2. 按来源策略获取**临时截图或许可代码**；**视觉研究截图不进长期训练集**。
 3. 在 **375 / 768 / 1440** 下提取 `DesignObservation`（§3）；分析完成后按 `retentionPolicy` **清理来源副本**。
 4. **Pattern Aggregator** 至少综合 **5 个独立来源/原创实验**，形成 `DesignRule` 和 `DesignDNA`（§2.3 四条件）。
 5. 映射到现有组件和变体，**记录缺口**；**Blueprint Synthesizer 只读聚合规则、不读来源页面**（干净室 §3）。
-6. 由平台 Agent 生成，**CC 重写为 Astro 封闭组件变体**；产物进入平台自有语料候选（**ADR-015** 封闭库）。
+6. 由平台 Agent 生成，**Codex 在开发期重写为 Astro 封闭组件变体**；产物进入平台自有语料候选（**ADR-015** 封闭库）。
 7. **清除**外部依赖、品牌标识、第三方文案和素材。
 8. 运行 **schema / a11y / 性能 / 三断点截图 / 代码·结构·视觉相似度 / 事实**评测。
 9. 生成 `DesignCatalogSnapshot` 与 `PlatformTemplateCorpus` 候选记录。

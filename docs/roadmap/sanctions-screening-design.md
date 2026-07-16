@@ -1,5 +1,7 @@
 # 制裁名单筛查 —— Qualify 第五门设计（出口管制合规硬门）
 
+> **后续实施状态（2026-07-16）**：本文设计已由 PR #104（merge `44e68ed`）落地，功能保持默认 `DISABLED`。下文“设计待认可 / 未动代码”是立项时快照，只作实施 provenance；当前状态以代码与 [../status/current.md](../status/current.md) 为准。
+>
 > 状态：**设计待认可**（2026-07-14）。四项方向已拍板（AskUserQuestion）：**① Phase 1 仅公司/实体**；**② 名单集=OFAC(SDN+Consolidated)+EU FSF**；**③ 命中处置=第 5 队列 `sanctions_hold` + 审计件 + `decide(accept)` 硬拦**；**④ 复筛=qualify+decide 筛 + 名单每日刷新**（存量 delta 复筛=Phase 1.5）；**⑤ 上线=种子 DISABLED，真测绿后 ops 翻 ENABLED**。
 > 承重假设已**真探证实**（见 §2，OFAC SDN 一手拉取；EU token 研究证实），未动任何代码。落地走 TDD + 真测 + 对抗复审 + PR。
 > 对标：`docs/roadmap/sam-sources-sought-p4-design.md`（近期同格式立项 spec）、`docs/implementation-records/openfda-provider-spec.md`（公共领域源 + 个体户拒收先例）。上位决策：`docs/adr/registry.md` **ADR-010**（「（待拍板）制裁名单筛查作 qualify 第五门」——本文即其落地）、ADR-005（执行门/Broker）、ADR-006（Evidence/Signal 事实源）。

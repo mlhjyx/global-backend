@@ -23,7 +23,7 @@ const SMTP_PROBE_TOOL = 'smtp.rcpt_probe';
  * 🔴 诚实上限（buyer-intelligence-v3.md §10.3，务必守）：
  *  - Gmail / Microsoft 365 等**反枚举**邮服对任意地址一律返 250 → **永不判 VALID**，只 RISKY。
  *  - **catch-all 域**（对随机地址也接受）同样不可逐一确认 → RISKY。
- *  - 端口 25 出网被封（Mac/多数云常见）→ SMTP 不可达 → RISKY（不谎报 INVALID）。
+ *  - 端口 25 出网被封（部分本地/云网络常见）→ SMTP 不可达 → RISKY（不谎报 INVALID）。
  *  只有「SMTP 可达 + RCPT 明确接受 + 非 catch-all + 非反枚举 provider」才判 VALID。
  */
 export class SelfHostedEmailVerifier implements EmailVerificationAdapter {

@@ -114,7 +114,7 @@ async function main() {
   console.log('\n█ 说明：');
   console.log('█  · 候选按 B2B 命名法先验排序，有站内样本则先学格式（命中率更高）');
   console.log('█  · SMTP 出网全经 ToolBroker（source_policy/预算/限流/幂等/Trace）；人名邮箱过 lawful-basis 门');
-  console.log('█  · Mac 端口25 常封 → 多数域 unverified(unreachable)，诚实不谎报 VALID；VALID 命中需放行25的环境');
+  console.log('█  · 部分本地/云网络封出网25 → 多数域 unverified(unreachable)，诚实不谎报 VALID；VALID 命中需放行25的环境');
 }
 
 try { await main(); } finally { await prisma.$disconnect(); }

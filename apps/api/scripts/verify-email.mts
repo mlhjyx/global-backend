@@ -1,7 +1,7 @@
 /**
  * 自建邮箱验证 · 真实验证。对真实邮箱跑 SelfHostedEmailVerifier(source_policy→MX→SMTP→分级)。
  * SMTP 出网经 ToolBroker 闸门（此脚本无 DB → source_policy reader 缺省=无策略，一律放行）。
- * 注:Mac/多数网络封出网 25 端口 → SMTP 段会 smtp_unreachable→RISKY(诚实降级,非 bug)。
+ * 注：部分本地/云网络封出网 25 端口 → SMTP 段会 smtp_unreachable→RISKY（诚实降级，非 bug）。
  *   node --import tsx scripts/verify-email.mts [email ...]
  */
 import { readFileSync } from 'node:fs';

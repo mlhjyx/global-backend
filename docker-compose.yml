@@ -1,5 +1,5 @@
 # Local dev infrastructure for the Global backend.
-# Temporal is added in P1 when the first durable workflow lands.
+# Temporal intentionally runs outside Compose via `temporal-dev.service`.
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -68,10 +68,6 @@ services:
       # Keep 11235 loopback-only and pass only developer-verified public URLs;
       # loopback does not stop API-driven SSRF. R1-safety must replace this before
       # production or any untrusted crawl input. See AGENTS.md §3.
-      - CRAWL4AI_ALLOW_INTERNAL_URLS=true
-      # DEV ONLY: Docker Desktop (macOS) resolves public hosts to 198.18.x.x
-      # (non-global), which Crawl4AI's SSRF guard blocks. Prod Linux resolves
-      # real public IPs, so keep SSRF on there — do NOT set this in prod.
       - CRAWL4AI_ALLOW_INTERNAL_URLS=true
 
   # Object storage for site-builder assets and KB objects (docs/site-builder/02 §2).

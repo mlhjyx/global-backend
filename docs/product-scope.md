@@ -96,7 +96,7 @@ Goal（业务目标：如进入德国市场）
 |---|---|
 | A（SaaS 平台） | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing |
 | B（接口层，同库） | JWKS 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射 |
-| C+Claude（本仓领域层） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规 |
+| Codex（本仓当前开发主体；用户 C 拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规 |
 
 三接缝：① **JWKS**——A 签发登录凭证、我们只验签解出租户；② **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK；③ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封）在实现前先经 B/A 评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
 

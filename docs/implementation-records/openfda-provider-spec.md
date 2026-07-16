@@ -1,10 +1,11 @@
 > 【Implementation Record 2026-07-10】P1 器械注册发现 / P2 ICP→FDA 产品码 / P3 510(k) intent / P5 Schedule 已完成（PR #34/#36/#37/#38）；剩余 P4 富集/monitoring/foiclass 全表种子。规格正文以「§8 审查修正」+ 现有代码为准。
+> 【现行流程覆盖】正文中旧的 `docs/feat` 分支、自审、自合并等表述只记录当时过程；当前统一使用 `codex/<topic>` + PR + CI/Codex 审查，合并须用户明确确认，权威规则见 [../../AGENTS.md](../../AGENTS.md) §8。
 
 # openFDA 认证/注册库 Provider — 落地规格（build-ready）
 
 > 2026-07-08 定。给**下一个开工会话**的权威实施规格。API 事实**均为当日活体实测**(curl 真打 `api.fda.gov`)；映射+合规经研究 agent 附实链核实。用哪个数字/字段直接照抄本文。
 > **与 [ted-provider-spec.md](ted-provider-spec.md) 同构**——集成接缝(§4)完全复用 TED 那份(同 `public_intelligence` discovery/enrich 模式)，本文只写 openFDA 特有的 API 契约 / ICP→产品码映射 / 合规 / 端点接缝映射。
-> 上游：[buyer-intelligence-v3.md](buyer-intelligence-v3.md)（P1「认证注册库」）· [positioning-and-acquisition-backlog.md](positioning-and-acquisition-backlog.md) §5 #2。
+> 上游：[buyer-intelligence-v3.md](../research/buyer-intelligence-v3.md)（P1「认证注册库」）· [positioning-and-acquisition-backlog.md](../research/positioning-and-acquisition-backlog.md) §5 #2。
 > 硬规矩：真实数据、无 sandbox（§5）；多租户、**绝不硬编码行业/国家**（§2）；合规红线（§3）。
 
 ---
