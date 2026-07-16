@@ -56,6 +56,8 @@ pnpm --filter @global/api worker           # Temporal worker（启动时幂等 s
 pnpm --filter @global/api test             # vitest；以本次命令输出为准，不在 README 固化计数
 ```
 
+> 从旧的目录推导项目 `global-backend` 迁移时，先按 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md) 核对标签、卷并备份；不要直接 `docker compose down -v`。
+
 Provider/采集/富集类改动**必须真实数据实测**（`cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md §8](AGENTS.md)。
 
 > 当前施工环境为 Ubuntu 26.04 `/global/backend`。需要 Node ≥ 20、pnpm、Docker；Temporal 开发服务由 `temporal-dev.service` 管理。

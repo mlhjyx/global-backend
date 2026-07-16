@@ -27,6 +27,8 @@
 **Docker 服务**（`docker compose -p global up -d`，共 8 个，容器名 `global-*`）：postgres `:5432`(pgvector/pg16, global/global/global_dev) · redis `:6379` · **new-api** `:3001`(模型网关，key 在 `apps/api/.env`) · **crawl4ai** `:11235`(token 在 .env) · **searxng** `:8081`(配置 `infra/searxng/settings.yml`) · **minio** `:9000/9001` · **embeddings**(ollama `:11434`，`bge-m3` 1024 维) · **docling** `:5001`。
 **Temporal** 不在 compose，跑成 systemd 服务 `temporal-dev.service`（开机自启、`:7233`）——`systemctl status/restart temporal-dev`，不再手动 CLI。
 
+**Compose 项目名迁移护栏**：当前 Ubuntu 实机的容器标签、固定容器名和数据卷已核验为项目 `global`（例如 `global_pgdata`）；`-p global` 是现行真值。旧 Mac/WSL 曾可能使用目录推导的 `global-backend`，切换时**不得**直接 `down -v`、删除固定 `global-*` 容器或假定新卷已有数据。先读 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md)；若尚未迁移，临时使用 `pnpm infra:up:legacy`，完成 pg_dump/restore 和卷/服务验收后再切换。
+
 **跑起来**：
 ```bash
 cd /global/backend

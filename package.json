@@ -10,6 +10,8 @@
     "api:build": "pnpm --filter @global/api build",
     "infra:up": "docker compose -p global up -d",
     "infra:down": "docker compose -p global down",
+    "infra:up:legacy": "docker compose -p global-backend up -d",
+    "infra:down:legacy": "docker compose -p global-backend down",
     "contracts:lint": "pnpm --filter @global/contracts lint",
     "contracts:docs": "pnpm --filter @global/contracts docs",
     "contracts:mock": "pnpm --filter @global/contracts mock",
