@@ -324,3 +324,29 @@ M1 只做**确定性动效 token**（Ken Burns/轻微视差/数字递增/Marquee
 ### 12.5 设计领域模型施工承载点（**领域契约真值见 [13 号](13-design-domain-model.md)**）
 
 09 只承载两处**施工序/DoD 门**：① **R0 相关**——当前 `demo-spec` 把 `BusinessArchetype/TemplateFamily/StylePreset` 混成一个关键词主题选择，**必须拆开**（五概念完整定义见 13 号 §1，与 §10.3 中性措辞同批治理，DV-0 PR）；② **M1-e-B DoD 门**——首批 **6 个 TemplateFamily**（`precision-industrial/technical-catalog/oem-capability/scientific-trust/natural-origin/premium-innovation`），每家族至少 2 首页 + 2 内页 Blueprint + 2–3 Hero 变体 + 1 套移动端重排 + 2 StylePreset + 1 DemoVisualPack + 覆盖 12 Golden fixture 中≥2 个（`global-wholesale` 等 4 家留 M1-g 后）。Family 设计语言/避免项/DesignDNA/Blueprint/DesignBrief 完整契约 = **13 号真值（DI-0 PR），本文不复述**。
+
+---
+
+## 实施风险寄存器（17 项，v3.2 §34 回写 · DOC-12 补漏）
+
+> 这些事项早期文档易被拆散，v3.2 §34 汇成实施检查项（completeness-critic 查漏后补回）。多数在他处有机制家（标指针）；**🔴 标注的是别处无家的独有承重项，必须在施工序里立项**。
+
+1. **变更影响图**：Claim/Offering/Asset/Pack/Family/组件/Renderer/模型下线都能反查受影响 Release 并建维护任务（`SiteMaintenanceTask`，见 [06 §8.3](06-security-abuse.md)）。
+2. 🔴 **人工编辑三方合并**（别处无家）：增量重建比较 base/current/generated；锁定字段不覆盖、未锁定冲突生成建议、**不 last-write-wins**（与 [07](07-api-contract-draft.md) 乐观并发 If-Match 互补，但三方合并语义独有）。
+3. **按可接受产物计成本**：不只 token；统计被拒图片/重做 Shot/schema repair/fallback/最终 accepted artifact 单价。
+4. **区域与供应商策略**：ModelPolicy 解析 data region/DPA/媒体保留/训练选项/workspace policy；能力更强 ≠ 允许出域（ADR-016 / [10](10-model-selection-study.md)）。
+5. 🔴 **Kill switch**（别处无家）：按 provider/profile/task/workspace 禁用**不发版**；图片/视频失败返回原始/静态结果。
+6. **依赖/模型弃用监控**：只告警/建变更单，不自动把 Preview alias 切进生产；Release 保存 snapshot。
+7. 🔴 **灾难恢复**（别处无家）：DB 备份不够；对象存储/manifest/域名绑定/发布指针要定期**恢复演练 + digest 校验**（部署面见 [05](05-deployment-hosting.md)）。
+8. **权利到期与撤回**：stock license/客户 Logo/音乐/人物授权到期能**阻断新发布并定位旧 Release**（[06](06-security-abuse.md)）。
+9. 🔴 **搜索上线检查**（别处无家）：preview `noindex` 与 published `indexable` **必须互斥验证**；sitemap/hreflang/canonical/structured data 在域名切换后复扫。
+10. **询盘交付可靠性**：邮件/CRM 失败可重试；Inquiry 表是数据真相；反垃圾不误删原始审计（[06](06-security-abuse.md)）。
+11. **可访问性持续性**：人工编辑和实验变体也过 a11y，不只初始 AI 生成（[08](08-eval-testing.md)）。
+12. **冻结获客、保留共享核心**：不开发获客新功能，但 Company/Claim/Offering/Outbox/Usage 共享域继续作独立站依赖，不复制/破坏。
+13. **权威与时间漂移**：每 PR 记 asBuilt SHA/决策版本/消费者；设计稿"当前"不覆盖后续合并事实。
+14. **单源设计支配**：规则多源聚合 + 过视觉/结构/代码相似度门；任一 Tier B 来源不主导可识别模板（ADR-019 / [13](13-design-domain-model.md)）。
+15. **训练与运行数据混用**：DesignObservation/生产 DesignRule/训练语料/用户站点数据各有 retention/trainingAllowed；默认不因"可访问"推"可训练"。
+16. **测试分支反向定规**：视觉试验可贡献原创实现 + 证据，但共享合同由主线 ADR/contract PR 决定；选择性提取非整包覆盖。
+17. **只有展示、没有转化**：首次公开发布前必须有最小 inquiry/consent/outbox/anti-abuse；视觉提升不能以丢失询盘闭环为代价。
+
+> **§35 依据索引**（Readdy/Relume/Astro/EU Art.50/各模型官方目录/仓库审查基线 PR 等 ~45 链接）：低损，多数链接已在各专题正文内联；完整索引保留在**归档 v3.2 §35**（仍在仓库内，随 DOC-12 committed），需要时查该处，不在活文档重复。
