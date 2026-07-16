@@ -6,7 +6,7 @@ export class SiteDto {
   @ApiProperty() name!: string;
   @ApiProperty({ description: '预览子域 slug' }) slug!: string;
   @ApiProperty({ enum: ['builder', 'diagnosis'] }) mode!: string;
-  @ApiProperty({ enum: ['draft', 'building', 'ready', 'published'] }) status!: string;
+  @ApiProperty({ enum: ['draft', 'building', 'ready', 'published', 'setup_failed'] }) status!: string;
   @ApiPropertyOptional({ nullable: true }) stylePreset!: string | null;
   @ApiProperty({ type: [String] }) locales!: unknown;
   @ApiPropertyOptional({ format: 'uuid', nullable: true }) activeVersionId!: string | null;
