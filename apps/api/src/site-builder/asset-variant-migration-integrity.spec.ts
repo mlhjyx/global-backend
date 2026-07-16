@@ -17,6 +17,8 @@ const ledgerIdentityMigrationPath =
   "packages/db/prisma/migrations/20260717042000_site_builder_asset_variant_ledger_identity/migration.sql";
 const sourceReadinessMigrationPath =
   "packages/db/prisma/migrations/20260717043000_site_builder_asset_variant_source_readiness/migration.sql";
+const upgradeValidationMigrationPath =
+  "packages/db/prisma/migrations/20260717044000_site_builder_asset_variant_upgrade_validation/migration.sql";
 
 describe("MF0-A AssetVariant migration integrity", () => {
   it("adds the tenant-scoped materialized variant and its complete provenance", () => {
@@ -141,5 +143,22 @@ describe("MF0-A AssetVariant migration integrity", () => {
     expect(sql).toMatch(/source_variant_id[\s\S]+content_hash[\s\S]+IS NOT NULL/i);
     expect(sql).toMatch(/BEFORE INSERT OR UPDATE ON "asset_variant"/i);
     expect(sql).toContain("AssetVariant source must be ready and checksummed");
+  });
+
+  it("fails dirty upgrades and binds canonical extensions to MIME", () => {
+    const sql = repositoryFile(upgradeValidationMigrationPath);
+
+    expect(sql).toMatch(
+      /source_variant_id[\s\S]+JOIN[\s\S]+status[\s\S]+ready[\s\S]+RAISE EXCEPTION/is,
+    );
+    for (const [mime, extension] of [
+      ["image/avif", ".avif"],
+      ["image/webp", ".webp"],
+      ["image/jpeg", ".jpg"],
+      ["image/png", ".png"],
+    ]) {
+      expect(sql).toContain(`'${mime}'`);
+      expect(sql).toContain(`'${extension}'`);
+    }
   });
 });
