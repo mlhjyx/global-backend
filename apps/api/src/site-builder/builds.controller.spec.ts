@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BuildsController } from './builds.controller';
 
@@ -48,5 +50,32 @@ describe('BuildsController public progress response', () => {
     const response = await controller.get(CTX, '22222222-2222-4222-8222-222222222222');
 
     expect(response.data.error).toBeNull();
+  });
+
+  it('exports the non-null progress shape as strings plus a step array', () => {
+    const spec = JSON.parse(
+      readFileSync(resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'), 'utf8'),
+    ) as {
+      components: {
+        schemas: {
+          BuildStatusResponseDto: {
+            properties: Record<string, { type?: string; nullable?: boolean; items?: unknown }>;
+          };
+        };
+      };
+    };
+    const properties = spec.components.schemas.BuildStatusResponseDto.properties;
+
+    expect(properties.phase).toMatchObject({ type: 'string', nullable: true });
+    expect(properties.error).toMatchObject({ type: 'string', nullable: true });
+    expect(properties.steps).toMatchObject({ type: 'array', nullable: true });
+    expect(properties.steps.items).toMatchObject({
+      type: 'object',
+      required: ['key', 'status'],
+      properties: {
+        key: { type: 'string' },
+        status: { type: 'string' },
+      },
+    });
   });
 });

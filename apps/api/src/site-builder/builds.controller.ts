@@ -60,19 +60,41 @@ class BuildStatusResponseDto {
   @ApiProperty()
   status!: string;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ type: String, nullable: true })
   phase!: string | null;
 
   @ApiProperty()
   progress!: number;
 
-  @ApiProperty({ type: 'object', nullable: true, additionalProperties: true })
-  steps!: Record<string, unknown> | null;
+  @ApiProperty({
+    type: 'array',
+    nullable: true,
+    items: {
+      type: 'object',
+      required: ['key', 'status'],
+      properties: {
+        key: { type: 'string' },
+        status: { type: 'string' },
+        attempt: { type: 'integer', minimum: 1 },
+        startedAt: { type: 'string', format: 'date-time', nullable: true },
+        finishedAt: { type: 'string', format: 'date-time', nullable: true },
+        error: { type: 'string', nullable: true },
+      },
+      // R3-5 会把各阶段的有界观测字段（processed/failed/gaps 等）逐步升格；
+      // R2 先准确声明数组基形，避免把运行时数组错误生成为单个 object。
+      additionalProperties: true,
+    },
+  })
+  steps!: Array<Record<string, unknown>> | null;
 
   @ApiProperty({ type: 'object', nullable: true, additionalProperties: true })
   costSummary!: Record<string, unknown> | null;
 
-  @ApiProperty({ nullable: true, description: '泛化错误；不含 worker/provider 诊断' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '泛化错误；不含 worker/provider 诊断',
+  })
   error!: string | null;
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })

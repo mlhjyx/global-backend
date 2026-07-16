@@ -8155,16 +8155,49 @@
             "type": "string"
           },
           "phase": {
-            "type": "object",
+            "type": "string",
             "nullable": true
           },
           "progress": {
             "type": "number"
           },
           "steps": {
-            "type": "object",
+            "type": "array",
             "nullable": true,
-            "additionalProperties": true
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "status"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "finishedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "error": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": true
+            }
           },
           "costSummary": {
             "type": "object",
@@ -8172,7 +8205,7 @@
             "additionalProperties": true
           },
           "error": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "description": "泛化错误；不含 worker/provider 诊断"
           },
