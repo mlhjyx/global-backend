@@ -64,6 +64,20 @@ function requireExplicitDevelopmentTargets(): void {
       throw new Error(`refusing KB verifier ${name}: endpoint must be loopback`);
     }
   }
+  const temporalAddress = process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
+  const temporalUrl = new URL(
+    temporalAddress.includes('://') ? temporalAddress : `grpc://${temporalAddress}`,
+  );
+  const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
+  if (
+    !isLoopbackHost(temporalUrl.hostname) ||
+    temporalUrl.port !== '7233' ||
+    temporalNamespace !== 'default'
+  ) {
+    throw new Error(
+      'refusing KB verifier Temporal target: require loopback:7233 and default development namespace',
+    );
+  }
 }
 
 async function isolateRecoverySchedule(): Promise<() => Promise<void>> {
