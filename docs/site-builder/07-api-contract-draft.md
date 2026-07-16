@@ -53,9 +53,11 @@ GET  /sites/{id}/profile
 
 > ⚠️ **as-built 待对齐（R2-7，`12` §24.2 回写；公开 intake 前修）**：现 profile patch **只校验五个顶层组名**，不校验组内 schema/数量/URL/总大小，且并发 read-merge-write 可**丢另一组更新**（大 JSON / 脏数据 / 提示注入面 / 向导丢数据）。改为组内 schema + 数量/大小上限校验 + 乐观并发（`baseVersionId`/`If-Match`），冲突 409 不 last-write-wins。
 
-## 3. 素材（Asset）〔🟢 M0：presign/commit/list/delete · 🎯 M1-c：process/select-variant〕
+## 3. 素材（Asset）〔🟢 M0 端点 + ✅ R2-A1 状态机 · 🎯 M1-c：process/select-variant〕
 
 上传三步：`presign → PUT 直传 → commit`（内容寻址，canonical key 由 content hash 决定，copy 幂等）。
+
+**R2-A1 as-built**：commit 先 CAS 进入 `committing`（递增 attempt + UUID fencing token + lease），再做事务外 HEAD/hash/copy；完成/失败回写必须匹配 fence。瞬时失败进入 `failed_retryable` 并保留 staging；同内容预检或最终部分唯一索引 P2002 均收敛为 `duplicate` + 409。canonical DB 真值与 staging cleanup intent 同事务提交，随后才 best-effort 删 staging。
 
 ```
 POST /sites/{id}/assets/presign  { "kind":"product_image", "filename":"a.jpg", "size":123, "mime":"image/jpeg" }
@@ -72,7 +74,7 @@ DELETE /assets/{assetId}       // 引用检查见下（409 ASSET_IN_USE + usages
 
 **MF-0 媒体地基（薄版，ADR-018 · §0.1 回写）**：M1-c **前**只落 `AssetVariant` 表 + 上述**删除守卫**（`SiteSpecAssetReferenceScanner`）；`MediaJob`/`AssetUsage` 待真实消费者（生成式图片/视频）出现再补建，不提前预建（YAGNI）。M1-c 图片处理是**纯确定性 Sharp**，**不塞生成式图片或设计 Agent**。
 
-> ⚠️ **as-built 现状**：`assets.controller.ts` 的 `DELETE` 注释标"引用检查随 M1 spec 物化补齐"——即 409+usages 守卫是 MF-0-thin 目标、尚未落地；`process`/`select-variant`/`GET /assets/{id}` 为 M1-c 目标端点。
+> ⚠️ **as-built 现状**：DELETE 已改为 tombstone，并把 canonical cleanup intent 以 `blockedUntil=site_spec_asset_reference_scanner` 持久 parked；不会在事务内/当前阶段删除 canonical。与正在 `committing/processing` 的 worker 竞争时 DELETE 以 CAS 返回 409，避免 copy 已完成但 canonical 尚未回写的孤儿窗口。409+usages 守卫仍是 MF-0-thin 目标；Outbox→Temporal cleanup/redrive 是 R2-A4，尚未落地。`process`/`select-variant`/`GET /assets/{id}` 为 M1-c 目标端点。
 
 ### 3.1 媒体作业（Media Job）〔🎯 M3 目标〕
 

@@ -43,8 +43,8 @@ Temporal 固定 DAG → 有界 AI Task / Docling / BGE-M3 → SiteSpec 1.0.0
 ```
 
 - 类型边界：`@global/contracts` 的 `SiteSpec` 1.0.0 是 API 生产端与 Astro 消费端唯一共享类型（DQ-1/#117）；运行时 Zod 门与 1.1.0 目标字段尚未落地，不得写成 as-built。
-- #121 已去 intake **行为分叉**，#123/#124 已落事实安全、隐私、可取消超时和失败保站，#126 已完成持久幂等、`buildId`、稳定错误码、Temporal 启动证据和 code-first OpenAPI。当前 renderer 产物键仍是 `local:` 路径；不可变 Release 尚属目标态。
-- 当前关键路径：R1-safety ①临时 SiteSpec/Renderer env 隔离与 ② Crawl/robots 全链 egress/SSRF 均已于 2026-07-17 落地；进入 R2-A（Asset/KB/Profile 分拆）→ MF-0-thin（含引用扫描器与删除 409）→ M1-c（纯 Sharp）。在引用扫描器落地前，不得把 canonical object 自动清理写成安全能力。
+- #121 已去 intake **行为分叉**，#123/#124 已落事实安全、隐私、可取消超时和失败保站，#126 已完成持久幂等、`buildId`、稳定错误码、Temporal 启动证据和 code-first OpenAPI。R2-A1 已把 Asset commit 改为 CAS+attempt/token/lease fencing，canonical 状态与 cleanup intent 同事务落库，duplicate/failed_retryable/tombstone 成为显式状态。当前 renderer 产物键仍是 `local:` 路径；不可变 Release 尚属目标态。
+- 当前关键路径：R1-safety ①临时 SiteSpec/Renderer env 隔离与 ② Crawl/robots 全链 egress/SSRF、R2-A1 Asset 均已于 2026-07-17 落地；下一步 R2-A2 KB → R2-A3 Profile → R2-A4 cleanup/integration → MF-0-thin（含引用扫描器与删除 409）→ M1-c（纯 Sharp）。A4 前 `AssetObjectCleanupRequested` 刻意 parked；引用扫描器落地前不得把 canonical object 自动清理写成安全能力。
 - 🔴 **抓取 egress as-built**：Compose 已移除 broad allow-internal；Crawl4AI 固定不可变镜像 digest，保留 seed global-unicast 守卫和浏览器 pinning proxy。Ubuntu fake-IP 仅在系统答案全部位于 `198.18.0.0/15` 时经固定 Cloudflare DoH 回退；private/loopback/metadata/保留或混合答案 fail-closed。API 的 Crawl/robots/`http.get` 在每一跳解析、校验并钉扎连接，限制 redirect、超时、响应大小且跨域剥离凭证。公网与 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机矩阵已全绿；loopback 端口绑定仍保留为 defense-in-depth。
 
 ## 2. Bounded Contexts（9 个）

@@ -14,6 +14,7 @@
  */
 import 'dotenv/config';
 import 'reflect-metadata';
+import { PrismaClient } from '@prisma/client';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -78,7 +79,8 @@ async function expectHttp(
 
 async function main(): Promise<void> {
   const prisma = new PrismaService();
-  await prisma.$connect();
+  const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+  await Promise.all([prisma.$connect(), owner.$connect()]);
 
   // RLS 验证前置守卫（memory: rls-verify-app-user）
   const su = await prisma.$queryRaw<{ is_superuser: string }[]>`
@@ -98,6 +100,13 @@ async function main(): Promise<void> {
   const ctxA = { userId: 'verify', workspaceId: wsA, roles: [] };
   const ctxB = { userId: 'verify', workspaceId: wsB, roles: [] };
   void ctxB;
+  // R2-A1 cleanup intent 对 workspace 有真实 FK；verifier 显式建立租户锚点。
+  await owner.workspace.createMany({
+    data: [
+      { id: wsA, name: 'site-builder-m1a-verify' },
+      { id: wsB, name: 'site-builder-m1a-verify-other' },
+    ],
+  });
 
   // ── ① intake 建档（不跑 demo，直接进精装修路径）─────────────────────────
   console.log('① intake');
@@ -160,6 +169,8 @@ async function main(): Promise<void> {
   const fin = await activities.finalizeRefurbish({
     ...refInput,
     kb: { ...kbSummary, degraded: false },
+    // 本脚本只验 M1-a；M1-b brand profile 用 workflow 的 fail-safe 汇总形状占位。
+    profile: { status: 'failed', gaps: 0 },
     build,
   });
   const buildMs = Date.now() - t0;
@@ -250,7 +261,8 @@ async function main(): Promise<void> {
 
   // 清理（级联删 site 下所有派生）
   await prisma.withWorkspace(wsA, (tx) => tx.site.delete({ where: { id: siteId } }));
-  await prisma.$disconnect();
+  await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } });
+  await Promise.all([prisma.$disconnect(), owner.$disconnect()]);
   console.log('\n🎉 verify-site-builder-m1a 全段通过');
 }
 

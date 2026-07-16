@@ -3362,7 +3362,7 @@
             "bearer": []
           }
         ],
-        "summary": "删除素材（spec 引用检查随 M1 spec 物化补齐）",
+        "summary": "软删除素材；canonical 清理等待 MF-0 引用扫描器",
         "tags": [
           "SiteBuilder"
         ]
