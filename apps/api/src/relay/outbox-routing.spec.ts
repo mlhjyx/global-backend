@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OutboxRelayService } from './outbox-relay.service';
+import { ASSET_OBJECT_CLEANUP_WORKFLOW } from '../temporal/understanding.constants';
 
 /**
  * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等 8 种）
@@ -293,6 +294,47 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
 
     expect(ev.publishedAt).toBeNull();
     expect(errSpy).toHaveBeenCalled();
+  });
+
+  it('AssetObjectCleanupRequested → workflowId=eventId 且完整转发严格 cleanup payload', async () => {
+    const ev = makeEvent({
+      eventType: 'AssetObjectCleanupRequested',
+      aggregateType: 'Asset',
+      aggregateId: '33333333-3333-4333-8333-333333333333',
+      payload: {
+        assetId: '33333333-3333-4333-8333-333333333333',
+        siteId: '22222222-2222-4222-8222-222222222222',
+        objectKey:
+          'ws/11111111-1111-1111-1111-111111111111/22222222-2222-4222-8222-222222222222/uploads/33333333-3333-4333-8333-333333333333',
+        objectClass: 'staging',
+        reason: 'commit_succeeded',
+        notBefore: '2026-07-17T08:15:00.000Z',
+      },
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      ASSET_OBJECT_CLEANUP_WORKFLOW,
+      expect.objectContaining({
+        workflowId: ev.eventId,
+        args: [
+          {
+            eventId: ev.eventId,
+            workspaceId: WS,
+            assetId: ev.aggregateId,
+            siteId: ev.payload.siteId,
+            objectKey: ev.payload.objectKey,
+            objectClass: 'staging',
+            reason: 'commit_succeeded',
+            notBefore: '2026-07-17T08:15:00.000Z',
+          },
+        ],
+      }),
+    );
+    expect(ev.publishedAt).toBeInstanceOf(Date);
   });
 });
 
