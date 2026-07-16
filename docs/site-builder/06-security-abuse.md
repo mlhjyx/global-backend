@@ -66,7 +66,7 @@ Ubuntu 本地 mihomo fake-IP 会把公开域解析到 `198.18.0.0/16`，而 Craw
 
 构建容器：**无网络**（依赖走离线 node_modules 基础镜像）、CPU/内存/时长/磁盘限额、非 root、只读基础层；产物大小上限；**每租户公平队列**（并发池隔离，防单租户挤占）。
 
-**临时盘与子进程隔离（as-built 缺陷，R1-2 立即修，v3.2 §24.2）**：临时 SiteSpec / staging 目录清理必须放 `finally`（当前只在成功后删除 → 失败/取消会把租户内容残留在临时盘）；Astro 子进程 env 改**显式 allowlist**，只传 Renderer 必需变量（当前继承整个 `process.env` → 构建进程拿到无关密钥）。
+**临时盘与子进程隔离（R1-safety ①，✅ 2026-07-17 已落地，v3.2 §24.2）**：SiteSpec 只在随机 0700 临时目录内以 0600 文件物化，成功/异常路径统一在 `finally` 删除整个目录；Astro 由固定 `process.execPath + astro.js` 参数数组启动，不经 shell/pnpm/PATH，子进程 env 固定为 `NODE_ENV/LANG/TZ/SITESPEC_PATH/OUT_DIR/BASE_PATH/ASTRO_TELEMETRY_DISABLED` 七项，不再继承数据库、对象存储、模型网关、代理或 `NODE_OPTIONS`。当前可见产物仍直接写 slug 目录；per-run staging/原子预览属于 R1-min，不在本安全小 PR 冒充完成。
 
 ## 6. 询盘安全与 PII（T6）
 

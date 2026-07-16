@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R1-safety ①（构建隔离）
+
+- 两条 Astro 构建路径共用随机 0700 临时目录与 0600 SiteSpec，成功/异常均由 `finally` 删除，消除失败/超时后的租户内容残留。
+- Renderer 改为固定 Node/Astro 入口和 7 变量 env allowlist，不经 shell/pnpm/PATH、不再展开 `process.env`；数据库、对象存储、模型网关、代理和 `NODE_OPTIONS` 均不出域。
+- 新增单测锁住权限/清理/错误保持/allowlist，并以真 Astro fixture 验证三页产物与子路径资产；R1-safety ② Crawl/robots egress/SSRF 仍是下一项，未把 per-run staging/原子预览冒充已完成。
+
 ## 2026-07-16 · Site Builder R0 contract closeout（#126）
 
 - intake 成功合同收口为 `{siteId,buildId,status:"generating_demo"}`，移除旧响应 `mode`；`hasWebsite/websiteUrl` 仅作品牌理解背景。

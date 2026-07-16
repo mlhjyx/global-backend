@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,10 +28,9 @@ import {
 } from '../site-builder/agents/brand-profile';
 import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
 import { buildKbDigest } from '../site-builder/agents/kb-digest';
+import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
-
-const execFileAsync = promisify(execFile);
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -69,7 +65,6 @@ export function buildCompensatedSteps(
 }
 
 const POLISH_TIMEOUT_MS = 2_000; // R0-5：硬超时压到 2s 内不破 Demo 10s P95；超时即 abort 底层 fetch，不烧钱
-const BUILD_TIMEOUT_MS = 180_000;
 
 export interface DemoV0ActivityInput {
   workspaceId: string;
@@ -184,24 +179,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
   }
 
-  async function runAstroBuild(specPath: string, outDir: string, basePath: string): Promise<void> {
-    await execFileAsync(
-      'pnpm',
-      ['--filter', '@global/site-renderer', 'exec', 'astro', 'build'],
-      {
-        env: {
-          ...process.env,
-          SITESPEC_PATH: specPath,
-          OUT_DIR: outDir,
-          BASE_PATH: basePath, // 子路径预览必设，否则 /_astro 资产 404
-          ASTRO_TELEMETRY_DISABLED: '1',
-        },
-        timeout: BUILD_TIMEOUT_MS,
-        maxBuffer: 16 * 1024 * 1024,
-      },
-    );
-  }
-
   /** 消化该站全部 queued KB 文档（refurbish P1 与 kbIngestWorkflow 共用）。 */
   async function processQueuedForSite(
     workspaceId: string,
@@ -253,12 +230,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           });
         });
 
-        const specPath = path.join(tmpdir(), `sitespec-${buildRunId}.json`);
-        await writeFile(specPath, JSON.stringify(doc), 'utf8');
         const outDir = path.join(previewRoot(), site.slug);
         await mkdir(outDir, { recursive: true });
-        await runAstroBuild(specPath, outDir, previewBasePath(site.slug));
-        await rm(specPath, { force: true });
+        await buildSiteSpecWithTemporaryFile(doc, {
+          outDir,
+          basePath: previewBasePath(site.slug),
+        });
 
         await prisma.withWorkspace(workspaceId, async (tx) => {
           await tx.siteVersion.update({
@@ -623,12 +600,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         });
       });
 
-      const specPath = path.join(tmpdir(), `sitespec-${buildRunId}.json`);
-      await writeFile(specPath, JSON.stringify(doc), 'utf8');
       const outDir = path.join(previewRoot(), site.slug);
       await mkdir(outDir, { recursive: true });
-      await runAstroBuild(specPath, outDir, previewBasePath(site.slug));
-      await rm(specPath, { force: true });
+      await buildSiteSpecWithTemporaryFile(doc, {
+        outDir,
+        basePath: previewBasePath(site.slug),
+      });
 
       await prisma.withWorkspace(workspaceId, async (tx) => {
         await tx.siteVersion.update({
