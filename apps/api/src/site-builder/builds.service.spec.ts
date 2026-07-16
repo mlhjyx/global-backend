@@ -194,11 +194,10 @@ describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）'
         },
       },
     });
-    await expect(
-      service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' }),
-    ).rejects.toSatisfy(
-      (err: unknown) => errorContract(err).code === 'BUILD_LAUNCH_UNAVAILABLE',
-    );
+    const firstError = await service
+      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' })
+      .catch((e: unknown) => e);
+    expect(errorContract(firstError).code).toBe('BUILD_LAUNCH_UNAVAILABLE');
     const retry = await service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' });
     expect(retry.status).toBe('queued');
     expect(db.runs).toHaveLength(2); // failed 行留档，新 run 真正重发
