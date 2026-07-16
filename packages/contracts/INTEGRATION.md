@@ -22,7 +22,7 @@
 
 `POST /api/v1/site-builder/intake` 是前后端正式联调前的一次 v1 契约纠偏：
 
-- 正式客户端 **MUST** 携带可重试复用的 `idempotency-key`（1–128 位：字母、数字、`.`、`_`、`:`、`-`）。同 key + 同请求重放首个结果；同 key + 异请求返回 `409 IDEMPOTENCY_KEY_REUSED`。端点暂保留无 key 兼容，但该路径不承诺 ACK-loss 下的安全重试。
+- 正式客户端 **MUST** 携带可重试复用的 `idempotency-key`（1–128 位：字母、数字、`.`、`_`、`:`、`-`）。同 key + 同请求重放首个结果；同 key + 异请求返回 `409 IDEMPOTENCY_KEY_REUSED`。端点暂保留无 key 兼容，但该路径不承诺 ACK-loss 下的安全重试；若 Temporal start 已返回而 DB ACK 持久化失败，后端会保留 Site/run，客户端应先查询 workspace 站点状态，绝不能假定失败即未启动。
 - 成功信封从旧 `{siteId, mode, status:"building"}` 改为 `{siteId, buildId, status:"generating_demo"}`；`mode` 已移除，`hasWebsite` 不再产生诊断分支。
 - `201` 表示 demo workflow 已取得持久启动证据；随后以返回的 `buildId` 轮询 `GET /api/v1/site-builder/builds/{buildId}`。`502 DEMO_LAUNCH_UNAVAILABLE` 时必须使用**同一个 key**重试，不要换 key。
 - 站点已占用且不是可原地重试的 `setup_failed` 时返回 `409 SITE_LIMIT_REACHED`；非法 key 返回 `400 INVALID_IDEMPOTENCY_KEY`。

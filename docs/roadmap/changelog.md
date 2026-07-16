@@ -5,7 +5,7 @@
 
 - intake 成功合同收口为 `{siteId,buildId,status:"generating_demo"}`，移除旧响应 `mode`；`hasWebsite/websiteUrl` 仅作品牌理解背景。
 - 复用通用 `idempotency_key` 账本并新增 nullable SHA-256 `request_hash`：同 workspace/endpoint/key 同请求重放首次结果，异请求 fail-closed 409；历史其他 endpoint 的 NULL 行保持兼容。
-- Temporal 以确定性 workflowId、`REJECT_DUPLICATE + USE_EXISTING`、execution-chain head 与 DB CAS 持久化收敛启动 ACK 不确定窗口；终态缺 ACK 只 describe 修复，不重新 start。
+- Temporal 以确定性 workflowId、`REJECT_DUPLICATE + USE_EXISTING`、execution-chain head 与 DB CAS 持久化收敛启动 ACK 不确定窗口；终态缺 ACK 只 describe 修复，不重新 start；start 已成功但 ACK 写库失败时保留 Site/run，绝不补偿删除仍在运行的 workflow 锚点。
 - code-first OpenAPI、生成类型、消费者迁移说明、稳定 400/409/502 错误码同步；验证包含单测、真实 PostgreSQL 并发/RLS/迁移约束与真实 Temporal probe。
 
 # 后端路线图 · 能力一：AI 获客主线

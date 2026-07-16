@@ -62,6 +62,7 @@ function makeService(
     existingSite?: boolean;
     existingStatus?: string;
     launcher?: DemoV0Launcher;
+    ackPersistError?: Error;
   } = {},
 ) {
   const db: FakeDb = { sites: [], runs: [], keys: [] };
@@ -137,6 +138,7 @@ function makeService(
         where: { id: string };
         data: Record<string, unknown>;
       }) => {
+        if (opts.ackPersistError) throw opts.ackPersistError;
         const row = db.runs.find((run) => run.id === where.id);
         if (!row) return { count: 0 };
         Object.assign(row, data);
@@ -565,6 +567,29 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     );
     expect(db.sites).toHaveLength(0);
     expect(db.runs).toHaveLength(0);
+    expect(db.keys).toHaveLength(0);
+  });
+
+  it("无 key：Temporal start 已成功但 ACK 写库失败时保留 Site/run，不删除运行中 workflow 的锚点", async () => {
+    const { service, db, launches } = makeService({
+      ackPersistError: new Error("transient DB failure after Temporal start"),
+    });
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE),
+      HttpStatus.BAD_GATEWAY,
+      "DEMO_LAUNCH_UNAVAILABLE",
+    );
+
+    expect(launches).toHaveLength(1);
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]).toMatchObject({ id: "site-1", status: "building" });
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]).toMatchObject({
+      id: "run-1",
+      status: "queued",
+      temporalRunId: null,
+    });
     expect(db.keys).toHaveLength(0);
   });
 

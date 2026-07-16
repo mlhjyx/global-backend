@@ -494,6 +494,39 @@ async function main(): Promise<void> {
       "无 key 新站失败补偿删除 Site，FK cascade 删除 run",
     );
 
+    const unkeyedAckWs = workspace();
+    let workspaceTransactions = 0;
+    const ackFailingPrisma = {
+      withWorkspace: async (
+        workspaceId: string,
+        fn: (tx: never) => Promise<unknown>,
+      ) => {
+        workspaceTransactions += 1;
+        if (workspaceTransactions === 2) {
+          throw new Error("simulated DB outage after Temporal start returned");
+        }
+        return prisma.withWorkspace(workspaceId, fn as never);
+      },
+    } as unknown as PrismaService;
+    const unkeyedAckCalls: DemoV0LaunchInput[] = [];
+    const unkeyedAckService = new IntakeService(
+      ackFailingPrisma,
+      countingLauncher(unkeyedAckCalls),
+    );
+    const unkeyedAckError = await unkeyedAckService
+      .create(ctx(unkeyedAckWs), INPUT)
+      .catch((error: unknown) => error);
+    check(
+      errorCode(unkeyedAckError) === "DEMO_LAUNCH_UNAVAILABLE" &&
+        unkeyedAckCalls.length === 1,
+      "无 key 的 start 成功 + ACK 写库失败返回稳定 502",
+    );
+    check(
+      JSON.stringify(await counts(prisma, unkeyedAckWs)) ===
+        JSON.stringify({ sites: 1, runs: 1, keys: 0 }),
+      "无 key 的 post-start ACK 失败保留真库 Site/run，不删除运行中 workflow 锚点",
+    );
+
     console.log("⑥ nullable 旧 endpoint 兼容");
     const legacyWs = workspace();
     await prisma.withWorkspace(legacyWs, (tx) =>

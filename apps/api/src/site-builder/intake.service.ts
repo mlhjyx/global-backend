@@ -140,7 +140,7 @@ export class IntakeService {
         "DEMO_LAUNCH_UNAVAILABLE",
         hasIdempotencyKey
           ? "demo orchestrator acknowledgement unavailable; retry with the same idempotency-key"
-          : "demo launch acknowledgement is uncertain; use an idempotency-key on the next request",
+          : "demo launch acknowledgement unavailable; inspect the workspace site before retrying",
       ),
     );
   }
@@ -301,18 +301,12 @@ export class IntakeService {
       }
     }
 
+    let launch: { firstExecutionRunId: string };
     try {
-      const launch = await this.demoLauncher.launchDemoV0(launchInput);
-      // 201 is not returned until the Temporal execution-chain head is durable in our DB.
-      await this.persistTemporalAck(
-        ctx.workspaceId,
-        prepared.response.buildId,
-        launch.firstExecutionRunId,
-      );
-      return prepared.response;
+      launch = await this.demoLauncher.launchDemoV0(launchInput);
     } catch (error) {
       this.log.error(
-        `demo v0 launch/ack failed for build ${prepared.response.buildId}: ${String(error)}`,
+        `demo v0 launch failed for build ${prepared.response.buildId}: ${String(error)}`,
       );
 
       if (idempotencyKey) {
@@ -342,6 +336,23 @@ export class IntakeService {
         }
       });
       throw this.unavailable(false);
+    }
+
+    try {
+      // 201 is not returned until the Temporal execution-chain head is durable in our DB. Once
+      // start returned successfully, however, compensation must never delete its Site/run: the
+      // workflow is already live and may still complete while a transient DB ACK write is retried.
+      await this.persistTemporalAck(
+        ctx.workspaceId,
+        prepared.response.buildId,
+        launch.firstExecutionRunId,
+      );
+      return prepared.response;
+    } catch (error) {
+      this.log.error(
+        `demo v0 ACK persistence failed for build ${prepared.response.buildId}: ${String(error)}`,
+      );
+      throw this.unavailable(Boolean(idempotencyKey));
     }
   }
 }
