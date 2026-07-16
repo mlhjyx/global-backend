@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder MF0-A（AssetVariant 数据地基）
+
+- 新增 additive `asset_variant`：workspace/site/Asset 直接 scope，父 Asset 与 source Variant 复合 FK 锁 provenance；单输出 `(asset_id,recipe_hash)` 幂等、canonical object key/hash/正尺寸/状态 payload CHECK、显式 app_user CRUD、ENABLE+FORCE RLS。
+- `@global/contracts` 新增 recipe 与 `DerivedImageManifest` 共享类型；recipe hash 覆盖 pipeline/source/role/format/尺寸/crop/focal/quality，纯 projector 只从 ready Variant 确定性物化旧 `derivedKeys` 视图。未接 Sharp writer、未伪造历史 backfill、未预建 MediaJob/AssetUsage。
+- TDD 与 Ubuntu 开发环境真 PostgreSQL 验证：app_user 非 super/non-BYPASSRLS，A/B/unset 隔离，跨 workspace/site/Asset provenance 和 CHECK 负例，并发同 recipe 恰一胜；现库增量迁移、临时空库 39 migrations 与 Prisma schema diff=0，fixture 清零。这里只代表开发环境，不代表生产部署。
+- MF0-B 仍须完成 SiteSpec+Profile 引用扫描、409、删除/写侧共享并发门，以及 canonical+Variant 严格异步回收与历史 parked 对账；在此之前 canonical 继续 parked，不宣称整个 MF-0 完成。
+
 ## 2026-07-17 · Site Builder R2-A2（KB 正确性状态机）
 
 - KB 改为单素材持久状态机：due queued/过期 processing 以 Asset attempt+UUID token+lease CAS 认领；外部 IO 间续租，所有回写 fenced。文档/chunks 与 Asset ready 同事务提交，结果丢失重跑 replace 同一文档，旧 worker 复活不能 zombie write。

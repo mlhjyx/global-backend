@@ -3,8 +3,8 @@
 > **薄版媒体合同的裁决已在别处，本文只做施工级展开。** 决策真值 = [00-decisions MF-0 裁决](00-decisions-and-coordination.md)（2026-07-15）+ [`docs/adr/registry.md` ADR-018](../adr/registry.md)（MF-0 媒体地基·薄版）；契约周边真值 = [02-architecture §8](02-architecture.md)（素材与版权基线）+ [04-sitespec-contract §4](04-sitespec-contract.md)（资产引用约定）+ DQ-1 `@global/contracts`（SiteSpec 1.0.0）。本文**非权威**、不自封"单一入口"；它把 ADR-018 的两句薄合同展开成可施工的表结构、扫描器、处理矩阵与分期触发条件，并把 v3.2 §20–§21 里关于图片/视频/音频的实质设计**回写归档**，好让 v3.2 归档时零内容损失。
 >
 > **严格分层（勿混淆 as-built 与 target）**：
-> - **当前 as-built（main）**：`packages/db/prisma/schema.prisma` 只有 `Asset` + `derivedKeys` JSON；**尚无** `AssetVariant`/`MediaJob`/`AssetUsage`/`SiteRelease`（v3.2 §1.11 已核实）。
-> - **M1-c as-built 目标**（本文 §2–§5，near-term，**尚未落地**）：只落 `AssetVariant` 表 + 删除守卫（删前查 active SiteSpec 引用→409）+ 纯 Sharp 确定性图片管线。
+> - **当前 as-built（MF0-A，2026-07-17）**：`AssetVariant` additive 表、复合租户/站点/Asset provenance、RLS/FORCE RLS、单输出 recipe hash 与 `derivedKeys` 纯兼容投影已落；`MediaJob`/`AssetUsage`/`SiteRelease` 仍不存在。删除扫描器、409 与 canonical/Variant 异步回收属于紧接的 MF0-B，**尚未落地**。
+> - **M1-c as-built 目标**（本文 §4，near-term，**尚未落地**）：MF0-B 收口后再落纯 Sharp 确定性图片管线并写 `AssetVariant`；不得把 MF0-A 当成整个 MF-0 已完成。
 > - **MF-1 目标**（本文 §6，事件触发补建，YAGNI）：`MediaJob`/`AssetUsage`——**接生成式/异步媒体或跨 Release 持久反查的第一个真实消费者前**才落，不提前建。
 > - **M3 目标**（本文 §7–§8，远期，全为 target）：视频与音频（VideoBrief/Shot/Seedance/旁白/播放/ReleaseManifest 媒体组合）。
 
@@ -24,22 +24,25 @@
 
 | 阶段 | 新增 | 触发条件（何时才落） | 合并门 |
 |---|---|---|---|
-| **MF-0-thin** | `AssetVariant` + RLS + `SiteSpecAssetReferenceScanner` + derivedKeys 兼容投影 | 现在（阻断 M1-c） | §2/§3 达标 + A/B 租户 RLS 测试 |
-| **M1-c** | 无新表；纯 Sharp 处理 + 写 `AssetVariant` | MF-0-thin 合并后 | §4 处理矩阵 + v3.2 §20.7 合并门 |
+| **MF0-A ✅** | `AssetVariant` + RLS/FORCE RLS + recipe/checksum/provenance + derivedKeys 纯兼容投影 | 2026-07-17 | 真 PostgreSQL A/B RLS、复合 FK/CHECK、并发 recipe、空库迁移与 schema diff |
+| **MF0-B** | `SiteSpecAssetReferenceScanner` + Profile 引用面 + 删除 409 + 并发写侧门 + canonical/Variant 严格异步回收 | MF0-A 后立即施工（阻断 M1-c） | §3 + 真 PostgreSQL 并发、MinIO/Temporal/redrive/历史 parked 对账 |
+| **M1-c** | 无新表；纯 Sharp 处理 + 写 `AssetVariant` | MF0-A/B 全部合并后 | §4 处理矩阵 + v3.2 §20.7 合并门 |
 | **MF-1** | `MediaJob` / `AssetUsage` | **第一个**生成式/异步 MediaJob 消费者，**或**第一个需跨 Release 持久反查 AssetUsage 的消费者出现前 | Job↔Variant 事务边界 + 补偿/对账 + rights |
 | **M3** | 视频/音频/字幕 Variant 种类 + 视频 provider adapter | 视频真实消费者；**MF-1 必须先于任何视频 provider adapter 合并** | §7 全部门 + 主体/时序/成本门 |
 
 > 🔴 **YAGNI 红线（ADR-018）**：不能为了"以后可能用"提前让当前图片 PR 承担三张表与跨域状态机。`MediaJob`/`AssetUsage` 的目标形状本文 §6 已定，但**属于 MF-1，不是 M1-c 合并门**。
 
-## 2. AssetVariant 表结构（M1-c as-built 目标 · v3.2 §20.2 回写）
+## 2. AssetVariant 表结构（MF0-A as-built · v3.2 §20.2 回写）
 
 `AssetVariant` = **可发布派生**（区别于 `Asset` = 逻辑素材/原件）。M1-c 里它承载 Sharp 确定性输出的每一档尺寸/格式。
 
-- **身份与来源**：`assetId`、`variantType`、`mime`、`width`/`height`/`duration`/`bitrate`。
+- **身份与来源**：`workspaceId`、`siteId`、`assetId`、`variantType`、`mime`、`width`/`height`/`durationMs`/`bitrateKbps`、`sizeBytes`。
 - **物化与幂等**：`objectKey`（MinIO 对象键）、`contentHash`、`pipelineVersion`、`recipeHash`、`sourceVariantId`（派生链，如从某 variant 再转码）。
 - **状态**：`status`/`error`/`metadata`。
 - **幂等约束**：`unique(assetId, recipeHash)`——**同一 recipe 不产生重复 Variant**（同图重跑幂等）。
-- **多租户**：RLS + FORCE RLS（镜像 M0 六表先例），A/B 租户测试为合并门。
+- **单输出 recipe 语义**：pipeline/source content/source Variant/role/format/尺寸/crop/focal/quality 全部进入规范 hash；一组响应式输出不能共用一个 recipeHash。
+- **provenance 硬门**：父 Asset 与 source Variant 均用复合 FK 锁住相同 workspace/site/asset；canonical key、hash、正尺寸、状态 payload 由 DB CHECK 守卫。
+- **多租户**：RLS + FORCE RLS + 显式 `app_user` CRUD；Ubuntu 开发库已验证 A 可 CRUD、B/unset-context 零可见、跨租户/站点/Asset 派生链拒绝与并发同 recipe 恰一胜。该证据不代表生产部署。
 
 写路径（M1-c）：**同一事务**写 `AssetVariant`，再物化兼容 manifest（§5）；**不为**确定性同步 Sharp 处理强制创建 `MediaJob`（那是 MF-1 异步任务的边界）。读路径：新代码优先读 Variant，旧代码可读 manifest。
 
@@ -85,7 +88,7 @@ M1-c 图片管线 = **确定性 Sharp**，零模型、零生成式（ADR-018 + D
 
 ## 5. derivedKeys 兼容投影（过渡角色 · v3.2 §20.3 回写）
 
-`derivedKeys`（现存 JSON 列）在 MF-0/M1-c 里**降级为兼容投影**，不是权威数据，只保留**一个 Release 周期**给旧 API/旧 Renderer 做读优化。目标形状：
+`derivedKeys`（现存 JSON 列）在 MF-0/M1-c 里**降级为兼容投影**，不是权威数据，只保留**一个 Release 周期**给旧 API/旧 Renderer 做读优化。MF0-A 已在 `@global/contracts` 落下列共享类型，并提供由 ready `AssetVariant` 行确定性生成的纯 projector；真正同事务双写由 M1-c 首个 writer 接入，不对历史 JSON 伪造 backfill：
 
 ```ts
 export interface DerivedImageManifest {
