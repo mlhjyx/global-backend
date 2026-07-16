@@ -1,4 +1,4 @@
-# 评测与测试策略 v1（草稿，待用户确认）
+# 评测与测试策略 v1（活文档，分阶段实施）
 
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
@@ -246,13 +246,13 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 
 - **触发**：改 agent prompt / 换模型或模型档 / 改组件库或主题 / 改校验器/evidence 门 → 必须跑回归再合并（写进 PR 模板检查项）。
 - **模型档晋升回归门**（ADR-016）：任何 `evaluatedCandidate → promotedRoute` 切换前，**必须过 Golden Set 回归**（§3.2/§3.3 硬门 + §3.5 切片报告），无回归门的晋级 = 违背 ADR-016。
-- **分层**：`smoke`（2 家，分钟级，日常改动）/ `full`（全量 Bootstrap 6 → 视觉 12，模型或组件库级改动）。
+- **分层**：`smoke`（从 Bootstrap 固定抽 2 个 fixture，分钟级日常冒烟；**不代表 Golden Set 规模或覆盖完成**）/ `full`（先跑完整 Bootstrap 6；M1-g 扩成视觉 12 后再跑完整 12，模型或组件库级改动）。Golden 口径始终是 **6 启动 → 12 视觉扩集 → 真实流量后 30+ 成熟集**。
 - **执行**：本地 verify 脚本真网关真构建（§8 硬规矩，CI 不跑）；报告（各维分数 vs 基线差值，按 §3.5 切片）贴 PR 描述；**硬门回退 = 改动打回**。
 - **基线更新**：有意的质量提升合并后，重跑 full 落新基线（基线文件随 repo 版本化）。
 
-## 5. 代码与真机测试六层（TDD 落到本功能）
+## 5. 代码与真机测试七层（TDD 落到本功能）
 
-**先写测试再实现**（RED→GREEN→IMPROVE），六层覆盖（v3.2 §27.7 回写）：
+**先写测试再实现**（RED→GREEN→IMPROVE），七层覆盖（v3.2 §27.7 回写）：
 
 1. **单测**（vitest，CI 跑）：schema/状态机/**引用扫描**/evidence 门/object key/image recipe/budget reserve-settle/**route registry**；SiteSpec 校验器（合法/非法/边界表驱动）、richtext 白名单序列化（注入样本集）、prompt 模板变量转义、发布门 L1 规则表、CopyBundle 槽位与长度、locale/RTL 工具、指针切换幂等。
 2. **属性 / fixture 测**：**SiteSpec 兼容演进**（`specVersion` minor 容错）、RichText sanitize、JSON Patch、locale、lock preservation。
@@ -319,6 +319,8 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ## 完成定义（DoD）— M0-M3 分层验收门（v3.2 §33 回写 · DOC-12 补漏）
 
 > **只有分层全部满足才能说 M1 完成**——"页面看起来不错"不能替代可靠性、安全与发布合同。本节是**跨里程碑的正式验收契约**（此前散在 v3.2 §33、未分发，completeness-critic 查漏后补回）。多数条目的**机制真值在他处**（R0 审计见 [09 §10](09-m1-implementation-design.md)、MF-0 见 [14](14-media-foundation-mf0.md)、组件/契约见 [04](04-sitespec-contract.md)、模型门见 [10](10-model-selection-study.md)、发布治理见 [06](06-security-abuse.md)/[05](05-deployment-hosting.md)）；本清单是**统一的"是否可发布"门**，按 ID 引 ADR。
+>
+> **as-built 注记（2026-07-16）**：#121 已完成无条件 Demo 的行为，#123 已完成禁虚构身份守卫，#124 已完成业务邮箱隔离、真取消与失败保站；但 DoD-1 第一项仍未完成，因为 intake 响应尚无 `buildId`、`Idempotency-Key` 尚未实现，Swagger/OpenAPI 亦待收口。复选框按完整验收项记，不因某个子 PR 合并而提前勾选。
 
 ### DoD-1 M0~M1-b 回补
 - [ ] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2）

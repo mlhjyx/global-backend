@@ -31,7 +31,7 @@
 - **生产期平面**（**本仓 as-built 基底** = API/Temporal/AiTask/SiteSpec/Astro Renderer）：按企业资料选**已批准** TemplateFamily+Blueprint → 按素材/文案/事实证据**受控组合** → 输出 DesignBrief/CopyBundle/SiteSpec/Findings。**运行时硬约束**：不抓 Readdy（ADR-019）、不读原始参考页/模板源码、不生成任意前端代码（护 D1）。
 - **两平面不可混合的四条理由**：① 设计研究需大量截图迭代，不适合 Demo 低延迟路径；② 来源许可有边界，不可在生产数据路径动态取用；③ 开发期靠**人工批准 PR**，生产期须**可重放/可计费/可降级**；④ 运行时自由设计会破坏 SiteSpec 白名单 / 缓存 / 可回归性。
 
-> 开发期工厂的详设归 14 号文档；本 02 只承载**生产期平面**的 as-built 架构，两平面通过版本化 `DesignCatalog` 单向对接。v3.2 吸收 v2 全部合同并新增四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / CC 从 M1-c 起哪些立即改哪些延后）——详见 14 号与 09 号。
+> 开发期设计智能工厂的详设归 [13 号领域模型](13-design-domain-model.md)；[14 号](14-media-foundation-mf0.md)只承载媒体地基。本 02 只承载**生产期平面**的 as-built 架构，两平面通过版本化 `DesignCatalog` 单向对接。v3.2 吸收 v2 合同并提出四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / CC 从 M1-c 起哪些立即改哪些延后）——施工状态以 09、13、14 号为准。
 
 ## 1. 模块与目录
 
@@ -89,6 +89,8 @@ GET  /sites/{id}/versions  POST /versions/{id}/rollback
 POST /site-builder/import/storefront          # 店铺 URL 导入（M3）
 POST /sites/{id}/publish                      # 发布（M2）
 ```
+
+> **intake as-built 尾巴（2026-07-16）**：#121 已实现「有/无旧站都无条件建 Demo」的行为，但当前响应仍为 `{siteId,mode,status}`，没有目标合同的 `buildId`，也未实现 `Idempotency-Key`；controller/Swagger 仍残留旧诊断分支描述。目标契约是 `{siteId,buildId,status}`，由独立 `R0-contract` 收口；在此之前不得把 intake API 宣称为完成。
 
 鉴权照旧：SaaS token → JWKS 验签 → workspace_id → RLS。全部接口 OpenAPI 注解，Scalar 门户可见。
 
@@ -220,7 +222,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 |---|---|---|---|---|---|
 | ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
 | 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-v4-pro（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
-| 3 | 图片管线 imagePipeline | 产品/工厂图变"专业站点图" | 原图 → 多尺寸 webp/avif 产物 | gpt-image 系（编辑）+ gemini-2.5-pro（质检） | 确定性步骤：EXIF 剥离→**rembg 主体分割出 mask**→质量评估→生成式仅重绘 mask 外（背景/打光/白底）→超分→导出。**主体保护双保险：mask 锁定 + 生成后主体 pHash/embedding 相似度校验，主体变形=丢弃重试**；人物照默认不做生成改动 |
+| 3 | 图片管线 imagePipeline | 产品/工厂图生成安全可发布的响应式派生件 | 原图 → 多尺寸 webp/avif + fallback | **M1-c 确定性零模型（纯 Sharp）** | 目标固定序：MIME/像素/解码炸弹检查→方向与 sRGB→重编码去 EXIF/GPS→质量门→安全裁切/focal point→多尺寸导出→`AssetVariant`；原图不可变、单图失败隔离。rembg、超分、生成式背景重绘、视觉质检与 pHash/embedding 主体校验均属 M1-c2/M3 后置能力，出现真实消费者、同意与 provider 门后另行落地（ADR-018） |
 | 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | gemini-2.5-pro（多语言） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
 | 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 Seedance 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | Seedance（火山，异步任务轮询） | 每站视频条数配额；视频失败自动降级动效 |
 | 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | gemini-2.5-pro（视觉） | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
@@ -232,7 +234,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 >
 > ⚠️ 上表"模型（首选）"列为初稿；**以 §6 四态路由为准**（ADR-016：currentRoute 现役 as-built，候选只经评测晋级，非终选/非采购承诺）。
 >
-> **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，CC 生态是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← seo-specialist 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（Playwright/Lighthouse/sharp/rembg 直接进 activity），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
+> **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，CC 生态是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← seo-specialist 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（M1 先落 Playwright/Lighthouse/Sharp；rembg 等只有真实消费者出现后才评估），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
 
 ## 6. 模型选型（**四态路由现役档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
 

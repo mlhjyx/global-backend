@@ -97,20 +97,14 @@ AiTask<I, O>：
 
 ## 3. imagePipeline —— 图片管线
 
-- **职责/触发**：P2；每张用户图（产品/工厂/团队/证书）→ 站点级成品图。**不是单次模型调用，是确定性状态机**，生成式只是其中一步。
-- **输入 → 输出**：`{assetId, kind, targetUsage(hero/grid/gallery…)}` → `{derivedKeys{web/thumb/og 多尺寸 webp+avif}, quality, subjectProtected:bool}`。
-- **执行流程**：
-  1. [确定性] 重编码+剥 EXIF（sharp）
-  2. [确定性] 主体分割出 mask（rembg 本地，产品主体锁定）
-  3. [模型-视觉] 质检打分：清晰度/构图/光线/背景杂乱度 → 好图直接走 6
-  4. [模型-生成] gpt-image-2 `images/edits` + mask：**只重绘 mask 外**（背景置换/打光/白底），主体像素区域不动
-  5. [确定性+模型] 主体保护校验：生成前后主体区域 pHash + embedding 相似度，低于阈值=丢弃重试（≤2），仍不过=用原图
-  6. [确定性] 超分（Real-ESRGAN，可选）→ 多尺寸导出（sharp）
-- **Prompt 内化来源**：电商产品图规范（白底/打光/一致性）rubric ← 通用产品摄影准则固化；质检维度 ← `ecc:taste`/设计审美清单。
-- **工具**：sharp、rembg、Real-ESRGAN（全本地库）；gpt-image-2（网关）；gemini-3.1-pro（质检视觉）。
-- **护栏**：人物照默认不做生成改动（只裁剪调色）；证书图**永不**生成式处理（防篡改嫌疑，只做透视校正）；content_hash 幂等（同图不重跑）。
-- **降级**：生成步失败 → 用原图+基础调色继续，标记 `enhanceSkipped`，不阻断整站。
-- **模型**：gpt-image-2（编辑）+ gemini-3.1-pro（质检）。
+- **状态**：M1-c 目标能力，**尚未落地**；它是确定性 Asset Processor，不新增 AI Task。当前施工路线以 **ADR-018 + [14](14-media-foundation-mf0.md)** 为准。
+- **职责/触发**：P2；每张用户图（产品/工厂/团队/证书）→ 安全、可追溯、响应式的站点派生件。
+- **输入 → 输出**：`{assetId, kind, targetUsage(hero/grid/gallery…)}` → `AssetVariant[] + DerivedImageManifest`（AVIF/WebP/fallback，多尺寸，带 recipe/checksum/provenance）。
+- **M1-c 固定序（纯 Sharp）**：MIME/像素/解码炸弹检查 → 自动方向/sRGB → 解码重编码并剥 EXIF/GPS → 模糊/曝光/噪点质量门 → 安全裁切/focal point → 320/640/960/1440/1920 响应式导出 → `AssetVariant`/兼容 manifest 持久化。
+- **工具**：M1-c 仅 `sharp` + 对象存储/校验器；**不调用模型**。
+- **护栏**：原件 immutable；content/recipe hash 幂等；人物照只做确定性裁切/调色；证书、Logo、标签与参数图不做生成式改造；单图失败隔离，仅必需 Hero 无 fallback 才阻断。
+- **降级**：派生失败时保留原件并给出显式 gap/错误；不得伪造成功 Variant，不得覆盖原件。
+- **后置研究（非 M1-c）**：rembg mask、Real-ESRGAN、生成式背景重绘、视觉模型质检和 pHash/embedding 主体保护只作为 M1-c2/M3 候选。只有出现真实消费者、用户同意、权利/成本/能力门与独立 feature flag 后，才另开 PR 评测；本卡不把它们描述为当前工具链。
 
 ## 4. copy —— 多语言文案
 

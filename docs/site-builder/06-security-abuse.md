@@ -1,8 +1,8 @@
-# 安全与滥用防控设计 v1（草稿，待用户确认）
+# 安全与滥用防控设计 v1（活文档，分阶段实施）
 
 > 落实 [02-architecture.md](02-architecture.md) §7/§11 与遗漏面盘点第 1/3/4/5 条。原则：**平台域名信誉是全体客户的公共资产**，滥用防控是生死线不是可选项。
 >
-> _Reviewed against 12 v3.2（2026-07-16 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地时点（v3.2 §0.3）**：R0（产品口径 / Demo 虚构身份 / 联系信息误出域）**立即修**（§6/§10）；最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略必须在 **M2 公开发布前**可用；完整获客评分后置。
+> _Reviewed against 12 v3.2（2026-07-16 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地状态（2026-07-16）**：R0 行为与安全修复已分批合并——无条件 Demo #121、禁虚构身份 #123、联系信息隔离/真取消/失败不删站 #124；但 intake 的 `buildId`、`Idempotency-Key` 与 Swagger/OpenAPI 仍是 `R0-contract` 尾巴，故不得笼统称 R0 全闭环。最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略必须在 **M2 公开发布前**可用；完整获客评分后置。
 
 ## 0. 威胁模型总览
 
@@ -71,7 +71,7 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 - **反垃圾**：蜜罐字段 + Cloudflare Turnstile + 每 IP/每站速率限制 + 一次性表单 token 防重放。提交进 Inquiry 表 + Outbox（`InquirySubmitted`），邮件只是可重试通知通道。
 - **PII 合规**：询盘（姓名/邮箱/电话）=个人数据；角色=**客户是控制者、平台是处理者**（DPA 条款提请 SaaS ToS）；保留期默认 24 个月可配；删除请求复用获客侧 Art.17 擦除编排；询盘表 RLS 隔离 + 静态加密（复用 PII 加密基建）。
 - **询盘个人数据隔离（🔴 GDPR 最小化）**：询盘正文与个人数据**不进入公开 KB、embedding、品牌 Prompt 或分析事件**（v3.2 §8.2）。
-- **联系信息不必要出域（as-built 缺陷，R0-4 立即修 + 清存量，v3.2 §24.2）**：`businessEmail` 当前经 `intakeToMarkdown`+`digestSources` 被写入 intake KB 再进 `brandProfile.kbDigest`，与"contact 不进品牌 Prompt"冲突。修法=联系信息留在受控结构化区（`Site.intake`/`profile.contact`），Copy contact 槽按用途读取，**不进通用 KB embedding 与品牌 Prompt**；对存量 `source=intake` 的 KbDocument 做一次可重放清理（脱敏重建，须证明旧 email chunk 已删）。
+- **联系信息不必要出域（R0-4，✅ #124 已合并）**：`businessEmail` 已从 `intakeToMarkdown` 移除，只留受控结构化区 `Site.intake`（未来 `profile.contact`）；不得进入通用 KB embedding 与品牌 Prompt。#124 同时提供幂等存量脱敏脚本，删除含邮箱的旧 intake KbDocument（级联 chunk），下次构建再以脱敏 markdown 摄入；部署环境仍须执行并留存脚本结果，不能因开发库 `scanned=0` 就推断所有环境已清存量。
 - **留存与治理（v3.2 §9.6）**：询盘保存 release/page/component/UTM/referrer、`consentVersion`、风险摘要与 retention；权限、导出、删除**独立治理**。
 - **分析事件隐私（v3.2 §3.6）**：访客分析受 **region/consent** 控制；询盘正文与个人信息**不得进入分析事件**。
 - **通知邮件不带完整 PII**（只带摘要+登录深链，防邮件转发泄漏）；发信域 SPF/DKIM/DMARC。
@@ -162,7 +162,7 @@ export interface DesignSourceManifest {
 
 ## 10. Demo 与文案事实安全（反造假，T11，ADR-017 回写）
 
-Demo/文案**只用 intake 明确输入**；对未知企业类型**禁止**默认写 manufacturer、工厂、工程/QC 团队、认证、年限、产能或客户名单——缺 = **留空 + 提示补录**，绝不虚构（🔴 合规红线，与存储侧"证据先行/最小化"同源，建站侧不可回退）。确定性模板本身也不得虚构（as-built `demo-spec.ts` 在未知企业类型时仍直接写 manufacturer/engineering team/QC/export packaging，属确定性模板层虚构，非模型护栏能解，R0-3 立即修）。
+Demo/文案**只用 intake 明确输入**；对未知企业类型**禁止**默认写 manufacturer、工厂、工程/QC 团队、认证、年限、产能或客户名单——缺 = **留空 + 提示补录**，绝不虚构（🔴 合规红线，与存储侧"证据先行/最小化"同源，建站侧不可回退）。✅ #123 已把确定性模板改成中性 supplier/supply/requirement review 等措辞，并在 `sanitizePolish`、活动提示词和独立 CI 守卫四处封口；后续模板/提示词改动必须继续通过非制造业 intake 的红线词守卫。
 
 - **反造假红线**：不在 Demo 中展示假的客户 logo、证书、团队、评论、销量和工厂数字（v3.2 §18.2）。
 - **DemoVisualPack** 必须为平台原创、明确许可或程序化生成的**非事实性**素材（授权与来源随包登记）。

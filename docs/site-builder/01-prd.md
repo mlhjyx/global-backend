@@ -31,9 +31,9 @@
 
 **两段式生成**（关键产品决策）：注册流程绝不等分钟级管线——先秒出能看的 v0（用户立刻看到印着自己公司名的站），资料补充后异步"精装修"。先看到东西，再看着它变好。
 
-> **引导流程与状态 = 前端全权，后端不管**（消息卡片/栏目/跳转皆前端做）：后端只提供**已有的预览链接**（`GET /sites/{id}` / `GET /builds/{id}` 的 `previewUrl`）——卡片点击即凭该链接跳转预览。build 状态、资料缺口 `gaps`（`GET /sites/{id}/kb/status`）等**既有端点**前端可自行取用；**后端不为引导新增任何编排/状态**。
+> **引导流程与状态 = 前端全权，后端不管**（消息卡片/栏目/跳转皆前端做）：as-built 的预览链接只从 `GET /sites/{id}` 获取（ready/published 时 `previewUrl` 非空）；当前 `GET /builds/{id}` 只提供 run 状态，build 级 `previewUrl` 是 R3 目标。build 状态、资料缺口 `gaps`（`GET /sites/{id}/kb/status`）等**既有端点**前端可自行组合；**后端不为引导新增任何编排/状态**。
 
-**Onboarding 分支口径（v3.2 §3.2 回写）**：`hasWebsite` / `websiteUrl` **只作品牌理解背景，不控制 builder / diagnosis 分支**；注册后**无条件**创建 `Site + demo_v0 BuildRun`；诊断是 M3 capability，不是注册入口分叉。后端返回 `siteId` / `buildId` / `status`，前端拥有卡片顺序与展示状态。intake 支持 `Idempotency-Key`，重放返回第一次结果。
+**Onboarding 分支口径（v3.2 §3.2 回写）**：`hasWebsite` / `websiteUrl` **只作品牌理解背景，不控制 builder / diagnosis 分支**；注册后**无条件**创建 `Site + demo_v0 BuildRun`；诊断是 M3 capability，不是注册入口分叉。**目标合同**返回 `siteId` / `buildId` / `status` 并支持 `Idempotency-Key` 重放；truth-sync 审计基线仍返回 `{siteId,mode,status}` 且无 intake 幂等 header，须由 R0-contract 与 OpenAPI 收口后才可依赖。
 
 ### 2.1 Demo v0 不变量与目标（v3.2 §18.1 / §26 DV-0 回写）
 
@@ -85,7 +85,7 @@ Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
 
 ### 3.3 去向
 
-以上全部结构化落**知识库**（见架构 §2 kb_document/brand_profile），供品牌定位、文案、SEO 等 agent 复用；后续也可反哺获客侧 ICP。
+除联系信息与其他受控个人数据外，上述公司/产品/品牌/信任资料按用途结构化落**知识库**（见架构 §2 `kb_document` / `brand_profile`），供品牌定位、文案、SEO 等 agent 复用；后续也可反哺获客侧 ICP。**业务邮箱、询盘接收邮箱、电话、WhatsApp 等只保留在受控 intake/profile/contact 设置中，不进入通用 KB、embedding、品牌 Prompt 或 Trace**；公开展示/询盘投递由专用字段与发布门消费（#124 隐私边界）。
 
 ## 4. 建站工作台（demo 预览旁能力面板，补全版）
 
