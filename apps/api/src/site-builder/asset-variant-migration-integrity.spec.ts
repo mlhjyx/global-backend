@@ -19,6 +19,8 @@ const sourceReadinessMigrationPath =
   "packages/db/prisma/migrations/20260717043000_site_builder_asset_variant_source_readiness/migration.sql";
 const upgradeValidationMigrationPath =
   "packages/db/prisma/migrations/20260717044000_site_builder_asset_variant_upgrade_validation/migration.sql";
+const rlsSafeUpgradeMigrationPath =
+  "packages/db/prisma/migrations/20260717045000_site_builder_asset_variant_rls_safe_upgrade/migration.sql";
 
 describe("MF0-A AssetVariant migration integrity", () => {
   it("adds the tenant-scoped materialized variant and its complete provenance", () => {
@@ -160,5 +162,14 @@ describe("MF0-A AssetVariant migration integrity", () => {
       expect(sql).toContain(`'${mime}'`);
       expect(sql).toContain(`'${extension}'`);
     }
+  });
+
+  it("makes the historical scan fail closed when the migration role cannot bypass RLS", () => {
+    const sql = repositoryFile(rlsSafeUpgradeMigrationPath);
+
+    expect(sql).toMatch(/SET LOCAL row_security\s*=\s*off/i);
+    expect(sql).toMatch(
+      /SET LOCAL row_security[\s\S]+JOIN[\s\S]+source_variant_id[\s\S]+RAISE EXCEPTION/is,
+    );
   });
 });
