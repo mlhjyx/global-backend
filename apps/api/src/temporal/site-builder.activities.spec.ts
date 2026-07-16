@@ -87,6 +87,36 @@ describe('processKbAsset — Temporal heartbeat/cancellation', () => {
     expect(heartbeat).toHaveBeenCalledWith({ assetId: 'asset-1', stage: 'claim' });
     expect(heartbeat).toHaveBeenCalledWith({ assetId: 'asset-1', stage: 'parsed' });
   });
+
+  it('refurbish ingestPendingKb 同样把 Activity 取消信号传给站点队列处理器', async () => {
+    const controller = new AbortController();
+    const heartbeat = vi.fn();
+    vi.spyOn(ActivityContext, 'current').mockReturnValue({
+      heartbeat,
+      cancellationSignal: controller.signal,
+    } as never);
+    const processQueued = vi.fn(async (...args: unknown[]) => {
+      const options = args[2] as {
+        signal?: AbortSignal;
+        heartbeat?: (stage: string) => void;
+      };
+      expect(options.signal).toBe(controller.signal);
+      options.heartbeat?.('queued:asset-1');
+      return { processed: 1, failed: 0 };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      kb: {
+        ingestText: vi.fn() as never,
+        processQueued: processQueued as never,
+        processAsset: vi.fn() as never,
+      },
+    });
+
+    await expect(acts.ingestPendingKb(INPUT)).resolves.toEqual({ processed: 1, failed: 0 });
+    expect(heartbeat).toHaveBeenCalledWith({ siteId: 'site-1', stage: 'list-queued' });
+    expect(heartbeat).toHaveBeenCalledWith({ siteId: 'site-1', stage: 'queued:asset-1' });
+  });
 });
 
 describe('beginRefurbishRun — 预算门接线（改动 1）', () => {

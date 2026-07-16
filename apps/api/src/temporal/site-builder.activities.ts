@@ -195,7 +195,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     siteId: string,
   ): Promise<{ processed: number; failed: number }> {
     if (!kb?.processQueued) return { processed: 0, failed: 0 };
-    return kb.processQueued({ userId: 'system', workspaceId, roles: [] }, siteId);
+    let activity: ActivityContext | undefined;
+    try {
+      activity = ActivityContext.current();
+    } catch {
+      activity = undefined;
+    }
+    let stage = 'list-queued';
+    activity?.heartbeat({ siteId, stage });
+    const heartbeatTimer = activity
+      ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000)
+      : undefined;
+    heartbeatTimer?.unref();
+    try {
+      return await kb.processQueued(
+        { userId: 'system', workspaceId, roles: [] },
+        siteId,
+        {
+          signal: activity?.cancellationSignal,
+          heartbeat: (nextStage) => {
+            stage = nextStage;
+            activity?.heartbeat({ siteId, stage });
+          },
+        },
+      );
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    }
   }
 
   return {

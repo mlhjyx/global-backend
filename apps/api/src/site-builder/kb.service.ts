@@ -61,7 +61,7 @@ interface KbFence {
   attempt: number;
 }
 
-interface KbProcessOptions {
+export interface KbProcessOptions {
   signal?: AbortSignal;
   heartbeat?: (stage: string) => void;
 }
@@ -203,6 +203,7 @@ export class KbService {
   async processQueued(
     ctx: RequestContext,
     siteId: string,
+    options: KbProcessOptions = {},
   ): Promise<{ processed: number; failed: number }> {
     const now = new Date();
     const due = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
@@ -228,7 +229,9 @@ export class KbService {
     let processed = 0;
     let failed = 0;
     for (const candidate of due) {
-      const result = await this.processAsset(ctx, siteId, candidate.id);
+      options.heartbeat?.(`queued:${candidate.id}`);
+      options.signal?.throwIfAborted();
+      const result = await this.processAsset(ctx, siteId, candidate.id, options);
       if (result.outcome === 'ready') processed += 1;
       else if (result.outcome === 'retry_scheduled' || result.outcome === 'failed_terminal') {
         failed += 1;

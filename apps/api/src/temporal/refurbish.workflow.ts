@@ -8,6 +8,12 @@ const activities = proxyActivities<SiteBuilderActivities>({
   retry: { maximumAttempts: 2 },
 });
 
+const kbActivities = proxyActivities<SiteBuilderActivities>({
+  startToCloseTimeout: '10 minutes',
+  heartbeatTimeout: '20 seconds',
+  retry: { maximumAttempts: 2 },
+});
+
 /**
  * 精装修管线（M1-a 骨架 + M1-b P1 brandProfile，09 §2.3）：
  * P1 理解（KB 摄入 → brandProfile，fail-safe 降级）→
@@ -25,7 +31,7 @@ export async function refurbishWorkflow(
 
     let kb = { processed: 0, failed: 0, degraded: true };
     try {
-      const r = await activities.ingestPendingKb(input);
+      const r = await kbActivities.ingestPendingKb(input);
       kb = { ...r, degraded: false };
     } catch (err) {
       // 🔴 取消必须穿透（Codex P2 / 复审 C1）：吞掉=取消窗口内照样发布

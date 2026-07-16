@@ -4,12 +4,13 @@
  * pause workers to deterministically create concurrency/takeover windows.
  *
  * Run:
- *   DOTENV_CONFIG_PATH=/global/backend/apps/api/.env \
+ *   ALLOW_DEV_DB_VERIFIER=true DOTENV_CONFIG_PATH=/global/backend/apps/api/.env \
  *   node --import tsx scripts/verify-site-builder-kb-r2.mts
  */
 import 'dotenv/config';
 import { ConflictException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { Client, Connection, ScheduleNotFoundError } from '@temporalio/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AssetsService } from '../src/site-builder/assets.service';
@@ -19,6 +20,7 @@ import { KbService } from '../src/site-builder/kb.service';
 import { buildObjectKey, extForMime } from '../src/site-builder/object-key';
 import { StorageService } from '../src/site-builder/storage.service';
 import { createSiteBuilderActivities } from '../src/temporal/site-builder.activities';
+import { KB_RECOVERY_SWEEP_SCHEDULE_ID } from '../src/temporal/understanding.constants';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -30,6 +32,81 @@ function deferred<T>() {
 
 function ok(section: string, message: string): void {
   console.log(`  ✅ ${section} ${message}`);
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname.toLowerCase());
+}
+
+function requireExplicitDevelopmentTargets(): void {
+  if (process.env.ALLOW_DEV_DB_VERIFIER !== 'true' || process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'refusing KB verifier: require ALLOW_DEV_DB_VERIFIER=true and non-production NODE_ENV',
+    );
+  }
+  const databaseUrls = [process.env.DATABASE_URL, process.env.APP_DATABASE_URL];
+  for (const raw of databaseUrls) {
+    if (!raw) throw new Error('DATABASE_URL and APP_DATABASE_URL are required');
+    const url = new URL(raw);
+    if (!isLoopbackHost(url.hostname) || url.pathname !== '/global_dev') {
+      throw new Error(
+        `refusing KB verifier database target: expected loopback/global_dev, got ${url.hostname}${url.pathname}`,
+      );
+    }
+  }
+  for (const [name, raw] of [
+    ['S3_ENDPOINT', process.env.S3_ENDPOINT ?? 'http://localhost:9000'],
+    ['DOCLING_URL', process.env.DOCLING_URL ?? 'http://localhost:5001'],
+    ['EMBEDDINGS_URL', process.env.EMBEDDINGS_URL ?? 'http://localhost:11434/v1'],
+  ] as const) {
+    const url = new URL(raw);
+    if (!isLoopbackHost(url.hostname)) {
+      throw new Error(`refusing KB verifier ${name}: endpoint must be loopback`);
+    }
+  }
+}
+
+async function isolateRecoverySchedule(): Promise<() => Promise<void>> {
+  const connection = await Connection.connect({
+    address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
+  });
+  const client = new Client({
+    connection,
+    namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+  });
+  const handle = client.schedule.getHandle(KB_RECOVERY_SWEEP_SCHEDULE_ID);
+  let pausedByVerifier = false;
+  let originalNote: string | undefined;
+  try {
+    const before = await handle.describe();
+    originalNote = before.state.note;
+    if (!before.state.paused) {
+      await handle.pause('temporarily paused by R2-A2 development verifier');
+      pausedByVerifier = true;
+    }
+    const isolated = await handle.describe();
+    if (isolated.info.runningActions.length > 0) {
+      throw new Error('KB recovery workflow is already running; wait for it before verifier');
+    }
+    ok(
+      'schedule isolation',
+      pausedByVerifier ? 'recovery paused temporarily' : 'recovery already paused',
+    );
+  } catch (err) {
+    if (err instanceof ScheduleNotFoundError) {
+      return async () => connection.close();
+    }
+    if (pausedByVerifier) await handle.unpause(originalNote).catch(() => undefined);
+    await connection.close();
+    throw err;
+  }
+  return async () => {
+    try {
+      if (pausedByVerifier) await handle.unpause(originalNote);
+    } finally {
+      await connection.close();
+    }
+  };
 }
 
 function makeProbePdf(text: string): Buffer {
@@ -66,17 +143,13 @@ function makeProbePdf(text: string): Buffer {
 }
 
 async function main(): Promise<void> {
-  if (!process.env.DATABASE_URL || !process.env.APP_DATABASE_URL) {
-    throw new Error('DATABASE_URL and APP_DATABASE_URL are required');
-  }
+  requireExplicitDevelopmentTargets();
+  const restoreRecoverySchedule = await isolateRecoverySchedule();
   const appDb = new PrismaService();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   const storage = new StorageService();
   const embeddings = new EmbeddingsClient();
   const docling = new DoclingClient();
-  await Promise.all([appDb.$connect(), owner.$connect()]);
-  await storage.onModuleInit();
-
   const wsA = randomUUID();
   const wsB = randomUUID();
   const siteA = randomUUID();
@@ -125,6 +198,8 @@ async function main(): Promise<void> {
   }
 
   try {
+    await Promise.all([appDb.$connect(), owner.$connect()]);
+    await storage.onModuleInit();
     const role = await appDb.$queryRaw<{ current_user: string; is_superuser: string }[]>`
       SELECT current_user, current_setting('is_superuser') AS is_superuser`;
     if (role[0]?.is_superuser === 'on') throw new Error('app connection is superuser');
@@ -446,6 +521,14 @@ async function main(): Promise<void> {
       await Promise.all([appDb.$disconnect(), owner.$disconnect()]);
     } catch (err) {
       cleanupErrors.push(new Error(`database disconnect failed: ${String(err)}`, { cause: err }));
+    }
+
+    try {
+      await restoreRecoverySchedule();
+    } catch (err) {
+      cleanupErrors.push(
+        new Error(`recovery Schedule restore failed: ${String(err)}`, { cause: err }),
+      );
     }
 
     const failures = [verificationError, ...cleanupErrors].filter(
