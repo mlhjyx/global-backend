@@ -1367,7 +1367,7 @@ model AssetVariant {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   asset           Asset          @relation(fields: [assetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: Cascade, map: "asset_variant_asset_scope_fkey")
-  sourceVariant   AssetVariant?  @relation("AssetVariantSource", fields: [sourceVariantId, workspaceId, siteId, assetId], references: [id, workspaceId, siteId, assetId], onDelete: Cascade, onUpdate: Cascade, map: "asset_variant_source_scope_fkey")
+  sourceVariant   AssetVariant?  @relation("AssetVariantSource", fields: [sourceVariantId, workspaceId, siteId, assetId], references: [id, workspaceId, siteId, assetId], onDelete: NoAction, onUpdate: NoAction, map: "asset_variant_source_scope_fkey")
   derivedVariants AssetVariant[] @relation("AssetVariantSource")
 
   @@unique([assetId, recipeHash], map: "asset_variant_asset_id_recipe_hash_key")

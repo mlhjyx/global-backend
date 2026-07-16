@@ -1,3 +1,5 @@
+import type { AssetVariantOutputFormat } from '@global/contracts';
+
 /**
  * 对象存储键布局（02 §2）与上传安全闸（06 §2）。
  * canonical：ws/{workspace_id}/{site_id}/{kind}/{content_hash}.{ext}
@@ -83,6 +85,21 @@ export function buildObjectKey(
 
 export function buildStagingKey(workspaceId: string, siteId: string, assetId: string): string {
   return `ws/${workspaceId}/${siteId}/uploads/${assetId}`;
+}
+
+/**
+ * 派生物独占命名空间；assetId + 单输出 recipeHash 把对象键绑定到 DB provenance。
+ * JPEG 的规范 recipe 名为 jpeg，对象扩展名保持通用 jpg。
+ */
+export function buildVariantObjectKey(
+  workspaceId: string,
+  siteId: string,
+  assetId: string,
+  recipeHash: string,
+  format: AssetVariantOutputFormat,
+): string {
+  const ext = format === 'jpeg' ? 'jpg' : format;
+  return `ws/${workspaceId}/${siteId}/variants/${assetId}/${recipeHash}.${ext}`;
 }
 
 interface MagicRule {

@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
 
 import { PrismaService } from "../src/prisma/prisma.service";
+import { buildVariantObjectKey } from "../src/site-builder/object-key";
 
 const checks: string[] = [];
 
@@ -59,14 +60,37 @@ function check(condition: unknown, message: string): asserts condition {
   console.log(`  ✅ ${message}`);
 }
 
-async function rejects(message: string, action: () => Promise<unknown>) {
-  let rejected = false;
+async function rejectsDb(
+  message: string,
+  action: () => Promise<unknown>,
+  expected: { codes: readonly string[]; evidence: RegExp },
+) {
+  let caught: unknown;
   try {
     await action();
-  } catch {
-    rejected = true;
+  } catch (error) {
+    caught = error;
   }
-  check(rejected, message);
+  const shaped = caught as
+    | { code?: unknown; message?: unknown; meta?: unknown }
+    | undefined;
+  const code = typeof shaped?.code === "string" ? shaped.code : "";
+  const evidence = `${String(shaped?.message ?? "")} ${JSON.stringify(shaped?.meta ?? {})}`;
+  const postgresCode =
+    evidence.match(/PostgresError \{ code: "([0-9A-Z]+)"/)?.[1] ?? "";
+  const observedCodes = [code, postgresCode].filter(Boolean);
+  if (
+    !observedCodes.some((observed) => expected.codes.includes(observed)) ||
+    !expected.evidence.test(evidence)
+  ) {
+    throw new Error(
+      `unexpected DB rejection for ${message}: codes=${observedCodes.join(",") || "<none>"}; evidence=${evidence}`,
+    );
+  }
+  check(
+    true,
+    `${message} (${observedCodes.join("/")}, ${expected.evidence.source})`,
+  );
 }
 
 function readyVariant(input: {
@@ -76,8 +100,11 @@ function readyVariant(input: {
   recipeHash?: string;
   objectKey?: string;
   sourceVariantId?: string;
+  format?: "avif" | "webp";
 }): Prisma.AssetVariantUncheckedCreateInput {
-  const suffix = randomUUID();
+  const recipeHash =
+    input.recipeHash ?? randomUUID().replaceAll("-", "").repeat(2);
+  const format = input.format ?? "avif";
   return {
     id: randomUUID(),
     workspaceId: input.workspaceId,
@@ -85,16 +112,22 @@ function readyVariant(input: {
     assetId: input.assetId,
     sourceVariantId: input.sourceVariantId,
     variantType: "hero",
-    mime: "image/avif",
+    mime: `image/${format}`,
     width: 1440,
     height: 810,
     sizeBytes: 123_456,
     objectKey:
       input.objectKey ??
-      `ws/${input.workspaceId}/${input.siteId}/variants/${suffix}.avif`,
+      buildVariantObjectKey(
+        input.workspaceId,
+        input.siteId,
+        input.assetId,
+        recipeHash,
+        format,
+      ),
     contentHash: "b".repeat(64),
     pipelineVersion: "sharp-v1",
-    recipeHash: input.recipeHash ?? randomUUID().replaceAll("-", "").repeat(2),
+    recipeHash,
     status: "ready",
   };
 }
@@ -237,7 +270,7 @@ async function main(): Promise<void> {
     const source = await app.withWorkspace(wsA, (tx) =>
       tx.assetVariant.create({ data: readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }) }),
     );
-    await app.withWorkspace(wsA, (tx) =>
+    const child = await app.withWorkspace(wsA, (tx) =>
       tx.assetVariant.create({
         data: readyVariant({
           workspaceId: wsA,
@@ -270,116 +303,267 @@ async function main(): Promise<void> {
       ).count === 0,
       "workspace B cannot update workspace A variants",
     );
-
-    await rejects("cross-workspace parent provenance is rejected", () =>
-      app.withWorkspace(wsB, (tx) =>
-        tx.assetVariant.create({
-          data: readyVariant({
-            workspaceId: wsB,
-            siteId: siteB,
-            assetId: assetA,
-          }),
-        }),
-      ),
+    check(
+      (
+        await app.withWorkspace(wsB, (tx) =>
+          tx.assetVariant.deleteMany({ where: { id: source.id } }),
+        )
+      ).count === 0,
+      "workspace B cannot delete workspace A variants",
     );
-    await rejects("cross-site parent provenance is rejected", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: readyVariant({
-            workspaceId: wsA,
-            siteId: siteA2,
-            assetId: assetA,
+    check(
+      (
+        await app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.updateMany({
+            where: { id: source.id },
+            data: { metadata: { verified: true } },
           }),
-        }),
-      ),
-    );
-    await rejects("sourceVariant cannot cross Asset scope", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: readyVariant({
-            workspaceId: wsA,
-            siteId: siteA,
-            assetId: assetA2,
-            sourceVariantId: source.id,
-          }),
-        }),
-      ),
+        )
+      ).count === 1,
+      "workspace A can update mutable metadata on its variant",
     );
 
-    await rejects("invalid recipe hash is rejected", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: {
-            ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
-            recipeHash: "not-a-sha256",
-          },
-        }),
-      ),
-    );
-    await rejects("zero image width is rejected", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: {
-            ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
-            width: 0,
-          },
-        }),
-      ),
-    );
-    await rejects("unknown materialization status is rejected", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: {
-            ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
-            status: "published",
-          },
-        }),
-      ),
-    );
-    await rejects("staging object keys are rejected for publishable variants", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: readyVariant({
-            workspaceId: wsA,
-            siteId: siteA,
-            assetId: assetA,
-            objectKey: `ws/${wsA}/${siteA}/uploads/${randomUUID()}`,
+    await rejectsDb(
+      "RLS WITH CHECK rejects an A row forged inside B context",
+      () =>
+        app.withWorkspace(wsB, (tx) =>
+          tx.assetVariant.create({
+            data: readyVariant({
+              workspaceId: wsA,
+              siteId: siteA,
+              assetId: assetA,
+            }),
           }),
-        }),
-      ),
+        ),
+      { codes: ["42501"], evidence: /row-level security/i },
     );
-    await rejects("ready rows require checksum and byte size", () =>
-      app.withWorkspace(wsA, (tx) =>
-        tx.assetVariant.create({
-          data: {
-            ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
-            contentHash: null,
-            sizeBytes: null,
-          },
-        }),
-      ),
+
+    await rejectsDb(
+      "cross-workspace parent provenance is rejected",
+      () =>
+        app.withWorkspace(wsB, (tx) =>
+          tx.assetVariant.create({
+            data: readyVariant({
+              workspaceId: wsB,
+              siteId: siteB,
+              assetId: assetA,
+            }),
+          }),
+        ),
+      { codes: ["P2003", "23503"], evidence: /asset_variant_asset_scope_fkey/ },
+    );
+    await rejectsDb(
+      "cross-site parent provenance is rejected",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: readyVariant({
+              workspaceId: wsA,
+              siteId: siteA2,
+              assetId: assetA,
+            }),
+          }),
+        ),
+      { codes: ["P2003", "23503"], evidence: /asset_variant_asset_scope_fkey/ },
+    );
+    await rejectsDb(
+      "sourceVariant cannot cross Asset scope",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: readyVariant({
+              workspaceId: wsA,
+              siteId: siteA,
+              assetId: assetA2,
+              sourceVariantId: source.id,
+            }),
+          }),
+        ),
+      { codes: ["P2003", "23503"], evidence: /asset_variant_source_scope_fkey/ },
+    );
+
+    await rejectsDb(
+      "invalid recipe hash is rejected",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: {
+              ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
+              recipeHash: "not-a-sha256",
+            },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence: /asset_variant_(recipe_hash|object_key_scope)_check/,
+      },
+    );
+    await rejectsDb(
+      "zero image width is rejected",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: {
+              ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
+              width: 0,
+            },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence: /asset_variant_(width|ready_image_dimensions)_check/,
+      },
+    );
+    await rejectsDb(
+      "ready image dimensions cannot be null",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: {
+              ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
+              width: null,
+              height: null,
+            },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence: /asset_variant_ready_image_dimensions_check/,
+      },
+    );
+    await rejectsDb(
+      "unknown materialization status is rejected",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: {
+              ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
+              status: "published",
+            },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence: /asset_variant_(status|state_payload)_check/,
+      },
+    );
+    for (const [label, objectKey] of [
+      ["staging", `ws/${wsA}/${siteA}/uploads/${randomUUID()}`],
+      [
+        "original Asset collision",
+        `ws/${wsA}/${siteA}/product_image/${"a".repeat(64)}.jpg`,
+      ],
+    ] as const) {
+      await rejectsDb(
+        `${label} object key is rejected for a Variant`,
+        () =>
+          app.withWorkspace(wsA, (tx) =>
+            tx.assetVariant.create({
+              data: readyVariant({
+                workspaceId: wsA,
+                siteId: siteA,
+                assetId: assetA,
+                objectKey,
+              }),
+            }),
+          ),
+        {
+          codes: ["P2004", "23514"],
+          evidence: /asset_variant_object_key_scope_check/,
+        },
+      );
+    }
+    await rejectsDb(
+      "ready rows require checksum and byte size",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.create({
+            data: {
+              ...readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA }),
+              contentHash: null,
+              sizeBytes: null,
+            },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence: /asset_variant_state_payload_check/,
+      },
+    );
+
+    await rejectsDb(
+      "source Variant deletion is NO ACTION while a descendant exists",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.delete({ where: { id: source.id } }),
+        ),
+      { codes: ["P2003", "23503"], evidence: /asset_variant_source_scope_fkey/ },
+    );
+    check(
+      (await app.withWorkspace(wsA, (tx) =>
+        tx.assetVariant.count({ where: { id: child.id } }),
+      )) === 1,
+      "failed source deletion preserves descendant ledger",
+    );
+    await rejectsDb(
+      "Variant provenance cannot be reparented after insert",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.update({
+            where: { id: source.id },
+            data: { assetId: assetA2 },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence:
+          /asset_variant_provenance_immutable|AssetVariant provenance is immutable/,
+      },
+    );
+
+    const disposable = await app.withWorkspace(wsA, (tx) =>
+      tx.assetVariant.create({
+        data: readyVariant({ workspaceId: wsA, siteId: siteA, assetId: assetA2 }),
+      }),
+    );
+    await app.withWorkspace(wsA, (tx) =>
+      tx.assetVariant.delete({ where: { id: disposable.id } }),
+    );
+    check(
+      (await app.withWorkspace(wsA, (tx) =>
+        tx.assetVariant.count({ where: { id: disposable.id } }),
+      )) === 0,
+      "workspace A can explicitly delete its unreferenced leaf Variant",
     );
 
     const concurrentRecipe = "f".repeat(64);
+    const concurrentAvif = readyVariant({
+      workspaceId: wsA,
+      siteId: siteA,
+      assetId: assetA2,
+      recipeHash: concurrentRecipe,
+      format: "avif",
+    });
+    const concurrentWebp = readyVariant({
+      workspaceId: wsA,
+      siteId: siteA,
+      assetId: assetA2,
+      recipeHash: concurrentRecipe,
+      format: "webp",
+    });
+    check(
+      concurrentAvif.objectKey !== concurrentWebp.objectKey,
+      "concurrent recipe probe uses distinct object keys to isolate recipe uniqueness",
+    );
     const concurrent = await Promise.allSettled([
       app.withWorkspace(wsA, (tx) =>
         tx.assetVariant.create({
-          data: readyVariant({
-            workspaceId: wsA,
-            siteId: siteA,
-            assetId: assetA2,
-            recipeHash: concurrentRecipe,
-          }),
+          data: concurrentAvif,
         }),
       ),
       app.withWorkspace(wsA, (tx) =>
         tx.assetVariant.create({
-          data: readyVariant({
-            workspaceId: wsA,
-            siteId: siteA,
-            assetId: assetA2,
-            recipeHash: concurrentRecipe,
-          }),
+          data: concurrentWebp,
         }),
       ),
     ]);
@@ -387,6 +571,18 @@ async function main(): Promise<void> {
       concurrent.filter((result) => result.status === "fulfilled").length === 1 &&
         concurrent.filter((result) => result.status === "rejected").length === 1,
       "concurrent identical recipes materialize exactly one row",
+    );
+    const concurrentRejection = concurrent.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    const concurrentError = concurrentRejection?.reason as
+      | { code?: unknown; message?: unknown; meta?: unknown }
+      | undefined;
+    const concurrentEvidence = `${String(concurrentError?.message ?? "")} ${JSON.stringify(concurrentError?.meta ?? {})}`;
+    check(
+      concurrentError?.code === "P2002" &&
+        /Unique constraint failed/.test(concurrentEvidence),
+      "concurrent recipe loser returns Prisma unique-conflict P2002",
     );
     check(
       (
@@ -403,12 +599,27 @@ async function main(): Promise<void> {
   } finally {
     const cleanupErrors: unknown[] = [];
     try {
-      await owner.site.deleteMany({ where: { id: { in: [siteA, siteA2, siteB] } } });
-      await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } });
-      const residue = await owner.assetVariant.count({
+      await owner.assetVariant.deleteMany({
+        where: {
+          workspaceId: { in: [wsA, wsB] },
+          sourceVariantId: { not: null },
+        },
+      });
+      await owner.assetVariant.deleteMany({
         where: { workspaceId: { in: [wsA, wsB] } },
       });
-      check(residue === 0, "verifier leaves no AssetVariant fixture residue");
+      await owner.site.deleteMany({ where: { id: { in: [siteA, siteA2, siteB] } } });
+      await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } });
+      const residue = await Promise.all([
+        owner.assetVariant.count({ where: { workspaceId: { in: [wsA, wsB] } } }),
+        owner.asset.count({ where: { workspaceId: { in: [wsA, wsB] } } }),
+        owner.site.count({ where: { workspaceId: { in: [wsA, wsB] } } }),
+        owner.workspace.count({ where: { id: { in: [wsA, wsB] } } }),
+      ]);
+      check(
+        residue.every((count) => count === 0),
+        "verifier leaves no workspace/site/Asset/Variant fixture residue",
+      );
     } catch (error) {
       cleanupErrors.push(error);
     }
