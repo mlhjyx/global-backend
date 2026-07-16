@@ -97,6 +97,46 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
     expect(sanitizePolish({ headline: '   ', subhead: 'x'.repeat(501) })).toEqual({});
   });
 
+  it('R0-3（ADR-017）sanitizePolish：角色虚构（manufacturer/engineering team/quality control/export packaging）也剔除——堵住润色回灌身份', () => {
+    expect(sanitizePolish({ headline: 'Your Trusted Pump Manufacturer' })).toEqual({});
+    expect(
+      sanitizePolish({ subhead: 'Backed by our engineering team and quality control.' }),
+    ).toEqual({});
+    expect(sanitizePolish({ aboutBody: 'Export packaging handled in-house.' })).toEqual({});
+    // 中性文案照常放行
+    expect(sanitizePolish({ headline: 'Reliable Pumps for Global Buyers' })).toEqual({
+      headline: 'Reliable Pumps for Global Buyers',
+    });
+  });
+
+  it('R0-3（ADR-017）去虚构身份：非制造业 intake 不得默认写 manufacturer/engineering team/quality control/export packaging', () => {
+    // 贸易/服务类：intake 无任何"制造商"事实，demo 绝不替其编造制造业身份（缺=中性，不虚构）
+    const nonManufacturer: IntakeInput = {
+      company: { nameZh: '示例国际贸易', nameEn: 'Example Trading Co.' },
+      industry: 'isic-4690',
+      products: ['sourcing service', 'logistics coordination'],
+      targetMarkets: ['US'],
+      hasWebsite: false,
+      websiteUrl: null,
+      businessEmail: 'hello@example.com',
+    };
+    const doc = buildDemoSpec({ siteName: 'Example Trading Co.', intake: nonManufacturer });
+    const all = Object.values(doc.copyBundles.en).join(' ');
+    // 守卫独立声明红线词表（不镜像实现，防实现被悄悄放宽 → 永久 CI 门）
+    for (const forbidden of [
+      /manufactur/i,
+      /engineering team/i,
+      /quality control/i,
+      /export packaging/i,
+    ]) {
+      expect(all, `demo 文案不得含虚构身份 ${forbidden}`).not.toMatch(forbidden);
+    }
+    // 仍必须用上真实 intake 事实（去虚构 ≠ 去内容）
+    expect(all).toContain('Example Trading Co.');
+    expect(all.toLowerCase()).toContain('sourcing service');
+    expect(all).toContain('United States');
+  });
+
   it('polish 覆盖 hero/about 文案；缺省用确定性模板', () => {
     const plain = buildDemoSpec({ siteName: 'Acme', intake: INTAKE });
     const polished = buildDemoSpec({
