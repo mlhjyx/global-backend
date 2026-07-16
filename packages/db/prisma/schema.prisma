@@ -1344,7 +1344,7 @@ model Asset {
 /// MF-0 可发布派生物：每行是一个确定性 recipe 的单一物化输出。
 /// Asset 是逻辑素材/原件；derivedKeys 仅是由本表投影的短期兼容视图。
 model AssetVariant {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId     String   @map("workspace_id") @db.Uuid
   siteId          String   @map("site_id") @db.Uuid
   assetId         String   @map("asset_id") @db.Uuid
