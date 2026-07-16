@@ -62,7 +62,7 @@ GET  /sites/{id}/profile
 
 上传三步：`presign → PUT 直传 → commit`（内容寻址，canonical key 由 content hash 决定，copy 幂等）。
 
-**R2-A1/A4 as-built**：commit 先 CAS 进入 `committing`（递增 attempt + UUID fencing token + lease），再做事务外 HEAD/hash/copy；完成/失败回写必须匹配 fence。瞬时失败进入 `failed_retryable` 并保留 staging；同内容预检或最终部分唯一索引 P2002 均收敛为 `duplicate` + 409。canonical DB 真值与 staging cleanup intent 同事务提交；不再立即 best-effort 删除 staging，而由 Temporal 等待原 presigned PUT 失效后执行，防旧 URL 晚到 PUT 复活孤儿。
+**R2-A1/A4 as-built**：commit 先 CAS 进入 `committing`（递增 attempt + UUID fencing token + lease），再做事务外 HEAD/hash/copy；完成/失败回写必须匹配 fence。瞬时失败进入 `failed_retryable` 并保留 staging；同内容预检或最终部分唯一索引 P2002 均收敛为 `duplicate` + 409。canonical DB 真值与 staging cleanup intent 同事务提交；不再立即 best-effort 删除 staging。Temporal 在原 presigned PUT 到期后继续等待生产固定、命令不可缩短的 15 分钟受支持在途窗口，以双 provenance 首删+HEAD，再 durable settle 5 分钟并二次删除+HEAD，覆盖到期前已授权且在窗口内完成的 PUT 复活竞态；“仅 URL 到期”不再作为绝对防复活保证。
 
 ```
 POST /sites/{id}/assets/presign  { "kind":"product_image", "filename":"a.jpg", "size":123, "mime":"image/jpeg" }

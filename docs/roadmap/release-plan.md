@@ -11,7 +11,7 @@
 - DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
 - #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
 - #126 已完成 R0 contract closeout：intake 幂等、`buildId`、去 `mode`、稳定错误码、Temporal 启动证据与 OpenAPI 同步均已落地并验证。
-- R1-safety 与 R2-A1–A4 正确性门已于 2026-07-17 完成。Profile 已具备五组严格有界 schema、独立 UUID ETag/CAS、稳定 428/409/412、同站 Asset 引用门；旧脏 JSON读路径 fail-closed，Prompt/证据入口覆盖 SMTPUTF8/IDN 邮箱与电话净化。A4 接通 staging-only cleanup：Outbox→Temporal 在 presigned PUT 失效后，以事件/资产双 provenance 执行幂等删除；canonical 继续 parked 到 MF-0 scanner。Asset/KB/Build 公共错误已稳定化并脱敏，Build cancel 改 CAS，失败 cleanup 有结构化告警与 guarded redrive。以上均为 Ubuntu 开发环境验收，不代表生产部署。
+- R1-safety 与 R2-A1–A4 正确性门已于 2026-07-17 完成。Profile 已具备五组严格有界 schema、独立 UUID ETag/CAS、稳定 428/409/412、同站 Asset 引用门；旧脏 JSON读路径 fail-closed，Prompt/证据入口覆盖 SMTPUTF8/IDN 邮箱与电话净化。A4 接通 staging-only cleanup：Outbox→Temporal 以事件/资产双 provenance，在 presigned PUT 到期后固定等待 15 分钟受支持在途窗口，首删后 durable settle 5 分钟并二次删除+HEAD；窗口由生产代码固定，客户端/Outbox 不可缩短。该机制覆盖到期前授权、窗口内完成的 PUT 复活竞态，不把“仅到期”写成绝对保证；canonical 继续 parked 到 MF-0 scanner。Asset/KB/Build 公共错误已稳定化并脱敏，Build cancel 改 CAS，失败 cleanup 有结构化告警与 guarded redrive。以上均为 Ubuntu 开发环境验收，不代表生产部署。
 
 ### 当前关键路径与退出门
 

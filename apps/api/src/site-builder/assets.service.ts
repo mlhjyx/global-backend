@@ -29,7 +29,7 @@ const SIZE_TOLERANCE_BYTES = 1024;
 const MAGIC_HEAD_BYTES = 16;
 const COMMIT_LEASE_MS = 15 * 60 * 1000;
 const COMMIT_RETRY_DELAY_MS = 30 * 1000;
-/** presignPut 的开发/生产统一有效期；cleanup 必须等旧 URL 失效，防晚到 PUT 复活孤儿。 */
+/** presignPut 固定有效期；cleanup 还会追加代码固定的在途宽限与二次删除窗口。 */
 const PRESIGN_PUT_TTL_MS = 15 * 60 * 1000;
 
 /** commit 后进 KB 摄入队列的素材类别（图片管线随 M1）。 */
@@ -320,7 +320,8 @@ export class AssetsService {
 
   /**
    * 删除只做 DB tombstone + durable cleanup intent。MF-0 引用扫描器落地前，
-   * canonical intent 明确 parked；staging 由 Temporal 等 presigned PUT 失效后再删。
+   * canonical intent 明确 parked；staging 由 Temporal 在 URL 到期后继续等待固定在途窗口，
+   * 并以首删 + durable settle + 二次删除收口，不把“仅到期”当成无在途 PUT 的证明。
    */
   async remove(ctx: RequestContext, assetId: string): Promise<void> {
     await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -490,8 +491,9 @@ export class AssetsService {
   }
 
   /**
-   * R2-A4 routes staging cleanup to Temporal, but only after the original presigned PUT URL
-   * has expired. Canonical payloads remain parked behind the MF-0 reference-scanner gate.
+   * R2-A4 routes staging cleanup to Temporal. notBefore records the original presigned PUT
+   * expiry; the workflow then enforces its own non-client-configurable in-flight grace and
+   * post-delete settle/redelete. Canonical payloads remain parked behind the MF-0 scanner gate.
    */
   private async createCleanupIntent(
     tx: {

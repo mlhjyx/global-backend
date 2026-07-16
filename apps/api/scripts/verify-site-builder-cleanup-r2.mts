@@ -94,6 +94,7 @@ async function main(): Promise<void> {
   const taskQueue = `r2-a4-cleanup-verify-${randomUUID()}`;
   const attempts = new Map<string, number>();
   const transportFailures = new Map<string, number>();
+  const successfulDeletes = new Map<string, number>();
   const forcedNonRetryable = new Set<string>();
   const workflowHandles = new Map<string, ReturnType<typeof temporal.client.workflow.getHandle>>();
   let minioStopped = false;
@@ -101,6 +102,8 @@ async function main(): Promise<void> {
   let workerRun: Promise<void> | undefined;
   let nativeConnection: NativeConnection | undefined;
   let verificationError: unknown;
+  let resurrectionPromise: Promise<void> | undefined;
+  let resurrectionObserved = false;
 
   const verifierStorage = {
     head: (key: string) => storage.head(key),
@@ -111,6 +114,21 @@ async function main(): Promise<void> {
       }
       try {
         await storage.delete(key);
+        const successful = (successfulDeletes.get(key) ?? 0) + 1;
+        successfulDeletes.set(key, successful);
+        if (key === cleanupStagingKey && successful === 1) {
+          // Reproduce a PUT authorised before expiry completing after the first delete. The
+          // script-only workflow's durable settle must then reach a second delete/recheck.
+          resurrectionPromise = new Promise<void>((resolve, reject) => {
+            setTimeout(() => {
+              storage.putBuffer(key, Buffer.from('completed-after-first-delete'), 'image/jpeg')
+                .then(async () => {
+                  resurrectionObserved = Boolean(await storage.head(key));
+                  resolve();
+                }, reject);
+            }, 500);
+          });
+        }
       } catch (error) {
         transportFailures.set(key, (transportFailures.get(key) ?? 0) + 1);
         throw error;
@@ -135,7 +153,9 @@ async function main(): Promise<void> {
       connection: nativeConnection,
       namespace: temporalNamespace,
       taskQueue,
-      workflowsPath: fileURLToPath(new URL('../src/temporal/workflows.ts', import.meta.url)),
+      workflowsPath: fileURLToPath(
+        new URL('./workflows/asset-cleanup-verifier.workflow.ts', import.meta.url),
+      ),
       activities: createAssetCleanupActivities({ prisma: app, storage: verifierStorage }),
     });
     workerRun = worker.run();
@@ -202,6 +222,10 @@ async function main(): Promise<void> {
       });
     }
     await workflowHandles.get(cleanupEventId)!.result();
+    await resurrectionPromise;
+    if (!resurrectionObserved || (successfulDeletes.get(cleanupStagingKey) ?? 0) < 2) {
+      throw new Error('settle/recheck did not prove deletion of an object revived after first delete');
+    }
     if (faultInjection && ((attempts.get(cleanupStagingKey) ?? 0) < 2 || (transportFailures.get(cleanupStagingKey) ?? 0) < 1)) {
       throw new Error('Temporal did not retry after the proven MinIO transport failure');
     }
@@ -234,7 +258,7 @@ async function main(): Promise<void> {
     const hidden = await app.withWorkspace(otherWorkspaceId, (tx) => tx.outboxEvent.findUnique({ where: { eventId: cleanupEventId } }));
     if (hidden) throw new Error('cross-workspace cleanup event was visible');
 
-    console.log(JSON.stringify({ ok: true, environment: 'ubuntu-development', taskQueue, checks: ['app_user_force_rls', 'dedicated_current_head_worker', 'relay_temporal_minio', 'durable_timer', ...(faultInjection ? ['real_minio_retry_recovery'] : []), 'failed_guarded_redrive_new_run', 'canonical_parked', 'cross_tenant_hidden'] }));
+    console.log(JSON.stringify({ ok: true, environment: 'ubuntu-development', taskQueue, checks: ['app_user_force_rls', 'dedicated_verifier_only_worker', 'relay_temporal_minio', 'durable_expiry_grace_timer', 'real_minio_post_delete_revival_settle_redelete', ...(faultInjection ? ['real_minio_retry_recovery'] : []), 'failed_guarded_redrive_new_run', 'canonical_parked', 'cross_tenant_hidden'] }));
   } catch (error) {
     verificationError = error;
   } finally {
@@ -255,30 +279,34 @@ async function main(): Promise<void> {
     }
     await nativeConnection?.close().catch((error) => cleanupErrors.push(error));
 
-    let dbClean = false;
-    try {
-      await owner.$transaction(async (tx) => {
-        await tx.outboxEvent.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
-        await tx.asset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
-        await tx.site.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
-        await tx.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } });
-      });
-      const [workspaces, sites, assets, events] = await Promise.all([
-        owner.workspace.count({ where: { id: { in: [workspaceId, otherWorkspaceId] } } }),
-        owner.site.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
-        owner.asset.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
-        owner.outboxEvent.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
-      ]);
-      if (workspaces || sites || assets || events) throw new Error(`database residue: ${JSON.stringify({ workspaces, sites, assets, events })}`);
-      dbClean = true;
-    } catch (error) { cleanupErrors.push(error); }
-    if (dbClean) {
-      for (const key of touchedKeys) {
-        try {
-          await storage.delete(key);
-          if (await storage.head(key)) throw new Error(`object residue: ${key}`);
-        } catch (error) { cleanupErrors.push(error); }
+    // Objects first, DB provenance last. If an object cannot be deleted/HEAD-verified, retain
+    // the workspace/Site/Asset/Outbox rows so the residue remains attributable and recoverable.
+    let objectsClean = true;
+    for (const key of touchedKeys) {
+      try {
+        await storage.delete(key);
+        if (await storage.head(key)) throw new Error(`object residue: ${key}`);
+      } catch (error) {
+        objectsClean = false;
+        cleanupErrors.push(error);
       }
+    }
+    if (objectsClean) {
+      try {
+        await owner.$transaction(async (tx) => {
+          await tx.outboxEvent.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
+          await tx.asset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
+          await tx.site.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
+          await tx.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } });
+        });
+        const [workspaces, sites, assets, events] = await Promise.all([
+          owner.workspace.count({ where: { id: { in: [workspaceId, otherWorkspaceId] } } }),
+          owner.site.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
+          owner.asset.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
+          owner.outboxEvent.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
+        ]);
+        if (workspaces || sites || assets || events) throw new Error(`database residue: ${JSON.stringify({ workspaces, sites, assets, events })}`);
+      } catch (error) { cleanupErrors.push(error); }
     }
     await temporal.onModuleDestroy().catch((error) => cleanupErrors.push(error));
     await app.$disconnect().catch((error) => cleanupErrors.push(error));

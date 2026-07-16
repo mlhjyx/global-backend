@@ -43,23 +43,38 @@ describe('assetObjectCleanupWorkflow', () => {
     temporal.cleanup.mockResolvedValue({ eventId: INPUT.eventId, deleted: true });
   });
 
-  it('uses a durable Temporal timer until notBefore, then invokes the activity', async () => {
+  it('waits through the fixed in-flight grace, deletes, settles durably, then rechecks/deletes', async () => {
     vi.setSystemTime(new Date('2026-07-17T08:10:00.000Z'));
 
     await assetObjectCleanupWorkflow(INPUT);
 
-    expect(temporal.sleep).toHaveBeenCalledWith(5 * 60 * 1000);
-    expect(temporal.cleanup).toHaveBeenCalledWith(INPUT);
+    expect(temporal.sleep).toHaveBeenNthCalledWith(1, 20 * 60 * 1000);
+    expect(temporal.sleep).toHaveBeenNthCalledWith(2, 5 * 60 * 1000);
+    expect(temporal.cleanup).toHaveBeenCalledTimes(2);
+    expect(temporal.cleanup).toHaveBeenNthCalledWith(1, INPUT);
+    expect(temporal.cleanup).toHaveBeenNthCalledWith(2, INPUT);
     vi.useRealTimers();
   });
 
-  it('does not sleep when redrive happens after notBefore', async () => {
-    vi.setSystemTime(new Date('2026-07-17T08:20:00.000Z'));
+  it('does not skip the fixed grace when redrive happens just after URL expiry', async () => {
+    vi.setSystemTime(new Date('2026-07-17T08:15:30.000Z'));
 
     await assetObjectCleanupWorkflow(INPUT);
 
-    expect(temporal.sleep).not.toHaveBeenCalled();
-    expect(temporal.cleanup).toHaveBeenCalledWith(INPUT);
+    expect(temporal.sleep).toHaveBeenNthCalledWith(1, 14.5 * 60 * 1000);
+    expect(temporal.sleep).toHaveBeenNthCalledWith(2, 5 * 60 * 1000);
+    expect(temporal.cleanup).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('redrive after expiry plus grace still performs a durable settle and second delete', async () => {
+    vi.setSystemTime(new Date('2026-07-17T08:31:00.000Z'));
+
+    await assetObjectCleanupWorkflow(INPUT);
+
+    expect(temporal.sleep).toHaveBeenCalledTimes(1);
+    expect(temporal.sleep).toHaveBeenCalledWith(5 * 60 * 1000);
+    expect(temporal.cleanup).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
@@ -72,10 +87,20 @@ describe('assetObjectCleanupWorkflow', () => {
     expect(temporal.cleanup).not.toHaveBeenCalled();
   });
 
+  it('rejects client or Outbox attempts to shorten code-owned cleanup windows', async () => {
+    await expect(
+      assetObjectCleanupWorkflow({ ...INPUT, inFlightGraceMs: 0, settleMs: 0 } as never),
+    ).rejects.toMatchObject({ nonRetryable: true });
+
+    expect(temporal.sleep).not.toHaveBeenCalled();
+    expect(temporal.cleanup).not.toHaveBeenCalled();
+  });
+
   it('logs a minimal structured alert after activity exhaustion and rethrows', async () => {
     const failure = Object.assign(new Error('S3 secret and object key must not be logged'), {
       cause: { type: 'ASSET_CLEANUP_STORAGE_UNAVAILABLE' },
     });
+    temporal.cleanup.mockResolvedValueOnce({ eventId: INPUT.eventId, deleted: true });
     temporal.cleanup.mockRejectedValueOnce(failure);
 
     await expect(assetObjectCleanupWorkflow(INPUT)).rejects.toBe(failure);
