@@ -3,6 +3,7 @@ import {
   ASSET_KINDS,
   buildObjectKey,
   buildStagingKey,
+  buildVariantObjectKey,
   extForMime,
   maxBytesForKind,
   sniffMime,
@@ -10,6 +11,7 @@ import {
 
 const WS = '11111111-1111-4111-8111-111111111111';
 const SITE = '22222222-2222-4222-8222-222222222222';
+const ASSET = '33333333-3333-4333-8333-333333333333';
 
 describe('object-key（对象存储键布局 + 上传安全闸，02 §2 / 06 §2）', () => {
   it('canonical key = ws/{workspace}/{site}/{kind}/{hash}.{ext}', () => {
@@ -21,6 +23,13 @@ describe('object-key（对象存储键布局 + 上传安全闸，02 §2 / 06 §2
   it('staging key 在 uploads/ 下且以 assetId 定位（commit 后搬运到 canonical）', () => {
     const key = buildStagingKey(WS, SITE, 'asset-1');
     expect(key).toBe(`ws/${WS}/${SITE}/uploads/asset-1`);
+  });
+
+  it('variant key 固定在 asset+recipe 专属命名空间，不能碰撞原件', () => {
+    const recipeHash = 'a'.repeat(64);
+    expect(
+      buildVariantObjectKey(WS, SITE, ASSET, recipeHash, 'avif'),
+    ).toBe(`ws/${WS}/${SITE}/variants/${ASSET}/${recipeHash}.avif`);
   });
 
   it('extForMime：白名单内返回扩展名，白名单外返回 null', () => {

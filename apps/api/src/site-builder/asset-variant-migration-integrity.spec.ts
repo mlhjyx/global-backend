@@ -11,6 +11,8 @@ function repositoryFile(relativePath: string): string {
 
 const migrationPath =
   "packages/db/prisma/migrations/20260717040000_site_builder_asset_variant_mf0/migration.sql";
+const hardeningMigrationPath =
+  "packages/db/prisma/migrations/20260717041000_site_builder_asset_variant_provenance_hardening/migration.sql";
 
 describe("MF0-A AssetVariant migration integrity", () => {
   it("adds the tenant-scoped materialized variant and its complete provenance", () => {
@@ -97,5 +99,26 @@ describe("MF0-A AssetVariant migration integrity", () => {
     expect(schema).toContain("@@map(\"asset_variant\")");
     expect(schema).not.toContain("model MediaJob {");
     expect(schema).not.toContain("model AssetUsage {");
+  });
+
+  it("hardens object identity, ready image dimensions, and source retention forward-only", () => {
+    const sql = repositoryFile(hardeningMigrationPath);
+
+    expect(sql).toMatch(
+      /object_key.+variants.+asset_id.+recipe_hash/is,
+    );
+    expect(sql).toMatch(
+      /status.+ready.+mime.+image\/.+width.+IS NOT NULL.+height.+IS NOT NULL/is,
+    );
+    expect(sql).toContain(
+      'DROP CONSTRAINT "asset_variant_source_scope_fkey"',
+    );
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "asset_variant_source_scope_fkey"[\s\S]+ON DELETE NO ACTION ON UPDATE NO ACTION/,
+    );
+    expect(sql).toMatch(
+      /CREATE (?:OR REPLACE )?FUNCTION enforce_asset_variant_provenance_immutable/,
+    );
+    expect(sql).toMatch(/CREATE TRIGGER asset_variant_provenance_immutable/);
   });
 });
