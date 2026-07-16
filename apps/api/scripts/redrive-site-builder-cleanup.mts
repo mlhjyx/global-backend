@@ -13,7 +13,6 @@ if (!workspaceId || !eventId) {
     'usage: node --import tsx scripts/redrive-site-builder-cleanup.mts <workspaceId> <eventId>',
   );
 }
-
 const temporalAddress = process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
 const prisma = new PrismaService();
 const connection = await Connection.connect({ address: temporalAddress });
@@ -78,4 +77,3 @@ try {
   await prisma.$disconnect();
   await connection.close();
 }
-

@@ -15,7 +15,6 @@ export interface AssetCleanupRedriveEvent {
   publishedAt: Date | null;
   parkedAt: Date | null;
 }
-
 export type CleanupExecutionStatus =
   | 'NOT_FOUND'
   | 'RUNNING'
@@ -80,4 +79,3 @@ export function assertAssetCleanupRedrivable(status: CleanupExecutionStatus): vo
     throw new Error(`cleanup execution status ${status} is not redrivable`);
   }
 }
-

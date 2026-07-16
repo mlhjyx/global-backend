@@ -233,4 +233,3 @@ main().catch((error) => {
   console.error('R2-A4 cleanup development verifier failed:', error);
   process.exit(1);
 });
-

@@ -51,4 +51,3 @@ describe('asset cleanup redrive safety gate', () => {
     (status) => expect(() => assertAssetCleanupRedrivable(status)).toThrow(),
   );
 });
-
