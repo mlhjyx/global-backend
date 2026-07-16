@@ -1,11 +1,25 @@
+import {
+  BadGatewayException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { BadGatewayException, BadRequestException, ConflictException } from '@nestjs/common';
-import { IntakeService } from './intake.service';
-import type { DemoV0Launcher } from './demo-launcher';
+import type { RequestContext } from '../auth/request-context';
+import type { DemoV0LaunchInput, DemoV0Launcher } from './demo-launcher';
+import { IntakeService, type IntakeInput, type IntakeResult } from './intake.service';
 
-const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
+const CTX: RequestContext = {
+  userId: 'u1',
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  roles: [],
+};
+const OTHER_CTX: RequestContext = {
+  userId: 'u2',
+  workspaceId: '22222222-2222-4222-8222-222222222222',
+  roles: [],
+};
 
-const BASE_INTAKE = {
+const BASE_INTAKE: IntakeInput = {
   company: { nameZh: '杭州爱克姆泵业有限公司', nameEn: 'Acme Pump Co., Ltd.' },
   industry: 'isic-2813',
   products: ['centrifugal pump', 'screw pump'],
@@ -18,172 +32,402 @@ const BASE_INTAKE = {
 interface FakeDb {
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
+  keys: Record<string, unknown>[];
+}
+
+interface TargetCreate {
+  (ctx: RequestContext, input: IntakeInput, idempotencyKey?: string): Promise<IntakeResult>;
+}
+
+function callCreate(
+  service: IntakeService,
+  ctx: RequestContext,
+  input: IntakeInput,
+  idempotencyKey?: string,
+): Promise<IntakeResult> {
+  // 这个适配让目标契约在生产签名尚未实现时仍能运行并形成行为 RED，而不是停在 TS2554。
+  return (service.create as TargetCreate)(ctx, input, idempotencyKey);
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function makeService(
-  opts: { existingSite?: boolean; existingStatus?: string; launcher?: DemoV0Launcher } = {},
+  opts: {
+    existingSite?: boolean;
+    existingStatus?: string;
+    launcher?: DemoV0Launcher;
+  } = {},
 ) {
-  const db: FakeDb = { sites: [], runs: [] };
-  if (opts.existingSite)
+  const db: FakeDb = { sites: [], runs: [], keys: [] };
+  let siteSeq = 0;
+  let runSeq = 0;
+
+  if (opts.existingSite) {
     db.sites.push({
-      id: 'existing',
+      id: 'site-existing',
       workspaceId: CTX.workspaceId,
       slug: 'existing-slug',
       status: opts.existingStatus ?? 'ready',
     });
+  }
+
   const tx = {
-    $executeRaw: async () => 0, // advisory lock no-op
+    $executeRaw: async () => 0,
     site: {
-      findFirst: async () => db.sites[0] ?? null,
+      findFirst: async ({ where }: { where: { workspaceId?: string } }) =>
+        db.sites.find((site) => site.workspaceId === where.workspaceId) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: 'site-1', ...data };
+        const row = { id: `site-${++siteSeq}`, ...data };
         db.sites.push(row);
         return row;
       },
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-        const row = db.sites.find((s) => s.id === where.id);
-        if (row) Object.assign(row, data);
+        const row = db.sites.find((site) => site.id === where.id);
+        if (!row) throw new Error(`missing site ${where.id}`);
+        Object.assign(row, data);
         return row;
       },
       delete: async ({ where }: { where: { id: string } }) => {
-        const i = db.sites.findIndex((s) => s.id === where.id);
-        if (i >= 0) db.sites.splice(i, 1);
+        const index = db.sites.findIndex((site) => site.id === where.id);
+        if (index >= 0) db.sites.splice(index, 1);
+        // 真库 Site → SiteBuildRun 是 ON DELETE CASCADE；fake 也必须忠实模拟。
+        db.runs.splice(0, db.runs.length, ...db.runs.filter((run) => run.siteId !== where.id));
       },
     },
     siteBuildRun: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        db.runs.find((run) => run.id === where.id) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: 'run-1', ...data };
+        const row = { id: `run-${++runSeq}`, temporalRunId: null, ...data };
         db.runs.push(row);
         return row;
       },
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-        const row = db.runs.find((r) => r.id === where.id);
-        if (row) Object.assign(row, data);
+        const row = db.runs.find((run) => run.id === where.id);
+        if (!row) throw new Error(`missing run ${where.id}`);
+        Object.assign(row, data);
+        return row;
+      },
+      updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        const row = db.runs.find((run) => run.id === where.id);
+        if (!row) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      },
+    },
+    idempotencyKey: {
+      findUnique: async ({
+        where,
+      }: {
+        where: {
+          workspaceId_endpoint_key: { workspaceId: string; endpoint: string; key: string };
+        };
+      }) => {
+        const wanted = where.workspaceId_endpoint_key;
+        return (
+          db.keys.find(
+            (row) =>
+              row.workspaceId === wanted.workspaceId &&
+              row.endpoint === wanted.endpoint &&
+              row.key === wanted.key,
+          ) ?? null
+        );
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const duplicate = db.keys.some(
+          (row) =>
+            row.workspaceId === data.workspaceId &&
+            row.endpoint === data.endpoint &&
+            row.key === data.key,
+        );
+        if (duplicate) throw new Error('fake unique violation');
+        const row = { id: `key-${db.keys.length + 1}`, ...clone(data) };
+        db.keys.push(row);
         return row;
       },
     },
   };
+
   const prisma = {
-    withWorkspace: async <T>(_ws: string, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
+    withWorkspace: async <T>(_workspaceId: string, fn: (client: typeof tx) => Promise<T>): Promise<T> =>
+      fn(tx),
   };
-  const launched: string[] = [];
-  const launcher: DemoV0Launcher =
+  const launches: DemoV0LaunchInput[] = [];
+  const launcher =
     opts.launcher ??
     ({
-      launchDemoV0: async ({ siteId }: { siteId: string }) => {
-        launched.push(siteId);
+      launchDemoV0: async (input: DemoV0LaunchInput) => {
+        launches.push(input);
+        return { firstExecutionRunId: `temporal-${input.buildRunId}` };
       },
-    } as DemoV0Launcher);
-  const service = new IntakeService(prisma as never, launcher);
-  return { service, db, launched };
+    } as unknown as DemoV0Launcher);
+
+  return {
+    service: new IntakeService(prisma as never, launcher),
+    db,
+    launches,
+  };
 }
 
-describe('IntakeService（注册引导 → 建档 + demo v0，01 §2 / 07 §1）', () => {
-  it('无站路径：建 site（mode=builder，status=building，slug 合法）+ demo_v0 run + 触发 launcher', async () => {
-    const { service, db, launched } = makeService();
-    const res = await service.create(CTX, BASE_INTAKE);
+async function expectHttpError(
+  promise: Promise<unknown>,
+  status: number,
+  code: string,
+): Promise<HttpException> {
+  const error = await promise.catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(HttpException);
+  expect((error as HttpException).getStatus()).toBe(status);
+  expect((error as HttpException).getResponse()).toMatchObject({ error: { code } });
+  return error as HttpException;
+}
 
-    expect(res).toEqual({ siteId: 'site-1', mode: 'builder', status: 'building' });
-    const site = db.sites[0] as Record<string, unknown>;
-    expect(site.workspaceId).toBe(CTX.workspaceId);
-    expect(site.mode).toBe('builder');
-    expect(site.status).toBe('building');
-    expect(site.name).toBe('Acme Pump Co., Ltd.');
-    expect(site.slug).toMatch(/^acme-pump-co-ltd-[a-z0-9]{6}$/);
-    expect(site.intake).toEqual(BASE_INTAKE);
-    expect(site.locales).toEqual(['en']);
+describe('IntakeService R0 contract（POST /site-builder/intake）', () => {
+  it('无 key：原子建 Site + demo run，返回 buildId/generating_demo，ACK 后落 temporalRunId', async () => {
+    const { service, db, launches } = makeService();
+    const result = await callCreate(service, CTX, BASE_INTAKE);
 
-    const run = db.runs[0] as Record<string, unknown>;
-    expect(run.kind).toBe('demo_v0');
-    expect(run.status).toBe('queued');
-    expect(run.siteId).toBe('site-1');
-    expect(launched).toEqual(['site-1']);
+    expect(result).toEqual({ siteId: 'site-1', buildId: 'run-1', status: 'generating_demo' });
+    expect(result).not.toHaveProperty('mode');
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]).toMatchObject({
+      workspaceId: CTX.workspaceId,
+      mode: 'builder',
+      status: 'building',
+      name: 'Acme Pump Co., Ltd.',
+      locales: ['en'],
+      intake: BASE_INTAKE,
+    });
+    expect(db.sites[0]?.slug).toMatch(/^acme-pump-co-ltd-[a-z0-9]{6}$/);
+    expect(db.runs).toEqual([
+      expect.objectContaining({
+        id: 'run-1',
+        workspaceId: CTX.workspaceId,
+        siteId: 'site-1',
+        kind: 'demo_v0',
+        status: 'queued',
+        temporalRunId: 'temporal-run-1',
+      }),
+    ]);
+    expect(launches).toEqual([
+      { workspaceId: CTX.workspaceId, siteId: 'site-1', buildRunId: 'run-1' },
+    ]);
   });
 
-  it('有站路径：hasWebsite=true 也无条件建 demo（mode=builder/status=building/建 run/触发 launcher）——只作背景知识不分叉（R0-2，01 §2.1 / DoD-1）', async () => {
-    const { service, db, launched } = makeService();
-    const res = await service.create(CTX, {
+  it('hasWebsite=true 仍走同一 demo 契约；websiteUrl 仅作为 intake 背景保留', async () => {
+    const { service, db } = makeService();
+    const input = {
       ...BASE_INTAKE,
       hasWebsite: true,
       websiteUrl: 'https://www.acmepump.com',
-    });
+    };
+    const result = await callCreate(service, CTX, input);
 
-    // 与无站路径同一结果：无条件建 demo
-    expect(res).toEqual({ siteId: 'site-1', mode: 'builder', status: 'building' });
+    expect(result).toEqual({ siteId: 'site-1', buildId: 'run-1', status: 'generating_demo' });
     expect(db.runs).toHaveLength(1);
-    const run = db.runs[0] as Record<string, unknown>;
-    expect(run.kind).toBe('demo_v0');
-    expect(run.status).toBe('queued');
-    expect(launched).toEqual(['site-1']);
-    // hasWebsite/websiteUrl 仍作背景知识存入 intake（供后续 M3 诊断，不再分叉栏目）
-    const site = db.sites[0] as Record<string, unknown>;
-    const intake = site.intake as Record<string, unknown>;
-    expect(intake.hasWebsite).toBe(true);
-    expect(intake.websiteUrl).toBe('https://www.acmepump.com');
+    expect((db.sites[0]?.intake as Record<string, unknown>).websiteUrl).toBe(
+      'https://www.acmepump.com',
+    );
   });
 
-  it('hasWebsite=true 但缺 websiteUrl → BadRequest（服务层兜底，不信 DTO 层）', async () => {
+  it('hasWebsite=true 但缺 websiteUrl → 400 VALIDATION_ERROR（服务层不信 DTO）', async () => {
     const { service } = makeService();
-    await expect(
-      service.create(CTX, { ...BASE_INTAKE, hasWebsite: true, websiteUrl: null }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expectHttpError(
+      callCreate(service, CTX, { ...BASE_INTAKE, hasWebsite: true, websiteUrl: null }),
+      HttpStatus.BAD_REQUEST,
+      'VALIDATION_ERROR',
+    );
   });
 
-  it('workspace 已有站点 → Conflict（v1 每 workspace 限 1 站）', async () => {
-    const { service } = makeService({ existingSite: true });
-    await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(ConflictException);
-  });
+  it.each(['', '   ', 'contains space', 'slash/not-allowed', 'x'.repeat(129)])(
+    '非法 Idempotency-Key %j → 400 INVALID_IDEMPOTENCY_KEY，且零写入',
+    async (key) => {
+      const { service, db } = makeService();
+      await expectHttpError(
+        callCreate(service, CTX, BASE_INTAKE, key),
+        HttpStatus.BAD_REQUEST,
+        'INVALID_IDEMPOTENCY_KEY',
+      );
+      expect(db.sites).toHaveLength(0);
+      expect(db.runs).toHaveLength(0);
+      expect(db.keys).toHaveLength(0);
+    },
+  );
 
-  it('launcher 抛错：补偿回滚（site 删除，级联 run）+ 502 上抛——re-intake 可重试不撞 409', async () => {
-    const failing: DemoV0Launcher = {
-      launchDemoV0: async () => {
-        throw new Error('temporal unreachable');
-      },
+  it('同 workspace + 同 key + 同语义请求：重放首个结果，不重复建站/run/Temporal', async () => {
+    const { service, db, launches } = makeService();
+    const first = await callCreate(service, CTX, BASE_INTAKE, 'intake-request-1');
+    // 属性插入顺序不同但语义相同，request hash 必须稳定。
+    const reordered: IntakeInput = {
+      businessEmail: BASE_INTAKE.businessEmail,
+      websiteUrl: null,
+      hasWebsite: false,
+      targetMarkets: ['DE', 'US'],
+      products: ['centrifugal pump', 'screw pump'],
+      industry: 'isic-2813',
+      company: { nameEn: 'Acme Pump Co., Ltd.', nameZh: '杭州爱克姆泵业有限公司' },
     };
-    const { service, db } = makeService({ launcher: failing });
-    await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(BadGatewayException);
-    expect(db.sites).toHaveLength(0); // 站点已回滚
-    // 回滚后同 workspace 再次 intake 成功（不因残留 409）
-    const ok = await service.create(CTX, BASE_INTAKE).catch(() => null);
-    expect(ok).toBeNull(); // 仍是 failing launcher → 依旧 502，但不是 Conflict
-  });
+    const replay = await callCreate(service, CTX, reordered, 'intake-request-1');
 
-  it('无英文名：站名用中文名，slug 退 site- 前缀', async () => {
-    const { service, db } = makeService();
-    await service.create(CTX, { ...BASE_INTAKE, company: { nameZh: '杭州泵业', nameEn: null } });
-    const site = db.sites[0] as Record<string, unknown>;
-    expect(site.name).toBe('杭州泵业');
-    expect(site.slug).toMatch(/^site-[a-z0-9]{6}$/);
-  });
-
-  it('R0-6 原地重试：已有 setup_failed 站 → 复用同 site 重建 demo（不 409、回 building）', async () => {
-    const { service, db, launched } = makeService({ existingSite: true, existingStatus: 'setup_failed' });
-    const res = await service.create(CTX, BASE_INTAKE);
-    expect(res).toEqual({ siteId: 'existing', mode: 'builder', status: 'building' });
-    expect(db.sites).toHaveLength(1); // 复用同 site，不新建
-    expect((db.sites[0] as Record<string, unknown>).status).toBe('building'); // 回 building 重试
-    expect(db.runs).toHaveLength(1); // 新 demo_v0 run
-    expect(launched).toEqual(['existing']);
-  });
-
-  it('R0-6：非 setup_failed 的既有站仍 Conflict（v1 每 workspace 限 1 站照旧）', async () => {
-    const { service } = makeService({ existingSite: true, existingStatus: 'ready' });
-    await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('R0-6：复用 setup_failed 站的同步 launch 失败 → 保留 setup_failed（不删用户数据）+ 502', async () => {
-    const failing: DemoV0Launcher = {
-      launchDemoV0: async () => {
-        throw new Error('temporal unreachable');
-      },
-    };
-    const { service, db } = makeService({
-      existingSite: true,
-      existingStatus: 'setup_failed',
-      launcher: failing,
+    expect(replay).toEqual(first);
+    expect(db.sites).toHaveLength(1);
+    expect(db.runs).toHaveLength(1);
+    expect(db.keys).toHaveLength(1);
+    expect(db.keys[0]).toMatchObject({
+      workspaceId: CTX.workspaceId,
+      endpoint: 'POST /api/v1/site-builder/intake',
+      key: 'intake-request-1',
+      requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      response: first,
     });
-    await expect(service.create(CTX, BASE_INTAKE)).rejects.toBeInstanceOf(BadGatewayException);
-    expect(db.sites).toHaveLength(1); // 保留，绝不删
-    expect((db.sites[0] as Record<string, unknown>).status).toBe('setup_failed');
+    expect(launches).toHaveLength(1);
+  });
+
+  it('同 key 改请求体 → 409 IDEMPOTENCY_KEY_REUSED，零新增、零重启', async () => {
+    const { service, db, launches } = makeService();
+    await callCreate(service, CTX, BASE_INTAKE, 'intake-request-1');
+
+    await expectHttpError(
+      callCreate(
+        service,
+        CTX,
+        { ...BASE_INTAKE, products: ['a materially different product'] },
+        'intake-request-1',
+      ),
+      HttpStatus.CONFLICT,
+      'IDEMPOTENCY_KEY_REUSED',
+    );
+    expect(db.sites).toHaveLength(1);
+    expect(db.runs).toHaveLength(1);
+    expect(db.keys).toHaveLength(1);
+    expect(launches).toHaveLength(1);
+  });
+
+  it('既有非 setup_failed 站 → 409 SITE_LIMIT_REACHED，错误码稳定', async () => {
+    const { service, db } = makeService({ existingSite: true, existingStatus: 'ready' });
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, 'new-request'),
+      HttpStatus.CONFLICT,
+      'SITE_LIMIT_REACHED',
+    );
+    expect(db.runs).toHaveLength(0);
+    expect(db.keys).toHaveLength(0);
+  });
+
+  it('有 key 的 launch 首次不确定失败：502 稳定码且保留账本；同 key 重试同一 build 并补写 ACK', async () => {
+    let failOnce = true;
+    const launches: DemoV0LaunchInput[] = [];
+    const launcher = {
+      launchDemoV0: async (input: DemoV0LaunchInput) => {
+        launches.push(input);
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('internal temporal address must never leak');
+        }
+        return { firstExecutionRunId: 'temporal-recovered' };
+      },
+    } as unknown as DemoV0Launcher;
+    const { service, db } = makeService({ launcher });
+
+    const firstError = await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, 'recoverable-request'),
+      HttpStatus.BAD_GATEWAY,
+      'DEMO_LAUNCH_UNAVAILABLE',
+    );
+    expect(JSON.stringify(firstError.getResponse())).not.toContain('internal temporal');
+    expect(db.sites).toHaveLength(1);
+    expect(db.runs).toHaveLength(1);
+    expect(db.keys).toHaveLength(1);
+    expect(db.runs[0]).toMatchObject({ status: 'queued', temporalRunId: null });
+
+    const replay = await callCreate(service, CTX, BASE_INTAKE, 'recoverable-request');
+    expect(replay).toEqual({ siteId: 'site-1', buildId: 'run-1', status: 'generating_demo' });
+    expect(db.sites).toHaveLength(1);
+    expect(db.runs).toHaveLength(1);
+    expect(db.keys).toHaveLength(1);
+    expect(db.runs[0]?.temporalRunId).toBe('temporal-recovered');
+    expect(launches).toHaveLength(2);
+  });
+
+  it('无 key 的同步 launch 失败仍补偿回滚新 Site/run，并返回稳定 502', async () => {
+    const launcher = {
+      launchDemoV0: async () => {
+        throw new Error('temporal unreachable at 10.0.0.1');
+      },
+    } as unknown as DemoV0Launcher;
+    const { service, db } = makeService({ launcher });
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE),
+      HttpStatus.BAD_GATEWAY,
+      'DEMO_LAUNCH_UNAVAILABLE',
+    );
+    expect(db.sites).toHaveLength(0);
+    expect(db.runs).toHaveLength(0);
+    expect(db.keys).toHaveLength(0);
+  });
+
+  it('旧 key 在异步终态失败后只重放旧 build；新 key 才原地复用 setup_failed Site 建新 build', async () => {
+    const { service, db, launches } = makeService();
+    const first = await callCreate(service, CTX, BASE_INTAKE, 'first-attempt');
+    Object.assign(db.sites[0]!, { status: 'setup_failed' });
+    Object.assign(db.runs[0]!, { status: 'failed', finishedAt: new Date() });
+
+    const oldReplay = await callCreate(service, CTX, BASE_INTAKE, 'first-attempt');
+    expect(oldReplay).toEqual(first);
+    expect(db.sites[0]?.status).toBe('setup_failed');
+    expect(db.runs).toHaveLength(1);
+    expect(launches).toHaveLength(1);
+
+    const retry = await callCreate(service, CTX, BASE_INTAKE, 'second-attempt');
+    expect(retry).toEqual({
+      siteId: 'site-1',
+      buildId: 'run-2',
+      status: 'generating_demo',
+    });
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]?.status).toBe('building');
+    expect(db.runs).toHaveLength(2);
+    expect(db.keys).toHaveLength(2);
+    expect(launches).toHaveLength(2);
+  });
+
+  it('相同 key 按 workspace 隔离：两租户各自创建、各自重放', async () => {
+    const { service, db, launches } = makeService();
+    const firstA = await callCreate(service, CTX, BASE_INTAKE, 'shared-key');
+    const firstB = await callCreate(service, OTHER_CTX, BASE_INTAKE, 'shared-key');
+    const replayA = await callCreate(service, CTX, BASE_INTAKE, 'shared-key');
+    const replayB = await callCreate(service, OTHER_CTX, BASE_INTAKE, 'shared-key');
+
+    expect(replayA).toEqual(firstA);
+    expect(replayB).toEqual(firstB);
+    expect(firstA.siteId).not.toBe(firstB.siteId);
+    expect(firstA.buildId).not.toBe(firstB.buildId);
+    expect(db.sites).toHaveLength(2);
+    expect(db.runs).toHaveLength(2);
+    expect(db.keys).toHaveLength(2);
+    expect(launches).toHaveLength(2);
+  });
+
+  it('无英文名：站名使用中文名，slug 使用 site- 前缀', async () => {
+    const { service, db } = makeService();
+    await callCreate(service, CTX, {
+      ...BASE_INTAKE,
+      company: { nameZh: '杭州泵业', nameEn: null },
+    });
+    expect(db.sites[0]?.name).toBe('杭州泵业');
+    expect(db.sites[0]?.slug).toMatch(/^site-[a-z0-9]{6}$/);
+  });
+
+  it('launcher 本身仍属于 502 边界，不冒充校验或冲突错误', async () => {
+    const launcher = {
+      launchDemoV0: async () => {
+        throw new Error('down');
+      },
+    } as unknown as DemoV0Launcher;
+    const { service } = makeService({ launcher });
+    const error = await callCreate(service, CTX, BASE_INTAKE).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BadGatewayException);
   });
 });
