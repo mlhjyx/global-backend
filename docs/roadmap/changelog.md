@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R2-A2（KB 正确性状态机）
+
+- KB 改为单素材持久状态机：due queued/过期 processing 以 Asset attempt+UUID token+lease CAS 认领；外部 IO 间续租，所有回写 fenced。文档/chunks 与 Asset ready 同事务提交，结果丢失重跑 replace 同一文档，旧 worker 复活不能 zombie write。
+- migration 以 020000 单事务/表锁完成 reconciliation + constraints 原子门，021000 仅作已在共享开发库执行过旧迁移名的 compatibility marker，022000 再让旧开发库形态通过正常 deploy 收敛到同一结构。除 duplicate/orphan/零块/不完整历史外，Site→Asset/KbDocument、document→Asset、chunk→document 均闭合复合租户 provenance；Site/workspace 不一致的子行无法安全跨租户改写时迁移直接中止，要求显式 quarantine/audit，绝不硬删 canonical Asset 或绕过 R2-A4/MF-0 cleanup 账本。开发库应用前预检该类行数为 0。
+- Docling、embedding 与 KB 存储边界改 typed error；瞬时故障回 `queued+retryAt`，真损坏文档才 `failed_terminal`。commit workflow 透传 assetId；新增 5 分钟 recovery Schedule、有界扫描、结构化告警和 `redrive-site-builder-kb.mts`。
+- 验证：专项 TDD、空库 37 migrations、从 34 migrations 构造旧 020000/021000 实际形态再只执行 022000 的升级、零块/healthy+processing|failed/重复/跨 workspace chunk/跨 Site 租户/terminal 保留等样本，以及真 PostgreSQL/app_user RLS/MinIO/Docling/BGE-M3、双 worker/过期接管/zombie fence、真损坏 PDF、recovery/redrive、unique/FK 与删除级联全部通过；fixture、对象与旧 M1-a verifier 残留均清零。当前仅为 Ubuntu 开发环境验证，不代表生产部署；生产迁移仍须独立变更审批与备份/回滚窗口。
+
 ## 2026-07-17 · Site Builder R2-A1（Asset 正确性状态机）
 
 - Asset 增加 `processing_attempt`、UUID `lease_token`、`lease_until`、`retry_at` 与 `deleted_at`；active `object_key` 改为部分唯一索引，并以 validated CHECK 锁住状态/lease/tombstone 形状。

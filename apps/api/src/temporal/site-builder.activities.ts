@@ -1,7 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import {
@@ -79,8 +80,11 @@ export interface SiteBuilderActivityDeps {
   kb?: {
     ingestText: KbService['ingestText'];
     processQueued: KbService['processQueued'];
+    processAsset: KbService['processAsset'];
     digestSources?: KbService['digestSources'];
   };
+  /** KB recovery 只读跨租户枚举；实际读写仍由 KbService.withWorkspace 执行。 */
+  ownerDb?: PrismaClient;
   /** 品牌 web 研究的唯一出网闸门（缺省=研究降级 researchDegraded，不裸出网）。 */
   broker?: ExecutionBroker;
 }
@@ -90,6 +94,12 @@ export interface RefurbishActivityInput {
   siteId: string;
   buildRunId: string;
   scope?: BuildScopeInput;
+}
+
+export interface KbRecoveryCandidate {
+  workspaceId: string;
+  siteId: string;
+  assetId: string;
 }
 
 /** buildBrandProfile 活动的返回（workflow 汇总进 finalize steps）。 */
@@ -124,7 +134,7 @@ export function previewBasePath(slug: string): string {
 }
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
-  const { prisma, gateway, kb, broker } = deps;
+  const { prisma, gateway, kb, broker, ownerDb } = deps;
   const log = new Logger('SiteBuilderActivities');
 
   // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
@@ -185,7 +195,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     siteId: string,
   ): Promise<{ processed: number; failed: number }> {
     if (!kb?.processQueued) return { processed: 0, failed: 0 };
-    return kb.processQueued({ userId: 'system', workspaceId, roles: [] }, siteId);
+    let activity: ActivityContext | undefined;
+    try {
+      activity = ActivityContext.current();
+    } catch {
+      activity = undefined;
+    }
+    let stage = 'list-queued';
+    activity?.heartbeat({ siteId, stage });
+    const heartbeatTimer = activity
+      ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000)
+      : undefined;
+    heartbeatTimer?.unref();
+    try {
+      return await kb.processQueued(
+        { userId: 'system', workspaceId, roles: [] },
+        siteId,
+        {
+          signal: activity?.cancellationSignal,
+          heartbeat: (nextStage) => {
+            stage = nextStage;
+            activity?.heartbeat({ siteId, stage });
+          },
+        },
+      );
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    }
   }
 
   return {
@@ -371,6 +407,112 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       siteId: string;
     }): Promise<{ processed: number; failed: number }> {
       return processQueuedForSite(input.workspaceId, input.siteId);
+    },
+
+    /** 单素材 KB 活动：workflowId/input/DB fence 三者都绑定 assetId。 */
+    async processKbAsset(input: KbRecoveryCandidate) {
+      if (!kb?.processAsset) {
+        return { assetId: input.assetId, outcome: 'not_due' as const };
+      }
+      // verifier/unit tests may invoke the activity function directly, outside a Temporal
+      // Activity context. Production worker calls get heartbeat+cancellation propagation.
+      let activity: ActivityContext | undefined;
+      try {
+        activity = ActivityContext.current();
+      } catch {
+        activity = undefined;
+      }
+      let stage = 'claim';
+      activity?.heartbeat({ assetId: input.assetId, stage });
+      const heartbeatTimer = activity
+        ? setInterval(() => activity?.heartbeat({ assetId: input.assetId, stage }), 5_000)
+        : undefined;
+      heartbeatTimer?.unref();
+      try {
+        return await kb.processAsset(
+          { userId: 'system', workspaceId: input.workspaceId, roles: [] },
+          input.siteId,
+          input.assetId,
+          {
+            signal: activity?.cancellationSignal,
+            heartbeat: (nextStage) => {
+              stage = nextStage;
+              activity?.heartbeat({ assetId: input.assetId, stage });
+            },
+          },
+        );
+      } finally {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+      }
+    },
+
+    /**
+     * 周期 recovery 的受信只读扫描器：只列有界 due queued / expired processing。
+     * 高 attempt/长等待发结构化告警；不在 owner 连接上做任何租户写入。
+     */
+    async listKbRecoveryCandidates(input: { limit: number }): Promise<KbRecoveryCandidate[]> {
+      if (!ownerDb) return [];
+      const now = new Date();
+      const limit = Math.max(1, Math.min(input.limit, 500));
+      const rows = await ownerDb.asset.findMany({
+        where: {
+          kind: 'doc',
+          contentHash: { not: null },
+          deletedAt: null,
+          OR: [
+            {
+              processingStatus: 'queued',
+              OR: [{ retryAt: null }, { retryAt: { lte: now } }],
+            },
+            { processingStatus: 'processing', leaseUntil: { lte: now } },
+          ],
+        },
+        orderBy: [
+          // `processing` sorts before `queued`, so an expired worker lease cannot be
+          // starved forever by a sustained queued backlog before `take` is applied.
+          { processingStatus: 'asc' },
+          { leaseUntil: { sort: 'asc', nulls: 'last' } },
+          { retryAt: { sort: 'asc', nulls: 'first' } },
+          { createdAt: 'asc' },
+          { id: 'asc' },
+        ],
+        take: limit,
+        select: {
+          id: true,
+          workspaceId: true,
+          siteId: true,
+          processingAttempt: true,
+          processingStatus: true,
+          retryAt: true,
+          leaseUntil: true,
+          createdAt: true,
+          processingErrorCode: true,
+        },
+      });
+      for (const row of rows) {
+        const ageMs = now.getTime() - row.createdAt.getTime();
+        if (row.processingAttempt >= 5 || ageMs >= 60 * 60 * 1000) {
+          log.warn(
+            JSON.stringify({
+              event: 'site_builder_kb_recovery_alert',
+              assetId: row.id,
+              workspaceId: row.workspaceId,
+              siteId: row.siteId,
+              status: row.processingStatus,
+              attempt: row.processingAttempt,
+              ageMs,
+              retryAt: row.retryAt?.toISOString() ?? null,
+              leaseUntil: row.leaseUntil?.toISOString() ?? null,
+              errorCode: row.processingErrorCode,
+            }),
+          );
+        }
+      }
+      return rows.map((row) => ({
+        workspaceId: row.workspaceId,
+        siteId: row.siteId,
+        assetId: row.id,
+      }));
     },
 
     /**

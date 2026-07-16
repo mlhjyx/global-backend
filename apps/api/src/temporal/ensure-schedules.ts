@@ -11,6 +11,8 @@ import {
   EXTERNAL_INTENT_SWEEP_WORKFLOW,
   INTENT_SWEEP_SCHEDULE_ID,
   INTENT_SWEEP_WORKFLOW,
+  KB_RECOVERY_SWEEP_SCHEDULE_ID,
+  KB_RECOVERY_SWEEP_WORKFLOW,
   PATENTS_CACHE_REFRESH_SCHEDULE_ID,
   PATENTS_CACHE_REFRESH_WORKFLOW,
   SANCTIONS_REFRESH_SCHEDULE_ID,
@@ -36,6 +38,8 @@ const SPECS = [
   { id: PATENTS_CACHE_REFRESH_SCHEDULE_ID, workflowType: PATENTS_CACHE_REFRESH_WORKFLOW, everyEnv: 'PATENT_CACHE_REFRESH_EVERY', everyDefault: '7d' },
   // 制裁名单刷新（Qualify 第五门）：OFAC 日更 → 每日足够；DISABLED 源零动作（refreshAll 只取 ENABLED）。
   { id: SANCTIONS_REFRESH_SCHEDULE_ID, workflowType: SANCTIONS_REFRESH_WORKFLOW, everyEnv: 'SANCTIONS_REFRESH_EVERY', everyDefault: '24h' },
+  // KB 启动丢失 / due retry / 过期 processing lease 的兜底；每轮活动内部有界处理。
+  { id: KB_RECOVERY_SWEEP_SCHEDULE_ID, workflowType: KB_RECOVERY_SWEEP_WORKFLOW, everyEnv: 'KB_RECOVERY_SWEEP_EVERY', everyDefault: '5m' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {
@@ -44,6 +48,7 @@ export async function ensurePlatformSchedules(): Promise<void> {
   try {
     for (const s of SPECS) {
       try {
+        const isKbRecovery = s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID;
         await client.schedule.create({
           scheduleId: s.id,
           spec: { intervals: [{ every: (process.env[s.everyEnv] ?? s.everyDefault) as Duration }] },
@@ -51,13 +56,34 @@ export async function ensurePlatformSchedules(): Promise<void> {
             type: 'startWorkflow',
             workflowType: s.workflowType,
             taskQueue: UNDERSTANDING_TASK_QUEUE,
-            args: [{}],
+            args: isKbRecovery ? [{ limit: 10 }] : [{}],
+            // KB workflow 自身也只有两轮 10m activity；Schedule 再加顶层硬截止，防异常 history 长占 SKIP 锁。
+            ...(isKbRecovery ? { workflowExecutionTimeout: '22 minutes' } : {}),
           },
           policies: { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' },
         });
         console.log(`[worker] schedule '${s.id}' created (every ${process.env[s.everyEnv] ?? s.everyDefault}, overlap=SKIP)`);
       } catch (e) {
-        if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) continue; // 已存在则不动
+        if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) {
+          if (s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID) {
+            // R2-A2 的有界执行参数属于正确性门，不能让已存在的开发/生产 Schedule 永久沿用旧 action。
+            // 只更新 action；频率、overlap、暂停状态与 ops note 全部保留。
+            await client.schedule.getHandle(s.id).update((previous) => ({
+              spec: previous.spec,
+              action: {
+                ...previous.action,
+                args: [{ limit: 10 }],
+                workflowExecutionTimeout: '22 minutes',
+              },
+              policies: previous.policies,
+              state: previous.state,
+              searchAttributes: previous.searchAttributes,
+              typedSearchAttributes: previous.typedSearchAttributes,
+            }));
+            console.log(`[worker] schedule '${s.id}' action reconciled; cadence/pause preserved`);
+          }
+          continue;
+        }
         throw e;
       }
     }

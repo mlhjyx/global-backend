@@ -19,6 +19,33 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
   };
   const rawInserts: unknown[][] = [];
   const embedCalls: string[][] = [];
+  const matches = (row: Record<string, unknown>, where: Record<string, unknown>): boolean =>
+    Object.entries(where).every(([key, expected]) => {
+      if (key === 'OR') {
+        return (expected as Record<string, unknown>[]).some((part) => matches(row, part));
+      }
+      const actual = row[key];
+      if (expected !== null && typeof expected === 'object' && !(expected instanceof Date)) {
+        const op = expected as Record<string, unknown>;
+        if ('not' in op) return actual !== op.not;
+        if ('in' in op) return (op.in as unknown[]).includes(actual);
+        if ('notIn' in op) return !(op.notIn as unknown[]).includes(actual);
+        if ('lte' in op) {
+          return actual instanceof Date && actual.getTime() <= (op.lte as Date).getTime();
+        }
+      }
+      if (expected === null) return actual == null;
+      return actual === expected;
+    });
+  const applyData = (row: Record<string, unknown>, data: Record<string, unknown>): void => {
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== null && typeof value === 'object' && 'increment' in value) {
+        row[key] = Number(row[key] ?? 0) + Number((value as { increment: number }).increment);
+      } else {
+        row[key] = value;
+      }
+    }
+  };
   const tx = {
     kbDocument: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -31,6 +58,10 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
         if (row) Object.assign(row, data);
         return row;
       },
+      findUnique: async ({ where }: { where: { id?: string; assetId?: string } }) =>
+        db.docs.find(
+          (d) => (where.id ? d.id === where.id : d.assetId === where.assetId),
+        ) ?? null,
       findMany: async ({
         where,
         orderBy,
@@ -54,23 +85,32 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
         db.docs.filter((d) => d.siteId === where.siteId).length,
     },
     asset: {
-      findMany: async ({ where }: { where: Record<string, unknown> }) =>
-        db.assets.filter(
-          (a) => a.siteId === (where.siteId as string) && a.processingStatus === 'queued',
-        ),
+      findMany: async ({
+        where,
+        take,
+        select,
+      }: {
+        where: Record<string, unknown>;
+        take?: number;
+        select?: Record<string, boolean>;
+      }) => {
+        const rows = db.assets.filter((a) => matches(a, where)).slice(0, take);
+        if (!select) return rows;
+        return rows.map((row) =>
+          Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])),
+        );
+      },
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        db.assets.find((a) => a.id === where.id) ?? null,
       updateMany: async ({
         where,
         data,
       }: {
-        where: { id: string; processingStatus?: string };
+        where: Record<string, unknown>;
         data: Record<string, unknown>;
       }) => {
-        const rows = db.assets.filter(
-          (a) =>
-            a.id === where.id &&
-            (!where.processingStatus || a.processingStatus === where.processingStatus),
-        );
-        rows.forEach((r) => Object.assign(r, data));
+        const rows = db.assets.filter((a) => matches(a, where));
+        rows.forEach((r) => applyData(r, data));
         return { count: rows.length };
       },
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
@@ -88,6 +128,11 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
       },
     },
     kbChunk: {
+      deleteMany: async ({ where }: { where: { documentId: string } }) => {
+        const before = db.chunks.length;
+        db.chunks = db.chunks.filter((c) => c.documentId !== where.documentId);
+        return { count: before - db.chunks.length };
+      },
       findMany: async ({
         where,
         take,
@@ -169,7 +214,7 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     const { service, embedCalls } = makeService();
     const paragraphs = Array.from({ length: 70 }, (_, i) => `Paragraph ${i}: ${'x'.repeat(280)}.`);
     const text = `# Big\n\n${paragraphs.join('\n\n')}`;
-    await service.ingestText(CTX, { siteId: SITE_ID, source: 'upload', title: 'big', text });
+    await service.ingestText(CTX, { siteId: SITE_ID, source: 'wizard', title: 'big', text });
     expect(embedCalls.length).toBeGreaterThanOrEqual(3);
     for (const batch of embedCalls) expect(batch.length).toBeLessThanOrEqual(32);
   });
@@ -183,6 +228,7 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
       filename: 'intro.txt',
       mime: 'text/plain',
       objectKey: 'ws/x/y/doc/abc.txt',
+      contentHash: 'a'.repeat(64),
       processingStatus: 'queued',
     });
     const summary = await service.processQueued(CTX, SITE_ID);
@@ -193,7 +239,245 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(db.docs[0].assetId).toBe('ast-1');
   });
 
-  it('processQueued：单个素材失败不阻断其余（fail-safe），失败原因落 asset.error', async () => {
+  it('R2-A2：进入外部 IO 前已分配 attempt + UUID fence + lease，完成后清 lease', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-fenced',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'intro.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/fenced.txt',
+      contentHash: 'b'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    const seen: Record<string, unknown>[] = [];
+    const svc = service as unknown as { storage: { getBuffer: () => Promise<Buffer> } };
+    svc.storage.getBuffer = async () => {
+      seen.push({ ...db.assets[0] });
+      return Buffer.from('Fenced document content, long enough to become a chunk.');
+    };
+
+    await service.processQueued(CTX, SITE_ID);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ processingStatus: 'processing', processingAttempt: 1 });
+    expect(seen[0].leaseToken).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(seen[0].leaseUntil).toBeInstanceOf(Date);
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'ready',
+      processingAttempt: 1,
+      leaseToken: null,
+      leaseUntil: null,
+      retryAt: null,
+      processingErrorCode: null,
+    });
+  });
+
+  it('R2-A2：typed 瞬时故障回 queued + retryAt，不误用 failed/failed_retryable', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-transient',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'catalog.pdf',
+      mime: 'application/pdf',
+      objectKey: 'ws/x/y/doc/transient.pdf',
+      contentHash: 'c'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+    const svc = service as unknown as { storage: { getBuffer: () => Promise<Buffer> } };
+    svc.storage.getBuffer = async () => {
+      throw Object.assign(new Error('arbitrary wording must not be parsed'), {
+        code: 'KB_STORAGE_UNAVAILABLE',
+        disposition: 'retryable',
+        stage: 'storage',
+      });
+    };
+
+    const out = await service.processQueued(CTX, SITE_ID);
+
+    expect(out).toEqual({ processed: 0, failed: 1 });
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'queued',
+      processingErrorCode: 'KB_STORAGE_UNAVAILABLE',
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    expect(db.assets[0].retryAt).toBeInstanceOf(Date);
+  });
+
+  it('R2-A2：同一 asset 结果丢失后重跑仍只有一个 KbDocument', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-idempotent',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'catalog.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/idempotent.txt',
+      contentHash: 'd'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+
+    await service.processQueued(CTX, SITE_ID);
+    Object.assign(db.assets[0], { processingStatus: 'queued' }); // 模拟 ready 回写 ACK 丢失后的恢复扫描
+    await service.processQueued(CTX, SITE_ID);
+
+    expect(db.docs.filter((d) => d.assetId === 'ast-idempotent')).toHaveLength(1);
+    expect(db.assets[0].processingStatus).toBe('ready');
+  });
+
+  it('R2-A2：persist 中途收到 Activity 取消会停止 chunk 写入并回 due queue', async () => {
+    const { service, db, rawInserts } = makeService();
+    db.assets.push({
+      id: 'ast-cancel-persist',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'cancel.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/cancel.txt',
+      contentHash: 'c'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+    const controller = new AbortController();
+
+    const out = await service.processAsset(CTX, SITE_ID, 'ast-cancel-persist', {
+      signal: controller.signal,
+      heartbeat: (stage) => {
+        if (stage === 'persist:chunk:0') controller.abort(new Error('activity cancelled'));
+      },
+    });
+
+    expect(out).toMatchObject({ outcome: 'retry_scheduled', errorCode: 'KB_PERSIST_FAILED' });
+    expect(rawInserts).toHaveLength(0);
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'queued',
+      leaseToken: null,
+      leaseUntil: null,
+    });
+  });
+
+  it('R2-A2：lease 过期接管后，旧 worker 恢复也不能 zombie write', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-zombie',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'zombie.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/zombie.txt',
+      contentHash: '1'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    let releaseOld!: (buffer: Buffer) => void;
+    const oldBuffer = new Promise<Buffer>((resolve) => {
+      releaseOld = resolve;
+    });
+    let storageCalls = 0;
+    const svc = service as unknown as { storage: { getBuffer: () => Promise<Buffer> } };
+    svc.storage.getBuffer = async () => {
+      storageCalls += 1;
+      if (storageCalls === 1) return oldBuffer;
+      return Buffer.from('new worker wins with fenced content');
+    };
+
+    const oldWorker = service.processAsset(CTX, SITE_ID, 'ast-zombie');
+    await vi.waitFor(() => expect(storageCalls).toBe(1));
+    const oldToken = db.assets[0].leaseToken;
+    db.assets[0].leaseUntil = new Date(Date.now() - 1);
+
+    const winner = await service.processAsset(CTX, SITE_ID, 'ast-zombie');
+    releaseOld(Buffer.from('old worker resumes too late'));
+    const loser = await oldWorker;
+
+    expect(winner.outcome).toBe('ready');
+    expect(loser.outcome).toBe('superseded');
+    expect(db.assets[0]).toMatchObject({ processingStatus: 'ready', processingAttempt: 2 });
+    expect(db.assets[0].leaseToken).toBeNull();
+    expect(oldToken).not.toBeNull();
+    expect(db.docs.filter((d) => d.assetId === 'ast-zombie')).toHaveLength(1);
+  });
+
+  it('R2-A2：只有 typed 文档损坏进入 failed_terminal，且不安排 retry', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-corrupt',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'corrupt.pdf',
+      mime: 'application/pdf',
+      objectKey: 'ws/x/y/doc/corrupt.pdf',
+      contentHash: '2'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+    const svc = service as unknown as {
+      docling: { convertToMarkdown: () => Promise<{ markdown: string }> };
+    };
+    svc.docling.convertToMarkdown = async () => {
+      throw Object.assign(new Error('wording does not determine disposition'), {
+        code: 'KB_DOCUMENT_INVALID',
+        disposition: 'terminal',
+        stage: 'parse',
+      });
+    };
+
+    const out = await service.processAsset(CTX, SITE_ID, 'ast-corrupt');
+
+    expect(out).toMatchObject({
+      outcome: 'failed_terminal',
+      errorCode: 'KB_DOCUMENT_INVALID',
+    });
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'failed_terminal',
+      processingErrorCode: 'KB_DOCUMENT_INVALID',
+      retryAt: null,
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    expect(db.docs).toHaveLength(0);
+  });
+
+  it('R2-A2：retryAt 未到期时不认领，也不触达 MinIO', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-not-due',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'later.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/later.txt',
+      contentHash: '3'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 3,
+      retryAt: new Date(Date.now() + 60_000),
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    const svc = service as unknown as { storage: { getBuffer: ReturnType<typeof vi.fn> } };
+    svc.storage.getBuffer = vi.fn(async () => Buffer.from('must not run'));
+
+    await expect(service.processAsset(CTX, SITE_ID, 'ast-not-due')).resolves.toEqual({
+      assetId: 'ast-not-due',
+      outcome: 'not_due',
+    });
+    expect(svc.storage.getBuffer).not.toHaveBeenCalled();
+    expect(db.assets[0].processingAttempt).toBe(3);
+  });
+
+  it('processQueued：单个瞬时失败不阻断其余，失败素材回 due queue', async () => {
     const { service, db } = makeService();
     db.assets.push(
       {
@@ -203,6 +487,7 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
         filename: 'bad.pdf',
         mime: 'application/pdf',
         objectKey: 'missing-object',
+        contentHash: 'e'.repeat(64),
         processingStatus: 'queued',
       },
       {
@@ -212,6 +497,7 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
         filename: 'ok.txt',
         mime: 'text/plain',
         objectKey: 'ws/x/y/doc/ok.txt',
+        contentHash: 'f'.repeat(64),
         processingStatus: 'queued',
       },
     );
@@ -224,7 +510,9 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     const summary = await service.processQueued(CTX, SITE_ID);
     expect(summary).toEqual({ processed: 1, failed: 1 });
     const bad = db.assets.find((a) => a.id === 'ast-bad');
-    expect(bad?.processingStatus).toBe('failed');
+    expect(bad?.processingStatus).toBe('queued');
+    expect(bad?.processingErrorCode).toBe('KB_STORAGE_UNAVAILABLE');
+    expect(bad?.retryAt).toBeInstanceOf(Date);
     expect(String(bad?.error)).toContain('NoSuchKey');
     const ok = db.assets.find((a) => a.id === 'ast-ok');
     expect(ok?.processingStatus).toBe('ready');

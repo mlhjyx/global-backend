@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Context as ActivityContext } from '@temporalio/activity';
+import type { PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   createSiteBuilderActivities,
@@ -52,6 +54,93 @@ function spyBudget() {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('processKbAsset — Temporal heartbeat/cancellation', () => {
+  it('worker Activity context 的取消信号与阶段 heartbeat 会传入单素材处理器', async () => {
+    const controller = new AbortController();
+    const heartbeat = vi.fn();
+    vi.spyOn(ActivityContext, 'current').mockReturnValue({
+      heartbeat,
+      cancellationSignal: controller.signal,
+    } as never);
+    const processAsset = vi.fn(async (...args: unknown[]) => {
+      const options = args[3] as {
+        signal?: AbortSignal;
+        heartbeat?: (stage: string) => void;
+      };
+      expect(options.signal).toBe(controller.signal);
+      options.heartbeat?.('parsed');
+      return { assetId: 'asset-1', outcome: 'ready' as const };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      kb: {
+        ingestText: vi.fn() as never,
+        processQueued: vi.fn() as never,
+        processAsset: processAsset as never,
+      },
+    });
+
+    await expect(
+      acts.processKbAsset({ workspaceId: 'ws-1', siteId: 'site-1', assetId: 'asset-1' }),
+    ).resolves.toMatchObject({ outcome: 'ready' });
+
+    expect(heartbeat).toHaveBeenCalledWith({ assetId: 'asset-1', stage: 'claim' });
+    expect(heartbeat).toHaveBeenCalledWith({ assetId: 'asset-1', stage: 'parsed' });
+  });
+
+  it('refurbish ingestPendingKb 同样把 Activity 取消信号传给站点队列处理器', async () => {
+    const controller = new AbortController();
+    const heartbeat = vi.fn();
+    vi.spyOn(ActivityContext, 'current').mockReturnValue({
+      heartbeat,
+      cancellationSignal: controller.signal,
+    } as never);
+    const processQueued = vi.fn(async (...args: unknown[]) => {
+      const options = args[2] as {
+        signal?: AbortSignal;
+        heartbeat?: (stage: string) => void;
+      };
+      expect(options.signal).toBe(controller.signal);
+      options.heartbeat?.('queued:asset-1');
+      return { processed: 1, failed: 0 };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      kb: {
+        ingestText: vi.fn() as never,
+        processQueued: processQueued as never,
+        processAsset: vi.fn() as never,
+      },
+    });
+
+    await expect(acts.ingestPendingKb(INPUT)).resolves.toEqual({ processed: 1, failed: 0 });
+    expect(heartbeat).toHaveBeenCalledWith({ siteId: 'site-1', stage: 'list-queued' });
+    expect(heartbeat).toHaveBeenCalledWith({ siteId: 'site-1', stage: 'queued:asset-1' });
+  });
+});
+
+describe('listKbRecoveryCandidates — expired lease fairness', () => {
+  it('sorts expired processing leases ahead of queued backlog before applying the batch limit', async () => {
+    const findMany = vi.fn(async () => []);
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      ownerDb: { asset: { findMany } } as unknown as PrismaClient,
+    });
+
+    await acts.listKbRecoveryCandidates({ limit: 10 });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 10,
+        orderBy: expect.arrayContaining([
+          { processingStatus: 'asc' },
+          { leaseUntil: { sort: 'asc', nulls: 'last' } },
+        ]),
+      }),
+    );
+  });
+});
 
 describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
   it('认领成功 → close(force) 后 open(buildRunId, siteBuildBudgetCents())', async () => {

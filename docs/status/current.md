@@ -1,6 +1,6 @@
 # status/current —— 当前真值与待拍板（活文档）
 
-> 2026-07-10 立；**2026-07-17 R1-safety 与 R2-A1 Asset 正确性门更新**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
+> 2026-07-10 立；**2026-07-17 R1-safety 与 R2-A1/A2 正确性门更新**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
 > 下方「真实具备/缺口/偏差/待拍板」四节是**获客侧快照，冻结于 2026-07-13 获客暂停时点**。测试数量随提交变化，不在活状态文档固化；是否通过以当前分支实际命令和 CI 结果为准。
 
 ## 🟢 当前主线：独立站建设（Site Builder）
@@ -11,8 +11,9 @@
 - **已合并（当前 main）**：#121 已把 intake **行为**改为无条件建站/触发 demo；#123 已修 ADR-017 禁虚构身份；#124 已完成 businessEmail 不进 KB/Prompt、LLM 真取消超时、异步失败保留站点并支持原地重试；#125 完成项目真值收口。
 - **R0 已闭环（#126）**：intake 已声明并持久处理 `Idempotency-Key`，同键同请求重放首次 Site/Build、同键异请求稳定返回 `409 IDEMPOTENCY_KEY_REUSED`；成功响应固定为 `{siteId,buildId,status:"generating_demo"}`，不再暴露 `mode`；Temporal ACK-loss/AlreadyStarted 收敛、稳定 400/409/502 错误信封与 code-first OpenAPI 已有测试和真 PostgreSQL/Temporal 验证。
 - **R2-A1 Asset 已闭环（2026-07-17）**：`pending_upload/failed_retryable/expired committing → committing` 由 attempt+UUID token+lease CAS 认领，完成/失败回写全部 fenced；canonical copy 按 content hash 幂等，P2002 明确转 `duplicate`，瞬时存储失败保留 staging，DELETE 改 tombstone。状态转换与 `AssetObjectCleanupRequested` 在同一事务落 Outbox；R2-A4 前命令刻意 parked，MF-0 引用扫描器前 canonical 对象不会自动删除。开发环境真 PostgreSQL/app_user RLS/MinIO 与空库全迁移均已验证。
+- **R2-A2 KB 已闭环（2026-07-17）**：canonical doc 的 `queued(due)/expired processing → processing` 复用 Asset attempt+UUID token+lease，所有续租、失败与完成回写 fenced；`KbDocument.assetId` 历史重复按健康度/向量版本/更新时间确定性收敛后加 nullable unique，Site→Asset/KbDocument 以 `id+workspace`、document→Asset 以 `id+workspace+site`、chunk→document 以 `id+workspace` 复合 FK 守 provenance。历史 Site/workspace 不一致的子行无法安全跨租户改写，迁移会中止并要求显式 quarantine/audit，绝不硬删 canonical Asset 或绕过 R2-A4/MF-0 cleanup 账本；当前开发库预检此类行数为 0。文档/chunks 与 Asset ready 同一事务提交，旧 worker 接管后不能 zombie write；MinIO/Docling/BGE 以 typed code 分流，瞬时错误回 `queued+retryAt`，只有结构化证据确认的真损坏文档才 `failed_terminal`。单素材 workflow 不再无界扫站，5 分钟 recovery Schedule、有界扫描/结构化告警和人工 redrive 已落；完整跨系统 cleanup/公共错误码验收仍属 R2-A4。开发环境真 PostgreSQL/app_user RLS/MinIO/Docling/BGE、34→37 脏数据升级和空库 37 migrations 已验证；不代表生产部署。
 - **DOC-12 状态**：#119/#120 已把主要内容分发进 00–14 并登记 ADR-013~019；v3.1/v3.2 已降为 dated proposal。此前把“内容分发”写成“全项目真值已收口”过早；2026-07-16 truth-sync 已纠正权威层与接入文档，未把旧 Word/研究稿升级为权威。
-- **当前关键路径**：**R1-safety ①+②与 R2-A1 Asset 已完成**；下一项 **R2-A2 KB**，随后 R2-A3 Profile → R2-A4 cleanup/integration → **MF-0-thin** → **M1-c 纯 Sharp**。R1-min 其余原子预览与 unknown component fail-closed 可并行；A4 前 parked cleanup 不会被消费，MF-0 scanner 前 canonical 不会自动删。
+- **当前关键路径**：**R1-safety ①+②与 R2-A1/A2 已完成**；下一项 **R2-A3 Profile** → R2-A4 cleanup/integration → **MF-0-thin** → **M1-c 纯 Sharp**。R1-min 其余原子预览与 unknown component fail-closed 可并行；A4 前 parked cleanup 不会被消费，MF-0 scanner 前 canonical 不会自动删。
 - **抓取出口 as-built**：Ubuntu mihomo fake-IP 兼容不再使用 broad allow-internal。只有系统解析结果全部落入 `198.18.0.0/15` 时才走固定 Cloudflare DoH；API 连接钉扎并逐跳重验 redirect，Crawl4AI 保留 global-unicast seed guard 与浏览器 pinning proxy。公网 `/md`/`/crawl` 正例和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 负例均已通过；`:11235` 仍只绑 loopback。
 - **已拍板、尚按消费者推进**：26 型封闭组件库（ADR-015）· 模型档四态路由（ADR-016）· MF-0 薄媒体地基（ADR-018）· Readdy 净室参考（ADR-019）· 不可变 Release（ADR-013）。ACCEPTED 不等于已实现。
 - **协同事实源**：[00-decisions-and-coordination.md](../site-builder/00-decisions-and-coordination.md)。承重决策只认 [ADR 注册表](../adr/registry.md)，施工序看 [09](../site-builder/09-m1-implementation-design.md)。

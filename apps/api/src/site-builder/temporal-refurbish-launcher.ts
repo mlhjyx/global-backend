@@ -31,8 +31,8 @@ export class TemporalRefurbishLauncher implements RefurbishLauncher {
 }
 
 /**
- * KB 摄入触发的 Temporal 实现：workflowId 以 assetId 幂等——每次 commit 恰起一条，
- * activity 内按 siteId 扫全部 queued（天然把并发 commit 的文档一起消化）。
+ * KB 摄入触发的 Temporal 实现：workflowId 与 input 都以 assetId 绑定。
+ * 一条 workflow 只处理一份素材；周期 recovery sweep 另行捞 due/过期 lease。
  */
 @Injectable()
 export class TemporalKbIngestLauncher implements KbIngestLauncher {
@@ -42,7 +42,7 @@ export class TemporalKbIngestLauncher implements KbIngestLauncher {
     await this.temporal.client.workflow.start('kbIngestWorkflow', {
       taskQueue: UNDERSTANDING_TASK_QUEUE,
       workflowId: `site-kb-${input.assetId}`,
-      args: [{ workspaceId: input.workspaceId, siteId: input.siteId }],
+      args: [input],
     });
   }
 }

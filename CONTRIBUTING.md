@@ -7,6 +7,7 @@
 - **不在 `main` 上直接提交**。`main` 受保护，只经 PR 合入。
 - Codex 开发分支统一使用 `codex/<topic>`，从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
 - 正式 worktree 统一放在持久目录 `/global/wt/<topic>`；禁止使用 `/tmp`、`/private/tmp` 等会被重启或系统清理的目录。长任务按阶段 checkpoint commit + push，未提交工作区不承担备份职责。
+- worktree 合并后**不要求立即删除**；删除仅是可选的本地空间/目录清理。只有在 PR 已合并、目标提交已进入 `main`、工作区干净且未跟踪文件已逐项归属后才可删除；需要回查、继续维护或留作开发现场时可以保留，并定期审计即可。
 
 ## 异常恢复审计（先取证，后重做）
 
@@ -19,7 +20,7 @@
 5. 从最后可信 commit 在 `/global/wt/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。
 6. 只有在“原始变更全部可追踪、后来正确修订未被覆盖、diff/check/build/test 通过”后才宣告恢复完成；恢复前的人工重写只能作为候选稿，不能冒充原始内容。
 
-恢复后立即 checkpoint commit + push；临时恢复 worktree 要等 PR 合并与分支清理完成后再删除。
+恢复后立即 checkpoint commit + push；临时恢复 worktree 即使计划删除，也必须等 PR 合并、分支清理与独有文件审计完成后再做。
 
 ## 提交信息（Conventional Commits）
 

@@ -162,19 +162,19 @@ enum ClaimStatus {
 }
 
 model CompanyProfile {
-  id          String        @id @default(uuid()) @db.Uuid
-  workspaceId String        @map("workspace_id") @db.Uuid
-  name        String
-  website     String?
-  status      CompanyStatus @default(DRAFT)
-  industry    String? // 画像回填（KNW-002 / 5.2.3）
-  summary     String? // 一段话企业简介（抽取，随 Claim 审批修正）
+  id             String        @id @default(uuid()) @db.Uuid
+  workspaceId    String        @map("workspace_id") @db.Uuid
+  name           String
+  website        String?
+  status         CompanyStatus @default(DRAFT)
+  industry       String? // 画像回填（KNW-002 / 5.2.3）
+  summary        String? // 一段话企业简介（抽取，随 Claim 审批修正）
   /// 官网上确定性抽取（正则，非 LLM）的公开联系方式/社媒，逐条带来源页 URL：
   /// [{ type: 'email'|'phone'|'social', value, sourceUrl }] — Buyer Trust 原料（PRD 7.15）
-  publicContacts Json?      @map("public_contacts")
-  version     Int           @default(1) // optimistic lock (PRD 11.16)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  publicContacts Json?         @map("public_contacts")
+  version        Int           @default(1) // optimistic lock (PRD 11.16)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
   workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   offerings Offering[]
@@ -355,23 +355,23 @@ model DataProvider {
 /// Source Registry（DAT-011 / PRD 7.4.11）：公开采集只允许访问已批准的来源。
 /// 平台级治理表（非租户数据，无 RLS）。爬取前逐域名检查。
 model SourcePolicy {
-  id             String    @id @default(uuid()) @db.Uuid
-  domain         String    @unique // 如 hannovermesse.de；'*' 不允许
-  sourceType     String    @map("source_type") // official_website | trade_fair | association | gov_registry | news | jobs | tender | search_engine
-  accessMode     String    @default("crawl") @map("access_mode") // crawl | api
-  allowedPaths   Json?     @map("allowed_paths") // string[] 前缀；null=全站
+  id              String   @id @default(uuid()) @db.Uuid
+  domain          String   @unique // 如 hannovermesse.de；'*' 不允许
+  sourceType      String   @map("source_type") // official_website | trade_fair | association | gov_registry | news | jobs | tender | search_engine
+  accessMode      String   @default("crawl") @map("access_mode") // crawl | api
+  allowedPaths    Json?    @map("allowed_paths") // string[] 前缀；null=全站
   disallowedPaths Json?    @map("disallowed_paths")
-  robotsStatus   String    @default("UNREVIEWED") @map("robots_status") // ALLOWS | RESTRICTS | UNREVIEWED
-  termsStatus    String    @default("UNREVIEWED") @map("terms_status") // REVIEWED_OK | REVIEWED_RESTRICTED | UNREVIEWED
-  personalData   Boolean   @default(false) @map("personal_data") // 是否可能含个人数据（限制用途）
-  allowedPurpose Json?     @map("allowed_purpose") // ['discovery','enrichment']
-  crawlDelayMs   Int       @default(2000) @map("crawl_delay_ms")
-  retentionDays  Int       @default(365) @map("retention_days")
-  reviewStatus   String    @default("APPROVED") @map("review_status") // APPROVED | SUSPENDED
-  owner          String    @default("backend")
-  notes          String?
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  robotsStatus    String   @default("UNREVIEWED") @map("robots_status") // ALLOWS | RESTRICTS | UNREVIEWED
+  termsStatus     String   @default("UNREVIEWED") @map("terms_status") // REVIEWED_OK | REVIEWED_RESTRICTED | UNREVIEWED
+  personalData    Boolean  @default(false) @map("personal_data") // 是否可能含个人数据（限制用途）
+  allowedPurpose  Json?    @map("allowed_purpose") // ['discovery','enrichment']
+  crawlDelayMs    Int      @default(2000) @map("crawl_delay_ms")
+  retentionDays   Int      @default(365) @map("retention_days")
+  reviewStatus    String   @default("APPROVED") @map("review_status") // APPROVED | SUSPENDED
+  owner           String   @default("backend")
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("source_policy")
 }
@@ -390,7 +390,7 @@ model MonitoredSource {
   region      String?
   seriesKey   String?   @map("series_key") // 跨届/跨次分组（如展会系列 'euroblech'），做纵向关联
   status      String    @default("ACTIVE") // ACTIVE | PAUSED | ARCHIVED（Kill-Switch）
-  cadence     Json?     // 抓取节奏 { kind:'fixed'|'adaptive', everyMs?, state? }
+  cadence     Json? // 抓取节奏 { kind:'fixed'|'adaptive', everyMs?, state? }
   lastFetchAt DateTime? @map("last_fetch_at")
   nextFetchAt DateTime? @map("next_fetch_at")
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -703,20 +703,20 @@ model DiscoveryRun {
 
 /// Raw Zone（PRD 8.7）：Provider 原始返回原样落地，永不直接进领域层（ADR-017）。
 model RawSourceRecord {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  runId       String   @map("run_id") @db.Uuid
-  providerKey String   @map("provider_key")
-  sourceClass String   @map("source_class")
-  externalId  String?  @map("external_id") // Provider 侧 id（幂等去重）
-  payload     Json
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  runId         String    @map("run_id") @db.Uuid
+  providerKey   String    @map("provider_key")
+  sourceClass   String    @map("source_class")
+  externalId    String?   @map("external_id") // Provider 侧 id（幂等去重）
+  payload       Json
   // 公开采集留痕（PRD 8.11）：来源 URL、抓取时间、内容指纹、解析版本
-  sourceUrl   String?  @map("source_url")
-  fetchedAt   DateTime? @map("fetched_at")
-  contentHash String?  @map("content_hash")
-  parserVersion String? @map("parser_version")
-  costCents   Int      @default(0) @map("cost_cents")
-  createdAt   DateTime @default(now()) @map("created_at")
+  sourceUrl     String?   @map("source_url")
+  fetchedAt     DateTime? @map("fetched_at")
+  contentHash   String?   @map("content_hash")
+  parserVersion String?   @map("parser_version")
+  costCents     Int       @default(0) @map("cost_cents")
+  createdAt     DateTime  @default(now()) @map("created_at")
 
   run DiscoveryRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
@@ -749,11 +749,11 @@ model CanonicalCompany {
   // 存量对账下游阶段的「处理水位」（null=从未处理）。各阶段处理后**无论命中与否**写时间戳，
   // 让「已处理且未过冷却期」的行离开当批过滤集 → id 游标真正吞噬存量，预算位次后的公司不再被永久饿死。
   // 详见 backlog.eligibility.ts / backlog.activities.ts。冷却期到后自然重新入选（信号刷新/富集复核）。
-  lastEnrichedAt              DateTime? @map("last_enriched_at")               // 快事实富集（GLEIF/Wikidata）
-  lastSignalAt                DateTime? @map("last_signal_at")                 // 信号富集（digital_footprint/structured_harvest）
-  lastWatchAt                 DateTime? @map("last_watch_at")                  // web_watch 监控注册
+  lastEnrichedAt              DateTime? @map("last_enriched_at") // 快事实富集（GLEIF/Wikidata）
+  lastSignalAt                DateTime? @map("last_signal_at") // 信号富集（digital_footprint/structured_harvest）
+  lastWatchAt                 DateTime? @map("last_watch_at") // web_watch 监控注册
   contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
-  emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at")        // 决策人邮箱猜测尝试（选项 B P0.4）
+  emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at") // 决策人邮箱猜测尝试（选项 B P0.4）
 
   contacts CanonicalContact[]
   leads    Lead[]
@@ -1254,6 +1254,7 @@ model Site {
   brandProfiles BrandProfile[]
 
   @@unique([slug])
+  @@unique([id, workspaceId], map: "site_id_workspace_id_key")
   @@index([workspaceId])
   @@map("site")
 }
@@ -1305,29 +1306,32 @@ model SiteBuildRun {
 
 /// 素材：presign→PUT 直传→commit 三步（07 §3）。active object_key 由部分唯一索引守护。
 model Asset {
-  id                String    @id @default(uuid()) @db.Uuid
-  workspaceId       String    @map("workspace_id") @db.Uuid
-  siteId            String    @map("site_id") @db.Uuid
-  kind              String // logo | product_image | factory_image | cert | doc | video | generated
-  filename          String // 原始文件名（展示用，不参与 key）
-  mime              String
-  sizeBytes         Int       @map("size_bytes")
-  objectKey         String    @map("object_key") // staging 或 ws/{workspace}/{site}/{kind}/{content_hash}.{ext}
-  contentHash       String?   @map("content_hash") // sha256，commit 校验后回填
-  derivedKeys       Json?     @map("derived_keys") // 多尺寸 webp/avif 等派生产物
-  processingStatus  String    @default("pending_upload") @map("processing_status") // pending_upload | committing | queued | processing | ready | failed | failed_retryable | rejected | duplicate | deleted
-  processingAttempt Int       @default(0) @map("processing_attempt")
-  leaseToken        String?   @map("lease_token") @db.Uuid // 每次 commit 认领的新 fencing token
-  leaseUntil        DateTime? @map("lease_until")
-  retryAt           DateTime? @map("retry_at")
-  deletedAt         DateTime? @map("deleted_at") // tombstone；canonical 清理由 MF-0 scanner 后的消费者执行
-  meta              Json? // 尺寸/EXIF 已剥离标记/来源等
-  error             String?
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  id                  String    @id @default(uuid()) @db.Uuid
+  workspaceId         String    @map("workspace_id") @db.Uuid
+  siteId              String    @map("site_id") @db.Uuid
+  kind                String // logo | product_image | factory_image | cert | doc | video | generated
+  filename            String // 原始文件名（展示用，不参与 key）
+  mime                String
+  sizeBytes           Int       @map("size_bytes")
+  objectKey           String    @map("object_key") // staging 或 ws/{workspace}/{site}/{kind}/{content_hash}.{ext}
+  contentHash         String?   @map("content_hash") // sha256，commit 校验后回填
+  derivedKeys         Json?     @map("derived_keys") // 多尺寸 webp/avif 等派生产物
+  processingStatus    String    @default("pending_upload") @map("processing_status") // pending_upload | committing | queued | processing | ready | failed | failed_retryable | rejected | duplicate | deleted
+  processingAttempt   Int       @default(0) @map("processing_attempt")
+  leaseToken          String?   @map("lease_token") @db.Uuid // 每次 commit 认领的新 fencing token
+  leaseUntil          DateTime? @map("lease_until")
+  retryAt             DateTime? @map("retry_at")
+  processingErrorCode String?   @map("processing_error_code")
+  deletedAt           DateTime? @map("deleted_at") // tombstone；canonical 清理由 MF-0 scanner 后的消费者执行
+  meta                Json? // 尺寸/EXIF 已剥离标记/来源等
+  error               String?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site        Site         @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "asset_site_workspace_fkey")
+  kbDocuments KbDocument[]
 
+  @@unique([id, workspaceId, siteId], map: "asset_id_workspace_id_site_id_key")
   // active object_key 的唯一性由 migration 中 WHERE deleted_at IS NULL 的部分唯一索引保证。
   @@index([objectKey], map: "asset_object_key_lookup_idx")
   @@index([workspaceId, siteId, kind])
@@ -1340,7 +1344,7 @@ model KbDocument {
   id          String   @id @default(uuid()) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
   siteId      String   @map("site_id") @db.Uuid
-  assetId     String?  @map("asset_id") @db.Uuid // upload 来源对应素材
+  assetId     String?  @unique(map: "kb_document_asset_id_key") @map("asset_id") @db.Uuid // upload 来源对应素材
   source      String // intake | wizard | upload | storefront | web_research
   title       String
   lang        String?
@@ -1351,9 +1355,11 @@ model KbDocument {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  site   Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site   Site      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "kb_document_site_workspace_fkey")
+  asset  Asset?    @relation(fields: [assetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: Cascade, map: "kb_document_asset_scope_fkey")
   chunks KbChunk[]
 
+  @@unique([id, workspaceId], map: "kb_document_id_workspace_id_key")
   @@index([workspaceId, siteId])
   @@map("kb_document")
 }
@@ -1371,7 +1377,7 @@ model KbChunk {
   embedding    Unsupported("vector(1024)")?
   createdAt    DateTime                     @default(now()) @map("created_at")
 
-  document KbDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document KbDocument @relation(fields: [documentId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "kb_chunk_document_workspace_fkey")
 
   @@unique([documentId, seq])
   @@index([workspaceId])

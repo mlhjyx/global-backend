@@ -19,5 +19,8 @@ export const PATENTS_CACHE_REFRESH_SCHEDULE_ID = 'patents-cache-refresh';
 // 制裁名单筛查（Qualify 第五门，第 6 个周期 Schedule）：每日刷新 OFAC/EU 名单 → sanctions_entity + 重建索引
 export const SANCTIONS_REFRESH_WORKFLOW = 'sanctionsRefreshWorkflow';
 export const SANCTIONS_REFRESH_SCHEDULE_ID = 'sanctions-refresh';
+// Site Builder KB：commit workflow 丢启动、retry 到期或 processing lease 过期的持久恢复面。
+export const KB_RECOVERY_SWEEP_WORKFLOW = 'kbRecoverySweepWorkflow';
+export const KB_RECOVERY_SWEEP_SCHEDULE_ID = 'site-builder-kb-recovery';
 // 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
 export const DELETION_WORKFLOW = 'deletionWorkflow';
