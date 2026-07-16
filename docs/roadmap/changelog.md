@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R1-safety ②（抓取出口隔离）
+
+- 移除开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS`；Crawl4AI 固定到 0.9.1 不可变 digest，保留 global-unicast seed guard 与浏览器 pinning proxy，并只在系统解析结果全部为 `198.18.0.0/15` fake-IP 时经固定 Cloudflare DoH 窄回退。
+- API 新增统一 guarded HTTP：Crawl、robots 与 `http.get` 均在每一跳校验 global-unicast、将连接钉扎到已校验 IP、跨域剥离凭证并执行 redirect/超时/响应大小上限；不再保留 check-then-fetch 的 DNS-rebinding 窗口。
+- 单测覆盖特殊地址、fake/private 混合答案、无二次 DNS、redirect 与大小上限；真机探针覆盖公网 `/md`+`/crawl`，并确认 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 均被拒绝。R1-safety 两个安全小 PR 至此完成，下一主路为拆分后的 R2-A。
+
 ## 2026-07-17 · Site Builder R1-safety ①（构建隔离）
 
 - 两条 Astro 构建路径共用随机 0700 临时目录与 0600 SiteSpec，成功/异常均由 `finally` 删除，消除失败/超时后的租户内容残留。

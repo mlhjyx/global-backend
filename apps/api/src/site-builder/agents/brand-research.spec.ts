@@ -4,8 +4,8 @@ import { researchBrand } from './brand-research';
 
 /**
  * 品牌 web 研究（09 §2.4 / C1-C4）：一切出网经 ToolBroker（searxng.search + crawl4ai.fetch），
- * robots/限流/预算由工具层与 Broker 复用，本模块不做任何裸出网；完整 SSRF egress
- * gate 属于 R1-safety，不能由本单测或当前 dev broad allow-internal 代替。
+ * robots/限流/预算由工具层与 Broker 复用，本模块不做任何裸出网；R1-safety 的完整
+ * SSRF egress gate 已由 adapter/Crawl4AI 层实现，本单测只验证本模块不绕过它。
  * fail-safe：任一步失败 → degraded=true，返回已有内容，绝不阻断 brandProfile。
  */
 

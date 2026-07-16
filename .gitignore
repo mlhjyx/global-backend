@@ -37,3 +37,7 @@ packages/contracts/src/**/*.d.ts
 # tmp
 tmp/
 *.tmp
+
+# Python infra verification cache
+__pycache__/
+*.py[cod]
