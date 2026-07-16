@@ -43,7 +43,7 @@
 - **单输出 recipe 语义**：pipeline/source content/source Variant/role/format/尺寸/crop/focal/quality 全部进入规范 hash；一组响应式输出不能共用一个 recipeHash。
 - **provenance 硬门**：父 Asset 与 source Variant 均用复合 FK 锁住相同 workspace/site/asset；canonical key、hash、正尺寸、状态 payload 由 DB CHECK 守卫。
 - **多租户**：RLS + FORCE RLS + 显式 `app_user` CRUD；Ubuntu 开发库已验证 A 可 CRUD、B/unset-context 零可见、跨租户/站点/Asset 派生链拒绝与并发同 recipe 恰一胜。该证据不代表生产部署。
-- **对象与来源账本**：Variant 只允许写入 `ws/{workspace}/{site}/variants/{assetId}/{recipeHash}.{ext}`，不得与 original/staging 共用 key；来源链与 recipe/object identity 插入后不可改写，带后代的来源行须按叶到根显式清理，不能靠级联静默抹掉账本。
+- **对象与来源账本**：Variant 只允许写入 `ws/{workspace}/{site}/variants/{assetId}/{recipeHash}.{ext}`，不得与 original/staging 共用 key；行 `id/createdAt`、来源链与 recipe/object identity 插入后不可改写，带后代的来源行须按叶到根显式清理，不能靠级联静默抹掉账本。
 - **ready 不变量**：`image/*` 的 ready 行必须同时有正 `width/height`、checksum 与 `sizeBytes`；ready 后物化身份和载荷不可回退或换写，业务 metadata 仍可独立更新。
 
 写路径（M1-c）：**同一事务**写 `AssetVariant`，再物化兼容 manifest（§5）；**不为**确定性同步 Sharp 处理强制创建 `MediaJob`（那是 MF-1 异步任务的边界）。读路径：新代码优先读 Variant，旧代码可读 manifest。

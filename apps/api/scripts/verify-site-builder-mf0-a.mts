@@ -20,6 +20,8 @@ import { PrismaService } from "../src/prisma/prisma.service";
 import { buildVariantObjectKey } from "../src/site-builder/object-key";
 
 const checks: string[] = [];
+const VERIFIER_WORKSPACE_PREFIX = "__codex_mf0a_verifier__:";
+const VERIFIER_ADVISORY_LOCK = "746381726451";
 
 function isLoopback(hostname: string): boolean {
   return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
@@ -132,10 +134,57 @@ function readyVariant(input: {
   };
 }
 
+function singleConnectionUrl(raw: string): string {
+  const url = new URL(raw);
+  url.searchParams.set("connection_limit", "1");
+  return url.toString();
+}
+
+async function cleanupVerifierWorkspaces(
+  owner: PrismaClient,
+  workspaceIds: readonly string[],
+): Promise<void> {
+  if (workspaceIds.length === 0) return;
+  await owner.assetVariant.deleteMany({
+    where: {
+      workspaceId: { in: [...workspaceIds] },
+      sourceVariantId: { not: null },
+    },
+  });
+  await owner.assetVariant.deleteMany({
+    where: { workspaceId: { in: [...workspaceIds] } },
+  });
+  await owner.site.deleteMany({
+    where: { workspaceId: { in: [...workspaceIds] } },
+  });
+  await owner.workspace.deleteMany({
+    where: { id: { in: [...workspaceIds] } },
+  });
+}
+
+async function cleanupAbandonedVerifierFixtures(owner: PrismaClient): Promise<void> {
+  const abandoned = await owner.workspace.findMany({
+    where: { name: { startsWith: VERIFIER_WORKSPACE_PREFIX } },
+    select: { id: true },
+  });
+  await cleanupVerifierWorkspaces(
+    owner,
+    abandoned.map(({ id }) => id),
+  );
+  check(
+    true,
+    `startup sweep removed ${abandoned.length} abandoned verifier workspace(s)`,
+  );
+}
+
 async function main(): Promise<void> {
   requireDevelopmentDatabase();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+  const lock = new PrismaClient({
+    datasourceUrl: singleConnectionUrl(process.env.DATABASE_URL!),
+  });
   const app = new PrismaService();
+  const verifierRunId = randomUUID();
   const wsA = randomUUID();
   const wsB = randomUUID();
   const siteA = randomUUID();
@@ -147,7 +196,12 @@ async function main(): Promise<void> {
   let failure: unknown;
 
   try {
+    await lock.$connect();
+    await lock.$executeRawUnsafe(
+      `SELECT pg_advisory_lock(${VERIFIER_ADVISORY_LOCK}::bigint)`,
+    );
     await Promise.all([owner.$connect(), app.$connect()]);
+    await cleanupAbandonedVerifierFixtures(owner);
 
     const role = await app.$queryRaw<
       { currentUser: string; isSuper: boolean; bypassRls: boolean }[]
@@ -197,8 +251,8 @@ async function main(): Promise<void> {
 
     await owner.workspace.createMany({
       data: [
-        { id: wsA, name: "MF0-A verify A" },
-        { id: wsB, name: "MF0-A verify B" },
+        { id: wsA, name: `${VERIFIER_WORKSPACE_PREFIX}${verifierRunId}:A` },
+        { id: wsB, name: `${VERIFIER_WORKSPACE_PREFIX}${verifierRunId}:B` },
       ],
     });
     await owner.site.createMany({
@@ -520,6 +574,36 @@ async function main(): Promise<void> {
           /asset_variant_provenance_immutable|AssetVariant provenance is immutable/,
       },
     );
+    await rejectsDb(
+      "Variant surrogate identity cannot be rewritten after insert",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.update({
+            where: { id: source.id },
+            data: { id: randomUUID() },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence:
+          /asset_variant_ledger_identity_immutable|AssetVariant ledger identity is immutable/,
+      },
+    );
+    await rejectsDb(
+      "Variant creation timestamp cannot be rewritten after insert",
+      () =>
+        app.withWorkspace(wsA, (tx) =>
+          tx.assetVariant.update({
+            where: { id: source.id },
+            data: { createdAt: new Date("2000-01-01T00:00:00.000Z") },
+          }),
+        ),
+      {
+        codes: ["P2004", "23514"],
+        evidence:
+          /asset_variant_ledger_identity_immutable|AssetVariant ledger identity is immutable/,
+      },
+    );
 
     const disposable = await app.withWorkspace(wsA, (tx) =>
       tx.assetVariant.create({
@@ -599,17 +683,7 @@ async function main(): Promise<void> {
   } finally {
     const cleanupErrors: unknown[] = [];
     try {
-      await owner.assetVariant.deleteMany({
-        where: {
-          workspaceId: { in: [wsA, wsB] },
-          sourceVariantId: { not: null },
-        },
-      });
-      await owner.assetVariant.deleteMany({
-        where: { workspaceId: { in: [wsA, wsB] } },
-      });
-      await owner.site.deleteMany({ where: { id: { in: [siteA, siteA2, siteB] } } });
-      await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } });
+      await cleanupVerifierWorkspaces(owner, [wsA, wsB]);
       const residue = await Promise.all([
         owner.assetVariant.count({ where: { workspaceId: { in: [wsA, wsB] } } }),
         owner.asset.count({ where: { workspaceId: { in: [wsA, wsB] } } }),
@@ -623,7 +697,11 @@ async function main(): Promise<void> {
     } catch (error) {
       cleanupErrors.push(error);
     }
-    await Promise.allSettled([owner.$disconnect(), app.$disconnect()]);
+    await Promise.allSettled([
+      owner.$disconnect(),
+      app.$disconnect(),
+      lock.$disconnect(),
+    ]);
     if (cleanupErrors.length > 0) {
       const cleanupFailure = new AggregateError(
         cleanupErrors,
