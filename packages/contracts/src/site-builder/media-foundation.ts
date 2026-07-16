@@ -8,10 +8,15 @@ export const IMAGE_VARIANT_ROLES = [
 ] as const;
 export type ImageVariantRole = (typeof IMAGE_VARIANT_ROLES)[number];
 
-export const IMAGE_VARIANT_FORMATS = ["avif", "webp", "fallback"] as const;
+export const IMAGE_VARIANT_FORMATS = [
+  "avif",
+  "webp",
+  "jpeg",
+  "png",
+] as const;
 export type ImageVariantFormat = (typeof IMAGE_VARIANT_FORMATS)[number];
 
-/** 物化 recipe 必须使用具体编码；fallback 只是旧 manifest 的槽位。 */
+/** 物化 recipe 与兼容 manifest 都保留具体编码身份。 */
 export const ASSET_VARIANT_OUTPUT_FORMATS = [
   "avif",
   "webp",
@@ -77,7 +82,8 @@ export interface DerivedImageVariant {
 export interface ImageVariantSet {
   avif?: DerivedImageVariant[];
   webp?: DerivedImageVariant[];
-  fallback?: DerivedImageVariant[];
+  jpeg?: DerivedImageVariant[];
+  png?: DerivedImageVariant[];
 }
 
 export interface DerivedImageManifest {

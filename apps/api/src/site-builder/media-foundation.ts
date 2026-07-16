@@ -106,7 +106,8 @@ export function buildAssetVariantRecipeHash(recipe: AssetVariantRecipe): string 
 function projectionFormat(mime: string): ImageVariantFormat | null {
   if (mime === "image/avif") return "avif";
   if (mime === "image/webp") return "webp";
-  if (mime === "image/jpeg" || mime === "image/png") return "fallback";
+  if (mime === "image/jpeg") return "jpeg";
+  if (mime === "image/png") return "png";
   return null;
 }
 
@@ -183,7 +184,7 @@ export function projectDerivedImageManifest(input: {
   const variants: DerivedImageManifest["variants"] = {};
   for (const role of IMAGE_VARIANT_ROLES) {
     const set: Partial<Record<ImageVariantFormat, DerivedImageVariant[]>> = {};
-    for (const format of ["avif", "webp", "fallback"] as const) {
+    for (const format of ["avif", "webp", "jpeg", "png"] as const) {
       const rows = [...selected.entries()]
         .filter(([key]) => key.startsWith(`${role}:${format}:`))
         .map(([, row]) => row)
