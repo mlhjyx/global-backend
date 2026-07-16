@@ -13,23 +13,28 @@ import { kbIngestWorkflow } from './kb-ingest.workflow';
 beforeEach(() => resetActivities());
 
 describe('kbIngestWorkflow（M1-a）', () => {
-  it('入参透传 processQueuedKbDocs，返回其结果', async () => {
-    acts.processQueuedKbDocs.mockResolvedValue({ processed: 3, failed: 1 });
+  it('R2-A2：单素材 workflow 必须透传 assetId，不再用 asset workflow 无界扫整站', async () => {
+    acts.processKbAsset.mockResolvedValue({ outcome: 'ready', assetId: 'asset-1', attempt: 1 });
 
-    const out = await kbIngestWorkflow({ workspaceId: 'ws-1', siteId: 'site-1' });
-
-    expect(acts.processQueuedKbDocs).toHaveBeenCalledTimes(1);
-    expect(acts.processQueuedKbDocs).toHaveBeenCalledWith({
+    const out = await kbIngestWorkflow({
       workspaceId: 'ws-1',
       siteId: 'site-1',
+      assetId: 'asset-1',
+    } as never);
+
+    expect(acts.processKbAsset).toHaveBeenCalledTimes(1);
+    expect(acts.processKbAsset).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      assetId: 'asset-1',
     });
-    expect(out).toEqual({ processed: 3, failed: 1 });
+    expect(out).toEqual({ outcome: 'ready', assetId: 'asset-1', attempt: 1 });
   });
 
   it('activity 失败原样上抛（不吞——Temporal retry 拥有重试权，文档留 queued）', async () => {
-    acts.processQueuedKbDocs.mockRejectedValue(new Error('embeddings down'));
-    await expect(kbIngestWorkflow({ workspaceId: 'ws-1', siteId: 'site-1' })).rejects.toThrow(
-      'embeddings down',
-    );
+    acts.processKbAsset.mockRejectedValue(new Error('embeddings down'));
+    await expect(
+      kbIngestWorkflow({ workspaceId: 'ws-1', siteId: 'site-1', assetId: 'asset-1' } as never),
+    ).rejects.toThrow('embeddings down');
   });
 });

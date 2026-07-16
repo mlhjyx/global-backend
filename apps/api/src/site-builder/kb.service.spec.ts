@@ -193,6 +193,99 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(db.docs[0].assetId).toBe('ast-1');
   });
 
+  it('R2-A2：进入外部 IO 前已分配 attempt + UUID fence + lease，完成后清 lease', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-fenced',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'intro.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/fenced.txt',
+      processingStatus: 'queued',
+      processingAttempt: 0,
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    const seen: Record<string, unknown>[] = [];
+    const svc = service as unknown as { storage: { getBuffer: () => Promise<Buffer> } };
+    svc.storage.getBuffer = async () => {
+      seen.push({ ...db.assets[0] });
+      return Buffer.from('Fenced document content, long enough to become a chunk.');
+    };
+
+    await service.processQueued(CTX, SITE_ID);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ processingStatus: 'processing', processingAttempt: 1 });
+    expect(seen[0].leaseToken).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(seen[0].leaseUntil).toBeInstanceOf(Date);
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'ready',
+      processingAttempt: 1,
+      leaseToken: null,
+      leaseUntil: null,
+      retryAt: null,
+      processingErrorCode: null,
+    });
+  });
+
+  it('R2-A2：typed 瞬时故障回 queued + retryAt，不误用 failed/failed_retryable', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-transient',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'catalog.pdf',
+      mime: 'application/pdf',
+      objectKey: 'ws/x/y/doc/transient.pdf',
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+    const svc = service as unknown as { storage: { getBuffer: () => Promise<Buffer> } };
+    svc.storage.getBuffer = async () => {
+      throw Object.assign(new Error('arbitrary wording must not be parsed'), {
+        code: 'KB_STORAGE_UNAVAILABLE',
+        disposition: 'retryable',
+        stage: 'storage',
+      });
+    };
+
+    const out = await service.processQueued(CTX, SITE_ID);
+
+    expect(out).toEqual({ processed: 0, failed: 1 });
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'queued',
+      processingErrorCode: 'KB_STORAGE_UNAVAILABLE',
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    expect(db.assets[0].retryAt).toBeInstanceOf(Date);
+  });
+
+  it('R2-A2：同一 asset 结果丢失后重跑仍只有一个 KbDocument', async () => {
+    const { service, db } = makeService();
+    db.assets.push({
+      id: 'ast-idempotent',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'catalog.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/idempotent.txt',
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+
+    await service.processQueued(CTX, SITE_ID);
+    Object.assign(db.assets[0], { processingStatus: 'queued' }); // 模拟 ready 回写 ACK 丢失后的恢复扫描
+    await service.processQueued(CTX, SITE_ID);
+
+    expect(db.docs.filter((d) => d.assetId === 'ast-idempotent')).toHaveLength(1);
+    expect(db.assets[0].processingStatus).toBe('ready');
+  });
+
   it('processQueued：单个素材失败不阻断其余（fail-safe），失败原因落 asset.error', async () => {
     const { service, db } = makeService();
     db.assets.push(
