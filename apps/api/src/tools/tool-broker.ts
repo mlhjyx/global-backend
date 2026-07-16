@@ -90,7 +90,7 @@ export class ToolBroker implements ExecutionBroker {
    * 收口②语义分层（见 SourcePolicyMode）：
    *  - required：无 reader → policy_unavailable；未登记 → unregistered（一律拒，fail-closed）。
    *  - advisory：无 reader / 未登记 → 放行（由工具自己的 robots/DAT-011 合规处理）；**登记即强制**。
-   *    这不是 SSRF 兜底；抓取 egress 完整门属于 R1-safety。
+   *    这不是 SSRF 兜底；抓取 egress 由已落地的 R1-safety 独立出口门负责。
    *  - none：不查。
    * 用途门：传了 purpose（本次调用用途）→ 域策略必须允许**该用途**（且工具须声明它）；
    * 缺省 → 工具声明集任一交集（多用途工具的既有语义，避免只登记单用途的域被误拒）。

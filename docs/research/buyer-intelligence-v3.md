@@ -1,5 +1,5 @@
 > 【定位 2026-07-10】本文件是 v3.0 买家智能**研究报告**（Research/RFC），正文多处被 §10 对抗核验修正——凡冲突以 §10 为准；不可平铺当最终需求。落地状态见 [../status/current.md](../status/current.md)。
-> 【环境勘误 2026-07-16】正文中的 Mac/SNI、手动 Temporal 与“Crawl4AI 自带 SSRF 守卫”等描述是历史实验环境，不是当前 Ubuntu 部署真值。现行环境与安全缺口只认 [../architecture/current.md](../architecture/current.md) 和 [../roadmap/release-plan.md](../roadmap/release-plan.md)；当前本地 fake-IP 兼容开关仅允许开发者可信 URL，完整 egress gate 属于 R1-safety。
+> 【环境勘误 2026-07-17】正文中的 Mac/SNI、手动 Temporal 与旧 Crawl4AI 安全描述是历史实验环境，不是当前 Ubuntu 部署真值。现行环境与安全边界只认 [../architecture/current.md](../architecture/current.md) 和 [../roadmap/release-plan.md](../roadmap/release-plan.md)；R1-safety 已移除 broad allow-internal，并落地 API/Crawl4AI 双层 egress gate 与 fake-IP-only 窄回退。
 
 # 买家智能与决策人触达层（v3.0）：从「公司名单」到「可成单线索」
 

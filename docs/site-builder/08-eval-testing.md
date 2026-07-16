@@ -260,7 +260,7 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 4. **集成（本地真库）**：intake→demo v0 全链、素材状态机（presign→commit→处理→引用对账）、spec PATCH→秒级重渲染、**RLS/FORCE RLS 隔离证明**（`APP_DATABASE_URL` app_user 跑 + is_superuser guard，复用既有先例）。
 5. **真机 verify（真实数据无 sandbox）**：PostgreSQL/FORCE RLS、MinIO、Docling、BGE-M3、Gateway、Sharp、Astro、Playwright/Lighthouse。每里程碑一份 `verify-site-builder-m{N}.mts`——M0=真网关真构建出真预览 URL 并可访问；M1=Golden 一家全管线；M2=发布门+域名绑定干跑。
 6. **契约测试**：OpenAPI diff/schema 快照 + [07](07-api-contract-draft.md) 示例作 contract fixtures、**SiteSpec fixtures**、**Renderer 兼容**、**capability snapshot**——防接口与渲染契约无声漂移（前端依赖面，ADR-014）。
-7. **安全测**：恶意文件、解码炸弹、SSRF、prompt injection、XSS、外呼域、撤权与下架。R1-safety ① 的可执行基线是 Renderer 子进程 env 精确 allowlist、临时目录/文件权限，以及成功/异常双路径清理；另以真 Astro build 探针证明产物可用且父进程密钥未进入子进程。R1-safety ② 另验公开 URL 正向与 private/loopback/metadata/DNS rebinding/redirect 负向。
+7. **安全测**：恶意文件、解码炸弹、SSRF、prompt injection、XSS、外呼域、撤权与下架。R1-safety ① 已锁定 Renderer 子进程 env 精确 allowlist、临时目录/文件权限、成功/异常双路径清理，并以真 Astro build 证明产物可用且父进程密钥未进入子进程。R1-safety ② 已用单测与真机覆盖公网 `/md`+`/crawl`、无二次 DNS pinning，以及 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 负向。
 
 ## 6. 里程碑评测门与测试泳道
 

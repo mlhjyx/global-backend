@@ -19,7 +19,9 @@
 #
 # DEV ONLY: prod runs Crawl4AI with its own persistence/ops posture — do not
 # reuse this wrapper there.
-FROM unclecode/crawl4ai:latest
+# Security boundary is reviewed against Crawl4AI 0.9.1 at this immutable digest.
+# Do not return to :latest: upstream egress_broker.py is patched and verified below.
+FROM unclecode/crawl4ai@sha256:c9e1b1217fdd04a013864482861db57fbf20d922fa55e3db3eb420ab0411a9af
 
 # Build stage runs as root; patch the root-owned, read-only supervisord.conf.
 # The trailing grep fails the build loudly if upstream ever renames the redis
@@ -35,3 +37,12 @@ USER appuser
 # 缺 chromium-headless-shell 二进制 → gunicorn worker 起不来、11235 不通、healthcheck unhealthy。
 # 显式装匹配浏览器到 appuser 的 ms-playwright cache，一劳永逸。
 RUN python -m playwright install chromium chromium-headless-shell
+
+# Preserve upstream's fail-closed global-IP check + browser pinning proxy. Only replace
+# the all-198.18/15 mihomo answer with fixed DoH answers before that existing check.
+USER root
+COPY --chown=root:root fakeip_resolver.py patch_egress_broker.py /app/
+RUN python /app/patch_egress_broker.py \
+    && rm /app/patch_egress_broker.py \
+    && chmod 0444 /app/fakeip_resolver.py /app/egress_broker.py
+USER appuser

@@ -62,13 +62,10 @@ services:
     shm_size: "1g" # Chromium shared memory
     environment:
       - CRAWL4AI_API_TOKEN=global-local-crawl-token # enables external access + auth
-      # DEV ONLY: current Ubuntu mihomo DNS maps public hosts into 198.18.0.0/16,
-      # which Crawl4AI correctly treats as reserved. This escape hatch is required
-      # for local crawling, but disables Crawl4AI's native destination guard.
-      # Keep 11235 loopback-only and pass only developer-verified public URLs;
-      # loopback does not stop API-driven SSRF. R1-safety must replace this before
-      # production or any untrusted crawl input. See AGENTS.md §3.
-      - CRAWL4AI_ALLOW_INTERNAL_URLS=true
+      # Ubuntu mihomo 将公网 DNS 映射到 RFC 2544 198.18/15。仅在全部系统答案都属于
+      # 该段时用固定 DoH 取真实答案，随后仍由 Crawl4AI 的 global-IP 守卫 + pinning
+      # proxy 逐连接校验；绝不启用 CRAWL4AI_ALLOW_INTERNAL_URLS。
+      - CRAWL4AI_FAKEIP_DOH_FALLBACK=true
 
   # Object storage for site-builder assets and KB objects (docs/site-builder/02 §2).
   # Renderer Release artifacts are still local: as-built; do not conflate them.

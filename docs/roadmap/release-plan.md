@@ -14,7 +14,7 @@
 
 ### 当前关键路径与退出门
 
-1. **R1-safety**：这是 R0 后立即执行的安全收口，拆成两个小 PR：**(a) ✅ 2026-07-17 已完成**——SiteSpec 改为随机 0700 临时目录内 0600 文件，成功/异常统一 `finally` 清理；Renderer 用固定 Node/Astro 入口和 7 变量 env allowlist，不经 shell/pnpm/PATH 且不继承宿主密钥。**(b) 当前项**——安全/infra PR 替换 Ubuntu fake-IP 开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 例外。(b) 必须覆盖 `IntakeDto.websiteUrl → brand research → crawl4ai` 和 `robots.txt` 直连两类入口，使用真实 DNS/可校验 egress 或逐跳 URL guard，关闭例外，并通过公网正例与 private/loopback/metadata/DNS-rebinding/redirect 反例。未通过前本地仅接受开发者核验的公网 URL，不得开放不可信租户输入或生产抓取。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可并行，但必须在 M1-e 可见预览前完成。
+1. **R1-safety ✅ 2026-07-17 完成**：两个小 PR 分别完成 (a) SiteSpec 随机 0700/0600 临时物化、成功/异常 `finally` 清理、Renderer 固定入口与 7 变量 env allowlist；(b) 移除 Ubuntu fake-IP 的 `CRAWL4AI_ALLOW_INTERNAL_URLS`，在 API 与 Crawl4AI 两层落 global-unicast 校验、fake-IP-only 固定 DoH 回退、连接 pinning、redirect 逐跳重验及响应上限。`websiteUrl → brand research → crawl4ai`、robots 与 `http.get` 均受控，公网正例和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机负例全绿。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可与 R2/M1-c 并行，但必须在 M1-e 可见预览前完成。
 2. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset 状态机/CAS/fencing；R2-A2 KB lease/fencing/retry/幂等；R2-A3 Profile schema/乐观并发；R2-A4 Outbox/Temporal cleanup、redrive 与真实集成验证。禁止合成一个 migration/API/状态机 mega PR。
 3. **MF-0-thin**：`AssetVariant` + RLS/FORCE RLS、recipe/checksum/provenance、SiteSpec 引用扫描器、删除 409、`derivedKeys` 兼容投影。在引用扫描器落地前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
 4. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。

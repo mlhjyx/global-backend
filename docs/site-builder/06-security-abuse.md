@@ -2,7 +2,7 @@
 
 > 落实 [02-architecture.md](02-architecture.md) §7/§11 与遗漏面盘点第 1/3/4/5 条。原则：**平台域名信誉是全体客户的公共资产**，滥用防控是生死线不是可选项。
 >
-> _Reviewed against 12 v3.2（2026-07-16 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地状态（2026-07-16）**：R0 已由无条件 Demo #121、禁虚构身份 #123、联系信息隔离/真取消/失败不删站 #124，以及 intake 幂等/Temporal 启动证据/OpenAPI #126 闭环。R0 完成不代表 R1 的构建环境与 Crawl/robots egress 安全债已完成；最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略仍必须在 **M2 公开发布前**可用。
+> _Reviewed against 12 v3.2（2026-07-17 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地状态**：R0 已由 #121/#123/#124/#126 闭环；R1-safety 已完成构建临时盘/子进程 env 隔离与 Crawl/robots 双层 egress 收口。R1-min 原子预览仍未完成；最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略仍必须在 **M2 公开发布前**可用。
 
 ## 0. 威胁模型总览
 
@@ -58,9 +58,9 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 
 ## 4. SSRF 防线（T4）
 
-**上线目标门（当前尚未闭环）**：仅 https、禁内网/链路本地/云 metadata IP 段、**DNS 解析后按 IP 校验再连接**（防重绑定）、redirect 逐跳同校验、超时与响应大小限额。适用：店铺导入、参考网站、品牌 web 研究；Research/参考 URL 还须经过 **robots、域策略（allow/deny 名单）、MIME 校验**，抓取内容体积与超时按 L0 限额（v3.2 §8.2）。
+**R1-safety ② 出口门（✅ 2026-07-17）**：API 的 Crawl/robots/`http.get` 统一只允许 HTTP(S)，解析后仅接受 global-unicast，并通过自定义 lookup 将连接钉扎到已校验 IP；redirect 每跳重验，跨 origin 剥离凭证，超时与响应大小有界。Crawl4AI 固定不可变镜像 digest，保留上游 seed guard 与浏览器 pinning proxy；Compose 已删除 broad `CRAWL4AI_ALLOW_INTERNAL_URLS`。
 
-Ubuntu 本地 mihomo fake-IP 会把公开域解析到 `198.18.0.0/16`，而 Crawl4AI 只有 broad `CRAWL4AI_ALLOW_INTERNAL_URLS` 开关；当前开发 compose 为维持公开站抓取临时开启该开关，并把端口限制在 loopback。**loopback 不能阻止 API 驱动 SSRF**，所以完成 R1-safety 前只允许开发者可信的公开 URL，绝不接收不可信输入或用于生产。R1-safety 必须同时封住 Crawl4AI 与 robots 直连路径，并以公开 URL 正向、private/loopback/metadata/DNS rebinding/redirect 负向用例验收。
+Ubuntu mihomo fake-IP 兼容只在系统答案**全部且仅**位于 `198.18.0.0/15` 时通过固定 Cloudflare DoH 回退；混入 private/loopback/metadata/保留地址或 DoH 返回非 global-unicast 均 fail-closed。单测证明连接层无二次 DNS、redirect 到 metadata 在连接前中止；真机证明公网 `/md`+`/crawl` 可用且 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 全部被拒。端口 loopback 绑定继续保留，但不作为 SSRF 防线的替代。
 
 ## 5. 构建沙箱（T5）
 

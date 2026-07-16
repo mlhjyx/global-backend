@@ -50,7 +50,7 @@ apps/api/src/site-builder/
 
 复用现有：JWKS 鉴权、RLS 基建、Transactional Outbox、模型网关 client、SearXNG+Crawl4AI（品牌研究）、taxonomy 词表（行业级联）、预算 reserve-settle 思路（ToolBroker 同款）。
 
-> **环境与安全边界（2026-07-16 Ubuntu as-built）**：这里的“复用 Crawl4AI”只表示本地开发容器与 client 可用，不代表生产 SSRF 闸门已经闭环。`websiteUrl` 会驱动抓取，容器端口绑定 loopback 不能阻止 API 驱动的 SSRF；Ubuntu mihomo fake-IP 环境下，本地开发暂以 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 维持公开站抓取，因此只允许开发者可信的公开 URL。**R1-safety 必须同时覆盖 Crawl4AI 路径和 robots 直连路径**，落实解析后 IP、redirect 逐跳、metadata/内网/loopback、DNS rebinding 与响应上限等 egress 校验，完成前不得接收不可信 URL 或用于生产。
+> **环境与安全边界（2026-07-17 Ubuntu as-built）**：R1-safety 已同时覆盖 Crawl4AI、robots 与平台 `http.get`。API 对每一跳做 global-unicast 校验并把连接钉扎到已验证 IP；Crawl4AI 保留 seed guard 与浏览器 pinning proxy。mihomo fake-IP 只有在系统答案全部位于 `198.18.0.0/15` 时才走固定 DoH 窄回退，broad `CRAWL4AI_ALLOW_INTERNAL_URLS` 已移除。公网抓取和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机矩阵均已验证；loopback 端口绑定只作附加防线。
 
 新增基建：**MinIO**（compose，对象存储）、**Astro 构建容器**（渲染器）、网关新模型通道（§6）。
 

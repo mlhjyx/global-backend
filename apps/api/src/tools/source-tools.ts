@@ -4,7 +4,7 @@ import { Tool } from './tool-contract';
 import { ToolRegistry } from './tool-registry';
 import { crawlHtml, CrawlHtmlResult } from '../adapters/web-crawler';
 import { isAllowedByRobots } from '../adapters/robots';
-import { resolvePublicIp } from '../adapters/net-guard';
+import { EgressBlockedError, requestPublicHttp } from '../adapters/guarded-http';
 import { wikidataSearchEntity, wikidataGetEntities, WikidataEntitySummary, RawEntity } from '../adapters/wikidata';
 import { searchLeiRecords, getDirectParent, getUltimateParent, GleifRecord, GleifParent } from '../adapters/gleif';
 import {
@@ -92,9 +92,8 @@ const MAX_REDIRECT_HOPS = 3;
 
 /**
  * http.get —— 标的站点的轻量 GET/HEAD（sitemap/careers 探测）。SSRF 护栏在内强制：
- * 初始 URL + **每一跳重定向目标**都先解析为公网 IP 才出网（redirect:'manual' 逐跳护栏——
- * 复审 HIGH：follow 模式下攻击者可用 30x 跳内网/云元数据）。残余 TOCTOU（校验与连接间
- * DNS rebinding 窗口）与 main 的原实现同级，根治需连接层 IP pinning，记档待收口⑥安全加固。
+ * 初始 URL + **每一跳重定向目标**都先解析为公网 IP，且实际 socket 固定到该 IP；
+ * Host/TLS SNI 仍使用原域名，既关闭 DNS rebinding/TOCTOU，也保持证书校验。
  */
 export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
   id: 'http.get',
@@ -108,54 +107,42 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
   idempotencyKey: (i) => `http.get:${stableKey({ url: i.url, method: i.method ?? 'GET' })}`,
   healthCheck: async () => ({ healthy: true, detail: 'fetch' }),
   execute: async (input) => {
-    let url = input.url;
-    let res: Response | null = null;
-    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-      // 🛡️ SSRF 护栏：sitemap 内 URL 与重定向 Location 都是攻击者可控输入——逐跳解析公网 IP 才出网。
-      let host: string;
-      try {
-        host = new URL(url).hostname;
-      } catch {
-        return { data: { status: 0, ok: false, text: '', blocked: 'invalid_url' }, costCents: 0 };
-      }
-      const guard = await resolvePublicIp(host);
-      if (!guard.safe) {
-        return { data: { status: 0, ok: false, text: '', blocked: guard.reason ?? 'unsafe' }, costCents: 0 };
-      }
-      res = await fetch(url, {
+    try {
+      const res = await requestPublicHttp(input.url, {
         method: input.method ?? 'GET',
-        // WAF 站点对 node 默认 UA 静默拒（复审 medium）——默认可识别 bot UA，调用方可覆盖。
         headers: { 'User-Agent': HTTP_GET_UA, ...input.headers },
-        signal: AbortSignal.timeout(input.timeoutMs ?? 15_000),
-        redirect: 'manual',
+        timeoutMs: input.timeoutMs ?? 15_000,
+        maxBytes: 3_000_000,
+        maxRedirects: MAX_REDIRECT_HOPS,
       });
-      if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get('location');
-        if (!loc) break;
-        url = new URL(loc, url).toString(); // 相对 Location 归一
-        continue;
-      }
-      break;
-    }
-    if (!res) return { data: { status: 0, ok: false, text: '', blocked: 'no_response' }, costCents: 0 };
-    if (res.status >= 300 && res.status < 400) {
-      // 跳数用尽仍在重定向 → 视作拦截（绝不无界跟随）
-      return { data: { status: res.status, ok: false, text: '', finalUrl: url, blocked: 'too_many_redirects' }, costCents: 0 };
-    }
-    let text = '';
-    if (input.method !== 'HEAD') {
       // gzip 魔数透明解压（sitemap.xml.gz 常见；与原 fetchText 实现对齐）
-      let buf = Buffer.from(await res.arrayBuffer());
+      let buf = res.body;
       if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
         try {
-          buf = gunzipSync(buf);
+          buf = gunzipSync(buf, { maxOutputLength: 3_000_000 });
         } catch {
           // 损坏的 gz → 保留原字节的文本化（下游解析器自然解不出内容，fail-safe）
         }
       }
-      text = buf.toString('utf8').slice(0, 3_000_000);
+      const text = input.method === 'HEAD' ? '' : buf.toString('utf8').slice(0, 3_000_000);
+      return {
+        data: {
+          status: res.status,
+          ok: res.ok,
+          text,
+          finalUrl: res.finalUrl,
+        },
+        costCents: 0,
+      };
+    } catch (error) {
+      if (error instanceof EgressBlockedError) {
+        return {
+          data: { status: 0, ok: false, text: '', blocked: error.code },
+          costCents: 0,
+        };
+      }
+      throw error;
     }
-    return { data: { status: res.status, ok: res.ok, text, finalUrl: url }, costCents: 0 };
   },
 };
 

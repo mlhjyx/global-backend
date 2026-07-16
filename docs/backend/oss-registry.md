@@ -13,7 +13,7 @@
 | **new-api / one-api**（中转站，已采用） | 模型 API 聚合网关：统一接入 DeepSeek/GPT/Gemini/火山，UI 管渠道/key/路由/额度/日志 | Integrate | ✅ docker 已起（`:3001`） | app 只接**单一 OpenAI 兼容端点**；薄 `ModelGateway` 契约在上（ADR-007，禁厂商 SDK） | 换 LiteLLM 或其它中转站仅改 `model-providers.config.ts` |
 | **LiteLLM**（备选中转站） | 模型连接内核（PRD 原选） | Integrate | 备选 | 同上单一端点接法 | 与 new-api 互为备选 |
 | **Docling** | 文档解析（PDF/DOCX/PPTX/网页） | Integrate | Security Review 后进 M1 | `DocumentParserProvider` | 自建解析器 fallback |
-| **Crawl4AI**（已采用） | 自托管公开情报采集 | Integrate | ⚠️ Ubuntu dev 已起（loopback `:11235`）；fake-IP 兼容暂启 broad allow-internal，当前**不能声称 SSRF 已闭环**。仅可信开发 URL，生产前以 R1-safety 补 API+crawler+robots 全链 egress gate | `WebCrawlerProvider`（`/md` 端点，token 鉴权） | 换 Firecrawl |
+| **Crawl4AI**（已采用） | 自托管公开情报采集 | Integrate | ✅ Ubuntu dev 已起（loopback `:11235`）；固定 0.9.1 digest，R1-safety 已移除 broad allow-internal，并以 API global-unicast/pinning + crawler seed guard/browser proxy + fake-IP-only DoH 窄回退闭环，公网/内网真机矩阵全绿 | `WebCrawlerProvider`（`/md`/`/crawl`，token 鉴权） | 换 Firecrawl |
 | **SearXNG**（已采用） | 自托管元搜索：客户发现的**发现层入口**（搜候选企业域名） | Integrate | ✅ docker 已起(:8081)，JSON API，实测真挖到真实公司 | `PublicWebDiscoveryProvider` 内部调用（`/search?format=json`）；**仅内网**、limiter off | 换商业搜索 API（Brave/Bing） |
 | **Firecrawl** | 托管采集备选 | Buy/API Candidate | Commercial/License Gate | 同 `WebCrawlerProvider` | 与 Crawl4AI 互为备选 |
 | **Langfuse** | Trace/Prompt/Eval | Integrate | 脱敏与保留策略 Gate | Observability 封装（写前脱敏） | 换 trace 后端 |
