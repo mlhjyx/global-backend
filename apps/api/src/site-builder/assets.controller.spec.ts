@@ -39,4 +39,33 @@ describe('AssetsController public contract', () => {
     expect(serialized).not.toContain('internal-storage');
     expect(serialized).not.toContain('accessKey');
   });
+
+  it.each([
+    ['duplicate', 'ASSET_DUPLICATE'],
+    ['rejected', 'ASSET_VALIDATION_FAILED'],
+    ['failed_retryable', 'ASSET_COMMIT_UNAVAILABLE'],
+  ])('list：状态 %s 在不写 Asset DB error-code 列时仍派生稳定码', async (processingStatus, expected) => {
+    const assets = {
+      list: async () => [
+        {
+          id: '33333333-3333-4333-8333-333333333333',
+          kind: 'doc',
+          filename: 'catalog.pdf',
+          mime: 'application/pdf',
+          sizeBytes: 123,
+          processingStatus,
+          contentHash: null,
+          processingErrorCode: null,
+          error: 'private database or SDK diagnostic',
+          createdAt: new Date('2026-07-17T00:00:00.000Z'),
+        },
+      ],
+    };
+    const controller = new AssetsController(assets as never, {} as never);
+
+    const response = await controller.list(CTX, SITE_ID);
+
+    expect(response.data[0]).toMatchObject({ processingErrorCode: expected });
+    expect(JSON.stringify(response)).not.toContain('private database');
+  });
 });

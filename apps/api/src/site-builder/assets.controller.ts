@@ -130,6 +130,14 @@ const ASSET_ERROR_SCHEMA = {
   },
 };
 
+function publicAssetErrorCode(status: string, storedCode: string | null): string | null {
+  if (storedCode) return storedCode;
+  if (status === 'duplicate') return 'ASSET_DUPLICATE';
+  if (status === 'rejected') return 'ASSET_VALIDATION_FAILED';
+  if (status === 'failed_retryable') return 'ASSET_COMMIT_UNAVAILABLE';
+  return null;
+}
+
 function publicAssetErrorMessage(code: string | null): string | null {
   if (!code) return null;
   if (code === 'ASSET_DUPLICATE') return 'Asset duplicates existing content.';
@@ -213,8 +221,10 @@ export class AssetsController {
         sizeBytes: a.sizeBytes,
         processingStatus: a.processingStatus,
         contentHash: a.contentHash,
-        processingErrorCode: a.processingErrorCode,
-        error: publicAssetErrorMessage(a.processingErrorCode),
+        processingErrorCode: publicAssetErrorCode(a.processingStatus, a.processingErrorCode),
+        error: publicAssetErrorMessage(
+          publicAssetErrorCode(a.processingStatus, a.processingErrorCode),
+        ),
         createdAt: a.createdAt,
       })),
     );

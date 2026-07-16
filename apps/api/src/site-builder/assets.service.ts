@@ -177,7 +177,7 @@ export class AssetsService {
     try {
       head = await this.storage.head(stagingKey);
     } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err, 'ASSET_STORAGE_UNAVAILABLE');
+      await this.markRetryable(ctx, asset, fence, err);
       throw assetStorageUnavailable();
     }
     if (!head) {
@@ -204,7 +204,7 @@ export class AssetsService {
     try {
       hashed = await this.storage.hashObject(stagingKey);
     } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err, 'ASSET_STORAGE_UNAVAILABLE');
+      await this.markRetryable(ctx, asset, fence, err);
       throw assetStorageUnavailable();
     }
     const { sha256, head: magicHead } = hashed;
@@ -244,7 +244,7 @@ export class AssetsService {
       // canonical key 来自内容哈希；同源重试/并发 copy 到同一 key 是幂等的。
       await this.storage.copy(stagingKey, canonicalKey);
     } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err, 'ASSET_STORAGE_UNAVAILABLE');
+      await this.markRetryable(ctx, asset, fence, err);
       throw assetStorageUnavailable();
     }
 
@@ -294,7 +294,7 @@ export class AssetsService {
           throw assetConflict('ASSET_DUPLICATE', 'asset content has already been uploaded');
         }
       }
-      await this.markRetryable(ctx, asset, fence, err, 'ASSET_COMMIT_UNAVAILABLE');
+      await this.markRetryable(ctx, asset, fence, err);
       throw assetCommitUnavailable();
     }
 
@@ -427,10 +427,6 @@ export class AssetsService {
     asset: Asset,
     fence: { token: string; attempt: number },
     err: unknown,
-    processingErrorCode:
-      | 'ASSET_STORAGE_UNAVAILABLE'
-      | 'ASSET_STATE_CONFLICT'
-      | 'ASSET_COMMIT_UNAVAILABLE',
   ): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const moved = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
@@ -446,7 +442,9 @@ export class AssetsService {
           leaseToken: null,
           leaseUntil: null,
           retryAt: new Date(Date.now() + COMMIT_RETRY_DELAY_MS),
-          processingErrorCode,
+          // DB CHECK reserves this column for KB queued/terminal failures. Commit codes are
+          // deterministically derived from processingStatus in the public DTO.
+          processingErrorCode: null,
           error: message.slice(0, 2000),
         },
       }),
@@ -475,8 +473,7 @@ export class AssetsService {
         data: {
           processingStatus: status,
           contentHash,
-          processingErrorCode:
-            status === 'duplicate' ? 'ASSET_DUPLICATE' : 'ASSET_VALIDATION_FAILED',
+          processingErrorCode: null,
           leaseToken: null,
           leaseUntil: null,
           retryAt: null,
