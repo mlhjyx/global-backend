@@ -31,7 +31,8 @@ export interface IntakeResult {
 
 /**
  * 注册引导 → 建档 + demo v0（01 §2 两段式：注册绝不等分钟级管线）。
- * 无站 → mode=builder，建 demo_v0 run 并触发 Temporal；有站 → mode=diagnosis（M3 分支只建档）。
+ * R0-2（01 §2.1 / DoD-1，2026-07-16 用户拍板）：**无条件建 demo**——不论 hasWebsite，都 mode=builder + 建 demo_v0 run + 触发 Temporal；
+ * hasWebsite/websiteUrl 只作背景知识存入 intake（供后续 M3 诊断），不再分叉栏目/不再走 diagnosis 只建档路径。
  */
 @Injectable()
 export class IntakeService {
@@ -46,8 +47,9 @@ export class IntakeService {
     if (input.hasWebsite && !input.websiteUrl) {
       throw new BadRequestException('websiteUrl is required when hasWebsite=true');
     }
-    const mode = input.hasWebsite ? 'diagnosis' : 'builder';
-    const status = mode === 'builder' ? 'building' : 'draft';
+    // R0-2：无条件建 demo，不因 hasWebsite 分叉（websiteUrl 仍在下方 intake JSON 里留存）
+    const mode = 'builder';
+    const status = 'building';
     const nameEn = input.company.nameEn?.trim() || null;
 
     const { site, run } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -71,7 +73,6 @@ export class IntakeService {
           intake: input as unknown as Prisma.InputJsonValue,
         },
       });
-      if (mode !== 'builder') return { site: createdSite, run: null };
       const createdRun = await tx.siteBuildRun.create({
         data: {
           workspaceId: ctx.workspaceId,

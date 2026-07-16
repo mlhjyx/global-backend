@@ -87,7 +87,7 @@ describe('IntakeService（注册引导 → 建档 + demo v0，01 §2 / 07 §1）
     expect(launched).toEqual(['site-1']);
   });
 
-  it('有站路径：mode=diagnosis（M3 分支），不建 run、不触发 launcher', async () => {
+  it('有站路径：hasWebsite=true 也无条件建 demo（mode=builder/status=building/建 run/触发 launcher）——只作背景知识不分叉（R0-2，01 §2.1 / DoD-1）', async () => {
     const { service, db, launched } = makeService();
     const res = await service.create(CTX, {
       ...BASE_INTAKE,
@@ -95,10 +95,18 @@ describe('IntakeService（注册引导 → 建档 + demo v0，01 §2 / 07 §1）
       websiteUrl: 'https://www.acmepump.com',
     });
 
-    expect(res.mode).toBe('diagnosis');
-    expect(res.status).toBe('draft');
-    expect(db.runs).toHaveLength(0);
-    expect(launched).toEqual([]);
+    // 与无站路径同一结果：无条件建 demo
+    expect(res).toEqual({ siteId: 'site-1', mode: 'builder', status: 'building' });
+    expect(db.runs).toHaveLength(1);
+    const run = db.runs[0] as Record<string, unknown>;
+    expect(run.kind).toBe('demo_v0');
+    expect(run.status).toBe('queued');
+    expect(launched).toEqual(['site-1']);
+    // hasWebsite/websiteUrl 仍作背景知识存入 intake（供后续 M3 诊断，不再分叉栏目）
+    const site = db.sites[0] as Record<string, unknown>;
+    const intake = site.intake as Record<string, unknown>;
+    expect(intake.hasWebsite).toBe(true);
+    expect(intake.websiteUrl).toBe('https://www.acmepump.com');
   });
 
   it('hasWebsite=true 但缺 websiteUrl → BadRequest（服务层兜底，不信 DTO 层）', async () => {
