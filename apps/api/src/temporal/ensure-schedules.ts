@@ -11,6 +11,8 @@ import {
   EXTERNAL_INTENT_SWEEP_WORKFLOW,
   INTENT_SWEEP_SCHEDULE_ID,
   INTENT_SWEEP_WORKFLOW,
+  KB_RECOVERY_SWEEP_SCHEDULE_ID,
+  KB_RECOVERY_SWEEP_WORKFLOW,
   PATENTS_CACHE_REFRESH_SCHEDULE_ID,
   PATENTS_CACHE_REFRESH_WORKFLOW,
   SANCTIONS_REFRESH_SCHEDULE_ID,
@@ -36,6 +38,8 @@ const SPECS = [
   { id: PATENTS_CACHE_REFRESH_SCHEDULE_ID, workflowType: PATENTS_CACHE_REFRESH_WORKFLOW, everyEnv: 'PATENT_CACHE_REFRESH_EVERY', everyDefault: '7d' },
   // 制裁名单刷新（Qualify 第五门）：OFAC 日更 → 每日足够；DISABLED 源零动作（refreshAll 只取 ENABLED）。
   { id: SANCTIONS_REFRESH_SCHEDULE_ID, workflowType: SANCTIONS_REFRESH_WORKFLOW, everyEnv: 'SANCTIONS_REFRESH_EVERY', everyDefault: '24h' },
+  // KB 启动丢失 / due retry / 过期 processing lease 的兜底；每轮活动内部有界处理。
+  { id: KB_RECOVERY_SWEEP_SCHEDULE_ID, workflowType: KB_RECOVERY_SWEEP_WORKFLOW, everyEnv: 'KB_RECOVERY_SWEEP_EVERY', everyDefault: '5m' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {

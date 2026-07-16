@@ -136,6 +136,7 @@ async function main(): Promise<void> {
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
         prisma,
+        ownerDb,
         gateway,
         broker,
         kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),

@@ -275,6 +275,7 @@ export class AssetsService {
           leaseToken: null,
           leaseUntil: null,
           retryAt: null,
+          processingErrorCode: null,
         },
       });
       if (moved.count !== 1) {
@@ -301,6 +302,9 @@ export class AssetsService {
             { processingStatus: 'pending_upload' },
             {
               processingStatus: 'failed_retryable',
+              // failed_retryable is an A1 commit-stage state: canonical KB failures use
+              // queued+retryAt. Never feed an already-canonical object back through commit.
+              contentHash: null,
               OR: [{ retryAt: null }, { retryAt: { lte: now } }],
             },
             { processingStatus: 'committing', leaseUntil: { lte: now } },
@@ -312,6 +316,7 @@ export class AssetsService {
           leaseToken: token,
           leaseUntil,
           retryAt: null,
+          processingErrorCode: null,
           error: null,
         },
       });

@@ -11,16 +11,15 @@ const activities = proxyActivities<SiteBuilderActivities>({
 export interface KbIngestWorkflowInput {
   workspaceId: string;
   siteId: string;
+  assetId: string;
 }
 
 /**
- * KB 摄入（M1-a：assets.controller M0 fire-and-forget 挂账的 Temporal 化）。
- * 单 activity 透传：基建级失败（扫库/入口抛错）上抛交 Temporal retry，文档留 queued
- * 可被 refurbish P1 或下次 commit 再扫；**逐文档**失败由 activity 内 fail-safe 标 failed
- * 不触发重试（复审 C5——failed 文档的重触发端点列 M1-b fast-follow）。
+ * KB 摄入：单素材 activity，持久 lease/retry 真值归 Asset 状态机；Temporal 仅重试
+ * activity 基建失败。typed dependency failure 会回 queued+retryAt，由 recovery sweep 自愈。
  */
 export async function kbIngestWorkflow(
   input: KbIngestWorkflowInput,
-): Promise<{ processed: number; failed: number }> {
-  return activities.processQueuedKbDocs(input);
+): Promise<Awaited<ReturnType<SiteBuilderActivities['processKbAsset']>>> {
+  return activities.processKbAsset(input);
 }

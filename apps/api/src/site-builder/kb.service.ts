@@ -1,14 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { KbDocument, Prisma } from '@prisma/client';
+import { Asset, KbDocument, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { Chunk, chunkMarkdown } from './chunker';
 import { DoclingClient } from './docling.client';
 import { EmbeddingsClient } from './embeddings.client';
+import { asKbIngestError, errorMessage, KbIngestError } from './kb-errors';
 import { StorageService } from './storage.service';
 
 const EMBED_BATCH = 32;
+const KB_LEASE_MS = 20 * 60 * 1000;
+const KB_RETRY_BASE_MS = 60 * 1000;
+const KB_RETRY_MAX_MS = 60 * 60 * 1000;
+const KB_DUE_BATCH = 25;
 
 /** 直读文本的 MIME；其余文档类走 Docling 解析。 */
 const TEXT_MIMES: ReadonlySet<string> = new Set(['text/plain', 'text/markdown']);
@@ -36,6 +41,26 @@ export interface SearchHit {
   score: number;
 }
 
+export type KbProcessOutcome =
+  | 'ready'
+  | 'retry_scheduled'
+  | 'failed_terminal'
+  | 'not_due'
+  | 'superseded';
+
+export interface KbProcessResult {
+  assetId: string;
+  outcome: KbProcessOutcome;
+  attempt?: number;
+  errorCode?: string;
+  retryAt?: Date;
+}
+
+interface KbFence {
+  token: string;
+  attempt: number;
+}
+
 /**
  * 知识库地基（02 §12）：解析（Docling/直读）→ 结构感知切块 → BGE-M3 批量向量化 →
  * pgvector 落库（RLS 事务内）。网络调用（embedding/解析）在事务外，避免长事务。
@@ -52,6 +77,9 @@ export class KbService {
   ) {}
 
   async ingestText(ctx: RequestContext, input: IngestTextInput): Promise<KbDocument> {
+    if ((input.source === 'upload') !== Boolean(input.assetId)) {
+      throw new Error('KB upload documents require exactly one assetId');
+    }
     const chunks = chunkMarkdown(input.text);
     const vectors = await this.embedAll(chunks.map((c) => c.text));
 
@@ -75,48 +103,149 @@ export class KbService {
     });
   }
 
-  /** commit 后排队的 doc 素材 → 解析入库；单个失败不阻断其余（fail-safe）。 */
+  /**
+   * 处理一个 canonical doc Asset。claim、失败回写和最终事务都匹配 attempt+token；
+   * lease 过期接管后旧 worker 只能得到 superseded，不能 zombie write。
+   */
+  async processAsset(
+    ctx: RequestContext,
+    siteId: string,
+    assetId: string,
+  ): Promise<KbProcessResult> {
+    const asset = await this.claimAsset(ctx, siteId, assetId);
+    if (!asset) return { assetId, outcome: 'not_due' };
+    const fence = this.fenceOf(asset);
+    try {
+      let buffer: Buffer;
+      try {
+        buffer = await this.storage.getBuffer(asset.objectKey);
+      } catch (err) {
+        throw new KbIngestError(
+          'KB_STORAGE_UNAVAILABLE',
+          'retryable',
+          'storage',
+          errorMessage(err),
+          err instanceof Error ? { cause: err } : undefined,
+        );
+      }
+      const markdown = TEXT_MIMES.has(asset.mime)
+        ? buffer.toString('utf8')
+        : (await this.docling.convertToMarkdown(asset.filename, buffer)).markdown;
+      if (markdown.trim().length === 0) {
+        throw new KbIngestError(
+          'KB_DOCUMENT_INVALID',
+          'terminal',
+          'parse',
+          'document produced no text',
+        );
+      }
+      const chunks = chunkMarkdown(markdown);
+      await this.renewFence(ctx, asset, fence);
+      const vectors = await this.embedAll(chunks.map((c) => c.text), () =>
+        this.renewFence(ctx, asset, fence),
+      );
+      await this.persistAssetDocument(ctx, asset, fence, chunks, vectors);
+      return { assetId, outcome: 'ready', attempt: fence.attempt };
+    } catch (err) {
+      const typed = asKbIngestError(err, 'persist');
+      if (typed.disposition === 'superseded') {
+        return {
+          assetId,
+          outcome: 'superseded',
+          attempt: fence.attempt,
+          errorCode: typed.code,
+        };
+      }
+      const released = await this.releaseFailure(ctx, asset, fence, typed);
+      if (!released) {
+        return {
+          assetId,
+          outcome: 'superseded',
+          attempt: fence.attempt,
+          errorCode: 'KB_LEASE_SUPERSEDED',
+        };
+      }
+      this.log.warn(
+        `kb ingest ${typed.disposition} for asset ${asset.id} attempt ${fence.attempt}: ${typed.code}`,
+      );
+      return {
+        assetId,
+        outcome: typed.disposition === 'terminal' ? 'failed_terminal' : 'retry_scheduled',
+        attempt: fence.attempt,
+        errorCode: typed.code,
+        retryAt: released.retryAt ?? undefined,
+      };
+    }
+  }
+
+  /** commit/refurbish 兼容入口：只列有界 due/过期 ID，再复用单素材 primitive。 */
   async processQueued(
     ctx: RequestContext,
     siteId: string,
   ): Promise<{ processed: number; failed: number }> {
-    const queued = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.asset.findMany({ where: { siteId, processingStatus: 'queued' } }),
+    const now = new Date();
+    const due = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.findMany({
+        where: {
+          siteId,
+          kind: 'doc',
+          contentHash: { not: null },
+          deletedAt: null,
+          OR: [
+            {
+              processingStatus: 'queued',
+              OR: [{ retryAt: null }, { retryAt: { lte: now } }],
+            },
+            { processingStatus: 'processing', leaseUntil: { lte: now } },
+          ],
+        },
+        orderBy: [{ retryAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        take: KB_DUE_BATCH,
+        select: { id: true },
+      }),
     );
     let processed = 0;
     let failed = 0;
-    for (const asset of queued) {
-      // CAS 认领（Codex P2）：commit 触发的 kbIngestWorkflow 与 refurbish P1 可能并发扫同站——
-      // queued→processing 原子翻转，翻不动=已被别处认领，跳过（防重复解析/重复入库）。
-      const claimed = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-        tx.asset.updateMany({
-          where: { id: asset.id, processingStatus: 'queued' },
-          data: { processingStatus: 'processing' },
-        }),
-      );
-      if (claimed.count === 0) continue;
-      try {
-        const buffer = await this.storage.getBuffer(asset.objectKey);
-        const markdown = TEXT_MIMES.has(asset.mime)
-          ? buffer.toString('utf8')
-          : (await this.docling.convertToMarkdown(asset.filename, buffer)).markdown;
-        await this.ingestText(ctx, {
-          siteId,
-          source: 'upload',
-          title: asset.filename,
-          text: markdown,
-          assetId: asset.id,
-        });
-        await this.updateAssetStatus(ctx, asset.id, 'ready', null);
-        processed += 1;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.log.warn(`kb ingest failed for asset ${asset.id}: ${message}`);
-        await this.updateAssetStatus(ctx, asset.id, 'failed', message);
+    for (const candidate of due) {
+      const result = await this.processAsset(ctx, siteId, candidate.id);
+      if (result.outcome === 'ready') processed += 1;
+      else if (result.outcome === 'retry_scheduled' || result.outcome === 'failed_terminal') {
         failed += 1;
       }
     }
     return { processed, failed };
+  }
+
+  /** 运维 redrive：只改持久真值；周期 sweep 或显式 processAsset 随后认领。 */
+  async redriveAsset(
+    ctx: RequestContext,
+    siteId: string,
+    assetId: string,
+    opts: { includeTerminal?: boolean } = {},
+  ): Promise<boolean> {
+    const moved = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.updateMany({
+        where: {
+          id: assetId,
+          siteId,
+          kind: 'doc',
+          deletedAt: null,
+          contentHash: { not: null },
+          processingStatus: opts.includeTerminal
+            ? { in: ['queued', 'failed_terminal'] }
+            : 'queued',
+        },
+        data: {
+          processingStatus: 'queued',
+          retryAt: new Date(0),
+          leaseToken: null,
+          leaseUntil: null,
+          processingErrorCode: null,
+          error: null,
+        },
+      }),
+    );
+    return moved.count === 1;
   }
 
   async status(ctx: RequestContext, siteId: string): Promise<KbStatus> {
@@ -194,9 +323,13 @@ export class KbService {
     });
   }
 
-  private async embedAll(texts: string[]): Promise<number[][]> {
+  private async embedAll(
+    texts: string[],
+    beforeBatch?: () => Promise<void>,
+  ): Promise<number[][]> {
     const vectors: number[][] = [];
     for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+      await beforeBatch?.();
       const batch = texts.slice(i, i + EMBED_BATCH);
       vectors.push(...(await this.embeddings.embed(batch)));
     }
@@ -219,15 +352,183 @@ export class KbService {
     `;
   }
 
-  private async updateAssetStatus(
+  private async claimAsset(
     ctx: RequestContext,
+    siteId: string,
     assetId: string,
-    status: string,
-    error: string | null,
+  ): Promise<Asset | null> {
+    const now = new Date();
+    const token = randomUUID();
+    const leaseUntil = new Date(now.getTime() + KB_LEASE_MS);
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const moved = await tx.asset.updateMany({
+        where: {
+          id: assetId,
+          siteId,
+          kind: 'doc',
+          contentHash: { not: null },
+          deletedAt: null,
+          OR: [
+            {
+              processingStatus: 'queued',
+              OR: [{ retryAt: null }, { retryAt: { lte: now } }],
+            },
+            { processingStatus: 'processing', leaseUntil: { lte: now } },
+          ],
+        },
+        data: {
+          processingStatus: 'processing',
+          processingAttempt: { increment: 1 },
+          leaseToken: token,
+          leaseUntil,
+          retryAt: null,
+          processingErrorCode: null,
+          error: null,
+        },
+      });
+      if (moved.count !== 1) return null;
+      return tx.asset.findUnique({ where: { id: assetId } });
+    });
+  }
+
+  private async persistAssetDocument(
+    ctx: RequestContext,
+    asset: Asset,
+    fence: KbFence,
+    chunks: Chunk[],
+    vectors: number[][],
   ): Promise<void> {
-    await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.asset.update({ where: { id: assetId }, data: { processingStatus: status, error } }),
+    await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      // This fenced write takes the Asset row lock and extends the lease inside the same
+      // transaction as document/chunk replacement. A takeover that already changed token
+      // makes count=0 and the entire transaction aborts before any KB write survives.
+      const held = await tx.asset.updateMany({
+        where: {
+          id: asset.id,
+          processingStatus: 'processing',
+          processingAttempt: fence.attempt,
+          leaseToken: fence.token,
+          deletedAt: null,
+        },
+        data: { leaseUntil: new Date(Date.now() + KB_LEASE_MS) },
+      });
+      if (held.count !== 1) throw this.superseded(asset.id);
+
+      const existing = await tx.kbDocument.findUnique({ where: { assetId: asset.id } });
+      const doc = existing
+        ? await tx.kbDocument.update({
+            where: { id: existing.id },
+            data: {
+              source: 'upload',
+              title: asset.filename,
+              lang: null,
+              status: 'ready',
+              parsedMeta: Prisma.DbNull,
+              chunkCount: chunks.length,
+              error: null,
+            },
+          })
+        : await tx.kbDocument.create({
+            data: {
+              workspaceId: ctx.workspaceId,
+              siteId: asset.siteId,
+              assetId: asset.id,
+              source: 'upload',
+              title: asset.filename,
+              status: 'ready',
+              chunkCount: chunks.length,
+            },
+          });
+      if (existing) await tx.kbChunk.deleteMany({ where: { documentId: doc.id } });
+      for (let i = 0; i < chunks.length; i += 1) {
+        await this.insertChunk(tx, ctx.workspaceId, doc.id, chunks[i], vectors[i]);
+      }
+
+      const ready = await tx.asset.updateMany({
+        where: {
+          id: asset.id,
+          processingStatus: 'processing',
+          processingAttempt: fence.attempt,
+          leaseToken: fence.token,
+          deletedAt: null,
+        },
+        data: {
+          processingStatus: 'ready',
+          leaseToken: null,
+          leaseUntil: null,
+          retryAt: null,
+          processingErrorCode: null,
+          error: null,
+        },
+      });
+      if (ready.count !== 1) throw this.superseded(asset.id);
+    });
+  }
+
+  private async renewFence(ctx: RequestContext, asset: Asset, fence: KbFence): Promise<void> {
+    const moved = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.updateMany({
+        where: {
+          id: asset.id,
+          processingStatus: 'processing',
+          processingAttempt: fence.attempt,
+          leaseToken: fence.token,
+          deletedAt: null,
+        },
+        data: { leaseUntil: new Date(Date.now() + KB_LEASE_MS) },
+      }),
     );
+    if (moved.count !== 1) throw this.superseded(asset.id);
+  }
+
+  private async releaseFailure(
+    ctx: RequestContext,
+    asset: Asset,
+    fence: KbFence,
+    err: KbIngestError,
+  ): Promise<{ retryAt: Date | null } | null> {
+    const retryAt =
+      err.disposition === 'terminal'
+        ? null
+        : new Date(Date.now() + this.retryDelayMs(fence.attempt));
+    const moved = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.updateMany({
+        where: {
+          id: asset.id,
+          processingStatus: 'processing',
+          processingAttempt: fence.attempt,
+          leaseToken: fence.token,
+          deletedAt: null,
+        },
+        data: {
+          processingStatus: err.disposition === 'terminal' ? 'failed_terminal' : 'queued',
+          leaseToken: null,
+          leaseUntil: null,
+          retryAt,
+          processingErrorCode: err.code,
+          error: err.message.slice(0, 2000),
+        },
+      }),
+    );
+    return moved.count === 1 ? { retryAt } : null;
+  }
+
+  private fenceOf(asset: Asset): KbFence {
+    if (!asset.leaseToken) throw this.superseded(asset.id);
+    return { token: asset.leaseToken, attempt: asset.processingAttempt };
+  }
+
+  private superseded(assetId: string): KbIngestError {
+    return new KbIngestError(
+      'KB_LEASE_SUPERSEDED',
+      'superseded',
+      'persist',
+      `KB lease superseded for asset ${assetId}`,
+    );
+  }
+
+  private retryDelayMs(attempt: number): number {
+    return Math.min(KB_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1), KB_RETRY_MAX_MS);
   }
 }
 

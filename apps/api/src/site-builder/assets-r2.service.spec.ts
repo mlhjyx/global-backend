@@ -301,6 +301,26 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(s.objects.has(stagingKey)).toBe(true);
   });
 
+  it('R2-A2：commit 不得重新认领已有 canonical contentHash 的 retryable 行', async () => {
+    const s = makeService();
+    const { signed, row } = await uploaded(s);
+    Object.assign(row, {
+      processingStatus: 'failed_retryable',
+      contentHash: 'a'.repeat(64),
+      retryAt: new Date(Date.now() - 1),
+      objectKey: `ws/${CTX.workspaceId}/${SITE_ID}/doc/${'a'.repeat(64)}.pdf`,
+    });
+    let storageTouched = false;
+    s.storage.head = async () => {
+      storageTouched = true;
+      return { size: JPEG.length };
+    };
+
+    await expect(s.service.commit(CTX, signed.assetId)).rejects.toBeInstanceOf(ConflictException);
+    expect(storageTouched).toBe(false);
+    expect(row.processingStatus).toBe('failed_retryable');
+  });
+
   it('persists canonical truth before deleting staging', async () => {
     const s = makeService();
     const { signed } = await uploaded(s);

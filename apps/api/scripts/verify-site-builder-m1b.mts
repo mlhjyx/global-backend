@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   // 有界样本 KB：一份真文本文档（真 BGE-M3 向量化真落库）
   await kb.ingestText(ctx, {
     siteId,
-    source: 'upload',
+    source: 'wizard',
     title: 'company-brief.md',
     text: [
       '# Company brief',
