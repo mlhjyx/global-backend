@@ -179,6 +179,16 @@ describe("derivedKeys compatibility projection", () => {
         recipeHash: "e".repeat(64),
       }),
       variant({
+        id: "00000000-0000-4000-8000-000000000005",
+        variantType: "logo",
+        mime: "image/jpeg",
+        width: 640,
+        height: 320,
+        objectKey: "ws/w/s/generated/logo-640.jpg",
+        sizeBytes: 80_000,
+        recipeHash: "f".repeat(64),
+      }),
+      variant({
         id: "00000000-0000-4000-8000-000000000004",
         variantType: "thumb",
         status: "failed",
@@ -215,7 +225,15 @@ describe("derivedKeys compatibility projection", () => {
           ],
         },
         logo: {
-          fallback: [
+          jpeg: [
+            {
+              key: "ws/w/s/generated/logo-640.jpg",
+              width: 640,
+              height: 320,
+              bytes: 80_000,
+            },
+          ],
+          png: [
             {
               key: "ws/w/s/generated/logo-640.png",
               width: 640,
