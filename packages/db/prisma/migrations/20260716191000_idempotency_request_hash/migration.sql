@@ -7,8 +7,3 @@ ADD COLUMN "request_hash" VARCHAR(64);
 ALTER TABLE "idempotency_key"
 ADD CONSTRAINT "idempotency_key_request_hash_format"
 CHECK ("request_hash" IS NULL OR "request_hash" ~ '^[0-9a-f]{64}$') NOT VALID;
-
--- Validate with a lighter lock than ADD CONSTRAINT's inline full-table validation, so existing
--- idempotency traffic can continue while PostgreSQL scans a potentially unbounded ledger.
-ALTER TABLE "idempotency_key"
-VALIDATE CONSTRAINT "idempotency_key_request_hash_format";
