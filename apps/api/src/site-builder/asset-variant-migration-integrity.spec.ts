@@ -149,7 +149,7 @@ describe("MF0-A AssetVariant migration integrity", () => {
     const sql = repositoryFile(upgradeValidationMigrationPath);
 
     expect(sql).toMatch(
-      /source_variant_id[\s\S]+JOIN[\s\S]+status[\s\S]+ready[\s\S]+RAISE EXCEPTION/is,
+      /JOIN[\s\S]+source_variant_id[\s\S]+status[\s\S]+ready[\s\S]+RAISE EXCEPTION/is,
     );
     for (const [mime, extension] of [
       ["image/avif", ".avif"],

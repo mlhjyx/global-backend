@@ -572,6 +572,28 @@ async function main(): Promise<void> {
         },
       );
     }
+    {
+      const recipeHash = "9".repeat(64);
+      await rejectsDb(
+        "Variant object-key extension must match its MIME",
+        () =>
+          app.withWorkspace(wsA, (tx) =>
+            tx.assetVariant.create({
+              data: readyVariant({
+                workspaceId: wsA,
+                siteId: siteA,
+                assetId: assetA,
+                recipeHash,
+                objectKey: `ws/${wsA}/${siteA}/variants/${assetA}/${recipeHash}.webp`,
+              }),
+            }),
+          ),
+        {
+          codes: ["P2004", "23514"],
+          evidence: /asset_variant_object_key_scope_check/,
+        },
+      );
+    }
     await rejectsDb(
       "ready rows require checksum and byte size",
       () =>
