@@ -22,14 +22,16 @@
 
 > truth-sync 审计基线（合并前）：`main@a306ffa`（#124）。#121 已让 intake **行为上**不再按 `hasWebsite` 分叉，始终触发 Demo v0；#123/#124 已落事实安全、隐私、可取消超时与失败保站。下列形状只描述当前 code-first OpenAPI；目标契约见 `docs/site-builder/07-api-contract-draft.md`。
 
-1. `POST /site-builder/intake` 提交公司、行业、产品、目标市场、网站背景与业务邮箱。
+> **Base URL**：以下路径均包含全局版本前缀 `/api/v1`；客户端应直接使用完整路径，不要省略 `/api/v1`。
+
+1. `POST /api/v1/site-builder/intake` 提交公司、行业、产品、目标市场、网站背景与业务邮箱。
    - 当前返回：`{ "data": { "siteId", "mode": "builder", "status": "building" } }`。
    - ⚠️ 当前端点**没有** `Idempotency-Key` 声明，也不返回 `buildId`；`mode` 与 Swagger 的“有站诊断”文字仍是旧契约。R0 contract closeout 将改为目标 `{siteId,buildId,status}`、去 `mode` 并重导 OpenAPI。在完成前，客户端不得假定目标形状已经可用。
-2. `GET /site-builder/sites` 或 `GET /site-builder/sites/{id}` 轮询站点；`status=ready` 后 `previewUrl` 可用。异步终态失败为 `setup_failed`，站点和 intake 会保留，用户可重试。
-3. `GET|PATCH /site-builder/sites/{id}/profile` 读取/分组保存建站档案。当前组内 schema 与乐观并发仍属 R2-A3 待收口，不要依赖 last-write-wins 行为。
-4. 素材三步：`POST /site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /site-builder/assets/{assetId}/commit`；随后用 `GET /site-builder/sites/{id}/assets` 查询。删除为 `DELETE /site-builder/assets/{assetId}`；SiteSpec 引用扫描与 `409 ASSET_IN_USE` 是 MF-0-thin 目标，当前尚未落地。
-5. `GET /site-builder/sites/{id}/kb/status` 查询文档、chunk 与资料缺口。
-6. 精装修构建：`POST /site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /site-builder/builds/{id}`，取消用 `POST /site-builder/builds/{id}/cancel`。更完整的 targetId/options/trace/progress/cost 契约仍待 R3。
+2. `GET /api/v1/site-builder/sites` 或 `GET /api/v1/site-builder/sites/{id}` 轮询站点；`status=ready` 后 `previewUrl` 可用。异步终态失败为 `setup_failed`，站点和 intake 会保留，用户可重试。
+3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。当前组内 schema 与乐观并发仍属 R2-A3 待收口，不要依赖 last-write-wins 行为。
+4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；SiteSpec 引用扫描与 `409 ASSET_IN_USE` 是 MF-0-thin 目标，当前尚未落地。
+5. `GET /api/v1/site-builder/sites/{id}/kb/status` 查询文档、chunk 与资料缺口。
+6. 精装修构建：`POST /api/v1/site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /api/v1/site-builder/builds/{id}`，取消用 `POST /api/v1/site-builder/builds/{id}/cancel`。更完整的 targetId/options/trace/progress/cost 契约仍待 R3。
 
 **SiteSpec / DQ-1**：`@global/contracts` 导出的 `SiteSpec` 1.0.0 是 API 生产端与 Astro Renderer 的唯一共享 TypeScript 真值；前端若需要编辑/物化 Spec，应等待相应 REST 端点进入 OpenAPI，不能直接把内部类型等同于已发布 API。DQ-1 是 type-only；运行时 Zod 与 1.1.0 仍是后续。
 
