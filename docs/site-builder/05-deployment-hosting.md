@@ -17,7 +17,7 @@
 
 ## 0.5 as-built 现状与 target 的分界（先分清）
 
-| 主题 | as-built（truth-sync 审计基线 `main@a306ffa`，#124） | target（本文设计，未落地） |
+| 主题 | as-built（2026-07-16，含 #125 truth-sync / #126 R0 contract） | target（本文设计，未落地） |
 |---|---|---|
 | 预览地址 | `PREVIEW_URL_PATTERN` env（`preview-url.ts` / `site-builder.activities.ts`），默认本地路径 `http://localhost:3000/preview/{slug}/`；仅 `ready`/`published` 站返回地址 | 平台域到手后改 env 为 `{slug}.preview.<平台域>`——**前端/后端零代码改动**（§3） |
 | 版本模型 | `SiteVersion`（`version` 站内递增、`@@unique([siteId,version])`、`artifactKey?`、`buildRunId?`）+ `Site.activeVersionId` 指针字段均存在 | 升级为**不可变 `SiteRelease`**（§1.2）；`SiteVersion` 继续做构建版本，Release 做发布单元 |

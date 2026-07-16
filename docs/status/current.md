@@ -1,6 +1,6 @@
 # status/current —— 当前真值与待拍板（活文档）
 
-> 2026-07-10 立；**2026-07-16 truth-sync 更新，审计基线（合并前）为 `main@a306ffa`（#124）**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
+> 2026-07-10 立；**2026-07-16 truth-sync（#125）与 R0 contract closeout（#126）更新**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
 > 下方「真实具备/缺口/偏差/待拍板」四节是**获客侧快照，冻结于 2026-07-13 获客暂停时点**。测试数量随提交变化，不在活状态文档固化；是否通过以当前分支实际命令和 CI 结果为准。
 
 ## 🟢 当前主线：独立站建设（Site Builder）
@@ -8,10 +8,10 @@
 获客侧 **2026-07-13 起暂停**（用户指示，明确通知才恢复）。当前唯一开发主线 = 为出海企业一键生成 / 精装修独立站。
 
 - **M0 as-built**：注册引导、`Site`/`SiteVersion`/`BuildRun`、素材上传与 KB、Demo v0 Temporal 工作流、Astro 渲染器（当前注册 10 型组件）、7 个有界 AI Task 路由，以及 **DQ-1 SiteSpec 共享契约（#117）**。`@global/contracts` 的 `SITE_SPEC_VERSION=1.0.0` 是生产/消费两端唯一类型源；运行时 Zod 与 1.1.0 目标字段尚未落地。
-- **已合并（当前 main）**：#121 已把 intake **行为**改为无条件建站/触发 demo；#123 已修 ADR-017 禁虚构身份；#124 已完成 businessEmail 不进 KB/Prompt、LLM 真取消超时、异步失败保留站点并支持原地重试。
-- **R0 尚未整体闭环**：#121 明确保留旧 DTO/OpenAPI。当前 intake 仍缺 `Idempotency-Key`、响应没有 `buildId`、仍暴露 `mode`，Swagger 仍描述“有站诊断”分叉。必须以 [07 目标契约](../site-builder/07-api-contract-draft.md) 做 **R0 contract closeout**，完成后才能把 R0 标为完成。
+- **已合并（当前 main）**：#121 已把 intake **行为**改为无条件建站/触发 demo；#123 已修 ADR-017 禁虚构身份；#124 已完成 businessEmail 不进 KB/Prompt、LLM 真取消超时、异步失败保留站点并支持原地重试；#125 完成项目真值收口。
+- **R0 已闭环（#126）**：intake 已声明并持久处理 `Idempotency-Key`，同键同请求重放首次 Site/Build、同键异请求稳定返回 `409 IDEMPOTENCY_KEY_REUSED`；成功响应固定为 `{siteId,buildId,status:"generating_demo"}`，不再暴露 `mode`；Temporal ACK-loss/AlreadyStarted 收敛、稳定 400/409/502 错误信封与 code-first OpenAPI 已有测试和真 PostgreSQL/Temporal 验证。
 - **DOC-12 状态**：#119/#120 已把主要内容分发进 00–14 并登记 ADR-013~019；v3.1/v3.2 已降为 dated proposal。此前把“内容分发”写成“全项目真值已收口”过早；2026-07-16 truth-sync 已纠正权威层与接入文档，未把旧 Word/研究稿升级为权威。
-- **当前关键路径**：R0 contract closeout → **R1-safety**（临时/构建清理、renderer 子进程 env allowlist、Crawl/robots 全链 egress/SSRF 收口）→ **R2-A 拆分交付**（Asset / KB / Profile / integration gate）→ **MF-0-thin** → **M1-c 纯 Sharp**。R1-min 其余原子预览与 unknown component fail-closed 可并行；R2-A 不得做成 schema/API/Outbox/Temporal/迁移一体的 mega PR。
+- **当前关键路径**：**R1-safety**（临时/构建清理、renderer 子进程 env allowlist、Crawl/robots 全链 egress/SSRF 收口）→ **R2-A 拆分交付**（Asset / KB / Profile / integration gate）→ **MF-0-thin** → **M1-c 纯 Sharp**。R1-min 其余原子预览与 unknown component fail-closed 可并行；R2-A 不得做成 schema/API/Outbox/Temporal/迁移一体的 mega PR。
 - **开发环境安全例外**：Ubuntu mihomo fake-IP 令公网域名落入 `198.18.0.0/16`；本地 Compose 当前必须开 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 才能真抓，且已把 `:11235` 限到 loopback。此状态会关闭 Crawl4AI 原生目的地址守卫；因 `websiteUrl` 会经 API 驱动抓取且 robots 还有直连，loopback 不等于 SSRF 闭环。R1-safety 通过前只允许开发者核验的公网 URL，不得对不可信租户/生产开放；安全/infra 子 PR 须覆盖 Crawl4AI + robots 全链并做 private/loopback/metadata/DNS-rebinding/redirect 反例。
 - **已拍板、尚按消费者推进**：26 型封闭组件库（ADR-015）· 模型档四态路由（ADR-016）· MF-0 薄媒体地基（ADR-018）· Readdy 净室参考（ADR-019）· 不可变 Release（ADR-013）。ACCEPTED 不等于已实现。
 - **协同事实源**：[00-decisions-and-coordination.md](../site-builder/00-decisions-and-coordination.md)。承重决策只认 [ADR 注册表](../adr/registry.md)，施工序看 [09](../site-builder/09-m1-implementation-design.md)。

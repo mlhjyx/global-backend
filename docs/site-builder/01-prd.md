@@ -33,7 +33,7 @@
 
 > **引导流程与状态 = 前端全权，后端不管**（消息卡片/栏目/跳转皆前端做）：as-built 的预览链接只从 `GET /sites/{id}` 获取（ready/published 时 `previewUrl` 非空）；当前 `GET /builds/{id}` 只提供 run 状态，build 级 `previewUrl` 是 R3 目标。build 状态、资料缺口 `gaps`（`GET /sites/{id}/kb/status`）等**既有端点**前端可自行组合；**后端不为引导新增任何编排/状态**。
 
-**Onboarding 分支口径（v3.2 §3.2 回写）**：`hasWebsite` / `websiteUrl` **只作品牌理解背景，不控制 builder / diagnosis 分支**；注册后**无条件**创建 `Site + demo_v0 BuildRun`；诊断是 M3 capability，不是注册入口分叉。**目标合同**返回 `siteId` / `buildId` / `status` 并支持 `Idempotency-Key` 重放；truth-sync 审计基线仍返回 `{siteId,mode,status}` 且无 intake 幂等 header，须由 R0-contract 与 OpenAPI 收口后才可依赖。
+**Onboarding 分支口径（v3.2 §3.2 回写，#126 已落地）**：`hasWebsite` / `websiteUrl` **只作品牌理解背景，不控制 builder / diagnosis 分支**；注册后**无条件**创建 `Site + demo_v0 BuildRun`；诊断是 M3 capability，不是注册入口分叉。当前合同返回 `siteId` / `buildId` / `status:"generating_demo"`，支持 `Idempotency-Key` 同请求重放且不返回旧 `mode`；正式客户端以 code-first OpenAPI 为准。
 
 ### 2.1 Demo v0 不变量与目标（v3.2 §18.1 / §26 DV-0 回写）
 

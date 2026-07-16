@@ -39,7 +39,7 @@ packages/contracts/
   - 协议键（`data`/`page`/`error` 及 `page` 内键）snake_case；资源字段 camelCase（DTO 层）。事件 envelope 字段全 snake_case（ADR-009）。
   - 例外：`/health*` 不套信封（基础设施探针）。
 - **ID**：`uuid`。**时间**：UTC ISO-8601（如 `2026-07-06T03:00:00Z`）。**金额**：`{ "currency": "USD", "amount": "1234.56" }`（历史 PRD 11.14 的兼容约定；以生成 OpenAPI 为准）。
-- **幂等**：写副作用接口在 OpenAPI **明确声明时**支持 `Idempotency-Key`；客户端不得仅凭通用约定猜测。Site Builder `POST /sites/{id}/builds` 已声明，`POST /site-builder/intake` 仍待 R0 contract closeout。
+- **幂等**：写副作用接口在 OpenAPI **明确声明时**支持 `Idempotency-Key`；客户端不得仅凭通用约定猜测。Site Builder `POST /site-builder/intake` 与 `POST /sites/{id}/builds` 均已声明；intake 正式客户端必须复用同一 key 安全重试。
 - **并发**：可变资源带 `version`，冲突返回 `409 CONFLICT`/`VERSION_CONFLICT` + 当前版本。
 
 ## 错误模型（稳定机器码约定）
@@ -71,4 +71,4 @@ packages/contracts/
 - **共享类型**：`SiteSpec`、`SitePage`、`PuckData`、`PuckBlock`、`AssetRef` 与 `SITE_SPEC_VERSION='1.0.0'` 由 `@global/contracts` 导出。API 生产端和 `apps/site-renderer` 必须 `import type` 此处，不得各自重建第二份接口。
 - **当前能力边界**：DQ-1/#117 解决的是**编译期类型双真值**。运行时 Zod 校验、SiteSpec 1.1.0、DesignBrief/DesignDNA、丰富资产 provenance 都是后续消费者驱动的增量能力，不能写成已落地。
 - **REST 接入**：当前 OpenAPI 已包含 `/api/v1/site-builder/intake`、sites/profile、assets、KB status、builds/cancel 等端点。逐端点请求/响应以 `openapi.json` 为准，前端调用顺序与 as-built/target 差异见 [INTEGRATION.md](INTEGRATION.md)。
-- **已知 contract closeout**（truth-sync 审计基线 `main@a306ffa`，#124）：#121 已让 intake 行为无条件触发 demo，但 OpenAPI 仍没有 intake `Idempotency-Key`，响应仍为旧 `mode` 且没有 `buildId`，Swagger 摘要仍写诊断分叉。完成代码与重导出前，不得按目标 `{siteId,buildId,status}` 冒充 as-built。
+- **R0 contract closeout（#126）**：intake OpenAPI 已声明 `idempotency-key`，成功响应为 `{siteId,buildId,status:"generating_demo"}` 且无 `mode`；400/409/502 稳定错误码、Temporal execution-chain ACK 与消费者迁移说明已同步。当前接入以本包生成的 OpenAPI/类型为准。

@@ -2940,7 +2940,20 @@
     "/api/v1/site-builder/intake": {
       "post": {
         "operationId": "IntakeController_create_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "required": false,
+            "in": "header",
+            "description": "幂等键（1–128 位字母、数字、点、下划线、冒号或连字符）",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2969,6 +2982,107 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "请求字段或 idempotency-key 非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键复用冲突或 workspace 已有站点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "SITE_LIMIT_REACHED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "demo workflow 启动 ACK 不可用；有 key 时应同 key 重试",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "DEMO_LAUNCH_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2976,7 +3090,7 @@
             "bearer": []
           }
         ],
-        "summary": "注册引导提交：建站档案 + 秒级触发 demo v0（无站）或转站点诊断分支（有站，M3）",
+        "summary": "注册引导提交：无条件建站档案并秒级触发 demo v0",
         "tags": [
           "SiteBuilder"
         ]
@@ -4512,21 +4626,22 @@
             "type": "string",
             "format": "uuid"
           },
-          "mode": {
+          "buildId": {
             "type": "string",
-            "enum": [
-              "builder",
-              "diagnosis"
-            ]
+            "format": "uuid",
+            "description": "本次 demo v0 构建记录"
           },
           "status": {
             "type": "string",
-            "description": "站点状态（builder 路径为 building=demo v0 生成中）"
+            "enum": [
+              "generating_demo"
+            ],
+            "description": "demo v0 已确认进入编排"
           }
         },
         "required": [
           "siteId",
-          "mode",
+          "buildId",
           "status"
         ]
       },
@@ -4538,7 +4653,7 @@
             "description": "公司中文名"
           },
           "nameEn": {
-            "type": "object",
+            "type": "string",
             "description": "公司英文名（缺省时系统转写并让用户确认，M1）",
             "nullable": true
           }
@@ -4580,10 +4695,11 @@
           },
           "hasWebsite": {
             "type": "boolean",
-            "description": "海外是否已有独立站（分支题）"
+            "description": "海外是否已有独立站（仅作品牌理解背景，不控制流程或栏目）"
           },
           "websiteUrl": {
-            "type": "object",
+            "type": "string",
+            "format": "uri",
             "description": "hasWebsite=true 时必填",
             "nullable": true
           },

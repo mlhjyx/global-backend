@@ -266,7 +266,7 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 
 各里程碑的**合并门/测试泳道**（DoD，v3.2 §26 回写）：
 
-- **测试泳道 IT-0（Industrial Template 效果验证）**：可与 R0/R2 并行、非架构主序列。基于最新 main 重跑（或记录落后 SHA）；industrial pump 与 auto-parts 各有 sparse/rich fixture，存 1440/768/390 截图；记录 Astro build/axe/性能预算/unknown component/copy 与事实风险；输出**"可保留原创 / 需按合同改造 / 应丢弃"清单**；**未经组件合同审查不得整包合并 Section/themes/demo-spec**。
+- **测试泳道 IT-0（Industrial Template 效果验证）**：可与 R2 并行、非架构主序列。基于最新 main 重跑（或记录落后 SHA）；industrial pump 与 auto-parts 各有 sparse/rich fixture，存 1440/768/390 截图；记录 Astro build/axe/性能预算/unknown component/copy 与事实风险；输出**"可保留原创 / 需按合同改造 / 应丢弃"清单**；**未经组件合同审查不得整包合并 Section/themes/demo-spec**。
 - **M1-c 合并门（9 条 DoD，ADR-018）**：`AssetVariant` additive migration + RLS/FORCE RLS A/B 租户测试（不预建 MediaJob/AssetUsage）；原件永不覆盖 + recipe 相同不重复；commit/processing CAS/lease/重试/取消/zombie write；EXIF-GPS 真图复验 + 方向/色彩/透明 + AVIF/WebP/fallback 可解码；cert/person/logo 不进生成式且无 provider 调用；单图失败隔离、仅必需 Hero 无 fallback 才阻断；被引用 Asset 删除 409 + 扫描器覆盖 SiteSpec 1.0.0 全 AssetRef；MinIO 对象/Variant/checksum 可对账且对象清理不在 DB 事务；derivedKeys 双写兼容 + 停双写迁移条件；MF-1 触发条件已记录。
 - **PR M1-f（确定性 QA + 审美与反模板感）**：先断点/溢出/对比度/资源/链接/schema/事实/a11y，**再冻结截图多模态审美**；**最多三轮定向修复，禁随机全站重生成**。
 - **PR EVAL-bootstrap（可执行启动集）**：6 fixture（§1.1）；存输入/不变量/desktop-mobile 截图/质量/成本-延迟；产品 owner 成对偏好，**4/6 胜且客观硬门全过才扩 12 视觉 fixture**；启动集不宣称统计显著。（施工顺序 #11，v3.2 §0.3）
@@ -320,10 +320,10 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 
 > **只有分层全部满足才能说 M1 完成**——"页面看起来不错"不能替代可靠性、安全与发布合同。本节是**跨里程碑的正式验收契约**（此前散在 v3.2 §33、未分发，completeness-critic 查漏后补回）。多数条目的**机制真值在他处**（R0 审计见 [09 §10](09-m1-implementation-design.md)、MF-0 见 [14](14-media-foundation-mf0.md)、组件/契约见 [04](04-sitespec-contract.md)、模型门见 [10](10-model-selection-study.md)、发布治理见 [06](06-security-abuse.md)/[05](05-deployment-hosting.md)）；本清单是**统一的"是否可发布"门**，按 ID 引 ADR。
 >
-> **as-built 注记（2026-07-16）**：#121 已完成无条件 Demo 的行为，#123 已完成禁虚构身份守卫，#124 已完成业务邮箱隔离、真取消与失败保站；但 DoD-1 第一项仍未完成，因为 intake 响应尚无 `buildId`、`Idempotency-Key` 尚未实现，Swagger/OpenAPI 亦待收口。复选框按完整验收项记，不因某个子 PR 合并而提前勾选。
+> **as-built 注记（2026-07-16）**：#121/#123/#124 已完成无条件 Demo、禁虚构身份、业务邮箱隔离、真取消与失败保站；#126 已补齐 `buildId`、intake 幂等、Temporal 启动证据和 Swagger/OpenAPI，并以单测、真 PostgreSQL 与真实 Temporal probe 覆盖 DoD-1 第一项。
 
 ### DoD-1 M0~M1-b 回补
-- [ ] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2）
+- [x] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2，#121/#126）
 - [ ] Demo 不虚构企业类型/工厂/团队/认证/年限/客户/数字；P95 < 10s。（🔴 ADR-017 / R0-3）
 - [ ] active preview 不被失败/取消/未发布 build 覆盖；Release/版本分配并发安全。（ADR-013）
 - [ ] businessEmail 不进通用 KB/embedding/品牌 Prompt；存量 chunk 已重建清理。（R0-4 隐私）

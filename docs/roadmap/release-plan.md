@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-16 truth-sync，审计基线（合并前）为 `main@a306ffa`（#124）**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-16 truth-sync（#125）与 R0 contract closeout（#126）更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -10,14 +10,14 @@
 - M0 建站快路径、Astro 渲染器、素材/KB/构建端点已存在；DQ-1 SiteSpec 1.0.0 共享类型由 #117 落地。
 - DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
 - #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
+- #126 已完成 R0 contract closeout：intake 幂等、`buildId`、去 `mode`、稳定错误码、Temporal 启动证据与 OpenAPI 同步均已落地并验证。
 
 ### 当前关键路径与退出门
 
-1. **R0 contract closeout**：intake 支持 `Idempotency-Key`，返回 `{siteId, buildId, status}`，移除 `mode`，同步 Swagger/OpenAPI 与稳定错误码。#121 没做这些，R0 不能整体标完成。
-2. **R1-safety**：这是 R0 后立即执行的安全收口，可拆成两个小 PR：(a) 临时/构建文件 `finally` 清理 + renderer 子进程 env allowlist；(b) 安全/infra PR 替换 Ubuntu fake-IP 开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 例外。(b) 必须覆盖 `IntakeDto.websiteUrl → brand research → crawl4ai` 和 `robots.txt` 直连两类入口，使用真实 DNS/可校验 egress 或逐跳 URL guard，关闭例外，并通过公网正例与 private/loopback/metadata/DNS-rebinding/redirect 反例。未通过前本地仅接受开发者核验的公网 URL，不得开放不可信租户输入或生产抓取。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可并行，但必须在 M1-e 可见预览前完成。
-3. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset 状态机/CAS/fencing；R2-A2 KB lease/fencing/retry/幂等；R2-A3 Profile schema/乐观并发；R2-A4 Outbox/Temporal cleanup、redrive 与真实集成验证。禁止合成一个 migration/API/状态机 mega PR。
-4. **MF-0-thin**：`AssetVariant` + RLS/FORCE RLS、recipe/checksum/provenance、SiteSpec 引用扫描器、删除 409、`derivedKeys` 兼容投影。在引用扫描器落地前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
-5. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
+1. **R1-safety**：这是 R0 后立即执行的安全收口，可拆成两个小 PR：(a) 临时/构建文件 `finally` 清理 + renderer 子进程 env allowlist；(b) 安全/infra PR 替换 Ubuntu fake-IP 开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 例外。(b) 必须覆盖 `IntakeDto.websiteUrl → brand research → crawl4ai` 和 `robots.txt` 直连两类入口，使用真实 DNS/可校验 egress 或逐跳 URL guard，关闭例外，并通过公网正例与 private/loopback/metadata/DNS-rebinding/redirect 反例。未通过前本地仅接受开发者核验的公网 URL，不得开放不可信租户输入或生产抓取。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可并行，但必须在 M1-e 可见预览前完成。
+2. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset 状态机/CAS/fencing；R2-A2 KB lease/fencing/retry/幂等；R2-A3 Profile schema/乐观并发；R2-A4 Outbox/Temporal cleanup、redrive 与真实集成验证。禁止合成一个 migration/API/状态机 mega PR。
+3. **MF-0-thin**：`AssetVariant` + RLS/FORCE RLS、recipe/checksum/provenance、SiteSpec 引用扫描器、删除 409、`derivedKeys` 兼容投影。在引用扫描器落地前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
+4. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 

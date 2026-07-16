@@ -12,7 +12,7 @@
 - **本文管什么**：设计智能层"从设计参考 → 平台自有设计知识 → 每次生成的冻结决策 → 质量评测"这条链上的领域模型。它是 [09-m1-implementation-design.md](09-m1-implementation-design.md) 精装修管线（P1→P4）在 M1-d/e/f 阶段的**数据契约层**。
 - **本文不管什么**：编排 DAG、Agent 卡执行流（→ [03-agents.md](03-agents.md)）、SiteSpec 页面数据形状（→ [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014**）、模型路由四态（→ [10-model-selection-study.md](10-model-selection-study.md)、**ADR-016**）。
 - **as-built ↔ target 分界（务必区分）**：
-  - **as-built（truth-sync 审计基线 `main@a306ffa`，#124）**：SiteSpec 1.0.0 type-only 共享契约（#117）、`design_spec` AI Task 路由（7 个 task 之一）、10 型渲染组件、基础 `Asset`/上传能力。
+  - **as-built（2026-07-16，含 #125 truth-sync / #126 R0 contract）**：SiteSpec 1.0.0 type-only 共享契约（#117）、`design_spec` AI Task 路由（7 个 task 之一）、10 型渲染组件、基础 `Asset`/上传能力。
   - **target（尚未落地）**：M1-c 纯 Sharp 图片管线、`AssetVariant`/MF-0、DesignDNA / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation、26 型组件库与 SiteSpec 1.1.0 演进。**ADR-018 是已接受的路线，不是实现完成证明**。
 - **红线继承**：设计智能层不改变 **ADR-013**（固定 DAG + 有界 AI Task，无自由 Agent/Planner）、**ADR-017**（禁虚构身份）、**ADR-019**（Readdy = 净室视觉参考、运行时零依赖）。本文所有实体在这三条约束下成立。
 

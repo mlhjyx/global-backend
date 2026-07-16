@@ -14,19 +14,30 @@
 | 租户 | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数 |
 | 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED` |
 | 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封 |
-| 幂等 | **仅在 OpenAPI 声明该 header 的端点**支持 `Idempotency-Key`（如 `POST /companies`、Site Builder builds）；不能从通用约定推断所有 POST 已实现 |
+| 幂等 | **仅在 OpenAPI 声明该 header 的端点**支持 `Idempotency-Key`（如 `POST /companies`、Site Builder intake/builds）；不能从通用约定推断所有 POST 已实现 |
 | 乐观锁 | 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，冲突返回 409 `VERSION_CONFLICT` |
 | 异步 | 长任务（理解/发现/评分）返回 `202`，前端轮询对应状态端点（见下） |
 
+### Site Builder intake · R0 契约迁移（2026-07-16）
+
+`POST /api/v1/site-builder/intake` 是前后端正式联调前的一次 v1 契约纠偏：
+
+- 正式客户端 **MUST** 携带可重试复用的 `idempotency-key`（1–128 位：字母、数字、`.`、`_`、`:`、`-`）。同 key + 同请求重放首个结果；同 key + 异请求返回 `409 IDEMPOTENCY_KEY_REUSED`。端点暂保留无 key 兼容，但该路径不承诺 ACK-loss 下的安全重试；若 Temporal start 已返回而 DB ACK 持久化失败，后端会保留 Site/run，客户端应先查询 workspace 站点状态，绝不能假定失败即未启动。
+- 成功信封从旧 `{siteId, mode, status:"building"}` 改为 `{siteId, buildId, status:"generating_demo"}`；`mode` 已移除，`hasWebsite` 不再产生诊断分支。
+- `201` 表示 demo workflow 已取得持久启动证据；随后以返回的 `buildId` 轮询 `GET /api/v1/site-builder/builds/{buildId}`。`502 DEMO_LAUNCH_UNAVAILABLE` 时必须使用**同一个 key**重试，不要换 key。
+- 站点已占用且不是可原地重试的 `setup_failed` 时返回 `409 SITE_LIMIT_REACHED`；非法 key 返回 `400 INVALID_IDEMPOTENCY_KEY`。
+
+这是已批准并落地的预接入 breaking correction；不提供旧响应双写。前端以本次生成的 OpenAPI/TS 类型为准。
+
 ## 2. Site Builder · 当前 as-built 接入顺序
 
-> truth-sync 审计基线（合并前）：`main@a306ffa`（#124）。#121 已让 intake **行为上**不再按 `hasWebsite` 分叉，始终触发 Demo v0；#123/#124 已落事实安全、隐私、可取消超时与失败保站。下列形状只描述当前 code-first OpenAPI；目标契约见 `docs/site-builder/07-api-contract-draft.md`。
+> R0 contract closeout（#126）已在 #121/#123/#124 的行为与安全修复之上，补齐 intake 幂等、`buildId`、稳定错误码、Temporal 启动证据与 code-first OpenAPI。下列形状描述合并后的 as-built；后续目标契约见 `docs/site-builder/07-api-contract-draft.md`。
 
 > **Base URL**：以下路径均包含全局版本前缀 `/api/v1`；客户端应直接使用完整路径，不要省略 `/api/v1`。
 
 1. `POST /api/v1/site-builder/intake` 提交公司、行业、产品、目标市场、网站背景与业务邮箱。
-   - 当前返回：`{ "data": { "siteId", "mode": "builder", "status": "building" } }`。
-   - ⚠️ 当前端点**没有** `Idempotency-Key` 声明，也不返回 `buildId`；`mode` 与 Swagger 的“有站诊断”文字仍是旧契约。R0 contract closeout 将改为目标 `{siteId,buildId,status}`、去 `mode` 并重导 OpenAPI。在完成前，客户端不得假定目标形状已经可用。
+   - 正式客户端必须携带 `Idempotency-Key`；同键同请求重放首次结果，同键异请求返回 `409 IDEMPOTENCY_KEY_REUSED`。
+   - 当前返回：`{ "data": { "siteId", "buildId", "status": "generating_demo" } }`；不再返回 `mode`。
 2. `GET /api/v1/site-builder/sites` 或 `GET /api/v1/site-builder/sites/{id}` 轮询站点；`status=ready` 后 `previewUrl` 可用。异步终态失败为 `setup_failed`，站点和 intake 会保留，用户可重试。
 3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。当前组内 schema 与乐观并发仍属 R2-A3 待收口，不要依赖 last-write-wins 行为。
 4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；SiteSpec 引用扫描与 `409 ASSET_IN_USE` 是 MF-0-thin 目标，当前尚未落地。
@@ -38,6 +49,7 @@
 ## 3. 获客主线 · 端到端调用顺序（冻结维护）
 
 ### 阶段 0：企业理解（Understand）
+
 1. `POST /companies { website, name? }` → 202，后台自动：多页抓取 → 抽取事实/产品/画像/公开联系方式
 2. 轮询 `GET /companies/:id` —— `status`: `DRAFT → ENRICHING → REVIEW → ACTIVE`
 3. `GET /companies/:id/claims?status=NEEDS_REVIEW` → 人工审批 `POST /claims/:id/approve|reject`
@@ -47,12 +59,14 @@
 5. 手工补充事实：`POST /companies/:id/claims`；纠错撤销：`POST /claims/:id/revoke`
 
 ### 阶段 1：ICP（Target）
+
 1. `POST /companies/:id/icps` → AI 生成 ICP（`HYPOTHESIS`）：属性/痛点/触发信号/排除 + 买家委员会 + **机器可评估规则 rules**
 2. 人工修订：`PATCH /icps/:id`；规则增删改：`POST /icps/:id/rules`、`PATCH|DELETE /icp-rules/:ruleId`
 3. 回测：`POST /icps/:id/backtests { samples: [{name, attributes, expected}] }` → 命中率指标（→ `VALIDATING`）
 4. 激活：`POST /icps/:id/activate`（旧 ACTIVE 自动 `SUPERSEDED`）
 
 ### 阶段 2：发现（Discover）
+
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
@@ -65,6 +79,7 @@
 6. 禁联名单：`POST|GET|DELETE /suppressions`（domain/email/company_name；即时生效）
 
 ### 阶段 3：验证评分（Qualify）
+
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
 2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**

@@ -92,7 +92,7 @@ POST /site-builder/import/storefront          # 店铺 URL 导入（M3）
 POST /sites/{id}/publish                      # 发布（M2）
 ```
 
-> **intake as-built 尾巴（2026-07-16）**：#121 已实现「有/无旧站都无条件建 Demo」的行为，但当前响应仍为 `{siteId,mode,status}`，没有目标合同的 `buildId`，也未实现 `Idempotency-Key`；controller/Swagger 仍残留旧诊断分支描述。目标契约是 `{siteId,buildId,status}`，由独立 `R0-contract` 收口；在此之前不得把 intake API 宣称为完成。
+> **intake as-built（2026-07-16，#126）**：有/无旧站都无条件建 Demo；响应为 `{siteId,buildId,status:"generating_demo"}` 且不返回 `mode`。`Idempotency-Key` 以 `(workspace, endpoint, key)` 持久化，同键同请求重放首次结果、异请求返回稳定 409；Temporal 使用确定性 workflowId 与 execution-chain ACK 收敛启动不确定窗口。正式形状以 code-first OpenAPI 为准。
 
 鉴权照旧：SaaS token → JWKS 验签 → workspace_id → RLS。全部接口 OpenAPI 注解，Scalar 门户可见。
 
