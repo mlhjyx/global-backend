@@ -162,6 +162,13 @@ describe("R2-A3 profile contract", () => {
     expect(() => assertProfileSize(justOver)).toThrow(HttpException);
   });
 
+  it("accepts an explicit null as whole-group clear semantics", () => {
+    expect(validateProfilePatch({ baseVersionId: V0, brand: null })).toEqual({
+      baseVersionId: V0,
+      groups: { brand: null },
+    });
+  });
+
   it("uses one strong resource-scoped ETag and deterministic precondition precedence", () => {
     expect(profileEtag(V0)).toBe(`"profile:${V0}"`);
     expect(
@@ -181,6 +188,8 @@ describe("R2-A3 profile contract", () => {
   });
 
   it.each([
+    [""],
+    ["   "],
     ["*"],
     [`W/"profile:${V0}"`],
     [`profile:${V0}`],
@@ -212,5 +221,12 @@ describe("R2-A3 profile contract", () => {
         "22222222-2222-4222-8222-222222222222",
       ),
     ).toThrow(HttpException);
+
+    try {
+      resolveProfilePrecondition("   ", V0);
+      throw new Error("expected malformed empty header");
+    } catch (error) {
+      expect(statusOf(error)).toBe(400);
+    }
   });
 });

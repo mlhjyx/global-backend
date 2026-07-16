@@ -14,13 +14,24 @@ import type { ResearchSource } from './brand-research';
  *   additionalProperties=false（网关校验拒绝加塞）。
  */
 
-export const EVIDENCE_SOURCE_TYPES = ['intake', 'upload', 'storefront', 'web_research'] as const;
+export const EVIDENCE_SOURCE_TYPES = [
+  'intake',
+  'upload',
+  'storefront',
+  'web_research',
+] as const;
 export type EvidenceSourceType = (typeof EVIDENCE_SOURCE_TYPES)[number];
 
 /** 引用了真实来源集合的证据类型（url 须命中本次抓取语料）。 */
-const URL_CITED_SOURCE_TYPES: ReadonlySet<string> = new Set(['storefront', 'web_research']);
+const URL_CITED_SOURCE_TYPES: ReadonlySet<string> = new Set([
+  'storefront',
+  'web_research',
+]);
 /** 站主自证的证据类型（可核验语料=intake 档案 / KB 上传件）。 */
-const SELF_ASSERTED_SOURCE_TYPES: ReadonlySet<string> = new Set(['intake', 'upload']);
+const SELF_ASSERTED_SOURCE_TYPES: ReadonlySet<string> = new Set([
+  'intake',
+  'upload',
+]);
 
 export interface FactEvidence {
   sourceType: EvidenceSourceType;
@@ -103,7 +114,9 @@ const CERTIFICATION_CLAIM_PATTERNS: RegExp[] = [
 ];
 
 const isCertificationClaim = (item: RawFactItem): boolean =>
-  CERTIFICATION_CLAIM_PATTERNS.some((re) => re.test(item.key) || re.test(item.value));
+  CERTIFICATION_CLAIM_PATTERNS.some(
+    (re) => re.test(item.key) || re.test(item.value),
+  );
 
 /** gap hint 里回显模型 value 的截断上限（复审 F4：value 无界，被拒内容逐版本持久化）。 */
 const HINT_VALUE_MAX = 120;
@@ -133,41 +146,66 @@ export function enforceEvidenceGate(
   for (const item of items) {
     const evidence = item.evidence;
     if (!evidence || !EVIDENCE_SOURCE_TYPES.includes(evidence.sourceType)) {
-      gap(item, 'missing_evidence', `「${clampHint(item.value)}」无可溯源证据，请在资料中心补充依据或确认删除`);
+      gap(
+        item,
+        'missing_evidence',
+        `「${clampHint(item.value)}」无可溯源证据，请在资料中心补充依据或确认删除`,
+      );
       continue;
     }
 
     // 该来源类型的可核验语料
     let sourceText: string | null = null;
     if (SELF_ASSERTED_SOURCE_TYPES.has(evidence.sourceType)) {
-      sourceText = evidence.sourceType === 'intake' ? corpus.intakeText : corpus.kbText;
+      sourceText =
+        evidence.sourceType === 'intake' ? corpus.intakeText : corpus.kbText;
     } else if (URL_CITED_SOURCE_TYPES.has(evidence.sourceType)) {
       const canonical = canonicalUrl(evidence.url);
       if (!canonical || !corpus.urlText.has(canonical)) {
-        gap(item, 'uncited_web_source', `「${clampHint(item.value)}」引用的网络来源无法核实（未命中本次抓取集合）`);
+        gap(
+          item,
+          'uncited_web_source',
+          `「${clampHint(item.value)}」引用的网络来源无法核实（未命中本次抓取集合）`,
+        );
         continue;
       }
       sourceText = corpus.urlText.get(canonical) ?? '';
     }
     if (sourceText == null || sourceText.trim() === '') {
       // 标了来源类型却无对应语料（如 upload 但 KB 为空）——无从核验，拒
-      gap(item, 'missing_evidence', `「${clampHint(item.value)}」标注的来源无可核验内容`);
+      gap(
+        item,
+        'missing_evidence',
+        `「${clampHint(item.value)}」标注的来源无可核验内容`,
+      );
       continue;
     }
 
     if (isCertificationClaim(item)) {
       // D2：认证类是最高标准——web 单源直接拒；其余来源必须 quote 实质命中源
       if (evidence.sourceType === 'web_research') {
-        gap(item, 'unverified_certification', `「${clampHint(item.value)}」为认证类断言，仅有网络单源不足以上站——请上传证书文件`);
+        gap(
+          item,
+          'unverified_certification',
+          `「${clampHint(item.value)}」为认证类断言，仅有网络单源不足以上站——请上传证书文件`,
+        );
         continue;
       }
       if (!quoteSupported(evidence.quote, sourceText)) {
-        gap(item, 'unverified_certification', `「${clampHint(item.value)}」为认证类断言，未在资料原文中找到对应依据——请上传证书或补充原文`);
+        gap(
+          item,
+          'unverified_certification',
+          `「${clampHint(item.value)}」为认证类断言，未在资料原文中找到对应依据——请上传证书或补充原文`,
+        );
         continue;
       }
     } else if (evidence.quote && !quoteSupported(evidence.quote, sourceText)) {
       // 非认证事实：给了 quote 就必须核验通过（防捏造引用蒙混）
-      gap(item, 'unsupported_quote', `「${clampHint(item.value)}」引用的原文片段未在来源中找到`);
+      gap(
+        item,
+        'unsupported_quote',
+        `「${clampHint(item.value)}」引用的原文片段未在来源中找到`,
+      );
       continue;
     }
 
@@ -220,14 +258,22 @@ export const BRAND_PROFILE_OUTPUT_SCHEMA: Record<string, unknown> = {
   required: ['valueProps', 'keywords', 'factSheet', 'gaps'],
   additionalProperties: false,
   properties: {
-    valueProps: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 300 } },
+    valueProps: {
+      type: 'array',
+      maxItems: 8,
+      items: { type: 'string', maxLength: 300 },
+    },
     tone: {
       type: 'object',
       required: ['voice'],
       additionalProperties: false,
       properties: {
         voice: { type: 'string', maxLength: 200 },
-        style: { type: 'array', maxItems: 6, items: { type: 'string', maxLength: 80 } },
+        style: {
+          type: 'array',
+          maxItems: 6,
+          items: { type: 'string', maxLength: 80 },
+        },
       },
     },
     glossary: {
@@ -243,8 +289,16 @@ export const BRAND_PROFILE_OUTPUT_SCHEMA: Record<string, unknown> = {
         },
       },
     },
-    keywords: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 80 } },
-    differentiators: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 300 } },
+    keywords: {
+      type: 'array',
+      maxItems: 30,
+      items: { type: 'string', maxLength: 80 },
+    },
+    differentiators: {
+      type: 'array',
+      maxItems: 8,
+      items: { type: 'string', maxLength: 300 },
+    },
     competitors: {
       type: 'array',
       maxItems: 6,
@@ -290,7 +344,13 @@ export const BRAND_PROFILE_OUTPUT_SCHEMA: Record<string, unknown> = {
 
 export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
   type: 'object',
-  required: ['companyName', 'products', 'targetMarkets', 'kbDigest', 'research'],
+  required: [
+    'companyName',
+    'products',
+    'targetMarkets',
+    'kbDigest',
+    'research',
+  ],
   properties: {
     companyName: { type: 'string', minLength: 1 },
     industry: { type: 'string' },
@@ -324,21 +384,37 @@ export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/2';
  */
 export const SENSITIVE_PROFILE_GROUPS = ['contact'] as const;
 
-/** 剔除敏感档案组（prompt 与 intake 语料共用，DRY）。 */
+function scrubProfileValue(value: unknown): unknown {
+  if (typeof value === 'string') return scrubPii(value);
+  if (Array.isArray(value)) return value.map(scrubProfileValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+        key,
+        scrubProfileValue(child),
+      ]),
+    );
+  }
+  return value;
+}
+
+/** 剔除敏感组并递归遮蔽其余自由文本 PII（prompt 与 evidence corpus 共用，DRY）。 */
 export function sanitizeProfileForPrompt(
   profile: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
   if (!profile) return undefined;
   const out = { ...profile };
   for (const group of SENSITIVE_PROFILE_GROUPS) delete out[group];
-  return out;
+  return scrubProfileValue(out) as Record<string, unknown>;
 }
 
 /** 落库前 PII 清洗（复审 F2）：自由文本里的邮箱/电话遮蔽（人名残余风险靠 prompt+人审）。 */
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 const PHONE_RE = /(?:\+?\d[\d\s().-]{7,}\d)/g;
 export function scrubPii(text: string): string {
-  return text.replace(EMAIL_RE, '[redacted-email]').replace(PHONE_RE, '[redacted-phone]');
+  return text
+    .replace(EMAIL_RE, '[redacted-email]')
+    .replace(PHONE_RE, '[redacted-phone]');
 }
 
 export function buildBrandProfilePrompt(input: BrandProfileInput): string {
@@ -384,7 +460,10 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
   ].join('\n');
 }
 
-export const BRAND_PROFILE_TASK: SiteBuilderTaskDefinition<BrandProfileInput, BrandProfileOutput> = {
+export const BRAND_PROFILE_TASK: SiteBuilderTaskDefinition<
+  BrandProfileInput,
+  BrandProfileOutput
+> = {
   id: 'site_builder.brand_profile',
   inputSchema: BRAND_PROFILE_INPUT_SCHEMA,
   outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA,

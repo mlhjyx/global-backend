@@ -3193,7 +3193,510 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "versionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                        },
+                        "companyProfile": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "foundedYear": {
+                              "type": "integer",
+                              "minimum": 1800,
+                              "maximum": 2026
+                            },
+                            "employeeCountRange": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "min": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                },
+                                "max": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                }
+                              }
+                            },
+                            "businessType": {
+                              "enum": [
+                                "manufacturer",
+                                "trading_company",
+                                "manufacturer_and_trader"
+                              ]
+                            },
+                            "city": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "annualExportRevenue": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$"
+                                },
+                                "min": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "max": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "currency"
+                              ]
+                            },
+                            "exportMarkets": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{2}$"
+                              }
+                            },
+                            "capacityDescription": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "productionLines": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                              }
+                            },
+                            "moq": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "leadTime": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "trustAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "certifications": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "certificateAssetIds": {
+                                    "type": "array",
+                                    "maxItems": 5,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "patents": {
+                              "type": "array",
+                              "maxItems": 50,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "number": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "jurisdiction": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 16,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "title"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "number"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "customerCases": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "displayLabel": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "industry": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  },
+                                  "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "anonymized": {
+                                    "type": "boolean"
+                                  },
+                                  "assetIds": {
+                                    "type": "array",
+                                    "maxItems": 10,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "displayLabel"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "industry"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "summary"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "exhibitions": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "year": {
+                                    "type": "integer",
+                                    "minimum": 1900,
+                                    "maximum": 2027
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "year"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "onlineAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "storefronts": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "alibaba",
+                                      "made_in_china",
+                                      "global_sources",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "importAuthorized": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url",
+                                  "importAuthorized"
+                                ]
+                              }
+                            },
+                            "socialProfiles": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            },
+                            "googleBusinessProfiles": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            }
+                          }
+                        },
+                        "brand": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "logoAssetId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                            },
+                            "colors": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$"
+                              }
+                            },
+                            "referenceSites": {
+                              "type": "array",
+                              "maxItems": 3,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            },
+                            "slogan": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "contact": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "publicEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "whatsappNumbers": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "phoneNumbers": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "inquiryRecipientEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "displaySocialLinks": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "instagram",
+                                      "x",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 80,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "versionId"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3216,11 +3719,1270 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "if-match",
+            "in": "header",
+            "description": "Profile 强 ETag；与 body.baseVersionId 至少提供一个",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "\"profile:11111111-1111-4111-8111-111111111111\""
+            }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "baseVersionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                  },
+                  "companyProfile": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "foundedYear": {
+                        "type": "integer",
+                        "minimum": 1800,
+                        "maximum": 2026
+                      },
+                      "employeeCountRange": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "max": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          }
+                        }
+                      },
+                      "businessType": {
+                        "enum": [
+                          "manufacturer",
+                          "trading_company",
+                          "manufacturer_and_trader"
+                        ]
+                      },
+                      "city": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      },
+                      "annualExportRevenue": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$"
+                          },
+                          "min": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "max": {
+                            "type": "number",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "currency"
+                        ]
+                      },
+                      "exportMarkets": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Z]{2}$"
+                        }
+                      },
+                      "capacityDescription": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      },
+                      "productionLines": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120,
+                          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                        }
+                      },
+                      "moq": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      },
+                      "leadTime": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "trustAssets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "certifications": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "certificateAssetIds": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                              }
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ]
+                        }
+                      },
+                      "patents": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "number": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "jurisdiction": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 16,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          },
+                          "anyOf": [
+                            {
+                              "required": [
+                                "title"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "number"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "customerCases": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "displayLabel": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "industry": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "country": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{2}$"
+                            },
+                            "summary": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "anonymized": {
+                              "type": "boolean"
+                            },
+                            "assetIds": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                              }
+                            }
+                          },
+                          "anyOf": [
+                            {
+                              "required": [
+                                "displayLabel"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "industry"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "summary"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "exhibitions": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "year": {
+                              "type": "integer",
+                              "minimum": 1900,
+                              "maximum": 2027
+                            },
+                            "country": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{2}$"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "year"
+                          ]
+                        }
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "onlineAssets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "storefronts": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "platform": {
+                              "enum": [
+                                "alibaba",
+                                "made_in_china",
+                                "global_sources",
+                                "other"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^https?://",
+                              "maxLength": 2048
+                            },
+                            "importAuthorized": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "platform",
+                            "url",
+                            "importAuthorized"
+                          ]
+                        }
+                      },
+                      "socialProfiles": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "platform": {
+                              "enum": [
+                                "linkedin",
+                                "facebook",
+                                "youtube",
+                                "other"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^https?://",
+                              "maxLength": 2048
+                            }
+                          },
+                          "required": [
+                            "platform",
+                            "url"
+                          ]
+                        }
+                      },
+                      "googleBusinessProfiles": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https?://",
+                          "maxLength": 2048
+                        }
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "brand": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "logoAssetId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                      },
+                      "colors": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^#[0-9A-Fa-f]{6}$"
+                        }
+                      },
+                      "referenceSites": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https?://",
+                          "maxLength": 2048
+                        }
+                      },
+                      "slogan": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "contact": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "publicEmails": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "email",
+                          "maxLength": 254
+                        }
+                      },
+                      "whatsappNumbers": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^\\+[1-9][0-9]{7,14}$"
+                        }
+                      },
+                      "phoneNumbers": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^\\+[1-9][0-9]{7,14}$"
+                        }
+                      },
+                      "inquiryRecipientEmails": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "email",
+                          "maxLength": 254
+                        }
+                      },
+                      "displaySocialLinks": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "platform": {
+                              "enum": [
+                                "linkedin",
+                                "facebook",
+                                "youtube",
+                                "instagram",
+                                "x",
+                                "other"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^https?://",
+                              "maxLength": 2048
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          },
+                          "required": [
+                            "platform",
+                            "url"
+                          ]
+                        }
+                      }
+                    },
+                    "nullable": true
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "companyProfile"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "trustAssets"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "onlineAssets"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "brand"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contact"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "versionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                        },
+                        "companyProfile": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "foundedYear": {
+                              "type": "integer",
+                              "minimum": 1800,
+                              "maximum": 2026
+                            },
+                            "employeeCountRange": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "min": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                },
+                                "max": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                }
+                              }
+                            },
+                            "businessType": {
+                              "enum": [
+                                "manufacturer",
+                                "trading_company",
+                                "manufacturer_and_trader"
+                              ]
+                            },
+                            "city": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "annualExportRevenue": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$"
+                                },
+                                "min": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "max": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "currency"
+                              ]
+                            },
+                            "exportMarkets": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{2}$"
+                              }
+                            },
+                            "capacityDescription": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "productionLines": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                              }
+                            },
+                            "moq": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "leadTime": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "trustAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "certifications": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "certificateAssetIds": {
+                                    "type": "array",
+                                    "maxItems": 5,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "patents": {
+                              "type": "array",
+                              "maxItems": 50,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "number": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "jurisdiction": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 16,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "title"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "number"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "customerCases": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "displayLabel": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "industry": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  },
+                                  "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "anonymized": {
+                                    "type": "boolean"
+                                  },
+                                  "assetIds": {
+                                    "type": "array",
+                                    "maxItems": 10,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "displayLabel"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "industry"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "summary"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "exhibitions": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "year": {
+                                    "type": "integer",
+                                    "minimum": 1900,
+                                    "maximum": 2027
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "year"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "onlineAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "storefronts": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "alibaba",
+                                      "made_in_china",
+                                      "global_sources",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "importAuthorized": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url",
+                                  "importAuthorized"
+                                ]
+                              }
+                            },
+                            "socialProfiles": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            },
+                            "googleBusinessProfiles": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            }
+                          }
+                        },
+                        "brand": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "logoAssetId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                            },
+                            "colors": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$"
+                              }
+                            },
+                            "referenceSites": {
+                              "type": "array",
+                              "maxItems": 3,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            },
+                            "slogan": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "contact": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "publicEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "whatsappNumbers": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "phoneNumbers": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "inquiryRecipientEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "displaySocialLinks": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "instagram",
+                                      "x",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 80,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "versionId"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "If-Match 非法或双判据矛盾",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "baseVersionId 已过期",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match 已过期",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Profile schema、数量、URL、引用或大小不合格",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match/baseVersionId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [

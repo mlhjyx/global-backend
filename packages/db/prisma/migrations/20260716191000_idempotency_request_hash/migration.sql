@@ -6,4 +6,4 @@ ADD COLUMN "request_hash" VARCHAR(64);
 -- Defense in depth: application code writes a lowercase SHA-256 hex digest.
 ALTER TABLE "idempotency_key"
 ADD CONSTRAINT "idempotency_key_request_hash_format"
-CHECK ("request_hash" IS NULL OR "request_hash" ~ '^[0-9a-f]{64}$') NOT VALID;
+CHECK ("request_hash" IS NULL OR "request_hash" ~ '^[0-9a-f]{64}$');

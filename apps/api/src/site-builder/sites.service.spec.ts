@@ -15,7 +15,10 @@ const BODY_PRECONDITION: ProfilePrecondition = {
   source: "baseVersionId",
 };
 
-function makeService(rows: Record<string, unknown>[] = []) {
+function makeService(
+  rows: Record<string, unknown>[] = [],
+  assets: Array<{ id: string; kind: string }> = [],
+) {
   const db = { sites: rows.map((r) => ({ ...r })) };
   const tx = {
     site: {
@@ -50,6 +53,9 @@ function makeService(rows: Record<string, unknown>[] = []) {
         return { count: 1 };
       },
     },
+    asset: {
+      findMany: async () => assets,
+    },
   };
   const prisma = {
     withWorkspace: async <T>(
@@ -71,7 +77,7 @@ const SITE_ROW = {
   locales: ["en"],
   activeVersionId: null,
   intake: {},
-  profile: { brand: { tone: "professional" } },
+  profile: { brand: { slogan: "Initial profile" } },
   profileVersionId: V0,
   createdAt: new Date("2026-07-14T00:00:00Z"),
   updatedAt: new Date("2026-07-14T00:00:00Z"),
@@ -101,12 +107,12 @@ describe("SitesService（站点列表/详情/向导档案，07 §2）", () => {
       BODY_PRECONDITION,
     );
     expect(merged).toMatchObject({
-      brand: { tone: "professional" },
+      brand: { slogan: "Initial profile" },
       contact: { publicEmails: ["sales@acmepump.com"] },
     });
     expect(merged.versionId).not.toBe(V0);
     expect((db.sites[0] as Record<string, unknown>).profile).toEqual({
-      brand: { tone: "professional" },
+      brand: { slogan: "Initial profile" },
       contact: { publicEmails: ["sales@acmepump.com"] },
     });
     expect((db.sites[0] as Record<string, unknown>).profileVersionId).toBe(
@@ -164,5 +170,74 @@ describe("SitesService（站点列表/详情/向导档案，07 §2）", () => {
       HttpException,
     );
     expect((loser as PromiseRejectedResult).reason.getStatus()).toBe(412);
+  });
+
+  it("rejects an Asset UUID that cannot resolve through current workspace/site RLS", async () => {
+    const { service, db } = makeService([SITE_ROW]);
+    await expect(
+      service.patchProfile(
+        CTX,
+        SITE_ID,
+        { brand: { logoAssetId: "55555555-5555-4555-8555-555555555555" } },
+        BODY_PRECONDITION,
+      ),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(db.sites[0].profileVersionId).toBe(V0);
+  });
+
+  it("validates Asset references on the merged Profile, including unchanged groups", async () => {
+    const logoId = "55555555-5555-4555-8555-555555555555";
+    const { service, db } = makeService([
+      { ...SITE_ROW, profile: { brand: { logoAssetId: logoId } } },
+    ]);
+    await expect(
+      service.patchProfile(
+        CTX,
+        SITE_ID,
+        { contact: { publicEmails: ["sales@example.com"] } },
+        BODY_PRECONDITION,
+      ),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(db.sites[0].profileVersionId).toBe(V0);
+  });
+
+  it("does not let one Asset kind overwrite another reference path requirement", async () => {
+    const sharedId = "55555555-5555-4555-8555-555555555555";
+    const { service } = makeService([SITE_ROW], [{ id: sharedId, kind: "cert" }]);
+    await expect(
+      service.patchProfile(
+        CTX,
+        SITE_ID,
+        {
+          brand: { logoAssetId: sharedId },
+          trustAssets: {
+            certifications: [{ name: "ISO 9001", certificateAssetIds: [sharedId] }],
+          },
+        },
+        BODY_PRECONDITION,
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      response: {
+        error: {
+          details: { path: "/brand/logoAssetId", expectedKind: "logo" },
+        },
+      },
+    });
+  });
+
+  it("rejects a write when historical merged Profile violates the strict response schema", async () => {
+    const { service, db } = makeService([
+      { ...SITE_ROW, profile: { brand: { legacyTone: "professional" } } },
+    ]);
+    await expect(
+      service.patchProfile(
+        CTX,
+        SITE_ID,
+        { contact: { publicEmails: ["sales@example.com"] } },
+        BODY_PRECONDITION,
+      ),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(db.sites[0].profileVersionId).toBe(V0);
   });
 });

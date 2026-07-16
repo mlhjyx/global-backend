@@ -1244,6 +1244,7 @@ model Site {
   activeVersionId String?  @map("active_version_id") @db.Uuid // 指针式发布/回滚（05 §4）
   intake          Json // 注册引导 6 项原始提交（01 §2）
   profile         Json? // 建站向导五组（companyProfile/trustAssets/onlineAssets/brand/contact）
+  profileVersionId String @default(dbgenerated("gen_random_uuid()")) @map("profile_version_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

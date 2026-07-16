@@ -54,6 +54,7 @@ function toSchema(model: ModelOrSchema): RawSchema {
 interface EnvelopeOptions {
   status?: number;
   description?: string;
+  headers?: Record<string, RawSchema>;
 }
 
 /** `{ data: Model }` 响应声明。DTO 类走 $ref（自动注册 extraModels），裸 schema 内联。 */
@@ -63,6 +64,7 @@ export function ApiEnvelope(model: ModelOrSchema, opts: EnvelopeOptions = {}): M
       status: opts.status ?? 200,
       description: opts.description,
       schema: envelopeSchema(toSchema(model)),
+      headers: opts.headers,
     }),
   ];
   if (isDtoClass(model)) decorators.unshift(ApiExtraModels(model));
