@@ -92,7 +92,7 @@ describe("MF0-A AssetVariant migration integrity", () => {
     const schema = repositoryFile("packages/db/prisma/schema.prisma");
 
     expect(schema).toContain("model AssetVariant {");
-    expect(schema).toContain("variants AssetVariant[]");
+    expect(schema).toMatch(/variants\s+AssetVariant\[\]/);
     expect(schema).toContain("@@unique([assetId, recipeHash]");
     expect(schema).toContain("@@map(\"asset_variant\")");
     expect(schema).not.toContain("model MediaJob {");

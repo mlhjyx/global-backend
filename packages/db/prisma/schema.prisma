@@ -1329,8 +1329,9 @@ model Asset {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  site        Site         @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "asset_site_workspace_fkey")
+  site        Site           @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "asset_site_workspace_fkey")
   kbDocuments KbDocument[]
+  variants    AssetVariant[]
 
   @@unique([id, workspaceId, siteId], map: "asset_id_workspace_id_site_id_key")
   // active object_key 的唯一性由 migration 中 WHERE deleted_at IS NULL 的部分唯一索引保证。
@@ -1338,6 +1339,43 @@ model Asset {
   @@index([workspaceId, siteId, kind])
   @@index([workspaceId, processingStatus, retryAt])
   @@map("asset")
+}
+
+/// MF-0 可发布派生物：每行是一个确定性 recipe 的单一物化输出。
+/// Asset 是逻辑素材/原件；derivedKeys 仅是由本表投影的短期兼容视图。
+model AssetVariant {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  siteId          String   @map("site_id") @db.Uuid
+  assetId         String   @map("asset_id") @db.Uuid
+  variantType     String   @map("variant_type") // hero | card | thumb | logo；后续媒体角色可扩展
+  mime            String
+  width           Int?
+  height          Int?
+  durationMs      Int?     @map("duration_ms")
+  bitrateKbps     Int?     @map("bitrate_kbps")
+  sizeBytes       Int?     @map("size_bytes")
+  objectKey       String   @map("object_key")
+  contentHash     String?  @map("content_hash") // ready 时必填，sha256 lowercase hex
+  pipelineVersion String   @map("pipeline_version")
+  recipeHash      String   @map("recipe_hash") // 单个输出 recipe 的 sha256
+  sourceVariantId String?  @map("source_variant_id") @db.Uuid
+  status          String   @default("processing") // processing | ready | failed
+  error           String?
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  asset           Asset          @relation(fields: [assetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: Cascade, map: "asset_variant_asset_scope_fkey")
+  sourceVariant   AssetVariant?  @relation("AssetVariantSource", fields: [sourceVariantId, workspaceId, siteId, assetId], references: [id, workspaceId, siteId, assetId], onDelete: Cascade, onUpdate: Cascade, map: "asset_variant_source_scope_fkey")
+  derivedVariants AssetVariant[] @relation("AssetVariantSource")
+
+  @@unique([assetId, recipeHash], map: "asset_variant_asset_id_recipe_hash_key")
+  @@unique([objectKey], map: "asset_variant_object_key_key")
+  @@unique([id, workspaceId, siteId, assetId], map: "asset_variant_id_workspace_site_asset_key")
+  @@index([workspaceId, siteId, assetId, status], map: "asset_variant_workspace_site_asset_status_idx")
+  @@index([sourceVariantId], map: "asset_variant_source_variant_id_idx")
+  @@map("asset_variant")
 }
 
 /// 知识库文档（02 §12）：Docling 解析 → 结构感知切块 → 向量化。删除=chunk 级联（分租户护栏②）。
