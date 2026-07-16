@@ -1,6 +1,9 @@
 -- R2-A2 constraint/state-machine phase. The preceding data migration guarantees the
 -- nullable unique and composite provenance FKs can be added without hiding bad history.
 
+BEGIN;
+LOCK TABLE asset, kb_document, kb_chunk IN SHARE ROW EXCLUSIVE MODE;
+
 ALTER TABLE asset ADD COLUMN processing_error_code text;
 
 ALTER TABLE asset DROP CONSTRAINT asset_processing_status_check;
@@ -68,3 +71,5 @@ CREATE INDEX asset_kb_queued_due_idx
 CREATE INDEX asset_kb_processing_expired_idx
   ON asset(workspace_id, lease_until, created_at)
   WHERE kind = 'doc' AND processing_status = 'processing' AND deleted_at IS NULL;
+
+COMMIT;

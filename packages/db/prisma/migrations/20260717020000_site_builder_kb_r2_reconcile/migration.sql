@@ -2,6 +2,9 @@
 -- asset uniqueness/provenance constraints. This migration is idempotent in effect:
 -- after the first successful run every upload Asset has at most one healthy document.
 
+BEGIN;
+LOCK TABLE asset, kb_document, kb_chunk IN SHARE ROW EXCLUSIVE MODE;
+
 -- Invalid upload provenance cannot be safely relabelled as an intake/wizard document.
 -- Delete it; the canonical doc Asset is re-queued below when it has no healthy document.
 WITH invalid AS (
@@ -112,3 +115,5 @@ BEGIN
     RAISE EXCEPTION 'R2-A2 KB reconciliation did not converge';
   END IF;
 END $$;
+
+COMMIT;
