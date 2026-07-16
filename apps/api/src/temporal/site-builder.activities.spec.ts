@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context as ActivityContext } from '@temporalio/activity';
+import type { PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   createSiteBuilderActivities,
@@ -116,6 +117,28 @@ describe('processKbAsset — Temporal heartbeat/cancellation', () => {
     await expect(acts.ingestPendingKb(INPUT)).resolves.toEqual({ processed: 1, failed: 0 });
     expect(heartbeat).toHaveBeenCalledWith({ siteId: 'site-1', stage: 'list-queued' });
     expect(heartbeat).toHaveBeenCalledWith({ siteId: 'site-1', stage: 'queued:asset-1' });
+  });
+});
+
+describe('listKbRecoveryCandidates — expired lease fairness', () => {
+  it('sorts expired processing leases ahead of queued backlog before applying the batch limit', async () => {
+    const findMany = vi.fn(async () => []);
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      ownerDb: { asset: { findMany } } as unknown as PrismaClient,
+    });
+
+    await acts.listKbRecoveryCandidates({ limit: 10 });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 10,
+        orderBy: expect.arrayContaining([
+          { processingStatus: 'asc' },
+          { leaseUntil: { sort: 'asc', nulls: 'last' } },
+        ]),
+      }),
+    );
   });
 });
 
