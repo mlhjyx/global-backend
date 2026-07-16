@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
 
-import type {
-  AssetVariantProjectionRow,
-  AssetVariantRecipe,
-  DerivedImageManifest,
-  DerivedImageVariant,
-  ImageVariantFormat,
-  ImageVariantRole,
+import {
+  ASSET_VARIANT_FITS,
+  ASSET_VARIANT_OUTPUT_FORMATS,
+  ASSET_VARIANT_POSITIONS,
+  IMAGE_VARIANT_ROLES,
+  type AssetVariantProjectionRow,
+  type AssetVariantRecipe,
+  type DerivedImageManifest,
+  type DerivedImageVariant,
+  type ImageVariantFormat,
+  type ImageVariantRole,
 } from "@global/contracts";
 
 export type {
@@ -16,7 +20,7 @@ export type {
 } from "@global/contracts";
 
 const SHA256 = /^[a-f0-9]{64}$/;
-const ROLES = ["hero", "card", "thumb", "logo"] as const;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * JSON 的确定性规范形。对象键排序，数组顺序保留；拒绝会被 JSON 静默改写的值。
@@ -49,19 +53,28 @@ function canonicalJson(value: unknown): string {
 
 function assertRecipe(recipe: AssetVariantRecipe): void {
   if (!recipe.pipelineVersion.trim()) throw new Error("pipelineVersion is required");
-  if (!SHA256.test(recipe.source.contentHash)) {
-    throw new Error("source contentHash must be a lowercase SHA-256");
+  if (!SHA256.test(recipe.source.assetContentHash)) {
+    throw new Error("source assetContentHash must be a lowercase SHA-256");
   }
-  const hasVariantId = recipe.source.variantId !== null;
-  const hasVariantHash = recipe.source.variantContentHash !== null;
-  if (hasVariantId !== hasVariantHash) {
-    throw new Error("source variant id and content hash must be provided together");
+  if (recipe.source.variant !== null) {
+    if (!UUID.test(recipe.source.variant.id)) {
+      throw new Error("source variant id must be a UUID");
+    }
+    if (!SHA256.test(recipe.source.variant.contentHash)) {
+      throw new Error("source variant contentHash must be a lowercase SHA-256");
+    }
   }
-  if (
-    recipe.source.variantContentHash !== null &&
-    !SHA256.test(recipe.source.variantContentHash)
-  ) {
-    throw new Error("source variantContentHash must be a lowercase SHA-256");
+  if (!(IMAGE_VARIANT_ROLES as readonly string[]).includes(recipe.output.role)) {
+    throw new Error("output role is not canonical");
+  }
+  if (!(ASSET_VARIANT_OUTPUT_FORMATS as readonly string[]).includes(recipe.output.format)) {
+    throw new Error("output format must name a concrete encoder");
+  }
+  if (!(ASSET_VARIANT_FITS as readonly string[]).includes(recipe.output.fit)) {
+    throw new Error("output fit is not canonical");
+  }
+  if (!(ASSET_VARIANT_POSITIONS as readonly string[]).includes(recipe.output.position)) {
+    throw new Error("output position is not canonical");
   }
   if (!Number.isInteger(recipe.output.width) || recipe.output.width <= 0) {
     throw new Error("output width must be a positive integer");
@@ -98,20 +111,20 @@ function projectionFormat(mime: string): ImageVariantFormat | null {
 }
 
 function isRole(value: string): value is ImageVariantRole {
-  return (ROLES as readonly string[]).includes(value);
+  return (IMAGE_VARIANT_ROLES as readonly string[]).includes(value);
 }
 
-function compareCandidate(
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function compareSameWidthCandidate(
   left: AssetVariantProjectionRow,
   right: AssetVariantProjectionRow,
 ): number {
-  const leftArea = (left.width ?? 0) * (left.height ?? 0);
-  const rightArea = (right.width ?? 0) * (right.height ?? 0);
-  if (leftArea !== rightArea) return rightArea - leftArea;
-  if (left.width !== right.width) return (right.width ?? 0) - (left.width ?? 0);
   if (left.height !== right.height) return (right.height ?? 0) - (left.height ?? 0);
-  const byRecipe = left.recipeHash.localeCompare(right.recipeHash);
-  return byRecipe || left.objectKey.localeCompare(right.objectKey) || left.id.localeCompare(right.id);
+  const byRecipe = compareText(left.recipeHash, right.recipeHash);
+  return byRecipe || compareText(left.objectKey, right.objectKey) || compareText(left.id, right.id);
 }
 
 function manifestEntry(row: AssetVariantProjectionRow): DerivedImageVariant {
@@ -119,12 +132,16 @@ function manifestEntry(row: AssetVariantProjectionRow): DerivedImageVariant {
     row.width === null ||
     row.height === null ||
     row.sizeBytes === null ||
+    row.contentHash === null ||
     !Number.isInteger(row.width) ||
     !Number.isInteger(row.height) ||
     !Number.isInteger(row.sizeBytes) ||
     row.width <= 0 ||
     row.height <= 0 ||
-    row.sizeBytes <= 0
+    row.sizeBytes <= 0 ||
+    !SHA256.test(row.contentHash) ||
+    !SHA256.test(row.recipeHash) ||
+    row.objectKey.length === 0
   ) {
     throw new Error(`ready image variant ${row.id} has invalid dimensions or bytes`);
   }
@@ -138,7 +155,7 @@ function manifestEntry(row: AssetVariantProjectionRow): DerivedImageVariant {
 
 /**
  * AssetVariant 是权威；此函数只生成一个 Release 周期内的 derivedKeys 兼容视图。
- * 旧 manifest 每个 role/format 只能容纳一项，因此稳定选择面积最大的 ready 输出。
+ * 同 role/format 保留响应式宽度数组；同宽重复 recipe 稳定选择一项。
  */
 export function projectDerivedImageManifest(input: {
   pipelineVersion: string;
@@ -153,24 +170,29 @@ export function projectDerivedImageManifest(input: {
   const selected = new Map<string, AssetVariantProjectionRow>();
   for (const row of input.variants) {
     if (row.status !== "ready") continue;
-    if (row.pipelineVersion !== input.pipelineVersion) {
-      throw new Error(`variant ${row.id} belongs to another pipeline`);
-    }
+    if (row.pipelineVersion !== input.pipelineVersion) continue;
     const format = projectionFormat(row.mime);
     if (!isRole(row.variantType) || format === null) continue;
     // Validate every eligible ready row, including rows that lose deterministic selection.
     manifestEntry(row);
-    const key = `${row.variantType}:${format}`;
+    const key = `${row.variantType}:${format}:${row.width}`;
     const current = selected.get(key);
-    if (!current || compareCandidate(row, current) < 0) selected.set(key, row);
+    if (!current || compareSameWidthCandidate(row, current) < 0) selected.set(key, row);
   }
 
   const variants: DerivedImageManifest["variants"] = {};
-  for (const role of ROLES) {
-    const set: Record<string, DerivedImageVariant> = {};
+  for (const role of IMAGE_VARIANT_ROLES) {
+    const set: Partial<Record<ImageVariantFormat, DerivedImageVariant[]>> = {};
     for (const format of ["avif", "webp", "fallback"] as const) {
-      const row = selected.get(`${role}:${format}`);
-      if (row) set[format] = manifestEntry(row);
+      const rows = [...selected.entries()]
+        .filter(([key]) => key.startsWith(`${role}:${format}:`))
+        .map(([, row]) => row)
+        .sort((left, right) =>
+          (left.width ?? 0) - (right.width ?? 0) ||
+          (left.height ?? 0) - (right.height ?? 0) ||
+          compareText(left.recipeHash, right.recipeHash),
+        );
+      if (rows.length > 0) set[format] = rows.map(manifestEntry);
     }
     if (Object.keys(set).length > 0) variants[role] = set;
   }

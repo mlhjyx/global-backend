@@ -11,23 +11,57 @@ export type ImageVariantRole = (typeof IMAGE_VARIANT_ROLES)[number];
 export const IMAGE_VARIANT_FORMATS = ["avif", "webp", "fallback"] as const;
 export type ImageVariantFormat = (typeof IMAGE_VARIANT_FORMATS)[number];
 
+/** 物化 recipe 必须使用具体编码；fallback 只是旧 manifest 的槽位。 */
+export const ASSET_VARIANT_OUTPUT_FORMATS = [
+  "avif",
+  "webp",
+  "jpeg",
+  "png",
+] as const;
+export type AssetVariantOutputFormat =
+  (typeof ASSET_VARIANT_OUTPUT_FORMATS)[number];
+
+export const ASSET_VARIANT_FITS = [
+  "cover",
+  "contain",
+  "fill",
+  "inside",
+  "outside",
+] as const;
+export type AssetVariantFit = (typeof ASSET_VARIANT_FITS)[number];
+
+/** Sharp position 的单一规范拼写；不接受 center 等别名进入 recipe。 */
+export const ASSET_VARIANT_POSITIONS = [
+  "centre",
+  "north",
+  "northeast",
+  "east",
+  "southeast",
+  "south",
+  "southwest",
+  "west",
+  "northwest",
+  "entropy",
+  "attention",
+] as const;
+export type AssetVariantPosition =
+  (typeof ASSET_VARIANT_POSITIONS)[number];
+
 export interface AssetVariantRecipe {
   pipelineVersion: string;
   source: {
-    /** 原始 Asset 或派生源的内容 SHA-256。 */
-    contentHash: string;
-    /** 直接从原件派生时为 null。 */
-    variantId: string | null;
-    /** 与 variantId 同空同存，防止可变 ID 掩盖内容变化。 */
-    variantContentHash: string | null;
+    /** 逻辑 Asset 原件的内容 SHA-256，始终参与身份。 */
+    assetContentHash: string;
+    /** 直接从原件派生时为 null；二次派生时同时固定 Variant ID 与内容。 */
+    variant: { id: string; contentHash: string } | null;
   };
   output: {
     role: ImageVariantRole;
-    format: ImageVariantFormat;
+    format: AssetVariantOutputFormat;
     width: number;
     height: number;
-    fit: "cover" | "contain" | "fill" | "inside" | "outside";
-    position: string;
+    fit: AssetVariantFit;
+    position: AssetVariantPosition;
     focalPoint: { x: number; y: number } | null;
     quality: number;
   };
@@ -41,9 +75,9 @@ export interface DerivedImageVariant {
 }
 
 export interface ImageVariantSet {
-  avif?: DerivedImageVariant;
-  webp?: DerivedImageVariant;
-  fallback?: DerivedImageVariant;
+  avif?: DerivedImageVariant[];
+  webp?: DerivedImageVariant[];
+  fallback?: DerivedImageVariant[];
 }
 
 export interface DerivedImageManifest {
@@ -62,7 +96,7 @@ export interface AssetVariantProjectionRow {
   height: number | null;
   sizeBytes: number | null;
   objectKey: string;
-  contentHash: string;
+  contentHash: string | null;
   recipeHash: string;
   pipelineVersion: string;
   status: string;
