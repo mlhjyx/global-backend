@@ -14,3 +14,4 @@ export const CONTRACTS_PACKAGE = '@global/contracts';
  * API 生产端与渲染器消费端的唯一类型真值，取代两处手写重复接口。
  */
 export * from './site-builder/site-spec';
+export * from './site-builder/media-foundation';
