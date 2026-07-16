@@ -1303,28 +1303,35 @@ model SiteBuildRun {
   @@map("site_build_run")
 }
 
-/// 素材：presign→PUT 直传→commit 三步（07 §3）。object_key 全局唯一（含 content hash 幂等）。
+/// 素材：presign→PUT 直传→commit 三步（07 §3）。active object_key 由部分唯一索引守护。
 model Asset {
-  id               String   @id @default(uuid()) @db.Uuid
-  workspaceId      String   @map("workspace_id") @db.Uuid
-  siteId           String   @map("site_id") @db.Uuid
-  kind             String // logo | product_image | factory_image | cert | doc | video | generated
-  filename         String // 原始文件名（展示用，不参与 key）
-  mime             String
-  sizeBytes        Int      @map("size_bytes")
-  objectKey        String   @map("object_key") // ws/{workspace_id}/{site_id}/{kind}/{content_hash}.{ext}
-  contentHash      String?  @map("content_hash") // sha256，commit 校验后回填
-  derivedKeys      Json?    @map("derived_keys") // 多尺寸 webp/avif 等派生产物
-  processingStatus String   @default("pending_upload") @map("processing_status") // pending_upload | queued | processing | ready | failed | rejected
-  meta             Json? // 尺寸/EXIF 已剥离标记/来源等
-  error            String?
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  siteId            String    @map("site_id") @db.Uuid
+  kind              String // logo | product_image | factory_image | cert | doc | video | generated
+  filename          String // 原始文件名（展示用，不参与 key）
+  mime              String
+  sizeBytes         Int       @map("size_bytes")
+  objectKey         String    @map("object_key") // staging 或 ws/{workspace}/{site}/{kind}/{content_hash}.{ext}
+  contentHash       String?   @map("content_hash") // sha256，commit 校验后回填
+  derivedKeys       Json?     @map("derived_keys") // 多尺寸 webp/avif 等派生产物
+  processingStatus  String    @default("pending_upload") @map("processing_status") // pending_upload | committing | queued | processing | ready | failed | failed_retryable | rejected | duplicate | deleted
+  processingAttempt Int       @default(0) @map("processing_attempt")
+  leaseToken        String?   @map("lease_token") @db.Uuid // 每次 commit 认领的新 fencing token
+  leaseUntil        DateTime? @map("lease_until")
+  retryAt           DateTime? @map("retry_at")
+  deletedAt         DateTime? @map("deleted_at") // tombstone；canonical 清理由 MF-0 scanner 后的消费者执行
+  meta              Json? // 尺寸/EXIF 已剥离标记/来源等
+  error             String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
-  @@unique([objectKey])
+  // active object_key 的唯一性由 migration 中 WHERE deleted_at IS NULL 的部分唯一索引保证。
+  @@index([objectKey], map: "asset_object_key_lookup_idx")
   @@index([workspaceId, siteId, kind])
+  @@index([workspaceId, processingStatus, retryAt])
   @@map("asset")
 }
 

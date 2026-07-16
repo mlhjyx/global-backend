@@ -233,6 +233,35 @@ describe('AssetsService R2-A1 correctness gate', () => {
     await first;
   });
 
+  it('allows an expired lease takeover and fences the resumed old holder from zombie writes', async () => {
+    const s = makeService();
+    const { signed, row } = await uploaded(s);
+    const firstAtCopy = deferred<void>();
+    const releaseFirst = deferred<void>();
+    let copyCalls = 0;
+    s.storage.copy = async (_from: string, to: string) => {
+      copyCalls += 1;
+      if (copyCalls === 1) {
+        firstAtCopy.resolve();
+        await releaseFirst.promise;
+      }
+      s.objects.set(to, JPEG);
+    };
+
+    const expiredHolder = s.service.commit(CTX, signed.assetId);
+    await firstAtCopy.promise;
+    row.leaseUntil = new Date(0);
+
+    const winner = await s.service.commit(CTX, signed.assetId);
+    expect(winner.processingStatus).toBe('ready');
+    expect(row.processingAttempt).toBe(2);
+
+    releaseFirst.resolve();
+    await expect(expiredHolder).rejects.toBeInstanceOf(ConflictException);
+    expect(row.processingStatus).toBe('ready');
+    expect(s.operations.filter((op) => op.startsWith('storage:delete'))).toHaveLength(1);
+  });
+
   it('marks a transient copy failure retryable and retains staging for a later lease', async () => {
     const s = makeService({ failCopy: true });
     const { signed, row } = await uploaded(s);

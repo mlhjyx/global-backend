@@ -12,11 +12,36 @@ const SITE_ID = '22222222-2222-4222-8222-222222222222';
 
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fakejpegbody')]);
 
+type Row = Record<string, unknown>;
+
+function matches(row: Row, where: Row): boolean {
+  return Object.entries(where).every(([key, expected]) => {
+    if (key === 'OR') return (expected as Row[]).some((candidate) => matches(row, candidate));
+    if (key === 'NOT') return !matches(row, expected as Row);
+    if (expected && typeof expected === 'object' && !(expected instanceof Date)) {
+      const condition = expected as Row;
+      if ('lte' in condition) return row[key] instanceof Date && row[key] <= condition.lte!;
+    }
+    return row[key] === expected;
+  });
+}
+
+function applyData(row: Row, data: Row): void {
+  for (const [key, value] of Object.entries(data)) {
+    if (value && typeof value === 'object' && 'increment' in value) {
+      row[key] = Number(row[key] ?? 0) + Number((value as { increment: number }).increment);
+    } else {
+      row[key] = value;
+    }
+  }
+}
+
 function makeService(opts: { siteExists?: boolean } = {}) {
   const db: { assets: Record<string, unknown>[] } = { assets: [] };
   const objects = new Map<string, Buffer>();
   const ops: string[] = [];
   const kbDeletes: string[] = [];
+  const outbox: Row[] = [];
   const tx = {
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -24,19 +49,31 @@ function makeService(opts: { siteExists?: boolean } = {}) {
     },
     asset: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        db.assets.push({ ...data });
+        db.assets.push({
+          processingAttempt: 0,
+          leaseToken: null,
+          leaseUntil: null,
+          retryAt: null,
+          deletedAt: null,
+          ...data,
+        });
         return db.assets[db.assets.length - 1];
       },
       findUnique: async ({ where }: { where: { id: string } }) =>
         db.assets.find((a) => a.id === where.id) ?? null,
-      findFirst: async ({ where }: { where: { objectKey: string } }) =>
-        db.assets.find((a) => a.objectKey === where.objectKey) ?? null,
-      findMany: async () => db.assets,
+      findFirst: async ({ where }: { where: Row }) => db.assets.find((a) => matches(a, where)) ?? null,
+      findMany: async ({ where = {} }: { where?: Row } = {}) =>
+        db.assets.filter((a) => matches(a, where)),
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = db.assets.find((a) => a.id === where.id);
         if (!row) throw new Error('missing');
-        Object.assign(row, data);
+        applyData(row, data);
         return row;
+      },
+      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+        const selected = db.assets.filter((a) => matches(a, where));
+        for (const row of selected) applyData(row, data);
+        return { count: selected.length };
       },
       count: async ({ where }: { where: { objectKey: string; NOT: { id: string } } }) =>
         db.assets.filter((a) => a.objectKey === where.objectKey && a.id !== where.NOT.id).length,
@@ -49,6 +86,12 @@ function makeService(opts: { siteExists?: boolean } = {}) {
       deleteMany: async ({ where }: { where: { assetId: string } }) => {
         kbDeletes.push(where.assetId);
         return { count: 0 };
+      },
+    },
+    outboxEvent: {
+      create: async ({ data }: { data: Row }) => {
+        outbox.push(data);
+        return data;
       },
     },
   };
@@ -86,7 +129,7 @@ function makeService(opts: { siteExists?: boolean } = {}) {
     },
   };
   const service = new AssetsService(prisma as never, storage as never);
-  return { service, db, objects, ops, kbDeletes };
+  return { service, db, objects, ops, kbDeletes, outbox };
 }
 
 async function presignAndUpload(
@@ -211,25 +254,27 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(s.objects.size).toBe(0);
   });
 
-  it('commit：内容重复（同 canonical key 已存在）→ 本行 rejected + 409 带既有 assetId', async () => {
+  it('commit：内容重复（同 canonical key 已存在）→ 本行 duplicate + 409 带既有 assetId', async () => {
     const s = makeService();
     const a = await presignAndUpload(s);
     await s.service.commit(CTX, a.assetId);
     const b = await presignAndUpload(s);
     await expect(s.service.commit(CTX, b.assetId)).rejects.toBeInstanceOf(ConflictException);
     const rowB = s.db.assets.find((x) => x.id === b.assetId) as Record<string, unknown>;
-    expect(rowB.processingStatus).toBe('rejected');
+    expect(rowB.processingStatus).toBe('duplicate');
     expect(String(rowB.error)).toContain(a.assetId);
   });
 
-  it('delete：最后一个引用才删对象，且级联清 KB 派生文档（已删资料不再可检索）', async () => {
+  it('delete：tombstone + 级联清 KB；scanner 前不删 canonical 对象', async () => {
     const s = makeService();
     const { assetId } = await presignAndUpload(s);
     await s.service.commit(CTX, assetId);
     const before = s.ops.filter((o) => o.startsWith('delete:')).length;
     await s.service.remove(CTX, assetId);
-    expect(s.db.assets.find((a) => a.id === assetId)).toBeUndefined();
-    expect(s.ops.filter((o) => o.startsWith('delete:')).length).toBe(before + 1);
+    const row = s.db.assets.find((a) => a.id === assetId);
+    expect(row).toMatchObject({ processingStatus: 'deleted', deletedAt: expect.any(Date) });
+    expect(s.ops.filter((o) => o.startsWith('delete:'))).toHaveLength(before);
     expect(s.kbDeletes).toEqual([assetId]);
+    expect(s.outbox.at(-1)).toMatchObject({ eventType: 'AssetObjectCleanupRequested' });
   });
 });
