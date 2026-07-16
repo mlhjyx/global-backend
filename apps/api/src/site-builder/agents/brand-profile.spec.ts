@@ -20,8 +20,10 @@ import {
 
 const FAIR_URL = 'https://fair.example/exhibitors/acme';
 const corpusWith = (over: Partial<EvidenceCorpus> = {}): EvidenceCorpus => ({
-  intakeText: 'Acme GmbH high-pressure industrial pumps Germany CE marked pumps since 2001',
-  kbText: '[来源:upload | catalog.pdf] Pumps up to 400 bar. ISO 9001 certified quality system.',
+  intakeText:
+    'Acme GmbH high-pressure industrial pumps Germany CE marked pumps since 2001',
+  kbText:
+    '[来源:upload | catalog.pdf] Pumps up to 400 bar. ISO 9001 certified quality system.',
   urlText: new Map([
     ['https://acme.example', 'We build pumps. Family owned since 2001.'],
     [FAIR_URL, 'Acme exhibited at EuroBLECH 2024 with new pump line.'],
@@ -38,18 +40,26 @@ const fact = (over: Partial<RawFactItem> = {}): RawFactItem => ({
 
 describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
   it('非认证 upload 事实（来源语料非空）通过', () => {
-    const { factSheet, gaps } = enforceEvidenceGate([fact()], { corpus: corpusWith() });
+    const { factSheet, gaps } = enforceEvidenceGate([fact()], {
+      corpus: corpusWith(),
+    });
     expect(factSheet).toHaveLength(1);
     expect(gaps).toHaveLength(0);
   });
 
   it('缺 evidence → 剔出 factSheet，降 gaps（reason=missing_evidence）', () => {
-    const { factSheet, gaps } = enforceEvidenceGate([fact({ evidence: undefined })], {
-      corpus: corpusWith(),
-    });
+    const { factSheet, gaps } = enforceEvidenceGate(
+      [fact({ evidence: undefined })],
+      {
+        corpus: corpusWith(),
+      },
+    );
     expect(factSheet).toHaveLength(0);
     expect(gaps).toEqual([
-      expect.objectContaining({ field: 'main_products', reason: 'missing_evidence' }),
+      expect.objectContaining({
+        field: 'main_products',
+        reason: 'missing_evidence',
+      }),
     ]);
   });
 
@@ -73,13 +83,21 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
   it('🔴 反捏造引用：storefront/web_research 的 url 未 canonical 命中抓取集合 → 降 gaps', () => {
     const { factSheet, gaps } = enforceEvidenceGate(
       [
-        fact({ evidence: { sourceType: 'web_research', url: 'https://made-up.example/page' } }),
+        fact({
+          evidence: {
+            sourceType: 'web_research',
+            url: 'https://made-up.example/page',
+          },
+        }),
         fact({ key: 'hq', evidence: { sourceType: 'storefront' } }), // 连 url 都没给
       ],
       { corpus: corpusWith() },
     );
     expect(factSheet).toHaveLength(0);
-    expect(gaps.map((g) => g.reason)).toEqual(['uncited_web_source', 'uncited_web_source']);
+    expect(gaps.map((g) => g.reason)).toEqual([
+      'uncited_web_source',
+      'uncited_web_source',
+    ]);
   });
 
   it('🔴 F3 URL 归一化：模型引用带尾斜杠/大写 host → canonical 后命中，真事实不被误降', () => {
@@ -88,7 +106,10 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
         fact({
           key: 'trade_fairs',
           value: 'Exhibited at EuroBLECH',
-          evidence: { sourceType: 'web_research', url: 'https://FAIR.example/exhibitors/acme/' },
+          evidence: {
+            sourceType: 'web_research',
+            url: 'https://FAIR.example/exhibitors/acme/',
+          },
         }),
       ],
       { corpus: corpusWith() },
@@ -108,12 +129,21 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
       { corpus: corpusWith() },
     );
     expect(factSheet).toHaveLength(0);
-    expect(gaps[0]).toMatchObject({ field: 'certifications', reason: 'unverified_certification' });
+    expect(gaps[0]).toMatchObject({
+      field: 'certifications',
+      reason: 'unverified_certification',
+    });
   });
 
   it('🔴 F1 洗白防线：认证类标 intake/upload 但无 quote → 降 gaps（标签不再无条件放行）', () => {
     const { factSheet, gaps } = enforceEvidenceGate(
-      [fact({ key: 'certifications', value: 'ISO 9001 certified', evidence: { sourceType: 'upload' } })],
+      [
+        fact({
+          key: 'certifications',
+          value: 'ISO 9001 certified',
+          evidence: { sourceType: 'upload' },
+        }),
+      ],
       { corpus: corpusWith() },
     );
     expect(factSheet).toHaveLength(0);
@@ -126,7 +156,10 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
         fact({
           key: 'certifications',
           value: 'ISO 9001 certified',
-          evidence: { sourceType: 'upload', quote: 'ISO 9001 certified quality system' },
+          evidence: {
+            sourceType: 'upload',
+            quote: 'ISO 9001 certified quality system',
+          },
         }),
       ],
       { corpus: corpusWith() },
@@ -140,7 +173,11 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
         fact({
           key: 'certifications',
           value: 'FDA cleared device',
-          evidence: { sourceType: 'storefront', url: 'https://acme.example', quote: 'FDA cleared class II' },
+          evidence: {
+            sourceType: 'storefront',
+            url: 'https://acme.example',
+            quote: 'FDA cleared class II',
+          },
         }),
       ],
       { corpus: corpusWith() },
@@ -151,7 +188,14 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
 
   it('非认证事实带 quote 但 quote 不在来源 → 降 gaps unsupported_quote（防捏造引用）', () => {
     const { factSheet, gaps } = enforceEvidenceGate(
-      [fact({ evidence: { sourceType: 'upload', quote: 'exports to 47 countries worldwide' } })],
+      [
+        fact({
+          evidence: {
+            sourceType: 'upload',
+            quote: 'exports to 47 countries worldwide',
+          },
+        }),
+      ],
       { corpus: corpusWith() },
     );
     expect(factSheet).toHaveLength(0);
@@ -160,7 +204,13 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
 
   it('引用命中真实来源的 web_research 非认证事实（无 quote）→ 放行', () => {
     const { factSheet } = enforceEvidenceGate(
-      [fact({ key: 'trade_fairs', value: 'Exhibited at EuroBLECH', evidence: { sourceType: 'web_research', url: FAIR_URL } })],
+      [
+        fact({
+          key: 'trade_fairs',
+          value: 'Exhibited at EuroBLECH',
+          evidence: { sourceType: 'web_research', url: FAIR_URL },
+        }),
+      ],
       { corpus: corpusWith() },
     );
     expect(factSheet).toHaveLength(1);
@@ -169,7 +219,9 @@ describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
 
 describe('canonicalUrl — F3 归一化', () => {
   it('host 小写 + 去尾斜杠 + 去 fragment', () => {
-    expect(canonicalUrl('https://WWW.Acme.com/about/#team')).toBe('https://www.acme.com/about');
+    expect(canonicalUrl('https://WWW.Acme.com/about/#team')).toBe(
+      'https://www.acme.com/about',
+    );
     expect(canonicalUrl('https://www.acme.com/')).toBe('https://www.acme.com');
   });
   it('非法 URL → null', () => {
@@ -187,6 +239,18 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     expect(out).toEqual({ companyProfile: { founded: 2001 } });
     expect(out).not.toHaveProperty('contact');
   });
+  it('递归遮蔽非 contact 自由文本里的邮箱与电话', () => {
+    const out = sanitizeProfileForPrompt({
+      brand: { slogan: 'Email alice@example.com' },
+      trustAssets: { customerCases: [{ summary: 'Call +49 30 1234567' }] },
+    });
+    expect(JSON.stringify(out)).not.toContain('alice@example.com');
+    expect(JSON.stringify(out)).not.toContain('+49 30 1234567');
+    expect(out).toEqual({
+      brand: { slogan: 'Email [redacted-email]' },
+      trustAssets: { customerCases: [{ summary: 'Call [redacted-phone]' }] },
+    });
+  });
   it('undefined profile → undefined', () => {
     expect(sanitizeProfileForPrompt(undefined)).toBeUndefined();
   });
@@ -194,6 +258,30 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     expect(scrubPii('reach us at sales@acme.com or +49 30 1234567')).toBe(
       'reach us at [redacted-email] or [redacted-phone]',
     );
+  });
+  it.each([
+    ['请联系 用户@例子.公司 获取报价', '请联系 [redacted-email] 获取报价'],
+    [
+      'IDN domain: sales@例子.公司',
+      'IDN domain: [redacted-email]',
+    ],
+    [
+      'SMTPUTF8 + punycode: 采购@xn--fsqu00a.xn--55qx5d',
+      'SMTPUTF8 + punycode: [redacted-email]',
+    ],
+    [
+      'Combining local/domain: u\u0308ser@exa\u0308mple.de',
+      'Combining local/domain: [redacted-email]',
+    ],
+  ])('遮蔽国际化邮箱且保留周边文本：%s', (input, expected) => {
+    expect(scrubPii(input)).toBe(expected);
+  });
+  it.each([
+    '主营精密泵阀，面向德国市场，支持小批量定制。',
+    '关注@环球泵业 获取更新',
+    '工艺温度为 80℃，不含邮箱或电话。',
+  ])('不误删普通中文或无合法域名的 @ 文本：%s', (input) => {
+    expect(scrubPii(input)).toBe(input);
   });
 });
 
@@ -203,7 +291,9 @@ describe('BRAND_PROFILE_OUTPUT_SCHEMA — C4 结构性排除个人字段', () =>
     const walk = (node: unknown, path: string[]): string[] => {
       if (node == null || typeof node !== 'object') return [];
       const hits: string[] = [];
-      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      for (const [key, value] of Object.entries(
+        node as Record<string, unknown>,
+      )) {
         if (path[path.length - 1] === 'properties' && banned.test(key)) {
           hits.push([...path, key].join('.'));
         }
@@ -215,7 +305,10 @@ describe('BRAND_PROFILE_OUTPUT_SCHEMA — C4 结构性排除个人字段', () =>
   });
 
   it('additionalProperties=false（模型加塞的字段被网关校验拒绝，而非静默入库）', () => {
-    expect((BRAND_PROFILE_OUTPUT_SCHEMA as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    expect(
+      (BRAND_PROFILE_OUTPUT_SCHEMA as { additionalProperties?: boolean })
+        .additionalProperties,
+    ).toBe(false);
   });
 });
 
@@ -249,13 +342,21 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
   });
 
   it('无 KB、无研究源时槽位标注「无」（模型不猜空槽位）', () => {
-    const prompt = buildBrandProfilePrompt({ ...input, kbDigest: '', research: [] });
+    const prompt = buildBrandProfilePrompt({
+      ...input,
+      kbDigest: '',
+      research: [],
+    });
     expect(prompt).toMatch(/知识库[^]{0,10}(无|空)/);
   });
 
   it('task 定义：id 正确 + 输入 schema 必填字段齐（fail-fast 面）', () => {
     expect(BRAND_PROFILE_TASK.id).toBe('site_builder.brand_profile');
-    const required = (BRAND_PROFILE_TASK.inputSchema as { required?: string[] }).required ?? [];
-    expect(required).toEqual(expect.arrayContaining(['companyName', 'products']));
+    const required =
+      (BRAND_PROFILE_TASK.inputSchema as { required?: string[] }).required ??
+      [];
+    expect(required).toEqual(
+      expect.arrayContaining(['companyName', 'products']),
+    );
   });
 });

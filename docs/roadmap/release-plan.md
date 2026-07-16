@@ -11,12 +11,12 @@
 - DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
 - #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
 - #126 已完成 R0 contract closeout：intake 幂等、`buildId`、去 `mode`、稳定错误码、Temporal 启动证据与 OpenAPI 同步均已落地并验证。
-- R1-safety、R2-A1 Asset 与 R2-A2 KB 正确性门已于 2026-07-17 完成；KB 已具备单素材 lease/fencing、typed retry、原子文档完成、确定性历史 reconciliation、周期 recovery 与人工 redrive。开发环境真实 PostgreSQL/RLS/MinIO/Docling/BGE、脏数据升级与空库 migration 全绿。
+- R1-safety、R2-A1 Asset、R2-A2 KB 与 R2-A3 Profile 正确性门已于 2026-07-17 完成。Profile 已具备五组严格有界 schema、独立 UUID ETag/CAS、稳定 428/409/412、同站 Asset 引用门；旧脏 JSON 读路径以 `PROFILE_MIGRATION_REQUIRED` fail-closed，Prompt/证据入口覆盖 SMTPUTF8/IDN 邮箱与电话净化。开发环境真 app_user/FORCE RLS 双连接并发与空库 38 migration/schema diff 全绿。KB 已具备单素材 lease/fencing、typed retry、原子文档完成、确定性历史 reconciliation、周期 recovery 与人工 redrive。
 
 ### 当前关键路径与退出门
 
 1. **R1-safety ✅ 2026-07-17 完成**：两个小 PR 分别完成 (a) SiteSpec 随机 0700/0600 临时物化、成功/异常 `finally` 清理、Renderer 固定入口与 7 变量 env allowlist；(b) 移除 Ubuntu fake-IP 的 `CRAWL4AI_ALLOW_INTERNAL_URLS`，在 API 与 Crawl4AI 两层落 global-unicast 校验、fake-IP-only 固定 DoH 回退、连接 pinning、redirect 逐跳重验及响应上限。`websiteUrl → brand research → crawl4ai`、robots 与 `http.get` 均受控，公网正例和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机负例全绿。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可与 R2/M1-c 并行，但必须在 M1-e 可见预览前完成。
-2. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset ✅、R2-A2 KB ✅；下一项 R2-A3 Profile schema/乐观并发，随后 R2-A4 Outbox/Temporal cleanup/公共错误码与跨系统真实集成。禁止合成一个 migration/API/状态机 mega PR。
+2. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset ✅、R2-A2 KB ✅、R2-A3 Profile schema/乐观并发 ✅；下一项 R2-A4 Outbox/Temporal cleanup/公共错误码与跨系统真实集成。禁止合成一个 migration/API/状态机 mega PR。
 3. **MF-0-thin**：`AssetVariant` + RLS/FORCE RLS、recipe/checksum/provenance、SiteSpec 引用扫描器、删除 409、`derivedKeys` 兼容投影。在引用扫描器落地前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
 4. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
 

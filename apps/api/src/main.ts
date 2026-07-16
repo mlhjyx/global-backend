@@ -43,7 +43,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: origins.length ? origins : process.env.NODE_ENV === 'production' ? false : true,
     credentials: true,
-    exposedHeaders: ['Location', 'X-Request-Id'],
+    exposedHeaders: ['Location', 'X-Request-Id', 'ETag'],
   });
   app.getHttpAdapter().getInstance().set('trust proxy', 1); // 限流/日志取真实 IP（经网关时）
 
