@@ -32,6 +32,13 @@ describe('object-key（对象存储键布局 + 上传安全闸，02 §2 / 06 §2
     ).toBe(`ws/${WS}/${SITE}/variants/${ASSET}/${recipeHash}.avif`);
   });
 
+  it('variant JPEG 使用规范 jpg 扩展名', () => {
+    const recipeHash = 'b'.repeat(64);
+    expect(
+      buildVariantObjectKey(WS, SITE, ASSET, recipeHash, 'jpeg'),
+    ).toBe(`ws/${WS}/${SITE}/variants/${ASSET}/${recipeHash}.jpg`);
+  });
+
   it('extForMime：白名单内返回扩展名，白名单外返回 null', () => {
     expect(extForMime('image/jpeg')).toBe('jpg');
     expect(extForMime('application/pdf')).toBe('pdf');

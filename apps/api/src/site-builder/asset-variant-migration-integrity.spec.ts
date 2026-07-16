@@ -13,6 +13,8 @@ const migrationPath =
   "packages/db/prisma/migrations/20260717040000_site_builder_asset_variant_mf0/migration.sql";
 const hardeningMigrationPath =
   "packages/db/prisma/migrations/20260717041000_site_builder_asset_variant_provenance_hardening/migration.sql";
+const ledgerIdentityMigrationPath =
+  "packages/db/prisma/migrations/20260717042000_site_builder_asset_variant_ledger_identity/migration.sql";
 
 describe("MF0-A AssetVariant migration integrity", () => {
   it("adds the tenant-scoped materialized variant and its complete provenance", () => {
@@ -120,5 +122,13 @@ describe("MF0-A AssetVariant migration integrity", () => {
       /CREATE (?:OR REPLACE )?FUNCTION enforce_asset_variant_provenance_immutable/,
     );
     expect(sql).toMatch(/CREATE TRIGGER asset_variant_provenance_immutable/);
+  });
+
+  it("freezes the surrogate identity and creation timestamp forward-only", () => {
+    const sql = repositoryFile(ledgerIdentityMigrationPath);
+
+    expect(sql).toMatch(/NEW\."id"[\s\S]+OLD\."id"/);
+    expect(sql).toMatch(/NEW\."created_at"[\s\S]+OLD\."created_at"/);
+    expect(sql).toContain("AssetVariant ledger identity is immutable after insert");
   });
 });
