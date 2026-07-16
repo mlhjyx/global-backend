@@ -12,7 +12,7 @@
 | **R0 intake 行为与契约尾巴** | 有/无旧站都无条件在同一 Site 发起 Demo；`hasWebsite/websiteUrl` 仅作背景。⚠️ 行为完成不等于 API 契约完成 | ✅ #121 已去掉行为分叉；⏳ 待独立 `R0-contract` 收口 `{siteId,buildId,status}`、`Idempotency-Key` 与 Swagger/OpenAPI，不能把保留的 `mode` 响应当目标合同 |
 | **R0-4/5/6 生产化加固** | 联系邮箱不进通用 KB/品牌 Prompt；copy polish 真取消；201 后异步失败保留 Site/intake 并可原地重试 | ✅ #124 已合并（含存量脱敏脚本、`setup_failed` 契约与迟到 cleanup 守卫） |
 | **模型路由** | currentRoute（现役=测试档）：7 task 走 deepseek-v4-pro/flash · glm-5.2 · minimax-m3 · doubao fallback。deepseek 一律**显式 v4-pro/v4-flash**，弃 chat/reasoner（官方 07-24 关停）。targetRoute（后期升级位）：copy→Claude Sonnet 5、视觉评审→Gemini 3.5 Flash 等，接通+评测后才切，**现在不接** | 02 §6 + 用户 2026-07-15 拍板；task-routes.ts |
-| **D9 Readdy** | 默认 `visual_reference_only`；仅有覆盖 AI 建站产品/衍生/商业分发的书面授权并登记后，才可按授权边界评审 owned export；运行时零依赖，禁止逆向/sourcemap | **ADR-019（现行真值）**；11 号已归档为历史研究 |
+| **D9 Readdy** | 默认 `visual_research_only`；仅有覆盖 AI 建站产品/衍生/商业分发的书面授权，且授权证据、范围、期限、地域、撤回与再分发权完整登记后，才可升为 `owned_export_authorized`；缺任一项 fail-closed。运行时零依赖，禁止逆向/sourcemap；旧字面量 `visual_reference_only` / `owned_export` 不再使用 | **ADR-019（现行真值）**；11 号已归档为历史研究 |
 | **MF-0 媒体合同（薄版）** | M1-c 只落 `AssetVariant` 表 + 「删除查 active SiteSpec 引用→409」；`MediaJob`/`AssetUsage` **事件触发**（接生成式图片/视频前再补），不提前建 | 2026-07-15 裁决 |
 | **rembg 延后** | M1-c 纯 sharp，不加 rembg 容器（其唯一消费者=生成式重绘已延后）D-M1c-1 | 2026-07-14 认可 |
 | **DOC-12 裁决与分发** | 三版 ChatGPT 稿（v2/v3/v3.2）是外部起草材料；接受项已分发进活文档和 ADR。12 v3.2 仅保留 provenance，不覆盖后续代码或决策 | ✅ #119 + #120，2026-07-16；本次 truth-sync 继续修正文档状态漂移，不重开 DOC-12 设计范围 |

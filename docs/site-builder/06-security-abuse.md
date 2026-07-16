@@ -126,7 +126,7 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 
 ## 9. 设计来源与训练语料合规（T10，v3.2 §13 回写）
 
-设计学习走多源干净室（方案 C，见 11/13 号）：Readdy 等默认 `visual_reference_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**（ADR-019）。**不把"分析"与"训练"混成一个开关**，来源按允许用途分层：
+设计学习走多源干净室（方案 C，见 11/13 号）：Readdy 等默认 `visual_research_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**（ADR-019）。**不把"分析"与"训练"混成一个开关**，来源按允许用途分层：
 
 | 层 | 来源 | Agent 可做 | 前置 / 禁止 |
 |---|---|---|---|
@@ -142,23 +142,74 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 export type DesignSourceClass =
   | "platform_original" | "permissive_licensed"
   | "owned_export_authorized" | "visual_research_only";
+export type DesignUse =
+  | "visual_analysis" | "token_abstraction"
+  | "structure_abstraction" | "code_transformation";
 
-export interface DesignSourceManifest {
-  id: string; title: string; sourceClass: DesignSourceClass;
+export interface OwnerAuthorization {
+  evidencePath: string;
+  covers: {
+    aiSiteBuilder: true;
+    derivativeComponents: true;
+    commercialDistribution: true;
+    training?: boolean;
+  };
+  territories: string[];
+  validity:
+    | { kind: "perpetual" }
+    | { kind: "expires"; expiresAt: string };
+  revocationTerms: string;
+  redistribution:
+    | { kind: "allowed" }
+    | { kind: "prohibited" }
+    | { kind: "conditional"; conditions: string };
+  recordedAt: string;
+}
+
+interface DesignSourceManifestBase {
+  id: string; title: string;
   sourceUrl?: string; capturedAt: string;
-  licenseSpdx?: string; licenseEvidencePath?: string; ownerAuthorizationPath?: string;
-  allowedUses: Array<"visual_analysis" | "token_abstraction" | "structure_abstraction" | "code_transformation">;
+  licenseSpdx?: string; licenseEvidencePath?: string;
+  allowedUses: DesignUse[];
   prohibitedUses: string[];
   retentionPolicy: "manifest_only" | "ephemeral_source" | "licensed_archive";
   trainingPolicy: "platform_corpus" | "license_permits" | "prohibited";
   sourceContributionGroup?: string;
   externalAssets: Array<{ kind: "image" | "font" | "icon" | "script" | "copy";
     source: string; disposition: "remove" | "replace" | "self_host" | "retain"; }>;
-  reviewer: string; approvedAt?: string;
+  reviewer: string;
 }
+
+export type DesignSourceManifest =
+  | (DesignSourceManifestBase & {
+      sourceClass: "owned_export_authorized";
+      ownerAuthorization: OwnerAuthorization;
+      approvedAt: string;
+    })
+  | (DesignSourceManifestBase & {
+      sourceClass: "visual_research_only";
+      allowedUses: Array<Exclude<DesignUse, "code_transformation">>;
+      retentionPolicy: "manifest_only" | "ephemeral_source";
+      trainingPolicy: "prohibited";
+      externalAssets: Array<{
+        kind: "image" | "font" | "icon" | "script" | "copy";
+        source: string;
+        disposition: "remove" | "replace";
+      }>;
+      ownerAuthorization?: never;
+      approvedAt?: string;
+    })
+  | (DesignSourceManifestBase & {
+      sourceClass: Exclude<
+        DesignSourceClass,
+        "owned_export_authorized" | "visual_research_only"
+      >;
+      ownerAuthorization?: never;
+      approvedAt?: string;
+    });
 ~~~
 
-许可用 SPDX 标识；**无清晰许可证即不可进入 `code_transformation` 或训练语料**。外链素材（字体/图标/脚本/图片/文案）按 `disposition` remove/replace/self_host 处理，不带进产物（呼应 §29 供应链：外部脚本默认删、图片重编码去元数据本地存储）。
+`owned_export_authorized` 是条件联合的硬门：`ownerAuthorization` 与 `approvedAt` 必填，且 validator 必须确认三项 `covers` 均为 `true`、证据路径非空、`validity` 已明确为永久或有期（有期必须尚未过期）、地域非空、撤回/再分发权已登记（conditional 必须有非空 conditions）；训练还须 `covers.training=true`。缺任一项即拒绝 manifest，**不得**自动降级后继续转换或训练。`visual_research_only` 在类型层固定禁止 `code_transformation` 与训练、禁止 `licensed_archive`，外部素材只能 remove/replace；运行时 validator 必须重复同一组断言，拒绝通过未类型化 JSON 自授高权限。旧字面量 `visual_reference_only` / `owned_export` 不接受、无运行时别名。许可用 SPDX 标识；**无清晰许可证即不可进入 `code_transformation` 或训练语料**。外链素材（字体/图标/脚本/图片/文案）按 `disposition` remove/replace/self_host 处理，不带进产物（呼应 §29 供应链：外部脚本默认删、图片重编码去元数据本地存储）。
 
 ## 10. Demo 与文案事实安全（反造假，T11，ADR-017 回写）
 

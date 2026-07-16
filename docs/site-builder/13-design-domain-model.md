@@ -45,9 +45,12 @@
 
 > v3.2 §13.4 回写。**定义**：进入开发工厂的每一个设计来源的权利与用途登记单。**无清晰许可证即不可进入 `code_transformation` 或训练语料**（SPDX 标识）。
 
-**字段**：`id` · `title` · `sourceClass`(`platform_original`|`permissive_licensed`|`owned_export_authorized`|`visual_research_only`) · `sourceUrl?` · `capturedAt` · `licenseSpdx?` · `licenseEvidencePath?` · `ownerAuthorizationPath?` · `allowedUses[]`(`visual_analysis`|`token_abstraction`|`structure_abstraction`|`code_transformation`) · `prohibitedUses[]` · `retentionPolicy`(`manifest_only`|`ephemeral_source`|`licensed_archive`) · `trainingPolicy`(`platform_corpus`|`license_permits`|`prohibited`) · `sourceContributionGroup?` · `externalAssets[]`(`{kind, source, disposition:remove|replace|self_host|retain}`) · `reviewer` · `approvedAt?`。
+**机器字面量（唯一）**：`sourceClass` = `platform_original` | `permissive_licensed` | `owned_export_authorized` | `visual_research_only`；历史稿中的 `visual_reference_only` / `owned_export` 不接受、无运行时别名。完整 TypeScript 条件联合见 [06 §9](06-security-abuse.md)，本领域模型不得另造一套字段。
 
-- **状态**：由 `approvedAt` 决定生效；`retentionPolicy=ephemeral_source` 的来源副本分析后即删。
+**公共字段**：`id` · `title` · `sourceClass` · `sourceUrl?` · `capturedAt` · `licenseSpdx?` · `licenseEvidencePath?` · `allowedUses[]`(`visual_analysis`|`token_abstraction`|`structure_abstraction`|`code_transformation`) · `prohibitedUses[]` · `retentionPolicy`(`manifest_only`|`ephemeral_source`|`licensed_archive`) · `trainingPolicy`(`platform_corpus`|`license_permits`|`prohibited`) · `sourceContributionGroup?` · `externalAssets[]`(`{kind, source, disposition:remove|replace|self_host|retain}`) · `reviewer`。
+
+- **`owned_export_authorized` 条件字段**：`ownerAuthorization`（`evidencePath` + `covers.aiSiteBuilder=true` + `covers.derivativeComponents=true` + `covers.commercialDistribution=true` + `covers.training?` + `territories[]` + `validity:{kind:perpetual}|{kind:expires,expiresAt}` + `revocationTerms` + `redistribution:{kind:allowed|prohibited}|{kind:conditional,conditions}` + `recordedAt`）与 `approvedAt` **同时必填**；其他 sourceClass 禁带 `ownerAuthorization`。
+- **状态硬门**：`approvedAt` 单独存在不代表授权生效。validator 必须核实授权证据非空、三项范围为真、`validity` 显式且未过期、地域非空、撤回/再分发权已登记；训练还须 `covers.training=true`。缺任一项 fail-closed，既不转换也不训练；不得自动降级绕过。`visual_research_only` 在类型层固定 `trainingPolicy=prohibited`、排除 `code_transformation` 与 `licensed_archive`，外部素材只能 remove/replace；运行时 validator 重复同一组断言，防未类型化 JSON 绕过。
 - **生产方**：Reference Curator（CC 开发角色，非生产 Agent）。**消费方**：Design Decomposer、Pattern Aggregator、整条固定工序（§8）。
 
 ### 2.3 外部观察提升为平台 `DesignRule` 的 4 条件
