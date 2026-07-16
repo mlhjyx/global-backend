@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadGatewayException, ConflictException, HttpException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { AssetsService } from './assets.service';
@@ -61,6 +61,7 @@ function makeService(options: {
     asset: {
       create: async ({ data }: { data: Row }) => {
         const row = {
+          createdAt: new Date('2026-07-17T00:00:00.000Z'),
           processingAttempt: 0,
           leaseToken: null,
           leaseUntil: null,
@@ -260,7 +261,8 @@ describe('AssetsService R2-A1 correctness gate', () => {
     releaseFirst.resolve();
     await expect(expiredHolder).rejects.toBeInstanceOf(ConflictException);
     expect(row.processingStatus).toBe('ready');
-    expect(s.operations.filter((op) => op.startsWith('storage:delete'))).toHaveLength(1);
+    expect(s.operations.filter((op) => op.startsWith('storage:delete'))).toHaveLength(0);
+    expect(s.outbox).toHaveLength(1);
   });
 
   it('rejects delete while commit owns the lease so a copied canonical object cannot become orphaned', async () => {
@@ -293,7 +295,12 @@ describe('AssetsService R2-A1 correctness gate', () => {
     const { signed, row } = await uploaded(s);
     const stagingKey = String(row.objectKey);
 
-    await expect(s.service.commit(CTX, signed.assetId)).rejects.toThrow('temporary MinIO failure');
+    const error = await s.service.commit(CTX, signed.assetId).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BadGatewayException);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      error: { code: 'ASSET_STORAGE_UNAVAILABLE' },
+    });
+    expect(JSON.stringify((error as HttpException).getResponse())).not.toContain('temporary MinIO');
 
     expect(row.processingStatus).toBe('failed_retryable');
     expect(row.retryAt).toBeInstanceOf(Date);
@@ -321,7 +328,7 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(row.processingStatus).toBe('failed_retryable');
   });
 
-  it('persists canonical truth before deleting staging', async () => {
+  it('persists canonical truth and defers staging deletion to durable cleanup', async () => {
     const s = makeService();
     const { signed } = await uploaded(s);
 
@@ -330,7 +337,6 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(s.operations.map((op) => op.split(':').slice(0, 2).join(':'))).toEqual([
       'storage:copy',
       'db:finalize',
-      'storage:delete',
     ]);
   });
 
@@ -344,7 +350,7 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(String(row.error)).toContain('33333333-3333-4333-8333-333333333333');
   });
 
-  it('parks durable staging cleanup intent when the post-commit delete fails', async () => {
+  it('routes staging cleanup durably only after the upload URL expires', async () => {
     const s = makeService({ failDelete: true });
     const { signed, row } = await uploaded(s);
     const stagingKey = String(row.objectKey);
@@ -356,9 +362,14 @@ describe('AssetsService R2-A1 correctness gate', () => {
       eventType: 'AssetObjectCleanupRequested',
       aggregateType: 'Asset',
       aggregateId: signed.assetId,
-      parkedAt: expect.any(Date),
-      payload: { objectKey: stagingKey, objectClass: 'staging' },
+      parkedAt: null,
+      payload: {
+        objectKey: stagingKey,
+        objectClass: 'staging',
+        notBefore: '2026-07-17T00:15:00.000Z',
+      },
     });
+    expect(s.operations.some((op) => op.startsWith('storage:delete'))).toBe(false);
   });
 
   it('tombstones a canonical asset and parks cleanup without deleting the object', async () => {

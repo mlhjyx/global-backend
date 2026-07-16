@@ -1,8 +1,9 @@
 import {
+  BadGatewayException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Asset } from '@prisma/client';
@@ -28,9 +29,62 @@ const SIZE_TOLERANCE_BYTES = 1024;
 const MAGIC_HEAD_BYTES = 16;
 const COMMIT_LEASE_MS = 15 * 60 * 1000;
 const COMMIT_RETRY_DELAY_MS = 30 * 1000;
+/** presignPut 的开发/生产统一有效期；cleanup 必须等旧 URL 失效，防晚到 PUT 复活孤儿。 */
+const PRESIGN_PUT_TTL_MS = 15 * 60 * 1000;
 
 /** commit 后进 KB 摄入队列的素材类别（图片管线随 M1）。 */
 const KB_QUEUED_KINDS: ReadonlySet<string> = new Set(['doc']);
+
+type AssetPublicErrorCode =
+  | 'ASSET_VALIDATION_FAILED'
+  | 'ASSET_UPLOAD_INCOMPLETE'
+  | 'ASSET_DUPLICATE'
+  | 'ASSET_STATE_CONFLICT'
+  | 'ASSET_BUSY'
+  | 'ASSET_STORAGE_UNAVAILABLE'
+  | 'ASSET_COMMIT_UNAVAILABLE';
+
+function assetErrorBody(
+  code: AssetPublicErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+): { error: { code: AssetPublicErrorCode; message: string; details?: Record<string, unknown> } } {
+  return { error: { code, message, ...(details ? { details } : {}) } };
+}
+
+function assetValidationError(reason: string, message: string): UnprocessableEntityException {
+  return new UnprocessableEntityException(
+    assetErrorBody('ASSET_VALIDATION_FAILED', message, { reason }),
+  );
+}
+
+function assetConflict(
+  code: Extract<
+    AssetPublicErrorCode,
+    'ASSET_UPLOAD_INCOMPLETE' | 'ASSET_DUPLICATE' | 'ASSET_STATE_CONFLICT' | 'ASSET_BUSY'
+  >,
+  message: string,
+): ConflictException {
+  return new ConflictException(assetErrorBody(code, message));
+}
+
+function assetStorageUnavailable(): BadGatewayException {
+  return new BadGatewayException(
+    assetErrorBody(
+      'ASSET_STORAGE_UNAVAILABLE',
+      'asset storage is temporarily unavailable; retry later',
+    ),
+  );
+}
+
+function assetCommitUnavailable(): ServiceUnavailableException {
+  return new ServiceUnavailableException(
+    assetErrorBody(
+      'ASSET_COMMIT_UNAVAILABLE',
+      'asset commit is temporarily unavailable; retry later',
+    ),
+  );
+}
 
 export interface PresignInput {
   kind: string;
@@ -51,8 +105,6 @@ export interface PresignResult {
  */
 @Injectable()
 export class AssetsService {
-  private readonly log = new Logger(AssetsService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -60,30 +112,38 @@ export class AssetsService {
 
   async presign(ctx: RequestContext, siteId: string, input: PresignInput): Promise<PresignResult> {
     if (!isAssetKind(input.kind)) {
-      throw new UnprocessableEntityException(`unsupported asset kind: ${input.kind}`);
+      throw assetValidationError('unsupported_kind', 'unsupported asset kind');
     }
     const ext = extForMime(input.mime);
-    if (!ext) throw new UnprocessableEntityException(`unsupported mime type: ${input.mime}`);
+    if (!ext) throw assetValidationError('unsupported_mime', 'unsupported asset mime type');
     if (!kindAcceptsMime(input.kind, input.mime)) {
-      throw new UnprocessableEntityException(
-        `mime ${input.mime} not allowed for kind ${input.kind}`,
-      );
+      throw assetValidationError('kind_mime_mismatch', 'asset mime type is not valid for kind');
     }
     if (!Number.isFinite(input.size) || input.size <= 0) {
-      throw new UnprocessableEntityException('invalid size');
+      throw assetValidationError('invalid_size', 'asset size must be positive');
     }
     const max = maxBytesForKind(input.kind);
     if (input.size > max) {
-      throw new UnprocessableEntityException(
-        `file too large for kind ${input.kind}: max ${max} bytes`,
-      );
+      throw assetValidationError('size_limit_exceeded', 'asset exceeds the size limit');
     }
+
+    // UUIDs are not capabilities. Resolve the parent through workspace RLS before touching
+    // object storage so a hidden/missing site cannot create a signed staging namespace.
+    const visible = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.site.findUnique({ where: { id: siteId }, select: { id: true } }),
+    );
+    if (!visible) throw new NotFoundException('site not found');
 
     // 预签名不需要网络 I/O，但仍属于对象存储边界：先在事务外生成，避免把
     // 外部依赖/SDK 延迟带进数据库事务。URL 只有 DB 行成功创建后才会返回给客户端。
     const assetId = randomUUID();
     const stagingKey = buildStagingKey(ctx.workspaceId, siteId, assetId);
-    const { url, expiresAt } = await this.storage.presignPut(stagingKey, input.mime);
+    let signed: Awaited<ReturnType<StorageService['presignPut']>>;
+    try {
+      signed = await this.storage.presignPut(stagingKey, input.mime);
+    } catch {
+      throw assetStorageUnavailable();
+    }
     await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const site = await tx.site.findUnique({ where: { id: siteId }, select: { id: true } });
       if (!site) throw new NotFoundException('site not found');
@@ -101,7 +161,7 @@ export class AssetsService {
         },
       });
     });
-    return { assetId, uploadUrl: url, expiresAt };
+    return { assetId, uploadUrl: signed.url, expiresAt: signed.expiresAt };
   }
 
   /**
@@ -117,12 +177,12 @@ export class AssetsService {
     try {
       head = await this.storage.head(stagingKey);
     } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err);
-      throw err;
+      await this.markRetryable(ctx, asset, fence, err, 'ASSET_STORAGE_UNAVAILABLE');
+      throw assetStorageUnavailable();
     }
     if (!head) {
       await this.releasePendingUpload(ctx, asset, fence);
-      throw new ConflictException('object not uploaded yet');
+      throw assetConflict('ASSET_UPLOAD_INCOMPLETE', 'asset upload is not complete');
     }
 
     const kind = asset.kind as AssetKind;
@@ -136,7 +196,7 @@ export class AssetsService {
         'rejected',
         `uploaded size ${head.size} exceeds limit`,
       );
-      throw new UnprocessableEntityException('uploaded object exceeds declared/kind size limit');
+      throw assetValidationError('size_mismatch', 'uploaded asset exceeds its declared size');
     }
 
     // 流式哈希 + 魔数头（大文件不整段进内存）
@@ -144,8 +204,8 @@ export class AssetsService {
     try {
       hashed = await this.storage.hashObject(stagingKey);
     } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err);
-      throw err;
+      await this.markRetryable(ctx, asset, fence, err, 'ASSET_STORAGE_UNAVAILABLE');
+      throw assetStorageUnavailable();
     }
     const { sha256, head: magicHead } = hashed;
     const sniffed = sniffMime(magicHead.subarray(0, MAGIC_HEAD_BYTES));
@@ -157,7 +217,7 @@ export class AssetsService {
         'rejected',
         `content does not match declared ${asset.mime}`,
       );
-      throw new UnprocessableEntityException('file content does not match declared type');
+      throw assetValidationError('content_type_mismatch', 'asset content does not match its type');
     }
 
     const ext = extForMime(asset.mime) ?? 'bin';
@@ -177,15 +237,15 @@ export class AssetsService {
         `duplicate content of asset ${duplicate.id}`,
         sha256,
       );
-      throw new ConflictException(`duplicate content: already uploaded as asset ${duplicate.id}`);
+      throw assetConflict('ASSET_DUPLICATE', 'asset content has already been uploaded');
     }
 
     try {
       // canonical key 来自内容哈希；同源重试/并发 copy 到同一 key 是幂等的。
       await this.storage.copy(stagingKey, canonicalKey);
     } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err);
-      throw err;
+      await this.markRetryable(ctx, asset, fence, err, 'ASSET_STORAGE_UNAVAILABLE');
+      throw assetStorageUnavailable();
     }
 
     const nextStatus = KB_QUEUED_KINDS.has(kind) ? 'queued' : 'ready';
@@ -231,25 +291,31 @@ export class AssetsService {
             `duplicate content of asset ${winner.id}`,
             sha256,
           );
-          throw new ConflictException(`duplicate content: already uploaded as asset ${winner.id}`);
+          throw assetConflict('ASSET_DUPLICATE', 'asset content has already been uploaded');
         }
       }
-      await this.markRetryable(ctx, asset, fence, err);
-      throw err;
+      await this.markRetryable(ctx, asset, fence, err, 'ASSET_COMMIT_UNAVAILABLE');
+      throw assetCommitUnavailable();
     }
 
-    if (!committed) throw new ConflictException('asset commit lease was superseded');
-    await this.deleteStagingBestEffort(stagingKey);
+    if (!committed) {
+      throw assetConflict('ASSET_STATE_CONFLICT', 'asset state changed; refresh and retry');
+    }
     return committed;
   }
 
   async list(ctx: RequestContext, siteId: string, kind?: string): Promise<Asset[]> {
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.asset.findMany({
+    if (kind && !isAssetKind(kind)) {
+      throw assetValidationError('unsupported_kind', 'unsupported asset kind');
+    }
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const site = await tx.site.findUnique({ where: { id: siteId }, select: { id: true } });
+      if (!site) throw new NotFoundException('site not found');
+      return tx.asset.findMany({
         where: { siteId, deletedAt: null, ...(kind ? { kind } : {}) },
         orderBy: { createdAt: 'asc' },
-      }),
-    );
+      });
+    });
   }
 
   /**
@@ -279,14 +345,14 @@ export class AssetsService {
         },
       });
       if (moved.count !== 1) {
-        throw new ConflictException('asset is currently being committed or processed');
+        throw assetConflict('ASSET_BUSY', 'asset is currently being processed');
       }
       // chunk 由 KbDocument FK 级联；同事务移除检索面，避免已删资料继续被命中。
       await tx.kbDocument.deleteMany({ where: { assetId } });
       await this.createCleanupIntent(tx, ctx, asset, asset.objectKey, objectClass, 'asset_deleted');
       return { objectKey: asset.objectKey, objectClass };
     });
-    if (target.objectClass === 'staging') await this.deleteStagingBestEffort(target.objectKey);
+    void target;
   }
 
   private async claimCommit(ctx: RequestContext, assetId: string): Promise<Asset> {
@@ -329,7 +395,7 @@ export class AssetsService {
       tx.asset.findUnique({ where: { id: assetId } }),
     );
     if (!current || current.deletedAt) throw new NotFoundException('asset not found');
-    throw new ConflictException(`asset already ${current.processingStatus}`);
+    throw assetConflict('ASSET_STATE_CONFLICT', 'asset state does not allow commit');
   }
 
   private async releasePendingUpload(
@@ -353,7 +419,9 @@ export class AssetsService {
         },
       }),
     );
-    if (moved.count !== 1) throw new ConflictException('asset commit lease was superseded');
+    if (moved.count !== 1) {
+      throw assetConflict('ASSET_STATE_CONFLICT', 'asset state changed; refresh and retry');
+    }
   }
 
   private async markRetryable(
@@ -361,6 +429,10 @@ export class AssetsService {
     asset: Asset,
     fence: { token: string; attempt: number },
     err: unknown,
+    processingErrorCode:
+      | 'ASSET_STORAGE_UNAVAILABLE'
+      | 'ASSET_STATE_CONFLICT'
+      | 'ASSET_COMMIT_UNAVAILABLE',
   ): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const moved = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
@@ -376,11 +448,14 @@ export class AssetsService {
           leaseToken: null,
           leaseUntil: null,
           retryAt: new Date(Date.now() + COMMIT_RETRY_DELAY_MS),
+          processingErrorCode,
           error: message.slice(0, 2000),
         },
       }),
     );
-    if (moved.count !== 1) throw new ConflictException('asset commit lease was superseded');
+    if (moved.count !== 1) {
+      throw assetConflict('ASSET_STATE_CONFLICT', 'asset state changed; refresh and retry');
+    }
   }
 
   private async markTerminalWithCleanup(
@@ -402,6 +477,8 @@ export class AssetsService {
         data: {
           processingStatus: status,
           contentHash,
+          processingErrorCode:
+            status === 'duplicate' ? 'ASSET_DUPLICATE' : 'ASSET_VALIDATION_FAILED',
           leaseToken: null,
           leaseUntil: null,
           retryAt: null,
@@ -412,14 +489,14 @@ export class AssetsService {
       await this.createCleanupIntent(tx, ctx, asset, asset.objectKey, 'staging', status);
       return result;
     });
-    if (moved.count !== 1) throw new ConflictException('asset commit lease was superseded');
-    await this.deleteStagingBestEffort(asset.objectKey);
+    if (moved.count !== 1) {
+      throw assetConflict('ASSET_STATE_CONFLICT', 'asset state changed; refresh and retry');
+    }
   }
 
   /**
-   * R2-A1 only records durable cleanup truth. parkedAt is intentional: R2-A4 will register
-   * the internal command, redrive these rows and run the Temporal consumer. Canonical payloads
-   * additionally carry the MF-0 scanner gate and must remain non-executable until then.
+   * R2-A4 routes staging cleanup to Temporal, but only after the original presigned PUT URL
+   * has expired. Canonical payloads remain parked behind the MF-0 reference-scanner gate.
    */
   private async createCleanupIntent(
     tx: {
@@ -428,7 +505,7 @@ export class AssetsService {
       };
     },
     ctx: RequestContext,
-    asset: Pick<Asset, 'id' | 'siteId'>,
+    asset: Pick<Asset, 'id' | 'siteId' | 'createdAt'>,
     objectKey: string,
     objectClass: 'staging' | 'canonical',
     reason: string,
@@ -441,29 +518,22 @@ export class AssetsService {
         aggregateType: 'Asset',
         aggregateId: asset.id,
         privacyClassification: 'INTERNAL',
-        parkedAt: new Date(),
+        parkedAt: objectClass === 'canonical' ? new Date() : null,
         payload: {
           assetId: asset.id,
           siteId: asset.siteId,
           objectKey,
           objectClass,
           reason,
+          ...(objectClass === 'staging'
+            ? { notBefore: new Date(asset.createdAt.getTime() + PRESIGN_PUT_TTL_MS).toISOString() }
+            : {}),
           ...(objectClass === 'canonical'
             ? { blockedUntil: 'site_spec_asset_reference_scanner' }
             : {}),
         },
       },
     });
-  }
-
-  private async deleteStagingBestEffort(stagingKey: string): Promise<void> {
-    try {
-      await this.storage.delete(stagingKey);
-    } catch (err) {
-      this.log.warn(
-        `staging cleanup failed for ${stagingKey}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
   }
 
   private isStagingKey(objectKey: string): boolean {

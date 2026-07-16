@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Asset, KbDocument, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -280,6 +280,8 @@ export class KbService {
 
   async status(ctx: RequestContext, siteId: string): Promise<KbStatus> {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const site = await tx.site.findUnique({ where: { id: siteId }, select: { id: true } });
+      if (!site) throw new NotFoundException('site not found');
       const docs = await tx.kbDocument.findMany({ where: { siteId } });
       const chunks = docs.reduce((sum, d) => sum + (d.chunkCount ?? 0), 0);
       // gaps 从最新 brand_profile 版本回填（M1-b；构建过一次才有，未构建=[]）

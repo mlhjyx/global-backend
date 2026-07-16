@@ -61,6 +61,7 @@ function makeService(opts: { siteExists?: boolean } = {}) {
     asset: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         db.assets.push({
+          createdAt: new Date(),
           processingAttempt: 0,
           leaseToken: null,
           leaseUntil: null,
@@ -140,7 +141,7 @@ function makeService(opts: { siteExists?: boolean } = {}) {
     },
   };
   const service = new AssetsService(prisma as never, storage as never);
-  return { service, db, objects, ops, kbDeletes, outbox };
+  return { service, db, objects, ops, kbDeletes, outbox, tx };
 }
 
 async function presignAndUpload(
@@ -215,6 +216,27 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(s.ops).toEqual([`site:find:${SITE_ID}`]);
   });
 
+  it('presign：对象存储故障 → 502 ASSET_STORAGE_UNAVAILABLE，不回显 SDK 文本', async () => {
+    const s = makeService();
+    const svc = s.service as unknown as { storage: { presignPut: () => Promise<never> } };
+    svc.storage.presignPut = async () => {
+      throw new Error('S3 endpoint http://storage.internal accessKey=secret');
+    };
+
+    const error = await s.service
+      .presign(CTX, SITE_ID, {
+        kind: 'doc',
+        filename: 'a.pdf',
+        size: 100,
+        mime: 'application/pdf',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadGatewayException);
+    expect(errorCode(error)).toBe('ASSET_STORAGE_UNAVAILABLE');
+    expect(JSON.stringify((error as HttpException).getResponse())).not.toContain('storage.internal');
+  });
+
   it('commit：魔数匹配 → 算 sha256、搬 canonical、图片直接 ready', async () => {
     const s = makeService();
     const { assetId } = await presignAndUpload(s);
@@ -224,7 +246,8 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(row.contentHash).toBe(hash);
     expect(row.objectKey).toBe(`ws/${CTX.workspaceId}/${SITE_ID}/product_image/${hash}.jpg`);
     expect(s.ops.some((o) => o.startsWith('copy:'))).toBe(true);
-    expect(s.ops.filter((o) => o.startsWith('delete:'))).toHaveLength(1); // staging 清理
+    expect(s.ops.filter((o) => o.startsWith('delete:'))).toHaveLength(0); // 由 durable cleanup 延后清理
+    expect(s.outbox.at(-1)).toMatchObject({ eventType: 'AssetObjectCleanupRequested' });
   });
 
   it('commit：doc 类进 KB 队列（processingStatus=queued）', async () => {
@@ -272,7 +295,8 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(errorCode(error)).toBe('ASSET_VALIDATION_FAILED');
     const row = s.db.assets.find((a) => a.id === assetId) as Record<string, unknown>;
     expect(row.processingStatus).toBe('rejected');
-    expect(s.objects.size).toBe(0);
+    expect(s.objects.size).toBe(1); // 预签名失效后由 durable cleanup 清 staging
+    expect(s.outbox.at(-1)).toMatchObject({ eventType: 'AssetObjectCleanupRequested' });
   });
 
   it('commit：内容重复（同 canonical key 已存在）→ 本行 duplicate + 409 带既有 assetId', async () => {
@@ -303,6 +327,25 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(error).toBeInstanceOf(BadGatewayException);
     expect(errorCode(error)).toBe('ASSET_STORAGE_UNAVAILABLE');
     expect(JSON.stringify((error as HttpException).getResponse())).not.toContain('internal-storage');
+  });
+
+  it('commit：canonical 真值落库暂不可用 → 503 ASSET_COMMIT_UNAVAILABLE，不回显 DB 文本', async () => {
+    const s = makeService();
+    const { assetId } = await presignAndUpload(s);
+    const updateMany = s.tx.asset.updateMany;
+    s.tx.asset.updateMany = async (args) => {
+      if (typeof args.data.objectKey === 'string') {
+        throw new Error('postgresql://global:secret@database.internal/global_dev');
+      }
+      return updateMany(args);
+    };
+
+    const error = await s.service.commit(CTX, assetId).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(503);
+    expect(errorCode(error)).toBe('ASSET_COMMIT_UNAVAILABLE');
+    expect(JSON.stringify((error as HttpException).getResponse())).not.toContain('database.internal');
   });
 
   it('list：先验证站点，不存在或跨租户不可见时统一 404', async () => {
