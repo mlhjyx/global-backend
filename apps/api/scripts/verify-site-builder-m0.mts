@@ -59,7 +59,9 @@ async function main(): Promise<void> {
   const intakeService = new IntakeService(prisma, {
     launchDemoV0: async (input) => {
       launched.push(input);
+      return { firstExecutionRunId: `verify-${input.buildRunId}` };
     },
+    recoverDemoV0: async (input) => ({ firstExecutionRunId: `verify-${input.buildRunId}` }),
   });
 
   const wsA = randomUUID();
@@ -79,11 +81,11 @@ async function main(): Promise<void> {
     businessEmail: 'sales@verifypump.com',
   };
   const created = await intakeService.create(ctxA, intake);
-  if (created.mode !== 'builder' || created.status !== 'building') {
+  if (created.status !== 'generating_demo' || created.buildId !== launched[0]?.buildRunId) {
     throw new Error(`unexpected intake result ${JSON.stringify(created)}`);
   }
   if (launched.length !== 1) throw new Error('demo launcher not invoked exactly once');
-  ok('intake', `site=${created.siteId} run=${launched[0].buildRunId} queued`);
+  ok('intake', `site=${created.siteId} run=${created.buildId} queued`);
 
   // ── ② demo v0：activity 直调（真 astro build；Temporal 接线由 worker 注册）──
   console.log('② demo v0（真 astro build）');

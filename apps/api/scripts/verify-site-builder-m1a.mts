@@ -101,7 +101,10 @@ async function main(): Promise<void> {
 
   // ── ① intake 建档（不跑 demo，直接进精装修路径）─────────────────────────
   console.log('① intake');
-  const intakeService = new IntakeService(prisma, { launchDemoV0: async () => undefined });
+  const intakeService = new IntakeService(prisma, {
+    launchDemoV0: async ({ buildRunId }) => ({ firstExecutionRunId: `verify-${buildRunId}` }),
+    recoverDemoV0: async ({ buildRunId }) => ({ firstExecutionRunId: `verify-${buildRunId}` }),
+  });
   const created = await intakeService.create(ctxA, {
     company: { nameZh: '杭州维实一号泵业', nameEn: 'Verify M1A Pump Co., Ltd.' },
     industry: 'isic-2813',

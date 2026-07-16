@@ -75,6 +75,7 @@ model IdempotencyKey {
   key         String
   endpoint    String
   response    Json
+  requestHash String?  @map("request_hash") @db.VarChar(64)
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@unique([workspaceId, endpoint, key])

@@ -95,7 +95,10 @@ async function main(): Promise<void> {
   const ws = randomUUID();
   const ctx = { userId: 'verify', workspaceId: ws, roles: [] };
 
-  const intakeService = new IntakeService(prisma, { launchDemoV0: async () => undefined });
+  const intakeService = new IntakeService(prisma, {
+    launchDemoV0: async ({ buildRunId }) => ({ firstExecutionRunId: `verify-${buildRunId}` }),
+    recoverDemoV0: async ({ buildRunId }) => ({ firstExecutionRunId: `verify-${buildRunId}` }),
+  });
   const created = await intakeService.create(ctx, {
     company: { nameZh: '凯士比泵业验证站', nameEn: 'KSB SE & Co. KGaA' },
     industry: 'isic-2813',
