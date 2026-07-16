@@ -34,7 +34,7 @@
 
 **第一版做法**：`trade_data` 类只落**国家级上下文**（Comtrade/Eurostat），明确标注无公司名、不进公司发现主流程；**公司级不接付费 reseller、不自建 manifest 抓取**，但保留 `data_provider` 表 `class='trade_data'` 契约插槽，待商业授权决策后接 reseller API。对 TRUMPF（卖设备给私营金属加工厂）场景，贸易数据本就匹配偏弱（提单多是成品/零件流而非设备采购），故整体列为**上下文/信号层**而非主发现源。
 
-> **⚠️ 更新（2026-07-07，见 [buyer-intelligence-v3.md §A1/§10.1](buyer-intelligence-v3.md)）**：上面「公司级只能付费」的结论**部分放宽**——对**中国工厂找海外买家**的主用户场景，美国海运提单**法定公开**（19 USC §1431），存在免费公司级通道：**ImportYeti 免费按公司名搜**（~50 票/公司顶，无 HS 反查/无 CSV/无免费 API）+ **Data Liberation Project 的 FOIA 提单开放数据集**（真免费可再分发，做离线基线）+ 逆向 ImportYeti 内部 JSON API 做 HS 反查（crawl4ai capture）。付费商卖的是「检索+聚合」不是数据授权。美国以外交易级仍基本付费。consignee 含自然人时 🔴 隔离。
+> **⚠️ 更新（2026-07-07，见 [buyer-intelligence-v3.md §A1/§10.1](../research/buyer-intelligence-v3.md)）**：上面「公司级只能付费」的结论**部分放宽**——对**中国工厂找海外买家**的主用户场景，美国海运提单**法定公开**（19 USC §1431），存在免费公司级通道：**ImportYeti 免费按公司名搜**（~50 票/公司顶，无 HS 反查/无 CSV/无免费 API）+ **Data Liberation Project 的 FOIA 提单开放数据集**（真免费可再分发，做离线基线）+ 逆向 ImportYeti 内部 JSON API 做 HS 反查（crawl4ai capture）。付费商卖的是「检索+聚合」不是数据授权。美国以外交易级仍基本付费。consignee 含自然人时 🔴 隔离。
 
 ## 与现有管线的集成点
 

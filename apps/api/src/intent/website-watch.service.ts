@@ -33,7 +33,8 @@ export interface WatchResult {
  *
  * 平台级共享（同 acquisition，无 RLS）：一家公司的公开页变化对所有租户是同一事实，抓一次共享；
  * 租户按 ICP 把公司加入监控（registerWatch，dedup by domain），并把 intent 事件投影进自己的 canonical（IntentProjectionService）。
- * 合规：全部🟢公司公开事实（岗位职务/产品/招募公告/新闻标题），无个人数据；抓取守 robots + crawl4ai egress 防护。
+ * 合规：全部🟢公司公开事实（岗位职务/产品/招募公告/新闻标题），无个人数据；抓取守 robots。
+ * 安全：当前 Ubuntu dev 的 Crawl4AI broad allow-internal 仅供可信 URL；完整 egress 防护待 R1-safety。
  *
  * ⚠️ web_watch 源**不进** acquisition 的通用 sweep（AcquisitionService.acquire 无 web_watch 适配器会抛错）——
  *   通用 listDueSources 已排除 providerKey='web_watch'，本引擎走独立 intentSweep + 独立 Schedule。

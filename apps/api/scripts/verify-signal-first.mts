@@ -1,5 +1,5 @@
 /**
- * 收口⑤「一等 Signal + ingest-once」真实数据端到端验收（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * 收口⑤「一等 Signal + ingest-once」真实数据端到端验收（真库真 API，无 sandbox，AGENTS.md §5）。
  * 验收三条（release-plan §1 ⑤）：
  *   ① 同一外部源同一时间窗**跨 workspace 只拉取一次**（signal_ingest 账本 + ledgerHit）；
  *   ② 信号可过期（expireStale → EXPIRED → 投影/复算剔除）/ 可撤回（revoke）；

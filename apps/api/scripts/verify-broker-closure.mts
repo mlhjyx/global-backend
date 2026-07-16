@@ -1,5 +1,5 @@
 /**
- * 收口② ExecutionContext + Broker 真收口 —— 真实数据端到端（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * 收口② ExecutionContext + Broker 真收口 —— 真实数据端到端（真库真 API，无 sandbox，AGENTS.md §5）。
  * 需 postgres + new-api 网关 + crawl4ai 在跑。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \

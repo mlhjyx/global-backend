@@ -40,7 +40,8 @@ export interface RateLimitSpec {
  *  - required：受治理**数据源**（TED/openFDA/GLEIF/Wikidata/Algolia…）。未登记、无 reader、
  *    提不出治理域 → 一律拒（fail-closed）。数据源必须先过合规审查登记才可直连。
  *  - advisory：**标的站点**类工具（抓任意公司官网 / SMTP 探测任意邮箱域）。要求预登记会杀死
- *    发现引擎——未登记放行（robots/SSRF/DAT-011 兜底），但**登记即强制**（SUSPENDED/用途门）。
+ *    发现引擎——未登记放行（工具仍须处理 robots/DAT-011），但**登记即强制**（SUSPENDED/用途门）。
+ *    source_policy 不是 SSRF 防线；抓取出站校验由独立 egress gate 负责（R1-safety）。
  *  - none：自托管基座（searxng），无外部源治理对象。
  */
 export type SourcePolicyMode = 'required' | 'advisory' | 'none';

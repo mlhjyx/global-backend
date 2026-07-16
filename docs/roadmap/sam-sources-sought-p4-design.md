@@ -1,5 +1,7 @@
 # SAM.gov Sources Sought — P4 设计（美国联邦「早数月」意图源）
 
+> **后续实施状态（2026-07-16）**：本文设计已由 PR #99（merge `bf16467`）落地，provider 保持默认 `DISABLED`；获客线当前冻结。下文“设计待认可 / 未动代码”是立项时快照，只作实施 provenance，当前状态以代码与 [../status/current.md](../status/current.md) 为准。
+>
 > 状态：**设计待认可**（2026-07-14）。方向已拍板（AskUserQuestion）：**纯 Intent 信号**（镜像 TED P3，非可直接成单的联邦线索）+ **CSV 优先 keyless** 摄取。
 > 承重假设已**真探证实**（见 §2），未动任何代码。落地走 TDD + 真测 + 对抗复审 + PR，功能默认 **DISABLED**（见 §5/§6）。
 > 对标：`docs/implementation-records/ted-provider-spec.md`（P3 招标 intent）、`docs/roadmap/decision-maker-p1-google-patents-inventor-design.md`（近期同类设计文档格式）。
@@ -132,7 +134,7 @@ sweep ─┬─ ingestSam（每 window 一次）: CSV 303→S3 →流式 filter 
 
 ## 9. 与既有线的关系
 
-- 是买家智能 P1「免费外部源」里 **TED v3 线的 P4 = SAM.gov Sources Sought**（CLAUDE.md §6）——早于 TED 招标/openFDA 清关的**招标前**意图。
+- 是买家智能 P1「免费外部源」里 **TED v3 线的 P4 = SAM.gov Sources Sought**（AGENTS.md §6）——早于 TED 招标/openFDA 清关的**招标前**意图。
 - 复用管线**零新 SourceClass**（归 `public_intelligence`），零 schema 迁移，纯增量。
 - 后续：P4.x Award notice（中标 prime=可成单客户，走个体户拒收）· PSC 精修 · 品类市场意图聚合层（§7.2）。
 

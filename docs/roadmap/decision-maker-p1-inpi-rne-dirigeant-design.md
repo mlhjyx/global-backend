@@ -20,7 +20,7 @@
 | 对本期价值 | 只要 dirigeant 名+职务，鉴权版**无额外价值** | 同样给 dirigeant 名+职务+qualite |
 | person Tier 0 | 无（法国不公示个人级 id） | 无（同）|
 
-→ **严格劣汰**：开放网关满足硬约束「真实数据、无 sandbox、当场真测」（CLAUDE.md §5），避开 EPO #61 的审批坑。
+→ **严格劣汰**：开放网关满足硬约束「真实数据、无 sandbox、当场真测」（AGENTS.md §5），避开 EPO #61 的审批坑。
 
 **这条路的优点**：
 - **官方政务 API、非爬**：延续 CH/TED/openFDA/EPO「官方 API 非爬」先例，平台合约轨干净。

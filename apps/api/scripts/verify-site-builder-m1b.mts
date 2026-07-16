@@ -3,13 +3,14 @@
  *
  * 四段：
  * ① 路由解析 + 网关真探活（brand_profile 路由主选微量真调——网关配置是活动的，用前探活不缓存结论）
- * ② researchBrand 真链路（真 ToolBroker → 真 searxng + 真 crawl4ai，robots/SSRF 在工具层）
+ * ② researchBrand 真链路（真 ToolBroker → 真 searxng + 真 crawl4ai；robots 在工具层；
+ *    SSRF 完整 egress gate 待 R1-safety，本脚本只允许开发者可信公开 URL）
  * ③ buildBrandProfile 全活动真跑（真库 intake+KB(BGE-M3) + 真研究 + 真模型 + evidence 闸）
  *    → brand_profile v1 落库、factSheet 全带合法 evidence、gaps 结构合规
  * ④ kb/status gaps 回填 + 重跑版本追加（v2，append-only）
  *
- * 依赖：docker compose up -d postgres minio embeddings docling searxng crawl4ai new-api
- * 跑：cd apps/api && node --import tsx scripts/verify-site-builder-m1b.mts
+ * 依赖：cd /global/backend && docker compose -p global up -d postgres minio embeddings docling searxng crawl4ai new-api
+ * 跑：cd /global/backend/apps/api && node --import tsx scripts/verify-site-builder-m1b.mts
  */
 import 'dotenv/config';
 import 'reflect-metadata';

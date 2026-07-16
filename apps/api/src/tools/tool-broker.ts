@@ -89,7 +89,8 @@ export class ToolBroker implements ExecutionBroker {
    * invoke 的合规门与调用方「昂贵前置（DNS/网络）前主动跳过」共用同一判定（单点真相）。
    * 收口②语义分层（见 SourcePolicyMode）：
    *  - required：无 reader → policy_unavailable；未登记 → unregistered（一律拒，fail-closed）。
-   *  - advisory：无 reader / 未登记 → 放行（robots/SSRF/DAT-011 兜底）；**登记即强制**。
+   *  - advisory：无 reader / 未登记 → 放行（由工具自己的 robots/DAT-011 合规处理）；**登记即强制**。
+   *    这不是 SSRF 兜底；抓取 egress 完整门属于 R1-safety。
    *  - none：不查。
    * 用途门：传了 purpose（本次调用用途）→ 域策略必须允许**该用途**（且工具须声明它）；
    * 缺省 → 工具声明集任一交集（多用途工具的既有语义，避免只登记单用途的域被误拒）。
@@ -151,7 +152,7 @@ export class ToolBroker implements ExecutionBroker {
           this.trace(ctx, tool, 'DENIED', 'no governable domain for required source_policy', 0, now() - started);
           throw new ToolPolicyDenied(toolId, 'no governable domain (required source_policy)');
         }
-        // advisory：无域可查 → 交给 robots/SSRF/DAT-011 兜底
+        // advisory：无域可查 → 交给工具自己的 robots/DAT-011 合规处理；这不构成 SSRF 兜底。
       } else {
         const chk = await this.checkSourcePolicy(toolId, domain, ctx.purpose);
         if (!chk.allowed) {

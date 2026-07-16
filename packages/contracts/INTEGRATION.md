@@ -1,22 +1,22 @@
-# Global 增长后端 · 前端接入说明
+# Global 后端 · 前端/服务端接入说明
 
-> 本文档给 SaaS 平台前端/服务端开发者。REST 契约以 `openapi/openapi.json`（code-first 导出）为准。
+> 本文档给 SaaS 平台前端/服务端开发者，覆盖 **Site Builder（当前主线）** 与冻结维护的获客能力。REST 契约以 `openapi/openapi.json`（code-first 导出）为准；本文只解释调用顺序，不覆盖生成契约。
 >
 > **统一接口门户（推荐前端入口）**：`http://<host>:3000/api/portal` —— 自托管 Scalar，一个地址浏览 + 在线调试全部端点。
 > 另有 Swagger UI `http://<host>:3000/api/docs`（内部调试）。契约由 `--export-openapi` 从代码生成，代码即事实源。
 
 ## 1. 基础约定
 
-| 项       | 约定                                                                                                                                                                                                                                     |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Base URL | `http://<host>:3000/api/v1`                                                                                                                                                                                                              |
-| 认证     | `Authorization: Bearer <token>` —— token 由 **SaaS 平台侧签发**，本后端只校验并解出 `sub`（用户）、`workspace_id`（租户）、`roles`。开发环境用 base64url(JSON) 即可：`base64url({"sub":"u1","workspace_id":"<uuid>","roles":["admin"]})` |
-| 租户     | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数                                                                                                                                                                    |
-| 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED`                                                    |
-| 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封                                                   |
-| 幂等     | 创建类 POST 支持 `Idempotency-Key` 头（如 `POST /companies`），同 key 重放返回首次结果                                                                                                                                                   |
-| 乐观锁   | 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，冲突返回 409 `VERSION_CONFLICT`                                                                                                                                                    |
-| 异步     | 长任务（理解/发现/评分）返回 `202`，前端轮询对应状态端点（见下）                                                                                                                                                                         |
+| 项 | 约定 |
+|---|---|
+| Base URL | `http://<host>:3000/api/v1` |
+| 认证 | `Authorization: Bearer <token>` —— token 由 **SaaS 平台侧签发**，本后端只校验并解出 `sub`（用户）、`workspace_id`（租户）、`roles`。开发环境用 base64url(JSON) 即可：`base64url({"sub":"u1","workspace_id":"<uuid>","roles":["admin"]})` |
+| 租户 | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数 |
+| 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED` |
+| 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封 |
+| 幂等 | **仅在 OpenAPI 声明该 header 的端点**支持 `Idempotency-Key`（如 `POST /companies`、Site Builder intake/builds）；不能从通用约定推断所有 POST 已实现 |
+| 乐观锁 | 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，冲突返回 409 `VERSION_CONFLICT` |
+| 异步 | 长任务（理解/发现/评分）返回 `202`，前端轮询对应状态端点（见下） |
 
 ### Site Builder intake · R0 契约迁移（2026-07-16）
 
@@ -27,9 +27,26 @@
 - `201` 表示 demo workflow 已取得持久启动证据；随后以返回的 `buildId` 轮询 `GET /api/v1/site-builder/builds/{buildId}`。`502 DEMO_LAUNCH_UNAVAILABLE` 时必须使用**同一个 key**重试，不要换 key。
 - 站点已占用且不是可原地重试的 `setup_failed` 时返回 `409 SITE_LIMIT_REACHED`；非法 key 返回 `400 INVALID_IDEMPOTENCY_KEY`。
 
-这是已批准的预接入 breaking correction；不提供旧响应双写。前端以本次生成的 OpenAPI/TS 类型为准。
+这是已批准并落地的预接入 breaking correction；不提供旧响应双写。前端以本次生成的 OpenAPI/TS 类型为准。
 
-## 2. 获客主线 · 端到端调用顺序
+## 2. Site Builder · 当前 as-built 接入顺序
+
+> R0 contract closeout（#126）已在 #121/#123/#124 的行为与安全修复之上，补齐 intake 幂等、`buildId`、稳定错误码、Temporal 启动证据与 code-first OpenAPI。下列形状描述合并后的 as-built；后续目标契约见 `docs/site-builder/07-api-contract-draft.md`。
+
+> **Base URL**：以下路径均包含全局版本前缀 `/api/v1`；客户端应直接使用完整路径，不要省略 `/api/v1`。
+
+1. `POST /api/v1/site-builder/intake` 提交公司、行业、产品、目标市场、网站背景与业务邮箱。
+   - 正式客户端必须携带 `Idempotency-Key`；同键同请求重放首次结果，同键异请求返回 `409 IDEMPOTENCY_KEY_REUSED`。
+   - 当前返回：`{ "data": { "siteId", "buildId", "status": "generating_demo" } }`；不再返回 `mode`。
+2. `GET /api/v1/site-builder/sites` 或 `GET /api/v1/site-builder/sites/{id}` 轮询站点；`status=ready` 后 `previewUrl` 可用。异步终态失败为 `setup_failed`，站点和 intake 会保留，用户可重试。
+3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。当前组内 schema 与乐观并发仍属 R2-A3 待收口，不要依赖 last-write-wins 行为。
+4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；SiteSpec 引用扫描与 `409 ASSET_IN_USE` 是 MF-0-thin 目标，当前尚未落地。
+5. `GET /api/v1/site-builder/sites/{id}/kb/status` 查询文档、chunk 与资料缺口。
+6. 精装修构建：`POST /api/v1/site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /api/v1/site-builder/builds/{id}`，取消用 `POST /api/v1/site-builder/builds/{id}/cancel`。更完整的 targetId/options/trace/progress/cost 契约仍待 R3。
+
+**SiteSpec / DQ-1**：`@global/contracts` 导出的 `SiteSpec` 1.0.0 是 API 生产端与 Astro Renderer 的唯一共享 TypeScript 真值；前端若需要编辑/物化 Spec，应等待相应 REST 端点进入 OpenAPI，不能直接把内部类型等同于已发布 API。DQ-1 是 type-only；运行时 Zod 与 1.1.0 仍是后续。
+
+## 3. 获客主线 · 端到端调用顺序（冻结维护）
 
 ### 阶段 0：企业理解（Understand）
 
@@ -68,13 +85,13 @@
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 
-## 3. 事件（服务端集成用）
+## 4. 事件（服务端集成用）
 
 领域事件经 Transactional Outbox 发布，信封结构见 `events/envelope.schema.json`。关键事件：
 `CompanyProfileCreated`、`ClaimApproved`、`ClaimRevoked`、`ClaimExpired`、`KnowledgeConflictDetected`、
 `ICPActivated`、`DiscoveryRunRequested/Completed`、`QualifyRequested`、`LeadsScored`、`LeadQualified`。
 
-## 4. 数据真实性说明（前端展示建议）
+## 5. 数据真实性说明（前端展示建议）
 
 - **Claim = 事实**：永远带来源 URL + 原文片段，建议 UI 提供「查看原文」
 - **ICP = 推断**（`HYPOTHESIS`）：建议 UI 标注「AI 生成，待回测/确认」

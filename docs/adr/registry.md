@@ -1,8 +1,8 @@
 # ADR/PDR 注册表（唯一决策真值）
 
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
-> 状态词表（与需求状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。以下均 ACCEPTED（2026-07-10 会话拍板/收敛），标注 ⚠ 者待 A/B 会签。
-> 2026-07-16 追加 **ADR-013~019**（独立站建设子系统承重决策，来源 `docs/site-builder/` 00-11 + 12 号裁决版；此前站建决策散落专题文档，未进本"唯一决策真值"=项目级漂移，本次回写收口）；ADR-010 制裁第五门更新为**已落地（#104）**。
+> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（2026-07-10 会话拍板/收敛），标注 ⚠ 者待 A/B 会签。
+> 2026-07-16 追加 **ADR-013~019**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档）。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
 
 ## PDR（产品决策）
 
@@ -34,6 +34,8 @@
 14. **ADR-014 SITESPEC-CONTRACT SiteSpec 三方契约**：SiteSpec = 建站三方（组装 agent 产出 ↔ 渲染器构建消费 ↔ SaaS 前端 Puck 编辑器）**唯一契约**——Puck 兼容页面数据形状 + i18n **键间接层**（CopyBundle，结构/内容分离）+ 资产**引用**（🔴 禁外链 URL 直嵌，版权链与稳定性）+ `specVersion` semver（minor=容忍新增可选字段，major 附迁移器）。**类型级单一真值 = `@global/contracts`**（DQ-1 #117 已落地 `SITE_SPEC_VERSION=1.0.0`，两端 `import type` 编译期防漂移；设计目标态 1.1.0）；渲染器侧 Zod 三重门（结构/引用完整性/语义规则）为紧接 follow-up。出处：04-sitespec-contract、DQ-1 记录。
 15. **ADR-015 CLOSED-COMPONENT-LIBRARY 封闭组件库**：v1 = **26 型封闭 section 组件**（D12，17→26）；组件 `type`/`variant`/原子字段类型**封闭枚举**，校验器 + 渲染器对未知组件**拒绝/返回空**（Section.astro 未知 type 静默 null），组装 agent **禁生成任意 JSX/CSS**、禁发明组件类型。扩库 = 显式加注册 + 版本 minor；ScrollVideoHero/Interactive3DHero 不进封闭库。出处：04 §5、11 号 + D12、Section.astro as-built。
 16. **ADR-016 MODEL-PROFILE-ROUTING 模型档四态路由**：Agent 卡绑 **ModelProfile 语义档**（能力/成本/延迟约束），**非硬编码模型字符串**；路由四态 = `currentRoute`（现役 as-built）/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + **deterministicFallback**；候选晋升**只经评测**（Golden Set 回归 + 成本/质量门），**不是采购承诺或永久终选**。deepseek 一律**显式 `v4-pro`/`v4-flash`**（chat/reasoner 官方 2026-07-24 关停）。出处：10-model-selection-study、02 §6、task-routes.ts as-built。
-17. **ADR-017 NO-FABRICATED-IDENTITY 禁虚构身份（🔴 合规红线）**：demo-spec 与文案 agent **只用 intake 事实**；对未知企业类型**禁止**默认写 manufacturer / 工程团队 / QC / 出口包装 / 认证 / 产能 / 年限 / 客户名单等身份声明；缺 = **留空 + 提示补录**，绝不虚构。与 ADR-010 存储侧"证据先行/最小化"红线同源，**建站侧不可回退**。（已核实 main 代码违反，R0-3 修复中）出处：01 事实红线、00-decisions R0-3、12 号裁决版。
+17. **ADR-017 NO-FABRICATED-IDENTITY 禁虚构身份（🔴 合规红线）**：demo-spec 与文案 agent **只用 intake 事实**；对未知企业类型**禁止**默认写 manufacturer / 工程团队 / QC / 出口包装 / 认证 / 产能 / 年限 / 客户名单等身份声明；缺 = **留空或中性措辞 + 提示补录**，绝不虚构。与 ADR-010 存储侧"证据先行/最小化"红线同源，**建站侧不可回退**。出处：01 事实红线、00-decisions R0-3。
 18. **ADR-018 MEDIA-FOUNDATION MF-0 媒体地基（薄版）**：M1-c 媒体只落 `AssetVariant` 表 + **删除守卫**（删除前查 active SiteSpec 引用 → 409）；`MediaJob`/`AssetUsage` **事件触发补建**（接生成式图片/视频前不提前建，YAGNI）。M1-c 图片管线 **纯 Sharp 确定性算法**，不加 rembg 容器（唯一消费者=生成式重绘已延后，D-M1c-1）。出处：00-decisions MF-0 裁决、02 §8。
-19. **ADR-019 READDY-VISUAL-REFERENCE Readdy 视觉参考（D9）**：Readdy 默认 `visual_reference_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**；仅在取得明确授权后升 `owned_export`，走一次性改造工序入封闭库。出处：11 号 D9、00-decisions。
+19. **ADR-019 READDY-VISUAL-REFERENCE Readdy 视觉参考（D9）**：来源状态唯一机器字面量为 `visual_research_only` / `owned_export_authorized`（历史稿中的 `visual_reference_only` / `owned_export` **不得持久化、无运行时别名**）。Readdy 默认 `visual_research_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**；只有取得覆盖 AI 建站产品、衍生组件和商业分发的**书面授权**，并完整登记授权证据、范围、期限、地域、撤回与再分发权后，才可升为 `owned_export_authorized`，按授权边界走一次性改造工序入封闭库；缺任一项 fail-closed。出处：11 号 D9、00-decisions、06 §9、13 §2。
+
+> Site Builder 的滚动实现状态与施工顺序不在 ADR 注册表维护；统一见 [status/current](../status/current.md) 与 [release-plan](../roadmap/release-plan.md)。`ACCEPTED` 始终不等于已实现。

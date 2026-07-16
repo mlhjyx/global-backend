@@ -65,7 +65,7 @@ const DELETION_REQUEST_SCHEMA = {
 /**
  * 收口⑥ PR-B 删除请求端点（GDPR Art.17 擦除编排）。
  * 🔐 授权模型：仅 AuthGuard（authN）+ RLS 工作区隔离——token 只能删本 workspace 内主体。本后端不做身份系统
- *（CLAUDE.md §1），「谁可发起 DSR 删除」的授权由 SaaS 签发 token 时控制；细粒度 RolesGuard 归 R1 加固。
+ *（AGENTS.md §1），「谁可发起 DSR 删除」的授权由 SaaS 签发 token 时控制；细粒度 RolesGuard 归 R1 加固。
  */
 @ApiTags('Compliance')
 @ApiBearerAuth()

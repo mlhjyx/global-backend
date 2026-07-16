@@ -1,5 +1,5 @@
 /**
- * 待办3 · 专利发明人 **postgres scoped 缓存**（scale-safe #89）—— 真库真 BigQuery 端到端（无 sandbox，CLAUDE.md §5）。
+ * 待办3 · 专利发明人 **postgres scoped 缓存**（scale-safe #89）—— 真库真 BigQuery 端到端（无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑；GOOGLE_PATENTS_SA_JSON + GOOGLE_PATENTS_PROJECT 在 .env。⚠️ 全脚本**只做 1 次真 BQ 扫描**（节制额度）。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \

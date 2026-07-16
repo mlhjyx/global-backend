@@ -1,5 +1,5 @@
 /**
- * 待办 3 · BigQuery Google Patents 发明人身份源（替代被封 EPO OPS）—— 真库真 API 端到端（无 sandbox，CLAUDE.md §5）。
+ * 待办 3 · BigQuery Google Patents 发明人身份源（替代被封 EPO OPS）—— 真库真 API 端到端（无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑；GOOGLE_PATENTS_SA_JSON（服务账号 key 文件路径）+ GOOGLE_PATENTS_PROJECT（计费/配额 project）在 .env。
  * 真欧洲专利公司 = Siemens（DE，海量专利，稳定出发明人）。
  *

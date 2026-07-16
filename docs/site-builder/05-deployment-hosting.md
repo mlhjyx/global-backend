@@ -2,7 +2,7 @@
 
 > 落实 [02-architecture.md](02-architecture.md) D10（海外部署）与 D7（预览域名）。2026-07-14 web 调研支撑。
 > Reviewed against 12 v3.2（2026-07-16 回写：slug 覆盖 → 不可变 Release、加域名 ownership/tombstone/原子指针、R1-min 构建隔离）。承重决策见 **ADR-013**（不可变 Release：内容寻址、可回放、可回滚，异步失败绝不删除用户现有 Site）。
-> **里程碑分层**：**M1 = 本地预览**（构建隔离 + 本地原子指针，零域名依赖）；**M2 = 发布/域名**（不可变 Release + 对象存储 + Caddy 边缘 + 自定义域 + 询盘）。本文 as-built 与 target 分栏，绝不把目标态写成已落地。
+> **里程碑分层**：**M1 = 本地预览**（先做 R1-safety：临时文件/子进程 env + Crawl4AI/robots 出站闸，再做构建隔离 + 本地原子指针，零域名依赖）；**M2 = 发布/域名**（不可变 Release 构建产物 + Caddy 边缘 + 自定义域 + 询盘）。素材/KB 对象当前已使用 MinIO，不能与尚未对象化的 Release artifact 混为一谈。本文 as-built 与 target 分栏，绝不把目标态写成已落地。
 
 ## 0. 全景（target 目标态）：一份产物，两条链路，三类域名
 
@@ -17,17 +17,17 @@
 
 ## 0.5 as-built 现状与 target 的分界（先分清）
 
-| 主题 | as-built（已落地，截 0737fee） | target（本文设计，未落地） |
+| 主题 | as-built（2026-07-16，含 #125 truth-sync / #126 R0 contract） | target（本文设计，未落地） |
 |---|---|---|
 | 预览地址 | `PREVIEW_URL_PATTERN` env（`preview-url.ts` / `site-builder.activities.ts`），默认本地路径 `http://localhost:3000/preview/{slug}/`；仅 `ready`/`published` 站返回地址 | 平台域到手后改 env 为 `{slug}.preview.<平台域>`——**前端/后端零代码改动**（§3） |
 | 版本模型 | `SiteVersion`（`version` 站内递增、`@@unique([siteId,version])`、`artifactKey?`、`buildRunId?`）+ `Site.activeVersionId` 指针字段均存在 | 升级为**不可变 `SiteRelease`**（§1.2）；`SiteVersion` 继续做构建版本，Release 做发布单元 |
 | 构建落盘 | 直接构建到 `previewRoot()/site.slug`（`activities.ts` L259/L608），refurbish 在 finalize 前已覆盖当前可见目录（**R1-1**）→ 失败/取消构建破坏当前预览、`activeVersionId` 形同虚设 | **R1-min 构建隔离**：per-run staging → 硬门过 → 事务切指针 → 原子替换（§5） |
 | 版本分配 | `max(version)+1` 无 advisory lock（**R1-3**），并发/活动重试可 P2002 | 同事务 advisory lock + CAS（§5 规则 7） |
 | Release / 产物快照 | **无** `SiteRelease` / `ReleaseManifest` / `AssetVariant` 模型 | §1.2 / §1.3 定义，M2（部分随 R1-min） |
-| 对象存储 / Caddy / CDN | **无**（M0/M1 仅本地预览服务） | §1、§4 定义，M2 |
+| 对象存储 / Caddy / CDN | 素材与供 KB 消化的上传对象已走 MinIO/S3 `StorageService`；renderer 构建产物仍以 `local:` 路径落本机。Caddy/CDN/Release artifact 对象化均未落地 | 构建/发布产物按不可变 Release prefix 进入对象存储；Caddy/CDN 见 §1、§4（M2） |
 | 多语言 | `[...slug].astro` 只渲染默认 locale（M0），多语言站点无法完整验证 | 多语种路径随 M1 copy agent 落，发布前完整验证 |
 
-**结论**：M0/M1-a 的"版本化 + 指针"骨架在 schema 层已预埋，但**原子性尚未真正成立**（R1-1/R1-3），构建仍直写可见目录。R1-min 修复优先于视觉优化，最迟在 M1-e 真实构建接入前完成（§10）。
+**结论**：M0/M1-a 的"版本化 + 指针"骨架在 schema 层已预埋，但**原子性尚未真正成立**（R1-1/R1-3），构建仍直写可见目录。`finally` 清理、renderer env allowlist 与 Crawl4AI/robots 完整出站闸先作为 **R1-safety** 完成；R1-min 余项最迟在 M1-e 真实构建接入前完成（§10）。
 
 ## 1. 发布托管（D10 落细，M2）
 
@@ -133,6 +133,7 @@ previewRoot/{slug}/current.json
 - Caddy `ask` 端点 + 授权列表（§2.3）杜绝非客户域名蹭挂；tombstone/cooldown 防解绑后 takeover（§2.5）。
 - Preview/Publish 同一 artifact，杜绝二次构建漂移（§3）。
 - AI 媒体真实性与披露按 `syntheticClass` / `disclosureMode` 分类处理（v3.2 §29.4，详见 06）——发布扫描据此决定机器标记/可见披露/阻断，不一刀切。
+- 生产禁止依赖 `CRAWL4AI_ALLOW_INTERNAL_URLS=true`。任何用户/导入/研究 URL 必须先过完整 egress gate，且 Crawl4AI 与 robots 直连两条路径都要覆盖 DNS 解析后 IP、redirect 逐跳、内网/loopback/metadata、DNS rebinding、超时和响应大小；Ubuntu 本地 fake-IP 例外只用于开发者可信 URL。
 
 ## 8. Release 可解释性 DecisionTrace（M2，v3.2 §9.2 回写）
 
@@ -151,10 +152,11 @@ previewRoot/{slug}/current.json
 
 | 门 | 内容 | 时点 |
 |---|---|---|
-| **R1-min**（→ M1） | per-run staging、不可变 artifact、active pointer 原子切换、版本 CAS/advisory lock、`finally` 清理、env allowlist、unknown component fail-closed（§5.1） | 可与 M1-c 算法并行，**必须早于 M1-e 可见预览 / 公开发布** |
+| **R1-safety**（当前前置） | 两个可审小 PR：① 临时 spec/staging 的 `finally` 清理 + renderer 子进程 env allowlist（§5.1 规则 8）；② Crawl4AI + robots 两条抓取路径的完整 egress gate 与正/负向验证，移除生产 broad allow-internal | **先于 R2-A / MF-0 / M1-c**；不与原子 Release 全套捆绑，出站闸完成前只允许本地开发者可信 URL |
+| **R1-min 余项**（→ M1） | per-run staging、不可变 artifact、active pointer 原子切换、版本 CAS/advisory lock、unknown component fail-closed（§5.1 规则 1–7/8 后半） | R1-safety 后可与 M1-c 算法并行，**必须早于 M1-e 可见预览 / 公开发布** |
 | **M2-PUBLISH**（→ M2） | 不可变 Release manifest（§1.2/§1.3）、原子发布/回滚（§1.4/§5.2）、域名 ownership + tombstone（§2）、安全头（§7）、最小询盘 + consent + anti-abuse + Outbox、AI 媒体按 §29.4 分类披露 | **公开发布前**；依赖 R1-min + PublishReview + 质量门（06/08） |
 
-**完整发布域名治理在 M2 公开发布前完成**；多 worker 高级预算治理与全 canary 自动化在付费 targetCandidate 进入生产前完成（不阻断 M1/首发）。M2-PUBLISH 与 MF-1/MODEL-2 一样，开工需以当时 main 证据为准，不以"v3.2 已写"替代。
+**完整发布域名治理在 M2 公开发布前完成**；多 worker 高级预算治理与全 canary 自动化在付费 targetCandidate 进入生产前完成（不阻断 M1/首发）。M2-PUBLISH 依赖 R1-safety + R1-min 余项；与 MF-1/MODEL-2 一样，开工需以当时 main 证据为准，不以"v3.2 已写"替代。
 
 ## 11. 开放问题 / 待拍板
 

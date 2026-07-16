@@ -2,7 +2,7 @@ import { cleanEmail } from '../../acquisition/clean';
 import { EmailVerifyContext, LawfulBasis, LawfulBasisKind } from '../provider-contract';
 
 /**
- * 邮箱验证的**合法性基础门**（GDPR Art.6 / Art.14，见 CLAUDE.md 合规红线 + buyer-intelligence-v3.md §10.3）。
+ * 邮箱验证的**合法性基础门**（GDPR Art.6 / Art.14，见 AGENTS.md 合规红线 + buyer-intelligence-v3.md §10.3）。
  *
  * 核心：对具体邮箱做 SMTP RCPT 存在性探测 = 处理该地址的可识别性 → 对**人名邮箱**（personalData）即处理个人数据。
  *  - 🟢 **职能邮箱**（info@ / sales@ …，`kind='role'`）非个人数据（Recital 14）→ 默认自动探测。

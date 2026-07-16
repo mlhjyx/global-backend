@@ -15,7 +15,7 @@ CH 董事（active director）经 `externalIds`（scheme `uk-ch-officer`）走 *
 
 - **官方注册处、零爬取**：REST API（Basic auth，key 作 username、空 password），非爬官网 → 平台合约轨干净（对齐 TED/openFDA「官方 API 非爬」先例）。
 - **董事 = 具名经济买家**：CH 依法公示公司 active director（对齐买家委员会「经济买家/决策人」维），且带**稳定 officer_id**（`/officers/{OFFICER_ID}/appointments`）→ 天然 Tier 0 精确键（跨源、跨时间稳定，不靠人名模糊）。
-- **免费**（CLAUDE.md §6 免费优先）：CH 免费数据产品 + API，OGL v3.0（Crown copyright，可商用、署名义务）。
+- **免费**（AGENTS.md §6 免费优先）：CH 免费数据产品 + API，OGL v3.0（Crown copyright，可商用、署名义务）。
 
 ## 2. 架构（复用三层，零新 SourceClass）
 

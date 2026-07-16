@@ -1,6 +1,6 @@
 /**
  * 收口⑥ PR-A 真库验证（无 sandbox）：DataRights 判定 + policy_decision_log + PII 加密 + jurisdiction_policy。
- * 运行：cd apps/api && node --import tsx scripts/verify-data-rights.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-data-rights.mts
  *
  * 🔴 RLS 硬规矩：app 连接必须是 app_user（非 superuser），否则 RLS/GRANT 被绕、证明失效。开头 guard。
  */

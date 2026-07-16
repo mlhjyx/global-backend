@@ -1,4 +1,4 @@
-# 评测与测试策略 v1（草稿，待用户确认）
+# 评测与测试策略 v1（活文档，分阶段实施）
 
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
@@ -246,13 +246,13 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 
 - **触发**：改 agent prompt / 换模型或模型档 / 改组件库或主题 / 改校验器/evidence 门 → 必须跑回归再合并（写进 PR 模板检查项）。
 - **模型档晋升回归门**（ADR-016）：任何 `evaluatedCandidate → promotedRoute` 切换前，**必须过 Golden Set 回归**（§3.2/§3.3 硬门 + §3.5 切片报告），无回归门的晋级 = 违背 ADR-016。
-- **分层**：`smoke`（2 家，分钟级，日常改动）/ `full`（全量 Bootstrap 6 → 视觉 12，模型或组件库级改动）。
+- **分层**：`smoke`（从 Bootstrap 固定抽 2 个 fixture，分钟级日常冒烟；**不代表 Golden Set 规模或覆盖完成**）/ `full`（先跑完整 Bootstrap 6；M1-g 扩成视觉 12 后再跑完整 12，模型或组件库级改动）。Golden 口径始终是 **6 启动 → 12 视觉扩集 → 真实流量后 30+ 成熟集**。
 - **执行**：本地 verify 脚本真网关真构建（§8 硬规矩，CI 不跑）；报告（各维分数 vs 基线差值，按 §3.5 切片）贴 PR 描述；**硬门回退 = 改动打回**。
 - **基线更新**：有意的质量提升合并后，重跑 full 落新基线（基线文件随 repo 版本化）。
 
-## 5. 代码与真机测试六层（TDD 落到本功能）
+## 5. 代码与真机测试七层（TDD 落到本功能）
 
-**先写测试再实现**（RED→GREEN→IMPROVE），六层覆盖（v3.2 §27.7 回写）：
+**先写测试再实现**（RED→GREEN→IMPROVE），七层覆盖（v3.2 §27.7 回写）：
 
 1. **单测**（vitest，CI 跑）：schema/状态机/**引用扫描**/evidence 门/object key/image recipe/budget reserve-settle/**route registry**；SiteSpec 校验器（合法/非法/边界表驱动）、richtext 白名单序列化（注入样本集）、prompt 模板变量转义、发布门 L1 规则表、CopyBundle 槽位与长度、locale/RTL 工具、指针切换幂等。
 2. **属性 / fixture 测**：**SiteSpec 兼容演进**（`specVersion` minor 容错）、RichText sanitize、JSON Patch、locale、lock preservation。
@@ -266,7 +266,7 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 
 各里程碑的**合并门/测试泳道**（DoD，v3.2 §26 回写）：
 
-- **测试泳道 IT-0（Industrial Template 效果验证）**：可与 R0/R2 并行、非架构主序列。基于最新 main 重跑（或记录落后 SHA）；industrial pump 与 auto-parts 各有 sparse/rich fixture，存 1440/768/390 截图；记录 Astro build/axe/性能预算/unknown component/copy 与事实风险；输出**"可保留原创 / 需按合同改造 / 应丢弃"清单**；**未经组件合同审查不得整包合并 Section/themes/demo-spec**。
+- **测试泳道 IT-0（Industrial Template 效果验证）**：可与 R2 并行、非架构主序列。基于最新 main 重跑（或记录落后 SHA）；industrial pump 与 auto-parts 各有 sparse/rich fixture，存 1440/768/390 截图；记录 Astro build/axe/性能预算/unknown component/copy 与事实风险；输出**"可保留原创 / 需按合同改造 / 应丢弃"清单**；**未经组件合同审查不得整包合并 Section/themes/demo-spec**。
 - **M1-c 合并门（9 条 DoD，ADR-018）**：`AssetVariant` additive migration + RLS/FORCE RLS A/B 租户测试（不预建 MediaJob/AssetUsage）；原件永不覆盖 + recipe 相同不重复；commit/processing CAS/lease/重试/取消/zombie write；EXIF-GPS 真图复验 + 方向/色彩/透明 + AVIF/WebP/fallback 可解码；cert/person/logo 不进生成式且无 provider 调用；单图失败隔离、仅必需 Hero 无 fallback 才阻断；被引用 Asset 删除 409 + 扫描器覆盖 SiteSpec 1.0.0 全 AssetRef；MinIO 对象/Variant/checksum 可对账且对象清理不在 DB 事务；derivedKeys 双写兼容 + 停双写迁移条件；MF-1 触发条件已记录。
 - **PR M1-f（确定性 QA + 审美与反模板感）**：先断点/溢出/对比度/资源/链接/schema/事实/a11y，**再冻结截图多模态审美**；**最多三轮定向修复，禁随机全站重生成**。
 - **PR EVAL-bootstrap（可执行启动集）**：6 fixture（§1.1）；存输入/不变量/desktop-mobile 截图/质量/成本-延迟；产品 owner 成对偏好，**4/6 胜且客观硬门全过才扩 12 视觉 fixture**；启动集不宣称统计显著。（施工顺序 #11，v3.2 §0.3）
@@ -319,9 +319,11 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ## 完成定义（DoD）— M0-M3 分层验收门（v3.2 §33 回写 · DOC-12 补漏）
 
 > **只有分层全部满足才能说 M1 完成**——"页面看起来不错"不能替代可靠性、安全与发布合同。本节是**跨里程碑的正式验收契约**（此前散在 v3.2 §33、未分发，completeness-critic 查漏后补回）。多数条目的**机制真值在他处**（R0 审计见 [09 §10](09-m1-implementation-design.md)、MF-0 见 [14](14-media-foundation-mf0.md)、组件/契约见 [04](04-sitespec-contract.md)、模型门见 [10](10-model-selection-study.md)、发布治理见 [06](06-security-abuse.md)/[05](05-deployment-hosting.md)）；本清单是**统一的"是否可发布"门**，按 ID 引 ADR。
+>
+> **as-built 注记（2026-07-16）**：#121/#123/#124 已完成无条件 Demo、禁虚构身份、业务邮箱隔离、真取消与失败保站；#126 已补齐 `buildId`、intake 幂等、Temporal 启动证据和 Swagger/OpenAPI，并以单测、真 PostgreSQL 与真实 Temporal probe 覆盖 DoD-1 第一项。
 
 ### DoD-1 M0~M1-b 回补
-- [ ] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2）
+- [x] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2，#121/#126）
 - [ ] Demo 不虚构企业类型/工厂/团队/认证/年限/客户/数字；P95 < 10s。（🔴 ADR-017 / R0-3）
 - [ ] active preview 不被失败/取消/未发布 build 覆盖；Release/版本分配并发安全。（ADR-013）
 - [ ] businessEmail 不进通用 KB/embedding/品牌 Prompt；存量 chunk 已重建清理。（R0-4 隐私）

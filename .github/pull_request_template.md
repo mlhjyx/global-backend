@@ -10,7 +10,7 @@
 ## 测试 / 验证
 - [ ] `pnpm --filter @global/api build` 绿（nest build = tsc 全量类型检查）
 - [ ] `pnpm --filter @global/api test` 绿（vitest）
-- [ ] **真实数据实测**（provider/采集/富集类改动必填；无 sandbox，见 CLAUDE.md §5）—— 附命令与结果：
+- [ ] **真实数据实测**（provider/采集/富集类改动必填；无 sandbox，见 AGENTS.md §5）—— 附命令与结果：
 - [ ] CI 绿
 
 ## 合规（涉数据源 / 联系人 / 抓取时必填）
@@ -21,4 +21,4 @@
 ## 待续 / 已知风险
 -
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+- [ ] Codex 实际参与了本 PR 的开发/复核（仅在真实发生时勾选，不伪造 provenance）
