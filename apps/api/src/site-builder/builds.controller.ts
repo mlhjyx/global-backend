@@ -21,6 +21,7 @@ import { IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { Enveloped, envelope } from '../common/envelope';
 import { BuildsService } from './builds.service';
 import type { BuildOptionsInput } from './refurbish-launcher';
@@ -41,6 +42,14 @@ class CreateBuildDto {
   options?: BuildOptionsInput;
 }
 
+class BuildActionResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  buildId!: string;
+
+  @ApiProperty()
+  status!: string;
+}
+
 @ApiTags('SiteBuilder')
 @ApiBearerAuth()
 @Controller('site-builder')
@@ -51,6 +60,7 @@ export class BuildsController {
   @Post('sites/:id/builds')
   @HttpCode(201)
   @ApiOperation({ summary: '触发精装修构建（07 §5；409=进行中，429=当日配额）' })
+  @ApiEnvelope(BuildActionResponseDto, { status: 201 })
   @ApiResponse({ status: 409, description: 'BUILD_IN_PROGRESS' })
   @ApiResponse({ status: 429, description: 'QUOTA_EXCEEDED；details.remaining 为剩余额度' })
   @ApiResponse({ status: 502, description: 'BUILD_LAUNCH_UNAVAILABLE；可安全重试' })
@@ -93,6 +103,7 @@ export class BuildsController {
   @Post('builds/:id/cancel')
   @HttpCode(200)
   @ApiOperation({ summary: '取消构建（终态 409）' })
+  @ApiEnvelope(BuildActionResponseDto)
   @ApiResponse({
     status: 409,
     description: 'BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL',

@@ -6135,6 +6135,24 @@
           }
         },
         "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BuildActionResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "409": {
             "description": "BUILD_IN_PROGRESS"
           },
@@ -6199,6 +6217,24 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BuildActionResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "409": {
             "description": "BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL"
           }
@@ -7630,6 +7666,22 @@
           "sizeBytes",
           "processingStatus",
           "createdAt"
+        ]
+      },
+      "BuildActionResponseDto": {
+        "type": "object",
+        "properties": {
+          "buildId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "buildId",
+          "status"
         ]
       },
       "CreateBuildDto": {
