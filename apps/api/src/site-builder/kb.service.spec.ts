@@ -1,10 +1,11 @@
+import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { KbService } from './kb.service';
 
 const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
 
-function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
+function makeService(opts: { embedDim?: number; doclingMd?: string; siteExists?: boolean } = {}) {
   const dim = opts.embedDim ?? 1024;
   const db: {
     docs: Record<string, unknown>[];
@@ -47,6 +48,10 @@ function makeService(opts: { embedDim?: number; doclingMd?: string } = {}) {
     }
   };
   const tx = {
+    site: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        opts.siteExists === false ? null : { id: where.id },
+    },
     kbDocument: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { id: `doc-${db.docs.length + 1}`, ...data };
@@ -525,6 +530,11 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
       { id: 'd2', siteId: SITE_ID, chunkCount: 2 },
     );
     expect(await service.status(CTX, SITE_ID)).toEqual({ documents: 2, chunks: 5, gaps: [] });
+  });
+
+  it('status：站点不存在或跨租户不可见时统一 404，而不是伪造空知识库', async () => {
+    const { service } = makeService({ siteExists: false });
+    await expect(service.status(CTX, SITE_ID)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('status：gaps 从最新 brand_profile 版本回填（M1-b，kb.service:116 挂账收口）', async () => {

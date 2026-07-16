@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BadGatewayException,
   ConflictException,
+  HttpException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -37,6 +39,12 @@ function applyData(row: Row, data: Row): void {
   }
 }
 
+function errorCode(error: unknown): string | undefined {
+  if (!(error instanceof HttpException)) return undefined;
+  const response = error.getResponse() as { error?: { code?: string } };
+  return response.error?.code;
+}
+
 function makeService(opts: { siteExists?: boolean } = {}) {
   const db: { assets: Record<string, unknown>[] } = { assets: [] };
   const objects = new Map<string, Buffer>();
@@ -45,8 +53,10 @@ function makeService(opts: { siteExists?: boolean } = {}) {
   const outbox: Row[] = [];
   const tx = {
     site: {
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        opts.siteExists === false ? null : { id: where.id },
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        ops.push(`site:find:${where.id}`);
+        return opts.siteExists === false ? null : { id: where.id };
+      },
     },
     asset: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -185,9 +195,14 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
         mime: 'application/pdf',
       }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    const error = await s.service
+      .presign(CTX, SITE_ID, { ...base, kind: 'weird' })
+      .catch((caught: unknown) => caught);
+    expect(errorCode(error)).toBe('ASSET_VALIDATION_FAILED');
   });
 
-  it('presign：站点不存在 → 404', async () => {
+  it('presign：先验证站点；站点不存在时不得触达对象存储', async () => {
     const s = makeService({ siteExists: false });
     await expect(
       s.service.presign(CTX, SITE_ID, {
@@ -197,6 +212,7 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
         mime: 'application/pdf',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+    expect(s.ops).toEqual([`site:find:${SITE_ID}`]);
   });
 
   it('commit：魔数匹配 → 算 sha256、搬 canonical、图片直接 ready', async () => {
@@ -232,10 +248,14 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
       size: JPEG.length,
       mime: 'image/jpeg',
     });
-    await expect(s.service.commit(CTX, res.assetId)).rejects.toBeInstanceOf(ConflictException);
+    const missing = await s.service.commit(CTX, res.assetId).catch((caught: unknown) => caught);
+    expect(missing).toBeInstanceOf(ConflictException);
+    expect(errorCode(missing)).toBe('ASSET_UPLOAD_INCOMPLETE');
     s.objects.set(`ws/${CTX.workspaceId}/${SITE_ID}/uploads/${res.assetId}`, JPEG);
     await s.service.commit(CTX, res.assetId);
-    await expect(s.service.commit(CTX, res.assetId)).rejects.toBeInstanceOf(ConflictException);
+    const repeated = await s.service.commit(CTX, res.assetId).catch((caught: unknown) => caught);
+    expect(repeated).toBeInstanceOf(ConflictException);
+    expect(errorCode(repeated)).toBe('ASSET_STATE_CONFLICT');
   });
 
   it('commit：声明 mime 与魔数不符 → 行标 rejected、staging 删除、422', async () => {
@@ -247,9 +267,9 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
       size: evil.length,
       mime: 'image/jpeg',
     });
-    await expect(s.service.commit(CTX, assetId)).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
-    );
+    const error = await s.service.commit(CTX, assetId).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnprocessableEntityException);
+    expect(errorCode(error)).toBe('ASSET_VALIDATION_FAILED');
     const row = s.db.assets.find((a) => a.id === assetId) as Record<string, unknown>;
     expect(row.processingStatus).toBe('rejected');
     expect(s.objects.size).toBe(0);
@@ -260,10 +280,41 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     const a = await presignAndUpload(s);
     await s.service.commit(CTX, a.assetId);
     const b = await presignAndUpload(s);
-    await expect(s.service.commit(CTX, b.assetId)).rejects.toBeInstanceOf(ConflictException);
+    const error = await s.service.commit(CTX, b.assetId).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(errorCode(error)).toBe('ASSET_DUPLICATE');
     const rowB = s.db.assets.find((x) => x.id === b.assetId) as Record<string, unknown>;
     expect(rowB.processingStatus).toBe('duplicate');
     expect(String(rowB.error)).toContain(a.assetId);
+  });
+
+  it('commit：对象存储故障 → 502 稳定码，原始 SDK 文本不进入公共异常', async () => {
+    const s = makeService();
+    const { assetId } = await presignAndUpload(s);
+    const svc = s.service as unknown as {
+      storage: { head: () => Promise<never> };
+    };
+    svc.storage.head = async () => {
+      throw new Error('MinIO http://internal-storage:9000 accessKey=secret');
+    };
+
+    const error = await s.service.commit(CTX, assetId).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadGatewayException);
+    expect(errorCode(error)).toBe('ASSET_STORAGE_UNAVAILABLE');
+    expect(JSON.stringify((error as HttpException).getResponse())).not.toContain('internal-storage');
+  });
+
+  it('list：先验证站点，不存在或跨租户不可见时统一 404', async () => {
+    const s = makeService({ siteExists: false });
+    await expect(s.service.list(CTX, SITE_ID)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('list：未知 kind → 422 ASSET_VALIDATION_FAILED', async () => {
+    const s = makeService();
+    const error = await s.service.list(CTX, SITE_ID, 'not-a-kind').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnprocessableEntityException);
+    expect(errorCode(error)).toBe('ASSET_VALIDATION_FAILED');
   });
 
   it('delete：tombstone + 级联清 KB；scanner 前不删 canonical 对象', async () => {
