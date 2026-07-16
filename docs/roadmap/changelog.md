@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R2-A1（Asset 正确性状态机）
+
+- Asset 增加 `processing_attempt`、UUID `lease_token`、`lease_until`、`retry_at` 与 `deleted_at`；active `object_key` 改为部分唯一索引，并以 validated CHECK 锁住状态/lease/tombstone 形状。
+- commit 入口先 CAS 认领，所有完成/失败回写按 attempt+token fencing；canonical copy content-addressed 幂等，DB 真值先于 staging 删除，瞬时错误保留 staging 转 `failed_retryable`，唯一竞态显式转 `duplicate`。
+- DELETE 从硬删改为 tombstone，KB 检索面同事务移除；cleanup intent 与状态变化同事务写 Outbox。R2-A4 前命令刻意 parked，MF-0 引用扫描器前 canonical 不自动删除。
+- TDD 覆盖并发 loser、过期 lease 接管/zombie write、copy 失败重试、P2002、清理失败与 tombstone；开发环境真 PostgreSQL/app_user RLS/MinIO/presigned PUT 全绿，34 个 migration 在临时空库全量 deploy、索引与约束复验通过，verifier 无残留。
+
 ## 2026-07-17 · Site Builder R1-safety ②（抓取出口隔离）
 
 - 移除开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS`；Crawl4AI 固定到 0.9.1 不可变 digest，保留 global-unicast seed guard 与浏览器 pinning proxy，并只在系统解析结果全部为 `198.18.0.0/15` fake-IP 时经固定 Cloudflare DoH 窄回退。

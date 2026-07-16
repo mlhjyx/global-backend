@@ -111,7 +111,7 @@ export class AssetsController {
 
   @Delete('assets/:id')
   @HttpCode(204)
-  @ApiOperation({ summary: '删除素材（spec 引用检查随 M1 spec 物化补齐）' })
+  @ApiOperation({ summary: '软删除素材；canonical 清理等待 MF-0 引用扫描器' })
   async remove(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) assetId: string,

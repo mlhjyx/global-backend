@@ -13,6 +13,7 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { PrismaClient } from '@prisma/client';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -37,7 +38,8 @@ function ok(section: string, message: string): void {
 
 async function main(): Promise<void> {
   const prisma = new PrismaService();
-  await prisma.$connect();
+  const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+  await Promise.all([prisma.$connect(), owner.$connect()]);
 
   // RLS 验证前置守卫（memory: rls-verify-app-user）
   const su = await prisma.$queryRaw<{ is_superuser: string }[]>`
@@ -68,6 +70,13 @@ async function main(): Promise<void> {
   const wsB = randomUUID();
   const ctxA = { userId: 'verify', workspaceId: wsA, roles: [] };
   const ctxB = { userId: 'verify', workspaceId: wsB, roles: [] };
+  // R2-A1 cleanup intent 对 workspace 有真实 FK；verifier 不再依赖历史的“裸 UUID 租户”。
+  await owner.workspace.createMany({
+    data: [
+      { id: wsA, name: 'site-builder-m0-verify' },
+      { id: wsB, name: 'site-builder-m0-verify-other' },
+    ],
+  });
 
   // ── ① intake：建档 + demo run 排队 ──────────────────────────────────────
   console.log('① intake');
@@ -235,7 +244,9 @@ async function main(): Promise<void> {
 
   console.log('\n🎉 M0 端到端全绿：intake → demo v0(真构建) → 预览 HTTP → 素材/KB(真向量) → RLS。');
   console.log(`   预览产物：${path.join(previewRoot(), previewSlug)}`);
-  await prisma.$disconnect();
+  await owner.site.deleteMany({ where: { id: created.siteId } });
+  await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } });
+  await Promise.all([prisma.$disconnect(), owner.$disconnect()]);
 }
 
 main().catch((err) => {

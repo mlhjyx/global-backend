@@ -20,6 +20,7 @@ function matches(row: Row, where: Row): boolean {
     if (key === 'NOT') return !matches(row, expected as Row);
     if (expected && typeof expected === 'object' && !(expected instanceof Date)) {
       const condition = expected as Row;
+      if ('notIn' in condition) return !(condition.notIn as unknown[]).includes(row[key]);
       if ('lte' in condition) return row[key] instanceof Date && row[key] <= condition.lte!;
     }
     return row[key] === expected;

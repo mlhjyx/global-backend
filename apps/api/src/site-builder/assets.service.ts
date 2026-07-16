@@ -262,7 +262,13 @@ export class AssetsService {
       if (!asset || asset.deletedAt) throw new NotFoundException('asset not found');
       const objectClass = this.isStagingKey(asset.objectKey) ? 'staging' : 'canonical';
       const moved = await tx.asset.updateMany({
-        where: { id: assetId, deletedAt: null },
+        // 与 commit/KB claim 做同一行 CAS：进行中的 worker 必须先完成或释放，
+        // 否则 delete 可能在 copy 已完成、canonical 尚未回写的窗口制造不可追踪孤儿。
+        where: {
+          id: assetId,
+          deletedAt: null,
+          processingStatus: { notIn: ['committing', 'processing'] },
+        },
         data: {
           processingStatus: 'deleted',
           deletedAt: new Date(),
@@ -271,7 +277,9 @@ export class AssetsService {
           retryAt: null,
         },
       });
-      if (moved.count !== 1) throw new ConflictException('asset deletion raced with another request');
+      if (moved.count !== 1) {
+        throw new ConflictException('asset is currently being committed or processed');
+      }
       // chunk 由 KbDocument FK 级联；同事务移除检索面，避免已删资料继续被命中。
       await tx.kbDocument.deleteMany({ where: { assetId } });
       await this.createCleanupIntent(tx, ctx, asset, asset.objectKey, objectClass, 'asset_deleted');

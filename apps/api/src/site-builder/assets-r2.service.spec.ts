@@ -25,6 +25,7 @@ function matches(row: Row, where: Row): boolean {
     if (expected && typeof expected === 'object' && !(expected instanceof Date)) {
       const condition = expected as Row;
       if ('in' in condition) return (condition.in as unknown[]).includes(row[key]);
+      if ('notIn' in condition) return !(condition.notIn as unknown[]).includes(row[key]);
       if ('lte' in condition) return row[key] instanceof Date && row[key] <= condition.lte!;
       if ('equals' in condition) return row[key] === condition.equals;
     }
@@ -260,6 +261,31 @@ describe('AssetsService R2-A1 correctness gate', () => {
     await expect(expiredHolder).rejects.toBeInstanceOf(ConflictException);
     expect(row.processingStatus).toBe('ready');
     expect(s.operations.filter((op) => op.startsWith('storage:delete'))).toHaveLength(1);
+  });
+
+  it('rejects delete while commit owns the lease so a copied canonical object cannot become orphaned', async () => {
+    const s = makeService();
+    const { signed, row } = await uploaded(s);
+    const canonicalCopied = deferred<void>();
+    const releaseCopy = deferred<void>();
+    s.storage.copy = async (_from: string, to: string) => {
+      s.objects.set(to, JPEG);
+      canonicalCopied.resolve();
+      await releaseCopy.promise;
+    };
+
+    const committing = s.service.commit(CTX, signed.assetId);
+    await canonicalCopied.promise;
+    const removal = await s.service.remove(CTX, signed.assetId).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    releaseCopy.resolve();
+    const commitResult = await Promise.allSettled([committing]);
+
+    expect(removal).toBeInstanceOf(ConflictException);
+    expect(commitResult[0]).toMatchObject({ status: 'fulfilled' });
+    expect(row.processingStatus).toBe('ready');
   });
 
   it('marks a transient copy failure retryable and retains staging for a later lease', async () => {
