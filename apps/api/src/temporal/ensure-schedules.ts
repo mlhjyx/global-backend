@@ -48,6 +48,7 @@ export async function ensurePlatformSchedules(): Promise<void> {
   try {
     for (const s of SPECS) {
       try {
+        const isKbRecovery = s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID;
         await client.schedule.create({
           scheduleId: s.id,
           spec: { intervals: [{ every: (process.env[s.everyEnv] ?? s.everyDefault) as Duration }] },
@@ -55,13 +56,34 @@ export async function ensurePlatformSchedules(): Promise<void> {
             type: 'startWorkflow',
             workflowType: s.workflowType,
             taskQueue: UNDERSTANDING_TASK_QUEUE,
-            args: [{}],
+            args: isKbRecovery ? [{ limit: 10 }] : [{}],
+            // KB workflow 自身也只有两轮 10m activity；Schedule 再加顶层硬截止，防异常 history 长占 SKIP 锁。
+            ...(isKbRecovery ? { workflowExecutionTimeout: '22 minutes' } : {}),
           },
           policies: { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' },
         });
         console.log(`[worker] schedule '${s.id}' created (every ${process.env[s.everyEnv] ?? s.everyDefault}, overlap=SKIP)`);
       } catch (e) {
-        if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) continue; // 已存在则不动
+        if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) {
+          if (s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID) {
+            // R2-A2 的有界执行参数属于正确性门，不能让已存在的开发/生产 Schedule 永久沿用旧 action。
+            // 只更新 action；频率、overlap、暂停状态与 ops note 全部保留。
+            await client.schedule.getHandle(s.id).update((previous) => ({
+              spec: previous.spec,
+              action: {
+                ...previous.action,
+                args: [{ limit: 10 }],
+                workflowExecutionTimeout: '22 minutes',
+              },
+              policies: previous.policies,
+              state: previous.state,
+              searchAttributes: previous.searchAttributes,
+              typedSearchAttributes: previous.typedSearchAttributes,
+            }));
+            console.log(`[worker] schedule '${s.id}' action reconciled; cadence/pause preserved`);
+          }
+          continue;
+        }
         throw e;
       }
     }

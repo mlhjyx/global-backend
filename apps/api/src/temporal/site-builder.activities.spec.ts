@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Context as ActivityContext } from '@temporalio/activity';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   createSiteBuilderActivities,
@@ -52,6 +53,41 @@ function spyBudget() {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('processKbAsset — Temporal heartbeat/cancellation', () => {
+  it('worker Activity context 的取消信号与阶段 heartbeat 会传入单素材处理器', async () => {
+    const controller = new AbortController();
+    const heartbeat = vi.fn();
+    vi.spyOn(ActivityContext, 'current').mockReturnValue({
+      heartbeat,
+      cancellationSignal: controller.signal,
+    } as never);
+    const processAsset = vi.fn(async (...args: unknown[]) => {
+      const options = args[3] as {
+        signal?: AbortSignal;
+        heartbeat?: (stage: string) => void;
+      };
+      expect(options.signal).toBe(controller.signal);
+      options.heartbeat?.('parsed');
+      return { assetId: 'asset-1', outcome: 'ready' as const };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      kb: {
+        ingestText: vi.fn() as never,
+        processQueued: vi.fn() as never,
+        processAsset: processAsset as never,
+      },
+    });
+
+    await expect(
+      acts.processKbAsset({ workspaceId: 'ws-1', siteId: 'site-1', assetId: 'asset-1' }),
+    ).resolves.toMatchObject({ outcome: 'ready' });
+
+    expect(heartbeat).toHaveBeenCalledWith({ assetId: 'asset-1', stage: 'claim' });
+    expect(heartbeat).toHaveBeenCalledWith({ assetId: 'asset-1', stage: 'parsed' });
+  });
+});
 
 describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
   it('认领成功 → close(force) 后 open(buildRunId, siteBuildBudgetCents())', async () => {

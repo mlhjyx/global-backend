@@ -335,6 +335,37 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
     expect(db.assets[0].processingStatus).toBe('ready');
   });
 
+  it('R2-A2：persist 中途收到 Activity 取消会停止 chunk 写入并回 due queue', async () => {
+    const { service, db, rawInserts } = makeService();
+    db.assets.push({
+      id: 'ast-cancel-persist',
+      siteId: SITE_ID,
+      kind: 'doc',
+      filename: 'cancel.txt',
+      mime: 'text/plain',
+      objectKey: 'ws/x/y/doc/cancel.txt',
+      contentHash: 'c'.repeat(64),
+      processingStatus: 'queued',
+      processingAttempt: 0,
+    });
+    const controller = new AbortController();
+
+    const out = await service.processAsset(CTX, SITE_ID, 'ast-cancel-persist', {
+      signal: controller.signal,
+      heartbeat: (stage) => {
+        if (stage === 'persist:chunk:0') controller.abort(new Error('activity cancelled'));
+      },
+    });
+
+    expect(out).toMatchObject({ outcome: 'retry_scheduled', errorCode: 'KB_PERSIST_FAILED' });
+    expect(rawInserts).toHaveLength(0);
+    expect(db.assets[0]).toMatchObject({
+      processingStatus: 'queued',
+      leaseToken: null,
+      leaseUntil: null,
+    });
+  });
+
   it('R2-A2：lease 过期接管后，旧 worker 恢复也不能 zombie write', async () => {
     const { service, db } = makeService();
     db.assets.push({

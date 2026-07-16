@@ -61,6 +61,11 @@ interface KbFence {
   attempt: number;
 }
 
+interface KbProcessOptions {
+  signal?: AbortSignal;
+  heartbeat?: (stage: string) => void;
+}
+
 /**
  * 知识库地基（02 §12）：解析（Docling/直读）→ 结构感知切块 → BGE-M3 批量向量化 →
  * pgvector 落库（RLS 事务内）。网络调用（embedding/解析）在事务外，避免长事务。
@@ -111,6 +116,7 @@ export class KbService {
     ctx: RequestContext,
     siteId: string,
     assetId: string,
+    options: KbProcessOptions = {},
   ): Promise<KbProcessResult> {
     const asset = await this.claimAsset(ctx, siteId, assetId);
     if (!asset) return { assetId, outcome: 'not_due' };
@@ -118,7 +124,9 @@ export class KbService {
     try {
       let buffer: Buffer;
       try {
-        buffer = await this.storage.getBuffer(asset.objectKey);
+        options.heartbeat?.('storage');
+        buffer = await this.storage.getBuffer(asset.objectKey, options.signal);
+        options.signal?.throwIfAborted();
       } catch (err) {
         throw new KbIngestError(
           'KB_STORAGE_UNAVAILABLE',
@@ -130,7 +138,9 @@ export class KbService {
       }
       const markdown = TEXT_MIMES.has(asset.mime)
         ? buffer.toString('utf8')
-        : (await this.docling.convertToMarkdown(asset.filename, buffer)).markdown;
+        : (await this.docling.convertToMarkdown(asset.filename, buffer, options.signal)).markdown;
+      options.heartbeat?.('parsed');
+      options.signal?.throwIfAborted();
       if (markdown.trim().length === 0) {
         throw new KbIngestError(
           'KB_DOCUMENT_INVALID',
@@ -143,8 +153,19 @@ export class KbService {
       await this.renewFence(ctx, asset, fence);
       const vectors = await this.embedAll(chunks.map((c) => c.text), () =>
         this.renewFence(ctx, asset, fence),
+        options.signal,
+        options.heartbeat,
       );
-      await this.persistAssetDocument(ctx, asset, fence, chunks, vectors);
+      options.signal?.throwIfAborted();
+      await this.persistAssetDocument(
+        ctx,
+        asset,
+        fence,
+        chunks,
+        vectors,
+        options.signal,
+        options.heartbeat,
+      );
       return { assetId, outcome: 'ready', attempt: fence.attempt };
     } catch (err) {
       const typed = asKbIngestError(err, 'persist');
@@ -326,12 +347,16 @@ export class KbService {
   private async embedAll(
     texts: string[],
     beforeBatch?: () => Promise<void>,
+    signal?: AbortSignal,
+    heartbeat?: (stage: string) => void,
   ): Promise<number[][]> {
     const vectors: number[][] = [];
     for (let i = 0; i < texts.length; i += EMBED_BATCH) {
       await beforeBatch?.();
+      heartbeat?.(`embedding:${i / EMBED_BATCH}`);
+      signal?.throwIfAborted();
       const batch = texts.slice(i, i + EMBED_BATCH);
-      vectors.push(...(await this.embeddings.embed(batch)));
+      vectors.push(...(await this.embeddings.embed(batch, signal)));
     }
     return vectors;
   }
@@ -397,7 +422,10 @@ export class KbService {
     fence: KbFence,
     chunks: Chunk[],
     vectors: number[][],
+    signal?: AbortSignal,
+    heartbeat?: (stage: string) => void,
   ): Promise<void> {
+    signal?.throwIfAborted();
     await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       // This fenced write takes the Asset row lock and extends the lease inside the same
       // transaction as document/chunk replacement. A takeover that already changed token
@@ -413,6 +441,8 @@ export class KbService {
         data: { leaseUntil: new Date(Date.now() + KB_LEASE_MS) },
       });
       if (held.count !== 1) throw this.superseded(asset.id);
+      heartbeat?.('persist:document');
+      signal?.throwIfAborted();
 
       const existing = await tx.kbDocument.findUnique({ where: { assetId: asset.id } });
       const doc = existing
@@ -441,9 +471,13 @@ export class KbService {
           });
       if (existing) await tx.kbChunk.deleteMany({ where: { documentId: doc.id } });
       for (let i = 0; i < chunks.length; i += 1) {
+        heartbeat?.(`persist:chunk:${i}`);
+        signal?.throwIfAborted();
         await this.insertChunk(tx, ctx.workspaceId, doc.id, chunks[i], vectors[i]);
       }
 
+      heartbeat?.('persist:ready');
+      signal?.throwIfAborted();
       const ready = await tx.asset.updateMany({
         where: {
           id: asset.id,

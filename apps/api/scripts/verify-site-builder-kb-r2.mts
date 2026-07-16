@@ -10,12 +10,13 @@
 import 'dotenv/config';
 import { ConflictException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AssetsService } from '../src/site-builder/assets.service';
 import { DoclingClient } from '../src/site-builder/docling.client';
 import { EmbeddingsClient } from '../src/site-builder/embeddings.client';
 import { KbService } from '../src/site-builder/kb.service';
+import { buildObjectKey, extForMime } from '../src/site-builder/object-key';
 import { StorageService } from '../src/site-builder/storage.service';
 import { createSiteBuilderActivities } from '../src/temporal/site-builder.activities';
 
@@ -85,6 +86,7 @@ async function main(): Promise<void> {
   const touchedKeys = new Set<string>();
   const baseKb = new KbService(appDb, embeddings, docling, storage);
   const assets = new AssetsService(appDb, storage);
+  let verificationError: unknown;
 
   async function uploadDoc(
     filename: string,
@@ -101,6 +103,13 @@ async function main(): Promise<void> {
       tx.asset.findUniqueOrThrow({ where: { id: signed.assetId } }),
     );
     touchedKeys.add(staging.objectKey);
+    const ext = extForMime(mime);
+    if (!ext) throw new Error(`unsupported verifier mime: ${mime}`);
+    // commit 的 canonical key 由 body hash 确定；在 copy 之前预登记，覆盖
+    // “copy 已成功但 DB fenced 回写/返回前失败”的对象清理窗口。
+    touchedKeys.add(
+      buildObjectKey(wsA, siteA, 'doc', createHash('sha256').update(body).digest('hex'), ext),
+    );
     const put = await fetch(signed.uploadUrl, {
       method: 'PUT',
       headers: { 'content-type': mime },
@@ -368,11 +377,87 @@ async function main(): Promise<void> {
       throw new Error(`KB cascade failed: ${JSON.stringify(deletedSurface)}`);
     }
     ok('delete', 'document and chunks removed; canonical object remains parked for A4/MF-0');
+  } catch (err) {
+    verificationError = err;
   } finally {
-    for (const key of touchedKeys) await storage.delete(key).catch(() => undefined);
-    await owner.site.deleteMany({ where: { id: { in: [siteA, siteB] } } }).catch(() => undefined);
-    await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } }).catch(() => undefined);
-    await Promise.all([appDb.$disconnect(), owner.$disconnect()]);
+    const cleanupErrors: unknown[] = [];
+    const workspaceIds = [wsA, wsB];
+
+    // 先删除数据库真值，确认引用面归零后，才允许删除对象；反向顺序会制造 DB→对象悬空。
+    try {
+      await owner.site.deleteMany({ where: { id: { in: [siteA, siteB] } } });
+      await owner.workspace.deleteMany({ where: { id: { in: workspaceIds } } });
+    } catch (err) {
+      cleanupErrors.push(new Error(`database cleanup failed: ${String(err)}`, { cause: err }));
+    }
+
+    let ownerCounts:
+      | { workspaces: number; sites: number; assets: number; documents: number; chunks: number }
+      | undefined;
+    try {
+      const [workspaces, sites, assetsCount, documents, chunks] = await Promise.all([
+        owner.workspace.count({ where: { id: { in: workspaceIds } } }),
+        owner.site.count({ where: { workspaceId: { in: workspaceIds } } }),
+        owner.asset.count({ where: { workspaceId: { in: workspaceIds } } }),
+        owner.kbDocument.count({ where: { workspaceId: { in: workspaceIds } } }),
+        owner.kbChunk.count({ where: { workspaceId: { in: workspaceIds } } }),
+      ]);
+      ownerCounts = { workspaces, sites, assets: assetsCount, documents, chunks };
+      if (Object.values(ownerCounts).some((count) => count !== 0)) {
+        cleanupErrors.push(
+          new Error(`database fixture residue remains: ${JSON.stringify(ownerCounts)}`),
+        );
+      }
+    } catch (err) {
+      cleanupErrors.push(new Error(`database residue verification failed: ${String(err)}`, { cause: err }));
+    }
+
+    // 若数据库未清干净，保留对象比删除对象更安全，且验证必须失败为非零退出。
+    const databaseCleanupSucceeded = cleanupErrors.length === 0;
+    if (databaseCleanupSucceeded) {
+      for (const key of touchedKeys) {
+        try {
+          await storage.delete(key);
+        } catch (err) {
+          cleanupErrors.push(new Error(`object cleanup failed for ${key}: ${String(err)}`, { cause: err }));
+        }
+      }
+    }
+    // 无论前面的清理是否成功，都实际探测对象面；失败时保留对象但仍明确报残留。
+    for (const key of touchedKeys) {
+      try {
+        if (await storage.head(key)) {
+          cleanupErrors.push(
+            new Error(
+              databaseCleanupSucceeded
+                ? `object residue remains after cleanup: ${key}`
+                : `object deliberately preserved because database cleanup failed: ${key}`,
+            ),
+          );
+        }
+      } catch (err) {
+        cleanupErrors.push(
+          new Error(`object residue verification failed for ${key}: ${String(err)}`, { cause: err }),
+        );
+      }
+    }
+
+    try {
+      await Promise.all([appDb.$disconnect(), owner.$disconnect()]);
+    } catch (err) {
+      cleanupErrors.push(new Error(`database disconnect failed: ${String(err)}`, { cause: err }));
+    }
+
+    const failures = [verificationError, ...cleanupErrors].filter(
+      (failure): failure is NonNullable<typeof failure> => failure !== undefined,
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'R2-A2 verification and/or cleanup failed');
+    }
+    ok(
+      'cleanup',
+      `owner residue=${JSON.stringify(ownerCounts)}; object residue=0/${touchedKeys.size}`,
+    );
   }
 }
 

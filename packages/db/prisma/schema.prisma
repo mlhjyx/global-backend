@@ -1254,6 +1254,7 @@ model Site {
   brandProfiles BrandProfile[]
 
   @@unique([slug])
+  @@unique([id, workspaceId], map: "site_id_workspace_id_key")
   @@index([workspaceId])
   @@map("site")
 }
@@ -1327,7 +1328,7 @@ model Asset {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site        Site         @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "asset_site_workspace_fkey")
   kbDocuments KbDocument[]
 
   @@unique([id, workspaceId, siteId], map: "asset_id_workspace_id_site_id_key")
@@ -1354,8 +1355,8 @@ model KbDocument {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  site   Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  asset  Asset?    @relation(fields: [assetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade)
+  site   Site      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "kb_document_site_workspace_fkey")
+  asset  Asset?    @relation(fields: [assetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: Cascade, map: "kb_document_asset_scope_fkey")
   chunks KbChunk[]
 
   @@unique([id, workspaceId], map: "kb_document_id_workspace_id_key")
@@ -1376,7 +1377,7 @@ model KbChunk {
   embedding    Unsupported("vector(1024)")?
   createdAt    DateTime                     @default(now()) @map("created_at")
 
-  document KbDocument @relation(fields: [documentId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  document KbDocument @relation(fields: [documentId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "kb_chunk_document_workspace_fkey")
 
   @@unique([documentId, seq])
   @@index([workspaceId])

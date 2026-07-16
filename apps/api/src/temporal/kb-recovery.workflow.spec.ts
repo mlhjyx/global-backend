@@ -22,7 +22,7 @@ describe('kbRecoverySweepWorkflow R2-A2', () => {
 
     const out = await kbRecoverySweepWorkflow({ limit: 20 });
 
-    expect(acts.listKbRecoveryCandidates).toHaveBeenCalledWith({ limit: 20 });
+    expect(acts.listKbRecoveryCandidates).toHaveBeenCalledWith({ limit: 10 });
     expect(acts.processKbAsset).toHaveBeenCalledTimes(3);
     expect(out).toMatchObject({
       scanned: 3,
@@ -32,5 +32,40 @@ describe('kbRecoverySweepWorkflow R2-A2', () => {
       skipped: 0,
     });
     expect(out.errors).toHaveLength(1);
+  });
+
+  it('把调用方 limit 钳制为 10，并以最多 5 条受控并发处理', async () => {
+    const candidates = Array.from({ length: 10 }, (_, i) => ({
+      workspaceId: `ws-${i}`,
+      siteId: `site-${i}`,
+      assetId: `asset-${i}`,
+    }));
+    acts.listKbRecoveryCandidates.mockResolvedValue(candidates);
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let releaseFirstWave!: () => void;
+    const firstWave = new Promise<void>((resolve) => {
+      releaseFirstWave = resolve;
+    });
+    acts.processKbAsset.mockImplementation(async (candidate: { assetId: string }) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      if (Number(candidate.assetId.slice('asset-'.length)) < 5) await firstWave;
+      inFlight -= 1;
+      return { assetId: candidate.assetId, outcome: 'ready' };
+    });
+
+    const pending = kbRecoverySweepWorkflow({ limit: 100 });
+    await vi.waitFor(() => expect(acts.processKbAsset).toHaveBeenCalledTimes(5));
+    expect(maxInFlight).toBe(5);
+    releaseFirstWave();
+
+    const out = await pending;
+
+    expect(acts.listKbRecoveryCandidates).toHaveBeenCalledWith({ limit: 10 });
+    expect(acts.processKbAsset).toHaveBeenCalledTimes(10);
+    expect(maxInFlight).toBe(5);
+    expect(out).toMatchObject({ scanned: 10, ready: 10, errors: [] });
   });
 });

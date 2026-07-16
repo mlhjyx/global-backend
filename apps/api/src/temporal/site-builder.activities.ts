@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import {
@@ -387,11 +388,36 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       if (!kb?.processAsset) {
         return { assetId: input.assetId, outcome: 'not_due' as const };
       }
-      return kb.processAsset(
-        { userId: 'system', workspaceId: input.workspaceId, roles: [] },
-        input.siteId,
-        input.assetId,
-      );
+      // verifier/unit tests may invoke the activity function directly, outside a Temporal
+      // Activity context. Production worker calls get heartbeat+cancellation propagation.
+      let activity: ActivityContext | undefined;
+      try {
+        activity = ActivityContext.current();
+      } catch {
+        activity = undefined;
+      }
+      let stage = 'claim';
+      activity?.heartbeat({ assetId: input.assetId, stage });
+      const heartbeatTimer = activity
+        ? setInterval(() => activity?.heartbeat({ assetId: input.assetId, stage }), 5_000)
+        : undefined;
+      heartbeatTimer?.unref();
+      try {
+        return await kb.processAsset(
+          { userId: 'system', workspaceId: input.workspaceId, roles: [] },
+          input.siteId,
+          input.assetId,
+          {
+            signal: activity?.cancellationSignal,
+            heartbeat: (nextStage) => {
+              stage = nextStage;
+              activity?.heartbeat({ assetId: input.assetId, stage });
+            },
+          },
+        );
+      } finally {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+      }
     },
 
     /**

@@ -5,6 +5,7 @@ type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
 
 const activities = proxyActivities<SiteBuilderActivities>({
   startToCloseTimeout: '10 minutes', // Docling 长解析（300s 上限）+ 分批向量化
+  heartbeatTimeout: '20 seconds',
   retry: { maximumAttempts: 3 },
 });
 

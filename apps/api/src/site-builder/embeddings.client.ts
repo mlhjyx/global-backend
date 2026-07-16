@@ -8,6 +8,15 @@ interface EmbeddingsResponse {
   data?: { index?: number; embedding?: number[] }[];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requestSignal(external?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(EMBED_TIMEOUT_MS);
+  return external ? AbortSignal.any([external, timeout]) : timeout;
+}
+
 /**
  * 自托管 embedding 客户端（D14：BGE-M3，OpenAI 兼容 /embeddings 端点，数据不出域）。
  * 维度硬校验：错维度绝不落库（混向量空间是静默毒药）。
@@ -23,7 +32,7 @@ export class EmbeddingsClient {
     '',
   );
 
-  async embed(texts: string[]): Promise<number[][]> {
+  async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
     let res: Response;
     try {
@@ -31,7 +40,7 @@ export class EmbeddingsClient {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.model, input: texts }),
-        signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
+        signal: requestSignal(signal),
       });
     } catch (err) {
       throw new KbIngestError(
@@ -51,9 +60,9 @@ export class EmbeddingsClient {
         `embeddings endpoint ${res.status}: ${body.slice(0, 300)}`,
       );
     }
-    let json: EmbeddingsResponse;
+    let parsed: unknown;
     try {
-      json = (await res.json()) as EmbeddingsResponse;
+      parsed = await res.json();
     } catch (err) {
       throw new KbIngestError(
         'KB_EMBEDDING_INVALID_RESPONSE',
@@ -63,7 +72,15 @@ export class EmbeddingsClient {
         err instanceof Error ? { cause: err } : undefined,
       );
     }
-    const data = json.data ?? [];
+    if (!isRecord(parsed) || !Array.isArray(parsed.data) || !parsed.data.every(isRecord)) {
+      throw new KbIngestError(
+        'KB_EMBEDDING_INVALID_RESPONSE',
+        'retryable',
+        'embedding',
+        'embeddings endpoint returned an invalid response shape',
+      );
+    }
+    const data = parsed.data as NonNullable<EmbeddingsResponse['data']>;
     if (data.length !== texts.length) {
       throw new KbIngestError(
         'KB_EMBEDDING_INVALID_RESPONSE',
@@ -72,7 +89,27 @@ export class EmbeddingsClient {
         `embeddings count mismatch: sent ${texts.length}, got ${data.length}`,
       );
     }
-    const sorted = [...data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const indexes = new Set<number>();
+    for (const row of data) {
+      const index = row.index;
+      if (
+        typeof index !== 'number' ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= texts.length ||
+        indexes.has(index)
+      ) {
+        throw new KbIngestError(
+          'KB_EMBEDDING_INVALID_RESPONSE',
+          'retryable',
+          'embedding',
+          `embeddings indexes must uniquely cover 0..${texts.length - 1}`,
+        );
+      }
+      indexes.add(index);
+    }
+    // count 已相等且每个 index 都是范围内唯一整数，因此集合必精确覆盖 0..n-1。
+    const sorted = [...data].sort((a, b) => (a.index as number) - (b.index as number));
     return sorted.map((row, i) => {
       const vec = row.embedding;
       if (!Array.isArray(vec) || vec.length !== this.dim) {

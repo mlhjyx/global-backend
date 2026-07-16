@@ -86,8 +86,11 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  async getBuffer(key: string): Promise<Buffer> {
-    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+  async getBuffer(key: string, signal?: AbortSignal): Promise<Buffer> {
+    const res = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      signal ? { abortSignal: signal } : undefined,
+    );
     const bytes = await res.Body?.transformToByteArray();
     if (!bytes) throw new Error(`empty object body: ${key}`);
     return Buffer.from(bytes);
