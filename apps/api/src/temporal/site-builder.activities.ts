@@ -151,12 +151,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           {
             task: 'site_builder.demo_copy',
             prompt: [
-              'Write concise English website copy for a manufacturer landing page.',
+              'Write concise English website copy for a B2B supplier landing page.',
               `Company: ${intake.company.nameEn ?? intake.company.nameZh}`,
               `Products: ${intake.products.join(', ')}`,
               `Target markets (ISO country codes): ${intake.targetMarkets.join(', ')}`,
               'Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).',
-              'Rules: use ONLY the facts above; never invent years in business, certificates, factory size or client names.',
+              'Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.',
             ].join('\n'),
             schema: {
               type: 'object',

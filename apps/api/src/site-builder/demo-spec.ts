@@ -4,8 +4,10 @@ import type { IntakeInput } from './intake.service';
 /**
  * demo v0 生成（02 §4 快速通道）：行业模板选择 + 注册 6 项确定性填充，
  * 可选 polish（一次轻文案调用的产物；超时/失败=不传，模板默认文案兜底）。
- * 🔴 零虚构红线（08 硬门）：文案只用 intake 事实（公司名/产品/目标市场），
- * 绝不编造年限/认证/产能——那些事实等向导资料进来后由 M1 管线补。
+ * 🔴 零虚构身份红线（08 硬门 + ADR-017 / R0-3）：文案只用 intake 事实（公司名/产品/目标市场），
+ * 一律**中性**措辞（supplier/supply），绝不默认断言 manufacturer/engineering team/quality
+ * control/export packaging，也不编造年限/认证/产能——具体身份等向导资料进来后由 M1 管线补。
+ * 双闸：确定性模板本身中性 + sanitizePolish 剔除 LLM 回灌的虚构角色；demo-spec.spec.ts 有强制守卫。
  */
 
 export const DEMO_SPEC_VERSION = '1.0.0';
@@ -16,7 +18,11 @@ export interface DemoCopyPolish {
   aboutBody?: string;
 }
 
-/** 模型输出里的虚构指征（Codex P2）：命中即弃该字段回退模板——宁可平淡不可造假。 */
+/**
+ * 模型输出里的虚构指征（Codex P2 + R0-3/ADR-017）：命中即弃该字段回退模板——宁可平淡不可造假。
+ * 两类：① 不可核验的数字事实（年限/认证/产能）；② 未经 intake 证实的**身份角色**——intake 只有
+ * 公司名/产品/目标市场，不足以断定制造/工程/质检/出口身份，一律不许 LLM 润色回灌。
+ */
 const FABRICATION_PATTERNS: RegExp[] = [
   /\d+\s*\+?\s*(years?|年)/i, // 年限
   /\bISO\s*\d{3,5}\b/i, // 认证编号
@@ -24,6 +30,10 @@ const FABRICATION_PATTERNS: RegExp[] = [
   /\bFDA\b/i,
   /\bUL\b/,
   /\d[\d,.]*\s*(m2|m²|sqm|square meters?|employees|workers|units\b)/i, // 面积/人数/产能
+  /manufactur/i, // 身份角色：manufacturer/manufactures/manufacturing（R0-3）
+  /engineering team/i, // 工程团队（R0-3）
+  /quality control/i, // 质检（R0-3）
+  /export packaging/i, // 出口包装（R0-3）
 ];
 const POLISH_MAX_CHARS = 500;
 
@@ -97,30 +107,30 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     'nav.home': 'Home',
     'nav.products': 'Products',
     'nav.contact': 'Contact',
-    'footer.tagline': `${primaryProduct} manufacturer serving ${listJoin(marketNames)}.`,
-    'seo.home.title': `${siteName} — ${primaryProduct} Manufacturer`,
-    'seo.home.desc': `${siteName} manufactures ${listJoin(products)} for customers in ${listJoin(marketNames)}.`,
+    'footer.tagline': `${primaryProduct} supplier serving ${listJoin(marketNames)}.`,
+    'seo.home.title': `${siteName} — ${primaryProduct} Supplier`,
+    'seo.home.desc': `${siteName} supplies ${listJoin(products)} for customers in ${listJoin(marketNames)}.`,
     'seo.products.title': `Products — ${siteName}`,
     'seo.products.desc': `Explore ${listJoin(products)} from ${siteName}.`,
     'seo.contact.title': `Contact — ${siteName}`,
     'seo.contact.desc': `Send an inquiry to ${siteName}.`,
-    'home.hero.headline': polish?.headline ?? `${siteName} — Professional ${primaryProduct} Manufacturer`,
+    'home.hero.headline': polish?.headline ?? `${siteName} — ${primaryProduct} Supplier`,
     'home.hero.subhead':
       polish?.subhead ??
-      `We manufacture ${listJoin(products)} for customers in ${listJoin(marketNames)}.`,
+      `We supply ${listJoin(products)} to customers in ${listJoin(marketNames)}.`,
     'home.hero.cta': 'Request a Quote',
     'products.title': 'Our Products',
     'about.title': `About ${siteName}`,
     'about.body':
       polish?.aboutBody ??
-      `${siteName} is a manufacturer of ${listJoin(products)}, serving customers in ${listJoin(marketNames)}. Tell us about your requirements and our team will get back to you with specifications, samples and a tailored quotation.`,
+      `${siteName} supplies ${listJoin(products)} to customers in ${listJoin(marketNames)}. Tell us about your requirements and our team will get back to you with details and a tailored quotation.`,
     'process.title': 'How We Work',
     'process.s1.title': 'Requirement Review',
-    'process.s1.body': 'Share your specifications and our engineering team confirms the details with you.',
-    'process.s2.title': 'Production & Quality Control',
-    'process.s2.body': 'Your order is manufactured and inspected against the agreed specification.',
+    'process.s1.body': 'Share your requirements and our team confirms the details with you.',
+    'process.s2.title': 'Proposal & Quotation',
+    'process.s2.body': 'We prepare a tailored proposal and quotation based on your requirements.',
     'process.s3.title': 'Delivery & Support',
-    'process.s3.body': 'Export packaging, shipping documentation and responsive after-sales support.',
+    'process.s3.body': 'Order fulfilment, documentation and responsive after-sales support.',
     'faq.title': 'Frequently Asked Questions',
     'faq.q1': 'Which markets do you serve?',
     'faq.a1': `We currently focus on customers in ${listJoin(marketNames)}.`,
