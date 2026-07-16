@@ -5,7 +5,7 @@
 - **买家智能与机会资格后端**：多源发现 → 身份解析 → 证据/权利 → 意向信号 → 决策人与邮箱验证 → 六维评分 → `LeadQualifiedPackage`。边界止于交付包（ADR-001）；身份/Campaign/触达/QGO/归因归外部 SaaS。
 - **Site Builder 独立站建设子系统**：注册引导 → 资料/素材/KB → 有界 AI Task + Temporal 固定 DAG → SiteSpec → Astro 静态站。**这是 2026-07-13 起的当前开发主线**；获客侧暂停开发、保留维护，明确通知后才恢复。
 
-2026-07-16 truth-sync（#125）已对齐 Ubuntu/Codex 项目真值；R0 contract closeout（#126）已在 #121/#123/#124 的行为与安全修复之上补齐 intake `Idempotency-Key`、`buildId`、稳定错误码、Temporal 启动证据和 code-first OpenAPI，并移除旧响应 `mode`。2026-07-17 R1-safety、R2-A1 Asset 与 R2-A2 KB 正确性门均已完成；下一主路为 R2-A3 Profile → R2-A4 cleanup/integration。
+2026-07-16 truth-sync（#125）已对齐 Ubuntu/Codex 项目真值；R0 contract closeout（#126）已在 #121/#123/#124 的行为与安全修复之上补齐 intake `Idempotency-Key`、`buildId`、稳定错误码、Temporal 启动证据和 code-first OpenAPI，并移除旧响应 `mode`。2026-07-17 R1-safety 与 R2-A1–A4 正确性门均已完成；下一主路为 MF-0-thin → M1-c 纯 Sharp。
 
 ## 文档入口（单一事实源体系）
 

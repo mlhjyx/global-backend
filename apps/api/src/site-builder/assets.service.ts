@@ -319,11 +319,11 @@ export class AssetsService {
   }
 
   /**
-   * R2-A1 删除只做 DB tombstone + durable cleanup intent。MF-0 引用扫描器落地前，
-   * canonical intent 明确 parked，绝不执行对象删除；staging 可在事务提交后 best-effort 删。
+   * 删除只做 DB tombstone + durable cleanup intent。MF-0 引用扫描器落地前，
+   * canonical intent 明确 parked；staging 由 Temporal 等 presigned PUT 失效后再删。
    */
   async remove(ctx: RequestContext, assetId: string): Promise<void> {
-    const target = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const asset = await tx.asset.findUnique({ where: { id: assetId } });
       if (!asset || asset.deletedAt) throw new NotFoundException('asset not found');
       const objectClass = this.isStagingKey(asset.objectKey) ? 'staging' : 'canonical';
@@ -350,9 +350,7 @@ export class AssetsService {
       // chunk 由 KbDocument FK 级联；同事务移除检索面，避免已删资料继续被命中。
       await tx.kbDocument.deleteMany({ where: { assetId } });
       await this.createCleanupIntent(tx, ctx, asset, asset.objectKey, objectClass, 'asset_deleted');
-      return { objectKey: asset.objectKey, objectClass };
     });
-    void target;
   }
 
   private async claimCommit(ctx: RequestContext, assetId: string): Promise<Asset> {
