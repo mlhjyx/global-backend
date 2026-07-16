@@ -3,7 +3,9 @@ import {
   AssetCleanupRedriveEvent,
   assertAssetCleanupRedrivable,
   validateAssetCleanupRedriveEvent,
+  queueAssetCleanupRedrive,
 } from './asset-cleanup.redrive';
+import { vi } from 'vitest';
 
 const EVENT: AssetCleanupRedriveEvent = {
   eventId: '44444444-4444-4444-8444-444444444444',
@@ -50,4 +52,53 @@ describe('asset cleanup redrive safety gate', () => {
     'rejects %s to prevent duplicate or destructive execution',
     (status) => expect(() => assertAssetCleanupRedrivable(status)).toThrow(),
   );
+});
+
+describe('asset cleanup redrive transaction', () => {
+  function harness(locked = true) {
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked }]),
+      outboxEvent: {
+        findUnique: vi.fn(async () => ({ id: 9n, ...EVENT })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (value: typeof tx) => unknown) => fn(tx)),
+    };
+    return { tx, prisma };
+  }
+
+  it('serializes, revalidates and CAS-resets a FAILED event', async () => {
+    const h = harness();
+    const out = await queueAssetCleanupRedrive({
+      prisma: h.prisma as never,
+      workspaceId: EVENT.workspaceId,
+      eventId: EVENT.eventId,
+      executionStatus: async () => 'FAILED',
+    });
+    expect(out.previousStatus).toBe('FAILED');
+    expect(h.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(h.tx.outboxEvent.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 9n,
+        publishedAt: EVENT.publishedAt,
+        parkedAt: EVENT.parkedAt,
+      }),
+      data: { publishedAt: null, parkedAt: null },
+    });
+  });
+
+  it('refuses concurrent operators before mutation', async () => {
+    const h = harness(false);
+    await expect(
+      queueAssetCleanupRedrive({
+        prisma: h.prisma as never,
+        workspaceId: EVENT.workspaceId,
+        eventId: EVENT.eventId,
+        executionStatus: async () => 'FAILED',
+      }),
+    ).rejects.toThrow('already being operated');
+    expect(h.tx.outboxEvent.updateMany).not.toHaveBeenCalled();
+  });
 });

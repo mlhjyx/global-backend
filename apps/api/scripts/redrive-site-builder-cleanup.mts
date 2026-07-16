@@ -3,8 +3,7 @@ import { Client, Connection, WorkflowNotFoundError } from '@temporalio/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   CleanupExecutionStatus,
-  assertAssetCleanupRedrivable,
-  validateAssetCleanupRedriveEvent,
+  queueAssetCleanupRedrive,
 } from '../src/temporal/asset-cleanup.redrive';
 
 const [workspaceId, eventId] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
@@ -23,46 +22,20 @@ const client = new Client({
 
 await prisma.$connect();
 try {
-  const event = await prisma.withWorkspace(workspaceId, (tx) =>
-    tx.outboxEvent.findUnique({
-      where: { eventId },
-      select: {
-        eventId: true,
-        workspaceId: true,
-        eventType: true,
-        schemaVersion: true,
-        aggregateType: true,
-        aggregateId: true,
-        payload: true,
-        publishedAt: true,
-        parkedAt: true,
-      },
-    }),
-  );
-  if (!event) throw new Error('cleanup event is not visible in the requested workspace');
-  const command = validateAssetCleanupRedriveEvent(event);
-
-  let status: CleanupExecutionStatus;
-  try {
-    const description = await client.workflow.getHandle(eventId).describe();
-    status = description.status.name as CleanupExecutionStatus;
-  } catch (error) {
-    if (!(error instanceof WorkflowNotFoundError)) throw error;
-    status = 'NOT_FOUND';
-  }
-  assertAssetCleanupRedrivable(status);
-
-  const moved = await prisma.withWorkspace(workspaceId, (tx) =>
-    tx.outboxEvent.updateMany({
-      where: {
-        eventId,
-        workspaceId,
-        eventType: 'AssetObjectCleanupRequested',
-      },
-      data: { publishedAt: null, parkedAt: null },
-    }),
-  );
-  if (moved.count !== 1) throw new Error('cleanup event changed before redrive');
+  const { command, previousStatus: status } = await queueAssetCleanupRedrive({
+    prisma,
+    workspaceId,
+    eventId,
+    executionStatus: async () => {
+      try {
+        const description = await client.workflow.getHandle(eventId).describe();
+        return description.status.name as CleanupExecutionStatus;
+      } catch (error) {
+        if (!(error instanceof WorkflowNotFoundError)) throw error;
+        return 'NOT_FOUND';
+      }
+    },
+  });
 
   console.log(
     JSON.stringify({
