@@ -24,19 +24,41 @@ function command(overrides: Partial<AssetCleanupCommand> = {}): AssetCleanupComm
   };
 }
 
-function harness(asset: Record<string, unknown> | null) {
+function harness(
+  asset: Record<string, unknown> | null,
+  event: Record<string, unknown> | null = {
+    eventId: EVENT,
+    workspaceId: WS,
+    eventType: 'AssetObjectCleanupRequested',
+    schemaVersion: 1,
+    aggregateType: 'Asset',
+    aggregateId: ASSET,
+    payload: {
+      assetId: ASSET,
+      siteId: SITE,
+      objectKey: KEY,
+      objectClass: 'staging',
+      reason: 'commit_succeeded',
+      notBefore: '2026-07-17T08:15:00.000Z',
+    },
+  },
+) {
   const tx = {
     asset: {
       findUnique: vi.fn(async () => asset),
       findFirst: vi.fn(async () => null),
     },
+    outboxEvent: { findUnique: vi.fn(async () => event) },
   };
   const prisma = {
     withWorkspace: vi.fn(async (_workspaceId: string, fn: (client: typeof tx) => unknown) =>
       fn(tx),
     ),
   };
-  const storage = { delete: vi.fn(async () => undefined) };
+  const storage = {
+    delete: vi.fn(async () => undefined),
+    head: vi.fn(async () => null),
+  };
   return {
     tx,
     prisma,
@@ -52,6 +74,7 @@ describe('asset cleanup activity', () => {
       siteId: SITE,
       objectKey: `ws/${WS}/${SITE}/doc/${'a'.repeat(64)}.pdf`,
       processingStatus: 'ready',
+      contentHash: 'a'.repeat(64),
       deletedAt: null,
     });
 
@@ -69,6 +92,7 @@ describe('asset cleanup activity', () => {
     expect(h.prisma.withWorkspace).toHaveBeenCalledWith(WS, expect.any(Function));
     expect(h.storage.delete).toHaveBeenCalledTimes(2);
     expect(h.storage.delete).toHaveBeenNthCalledWith(1, KEY);
+    expect(h.storage.head).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -96,6 +120,38 @@ describe('asset cleanup activity', () => {
     expect(h.storage.delete).not.toHaveBeenCalled();
   });
 
+  it('fails closed when the durable Outbox provenance is missing or differs from the workflow input', async () => {
+    const asset = {
+      id: ASSET,
+      siteId: SITE,
+      objectKey: `ws/${WS}/${SITE}/doc/${'a'.repeat(64)}.pdf`,
+      processingStatus: 'ready',
+      contentHash: 'a'.repeat(64),
+      deletedAt: null,
+    };
+    const missing = harness(asset, null);
+    await expect(missing.activities.cleanupStagingAssetObject(command())).rejects.toMatchObject({
+      nonRetryable: true,
+      type: 'ASSET_CLEANUP_PROVENANCE_INVALID',
+    });
+    expect(missing.storage.delete).not.toHaveBeenCalled();
+
+    const forged = harness(asset, {
+      eventId: EVENT,
+      workspaceId: WS,
+      eventType: 'AssetObjectCleanupRequested',
+      schemaVersion: 1,
+      aggregateType: 'Asset',
+      aggregateId: ASSET,
+      payload: { ...command(), eventId: undefined, workspaceId: undefined, objectKey: `${KEY}-other` },
+    });
+    await expect(forged.activities.cleanupStagingAssetObject(command())).rejects.toMatchObject({
+      nonRetryable: true,
+      type: 'ASSET_CLEANUP_PROVENANCE_INVALID',
+    });
+    expect(forged.storage.delete).not.toHaveBeenCalled();
+  });
+
   it('fails closed while the staging key is still owned by an active upload', async () => {
     const h = harness({
       id: ASSET,
@@ -121,11 +177,53 @@ describe('asset cleanup activity', () => {
       deletedAt: null,
     });
 
+    const duplicateEvent = {
+      eventId: EVENT,
+      workspaceId: WS,
+      eventType: 'AssetObjectCleanupRequested',
+      schemaVersion: 1,
+      aggregateType: 'Asset',
+      aggregateId: ASSET,
+      payload: {
+        assetId: ASSET,
+        siteId: SITE,
+        objectKey: KEY,
+        objectClass: 'staging',
+        reason: 'duplicate',
+        notBefore: '2026-07-17T08:15:00.000Z',
+      },
+    };
+    const duplicate = harness(
+      {
+        id: ASSET,
+        siteId: SITE,
+        objectKey: KEY,
+        processingStatus: 'duplicate',
+        deletedAt: null,
+      },
+      duplicateEvent,
+    );
     await expect(
-      h.activities.cleanupStagingAssetObject(command({ reason: 'duplicate' })),
+      duplicate.activities.cleanupStagingAssetObject(command({ reason: 'duplicate' })),
     ).resolves.toMatchObject({ deleted: true });
     await expect(
       h.activities.cleanupStagingAssetObject(command({ reason: 'rejected' })),
     ).rejects.toMatchObject({ nonRetryable: true });
+  });
+
+  it('retries when delete returns but the object is still present', async () => {
+    const h = harness({
+      id: ASSET,
+      siteId: SITE,
+      objectKey: `ws/${WS}/${SITE}/doc/${'a'.repeat(64)}.pdf`,
+      processingStatus: 'ready',
+      contentHash: 'a'.repeat(64),
+      deletedAt: null,
+    });
+    h.storage.head.mockResolvedValue({ size: 1 });
+
+    await expect(h.activities.cleanupStagingAssetObject(command())).rejects.toThrow(
+      'staging object still exists after delete',
+    );
   });
 });

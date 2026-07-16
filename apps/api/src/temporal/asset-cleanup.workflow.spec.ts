@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const temporal = vi.hoisted(() => ({
   cleanup: vi.fn(),
   sleep: vi.fn(async () => undefined),
+  logError: vi.fn(),
 }));
 
 vi.mock('@temporalio/workflow', () => ({
   proxyActivities: () => ({ cleanupStagingAssetObject: temporal.cleanup }),
   sleep: temporal.sleep,
+  log: { error: temporal.logError },
   ApplicationFailure: class MockApplicationFailure extends Error {
     nonRetryable = true;
     type: string;
@@ -68,5 +70,23 @@ describe('assetObjectCleanupWorkflow', () => {
 
     expect(temporal.sleep).not.toHaveBeenCalled();
     expect(temporal.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('logs a minimal structured alert after activity exhaustion and rethrows', async () => {
+    const failure = Object.assign(new Error('S3 secret and object key must not be logged'), {
+      cause: { type: 'ASSET_CLEANUP_STORAGE_UNAVAILABLE' },
+    });
+    temporal.cleanup.mockRejectedValueOnce(failure);
+
+    await expect(assetObjectCleanupWorkflow(INPUT)).rejects.toBe(failure);
+
+    expect(temporal.logError).toHaveBeenCalledWith('asset staging cleanup failed', {
+      eventId: INPUT.eventId,
+      workspaceId: INPUT.workspaceId,
+      objectClass: 'staging',
+      errorCode: 'ASSET_CLEANUP_STORAGE_UNAVAILABLE',
+    });
+    expect(JSON.stringify(temporal.logError.mock.calls)).not.toContain(INPUT.objectKey);
+    expect(JSON.stringify(temporal.logError.mock.calls)).not.toContain('S3 secret');
   });
 });

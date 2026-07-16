@@ -16,3 +16,4 @@ export { demoV0Workflow } from './site-builder.workflow';
 export { refurbishWorkflow } from './refurbish.workflow';
 export { kbIngestWorkflow } from './kb-ingest.workflow';
 export { kbRecoverySweepWorkflow } from './kb-recovery.workflow';
+export { assetObjectCleanupWorkflow } from './asset-cleanup.workflow';
