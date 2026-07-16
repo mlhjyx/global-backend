@@ -1,8 +1,8 @@
-# 安全与滥用防控设计 v1（草稿，待用户确认）
+# 安全与滥用防控设计 v1（活文档，分阶段实施）
 
 > 落实 [02-architecture.md](02-architecture.md) §7/§11 与遗漏面盘点第 1/3/4/5 条。原则：**平台域名信誉是全体客户的公共资产**，滥用防控是生死线不是可选项。
 >
-> _Reviewed against 12 v3.2（2026-07-16 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地时点（v3.2 §0.3）**：R0（产品口径 / Demo 虚构身份 / 联系信息误出域）**立即修**（§6/§10）；最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略必须在 **M2 公开发布前**可用；完整获客评分后置。
+> _Reviewed against 12 v3.2（2026-07-16 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地状态（2026-07-16）**：R0 行为与安全修复已分批合并——无条件 Demo #121、禁虚构身份 #123、联系信息隔离/真取消/失败不删站 #124；但 intake 的 `buildId`、`Idempotency-Key` 与 Swagger/OpenAPI 仍是 `R0-contract` 尾巴，故不得笼统称 R0 全闭环。最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略必须在 **M2 公开发布前**可用；完整获客评分后置。
 
 ## 0. 威胁模型总览
 
@@ -45,7 +45,7 @@
 
 ## 2. 上传与素材安全（T2）
 
-MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 ≤20MB/文档 ≤50MB/视频 ≤500MB）；图片一律 sharp 解码重编码（消 payload+剥 **EXIF/GPS**）；文档解析（Docling）跑**非特权无网络容器**；素材总量走 workspace 配额（02 §12）。**原件对象私有、不公开直链**（访问走签名 URL），对外展示/导出只用去元数据的派生件（版权链与稳定性=ADR-014 禁外链直嵌，媒体权利详见 §8）。
+MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 ≤20MB/文档 ≤50MB/视频 ≤500MB）；图片一律 sharp 解码重编码（消 payload+剥 **EXIF/GPS**）；文档解析（Docling）目标跑**非特权无网络容器**，但当前开发 compose 仍保留模型下载所需出站，生产需预烘模型后断网；素材总量走 workspace 配额（02 §12）。**原件对象私有、不公开直链**（访问走签名 URL），对外展示/导出只用去元数据的派生件（版权链与稳定性=ADR-014 禁外链直嵌，媒体权利详见 §8）。
 
 ## 3. Prompt 注入防线（T3）
 
@@ -58,7 +58,9 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 
 ## 4. SSRF 防线（T4）
 
-复用获客侧 crawl4ai SSRF 守卫先例：仅 https、禁内网/链路本地/云 metadata IP 段、**DNS 解析后按 IP 校验再连接**（防重绑定）、redirect 逐跳同校验、超时与响应大小限额。适用：店铺导入、参考网站、品牌 web 研究。Research/参考 URL 另过 **robots、域策略（allow/deny 名单）、MIME 校验**，抓取内容体积与超时按 L0 限额（v3.2 §8.2）。
+**上线目标门（当前尚未闭环）**：仅 https、禁内网/链路本地/云 metadata IP 段、**DNS 解析后按 IP 校验再连接**（防重绑定）、redirect 逐跳同校验、超时与响应大小限额。适用：店铺导入、参考网站、品牌 web 研究；Research/参考 URL 还须经过 **robots、域策略（allow/deny 名单）、MIME 校验**，抓取内容体积与超时按 L0 限额（v3.2 §8.2）。
+
+Ubuntu 本地 mihomo fake-IP 会把公开域解析到 `198.18.0.0/16`，而 Crawl4AI 只有 broad `CRAWL4AI_ALLOW_INTERNAL_URLS` 开关；当前开发 compose 为维持公开站抓取临时开启该开关，并把端口限制在 loopback。**loopback 不能阻止 API 驱动 SSRF**，所以完成 R1-safety 前只允许开发者可信的公开 URL，绝不接收不可信输入或用于生产。R1-safety 必须同时封住 Crawl4AI 与 robots 直连路径，并以公开 URL 正向、private/loopback/metadata/DNS rebinding/redirect 负向用例验收。
 
 ## 5. 构建沙箱（T5）
 
@@ -71,7 +73,7 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 - **反垃圾**：蜜罐字段 + Cloudflare Turnstile + 每 IP/每站速率限制 + 一次性表单 token 防重放。提交进 Inquiry 表 + Outbox（`InquirySubmitted`），邮件只是可重试通知通道。
 - **PII 合规**：询盘（姓名/邮箱/电话）=个人数据；角色=**客户是控制者、平台是处理者**（DPA 条款提请 SaaS ToS）；保留期默认 24 个月可配；删除请求复用获客侧 Art.17 擦除编排；询盘表 RLS 隔离 + 静态加密（复用 PII 加密基建）。
 - **询盘个人数据隔离（🔴 GDPR 最小化）**：询盘正文与个人数据**不进入公开 KB、embedding、品牌 Prompt 或分析事件**（v3.2 §8.2）。
-- **联系信息不必要出域（as-built 缺陷，R0-4 立即修 + 清存量，v3.2 §24.2）**：`businessEmail` 当前经 `intakeToMarkdown`+`digestSources` 被写入 intake KB 再进 `brandProfile.kbDigest`，与"contact 不进品牌 Prompt"冲突。修法=联系信息留在受控结构化区（`Site.intake`/`profile.contact`），Copy contact 槽按用途读取，**不进通用 KB embedding 与品牌 Prompt**；对存量 `source=intake` 的 KbDocument 做一次可重放清理（脱敏重建，须证明旧 email chunk 已删）。
+- **联系信息不必要出域（R0-4，✅ #124 已合并）**：`businessEmail` 已从 `intakeToMarkdown` 移除，只留受控结构化区 `Site.intake`（未来 `profile.contact`）；不得进入通用 KB embedding 与品牌 Prompt。#124 同时提供幂等存量脱敏脚本，删除含邮箱的旧 intake KbDocument（级联 chunk），下次构建再以脱敏 markdown 摄入；部署环境仍须执行并留存脚本结果，不能因开发库 `scanned=0` 就推断所有环境已清存量。
 - **留存与治理（v3.2 §9.6）**：询盘保存 release/page/component/UTM/referrer、`consentVersion`、风险摘要与 retention；权限、导出、删除**独立治理**。
 - **分析事件隐私（v3.2 §3.6）**：访客分析受 **region/consent** 控制；询盘正文与个人信息**不得进入分析事件**。
 - **通知邮件不带完整 PII**（只带摘要+登录深链，防邮件转发泄漏）；发信域 SPF/DKIM/DMARC。
@@ -126,7 +128,7 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 
 ## 9. 设计来源与训练语料合规（T10，v3.2 §13 回写）
 
-设计学习走多源干净室（方案 C，见 11/13 号）：Readdy 等默认 `visual_reference_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**（ADR-019）。**不把"分析"与"训练"混成一个开关**，来源按允许用途分层：
+设计学习走多源干净室（方案 C，见 11/13 号）：Readdy 等默认 `visual_research_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**（ADR-019）。**不把"分析"与"训练"混成一个开关**，来源按允许用途分层：
 
 | 层 | 来源 | Agent 可做 | 前置 / 禁止 |
 |---|---|---|---|
@@ -142,27 +144,78 @@ MIME 白名单 + **魔数校验**（不信 Content-Type）；大小限额（图 
 export type DesignSourceClass =
   | "platform_original" | "permissive_licensed"
   | "owned_export_authorized" | "visual_research_only";
+export type DesignUse =
+  | "visual_analysis" | "token_abstraction"
+  | "structure_abstraction" | "code_transformation";
 
-export interface DesignSourceManifest {
-  id: string; title: string; sourceClass: DesignSourceClass;
+export interface OwnerAuthorization {
+  evidencePath: string;
+  covers: {
+    aiSiteBuilder: true;
+    derivativeComponents: true;
+    commercialDistribution: true;
+    training?: boolean;
+  };
+  territories: string[];
+  validity:
+    | { kind: "perpetual" }
+    | { kind: "expires"; expiresAt: string };
+  revocationTerms: string;
+  redistribution:
+    | { kind: "allowed" }
+    | { kind: "prohibited" }
+    | { kind: "conditional"; conditions: string };
+  recordedAt: string;
+}
+
+interface DesignSourceManifestBase {
+  id: string; title: string;
   sourceUrl?: string; capturedAt: string;
-  licenseSpdx?: string; licenseEvidencePath?: string; ownerAuthorizationPath?: string;
-  allowedUses: Array<"visual_analysis" | "token_abstraction" | "structure_abstraction" | "code_transformation">;
+  licenseSpdx?: string; licenseEvidencePath?: string;
+  allowedUses: DesignUse[];
   prohibitedUses: string[];
   retentionPolicy: "manifest_only" | "ephemeral_source" | "licensed_archive";
   trainingPolicy: "platform_corpus" | "license_permits" | "prohibited";
   sourceContributionGroup?: string;
   externalAssets: Array<{ kind: "image" | "font" | "icon" | "script" | "copy";
     source: string; disposition: "remove" | "replace" | "self_host" | "retain"; }>;
-  reviewer: string; approvedAt?: string;
+  reviewer: string;
 }
+
+export type DesignSourceManifest =
+  | (DesignSourceManifestBase & {
+      sourceClass: "owned_export_authorized";
+      ownerAuthorization: OwnerAuthorization;
+      approvedAt: string;
+    })
+  | (DesignSourceManifestBase & {
+      sourceClass: "visual_research_only";
+      allowedUses: Array<Exclude<DesignUse, "code_transformation">>;
+      retentionPolicy: "manifest_only" | "ephemeral_source";
+      trainingPolicy: "prohibited";
+      externalAssets: Array<{
+        kind: "image" | "font" | "icon" | "script" | "copy";
+        source: string;
+        disposition: "remove" | "replace";
+      }>;
+      ownerAuthorization?: never;
+      approvedAt?: string;
+    })
+  | (DesignSourceManifestBase & {
+      sourceClass: Exclude<
+        DesignSourceClass,
+        "owned_export_authorized" | "visual_research_only"
+      >;
+      ownerAuthorization?: never;
+      approvedAt?: string;
+    });
 ~~~
 
-许可用 SPDX 标识；**无清晰许可证即不可进入 `code_transformation` 或训练语料**。外链素材（字体/图标/脚本/图片/文案）按 `disposition` remove/replace/self_host 处理，不带进产物（呼应 §29 供应链：外部脚本默认删、图片重编码去元数据本地存储）。
+`owned_export_authorized` 是条件联合的硬门：`ownerAuthorization` 与 `approvedAt` 必填，且 validator 必须确认三项 `covers` 均为 `true`、证据路径非空、`validity` 已明确为永久或有期（有期必须尚未过期）、地域非空、撤回/再分发权已登记（conditional 必须有非空 conditions）；训练还须 `covers.training=true`。缺任一项即拒绝 manifest，**不得**自动降级后继续转换或训练。`visual_research_only` 在类型层固定禁止 `code_transformation` 与训练、禁止 `licensed_archive`，外部素材只能 remove/replace；运行时 validator 必须重复同一组断言，拒绝通过未类型化 JSON 自授高权限。旧字面量 `visual_reference_only` / `owned_export` 不接受、无运行时别名。许可用 SPDX 标识；**无清晰许可证即不可进入 `code_transformation` 或训练语料**。外链素材（字体/图标/脚本/图片/文案）按 `disposition` remove/replace/self_host 处理，不带进产物（呼应 §29 供应链：外部脚本默认删、图片重编码去元数据本地存储）。
 
 ## 10. Demo 与文案事实安全（反造假，T11，ADR-017 回写）
 
-Demo/文案**只用 intake 明确输入**；对未知企业类型**禁止**默认写 manufacturer、工厂、工程/QC 团队、认证、年限、产能或客户名单——缺 = **留空 + 提示补录**，绝不虚构（🔴 合规红线，与存储侧"证据先行/最小化"同源，建站侧不可回退）。确定性模板本身也不得虚构（as-built `demo-spec.ts` 在未知企业类型时仍直接写 manufacturer/engineering team/QC/export packaging，属确定性模板层虚构，非模型护栏能解，R0-3 立即修）。
+Demo/文案**只用 intake 明确输入**；对未知企业类型**禁止**默认写 manufacturer、工厂、工程/QC 团队、认证、年限、产能或客户名单——缺 = **留空 + 提示补录**，绝不虚构（🔴 合规红线，与存储侧"证据先行/最小化"同源，建站侧不可回退）。✅ #123 已把确定性模板改成中性 supplier/supply/requirement review 等措辞，并在 `sanitizePolish`、活动提示词和独立 CI 守卫四处封口；后续模板/提示词改动必须继续通过非制造业 intake 的红线词守卫。
 
 - **反造假红线**：不在 Demo 中展示假的客户 logo、证书、团队、评论、销量和工厂数字（v3.2 §18.2）。
 - **DemoVisualPack** 必须为平台原创、明确许可或程序化生成的**非事实性**素材（授权与来源随包登记）。

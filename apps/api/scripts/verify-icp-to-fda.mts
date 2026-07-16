@@ -1,5 +1,5 @@
 /**
- * openFDA P2 ICP→FDA 产品码映射 —— 真实数据端到端（真库真 API，无 sandbox，CLAUDE.md §5）。
+ * openFDA P2 ICP→FDA 产品码映射 —— 真实数据端到端（真库真 API，无 sandbox，AGENTS.md §5）。
  * 需 postgres 在跑 + FDA taxonomy 已种子（`node scripts/seed-taxonomy.mjs`，需先 build）。
  * 真 ICP：放射影像医疗器械，找美国进口渠道 → 行业 crosswalk 锚 panel RA → product code 子树。
  *

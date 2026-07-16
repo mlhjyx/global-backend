@@ -4,10 +4,10 @@
  *       storage 值 → 断言 dedupe_key = bi:v1:<hex>、不含明文 email、非 legacy e: 键形。
  *  段2 回填逻辑：seed 一个 legacy 明文键联系人 → 施回填同款盲化（blindContactKey）→ 断言变 bi:v1:、
  *       且幂等重跑（isBlindedContactKey 命中 → 跳过）。
- * 运行：cd apps/api && node --import tsx scripts/verify-blind-dedupe.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-blind-dedupe.mts
  */
 import { config } from 'dotenv';
-config({ path: '/Users/xin/Documents/Global/apps/api/.env' });
+config({ path: new URL('../.env', import.meta.url) });
 import { PrismaClient, Prisma } from '@prisma/client';
 import { persistDiscoveredContacts } from '../src/discovery/contact-persist';
 import { blindContactKey, isBlindedContactKey } from '../src/compliance/pii-crypto';

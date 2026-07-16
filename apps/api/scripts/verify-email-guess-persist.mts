@@ -4,7 +4,7 @@
  * → 读回 contact_point(status/verifiedAt) + field_evidence(email.guess) 证明真进了库。
  *   node --import tsx scripts/verify-email-guess-persist.mts
  *
- * ⚠️ Mac 端口25 常封 → SMTP 不可达 → 猜测多为 unverified(RISKY)：落库为 RISKY contact_point
+ * ⚠️ 部分本地/云网络封出网 25 端口 → SMTP 不可达 → 猜测多为 unverified(RISKY)：落库为 RISKY contact_point
  *    （allowedActions 不含 outreach），诚实不谎报 VALID。VALID 命中需放行 25 出网的环境。
  */
 import { readFileSync } from 'node:fs';

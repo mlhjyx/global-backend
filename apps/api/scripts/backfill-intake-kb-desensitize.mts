@@ -12,7 +12,7 @@
  *
  * 幂等：无匹配即 no-op（可重放）。运行完再查 `%@%` 为 0 即证明清理成功。
  * owner 连接（跨租户平台级维护，绕 RLS——同 relay/seed 先例）。
- * 运行：cd apps/api && node --import tsx scripts/backfill-intake-kb-desensitize.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/backfill-intake-kb-desensitize.mts
  */
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';

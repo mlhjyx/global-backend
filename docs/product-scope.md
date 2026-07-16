@@ -2,7 +2,7 @@
 
 > 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001~012/OD-01~06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [roadmap/release-plan.md](roadmap/release-plan.md)。
-> **2026-07-16 补**：本文定义**获客后端**产品范围（止于 LeadQualifiedPackage）。自 2026-07-13 起当前主线为**独立站建设（Site Builder）**——为出海企业一键生成/精装修独立站的第二产品面；其范围/边界/决策见 [status/current.md](status/current.md) 「当前主线」节 + [site-builder/](site-builder/) 00-14 + [adr/registry.md](adr/registry.md) **ADR-013~019**。获客侧范围本文以下不变（暂停非取消）。
+> **2026-07-16 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。自 2026-07-13 起当前主线为**独立站建设（Site Builder）**——为出海企业一键生成/精装修独立站的第二产品面；其范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。获客侧暂停开发、边界不变。
 
 ## 0. 术语表
 
@@ -67,6 +67,14 @@ Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost /
 - **改边界的唯一途径**：修订 ADR-001 并经 A/B/业务负责人三方书面确认——不存在其他「过流程就能加」的后门。
 - **身份归属（已拍板）与两条硬规矩**：身份 SoR 维持在 A（独立库），本仓只 JWKS 验签；为拦住交付包 AR-01/AR-02 风险，锁定：① **A 的库永远不存业务对象**——Company/ICP/Lead/Campaign/Opportunity/QGO 唯一主数据在增长库；② **权限执行点在服务端**（B 层 claims→scopes），任何接口不信任前端提交的 role。详见 ADR-011。
 
+## 4A. Site Builder 产品面与当前边界【2026-07-16 真值】
+
+- **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
+- **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
+- **truth-sync 审计基线 as-built（合并前 `main@a306ffa`，#124）**：M0 快路径、Astro 渲染器、DQ-1 SiteSpec 1.0.0、素材/KB/构建端点已存在；#121 已实现 intake 无条件触发 demo 的行为，#123/#124 已完成禁虚构身份、businessEmail 隔离、可取消超时和失败保站。
+- **尚未完成**：#121 没有同步完成 intake 目标契约；`Idempotency-Key`、响应 `buildId`、去 `mode` 和 Swagger/OpenAPI 更正仍是 R0 contract closeout。之后关键路径为 R1-safety（临时/子进程隔离 + Crawl/robots 全链 egress/SSRF）→ 拆分后的 R2-A → MF-0-thin → M1-c 纯 Sharp。
+- **权威规则**：承重决策只进 ADR-013~019；具体产品/施工真值在 Site Builder 00–14。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
+
 ## 5. 业务层级四层（PDR-002，已收敛=交付包 TA-003，待 A/B 会签）
 
 ```
@@ -88,7 +96,7 @@ Goal（业务目标：如进入德国市场）
 |---|---|
 | A（SaaS 平台） | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing |
 | B（接口层，同库） | JWKS 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射 |
-| C+Claude（本仓领域层） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规 |
+| Codex（本仓当前开发主体；用户 C 拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规 |
 
 三接缝：① **JWKS**——A 签发登录凭证、我们只验签解出租户；② **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK；③ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封）在实现前先经 B/A 评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
 
@@ -106,7 +114,7 @@ Goal（业务目标：如进入德国市场）
 1. 两份 v3.0 Word=冻结的研究综合稿（权威链断裂：自称待批准且母本 v2.1 不在仓库）。
 2. [docs/platform/](platform/) 交付包=L0/L1 全平台基底（待批准评审稿）；本文件+architecture+adr 是其获客模块层实现。
 3. 本仓范围与分工：本文件。当前完成度：[status/current.md](status/current.md) + 代码 + 真实验证（roadmap 已降级为 [roadmap/changelog.md](roadmap/changelog.md)）。
-4. API：code-first 导出的 `packages/contracts/openapi/openapi.json` 唯一真值（旧 openapi.yaml 链路待收口④删除）。
+4. API：code-first 导出的 `packages/contracts/openapi/openapi.json` 唯一 REST 真值（旧 openapi.yaml 链路已删除，收口④完成）；SiteSpec 类型真值为 `@global/contracts`（DQ-1/#117）。
 5. TED/openFDA spec：以其「审查修正」章节+代码为准，已降级为 [implementation-records/](implementation-records/)。
 
 ## 9. 决策记录（2026-07-10）
@@ -114,7 +122,7 @@ Goal（业务目标：如进入德国市场）
 **已拍板**【用户】：① 边界止于 LeadQualifiedPackage（QGO 归 SaaS）；② 身份归属维持 A（+ADR-011 两条硬规矩）；③ 设计类产出先评审后进仓；④ 收敛方案与交付包合流。
 **与交付包裁决对照**：TA-001/002/004/008/009 采纳；TA-003=PDR-002；TA-005 逻辑 Schema=演进方向；TA-006/OD-01/OD-02 按身份拍板修正采纳；TA-007/OD-03=ADR-001；TA-010/011/OD-05=PDR-003；TA-012/OD-06=本次文档迁移；OD-04（Policy 宿主=横向平台模块）方向认可，现阶段以本仓 PolicyPort/DataRightsService 为其获客侧实现。
 **本稿裁定**：北极星保 QGO、SAO 作商业验证层；研究域最小版列 R3 可选；Docling/Langfuse 不进封版 Gate。
-**待拍板 4 项**：见 [status/current.md](status/current.md)。
+**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧事项在冻结期不进入当前施工序。
 
 ---
 

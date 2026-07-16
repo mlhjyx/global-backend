@@ -1,6 +1,6 @@
 /**
  * 收口⑥ PR-B 真库验证（无 sandbox）：GDPR Art.17 删除编排 DSR 全链演练。
- * 运行：cd apps/api && node --import tsx scripts/verify-deletion-orchestration.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-deletion-orchestration.mts
  *
  * 覆盖：contact 主体 + company 主体 全链（受理→冻结→擦除→重评分请求→回执）、幂等重跑、
  * append-only 回执拒改、RLS 跨租户隔离、🔴 擦除后无 PII 残留 + 事件/回执内容最小化。

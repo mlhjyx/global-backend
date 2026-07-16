@@ -1,5 +1,5 @@
 # Local dev infrastructure for the Global backend.
-# Temporal is added in P1 when the first durable workflow lands.
+# Temporal intentionally runs outside Compose via `temporal-dev.service`.
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: global
       POSTGRES_DB: global_dev
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: global-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -41,7 +41,7 @@ services:
     container_name: global-new-api
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       - TZ=Asia/Shanghai
     volumes:
@@ -58,16 +58,20 @@ services:
     container_name: global-crawl4ai
     restart: unless-stopped
     ports:
-      - "11235:11235"
+      - "127.0.0.1:11235:11235"
     shm_size: "1g" # Chromium shared memory
     environment:
       - CRAWL4AI_API_TOKEN=global-local-crawl-token # enables external access + auth
-      # DEV ONLY: Docker Desktop (macOS) resolves public hosts to 198.18.x.x
-      # (non-global), which Crawl4AI's SSRF guard blocks. Prod Linux resolves
-      # real public IPs, so keep SSRF on there — do NOT set this in prod.
+      # DEV ONLY: current Ubuntu mihomo DNS maps public hosts into 198.18.0.0/16,
+      # which Crawl4AI correctly treats as reserved. This escape hatch is required
+      # for local crawling, but disables Crawl4AI's native destination guard.
+      # Keep 11235 loopback-only and pass only developer-verified public URLs;
+      # loopback does not stop API-driven SSRF. R1-safety must replace this before
+      # production or any untrusted crawl input. See AGENTS.md §3.
       - CRAWL4AI_ALLOW_INTERNAL_URLS=true
 
-  # Object storage for site-builder assets & build artifacts (docs/site-builder/02 §2).
+  # Object storage for site-builder assets and KB objects (docs/site-builder/02 §2).
+  # Renderer Release artifacts are still local: as-built; do not conflate them.
   # Tenant isolation = key prefix ws/{workspace_id}/… + presigned URLs; bucket is
   # never public. Console at http://localhost:9001 (dev creds below, dev only).
   minio:
@@ -76,8 +80,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000" # S3 API
-      - "9001:9001" # Web console (dev only)
+      - "127.0.0.1:9000:9000" # S3 API
+      - "127.0.0.1:9001:9001" # Web console (dev only)
     environment:
       MINIO_ROOT_USER: global
       MINIO_ROOT_PASSWORD: global-minio-dev # dev only — never reuse in prod
@@ -99,7 +103,7 @@ services:
     container_name: global-embeddings
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollamadata:/root/.ollama
     entrypoint: ["/bin/sh", "-c"]
@@ -112,14 +116,15 @@ services:
       start_period: 60s
 
   # Document parsing for the knowledge base (docs/site-builder/02 §12: Docling —
-  # layout-aware PDF/DOCX/PPTX → markdown, tables preserved). Fully local parsing;
-  # runs in an unprivileged container (06 §2). First convert downloads layout models.
+  # layout-aware PDF/DOCX/PPTX → markdown, tables preserved). Current dev runs
+  # unprivileged but retains egress because first convert downloads layout models;
+  # production target pre-bakes models and disables network (06 §2).
   docling:
     image: ghcr.io/docling-project/docling-serve:latest
     container_name: global-docling
     restart: unless-stopped
     ports:
-      - "5001:5001"
+      - "127.0.0.1:5001:5001"
     environment:
       - DOCLING_SERVE_ENABLE_UI=0
 
@@ -130,7 +135,7 @@ services:
     container_name: global-searxng
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
       - ./infra/searxng:/etc/searxng:rw
     environment:

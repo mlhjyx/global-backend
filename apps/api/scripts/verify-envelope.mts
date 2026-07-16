@@ -1,7 +1,7 @@
 /**
  * 收口④ verify：统一响应信封 —— 真 API + 真 dev 库，纯 HTTP 断言（无 sandbox）。
  *
- * 跑法：cd apps/api && pnpm build && node --import tsx scripts/verify-envelope.mts
+ * 跑法：cd /global/backend/apps/api && pnpm build && node --import tsx scripts/verify-envelope.mts
  * 前提：本地 dev 栈（postgres :5432）+ apps/api/.env。脚本自起 API 于测试端口，结束后关掉。
  *
  * 断言面（B 读路径全信封 + 例外/错误模型）：

@@ -11,7 +11,7 @@
  *    L 的 phone 点改挂到 S 并加密、L 的 field_evidence 改挂到 S、无重复点。
  * ③ 再跑 runBackfill()：幂等（merges=0，S 不变）。
  *
- * 运行：cd apps/api && node --import tsx scripts/verify-backfill-blinded-merge.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-backfill-blinded-merge.mts
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';

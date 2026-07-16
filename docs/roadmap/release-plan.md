@@ -1,9 +1,31 @@
-# roadmap/release-plan —— 六项收口 + R0-R3 交付路线（L2）
+# roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（合流定稿）。历史实施日志见 [changelog.md](changelog.md)。**最高优先=六项工程收口，替代「继续加 provider」（先不加 SAM/专利/提单/新源）。**
-> **2026-07-16 补**：六项收口（下 ✅①~⑥）已全部完成。自 2026-07-13 起主线转**独立站建设**，获客 R1-R3 暂停（非取消）。站建路线：M0 建站快路径 + DQ-1 SiteSpec 契约（#117）已落地 → **DOC-12 设计文档去漂移（2026-07-16，本轮）** → R0 生产化修正（demo-spec 去虚构身份等）→ M1 精装修管线（[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md)）。站建里程碑门见 [site-builder/08](../site-builder/08-eval-testing.md) 里程碑节 + [05](../site-builder/05-deployment-hosting.md) §10。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-16 truth-sync，审计基线（合并前）为 `main@a306ffa`（#124）**。历史实施日志见 [changelog.md](changelog.md)。
+> 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
-## 1. 六项工程收口（owner=C+Claude）
+## 0. Site Builder 当前路线
+
+### 已完成到哪里
+
+- M0 建站快路径、Astro 渲染器、素材/KB/构建端点已存在；DQ-1 SiteSpec 1.0.0 共享类型由 #117 落地。
+- DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
+- #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
+
+### 当前关键路径与退出门
+
+1. **R0 contract closeout**：intake 支持 `Idempotency-Key`，返回 `{siteId, buildId, status}`，移除 `mode`，同步 Swagger/OpenAPI 与稳定错误码。#121 没做这些，R0 不能整体标完成。
+2. **R1-safety**：这是 R0 后立即执行的安全收口，可拆成两个小 PR：(a) 临时/构建文件 `finally` 清理 + renderer 子进程 env allowlist；(b) 安全/infra PR 替换 Ubuntu fake-IP 开发 Compose 的 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 例外。(b) 必须覆盖 `IntakeDto.websiteUrl → brand research → crawl4ai` 和 `robots.txt` 直连两类入口，使用真实 DNS/可校验 egress 或逐跳 URL guard，关闭例外，并通过公网正例与 private/loopback/metadata/DNS-rebinding/redirect 反例。未通过前本地仅接受开发者核验的公网 URL，不得开放不可信租户输入或生产抓取。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可并行，但必须在 M1-e 可见预览前完成。
+3. **R2-A 正确性门（拆分 PR）**：R2-A1 Asset 状态机/CAS/fencing；R2-A2 KB lease/fencing/retry/幂等；R2-A3 Profile schema/乐观并发；R2-A4 Outbox/Temporal cleanup、redrive 与真实集成验证。禁止合成一个 migration/API/状态机 mega PR。
+4. **MF-0-thin**：`AssetVariant` + RLS/FORCE RLS、recipe/checksum/provenance、SiteSpec 引用扫描器、删除 409、`derivedKeys` 兼容投影。在引用扫描器落地前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
+5. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
+
+并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
+
+---
+
+以下为**冻结的获客路线**，保留作为恢复开发时的历史计划。
+
+## 1. 六项工程收口（历史已完成；当前暂停、无执行 owner）
 
 | # | 收口 | 做什么 | 验收 |
 |---|---|---|---|
@@ -28,7 +50,7 @@
 
 ## 2. R0-R3 路线（与交付包 R0-R5 映射：其 R0=本 R0，R1 获客 Pilot=本 R0/R1 封版，R2 Campaign=本 R1 SaaS 侧，R3 QGO Pilot=本 R1 末~R2，R4/R5=本 R3+）
 
-| 阶段 | 本仓 C+Claude | B | A / SaaS 侧 | 退出条件（标注归属） |
+| 阶段 | 本仓领域层（历史计划） | B | A / SaaS 侧 | 退出条件（标注归属） |
 |---|---|---|---|---|
 | **R0 握手+收口**（2-4 周） | 收口①-④ + 删除编排启动 + 文档迁移；保持 sweep 运转 | 读路径 OpenAPI（套统一信封）+ `GET /events` + roles→scopes 映射 | JWKS+claim；登录/Workspace；Lead 队列查看页 | A 真 token 经 B 读到真实 lead（A+B+C）；LeadQualified 可被拉取并 ACK（B+C） |
 | **R1 单渠道最小闭环**（6-8 周） | 收口⑤⑥完成；QualificationDecision 定版；快照 scores 升 v2 | 写路径 API + 审批校验最小版 | **Campaign 最小对象 + 邮件受控发送 + 收件箱 + QGO 手工确认**（SaaS 侧建设，参照 product-scope 附录 A） | 内部账号全链走通一次（发送段=A/SaaS，供给段=C）；0 未授权动作（A+C）；**删除编排（C）先于发送（A）上线**（联合时序门） |

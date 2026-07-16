@@ -3,6 +3,10 @@
  * 未被该域名的 robots.txt 对通配 UA 禁止。这是我方侧的第一道合规闸门——
  * 红线是「不绕过访问控制」，被 Disallow 的路径直接放弃，不换 UA 硬闯。
  *
+ * 安全边界：这里直接由 API 进程 fetch origin，目前只实现 robots 合规，不是 SSRF
+ * 防线。R1-safety 必须在此路径补齐解析后 IP、redirect 逐跳、内网/metadata/rebinding
+ * 与体积上限；完成前只允许开发者可信的公开 URL。
+ *
  * 只解析 `User-agent: *` 段的 Disallow 前缀（够用于「首页是否可抓」判断）；
  * 复杂 robots（Allow 覆盖、按 UA 细分）从严处理为不可抓。结果带 TTL 缓存。
  */

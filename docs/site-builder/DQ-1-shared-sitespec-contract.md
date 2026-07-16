@@ -1,7 +1,7 @@
 # DQ-1 · SiteSpec 共享契约（落地设计 + 实施记录）
 
-> 状态：**实施完成，待审**（本 PR）；本地全绿（契约 build → API build → 1239 测试 → 渲染器解析探针）。
-> 日期：2026-07-15。协同背景见 [00-decisions-and-coordination.md](00-decisions-and-coordination.md) §3（合并顺序：DQ-1 最先，两人之后 rebase）。
+> 状态：✅ **已由 PR #117 合并**（commit `af87fd1`，2026-07-15）；SiteSpec 1.0.0 type-only 共享契约已进入 main。本页以下保留实施记录与当时的本地验证证据。
+> 协同背景见 [00-decisions-and-coordination.md](00-decisions-and-coordination.md) §3。后续分支必须以 #117 为基线，DQ-1 不再列为待做；运行时 Zod、DesignBrief 与 SiteSpec 1.1.0 仍是独立消费者驱动的 follow-up。
 
 ## 1. 问题：契约有文档、无代码执行 → 双真值静默漂移
 
@@ -18,7 +18,7 @@
 | `pages[].puck.root.props` | 必填 | 可选 | 契约松紧不一致 |
 | `assets` 值形状 | `Record<string, never>`（永远空） | `Record<string, { kind, hash }>` | 同名字段两种形状 |
 
-任一端改动无编译期护栏 → 漂移只在运行时暴露。这是双人协同的头号地基风险。
+任一端改动无编译期护栏 → 漂移只在运行时暴露。这是跨应用共享契约的头号地基风险。
 
 ## 2. 决策
 
@@ -65,4 +65,4 @@
 
 ## 7. 风险分级
 
-`packages/contracts/**` + CI + 跨两 app → **实质级**（[CONTRIBUTING.md](../../CONTRIBUTING.md)「PR 粒度分级」/ [ci-merge-automation.md](../backend/ci-merge-automation.md) 自动升级规则）→ **人审、不 auto-merge**。
+`packages/contracts/**` + CI + 跨两 app → **实质级**（[CONTRIBUTING.md](../../CONTRIBUTING.md)「PR 粒度与风险分级」/ [ci-merge-automation.md](../backend/ci-merge-automation.md) 风险规则）→ **专项复核，用户明确确认后才合并**。

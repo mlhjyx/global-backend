@@ -1,6 +1,6 @@
-# Global 增长后端 · 前端接入说明
+# Global 后端 · 前端/服务端接入说明
 
-> 本文档给 SaaS 平台前端/服务端开发者。REST 契约以 `openapi/openapi.json`（code-first 导出）为准。
+> 本文档给 SaaS 平台前端/服务端开发者，覆盖 **Site Builder（当前主线）** 与冻结维护的获客能力。REST 契约以 `openapi/openapi.json`（code-first 导出）为准；本文只解释调用顺序，不覆盖生成契约。
 >
 > **统一接口门户（推荐前端入口）**：`http://<host>:3000/api/portal` —— 自托管 Scalar，一个地址浏览 + 在线调试全部端点。
 > 另有 Swagger UI `http://<host>:3000/api/docs`（内部调试）。契约由 `--export-openapi` 从代码生成，代码即事实源。
@@ -14,11 +14,28 @@
 | 租户 | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数 |
 | 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED` |
 | 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封 |
-| 幂等 | 创建类 POST 支持 `Idempotency-Key` 头（如 `POST /companies`），同 key 重放返回首次结果 |
+| 幂等 | **仅在 OpenAPI 声明该 header 的端点**支持 `Idempotency-Key`（如 `POST /companies`、Site Builder builds）；不能从通用约定推断所有 POST 已实现 |
 | 乐观锁 | 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，冲突返回 409 `VERSION_CONFLICT` |
 | 异步 | 长任务（理解/发现/评分）返回 `202`，前端轮询对应状态端点（见下） |
 
-## 2. 获客主线 · 端到端调用顺序
+## 2. Site Builder · 当前 as-built 接入顺序
+
+> truth-sync 审计基线（合并前）：`main@a306ffa`（#124）。#121 已让 intake **行为上**不再按 `hasWebsite` 分叉，始终触发 Demo v0；#123/#124 已落事实安全、隐私、可取消超时与失败保站。下列形状只描述当前 code-first OpenAPI；目标契约见 `docs/site-builder/07-api-contract-draft.md`。
+
+> **Base URL**：以下路径均包含全局版本前缀 `/api/v1`；客户端应直接使用完整路径，不要省略 `/api/v1`。
+
+1. `POST /api/v1/site-builder/intake` 提交公司、行业、产品、目标市场、网站背景与业务邮箱。
+   - 当前返回：`{ "data": { "siteId", "mode": "builder", "status": "building" } }`。
+   - ⚠️ 当前端点**没有** `Idempotency-Key` 声明，也不返回 `buildId`；`mode` 与 Swagger 的“有站诊断”文字仍是旧契约。R0 contract closeout 将改为目标 `{siteId,buildId,status}`、去 `mode` 并重导 OpenAPI。在完成前，客户端不得假定目标形状已经可用。
+2. `GET /api/v1/site-builder/sites` 或 `GET /api/v1/site-builder/sites/{id}` 轮询站点；`status=ready` 后 `previewUrl` 可用。异步终态失败为 `setup_failed`，站点和 intake 会保留，用户可重试。
+3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。当前组内 schema 与乐观并发仍属 R2-A3 待收口，不要依赖 last-write-wins 行为。
+4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；SiteSpec 引用扫描与 `409 ASSET_IN_USE` 是 MF-0-thin 目标，当前尚未落地。
+5. `GET /api/v1/site-builder/sites/{id}/kb/status` 查询文档、chunk 与资料缺口。
+6. 精装修构建：`POST /api/v1/site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /api/v1/site-builder/builds/{id}`，取消用 `POST /api/v1/site-builder/builds/{id}/cancel`。更完整的 targetId/options/trace/progress/cost 契约仍待 R3。
+
+**SiteSpec / DQ-1**：`@global/contracts` 导出的 `SiteSpec` 1.0.0 是 API 生产端与 Astro Renderer 的唯一共享 TypeScript 真值；前端若需要编辑/物化 Spec，应等待相应 REST 端点进入 OpenAPI，不能直接把内部类型等同于已发布 API。DQ-1 是 type-only；运行时 Zod 与 1.1.0 仍是后续。
+
+## 3. 获客主线 · 端到端调用顺序（冻结维护）
 
 ### 阶段 0：企业理解（Understand）
 1. `POST /companies { website, name? }` → 202，后台自动：多页抓取 → 抽取事实/产品/画像/公开联系方式
@@ -53,13 +70,13 @@
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 
-## 3. 事件（服务端集成用）
+## 4. 事件（服务端集成用）
 
 领域事件经 Transactional Outbox 发布，信封结构见 `events/envelope.schema.json`。关键事件：
 `CompanyProfileCreated`、`ClaimApproved`、`ClaimRevoked`、`ClaimExpired`、`KnowledgeConflictDetected`、
 `ICPActivated`、`DiscoveryRunRequested/Completed`、`QualifyRequested`、`LeadsScored`、`LeadQualified`。
 
-## 4. 数据真实性说明（前端展示建议）
+## 5. 数据真实性说明（前端展示建议）
 
 - **Claim = 事实**：永远带来源 URL + 原文片段，建议 UI 提供「查看原文」
 - **ICP = 推断**（`HYPOTHESIS`）：建议 UI 标注「AI 生成，待回测/确认」

@@ -17,7 +17,7 @@
  *
  * ⚠️ 未跑此回填则：新 upsert 的 where.value/dedupe_key 被加密/盲化后匹配不到旧明文行 → 造重复行 +
  * 旧明文 PII 永留库。故须与新代码上线同步跑（与既有 contact_point 回填同一运维步）。
- * 运行：cd apps/api && node --import tsx scripts/backfill-pii-encryption.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/backfill-pii-encryption.mts
  */
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';

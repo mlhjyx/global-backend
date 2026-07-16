@@ -18,7 +18,7 @@
  *   node --import tsx scripts/verify-e2e-acquisition-funnel.mts
  *
  * ⚠️ 必须以 app_user（非 superuser）连接跑，否则 RLS 被绕、证明无意义（开头硬 guard）。
- * ⚠️ Mac 端口25 常封 → SMTP 不可达 → 猜测多为 unverified(RISKY)：落库为 RISKY（无 outreach，reachability=0.5），
+ * ⚠️ 部分本地/云网络封出网 25 端口 → SMTP 不可达 → 猜测多为 unverified(RISKY)：落库为 RISKY（无 outreach，reachability=0.5），
  *    诚实不谎报 VALID。RISKY 已足以越过「reachability>0」推荐门——本测正是要证明这一步。
  * ⚠️ 迁移 add_email_guess_watermark 必须先 apply（canonical_company.email_guess_attempted_at 列）。
  * ⚠️ 用**专属空 workspace**（scoreCandidates 全表扫描该 WS）——只评本测那家公司，绝不 grind 存量。

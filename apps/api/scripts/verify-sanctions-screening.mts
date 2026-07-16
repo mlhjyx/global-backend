@@ -1,5 +1,5 @@
 /**
- * 制裁名单筛查（Qualify 第五门）—— 真实数据端到端（真库真 OFAC，无 sandbox，CLAUDE.md §5）。
+ * 制裁名单筛查（Qualify 第五门）—— 真实数据端到端（真库真 OFAC，无 sandbox，AGENTS.md §5）。
  *
  *   DATABASE_URL=postgresql://global:global@localhost:5432/global_dev \
  *   APP_DATABASE_URL=postgresql://app_user:app_pw@localhost:5432/global_dev \

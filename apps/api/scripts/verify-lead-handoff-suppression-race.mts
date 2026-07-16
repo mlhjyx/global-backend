@@ -11,7 +11,7 @@
  *  ⑤ 断言：无 LeadQualified 交棒、lead 未 QUALIFIED、无 LeadDecision（整事务原子回滚）、company=SUPPRESSED。
  *  ⑥ 正路：另一 ENRICHED 公司无并发 freeze → decide(accept) 正常发 LeadQualified（修复不误伤 happy path）。
  *
- * 运行：cd apps/api && node --import tsx scripts/verify-lead-handoff-suppression-race.mts
+ * 运行：cd /global/backend/apps/api && node --import tsx scripts/verify-lead-handoff-suppression-race.mts
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';

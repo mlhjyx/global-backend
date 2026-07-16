@@ -4,7 +4,9 @@ import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { ExecutionBroker } from '../tools/tool-contract';
 
 /**
- * 抓一个被监控页面的渲染后 HTML（robots 门 + crawl4ai 的 egress/SSRF 防护）。
+ * 抓一个被监控页面的渲染后 HTML（robots 合规门 + Crawl4AI）。
+ * 当前 Ubuntu dev 的 broad allow-internal 不是 SSRF 防护；R1-safety 须同时覆盖本工具
+ * 与 robots 直连路径。完成前调用方只能提供开发者可信的公开 URL。
  * 抽象成注入点（PageFetcher）：WebsiteWatchService 依赖此接口，测试可注入假实现（不触网）。
  * fail-safe：robots 禁止 / 抓取失败 / 空内容 → 返回 null（单页失败不阻断其余页与其余源）。
  * 收口②：原始出网改经 ExecutionBroker 的 crawl4ai.render 工具（robots 在工具内权威强制，

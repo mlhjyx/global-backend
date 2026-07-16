@@ -9,8 +9,8 @@
  * ⑤KB 摄入 Temporal 化：真 PDF 直传→commit→queued→processQueuedKbDocs（真 MinIO+docling+BGE-M3）→ready+chunks>0
  * 尾段：brand_profile RLS A/B 隔离（app_user + is_superuser guard）。
  *
- * 依赖：docker compose up -d postgres minio embeddings docling。
- * 跑：cd apps/api && node --import tsx scripts/verify-site-builder-m1a.mts
+ * 依赖：cd /global/backend && docker compose -p global up -d postgres minio embeddings docling。
+ * 跑：cd /global/backend/apps/api && node --import tsx scripts/verify-site-builder-m1a.mts
  */
 import 'dotenv/config';
 import 'reflect-metadata';

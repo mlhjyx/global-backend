@@ -19,7 +19,7 @@
 
 ### 0.1 运行时硬约束（v3.2 §0.1 回写，护 D1/D13）
 
-- **不让运行时 Agent 自由写 React/Astro/CSS 或任意组件**——只能从**已批准封闭组件库**（ADR-015，26 型为 v1 target）选择组合，产出 SiteSpec/DesignBrief。
+- **不让运行时 Agent 自由写 React/Astro/CSS 或任意组件**——只能从**已批准封闭组件库**（ADR-015，26 型为 v1 target）选择组合；当前产物是 SiteSpec，DesignBrief 属 DI-0/M1-e 目标。
 - **不新增 planner Agent**——固定 DAG + 规则选择 + 现有 Temporal 编排是**唯一调度**（D13 / ADR-013）。
 - **不把"再写一个更长的 prompt"当成设计方案**——设计智能靠开发期工厂沉淀的语料/组件/规则，不靠运行时长 prompt 即兴发挥。
 
@@ -27,11 +27,11 @@
 
 把 01 号"两主题预设 + 固定页面结构"升级为**两层**：
 
-- **开发期平面**（CC/开发 Agent 工作区，**非用户建站时运行**）：研究多源参考 → 临时分析压成 `DesignObservation` → 只把**聚合规则 / 许可代码 / 原创资产**提升为可运行语料 → 生成内部组件变体、构建 TemplateFamily → 跑合规/截图/性能/原创性评测 → **经 PR 发布版本化 DesignCatalog**。
-- **生产期平面**（**本仓 as-built 基底** = API/Temporal/AiTask/SiteSpec/Astro Renderer）：按企业资料选**已批准** TemplateFamily+Blueprint → 按素材/文案/事实证据**受控组合** → 输出 DesignBrief/CopyBundle/SiteSpec/Findings。**运行时硬约束**：不抓 Readdy（ADR-019）、不读原始参考页/模板源码、不生成任意前端代码（护 D1）。
+- **开发期平面**（Codex/开发 Agent 工作区，**非用户建站时运行**）：研究多源参考 → 临时分析压成 `DesignObservation` → 只把**聚合规则 / 许可代码 / 原创资产**提升为可运行语料 → 生成内部组件变体、构建 TemplateFamily → 跑合规/截图/性能/原创性评测 → **经 PR 发布版本化 DesignCatalog**。
+- **生产期平面**：**当前 as-built 基底仅有** API / Temporal / AiTask / SiteSpec / Astro Renderer，Demo 仍由现有确定性 spec/模板路径生成，**尚无**运行时 DesignCatalog、TemplateFamily/Blueprint 选择或 DesignBrief 消费。**目标（DI-0 → M1-e）**才是按企业资料选择已批准 Family+Blueprint → 按素材/文案/事实证据受控组合 → 输出 DesignBrief/CopyBundle/SiteSpec/Findings。两阶段共同硬约束：不抓 Readdy（ADR-019）、不读原始参考页/模板源码、不生成任意前端代码（护 D1）。
 - **两平面不可混合的四条理由**：① 设计研究需大量截图迭代，不适合 Demo 低延迟路径；② 来源许可有边界，不可在生产数据路径动态取用；③ 开发期靠**人工批准 PR**，生产期须**可重放/可计费/可降级**；④ 运行时自由设计会破坏 SiteSpec 白名单 / 缓存 / 可回归性。
 
-> 开发期工厂的详设归 14 号文档；本 02 只承载**生产期平面**的 as-built 架构，两平面通过版本化 `DesignCatalog` 单向对接。v3.2 吸收 v2 全部合同并新增四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / CC 从 M1-c 起哪些立即改哪些延后）——详见 14 号与 09 号。
+> 开发期设计智能工厂的详设归 [13 号领域模型](13-design-domain-model.md)；[14 号](14-media-foundation-mf0.md)只承载媒体地基。本 02 的 as-built 只到上述 API/Temporal/AiTask/SiteSpec/Astro 基底；**两平面的版本化 `DesignCatalog` 单向接缝尚未实现**，属于 DI-0 契约 + M1-e 消费目标，不得被当前代码假定可用。v3.2 吸收 v2 合同并提出四层（设计合法复用抽象成内部资产 / 整站视觉语法+页面节奏+家族一致性 / Demo v0 10 秒也像有效海外站 / Codex 从 M1-c 起哪些立即改哪些延后）——施工状态以 09、13、14 号为准。
 
 ## 1. 模块与目录
 
@@ -49,6 +49,8 @@ apps/api/src/site-builder/
 ```
 
 复用现有：JWKS 鉴权、RLS 基建、Transactional Outbox、模型网关 client、SearXNG+Crawl4AI（品牌研究）、taxonomy 词表（行业级联）、预算 reserve-settle 思路（ToolBroker 同款）。
+
+> **环境与安全边界（2026-07-16 Ubuntu as-built）**：这里的“复用 Crawl4AI”只表示本地开发容器与 client 可用，不代表生产 SSRF 闸门已经闭环。`websiteUrl` 会驱动抓取，容器端口绑定 loopback 不能阻止 API 驱动的 SSRF；Ubuntu mihomo fake-IP 环境下，本地开发暂以 `CRAWL4AI_ALLOW_INTERNAL_URLS=true` 维持公开站抓取，因此只允许开发者可信的公开 URL。**R1-safety 必须同时覆盖 Crawl4AI 路径和 robots 直连路径**，落实解析后 IP、redirect 逐跳、metadata/内网/loopback、DNS rebinding 与响应上限等 egress 校验，完成前不得接收不可信 URL 或用于生产。
 
 新增基建：**MinIO**（compose，对象存储）、**Astro 构建容器**（渲染器）、网关新模型通道（§6）。
 
@@ -90,6 +92,8 @@ POST /site-builder/import/storefront          # 店铺 URL 导入（M3）
 POST /sites/{id}/publish                      # 发布（M2）
 ```
 
+> **intake as-built 尾巴（2026-07-16）**：#121 已实现「有/无旧站都无条件建 Demo」的行为，但当前响应仍为 `{siteId,mode,status}`，没有目标合同的 `buildId`，也未实现 `Idempotency-Key`；controller/Swagger 仍残留旧诊断分支描述。目标契约是 `{siteId,buildId,status}`，由独立 `R0-contract` 收口；在此之前不得把 intake API 宣称为完成。
+
 鉴权照旧：SaaS token → JWKS 验签 → workspace_id → RLS。全部接口 OpenAPI 注解，Scalar 门户可见。
 
 ## 4. 编排（siteBuilderWorkflow）
@@ -110,14 +114,16 @@ flowchart TD
 
 ### 4.1 Fast Demo 通道（P95 < 10s，v3.2 §4.2/§18.2 回写）
 
-`demoV0Activity` —— 8 阶段确定性快路径：**注册资料 → 规则识别 Archetype → Family/Blueprint 规则打分排序 → 安全 DemoVisualPack → 确定性 SiteSpec → 可选轻文案润色 → Astro 构建 → 快速 lint + 发布预览**。硬约束：
+**当前 as-built**：`demoV0Workflow` 只编排一个 `generateDemoV0` activity；真实路径是 **读取 Site/intake → 使用站点 `stylePreset`（缺省时 `pickPreset` 在两套主题间确定性选择）→ 可选轻文案润色 → `buildDemoSpec` 生成 home/products/contact 三页 SiteSpec → 建 SiteVersion → Astro 构建 → 写 ready 预览**。当前没有 Archetype、Family/Blueprint、DesignBrief、DesignCatalog 或 DemoVisualPack。
 
-- **关键路径不调视觉模型**：Family/Blueprint 用**规则打分**，不在 10s 预算内调多模态模型（保确定性）。
+**目标（DI-0 → M1-e）**才扩为 8 阶段快路径：**注册资料 → 规则识别 Archetype → Family/Blueprint 规则打分排序 → 安全 DemoVisualPack → 确定性 SiteSpec → 可选轻文案润色 → Astro 构建 → 快速 lint + 发布预览**。当前与目标共同硬约束：
+
+- **关键路径不调视觉模型**：当前仅 `pickPreset` 关键词规则；目标 Family/Blueprint 也只用规则打分，不在 10s 预算内调多模态模型（保确定性）。
 - **文案润色可取消、非依赖**：一次异步轻文案调用（deepseek-v4-flash）为锦上添花；硬超时即用模板默认文案，Demo 成功不依赖它。
 - **只用注册明确事实**（ADR-017 禁虚构身份）；preview-only ≠ 可公开发布。
 - **不跑**图片生成 / 视频 / 全页多模态 QA / 网络研究。
-- **DemoVisualPack 素材约束**：必须为平台原创、明确许可或程序化生成的**非事实性**素材；推荐三类来源=①平台自制抽象 SVG/网格/渐变/技术纹理；②明确可商用并本地化的图片；③后期由已批准图片模型生成的非事实性场景（不进 M1 Demo 必选路径）。
-- as-built 现状：`demo-spec.ts` 仍是 home/products/contact 三页确定性 Demo；`themes.ts` 仅两主题（颜色/系统字体/圆角/motionIntensity）=换皮而非完整设计语言。
+- **目标 DemoVisualPack 素材约束**：必须为平台原创、明确许可或程序化生成的**非事实性**素材；推荐三类来源=①平台自制抽象 SVG/网格/渐变/技术纹理；②明确可商用并本地化的图片；③后期由已批准图片模型生成的非事实性场景（不进 M1 Demo 必选路径）。
+- **当前视觉能力边界**：`demo-spec.ts` 是 home/products/contact 三页确定性 Demo；`themes.ts` 仅两主题（颜色/系统字体/圆角/motionIntensity）=换皮而非完整设计语言。
 
 ### 4.2 Refurbish 精装修管线（异步，触发=用户补资料/选风格/点重新生成）
 
@@ -220,7 +226,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 |---|---|---|---|---|---|
 | ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
 | 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-v4-pro（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
-| 3 | 图片管线 imagePipeline | 产品/工厂图变"专业站点图" | 原图 → 多尺寸 webp/avif 产物 | gpt-image 系（编辑）+ gemini-2.5-pro（质检） | 确定性步骤：EXIF 剥离→**rembg 主体分割出 mask**→质量评估→生成式仅重绘 mask 外（背景/打光/白底）→超分→导出。**主体保护双保险：mask 锁定 + 生成后主体 pHash/embedding 相似度校验，主体变形=丢弃重试**；人物照默认不做生成改动 |
+| 3 | 图片管线 imagePipeline | 产品/工厂图生成安全可发布的响应式派生件 | 原图 → 多尺寸 webp/avif + fallback | **M1-c 确定性零模型（纯 Sharp）** | 目标固定序：MIME/像素/解码炸弹检查→方向与 sRGB→重编码去 EXIF/GPS→质量门→安全裁切/focal point→多尺寸导出→`AssetVariant`；原图不可变、单图失败隔离。rembg、超分、生成式背景重绘、视觉质检与 pHash/embedding 主体校验均属 M1-c2/M3 后置能力，出现真实消费者、同意与 provider 门后另行落地（ADR-018） |
 | 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | gemini-2.5-pro（多语言） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
 | 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 Seedance 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | Seedance（火山，异步任务轮询） | 每站视频条数配额；视频失败自动降级动效 |
 | 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | gemini-2.5-pro（视觉） | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
@@ -232,7 +238,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 >
 > ⚠️ 上表"模型（首选）"列为初稿；**以 §6 四态路由为准**（ADR-016：currentRoute 现役 as-built，候选只经评测晋级，非终选/非采购承诺）。
 >
-> **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，CC 生态是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← seo-specialist 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（Playwright/Lighthouse/sharp/rembg 直接进 activity），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
+> **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，Codex 与已安装的 ECC/Superpowers skills 是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← SEO 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（M1 先落 Playwright/Lighthouse/Sharp；rembg 等只有真实消费者出现后才评估），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
 
 ## 6. 模型选型（**四态路由现役档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
 
@@ -280,7 +286,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ## 8. 素材与版权基线（2026-07-14 调研结论）
 
-- **readdy.ai 结论**：它支持导出代码/Figma（付费档）并有页面级 REST API，但**没有可供第三方产品调用的"素材库"开放接口**，其模板/素材授权也不随导出转移到我们客户的商用站点——直接联动其素材库不可行。合法用法两种：(a) 开发期付费账号生成参考设计并导出，作**内部设计基准**（审美 rubric 校准、组件库借鉴），不搬素材进客户站；(b) 生产素材走下方开放授权生态。
+- **readdy.ai 结论（ADR-019 现行边界）**：它支持导出代码/Figma（付费档）并有页面级 REST API，但**没有可供第三方产品调用的"素材库"开放接口**，其模板/素材授权也不随导出转移到我们客户的商用站点——直接联动其素材库不可行。默认仅作 `visual_research_only`：开发期可少量、临时观察并抽象跨来源设计规律，**不导出/复用源码、文案或素材**；只有取得覆盖 AI 建站产品、衍生组件和商业分发的书面授权，并完整登记授权证据、范围、期限、地域、撤回与再分发权后，才可登记为 `owned_export_authorized`，在授权边界内走一次性导出改造工序；缺任一项 fail-closed。生产素材走下方开放授权生态。
 - **开放素材生态（均免费，可商用；注意点如下）**：
   - **Unsplash**：免费，Unsplash License 商用无需署名；API 免费（production 档需申请、有速率限制）；Unsplash+ 付费专区不可用；禁原样转售。
   - **Pexels**：免费，Pexels License 商用无需署名；API 免费有速率限制。
@@ -320,7 +326,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 | D6 | 多租户隔离 | RLS + 对象存储前缀 + 签名 URL（§7） |
 | D7 | 预览方式 | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属 |
 | D8 | 模型选型原则 | 按 agent 能力需求全市场选型；**2026-07-14 现役档定档**（§6 表=currentRoute as-built：实测评比+用户三轮拍板，依据见 10 号文档；ADR-016 四态路由，候选经评测晋级非终选）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档） |
-| D9 | readdy 定位 | **修订（2026-07-14 用户拍板）：仅设计基准 → 开发期设计源**——自己账号生成→产品内导出 React/Figma→固定工序改造成 Astro 组件入封闭库（工序与 ToS 边界见 11 号文档）；运行时逐站生成否决（无公开 API+撞 D1+数据出境）；生产素材仍走开放授权生态（§8） |
+| D9 | readdy 定位 | **已由 ADR-019 取代（2026-07-16）**：默认 `visual_research_only`，仅允许开发期少量、临时、多来源净室观察，持久化抽象 `DesignObservation/DesignRule`；**未经覆盖 AI 建站产品、衍生组件和商业分发的书面授权，且未完整登记证据、范围、期限、地域、撤回与再分发权，不得导出或改造 React/Figma**。全部满足后才可登记为 `owned_export_authorized`，按授权边界走一次性改造工序；缺任一项 fail-closed，运行时零依赖、禁止逆向，生产素材仍走开放授权生态（§8）。 |
 | D10 | 发布部署 | **海外服务器**（免 ICP 备案）；静态托管=对象存储+CDN 优先（非 VPS）；预览国内友好线路/发布海外 CDN 双链路 |
 | D11 | SiteSpec 数据形状 | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认） |
 | D12 | 模板策略 | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认）；**组件库 v1 扩容 17→26 型**（2026-07-14 用户拍板，readdy demo 缺口实证见 11 号文档：9 个小难度缺口并入 M1-e，中难度 3 个 v1.5，沉浸叙事类不进封闭库） |
@@ -352,7 +358,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 6. **询盘通知邮件**：发信域 SPF/DKIM/DMARC（M2）。
 7. **发布 CDN**：发布站挂 CDN（Cloudflare 免费档起步）+ 图片按需变换（M2+）。
 8. **质量评测基线（eval harness）**：golden set（N 家真实企业脱敏资料）+ rubric 自动打分回归——每次改 prompt/换模型跑回归防退化；**AI 产品工程化的关键一环**（M1 起建）。
-9. **模板冷启动**：开发期用 CC 的 GAN 设计循环（gan-design/theme-factory）批量产行业模板+人工终审——模板质量决定 demo v0 第一印象（M0 的核心工作量）。
+9. **模板冷启动**：开发期由 Codex 使用生成/评审分离的 GAN 设计循环方法批量产行业模板，再经人工终审——模板质量决定 demo v0 第一印象（M0 的核心工作量）。
 10. **内容安全审核**：用户上传图+生成文案过安全审核后才上站（M1）。
 11. **SiteSpec 版本化**：`specVersion` 字段+迁移器，保老站向后兼容（M0 起）。
 12. **观测**：build 成功率/时长/单站成本 dashboard（M1）。

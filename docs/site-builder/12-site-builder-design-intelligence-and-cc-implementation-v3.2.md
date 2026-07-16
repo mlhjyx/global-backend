@@ -1,7 +1,8 @@
 # 12 · 海外独立站完整设计、设计学习与裁决迁移施工图
 
-> ⚠️ **已归档为 dated proposal（2026-07-16，DOC-12 完成）**——本文是 ChatGPT 起草的**外部设计草稿**，**非权威、不作施工依据、不再更新**。其 362 条实质内容已由 DOC-12 系列 PR 分发进活文档 **00-14 + ADR-013~019**（各文档大段新增处标「（v3.2 §X 回写）」可溯源；新建 13 设计智能层领域模型 / 14 MF-0 媒体地基）。
-> **权威真值 = `docs/site-builder/` 00-14 + `docs/adr/registry.md`**。本文仅作 provenance 保留。分发映射见 `overnight-plan.md` 与 DOC-12 commit 系列。
+> ⚠️ **已归档为 dated proposal（2026-07-16）**——本文是 ChatGPT 起草的**外部设计草稿**，**非权威、不作施工依据、不再更新正文**。接受内容已由 DOC-12 的 **PR #119（commit `eaf6063`）与补漏 PR #120（commit `c7ea690`）** 分发进活文档和 ADR；各落点以「v3.2 §X 回写」标记提供逐节 provenance。
+> **权威真值 = 当前代码 + `docs/site-builder/` 00-14 + [ADR registry](../adr/registry.md) + [当前状态](../status/current.md) + [施工路线](../roadmap/release-plan.md)**。本文仅保留当时提案与审计快照，不能覆盖 #121/#123/#124 等后来事实。曾用于 DOC-12 的 `overnight-plan.md` 是会话临时 scratchpad、**未提交入仓且不是可持续引用**；持久 provenance 只认 #119/#120 的 Git diff、活文档回写标记与 ADR-013~019。
+> 下文 `CC/Claude` 是 2026-07-15 的历史角色与工具称谓；**当前开发主体已改为 Codex**，不得据此恢复旧责任、权限或施工入口。
 
 > 版本：v3.2（CC 评审裁决、最新 main 对账与多源设计学习版）  
 > 日期：2026-07-15  

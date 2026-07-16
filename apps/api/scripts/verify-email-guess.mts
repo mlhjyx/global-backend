@@ -4,8 +4,8 @@
  *       （模式排列 + 若站上有一个具名邮箱则学格式）→ 经 ToolBroker 真 SMTP 验证 → 诚实裁决。
  *   node --import tsx scripts/verify-email-guess.mts
  *
- * ⚠️ 诚实预期：Mac 常封端口 25 → 多数真域 SMTP 不可达 → 猜测**降级 unverified（unreachable）**，
- *    不谎报 VALID。这正是设计红线。要看 VALID 命中需在放行 25 出网的环境（如 WSL）跑。
+ * ⚠️ 诚实预期：若当前网络封锁出站 TCP/25，多数真域 SMTP 不可达，猜测必须
+ *    降级 unverified（unreachable），不谎报 VALID。只有明确放行 25 出网并完成真握手时才可能命中 VALID。
  */
 import { readFileSync } from 'node:fs';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -114,7 +114,7 @@ async function main() {
   console.log('\n█ 说明：');
   console.log('█  · 候选按 B2B 命名法先验排序，有站内样本则先学格式（命中率更高）');
   console.log('█  · SMTP 出网全经 ToolBroker（source_policy/预算/限流/幂等/Trace）；人名邮箱过 lawful-basis 门');
-  console.log('█  · Mac 端口25 常封 → 多数域 unverified(unreachable)，诚实不谎报 VALID；VALID 命中需放行25的环境');
+  console.log('█  · 部分本地/云网络封出网25 → 多数域 unverified(unreachable)，诚实不谎报 VALID；VALID 命中需放行25的环境');
 }
 
 try { await main(); } finally { await prisma.$disconnect(); }
