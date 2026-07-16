@@ -313,11 +313,29 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      */
     async cleanupFailedDemo(input: DemoV0ActivityInput): Promise<void> {
       try {
-        await prisma.withWorkspace(input.workspaceId, async (tx) => {
+        const applied = await prisma.withWorkspace(input.workspaceId, async (tx) => {
+          // Codex P1：条件守卫——仅当本 run 仍是该站**最新** demo_v0 run 时才置 setup_failed。
+          // 否则若 Temporal 丢失本 cleanup 的完成 ack 触发迟到重试，而用户此间已 re-intake（复用
+          // setup_failed 站、新 run 已跑到 ready），无条件 update 会 clobber 掉那个成功的站。
+          const latest = await tx.siteBuildRun.findFirst({
+            where: { siteId: input.siteId, kind: 'demo_v0' },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true },
+          });
+          if (latest?.id !== input.buildRunId) return false; // 更新的 run 已接管，本次 cleanup 作废
+          // Codex P2：清本 run 残留的 building 版本（旧版靠删站 cascade 带走；保留站后须显式收尾，
+          // 否则终态失败留下永久 in-progress 版本行——下次 re-intake 用新 runId 只清自己那批）。
+          await tx.siteVersion.updateMany({
+            where: { buildRunId: input.buildRunId, buildStatus: 'building' },
+            data: { buildStatus: 'failed' },
+          });
           await tx.site.update({ where: { id: input.siteId }, data: { status: 'setup_failed' } });
+          return true;
         });
         log.warn(
-          `demo v0 terminally failed — site ${input.siteId} kept as setup_failed, retryable via re-intake`,
+          applied
+            ? `demo v0 terminally failed — site ${input.siteId} kept as setup_failed, retryable via re-intake`
+            : `demo v0 cleanup skipped — site ${input.siteId} already taken over by a newer run`,
         );
       } catch (err) {
         log.error(`cleanupFailedDemo failed for site ${input.siteId}: ${String(err)}`);
