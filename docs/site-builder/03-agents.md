@@ -127,7 +127,7 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 - **输入 → 输出**：`{assets[], brandBrief.tone}` → `{motionSpecs{[assetId]: preset+params}, videoAssets[]?}`。
 - **执行流程**：v1 [确定性] 按素材类型/位置套 motion token 预设（hero=Ken Burns 慢推、gallery=视差、数字带=计数动画）；M3 [模型-视频] 经 MediaGateway/new-api 调 `video.primary` 图生视频：提交任务→轮询→产物落 asset。
 - **Prompt 内化来源**：动效预设库 ← 当前已安装的 `ecc:motion-foundations`、`ecc:motion-patterns`、`ecc:motion-advanced`、`ecc:make-interfaces-feel-better`（缓动曲线/时长档/克制原则——B2B 站动效克制是纪律）。
-- **工具**：MediaGateway + new-api；当前无 M3 as-built 路由。M3 前若 new-api→Ark 异步任务能力探针失败，仅可走 02 §6 / 14 §7.3 已批准的窄方案 B：由后端 MediaGateway 集中直连 Ark，凭证集中管理并写入同一 cost/trace/audit，同时保留确定性动效/静态降级。超出该边界的直连须新建 ADR，严禁散落 provider fetch。
+- **工具**：MediaGateway + new-api；当前无 M3 as-built 路由。MediaGateway 只可调用 new-api：M3 前若 new-api→Ark 异步任务能力探针失败，`video.primary` 不晋级并使用确定性动效/静态降级。后端直连 provider 当前未获批准；未来必须先有独立 ADR、集中控制面实现和真服务验证，严禁散落 provider fetch。
 - **护栏**：每站视频条数配额（成本 ~1 元/秒）；视频 prompt 只描述镜头运动与氛围、不得虚构厂景内容之外的元素。
 - **降级**：视频失败/超时 → 自动回落该位置的动效预设，站点永远有东西可看。
 - **modelProfile**：M1=`deterministic`；M3=`video.primary`（ADR-020 目标由 registry 解析）。

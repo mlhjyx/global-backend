@@ -137,7 +137,7 @@ Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
 ## 8. 开放问题 / 待拍板
 
 1. ~~readdy 素材库联动~~ → 已研究定案 D9：不联动，开发期作设计基准（架构 §8）。
-2. ~~模型终选~~ → **不称"终选"**：模型走**四态路由**（`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + deterministicFallback，见 ADR-016 / 架构 §6 表 D8），"推荐不等于代码已切换"、候选晋升只经评测、非采购承诺或永久终选。M1 文本任务先用 `currentRoute` 跑通全链，registry 配置化、候选评测晋级后才翻配置。**当前操作项**：不重复配置已在通用令牌可见的 Anthropic / Google / OpenAI 文本通道；晋级前分任务真探 Structured Output、视觉输入、图片生成/编辑、长任务与 provider 失败语义。`gemini-3.1-flash-image` / `gemini-3-pro-image` 当前不可见，未接通前只能使用 ADR-020 的现有媒体回退；Ark 视频等 M3 前再做 new-api 异步能力探针，失败时仅允许 02 §6 / 14 §7.3 的集中 MediaGateway 窄例外。
+2. ~~模型终选~~ → **不称"终选"**：模型走**四态路由**（`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + deterministicFallback，见 ADR-016 / 架构 §6 表 D8），"推荐不等于代码已切换"、候选晋升只经评测、非采购承诺或永久终选。M1 文本任务先用 `currentRoute` 跑通全链，registry 配置化、候选评测晋级后才翻配置。**当前操作项**：不重复配置已在通用令牌可见的 Anthropic / Google / OpenAI 文本通道；晋级前分任务真探 Structured Output、视觉输入、图片生成/编辑、长任务与 provider 失败语义。`gemini-3.1-flash-image` / `gemini-3-pro-image` 当前不可见，未接通前只能使用 ADR-020 的现有媒体回退；Ark 视频等 M3 前再做 new-api 异步能力探针，失败时不晋级并使用确定性动效/静态降级，不允许绕过网关直连。
 3. 预览/发布域名与 DNS、泛证书的运维归属（本后端 or SaaS 侧）——M0 开工前对齐，用户告知平台域名。
 4. 店铺导入的用户授权勾选文案（提请 SaaS 侧 ToS 一并加素材权属条款）。
 

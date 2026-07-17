@@ -160,12 +160,12 @@ export interface ImageVariantSet {
 
 1. **资产权利 + 敏感内容检查**（rights/moderation 前置门）。
 2. **生成 `VideoBrief` + `Storyboard` + `ShotPlan`**。
-3. **Seedance 2.0 官方 Ark API**：异步提交、轮询、取消、超时回收（`video.primary` 首选 evaluatedCandidate；只有 M3 capability/主体/时序/成本门通过才写为 promotedRoute，ADR-016）。
+3. **经 new-api 转发到 Seedance 2.0 Ark 上游**：异步提交、轮询、取消、超时回收（`video.primary` 首选 evaluatedCandidate；只有 M3 capability/主体/时序/成本门通过才写为 promotedRoute，ADR-016）。
 4. **按 Shot QA**：安全、主体、品牌、时序、闪烁、文字、音画（详见 §7.4 补充；QA 由 `multimodal.review` 档按时间戳输出 finding，模型不可用时保留确定性时长/编码/闪烁基础门；关键产品/人物严重漂移直接拒绝 Shot，低风险缺陷可替换为静态图/上一版镜头；QA 须记录输入帧/时间戳/rubric/model snapshot/置信度，不只存总分）。
 5. **只重做失败 Shot**；通过后转码 **H.264（可选 AV1）** + 生成 **poster / 音轨 / 字幕 Variant**。
 6. **写 Usage、成本、Release 引用**；🔴 **失败自动退静态图 + 确定性动效**（不阻断整站）。
 
-> 已知约束：方舟套餐需 Large 档才可用 Seedance；new-api 视频中转需 M3 前真探，不稳定时按 02 方案 B 由后端直连方舟异步任务（密钥集中管理、成本写入 build run）；Veo 3.1 仅 shadow/premium 候选（当前 Preview），Sora 2 不接（官方目录已标 deprecated）；C2PA/Content Credentials 可后续记录来源，非 M1 阻断项。
+> 已知约束：方舟套餐需 Large 档才可用 Seedance；new-api 视频中转需 M3 前真探，能力或稳定性不达标时 `video.primary` 不晋级并使用确定性动效/静态降级，不允许绕过网关直连。未来任何直连提案都须先经独立 ADR、实现集中控制面并通过真服务验证；Veo 3.1 仅 shadow/premium 候选（当前 Preview），Sora 2 不接（官方目录已标 deprecated）；C2PA/Content Credentials 可后续记录来源，非 M1 阻断项。
 
 ### 7.4 旁白事实安全（v3.2 §21.5 回写）
 

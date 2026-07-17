@@ -45,7 +45,7 @@
 | qa / seo 汇总 | **deepseek-v4-flash**（$0.14/$0.28 全场最低） | doubao-seed-2.0-lite | gemini-3-flash |
 | designSpec / 审美视觉评审 | **minimax-m3**（网关内唯一原生图像输入——P4 审美维可能不必等 Google，待 M1-f 真探图像输入经 plan 端点是否可用） | doubao-seed-2.0-pro（VideoMME 89.5） | gemini-3.1-pro / claude-sonnet-5 |
 | 图像生成/编辑 | **seedream-5.0-lite**（已接通实测出图；用户已定暂用） | — | **gpt-image-2**（文字渲染 Elo 第一；含长文字图必用；与 seedream 组"贵精/便宜快"双轨） |
-| video（M3） | — | — | Seedance 直连方案 B（key 已在手） |
+| video（M3） | — | — | 历史曾提 Seedance 直连方案 B；已被 ADR-020 的 new-api-only 决策取代，当前只保留网关能力探针与确定性降级 |
 
 **与用户 7/14 调整表的对齐记录**：①组装维持用户拍板的 **glm-5.2 主选**——初版评测 90s 内 50% 超时是评测口径非生产约束（Temporal 预算 10min），生产给 180s + 三重门校验 + 超时/违规自动回退 deepseek-v4-pro；M1-g golden set 按生产口径双模型对比终审。**架构澄清（D1）**：组装 agent 不写前端代码——组件库是仓内手写 Astro，agent 只产 SiteSpec JSON，该任务考 schema 纪律非编码力；将来真出现代码生成任务（M2+ 自定义组件）glm-5.2 是无争议首选。②GLM-5.2 同时是 **copy 主选**（唯一零 reasoning 开销、约束全过）。③GPT-5.5 已被 GPT-5.6 三档取代（Terra $2.5/$15 同能力更便宜）——接 OpenAI 通道建议直接 5.6。④用户档位后期升 **Large**（seedance 解锁，供 M3 视频）。⑤用户 7/14 第三轮调整定 currentRoute：**copy 现役对调为 deepseek-v4-pro**（glm-5.2 转 fallback；注：本文附录 C 实验建议仍是 glm-5.2，evidence 与 currentRoute 分栏记录，见 §0.2.2）；各任务升级位统一指向 **GPT-5.6 Terra/Luna + gemini-3.1-pro**（组装升级 Terra、copy 升级 Luna、研究/视觉/qa 升级 gemini-3.1 系）——均为 targetCandidate（未接通未评测），非终选。
 
