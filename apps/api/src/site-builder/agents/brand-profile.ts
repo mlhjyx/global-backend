@@ -588,7 +588,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 };
 
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
-export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/2';
+export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/3';
 
 /**
  * 品牌档案不需要的敏感档案组（复审 F2：contact 组含邮箱/电话——数据最小化 Art.5(1)(c)，
@@ -642,6 +642,7 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
     '',
     '硬规则：',
     '1. 只使用资料中明确存在的信息；绝不编造事实、数字、年份、认证、客户名。',
+    '1a. 企业身份/商业角色也是事实：supplier、distributor、trader、assembler、manufacturer、OEM、brand owner 等不得互相升级或替换；仅可使用资料明确给出的角色，否则省略或写进 gaps。',
     `2. factSheet 每项 evidence 必须给 sourceType、sourceId、contentHash、quote；sourceType 取 ${EVIDENCE_SOURCE_TYPES.join('|')} 之一。`,
     '3. 每项 factSheet（不只认证或数字）都必须附 quote=同一 source_id 区块中的逐字原文片段，',
     '   sourceId/contentHash 必须逐字复制区块头；quote 不得改写、翻译或做标点/大小写归一。',

@@ -32,6 +32,16 @@ const lastRequestBody = (): Record<string, unknown> => {
   return JSON.parse(mock.mock.calls[0][1].body as string) as Record<string, unknown>;
 };
 
+const lastRequestUrl = (): string => {
+  const mock = fetch as unknown as ReturnType<typeof vi.fn>;
+  return mock.mock.calls[0][0] as string;
+};
+
+const lastRequestHeaders = (): Record<string, string> => {
+  const mock = fetch as unknown as ReturnType<typeof vi.fn>;
+  return mock.mock.calls[0][1].headers as Record<string, string>;
+};
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
@@ -73,6 +83,21 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     expect((err as Error).message).toMatch(/empty content.*finish_reason=length/s);
     // 🔴 改动 2：花了 token 却失败必须带 usage，供网关 catch 结算（否则绕过硬预算上界）
     expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 300, outputTokens: 2000 });
+  });
+
+  it('content 为空 + finish_reason=stop → 明确为可见内容通道异常，不能误报截断', async () => {
+    mockChatResponse({
+      choices: [{ message: { content: '' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 300, completion_tokens: 794 },
+    });
+    const err = await provider
+      .generateStructured({ task: 't', prompt: 'p', schema: {}, model: 'gpt-5.6-terra' })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ProviderOutputError);
+    expect((err as Error).message).toMatch(/empty content.*finish_reason=stop.*no visible message content/s);
+    expect((err as Error).message).not.toMatch(/output truncated/);
+    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 300, outputTokens: 794 });
   });
 
   it('content 正常 → 照常解析', async () => {
@@ -135,6 +160,85 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     });
     const r = await provider.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {} });
     expect(r.data.ok).toBe(true);
+  });
+});
+
+describe('OpenAICompatibleProvider — explicit native gateway transports', () => {
+  it('GPT Responses reads nested output text before the inconsistent output_text helper', async () => {
+    const responses = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'gpt-5.6-terra',
+      modelTransports: { 'gpt-5.6-terra': 'openai-responses' },
+    });
+    mockChatResponse({
+      model: 'gpt-5.6-terra-2026-07-18',
+      status: 'completed',
+      output_text: '',
+      output: [
+        { type: 'reasoning', content: [] },
+        { type: 'message', content: [{ type: 'output_text', text: '```json\n{"ok":true}\n```' }] },
+      ],
+      usage: { input_tokens: 101, output_tokens: 45 },
+    });
+
+    const result = await responses.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 });
+
+    expect(result).toMatchObject({
+      data: { ok: true },
+      model: 'gpt-5.6-terra-2026-07-18',
+      usage: { inputTokens: 101, outputTokens: 45 },
+    });
+    expect(lastRequestUrl()).toBe('http://gw.test/v1/responses');
+    expect(lastRequestBody()).toMatchObject({
+      model: 'gpt-5.6-terra',
+      max_output_tokens: 456,
+      text: { format: { type: 'json_object' } },
+    });
+    expect(lastRequestBody().input).toEqual([
+      expect.objectContaining({ role: 'system' }),
+      { role: 'user', content: 'p' },
+    ]);
+  });
+
+  it('Claude Messages sends native headers, separates system text, and excludes thinking from output', async () => {
+    const messages = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'claude-sonnet-5',
+      modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+    });
+    mockChatResponse({
+      model: 'claude-sonnet-5-2026-07-18',
+      stop_reason: 'end_turn',
+      content: [
+        { type: 'thinking', thinking: 'private reasoning must not enter the artifact' },
+        { type: 'text', text: '```json\n{"ok":true}\n```' },
+      ],
+      usage: { input_tokens: 99, output_tokens: 55 },
+    });
+
+    const result = await messages.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 });
+
+    expect(result).toMatchObject({
+      data: { ok: true },
+      model: 'claude-sonnet-5-2026-07-18',
+      usage: { inputTokens: 99, outputTokens: 55 },
+    });
+    expect(lastRequestUrl()).toBe('http://gw.test/v1/messages');
+    expect(lastRequestHeaders()).toEqual({
+      'Content-Type': 'application/json',
+      'x-api-key': 'k',
+      'anthropic-version': '2023-06-01',
+    });
+    expect(lastRequestBody()).toMatchObject({
+      model: 'claude-sonnet-5',
+      max_tokens: 456,
+      messages: [{ role: 'user', content: 'p' }],
+    });
+    expect(lastRequestBody().system).toContain('只返回符合以下 JSON Schema');
   });
 });
 

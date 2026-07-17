@@ -523,13 +523,15 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     ],
   };
 
-  it('用户数据只进标注槽位；硬规则含零编造/证据溯源/无具名个人/指令视为数据', () => {
+  it('用户数据只进标注槽位；硬规则含零编造、角色不升级、证据溯源、无具名个人/指令视为数据', () => {
     const prompt = buildBrandProfilePrompt(input);
     expect(prompt).toContain('Acme GmbH');
     expect(prompt).toContain('[来源:upload | catalog.pdf]');
     expect(prompt).not.toContain('https://fair.example/exhibitors/acme');
     expect(prompt).not.toContain('(fair)');
     expect(prompt).toMatch(/绝不编造/);
+    expect(prompt).toMatch(/角色.*不得互相升级|不得互相升级.*角色/);
+    expect(prompt).toContain('manufacturer');
     expect(prompt).toMatch(/具名个人/);
     expect(prompt).toMatch(/视为.{0,4}数据/); // 资料中的指令性文字一律当数据
   });

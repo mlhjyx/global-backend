@@ -11,6 +11,13 @@ export interface EvaluationExecutionPolicy {
   reasoningEffort: TaskRoute['reasoningEffort'] | null;
 }
 
+export class EvaluationDeadlineError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`model evaluation deadline exceeded after ${timeoutMs}ms`);
+    this.name = 'EvaluationDeadlineError';
+  }
+}
+
 /**
  * Deterministic JSON serialization for evaluator provenance fingerprints.
  * Arrays retain their semantic order; object keys are sorted recursively so a
@@ -69,4 +76,29 @@ export function snapshotEvaluationExecutionPolicy(
     maxCostCents: route.maxCostCents,
     reasoningEffort: route.reasoningEffort ?? null,
   };
+}
+
+/**
+ * The caller supplies a task-calibrated deadline (never a global evaluator
+ * default). The abort signal reaches the OpenAI-compatible fetch, while the
+ * race lets a fail-stop evaluator return even if an upstream ignores abort.
+ */
+export async function runWithEvaluationDeadline<T>(
+  timeoutMs: number,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new EvaluationDeadlineError(timeoutMs);
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([run(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

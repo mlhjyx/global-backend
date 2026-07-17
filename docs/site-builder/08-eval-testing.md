@@ -38,7 +38,7 @@
 
 作用 = 尽快发现**结构、事实、响应式与"没效果"问题**；**不**用于宣称统计显著、永久终选或跨行业胜率。
 
-**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 EU 目标市场 rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；BrandProfile 当前没有 locale 输入，故该样本**不**构成 de-DE 本地化验证。桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
+**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 EU 目标市场 rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；每个候选先经过真实结构化能力 probe，probe 与每个 fixture attempt 均继承该 Task 路由的 `timeoutMs`，而不是套一个全局秒数；失败即记录并跳过整个 fixture 矩阵。最终 JSON 报告只在完整矩阵结束后生成，避免半途结果被误用；运行中的每个 probe/fixture 会以 JSON Lines 写入 stderr，供操作员确认仍有进展。**传输协议也是候选契约的一部分**：2026-07-18 真网关对照已证明 Terra 的 `chat/completions` 会间歇给出 200/`stop`/role-only 空正文，而同一任务通过 `responses` 有可解析嵌套正文；Sonnet 的原生 `messages` 同样可返回 text（thinking 块不进入产物）。因此报告逐 probe/run 固定 transport；只允许已实测的 `gpt-5.6-terra → openai-responses`、`claude-sonnet-5 → anthropic-messages` 进入本次评测，未登记模型仍默认 OpenAI Chat，**这不是生产启用或能力声明**。BrandProfile 当前没有 locale 输入，故该样本**不**构成 de-DE 本地化验证。桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
 
 ### 1.2 视觉子集：6 扩 12（M1-g）
 
@@ -61,7 +61,7 @@ Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包
 - **不允许出现的 Claim**、必需页面/section、客观不变量。
 - desktop/tablet/mobile 三尺寸截图 + 确定性 QA 结果。
 - **DesignEvaluation、owner preference 与选择原因**。
-- catalog / model / prompt / schema / evaluator 版本与不可变指纹 + Claim/Offering/Asset snapshot；当前 BrandProfile report 在 header 固定 task、prompt version、output-schema hash、evaluator version/rubric hash，并对每个 fixture/run 固定 fixture、实际 prompt hash、完整执行策略与已判定 artifact hash。
+- catalog / model / **transport** / prompt / schema / evaluator 版本与不可变指纹 + Claim/Offering/Asset snapshot；当前 BrandProfile report 在 header 固定 task、prompt version、output-schema hash、evaluator version/rubric hash，并对每个 fixture/run 固定 fixture、实际 prompt hash、完整执行策略、transport 与已判定 artifact hash。
 - accepted/rejected artifact、trace、token/latency/cost。
 - 来源许可、是否允许训练、保留策略；**不得混入原始 Tier B 页面语料**（净室边界，ADR-019）。
 
@@ -219,7 +219,7 @@ export interface DesignEvaluation {
 
 ### 3.2 MODEL-1 / MODEL-2 分期
 
-- **MODEL-1（候选接通时）**：真实 endpoint 先跑 **capability probe（失败即停）**，不把官方规格当租户可用事实；每 task 用 **6–12 代表样本 × 固定 prompt/schema/rubric × 2 次**，**先判 schema/事实/身份/延迟/成本，再做偏好比较**；通过者 = `evaluatedCandidate`（保留报告，不进用户路径）。默认晋级原则 = **"满足所有硬门的最低 accepted-artifact 成本"**，只有高价值页面证明可见质量增益才用 premium。
+- **MODEL-1（候选接通时）**：真实 endpoint 先跑 **capability probe（失败即停）**，不把官方规格当租户可用事实；probe 同时验证**模型 × 协议 × 响应字段映射**，不能把 HTTP 200 或 `/v1/models` 可见当作结构化能力；每 task 用 **6–12 代表样本 × 固定 prompt/schema/rubric × 2 次**，**先判 schema/事实/身份/延迟/成本，再做偏好比较**；通过者 = `evaluatedCandidate`（保留报告，不进用户路径）。默认晋级原则 = **"满足所有硬门的最低 accepted-artifact 成本"**，只有高价值页面证明可见质量增益才用 premium。
 - **MODEL-2（有真实流量或高风险生产切换前）**：扩至 **≥ 30 样本 × 3 次 + 100% shadow**；经批准进 **5%→25%→100% canary**（每档样本/时间门由当时流量与风险写入 ADR，不假装已有统计基础）；任一事实/身份硬失败、P95、provider error 或 accepted-cost regression **触发自动回 `promotedRoute`**。
 
 ### 3.3 全阶段硬门阈值（6 条）
@@ -272,7 +272,7 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 - **M1-c 合并门（9 条 DoD，ADR-018）**：`AssetVariant` additive migration + RLS/FORCE RLS A/B 租户测试（不预建 MediaJob/AssetUsage）；原件永不覆盖 + recipe 相同不重复；commit/processing CAS/lease/重试/取消/zombie write；EXIF-GPS 真图复验 + 方向/色彩/透明 + AVIF/WebP/fallback 可解码；cert/person/logo 不进生成式且无 provider 调用；单图失败隔离、仅必需 Hero 无 fallback 才阻断；被引用 Asset 删除 409 + 扫描器覆盖 SiteSpec 1.0.0 全 AssetRef；MinIO 对象/Variant/checksum 可对账且对象清理不在 DB 事务；derivedKeys 双写兼容 + 停双写迁移条件；MF-1 触发条件已记录。
 - **PR M1-f（确定性 QA + 审美与反模板感）**：先断点/溢出/对比度/资源/链接/schema/事实/a11y，**再冻结截图多模态审美**；**最多三轮定向修复，禁随机全站重生成**。
 - **PR EVAL-bootstrap（可执行启动集）**：6 fixture（§1.1）；存输入/不变量/desktop-mobile 截图/质量/成本-延迟；产品 owner 成对偏好，**4/6 胜且客观硬门全过才扩 12 视觉 fixture**；启动集不宣称统计显著。（施工顺序 #11，v3.2 §0.3）
-- **PR MODEL-1（候选真探与小样本评测）**：依赖 MODEL-0/EVAL-bootstrap；每候选先 capability probe，再跑 6–12 task-shaped 样本与 accepted-artifact cost；**只产 `evaluatedCandidate` 报告，不自动切生产**。（施工顺序 #12 分期，v3.2 §0.3）
+- **PR MODEL-1（候选真探与小样本评测）**：依赖 MODEL-0/EVAL-bootstrap；每候选先 capability probe（含协议/响应映射），再跑 6–12 task-shaped 样本与 accepted-artifact cost；**只产 `evaluatedCandidate` 报告，不自动切生产**。（施工顺序 #12 分期，v3.2 §0.3）
 - **PR M1-g（阶段收口）**：启动集扩至 12 视觉子集；跑 Catalog/模型/事实/安全/a11y/性能/回滚回归；**记录尚未完成的 30+ 成熟系统集，不得把计划冒充覆盖**。
 
 ## 7. 指标与可观测性
