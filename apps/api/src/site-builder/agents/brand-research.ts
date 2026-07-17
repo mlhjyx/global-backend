@@ -8,7 +8,8 @@ import type { ExecutionBroker } from '../../tools/tool-contract';
  *   robots（crawl4ai.fetch execute 内强制）/ 限流 / 预算 / trace 全部复用，本模块零裸出网（C1/C3）。
  *   R1-safety 的 API + crawler 双层 egress gate 已落地：global-unicast 校验、连接 pinning、
  *   redirect 逐跳重验与 fake-IP-only 窄回退均由下层统一强制。
- * - 搜索结果只取 title/snippet（第三方页面不搬运正文，竞品只做定位参考，C3）；
+ * - 搜索结果只保留按站主公司名 + 外部 origin 生成的最小 research hint；上游
+ *   title/snippet/path/query/fragment 一律不持久化，避免第三方具名个人进入冻结语料（C3/C4）；
  *   自有官网整页抓取归 storefront 级证据。
  * - fail-safe：任一步失败 → degraded=true 返回已有内容，绝不阻断 brandProfile
  *   （researchDegraded 落库，仅凭 KB 出 Brief 的降级语义）。
@@ -45,7 +46,6 @@ interface SearchResult {
 const TASK_CONTRACT_ID = 'site_builder.brand_profile';
 const MAX_WEB_RESULTS = 5;
 const STOREFRONT_MAX_CHARS = 20_000;
-const SNIPPET_MAX_CHARS = 500;
 
 const sha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
@@ -54,6 +54,17 @@ function hostOf(url: string | undefined): string | null {
   if (!url) return null;
   try {
     return new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function originOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}/`;
   } catch {
     return null;
   }
@@ -116,7 +127,8 @@ export async function researchBrand(
     }
   }
 
-  // ② 元搜索 → web_research 级证据（snippet only；剔除自域名防与 storefront 重复计源）
+  // ② 元搜索 → web_research 级 hint。只保留公司自有名称 + external origin；
+  // 上游 title/snippet/path/query/fragment 可能含具名个人，C4 要求一律不落库。
   try {
     const q = [`"${args.companyName}"`, args.industry ?? ''].join(' ').trim();
     const r = await deps.broker.invoke<{ q: string; language: string; pages: number }, { results: SearchResult[] }>(
@@ -132,19 +144,20 @@ export async function researchBrand(
         return host !== null && !isSameSite(host, ownHost);
       })
       .slice(0, MAX_WEB_RESULTS);
+    const seenOrigins = new Set<string>();
     for (const item of external) {
-      const content = [item.title ?? '', item.content ?? '']
-        .join(' — ')
-        .slice(0, SNIPPET_MAX_CHARS);
+      const origin = originOf(item.url);
+      if (!origin || seenOrigins.has(origin)) continue;
+      seenOrigins.add(origin);
+      const content = `Search index references ${args.companyName} at external origin ${new URL(origin).host}. Raw third-party page metadata omitted by policy.`;
       sources.push({
         sourceType: 'web_research',
         sourceRole: 'research_hint',
-        url: item.url as string,
-        title: item.title,
+        url: origin,
         content,
         fetchedAt: now(),
         upstreamContentHash: sha256(content),
-        parserVersion: 'searxng-snippet/1',
+        parserVersion: 'searxng-origin-hint/1',
       });
     }
   } catch {

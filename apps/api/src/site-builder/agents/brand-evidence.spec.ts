@@ -17,7 +17,7 @@ const BASE = {
 };
 
 describe('prepareBrandEvidenceSources — immutable metadata minimization', () => {
-  it('scrubs and bounds KB/research titles before freezing provenance', () => {
+  it('scrubs KB titles and drops third-party search titles before freezing provenance', () => {
     const prepared = prepareBrandEvidenceSources({
       ...BASE,
       kb: [
@@ -54,10 +54,7 @@ describe('prepareBrandEvidenceSources — immutable metadata minimization', () =
     expect(prepared.kb[0].provenance.title).toBe(
       'Catalog [redacted-email]',
     );
-    const researchTitle = prepared.research[0].provenance.title;
-    expect(researchTitle).toBeTypeOf('string');
-    expect(researchTitle).not.toContain('+49 30 1234567');
-    expect(researchTitle).toContain('[redacted-phone]');
-    expect(Array.from(researchTitle as string)).toHaveLength(512);
+    expect(prepared.research[0].provenance).not.toHaveProperty('title');
+    expect(prepared.research[0].provenance.kind).toBe('search_origin_hint');
   });
 });

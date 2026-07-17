@@ -63,15 +63,16 @@ describe('researchBrand — 正常链路', () => {
     });
     const web = out.sources.filter((s) => s.sourceType === 'web_research');
     expect(web.map((s) => s.url)).toEqual([
-      'https://directory.example/acme',
-      'https://fair.example/exhibitors/acme',
+      'https://directory.example/',
+      'https://fair.example/',
     ]); // 自域名 acme.example 结果被剔除
     for (const s of out.sources) expect(s.fetchedAt).toBeTruthy();
     for (const s of web) {
       expect(s.sourceRole).toBe('research_hint');
       expect(s.upstreamContentHash).toMatch(/^[0-9a-f]{64}$/);
-      expect(s.parserVersion).toBe('searxng-snippet/1');
+      expect(s.parserVersion).toBe('searxng-origin-hint/1');
       expect(s.content.length).toBeLessThanOrEqual(500);
+      expect(s.title).toBeUndefined();
     }
   });
 
@@ -129,7 +130,7 @@ describe('researchBrand — 正常链路', () => {
     );
     const out = await researchBrand({ broker }, { ...ARGS, websiteUrl: 'https://www.acme.example' });
     const webUrls = out.sources.filter((s) => s.sourceType === 'web_research').map((s) => s.url);
-    expect(webUrls).toEqual(['https://directory.example/acme']); // 两个自域名变体都被剔除
+    expect(webUrls).toEqual(['https://directory.example/']); // 两个自域名变体都被剔除
   });
 
   it('无 websiteUrl → 只搜索不 crawl', async () => {
@@ -161,10 +162,10 @@ describe('researchBrand — 正常链路', () => {
 
     expect(hint).toMatchObject({
       url: 'https://news.example/',
-      title: undefined,
       sourceRole: 'research_hint',
       parserVersion: 'searxng-origin-hint/1',
     });
+    expect(hint).not.toHaveProperty('title');
     expect(hint?.content).not.toMatch(/Jane Smith|CEO|new pump factory/i);
     expect(hint?.content).toContain('Acme GmbH');
   });

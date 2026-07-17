@@ -403,6 +403,18 @@ async function main(): Promise<void> {
             : "fact_candidate"),
         `${source.sourceType} has the bounded source role`,
       );
+      if (source.sourceType === "web_research") {
+        const url = new URL(source.url);
+        check(
+          url.pathname === "/" && !url.search && !url.hash,
+          "web_research retains external origin only",
+        );
+        check(
+          source.title === undefined &&
+            source.parserVersion === "searxng-origin-hint/1",
+          "web_research omits raw title/snippet provenance",
+        );
+      }
     }
 
     console.log(

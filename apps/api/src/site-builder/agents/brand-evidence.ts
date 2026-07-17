@@ -123,7 +123,12 @@ export function prepareBrandEvidenceSources(input: {
 
   const research = input.research.map((source) => {
     const displayUrl = sanitizeEvidenceUrl(source.url);
-    const title = sanitizeEvidenceMetadataText(source.title);
+    // C4: third-party search titles are arbitrary page data and may name people.
+    // researchBrand emits no title; ignore one defensively if another caller adds it.
+    const title =
+      source.sourceType === "web_research"
+        ? undefined
+        : sanitizeEvidenceMetadataText(source.title);
     return freezeEvidenceSource({
       sourceKey: `${source.sourceType}:${displayUrl ?? `invalid-url:${source.upstreamContentHash}`}`,
       sourceType: source.sourceType,
@@ -136,7 +141,7 @@ export function prepareBrandEvidenceSources(input: {
         kind:
           source.sourceType === "storefront"
             ? "storefront_crawl"
-            : "search_result_snippet",
+            : "search_origin_hint",
         ...(title ? { title } : {}),
         parserVersion: source.parserVersion,
         providerContentHash: source.providerContentHash,

@@ -176,7 +176,7 @@ export interface DesignEvaluation {
 
 - 所有模型产出的 FactSheet 事实**都须有 quote**，且 quote 命中 `sourceId` 对应的**冻结语料**。
 - value 中的**数字/单位/认证代码/关键专名**必须在 quote 中一致出现，否则降 gap。
-- web 搜索 **snippet 只能进 research_hint/competitors**，不得直接成 publishable fact。
+- 新 A1 写入中，web 搜索原始 **title/snippet/path/query/fragment 一律不冻结**，只保留由站主公司名 + external origin 生成的最小 `research_hint`；旧数据或其他 `research_hint` 仍不得直接成 publishable fact。
 - web_research 若要支撑事实，须**抓取原始权威页并冻结正文 hash**，仍按低信任来源处理。
 - 认证必须**引用 ready 的 cert Asset 或人工 verified**；intake 自填/官网文案不能直接上站。
 - valueProps/differentiators/tone **只能从已过闸的 FactSheet 推导**。
@@ -186,7 +186,7 @@ export interface DesignEvaluation {
 | ID | 代码证据 | 问题 |
 |---|---|---|
 | R4-1 | `enforceEvidenceGate` | 普通事实无 quote 也过；quote 只查"存在于来源"，不查数字/实体/claim 是否被支持 → 可用真实 URL/无关引文给虚构事实洗白 |
-| R4-2 | `brand-research.ts` | 搜索结果只取 snippet 却作 web_research evidence 交给 FactSheet → 摘要可能错配/截断/过时 |
+| R4-2 ✅ A1 隐私半闭环 | `brand-research.ts` | 新写已不冻结原始 title/snippet/path/query/fragment，只生成 origin hint；A2 仍须让任何 `research_hint` 不可发布，并要求事实回抓权威正文 |
 | R4-3 | 认证 evidence | intake/upload 标签 + 任意命中 quote 即放行认证，无强制 ready cert 资产引用 → 自填"ISO"可变成站点事实 |
 
 ### 2.8 视频 QA rubric（M3 目标态）
