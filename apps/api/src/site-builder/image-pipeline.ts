@@ -6,6 +6,7 @@ import type {
   ImageVariantRole,
 } from '@global/contracts';
 import sharp from 'sharp';
+import type { Metadata, Sharp } from 'sharp';
 
 import { buildAssetVariantRecipeHash } from './media-foundation';
 import type { AssetKind } from './object-key';
@@ -126,7 +127,7 @@ function decodedMime(format: string | undefined): ImageInspection['decodedMime']
   return null;
 }
 
-function encodedMime(metadata: sharp.Metadata): RenderedImageVariant['info']['mime'] | null {
+function encodedMime(metadata: Metadata): RenderedImageVariant['info']['mime'] | null {
   if (metadata.format === 'heif' && metadata.compression === 'av1') return 'image/avif';
   return decodedMime(metadata.format);
 }
@@ -339,9 +340,9 @@ function cropForFocalPoint(
 }
 
 function encode(
-  pipeline: sharp.Sharp,
+  pipeline: Sharp,
   recipe: AssetVariantRecipeV2,
-): sharp.Sharp {
+): Sharp {
   const { format, quality } = recipe.output;
   const { effort, lossless, chromaSubsampling } = recipe.operations.encoder;
   if (format === 'avif') {

@@ -38,7 +38,7 @@ async function transparentPng(width = 3200, height = 2400): Promise<Buffer> {
 describe('M1-c deterministic image policy', () => {
   it('locks the versioned kind→role policy and responsive widths', () => {
     expect(IMAGE_PIPELINE_VERSION).toMatch(
-      /^sharp-0\.35\.0-vips-[0-9.]+-m1c\.\d+$/,
+      /^sharp-0\.35\.3-vips-[0-9.]+-m1c\.\d+$/,
     );
     expect(RESPONSIVE_IMAGE_WIDTHS).toEqual([320, 640, 960, 1440, 1920]);
     expect(rolesForAssetKind('logo')).toEqual(['logo']);
