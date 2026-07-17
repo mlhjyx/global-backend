@@ -285,7 +285,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 **BGE new-api 配置合同（PR #140 目标；合并前不是 main as-built）**：幂等引导命令 `pnpm --filter @global/api new-api:ensure-embeddings -- --write-env` 创建唯一 OpenAI-compatible channel：base URL=`http://embeddings:11434`（Compose 内网），对应用只声明 `site-builder-bge-m3-local`，并以 model mapping 映射到 Ollama `bge-m3`；同时创建只允许该别名、禁跨 group retry 的专用令牌并真验 1024 维。网关路径的模型别名固定、`EMBEDDINGS_API_KEY` 必填，禁止复用 `MODEL_GATEWAY_KEY` 或用 env 改投公共模型；只有精确 allowlist 的 `localhost/127.0.0.1/[::1]/embeddings:11434/v1` break-glass 可无 token 使用上游名 `bge-m3`。当前网关 channel/专用令牌已经就绪，但 **current main 的 EmbeddingsClient 仍直连 `:11434` 且不发 Bearer**；只有 #140 合并并执行 env 切换后，应用经 new-api 才成为 as-built。回滚把应用 `EMBEDDINGS_URL` 指回上述受控本机上游即可，维持同一模型/维度/version，不改数据库向量；定位完成后重新运行引导命令恢复统一网关。
 
-🔴 全模型共用硬门：`finish_reason=length`、空 content、schema/capability 不符均显式失败；原始输出先过 schema→事实→引用→安全门；记录 policy/model snapshot、fallback、prompt/schema/rubric、token/latency/cost 与回滚原因。BGE 的 new-api 生产 channel 必须使用固定私有别名、专用模型受限 key、唯一本机/Compose 上游和幂等 inventory/readiness 检查，任一远端同别名或额外令牌模型都失败关闭；统一网关不改变“企业 KB 不出域”红线。new-api 视频中转若能力探针失败，不允许绕统一网关静默直连；任何例外须新 ADR、集中凭证与同等审计。
+🔴 全模型共用硬门：`finish_reason=length`、空 content、schema/capability 不符均显式失败；原始输出先过 schema→事实→引用→安全门；记录 policy/model snapshot、fallback、prompt/schema/rubric、token/latency/cost 与回滚原因。BGE 的 new-api 生产 channel 必须使用固定私有别名、专用模型受限 key、唯一本机/Compose 上游和幂等 inventory/readiness 检查，任一远端同别名或额外令牌模型都失败关闭；统一网关不改变“企业 KB 不出域”红线。视频仅保留 14 §11 已批准的窄例外：M3 前 new-api→Ark 异步任务能力探针失败时，可由后端 MediaGateway 方案 B 集中直连 Ark，但必须集中凭证、写入同一 cost/trace/audit、保持静态降级且不得散落 provider fetch；超出该边界的直连仍须新 ADR。
 
 ## 7. 权限与安全
 
