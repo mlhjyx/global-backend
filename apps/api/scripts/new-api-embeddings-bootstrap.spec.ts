@@ -1,9 +1,13 @@
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   LOCAL_EMBEDDING_CHANNEL_NAME,
   LOCAL_EMBEDDING_MODEL_ALIAS,
   mergeEmbeddingEnv,
   provisionLocalEmbeddingGateway,
+  writeEmbeddingEnv,
 } from '../src/site-builder/new-api-embeddings-bootstrap';
 
 const json = (body: unknown, status = 200) =>
@@ -32,12 +36,38 @@ describe('New API local embedding bootstrap', () => {
     expect(output).not.toContain('EMBEDDINGS_MODEL=bge-m3\n');
   });
 
+  it('用 0600 临时文件原子替换已有 env，不在宽权限 inode 上写入专用 token', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'new-api-embedding-env-'));
+    const path = join(directory, '.env');
+    try {
+      await writeFile(path, 'MODEL_GATEWAY_KEY=general-secret\n', { mode: 0o644 });
+      await chmod(path, 0o644);
+      const before = await stat(path);
+
+      await writeEmbeddingEnv(
+        path,
+        { apiKey: 'sk-dedicated-secret' },
+        'http://localhost:3001/v1',
+      );
+
+      const after = await stat(path);
+      expect(after.ino).not.toBe(before.ino);
+      expect(after.mode & 0o777).toBe(0o600);
+      expect(await readFile(path, 'utf8')).toContain(
+        'EMBEDDINGS_API_KEY=sk-dedicated-secret',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('幂等创建本机别名通道、模型受限令牌，并完成真 endpoint 形状检查', async () => {
     const channels: Record<string, unknown>[] = [];
     const tokens: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/channel/?')) {
+        expect(new URL(url).searchParams.get('p')).toBe('1');
         return json({ success: true, data: { items: channels, total: channels.length } });
       }
       if (url.endsWith('/api/channel/') && init?.method === 'POST') {
@@ -46,6 +76,7 @@ describe('New API local embedding bootstrap', () => {
         return json({ success: true });
       }
       if (url.includes('/api/token/?')) {
+        expect(new URL(url).searchParams.get('p')).toBe('1');
         return json({ success: true, data: { items: tokens, total: tokens.length } });
       }
       if (url.endsWith('/api/token/') && init?.method === 'POST') {
