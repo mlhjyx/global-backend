@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "brand-profile-eval-fixture/v1",
+  "id": "auto-parts-sparse",
+  "industry": "automotive components",
+  "locale": "en-US",
+  "materialCompleteness": "sparse",
+  "companyName": "Vector Motion Components",
+  "products": ["forged suspension links", "machined steering housings"],
+  "targetMarkets": ["US", "MX"],
+  "sources": [
+    {
+      "id": "intake-1",
+      "sourceKey": "fixture:auto-parts-sparse:intake",
+      "sourceType": "intake",
+      "sourceRole": "fact_candidate",
+      "content": "Vector Motion Components supplies forged suspension links and machined steering housings for automotive component programs. The company targets OEM and Tier suppliers in the United States and Mexico."
+    }
+  ],
+  "assertions": {
+    "minimumAcceptedFacts": 1,
+    "requiredAcceptedTerms": ["forged suspension links"],
+    "forbiddenOutputTerms": ["IATF 16949", "zero defects", "manufacturer"]
+  }
+}

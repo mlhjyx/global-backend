@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "brand-profile-eval-fixture/v1",
+  "id": "industrial-pump-sparse",
+  "industry": "industrial pumps",
+  "locale": "en-US",
+  "materialCompleteness": "sparse",
+  "companyName": "Northfield Flow Systems",
+  "products": ["centrifugal process pumps", "chemical transfer skids"],
+  "targetMarkets": ["US", "CA"],
+  "sources": [
+    {
+      "id": "intake-1",
+      "sourceKey": "fixture:industrial-pump-sparse:intake",
+      "sourceType": "intake",
+      "sourceRole": "fact_candidate",
+      "content": "Northfield Flow Systems supplies centrifugal process pumps and chemical transfer skids for industrial fluid handling. The company serves distributors in the United States and Canada."
+    }
+  ],
+  "assertions": {
+    "minimumAcceptedFacts": 1,
+    "requiredAcceptedTerms": ["centrifugal process pumps"],
+    "forbiddenOutputTerms": ["ISO 9001", "CE marked", "manufacturer"]
+  }
+}
