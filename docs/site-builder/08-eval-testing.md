@@ -311,7 +311,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ## 10. 待拍板
 
 1. 真实工厂资料进 Golden Set 的**授权方式**（2~3 家合作工厂：口头授权+书面记录 or 简单授权书模板）。
-2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。当前已接文本集合 = 方舟 11 个 + DeepSeek `v4-pro/v4-flash`；GPT/Gemini/Claude 尚未接入。不能由通道连通直接指定 Judge；多模态与跨 provider Judge 均须 MODEL-1 用真实输入、固定 snapshot 校准后再写入 ADR。
+2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。2026-07-17 本机网关已扩到 39 个可调用型号，包含 GPT/Claude/Gemini 候选与原方舟/DeepSeek；但不能由清单可见或单次连通直接指定 Judge。多模态与跨 provider Judge 均须 MODEL-1 用真实输入、固定 snapshot 校准后再写入 ADR；ADR-020 只决定目标组合，不代替 Judge 校准。
 3. Bootstrap 6 fixture 的 sparse/rich 素材与期望锚点**由谁产出、何时冻结**（EVAL-bootstrap PR 前置）。
 
 ---

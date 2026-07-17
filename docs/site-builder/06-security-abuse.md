@@ -2,7 +2,7 @@
 
 > 落实 [02-architecture.md](02-architecture.md) §7/§11 与遗漏面盘点第 1/3/4/5 条。原则：**平台域名信誉是全体客户的公共资产**，滥用防控是生死线不是可选项。
 >
-> _Reviewed against 12 v3.2（2026-07-17 回写 §8/§13/§18/§20–22/§24/§29；站建承重决策见 [ADR-013~019](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地状态**：R0 已由 #121/#123/#124/#126 闭环；R1-safety 已完成构建临时盘/子进程 env 隔离与 Crawl/robots 双层 egress 收口；R3-B2 已完成本地 durable artifact + 原子 symlink pointer。R1-min 尚缺生产对象存储不可变 Release、跨节点恢复/回收与 unknown component 门，不能以本地 pointer 冒充完成。最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略仍必须在 **M2 公开发布前**可用。
+> _Reviewed against 12 v3.2（2026-07-17 回写；站建承重决策见 [ADR-013~020](../adr/registry.md)）。_ **收紧原则（v3.2 §1.3#6）**：安全/RLS/事实门与对外发布要求**只能收紧**；但"更重的系统"不自动等于更安全，**每道前置门必须绑定真实消费者与真实失败风险**，不为形式堆门。**落地状态**：R0 已由 #121/#123/#124/#126 闭环；R1-safety 已完成构建临时盘/子进程 env 隔离与 Crawl/robots 双层 egress 收口；R3-B2 已完成本地 durable artifact + 原子 symlink pointer。R1-min 尚缺生产对象存储不可变 Release、跨节点恢复/回收与 unknown component 门，不能以本地 pointer 冒充完成。最小询盘持久化、反垃圾、同意记录、PublishReview、域名与媒体披露策略仍必须在 **M2 公开发布前**可用。
 
 ## 0. 威胁模型总览
 

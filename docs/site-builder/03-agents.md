@@ -1,7 +1,7 @@
 # Site Builder Agent 详细设计 v1
 
 > 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型路由）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent（对应 as-built 7 个 task id，见 §0.4）。**
-> ⚠️ **卡内出现的具体型号名是初稿参考、非权威**（卡片写作早于路由定档）。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 `currentRoute` 为准（见 §0.4 路由表）；路由是**四态治理（current / evaluatedCandidate / targetCandidate / promoted）非永久"终选"**（引 ADR-016、v3.2 §23.1 回写，依据 [10-model-selection-study.md](10-model-selection-study.md) 仅作 evidence 不自动写成 promoted）。目标态**型号移出卡片、每 task 只绑 `modelProfile`**，由 ModelPolicyRegistry 解析（§0.2、v3.2 §5.3/§23.4 回写）。deepseek 一律用显式 `v4-pro`/`v4-flash`（旧别名 `deepseek-chat`/`deepseek-reasoner` 已于 2026-07-24 关停）。
+> Agent 卡**只绑定 `modelProfile`，不绑定供应商型号**。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 `currentRoute` 为准（见 §0.4）；ADR-020 型号组合是已批准 `targetCandidate`，须经 ADR-016 的能力探针/评测/晋级后才成为 promotedRoute。换型号只改 ModelPolicyRegistry，并保存 model snapshot；不得散落回卡片。
 > **卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
 
 ## 0. 统一运行时契约（AiTask 基类，所有 agent 共用）
@@ -31,7 +31,9 @@ AiTask<I, O>：
 
 ### 0.2 型号绑 profile，不绑型号（v3.2 §1.6/§5.3/§23.4 回写，引 ADR-016）
 
-各卡「模型」行是初稿参考。目标态 task 只引用稳定的 **`modelProfile`**（15 档：`structured.default` / `reasoning.high` / `copy.premium` / `text.bulk` / `multimodal.review` / `text.summary` / `image.precise_edit` / `image.bulk.creative` / `image.premium.design` / `video.primary` / `video.premium` / `speech.production` / `transcription` / `moderation.media` / `embedding.private`），由 registry 映射到当下 snapshot。换型号不改 Agent 卡；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 以支持历史重放与回归定位。
+task 只引用稳定的 **`modelProfile`**（16 档：`deterministic` / `structured.default` / `reasoning.high` / `copy.premium` / `text.bulk` / `multimodal.review` / `text.summary` / `image.precise_edit` / `image.bulk.creative` / `image.premium.design` / `video.primary` / `video.premium` / `speech.production` / `transcription` / `moderation.media` / `embedding.private`），由 registry 映射到当下 snapshot。换型号不改 Agent 卡；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 以支持历史重放与回归定位。
+
+ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonnet-5`，`reasoning.high → gpt-5.6-sol / deterministic safe blueprint`，`copy.premium → claude-sonnet-5 / gpt-5.6-terra`，`multimodal.review|text.summary → gemini-3.5-flash / gpt-5.6-terra`；图片/视频/embedding 的映射见 02 §6。该映射不是 §0.4 的 as-built 替代品。
 
 ### 0.3 每次执行记录（可观测，v3.2 §5.3 回写）
 
@@ -81,7 +83,7 @@ AiTask<I, O>：
 - **工具**：无外部工具（纯推理）。
 - **护栏**：只能从任务白名单选；scope=section 时禁止扩大到整站；预算超限直接裁剪低优任务并在 plan 里写明 skipReasons。
 - **降级**：模型失败 → 规则版兜底 plan（全量标准管线），不阻断。
-- **模型**：claude-sonnet-5。
+- **modelProfile**：`deterministic`（v1 无模型）；M2 若复活自由意图规划，另绑 profile 并走新 ADR/评测。
 
 ## 2. brandProfile —— 品牌定位
 
@@ -94,7 +96,7 @@ AiTask<I, O>：
 - **事实真值/发布护栏（R4-A2，尚未落地）**：R4-A1 的引用完整性**不等于事实为真或可发布**。A2 才负责 value 中数字/单位/认证代码/关键专名与 quote 的语义对齐、`research_hint`/搜索 snippet 不可发布、ready cert Asset/人工 verified 认证门，以及公共 Claim/Evidence truth bridge/APPROVED 状态；在 A2 前新 v2 FactSheet 仍不可被 M1-d 当成 PublishableClaimSnapshot。
 - **产物治理（幂等 + 溯源，v3.2 §24.7 / PR R4-B-min 回写）**：BrandBrief 新增 `buildRunId`(唯一引用) / `inputHash` / `promptVersion` / `model·route` / `sourceSnapshotHash` / `usage·cost` 六字段；**同一 `buildRunId` 重试先复用已有成功 BrandBrief，不重复调模型、不追加版本**。**预算**：M1-d 首个付费 fan-out 前须有 DB 持久 `reserve/settle` + 人工停用开关；`SiteBuildRun.costSummary` 是持久聚合真值（含成功/失败调用、schema repair、timeout、fallback、工具成本），进程内 Map 不算生产真值。
 - **降级**：web 研究失败 → 仅用 KB 资料出 Brief 并标记 `researchDegraded`。
-- **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（fallback glm-5.2），见 §0.4。目标 profile：`reasoning.high`/`structured.default`。
+- **modelProfile**：`structured.default`。as-built 型号只见 §0.4；目标型号只由 ADR-020 registry 映射。
 
 ## 3. imagePipeline —— 图片管线
 
@@ -117,18 +119,18 @@ AiTask<I, O>：
 - **护栏**：术语表强一致（glossary 注入）；禁绝对化宣称（"best/No.1"类）与虚构事实（只能引用 factSheet，引 ADR-017）；每语种输出过字符集/方向 sanity（阿语 RTL 标记）。
 - **内容预算与最小询盘合同（M1-d，v3.2 §26 回写）**：Copy 按 **slot / locale / Claim refs** 生成，**先过事实门再文风**（valueProps/differentiators/tone 只能从已通过 FactSheet 推导，不得把未闸门的自由结论当事实）；槽位长度=组件内容预算硬约束（超预算优先换变体/定向重写，禁 CSS 缩到不可读，见卡7兼容矩阵）。M1-d 同步定义**最小 inquiry / consent / outbox 合同**（实际公开接收随 M2）。R3 与 R4-A1 已完成；硬前置尚余 **R4-A2 + R4-B-min**。DI-0 的设计消费者契约可并行推进并在 M1-e 前收口，不阻塞 M1-d 核心文案。
 - **降级**：某语种失败 → 该语种缺席本轮（站点先上已成语种），标记待重跑；**Demo 快路径 copy polish 失败 → 直接用 deterministic copy，不阻断 Demo 生成**（v3.2 §18.2）。
-- **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（reasoning low，fallback glm-5.2 / doubao-seed-2.0-pro），见 §0.4。目标 profile：`copy.premium`/`text.bulk`。
+- **modelProfile**：高价值文案/本地化=`copy.premium`；低风险批量=`text.bulk`。as-built 型号只见 §0.4。
 
 ## 5. motionVideo —— 动效与视频
 
 - **职责/触发**：P2；给图片素材配动效参数（v1）与生成环境视频（M3）。
 - **输入 → 输出**：`{assets[], brandBrief.tone}` → `{motionSpecs{[assetId]: preset+params}, videoAssets[]?}`。
-- **执行流程**：v1 [确定性] 按素材类型/位置套 motion token 预设（hero=Ken Burns 慢推、gallery=视差、数字带=计数动画）；M3 [模型-视频] Seedance 2.0 图生视频（工厂环境图→10s 环境视频，产品图→旋转展示）：提交任务→轮询→产物落 asset。
+- **执行流程**：v1 [确定性] 按素材类型/位置套 motion token 预设（hero=Ken Burns 慢推、gallery=视差、数字带=计数动画）；M3 [模型-视频] 经 MediaGateway/new-api 调 `video.primary` 图生视频：提交任务→轮询→产物落 asset。
 - **Prompt 内化来源**：动效预设库 ← 当前已安装的 `ecc:motion-foundations`、`ecc:motion-patterns`、`ecc:motion-advanced`、`ecc:make-interfaces-feel-better`（缓动曲线/时长档/克制原则——B2B 站动效克制是纪律）。
-- **工具**：Seedance 2.0（网关豆包通道；中转不稳走方舟直连方案 B，见 02 §6）。
+- **工具**：MediaGateway + new-api；当前无 M3 as-built 路由。若网关能力探针失败，保持确定性降级并新建 ADR，不静默散落 provider 直连。
 - **护栏**：每站视频条数配额（成本 ~1 元/秒）；视频 prompt 只描述镜头运动与氛围、不得虚构厂景内容之外的元素。
 - **降级**：视频失败/超时 → 自动回落该位置的动效预设，站点永远有东西可看。
-- **模型**：doubao-seedance-2-0-260128。
+- **modelProfile**：M1=`deterministic`；M3=`video.primary`（ADR-020 目标由 registry 解析）。
 
 ## 6. designSpec + aestheticReview —— 审美（双角色）
 
@@ -142,7 +144,7 @@ AiTask<I, O>：
 - **受控差异化 7 来源（v3.2 §17.3 回写）**：每次生成的差异**只**来自 ① BusinessArchetype ② TemplateFamily ③ Blueprint ④ StylePreset ⑤ 组件 variant ⑥ 素材完整度 ⑦ `variationSeed`。**`variationSeed` 只能在合法候选中做确定性选择，不能改变事实和组件契约**（反"换皮同版式"通用感；配套 M1-f genericness 检查见 02/08）。
 - **审美评审隔离（aestheticReview，v3.2 §23.5 回写）**：评审与生成**必须隔离**——不同 prompt/rubric，**最好不同 provider**；评审**只看冻结截图 + DesignBrief + 事实摘要 + deterministic findings**，输出 `DesignEvaluation` + 结构化 Findings（禁"好看/不好看"自由文本）。**多模态能力探针失败**时审美维**弃权**、确定性 QA 继续、Release 标 `aesthetic_review_unavailable`（不阻断发布门其余维度）。
 - **降级**：评审失败 → 该维弃权（不阻断质量环其余维度）。
-- **模型**：初稿参考 gemini-3.1-pro（视觉）；as-built = design_spec 生成走 minimax-m3（fallback doubao-seed-2.0-pro），aestheticReview 到 M1-f 才增 `site_builder.aesthetic_review` 路由（见 §0.4）。目标 profile：生成 `structured.default` / 评审 `multimodal.review`。
+- **modelProfile**：生成=`structured.default`；评审=`multimodal.review`。as-built 生成型号见 §0.4；aestheticReview 到 M1-f 才新增 task。
 
 ## 7. siteAssembly + assemblyFix —— 站点组装（生成+修复双模式）
 
@@ -154,7 +156,7 @@ AiTask<I, O>：
 - **工具**：SiteSpec 校验器、Astro 构建器（库内化）。
 - **护栏**：修复模式**只接受结构化 Findings、只许输出 JSON Patch 或受限 SiteSpec Patch**（防重写全 spec 引入回归）；每轮 patch 后 diff 记录进 run steps（可审计谁改了什么）；**每轮必须让硬门单调改善**。
 - **降级（assemblyFix 三轮修补失败语义，v3.2 §19.3 回写，引 ADR-013）**：assemblyFix **最多三轮**；三轮仍失败则——**保留最近一次可构建版本** + 标 `quality_degraded` + **回退到同 Family 的安全 Blueprint** + **绝不删除用户现有站点**（ADR-013：异步失败绝不删除用户现有 Site）。run 标记 partial、findings 转人工。
-- **模型**：初稿参考 claude-sonnet-5；as-built = assemble/assembly_fix 均走 glm-5.2（fallback deepseek-v4-pro），见 §0.4。目标 profile：`structured.default`。
+- **modelProfile**：首次组装/普通修复=`structured.default`；连续两次失败后才允许 `reasoning.high` escalation；再失败走确定性安全 Blueprint。as-built 型号见 §0.4。
 
 ## 8. qa —— 审核
 
@@ -165,7 +167,7 @@ AiTask<I, O>：
 - **工具**：Playwright + Lighthouse（库内化，CI 同款）；开发期调试用已安装的 `playwright-interactive` / `ecc:browser-qa`。
 - **护栏**：硬门槛（构建产物必须过才能出质量环）：链接零死链、表单可用、console 零 error、Lighthouse Perf ≥85 / A11y ≥90。
 - **降级**：无（这是门，门坏了要修门不是绕门）；工具自身崩溃 → run 失败可重试。
-- **模型**：as-built `deepseek-v4-flash`，fallback `doubao-seed-2.0-lite`（仅汇总）；Gemini 仍是未接 targetCandidate。
+- **modelProfile**：确定性工具结果汇总=`text.summary`；三断点审美/媒体 Finding=`multimodal.review`。as-built 型号见 §0.4。
 
 ## 9. seo —— SEO
 
@@ -176,7 +178,7 @@ AiTask<I, O>：
 - **工具**：HTML 解析器 + JSON-LD 校验（库内化）。
 - **护栏**：多语言站 hreflang 是硬检查（错配=国际 SEO 灾难）；未发布预览必须 noindex（防提前收录），发布时自动翻转。
 - **降级**：无硬门（findings 进质量环修复即可）。
-- **模型**：as-built `deepseek-v4-flash`，fallback `doubao-seed-2.0-lite`；Gemini 仍是未接 targetCandidate。
+- **modelProfile**：`text.summary`；硬门保持确定性。as-built 型号见 §0.4。
 
 ## 10. 研究依据与设计修订（2026-07-14 补研；修订①②③待用户确认后定稿）
 
