@@ -1,4 +1,5 @@
 import { mkdir, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -23,11 +24,10 @@ import { runAiTask } from '../site-builder/agents/ai-task';
 import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
-  canonicalUrl,
-  enforceEvidenceGate,
-  EvidenceCorpus,
+  enforceEvidenceGateV2,
+  EvidenceFactItem,
   GapItem,
-  RawFactItem,
+  PromptEvidenceSource,
   sanitizeProfileForPrompt,
   scrubPii,
 } from '../site-builder/agents/brand-profile';
@@ -35,7 +35,11 @@ import {
   researchBrand,
   ResearchSource,
 } from '../site-builder/agents/brand-research';
-import { buildKbDigest } from '../site-builder/agents/kb-digest';
+import { prepareBrandEvidenceSources } from '../site-builder/agents/brand-evidence';
+import {
+  evidenceSourceDedupeKey,
+  type FrozenEvidenceSource,
+} from '../site-builder/agents/evidence-ref';
 import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
 import {
   preparePreviewPromotion,
@@ -745,7 +749,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             siteId,
           )
         : [];
-      const kbDigest = buildKbDigest(digestDocs);
 
       let research: { sources: ResearchSource[]; degraded: boolean } = {
         sources: [],
@@ -764,6 +767,105 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         );
       }
 
+      // A1: PII is scrubbed before these exact model-visible blocks are normalized,
+      // hashed and persisted. Upstream hashes remain separate provenance fields.
+      const prepared = prepareBrandEvidenceSources({
+        siteId,
+        profileVersionId: site.profileVersionId,
+        intake,
+        profile,
+        kb: digestDocs,
+        research: research.sources,
+      });
+      const frozenSources = [
+        prepared.intake,
+        ...prepared.kb,
+        ...prepared.research,
+      ];
+      const sourceEntries = frozenSources.map((source) => ({
+        source,
+        dedupeKey: evidenceSourceDedupeKey(siteId, source),
+      }));
+      const persistedSources = await prisma.withWorkspace(
+        workspaceId,
+        async (tx) => {
+          const live = await tx.siteBuildRun.findUnique({
+            where: { id: buildRunId },
+            select: { status: true },
+          });
+          if (!live || live.status !== 'running') {
+            throw new Error(
+              `run ${buildRunId} no longer running — skip evidence snapshot write`,
+            );
+          }
+          await tx.siteEvidenceSourceSnapshot.createMany({
+            data: sourceEntries.map(({ source, dedupeKey }) => ({
+              workspaceId,
+              siteId,
+              sourceKey: source.sourceKey,
+              sourceType: source.sourceType,
+              sourceRole: source.sourceRole,
+              hashAlgorithm: source.hashAlgorithm,
+              contentHash: source.contentHash,
+              upstreamContentHash: source.upstreamContentHash,
+              normalizationVersion: source.normalizationVersion,
+              snapshotText: source.snapshotText,
+              displayUrl: source.displayUrl,
+              fetchedAt: source.fetchedAt
+                ? new Date(source.fetchedAt)
+                : undefined,
+              provenance: source.provenance as Prisma.InputJsonObject,
+              dedupeKey,
+            })),
+            skipDuplicates: true,
+          });
+          return tx.siteEvidenceSourceSnapshot.findMany({
+            where: {
+              siteId,
+              dedupeKey: { in: sourceEntries.map((entry) => entry.dedupeKey) },
+            },
+          });
+        },
+      );
+      const persistedByDedupe = new Map(
+        persistedSources.map((source) => [source.dedupeKey, source]),
+      );
+      const persistedFor = (source: FrozenEvidenceSource) => {
+        const persisted = persistedByDedupe.get(
+          evidenceSourceDedupeKey(siteId, source),
+        );
+        if (!persisted) {
+          throw new Error(
+            `evidence snapshot persistence lost source ${source.sourceKey}`,
+          );
+        }
+        return persisted;
+      };
+      const toPromptSource = (
+        source: FrozenEvidenceSource,
+      ): PromptEvidenceSource => {
+        const persisted = persistedFor(source);
+        const title =
+          typeof source.provenance.title === 'string'
+            ? source.provenance.title
+            : undefined;
+        return {
+          sourceId: persisted.id,
+          sourceType: source.sourceType,
+          sourceRole: source.sourceRole,
+          contentHash: persisted.contentHash,
+          content: persisted.snapshotText,
+          ...(title ? { title } : {}),
+          ...(persisted.displayUrl ? { url: persisted.displayUrl } : {}),
+          ...(persisted.fetchedAt
+            ? { fetchedAt: persisted.fetchedAt.toISOString() }
+            : {}),
+        };
+      };
+      const intakeSource = toPromptSource(prepared.intake);
+      const kbSources = prepared.kb.map(toPromptSource);
+      const researchSources = prepared.research.map(toPromptSource);
+
       const result = await runAiTask<
         Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
         BrandProfileOutput
@@ -774,34 +876,34 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           industry: intake.industry,
           products: intake.products ?? [],
           targetMarkets: intake.targetMarkets ?? [],
-          profile,
-          kbDigest,
-          research: research.sources,
+          intakeSource,
+          kbSources,
+          research: researchSources,
         },
         { gateway, ctx: { workspaceId, runId: buildRunId } },
       );
 
-      // D1/D2 确定性出口闸（复审 F1）：闸执行时活动内有全部原文——按来源做 quote 核验。
-      // intakeText 剔 contact 且不含 businessEmail（数据最小化）；urlText 用 canonical(url) 防尾斜杠误降。
-      const urlText = new Map<string, string>();
-      for (const s of research.sources) {
-        const c = canonicalUrl(s.url);
-        if (c) urlText.set(c, s.content);
-      }
-      const corpus: EvidenceCorpus = {
-        intakeText: [
-          intake.company.nameEn ?? '',
-          intake.company.nameZh,
-          intake.industry ?? '',
-          (intake.products ?? []).join(' '),
-          (intake.targetMarkets ?? []).join(' '),
-          profile ? JSON.stringify(profile) : '',
-        ].join(' '),
-        kbText: kbDigest,
-        urlText,
-      };
-      const gated = enforceEvidenceGate(result.data.factSheet ?? [], {
-        corpus,
+      const frozenById = new Map<string, FrozenEvidenceSource>(
+        persistedSources.map((source) => [
+          source.id,
+          {
+            sourceKey: source.sourceKey,
+            sourceType: source.sourceType as FrozenEvidenceSource['sourceType'],
+            sourceRole: source.sourceRole as FrozenEvidenceSource['sourceRole'],
+            hashAlgorithm: 'sha256',
+            contentHash: source.contentHash,
+            upstreamContentHash: source.upstreamContentHash ?? undefined,
+            normalizationVersion:
+              source.normalizationVersion as FrozenEvidenceSource['normalizationVersion'],
+            snapshotText: source.snapshotText,
+            displayUrl: source.displayUrl ?? undefined,
+            fetchedAt: source.fetchedAt?.toISOString(),
+            provenance: source.provenance as Record<string, unknown>,
+          },
+        ]),
+      );
+      const gated = enforceEvidenceGateV2(result.data.factSheet ?? [], {
+        sources: frozenById,
       });
       const gaps: GapItem[] = [
         ...gated.gaps,
@@ -813,15 +915,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       ];
 
       // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
-      const scrubFact = (f: RawFactItem): RawFactItem => ({
+      const scrubFact = (f: EvidenceFactItem): EvidenceFactItem => ({
         ...f,
         value: scrubPii(f.value),
-        evidence: f.evidence
-          ? {
-              ...f.evidence,
-              quote: f.evidence.quote ? scrubPii(f.evidence.quote) : undefined,
-            }
-          : undefined,
       });
       const clean = {
         valueProps: (result.data.valueProps ?? []).map(scrubPii),
@@ -847,6 +943,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
       // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
+      const brandProfileId = randomUUID();
       let version = 0;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
@@ -867,9 +964,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
             await tx.brandProfile.create({
               data: {
+                id: brandProfileId,
                 workspaceId,
                 siteId,
                 version: next,
+                evidenceSchemaVersion: 2,
                 valueProps: clean.valueProps as Prisma.InputJsonValue,
                 tone: (clean.tone ?? Prisma.JsonNull) as Prisma.InputJsonValue,
                 glossary: clean.glossary as Prisma.InputJsonValue,
@@ -881,6 +980,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 researchDegraded: research.degraded,
               },
             });
+            if (clean.factSheet.length > 0) {
+              await tx.brandProfileEvidenceRef.createMany({
+                data: clean.factSheet.map((fact, factIndex) => ({
+                  id: fact.evidence.evidenceRefId,
+                  workspaceId,
+                  siteId,
+                  brandProfileId,
+                  factIndex,
+                  factKey: fact.key,
+                  sourceSnapshotId: fact.evidence.sourceId,
+                  sourceContentHash: fact.evidence.contentHash,
+                  quote: fact.evidence.quote,
+                  quoteStart: fact.evidence.selector.start,
+                  quoteEnd: fact.evidence.selector.end,
+                  quotePrefix: fact.evidence.selector.prefix,
+                  quoteSuffix: fact.evidence.selector.suffix,
+                })),
+              });
+            }
             return next;
           });
           break;

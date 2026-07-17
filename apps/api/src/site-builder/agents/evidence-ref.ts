@@ -1,0 +1,232 @@
+import { createHash } from "node:crypto";
+import type {
+  EvidenceRefV2,
+  EvidenceSourceRole,
+  EvidenceSourceType,
+} from "@global/contracts";
+import { scrubPii } from "./pii";
+
+export const EVIDENCE_NORMALIZATION_VERSION = "evidence-text/1" as const;
+export const EVIDENCE_HASH_ALGORITHM = "sha256" as const;
+export const MAX_EVIDENCE_SNAPSHOT_CODE_POINTS = 20_000;
+export const MAX_EVIDENCE_QUOTE_CODE_POINTS = 512;
+export const MIN_EVIDENCE_QUOTE_CODE_POINTS = 8;
+const SELECTOR_CONTEXT_CODE_POINTS = 32;
+
+const SENSITIVE_QUERY_KEY =
+  /(?:^|[_-])(token|key|secret|signature|password|passwd|auth|authorization|credential|jwt|session|code)(?:$|[_-])/i;
+
+export interface FrozenEvidenceSource {
+  sourceKey: string;
+  sourceType: EvidenceSourceType;
+  sourceRole: EvidenceSourceRole;
+  hashAlgorithm: "sha256";
+  contentHash: string;
+  upstreamContentHash?: string;
+  normalizationVersion: typeof EVIDENCE_NORMALIZATION_VERSION;
+  snapshotText: string;
+  displayUrl?: string;
+  fetchedAt?: string;
+  provenance: Record<string, unknown>;
+}
+
+export interface FreezeEvidenceSourceInput {
+  sourceKey: string;
+  sourceType: EvidenceSourceType;
+  sourceRole: EvidenceSourceRole;
+  rawText: string;
+  upstreamContentHash?: string;
+  displayUrl?: string;
+  fetchedAt?: string;
+  provenance: Record<string, unknown>;
+}
+
+export interface RawEvidenceReferenceInput {
+  sourceId?: string;
+  sourceType?: EvidenceSourceType;
+  contentHash?: string;
+  quote?: string;
+}
+
+export type EvidenceReferenceFailureReason =
+  | "missing_evidence"
+  | "missing_quote"
+  | "quote_too_short"
+  | "quote_too_long"
+  | "unknown_source"
+  | "source_hash_mismatch"
+  | "source_type_mismatch"
+  | "unsupported_quote";
+
+export type EvidenceReferenceResolution =
+  | { ok: true; ref: EvidenceRefV2 }
+  | { ok: false; reason: EvidenceReferenceFailureReason };
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+function codePoints(text: string): string[] {
+  return Array.from(text);
+}
+
+function stripControlCharacters(text: string): string {
+  return codePoints(text)
+    .filter((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return (
+        codePoint === 0x09 ||
+        codePoint === 0x0a ||
+        (codePoint >= 0x20 && codePoint !== 0x7f)
+      );
+    })
+    .join("");
+}
+
+/** Normalize the persisted/model-visible corpus once; quote matching is exact after this point. */
+export function normalizeEvidenceText(rawText: string): string {
+  const normalized = stripControlCharacters(
+    scrubPii(rawText).normalize("NFC").replace(/\r\n?/g, "\n"),
+  )
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return codePoints(normalized)
+    .slice(0, MAX_EVIDENCE_SNAPSHOT_CODE_POINTS)
+    .join("");
+}
+
+/** Display-only URL: credentials, fragments and common sensitive query values are not retained. */
+export function sanitizeEvidenceUrl(
+  rawUrl: string | undefined,
+): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_KEY.test(key)) {
+        url.searchParams.set(key, "[redacted]");
+      }
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function freezeEvidenceSource(
+  input: FreezeEvidenceSourceInput,
+): FrozenEvidenceSource {
+  const snapshotText = normalizeEvidenceText(input.rawText);
+  if (!snapshotText) throw new Error("evidence source snapshot is empty");
+  if (
+    input.upstreamContentHash &&
+    !/^[0-9a-f]{64}$/.test(input.upstreamContentHash)
+  ) {
+    throw new Error("upstream evidence hash must be lowercase sha256");
+  }
+  return {
+    sourceKey: input.sourceKey.slice(0, 1024),
+    sourceType: input.sourceType,
+    sourceRole: input.sourceRole,
+    hashAlgorithm: EVIDENCE_HASH_ALGORITHM,
+    contentHash: sha256(snapshotText),
+    upstreamContentHash: input.upstreamContentHash,
+    normalizationVersion: EVIDENCE_NORMALIZATION_VERSION,
+    snapshotText,
+    displayUrl: sanitizeEvidenceUrl(input.displayUrl),
+    fetchedAt: input.fetchedAt,
+    provenance: input.provenance,
+  };
+}
+
+export function evidenceSourceDedupeKey(
+  siteId: string,
+  source: FrozenEvidenceSource,
+): string {
+  return sha256(
+    [
+      siteId,
+      source.sourceKey,
+      source.sourceType,
+      source.sourceRole,
+      source.normalizationVersion,
+      source.contentHash,
+      source.upstreamContentHash ?? "",
+    ].join("\u001f"),
+  );
+}
+
+export function resolveEvidenceReference(
+  input: RawEvidenceReferenceInput | undefined,
+  sources: ReadonlyMap<string, FrozenEvidenceSource>,
+  options: { evidenceRefId: string },
+): EvidenceReferenceResolution {
+  if (!input?.sourceId || !input.sourceType || !input.contentHash) {
+    return { ok: false, reason: "missing_evidence" };
+  }
+  if (!input.quote) return { ok: false, reason: "missing_quote" };
+  const quoteLength = codePoints(input.quote).length;
+  if (quoteLength < MIN_EVIDENCE_QUOTE_CODE_POINTS) {
+    return { ok: false, reason: "quote_too_short" };
+  }
+  if (quoteLength > MAX_EVIDENCE_QUOTE_CODE_POINTS) {
+    return { ok: false, reason: "quote_too_long" };
+  }
+  const source = sources.get(input.sourceId);
+  if (!source) return { ok: false, reason: "unknown_source" };
+  if (source.sourceType !== input.sourceType) {
+    return { ok: false, reason: "source_type_mismatch" };
+  }
+  if (source.contentHash !== input.contentHash) {
+    return { ok: false, reason: "source_hash_mismatch" };
+  }
+  const quoteCodeUnitStart = source.snapshotText.indexOf(input.quote);
+  if (quoteCodeUnitStart < 0) {
+    return { ok: false, reason: "unsupported_quote" };
+  }
+  const start = codePoints(
+    source.snapshotText.slice(0, quoteCodeUnitStart),
+  ).length;
+  const end = start + quoteLength;
+  const snapshotCodePoints = codePoints(source.snapshotText);
+  const prefix = snapshotCodePoints
+    .slice(Math.max(0, start - SELECTOR_CONTEXT_CODE_POINTS), start)
+    .join("");
+  const suffix = snapshotCodePoints
+    .slice(end, end + SELECTOR_CONTEXT_CODE_POINTS)
+    .join("");
+  const assetId =
+    typeof source.provenance.assetId === "string"
+      ? source.provenance.assetId
+      : undefined;
+
+  return {
+    ok: true,
+    ref: {
+      version: 2,
+      evidenceRefId: options.evidenceRefId,
+      sourceId: input.sourceId,
+      sourceType: source.sourceType,
+      sourceRole: source.sourceRole,
+      hashAlgorithm: EVIDENCE_HASH_ALGORITHM,
+      contentHash: source.contentHash,
+      quote: input.quote,
+      selector: {
+        start,
+        end,
+        ...(prefix ? { prefix } : {}),
+        ...(suffix ? { suffix } : {}),
+      },
+      ...(assetId ? { assetId } : {}),
+      ...(source.displayUrl ? { url: source.displayUrl } : {}),
+      ...(source.fetchedAt ? { fetchedAt: source.fetchedAt } : {}),
+    },
+  };
+}

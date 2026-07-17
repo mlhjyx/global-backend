@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { EvidenceSourceRole } from '@global/contracts';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 
 /**
@@ -16,10 +18,14 @@ export type ResearchSourceType = 'storefront' | 'web_research';
 
 export interface ResearchSource {
   sourceType: ResearchSourceType;
+  sourceRole: EvidenceSourceRole;
   url: string;
   title?: string;
   content: string;
   fetchedAt: string;
+  upstreamContentHash: string;
+  providerContentHash?: string;
+  parserVersion: string;
 }
 
 export interface BrandResearchArgs {
@@ -40,6 +46,9 @@ const TASK_CONTRACT_ID = 'site_builder.brand_profile';
 const MAX_WEB_RESULTS = 5;
 const STOREFRONT_MAX_CHARS = 20_000;
 const SNIPPET_MAX_CHARS = 500;
+
+const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
 
 function hostOf(url: string | undefined): string | null {
   if (!url) return null;
@@ -84,15 +93,22 @@ export async function researchBrand(
     try {
       const r = await deps.broker.invoke<
         { url: string; maxChars: number },
-        { url: string; text: string }
+        { url: string; text: string; contentHash: string }
       >('crawl4ai.fetch', { url: args.websiteUrl, maxChars: STOREFRONT_MAX_CHARS }, ctx);
       if (r.data.text.trim()) {
         sources.push({
           sourceType: 'storefront',
+          sourceRole: 'fact_candidate',
           url: args.websiteUrl,
           title: 'company website',
           content: r.data.text,
-          fetchedAt: now(),
+          fetchedAt: r.provenance?.fetchedAt ?? now(),
+          // The legacy tool currently exposes a 24-hex digest prefix. A1 must
+          // bind a complete SHA-256 and retain the provider value only as metadata.
+          upstreamContentHash: sha256(r.data.text),
+          providerContentHash:
+            r.provenance?.contentHash ?? r.data.contentHash ?? undefined,
+          parserVersion: r.provenance?.parserVersion ?? 'crawl4ai/1',
         });
       }
     } catch {
@@ -117,12 +133,18 @@ export async function researchBrand(
       })
       .slice(0, MAX_WEB_RESULTS);
     for (const item of external) {
+      const content = [item.title ?? '', item.content ?? '']
+        .join(' — ')
+        .slice(0, SNIPPET_MAX_CHARS);
       sources.push({
         sourceType: 'web_research',
+        sourceRole: 'research_hint',
         url: item.url as string,
         title: item.title,
-        content: [item.title ?? '', item.content ?? ''].join(' — ').slice(0, SNIPPET_MAX_CHARS),
+        content,
         fetchedAt: now(),
+        upstreamContentHash: sha256(content),
+        parserVersion: 'searxng-snippet/1',
       });
     }
   } catch {

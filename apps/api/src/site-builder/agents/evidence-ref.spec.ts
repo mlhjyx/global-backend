@@ -99,7 +99,7 @@ describe('resolveEvidenceReference — exact quote/hash/source binding', () => {
       hashAlgorithm: 'sha256',
       contentHash: source.contentHash,
       quote: '最高工作压力 400 bar',
-      selector: { start: 2, end: 18 },
+      selector: { start: 2, end: 16 },
     });
   });
 
