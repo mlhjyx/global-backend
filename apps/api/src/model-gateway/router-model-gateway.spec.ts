@@ -5,6 +5,7 @@ import { ModelProvider } from './model-provider';
 import { ProviderOutputError } from './providers/provider-output-error';
 import { BudgetLedger, BudgetExceededError } from '../tools/budget';
 import { ModelResult } from './types';
+import { AiTraceSink } from './ai-trace.sink';
 
 /**
  * 收口② D：LLM 网关预算门——task.maxCostCents 从纯声明变 reserve-then-settle 真闸。
@@ -17,7 +18,11 @@ function fakeProvider(impl?: () => Promise<ModelResult<string>>): ModelProvider 
   return {
     id: 'fake',
     generateText: vi.fn(impl ?? (async () => ({ data: 'ok', provider: 'fake', model: 'm' }))),
-    generateStructured: vi.fn(async () => ({ data: {} as never, provider: 'fake', model: 'm' })),
+    generateStructured: vi.fn(async () => ({
+      data: {} as never,
+      provider: 'fake',
+      model: 'm',
+    })),
     embed: vi.fn(async () => ({ data: [], provider: 'fake', model: 'm' })),
     health: vi.fn(async () => ({ healthy: true })),
   } as unknown as ModelProvider;
@@ -69,7 +74,10 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     budget.open('run-1', 40); // 恰够两次上限
     const provider = fakeProvider();
     const gw = gatewayWith(provider, budget);
-    const r = await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' });
+    const r = await gw.generateStructured(
+      { task: QUALIFY_TASK, prompt: 'p', schema: {} },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    );
     expect(r.data).toEqual({});
   });
 
@@ -79,10 +87,21 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const provider = fakeProvider();
     // 首次输出缺 x（schema 校验失败）→ 触发修复；修复补上 x（通过）。两次均**不报** usage。
     (provider.generateStructured as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm' })
-      .mockResolvedValueOnce({ data: { x: 1 } as never, provider: 'fake', model: 'm' });
+      .mockResolvedValueOnce({
+        data: {} as never,
+        provider: 'fake',
+        model: 'm',
+      })
+      .mockResolvedValueOnce({
+        data: { x: 1 } as never,
+        provider: 'fake',
+        model: 'm',
+      });
     const gw = gatewayWith(provider, budget);
-    await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } }, { workspaceId: 'ws-1', runId: 'run-1' });
+    await gw.generateStructured(
+      { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    );
     // 两次调用各 20¢ → settle 40¢ → 账户见底（不再留 20¢ 给下次绕过硬顶）。
     expect(budget.remainingCents('run-1')).toBe(0);
     expect((provider.generateStructured as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
@@ -92,7 +111,10 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budget = new BudgetLedger();
     budget.open('run-1', 40);
     const gw = gatewayWith(fakeProvider(), budget); // 默认 generateStructured 返回 {}，schema {} 通过 → 无修复
-    await gw.generateStructured({ task: QUALIFY_TASK, prompt: 'p', schema: {} }, { workspaceId: 'ws-1', runId: 'run-1' });
+    await gw.generateStructured(
+      { task: QUALIFY_TASK, prompt: 'p', schema: {} },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    );
     expect(budget.remainingCents('run-1')).toBe(20); // 预留 40、settle 20（1 次）→ 剩 20
   });
 
@@ -108,7 +130,12 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budget = new BudgetLedger();
     budget.open('run-1', 100);
     const gw = gatewayWith(
-      fakeProvider(async () => ({ data: 'ok', provider: 'fake', model: 'm', usage: { costUsd: 0.02 } })),
+      fakeProvider(async () => ({
+        data: 'ok',
+        provider: 'fake',
+        model: 'm',
+        usage: { costUsd: 0.02 },
+      })),
       budget,
     );
     await gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' });
@@ -124,9 +151,9 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       }),
       budget,
     );
-    await expect(gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' })).rejects.toThrow(
-      'model down',
-    );
+    await expect(
+      gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toThrow('model down');
     expect(budget.remainingCents('run-1')).toBe(100);
   });
 
@@ -136,6 +163,53 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const gw = gatewayWith(fakeProvider(), budget);
     await gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1' });
     expect(budget.remainingCents('ws-1')).toBe(80);
+  });
+
+  it('Site Builder policy snapshot and fallback index are copied into the gateway trace', async () => {
+    const budget = new BudgetLedger();
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const router = { route: () => [fakeProvider()] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budget = budget;
+
+    await gw.generateText(
+      {
+        task: 'site_builder.copy',
+        prompt: 'p',
+        maxCostCents: 40,
+        model: 'selected-model',
+      },
+      {
+        workspaceId: 'ws-1',
+        modelPolicy: {
+          policyVersion: 'site-builder-model-policy/v1',
+          profile: 'copy.premium',
+          routeState: 'currentRoute',
+          lifecycle: 'active',
+          source: 'registry',
+          dataPolicy: {
+            transport: 'new_api_only',
+            region: 'gateway_controlled',
+            personalData: 'forbidden',
+            dataScope: 'company_facts_only',
+          },
+          maxCostCents: 40,
+          route: { primary: 'selected-model', fallbacks: ['fallback-model'] },
+          fallbackIndex: 1,
+        },
+      },
+    );
+
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'OK',
+        modelPolicy: expect.objectContaining({
+          profile: 'copy.premium',
+          fallbackIndex: 1,
+          route: { primary: 'selected-model', fallbacks: ['fallback-model'] },
+        }),
+      }),
+    );
   });
 });
 
@@ -226,7 +300,12 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
     const provider = fakeProvider();
     (provider.generateStructured as ReturnType<typeof vi.fn>)
       // 首调缺 x（schema 校验失败）→ 触发修复；带 sizable usage（1e6 token）
-      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm', usage: { inputTokens: 1_000_000 } })
+      .mockResolvedValueOnce({
+        data: {} as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 1_000_000 },
+      })
       // 修复调用抛错（只携修复自身的小 usage 5e4）
       .mockRejectedValueOnce(new ProviderOutputError('repair truncated', { inputTokens: 50_000 }));
     const gw = gatewayWith(provider, budget);
@@ -245,9 +324,19 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
     budget.open('run-1', 500);
     const provider = fakeProvider();
     (provider.generateStructured as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm', usage: { inputTokens: 1_000_000 } })
+      .mockResolvedValueOnce({
+        data: {} as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 1_000_000 },
+      })
       // 修复后仍缺 x → recheck 失败
-      .mockResolvedValueOnce({ data: {} as never, provider: 'fake', model: 'm', usage: { inputTokens: 50_000 } });
+      .mockResolvedValueOnce({
+        data: {} as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 50_000 },
+      });
     const gw = gatewayWith(provider, budget);
     await expect(
       gw.generateStructured(

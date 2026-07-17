@@ -43,6 +43,8 @@ model AiTrace {
   outputTokens  Int?     @map("output_tokens")
   costUsd       Float?   @map("cost_usd")
   correlationId String?  @map("correlation_id")
+  /// Resolved Site Builder model policy + fallback position when the call is policy-routed.
+  meta          Json?
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([workspaceId])

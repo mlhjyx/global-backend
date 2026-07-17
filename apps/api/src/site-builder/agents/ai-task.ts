@@ -2,6 +2,7 @@ import type { ModelGateway } from '../../model-gateway/model-gateway';
 import { checkAgainstSchema } from '../../model-gateway/schema-validate';
 import type { AiContext, ModelResult, ModelUsage } from '../../model-gateway/types';
 import { resolveTaskRoute, SiteBuilderTaskId, TaskRoute } from './task-routes';
+import type { ModelExecutionPolicySnapshot, ModelRouteSnapshot } from '@global/contracts';
 
 /**
  * L2 AiTask 统一执行器（09 §2.4，镜像获客侧「有界任务契约，非超级 Agent」哲学）。
@@ -33,6 +34,12 @@ export interface AiTaskRunResult<TOut> {
   /** 实际服务的模型（回退链命中哪个）。 */
   model: string;
   usage: { inputTokens: number; outputTokens: number; calls: number };
+  /** Resolved profile, lifecycle, data handling and cost ceiling used for this run. */
+  routePolicy: ModelExecutionPolicySnapshot;
+  /** Requested primary/fallback model snapshot, before provider-side alias resolution. */
+  modelSnapshot: ModelRouteSnapshot;
+  /** Zero-based position in modelSnapshot that produced this result. */
+  fallbackIndex: number;
 }
 
 export class AiTaskError extends Error {
@@ -58,8 +65,18 @@ export interface AiTaskDeps {
   route?: TaskRoute;
 }
 
-const sum = (usage: ModelUsage | undefined, field: 'inputTokens' | 'outputTokens'): number =>
-  usage?.[field] ?? 0;
+const sum = (usage: ModelUsage | undefined, field: 'inputTokens' | 'outputTokens'): number => usage?.[field] ?? 0;
+
+function cloneRoutePolicy(policy: ModelExecutionPolicySnapshot): ModelExecutionPolicySnapshot {
+  return {
+    ...policy,
+    dataPolicy: { ...policy.dataPolicy },
+    route: {
+      primary: policy.route.primary,
+      fallbacks: [...policy.route.fallbacks],
+    },
+  };
+}
 
 export async function runAiTask<TIn, TOut>(
   def: SiteBuilderTaskDefinition<TIn, TOut>,
@@ -73,10 +90,15 @@ export async function runAiTask<TIn, TOut>(
 
   const prompt = def.buildPrompt(rawInput);
   const route = deps.route ?? resolveTaskRoute(def.id);
+  const routePolicy = cloneRoutePolicy(route.policy);
+  const modelSnapshot: ModelRouteSnapshot = {
+    primary: routePolicy.route.primary,
+    fallbacks: [...routePolicy.route.fallbacks],
+  };
   const attempts: { model: string; error: string }[] = [];
   let usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 
-  for (const model of [route.primary, ...route.fallbacks]) {
+  for (const [fallbackIndex, model] of [route.primary, ...route.fallbacks].entries()) {
     // per-task 超时（复审 Temporal F1）：既 abort signal（真取消底层 fetch，含网关内修复重试的
     // 两次调用，不留后台弃单烧钱）——又 race 一个 reject 让本层立即换模型，不干等底层响应 abort。
     const controller = new AbortController();
@@ -98,10 +120,17 @@ export async function runAiTask<TIn, TOut>(
             schema: def.outputSchema,
             model,
             maxTokens: route.maxTokens,
+            maxCostCents: route.maxCostCents,
             reasoningEffort: route.reasoningEffort,
             signal: controller.signal,
           },
-          deps.ctx,
+          {
+            ...deps.ctx,
+            modelPolicy: {
+              ...cloneRoutePolicy(routePolicy),
+              fallbackIndex,
+            },
+          },
         ),
         timeout,
       ]);
@@ -114,9 +143,19 @@ export async function runAiTask<TIn, TOut>(
         // 🔴 stub 兜底绝不写真实产物：dev 网关瞬时失败会 fallback 到 stub（罐头输出）。
         throw new Error('stub provider refused (fake data must never pass as real)');
       }
-      return { data: result.data, model: result.model, usage };
+      return {
+        data: result.data,
+        model: result.model,
+        usage,
+        routePolicy,
+        modelSnapshot,
+        fallbackIndex,
+      };
     } catch (err) {
-      attempts.push({ model, error: err instanceof Error ? err.message : String(err) });
+      attempts.push({
+        model,
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       clearTimeout(timer);
     }
