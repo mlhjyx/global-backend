@@ -25,7 +25,6 @@ export interface BrandProfileEvalFixture {
   schemaVersion: typeof BRAND_PROFILE_EVAL_FIXTURE_SCHEMA_VERSION;
   id: string;
   industry: string;
-  locale: string;
   materialCompleteness: 'sparse' | 'rich';
   companyName: string;
   products: string[];
@@ -142,13 +141,16 @@ export function evaluateBrandProfileOutput(
   output: BrandProfileOutput,
 ): BrandProfileEvalOutcome {
   const gated = enforceEvidenceGateV2(output.factSheet, { sources: prepared.frozenSources });
-  const acceptedText = gated.factSheet
-    .flatMap((item) => [item.key, item.value, item.evidence.quote])
+  // Do not let a source quote satisfy a required output fact. The evidence
+  // gate proves that the quote exists, not that it semantically supports a
+  // different model-provided value (for example 300 bar citing 160 bar).
+  const assertedFactText = gated.factSheet
+    .flatMap((item) => [item.key, item.value])
     .join('\n')
     .toLocaleLowerCase('en-US');
   const outputText = modelOutputText(output);
   const missingAcceptedTerms = prepared.fixture.assertions.requiredAcceptedTerms.filter(
-    (term) => !acceptedText.includes(term.toLocaleLowerCase('en-US')),
+    (term) => !assertedFactText.includes(term.toLocaleLowerCase('en-US')),
   );
   const forbiddenOutputTerms = prepared.fixture.assertions.forbiddenOutputTerms.filter((term) =>
     outputText.includes(term.toLocaleLowerCase('en-US')),

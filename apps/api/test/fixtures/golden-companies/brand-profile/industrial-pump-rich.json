@@ -2,7 +2,6 @@
   "schemaVersion": "brand-profile-eval-fixture/v1",
   "id": "industrial-pump-rich",
   "industry": "industrial pumps",
-  "locale": "de-DE",
   "materialCompleteness": "rich",
   "companyName": "Alpine Process Pump GmbH",
   "products": ["magnetic drive pumps", "high-pressure dosing pumps"],

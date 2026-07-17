@@ -2,7 +2,6 @@
   "schemaVersion": "brand-profile-eval-fixture/v1",
   "id": "auto-parts-rich",
   "industry": "automotive components",
-  "locale": "en-US",
   "materialCompleteness": "rich",
   "companyName": "Harbor Drive Precision Parts",
   "products": ["cold-forged yokes", "CNC transmission flanges"],

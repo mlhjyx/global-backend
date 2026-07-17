@@ -2,7 +2,6 @@
   "schemaVersion": "brand-profile-eval-fixture/v1",
   "id": "lab-instrument-rich",
   "industry": "laboratory instruments",
-  "locale": "en-US",
   "materialCompleteness": "rich",
   "companyName": "Meridian Lab Motion",
   "products": ["CO2 incubator shakers", "microplate mixers"],

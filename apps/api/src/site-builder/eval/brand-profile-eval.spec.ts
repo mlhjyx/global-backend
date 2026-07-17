@@ -66,7 +66,7 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     );
     expect(bootstrapFixtures.filter((fixture) => fixture.materialCompleteness === 'sparse')).toHaveLength(3);
     expect(bootstrapFixtures.filter((fixture) => fixture.materialCompleteness === 'rich')).toHaveLength(3);
-    expect(bootstrapFixtures.some((fixture) => fixture.locale === 'de-DE')).toBe(true);
+    expect(bootstrapFixtures.some((fixture) => fixture.targetMarkets.includes('DE'))).toBe(true);
     expect(bootstrapFixtures.every((fixture) => fixture.schemaVersion === 'brand-profile-eval-fixture/v1')).toBe(true);
   });
 
@@ -103,6 +103,17 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     const outcome = evaluateBrandProfileOutput(prepared, output);
     expect(outcome.acceptedArtifact).toBe(false);
     expect(outcome.forbiddenOutputTerms).toEqual(['ISO 9001']);
+  });
+
+  it('does not allow a source quote to satisfy a required value the model did not assert', () => {
+    const prepared = prepareBrandProfileEvalFixture(richFixture);
+    const output = outputFor(prepared);
+    output.factSheet[1].value = 'The DP dosing series supports discharge pressure up to 300 bar.';
+
+    const outcome = evaluateBrandProfileOutput(prepared, output);
+    expect(outcome.acceptedArtifact).toBe(false);
+    expect(outcome.rejectedFactCount).toBe(0);
+    expect(outcome.missingAcceptedTerms).toEqual(['160 bar']);
   });
 
   it('handles schema-legal omissions of optional enrichment sections without crashing', () => {

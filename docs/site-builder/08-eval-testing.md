@@ -34,11 +34,11 @@
 - **auto parts**：检验产品矩阵、兼容/型号事实与测试分支成果。
 - **lab / medical instrument**：检验高信任、合规措辞与信息密度。
 
-约束：至少 1 个 fixture 用 **de-DE/EU** 市场；另建 1 个**不计审美胜率的 ar/RTL 合同 smoke fixture**（考组件库 RTL 承载）。`sparse` = 只有公司名/主营/国家/联系方式；`rich` = 含批准产品/图片/地址/证据素材。
+约束：至少 1 个 fixture 覆盖 **EU 目标市场**；另建 1 个**不计审美胜率的 ar/RTL 合同 smoke fixture**（考组件库 RTL 承载）。`sparse` = 只有公司名/主营/国家/联系方式；`rich` = 含批准产品/图片/地址/证据素材。
 
 作用 = 尽快发现**结构、事实、响应式与"没效果"问题**；**不**用于宣称统计显著、永久终选或跨行业胜率。
 
-**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 `de-DE` rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
+**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 EU 目标市场 rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；BrandProfile 当前没有 locale 输入，故该样本**不**构成 de-DE 本地化验证。桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
 
 ### 1.2 视觉子集：6 扩 12（M1-g）
 

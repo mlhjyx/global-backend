@@ -2,7 +2,6 @@
   "schemaVersion": "brand-profile-eval-fixture/v1",
   "id": "industrial-pump-sparse",
   "industry": "industrial pumps",
-  "locale": "en-US",
   "materialCompleteness": "sparse",
   "companyName": "Northfield Flow Systems",
   "products": ["centrifugal process pumps", "chemical transfer skids"],

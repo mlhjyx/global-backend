@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
 import type { AiContext, GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
+import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
 import { AiTaskError, runAiTask, SiteBuilderTaskDefinition } from './ai-task';
 import type { TaskRoute } from './task-routes';
 
@@ -159,6 +160,18 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(contexts.map((ctx) => ctx.modelPolicy?.fallbackIndex)).toEqual([0, 1]);
   });
 
+  it('保留主选不可用输出已消耗的 token，再由回退返回', async () => {
+    const { gateway } = gatewayReturning(async (input) => {
+      if (input.model === 'model-a') {
+        throw new ProviderOutputError('model-a returned truncated JSON', { inputTokens: 7, outputTokens: 3 });
+      }
+      return okResult(input.model ?? '?');
+    });
+
+    const out = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE });
+    expect(out.usage).toEqual({ inputTokens: 17, outputTokens: 8, calls: 2 });
+  });
+
   it('🔴 stub 兜底拒绝：provider=stub 视为失败换下一模型（假数据绝不充真，fit-judge 先例）', async () => {
     const { gateway } = gatewayReturning(async (i) => {
       if (i.model === 'model-a') {
@@ -182,6 +195,16 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(err).toBeInstanceOf(AiTaskError);
     expect(err.message).toContain('model-a');
     expect(err.message).toContain('model-b');
+  });
+
+  it('全链失败也把 provider 已报告的 token 使用量交给调用者', async () => {
+    const { gateway } = gatewayReturning(async (input) => {
+      throw new ProviderOutputError(`${input.model} invalid JSON`, { inputTokens: 7, outputTokens: 3 });
+    });
+    const err = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AiTaskError);
+    expect((err as AiTaskError).usage).toEqual({ inputTokens: 14, outputTokens: 6, calls: 2 });
   });
 
   it('单模型超时（route.timeoutMs）→ 换下一模型', async () => {

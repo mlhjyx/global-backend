@@ -2,7 +2,6 @@
   "schemaVersion": "brand-profile-eval-fixture/v1",
   "id": "lab-instrument-sparse",
   "industry": "laboratory instruments",
-  "locale": "en-US",
   "materialCompleteness": "sparse",
   "companyName": "ClearBench Instruments",
   "products": ["benchtop orbital shakers", "laboratory sample mixers"],

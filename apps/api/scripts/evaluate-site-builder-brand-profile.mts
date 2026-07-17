@@ -19,7 +19,7 @@ import { ModelProviderRegistry } from '../src/model-gateway/model-provider.regis
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { OpenAICompatibleProvider } from '../src/model-gateway/providers/openai-compatible.provider';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
-import { runAiTask } from '../src/site-builder/agents/ai-task';
+import { AiTaskError, runAiTask } from '../src/site-builder/agents/ai-task';
 import {
   BRAND_PROFILE_TASK,
   evaluateBrandProfileOutput,
@@ -119,7 +119,7 @@ for (const model of models) {
         runs.push({
           model,
           fixtureId: fixture.id,
-          locale: fixture.locale,
+          targetMarkets: fixture.targetMarkets,
           materialCompleteness: fixture.materialCompleteness,
           attempt,
           acceptedArtifact: outcome.acceptedArtifact,
@@ -139,14 +139,22 @@ for (const model of models) {
           },
         });
       } catch (error) {
+        const usage = error instanceof AiTaskError ? error.usage : undefined;
         runs.push({
           model,
           fixtureId: fixture.id,
-          locale: fixture.locale,
+          targetMarkets: fixture.targetMarkets,
           materialCompleteness: fixture.materialCompleteness,
           attempt,
           acceptedArtifact: false,
           elapsedMs: Math.round(performance.now() - started),
+          usage,
+          acceptedArtifactCost: {
+            reportedCostUsd: null,
+            inputTokens: usage?.inputTokens ?? 0,
+            outputTokens: usage?.outputTokens ?? 0,
+            note: 'A failed call can still consume tokens; new-api does not report costUsd for reconciliation.',
+          },
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -166,7 +174,17 @@ const summary = models.map((model) => {
     acceptedArtifacts: accepted.length,
     hardFailures: rows.length - accepted.length,
     p95LatencyMs: percentile95(latencies),
-    tokenTotals: accepted.reduce(
+    attemptedTokenTotals: rows.reduce(
+      (total, row) => {
+        const usage = row.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        return {
+          inputTokens: total.inputTokens + (usage?.inputTokens ?? 0),
+          outputTokens: total.outputTokens + (usage?.outputTokens ?? 0),
+        };
+      },
+      { inputTokens: 0, outputTokens: 0 },
+    ),
+    acceptedArtifactTokenTotals: accepted.reduce(
       (total, row) => {
         const usage = row.usage as { inputTokens?: number; outputTokens?: number } | undefined;
         return {
