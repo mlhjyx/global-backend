@@ -96,6 +96,8 @@ services:
   # into the volume — healthcheck only goes green once the model is present.
   # Ollama upstream: http://embeddings:11434/v1/embeddings (inside Compose).
   # Application traffic goes through new-api at http://localhost:3001/v1/embeddings;
+  # run `pnpm --filter @global/api new-api:ensure-embeddings -- --write-env`
+  # once after New API admin setup to create the private alias + model-limited token.
   # loopback :11434 is retained for local health checks and break-glass diagnostics only.
   embeddings:
     image: ollama/ollama:latest

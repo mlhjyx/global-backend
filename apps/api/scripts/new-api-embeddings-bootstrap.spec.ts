@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   LOCAL_EMBEDDING_CHANNEL_NAME,
   LOCAL_EMBEDDING_MODEL_ALIAS,
+  mergeEmbeddingEnv,
   provisionLocalEmbeddingGateway,
-} from './new-api-embeddings-bootstrap';
+} from '../src/site-builder/new-api-embeddings-bootstrap';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -12,6 +13,25 @@ const json = (body: unknown, status = 200) =>
   });
 
 describe('New API local embedding bootstrap', () => {
+  it('只更新 embedding 配置并保留通用网关配置', () => {
+    const output = mergeEmbeddingEnv(
+      [
+        'MODEL_GATEWAY_KEY=general-secret',
+        'EMBEDDINGS_URL=http://localhost:11434/v1',
+        'EMBEDDINGS_MODEL=bge-m3',
+        'EMBEDDINGS_DIM=1024',
+      ].join('\n'),
+      { apiKey: 'sk-dedicated-secret' },
+      'http://localhost:3001/v1',
+    );
+
+    expect(output).toContain('MODEL_GATEWAY_KEY=general-secret');
+    expect(output).toContain('EMBEDDINGS_URL=http://localhost:3001/v1');
+    expect(output).toContain('EMBEDDINGS_API_KEY=sk-dedicated-secret');
+    expect(output).toContain(`EMBEDDINGS_MODEL=${LOCAL_EMBEDDING_MODEL_ALIAS}`);
+    expect(output).not.toContain('EMBEDDINGS_MODEL=bge-m3\n');
+  });
+
   it('幂等创建本机别名通道、模型受限令牌，并完成真 endpoint 形状检查', async () => {
     const channels: Record<string, unknown>[] = [];
     const tokens: Record<string, unknown>[] = [];
@@ -62,7 +82,7 @@ describe('New API local embedding bootstrap', () => {
     expect(result).toMatchObject({
       channelId: 7,
       tokenId: 2,
-      apiKey: 'dedicated-secret',
+      apiKey: 'sk-dedicated-secret',
       createdChannel: true,
       createdToken: true,
       vectorDimension: 1024,

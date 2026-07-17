@@ -3,6 +3,7 @@ import { KbIngestError } from './kb-errors';
 
 const EMBED_TIMEOUT_MS = 120_000; // CPU 推理留足余量
 const DEFAULT_DIM = 1024; // BGE-M3（D14）
+export const LOCAL_EMBEDDING_MODEL_ALIAS = 'site-builder-bge-m3-local';
 
 interface EmbeddingsResponse {
   data?: { index?: number; embedding?: number[] }[];
@@ -32,7 +33,9 @@ function requestSignal(external?: AbortSignal): AbortSignal {
  */
 @Injectable()
 export class EmbeddingsClient {
-  readonly model = process.env.EMBEDDINGS_MODEL ?? 'bge-m3';
+  // 安全边界：固定请求只由本机 bootstrap 声明的私有别名。不能用 env 把租户
+  // KB 内容改投到公共同名模型；换底模必须走新别名 + 重嵌版本迁移。
+  readonly model = LOCAL_EMBEDDING_MODEL_ALIAS;
   /** 行级 embed_version：换模型/量化档按版本重嵌，不混空间（02 §12）。 */
   readonly version = process.env.EMBEDDINGS_VERSION ?? 'bge-m3:2026-07';
   readonly dim = Number(process.env.EMBEDDINGS_DIM) || DEFAULT_DIM;
@@ -40,20 +43,25 @@ export class EmbeddingsClient {
     firstNonBlank(process.env.EMBEDDINGS_URL, process.env.MODEL_GATEWAY_URL) ??
     'http://localhost:3001/v1'
   ).replace(/\/$/, '');
-  private readonly apiKey = firstNonBlank(
-    process.env.EMBEDDINGS_API_KEY,
-    process.env.MODEL_GATEWAY_KEY,
-  );
+  private readonly apiKey = firstNonBlank(process.env.EMBEDDINGS_API_KEY);
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
+    if (!this.apiKey) {
+      throw new KbIngestError(
+        'KB_EMBEDDING_CONFIGURATION_INVALID',
+        'terminal',
+        'embedding',
+        'EMBEDDINGS_API_KEY must be a dedicated New API token limited to site-builder-bge-m3-local',
+      );
+    }
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/embeddings`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+          authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({ model: this.model, input: texts }),
         signal: requestSignal(signal),
