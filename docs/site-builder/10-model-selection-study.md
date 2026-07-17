@@ -29,7 +29,7 @@
 
 `gemini-omni-flash-preview` 与 `veo-3.1-generate-preview` 只进评测池：Preview 不作为唯一生产依赖。Omni 当前没有独占职责，已由稳定的 `gemini-3.5-flash` 覆盖截图/媒体 QA；这就是基于当前支持型号的平替。`gemini-3.1-flash-image` 缺失时用 `doubao-seedream-5.0-lite`，`gemini-3-pro-image` 缺失时用 `gpt-image-2`，但替代也须真实媒体任务评测后才能 promoted。
 
-**当前网关反证**：2026-07-17 用通用应用令牌读取本机 `/v1/models` 得 39 个可调用型号；上表中 `gpt-5.6-terra/sol`、`claude-sonnet-5`、`gemini-3.5-flash`、`gpt-image-2` 可见，三个 Gemini 图片/Omni 型号不可见。自托管 BGE-M3 不再暴露公共名，只以 `site-builder-bge-m3-local` 私有别名存在；专用令牌只返回该别名，并经真实 `/v1/embeddings` 返回两组 1024 维有限向量。清单可见和单次 embedding 连通都**不能证明**结构化任务、视觉输入、mask 编辑或质量达标；current main 在 #140 合并前仍直连 Ollama。
+**当前网关反证**：2026-07-17 用通用应用令牌读取本机 `/v1/models` 得 39 个可调用型号；上表中 `gpt-5.6-terra/sol`、`claude-sonnet-5`、`gemini-3.5-flash`、`gpt-image-2` 可见，三个 Gemini 图片/Omni 型号不可见。自托管 BGE-M3 不再暴露公共名，只以 `site-builder-bge-m3-local` 私有别名存在；#140 合并并完成 Ubuntu 开发环境切换后，专用令牌只返回该别名，真实 `EmbeddingsClient` 返回两组 1024 维有限向量。清单可见和 embedding 连通都**不能证明**结构化任务、视觉输入、mask 编辑或质量达标，也不代表生产部署。
 
 公开依据入口：[OpenAI GPT-5.6 models](https://developers.openai.com/api/docs/models)、[Anthropic Claude models](https://docs.anthropic.com/en/docs/about-claude/models/overview)、[Gemini models](https://ai.google.dev/gemini-api/docs/models)、[Gemini image generation](https://ai.google.dev/gemini-api/docs/image-generation)、[BGE-M3](https://huggingface.co/BAAI/bge-m3)。更换本组合必须新建 ADR；上线仍须 §0.2.6 的真实 endpoint 与 Golden Set 门。
 
