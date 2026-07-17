@@ -4,6 +4,7 @@ import type { ResearchSource } from "./brand-research";
 import {
   freezeEvidenceSource,
   normalizeEvidenceText,
+  sanitizeEvidenceMetadataText,
   sanitizeEvidenceUrl,
   type FrozenEvidenceSource,
 } from "./evidence-ref";
@@ -98,6 +99,7 @@ export function prepareBrandEvidenceSources(input: {
     if (!body) break;
     used += Array.from(body).length;
     const sourceType = kbSourceType(doc.source);
+    const title = sanitizeEvidenceMetadataText(doc.title);
     kb.push(
       freezeEvidenceSource({
         sourceKey: `kb_document:${doc.documentId}:chunks:${doc.chunks.map((chunk) => chunk.id).join(",")}`,
@@ -110,7 +112,7 @@ export function prepareBrandEvidenceSources(input: {
           kind: "kb_digest_selection",
           documentId: doc.documentId,
           assetId: doc.assetId,
-          title: doc.title,
+          ...(title ? { title } : {}),
           chunks: doc.chunks,
           parserVersion: "kb-digest/2",
         },
@@ -121,6 +123,7 @@ export function prepareBrandEvidenceSources(input: {
 
   const research = input.research.map((source) => {
     const displayUrl = sanitizeEvidenceUrl(source.url);
+    const title = sanitizeEvidenceMetadataText(source.title);
     return freezeEvidenceSource({
       sourceKey: `${source.sourceType}:${displayUrl ?? `invalid-url:${source.upstreamContentHash}`}`,
       sourceType: source.sourceType,
@@ -134,7 +137,7 @@ export function prepareBrandEvidenceSources(input: {
           source.sourceType === "storefront"
             ? "storefront_crawl"
             : "search_result_snippet",
-        title: source.title,
+        ...(title ? { title } : {}),
         parserVersion: source.parserVersion,
         providerContentHash: source.providerContentHash,
       },

@@ -11,6 +11,8 @@ export const EVIDENCE_HASH_ALGORITHM = "sha256" as const;
 export const MAX_EVIDENCE_SNAPSHOT_CODE_POINTS = 20_000;
 export const MAX_EVIDENCE_QUOTE_CODE_POINTS = 512;
 export const MIN_EVIDENCE_QUOTE_CODE_POINTS = 8;
+export const MAX_EVIDENCE_METADATA_CODE_POINTS = 512;
+export const MAX_EVIDENCE_DISPLAY_URL_CODE_POINTS = 2_048;
 const SELECTOR_CONTEXT_CODE_POINTS = 32;
 
 const SENSITIVE_QUERY_KEY =
@@ -98,7 +100,30 @@ export function normalizeEvidenceText(rawText: string): string {
     .join("");
 }
 
-/** Display-only URL: credentials, fragments and common sensitive query values are not retained. */
+/** Free-text provenance metadata follows the same PII/control-character policy as corpus text. */
+export function sanitizeEvidenceMetadataText(
+  rawText: string | undefined,
+): string | undefined {
+  if (!rawText) return undefined;
+  const normalized = normalizeEvidenceText(rawText);
+  if (!normalized) return undefined;
+  return codePoints(normalized)
+    .slice(0, MAX_EVIDENCE_METADATA_CODE_POINTS)
+    .join("");
+}
+
+function sanitizeUrlPathSegment(segment: string): string {
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Keep malformed percent encoding display-only and still scrub visible PII.
+  }
+  const scrubbed = scrubPii(decoded);
+  return scrubbed === decoded ? segment : encodeURIComponent(scrubbed);
+}
+
+/** Display-only URL: credentials, fragments, PII and sensitive query values are not retained. */
 export function sanitizeEvidenceUrl(
   rawUrl: string | undefined,
 ): string | undefined {
@@ -109,12 +134,23 @@ export function sanitizeEvidenceUrl(
     url.username = "";
     url.password = "";
     url.hash = "";
-    for (const key of [...url.searchParams.keys()]) {
-      if (SENSITIVE_QUERY_KEY.test(key)) {
-        url.searchParams.set(key, "[redacted]");
-      }
+    url.pathname = url.pathname
+      .split("/")
+      .map(sanitizeUrlPathSegment)
+      .join("/");
+    const sanitizedQuery = new URLSearchParams();
+    for (const [key, value] of url.searchParams.entries()) {
+      sanitizedQuery.append(
+        scrubPii(key),
+        SENSITIVE_QUERY_KEY.test(key) ? "[redacted]" : scrubPii(value),
+      );
     }
-    return url.toString();
+    url.search = sanitizedQuery.toString();
+    const serialized = url.toString();
+    return codePoints(serialized).length <=
+      MAX_EVIDENCE_DISPLAY_URL_CODE_POINTS
+      ? serialized
+      : undefined;
   } catch {
     return undefined;
   }

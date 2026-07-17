@@ -229,6 +229,52 @@ export interface EvidenceFactItem extends Omit<RawFactItem, 'evidence'> {
   evidence: EvidenceRefV2;
 }
 
+export interface BrandProfilePersistenceOutput {
+  valueProps: string[];
+  tone: { voice: string; style: string[] } | null;
+  glossary: { term: string; definition: string }[];
+  keywords: string[];
+  differentiators: string[];
+  competitors: { name: string; positioning: string }[];
+  factSheet: EvidenceFactItem[];
+  gaps: GapItem[];
+}
+
+/** Scrub every model-controlled free-text field before JSON/relational persistence. */
+export function sanitizeBrandProfilePersistenceOutput(
+  input: BrandProfilePersistenceOutput,
+): BrandProfilePersistenceOutput {
+  return {
+    valueProps: input.valueProps.map(scrubPii),
+    tone: input.tone
+      ? {
+          voice: scrubPii(input.tone.voice),
+          style: input.tone.style.map(scrubPii),
+        }
+      : null,
+    glossary: input.glossary.map((item) => ({
+      term: scrubPii(item.term),
+      definition: scrubPii(item.definition),
+    })),
+    keywords: input.keywords.map(scrubPii),
+    differentiators: input.differentiators.map(scrubPii),
+    competitors: input.competitors.map((item) => ({
+      name: scrubPii(item.name),
+      positioning: scrubPii(item.positioning),
+    })),
+    factSheet: input.factSheet.map((item) => ({
+      ...item,
+      key: scrubPii(item.key),
+      value: scrubPii(item.value),
+    })),
+    gaps: input.gaps.map((item) => ({
+      ...item,
+      field: scrubPii(item.field),
+      hint: scrubPii(item.hint),
+    })),
+  };
+}
+
 /**
  * Evidence 2.0 new-write gate. V1 remains above only to interpret historical inline
  * facts; all newly generated facts require an exact quote bound to a frozen source/hash.
@@ -483,12 +529,32 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
         ],
         properties: {
           sourceId: { type: 'string' },
-          sourceType: { type: 'string', enum: ['upload', 'intake'] },
-          sourceRole: { type: 'string', enum: ['fact_candidate'] },
+          sourceType: { type: 'string', enum: [...EVIDENCE_SOURCE_TYPES] },
+          sourceRole: {
+            type: 'string',
+            enum: ['fact_candidate', 'research_hint'],
+          },
           contentHash: { type: 'string', pattern: '^[0-9a-f]{64}$' },
           content: { type: 'string' },
           title: { type: 'string' },
         },
+        oneOf: [
+          {
+            properties: {
+              sourceType: {
+                type: 'string',
+                enum: ['intake', 'upload', 'storefront'],
+              },
+              sourceRole: { type: 'string', const: 'fact_candidate' },
+            },
+          },
+          {
+            properties: {
+              sourceType: { type: 'string', const: 'web_research' },
+              sourceRole: { type: 'string', const: 'research_hint' },
+            },
+          },
+        ],
       },
     },
     research: {

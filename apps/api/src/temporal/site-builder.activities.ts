@@ -25,11 +25,10 @@ import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
   enforceEvidenceGateV2,
-  EvidenceFactItem,
   GapItem,
   PromptEvidenceSource,
+  sanitizeBrandProfilePersistenceOutput,
   sanitizeProfileForPrompt,
-  scrubPii,
 } from '../site-builder/agents/brand-profile';
 import {
   researchBrand,
@@ -910,36 +909,26 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         ...(result.data.gaps ?? []).map((g) => ({
           field: g.field,
           reason: 'needs_input' as const,
-          hint: scrubPii(g.question),
+          hint: g.question,
         })),
       ];
 
       // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
-      const scrubFact = (f: EvidenceFactItem): EvidenceFactItem => ({
-        ...f,
-        value: scrubPii(f.value),
-      });
-      const clean = {
-        valueProps: (result.data.valueProps ?? []).map(scrubPii),
+      const clean = sanitizeBrandProfilePersistenceOutput({
+        valueProps: result.data.valueProps ?? [],
         tone: result.data.tone
           ? {
-              voice: scrubPii(result.data.tone.voice),
-              style: (result.data.tone.style ?? []).map(scrubPii),
+              voice: result.data.tone.voice,
+              style: result.data.tone.style ?? [],
             }
           : null,
-        glossary: (result.data.glossary ?? []).map((g) => ({
-          term: scrubPii(g.term),
-          definition: scrubPii(g.definition),
-        })),
-        keywords: (result.data.keywords ?? []).map(scrubPii),
-        differentiators: (result.data.differentiators ?? []).map(scrubPii),
-        competitors: (result.data.competitors ?? []).map((c) => ({
-          name: scrubPii(c.name),
-          positioning: scrubPii(c.positioning),
-        })),
-        factSheet: gated.factSheet.map(scrubFact),
-        gaps: gaps.map((g) => ({ ...g, hint: scrubPii(g.hint) })),
-      };
+        glossary: result.data.glossary ?? [],
+        keywords: result.data.keywords ?? [],
+        differentiators: result.data.differentiators ?? [],
+        competitors: result.data.competitors ?? [],
+        factSheet: gated.factSheet,
+        gaps,
+      });
 
       // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
       // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。

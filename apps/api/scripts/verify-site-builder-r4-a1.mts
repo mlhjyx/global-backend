@@ -375,11 +375,36 @@ async function main(): Promise<void> {
       SELECT count(*) AS count
         FROM site_evidence_source_snapshot
        WHERE site_id = ${siteId}::uuid`;
+    const refCount = await owner.brandProfileEvidenceRef.count({
+      where: { siteId },
+    });
+    const visibleRefsA = await app.withWorkspace(workspaceId, (tx) =>
+      tx.brandProfileEvidenceRef.count({ where: { siteId } }),
+    );
+    const visibleRefsB = await app.withWorkspace(otherWorkspaceId, (tx) =>
+      tx.brandProfileEvidenceRef.count({ where: { siteId } }),
+    );
+    const visibleRefsUnset = await app.$queryRaw<{ count: bigint }[]>`
+      SELECT count(*) AS count
+        FROM brand_profile_evidence_ref
+       WHERE site_id = ${siteId}::uuid`;
     check(visibleA === sourceCount, "workspace A can read its snapshots");
     check(visibleB === 0, "workspace B cannot read workspace A snapshots");
     check(
       Number(visibleUnset[0]?.count ?? -1) === 0,
       "unset workspace sees zero snapshots",
+    );
+    check(
+      visibleRefsA === refCount,
+      "workspace A can read its evidence refs",
+    );
+    check(
+      visibleRefsB === 0,
+      "workspace B cannot read workspace A evidence refs",
+    );
+    check(
+      Number(visibleRefsUnset[0]?.count ?? -1) === 0,
+      "unset workspace sees zero evidence refs",
     );
     let crossTenantRejected = false;
     try {
@@ -404,6 +429,35 @@ async function main(): Promise<void> {
       crossTenantRejected = true;
     }
     check(crossTenantRejected, "cross-tenant snapshot provenance is rejected");
+    const firstRef = profile.evidenceRefs[0];
+    let crossTenantRefRejected = false;
+    try {
+      await app.withWorkspace(otherWorkspaceId, (tx) =>
+        tx.brandProfileEvidenceRef.create({
+          data: {
+            id: randomUUID(),
+            workspaceId: otherWorkspaceId,
+            siteId,
+            brandProfileId: profile.id,
+            factIndex: 999,
+            factKey: "cross_tenant_negative",
+            sourceSnapshotId: firstRef.sourceSnapshotId,
+            sourceContentHash: firstRef.sourceContentHash,
+            quote: firstRef.quote,
+            quoteStart: firstRef.quoteStart,
+            quoteEnd: firstRef.quoteEnd,
+            quotePrefix: firstRef.quotePrefix,
+            quoteSuffix: firstRef.quoteSuffix,
+          },
+        }),
+      );
+    } catch {
+      crossTenantRefRejected = true;
+    }
+    check(
+      crossTenantRefRejected,
+      "cross-tenant evidence ref provenance is rejected",
+    );
     let updateRejected = false;
     try {
       await app.withWorkspace(workspaceId, (tx) =>
@@ -416,6 +470,18 @@ async function main(): Promise<void> {
       updateRejected = true;
     }
     check(updateRejected, "app_user cannot mutate a frozen source snapshot");
+    let refUpdateRejected = false;
+    try {
+      await app.withWorkspace(workspaceId, (tx) =>
+        tx.brandProfileEvidenceRef.update({
+          where: { id: firstRef.id },
+          data: { factKey: "tampered" },
+        }),
+      );
+    } catch {
+      refUpdateRejected = true;
+    }
+    check(refUpdateRejected, "app_user cannot mutate a frozen evidence ref");
 
     console.log("\n🎉 verify-site-builder-r4-a1 all sections passed");
   } catch (error) {
@@ -423,18 +489,65 @@ async function main(): Promise<void> {
     throw error;
   } finally {
     for (const runId of runIds) budgetLedger.close(runId, { force: true });
-    await owner.aiTrace
-      .deleteMany({ where: { workspaceId } })
-      .catch(() => undefined);
-    await owner.site
-      .deleteMany({ where: { id: siteId } })
-      .catch(() => undefined);
-    await owner.workspace
-      .deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
-      .catch(() => undefined);
-    await Promise.allSettled([owner.$disconnect(), app.$disconnect()]);
-    if (!verificationError)
+    const cleanupErrors: unknown[] = [];
+    const cleanup = async (
+      label: string,
+      operation: () => Promise<unknown>,
+    ): Promise<void> => {
+      try {
+        await operation();
+      } catch (error) {
+        cleanupErrors.push(
+          new Error(`cleanup ${label} failed`, { cause: error }),
+        );
+      }
+    };
+    await cleanup("ai_trace", () =>
+      owner.aiTrace.deleteMany({ where: { workspaceId } }),
+    );
+    await cleanup("site cascade", () =>
+      owner.site.deleteMany({ where: { id: siteId } }),
+    );
+    await cleanup("workspaces", () =>
+      owner.workspace.deleteMany({
+        where: { id: { in: [workspaceId, otherWorkspaceId] } },
+      }),
+    );
+    await cleanup("residual fixture assertion", async () => {
+      const [sites, workspaces, refs, snapshots] = await Promise.all([
+        owner.site.count({ where: { id: siteId } }),
+        owner.workspace.count({
+          where: { id: { in: [workspaceId, otherWorkspaceId] } },
+        }),
+        owner.brandProfileEvidenceRef.count({ where: { siteId } }),
+        owner.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
+      ]);
+      if (sites + workspaces + refs + snapshots !== 0) {
+        throw new Error(
+          `cleanup verification found residual R4-A1 fixtures: sites=${sites}, workspaces=${workspaces}, refs=${refs}, snapshots=${snapshots}`,
+        );
+      }
+    });
+    for (const result of await Promise.allSettled([
+      owner.$disconnect(),
+      app.$disconnect(),
+    ])) {
+      if (result.status === "rejected") cleanupErrors.push(result.reason);
+    }
+    if (cleanupErrors.length > 0) {
+      console.error(
+        "R4-A1 verifier cleanup failed:",
+        new AggregateError(cleanupErrors),
+      );
+      if (!verificationError) {
+        throw new AggregateError(
+          cleanupErrors,
+          "R4-A1 verifier passed but fixture cleanup failed",
+        );
+      }
+    } else if (!verificationError) {
       console.log("  ✅ isolated verification fixtures removed");
+    }
   }
 }
 
