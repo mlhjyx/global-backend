@@ -76,4 +76,73 @@ describe('prepareBrandEvidenceSources — immutable metadata minimization', () =
     expect(prepared.intake.snapshotText).toContain('https://acme.example/');
     expect(prepared.intake.snapshotText).toContain('token=%5Bredacted%5D');
   });
+
+  it('re-minimizes direct web research inputs at the persistence boundary', () => {
+    const prepared = prepareBrandEvidenceSources({
+      ...BASE,
+      kb: [],
+      research: [
+        {
+          sourceType: 'web_research',
+          sourceRole: 'research_hint',
+          url: 'https://news.example/people/jane-smith?author=Jane+Smith',
+          title: 'CEO Jane Smith',
+          content: 'CEO Jane Smith announced a private acquisition.',
+          fetchedAt: '2026-07-17T00:00:00.000Z',
+          upstreamContentHash: 'c'.repeat(64),
+          parserVersion: 'legacy-searxng-snippet/1',
+        },
+      ],
+    });
+
+    expect(prepared.research[0].displayUrl).toBe('https://news.example/');
+    expect(prepared.research[0].snapshotText).not.toMatch(
+      /Jane Smith|CEO|private acquisition/i,
+    );
+    expect(prepared.research[0].snapshotText).toContain('Acme');
+    expect(prepared.research[0].provenance).not.toHaveProperty('title');
+  });
+
+  it('does not re-freeze legacy web-research KB bodies with unbounded third-party data', () => {
+    const prepared = prepareBrandEvidenceSources({
+      ...BASE,
+      kb: [
+        {
+          source: 'web_research',
+          title: 'CEO Jane Smith',
+          text: 'CEO Jane Smith announced a private acquisition.',
+          documentId: '55555555-5555-4555-8555-555555555555',
+          assetId: null,
+          upstreamContentHash: 'd'.repeat(64),
+          chunks: [
+            {
+              id: '66666666-6666-4666-8666-666666666666',
+              seq: 0,
+              textHash: 'e'.repeat(64),
+            },
+          ],
+        },
+        {
+          source: 'upload',
+          title: 'catalog.pdf',
+          text: 'Acme pumps support 400 bar.',
+          documentId: '77777777-7777-4777-8777-777777777777',
+          assetId: null,
+          upstreamContentHash: null,
+          chunks: [
+            {
+              id: '88888888-8888-4888-8888-888888888888',
+              seq: 0,
+              textHash: 'f'.repeat(64),
+            },
+          ],
+        },
+      ],
+      research: [],
+    });
+
+    expect(prepared.kb).toHaveLength(1);
+    expect(prepared.kb[0].sourceType).toBe('upload');
+    expect(prepared.kb[0].snapshotText).not.toContain('Jane Smith');
+  });
 });
