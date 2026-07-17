@@ -18,6 +18,14 @@ const SELECTOR_CONTEXT_CODE_POINTS = 32;
 const SENSITIVE_QUERY_KEY =
   /(?:^|[_-])(token|key|secret|signature|password|passwd|auth|authorization|credential|jwt|session|code)(?:$|[_-])/i;
 
+function isSensitiveQueryKey(key: string): boolean {
+  const boundaryNormalized = key
+    .normalize("NFKC")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2");
+  return SENSITIVE_QUERY_KEY.test(boundaryNormalized);
+}
+
 export interface FrozenEvidenceSource {
   sourceKey: string;
   sourceType: EvidenceSourceType;
@@ -142,7 +150,7 @@ export function sanitizeEvidenceUrl(
     for (const [key, value] of url.searchParams.entries()) {
       sanitizedQuery.append(
         scrubPii(key),
-        SENSITIVE_QUERY_KEY.test(key) ? "[redacted]" : scrubPii(value),
+        isSensitiveQueryKey(key) ? "[redacted]" : scrubPii(value),
       );
     }
     url.search = sanitizedQuery.toString();
