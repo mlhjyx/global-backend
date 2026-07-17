@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { KbService } from './kb.service';
 
 const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
+const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
 
 function makeService(opts: { embedDim?: number; doclingMd?: string; siteExists?: boolean } = {}) {
   const dim = opts.embedDim ?? 1024;
@@ -569,8 +572,8 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
         assetId: 'asset-1',
         upstreamContentHash: null,
         chunks: [
-          { id: 'c1', seq: 0 },
-          { id: 'c2', seq: 1 },
+          { id: 'c1', seq: 0, textHash: sha256('first') },
+          { id: 'c2', seq: 1, textHash: sha256('second') },
         ],
       }, // queued 的 d2 不参与
     ]);
