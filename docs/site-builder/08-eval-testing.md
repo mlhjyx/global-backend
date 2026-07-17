@@ -2,7 +2,7 @@
 
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
-> **as-built vs target**：本文的**离线评测已覆盖 7 个已落地 AI Task**（`apps/api/src/site-builder/agents/task-routes.ts`：`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`）与 10 个已注册渲染组件（`apps/site-renderer/src/components/Section.astro`）。**审美评审（aesthetic_review）、本地化（localize）、Claim 投影（claim_projection）、视频 QA、DesignEvaluation 契约、通用感检测、shadow/canary 自动化**是**目标态**（M1-d/e/f 与 M2/真实流量后落地），文中逐处标注。26 型封闭组件库是 v1 目标（ADR-015），当前 10 型 as-built。
+> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task（`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`），但当前离线 MODEL-1 评测只实现了有真实工作流消费者的 **BrandProfile 文本子集**；其余 task、截图与渲染组件尚无对应评测消费者，不能宣称已覆盖。**审美评审（aesthetic_review）、本地化（localize）、Claim 投影（claim_projection）、视频 QA、DesignEvaluation 契约、通用感检测、shadow/canary 自动化**是**目标态**（M1-d/e/f 与 M2/真实流量后落地），文中逐处标注。26 型封闭组件库是 v1 目标（ADR-015），当前 10 型 as-built。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 
@@ -61,7 +61,7 @@ Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包
 - **不允许出现的 Claim**、必需页面/section、客观不变量。
 - desktop/tablet/mobile 三尺寸截图 + 确定性 QA 结果。
 - **DesignEvaluation、owner preference 与选择原因**。
-- catalog / model / prompt / schema 版本 + Claim/Offering/Asset snapshot。
+- catalog / model / prompt / schema / evaluator 版本与不可变指纹 + Claim/Offering/Asset snapshot；当前 BrandProfile report 在 header 固定 task、prompt version、output-schema hash、evaluator version/rubric hash，并对每个 fixture/run 固定 fixture 与实际 prompt hash。
 - accepted/rejected artifact、trace、token/latency/cost。
 - 来源许可、是否允许训练、保留策略；**不得混入原始 Tier B 页面语料**（净室边界，ADR-019）。
 

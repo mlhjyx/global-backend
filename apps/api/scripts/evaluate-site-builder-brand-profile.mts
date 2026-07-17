@@ -21,12 +21,16 @@ import { OpenAICompatibleProvider } from '../src/model-gateway/providers/openai-
 import { ProviderOutputError } from '../src/model-gateway/providers/provider-output-error';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import { AiTaskError, runAiTask } from '../src/site-builder/agents/ai-task';
+import { BRAND_PROFILE_PROMPT_VERSION } from '../src/site-builder/agents/brand-profile';
 import {
+  BRAND_PROFILE_EVALUATOR_RUBRIC,
+  BRAND_PROFILE_EVALUATOR_VERSION,
   BRAND_PROFILE_TASK,
   evaluateBrandProfileOutput,
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from '../src/site-builder/eval/brand-profile-eval';
+import { sha256CanonicalJson, sha256Text } from '../src/site-builder/eval/eval-provenance';
 import { resolveTaskRoute, type TaskRoute } from '../src/site-builder/agents/task-routes';
 
 const FIXTURE_DIR = join(
@@ -45,6 +49,20 @@ interface EvalUsage {
   inputTokens?: number;
   outputTokens?: number;
   calls?: number;
+}
+
+interface EvalTaskContract {
+  taskId: string;
+  promptVersion: string;
+  outputSchemaSha256: string;
+  evaluatorVersion: string;
+  evaluatorRubricSha256: string;
+}
+
+interface EvalFixtureContract extends EvalTaskContract {
+  fixtureId: string;
+  fixtureSha256: string;
+  promptSha256: string;
 }
 
 interface EvalProbe {
@@ -74,6 +92,7 @@ interface EvalRun {
   forbiddenOutputTerms?: string[];
   modelSnapshot?: unknown;
   fallbackIndex?: number;
+  taskContract: EvalFixtureContract;
   usage?: EvalUsage;
   acceptedArtifactCost: {
     reportedCostUsd: null;
@@ -197,6 +216,30 @@ if (models.length === 0) throw new Error('MODEL_EVAL_MODELS must contain at leas
 const fixtures = await loadFixtures();
 const runs: EvalRun[] = [];
 const probes: EvalProbe[] = [];
+const taskContract: EvalTaskContract = {
+  taskId: BRAND_PROFILE_TASK.id,
+  promptVersion: BRAND_PROFILE_PROMPT_VERSION,
+  outputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_TASK.outputSchema),
+  evaluatorVersion: BRAND_PROFILE_EVALUATOR_VERSION,
+  evaluatorRubricSha256: sha256CanonicalJson(BRAND_PROFILE_EVALUATOR_RUBRIC),
+};
+const fixtureContracts = new Map<string, EvalFixtureContract>();
+
+function contractForFixture(
+  fixture: BrandProfileEvalFixture,
+  input: Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+): EvalFixtureContract {
+  const existing = fixtureContracts.get(fixture.id);
+  if (existing) return existing;
+  const contract = {
+    ...taskContract,
+    fixtureId: fixture.id,
+    fixtureSha256: sha256CanonicalJson(fixture),
+    promptSha256: sha256Text(BRAND_PROFILE_TASK.buildPrompt(input)),
+  };
+  fixtureContracts.set(fixture.id, contract);
+  return contract;
+}
 
 for (const model of models) {
   const route = candidateRoute(model);
@@ -206,6 +249,7 @@ for (const model of models) {
   if (probe.accepted !== true) continue;
   for (const fixture of fixtures) {
     const prepared = prepareBrandProfileEvalFixture(fixture);
+    const fixtureContract = contractForFixture(fixture, prepared.input);
     for (let attempt = 1; attempt <= repeats; attempt += 1) {
       const started = performance.now();
       try {
@@ -232,6 +276,7 @@ for (const model of models) {
           forbiddenOutputTerms: outcome.forbiddenOutputTerms,
           modelSnapshot: result.modelSnapshot,
           fallbackIndex: result.fallbackIndex,
+          taskContract: fixtureContract,
           usage: result.usage,
           acceptedArtifactCost: {
             reportedCostUsd: null,
@@ -252,6 +297,7 @@ for (const model of models) {
           acceptedArtifact: false,
           elapsedMs: Math.round(performance.now() - started),
           usage,
+          taskContract: fixtureContract,
           acceptedArtifactCost: {
             reportedCostUsd: null,
             inputTokens: usage?.inputTokens ?? 0,
@@ -305,10 +351,12 @@ const summary = models.map((model) => {
 
 const report = JSON.stringify(
   {
-    schemaVersion: 'site-builder-model1-brand-profile-report/v1',
+    schemaVersion: 'site-builder-model1-brand-profile-report/v2',
     generatedAt: new Date().toISOString(),
     repeats,
     fixtureCount: fixtures.length,
+    taskContract,
+    fixtureContracts: [...fixtureContracts.values()],
     probes,
     summary,
     runs,

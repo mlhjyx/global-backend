@@ -1,11 +1,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  BRAND_PROFILE_EVALUATOR_RUBRIC,
+  BRAND_PROFILE_EVALUATOR_VERSION,
   evaluateBrandProfileOutput,
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from './brand-profile-eval';
 import type { BrandProfileOutput } from '../agents/brand-profile';
+import { canonicalJson, sha256CanonicalJson } from './eval-provenance';
 
 const richFixture = JSON.parse(
   readFileSync(new URL('../../../test/fixtures/golden-companies/brand-profile/industrial-pump-rich.json', import.meta.url), 'utf8'),
@@ -59,6 +62,15 @@ function outputFor(
 }
 
 describe('BrandProfile MODEL-1 fixture evaluator', () => {
+  it('exposes a versioned, hashable evaluator contract for model reports', () => {
+    expect(BRAND_PROFILE_EVALUATOR_VERSION).toBe('brand-profile-evaluator/2');
+    expect(canonicalJson({ b: 2, a: [true, null] })).toBe('{"a":[true,null],"b":2}');
+    expect(sha256CanonicalJson({ b: 2, a: [true, null] })).toBe(
+      sha256CanonicalJson({ a: [true, null], b: 2 }),
+    );
+    expect(BRAND_PROFILE_EVALUATOR_RUBRIC.acceptedFactGate).toContain('EvidenceRefV2');
+  });
+
   it('keeps the documented six-fixture bootstrap coverage intact', () => {
     expect(bootstrapFixtures).toHaveLength(6);
     expect(new Set(bootstrapFixtures.map((fixture) => fixture.industry))).toEqual(
