@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Asset, KbDocument, Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { Chunk, chunkMarkdown } from './chunker';
@@ -303,7 +303,17 @@ export class KbService {
     ctx: RequestContext,
     siteId: string,
     opts: { maxDocs?: number; chunksPerDoc?: number } = {},
-  ): Promise<{ source: string; title: string; text: string }[]> {
+  ): Promise<
+    {
+      source: string;
+      title: string;
+      text: string;
+      documentId: string;
+      assetId: string | null;
+      upstreamContentHash: string | null;
+      chunks: { id: string; seq: number; textHash: string }[];
+    }[]
+  > {
     const maxDocs = opts.maxDocs ?? 12;
     const chunksPerDoc = opts.chunksPerDoc ?? 4;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -312,18 +322,42 @@ export class KbService {
         orderBy: { createdAt: 'desc' },
         take: maxDocs,
       });
-      const out: { source: string; title: string; text: string }[] = [];
+      const out: {
+        source: string;
+        title: string;
+        text: string;
+        documentId: string;
+        assetId: string | null;
+        upstreamContentHash: string | null;
+        chunks: { id: string; seq: number; textHash: string }[];
+      }[] = [];
       for (const doc of docs) {
         const chunks = await tx.kbChunk.findMany({
           where: { documentId: doc.id },
           orderBy: { seq: 'asc' },
           take: chunksPerDoc,
-          select: { text: true },
+          select: { id: true, seq: true, text: true },
         });
+        const asset = doc.assetId
+          ? await tx.asset.findUnique({
+              where: { id: doc.assetId },
+              select: { contentHash: true },
+            })
+          : null;
         out.push({
           source: doc.source,
           title: doc.title,
           text: chunks.map((c) => c.text).join('\n'),
+          documentId: doc.id,
+          assetId: doc.assetId,
+          upstreamContentHash: asset?.contentHash ?? null,
+          chunks: chunks.map((chunk) => ({
+            id: chunk.id,
+            seq: chunk.seq,
+            textHash: createHash('sha256')
+              .update(chunk.text, 'utf8')
+              .digest('hex'),
+          })),
         });
       }
       return out;

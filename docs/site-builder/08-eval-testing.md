@@ -176,7 +176,7 @@ export interface DesignEvaluation {
 
 - 所有模型产出的 FactSheet 事实**都须有 quote**，且 quote 命中 `sourceId` 对应的**冻结语料**。
 - value 中的**数字/单位/认证代码/关键专名**必须在 quote 中一致出现，否则降 gap。
-- web 搜索 **snippet 只能进 research_hint/competitors**，不得直接成 publishable fact。
+- 新 A1 写入中，web 搜索原始 **title/snippet/path/query/fragment 一律不冻结**，只保留由站主公司名 + external origin 生成的最小 `research_hint`；旧数据或其他 `research_hint` 仍不得直接成 publishable fact。
 - web_research 若要支撑事实，须**抓取原始权威页并冻结正文 hash**，仍按低信任来源处理。
 - 认证必须**引用 ready 的 cert Asset 或人工 verified**；intake 自填/官网文案不能直接上站。
 - valueProps/differentiators/tone **只能从已过闸的 FactSheet 推导**。
@@ -186,14 +186,14 @@ export interface DesignEvaluation {
 | ID | 代码证据 | 问题 |
 |---|---|---|
 | R4-1 | `enforceEvidenceGate` | 普通事实无 quote 也过；quote 只查"存在于来源"，不查数字/实体/claim 是否被支持 → 可用真实 URL/无关引文给虚构事实洗白 |
-| R4-2 | `brand-research.ts` | 搜索结果只取 snippet 却作 web_research evidence 交给 FactSheet → 摘要可能错配/截断/过时 |
+| R4-2 ✅ A1 隐私半闭环 | `brand-research.ts` | 新写已不冻结原始 title/snippet/path/query/fragment，只生成 origin hint；A2 仍须让任何 `research_hint` 不可发布，并要求事实回抓权威正文 |
 | R4-3 | 认证 evidence | intake/upload 标签 + 任意命中 quote 即放行认证，无强制 ready cert 资产引用 → 自填"ISO"可变成站点事实 |
 
 ### 2.8 视频 QA rubric（M3 目标态）
 
 视频/动效不塞进 M1；QA 契约预埋（v3.2 §21.4 回写）：
 
-- **多模态评审模型**（`multimodal.review`，型号经 ADR-016 档选、不硬编码；当前可用多模态候选 = `gemini-2.5-pro`）**按时间戳输出 finding**；模型不可用时保留**确定性时长/编码/闪烁基础门**。
+- **多模态评审模型**（`multimodal.review`，型号经 ADR-016 档选、不硬编码）**按时间戳输出 finding**；当前已接文本集合中 `minimax-m3` 是视觉候选，但 plan 端点能否接收真实图像输入仍须 M1-f capability probe，未通过不得冒充可用。模型不可用时保留**确定性时长/编码/闪烁基础门**。
 - 检查：产品形状/标签/Logo/人物异常/闪烁/字幕/音画/品牌色/黑帧/违规内容。
 - **关键产品或人物严重漂移直接拒绝 Shot**；低风险缺陷可替换为静态图/上一版镜头。
 - **证据记录要求**：必须记录输入帧/时间戳、rubric、model snapshot 与置信度，**不能只保存总分**（v3.2 §21.4）。
@@ -311,7 +311,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ## 10. 待拍板
 
 1. 真实工厂资料进 Golden Set 的**授权方式**（2~3 家合作工厂：口头授权+书面记录 or 简单授权书模板）。
-2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。当前网关可用模型 = `deepseek-v4-pro`/`v4-flash` + `gemini-2.5-pro`/`gemini-2.5-flash`；建议主 Judge 用 `gemini-2.5-pro`（多模态审美评审）、文案/事实类交叉校验用 `deepseek-v4-pro`（跨 provider）——具体 snapshot 由 MODEL-1 校准后写入 ADR。
+2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。当前已接文本集合 = 方舟 11 个 + DeepSeek `v4-pro/v4-flash`；GPT/Gemini/Claude 尚未接入。不能由通道连通直接指定 Judge；多模态与跨 provider Judge 均须 MODEL-1 用真实输入、固定 snapshot 校准后再写入 ADR。
 3. Bootstrap 6 fixture 的 sparse/rich 素材与期望锚点**由谁产出、何时冻结**（EVAL-bootstrap PR 前置）。
 
 ---

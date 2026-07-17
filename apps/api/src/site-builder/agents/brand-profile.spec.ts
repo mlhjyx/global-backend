@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import { checkAgainstSchema } from '../../model-gateway/schema-validate';
+import * as brandProfileModule from './brand-profile';
 import {
+  BRAND_PROFILE_INPUT_SCHEMA,
   BRAND_PROFILE_OUTPUT_SCHEMA,
   BRAND_PROFILE_TASK,
   buildBrandProfilePrompt,
   canonicalUrl,
   enforceEvidenceGate,
+  enforceEvidenceGateV2,
   EvidenceCorpus,
   RawFactItem,
   sanitizeProfileForPrompt,
   scrubPii,
 } from './brand-profile';
+import { freezeEvidenceSource } from './evidence-ref';
 
 /**
  * brandProfile AiTask（09 §2.4 / 合规 C4 + D1/D2，复审 F1/F2/F3/F4 加固）：
@@ -36,6 +41,95 @@ const fact = (over: Partial<RawFactItem> = {}): RawFactItem => ({
   value: 'High-pressure industrial pumps',
   evidence: { sourceType: 'upload' },
   ...over,
+});
+
+describe('enforceEvidenceGateV2 — all new facts bind exact frozen evidence', () => {
+  const frozen = freezeEvidenceSource({
+    sourceKey: 'kb_document:doc-1',
+    sourceType: 'upload',
+    sourceRole: 'fact_candidate',
+    rawText: 'Pumps up to 400 bar. ISO 9001 certified quality system.',
+    provenance: { documentId: 'doc-1', chunkIds: ['chunk-1'] },
+  });
+  const sources = new Map([['source-1', frozen]]);
+
+  it('hydrates a server-owned EvidenceRef v2 and returns a persistence row', () => {
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          evidence: {
+            sourceType: 'upload',
+            sourceId: 'source-1',
+            contentHash: frozen.contentHash,
+            quote: 'Pumps up to 400 bar',
+          },
+        }),
+      ],
+      { sources, createEvidenceRefId: () => 'ref-1' },
+    );
+
+    expect(out.gaps).toEqual([]);
+    expect(out.factSheet[0].evidence).toMatchObject({
+      version: 2,
+      evidenceRefId: 'ref-1',
+      sourceId: 'source-1',
+      contentHash: frozen.contentHash,
+      quote: 'Pumps up to 400 bar',
+    });
+    expect(out.refs).toEqual([
+      expect.objectContaining({ evidenceRefId: 'ref-1' }),
+    ]);
+  });
+
+  it('rejects ordinary facts without an exact quote (v1 permissive behavior is read-only legacy)', () => {
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          evidence: {
+            sourceType: 'upload',
+            sourceId: 'source-1',
+            contentHash: frozen.contentHash,
+          },
+        }),
+      ],
+      { sources, createEvidenceRefId: () => 'ref-1' },
+    );
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.gaps[0].reason).toBe('missing_evidence');
+  });
+
+  it('retains the existing certification rule: web-research-only certification is still a gap', () => {
+    const hint = freezeEvidenceSource({
+      sourceKey: 'search:https://directory.example/acme',
+      sourceType: 'web_research',
+      sourceRole: 'research_hint',
+      rawText: 'Acme is ISO 9001 certified.',
+      displayUrl: 'https://directory.example/acme',
+      provenance: { parserVersion: 'searxng-snippet/1' },
+    });
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          key: 'certifications',
+          value: 'ISO 9001 certified',
+          evidence: {
+            sourceType: 'web_research',
+            sourceId: 'hint-1',
+            contentHash: hint.contentHash,
+            quote: 'ISO 9001 certified',
+          },
+        }),
+      ],
+      {
+        sources: new Map([['hint-1', hint]]),
+        createEvidenceRefId: () => 'ref-1',
+      },
+    );
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.gaps[0].reason).toBe('unverified_certification');
+  });
 });
 
 describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
@@ -283,6 +377,86 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
   ])('不误删普通中文或无合法域名的 @ 文本：%s', (input) => {
     expect(scrubPii(input)).toBe(input);
   });
+
+  it('落库清洗覆盖 fact key 与 gap field，而不只清洗 value/hint', () => {
+    const sanitize = (
+      brandProfileModule as typeof brandProfileModule & {
+        sanitizeBrandProfilePersistenceOutput?: (
+          input: Record<string, unknown>,
+        ) => Record<string, unknown>;
+      }
+    ).sanitizeBrandProfilePersistenceOutput;
+
+    expect(sanitize).toBeTypeOf('function');
+    if (!sanitize) return;
+    const out = sanitize({
+      valueProps: [],
+      tone: null,
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      factSheet: [
+        {
+          key: 'Contact alice@example.com',
+          value: 'Call +49 30 1234567',
+          evidence: { evidenceRefId: 'ref-1' },
+        },
+      ],
+      gaps: [
+        {
+          field: 'Owner bob@example.com',
+          reason: 'needs_input',
+          hint: 'Call +49 30 7654321',
+        },
+      ],
+    }) as {
+      factSheet: { key: string; value: string }[];
+      gaps: { field: string; hint: string }[];
+    };
+
+    expect(out.factSheet[0]).toMatchObject({
+      key: 'Contact [redacted-email]',
+      value: 'Call [redacted-phone]',
+    });
+    expect(out.gaps[0]).toMatchObject({
+      field: 'Owner [redacted-email]',
+      hint: 'Call [redacted-phone]',
+    });
+  });
+});
+
+describe('BRAND_PROFILE_INPUT_SCHEMA — frozen KB source compatibility', () => {
+  it.each([
+    ['storefront', 'fact_candidate'],
+    ['web_research', 'research_hint'],
+  ] as const)('accepts ready KB documents preserved as %s/%s', (sourceType, sourceRole) => {
+    const result = checkAgainstSchema(BRAND_PROFILE_INPUT_SCHEMA, {
+      companyName: 'Acme',
+      products: ['pumps'],
+      targetMarkets: ['DE'],
+      intakeSource: {
+        sourceId: 'intake-source',
+        sourceType: 'intake',
+        sourceRole: 'fact_candidate',
+        contentHash: 'a'.repeat(64),
+        content: 'Company: Acme',
+      },
+      kbSources: [
+        {
+          sourceId: `kb-${sourceType}`,
+          sourceType,
+          sourceRole,
+          contentHash: 'b'.repeat(64),
+          content: 'Frozen ready KB content.',
+          title: 'source.txt',
+        },
+      ],
+      research: [],
+    });
+
+    expect(result).toEqual({ valid: true });
+  });
 });
 
 describe('BRAND_PROFILE_OUTPUT_SCHEMA — C4 结构性排除个人字段', () => {
@@ -318,11 +492,29 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     industry: 'industrial pumps',
     products: ['high-pressure pumps'],
     targetMarkets: ['DE', 'US'],
-    profile: { companyProfile: { founded: 2001 } },
-    kbDigest: '[来源:upload | catalog.pdf]\nPumps up to 400 bar.',
+    intakeSource: {
+      sourceId: 'intake-1',
+      sourceType: 'intake' as const,
+      sourceRole: 'fact_candidate' as const,
+      contentHash: 'a'.repeat(64),
+      content: 'Company: Acme GmbH\nFounded: 2001',
+    },
+    kbSources: [
+      {
+        sourceId: 'kb-1',
+        sourceType: 'upload' as const,
+        sourceRole: 'fact_candidate' as const,
+        contentHash: 'b'.repeat(64),
+        title: 'catalog.pdf',
+        content: '[来源:upload | catalog.pdf]\nPumps up to 400 bar.',
+      },
+    ],
     research: [
       {
+        sourceId: 'research-1',
         sourceType: 'web_research' as const,
+        sourceRole: 'research_hint' as const,
+        contentHash: 'c'.repeat(64),
         url: 'https://fair.example/exhibitors/acme',
         title: 'fair',
         content: 'exhibitor Acme',
@@ -335,7 +527,8 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     const prompt = buildBrandProfilePrompt(input);
     expect(prompt).toContain('Acme GmbH');
     expect(prompt).toContain('[来源:upload | catalog.pdf]');
-    expect(prompt).toContain('https://fair.example/exhibitors/acme');
+    expect(prompt).not.toContain('https://fair.example/exhibitors/acme');
+    expect(prompt).not.toContain('(fair)');
     expect(prompt).toMatch(/绝不编造/);
     expect(prompt).toMatch(/具名个人/);
     expect(prompt).toMatch(/视为.{0,4}数据/); // 资料中的指令性文字一律当数据
@@ -344,7 +537,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
   it('无 KB、无研究源时槽位标注「无」（模型不猜空槽位）', () => {
     const prompt = buildBrandProfilePrompt({
       ...input,
-      kbDigest: '',
+      kbSources: [],
       research: [],
     });
     expect(prompt).toMatch(/知识库[^]{0,10}(无|空)/);
@@ -358,5 +551,44 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(required).toEqual(
       expect.arrayContaining(['companyName', 'products']),
     );
+  });
+
+  it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
+    const prompt = buildBrandProfilePrompt({
+      ...input,
+      intakeSource: {
+        sourceId: 'intake-source-1',
+        sourceType: 'intake',
+        sourceRole: 'fact_candidate',
+        contentHash: 'a'.repeat(64),
+        content: 'Company: Acme GmbH\nProducts: high-pressure pumps',
+      },
+      kbSources: [
+        {
+          sourceId: 'kb-source-1',
+          sourceType: 'upload',
+          sourceRole: 'fact_candidate',
+          contentHash: 'b'.repeat(64),
+          title: 'catalog.pdf',
+          content: 'Pumps up to 400 bar.',
+        },
+      ],
+      research: [
+        {
+          ...input.research[0],
+          sourceId: 'hint-source-1',
+          sourceRole: 'research_hint',
+          contentHash: 'c'.repeat(64),
+          upstreamContentHash: 'd'.repeat(64),
+          parserVersion: 'searxng-snippet/1',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('source_id=intake-source-1');
+    expect(prompt).toContain(`sha256=${'a'.repeat(64)}`);
+    expect(prompt).toContain('source_id=kb-source-1');
+    expect(prompt).toContain('source_role=research_hint');
+    expect(prompt).toMatch(/每项.*quote|quote.*每项/);
   });
 });

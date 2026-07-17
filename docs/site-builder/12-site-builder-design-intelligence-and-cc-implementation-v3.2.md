@@ -3,6 +3,7 @@
 > ⚠️ **已归档为 dated proposal（2026-07-16）**——本文是 ChatGPT 起草的**外部设计草稿**，**非权威、不作施工依据、不再更新正文**。接受内容已由 DOC-12 的 **PR #119（commit `eaf6063`）与补漏 PR #120（commit `c7ea690`）** 分发进活文档和 ADR；各落点以「v3.2 §X 回写」标记提供逐节 provenance。
 > **权威真值 = 当前代码 + `docs/site-builder/` 00-14 + [ADR registry](../adr/registry.md) + [当前状态](../status/current.md) + [施工路线](../roadmap/release-plan.md)**。本文仅保留当时提案与审计快照，不能覆盖 #121/#123/#124 等后来事实。曾用于 DOC-12 的 `overnight-plan.md` 是会话临时 scratchpad、**未提交入仓且不是可持续引用**；持久 provenance 只认 #119/#120 的 Git diff、活文档回写标记与 ADR-013~019。
 > 下文 `CC/Claude` 是 2026-07-15 的历史角色与工具称谓；**当前开发主体已改为 Codex**，不得据此恢复旧责任、权限或施工入口。
+> **2026-07-17 漂移提示（不改历史正文）**：§24.6 所写“R3-B2 尚待完成”、§26 `R1-min` 把本地 pointer 列作待办，以及合并的 `R4-A` 均已被活文档 supersede。R3-B2 已完成本地 durable artifact/原子 symlink pointer，但不等于生产 R1-min；生产对象存储 Release、跨节点恢复/回收与 unknown component 门仍待。R4-A 已拆为已完成的 A1（冻结来源 + EvidenceRef v2 引用完整性）与待完成的 A2（Claim truth bridge/value 对齐/snippet/认证发布门）。下一施工序以 09/roadmap 为准：**R4-A2 → R4-B-min → M1-d**。
 
 > 版本：v3.2（CC 评审裁决、最新 main 对账与多源设计学习版）  
 > 日期：2026-07-15  

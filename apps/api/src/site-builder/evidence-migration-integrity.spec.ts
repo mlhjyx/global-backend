@@ -1,0 +1,160 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const repo = path.resolve(import.meta.dirname, '../../../..');
+const migration = readFileSync(
+  path.join(
+    repo,
+    'packages/db/prisma/migrations/20260717120000_site_builder_r4a1_evidence_v2/migration.sql',
+  ),
+  'utf8',
+);
+const schema = readFileSync(
+  path.join(repo, 'packages/db/prisma/schema.prisma'),
+  'utf8',
+);
+const grantHardening = readFileSync(
+  path.join(
+    repo,
+    'packages/db/prisma/migrations/20260717121000_site_builder_r4a1_evidence_grant_hardening/migration.sql',
+  ),
+  'utf8',
+);
+const profileHardeningPath = path.join(
+  repo,
+  'packages/db/prisma/migrations/20260717122000_site_builder_r4a1_brand_profile_append_only/migration.sql',
+);
+const profileHardening = existsSync(profileHardeningPath)
+  ? readFileSync(profileHardeningPath, 'utf8')
+  : '';
+const verifier = readFileSync(
+  path.join(repo, 'apps/api/scripts/verify-site-builder-r4-a1.mts'),
+  'utf8',
+);
+
+describe('R4-A1 Evidence 2.0 database invariants', () => {
+  it('fails closed on historical BrandProfile tenant mismatches before replacing the FK', () => {
+    expect(migration).toContain("SET LOCAL lock_timeout = '5s'");
+    expect(migration).toContain('SET LOCAL row_security = off');
+    expect(migration).toMatch(
+      /brand_profile[\s\S]+JOIN "site"[\s\S]+workspace_id[\s\S]+RAISE EXCEPTION/i,
+    );
+    expect(migration).toContain(
+      'DROP CONSTRAINT "brand_profile_site_id_fkey"',
+    );
+    expect(migration).toMatch(
+      /FOREIGN KEY \("site_id", "workspace_id"\)[\s\S]+REFERENCES "site"\("id", "workspace_id"\)/,
+    );
+  });
+
+  it('stores immutable frozen source snapshots with bounded roles, hashes and provenance', () => {
+    expect(migration).toContain('CREATE TABLE "site_evidence_source_snapshot"');
+    for (const column of [
+      'workspace_id',
+      'site_id',
+      'source_key',
+      'source_type',
+      'source_role',
+      'hash_algorithm',
+      'content_hash',
+      'upstream_content_hash',
+      'normalization_version',
+      'snapshot_text',
+      'display_url',
+      'fetched_at',
+      'provenance',
+      'dedupe_key',
+    ]) {
+      expect(migration).toContain(`"${column}"`);
+    }
+    expect(migration).toMatch(/source_role.+fact_candidate.+research_hint/is);
+    expect(migration).toMatch(/content_hash.+\^\[0-9a-f\]\{64\}\$/is);
+    expect(migration).toMatch(/upstream_content_hash.+\^\[0-9a-f\]\{64\}\$/is);
+    expect(migration).toMatch(/CREATE TRIGGER.+evidence.+immutable/is);
+  });
+
+  it('binds every EvidenceRef to the same profile/site/workspace and exact source hash', () => {
+    expect(migration).toContain('CREATE TABLE "brand_profile_evidence_ref"');
+    expect(migration).toMatch(
+      /FOREIGN KEY \("brand_profile_id", "workspace_id", "site_id"\)[\s\S]+REFERENCES "brand_profile"\("id", "workspace_id", "site_id"\)/,
+    );
+    expect(migration).toMatch(
+      /FOREIGN KEY \("source_snapshot_id", "workspace_id", "site_id", "source_content_hash"\)[\s\S]+REFERENCES "site_evidence_source_snapshot"\("id", "workspace_id", "site_id", "content_hash"\)/,
+    );
+    expect(migration).toMatch(/quote_start.+>= 0/is);
+    expect(migration).toMatch(/quote_end.+quote_start/is);
+  });
+
+  it('forces symmetric RLS and gives app_user no arbitrary source/ref update or delete', () => {
+    for (const table of [
+      'site_evidence_source_snapshot',
+      'brand_profile_evidence_ref',
+    ]) {
+      expect(migration).toContain(
+        `ALTER TABLE "${table}" FORCE ROW LEVEL SECURITY`,
+      );
+      expect(migration).toMatch(
+        new RegExp(
+          `CREATE POLICY "${table}_tenant_isolation"[\\s\\S]+USING \\(\\"workspace_id\\" = current_workspace_id\\(\\)\\)[\\s\\S]+WITH CHECK \\(\\"workspace_id\\" = current_workspace_id\\(\\)\\)`,
+        ),
+      );
+      expect(migration).toContain(
+        `GRANT SELECT, INSERT ON TABLE "${table}" TO app_user`,
+      );
+      expect(migration).not.toContain(
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "${table}" TO app_user`,
+      );
+    }
+    expect(grantHardening).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "site_evidence_source_snapshot" FROM app_user',
+    );
+    expect(grantHardening).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "brand_profile_evidence_ref" FROM app_user',
+    );
+  });
+
+  it('keeps existing rows on v1 and makes only new writes opt into v2', () => {
+    expect(migration).toContain(
+      '"evidence_schema_version" INTEGER NOT NULL DEFAULT 1',
+    );
+    expect(migration).not.toMatch(/UPDATE\s+"brand_profile"/i);
+    expect(schema).toContain('evidenceSchemaVersion Int');
+    expect(schema).toContain('model SiteEvidenceSourceSnapshot {');
+    expect(schema).toContain('model BrandProfileEvidenceRef {');
+  });
+
+  it('makes the BrandProfile root append-only with its immutable v2 refs', () => {
+    expect(profileHardening).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "brand_profile" FROM app_user',
+    );
+    expect(profileHardening).toContain(
+      'REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE "brand_profile" FROM app_user',
+    );
+    expect(profileHardening).toContain(
+      'CREATE TRIGGER brand_profile_append_only',
+    );
+    expect(verifier).toContain(
+      'app_user has SELECT+INSERT only on the immutable Evidence 2.0 graph',
+    );
+    expect(verifier).toContain('app_user cannot mutate a BrandProfile root');
+    expect(verifier).toContain('app_user cannot delete a BrandProfile root');
+    expect(verifier).toContain('owner cannot mutate a BrandProfile root');
+  });
+
+  it('verifies both immutable ledgers symmetrically and cannot claim cleanup after swallowing failures', () => {
+    expect(verifier).toMatch(/tx\.brandProfileEvidenceRef\.count/);
+    expect(verifier).toContain(
+      'workspace B cannot read workspace A evidence refs',
+    );
+    expect(verifier).toContain(
+      'cleanup verification found residual R4-A1 fixtures',
+    );
+    expect(verifier.indexOf('tx.brandProfileEvidenceRef.count')).toBeLessThan(
+      verifier.indexOf('const liveResearch = await researchBrand'),
+    );
+    expect(verifier).not.toMatch(
+      /owner\.site[\s\S]{0,160}\.catch\(\(\) => undefined\)/,
+    );
+  });
+});

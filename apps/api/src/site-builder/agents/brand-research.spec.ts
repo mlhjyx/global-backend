@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { researchBrand } from './brand-research';
@@ -38,6 +39,8 @@ const ARGS = {
   industry: 'industrial pumps',
   websiteUrl: 'https://acme.example',
 };
+const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
 
 describe('researchBrand — 正常链路', () => {
   it('自有官网 crawl → storefront 源；搜索结果 → web_research 源（排除自域名防重复计源）', async () => {
@@ -51,13 +54,26 @@ describe('researchBrand — 正常链路', () => {
     expect(out.degraded).toBe(false);
     const storefront = out.sources.filter((s) => s.sourceType === 'storefront');
     expect(storefront).toHaveLength(1);
-    expect(storefront[0].url).toBe('https://acme.example');
+    expect(storefront[0]).toMatchObject({
+      url: 'https://acme.example',
+      sourceRole: 'fact_candidate',
+      upstreamContentHash: sha256('We build pumps since forever.'),
+      providerContentHash: 'h',
+      parserVersion: 'crawl4ai/1',
+    });
     const web = out.sources.filter((s) => s.sourceType === 'web_research');
     expect(web.map((s) => s.url)).toEqual([
-      'https://directory.example/acme',
-      'https://fair.example/exhibitors/acme',
+      'https://directory.example/',
+      'https://fair.example/',
     ]); // 自域名 acme.example 结果被剔除
     for (const s of out.sources) expect(s.fetchedAt).toBeTruthy();
+    for (const s of web) {
+      expect(s.sourceRole).toBe('research_hint');
+      expect(s.upstreamContentHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(s.parserVersion).toBe('searxng-origin-hint/1');
+      expect(s.content.length).toBeLessThanOrEqual(500);
+      expect(s.title).toBeUndefined();
+    }
   });
 
   it('全部出网带 taskContractId=site_builder.brand_profile（Broker allowedTools 白名单按它裁决）', async () => {
@@ -114,7 +130,7 @@ describe('researchBrand — 正常链路', () => {
     );
     const out = await researchBrand({ broker }, { ...ARGS, websiteUrl: 'https://www.acme.example' });
     const webUrls = out.sources.filter((s) => s.sourceType === 'web_research').map((s) => s.url);
-    expect(webUrls).toEqual(['https://directory.example/acme']); // 两个自域名变体都被剔除
+    expect(webUrls).toEqual(['https://directory.example/']); // 两个自域名变体都被剔除
   });
 
   it('无 websiteUrl → 只搜索不 crawl', async () => {
@@ -122,6 +138,36 @@ describe('researchBrand — 正常链路', () => {
     const out = await researchBrand({ broker }, { ...ARGS, websiteUrl: undefined });
     expect(invocations.every((c) => c.toolId === 'searxng.search')).toBe(true);
     expect(out.sources.every((s) => s.sourceType === 'web_research')).toBe(true);
+  });
+
+  it('🔴 C4：第三方搜索 title/snippet/路径中的具名个人不进入冻结候选', async () => {
+    const { broker } = brokerWith(async (toolId) =>
+      toolId === 'searxng.search'
+        ? {
+            data: {
+              results: [
+                {
+                  title: 'Acme appoints Jane Smith as CEO',
+                  url: 'https://news.example/people/jane-smith?author=Jane+Smith',
+                  content: 'CEO Jane Smith announced a new pump factory.',
+                },
+              ],
+            },
+          }
+        : { data: { url: 'https://acme.example', text: 'pumps', contentHash: 'h' } },
+    );
+
+    const out = await researchBrand({ broker }, ARGS);
+    const hint = out.sources.find((source) => source.sourceType === 'web_research');
+
+    expect(hint).toMatchObject({
+      url: 'https://news.example/',
+      sourceRole: 'research_hint',
+      parserVersion: 'searxng-origin-hint/1',
+    });
+    expect(hint).not.toHaveProperty('title');
+    expect(hint?.content).not.toMatch(/Jane Smith|CEO|new pump factory/i);
+    expect(hint?.content).toContain('Acme GmbH');
   });
 });
 

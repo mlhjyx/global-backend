@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B + M1-c + R3-A + R3-B1/B2 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B + M1-c + R3-A + R3-B1/B2 + R4-A1 更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -15,14 +15,15 @@
 
 ### 当前关键路径与退出门
 
-1. **R1-safety ✅ 2026-07-17 完成**：两个小 PR 分别完成 (a) SiteSpec 随机 0700/0600 临时物化、成功/异常 `finally` 清理、Renderer 固定入口与 7 变量 env allowlist；(b) 移除 Ubuntu fake-IP 的 `CRAWL4AI_ALLOW_INTERNAL_URLS`，在 API 与 Crawl4AI 两层落 global-unicast 校验、fake-IP-only 固定 DoH 回退、连接 pinning、redirect 逐跳重验及响应上限。`websiteUrl → brand research → crawl4ai`、robots 与 `http.get` 均受控，公网正例和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机负例全绿。R1-min 其余 per-run staging、不可变 artifact、active pointer 原子切换、unknown component fail-closed 可与 R2/M1-c 并行，但必须在 M1-e 可见预览前完成。
+1. **R1-safety ✅ 2026-07-17 完成**：两个小 PR 分别完成 (a) SiteSpec 随机 0700/0600 临时物化、成功/异常 `finally` 清理、Renderer 固定入口与 7 变量 env allowlist；(b) 移除 Ubuntu fake-IP 的 `CRAWL4AI_ALLOW_INTERNAL_URLS`，在 API 与 Crawl4AI 两层落 global-unicast 校验、fake-IP-only 固定 DoH 回退、连接 pinning、redirect 逐跳重验及响应上限。`websiteUrl → brand research → crawl4ai`、robots 与 `http.get` 均受控，公网正例和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机负例全绿。R3-B2 后来补齐了本地 run-scoped durable artifact 与原子 symlink pointer；R1-min 剩余的生产对象存储 Release、跨节点恢复/回收与 unknown component fail-closed 仍必须在 M1-e 可见预览前完成。
 2. **R2-A 正确性门（拆分 PR）✅**：R2-A1 Asset、R2-A2 KB、R2-A3 Profile schema/乐观并发、R2-A4 staging cleanup/公共错误码/跨系统集成均已收口；canonical 删除明确不属于 A4。禁止回退成 migration/API/状态机 mega PR。
 3. **MF-0-thin（连续两个独立交付，总范围不缩水）**：
    - **MF0-A ✅ 2026-07-17 完成**：`AssetVariant` + RLS/FORCE RLS、单输出 recipe/checksum/复合 provenance、ready+checksummed source 门、MIME→规范扩展名精确绑定的 Variant 专属对象键、不可改写行身份/来源账本与 RLS-safe 脏升级 fail-closed 预检、`derivedKeys` 响应式共享合同及纯兼容投影；真 PostgreSQL A/B/unset 隔离、并发 unique、增量/空库 44 migrations 与 schema diff=0 已验证。仅为 Ubuntu 开发环境，不代表生产部署。
    - **MF0-B ✅ 2026-07-17 完成**：Profile+当前 activeVersion SiteSpec 引用扫描、删除 409、共享 Asset 锁/Variant trigger、同 hash producer barrier、严格 canonical+Variant Temporal 回收、legacy quarantine 与 parked 对账；真 PG/MinIO/Temporal/replay 已验。
 4. **M1-c ✅ 2026-07-17 完成**：纯 Sharp 确定性图片管线；未加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage、公开 process/select API 或 Renderer `<picture>`。Renderer 固定 Variant 消费仍归 M1-e。
 5. **R3-A ✅ 2026-07-17 完成**：BuildRun 复合租户 provenance FK（父 workspace 更新 `NO ACTION`）、合法状态 CHECK、每站 active 单飞部分唯一索引、nullable Temporal workflow identity 与确定性历史回填已落；迁移带有界锁/语句超时，对脏 provenance/状态/重复 active fail-closed。验证只发生在 Ubuntu 开发环境，不代表生产部署。
-6. **R3-B1/B2 ✅ 2026-07-17 当前交付分支**：B1 完成 Build API/严格 options/请求指纹幂等/Temporal 双 ID ACK；B2 完成 active SiteSpec 的 page/section/pages 确定性局部合并与 `SiteBuildStep` 单调 phase/progress/attempt/replay/终态。全站 `stylePreset` 禁止与局部 scope 混用；非 en 在 M1-d 前继续 422，不冒充已翻译。真 PostgreSQL+Temporal 在 Ubuntu 隔离开发环境验证，不代表生产部署。**下一施工顺序：R4-A1 → R4-A2 → R4-B-min**（见 09 §10.6/§11），之后才进入 **M1-d 多 locale 文案 + CopyBundle**。同时推进独立 R1-min 原子预览安全 PR，保证 M1-e 可见预览前完成 active pointer/unknown component fail-closed 门。
+6. **R3-B1/B2 ✅ 2026-07-17 当前交付分支**：B1 完成 Build API/严格 options/请求指纹幂等/Temporal 双 ID ACK；B2 完成 active SiteSpec 的 page/section/pages 确定性局部合并与 `SiteBuildStep` 单调 phase/progress/attempt/replay/终态。全站 `stylePreset` 禁止与局部 scope 混用；非 en 在 M1-d 前继续 422，不冒充已翻译。真 PostgreSQL+Temporal 在 Ubuntu 隔离开发环境验证，不代表生产部署。本地 durable artifact/原子 pointer 已完成，但不冒充生产 R1-min。
+7. **R4-A1 ✅ 2026-07-17 当前交付分支**：冻结有界 intake/KB/storefront/research 语料，落不可变、FORCE RLS 的 source snapshot 与事实级 EvidenceRef v2；服务端校验 source/type/SHA-256/精确 quote/Unicode selector，旧 BrandProfile v1 只兼容读取、不伪造回填。迁移 additive/forward-only，应用角色仅可读/追加；真 PostgreSQL/RLS + SearXNG/Crawl4AI/BGE-M3/DeepSeek 已验证且无公开 OpenAPI 变化。**下一施工顺序：R4-A2 → R4-B-min**（见 09 §10.6/§11），之后才进入 **M1-d 多 locale 文案 + CopyBundle**。A2 单独负责 Claim/Evidence truth bridge、value/quote 语义对齐、snippet 发布降级与 cert Asset/人工 verified 发布门；B-min 负责幂等和成本真值。
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 

@@ -1248,11 +1248,12 @@ model Site {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  versions      SiteVersion[]
-  buildRuns     SiteBuildRun[]
-  assets        Asset[]
-  documents     KbDocument[]
-  brandProfiles BrandProfile[]
+  versions                SiteVersion[]
+  buildRuns               SiteBuildRun[]
+  assets                  Asset[]
+  documents               KbDocument[]
+  brandProfiles           BrandProfile[]
+  evidenceSourceSnapshots SiteEvidenceSourceSnapshot[]
 
   @@unique([slug])
   @@unique([id, workspaceId], map: "site_id_workspace_id_key")
@@ -1455,26 +1456,82 @@ model KbChunk {
 }
 
 /// P1 理解产物（09 §2.1，M1）：品牌事实/语调/术语，版本化追加不覆盖。
-/// 🔴 factSheet 每项 {value, evidence:{sourceType, url?, fetchedAt?}}——无 evidence 的事实进 gaps，绝不虚构。
+/// 🔴 v1 factSheet 保留 inline citation；v2 每项由 EvidenceRefV2 + 不可变关系行精确绑定冻结 source/hash/quote。
 model BrandProfile {
-  id               String   @id @default(uuid()) @db.Uuid
-  workspaceId      String   @map("workspace_id") @db.Uuid
-  siteId           String   @map("site_id") @db.Uuid
-  version          Int // 站内递增（brandProfile 每次重跑追加新版本）
-  valueProps       Json?    @map("value_props")
-  tone             Json?
-  glossary         Json?
-  keywords         Json?
-  differentiators  Json?
-  competitors      Json?
-  factSheet        Json?    @map("fact_sheet")
-  gaps             Json? // 待补资料清单 → GET /sites/{id}/kb/status
-  researchDegraded Boolean  @default(false) @map("research_degraded") // web 研究失败仅 KB 出 Brief
-  createdAt        DateTime @default(now()) @map("created_at")
+  id                    String   @id @default(uuid()) @db.Uuid
+  workspaceId           String   @map("workspace_id") @db.Uuid
+  siteId                String   @map("site_id") @db.Uuid
+  version               Int // 站内递增（brandProfile 每次重跑追加新版本）
+  valueProps            Json?    @map("value_props")
+  tone                  Json?
+  glossary              Json?
+  keywords              Json?
+  differentiators       Json?
+  competitors           Json?
+  factSheet             Json?    @map("fact_sheet")
+  gaps                  Json? // 待补资料清单 → GET /sites/{id}/kb/status
+  researchDegraded      Boolean  @default(false) @map("research_degraded") // web 研究失败仅 KB 出 Brief
+  evidenceSchemaVersion Int      @default(1) @map("evidence_schema_version") // 1=legacy inline citation; 2=EvidenceRef frozen provenance
+  createdAt             DateTime @default(now()) @map("created_at")
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site         Site                      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_site_workspace_fkey")
+  evidenceRefs BrandProfileEvidenceRef[]
 
   @@unique([siteId, version])
+  @@unique([id, workspaceId, siteId], map: "brand_profile_id_workspace_site_key")
   @@index([workspaceId])
   @@map("brand_profile")
+}
+
+/// Evidence 2.0 immutable model-visible corpus, scrubbed and bounded before hashing.
+model SiteEvidenceSourceSnapshot {
+  id                   String    @id @default(uuid()) @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  siteId               String    @map("site_id") @db.Uuid
+  sourceKey            String    @map("source_key")
+  sourceType           String    @map("source_type") // intake | upload | storefront | web_research
+  sourceRole           String    @map("source_role") // fact_candidate | research_hint
+  hashAlgorithm        String    @default("sha256") @map("hash_algorithm")
+  contentHash          String    @map("content_hash") // frozen snapshot_text SHA-256
+  upstreamContentHash  String?   @map("upstream_content_hash") // object/crawl/chunk upstream hash, never substituted for content_hash
+  normalizationVersion String    @map("normalization_version")
+  snapshotText         String    @map("snapshot_text")
+  displayUrl           String?   @map("display_url")
+  fetchedAt            DateTime? @map("fetched_at")
+  provenance           Json
+  dedupeKey            String    @map("dedupe_key")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  site         Site                      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "site_evidence_source_snapshot_site_scope_fkey")
+  evidenceRefs BrandProfileEvidenceRef[]
+
+  @@unique([siteId, dedupeKey], map: "site_evidence_source_snapshot_site_dedupe_key")
+  @@unique([id, workspaceId, siteId, contentHash], map: "site_evidence_source_snapshot_scope_hash_key")
+  @@index([workspaceId, siteId, sourceType], map: "site_evidence_source_snapshot_workspace_site_type_idx")
+  @@map("site_evidence_source_snapshot")
+}
+
+/// Fact-level immutable binding from a BrandProfile v2 fact to its exact frozen source quote.
+model BrandProfileEvidenceRef {
+  id                String   @id @default(uuid()) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  siteId            String   @map("site_id") @db.Uuid
+  brandProfileId    String   @map("brand_profile_id") @db.Uuid
+  factIndex         Int      @map("fact_index")
+  factKey           String   @map("fact_key")
+  sourceSnapshotId  String   @map("source_snapshot_id") @db.Uuid
+  sourceContentHash String   @map("source_content_hash")
+  quote             String
+  quoteStart        Int      @map("quote_start")
+  quoteEnd          Int      @map("quote_end")
+  quotePrefix       String?  @map("quote_prefix")
+  quoteSuffix       String?  @map("quote_suffix")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  brandProfile   BrandProfile               @relation(fields: [brandProfileId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_evidence_ref_profile_scope_fkey")
+  sourceSnapshot SiteEvidenceSourceSnapshot @relation(fields: [sourceSnapshotId, workspaceId, siteId, sourceContentHash], references: [id, workspaceId, siteId, contentHash], onDelete: NoAction, onUpdate: NoAction, map: "brand_profile_evidence_ref_source_scope_hash_fkey")
+
+  @@unique([brandProfileId, factIndex], map: "brand_profile_evidence_ref_profile_fact_key")
+  @@index([workspaceId, siteId, sourceSnapshotId], map: "brand_profile_evidence_ref_workspace_site_source_idx")
+  @@map("brand_profile_evidence_ref")
 }

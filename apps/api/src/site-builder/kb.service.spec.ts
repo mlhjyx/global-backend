@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { KbService } from './kb.service';
 
 const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
+const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
 
 function makeService(opts: { embedDim?: number; doclingMd?: string; siteExists?: boolean } = {}) {
   const dim = opts.embedDim ?? 1024;
@@ -551,17 +554,28 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
   it('digestSources：只取 ready 文档、每文档按 seq 取前 N 块拼正文', async () => {
     const { service, db } = makeService();
     db.docs.push(
-      { id: 'd1', siteId: SITE_ID, source: 'upload', title: 'catalog.pdf', status: 'ready', createdAt: new Date('2026-07-02') },
+      { id: 'd1', siteId: SITE_ID, assetId: 'asset-1', source: 'upload', title: 'catalog.pdf', status: 'ready', createdAt: new Date('2026-07-02') },
       { id: 'd2', siteId: SITE_ID, source: 'intake', title: '注册资料', status: 'queued', createdAt: new Date('2026-07-03') },
     );
     db.chunks.push(
-      { documentId: 'd1', seq: 1, text: 'second' },
-      { documentId: 'd1', seq: 0, text: 'first' },
-      { documentId: 'd1', seq: 2, text: 'third' },
+      { id: 'c2', documentId: 'd1', seq: 1, text: 'second' },
+      { id: 'c1', documentId: 'd1', seq: 0, text: 'first' },
+      { id: 'c3', documentId: 'd1', seq: 2, text: 'third' },
     );
     const sources = await service.digestSources(CTX, SITE_ID, { chunksPerDoc: 2 });
     expect(sources).toEqual([
-      { source: 'upload', title: 'catalog.pdf', text: 'first\nsecond' }, // queued 的 d2 不参与
+      {
+        source: 'upload',
+        title: 'catalog.pdf',
+        text: 'first\nsecond',
+        documentId: 'd1',
+        assetId: 'asset-1',
+        upstreamContentHash: null,
+        chunks: [
+          { id: 'c1', seq: 0, textHash: sha256('first') },
+          { id: 'c2', seq: 1, textHash: sha256('second') },
+        ],
+      }, // queued 的 d2 不参与
     ]);
   });
 });

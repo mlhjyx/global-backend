@@ -228,10 +228,10 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 | ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
 | 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-v4-pro（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
 | 3 | 图片管线 imagePipeline | 产品/工厂图生成安全可发布的响应式派生件 | 原图 → 多尺寸 webp/avif + fallback | **M1-c 确定性零模型（纯 Sharp）** | 目标固定序：MIME/像素/解码炸弹检查→方向与 sRGB→重编码去 EXIF/GPS→质量门→安全裁切/focal point→多尺寸导出→`AssetVariant`；原图不可变、单图失败隔离。rembg、超分、生成式背景重绘、视觉质检与 pHash/embedding 主体校验均属 M1-c2/M3 后置能力，出现真实消费者、同意与 provider 门后另行落地（ADR-018） |
-| 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | gemini-2.5-pro（多语言） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
+| 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | deepseek-v4-pro（fallback `glm-5.2` → `doubao-seed-2.0-pro`） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
 | 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 Seedance 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | Seedance（火山，异步任务轮询） | 每站视频条数配额；视频失败自动降级动效 |
-| 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | gemini-2.5-pro（视觉） | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
-| 7 | 组装 siteAssembly + assemblyFix | 产出/修补 SiteSpec | DesignSpec+文案+素材清单 → SiteSpec；findings → SiteSpec patch | claude-sonnet-5（网关有则首选）或 deepseek-v4-pro | 输出必过 zod schema+素材引用存在性+内链有效性（确定性校验器），不过=带错误重试 |
+| 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | DesignSpec 当前 `minimax-m3`；审美视觉输入须在 M1-f 真探后才激活 | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
+| 7 | 组装 siteAssembly + assemblyFix | 产出/修补 SiteSpec | DesignSpec+文案+素材清单 → SiteSpec；findings → SiteSpec patch | `glm-5.2`（fallback `deepseek-v4-pro`） | 输出必过 zod schema+素材引用存在性+内链有效性（确定性校验器），不过=带错误重试 |
 | 8 | 审核 qa | 功能/性能体检 | 构建产物 → findings | deepseek-v4-flash（只做汇总） | **主体是确定性工具**：Playwright 遍历（链接/表单/响应式 3 断点/console error）+ Lighthouse（性能/a11y/SEO 基线分） |
 | 9 | SEO seo | 技术 SEO+关键词落位 | 构建产物+Brand Brief → findings+patch 建议 | deepseek-v4-flash | 确定性检查：meta/OG/schema.org(Organization+Product)/sitemap/robots/**hreflang 多语言**/图 alt；关键词→页面映射 |
 
@@ -243,7 +243,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ## 6. 模型选型（**四态路由现役档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
 
-> 本表是**当前路由（currentRoute，as-built）**，不是永久终选——ADR-016 四态路由：`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + `deterministicFallback`。「推荐 ≠ 代码已切换」，候选**只经 Golden Set 回归 + 成本/质量门**晋级，非采购承诺。Agent 卡只绑 **ModelProfile 语义档**（能力/成本/延迟约束），不硬编码型号；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 供历史重放。定档方法：三任务形状本地网关真实调用评测（确定性判分+延迟实测）+ 外部信源 + 用户拍板。「现役」列今天即可真跑（方舟 agent plan 10 文本模型 + seedream 已接通实测，deepseek 直连双档已接）；「升级位」待通道接入后按同套评测题复测再切。
+> 本表是**当前路由（currentRoute，as-built）**，不是永久终选——ADR-016 四态路由：`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + `deterministicFallback`。「推荐 ≠ 代码已切换」，候选**只经 Golden Set 回归 + 成本/质量门**晋级，非采购承诺。Agent 卡只绑 **ModelProfile 语义档**（能力/成本/延迟约束），不硬编码型号；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 供历史重放。定档方法：三任务形状本地网关真实调用评测（确定性判分+延迟实测）+ 外部信源 + 用户拍板。「现役」列只使用已接通集合中的 task-shaped 评测子集（方舟 agent plan 当前 11 个文本模型，2026-07-17 通道批测 11/11 成功；DeepSeek 直连双档已接）；通道连通不等于结构化长任务通过，「升级位」待接入后按同套评测题复测再切。
 
 | Agent/用途 | 现役主选（实测背书） | 回退链 | 升级位（通道待接） |
 |---|---|---|---|
@@ -267,10 +267,10 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 - Judge 尽量不与 candidate 同 provider；先跑确定性门再盲评，防高文风掩盖事实错误。
 
 **网关通道现状与待接清单**：
-1. ✅ **火山方舟 agent plan**（已接，2026-07-14 实测）：10 文本模型（doubao-seed-2.0 全家/kimi 双档/glm-5.2/minimax 双档）+ seedream-5.0-lite 图像；plan 专属路径 `/api/plan/*`（文本 OpenAI 型通道、图像 Custom 型完整 URL——type 45 火山适配器与 plan 路径不兼容）
+1. ✅ **火山方舟 agent plan**（已接；2026-07-17 通道批测）：11 个文本模型全部连通——`doubao-seed-2.0-pro/lite/mini/code`、`kimi-k2.6`、`kimi-k2.7-code`、`kimi-k3`、`glm-5.2`、`glm-latest`、`minimax-m2.7`、`minimax-m3`；另有已登记的 seedream-5.0-lite 图像能力。plan 专属路径 `/api/plan/*`（文本 OpenAI 型通道、图像 Custom 型完整 URL——type 45 火山适配器与 plan 路径不兼容）。批测只证明连通，结构化输出/视觉输入/长任务仍逐 task 真探
 2. ✅ **DeepSeek 直连**（既有）：deepseek-v4-flash/pro 双档（plan 内同名双档为尝鲜限流版，不绑避免分流）
 3. ⬜ OpenAI 通道 → **GPT-5.6 Terra/Luna**（勿接 5.5，已被 5.6 三档取代）+ gpt-image-2（须确认 `images/edits` 端点转发）
-4. ⬜ Google 通道 → gemini-3.1-pro + gemini-3-flash（现 Gemini 通道额度耗尽 429）
+4. ⬜ Google 通道 → gemini-3.1-pro + gemini-3-flash（当前尚未接入）
 5. ⬜ Anthropic 通道 → claude-sonnet-5（可选；8/31 前介绍价窗口）
 
 ⚠️ **视频已知坑**（M3 前置）：new-api 对豆包视频任务中转有失败案例（[QuantumNous/new-api issue #2174](https://github.com/QuantumNous/new-api/issues/2174)）——接入时先升级 new-api 最新版实测；中转不稳则**方案 B**：视频 activity 后端直连火山方舟任务接口（异步轮询），key 集中配置，成本照记 `site_build_run.cost_summary`，其余模型不受影响仍统一网关。且 seedance 在 agent plan 中仅 Large/Max 档可用（已实测现档位 UnsupportedModel）。🔴 **视频不得进入 Demo v0 10s 路径**（§4.1）；C2PA/Content Credentials 可后续记录，但**不作 M1 阻断项**（v3.2 §21.3）。
