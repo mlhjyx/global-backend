@@ -70,13 +70,15 @@ export function prepareBrandEvidenceSources(input: {
   kb: KbEvidenceDigestSource[];
   research: ResearchSource[];
 }): PreparedBrandEvidence {
+  const intakeWebsiteUrl =
+    sanitizeEvidenceUrl(input.intake.websiteUrl ?? undefined) ?? "not provided";
   const intakeText = [
     `Company name (English): ${input.intake.company.nameEn ?? "not provided"}`,
     `Company name (Chinese): ${input.intake.company.nameZh}`,
     `Industry: ${input.intake.industry || "not provided"}`,
     `Products: ${input.intake.products.join(", ") || "not provided"}`,
     `Target markets: ${input.intake.targetMarkets.join(", ") || "not provided"}`,
-    `Company website: ${input.intake.websiteUrl ?? "not provided"}`,
+    `Company website: ${intakeWebsiteUrl}`,
     `Site owner profile: ${stableJson(input.profile ?? {})}`,
   ].join("\n");
   const intake = freezeEvidenceSource({
