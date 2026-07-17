@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B + M1-c 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B + M1-c + R3-A 更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -21,7 +21,8 @@
    - **MF0-A ✅ 2026-07-17 完成**：`AssetVariant` + RLS/FORCE RLS、单输出 recipe/checksum/复合 provenance、ready+checksummed source 门、MIME→规范扩展名精确绑定的 Variant 专属对象键、不可改写行身份/来源账本与 RLS-safe 脏升级 fail-closed 预检、`derivedKeys` 响应式共享合同及纯兼容投影；真 PostgreSQL A/B/unset 隔离、并发 unique、增量/空库 44 migrations 与 schema diff=0 已验证。仅为 Ubuntu 开发环境，不代表生产部署。
    - **MF0-B ✅ 2026-07-17 完成**：Profile+当前 activeVersion SiteSpec 引用扫描、删除 409、共享 Asset 锁/Variant trigger、同 hash producer barrier、严格 canonical+Variant Temporal 回收、legacy quarantine 与 parked 对账；真 PG/MinIO/Temporal/replay 已验。
 4. **M1-c ✅ 2026-07-17 完成**：纯 Sharp 确定性图片管线；未加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage、公开 process/select API 或 Renderer `<picture>`。Renderer 固定 Variant 消费仍归 M1-e。
-5. **下一施工批次：R3 + R4-A + R4-B-min**（见 09 §10.6/§11），这是 M1-d 的权威前置；三门完成后才进入 **M1-d 多 locale 文案 + CopyBundle**。同时推进独立 R1-min 原子预览安全 PR，保证 M1-e 可见预览前完成 active pointer/unknown component fail-closed 门。
+5. **R3-A ✅ 2026-07-17 完成**：BuildRun 复合租户 provenance FK（父 workspace 更新 `NO ACTION`）、合法状态 CHECK、每站 active 单飞部分唯一索引、nullable Temporal workflow identity 与确定性历史回填已落；迁移带有界锁/语句超时，对脏 provenance/状态/重复 active fail-closed。验证只发生在 Ubuntu 开发环境，不代表生产部署。
+6. **下一施工顺序：R3-B → R4-A1 → R4-A2 → R4-B-min**（见 09 §10.6/§11）。R3-B 收 API/Idempotency-Key/Temporal ACK/增量进度；R4-A 拆 Evidence 2.0 机械门与 Claim/Evidence truth bridge，避免 mega PR；之后才进入 **M1-d 多 locale 文案 + CopyBundle**。同时推进独立 R1-min 原子预览安全 PR，保证 M1-e 可见预览前完成 active pointer/unknown component fail-closed 门。
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 

@@ -1293,13 +1293,14 @@ model SiteBuildRun {
   progress      Float     @default(0)
   steps         Json? // 步骤明细 [{key,status,at}]
   costSummary   Json?     @map("cost_summary") // 预算 reserve-settle 汇总
+  temporalWorkflowId String? @map("temporal_workflow_id")
   temporalRunId String?   @map("temporal_run_id")
   error         String?
   startedAt     DateTime? @map("started_at")
   finishedAt    DateTime? @map("finished_at")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([workspaceId, siteId])
   @@map("site_build_run")
