@@ -273,10 +273,11 @@ try {
       ),
     'successful workflow persists terminal step attempts',
   );
-  const livePreview = path.join(previewRoot(), pageSlug);
+  const livePreview = path.join(previewRoot(), '.active', pageSlug);
+  const versionPreview = path.join(previewRoot(), '.versions', pageRunId);
   const stagingPreview = path.join(previewRoot(), '.staging', pageRunId);
   check(
-    pageResult.version.artifactKey === `local:${livePreview}` &&
+    pageResult.version.artifactKey === `local:${versionPreview}` &&
       (await access(path.join(livePreview, 'index.html')).then(
         () => true,
         () => false,
@@ -285,7 +286,7 @@ try {
         () => true,
         () => false,
       )),
-    'successful CAS promotes run staging to the live preview and records the live artifact',
+    'successful CAS records an immutable version and atomically points the live preview at it',
   );
 
   console.log('② real Temporal cancellation terminalizes unfinished steps');
@@ -397,6 +398,11 @@ try {
       recursive: true,
       force: true,
     }),
+    rm(path.join(previewRoot(), '.versions', pageRunId), {
+      recursive: true,
+      force: true,
+    }),
+    rm(path.join(previewRoot(), '.active', pageSlug), { force: true }),
   ]);
   await owner.site
     .deleteMany({

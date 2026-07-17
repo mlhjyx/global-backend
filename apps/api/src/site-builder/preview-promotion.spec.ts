@@ -1,4 +1,12 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,43 +22,72 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'preview-promotion-'));
   roots.push(root);
-  const live = path.join(root, 'acme');
+  const oldVersion = path.join(root, '.versions', 'old-run');
   const staging = path.join(root, '.staging', 'run-1');
-  await mkdir(live, { recursive: true });
-  await mkdir(staging, { recursive: true });
-  await writeFile(path.join(live, 'index.html'), 'old');
-  await writeFile(path.join(staging, 'index.html'), 'candidate');
-  return { root, live };
+  const activeDir = path.join(root, '.active');
+  const active = path.join(activeDir, 'acme');
+  await Promise.all([
+    mkdir(oldVersion, { recursive: true }),
+    mkdir(staging, { recursive: true }),
+    mkdir(activeDir, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(path.join(oldVersion, 'index.html'), 'old'),
+    writeFile(path.join(staging, 'index.html'), 'candidate'),
+  ]);
+  await symlink(path.join('..', '.versions', 'old-run'), active, 'dir');
+  return { root, active, staging };
 }
 
 describe('preparePreviewPromotion', () => {
-  it('restores the previously served preview when the DB transaction fails', async () => {
-    const { root, live } = await fixture();
+  it('keeps the old served pointer while the DB transaction is uncommitted and restores staging on rollback', async () => {
+    const { root, active, staging } = await fixture();
     const promotion = await preparePreviewPromotion({
       root,
       slug: 'acme',
       buildRunId: 'run-1',
     });
-    expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe(
+    expect(await readFile(path.join(active, 'index.html'), 'utf8')).toBe('old');
+    await promotion.rollback();
+    expect(await readFile(path.join(active, 'index.html'), 'utf8')).toBe('old');
+    expect(await readFile(path.join(staging, 'index.html'), 'utf8')).toBe(
       'candidate',
     );
-    await promotion.rollback();
-    expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe('old');
   });
 
-  it('keeps the candidate and removes rollback state after commit', async () => {
-    const { root, live } = await fixture();
+  it('atomically replaces only the active symlink after commit', async () => {
+    const { root, active } = await fixture();
     const promotion = await preparePreviewPromotion({
       root,
       slug: 'acme',
       buildRunId: 'run-1',
     });
+    expect(await readFile(path.join(active, 'index.html'), 'utf8')).toBe('old');
     await promotion.commit();
-    expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe(
+    expect(await readlink(active)).toBe(path.join('..', '.versions', 'run-1'));
+    expect(await readFile(path.join(active, 'index.html'), 'utf8')).toBe(
       'candidate',
     );
-    await expect(
-      readFile(path.join(root, '.rollback', 'run-1', 'index.html')),
-    ).rejects.toThrow();
+  });
+
+  it('reconstructs a pending pointer after a post-commit Activity crash', async () => {
+    const { root, active } = await fixture();
+    const first = await preparePreviewPromotion({
+      root,
+      slug: 'acme',
+      buildRunId: 'run-1',
+    });
+    // Simulate process death after DB commit: immutable version exists, pending pointer is lost.
+    await rm(path.join(root, '.active', '.pending-run-1'), { force: true });
+    void first;
+    const retry = await preparePreviewPromotion({
+      root,
+      slug: 'acme',
+      buildRunId: 'run-1',
+    });
+    await retry.commit();
+    expect(await readFile(path.join(active, 'index.html'), 'utf8')).toBe(
+      'candidate',
+    );
   });
 });

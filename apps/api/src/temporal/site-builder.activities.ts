@@ -180,6 +180,10 @@ function previewStagingDir(buildRunId: string): string {
   return path.join(previewRoot(), '.staging', buildRunId);
 }
 
+function previewVersionDir(buildRunId: string): string {
+  return path.join(previewRoot(), '.versions', buildRunId);
+}
+
 function previewLiveDir(slug: string): string {
   return path.join(previewRoot(), slug);
 }
@@ -1126,7 +1130,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
           if (input.scope?.baseVersionId) {
             const activated = await tx.site.updateMany({
-              where: { id: siteId, activeVersionId: input.scope.baseVersionId },
+              where: {
+                id: siteId,
+                activeVersionId: {
+                  in: [input.scope.baseVersionId, build.versionId],
+                },
+              },
               data: { activeVersionId: build.versionId, status: 'ready' },
             });
             if (activated.count !== 1) {
@@ -1142,26 +1151,32 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }
           if (input.progressV1) {
             const stagingArtifact = `local:${previewStagingDir(buildRunId)}`;
+            const versionArtifact = `local:${previewVersionDir(buildRunId)}`;
             const liveArtifact = `local:${previewLiveDir(build.previewSlug)}`;
-            // A finalize Activity result may be lost after commit. In that replay, both the active
-            // pointer and artifactKey already describe the promoted preview, so no second swap occurs.
+            // liveArtifact only supports executions completed by the short-lived pre-fix branch.
+            // Current executions prepare an immutable hidden version and atomically replace the
+            // served .active symlink only after this transaction commits. On Activity retry the
+            // version artifact already exists, so preparePreviewPromotion reconstructs the pointer.
             if (targetVersion.artifactKey !== liveArtifact) {
-              if (targetVersion.artifactKey !== stagingArtifact) {
+              if (
+                targetVersion.artifactKey !== stagingArtifact &&
+                targetVersion.artifactKey !== versionArtifact
+              ) {
                 throw new Error(
                   `site version ${build.versionId} has unexpected preview artifact`,
                 );
               }
-              // The pointer CAS above is the publication gate. Keep the former live directory as a
-              // rollback copy until Prisma confirms this transaction committed.
               promotion = await preparePreviewPromotion({
                 root: previewRoot(),
                 slug: build.previewSlug,
                 buildRunId,
               });
-              await tx.siteVersion.update({
-                where: { id: build.versionId },
-                data: { artifactKey: liveArtifact },
-              });
+              if (targetVersion.artifactKey === stagingArtifact) {
+                await tx.siteVersion.update({
+                  where: { id: build.versionId },
+                  data: { artifactKey: versionArtifact },
+                });
+              }
             }
           }
         });
@@ -1178,15 +1193,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         throw error;
       }
       if (promotion) {
-        try {
-          await promotion.commit();
-        } catch (cleanupError) {
-          // Publication is already committed. A retained rollback directory is safe garbage and
-          // must not turn a successful workflow into a retry that could re-publish.
-          log.warn(
-            `preview rollback-copy cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
-          );
-        }
+        // DB activeVersionId/artifactKey are committed before the only served-pointer mutation.
+        // A crash or rename failure leaves the old pointer visible; Temporal retries this Activity
+        // and reconstructs the pending link from the durable immutable version directory.
+        await promotion.commit();
       }
       // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
       budgetLedger.close(buildRunId, { force: true });

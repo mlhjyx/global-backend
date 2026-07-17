@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ServeStaticModule } from '@nestjs/serve-static';
-import path from 'node:path';
 import { PrismaModule } from './prisma/prisma.module';
 import { WsThrottlerGuard } from './common/ws-throttler.guard';
 import { AuthModule } from './auth/auth.module';
@@ -20,6 +19,7 @@ import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
+import { previewStaticOptions } from './site-builder/preview-static';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -34,13 +34,10 @@ import { SiteBuilderModule } from './site-builder/site-builder.module';
         limit: Number(process.env.THROTTLE_LIMIT) || 300,
       },
     ]),
-    // 本地预览雏形（site-builder M0）：/preview/{slug}/ → 构建产物目录。
-    // M1 迁独立预览域 + 边缘节点（05 §1），此处仅 dev 直出。
-    ServeStaticModule.forRoot({
-      rootPath: process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites'),
-      serveRoot: '/preview',
-      serveStaticOptions: { index: ['index.html'], fallthrough: true },
-    }),
+    // 本地预览雏形（site-builder M0）：新构建从 .active/<slug> 原子 symlink 指针直出；
+    // 第二项只为旧 demo_v0 的 root/<slug> 实目录提供兼容 fallback。禁用 SPA catch-all，
+    // 让首个静态根 miss 后真正落到 legacy 根，而不是抢先 sendFile。
+    ServeStaticModule.forRoot(...previewStaticOptions()),
     PrismaModule,
     AuthModule,
     ModelGatewayModule,

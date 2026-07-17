@@ -339,7 +339,12 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
         }),
       ).rejects.toThrow('active SiteVersion changed');
       expect(updateMany).toHaveBeenCalledWith({
-        where: { id: 'site-1', activeVersionId: 'base-version' },
+        where: {
+          id: 'site-1',
+          activeVersionId: {
+            in: ['base-version', 'candidate-version'],
+          },
+        },
         data: { activeVersionId: 'candidate-version', status: 'ready' },
       });
       expect(update).not.toHaveBeenCalled();
