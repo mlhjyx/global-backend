@@ -96,9 +96,12 @@ export class EmbeddingsClient {
     }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      const configurationError = res.status === 401 || res.status === 403;
       throw new KbIngestError(
-        'KB_EMBEDDING_UNAVAILABLE',
-        'retryable',
+        configurationError
+          ? 'KB_EMBEDDING_CONFIGURATION_INVALID'
+          : 'KB_EMBEDDING_UNAVAILABLE',
+        configurationError ? 'terminal' : 'retryable',
         'embedding',
         `embeddings endpoint ${res.status}: ${body.slice(0, 300)}`,
       );
