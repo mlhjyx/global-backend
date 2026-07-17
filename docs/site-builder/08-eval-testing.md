@@ -332,10 +332,10 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 - [ ] 首个付费 fan-out 前预算 reserve/settle、AiTrace、costSummary 可持久对账。
 
 ### DoD-2 M1-c 媒体基础与图片
-- [ ] AssetVariant additive migration/RLS/recipe 幂等/derivedKeys 兼容/回滚通过；M1-c 不预建 MediaJob/AssetUsage。（ADR-018 / 14）
-- [ ] M1-c 纯 Sharp；原图 immutable；EXIF/GPS/方向/色彩/响应式格式真测。
-- [ ] active SiteSpec 引用素材不可删（→409）；对象/DB/checksum 可对账；MF-1 后无感切 AssetUsage。
-- [ ] video/audio/poster/caption 演进方向已记录，但 M1 不调 video/TTS provider。
+- [x] AssetVariant additive migration/RLS/recipe 幂等/derivedKeys 兼容/回滚通过；M1-c 不预建 MediaJob/AssetUsage。（MF0-A/B + M1-c verifier；ADR-018 / 14）
+- [x] M1-c 纯 Sharp；原图 immutable；EXIF/GPS/方向/色彩/透明与响应式格式由实际 Sharp fixture/开发环境 MinIO 对账覆盖；不把编码子进程描述为生产容器/cgroup 隔离。
+- [x] active SiteSpec 引用素材不可删（→409）；对象/DB/checksum 可对账；MF-1 后无感切 AssetUsage。（MF0-B + M1-c verifier）
+- [x] video/audio/poster/caption 演进方向已记录，且 M1-c 未调用 video/TTS provider。（14 §6–7）
 
 ### DoD-3 M1-d~g 内容、设计与质量
 - [ ] 6 Family 各 ≥2 首页 + 2 内页 Blueprint，差异可解释；26 组件 schema/Astro/fixture/a11y/content budget/visual test 一致。（04 / 13）

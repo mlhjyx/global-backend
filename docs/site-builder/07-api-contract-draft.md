@@ -58,7 +58,7 @@ GET  /sites/{id}/profile
 
 五组均为 `additionalProperties:false` 的有界 schema；未知顶层/嵌套字段、非法关系/数量/字符串/URL/Asset 引用返回 `422 PROFILE_VALIDATION_FAILED`。请求与合并后的完整 Profile 均不超过 64 KiB；组上限分别为 company 8 / trust 24 / online 12 / brand 8 / contact 8 KiB。URL 只存规范化 `http/https`，PATCH 不做 DNS/HTTP、抓取、模型、Temporal 或 build；真正消费 URL 时仍须重新过 SSRF/redirect/pinning 门。`contact` 继续禁止进入 KB、embedding、Brand Prompt 与 Trace；其余自由文本在进入 Brand Prompt/证据语料前递归遮蔽 ASCII、SMTPUTF8、IDN/punycode 邮箱与电话号码。Profile 使用独立 UUID CAS token，不复用 `updatedAt`、`SiteVersion` 或活动发布指针。
 
-## 3. 素材（Asset）〔🟢 M0 端点 + ✅ R2-A1 状态机 · 🎯 M1-c：process/select-variant〕
+## 3. 素材（Asset）〔🟢 M0 端点 + ✅ R2-A1/MF0/M1-c 内部管线〕
 
 上传三步：`presign → PUT 直传 → commit`（内容寻址，canonical key 由 content hash 决定，copy 幂等）。
 
@@ -69,9 +69,9 @@ POST /sites/{id}/assets/presign  { "kind":"product_image", "filename":"a.jpg", "
   → { "assetId":"ast_…", "uploadUrl":"<presigned>", "expiresAt":"…" }        // 422=类型/大小拒绝
 POST /assets/{assetId}/commit → { "assetId", "processingStatus":"queued|ready" } // 魔数/大小/去重 → 归位；doc 类进 KB 队列
 GET  /sites/{id}/assets?kind=&page= → [{ id, kind, processingStatus, thumbUrl(签名短效), usedIn:[sectionId] }]
-GET  /assets/{assetId}         → 单资产详情（含 variants 列表，M1-c 后）
-POST /assets/{assetId}/process       // 🎯 M1-c：确定性 Sharp 管线（方向/sRGB/剥 EXIF-GPS/多尺寸/AVIF+WebP+fallback）
-POST /assets/{assetId}/select-variant { "variantId":"…" }  // 🎯 M1-c：从已生成 AssetVariant 选定供 SiteSpec 引用
+GET  /assets/{assetId}         → 单资产详情（含 variants 列表；待前端真实消费者再落）
+POST /assets/{assetId}/process       // 后续按需入口；M1-c as-built 由 refurbish Temporal P2 内部调用
+POST /assets/{assetId}/select-variant { "variantId":"…" }  // M1-e：选择属于 page/component usage，随 SiteSpec variant 引用落地
 DELETE /assets/{assetId}       // 引用检查见下（409 ASSET_IN_USE + usages）
 ```
 
@@ -79,7 +79,7 @@ DELETE /assets/{assetId}       // 引用检查见下（409 ASSET_IN_USE + usages
 
 **MF-0 媒体地基（薄版，ADR-018 · §0.1 回写）**：M1-c **前**只落 `AssetVariant` 表 + 上述**删除守卫**（`SiteSpecAssetReferenceScanner`）；`MediaJob`/`AssetUsage` 待真实消费者（生成式图片/视频）出现再补建，不提前预建（YAGNI）。M1-c 图片处理是**纯确定性 Sharp**，**不塞生成式图片或设计 Agent**。
 
-> ✅ **MF0-B as-built**：DELETE 与 Profile/activeVersion/Variant writer 共享 Asset 行锁；canonical schema v2 冻结 canonical + 最多 128 个无环 Variant，Temporal 两轮 Delete+HEAD 后叶→根删 Variant 行并标记 `cleanupCompletedAt`。同 hash 只在全部旧 owner 已 settle 后复用；settled 旧事件重放不碰 replacement。历史 schema v1 parked 事件由默认 dry-run operator 分类为 eligible/referenced/busy/inconsistent/missing/already_reconciled，只有 eligible 生成带 `causationId` 的 v2 successor。`process`/`select-variant`/`GET /assets/{id}` 仍为 M1-c 目标端点。
+> ✅ **M1-c as-built**：refurbish P2 已内部调用纯 Sharp writer；当前没有为此新增公开 REST/OpenAPI。`select-variant` 不可偷存为 Asset 全局选择，因为它属于 page/component usage；随 M1-e SiteSpec/Renderer 消费一起落。`GET detail/process` 仅在 SaaS 前端出现真实调用方时补建。
 
 ### 3.1 媒体作业（Media Job）〔🎯 M3 目标〕
 

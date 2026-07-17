@@ -28,6 +28,8 @@ import { KbService } from '../site-builder/kb.service';
 import { EmbeddingsClient } from '../site-builder/embeddings.client';
 import { DoclingClient } from '../site-builder/docling.client';
 import { StorageService } from '../site-builder/storage.service';
+import { ImagePipelineService } from '../site-builder/image-pipeline.service';
+import { IsolatedImagePipelineRunner } from '../site-builder/image-pipeline-runner';
 import { ensurePlatformSchedules } from './ensure-schedules';
 import { seedJurisdictionPolicy } from '../compliance/jurisdiction-policy.seed';
 import { Crawl4aiPageFetcher } from '../intent/page-fetcher';
@@ -43,6 +45,12 @@ import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 async function main(): Promise<void> {
   const prisma = new PrismaService();
   await prisma.$connect();
+  const siteBuilderStorage = new StorageService();
+  const imagePipeline = new ImagePipelineService(
+    prisma,
+    siteBuilderStorage,
+    new IsolatedImagePipelineRunner(),
+  );
 
   // owner 连接（DATABASE_URL）：① data_provider seed（平台配置表，app_user 无写权）；
   // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
@@ -140,9 +148,10 @@ async function main(): Promise<void> {
         ownerDb,
         gateway,
         broker,
+        imagePipeline,
         kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),
       }),
-      ...createAssetCleanupActivities({ prisma, storage: new StorageService() }),
+      ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
     },
   });
 

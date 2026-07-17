@@ -6,7 +6,8 @@ import {
   ASSET_VARIANT_POSITIONS,
   IMAGE_VARIANT_ROLES,
   type AssetVariantProjectionRow,
-  type AssetVariantRecipe,
+  type AnyAssetVariantRecipe,
+  type AssetVariantRecipeV2,
   type DerivedImageManifest,
   type DerivedImageVariant,
   type ImageVariantFormat,
@@ -15,7 +16,9 @@ import {
 
 export type {
   AssetVariantProjectionRow,
+  AnyAssetVariantRecipe,
   AssetVariantRecipe,
+  AssetVariantRecipeV2,
   DerivedImageManifest,
 } from "@global/contracts";
 
@@ -51,7 +54,11 @@ function canonicalJson(value: unknown): string {
   throw new Error(`recipe contains unsupported ${typeof value}`);
 }
 
-function assertRecipe(recipe: AssetVariantRecipe): void {
+function isV2Recipe(recipe: AnyAssetVariantRecipe): recipe is AssetVariantRecipeV2 {
+  return "schemaVersion" in recipe;
+}
+
+function assertRecipe(recipe: AnyAssetVariantRecipe): void {
   if (!recipe.pipelineVersion.trim()) throw new Error("pipelineVersion is required");
   if (!SHA256.test(recipe.source.assetContentHash)) {
     throw new Error("source assetContentHash must be a lowercase SHA-256");
@@ -62,6 +69,43 @@ function assertRecipe(recipe: AssetVariantRecipe): void {
     }
     if (!SHA256.test(recipe.source.variant.contentHash)) {
       throw new Error("source variant contentHash must be a lowercase SHA-256");
+    }
+  }
+  if (isV2Recipe(recipe)) {
+    if (recipe.schemaVersion !== "2.0") throw new Error("recipe schemaVersion is unsupported");
+    if (
+      !recipe.operations ||
+      recipe.operations.autoOrient !== true ||
+      recipe.operations.colourspace !== "srgb" ||
+      recipe.operations.stripMetadata !== true ||
+      recipe.operations.withoutEnlargement !== true ||
+      recipe.operations.kernel !== "lanczos3" ||
+      recipe.operations.alpha !== "preserve"
+    ) {
+      throw new Error("recipe operations are not canonical");
+    }
+    const background = recipe.operations.background;
+    if (
+      background !== null &&
+      (![background.r, background.g, background.b].every(
+        (value) => Number.isInteger(value) && value >= 0 && value <= 255,
+      ) ||
+        !Number.isFinite(background.alpha) ||
+        background.alpha < 0 ||
+        background.alpha > 1)
+    ) {
+      throw new Error("recipe background is invalid");
+    }
+    const encoder = recipe.operations.encoder;
+    if (
+      !encoder ||
+      !Number.isInteger(encoder.effort) ||
+      encoder.effort < 0 ||
+      encoder.effort > 9 ||
+      typeof encoder.lossless !== "boolean" ||
+      !(["4:4:4", "4:2:0", null] as const).includes(encoder.chromaSubsampling)
+    ) {
+      throw new Error("recipe encoder policy is invalid");
     }
   }
   if (!(IMAGE_VARIANT_ROLES as readonly string[]).includes(recipe.output.role)) {
@@ -98,7 +142,7 @@ function assertRecipe(recipe: AssetVariantRecipe): void {
 }
 
 /** 每个物化输出一个 recipeHash；格式、尺寸和质量都参与身份。 */
-export function buildAssetVariantRecipeHash(recipe: AssetVariantRecipe): string {
+export function buildAssetVariantRecipeHash(recipe: AnyAssetVariantRecipe): string {
   assertRecipe(recipe);
   return createHash("sha256").update(canonicalJson(recipe)).digest("hex");
 }

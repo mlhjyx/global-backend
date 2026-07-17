@@ -5,18 +5,34 @@ import {
   projectDerivedImageManifest,
   type AssetVariantProjectionRow,
   type AssetVariantRecipe,
+  type AssetVariantRecipeV2,
 } from "./media-foundation";
 
 const SOURCE_HASH = "a".repeat(64);
 
 function recipe(
-  overrides: Partial<AssetVariantRecipe> = {},
-): AssetVariantRecipe {
+  overrides: Partial<AssetVariantRecipeV2> = {},
+): AssetVariantRecipeV2 {
   return {
+    schemaVersion: "2.0",
     pipelineVersion: "sharp-v1",
     source: {
       assetContentHash: SOURCE_HASH,
       variant: null,
+    },
+    operations: {
+      autoOrient: true,
+      colourspace: "srgb",
+      stripMetadata: true,
+      withoutEnlargement: true,
+      kernel: "lanczos3",
+      alpha: "preserve",
+      background: null,
+      encoder: {
+        effort: 4,
+        lossless: false,
+        chromaSubsampling: "4:4:4",
+      },
     },
     output: {
       role: "hero",
@@ -69,12 +85,43 @@ describe("AssetVariant recipe hash", () => {
         variant: null,
         assetContentHash: SOURCE_HASH,
       },
+      operations: canonical.operations,
       pipelineVersion: "sharp-v1",
-    } satisfies AssetVariantRecipe;
+      schemaVersion: "2.0",
+    } satisfies AssetVariantRecipeV2;
 
     expect(buildAssetVariantRecipeHash(canonical)).toMatch(/^[a-f0-9]{64}$/);
     expect(buildAssetVariantRecipeHash(reordered)).toBe(
       buildAssetVariantRecipeHash(canonical),
+    );
+  });
+
+  it("keeps the shipped MF0-A recipe API and hash behavior compatible", () => {
+    const legacy: AssetVariantRecipe = {
+      pipelineVersion: "sharp-v1",
+      source: { assetContentHash: SOURCE_HASH, variant: null },
+      output: {
+        role: "hero",
+        format: "avif",
+        width: 1440,
+        height: 810,
+        fit: "cover",
+        position: "centre",
+        focalPoint: { x: 0.5, y: 0.4 },
+        quality: 62,
+      },
+    };
+
+    expect(buildAssetVariantRecipeHash(legacy)).toMatch(/^[a-f0-9]{64}$/);
+    expect(buildAssetVariantRecipeHash(legacy)).toBe(
+      "239231fda536f56aa34d624b32841489b94033cac16515bcfe0066ae5ec739cc",
+    );
+  });
+
+  it("rejects malformed v2 input without dereferencing missing operations", () => {
+    const malformed = { ...recipe(), operations: undefined } as unknown as AssetVariantRecipeV2;
+    expect(() => buildAssetVariantRecipeHash(malformed)).toThrow(
+      "recipe operations are not canonical",
     );
   });
 
@@ -98,6 +145,33 @@ describe("AssetVariant recipe hash", () => {
             id: "00000000-0000-4000-8000-000000000099",
             contentHash: "e".repeat(64),
           },
+        },
+      }),
+    ],
+    [
+      "encoder effort",
+      recipe({
+        operations: {
+          ...recipe().operations,
+          encoder: { ...recipe().operations.encoder, effort: 5 },
+        },
+      }),
+    ],
+    [
+      "encoder lossless",
+      recipe({
+        operations: {
+          ...recipe().operations,
+          encoder: { ...recipe().operations.encoder, lossless: true },
+        },
+      }),
+    ],
+    [
+      "background",
+      recipe({
+        operations: {
+          ...recipe().operations,
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
         },
       }),
     ],
@@ -136,6 +210,7 @@ describe("AssetVariant recipe hash", () => {
       { ...recipe(), output: { ...recipe().output, format: "fallback" } },
     ],
     ["fit", { ...recipe(), output: { ...recipe().output, fit: "explode" } }],
+    ["schema version", { ...recipe(), schemaVersion: "3.0" }],
     [
       "position",
       { ...recipe(), output: { ...recipe().output, position: "center" } },

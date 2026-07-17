@@ -102,6 +102,22 @@ export function buildVariantObjectKey(
   return `ws/${workspaceId}/${siteId}/variants/${assetId}/${recipeHash}.${ext}`;
 }
 
+/**
+ * Producer-isolated write key. An expired producer can only recreate its own non-canonical
+ * attempt object; promotion to the public Variant key requires the current DB fencing token.
+ */
+export function buildVariantAttemptObjectKey(
+  workspaceId: string,
+  siteId: string,
+  assetId: string,
+  producerToken: string,
+  recipeHash: string,
+  format: AssetVariantOutputFormat,
+): string {
+  const ext = format === 'jpeg' ? 'jpg' : format;
+  return `ws/${workspaceId}/${siteId}/variant-attempts/${assetId}/${producerToken}/${recipeHash}.${ext}`;
+}
+
 interface MagicRule {
   mime: string;
   matches(head: Buffer): boolean;

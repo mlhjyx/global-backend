@@ -1,4 +1,4 @@
-import { ApplicationFailure } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../site-builder/storage.service';
 import {
@@ -18,6 +18,16 @@ export interface AssetCleanupActivityDeps {
 
 function invalidProvenance(message: string): ApplicationFailure {
   return ApplicationFailure.nonRetryable(message, 'ASSET_CLEANUP_PROVENANCE_INVALID');
+}
+
+function cleanupOperationSignal(): AbortSignal {
+  const localDeadline = AbortSignal.timeout(110_000);
+  try {
+    return AbortSignal.any([Context.current().cancellationSignal, localDeadline]);
+  } catch {
+    // Unit tests call these functions without a Temporal activity context.
+    return localDeadline;
+  }
 }
 
 function assetStateAllowsCleanup(
@@ -45,6 +55,20 @@ function assetStateAllowsCleanup(
     );
   }
   return asset.objectKey === command.objectKey && asset.processingStatus === command.reason;
+}
+
+function attemptKeysFromMetadata(metadata: unknown): string[] {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
+  const value = metadata as Record<string, unknown>;
+  const keys = Array.isArray(value.attemptKeys)
+    ? value.attemptKeys.filter((key): key is string => typeof key === 'string')
+    : [];
+  const reservation = value.reservation;
+  if (reservation && typeof reservation === 'object' && !Array.isArray(reservation)) {
+    const key = (reservation as Record<string, unknown>).attemptKey;
+    if (typeof key === 'string') keys.push(key);
+  }
+  return [...new Set(keys)];
 }
 
 function canonicalVariantDeleteOrder(command: CanonicalAssetCleanupCommand) {
@@ -77,6 +101,7 @@ function sameVariantPlan(
     recipeHash: string;
     sourceVariantId: string | null;
     status: string;
+    metadata?: unknown;
   }>,
 ): boolean {
   return (
@@ -90,7 +115,9 @@ function sameVariantPlan(
         row.contentHash === expected.contentHash &&
         row.recipeHash === expected.recipeHash &&
         row.sourceVariantId === expected.sourceVariantId &&
-        row.status === expected.status
+        row.status === expected.status &&
+        (expected.attemptKeys === undefined ||
+          JSON.stringify(attemptKeysFromMetadata(row.metadata)) === JSON.stringify(expected.attemptKeys))
       );
     })
   );
@@ -137,6 +164,7 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
           recipeHash: true,
           sourceVariantId: true,
           status: true,
+          metadata: true,
         },
       }),
       tx.asset.findFirst({
@@ -207,6 +235,7 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
       if (command.objectClass !== 'staging') {
         throw invalidProvenance('staging activity received a canonical command');
       }
+      const signal = cleanupOperationSignal();
 
       await prisma.withWorkspace(command.workspaceId, async (tx) => {
         const [event, asset, foreignOwner] = await Promise.all([
@@ -261,8 +290,8 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
 
       // S3 DeleteObject is idempotent for a missing key. HEAD closes the transport-success but
       // object-still-present ambiguity; throwing here lets Temporal retry the same safe command.
-      await storage.delete(command.objectKey);
-      if (await storage.head(command.objectKey)) {
+      await storage.delete(command.objectKey, signal);
+      if (await storage.head(command.objectKey, signal)) {
         throw new Error(`staging object still exists after delete: ${command.eventId}`);
       }
       return {
@@ -285,12 +314,24 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
       } catch (error) {
         throw invalidProvenance(error instanceof Error ? error.message : String(error));
       }
+      const signal = cleanupOperationSignal();
 
       const alreadySettled = await prisma.withWorkspace(
         command.workspaceId,
         async (tx) => (await validateCanonicalCleanupTx(tx, command)).completed,
       );
       if (alreadySettled) {
+        // A fenced producer can resume after the original cleanup settled and recreate only its
+        // token-scoped attempt object. Redrive those immutable frozen keys, but never touch
+        // canonical/variant keys here because a replacement Asset may now own them.
+        for (const variant of command.variants) {
+          for (const attemptKey of variant.attemptKeys ?? []) {
+            await storage.delete(attemptKey, signal);
+            if (await storage.head(attemptKey, signal)) {
+              throw new Error(`settled cleanup attempt object still exists: ${command.eventId}`);
+            }
+          }
+        }
         return {
           eventId: command.eventId,
           deleted: true,
@@ -299,8 +340,14 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
       }
 
       for (const object of [...canonicalVariantDeleteOrder(command), command.canonical]) {
-        await storage.delete(object.objectKey);
-        if (await storage.head(object.objectKey)) {
+        for (const attemptKey of ('attemptKeys' in object ? object.attemptKeys ?? [] : [])) {
+          await storage.delete(attemptKey, signal);
+          if (await storage.head(attemptKey, signal)) {
+            throw new Error(`canonical cleanup attempt object still exists: ${command.eventId}`);
+          }
+        }
+        await storage.delete(object.objectKey, signal);
+        if (await storage.head(object.objectKey, signal)) {
           throw new Error(`canonical cleanup object still exists: ${command.eventId}`);
         }
       }
@@ -317,6 +364,7 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
         throw invalidProvenance('canonical settle received a staging command');
       }
       const command = parsed;
+      const signal = cleanupOperationSignal();
       const alreadySettled = await prisma.withWorkspace(
         command.workspaceId,
         async (tx) => (await validateCanonicalCleanupTx(tx, command)).completed,
@@ -325,7 +373,12 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
         return { eventId: command.eventId, settled: true, variantsDeleted: 0 };
       }
       for (const object of [...command.variants, command.canonical]) {
-        if (await storage.head(object.objectKey)) {
+        for (const attemptKey of ('attemptKeys' in object ? object.attemptKeys ?? [] : [])) {
+          if (await storage.head(attemptKey, signal)) {
+            throw new Error(`canonical cleanup cannot settle while attempt object exists: ${command.eventId}`);
+          }
+        }
+        if (await storage.head(object.objectKey, signal)) {
           throw new Error(`canonical cleanup cannot settle while object exists: ${command.eventId}`);
         }
       }

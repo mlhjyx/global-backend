@@ -14,6 +14,7 @@ const V1 = '55555555-5555-4555-8555-555555555555';
 const V2 = '66666666-6666-4666-8666-666666666666';
 const SOURCE = 'a'.repeat(64);
 const CHILD = 'b'.repeat(64);
+const TOKEN = '77777777-7777-4777-8777-777777777777';
 
 function canonical() {
   return {
@@ -83,6 +84,20 @@ describe('MF0-B canonical cleanup contract', () => {
     ).toBe(true);
   });
 
+  it('accepts a producer-isolated attempt key only when token, asset and recipe provenance match', () => {
+    const value = canonical();
+    value.variants[0] = {
+      ...value.variants[0],
+      attemptKeys: [`ws/${WS}/${SITE}/variant-attempts/${ASSET}/${TOKEN}/${SOURCE}.webp`],
+    } as typeof value.variants[number] & { attemptKeys: string[] };
+    const parsed = parseAssetCleanupCommand(value);
+    expect(parsed.objectClass).toBe('canonical');
+    if (parsed.objectClass !== 'canonical') throw new Error('test command mismatch');
+    expect(parsed.variants[0]?.attemptKeys?.[0]).toContain(TOKEN);
+    value.variants[0].attemptKeys = [`ws/${WS}/${SITE}/variant-attempts/${ASSET}/${TOKEN}/${CHILD}.webp`];
+    expect(() => parseAssetCleanupCommand(value)).toThrow(/attempt key/);
+  });
+
   it.each([
     ['unknown field', { ...canonical(), surprise: true }],
     [
@@ -126,5 +141,42 @@ describe('MF0-B canonical cleanup contract', () => {
       };
     });
     expect(() => parseAssetCleanupCommand(value)).toThrow(/bounded array/);
+  });
+
+  it('rejects a plan whose canonical, variants and attempts exceed 128 total objects', () => {
+    const value = canonical();
+    value.variants = Array.from({ length: 64 }, (_unused, index) => {
+      const id = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      const recipeHash = index.toString(16).padStart(64, '0');
+      return {
+        id,
+        objectKey: `ws/${WS}/${SITE}/variants/${ASSET}/${recipeHash}.webp`,
+        contentHash: 'c'.repeat(64),
+        recipeHash,
+        sourceVariantId: null,
+        status: 'ready' as const,
+        attemptKeys: [
+          `ws/${WS}/${SITE}/variant-attempts/${ASSET}/${TOKEN}/${recipeHash}.webp`,
+        ],
+      };
+    });
+    expect(() => parseAssetCleanupCommand(value)).toThrow(/128 total objects/);
+  });
+
+  it('replays the legacy upper bound of 128 variants plus canonical when no attempt field exists', () => {
+    const value = canonical();
+    value.variants = Array.from({ length: 128 }, (_unused, index) => {
+      const id = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      const recipeHash = index.toString(16).padStart(64, '0');
+      return {
+        id,
+        objectKey: `ws/${WS}/${SITE}/variants/${ASSET}/${recipeHash}.webp`,
+        contentHash: 'c'.repeat(64),
+        recipeHash,
+        sourceVariantId: null,
+        status: 'ready' as const,
+      };
+    });
+    expect(parseAssetCleanupCommand(value)).toMatchObject({ objectClass: 'canonical' });
   });
 });

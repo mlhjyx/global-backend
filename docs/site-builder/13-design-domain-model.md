@@ -13,7 +13,7 @@
 - **本文不管什么**：编排 DAG、Agent 卡执行流（→ [03-agents.md](03-agents.md)）、SiteSpec 页面数据形状（→ [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014**）、模型路由四态（→ [10-model-selection-study.md](10-model-selection-study.md)、**ADR-016**）。
 - **as-built ↔ target 分界（务必区分）**：
   - **as-built（2026-07-16，含 #125 truth-sync / #126 R0 contract）**：SiteSpec 1.0.0 type-only 共享契约（#117）、`design_spec` AI Task 路由（7 个 task 之一）、10 型渲染组件、基础 `Asset`/上传能力。
-  - **target（尚未落地）**：M1-c 纯 Sharp 图片管线、`AssetVariant`/MF-0、DesignDNA / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation、26 型组件库与 SiteSpec 1.1.0 演进。**ADR-018 是已接受的路线，不是实现完成证明**。
+  - **target（尚未落地）**：DesignDNA / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation、26 型组件库与 SiteSpec 1.1.0 演进。`AssetVariant`/MF-0 与 M1-c 纯 Sharp 图片管线已在 2026-07-17 当前交付分支实现并完成开发验证；是否进入 `main` 以 PR/CI/合并证据为准。**ADR-018 本身只是路线，代码与验证才是实现证明**。
 - **红线继承**：设计智能层不改变 **ADR-013**（固定 DAG + 有界 AI Task，无自由 Agent/Planner）、**ADR-017**（禁虚构身份）、**ADR-019**（Readdy = 净室视觉参考、运行时零依赖）。本文所有实体在这三条约束下成立。
 
 ---
@@ -246,10 +246,10 @@
 | `DesignBrief` | `designSpec` Agent(P3) | copy / assembly / renderer / quality | M1-e | 路由 `design_spec` 存在，产出未达全 schema |
 | `DesignEvaluation` | Visual Evaluator / quality(P4) | assemblyFix、发布门 | M1-f | 路由 `qa_summarize` 存在；`aesthetic_review` 为目标 |
 | `Asset` | imagePipeline(P2)/上传 | Variant 派生、装配、删除守卫 | MF-1（薄面 MF-0） | 部分 |
-| `AssetVariant` | M1-c Sharp 管线 | 渲染器、SiteSpec AssetRef | **MF-0-thin（M1-c 门）** | 目标（ADR-018） |
+| `AssetVariant` | M1-c Sharp 管线 | 渲染器、SiteSpec AssetRef | **MF-0-thin（M1-c 门）** | 表/RLS/删除与当前分支 writer 已落；Renderer 消费待 M1-e |
 | `MediaJob` | 媒体工作流 | 成本/审计/对账 | MF-1（有真实消费者才建） | 无 |
 | `AssetUsage` | Release/构建 | 删除守卫、增量重建、版权审计 | MF-1 | 无 |
-| `SiteSpecAssetReferenceScanner` | 删除路径（确定性） | 删除 API（409） | **MF-0-thin** | 目标（ADR-018） |
+| `SiteSpecAssetReferenceScanner` | 删除路径（确定性） | 删除 API（409） | **MF-0-thin** | MF0-B 已落并接 DELETE |
 | `PlatformTemplateCorpus` | 工序 §8 步 9 | 未来微调/检索 | M1-e+ | 无 |
 
 **回写路径**：本层任一实体实际落地时——① schema 合入 `@global/contracts`（SiteSpec 需升 **1.1.0**，minor 附新增可选字段，**ADR-014**）；② 生产/消费 Agent 卡回写 [03-agents.md](03-agents.md)；③ SiteSpec 引用面回写 [04-sitespec-contract.md](04-sitespec-contract.md)；④ 承重决策若变，追加 ADR 而非改本文。

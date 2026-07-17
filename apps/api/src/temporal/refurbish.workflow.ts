@@ -1,7 +1,8 @@
-import { CancellationScope, isCancellation, proxyActivities } from '@temporalio/workflow';
+import { CancellationScope, isCancellation, patched, proxyActivities } from '@temporalio/workflow';
 import type { createSiteBuilderActivities, RefurbishActivityInput } from './site-builder.activities';
 
 type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
+const MAX_IMAGE_BATCHES_PER_BUILD = 256;
 
 const activities = proxyActivities<SiteBuilderActivities>({
   startToCloseTimeout: '10 minutes',
@@ -52,8 +53,97 @@ export async function refurbishWorkflow(
       if (isCancellation(err)) throw err;
     }
 
+    let images: {
+      status: 'done' | 'degraded';
+      processed: number;
+      failed: number;
+      variants: number;
+    } = { status: 'degraded', processed: 0, failed: 0, variants: 0 };
+    if (patched('site-builder-m1c-image-pipeline-v1')) {
+      try {
+        if (patched('site-builder-m1c-image-batches-v1')) {
+          if (patched('site-builder-m1c-image-workset-v1')) {
+            const workset = await kbActivities.listImages(input);
+            if (workset.truncated || workset.assetIds.length > MAX_IMAGE_BATCHES_PER_BUILD * 2) {
+              throw new Error('image workset exceeds the per-build limit');
+            }
+            images = { status: 'done', processed: 0, failed: 0, variants: 0 };
+            for (let offset = 0; offset < workset.assetIds.length; offset += 2) {
+              const assetIds = workset.assetIds.slice(offset, offset + 2);
+              const summary: {
+                status: 'done' | 'degraded';
+                processed: number;
+                failed: number;
+                variants: number;
+                nextCursor?: string | null;
+                upperBound?: string | null;
+              } = await kbActivities.processImages({
+                ...input,
+                imageAssetIds: assetIds,
+                imageBatchLimit: 2,
+              });
+              if (summary.processed + summary.failed !== assetIds.length) {
+                throw new Error('image batch summary does not cover its frozen workset slice');
+              }
+              images = {
+                status: images.status === 'degraded' || summary.status === 'degraded' ? 'degraded' : 'done',
+                processed: images.processed + summary.processed,
+                failed: images.failed + summary.failed,
+                variants: images.variants + summary.variants,
+              };
+            }
+          } else {
+            // Replay-only path for histories that recorded the original cursor batching patch.
+            let cursor: string | null = null;
+            let upperBound: string | null = null;
+            let accumulatedStatus: 'done' | 'degraded' = 'done';
+            images = { status: 'done', processed: 0, failed: 0, variants: 0 };
+            do {
+              const summary: {
+                status: 'done' | 'degraded';
+                processed: number;
+                failed: number;
+                variants: number;
+                nextCursor?: string | null;
+                upperBound?: string | null;
+              } = await kbActivities.processImages({
+                ...input,
+                imageCursor: cursor,
+                imageUpperBound: upperBound,
+                imageBatchLimit: 2,
+              });
+              if (summary.status === 'degraded') accumulatedStatus = 'degraded';
+              images = {
+                status: accumulatedStatus,
+                processed: images.processed + summary.processed,
+                failed: images.failed + summary.failed,
+                variants: images.variants + summary.variants,
+              };
+              upperBound = summary.upperBound ?? upperBound;
+              const nextCursor: string | null = summary.nextCursor ?? null;
+              if (nextCursor !== null && cursor !== null && nextCursor <= cursor) {
+                throw new Error('image batch cursor did not advance');
+              }
+              cursor = nextCursor;
+            } while (cursor !== null);
+          }
+        } else {
+          const summary = await kbActivities.processImages(input);
+          images = {
+            status: summary.status,
+            processed: summary.processed,
+            failed: summary.failed,
+            variants: summary.variants,
+          };
+        }
+      } catch (err) {
+        if (isCancellation(err)) throw err;
+        images = { ...images, status: 'degraded' };
+      }
+    }
+
     const build = await activities.assembleAndBuild(input);
-    return await activities.finalizeRefurbish({ ...input, kb, profile, build });
+    return await activities.finalizeRefurbish({ ...input, kb, profile, images, build });
   } catch (err) {
     try {
       // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即

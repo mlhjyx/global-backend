@@ -72,6 +72,32 @@ export interface AssetVariantRecipe {
   };
 }
 
+/**
+ * M1-c recipe v2. The original `AssetVariantRecipe` is a shipped MF0-A API and remains source-
+ * compatible; v2 is explicitly discriminated because adding these required identity fields to
+ * the old interface would be a breaking, unversioned contract change.
+ */
+export interface AssetVariantRecipeV2 extends AssetVariantRecipe {
+  schemaVersion: "2.0";
+  /** Every byte-affecting safety/resize/encoder choice is part of the identity. */
+  operations: {
+    autoOrient: true;
+    colourspace: "srgb";
+    stripMetadata: true;
+    withoutEnlargement: true;
+    kernel: "lanczos3";
+    alpha: "preserve";
+    background: { r: number; g: number; b: number; alpha: number } | null;
+    encoder: {
+      effort: number;
+      lossless: boolean;
+      chromaSubsampling: "4:4:4" | "4:2:0" | null;
+    };
+  };
+}
+
+export type AnyAssetVariantRecipe = AssetVariantRecipe | AssetVariantRecipeV2;
+
 export interface DerivedImageVariant {
   key: string;
   width: number;

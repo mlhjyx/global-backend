@@ -4,7 +4,7 @@
 >
 > **严格分层（勿混淆 as-built 与 target）**：
 > - **当前 as-built（MF0-A + MF0-B，2026-07-17）**：`AssetVariant` 数据地基、Profile + 当前 `activeVersionId` 引用守卫、共享 Asset 行锁、`409 ASSET_IN_USE`、严格 canonical/Variant Temporal 回收与历史 parked 对账已落；`MediaJob`/`AssetUsage`/`SiteRelease`、Sharp writer 仍不存在。
-> - **M1-c as-built 目标**（本文 §4，near-term，**尚未落地**）：MF0-B 已收口，下一项落纯 Sharp 确定性图片管线并写 `AssetVariant`。
+> - **M1-c as-built**（本文 §4，2026-07-17 当前交付分支）：MF0-B 之上已落纯 Sharp 确定性图片管线并写 `AssetVariant`；是否进入 `main` 以 PR/CI/合并证据为准。
 > - **MF-1 目标**（本文 §6，事件触发补建，YAGNI）：`MediaJob`/`AssetUsage`——**接生成式/异步媒体或跨 Release 持久反查的第一个真实消费者前**才落，不提前建。
 > - **M3 目标**（本文 §7–§8，远期，全为 target）：视频与音频（VideoBrief/Shot/Seedance/旁白/播放/ReleaseManifest 媒体组合）。
 
@@ -87,9 +87,13 @@ M1-c 图片管线 = **确定性 Sharp**，零模型、零生成式（ADR-018 + D
 
 - **格式**：每档尺寸输出 AVIF + WebP + fallback（渲染器统一 `<picture>` 消费，见下）。
 - **焦点裁剪**：`focalPoint`（04 §4，`[x,y]∈[0,1]`）驱动 contain/cover 受控裁切，避免主体被裁掉。
-- **失败隔离**：单图失败不阻断全站；**只有必需 Hero 无 fallback** 才阻断（v3.2 §20.7）。原图不可用时降级到占位，不阻塞发布。
+- **失败隔离**：M1-c 逐图返回结构化成功/失败，坏图只令本步骤 `degraded`，取消必须穿透。当前 SiteSpec/DesignBrief 尚无可靠 required-media 声明，故“必需 Hero 无 fallback 才阻断”由 M1-e 消费者落地，M1-c 不猜测。
 - 🔴 **不接 rembg**（D-M1c-1）：抠图容器唯一消费者=生成式重绘，已延后；M1-c 不加 rembg 容器、不写生成式图片调用。
 - 🔴 **cert/person/logo 不进入生成式分支**；本 PR 无任何 provider 调用。
+
+> ✅ **M1-c as-built（2026-07-17）**：`sharp@0.35.0` 为 API 直接 exact dependency，运行时 `pipelineVersion=sharp-0.35.0-vips-<version>-m1c.1`；输入硬限 20 MiB/40 MP/4 channels/单页，`failOn=warning`，输出再解码核验 MIME/尺寸/sRGB/无 EXIF/XMP/hash/bytes。质量指标只产生 `image-qa-m1c.1` warning；显式 focal 才 cover，其他路径保守保持主体比例，任何 role 都不放大。inspection 与编码均在 `cache(false)`、`concurrency(1)` 的可杀子进程内执行；worker 内全局门默认并发 1，输出/结果有硬字节上限，Ubuntu 编译产物子进程再用 `prlimit` 限虚拟地址空间与 fd。临时目录可配置并 `finally` 清理；这些是开发环境 containment，**不冒充生产容器/cgroup/独立 UID/禁网沙箱**。writer 在首个对象写前为完整 recipe set 持久预占带 token/lease 的 `processing` 行；对象先写 producer-token 隔离的 attempt key，只有当前 token 在 Asset/key fence 内才能 promote canonical，attempt key 同样进入冻结 cleanup plan。refurbish 首个 Activity 物化≤512 个排序 Asset ID 的不可变 workset，再按两张/Activity 执行；超限在 Sharp 前降级，旧 cursor history 只作 replay。
+>
+> writer 先核验完整 ready-set；对象/DB 全部匹配时直接复用并修正 manifest，不启动 Sharp；ready 账本对应 canonical 对象缺失/身份不符时按完整性故障 fail-closed，绝不绕过 fencing 原地补写。否则先在父 Asset 行锁与规范 recipe 集合下持久建立完整 `processing` owner，再于事务外编码并写 `ws/{workspace}/{site}/variant-attempts/{assetId}/{producerToken}/{recipeHash}.{ext}`。每个 attempt 回读 hash/content-type/bytes；随后重新锁父 Asset、校验 source identity/token、取得 canonical key advisory fence，在至多 15 秒的短事务窗口内 copy/promote 到 `ws/{workspace}/{site}/variants/{assetId}/{recipeHash}.{ext}` 并转 ready，copy 显式剥离 attempt TTL tag。失败只以 producer token 的 JSON CAS 把自己的 owner 转 `failed`；重试前以 8 路有界 Delete+HEAD 删除并压缩 ready/failed/过期 processing attempt，最后完整 ready set 与 `derivedKeys` 同事务收口。attempt key 进入 Variant metadata 与 DELETE 冻结计划，promotion 后尽力删除；settled cleanup 重放只重删冻结 attempt，不碰后来 canonical/Variant。attempt PUT 带专用 tag，bucket 一日 lifecycle 是晚恢复 producer 的最终收敛门：生产 API 默认只验证、不改全桶规则，缺失即阻止启动；只有单一 IaC/部署 owner 可显式管理。cleanup S3 调用接 Temporal cancellation 与 110 秒本地 deadline。单 Asset 最多 120 个 Variant 行；新 attempt-aware cleanup 的原件 + Variant + attempt **总对象硬上限为 128**，不能把“120 行”误写成 120×8 个可清理 attempt；历史无 attempt 字段合同继续兼容 128 Variant + canonical（129 对象）。
 
 **渲染器同步契约（M1-e，v3.2 §20.5）**：图片组件统一输出 `<picture>`（AVIF/WebP/fallback）+ `width`/`height`（防 CLS）+ 按角色设 `loading`/`fetchpriority`/`sizes`；**不允许组件自己拼对象存储 URL**、**不允许 Renderer 自己选最新 Variant**——build 时固定 `variantId`。
 

@@ -11,6 +11,7 @@ const CHILD = '66666666-6666-4666-8666-666666666666';
 const SOURCE_HASH = 'a'.repeat(64);
 const PARENT_RECIPE = 'b'.repeat(64);
 const CHILD_RECIPE = 'c'.repeat(64);
+const TOKEN = '77777777-7777-4777-8777-777777777777';
 
 function command() {
   return parseAssetCleanupCommand({
@@ -40,6 +41,7 @@ function command() {
         recipeHash: CHILD_RECIPE,
         sourceVariantId: PARENT,
         status: 'ready',
+        attemptKeys: [`ws/${WS}/${SITE}/variant-attempts/${ASSET}/${TOKEN}/${CHILD_RECIPE}.avif`],
       },
     ],
   });
@@ -49,7 +51,10 @@ describe('MF0-B canonical cleanup activity', () => {
   it('deletes leaf-to-root then canonical, settles rows, and makes old-event replay a no-op', async () => {
     const cmd = command();
     if (cmd.objectClass !== 'canonical') throw new Error('test command mismatch');
-    const variants = cmd.variants.map((variant) => ({ ...variant }));
+    const variants = cmd.variants.map((variant) => ({
+      ...variant,
+      metadata: variant.attemptKeys ? { attemptKeys: variant.attemptKeys } : null,
+    }));
     const asset = {
       id: ASSET,
       siteId: SITE,
@@ -94,7 +99,10 @@ describe('MF0-B canonical cleanup activity', () => {
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId: string, fn: (client: typeof tx) => unknown) => fn(tx)),
     };
-    const objects = new Set([cmd.canonical.objectKey, ...cmd.variants.map((variant) => variant.objectKey)]);
+    const objects = new Set([
+      cmd.canonical.objectKey,
+      ...cmd.variants.flatMap((variant) => [variant.objectKey, ...(variant.attemptKeys ?? [])]),
+    ]);
     const deletes: string[] = [];
     const storage = {
       delete: vi.fn(async (key: string) => {
@@ -109,7 +117,13 @@ describe('MF0-B canonical cleanup activity', () => {
     });
 
     await activities.cleanupCanonicalAssetObjects(cmd);
-    expect(deletes).toEqual([cmd.variants[1].objectKey, cmd.variants[0].objectKey, cmd.canonical.objectKey]);
+    expect(storage.delete.mock.calls[0]?.[1]).toBeInstanceOf(AbortSignal);
+    expect(deletes).toEqual([
+      cmd.variants[1].attemptKeys?.[0],
+      cmd.variants[1].objectKey,
+      cmd.variants[0].objectKey,
+      cmd.canonical.objectKey,
+    ]);
     await expect(activities.settleCanonicalAssetCleanup(cmd)).resolves.toMatchObject({
       settled: true,
       variantsDeleted: 2,
@@ -117,11 +131,15 @@ describe('MF0-B canonical cleanup activity', () => {
     expect(variants).toEqual([]);
     expect(asset.cleanupCompletedAt).toBeInstanceOf(Date);
 
+    // A producer that was fenced before settlement may resume late and recreate only its tagged
+    // attempt key. Settled replay re-deletes that frozen key without touching canonical objects.
+    objects.add(cmd.variants[1].attemptKeys![0]!);
     deletes.length = 0;
     await expect(activities.cleanupCanonicalAssetObjects(cmd)).resolves.toMatchObject({
       alreadySettled: true,
     });
-    expect(deletes).toEqual([]);
+    expect(deletes).toEqual([cmd.variants[1].attemptKeys?.[0]]);
+    expect(objects.has(cmd.variants[1].attemptKeys![0]!)).toBe(false);
 
     // Simulate a lost first settle response followed by legitimate same-hash reuse. A retry must
     // observe durable settlement before HEAD and must not reject or touch the replacement object.
