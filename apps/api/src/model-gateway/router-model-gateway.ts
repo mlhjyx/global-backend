@@ -36,14 +36,7 @@ function mergeStructuredUsage(
     outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
   };
 }
-import {
-  AiContext,
-  EmbedInput,
-  GenerateStructuredInput,
-  GenerateTextInput,
-  ModelOp,
-  ModelResult,
-} from './types';
+import { AiContext, EmbedInput, GenerateStructuredInput, GenerateTextInput, ModelOp, ModelResult } from './types';
 
 /**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
@@ -71,10 +64,7 @@ export class RouterModelGateway extends ModelGateway {
     return this.run('generateText', input, ctx, (p) => p.generateText(input, ctx));
   }
 
-  generateStructured<T = unknown>(
-    input: GenerateStructuredInput,
-    ctx: AiContext,
-  ): Promise<ModelResult<T>> {
+  generateStructured<T = unknown>(input: GenerateStructuredInput, ctx: AiContext): Promise<ModelResult<T>> {
     return this.run('generateStructured', input, ctx, async (p) => {
       const first = await p.generateStructured<T>(input, ctx);
       if (p.id === 'stub') return first; // stub 输出不参与 schema 校验（dev 兜底）
@@ -123,7 +113,7 @@ export class RouterModelGateway extends ModelGateway {
 
   private async run<T>(
     op: ModelOp,
-    input: { task: string; model?: string },
+    input: { task: string; model?: string; maxCostCents?: number },
     ctx: AiContext,
     call: (p: ModelProvider) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
@@ -133,7 +123,7 @@ export class RouterModelGateway extends ModelGateway {
     // 预算门（收口② D）：task.maxCostCents 从纯声明变真闸——reserve-then-settle，
     // 账户（runId ?? workspaceId）超限即抛 BudgetExceededError（调用不发生=真拦截）。
     // settle 优先级：costUsd（按实）→ token 折算（centsFromTokens）→ est 兜底。
-    const baseCents = getTask(input.task)?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
+    const baseCents = input.maxCostCents ?? getTask(input.task)?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
     // generateStructured 可能做一次校验-修复重试（第二次模型调用，见下）——预留**两次**上限，否则账户仅够
     // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
     const reserveCents = op === 'generateStructured' ? baseCents * 2 : baseCents;
@@ -153,6 +143,7 @@ export class RouterModelGateway extends ModelGateway {
           errorMessage: `budget exceeded (DENIED before call): ${err.message.slice(0, 300)}`,
           latencyMs: 0,
           correlationId: ctx.correlationId,
+          modelPolicy: ctx.modelPolicy,
         });
       }
       throw err;
@@ -171,7 +162,11 @@ export class RouterModelGateway extends ModelGateway {
         try {
           const result = await call(provider);
           const costUsd = result.usage?.costUsd;
-          settle(costUsd != null ? Math.ceil(costUsd * 100) : centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1));
+          settle(
+            costUsd != null
+              ? Math.ceil(costUsd * 100)
+              : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1)),
+          );
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,
@@ -184,6 +179,7 @@ export class RouterModelGateway extends ModelGateway {
             outputTokens: result.usage?.outputTokens,
             costUsd: result.usage?.costUsd,
             correlationId: ctx.correlationId,
+            modelPolicy: ctx.modelPolicy,
           });
           return result;
         } catch (err) {
@@ -202,6 +198,7 @@ export class RouterModelGateway extends ModelGateway {
             errorMessage: String(err),
             latencyMs: Date.now() - started,
             correlationId: ctx.correlationId,
+            modelPolicy: ctx.modelPolicy,
           });
           lastErr = err; // try the next provider (fallback)
         }

@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { ModelExecutionTrace } from '@global/contracts';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface TraceEntry {
@@ -14,6 +16,8 @@ export interface TraceEntry {
   outputTokens?: number;
   costUsd?: number;
   correlationId?: string;
+  /** Site Builder resolved policy + selected fallback position, when applicable. */
+  modelPolicy?: ModelExecutionTrace;
 }
 
 /**
@@ -43,6 +47,11 @@ export class AiTraceSink {
             outputTokens: entry.outputTokens ?? null,
             costUsd: entry.costUsd ?? null,
             correlationId: entry.correlationId ?? null,
+            meta: entry.modelPolicy
+              ? ({
+                  modelPolicy: entry.modelPolicy,
+                } as unknown as Prisma.InputJsonObject)
+              : undefined,
           },
         });
         const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);

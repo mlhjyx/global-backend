@@ -1,3 +1,5 @@
+import type { ModelExecutionTrace } from '@global/contracts';
+
 /** Context threaded into every model call — for routing, tenancy, cost, trace. */
 export interface AiContext {
   /** 必须是真实 workspace uuid（ai_trace/usage_ledger @db.Uuid 列；伪值=记账静默失败）。 */
@@ -6,6 +8,8 @@ export interface AiContext {
   /** 预算归账键（BudgetLedger reserve-then-settle 按 runId ?? workspaceId 归账）。 */
   runId?: string;
   correlationId?: string;
+  /** Optional Site Builder policy evidence; copied to every gateway trace row. */
+  modelPolicy?: ModelExecutionTrace;
 }
 
 export interface ModelUsage {
@@ -33,6 +37,8 @@ export interface GenerateTextInput {
   temperature?: number;
   /** reasoning 模型的思考预算（OpenAI 兼容 reasoning_effort）。copy 类任务 🔴 必配 low（02 §6）。 */
   reasoningEffort?: 'low' | 'medium' | 'high';
+  /** Per-call ceiling from the resolved task policy; takes precedence over legacy registry defaults. */
+  maxCostCents?: number;
   /** 调用方超时/取消信号，透传到底层 fetch——超时即真 abort，不留后台弃单继续烧钱。 */
   signal?: AbortSignal;
 }
@@ -45,6 +51,8 @@ export interface GenerateStructuredInput {
   schema: Record<string, unknown>; // JSON Schema the output must satisfy
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
+  /** Per-call ceiling from the resolved task policy; takes precedence over legacy registry defaults. */
+  maxCostCents?: number;
   /** 调用方超时/取消信号，透传到底层 fetch（含网关内修复重试的两次调用）。 */
   signal?: AbortSignal;
 }

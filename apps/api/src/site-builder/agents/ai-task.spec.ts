@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
-import type { GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
+import type { AiContext, GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
 import { AiTaskError, runAiTask, SiteBuilderTaskDefinition } from './ai-task';
 import type { TaskRoute } from './task-routes';
 
@@ -33,23 +33,50 @@ const DEF: SiteBuilderTaskDefinition<EchoIn, EchoOut> = {
 };
 
 const ROUTE: TaskRoute = {
+  profile: 'structured.default',
   primary: 'model-a',
   fallbacks: ['model-b'],
   maxTokens: 1000,
   timeoutMs: 200,
+  maxCostCents: 40,
+  dataPolicy: {
+    transport: 'new_api_only',
+    region: 'gateway_controlled',
+    personalData: 'forbidden',
+    dataScope: 'company_facts_only',
+  },
+  policy: {
+    policyVersion: 'test-policy/v1',
+    profile: 'structured.default',
+    routeState: 'currentRoute',
+    lifecycle: 'active',
+    source: 'registry',
+    dataPolicy: {
+      transport: 'new_api_only',
+      region: 'gateway_controlled',
+      personalData: 'forbidden',
+      dataScope: 'company_facts_only',
+    },
+    maxCostCents: 40,
+    route: { primary: 'model-a', fallbacks: ['model-b'] },
+  },
 };
 
-function gatewayReturning(
-  impl: (input: GenerateStructuredInput) => Promise<ModelResult<EchoOut>>,
-): { gateway: ModelGateway; calls: GenerateStructuredInput[] } {
+function gatewayReturning(impl: (input: GenerateStructuredInput, ctx: AiContext) => Promise<ModelResult<EchoOut>>): {
+  gateway: ModelGateway;
+  calls: GenerateStructuredInput[];
+  contexts: AiContext[];
+} {
   const calls: GenerateStructuredInput[] = [];
+  const contexts: AiContext[] = [];
   const gateway = {
-    generateStructured: vi.fn(async (input: GenerateStructuredInput) => {
+    generateStructured: vi.fn(async (input: GenerateStructuredInput, ctx: AiContext) => {
       calls.push(input);
-      return impl(input);
+      contexts.push(ctx);
+      return impl(input, ctx);
     }),
   } as unknown as ModelGateway;
-  return { gateway, calls };
+  return { gateway, calls, contexts };
 }
 
 const okResult = (model: string): ModelResult<EchoOut> => ({
@@ -65,13 +92,17 @@ describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
   it('输入不合 schema → 立即抛错，绝不调模型', async () => {
     const { gateway } = gatewayReturning(async () => okResult('model-a'));
     await expect(
-      runAiTask(DEF, { name: '' } as EchoIn, { gateway, ctx: CTX, route: ROUTE }),
+      runAiTask(DEF, { name: '' } as EchoIn, {
+        gateway,
+        ctx: CTX,
+        route: ROUTE,
+      }),
     ).rejects.toThrow(/input invalid/);
     expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
 
   it('happy path：prompt 来自模板槽位，task/model/maxTokens/schema 透传网关', async () => {
-    const { gateway, calls } = gatewayReturning(async (i) => okResult(i.model ?? '?'));
+    const { gateway, calls, contexts } = gatewayReturning(async (i) => okResult(i.model ?? '?'));
     const out = await runAiTask(DEF, { name: 'Acme GmbH' }, { gateway, ctx: CTX, route: ROUTE });
 
     expect(out.data.headline).toBe('Precision pumps');
@@ -81,36 +112,61 @@ describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
       prompt: 'Company: Acme GmbH',
       model: 'model-a',
       maxTokens: 1000,
+      maxCostCents: 40,
     });
     expect(calls[0].schema).toBe(DEF.outputSchema);
+    expect(out).toMatchObject({
+      fallbackIndex: 0,
+      routePolicy: {
+        policyVersion: 'test-policy/v1',
+        profile: 'structured.default',
+        maxCostCents: 40,
+      },
+      modelSnapshot: { primary: 'model-a', fallbacks: ['model-b'] },
+    });
+    expect(contexts[0].modelPolicy).toMatchObject({
+      profile: 'structured.default',
+      route: { primary: 'model-a', fallbacks: ['model-b'] },
+      fallbackIndex: 0,
+    });
   });
 
   it('route.reasoningEffort 透传（copy 的 🔴 low 护栏经此生效）', async () => {
     const { gateway, calls } = gatewayReturning(async (i) => okResult(i.model ?? '?'));
-    await runAiTask(DEF, { name: 'Acme' }, {
-      gateway,
-      ctx: CTX,
-      route: { ...ROUTE, reasoningEffort: 'low' },
-    });
+    await runAiTask(
+      DEF,
+      { name: 'Acme' },
+      {
+        gateway,
+        ctx: CTX,
+        route: { ...ROUTE, reasoningEffort: 'low' },
+      },
+    );
     expect(calls[0].reasoningEffort).toBe('low');
   });
 });
 
 describe('runAiTask — 回退链与显式失败', () => {
   it('主选失败 → 按回退链换模型重试，成功即返回', async () => {
-    const { gateway, calls } = gatewayReturning(async (i) => {
+    const { gateway, calls, contexts } = gatewayReturning(async (i) => {
       if (i.model === 'model-a') throw new Error('503 upstream');
       return okResult(i.model ?? '?');
     });
     const out = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE });
     expect(out.model).toBe('model-b');
+    expect(out.fallbackIndex).toBe(1);
     expect(calls.map((c) => c.model)).toEqual(['model-a', 'model-b']);
+    expect(contexts.map((ctx) => ctx.modelPolicy?.fallbackIndex)).toEqual([0, 1]);
   });
 
   it('🔴 stub 兜底拒绝：provider=stub 视为失败换下一模型（假数据绝不充真，fit-judge 先例）', async () => {
     const { gateway } = gatewayReturning(async (i) => {
       if (i.model === 'model-a') {
-        return { data: { headline: 'stub junk' }, provider: 'stub', model: 'stub-v0' };
+        return {
+          data: { headline: 'stub junk' },
+          provider: 'stub',
+          model: 'stub-v0',
+        };
       }
       return okResult(i.model ?? '?');
     });
@@ -122,9 +178,7 @@ describe('runAiTask — 回退链与显式失败', () => {
     const { gateway } = gatewayReturning(async (i) => {
       throw new Error(`${i.model} down`);
     });
-    const err = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE }).catch(
-      (e) => e,
-    );
+    const err = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE }).catch((e) => e);
     expect(err).toBeInstanceOf(AiTaskError);
     expect(err.message).toContain('model-a');
     expect(err.message).toContain('model-b');

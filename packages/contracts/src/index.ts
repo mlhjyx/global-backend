@@ -16,3 +16,4 @@ export const CONTRACTS_PACKAGE = '@global/contracts';
 export * from './site-builder/site-spec';
 export * from './site-builder/media-foundation';
 export * from './site-builder/evidence';
+export * from './site-builder/model-policy';
