@@ -57,4 +57,23 @@ describe('prepareBrandEvidenceSources — immutable metadata minimization', () =
     expect(prepared.research[0].provenance).not.toHaveProperty('title');
     expect(prepared.research[0].provenance.kind).toBe('search_origin_hint');
   });
+
+  it('sanitizes the intake website URL before it enters the immutable corpus', () => {
+    const prepared = prepareBrandEvidenceSources({
+      ...BASE,
+      intake: {
+        ...BASE.intake,
+        websiteUrl:
+          'https://alice:secret@acme.example/private/alice@example.com?token=top-secret&contact=alice@example.com#Jane-Smith',
+      },
+      kb: [],
+      research: [],
+    });
+
+    expect(prepared.intake.snapshotText).not.toMatch(
+      /alice:secret|top-secret|alice@example\.com|Jane-Smith/,
+    );
+    expect(prepared.intake.snapshotText).toContain('https://acme.example/');
+    expect(prepared.intake.snapshotText).toContain('token=%5Bredacted%5D');
+  });
 });
