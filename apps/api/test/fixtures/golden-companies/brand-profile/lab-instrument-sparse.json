@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "brand-profile-eval-fixture/v1",
+  "id": "lab-instrument-sparse",
+  "industry": "laboratory instruments",
+  "materialCompleteness": "sparse",
+  "companyName": "ClearBench Instruments",
+  "products": ["benchtop orbital shakers", "laboratory sample mixers"],
+  "targetMarkets": ["US", "SG"],
+  "sources": [
+    {
+      "id": "intake-1",
+      "sourceKey": "fixture:lab-instrument-sparse:intake",
+      "sourceType": "intake",
+      "sourceRole": "fact_candidate",
+      "content": "ClearBench Instruments supplies benchtop orbital shakers and laboratory sample mixers for routine laboratory workflows. The company serves laboratory distributors in the United States and Singapore."
+    }
+  ],
+  "assertions": {
+    "minimumAcceptedFacts": 1,
+    "requiredAcceptedTerms": ["benchtop orbital shakers"],
+    "forbiddenOutputTerms": ["FDA approved", "medical diagnosis", "certified"]
+  }
+}

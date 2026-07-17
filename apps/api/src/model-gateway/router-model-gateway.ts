@@ -85,7 +85,10 @@ export class RouterModelGateway extends ModelGateway {
         throw new ProviderOutputError(
           `repair call failed: ${String(err)}`,
           mergeStructuredUsage(first.usage, err instanceof ProviderOutputError ? err.usage : undefined),
-          { cause: err },
+          {
+            cause: err,
+            callCount: 1 + (err instanceof ProviderOutputError ? err.callCount : 1),
+          },
         );
       }
       const recheck = checkAgainstSchema(input.schema, repair.data);
@@ -95,6 +98,7 @@ export class RouterModelGateway extends ModelGateway {
         throw new ProviderOutputError(
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join('; ')}`,
           mergeStructuredUsage(first.usage, repair.usage),
+          { callCount: 2 },
         );
       }
       // usage 合并：重试消耗也要入账。callCount=2 → 无 usage 上报时 settle 按**两次**兜底（否则少记一次、

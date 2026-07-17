@@ -1,6 +1,7 @@
 import type { ModelGateway } from '../../model-gateway/model-gateway';
 import { checkAgainstSchema } from '../../model-gateway/schema-validate';
 import type { AiContext, ModelResult, ModelUsage } from '../../model-gateway/types';
+import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
 import { resolveTaskRoute, SiteBuilderTaskId, TaskRoute } from './task-routes';
 import type { ModelExecutionPolicySnapshot, ModelRouteSnapshot } from '@global/contracts';
 
@@ -33,6 +34,8 @@ export interface AiTaskRunResult<TOut> {
   data: TOut;
   /** 实际服务的模型（回退链命中哪个）。 */
   model: string;
+  /** Provider identifier that served the successful response. */
+  provider: string;
   usage: { inputTokens: number; outputTokens: number; calls: number };
   /** Resolved profile, lifecycle, data handling and cost ceiling used for this run. */
   routePolicy: ModelExecutionPolicySnapshot;
@@ -46,6 +49,8 @@ export class AiTaskError extends Error {
   constructor(
     readonly taskId: string,
     readonly attempts: { model: string; error: string }[],
+    /** Token usage spent on unsuccessful attempts, where the provider reported it. */
+    readonly usage: { inputTokens: number; outputTokens: number; calls: number },
   ) {
     super(
       `AI task ${taskId} failed on all models: ` +
@@ -66,6 +71,18 @@ export interface AiTaskDeps {
 }
 
 const sum = (usage: ModelUsage | undefined, field: 'inputTokens' | 'outputTokens'): number => usage?.[field] ?? 0;
+
+function addUsage(
+  total: { inputTokens: number; outputTokens: number; calls: number },
+  usage: ModelUsage | undefined,
+  calls: number,
+): { inputTokens: number; outputTokens: number; calls: number } {
+  return {
+    inputTokens: total.inputTokens + sum(usage, 'inputTokens'),
+    outputTokens: total.outputTokens + sum(usage, 'outputTokens'),
+    calls: total.calls + calls,
+  };
+}
 
 function cloneRoutePolicy(policy: ModelExecutionPolicySnapshot): ModelExecutionPolicySnapshot {
   return {
@@ -134,11 +151,7 @@ export async function runAiTask<TIn, TOut>(
         ),
         timeout,
       ]);
-      usage = {
-        inputTokens: usage.inputTokens + sum(result.usage, 'inputTokens'),
-        outputTokens: usage.outputTokens + sum(result.usage, 'outputTokens'),
-        calls: usage.calls + (result.callCount ?? 1),
-      };
+      usage = addUsage(usage, result.usage, result.callCount ?? 1);
       if (result.provider === 'stub') {
         // 🔴 stub 兜底绝不写真实产物：dev 网关瞬时失败会 fallback 到 stub（罐头输出）。
         throw new Error('stub provider refused (fake data must never pass as real)');
@@ -146,12 +159,18 @@ export async function runAiTask<TIn, TOut>(
       return {
         data: result.data,
         model: result.model,
+        provider: result.provider,
         usage,
         routePolicy,
         modelSnapshot,
         fallbackIndex,
       };
     } catch (err) {
+      // A malformed/truncated provider response can have consumed tokens even
+      // though it has no usable artifact. Keep that usage through a fallback
+      // or final AiTaskError so evaluations and later cost reconciliation do
+      // not silently make rejected attempts look free.
+      if (err instanceof ProviderOutputError) usage = addUsage(usage, err.usage, err.callCount);
       attempts.push({
         model,
         error: err instanceof Error ? err.message : String(err),
@@ -161,5 +180,5 @@ export async function runAiTask<TIn, TOut>(
     }
   }
 
-  throw new AiTaskError(def.id, attempts);
+  throw new AiTaskError(def.id, attempts, usage);
 }

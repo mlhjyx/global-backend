@@ -2,7 +2,7 @@
 
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
-> **as-built vs target**：本文的**离线评测已覆盖 7 个已落地 AI Task**（`apps/api/src/site-builder/agents/task-routes.ts`：`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`）与 10 个已注册渲染组件（`apps/site-renderer/src/components/Section.astro`）。**审美评审（aesthetic_review）、本地化（localize）、Claim 投影（claim_projection）、视频 QA、DesignEvaluation 契约、通用感检测、shadow/canary 自动化**是**目标态**（M1-d/e/f 与 M2/真实流量后落地），文中逐处标注。26 型封闭组件库是 v1 目标（ADR-015），当前 10 型 as-built。
+> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task（`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`），但当前离线 MODEL-1 评测只实现了有真实工作流消费者的 **BrandProfile 文本子集**；其余 task、截图与渲染组件尚无对应评测消费者，不能宣称已覆盖。**审美评审（aesthetic_review）、本地化（localize）、Claim 投影（claim_projection）、视频 QA、DesignEvaluation 契约、通用感检测、shadow/canary 自动化**是**目标态**（M1-d/e/f 与 M2/真实流量后落地），文中逐处标注。26 型封闭组件库是 v1 目标（ADR-015），当前 10 型 as-built。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 
@@ -34,9 +34,11 @@
 - **auto parts**：检验产品矩阵、兼容/型号事实与测试分支成果。
 - **lab / medical instrument**：检验高信任、合规措辞与信息密度。
 
-约束：至少 1 个 fixture 用 **de-DE/EU** 市场；另建 1 个**不计审美胜率的 ar/RTL 合同 smoke fixture**（考组件库 RTL 承载）。`sparse` = 只有公司名/主营/国家/联系方式；`rich` = 含批准产品/图片/地址/证据素材。
+约束：至少 1 个 fixture 覆盖 **EU 目标市场**；另建 1 个**不计审美胜率的 ar/RTL 合同 smoke fixture**（考组件库 RTL 承载）。`sparse` = 只有公司名/主营/国家/联系方式；`rich` = 含批准产品/图片/地址/证据素材。
 
 作用 = 尽快发现**结构、事实、响应式与"没效果"问题**；**不**用于宣称统计显著、永久终选或跨行业胜率。
+
+**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 EU 目标市场 rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；BrandProfile 当前没有 locale 输入，故该样本**不**构成 de-DE 本地化验证。桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
 
 ### 1.2 视觉子集：6 扩 12（M1-g）
 
@@ -59,7 +61,7 @@ Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包
 - **不允许出现的 Claim**、必需页面/section、客观不变量。
 - desktop/tablet/mobile 三尺寸截图 + 确定性 QA 结果。
 - **DesignEvaluation、owner preference 与选择原因**。
-- catalog / model / prompt / schema 版本 + Claim/Offering/Asset snapshot。
+- catalog / model / prompt / schema / evaluator 版本与不可变指纹 + Claim/Offering/Asset snapshot；当前 BrandProfile report 在 header 固定 task、prompt version、output-schema hash、evaluator version/rubric hash，并对每个 fixture/run 固定 fixture、实际 prompt hash、完整执行策略与已判定 artifact hash。
 - accepted/rejected artifact、trace、token/latency/cost。
 - 来源许可、是否允许训练、保留策略；**不得混入原始 Tier B 页面语料**（净室边界，ADR-019）。
 

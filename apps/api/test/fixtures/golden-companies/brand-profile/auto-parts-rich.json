@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "brand-profile-eval-fixture/v1",
+  "id": "auto-parts-rich",
+  "industry": "automotive components",
+  "materialCompleteness": "rich",
+  "companyName": "Harbor Drive Precision Parts",
+  "products": ["cold-forged yokes", "CNC transmission flanges"],
+  "targetMarkets": ["US", "GB", "PL"],
+  "sources": [
+    {
+      "id": "intake-1",
+      "sourceKey": "fixture:auto-parts-rich:intake",
+      "sourceType": "intake",
+      "sourceRole": "fact_candidate",
+      "content": "Harbor Drive Precision Parts supplies cold-forged yokes and CNC transmission flanges for drivetrain assemblies. Target markets are the United States, United Kingdom, and Poland."
+    },
+    {
+      "id": "drawing-1",
+      "sourceKey": "fixture:auto-parts-rich:drawing",
+      "sourceType": "upload",
+      "sourceRole": "fact_candidate",
+      "content": "Approved product note: yoke program YK-42 uses 42CrMo4 steel. Flange program FL-88 supports diameters from 88 mm to 160 mm."
+    }
+  ],
+  "assertions": {
+    "minimumAcceptedFacts": 2,
+    "requiredAcceptedTerms": ["42CrMo4", "88 mm"],
+    "forbiddenOutputTerms": ["IATF 16949", "PPAP approved", "award-winning"]
+  }
+}

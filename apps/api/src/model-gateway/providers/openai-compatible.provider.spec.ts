@@ -88,6 +88,16 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     expect(r.data.ok).toBe(true);
   });
 
+  it('new-api 返回已解析模型时，保留该模型用于可重放 trace', async () => {
+    mockChatResponse({
+      model: 'upstream/claude-sonnet-5-2026-07-18',
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: {},
+    });
+    const r = await provider.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {} });
+    expect(r.model).toBe('upstream/claude-sonnet-5-2026-07-18');
+  });
+
   it('JSON 中途截断 + finish_reason=length → 抛 ProviderOutputError（truncated 语义，带 cause+usage）', async () => {
     mockChatResponse({
       choices: [{ message: { content: '{"facts": ["pump' }, finish_reason: 'length' }],

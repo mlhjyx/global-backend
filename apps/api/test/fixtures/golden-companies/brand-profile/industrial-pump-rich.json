@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "brand-profile-eval-fixture/v1",
+  "id": "industrial-pump-rich",
+  "industry": "industrial pumps",
+  "materialCompleteness": "rich",
+  "companyName": "Alpine Process Pump GmbH",
+  "products": ["magnetic drive pumps", "high-pressure dosing pumps"],
+  "targetMarkets": ["DE", "NL", "AT"],
+  "sources": [
+    {
+      "id": "intake-1",
+      "sourceKey": "fixture:industrial-pump-rich:intake",
+      "sourceType": "intake",
+      "sourceRole": "fact_candidate",
+      "content": "Alpine Process Pump GmbH supplies magnetic drive pumps and high-pressure dosing pumps for chemical processing. Its export markets are Germany, the Netherlands, and Austria."
+    },
+    {
+      "id": "catalog-1",
+      "sourceKey": "fixture:industrial-pump-rich:catalog",
+      "sourceType": "upload",
+      "sourceRole": "fact_candidate",
+      "content": "Catalog extract: the MX magnetic drive series is designed for seal-less transfer of corrosive process media. The DP dosing series supports discharge pressure up to 160 bar."
+    }
+  ],
+  "assertions": {
+    "minimumAcceptedFacts": 2,
+    "requiredAcceptedTerms": ["magnetic drive", "160 bar"],
+    "forbiddenOutputTerms": ["ISO 9001", "CE marked", "worldwide"]
+  }
+}

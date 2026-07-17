@@ -309,12 +309,12 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
       // 修复调用抛错（只携修复自身的小 usage 5e4）
       .mockRejectedValueOnce(new ProviderOutputError('repair truncated', { inputTokens: 50_000 }));
     const gw = gatewayWith(provider, budget);
-    await expect(
-      gw.generateStructured(
-        { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
-        { workspaceId: 'ws-1', runId: 'run-1' },
-      ),
-    ).rejects.toBeInstanceOf(ProviderOutputError);
+    const error = await gw.generateStructured(
+      { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    ).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as ProviderOutputError).callCount).toBe(2);
     // 合并 1_050_000 token × 100¢/Mtok = 105¢（仅修复=5¢会漏首调、0¢=全不记）→ 剩 395
     expect(budget.remainingCents('run-1')).toBe(395);
   });
@@ -338,12 +338,12 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
         usage: { inputTokens: 50_000 },
       });
     const gw = gatewayWith(provider, budget);
-    await expect(
-      gw.generateStructured(
-        { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
-        { workspaceId: 'ws-1', runId: 'run-1' },
-      ),
-    ).rejects.toBeInstanceOf(ProviderOutputError);
+    const error = await gw.generateStructured(
+      { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    ).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as ProviderOutputError).callCount).toBe(2);
     // 合并 1_050_000 token = 105¢（旧行为裸 Error → 网关记 0¢ 剩 500，两次调用白烧）→ 剩 395
     expect(budget.remainingCents('run-1')).toBe(395);
   });

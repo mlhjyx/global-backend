@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "brand-profile-eval-fixture/v1",
+  "id": "lab-instrument-rich",
+  "industry": "laboratory instruments",
+  "materialCompleteness": "rich",
+  "companyName": "Meridian Lab Motion",
+  "products": ["CO2 incubator shakers", "microplate mixers"],
+  "targetMarkets": ["US", "JP", "KR"],
+  "sources": [
+    {
+      "id": "intake-1",
+      "sourceKey": "fixture:lab-instrument-rich:intake",
+      "sourceType": "intake",
+      "sourceRole": "fact_candidate",
+      "content": "Meridian Lab Motion supplies CO2 incubator shakers and microplate mixers for cell culture and sample preparation workflows. Target markets are the United States, Japan, and South Korea."
+    },
+    {
+      "id": "catalog-1",
+      "sourceKey": "fixture:lab-instrument-rich:catalog",
+      "sourceType": "upload",
+      "sourceRole": "fact_candidate",
+      "content": "Catalog extract: the IC-180 incubator shaker supports an orbital diameter of 19 mm and a speed range of 30 to 300 rpm. The MP-24 microplate mixer accepts 24-well and 96-well plates."
+    }
+  ],
+  "assertions": {
+    "minimumAcceptedFacts": 2,
+    "requiredAcceptedTerms": ["19 mm", "96-well"],
+    "forbiddenOutputTerms": ["FDA approved", "clinical diagnosis", "ISO 13485"]
+  }
+}
