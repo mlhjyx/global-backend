@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { researchBrand } from './brand-research';
@@ -38,6 +39,8 @@ const ARGS = {
   industry: 'industrial pumps',
   websiteUrl: 'https://acme.example',
 };
+const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
 
 describe('researchBrand — 正常链路', () => {
   it('自有官网 crawl → storefront 源；搜索结果 → web_research 源（排除自域名防重复计源）', async () => {
@@ -54,7 +57,8 @@ describe('researchBrand — 正常链路', () => {
     expect(storefront[0]).toMatchObject({
       url: 'https://acme.example',
       sourceRole: 'fact_candidate',
-      upstreamContentHash: 'h',
+      upstreamContentHash: sha256('We build pumps since forever.'),
+      providerContentHash: 'h',
       parserVersion: 'crawl4ai/1',
     });
     const web = out.sources.filter((s) => s.sourceType === 'web_research');
