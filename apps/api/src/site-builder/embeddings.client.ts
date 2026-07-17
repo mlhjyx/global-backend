@@ -21,6 +21,24 @@ function firstNonBlank(...values: (string | undefined)[]): string | undefined {
   return undefined;
 }
 
+function isLocalOllamaBreakGlass(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.protocol === 'http:' &&
+      ['localhost', '127.0.0.1', '[::1]', 'embeddings'].includes(url.hostname) &&
+      url.port === '11434' &&
+      url.pathname.replace(/\/$/, '') === '/v1' &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
 function requestSignal(external?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(EMBED_TIMEOUT_MS);
   return external ? AbortSignal.any([external, timeout]) : timeout;
@@ -33,9 +51,6 @@ function requestSignal(external?: AbortSignal): AbortSignal {
  */
 @Injectable()
 export class EmbeddingsClient {
-  // 安全边界：固定请求只由本机 bootstrap 声明的私有别名。不能用 env 把租户
-  // KB 内容改投到公共同名模型；换底模必须走新别名 + 重嵌版本迁移。
-  readonly model = LOCAL_EMBEDDING_MODEL_ALIAS;
   /** 行级 embed_version：换模型/量化档按版本重嵌，不混空间（02 §12）。 */
   readonly version = process.env.EMBEDDINGS_VERSION ?? 'bge-m3:2026-07';
   readonly dim = Number(process.env.EMBEDDINGS_DIM) || DEFAULT_DIM;
@@ -43,11 +58,15 @@ export class EmbeddingsClient {
     firstNonBlank(process.env.EMBEDDINGS_URL, process.env.MODEL_GATEWAY_URL) ??
     'http://localhost:3001/v1'
   ).replace(/\/$/, '');
+  private readonly localBreakGlass = isLocalOllamaBreakGlass(this.baseUrl);
+  // 网关路径固定请求只由 bootstrap 声明的私有别名；只有严格 allowlist 的本机
+  // Ollama break-glass 才使用上游名，不能用 EMBEDDINGS_MODEL 改投远端模型。
+  readonly model = this.localBreakGlass ? 'bge-m3' : LOCAL_EMBEDDING_MODEL_ALIAS;
   private readonly apiKey = firstNonBlank(process.env.EMBEDDINGS_API_KEY);
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
-    if (!this.apiKey) {
+    if (!this.localBreakGlass && !this.apiKey) {
       throw new KbIngestError(
         'KB_EMBEDDING_CONFIGURATION_INVALID',
         'terminal',
@@ -61,7 +80,7 @@ export class EmbeddingsClient {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${this.apiKey}`,
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
         },
         body: JSON.stringify({ model: this.model, input: texts }),
         signal: requestSignal(signal),
