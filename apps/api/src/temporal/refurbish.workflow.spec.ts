@@ -25,6 +25,13 @@ function primeHappyPath() {
     researchDegraded: false,
     model: 'deepseek-v4-pro',
   });
+  acts.processImages.mockResolvedValue({
+    status: 'done',
+    processed: 2,
+    failed: 0,
+    variants: 45,
+    items: [],
+  });
   acts.assembleAndBuild.mockResolvedValue({ previewSlug: 'acme-abc123', versionId: 'ver-1' });
   acts.finalizeRefurbish.mockImplementation(async (arg: Record<string, unknown>) => ({
     previewSlug: (arg.build as { previewSlug: string }).previewSlug,
@@ -37,14 +44,15 @@ const firstOrder = (m: Mock): number => m.mock.invocationCallOrder[0];
 beforeEach(() => resetActivities());
 
 describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
-  it('顺序 begin < ingest < brandProfile < assemble < finalize（🔴 digest 必须看到刚摄入的文档=顺序非并行）；不触发补偿', async () => {
+  it('顺序 begin < ingest < brandProfile < imagePipeline < assemble < finalize；不触发补偿', async () => {
     primeHappyPath();
 
     const out = await refurbishWorkflow(INPUT);
 
     expect(firstOrder(acts.beginRefurbishRun)).toBeLessThan(firstOrder(acts.ingestPendingKb));
     expect(firstOrder(acts.ingestPendingKb)).toBeLessThan(firstOrder(acts.buildBrandProfile));
-    expect(firstOrder(acts.buildBrandProfile)).toBeLessThan(firstOrder(acts.assembleAndBuild));
+    expect(firstOrder(acts.buildBrandProfile)).toBeLessThan(firstOrder(acts.processImages));
+    expect(firstOrder(acts.processImages)).toBeLessThan(firstOrder(acts.assembleAndBuild));
     expect(firstOrder(acts.assembleAndBuild)).toBeLessThan(firstOrder(acts.finalizeRefurbish));
     expect(acts.compensateRefurbish).not.toHaveBeenCalled();
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
@@ -58,6 +66,7 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
         ...INPUT,
         kb: { processed: 2, failed: 0, degraded: false },
         profile: { status: 'done', gaps: 2 },
+        images: { status: 'done', processed: 2, failed: 0, variants: 45 },
         build: { previewSlug: 'acme-abc123', versionId: 'ver-1' },
       }),
     );
@@ -113,6 +122,33 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
     );
     expect(acts.compensateRefurbish).not.toHaveBeenCalled();
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
+  });
+
+  it('图片活动整体失败 → image_pipeline 降级且仍继续构建', async () => {
+    primeHappyPath();
+    acts.processImages.mockRejectedValue(new Error('sharp child unavailable'));
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.assembleAndBuild).toHaveBeenCalledTimes(1);
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
+      }),
+    );
+  });
+
+  it('图片处理期间收到取消 → 取消穿透，绝不继续 assemble/publish', async () => {
+    primeHappyPath();
+    acts.processImages.mockRejectedValue(
+      Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' }),
+    );
+
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('workflow cancelled');
+
+    expect(acts.assembleAndBuild).not.toHaveBeenCalled();
+    expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
+    expect(acts.compensateRefurbish).toHaveBeenCalledTimes(1);
   });
 
   it('brandProfile 期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {

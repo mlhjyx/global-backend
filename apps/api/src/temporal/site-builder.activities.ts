@@ -9,6 +9,10 @@ import { buildDemoSpec, DEMO_SPEC_VERSION, DemoCopyPolish, sanitizePolish } from
 import type { IntakeInput } from '../site-builder/intake.service';
 import type { KbService } from '../site-builder/kb.service';
 import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
+import type {
+  ImagePipelineService,
+  SiteImagePipelineSummary,
+} from '../site-builder/image-pipeline.service';
 import { allocateNextSiteVersion } from '../site-builder/version-alloc';
 import { runAiTask } from '../site-builder/agents/ai-task';
 import {
@@ -83,6 +87,8 @@ export interface SiteBuilderActivityDeps {
   ownerDb?: PrismaClient;
   /** 品牌 web 研究的唯一出网闸门（缺省=研究降级 researchDegraded，不裸出网）。 */
   broker?: ExecutionBroker;
+  /** M1-c deterministic Sharp writer; absent in narrow unit tests means an honest degraded step. */
+  imagePipeline?: Pick<ImagePipelineService, 'processSiteImages'>;
 }
 
 export interface RefurbishActivityInput {
@@ -111,6 +117,7 @@ export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   kb: { processed: number; failed: number; degraded: boolean };
   /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
   profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
+  images: Pick<SiteImagePipelineSummary, 'status' | 'processed' | 'failed' | 'variants'>;
   build: { previewSlug: string; versionId: string };
 }
 
@@ -130,7 +137,7 @@ export function previewBasePath(slug: string): string {
 }
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
-  const { prisma, gateway, kb, broker, ownerDb } = deps;
+  const { prisma, gateway, kb, broker, ownerDb, imagePipeline } = deps;
   const log = new Logger('SiteBuilderActivities');
 
   // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
@@ -366,7 +373,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             steps: [
               { key: 'kb_ingest', status: 'pending' },
               { key: 'brand_profile', status: 'pending' },
-              { key: 'image_pipeline', status: 'pending_m1c' },
+              { key: 'image_pipeline', status: 'pending' },
               { key: 'copy', status: 'pending_m1d' },
               { key: 'assemble_build', status: 'pending' },
               { key: 'quality_loop', status: 'pending_m1f' },
@@ -388,6 +395,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     /** P1：消化该站 queued KB 文档（fail-safe：workflow 侧降级不阻断构建）。 */
     async ingestPendingKb(input: RefurbishActivityInput): Promise<{ processed: number; failed: number }> {
       return processQueuedForSite(input.workspaceId, input.siteId);
+    },
+
+    /** P2：每张 ready 图片独立失败隔离；Sharp 在可杀子进程内运行。 */
+    async processImages(input: RefurbishActivityInput): Promise<SiteImagePipelineSummary> {
+      if (!imagePipeline) {
+        return { status: 'degraded', processed: 0, failed: 0, variants: 0, items: [] };
+      }
+      let activity: ActivityContext | undefined;
+      try {
+        activity = ActivityContext.current();
+      } catch {
+        activity = undefined;
+      }
+      activity?.heartbeat({ siteId: input.siteId, stage: 'image-pipeline' });
+      const heartbeatTimer = activity
+        ? setInterval(
+            () => activity?.heartbeat({ siteId: input.siteId, stage: 'image-pipeline' }),
+            5_000,
+          )
+        : undefined;
+      heartbeatTimer?.unref();
+      try {
+        return await imagePipeline.processSiteImages(
+          { workspaceId: input.workspaceId, siteId: input.siteId },
+          activity?.cancellationSignal,
+        );
+      } finally {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+      }
     },
 
     /** kbIngestWorkflow 的单 activity（assets commit 触发的摄入 Temporal 化）。 */
@@ -741,7 +777,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
     /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb/profile 实况与骨架跳过项）。 */
     async finalizeRefurbish(input: RefurbishFinalizeInput): Promise<{ previewSlug: string }> {
-      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, build } = input;
+      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, images, build } = input;
       await prisma.withWorkspace(workspaceId, async (tx) => {
         // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
         // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
@@ -760,7 +796,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 failed: kbSummary.failed,
               },
               { key: 'brand_profile', status: profile.status, gaps: profile.gaps },
-              { key: 'image_pipeline', status: 'skipped_m1c' },
+              {
+                key: 'image_pipeline',
+                status: images.status,
+                processed: images.processed,
+                failed: images.failed,
+                variants: images.variants,
+              },
               { key: 'copy', status: 'skipped_m1d' },
               { key: 'assemble_build', status: 'done' },
               { key: 'quality_loop', status: 'skipped_m1f' },

@@ -1,4 +1,4 @@
-import { CancellationScope, isCancellation, proxyActivities } from '@temporalio/workflow';
+import { CancellationScope, isCancellation, patched, proxyActivities } from '@temporalio/workflow';
 import type { createSiteBuilderActivities, RefurbishActivityInput } from './site-builder.activities';
 
 type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
@@ -52,8 +52,28 @@ export async function refurbishWorkflow(
       if (isCancellation(err)) throw err;
     }
 
+    let images: {
+      status: 'done' | 'degraded';
+      processed: number;
+      failed: number;
+      variants: number;
+    } = { status: 'degraded', processed: 0, failed: 0, variants: 0 };
+    if (patched('site-builder-m1c-image-pipeline-v1')) {
+      try {
+        const summary = await kbActivities.processImages(input);
+        images = {
+          status: summary.status,
+          processed: summary.processed,
+          failed: summary.failed,
+          variants: summary.variants,
+        };
+      } catch (err) {
+        if (isCancellation(err)) throw err;
+      }
+    }
+
     const build = await activities.assembleAndBuild(input);
-    return await activities.finalizeRefurbish({ ...input, kb, profile, build });
+    return await activities.finalizeRefurbish({ ...input, kb, profile, images, build });
   } catch (err) {
     try {
       // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即

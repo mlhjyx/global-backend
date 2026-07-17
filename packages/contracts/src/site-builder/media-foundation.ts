@@ -53,12 +53,28 @@ export type AssetVariantPosition =
   (typeof ASSET_VARIANT_POSITIONS)[number];
 
 export interface AssetVariantRecipe {
+  schemaVersion: "1.0";
   pipelineVersion: string;
   source: {
     /** 逻辑 Asset 原件的内容 SHA-256，始终参与身份。 */
     assetContentHash: string;
     /** 直接从原件派生时为 null；二次派生时同时固定 Variant ID 与内容。 */
     variant: { id: string; contentHash: string } | null;
+  };
+  /** Every byte-affecting safety/resize/encoder choice is part of the identity. */
+  operations: {
+    autoOrient: true;
+    colourspace: "srgb";
+    stripMetadata: true;
+    withoutEnlargement: true;
+    kernel: "lanczos3";
+    alpha: "preserve";
+    background: { r: number; g: number; b: number; alpha: number } | null;
+    encoder: {
+      effort: number;
+      lossless: boolean;
+      chromaSubsampling: "4:4:4" | "4:2:0" | null;
+    };
   };
   output: {
     role: ImageVariantRole;

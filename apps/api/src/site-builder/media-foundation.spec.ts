@@ -13,10 +13,25 @@ function recipe(
   overrides: Partial<AssetVariantRecipe> = {},
 ): AssetVariantRecipe {
   return {
+    schemaVersion: "1.0",
     pipelineVersion: "sharp-v1",
     source: {
       assetContentHash: SOURCE_HASH,
       variant: null,
+    },
+    operations: {
+      autoOrient: true,
+      colourspace: "srgb",
+      stripMetadata: true,
+      withoutEnlargement: true,
+      kernel: "lanczos3",
+      alpha: "preserve",
+      background: null,
+      encoder: {
+        effort: 4,
+        lossless: false,
+        chromaSubsampling: "4:4:4",
+      },
     },
     output: {
       role: "hero",
@@ -69,7 +84,9 @@ describe("AssetVariant recipe hash", () => {
         variant: null,
         assetContentHash: SOURCE_HASH,
       },
+      operations: canonical.operations,
       pipelineVersion: "sharp-v1",
+      schemaVersion: "1.0",
     } satisfies AssetVariantRecipe;
 
     expect(buildAssetVariantRecipeHash(canonical)).toMatch(/^[a-f0-9]{64}$/);

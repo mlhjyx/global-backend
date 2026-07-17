@@ -1,6 +1,15 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder M1-c（纯 Sharp 确定性图片管线）
+
+- API 直接 exact pin `sharp@0.35.0`，pipeline identity 同时包含 libvips；输入按 20 MiB/40 MP/4 channels/单页严格解码，自动方向与 sRGB，输出默认剥离 EXIF/GPS/XMP。模糊/曝光/噪点记录为版本化 warning，不以未校准阈值主观拒绝可解码图片。
+- kind→role 与 explicit focal policy 版本化；只生成源裁切可承受的 320/640/960/1440/1920 档，绝不放大。每档 AVIF+WebP+JPEG/PNG fallback；recipe 纳入 encoder/alpha/background/kernel/withoutEnlargement 等全部字节影响参数，Sharp/libvips 在 cache=false、concurrency=1 的可杀子进程运行。
+- 首个真实 Variant writer 先核验 ready-set，完整重放零编码；否则在事务外编码、事务内锁父 Asset 与排序后的 canonical Variant keys，PUT 后回读 content-type/hash/bytes。响应丢失按对象真值收敛，数据库回滚后重新加锁并只删除无 owner 对象；删除不可用时用 failed Variant 持久认领孤儿，供 cleanup/重试收口。ready Variant 与 derivedKeys 同事务，单 Asset 预算 120 行低于 MF0-B cleanup 128 上限。
+- refurbish P2 正式调用图片活动：逐图失败隔离，步骤记录 done/degraded 与数量，取消穿透；既有 `hasPerson` 只保留不臆测，全部 `aiEdited=false`。Temporal 以 patch marker 兼容在途历史。
+- Ubuntu 开发环境真 PG/app_user FORCE RLS + MinIO 验证：同 asset 双 producer 同 key 只物化 30 行、对象/DB checksum 对账、EXIF/GPS/XMP 清零、sRGB、原图不变、重放 ID/hash 不变、PUT response loss 收敛、DB rollback ownership compensation、坏图隔离、A/B/unset RLS 与 fixture/object 清零。仅为开发验证，不代表生产部署。
+- 明确未做：migration、MediaJob/AssetUsage、rembg、生成图、视频、Readdy/设计 Agent、公开 process/select API、SiteSpec variantId 与 Renderer `<picture>`；最后两项归 M1-e 消费者交付。
+
 ## 2026-07-17 · Site Builder MF0-B（引用守卫与 canonical/Variant 安全回收）
 
 - Profile 三个正式 Asset 引用面与当前 `Site.activeVersionId` SiteVersion 进入同一 fail-closed scanner；SiteSpec 1.0.0 manifest UUID/kind/hash 与 ready Asset 对账，开放 props 按媒体字段语义有界扫描，缺 manifest/畸形/未知/超预算拒绝。Profile/active 指针/Variant/DELETE 共用 Asset 行锁，Variant trigger 作 DB backstop；DELETE 命中返回稳定 `409 ASSET_IN_USE` usages。

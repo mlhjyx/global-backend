@@ -87,9 +87,13 @@ M1-c 图片管线 = **确定性 Sharp**，零模型、零生成式（ADR-018 + D
 
 - **格式**：每档尺寸输出 AVIF + WebP + fallback（渲染器统一 `<picture>` 消费，见下）。
 - **焦点裁剪**：`focalPoint`（04 §4，`[x,y]∈[0,1]`）驱动 contain/cover 受控裁切，避免主体被裁掉。
-- **失败隔离**：单图失败不阻断全站；**只有必需 Hero 无 fallback** 才阻断（v3.2 §20.7）。原图不可用时降级到占位，不阻塞发布。
+- **失败隔离**：M1-c 逐图返回结构化成功/失败，坏图只令本步骤 `degraded`，取消必须穿透。当前 SiteSpec/DesignBrief 尚无可靠 required-media 声明，故“必需 Hero 无 fallback 才阻断”由 M1-e 消费者落地，M1-c 不猜测。
 - 🔴 **不接 rembg**（D-M1c-1）：抠图容器唯一消费者=生成式重绘，已延后；M1-c 不加 rembg 容器、不写生成式图片调用。
 - 🔴 **cert/person/logo 不进入生成式分支**；本 PR 无任何 provider 调用。
+
+> ✅ **M1-c as-built（2026-07-17）**：`sharp@0.35.0` 为 API 直接 exact dependency，运行时 `pipelineVersion=sharp-0.35.0-vips-<version>-m1c.1`；输入硬限 20 MiB/40 MP/4 channels/单页，`failOn=warning`，输出再解码核验 MIME/尺寸/sRGB/无 EXIF/XMP/hash/bytes。质量指标只产生 `image-qa-m1c.1` warning；显式 focal 才 cover，其他路径保守保持主体比例，任何 role 都不放大。Sharp/libvips 在 `cache(false)`、`concurrency(1)` 的可杀子进程内执行，运行时临时目录可配置并 `finally` 清理。
+>
+> writer 先核验完整 ready-set；对象/DB 全部匹配时直接复用并修正 manifest，不启动 Sharp。否则在事务外编码，再在父 Asset `FOR UPDATE` 与按规范 Variant key 排序的 advisory locks 下写 MinIO；每个对象 PUT 后回读 hash/content-type/bytes。DB 回滚或提交响应不确定时重新取同 key 锁，仅在无 authoritative Variant owner 时删除对象；若删除服务不可用，则建立 `failed` Variant 作为 durable owner，供 MF0-B cleanup 或下次精确重试收口。ready Variant 与 `derivedKeys` 在同一数据库事务提交，单 Asset 硬预算 120 行（低于 MF0-B cleanup 128 上限）。对象键严格为 `ws/{workspace}/{site}/variants/{assetId}/{recipeHash}.{ext}`，不使用旧 `generated` 命名空间。
 
 **渲染器同步契约（M1-e，v3.2 §20.5）**：图片组件统一输出 `<picture>`（AVIF/WebP/fallback）+ `width`/`height`（防 CLS）+ 按角色设 `loading`/`fetchpriority`/`sizes`；**不允许组件自己拼对象存储 URL**、**不允许 Renderer 自己选最新 Variant**——build 时固定 `variantId`。
 

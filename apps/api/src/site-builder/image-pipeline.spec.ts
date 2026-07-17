@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
+import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
 import {
   IMAGE_PIPELINE_VERSION,
   RESPONSIVE_IMAGE_WIDTHS,
@@ -15,7 +16,7 @@ function sha256(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
-async function opaqueJpeg(width = 2400, height = 1350): Promise<Buffer> {
+async function opaqueJpeg(width = 3200, height = 2400): Promise<Buffer> {
   return sharp({
     create: { width, height, channels: 3, background: { r: 80, g: 120, b: 160 } },
   })
@@ -23,7 +24,7 @@ async function opaqueJpeg(width = 2400, height = 1350): Promise<Buffer> {
     .toBuffer();
 }
 
-async function transparentPng(width = 2400, height = 1350): Promise<Buffer> {
+async function transparentPng(width = 3200, height = 2400): Promise<Buffer> {
   return sharp({
     create: { width, height, channels: 4, background: { r: 20, g: 40, b: 60, alpha: 0.5 } },
   })
@@ -79,6 +80,17 @@ describe('M1-c deterministic image policy', () => {
     expect(new Set(alphaPlan.map((item) => item.recipe.output.format))).toEqual(
       new Set(['avif', 'webp', 'png']),
     );
+    expect(alphaPlan.every((item) => item.recipe.operations.encoder.lossless)).toBe(true);
+
+    const certPlan = planImageVariants({
+      assetKind: 'cert',
+      assetContentHash: sha256(opaque),
+      inspection: opaqueInspection,
+    });
+    expect(new Set(certPlan.map((item) => item.recipe.output.format))).toEqual(
+      new Set(['avif', 'webp', 'png']),
+    );
+    expect(certPlan.every((item) => item.recipe.operations.encoder.lossless)).toBe(true);
   });
 
   it('auto-orients, converts to sRGB and strips EXIF/GPS from every output', async () => {
@@ -86,7 +98,6 @@ describe('M1-c deterministic image policy', () => {
       create: { width: 2400, height: 1200, channels: 3, background: '#876543' },
     })
       .withExif({
-        IFD0: { Orientation: '6' },
         IFD3: {
           GPSLatitudeRef: 'N',
           GPSLatitude: '31/1 14/1 0/1',
@@ -94,6 +105,7 @@ describe('M1-c deterministic image policy', () => {
           GPSLongitude: '121/1 28/1 0/1',
         },
       })
+      .withMetadata({ orientation: 6 })
       .jpeg({ quality: 90 })
       .toBuffer();
     const inspection = await inspectImageInput(input, 'image/jpeg');
@@ -183,9 +195,8 @@ describe('M1-c deterministic image policy', () => {
       focalPoint: { x: 0.5, y: 0.5 },
     });
 
-    expect(new Set(plan.map((item) => item.recipe.output.width))).toEqual(
-      new Set([320, 640]),
-    );
+    // A 640×360 source has only a 480px-wide 4:3 crop and a 360px square crop.
+    expect(new Set(plan.map((item) => item.recipe.output.width))).toEqual(new Set([320]));
     expect(plan.every((item) => item.recipe.operations.withoutEnlargement)).toBe(true);
   });
 
@@ -202,5 +213,26 @@ describe('M1-c deterministic image policy', () => {
     expect(inspection.quality.metrics).toEqual(
       expect.objectContaining({ entropy: expect.any(Number), sharpness: expect.any(Number) }),
     );
+  });
+
+  it('renders the native codec work in a killable isolated child process', async () => {
+    const input = await opaqueJpeg(640, 360);
+    const inspection = await inspectImageInput(input, 'image/jpeg');
+    const [plan] = planImageVariants({
+      assetKind: 'product_image',
+      assetContentHash: sha256(input),
+      inspection,
+      focalPoint: { x: 0.5, y: 0.5 },
+    }).filter(
+      (item) =>
+        item.recipe.output.role === 'thumb' &&
+        item.recipe.output.width === 320 &&
+        item.recipe.output.format === 'webp',
+    );
+
+    const result = await new IsolatedImagePipelineRunner(30_000).render(input, [plan]);
+    const rendered = result.get(plan.recipeHash);
+    expect(rendered?.info).toMatchObject({ mime: 'image/webp', width: 320, height: 320 });
+    expect(rendered?.info.contentHash).toBe(sha256(rendered!.data));
   });
 });

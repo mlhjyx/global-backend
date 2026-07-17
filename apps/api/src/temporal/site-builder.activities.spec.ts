@@ -205,6 +205,7 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       ...INPUT,
       kb: { processed: 1, failed: 0, degraded: false },
       profile: { status: 'done', gaps: 0 },
+      images: { status: 'done', processed: 2, failed: 0, variants: 30 },
       build: { previewSlug: 'acme', versionId: 'v-1' },
     };
     await acts.finalizeRefurbish(input);

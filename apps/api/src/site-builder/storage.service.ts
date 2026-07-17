@@ -75,10 +75,10 @@ export class StorageService implements OnModuleInit {
   }
 
   /** 对象元信息；不存在返回 null（fail-safe 判断，调用方决定 409/422）。 */
-  async head(key: string): Promise<{ size: number } | null> {
+  async head(key: string): Promise<{ size: number; contentType: string | null } | null> {
     try {
       const res = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
-      return { size: res.ContentLength ?? 0 };
+      return { size: res.ContentLength ?? 0, contentType: res.ContentType ?? null };
     } catch (err) {
       const name = err instanceof Error ? err.name : '';
       if (name === 'NotFound' || name === 'NoSuchKey' || name === '404') return null;
@@ -94,6 +94,30 @@ export class StorageService implements OnModuleInit {
     const bytes = await res.Body?.transformToByteArray();
     if (!bytes) throw new Error(`empty object body: ${key}`);
     return Buffer.from(bytes);
+  }
+
+  /** Read a small trusted class of object with a hard byte ceiling (image pipeline input). */
+  async getBufferBounded(key: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('maxBytes must be positive');
+    const res = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      signal ? { abortSignal: signal } : undefined,
+    );
+    const stream = res.Body as Readable | undefined;
+    if (!stream) throw new Error(`empty object body: ${key}`);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of stream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      size += buf.length;
+      if (size > maxBytes) {
+        stream.destroy();
+        throw new Error(`object exceeds ${maxBytes} bytes: ${key}`);
+      }
+      chunks.push(buf);
+    }
+    if (size === 0) throw new Error(`empty object body: ${key}`);
+    return Buffer.concat(chunks, size);
   }
 
   /** 流式 sha256 + 魔数头（Codex P2：500MB 视频整段进 Buffer 会打爆内存）。 */

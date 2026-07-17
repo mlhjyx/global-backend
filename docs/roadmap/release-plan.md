@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B + M1-c 更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -11,7 +11,7 @@
 - DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
 - #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
 - #126 已完成 R0 contract closeout：intake 幂等、`buildId`、去 `mode`、稳定错误码、Temporal 启动证据与 OpenAPI 同步均已落地并验证。
-- R1-safety、R2-A1–A4 与 MF0-A/B 已于 2026-07-17 完成。Profile 严格 schema/UUID ETag/CAS、staging cleanup 固定在途/settle 双删、AssetVariant 地基、Profile+当前 activeVersion 引用守卫、共享并发门、canonical/Variant schema v2 回收和历史 parked 对账均已落地。Ubuntu 开发环境已验证 46 migrations、validated lifecycle、schema diff=0、真 PG/RLS 并发/对账与真 MinIO+Temporal cleanup/replay；不代表生产部署。
+- R1-safety、R2-A1–A4、MF0-A/B 与 M1-c 已于 2026-07-17 完成。M1-c 首个真实 writer 已把纯 Sharp 处理接进 refurbish P2，包含可杀子进程、严格解码/元数据剥离、无放大响应式编码、同 key producer barrier、对象回读、回滚补偿、同事务 manifest 与逐图降级。Ubuntu 开发环境已验证 46 migrations、真 PG/RLS/MinIO 并发、幂等、PUT 响应丢失与 DB rollback；不代表生产部署。
 
 ### 当前关键路径与退出门
 
@@ -20,7 +20,8 @@
 3. **MF-0-thin（连续两个独立交付，总范围不缩水）**：
    - **MF0-A ✅ 2026-07-17 完成**：`AssetVariant` + RLS/FORCE RLS、单输出 recipe/checksum/复合 provenance、ready+checksummed source 门、MIME→规范扩展名精确绑定的 Variant 专属对象键、不可改写行身份/来源账本与 RLS-safe 脏升级 fail-closed 预检、`derivedKeys` 响应式共享合同及纯兼容投影；真 PostgreSQL A/B/unset 隔离、并发 unique、增量/空库 44 migrations 与 schema diff=0 已验证。仅为 Ubuntu 开发环境，不代表生产部署。
    - **MF0-B ✅ 2026-07-17 完成**：Profile+当前 activeVersion SiteSpec 引用扫描、删除 409、共享 Asset 锁/Variant trigger、同 hash producer barrier、严格 canonical+Variant Temporal 回收、legacy quarantine 与 parked 对账；真 PG/MinIO/Temporal/replay 已验。
-4. **M1-c（下一项）**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
+4. **M1-c ✅ 2026-07-17 完成**：纯 Sharp 确定性图片管线；未加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage、公开 process/select API 或 Renderer `<picture>`。Renderer 固定 Variant 消费仍归 M1-e。
+5. **下一项：M1-d** 多 locale 文案 + CopyBundle；同时优先评估一个独立 R1-min 原子预览安全 PR，保证 M1-e 可见预览前完成 active pointer/unknown component fail-closed 门。
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 
