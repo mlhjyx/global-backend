@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -21,6 +21,13 @@ const grantHardening = readFileSync(
   ),
   'utf8',
 );
+const profileHardeningPath = path.join(
+  repo,
+  'packages/db/prisma/migrations/20260717122000_site_builder_r4a1_brand_profile_append_only/migration.sql',
+);
+const profileHardening = existsSync(profileHardeningPath)
+  ? readFileSync(profileHardeningPath, 'utf8')
+  : '';
 const verifier = readFileSync(
   path.join(repo, 'apps/api/scripts/verify-site-builder-r4-a1.mts'),
   'utf8',
@@ -115,6 +122,24 @@ describe('R4-A1 Evidence 2.0 database invariants', () => {
     expect(schema).toContain('evidenceSchemaVersion Int');
     expect(schema).toContain('model SiteEvidenceSourceSnapshot {');
     expect(schema).toContain('model BrandProfileEvidenceRef {');
+  });
+
+  it('makes the BrandProfile root append-only with its immutable v2 refs', () => {
+    expect(profileHardening).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "brand_profile" FROM app_user',
+    );
+    expect(profileHardening).toContain(
+      'REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE "brand_profile" FROM app_user',
+    );
+    expect(profileHardening).toContain(
+      'CREATE TRIGGER brand_profile_append_only',
+    );
+    expect(verifier).toContain(
+      'app_user has SELECT+INSERT only on the immutable Evidence 2.0 graph',
+    );
+    expect(verifier).toContain('app_user cannot mutate a BrandProfile root');
+    expect(verifier).toContain('app_user cannot delete a BrandProfile root');
+    expect(verifier).toContain('owner cannot mutate a BrandProfile root');
   });
 
   it('verifies both immutable ledgers symmetrically and cannot claim cleanup after swallowing failures', () => {

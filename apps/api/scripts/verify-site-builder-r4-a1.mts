@@ -200,6 +200,40 @@ async function verifyImmutableLedgerRls(args: {
     refUpdateRejected = true;
   }
   check(refUpdateRejected, "app_user cannot mutate a frozen evidence ref");
+
+  let profileUpdateRejected = false;
+  try {
+    await app.withWorkspace(workspaceId, (tx) =>
+      tx.brandProfile.update({
+        where: { id: firstRef.brandProfileId },
+        data: { gaps: [{ key: "tampered", reason: "must fail" }] },
+      }),
+    );
+  } catch {
+    profileUpdateRejected = true;
+  }
+  check(profileUpdateRejected, "app_user cannot mutate a BrandProfile root");
+
+  let profileDeleteRejected = false;
+  try {
+    await app.withWorkspace(workspaceId, (tx) =>
+      tx.brandProfile.delete({ where: { id: firstRef.brandProfileId } }),
+    );
+  } catch {
+    profileDeleteRejected = true;
+  }
+  check(profileDeleteRejected, "app_user cannot delete a BrandProfile root");
+
+  let ownerUpdateRejected = false;
+  try {
+    await owner.brandProfile.update({
+      where: { id: firstRef.brandProfileId },
+      data: { gaps: [{ key: "owner_tamper", reason: "must fail" }] },
+    });
+  } catch {
+    ownerUpdateRejected = true;
+  }
+  check(ownerUpdateRejected, "owner cannot mutate a BrandProfile root");
 }
 
 async function main(): Promise<void> {
@@ -256,15 +290,16 @@ async function main(): Promise<void> {
         FROM information_schema.role_table_grants
        WHERE grantee = 'app_user'
          AND table_name IN (
+           'brand_profile',
            'site_evidence_source_snapshot',
            'brand_profile_evidence_ref'
          )
        GROUP BY table_name
        ORDER BY table_name`;
     check(
-      grants.length === 2 &&
+      grants.length === 3 &&
         grants.every((grant) => grant.privileges.join(",") === "INSERT,SELECT"),
-      "app_user has SELECT+INSERT only on immutable evidence ledgers",
+      "app_user has SELECT+INSERT only on the immutable Evidence 2.0 graph",
     );
 
     await owner.workspace.createMany({
