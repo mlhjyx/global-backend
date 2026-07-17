@@ -1075,6 +1075,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           // Serialize terminal publication with progress writes. This also fences an ACK-lost
           // progress retry that arrives after the run becomes terminal.
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-publish-${siteId}`}))`;
           const [runBefore, siteBefore] = await Promise.all([
             tx.siteBuildRun.findUnique({
               where: { id: buildRunId },
@@ -1257,12 +1258,43 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         // A crash or rename failure leaves the old pointer visible; Temporal retries this Activity
         // and reconstructs the pending link from the durable immutable version directory.
         try {
-          await promotion.commit();
+          await prisma.withWorkspace(workspaceId, async (tx) => {
+            // This site-wide lock spans the final DB recheck and the single pointer rename. A
+            // later build cannot publish between them; an old Activity retry that arrives after a
+            // newer build observes the mismatch and only abandons its pending link.
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-publish-${siteId}`}))`;
+            const [siteNow, runNow, versionNow] = await Promise.all([
+              tx.site.findUnique({
+                where: { id: siteId },
+                select: { activeVersionId: true },
+              }),
+              tx.siteBuildRun.findUnique({
+                where: { id: buildRunId },
+                select: { status: true },
+              }),
+              tx.siteVersion.findUnique({
+                where: { id: build.versionId },
+                select: { buildStatus: true, artifactKey: true },
+              }),
+            ]);
+            const expectedArtifact = `local:${previewVersionDir(buildRunId)}`;
+            if (
+              siteNow?.activeVersionId !== build.versionId ||
+              runNow?.status !== 'succeeded' ||
+              versionNow?.buildStatus !== 'succeeded' ||
+              versionNow.artifactKey !== expectedArtifact
+            ) {
+              await promotion!.abandon();
+              return;
+            }
+            await promotion!.commit();
+          });
         } catch (pointerError) {
           if (publicationBaseVersionId !== undefined) {
             try {
               await prisma.withWorkspace(workspaceId, async (tx) => {
                 await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-publish-${siteId}`}))`;
                 await tx.site.updateMany({
                   where: { id: siteId, activeVersionId: build.versionId },
                   data: {

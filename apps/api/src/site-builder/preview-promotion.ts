@@ -4,6 +4,7 @@ import path from 'node:path';
 export interface PreviewPromotion {
   commit(): Promise<void>;
   rollback(): Promise<void>;
+  abandon(): Promise<void>;
 }
 
 async function exists(target: string): Promise<boolean> {
@@ -80,6 +81,13 @@ export async function preparePreviewPromotion(input: {
       if (settled) return;
       await rm(pending, { force: true });
       if (movedThisAttempt) await rename(version, staging);
+      settled = true;
+    },
+    async abandon() {
+      if (settled) return;
+      // A newer build may win after this immutable version was durably recorded. Only discard the
+      // unserved pending link; the historical version directory remains attached to its DB row.
+      await rm(pending, { force: true });
       settled = true;
     },
   };

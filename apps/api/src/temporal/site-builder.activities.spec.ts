@@ -445,19 +445,31 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
     const runUpdateMany = vi.fn(async () => ({ count: 1 }));
     const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
     const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const siteFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ activeVersionId: 'base-version' })
+      .mockResolvedValueOnce({ activeVersionId: 'candidate-version' });
+    const runFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'running', scope: {} })
+      .mockResolvedValueOnce({ status: 'succeeded' });
     const tx = {
       siteBuildRun: {
-        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        findUnique: runFindUnique,
         updateMany: runUpdateMany,
       },
       site: {
-        findUnique: vi.fn(async () => ({ activeVersionId: 'base-version' })),
+        findUnique: siteFindUnique,
         updateMany: siteUpdateMany,
       },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
           artifactKey: `local:${staging}`,
+        })),
+        findUnique: vi.fn(async () => ({
+          buildStatus: 'succeeded',
+          artifactKey: `local:${path.join(root, '.versions', 'run-1')}`,
         })),
         update: vi.fn(async () => ({})),
         updateMany: versionUpdateMany,
@@ -469,6 +481,7 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
         throw pointerFailure;
       },
       rollback: async () => undefined,
+      abandon: async () => undefined,
     }));
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma(tx),
@@ -517,6 +530,71 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
         },
         data: { buildStatus: 'failed' },
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('旧 finalize retry 发现更新 build 已接管时不覆盖新的 served pointer', async () => {
+    const { close } = spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-stale-publish-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const staging = path.join(root, '.staging', 'run-1');
+    await mkdir(staging, { recursive: true });
+    await writeFile(path.join(staging, 'index.html'), 'candidate-preview');
+    const siteFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ activeVersionId: 'base-version' })
+      .mockResolvedValueOnce({ activeVersionId: 'newer-version' });
+    const runFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'running', scope: {} })
+      .mockResolvedValueOnce({ status: 'succeeded' });
+    const tx = {
+      siteBuildRun: {
+        findUnique: runFindUnique,
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: siteFindUnique,
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+        findUnique: vi.fn(async () => ({
+          buildStatus: 'succeeded',
+          artifactKey: `local:${path.join(root, '.versions', 'run-1')}`,
+        })),
+        update: vi.fn(async () => ({})),
+      },
+    };
+    const commit = vi.fn(async () => undefined);
+    const abandon = vi.fn(async () => undefined);
+    const promotePreview = vi.fn(async () => ({
+      commit,
+      rollback: async () => undefined,
+      abandon,
+    }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      promotePreview,
+    });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).resolves.toEqual({ previewSlug: 'acme' });
+      expect(abandon).toHaveBeenCalledOnce();
+      expect(commit).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledWith('run-1', { force: true });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

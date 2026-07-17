@@ -90,4 +90,21 @@ describe('preparePreviewPromotion', () => {
       'candidate',
     );
   });
+
+  it('abandons only the pending link when a newer build has taken over', async () => {
+    const { root, active } = await fixture();
+    const promotion = await preparePreviewPromotion({
+      root,
+      slug: 'acme',
+      buildRunId: 'run-1',
+    });
+    await promotion.abandon();
+    expect(await readFile(path.join(active, 'index.html'), 'utf8')).toBe('old');
+    expect(
+      await readFile(
+        path.join(root, '.versions', 'run-1', 'index.html'),
+        'utf8',
+      ),
+    ).toBe('candidate');
+  });
 });
