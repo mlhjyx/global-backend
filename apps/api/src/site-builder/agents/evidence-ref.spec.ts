@@ -74,6 +74,35 @@ describe('freezeEvidenceSource — Evidence 2.0 frozen corpus', () => {
       'https://acme.example/catalog?token=%5Bredacted%5D&utm_source=test',
     );
   });
+
+  it('redacts PII in URL path/query metadata and drops overlong display URLs', () => {
+    const source = freezeEvidenceSource({
+      sourceKey: 'web_research:directory',
+      sourceType: 'web_research',
+      sourceRole: 'research_hint',
+      rawText: 'Directory snippet about Acme pumps.',
+      displayUrl:
+        'https://directory.example/contact/alice%40example.com?email=bob%40example.com&phone=%2B49%2030%201234567',
+      provenance: { parserVersion: 'searxng-snippet/1' },
+    });
+
+    const decoded = decodeURIComponent(source.displayUrl ?? '');
+    expect(decoded).not.toContain('alice@example.com');
+    expect(decoded).not.toContain('bob@example.com');
+    expect(decoded).not.toContain('+49 30 1234567');
+    expect(decoded).toContain('[redacted-email]');
+    expect(decoded).toContain('[redacted-phone]');
+
+    const overlong = freezeEvidenceSource({
+      sourceKey: 'storefront:overlong',
+      sourceType: 'storefront',
+      sourceRole: 'fact_candidate',
+      rawText: 'Acme storefront.',
+      displayUrl: `https://acme.example/${'x'.repeat(2_100)}`,
+      provenance: { parserVersion: 'crawl4ai/1' },
+    });
+    expect(overlong.displayUrl).toBeUndefined();
+  });
 });
 
 describe('resolveEvidenceReference — exact quote/hash/source binding', () => {

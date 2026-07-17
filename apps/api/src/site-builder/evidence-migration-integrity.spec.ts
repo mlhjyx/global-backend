@@ -21,6 +21,10 @@ const grantHardening = readFileSync(
   ),
   'utf8',
 );
+const verifier = readFileSync(
+  path.join(repo, 'apps/api/scripts/verify-site-builder-r4-a1.mts'),
+  'utf8',
+);
 
 describe('R4-A1 Evidence 2.0 database invariants', () => {
   it('fails closed on historical BrandProfile tenant mismatches before replacing the FK', () => {
@@ -111,5 +115,18 @@ describe('R4-A1 Evidence 2.0 database invariants', () => {
     expect(schema).toContain('evidenceSchemaVersion Int');
     expect(schema).toContain('model SiteEvidenceSourceSnapshot {');
     expect(schema).toContain('model BrandProfileEvidenceRef {');
+  });
+
+  it('verifies both immutable ledgers symmetrically and cannot claim cleanup after swallowing failures', () => {
+    expect(verifier).toMatch(/tx\.brandProfileEvidenceRef\.count/);
+    expect(verifier).toContain(
+      'workspace B cannot read workspace A evidence refs',
+    );
+    expect(verifier).toContain(
+      'cleanup verification found residual R4-A1 fixtures',
+    );
+    expect(verifier).not.toMatch(
+      /owner\.site[\s\S]{0,160}\.catch\(\(\) => undefined\)/,
+    );
   });
 });

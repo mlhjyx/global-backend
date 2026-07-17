@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { checkAgainstSchema } from '../../model-gateway/schema-validate';
+import * as brandProfileModule from './brand-profile';
 import {
+  BRAND_PROFILE_INPUT_SCHEMA,
   BRAND_PROFILE_OUTPUT_SCHEMA,
   BRAND_PROFILE_TASK,
   buildBrandProfilePrompt,
@@ -373,6 +376,86 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     '工艺温度为 80℃，不含邮箱或电话。',
   ])('不误删普通中文或无合法域名的 @ 文本：%s', (input) => {
     expect(scrubPii(input)).toBe(input);
+  });
+
+  it('落库清洗覆盖 fact key 与 gap field，而不只清洗 value/hint', () => {
+    const sanitize = (
+      brandProfileModule as typeof brandProfileModule & {
+        sanitizeBrandProfilePersistenceOutput?: (
+          input: Record<string, unknown>,
+        ) => Record<string, unknown>;
+      }
+    ).sanitizeBrandProfilePersistenceOutput;
+
+    expect(sanitize).toBeTypeOf('function');
+    if (!sanitize) return;
+    const out = sanitize({
+      valueProps: [],
+      tone: null,
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      factSheet: [
+        {
+          key: 'Contact alice@example.com',
+          value: 'Call +49 30 1234567',
+          evidence: { evidenceRefId: 'ref-1' },
+        },
+      ],
+      gaps: [
+        {
+          field: 'Owner bob@example.com',
+          reason: 'needs_input',
+          hint: 'Call +49 30 7654321',
+        },
+      ],
+    }) as {
+      factSheet: { key: string; value: string }[];
+      gaps: { field: string; hint: string }[];
+    };
+
+    expect(out.factSheet[0]).toMatchObject({
+      key: 'Contact [redacted-email]',
+      value: 'Call [redacted-phone]',
+    });
+    expect(out.gaps[0]).toMatchObject({
+      field: 'Owner [redacted-email]',
+      hint: 'Call [redacted-phone]',
+    });
+  });
+});
+
+describe('BRAND_PROFILE_INPUT_SCHEMA — frozen KB source compatibility', () => {
+  it.each([
+    ['storefront', 'fact_candidate'],
+    ['web_research', 'research_hint'],
+  ] as const)('accepts ready KB documents preserved as %s/%s', (sourceType, sourceRole) => {
+    const result = checkAgainstSchema(BRAND_PROFILE_INPUT_SCHEMA, {
+      companyName: 'Acme',
+      products: ['pumps'],
+      targetMarkets: ['DE'],
+      intakeSource: {
+        sourceId: 'intake-source',
+        sourceType: 'intake',
+        sourceRole: 'fact_candidate',
+        contentHash: 'a'.repeat(64),
+        content: 'Company: Acme',
+      },
+      kbSources: [
+        {
+          sourceId: `kb-${sourceType}`,
+          sourceType,
+          sourceRole,
+          contentHash: 'b'.repeat(64),
+          content: 'Frozen ready KB content.',
+          title: 'source.txt',
+        },
+      ],
+      research: [],
+    });
+
+    expect(result).toEqual({ valid: true });
   });
 });
 
