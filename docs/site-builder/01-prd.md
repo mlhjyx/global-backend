@@ -2,7 +2,7 @@
 
 > 状态：设计中（2026-07-13 需求口述 + 拍板：SiteSpec+组件库路线 ✅ / 付费模型统一走 new-api 网关 ✅ / 站点诊断（二级栏目）后置 ✅ / 预览=独立预览域名 ✅ D7）。
 > 架构详设见 [02-architecture.md](02-architecture.md)。获客侧开发已冻结（用户指示，另行通知恢复）。
-> Reviewed against 12 号 v3.2（2026-07-16 回写：真实北极星 + 五结果、四层模板分层、Demo v0 不变量/页面结构、M0–M3 细化、Release/维护/媒体、明确不做）。站建承重决策以 [docs/adr/registry.md](../adr/registry.md) **ADR-013~019** 为准，本 PRD 相关处按 ID 引用不复述。
+> Reviewed against 12 号 v3.2（2026-07-16 回写；2026-07-17 ADR-020 模型组合同步）。站建承重决策以 [docs/adr/registry.md](../adr/registry.md) **ADR-013~020** 为准，本 PRD 相关处按 ID 引用不复述。
 
 ## 0. 一句话
 
@@ -117,7 +117,7 @@ Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
 
 ## 7. 阶段划分
 
-> **口径对齐（2026-07-14 拍板 D-M1-1，见 [09-m1-implementation-design.md](09-m1-implementation-design.md)）**：本 PRD 早前把「质量环（审核/SEO/审美）」列在 M2，与 02 架构把 P4 定义在精装修管线内相冲突。**已裁决：质量环骨架进 M1（M1-f），"确定性优先"**——qa（Playwright+Lighthouse）与 seo（确定性检查表）立即激活；**审美复核需视觉模型，在 Google 通道接入前自带"评审失败→该维弃权"降级（03 卡6），不阻断出环，通道就绪后零改码激活**。管线形状一次成型，避免 M2 再动编排，也不把 M2 的模型评审成本提前。M0-M3 细化如下（v3.2 §3.4 回写）：
+> **口径对齐（2026-07-14 拍板 D-M1-1，2026-07-17 通道真值修订；见 [09-m1-implementation-design.md](09-m1-implementation-design.md)）**：本 PRD 早前把「质量环（审核/SEO/审美）」列在 M2，与 02 架构把 P4 定义在精装修管线内相冲突。**已裁决：质量环骨架进 M1（M1-f），"确定性优先"**——qa（Playwright+Lighthouse）与 seo（确定性检查表）立即激活；审美复核需视觉模型，当前 `gemini-3.5-flash` 虽已在网关可见，仍须 MODEL-1 视觉输入探针/评测后才激活。未晋级或失败时该维弃权（03 卡6），不阻断出环。管线形状一次成型，避免 M2 再动编排。
 
 | 里程碑 | 目标 | 范围 |
 |---|---|---|
@@ -137,7 +137,7 @@ Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
 ## 8. 开放问题 / 待拍板
 
 1. ~~readdy 素材库联动~~ → 已研究定案 D9：不联动，开发期作设计基准（架构 §8）。
-2. ~~模型终选~~ → **不称"终选"**：模型走**四态路由**（`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + deterministicFallback，见 ADR-016 / 架构 §6 表 D8），"推荐不等于代码已切换"、候选晋升只经评测、非采购承诺或永久终选。M1 文本任务先用 deepseek 双档（显式 `v4-flash` / `v4-pro`）跑通全链，registry 配置化、通道就绪后翻配置 + 重启即切换。**用户操作项：在 new-api 接入 Anthropic/Google/OpenAI/火山方舟四通道**，接入一条我实测一条。
+2. ~~模型终选~~ → **不称"终选"**：模型走**四态路由**（`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + deterministicFallback，见 ADR-016 / 架构 §6 表 D8），"推荐不等于代码已切换"、候选晋升只经评测、非采购承诺或永久终选。M1 文本任务先用 `currentRoute` 跑通全链，registry 配置化、候选评测晋级后才翻配置。**当前操作项**：不重复配置已在通用令牌可见的 Anthropic / Google / OpenAI 文本通道；晋级前分任务真探 Structured Output、视觉输入、图片生成/编辑、长任务与 provider 失败语义。`gemini-3.1-flash-image` / `gemini-3-pro-image` 当前不可见，未接通前只能使用 ADR-020 的现有媒体回退；Ark 视频等 M3 前再做 new-api 异步能力探针，失败时不晋级并使用确定性动效/静态降级，不允许绕过网关直连。
 3. 预览/发布域名与 DNS、泛证书的运维归属（本后端 or SaaS 侧）——M0 开工前对齐，用户告知平台域名。
 4. 店铺导入的用户授权勾选文案（提请 SaaS 侧 ToS 一并加素材权属条款）。
 

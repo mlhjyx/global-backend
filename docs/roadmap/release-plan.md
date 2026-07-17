@@ -27,6 +27,8 @@
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 
+**MODEL 路由泳道（2026-07-17 决策同步，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；它不改 `task-routes.ts` 的 currentRoute。先以独立小 PR 将同一自托管 BGE-M3 的应用调用改经 new-api（保留 1024 维/`embed_version`，真 endpoint + 回滚验证），再按消费者逐项做 MODEL-1 capability probe 与 6–12 样本评测；文本、图片、视频各自独立晋级/回退，禁止一次 mega switch。M3 视频可纳入 Seedance 2.0 目标路由，但不进入 M1 关键路径。
+
 ---
 
 以下为**冻结的获客路线**，保留作为恢复开发时的历史计划。

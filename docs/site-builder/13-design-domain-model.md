@@ -3,7 +3,7 @@
 > 本文 = 独立站建设**设计智能层的目标态领域契约**（随 **M1-d/e/f** 落地）。系统化承载设计工厂的实体：`DesignSourceManifest / DesignObservation / DesignRule / DesignDNA / StylePreset / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation` + 媒体域 `Asset / AssetVariant / MediaJob / AssetUsage / DemoVisualPack`——每个实体的**定义 / 字段 / 关系 / 状态 / 生产方·消费方**。
 > ⚠️ **这些实体当前尚未落地**：as-built 的 SiteSpec 共享契约是 `@global/contracts` 的 **1.0.0**（`SITE_SPEC_VERSION='1.0.0'`，type-only：顶层信封 + string-only CopyBundle + 基础 `AssetRef`），**不含** `DesignBrief / DesignDNA / componentLibraryVersion / rendererVersion / claimRefs / RichText——这些属 1.1.0 目标态**（见 [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014**）。渲染器 as-built 注册 **10** 型 section 组件（`apps/site-renderer/.../Section.astro`），**26 型封闭库是 v1 目标**（**ADR-015 / D12**）。
 > **非自封权威**：施工真值仍是当前代码、活文档 00-10/[14](14-media-foundation-mf0.md) 与 [ADR registry](../adr/registry.md)；11 是受 ADR-019 取代的历史研究，12 v3.2 是归档 proposal。本文是设计智能层的**目标设计基线**，实际落地时须回写 [03-agents.md](03-agents.md) / [04-sitespec-contract.md](04-sitespec-contract.md) 并把消费者需要的字段合入 `@global/contracts`。
-> 实质内容由外部草稿 v3.2 §13–§20 分发而来（逐节标注「v3.2 §X 回写」），v3.2 本身非权威。承重决策**按 ID 引用** ADR-013~019，不复述整条。
+> 实质内容由外部草稿 v3.2 §13–§20 分发而来（逐节标注「v3.2 §X 回写」），v3.2 本身非权威。承重决策**按 ID 引用** ADR-013~020，不复述整条。
 
 ---
 

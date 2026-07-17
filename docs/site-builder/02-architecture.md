@@ -226,14 +226,14 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 | # | Agent | 职责 | 输入 → 输出 | 模型（首选） | 工具/护栏 |
 |---|---|---|---|---|---|
 | ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
-| 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | deepseek-v4-pro（研究综合）| SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
+| 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | `structured.default` | SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
 | 3 | 图片管线 imagePipeline | 产品/工厂图生成安全可发布的响应式派生件 | 原图 → 多尺寸 webp/avif + fallback | **M1-c 确定性零模型（纯 Sharp）** | 目标固定序：MIME/像素/解码炸弹检查→方向与 sRGB→重编码去 EXIF/GPS→质量门→安全裁切/focal point→多尺寸导出→`AssetVariant`；原图不可变、单图失败隔离。rembg、超分、生成式背景重绘、视觉质检与 pHash/embedding 主体校验均属 M1-c2/M3 后置能力，出现真实消费者、同意与 provider 门后另行落地（ADR-018） |
-| 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | deepseek-v4-pro（fallback `glm-5.2` → `doubao-seed-2.0-pro`） | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
-| 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 Seedance 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | Seedance（火山，异步任务轮询） | 每站视频条数配额；视频失败自动降级动效 |
-| 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | DesignSpec 当前 `minimax-m3`；审美视觉输入须在 M1-f 真探后才激活 | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
-| 7 | 组装 siteAssembly + assemblyFix | 产出/修补 SiteSpec | DesignSpec+文案+素材清单 → SiteSpec；findings → SiteSpec patch | `glm-5.2`（fallback `deepseek-v4-pro`） | 输出必过 zod schema+素材引用存在性+内链有效性（确定性校验器），不过=带错误重试 |
-| 8 | 审核 qa | 功能/性能体检 | 构建产物 → findings | deepseek-v4-flash（只做汇总） | **主体是确定性工具**：Playwright 遍历（链接/表单/响应式 3 断点/console error）+ Lighthouse（性能/a11y/SEO 基线分） |
-| 9 | SEO seo | 技术 SEO+关键词落位 | 构建产物+Brand Brief → findings+patch 建议 | deepseek-v4-flash | 确定性检查：meta/OG/schema.org(Organization+Product)/sitemap/robots/**hreflang 多语言**/图 alt；关键词→页面映射 |
+| 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | `copy.premium` | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
+| 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | M1=`deterministic`；M3=`video.primary` | 每站视频条数配额；视频失败自动降级动效 |
+| 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | 生成=`structured.default`；评审=`multimodal.review` | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
+| 7 | 组装 siteAssembly + assemblyFix | 产出/修补 SiteSpec | DesignSpec+文案+素材清单 → SiteSpec；findings → SiteSpec patch | 普通=`structured.default`；复杂升级=`reasoning.high` | 输出必过 zod schema+素材引用存在性+内链有效性（确定性校验器），不过=带错误重试 |
+| 8 | 审核 qa | 功能/性能体检 | 构建产物 → findings | `text.summary` / `multimodal.review`（只做汇总/审美 finding） | **主体是确定性工具**：Playwright 遍历（链接/表单/响应式 3 断点/console error）+ Lighthouse（性能/a11y/SEO 基线分） |
+| 9 | SEO seo | 技术 SEO+关键词落位 | 构建产物+Brand Brief → findings+patch 建议 | `text.summary` | 确定性检查：meta/OG/schema.org(Organization+Product)/sitemap/robots/**hreflang 多语言**/图 alt；关键词→页面映射 |
 
 > 评审三人组（8/9/6 评审面）= GAN 式生成-评审循环（生成者改，评审者挑），有界 ≤3 轮防死循环；单维不过阈值出 findings，全过或轮数用尽即出环。
 >
@@ -241,39 +241,51 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 >
 > **方法论内化说明**（用户确认的路线）：生产 agent 跑在本后端，Codex 与已安装的 ECC/Superpowers skills 是**开发期知识源**——各 agent 的 prompt/rubric 从对应 skills 方法论提炼固化（SEO rubric ← SEO 审计清单；审美 rubric ← frontend-design-direction/design-system；动效预设 ← motion-* 系列；质量环 ← GAN harness 模式；a11y ← WCAG 清单）。工具能力以**库内化**为先（M1 先落 Playwright/Lighthouse/Sharp；rembg 等只有真实消费者出现后才评估），MCP 只作确需外部服务时的传输选项（续 ADR「MCP=传输非授权」）。
 
-## 6. 模型选型（**四态路由现役档 2026-07-14**：真实评测 + 用户三轮拍板；依据与全部实测数据见 [10-model-selection-study.md](10-model-selection-study.md)）
+## 6. 模型路由（currentRoute 与 ADR-020 目标组合分层）
 
-> 本表是**当前路由（currentRoute，as-built）**，不是永久终选——ADR-016 四态路由：`currentRoute` / `evaluatedCandidate` / `targetCandidate` / `promotedRoute` + `deterministicFallback`。「推荐 ≠ 代码已切换」，候选**只经 Golden Set 回归 + 成本/质量门**晋级，非采购承诺。Agent 卡只绑 **ModelProfile 语义档**（能力/成本/延迟约束），不硬编码型号；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 供历史重放。定档方法：三任务形状本地网关真实调用评测（确定性判分+延迟实测）+ 外部信源 + 用户拍板。「现役」列只使用已接通集合中的 task-shaped 评测子集（方舟 agent plan 当前 11 个文本模型，2026-07-17 通道批测 11/11 成功；DeepSeek 直连双档已接）；通道连通不等于结构化长任务通过，「升级位」待接入后按同套评测题复测再切。
+> **代码事实优先**：`task-routes.ts` 的 7 个文本 task 是 `currentRoute`；下方 ADR-020 表是用户批准的质量优先 `targetCandidate`，不是已切换的 `promotedRoute`。本轮选择不以官网价格为主约束，而以任务效果、模型特性、结构化稳定性、多语言质量、多模态能力和安全边界为主；但 promotion 仍须 ADR-016 的真实 endpoint capability probe、Golden Set、shadow/canary 和可回滚证据。外部依据与历史实测见 [10-model-selection-study.md](10-model-selection-study.md)。
 
-| Agent/用途 | 现役主选（实测背书） | 回退链 | 升级位（通道待接） |
+**currentRoute（as-built，不变）**：
+
+| task | primary | fallback |
+|---|---|---|
+| `brand_profile` | `deepseek-v4-pro` | `glm-5.2` |
+| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` |
+| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` |
+| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` |
+| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` |
+
+**ADR-020 质量优先目标组合（approved targetCandidate）**：
+
+| 任务 | 目标主模型 | 唯一模型回退 / 降级 | 不可绕过的规则 |
 |---|---|---|---|
-| 编排/增量规划（原 planner 卡1） | **确定性零模型**（D13：固定 DAG + scope 参数 + content_hash 幂等判定——结构化输入下用模型规划=花钱买不可复现）；「站点该有哪些页面/每页什么结构」的规划智能在 **designSpec 行**（未砍，见下） | —（Temporal workflow 即规划器，可回放可审计） | M2+ 自由意图规划（工作台口语化改站需求→任务计划）：GPT-5.6 Terra / deepseek-v4-pro 预留 |
-| 品牌研究综合 brandProfile | **deepseek-v4-pro** 或 **minimax-m3**（评测并列 99/100；竞品认证陷阱零踩、引文逐字核验零虚构） | glm-5.2（唯二主动消歧，审计留痕最佳） | gemini-3.1-pro（长文档检索王）/ GPT-5.6 Terra |
-| 多语言文案 copy | **deepseek-v4-pro**（德语原生度评测最佳；🔴 必配护栏：`reasoning_effort:"low"` + 长度超限裁剪重写 + factSheet 白名单后校验） | glm-5.2（约束遵循最佳、零 reasoning 税）→ doubao-seed-2.0-pro | GPT-5.6 Luna / gemini-3.1-pro（claude-sonnet-5 营销语气口碑第一，8/31 前介绍价 $2/$10） |
-| 站点组装/修复 siteAssembly/Fix | **glm-5.2**（应答质量满分；超时预算 180s 吸收其延迟尾部） | 三重门校验 → 超时/违规**自动回退 deepseek-v4-pro**（加压评测全满分+跨 run 同构）；低成本批量档 doubao-seed-2.0-code（须配校验重试链） | GPT-5.6 Terra / claude-sonnet-5（唯二官方 Structured Outputs） |
-| 视觉评审（审美/图片质检） | **minimax-m3**（网关内唯一原生图像输入；plan 端点收图与否 M1-f 真探，不通则该维弃权降级） | doubao-seed-2.0-pro（多模态） | gemini-3.1-pro / GPT-5.6 Terra |
-| qa/seo 汇总、demo v0 轻文案 | **deepseek-v4-flash**（$0.14/$0.28 全场最低价） | doubao-seed-2.0-lite | gemini-3-flash |
-| 图像生成/编辑 | **doubao-seedream-5.0-lite**（方舟套餐已接通、网关真出图实测；双语文字渲染强、低成本；用户拍板暂用） | — | **gpt-image-2**（文字渲染 Elo 第一 + `images/edits` mask 局部重绘=保主体关键能力；接通后组"贵精/便宜快"双轨，含长文字图必用） |
-| 视频生成（M3） | doubao-seedance-2.0（标准/fast/mini）——🔴 **需方舟 Large 档**（现档位实测不含，用户已确认后期升 Large） | 动效预设降级（确定性零模型，M1 即有） | — |
-| 知识库 embedding | **BGE-M3 自托管**（Ollama 容器，1024 维；M0 已落地实测） | —（🔴 D14 合规红线：公司资料不出域，**故意不走网关**，配置层禁自由 URL） | 无升级位（换模型=按 embed_version 全量重嵌，非通道问题） |
+| 品牌研究归纳、FactSheet、BrandProfile、Claim Gap | `gpt-5.6-terra` | `claude-sonnet-5` | 搜索/抓取由确定性服务完成；模型只处理 R4 冻结证据 |
+| 海外英文/德文文案、产品页、品牌叙事、本地化 | `claude-sonnet-5` | `gpt-5.6-terra` | 只引用 APPROVED ClaimSnapshot；术语/长度/事实后校验 |
+| DesignBrief、Family/Blueprint/组件变体选择 | `gpt-5.6-terra` | `claude-sonnet-5` | 只从封闭 DesignCatalog 选择，不生成前端代码 |
+| SiteSpec 首次组装与普通修复 | `gpt-5.6-terra` | `claude-sonnet-5` | Structured Output + schema/引用/兼容矩阵/Astro 八门 |
+| 连续两次失败后的高难 SiteSpec 修复 | `gpt-5.6-sol` | 确定性安全 Blueprint | Sol 只作显式 escalation，不进入普通 fallback 链 |
+| 三断点截图审美、图片/后续视频 QA | `gemini-3.5-flash` | `gpt-5.6-terra` | 只输出 Finding；不能直接任意重写页面 |
+| QA/SEO 摘要、标签、内部分类、可选 Demo 润色 | `gemini-3.5-flash` | `gpt-5.6-terra` | 硬门继续由代码执行；Demo 无模型仍必须成功 |
+| 企业 KB 向量 | `bge-m3` 自托管 | 无 | 经 new-api `/v1/embeddings`；维持 1024 维/版本，不出域 |
 
-🔴 评测出的工程硬约束（AiTask 基类内建，全模型适用）：现役全员是 reasoning 模型——`finish_reason=length && content 空`=显式失败必检（换预算/换模型重试，绝不静默）；kimi/minimax 无视 `reasoning_effort` 参数；doubao 不严守 max_tokens（预算按实际用量 settle）；kimi 双档最大输出仅 32k 不选长产出。
+**图片与视频目标路由（不进入 M1-c；由真实媒体消费者触发）**：
 
-**路由工程门与可观测性（v3.2 §23.7 回写，ADR-016）**：
-- 每个 task 固定 `maxTokens`/`timeout`/`reasoningEffort`/`maxCost`/fallback policy（as-built：`task-routes.ts` 已按 task 配齐，回退链=合法路由非静默降级）。
-- **显式错误码**：`finish_reason=length`、空 content、schema 不合、capability 不符**必须**是显式错误码，绝不静默。
-- **模型原始输出不直接进数据库或 Renderer**——先过 schema → 事实 → 引用 → 安全四门。
-- **可观测性记录字段集**：`profile`、`policyVersion`、`channel/provider/model/modelSnapshot`、`fallbackIndex`、`prompt/schema/rubric`、`token/latency/cost`、`finish/fallback/rollback reason`。
-- Judge 尽量不与 candidate 同 provider；先跑确定性门再盲评，防高文风掩盖事实错误。
+| 任务 | 目标主模型 | 回退 | 安全边界 |
+|---|---|---|---|
+| 批量非事实 Hero、抽象背景、通用工业场景 | `gemini-3.1-flash-image` | `doubao-seedream-5.0-lite` | 禁伪造工厂、客户、认证、项目现场 |
+| 高价值首页 Hero、品牌主视觉、复杂营销合成 | `gemini-3-pro-image` | `gpt-image-2` | 高价值小批量；文字/OCR 与权利门必过 |
+| 产品主体敏感的背景替换、mask 外编辑 | `gpt-image-2` | 原图 Sharp Variant | mask 内产品锁定；Logo/标签/颜色/接口/孔位/轮廓任一变化即拒绝 |
+| OG 图、带文字营销横幅 | `gpt-image-2` | 确定性 HTML/SVG | 事实文字仍来自批准 Claim |
+| 产品几何、证书/报告、人物身份图片 | **禁生成式编辑** | 原图 | 永久 fail-closed |
+| M3 5–10 秒图生视频 | `seedance-2.0` | 确定性动效/静态图 | 不进 Demo；主体/时序/权利 QA 后才能发布 |
 
-**网关通道现状与待接清单**：
-1. ✅ **火山方舟 agent plan**（已接；2026-07-17 通道批测）：11 个文本模型全部连通——`doubao-seed-2.0-pro/lite/mini/code`、`kimi-k2.6`、`kimi-k2.7-code`、`kimi-k3`、`glm-5.2`、`glm-latest`、`minimax-m2.7`、`minimax-m3`；另有已登记的 seedream-5.0-lite 图像能力。plan 专属路径 `/api/plan/*`（文本 OpenAI 型通道、图像 Custom 型完整 URL——type 45 火山适配器与 plan 路径不兼容）。批测只证明连通，结构化输出/视觉输入/长任务仍逐 task 真探
-2. ✅ **DeepSeek 直连**（既有）：deepseek-v4-flash/pro 双档（plan 内同名双档为尝鲜限流版，不绑避免分流）
-3. ⬜ OpenAI 通道 → **GPT-5.6 Terra/Luna**（勿接 5.5，已被 5.6 三档取代）+ gpt-image-2（须确认 `images/edits` 端点转发）
-4. ⬜ Google 通道 → gemini-3.1-pro + gemini-3-flash（当前尚未接入）
-5. ⬜ Anthropic 通道 → claude-sonnet-5（可选；8/31 前介绍价窗口）
+`gemini-omni-flash-preview` 与 `veo-3.1-generate-preview` 只保留为评测候选：Preview 不作唯一生产依赖；Omni 当前没有不可替代职责，截图/媒体 QA 由稳定的 `gemini-3.5-flash` 承担。更换上述 target portfolio 必须新增 ADR，不能通过改一张表静默换型。
 
-⚠️ **视频已知坑**（M3 前置）：new-api 对豆包视频任务中转有失败案例（[QuantumNous/new-api issue #2174](https://github.com/QuantumNous/new-api/issues/2174)）——接入时先升级 new-api 最新版实测；中转不稳则**方案 B**：视频 activity 后端直连火山方舟任务接口（异步轮询），key 集中配置，成本照记 `site_build_run.cost_summary`，其余模型不受影响仍统一网关。且 seedance 在 agent plan 中仅 Large/Max 档可用（已实测现档位 UnsupportedModel）。🔴 **视频不得进入 Demo v0 10s 路径**（§4.1）；C2PA/Content Credentials 可后续记录，但**不作 M1 阻断项**（v3.2 §21.3）。
+**2026-07-17 本机网关事实**：通用应用令牌 `/v1/models` 返回 39 个可调用型号，目标组合中 `gpt-5.6-terra`、`gpt-5.6-sol`、`claude-sonnet-5`、`gemini-3.5-flash`、`gpt-image-2` 已可见；BGE 不再暴露公共名，而只暴露私有别名 `site-builder-bge-m3-local`。`gemini-3.1-flash-image`、`gemini-3-pro-image`、`gemini-omni-flash-preview` 不可见。BGE 专用令牌的 `/v1/models` 只返回该一个别名，真实 `/v1/embeddings` 两条输入返回两组 1024 维有限向量。**型号可见/单次连通不等于 task promotion**；图片编辑、视觉输入、Structured Output、长任务和 provider 失败语义仍分别真探。`MODEL_DEFAULT_MODEL=deepseek-v4-flash` 只服务未显式传 model 的 legacy/general 调用，不是 Site Builder 主模型，也不覆盖本节 per-task 路由；在未显式化并评测那些旧调用前不得借 ADR-020 顺手修改它。
+
+**BGE new-api 配置合同（#140；2026-07-18 Ubuntu 开发环境 as-built）**：幂等引导命令 `pnpm --filter @global/api new-api:ensure-embeddings -- --write-env` 创建唯一 OpenAI-compatible channel：base URL=`http://embeddings:11434`（Compose 内网），对应用只声明 `site-builder-bge-m3-local`，并以 model mapping 映射到 Ollama `bge-m3`；同时创建只允许该别名、禁跨 group retry 的专用令牌并真验 1024 维。网关路径的模型别名固定、`EMBEDDINGS_API_KEY` 必填，禁止复用 `MODEL_GATEWAY_KEY` 或用 env 改投公共模型；只有精确 allowlist 的 `localhost/127.0.0.1/[::1]/embeddings:11434/v1` break-glass 可无 token 使用上游名 `bge-m3`。应用 `.env` 已切到 new-api，真实 `EmbeddingsClient` 两条输入均返回 1024 维有限向量，专用令牌 `/v1/models` 仅暴露该别名；这不代表生产部署。回滚把应用 `EMBEDDINGS_URL` 指回上述受控本机上游即可，维持同一模型/维度/version，不改数据库向量；定位完成后重新运行引导命令恢复统一网关。
+
+🔴 全模型共用硬门：`finish_reason=length`、空 content、schema/capability 不符均显式失败；原始输出先过 schema→事实→引用→安全门；记录 policy/model snapshot、fallback、prompt/schema/rubric、token/latency/cost 与回滚原因。BGE 的 new-api 生产 channel 必须使用固定私有别名、专用模型受限 key、唯一本机/Compose 上游和幂等 inventory/readiness 检查，任一远端同别名或额外令牌模型都失败关闭；统一网关不改变“企业 KB 不出域”红线。文本、图片、embedding 与视频当前均只批准经 new-api 的生产调用；M3 前若 new-api→Ark 异步任务探针失败，`video.primary` 不得晋级并使用确定性动效/静态降级。后端直连 Ark 当前未获批准，未来只能在独立 ADR、集中控制面实现及真服务验证全部完成后重新决策。
 
 ## 7. 权限与安全
 
@@ -315,7 +327,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ## 10. 决策记录（本轮拍板）
 
-> 站建承重决策已于 2026-07-16 收口为 **ADR-013~019**（`docs/adr/registry.md`，唯一决策真值：SCOPE/SiteSpec/封闭组件库/模型档路由/禁虚构身份/媒体地基/Readdy 参考）；下表 D1-D17 为本轮拍板原文，与 ADR 的对应见各 ADR「出处」列。
+> 站建承重决策已收口为 **ADR-013~020**（`docs/adr/registry.md`，唯一决策真值：SCOPE/SiteSpec/封闭组件库/模型档路由/禁虚构身份/媒体地基/Readdy 参考/质量优先目标模型组合）；下表 D1-D17 为此前拍板原文，与 ADR 的对应见各 ADR「出处」列。
 
 | # | 决策 | 结论 |
 |---|---|---|
@@ -332,7 +344,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 | D11 | SiteSpec 数据形状 | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认） |
 | D12 | 模板策略 | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认）；**组件库 v1 扩容 17→26 型**（2026-07-14 用户拍板，readdy demo 缺口实证见 11 号文档：9 个小难度缺口并入 M1-e，中难度 3 个 v1.5，沉浸叙事类不进封闭库） |
 | D13 | v1 编排 | **无 planner agent**：固定 DAG + 规则判定增量范围；M2+ 真需要再评估（修订①，用户确认） |
-| D14 | 知识库与 embedding | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12）；embedding 自托管 day1 起（换模型=全量重嵌，切换成本决定不走"先 API 后自托管"） |
+| D14 | 知识库与 embedding | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12）；模型从 day1 自托管，经 new-api 统一鉴权/审计传输（换模型才需全量重嵌，单纯换传输不需） |
 | D15 | 富文本 | v1 即开（用户拍板）：受限 ProseMirror JSON、不存 HTML（04 §5） |
 | D16 | 交互地图 | Google Maps **Embed API**（免费无限量）+ 两步加载 GDPR 方案；Geocoding 建站期一次缓存（04 §10 申请清单） |
 | D17 | 注册去分支 + 引导式 onboarding | **修订④（2026-07-14 用户确认）**：注册「有无海外独立站」**只作背景知识、不分叉栏目**；后台统一一级「独立站管理」下挂**独立站建设 + 站点诊断**两个二级栏目；注册即**无条件**生成 demo（不论有无既有站）；进后台的引导（消息卡片→跳转预览→引导填向导）**流程与状态全在前端**（本仓不管），后端只提供**已有的预览链接**（`previewUrl`）供卡片跳转、**不为引导新增编排/状态端点** |
@@ -341,7 +353,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 - **解析**：**Docling**（MIT，IBM）——Word/Excel/PPT/PDF/HTML/图片全格式，复杂表格抽取 97.9% 准度、开源基准第一（0.877）；外贸资料主流是 Word/Excel 产品表，正中其强项。中文复杂版式画册（扫描版 PDF）备选 **MinerU**（上海 AI Lab，CJK 最强 0.831），v1 不引入（KISS）。
 - **切块**：结构感知——按标题层级切、表格整块保留（Docling 输出天然带文档树）；产品 SKU 表逐行成 chunk 并带表头上下文。
-- **Embedding**：**BGE-M3 自托管**（MIT、1024 维、100+ 语言含中文），compose 加一个容器（Ollama/sentence-transformers，CPU 可跑）——沿 v3.0 D1 既定，**不接付费 embedding API**。理由：公司资料敏感（数据不出域）、KB 吞吐大（零边际成本）、且与获客侧 `entity_embedding` **同一向量空间**——未来"客户产品 ↔ 海外买家需求"跨域匹配的直接红利。
+- **Embedding**：**BGE-M3 自托管**（MIT、1024 维、100+ 语言含中文），Ollama 容器作 new-api 的本机上游——沿 v3.0 D1 既定，**不接远端/付费 embedding 模型**。应用统一调用 new-api `/v1/embeddings` 只改变鉴权、路由与审计传输，不改变数据出域、模型、维度或向量空间。理由：公司资料敏感、KB 吞吐大，且与获客侧 `entity_embedding` **同一向量空间**。
 - **存储**：`kb_chunk.embedding vector(1024)` + HNSW（halfvec cosine）+ workspace RLS；行上记 `embed_model`/`embed_version`（换模型=按版本重嵌，不混空间）。
 - **检索**：向量 + 关键词（tsvector）混合召回，agent 侧按任务取 top-k 拼 kbDigest。
 - **注意**：批量上传高峰的嵌入排队走 Temporal activity 限速，不阻塞交互路径。

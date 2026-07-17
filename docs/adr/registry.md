@@ -1,8 +1,8 @@
 # ADR/PDR 注册表（唯一决策真值）
 
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
-> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（2026-07-10 会话拍板/收敛），标注 ⚠ 者待 A/B 会签。
-> 2026-07-16 追加 **ADR-013~019**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档）。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
+> 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（按各批追加日期拍板/收敛），标注 ⚠ 者待 A/B 会签。
+> 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档）。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
 
 ## PDR（产品决策）
 
@@ -37,5 +37,6 @@
 17. **ADR-017 NO-FABRICATED-IDENTITY 禁虚构身份（🔴 合规红线）**：demo-spec 与文案 agent **只用 intake 事实**；对未知企业类型**禁止**默认写 manufacturer / 工程团队 / QC / 出口包装 / 认证 / 产能 / 年限 / 客户名单等身份声明；缺 = **留空或中性措辞 + 提示补录**，绝不虚构。与 ADR-010 存储侧"证据先行/最小化"红线同源，**建站侧不可回退**。出处：01 事实红线、00-decisions R0-3。
 18. **ADR-018 MEDIA-FOUNDATION MF-0 媒体地基（薄版）**：M1-c 媒体只落 `AssetVariant` 表 + **删除守卫**（删除前查 active SiteSpec 引用 → 409）；`MediaJob`/`AssetUsage` **事件触发补建**（接生成式图片/视频前不提前建，YAGNI）。M1-c 图片管线 **纯 Sharp 确定性算法**，不加 rembg 容器（唯一消费者=生成式重绘已延后，D-M1c-1）。出处：00-decisions MF-0 裁决、02 §8。
 19. **ADR-019 READDY-VISUAL-REFERENCE Readdy 视觉参考（D9）**：来源状态唯一机器字面量为 `visual_research_only` / `owned_export_authorized`（历史稿中的 `visual_reference_only` / `owned_export` **不得持久化、无运行时别名**）。Readdy 默认 `visual_research_only`——**净室抽象**（借鉴布局意图非拷贝实现）、运行时**零依赖**、**不逆向**；只有取得覆盖 AI 建站产品、衍生组件和商业分发的**书面授权**，并完整登记授权证据、范围、期限、地域、撤回与再分发权后，才可升为 `owned_export_authorized`，按授权边界走一次性改造工序入封闭库；缺任一项 fail-closed。出处：11 号 D9、00-decisions、06 §9、13 §2。
+20. **ADR-020 QUALITY-FIRST-MODEL-PORTFOLIO 质量优先目标模型组合**：批准一组稳定、按任务唯一职责的 **target portfolio**，停止在几十个网关型号间动态挑选：Brand/FactSheet/DesignBrief/SiteSpec=`gpt-5.6-terra`，高难组装升级=`gpt-5.6-sol`，海外文案=`claude-sonnet-5`，截图/图片/后续视频 QA=`gemini-3.5-flash`；批量非事实图=`gemini-3.1-flash-image`（回退 `doubao-seedream-5.0-lite`），高价值主视觉=`gemini-3-pro-image`（回退 `gpt-image-2`），mask 外精确编辑=`gpt-image-2`（回退原图 Sharp），产品几何/证书/人物身份生成式编辑永久 fail-closed；M3 视频主路=`seedance-2.0`（静态/确定性动效回退），Preview 型号只可 shadow；KB 继续 `bge-m3` 自托管、1024 维和原 `embed_version`，但应用调用统一经 new-api `/v1/embeddings`。**所有文本、图片、embedding 与视频生产调用当前唯一批准路径均经 new-api**；M3 前若 new-api→Ark 异步任务能力探针失败，视频路由不得晋级，直接使用静态/确定性动效降级。后端直连 Ark 当前未获批准；未来若确有必要，须以独立 ADR、已实现的集中凭证/预算 reserve-settle/成本/trace/audit/取消与对账边界，以及真服务验证为前置条件。这是**批准的目标组合，不是 currentRoute/promotedRoute 或已实施声明**：文本与媒体切换仍逐 task 服从 ADR-016 的 capability probe、Golden Set、shadow/canary/回滚门；路由表不因供应商目录出现新型号而静默改变，组合更换须新 ADR。出处：02 §6、03 §0.2、10 §0A、14 §7.3。
 
 > Site Builder 的滚动实现状态与施工顺序不在 ADR 注册表维护；统一见 [status/current](../status/current.md) 与 [release-plan](../roadmap/release-plan.md)。`ACCEPTED` 始终不等于已实现。

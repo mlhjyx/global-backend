@@ -1,6 +1,6 @@
 # 09 · M1 精装修管线 — 落地设计（implementation design）
 
-> 状态：**已认可（2026-07-14 用户拍板：设计整体 go；D-M1-1=质量环进 M1、确定性优先；D-M1-2…9 按推荐执行；四通道后接不阻塞）**。设计真值 = 本目录 01-08（PR #90 已批准）；决策真值 = `docs/adr/registry.md`（ADR-013~019，2026-07-16 立）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
+> 状态：**已认可（2026-07-14 用户拍板；2026-07-17 ADR-020 模型组合补充）**。设计真值 = 本目录活文档；决策真值 = `docs/adr/registry.md`（ADR-013~020）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
 >
 > **2026-07-16 回写（v3.2 §24/§26 分发入本文，Reviewed against 12 v3.2）**：新增 §10 生产化审计（R0–R4 定点修复 + 各阶段前置门）、§11 施工 PR 图（粒度/顺序/风险分级）、§12 目标态消费契约与 schema；并就地校正过时表述（组件库 17→26 型/ADR-015；rembg 移出 M1-c/ADR-018；「终选」改四态路由 currentRoute/targetCandidate/ADR-016；R0-3 禁虚构身份引 ADR-017）。**严格区分 as-built（§2 触点 + `@global/contracts` SiteSpec 1.0.0 type-only）与目标态（§12，SiteSpec 1.1 / 内容生命周期，未落地）**。
 >
@@ -19,7 +19,7 @@
 
 | # | 假设 | 探法 | 结果 | 对设计的影响 |
 |---|---|---|---|---|
-| H1 | 设计目标候选模型 targetCandidate（claude-sonnet-5 / gemini-3.1-pro / gpt-image-2 / seedance）可用 | 网关 `/v1/models` + 逐名微量真调；2026-07-17 用户补充当前通道真值 | ❌ GPT/Gemini/Claude 通道尚未接入；✅ 当前文本集合为方舟 11 个 + DeepSeek 双档 | 模型路由必须**配置驱动、按名探活**；targetCandidate=用户接通道后经评测晋级+翻配置（ADR-016，非永久终选） |
+| H1 | ADR-020 targetCandidate 在当前网关的可用边界 | 网关 `/v1/models`；本轮按用户要求不做模型效果实测 | ✅ 通用令牌 39 个可调用型号；Terra/Sol/Sonnet 5/Gemini 3.5 Flash/GPT Image 2 可见；BGE-M3 仅以私有别名 + 专用令牌可见；❌ 三个 Gemini 图片/Omni 型号不可见；所有 Site Builder currentRoute 未切 | 型号可见≠能力/质量晋级；配置驱动、逐 task capability probe + Golden Set 后才 promotion |
 | H2 | 网关现有可用文本模型足以真跑 M1 全链文本任务 | DeepSeek 双档与方舟通道批测；具体任务再走 task-shaped probe | ✅ 方舟 11/11 连通，DeepSeek 双档已接；R4-A1 最终真跑由 DeepSeek Pro 完成两轮结构化 Activity，但此前同任务也观察到 DeepSeek 超时与 `glm-5.2` 空 content/`finish_reason=length`，证明连通不等于稳定 | currentRoute 只从已接集合选经具体任务评估的子集；调用层须给足 token/timeout 并对空 content 显式失败 |
 | H3 | 图片/视觉/视频能力当下可用 | 同 H1 | ⚠️ `images/edits`（gpt-image-2）无通道；`minimax-m3` 虽在已接文本清单，plan 端点真实图像输入尚未真探；视频另待 M3 | imagePipeline 生成步与视觉质检、审美评审 = **capability-gated**，未就绪即显式跳过（`enhanceSkipped`/该维弃权），绝不拿文本模型硬顶 |
 | H4 | Docling 能转真 PDF（M0 只软检） | 现造真 PDF 宣传册，按 `DoclingClient` 生产同形状 POST `/v1/convert/source` | ✅ status=success，全文精准转出 markdown | P1 资料解析可靠；M0 欠账在设计期即闭合 |
@@ -75,30 +75,28 @@
 
 ## 3. 模型路由与四通道现实
 
-**per-task 路由表（配置驱动，`agents/task-registry`；「现役主选」列 = 今天就能真测的 `currentRoute` 默认值，「targetCandidate」列 = 用户接通道后经评测晋级再翻配置，02 §6 唯一真值）**：
+> **2026-07-17 路由裁决**：本节旧 targetCandidate/“四通道”清单保留为施工历史；目标组合已由 ADR-020 与 02 §6 覆盖，currentRoute 仍只认 `task-routes.ts`。目标文本中枢=`gpt-5.6-terra`，海外文案=`claude-sonnet-5`，高难修复=`gpt-5.6-sol`，审美/媒体 QA=`gemini-3.5-flash`；图片/视频/BGE 见 02 §6。该裁决不改变 R4-A2 → R4-B-min → M1-d 的施工顺序，也不等于已切生产路由。
 
-> **路由四态（ADR-016，非「永久终选」）**：下表「现役主选」列 = `currentRoute`（as-built 真值 = 代码 `task-routes.ts`）；「升级位」列 = `targetCandidate`（成本约束候选，**须经评测晋级才成 `promotedRoute`，非采购承诺**）。10 号文档评测 + 用户拍板只作 `evaluatedCandidate` 证据，**推荐 ≠ 代码已切换**。deepseek 一律显式 `v4-pro`/`v4-flash`（chat/reasoner 官方 2026-07-24 关停）。唯一真值=02 §6 与 10 号文档，下表为施工执行版：
+旧“四通道升级位”表已从施工入口撤下，只在 [10 §0](10-model-selection-study.md#0-2026-07-14-dated-结论按任务路由保留为历史实测证据) 保留 dated provenance；其中 `gemini-3.1-pro`、Luna、旧 `gemini-3-flash` 等不再是可执行 target。下面只抄录 `task-routes.ts` 的 currentRoute；目标组合只看 ADR-020/02 §6，两者之间必须经过 ADR-016 promotion 门。
 
-| task | 现役主选 currentRoute（已实测活） | deterministicFallback / 回退链 | targetCandidate（待通道评测晋级） |
-|---|---|---|---|
-| site_builder.brand_profile | deepseek-v4-pro（或 minimax-m3，评测并列） | glm-5.2；web 研究失败独立降级位 `researchDegraded` | gemini-3.1-pro / GPT-5.6 Terra |
-| site_builder.copy | deepseek-v4-pro（🔴 护栏：`reasoning_effort:"low"`+长度裁剪+factSheet 白名单后校验） | glm-5.2 → doubao-seed-2.0-pro | GPT-5.6 Luna / gemini-3.1-pro |
-| site_builder.design_spec | minimax-m3（与审美评审同档，多模态） | doubao-seed-2.0-pro | gemini-3.1-pro / GPT-5.6 Terra |
-| site_builder.assemble / fix | **glm-5.2**（超时预算 180s） | 三重门校验→超时/违规自动回退 deepseek-v4-pro；批量档 doubao-seed-2.0-code | GPT-5.6 Terra / claude-sonnet-5 |
-| site_builder.qa_summarize / seo_review | deepseek-v4-flash | doubao-seed-2.0-lite | gemini-3-flash |
-| site_builder.image_qc / image_edit | seedream-5.0-lite（方舟已接真出图；图生图同端点，mask 保主体语义 M1-c 真探） | 确定性步兜底（`enhanceSkipped`） | gpt-image-2 `images/edits`（贵精档） |
-| site_builder.aesthetic_review | minimax-m3（plan 端点收图与否 M1-f 真探） | **该维弃权**（03 卡6 降级语义），不阻断出环 | gemini-3.1-pro / GPT-5.6 Terra |
+| task | currentRoute | fallback |
+|---|---|---|
+| `brand_profile` | `deepseek-v4-pro` | `glm-5.2` |
+| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` |
+| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` |
+| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` |
+| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` |
 
-原则：**文本任务 = currentRoute 使用已评测的 DeepSeek 主档与方舟 fallback 子集（合法路由，非静默降级）；能力缺失任务（视觉/图编）= 显式跳过并落标记，绝不拿文本模型硬顶**。通道接入后翻 registry 配置 + 重启 worker 即切换（获客侧 #35 先例：旧进程持旧注册表须重启）。豆包视频中转坑（issue #2174/方案 B 直连方舟）与 M1 无关（视频=M3），仅在契约留降级位。
+原则：**文本任务只走已登记的 currentRoute/fallback；能力缺失的视觉/图编任务显式跳过并落标记，绝不拿文本模型硬顶**。通道接入不会自动切路由；只有 task-shaped 评测通过后翻 registry 配置并重启 worker。
 
 **MODEL-0 路由治理落地（v3.2 §23.4/§23.7，profile 化，非本文自封终选）**：Agent 只绑 **ModelProfile 语义档**（`structured.default/reasoning.high/copy.premium/text.bulk/multimodal.review/text.summary/image.*/video.*/…`）**不绑型号**（ADR-016）。`task-routes.ts` 从 `task→model string` 改 `task→profile + task budget`；保留 `SITE_BUILDER_MODEL_*` 紧急 model override，增 `SITE_BUILDER_PROFILE_*`；registry 解析后记录 `policyVersion` + model snapshot。建议文件布局（禁 provider fetch 散落）：`agents/model-profiles.ts`（profile/capability 类型）· `model-policy.registry.ts`（四态 + 流量模式/健康度/区域/价格/生命周期）· `model-capabilities.ts`（structured/vision/video/edit/async-job 静态声明）· `model-capability-probe.ts`（真 endpoint 验 IO/JSON/finish_reason/超时）· `model-promotion.service.ts`（**MODEL-0 不预建完整服务**，shadow/canary/rollback 状态机后期真流量才建）· `media-gateway/`（图/视频/语音异步任务）。**每 task 路由工程门**：固定 `maxTokens/timeout/reasoning effort/maxCost/fallback policy`；`finish_reason=length`、空 content、schema 不合、capability 不符**必须是显式错误码**；模型原始输出**先过 schema/事实/引用/安全门**再进 DB/Renderer；alias 运行时解析到 snapshot 存 ReleaseManifest（历史重放/回归定位）；Judge 尽量不与 candidate 同 provider（先确定性门再盲评，防高文风掩盖事实错）。分期晋级 MODEL-1（候选真探 + 6–12 样本 task-shaped eval）/MODEL-2（真流量前 30×3 + shadow/canary + 自动回退）见 §11。
 
-**用户侧通道就绪清单（不阻塞 M1 开工，影响激活时点）**：① Anthropic → claude-sonnet-5（组装主力）② Google → gemini-3.1-pro + flash 档（研究/文案/视觉三评审）③ OpenAI → gpt-image-2 且**确认网关转发 `images/edits`**。接入一条我实测一条、翻一条。
+**剩余通道/能力清单（不阻塞 R4/M1）**：① `gemini-3.1-flash-image` 与 `gemini-3-pro-image` 尚不可调用；当前平替分别是 Seedream 5.0 Lite 与 GPT Image 2 ② `gemini-omni-flash-preview` 尚不可调用且无独占生产职责 ③ GPT Image 2 仍须真探网关是否完整转发 mask/edit 语义 ④ Seedance 2.0 待 M3 接火山能力。已可见的文本/多模态型号也必须逐 task 评测后才翻 registry。
 
 ## 4. 合规红线（编号沿用提取记录 A-F；🔴=硬闸）
 
 - **A 素材**：A2 sharp 一律解码重编码+剥 EXIF（GPS=个人数据）🔴；A3 双闸（presign 出票限制 + commit 魔数复验，M0 已建沿用）；A4 Docling 容器非特权无网络（compose 规格化）；A5 人物照默认不做生成改动；A6 证书图永不生成式处理 🔴；A7【补】人脸检测落 `hasPerson` 标记。ToS 素材权属条款=SaaS 侧阻塞项（对外依赖清单）。
-- **B KB**：B1 删除链路可证（document 级联删 M0 已建；workspace 注销接 Art.17 编排先例）；B2 embedding 只许自托管端点（配置校验非自由 URL）🔴；B3 检索 RLS；B4【补】**用户自有资料含 PII：用户=控制者/我们=处理者，可入 KB 仅限本 workspace 消费；(a) 不回流获客绿库 🔴 (b) copy 输出具名人白名单（仅显式团队素材可上站）(c) 受 B1 删除覆盖**。
+- **B KB**：B1 删除链路可证（document 级联删 M0 已建；workspace 注销接 Art.17 编排先例）；B2 embedding 模型只许本机自托管 BGE-M3 🔴——经 new-api 时固定私有别名 `site-builder-bge-m3-local`、专用模型受限 key、唯一 Compose 上游且禁跨 group retry，公共名/远端同别名/额外令牌模型均失败关闭；Ollama `:11434` 只作网关上游与 break-glass 诊断；B3 检索 RLS；B4【补】**用户自有资料含 PII：用户=控制者/我们=处理者，可入 KB 仅限本 workspace 消费；(a) 不回流获客绿库 🔴 (b) copy 输出具名人白名单（仅显式团队素材可上站）(c) 受 B1 删除覆盖**。
 - **C 研究**：C1 SSRF 的 R1-safety 门已完成：Crawl4AI、robots 与 `http.get` 均按解析后 global-unicast、连接 pinning、redirect 逐跳、metadata/内网/IPv4-mapped/上限校验，broad allow-internal 已移除 🔴；C2 抓取内容只进模板变量位（AiTask 基类结构性保证）🔴；C3【补】robots 遵守（web_watch 先例）+ 竞品只做定位参考不搬运；C4 第三方页面具名个人不落库不进 Brief（schema 结构性排除）🔴。
 - **D 文案**：D0【🔴 红线 ADR-017 NO-FABRICATED-IDENTITY / R0-3】**demo-spec 与文案 agent 只用 intake 事实**——对未知企业类型**禁止**默认写 manufacturer/engineering team/production/QC/export packaging/认证/产能/年限/客户名单等身份声明；缺 = 留空 + 提示补录，绝不虚构。✅ #123 已把无证据措辞改为中性事实安全（`supplier/supply/requirement review/delivery & support`），并加 sanitizer/提示词/CI 守卫；仅 BrandProfile 明确证实企业类型后才升级措辞。D1 factSheet 零虚构=模型后置**代码闸**（evidence 非空，缺=gaps）🔴；D2【补】evidence 分级溯源（R4-A1 已落 `EvidenceRefV2` 引用完整性，R4-A2 待落 quote/value 与发布真值门，见 §2.1）；D3 只引 factSheet+禁绝对化宣称；D4 kbDigest 来源标注+截断；D5 预览产物过 L1 确定性筛查（词库资产先建，L2 模型审查挂 M2 发布门）。✅ **R0-4 #124**：`intakeToMarkdown` 已不再写 `businessEmail`；联系信息只留 `Site.intake` 受控结构区，并提供幂等存量脱敏脚本（各部署环境仍须执行并留证）。
 - **E 图片**：E1 mask 外重绘、无 mask 不许调编辑端点 🔴；E2 主体 pHash+embedding 双保险（不过=原图）🔴；E3【补】`aiEdited` day1 落数据（AI Act 钩子）；E4 图库/图标许可白名单+禁外链直嵌。
@@ -108,8 +106,8 @@
 
 | # | 决策 | 推荐与理由 |
 |---|---|---|
-| D-M1-1 | M1 是否含 P4 质量环（01/02 口径张力） | **含，确定性优先**：qa/seo 主体是 Playwright/Lighthouse/检查表（今天就能真测且价值最大）；审美维 capability-gated 自动弃权，Google 通道来了零改码激活。管线形状一次成型，避免 M2 再动编排 |
-| D-M1-2 | 文本模型先用当前已接集合跑通全链 | **是**：currentRoute 采用已评测的 DeepSeek 主档与方舟 fallback 子集，不等 GPT/Gemini/Claude；registry 配置化，后续候选接入并通过评测后再翻配置。eval 基线在切换前后各跑一轮量化差异 |
+| D-M1-1 | M1 是否含 P4 质量环（01/02 口径张力） | **含，确定性优先**：qa/seo 主体是 Playwright/Lighthouse/检查表；审美维 capability-gated 自动弃权。Gemini 3.5 Flash 虽已在网关可见，仍须视觉输入探针和评测后激活，不能“见到型号即零门槛切换” |
+| D-M1-2 | 文本模型先用 currentRoute 跑通全链 | **是**：currentRoute 保持已评测的 DeepSeek 主档与方舟 fallback 子集；ADR-020 目标组合不改 as-built。registry 配置化，候选通过评测后再翻配置；eval 基线在切换前后各跑一轮量化差异 |
 | D-M1-3 | gpt-image-2 生成步现在写吗 | **不写调用代码，也不在 M1-c 预建其 rembg/mask 步骤位**：当前无真实消费者与可验证通道；M1-c 只落 Sharp 的重编码/方向/sRGB/EXIF-GPS/质量门/裁切/多尺寸。生成式编辑进入 M1-c2/M3 时再随真实合同加 feature flag |
 | D-M1-4 | 组件库扩展幅度 | **补齐 04 §5 封闭 26 型**（D12/ADR-015，17→26）：契约是封闭枚举，P3 组装 prompt 需要完整菜单；现渲染器已注册 10 个，增量 16 个（M1-e-A）。ScrollVideoHero/Interactive3DHero 不进封闭库 |
 | D-M1-5 | M1 语种范围 | **en + de 真跑**（golden=德国市场先例），`ar`(RTL) 进渲染器单测但不进 M1 golden；语种是 options 参数非硬编码 |
@@ -120,7 +118,7 @@
 
 ## 6. 主动风险/权衡（没问但该知道）
 
-1. **模型任务形状与主档集中风险**：部分主任务仍优先 DeepSeek，方舟 fallback 已降低单 provider 风险，但“通道连通”不代表长结构化任务稳定；网关配置漂移、超时或空 content 仍可让 build fail-closed。缓解：AiTask 探活+显式失败+run 可重跑；按 task-shaped eval 晋级更多现有候选，后续再接 GPT/Gemini/Claude。
+1. **模型任务形状与主档集中风险**：部分主任务仍优先 DeepSeek，方舟 fallback 已降低单 provider 风险；GPT/Claude/Gemini 通道扩容也只增加候选面，“通道连通”仍不代表长结构化任务稳定。网关配置漂移、超时或空 content 可让 build fail-closed。缓解：AiTask 探活+显式失败+run 可重跑；按 task-shaped eval 晋级 ADR-020 候选。
 2. **P95<15min 与质量环相乘**：3 轮 × Astro 重构建（M0 单次 ~5-6s，M1 组件×语种×图片后会涨）+ 逐图处理。缓解：P2 素材并行 + content_hash 幂等跳过 + 增量 scope；verify-m1 落真实计时基线，超标再优化（不预优化）。
 3. **reasoning 模型结构化输出**：v4 双档思考吃 token、JSON 模式行为与非 reasoning 模型不同。缓解：generateStructured 统一封装 maxTokens 预算 + zod 重试 ≤2；eval harness 记录每 task 成功率。
 4. **后置 rembg 对工业产品图的分割质量未知**（管道/异形件/反光金属）。它不在 M1-c 范围；只有 M1-c2/M3 出现生成式背景重绘真实消费者后，才以独立 feature flag 和 Golden 图集 IoU/主体保护评测决定是否接入。
@@ -164,7 +162,7 @@
 
 ## 10. 生产化审计（R0–R4 定点修复）与阶段前置门
 
-> 来源 v3.2 §24 回写。权威 = `docs/adr/registry.md`（ADR-013~019）+ `00-decisions-and-coordination.md`。审计对象 = 已合并的 M0/M1-a/M1-b **main 代码**（多为 as-built 已实现缺陷，非目标态设想）。
+> 来源 v3.2 §24 回写。权威 = `docs/adr/registry.md`（ADR-013~020）+ `00-decisions-and-coordination.md`。审计对象 = 已合并的 M0/M1-a/M1-b **main 代码**（多为 as-built 已实现缺陷，非目标态设想）。
 
 ### 10.1 审计结论：保留主干 + 定点修复 + 明确前置门
 
