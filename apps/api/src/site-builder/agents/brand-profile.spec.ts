@@ -5,11 +5,13 @@ import {
   buildBrandProfilePrompt,
   canonicalUrl,
   enforceEvidenceGate,
+  enforceEvidenceGateV2,
   EvidenceCorpus,
   RawFactItem,
   sanitizeProfileForPrompt,
   scrubPii,
 } from './brand-profile';
+import { freezeEvidenceSource } from './evidence-ref';
 
 /**
  * brandProfile AiTask（09 §2.4 / 合规 C4 + D1/D2，复审 F1/F2/F3/F4 加固）：
@@ -36,6 +38,95 @@ const fact = (over: Partial<RawFactItem> = {}): RawFactItem => ({
   value: 'High-pressure industrial pumps',
   evidence: { sourceType: 'upload' },
   ...over,
+});
+
+describe('enforceEvidenceGateV2 — all new facts bind exact frozen evidence', () => {
+  const frozen = freezeEvidenceSource({
+    sourceKey: 'kb_document:doc-1',
+    sourceType: 'upload',
+    sourceRole: 'fact_candidate',
+    rawText: 'Pumps up to 400 bar. ISO 9001 certified quality system.',
+    provenance: { documentId: 'doc-1', chunkIds: ['chunk-1'] },
+  });
+  const sources = new Map([['source-1', frozen]]);
+
+  it('hydrates a server-owned EvidenceRef v2 and returns a persistence row', () => {
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          evidence: {
+            sourceType: 'upload',
+            sourceId: 'source-1',
+            contentHash: frozen.contentHash,
+            quote: 'Pumps up to 400 bar',
+          },
+        }),
+      ],
+      { sources, createEvidenceRefId: () => 'ref-1' },
+    );
+
+    expect(out.gaps).toEqual([]);
+    expect(out.factSheet[0].evidence).toMatchObject({
+      version: 2,
+      evidenceRefId: 'ref-1',
+      sourceId: 'source-1',
+      contentHash: frozen.contentHash,
+      quote: 'Pumps up to 400 bar',
+    });
+    expect(out.refs).toEqual([
+      expect.objectContaining({ evidenceRefId: 'ref-1' }),
+    ]);
+  });
+
+  it('rejects ordinary facts without an exact quote (v1 permissive behavior is read-only legacy)', () => {
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          evidence: {
+            sourceType: 'upload',
+            sourceId: 'source-1',
+            contentHash: frozen.contentHash,
+          },
+        }),
+      ],
+      { sources, createEvidenceRefId: () => 'ref-1' },
+    );
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.gaps[0].reason).toBe('missing_evidence');
+  });
+
+  it('retains the existing certification rule: web-research-only certification is still a gap', () => {
+    const hint = freezeEvidenceSource({
+      sourceKey: 'search:https://directory.example/acme',
+      sourceType: 'web_research',
+      sourceRole: 'research_hint',
+      rawText: 'Acme is ISO 9001 certified.',
+      displayUrl: 'https://directory.example/acme',
+      provenance: { parserVersion: 'searxng-snippet/1' },
+    });
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          key: 'certifications',
+          value: 'ISO 9001 certified',
+          evidence: {
+            sourceType: 'web_research',
+            sourceId: 'hint-1',
+            contentHash: hint.contentHash,
+            quote: 'ISO 9001 certified',
+          },
+        }),
+      ],
+      {
+        sources: new Map([['hint-1', hint]]),
+        createEvidenceRefId: () => 'ref-1',
+      },
+    );
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.gaps[0].reason).toBe('unverified_certification');
+  });
 });
 
 describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
@@ -358,5 +449,44 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(required).toEqual(
       expect.arrayContaining(['companyName', 'products']),
     );
+  });
+
+  it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
+    const prompt = buildBrandProfilePrompt({
+      ...input,
+      intakeSource: {
+        sourceId: 'intake-source-1',
+        sourceType: 'intake',
+        sourceRole: 'fact_candidate',
+        contentHash: 'a'.repeat(64),
+        content: 'Company: Acme GmbH\nProducts: high-pressure pumps',
+      },
+      kbSources: [
+        {
+          sourceId: 'kb-source-1',
+          sourceType: 'upload',
+          sourceRole: 'fact_candidate',
+          contentHash: 'b'.repeat(64),
+          title: 'catalog.pdf',
+          content: 'Pumps up to 400 bar.',
+        },
+      ],
+      research: [
+        {
+          ...input.research[0],
+          sourceId: 'hint-source-1',
+          sourceRole: 'research_hint',
+          contentHash: 'c'.repeat(64),
+          upstreamContentHash: 'd'.repeat(64),
+          parserVersion: 'searxng-snippet/1',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('source_id=intake-source-1');
+    expect(prompt).toContain(`sha256=${'a'.repeat(64)}`);
+    expect(prompt).toContain('source_id=kb-source-1');
+    expect(prompt).toContain('source_role=research_hint');
+    expect(prompt).toMatch(/每项.*quote|quote.*每项/);
   });
 });
