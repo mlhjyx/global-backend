@@ -14,6 +14,13 @@ const schema = readFileSync(
   path.join(repo, 'packages/db/prisma/schema.prisma'),
   'utf8',
 );
+const grantHardening = readFileSync(
+  path.join(
+    repo,
+    'packages/db/prisma/migrations/20260717121000_site_builder_r4a1_evidence_grant_hardening/migration.sql',
+  ),
+  'utf8',
+);
 
 describe('R4-A1 Evidence 2.0 database invariants', () => {
   it('fails closed on historical BrandProfile tenant mismatches before replacing the FK', () => {
@@ -88,6 +95,12 @@ describe('R4-A1 Evidence 2.0 database invariants', () => {
         `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "${table}" TO app_user`,
       );
     }
+    expect(grantHardening).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "site_evidence_source_snapshot" FROM app_user',
+    );
+    expect(grantHardening).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "brand_profile_evidence_ref" FROM app_user',
+    );
   });
 
   it('keeps existing rows on v1 and makes only new writes opt into v2', () => {
