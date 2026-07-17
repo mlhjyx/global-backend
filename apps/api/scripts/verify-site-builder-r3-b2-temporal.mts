@@ -2,7 +2,8 @@
 import 'dotenv/config';
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { access, mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { Client, Connection } from '@temporalio/client';
@@ -101,6 +102,12 @@ try {
     where: { id: pageSiteId },
     data: { activeVersionId: active.id, status: 'ready' },
   });
+  const previousPreview = path.join(previewRoot(), pageSlug);
+  await mkdir(previousPreview, { recursive: true });
+  await writeFile(
+    path.join(previousPreview, 'pre-r3b2.txt'),
+    'active-before-build',
+  );
   await owner.siteBuildRun.createMany({
     data: [
       {
@@ -219,6 +226,20 @@ try {
         (step) => !['queued', 'running'].includes(step.status),
       ),
     'successful workflow persists terminal step attempts',
+  );
+  const livePreview = path.join(previewRoot(), pageSlug);
+  const stagingPreview = path.join(previewRoot(), '.staging', pageRunId);
+  check(
+    pageResult.version.artifactKey === `local:${livePreview}` &&
+      (await access(path.join(livePreview, 'index.html')).then(
+        () => true,
+        () => false,
+      )) &&
+      !(await access(stagingPreview).then(
+        () => true,
+        () => false,
+      )),
+    'successful CAS promotes run staging to the live preview and records the live artifact',
   );
 
   console.log('② real Temporal cancellation terminalizes unfinished steps');

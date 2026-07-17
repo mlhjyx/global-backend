@@ -15,7 +15,9 @@ export interface RendererBuildInput {
   basePath: string;
 }
 
-export type RendererBuildExecutor = (input: RendererBuildInput) => Promise<void>;
+export type RendererBuildExecutor = (
+  input: RendererBuildInput,
+) => Promise<void>;
 
 /**
  * Renderer 是处理租户内容的低信任子进程，不能继承 API/worker 的数据库、对象存储、
@@ -37,7 +39,10 @@ function resolveRendererEntrypoint(cwd = process.cwd()): {
   rendererRoot: string;
   astroCli: string;
 } {
-  const candidates = [path.join(cwd, 'apps', 'site-renderer'), path.join(cwd, '..', 'site-renderer')];
+  const candidates = [
+    path.join(cwd, 'apps', 'site-renderer'),
+    path.join(cwd, '..', 'site-renderer'),
+  ];
   const requireFromCwd = createRequire(path.join(cwd, 'package.json'));
 
   for (const rendererRoot of candidates) {
@@ -70,7 +75,8 @@ export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
 
 /**
  * SiteSpec 只在权限 0700 的随机目录内以 0600 物化，并在成功、异常、子进程超时路径统一清理。
- * 构建产物目录不是这里的 staging；当前可见预览原子化由后续 R1-min 独立交付。
+ * 本函数不拥有发布语义；R3-B2 refurbish 调用方会传 run-scoped staging 并在 active pointer
+ * CAS 后提升到本地开发预览。生产不可变 Release、崩溃恢复与其余可见预览安全门仍归 R1-min。
  */
 export async function buildSiteSpecWithTemporaryFile(
   spec: unknown,
@@ -81,8 +87,15 @@ export async function buildSiteSpecWithTemporaryFile(
   const specPath = path.join(tempDir, 'site-spec.json');
 
   try {
-    await writeFile(specPath, JSON.stringify(spec), { encoding: 'utf8', mode: 0o600 });
-    await execute({ specPath, outDir: output.outDir, basePath: output.basePath });
+    await writeFile(specPath, JSON.stringify(spec), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await execute({
+      specPath,
+      outDir: output.outDir,
+      basePath: output.basePath,
+    });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

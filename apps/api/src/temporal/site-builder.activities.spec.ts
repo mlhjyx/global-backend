@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context as ActivityContext } from '@temporalio/activity';
 import type { PrismaClient } from '@prisma/client';
@@ -60,7 +63,10 @@ function spyBudget() {
   return { open, close };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe('processKbAsset — Temporal heartbeat/cancellation', () => {
   it('worker Activity context 的取消信号与阶段 heartbeat 会传入单素材处理器', async () => {
@@ -292,6 +298,18 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
 
   it('局部构建发布时 active pointer 已变化则 CAS 失败且不覆盖新版本', async () => {
     spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-cas-preview-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const live = path.join(root, 'acme');
+    const staging = path.join(root, '.staging', 'run-1');
+    await Promise.all([
+      mkdir(live, { recursive: true }),
+      mkdir(staging, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(path.join(live, 'index.html'), 'active-preview'),
+      writeFile(path.join(staging, 'index.html'), 'candidate-preview'),
+    ]);
     const update = vi.fn(async () => ({}));
     const updateMany = vi.fn(async () => ({ count: 0 }));
     const tx = {
@@ -300,28 +318,89 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
         })),
       },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
-    await expect(
-      acts.finalizeRefurbish({
-        ...INPUT,
-        scope: {
-          scope: 'page',
-          targetId: 'products',
-          baseVersionId: 'base-version',
-        },
-        kb: { processed: 0, failed: 0, degraded: false },
-        profile: { status: 'done', gaps: 0 },
-        build: { previewSlug: 'acme', versionId: 'candidate-version' },
-      }),
-    ).rejects.toThrow('active SiteVersion changed');
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: 'site-1', activeVersionId: 'base-version' },
-      data: { activeVersionId: 'candidate-version', status: 'ready' },
-    });
-    expect(update).not.toHaveBeenCalled();
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          scope: {
+            scope: 'page',
+            targetId: 'products',
+            baseVersionId: 'base-version',
+          },
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).rejects.toThrow('active SiteVersion changed');
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { id: 'site-1', activeVersionId: 'base-version' },
+        data: { activeVersionId: 'candidate-version', status: 'ready' },
+      });
+      expect(update).not.toHaveBeenCalled();
+      expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe(
+        'active-preview',
+      );
+      expect(await readFile(path.join(staging, 'index.html'), 'utf8')).toBe(
+        'candidate-preview',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('预览提升后的事务写入失败会恢复原 live 目录', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-tx-preview-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const live = path.join(root, 'acme');
+    const staging = path.join(root, '.staging', 'run-1');
+    await Promise.all([
+      mkdir(live, { recursive: true }),
+      mkdir(staging, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(path.join(live, 'index.html'), 'active-preview'),
+      writeFile(path.join(staging, 'index.html'), 'candidate-preview'),
+    ]);
+    const tx = {
+      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      site: { update: vi.fn(async () => ({})) },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+        update: vi.fn(async () => {
+          throw new Error('artifact DB write failed');
+        }),
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).rejects.toThrow('artifact DB write failed');
+      expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe(
+        'active-preview',
+      );
+      await expect(
+        readFile(path.join(root, '.rollback', 'run-1', 'index.html')),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -415,20 +494,26 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     const updateMany = vi.fn(async () => ({ count: 1 }));
     let call = 0;
     const prisma = {
-      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => unknown) => {
-        call += 1;
-        if (call > 1) throw new Error('stop-after-read');
-        return fn({
-          siteBuildRun: { updateMany },
-          site: {
-            findUnique: vi.fn(async () => ({
-              id: 'site-1', name: 'Acme', slug: 'acme', intake: INTAKE,
-              stylePreset: 'modern-industrial', activeVersionId: null,
-            })),
-          },
-          siteVersion: { findFirst: vi.fn(async () => null) },
-        });
-      }),
+      withWorkspace: vi.fn(
+        async (_workspaceId: string, fn: (tx: unknown) => unknown) => {
+          call += 1;
+          if (call > 1) throw new Error('stop-after-read');
+          return fn({
+            siteBuildRun: { updateMany },
+            site: {
+              findUnique: vi.fn(async () => ({
+                id: 'site-1',
+                name: 'Acme',
+                slug: 'acme',
+                intake: INTAKE,
+                stylePreset: 'modern-industrial',
+                activeVersionId: null,
+              })),
+            },
+            siteVersion: { findFirst: vi.fn(async () => null) },
+          });
+        },
+      ),
     } as unknown as PrismaService;
     const acts = createSiteBuilderActivities({ prisma });
     await expect(

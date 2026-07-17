@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -37,6 +37,10 @@ import {
 } from '../site-builder/agents/brand-research';
 import { buildKbDigest } from '../site-builder/agents/kb-digest';
 import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
+import {
+  preparePreviewPromotion,
+  type PreviewPromotion,
+} from '../site-builder/preview-promotion';
 import { lockSiteSpecAssetsForActivation } from '../site-builder/asset-reference-gate';
 import { applyBuildScope } from '../site-builder/build-scope';
 import type { SiteSpec } from '@global/contracts';
@@ -168,6 +172,14 @@ export function previewRoot(): string {
   return (
     process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites')
   );
+}
+
+function previewStagingDir(buildRunId: string): string {
+  return path.join(previewRoot(), '.staging', buildRunId);
+}
+
+function previewLiveDir(slug: string): string {
+  return path.join(previewRoot(), slug);
 }
 
 /** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
@@ -888,7 +900,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         Boolean(input.scope?.options?.pages);
       const baseVersionId = input.scope?.baseVersionId;
       if (partialBuild && !baseVersionId) {
-        throw new Error('partial build is missing its immutable base SiteVersion');
+        throw new Error(
+          'partial build is missing its immutable base SiteVersion',
+        );
       }
       const { site, existing, activeSpec } = await prisma.withWorkspace(
         workspaceId,
@@ -967,7 +981,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         });
       });
 
-      const outDir = path.join(previewRoot(), site.slug);
+      // New R3-B2 histories render outside the slug served by the dev preview. finalizeRefurbish
+      // promotes this run-scoped candidate only after the active-version CAS succeeds. Legacy
+      // histories retain the original direct-to-slug path for Temporal replay compatibility.
+      const outDir = input.progressV1
+        ? previewStagingDir(buildRunId)
+        : previewLiveDir(site.slug);
+      if (input.progressV1) {
+        await rm(outDir, { recursive: true, force: true });
+      }
       await mkdir(outDir, { recursive: true });
       await buildSiteSpecWithTemporaryFile(doc, {
         outDir,
@@ -1001,82 +1023,133 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         failed: 0,
         variants: 0,
       };
-      await prisma.withWorkspace(workspaceId, async (tx) => {
-        // Serialize terminal publication with progress writes. This also fences an ACK-lost
-        // progress retry that arrives after the run becomes terminal.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
-        // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
-        // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
-        const published = await tx.siteBuildRun.updateMany({
-          where: { id: buildRunId, status: { in: ['running', 'succeeded'] } },
-          data: {
-            status: 'succeeded',
-            phase: 'P5_publish',
-            progress: 1,
-            finishedAt: new Date(),
-            ...(input.progressV1
-              ? {}
-              : {
-                  steps: [
-                    {
-                      key: 'kb_ingest',
-                      status: kbSummary.degraded ? 'degraded' : 'done',
-                      processed: kbSummary.processed,
-                      failed: kbSummary.failed,
-                    },
-                    {
-                      key: 'brand_profile',
-                      status: profile.status,
-                      gaps: profile.gaps,
-                    },
-                    {
-                      key: 'image_pipeline',
-                      status: images.status,
-                      processed: images.processed,
-                      failed: images.failed,
-                      variants: images.variants,
-                    },
-                    { key: 'copy', status: 'skipped_m1d' },
-                    { key: 'assemble_build', status: 'done' },
-                    { key: 'quality_loop', status: 'skipped_m1f' },
-                  ] as Prisma.InputJsonValue,
-                }),
-          },
-        });
-        if (published.count === 0) {
-          throw new Error(
-            `run ${buildRunId} not publishable (cancelled?) — pointer untouched`,
-          );
-        }
-        const targetVersion = await tx.siteVersion.findFirst({
-          where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
-          select: { spec: true },
-        });
-        if (!targetVersion)
-          throw new Error(`site version ${build.versionId} is not activatable`);
-        await lockSiteSpecAssetsForActivation(tx, {
-          workspaceId,
-          siteId,
-          spec: targetVersion.spec,
-        });
-        // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
-        if (input.scope?.baseVersionId) {
-          const activated = await tx.site.updateMany({
-            where: { id: siteId, activeVersionId: input.scope.baseVersionId },
-            data: { activeVersionId: build.versionId, status: 'ready' },
+      let promotion: PreviewPromotion | undefined;
+      try {
+        await prisma.withWorkspace(workspaceId, async (tx) => {
+          // Serialize terminal publication with progress writes. This also fences an ACK-lost
+          // progress retry that arrives after the run becomes terminal.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+          // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
+          // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
+          const published = await tx.siteBuildRun.updateMany({
+            where: { id: buildRunId, status: { in: ['running', 'succeeded'] } },
+            data: {
+              status: 'succeeded',
+              phase: 'P5_publish',
+              progress: 1,
+              finishedAt: new Date(),
+              ...(input.progressV1
+                ? {}
+                : {
+                    steps: [
+                      {
+                        key: 'kb_ingest',
+                        status: kbSummary.degraded ? 'degraded' : 'done',
+                        processed: kbSummary.processed,
+                        failed: kbSummary.failed,
+                      },
+                      {
+                        key: 'brand_profile',
+                        status: profile.status,
+                        gaps: profile.gaps,
+                      },
+                      {
+                        key: 'image_pipeline',
+                        status: images.status,
+                        processed: images.processed,
+                        failed: images.failed,
+                        variants: images.variants,
+                      },
+                      { key: 'copy', status: 'skipped_m1d' },
+                      { key: 'assemble_build', status: 'done' },
+                      { key: 'quality_loop', status: 'skipped_m1f' },
+                    ] as Prisma.InputJsonValue,
+                  }),
+            },
           });
-          if (activated.count !== 1) {
+          if (published.count === 0) {
             throw new Error(
-              'active SiteVersion changed during partial build — pointer untouched',
+              `run ${buildRunId} not publishable (cancelled?) — pointer untouched`,
             );
           }
-        } else {
-          await tx.site.update({
-            where: { id: siteId },
-            data: { activeVersionId: build.versionId, status: 'ready' },
+          const targetVersion = await tx.siteVersion.findFirst({
+            where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
+            select: { spec: true, artifactKey: true },
           });
+          if (!targetVersion)
+            throw new Error(
+              `site version ${build.versionId} is not activatable`,
+            );
+          await lockSiteSpecAssetsForActivation(tx, {
+            workspaceId,
+            siteId,
+            spec: targetVersion.spec,
+          });
+          // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
+          if (input.scope?.baseVersionId) {
+            const activated = await tx.site.updateMany({
+              where: { id: siteId, activeVersionId: input.scope.baseVersionId },
+              data: { activeVersionId: build.versionId, status: 'ready' },
+            });
+            if (activated.count !== 1) {
+              throw new Error(
+                'active SiteVersion changed during partial build — pointer untouched',
+              );
+            }
+          } else {
+            await tx.site.update({
+              where: { id: siteId },
+              data: { activeVersionId: build.versionId, status: 'ready' },
+            });
+          }
+          if (input.progressV1) {
+            const stagingArtifact = `local:${previewStagingDir(buildRunId)}`;
+            const liveArtifact = `local:${previewLiveDir(build.previewSlug)}`;
+            // A finalize Activity result may be lost after commit. In that replay, both the active
+            // pointer and artifactKey already describe the promoted preview, so no second swap occurs.
+            if (targetVersion.artifactKey !== liveArtifact) {
+              if (targetVersion.artifactKey !== stagingArtifact) {
+                throw new Error(
+                  `site version ${build.versionId} has unexpected preview artifact`,
+                );
+              }
+              // The pointer CAS above is the publication gate. Keep the former live directory as a
+              // rollback copy until Prisma confirms this transaction committed.
+              promotion = await preparePreviewPromotion({
+                root: previewRoot(),
+                slug: build.previewSlug,
+                buildRunId,
+              });
+              await tx.siteVersion.update({
+                where: { id: build.versionId },
+                data: { artifactKey: liveArtifact },
+              });
+            }
+          }
+        });
+      } catch (error) {
+        if (promotion) {
+          try {
+            await promotion.rollback();
+          } catch (rollbackError) {
+            log.error(
+              `preview rollback failed for run ${buildRunId}: ${String(rollbackError)}`,
+            );
+          }
         }
-      });
+        throw error;
+      }
+      if (promotion) {
+        try {
+          await promotion.commit();
+        } catch (cleanupError) {
+          // Publication is already committed. A retained rollback directory is safe garbage and
+          // must not turn a successful workflow into a retry that could re-publish.
+          log.warn(
+            `preview rollback-copy cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
+          );
+        }
+      }
       // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
       budgetLedger.close(buildRunId, { force: true });
       return { previewSlug: build.previewSlug };
@@ -1172,6 +1245,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         );
         throw err;
       } finally {
+        if (input.progressV1) {
+          await rm(previewStagingDir(buildRunId), {
+            recursive: true,
+            force: true,
+          }).catch((cleanupError) =>
+            log.warn(
+              `preview staging cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
+            ),
+          );
+        }
         // 预算门收尾（改动 1）：run 终点强制关账，即便补偿 DB 工作失败也释放账户（force 无视 refs）。
         budgetLedger.close(buildRunId, { force: true });
       }

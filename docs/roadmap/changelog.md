@@ -3,9 +3,9 @@
 
 ## 2026-07-17 · Site Builder R3-B2（局部 SiteSpec 消费与单调 Build 进度）
 
-- `scope=page|section` 与 `options.pages` 现在冻结请求时的 active `baseVersionId` 并做确定性局部合并：只替换命中的 page/block 及其引用文案键，未选择页面、全站主题、assets 与其余 CopyBundle 保持不变；发布时以 active pointer CAS 防止覆盖并发人工编辑。缺目标 404、重复目标/脏 active spec 422。`stylePreset` 属全站副作用，禁止与局部请求组合。非 `en` 仍 422，真实多语种 CopyBundle/Renderer 路径归 M1-d，不以英文复制冒充翻译。
+- `scope=page|section` 与 `options.pages` 现在冻结请求时的 active `baseVersionId` 并做确定性局部合并：只替换命中的 page/block 及其引用文案键，未选择页面、全站主题、assets 与其余 CopyBundle 保持不变；发布时以 active pointer CAS 防止覆盖并发人工编辑。新执行先渲染到 run-scoped 本地 staging，CAS 成功后才原子替换开发预览目录，事务失败恢复旧目录，CAS 拒绝不会提前泄露候选页面；生产不可变 Release 与崩溃恢复仍归 R1-min。缺目标 404、重复目标/脏 active spec 422。`stylePreset` 属全站副作用，禁止与局部请求组合。非 `en` 仍 422，真实多语种 CopyBundle/Renderer 路径归 M1-d，不以英文复制冒充翻译。
 - 新增 RLS/FORCE RLS 的 `SiteBuildStep` 一等真值表；Temporal patch 保护旧历史命令序列，新执行按 Activity/图片批次增量落 attempt/status/phase/progress。BuildRun phase/progress 只前进，旧 attempt 迟到不可覆盖，begin replay 不重写 `startedAt`，成功/失败/取消均终态化未完成步骤；`SiteBuildRun.steps` 继续作为有界公共读模型，`costSummary` 保持 null 归 R4-B-min。
-- 验证：155 files / 1614 tests 全绿、API build、lint 0 error；独立空库 50 migrations；真 PostgreSQL `app_user`/FORCE RLS 验证跨租户不可见与 attempt fencing；隔离 Temporal namespace/worker 验证 page 局部构建和 KB Activity 中取消补偿，临时 namespace/数据库/预览均清理。仅代表 Ubuntu 开发环境，不代表生产部署。
+- 验证：156 files / 1621 tests 全绿、API build、lint 0 error；独立空库 50 migrations；真 PostgreSQL `app_user`/FORCE RLS 验证跨租户不可见与 attempt fencing；隔离 Temporal namespace/worker 验证 page 局部构建、staging→live 提升与 KB Activity 中取消补偿，临时 namespace/数据库/预览均清理。仅代表 Ubuntu 开发环境，不代表生产部署。
 
 ## 2026-07-17 · Site Builder R3-B1（Build 请求合同、持久幂等与 Temporal ACK）
 
