@@ -409,11 +409,29 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     industry: 'industrial pumps',
     products: ['high-pressure pumps'],
     targetMarkets: ['DE', 'US'],
-    profile: { companyProfile: { founded: 2001 } },
-    kbDigest: '[来源:upload | catalog.pdf]\nPumps up to 400 bar.',
+    intakeSource: {
+      sourceId: 'intake-1',
+      sourceType: 'intake' as const,
+      sourceRole: 'fact_candidate' as const,
+      contentHash: 'a'.repeat(64),
+      content: 'Company: Acme GmbH\nFounded: 2001',
+    },
+    kbSources: [
+      {
+        sourceId: 'kb-1',
+        sourceType: 'upload' as const,
+        sourceRole: 'fact_candidate' as const,
+        contentHash: 'b'.repeat(64),
+        title: 'catalog.pdf',
+        content: '[来源:upload | catalog.pdf]\nPumps up to 400 bar.',
+      },
+    ],
     research: [
       {
+        sourceId: 'research-1',
         sourceType: 'web_research' as const,
+        sourceRole: 'research_hint' as const,
+        contentHash: 'c'.repeat(64),
         url: 'https://fair.example/exhibitors/acme',
         title: 'fair',
         content: 'exhibitor Acme',
@@ -426,7 +444,8 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     const prompt = buildBrandProfilePrompt(input);
     expect(prompt).toContain('Acme GmbH');
     expect(prompt).toContain('[来源:upload | catalog.pdf]');
-    expect(prompt).toContain('https://fair.example/exhibitors/acme');
+    expect(prompt).not.toContain('https://fair.example/exhibitors/acme');
+    expect(prompt).not.toContain('(fair)');
     expect(prompt).toMatch(/绝不编造/);
     expect(prompt).toMatch(/具名个人/);
     expect(prompt).toMatch(/视为.{0,4}数据/); // 资料中的指令性文字一律当数据
@@ -435,7 +454,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
   it('无 KB、无研究源时槽位标注「无」（模型不猜空槽位）', () => {
     const prompt = buildBrandProfilePrompt({
       ...input,
-      kbDigest: '',
+      kbSources: [],
       research: [],
     });
     expect(prompt).toMatch(/知识库[^]{0,10}(无|空)/);
