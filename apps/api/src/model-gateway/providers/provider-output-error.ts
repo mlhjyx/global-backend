@@ -5,14 +5,17 @@
  */
 export class ProviderOutputError extends Error {
   readonly usage?: { inputTokens?: number; outputTokens?: number };
+  /** Number of provider requests represented by this error (schema repair may be two). */
+  readonly callCount: number;
 
   constructor(
     message: string,
     usage?: { inputTokens?: number; outputTokens?: number },
-    opts?: { cause?: unknown },
+    opts?: { cause?: unknown; callCount?: number },
   ) {
     super(message, opts);
     this.name = 'ProviderOutputError';
     this.usage = usage;
+    this.callCount = opts?.callCount ?? 1;
   }
 }

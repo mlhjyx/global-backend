@@ -61,7 +61,7 @@ Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包
 - **不允许出现的 Claim**、必需页面/section、客观不变量。
 - desktop/tablet/mobile 三尺寸截图 + 确定性 QA 结果。
 - **DesignEvaluation、owner preference 与选择原因**。
-- catalog / model / prompt / schema / evaluator 版本与不可变指纹 + Claim/Offering/Asset snapshot；当前 BrandProfile report 在 header 固定 task、prompt version、output-schema hash、evaluator version/rubric hash，并对每个 fixture/run 固定 fixture 与实际 prompt hash。
+- catalog / model / prompt / schema / evaluator 版本与不可变指纹 + Claim/Offering/Asset snapshot；当前 BrandProfile report 在 header 固定 task、prompt version、output-schema hash、evaluator version/rubric hash，并对每个 fixture/run 固定 fixture、实际 prompt hash、完整执行策略与已判定 artifact hash。
 - accepted/rejected artifact、trace、token/latency/cost。
 - 来源许可、是否允许训练、保留策略；**不得混入原始 Tier B 页面语料**（净室边界，ADR-019）。
 

@@ -208,6 +208,17 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect((err as AiTaskError).usage).toEqual({ inputTokens: 14, outputTokens: 6, calls: 2 });
   });
 
+  it('全链失败时保留 schema-repair 代表的每一次 provider 调用', async () => {
+    const route = { ...ROUTE, fallbacks: [] };
+    const { gateway } = gatewayReturning(async () => {
+      throw new ProviderOutputError('repair failed after two provider calls', { inputTokens: 7, outputTokens: 3 }, { callCount: 2 });
+    });
+    const err = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(AiTaskError);
+    expect((err as AiTaskError).usage).toEqual({ inputTokens: 7, outputTokens: 3, calls: 2 });
+  });
+
   it('单模型超时（route.timeoutMs）→ 换下一模型', async () => {
     const { gateway } = gatewayReturning(async (i) => {
       if (i.model === 'model-a') return new Promise(() => undefined) as never; // 永不返回

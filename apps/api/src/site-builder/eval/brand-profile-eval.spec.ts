@@ -8,7 +8,12 @@ import {
   type BrandProfileEvalFixture,
 } from './brand-profile-eval';
 import type { BrandProfileOutput } from '../agents/brand-profile';
-import { canonicalJson, sha256CanonicalJson } from './eval-provenance';
+import { resolveTaskRoute } from '../agents/task-routes';
+import {
+  canonicalJson,
+  sha256CanonicalJson,
+  snapshotEvaluationExecutionPolicy,
+} from './eval-provenance';
 
 const richFixture = JSON.parse(
   readFileSync(new URL('../../../test/fixtures/golden-companies/brand-profile/industrial-pump-rich.json', import.meta.url), 'utf8'),
@@ -69,6 +74,14 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
       sha256CanonicalJson({ a: [true, null], b: 2 }),
     );
     expect(BRAND_PROFILE_EVALUATOR_RUBRIC.acceptedFactGate).toContain('EvidenceRefV2');
+    expect(sha256CanonicalJson(outputFor(prepareBrandProfileEvalFixture(richFixture)))).toMatch(/^[a-f0-9]{64}$/);
+    expect(snapshotEvaluationExecutionPolicy(resolveTaskRoute('site_builder.brand_profile', {}))).toMatchObject({
+      maxTokens: 12_000,
+      timeoutMs: 150_000,
+      maxCostCents: 40,
+      reasoningEffort: null,
+      modelPolicy: { profile: 'structured.default' },
+    });
   });
 
   it('keeps the documented six-fixture bootstrap coverage intact', () => {
@@ -143,6 +156,18 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     const prepared = prepareBrandProfileEvalFixture(richFixture);
     const output = outputFor(prepared);
     output.gaps.push({ field: 'certification', question: 'Can you provide ISO 9001 evidence?' });
+
+    expect(evaluateBrandProfileOutput(prepared, output).acceptedArtifact).toBe(true);
+  });
+
+  it('does not treat an evidence quote as a publishable forbidden assertion', () => {
+    const fixture = structuredClone(richFixture);
+    fixture.assertions.forbiddenOutputTerms = ['corrosive process media'];
+    const prepared = prepareBrandProfileEvalFixture(fixture);
+    const output = outputFor(prepared);
+    output.valueProps = ['Grounded operating data for chemical processing.'];
+    output.factSheet[1].evidence!.quote =
+      'the MX magnetic drive series is designed for seal-less transfer of corrosive process media';
 
     expect(evaluateBrandProfileOutput(prepared, output).acceptedArtifact).toBe(true);
   });

@@ -17,6 +17,7 @@ describe('ProviderOutputError', () => {
   it('携带 usage（供网关 centsFromTokens 结算）', () => {
     const err = new ProviderOutputError('truncated', { inputTokens: 100, outputTokens: 2000 });
     expect(err.usage).toEqual({ inputTokens: 100, outputTokens: 2000 });
+    expect(err.callCount).toBe(1);
   });
 
   it('无 usage 时 usage 为 undefined', () => {
@@ -28,5 +29,10 @@ describe('ProviderOutputError', () => {
     const root = new SyntaxError('Unterminated string');
     const err = new ProviderOutputError('parse failed', { outputTokens: 5 }, { cause: root });
     expect(err.cause).toBe(root);
+  });
+
+  it('can represent a failed schema-repair pair of provider calls', () => {
+    const err = new ProviderOutputError('repair failed', undefined, { callCount: 2 });
+    expect(err.callCount).toBe(2);
   });
 });

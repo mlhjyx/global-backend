@@ -30,7 +30,12 @@ import {
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from '../src/site-builder/eval/brand-profile-eval';
-import { sha256CanonicalJson, sha256Text } from '../src/site-builder/eval/eval-provenance';
+import {
+  sha256CanonicalJson,
+  sha256Text,
+  snapshotEvaluationExecutionPolicy,
+  type EvaluationExecutionPolicy,
+} from '../src/site-builder/eval/eval-provenance';
 import { resolveTaskRoute, type TaskRoute } from '../src/site-builder/agents/task-routes';
 
 const FIXTURE_DIR = join(
@@ -92,6 +97,9 @@ interface EvalRun {
   forbiddenOutputTerms?: string[];
   modelSnapshot?: unknown;
   fallbackIndex?: number;
+  executionPolicy: EvaluationExecutionPolicy;
+  /** Privacy-safe fingerprint of the model artifact actually judged. */
+  artifactSha256?: string;
   taskContract: EvalFixtureContract;
   usage?: EvalUsage;
   acceptedArtifactCost: {
@@ -276,6 +284,8 @@ for (const model of models) {
           forbiddenOutputTerms: outcome.forbiddenOutputTerms,
           modelSnapshot: result.modelSnapshot,
           fallbackIndex: result.fallbackIndex,
+          executionPolicy: snapshotEvaluationExecutionPolicy(route, result.routePolicy),
+          artifactSha256: sha256CanonicalJson(result.data),
           taskContract: fixtureContract,
           usage: result.usage,
           acceptedArtifactCost: {
@@ -297,6 +307,7 @@ for (const model of models) {
           acceptedArtifact: false,
           elapsedMs: Math.round(performance.now() - started),
           usage,
+          executionPolicy: snapshotEvaluationExecutionPolicy(route),
           taskContract: fixtureContract,
           acceptedArtifactCost: {
             reportedCostUsd: null,

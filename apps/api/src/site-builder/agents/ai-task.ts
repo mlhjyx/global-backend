@@ -170,7 +170,7 @@ export async function runAiTask<TIn, TOut>(
       // though it has no usable artifact. Keep that usage through a fallback
       // or final AiTaskError so evaluations and later cost reconciliation do
       // not silently make rejected attempts look free.
-      if (err instanceof ProviderOutputError) usage = addUsage(usage, err.usage, 1);
+      if (err instanceof ProviderOutputError) usage = addUsage(usage, err.usage, err.callCount);
       attempts.push({
         model,
         error: err instanceof Error ? err.message : String(err),

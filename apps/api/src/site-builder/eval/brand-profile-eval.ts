@@ -136,7 +136,10 @@ function modelOutputText(output: BrandProfileOutput): string {
     ...output.keywords,
     ...differentiators,
     ...competitors.flatMap((item) => [item.name, item.positioning]),
-    ...output.factSheet.flatMap((item) => [item.key, item.value, item.evidence?.quote ?? '']),
+    // Evidence metadata is not published to the site. A source can legitimately
+    // mention a forbidden phrase while the model's visible claim correctly
+    // negates or omits it, so citation text must not trigger this output gate.
+    ...output.factSheet.flatMap((item) => [item.key, item.value]),
     // Gaps are questions to the site owner, not publishable model assertions.
     // Asking whether a certification exists must not be scored as asserting it.
   ]

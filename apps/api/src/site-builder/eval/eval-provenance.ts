@@ -1,4 +1,15 @@
 import { createHash } from 'node:crypto';
+import type { ModelExecutionPolicySnapshot } from '@global/contracts';
+import type { TaskRoute } from '../agents/task-routes';
+
+export interface EvaluationExecutionPolicy {
+  /** Registry/env policy used by the gateway, including profile and data policy. */
+  modelPolicy: ModelExecutionPolicySnapshot;
+  maxTokens: number;
+  timeoutMs: number;
+  maxCostCents: number;
+  reasoningEffort: TaskRoute['reasoningEffort'] | null;
+}
 
 /**
  * Deterministic JSON serialization for evaluator provenance fingerprints.
@@ -30,4 +41,28 @@ export function sha256Text(value: string): string {
 
 export function sha256CanonicalJson(value: unknown): string {
   return sha256Text(canonicalJson(value));
+}
+
+/**
+ * A task contract alone is insufficient to replay a model run: token ceiling,
+ * timeout and reasoning effort materially affect structured-output quality.
+ */
+export function snapshotEvaluationExecutionPolicy(
+  route: TaskRoute,
+  modelPolicy: ModelExecutionPolicySnapshot = route.policy,
+): EvaluationExecutionPolicy {
+  return {
+    modelPolicy: {
+      ...modelPolicy,
+      dataPolicy: { ...modelPolicy.dataPolicy },
+      route: {
+        primary: modelPolicy.route.primary,
+        fallbacks: [...modelPolicy.route.fallbacks],
+      },
+    },
+    maxTokens: route.maxTokens,
+    timeoutMs: route.timeoutMs,
+    maxCostCents: route.maxCostCents,
+    reasoningEffort: route.reasoningEffort ?? null,
+  };
 }
