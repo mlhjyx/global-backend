@@ -125,6 +125,9 @@ describe('R4-A1 Evidence 2.0 database invariants', () => {
     expect(verifier).toContain(
       'cleanup verification found residual R4-A1 fixtures',
     );
+    expect(verifier.indexOf('tx.brandProfileEvidenceRef.count')).toBeLessThan(
+      verifier.indexOf('const liveResearch = await researchBrand'),
+    );
     expect(verifier).not.toMatch(
       /owner\.site[\s\S]{0,160}\.catch\(\(\) => undefined\)/,
     );
