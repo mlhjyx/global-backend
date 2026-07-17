@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { open, readFile, rename, unlink } from 'node:fs/promises';
+import { open, readFile, rename, stat, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 export const LOCAL_EMBEDDING_MODEL_ALIAS = 'site-builder-bge-m3-local';
@@ -9,6 +10,10 @@ export const LOCAL_EMBEDDING_TOKEN_NAME = 'Site Builder Local Embeddings';
 export const LOCAL_EMBEDDING_BASE_URL = 'http://embeddings:11434';
 const LOCAL_CHANNEL_KEY = 'ollama-local-no-auth';
 const PAGE_SIZE = 100;
+const PROVISION_LOCK_PATH = join(tmpdir(), 'global-site-builder-new-api-embeddings.lock');
+const PROVISION_LOCK_WAIT_MS = 30_000;
+const PROVISION_LOCK_POLL_MS = 25;
+const MALFORMED_LOCK_STALE_MS = 5 * 60_000;
 
 type Fetch = typeof fetch;
 
@@ -47,6 +52,11 @@ interface ApiEnvelope {
   data?: unknown;
 }
 
+interface ProvisionLockOwner {
+  pid: number;
+  nonce: string;
+}
+
 export interface ProvisionResult {
   channelId: number;
   tokenId: number;
@@ -58,6 +68,97 @@ export interface ProvisionResult {
 
 function trimSlash(value: string): string {
   return value.trim().replace(/\/+$/, '');
+}
+
+function isLocalNewApiAdminBase(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'http:' &&
+      ((['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.port === '3001') ||
+        (url.hostname === 'new-api' && url.port === '3000')) &&
+      (url.pathname === '/' || url.pathname === '') &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+function errnoCode(error: unknown): string | undefined {
+  return error && typeof error === 'object' && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errnoCode(error) === 'EPERM';
+  }
+}
+
+async function readProvisionLockOwner(): Promise<ProvisionLockOwner | undefined> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(PROVISION_LOCK_PATH, 'utf8'),
+    ) as Partial<ProvisionLockOwner>;
+    if (Number.isInteger(parsed.pid) && typeof parsed.nonce === 'string' && parsed.nonce) {
+      return { pid: parsed.pid as number, nonce: parsed.nonce };
+    }
+  } catch {
+    // A creator may have opened the lock and not written its owner record yet.
+  }
+  return undefined;
+}
+
+async function acquireProvisionLock(): Promise<ProvisionLockOwner> {
+  const owner = { pid: process.pid, nonce: randomUUID() };
+  const deadline = Date.now() + PROVISION_LOCK_WAIT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const handle = await open(PROVISION_LOCK_PATH, 'wx', 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(owner), 'utf8');
+        await handle.sync();
+      } catch (error) {
+        await unlink(PROVISION_LOCK_PATH).catch(() => undefined);
+        throw error;
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+      return owner;
+    } catch (error) {
+      if (errnoCode(error) !== 'EEXIST') throw error;
+      const existing = await readProvisionLockOwner();
+      if (existing && !processIsAlive(existing.pid)) {
+        await unlink(PROVISION_LOCK_PATH).catch(() => undefined);
+        continue;
+      }
+      if (!existing) {
+        const info = await stat(PROVISION_LOCK_PATH).catch(() => undefined);
+        if (info && Date.now() - info.mtimeMs > MALFORMED_LOCK_STALE_MS) {
+          await unlink(PROVISION_LOCK_PATH).catch(() => undefined);
+          continue;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, PROVISION_LOCK_POLL_MS));
+    }
+  }
+  throw new Error('Timed out waiting for the local New API embedding bootstrap lock');
+}
+
+async function releaseProvisionLock(owner: ProvisionLockOwner): Promise<void> {
+  const current = await readProvisionLockOwner();
+  if (current?.pid === owner.pid && current.nonce === owner.nonce) {
+    await unlink(PROVISION_LOCK_PATH).catch(() => undefined);
+  }
 }
 
 function adminHeaders(config: AdminConfig): Record<string, string> {
@@ -106,7 +207,10 @@ async function listAll<T>(
     );
     const batch = pageItems<T>(envelope, path);
     items.push(...batch.items);
-    if (items.length >= batch.total || batch.items.length < PAGE_SIZE) return items;
+    if (items.length >= batch.total) return items;
+    if (batch.items.length === 0) {
+      throw new Error(`New API ${path} inventory ended before its reported total`);
+    }
   }
   throw new Error(`New API ${path} inventory exceeded the bootstrap safety bound`);
 }
@@ -341,17 +445,29 @@ export async function provisionLocalEmbeddingGateway(
   if (!config.adminAccessToken.trim() || !Number.isInteger(config.adminUserId)) {
     throw new Error('New API admin access token and numeric user id are required');
   }
-  const channel = await ensureChannel(config, fetchImpl);
-  const token = await ensureToken(config, fetchImpl);
-  const vectorDimension = await verifyPublicRoute(config, token.apiKey, fetchImpl);
-  return {
-    channelId: channel.channel.id,
-    tokenId: token.token.id,
-    apiKey: token.apiKey,
-    createdChannel: channel.created,
-    createdToken: token.created,
-    vectorDimension,
+  const normalizedConfig = {
+    ...config,
+    adminBaseUrl: trimSlash(config.adminBaseUrl),
   };
+  if (!isLocalNewApiAdminBase(normalizedConfig.adminBaseUrl)) {
+    throw new Error('New API admin URL must be the approved local gateway endpoint');
+  }
+  const lockOwner = await acquireProvisionLock();
+  try {
+    const channel = await ensureChannel(normalizedConfig, fetchImpl);
+    const token = await ensureToken(normalizedConfig, fetchImpl);
+    const vectorDimension = await verifyPublicRoute(normalizedConfig, token.apiKey, fetchImpl);
+    return {
+      channelId: channel.channel.id,
+      tokenId: token.token.id,
+      apiKey: token.apiKey,
+      createdChannel: channel.created,
+      createdToken: token.created,
+      vectorDimension,
+    };
+  } finally {
+    await releaseProvisionLock(lockOwner);
+  }
 }
 
 export async function writeEmbeddingEnv(

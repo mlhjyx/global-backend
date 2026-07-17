@@ -21,21 +21,34 @@ function firstNonBlank(...values: (string | undefined)[]): string | undefined {
   return undefined;
 }
 
-function isLocalOllamaBreakGlass(baseUrl: string): boolean {
+type LocalEmbeddingEndpointKind = 'gateway' | 'ollama';
+
+function localEmbeddingEndpointKind(baseUrl: string): LocalEmbeddingEndpointKind | undefined {
   try {
     const url = new URL(baseUrl);
-    return (
+    const commonSafeUrl =
       url.protocol === 'http:' &&
-      ['localhost', '127.0.0.1', '[::1]', 'embeddings'].includes(url.hostname) &&
-      url.port === '11434' &&
       url.pathname.replace(/\/$/, '') === '/v1' &&
       url.username === '' &&
       url.password === '' &&
       url.search === '' &&
-      url.hash === ''
-    );
+      url.hash === '';
+    if (!commonSafeUrl) return undefined;
+    if (
+      (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.port === '3001') ||
+      (url.hostname === 'new-api' && url.port === '3000')
+    ) {
+      return 'gateway';
+    }
+    if (
+      ['localhost', '127.0.0.1', '[::1]', 'embeddings'].includes(url.hostname) &&
+      url.port === '11434'
+    ) {
+      return 'ollama';
+    }
+    return undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -58,7 +71,8 @@ export class EmbeddingsClient {
     firstNonBlank(process.env.EMBEDDINGS_URL, process.env.MODEL_GATEWAY_URL) ??
     'http://localhost:3001/v1'
   ).replace(/\/$/, '');
-  private readonly localBreakGlass = isLocalOllamaBreakGlass(this.baseUrl);
+  private readonly endpointKind = localEmbeddingEndpointKind(this.baseUrl);
+  private readonly localBreakGlass = this.endpointKind === 'ollama';
   // 网关路径固定请求只由 bootstrap 声明的私有别名；只有严格 allowlist 的本机
   // Ollama break-glass 才使用上游名，不能用 EMBEDDINGS_MODEL 改投远端模型。
   readonly model = this.localBreakGlass ? 'bge-m3' : LOCAL_EMBEDDING_MODEL_ALIAS;
@@ -66,6 +80,14 @@ export class EmbeddingsClient {
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
+    if (!this.endpointKind) {
+      throw new KbIngestError(
+        'KB_EMBEDDING_CONFIGURATION_INVALID',
+        'terminal',
+        'embedding',
+        'EMBEDDINGS_URL must be the approved local New API or Ollama endpoint',
+      );
+    }
     if (!this.localBreakGlass && !this.apiKey) {
       throw new KbIngestError(
         'KB_EMBEDDING_CONFIGURATION_INVALID',

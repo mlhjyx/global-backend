@@ -40,22 +40,18 @@ describe('New API local embedding bootstrap', () => {
     const directory = await mkdtemp(join(tmpdir(), 'new-api-embedding-env-'));
     const path = join(directory, '.env');
     try {
-      await writeFile(path, 'MODEL_GATEWAY_KEY=general-secret\n', { mode: 0o644 });
+      await writeFile(path, 'MODEL_GATEWAY_KEY=general-secret\n', {
+        mode: 0o644,
+      });
       await chmod(path, 0o644);
       const before = await stat(path);
 
-      await writeEmbeddingEnv(
-        path,
-        { apiKey: 'sk-dedicated-secret' },
-        'http://localhost:3001/v1',
-      );
+      await writeEmbeddingEnv(path, { apiKey: 'sk-dedicated-secret' }, 'http://localhost:3001/v1');
 
       const after = await stat(path);
       expect(after.ino).not.toBe(before.ino);
       expect(after.mode & 0o777).toBe(0o600);
-      expect(await readFile(path, 'utf8')).toContain(
-        'EMBEDDINGS_API_KEY=sk-dedicated-secret',
-      );
+      expect(await readFile(path, 'utf8')).toContain('EMBEDDINGS_API_KEY=sk-dedicated-secret');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -70,7 +66,9 @@ describe('New API local embedding bootstrap', () => {
       base_url: 'http://embeddings:11434',
       models: LOCAL_EMBEDDING_MODEL_ALIAS,
       group: 'default',
-      model_mapping: JSON.stringify({ [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3' }),
+      model_mapping: JSON.stringify({
+        [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+      }),
     };
     const token = {
       id: 2,
@@ -130,7 +128,14 @@ describe('New API local embedding bootstrap', () => {
         fetchMock,
       ),
     ).resolves.toMatchObject({ channelId: 7, tokenId: 2 });
-    expect(requestedPages).toEqual(['channel:1', 'channel:2', 'token:1', 'token:2']);
+    expect(requestedPages).toEqual([
+      'channel:1',
+      'channel:2',
+      'token:1',
+      'token:2',
+      'token:1',
+      'token:2',
+    ]);
   });
 
   it('并发执行引导时串行化 read-create，只创建一条本机通道和专用令牌', async () => {
@@ -141,7 +146,10 @@ describe('New API local embedding bootstrap', () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/channel/?')) {
-        return json({ success: true, data: { items: [...channels], total: channels.length } });
+        return json({
+          success: true,
+          data: { items: [...channels], total: channels.length },
+        });
       }
       if (url.endsWith('/api/channel/') && init?.method === 'POST') {
         channelPosts += 1;
@@ -152,7 +160,10 @@ describe('New API local embedding bootstrap', () => {
         return json({ success: true });
       }
       if (url.includes('/api/token/?')) {
-        return json({ success: true, data: { items: [...tokens], total: tokens.length } });
+        return json({
+          success: true,
+          data: { items: [...tokens], total: tokens.length },
+        });
       }
       if (url.endsWith('/api/token/') && init?.method === 'POST') {
         tokenPosts += 1;
@@ -167,7 +178,9 @@ describe('New API local embedding bootstrap', () => {
         return json({ data: [{ id: LOCAL_EMBEDDING_MODEL_ALIAS }] });
       }
       if (url.endsWith('/v1/embeddings')) {
-        return json({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] });
+        return json({
+          data: [{ index: 0, embedding: Array(1024).fill(0.1) }],
+        });
       }
       throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
     });
@@ -194,7 +207,10 @@ describe('New API local embedding bootstrap', () => {
       const url = String(input);
       if (url.includes('/api/channel/?')) {
         expect(new URL(url).searchParams.get('p')).toBe('1');
-        return json({ success: true, data: { items: channels, total: channels.length } });
+        return json({
+          success: true,
+          data: { items: channels, total: channels.length },
+        });
       }
       if (url.endsWith('/api/channel/') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
@@ -203,7 +219,10 @@ describe('New API local embedding bootstrap', () => {
       }
       if (url.includes('/api/token/?')) {
         expect(new URL(url).searchParams.get('p')).toBe('1');
-        return json({ success: true, data: { items: tokens, total: tokens.length } });
+        return json({
+          success: true,
+          data: { items: tokens, total: tokens.length },
+        });
       }
       if (url.endsWith('/api/token/') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
@@ -222,7 +241,9 @@ describe('New API local embedding bootstrap', () => {
       if (url.endsWith('/v1/embeddings')) {
         const body = JSON.parse(String(init?.body));
         expect(body.model).toBe(LOCAL_EMBEDDING_MODEL_ALIAS);
-        return json({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] });
+        return json({
+          data: [{ index: 0, embedding: Array(1024).fill(0.1) }],
+        });
       }
       throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
     });
@@ -248,7 +269,9 @@ describe('New API local embedding bootstrap', () => {
       name: LOCAL_EMBEDDING_CHANNEL_NAME,
       base_url: 'http://embeddings:11434',
       models: LOCAL_EMBEDDING_MODEL_ALIAS,
-      model_mapping: JSON.stringify({ [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3' }),
+      model_mapping: JSON.stringify({
+        [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+      }),
     });
     expect(tokens[0]).toMatchObject({
       model_limits_enabled: true,
@@ -274,7 +297,9 @@ describe('New API local embedding bootstrap', () => {
                 base_url: 'http://embeddings:11434',
                 models: LOCAL_EMBEDDING_MODEL_ALIAS,
                 group: 'default',
-                model_mapping: JSON.stringify({ [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3' }),
+                model_mapping: JSON.stringify({
+                  [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+                }),
               },
               {
                 id: 8,
@@ -314,7 +339,9 @@ describe('New API local embedding bootstrap', () => {
       base_url: 'http://embeddings:11434',
       models: LOCAL_EMBEDDING_MODEL_ALIAS,
       group: 'default',
-      model_mapping: JSON.stringify({ [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3' }),
+      model_mapping: JSON.stringify({
+        [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+      }),
     };
     const token = {
       id: 2,
