@@ -165,7 +165,7 @@ AiTask<I, O>：
 - **工具**：Playwright + Lighthouse（库内化，CI 同款）；开发期调试用已安装的 `playwright-interactive` / `ecc:browser-qa`。
 - **护栏**：硬门槛（构建产物必须过才能出质量环）：链接零死链、表单可用、console 零 error、Lighthouse Perf ≥85 / A11y ≥90。
 - **降级**：无（这是门，门坏了要修门不是绕门）；工具自身崩溃 → run 失败可重试。
-- **模型**：gemini-3-flash 档（仅汇总）。
+- **模型**：as-built `deepseek-v4-flash`，fallback `doubao-seed-2.0-lite`（仅汇总）；Gemini 仍是未接 targetCandidate。
 
 ## 9. seo —— SEO
 
@@ -176,7 +176,7 @@ AiTask<I, O>：
 - **工具**：HTML 解析器 + JSON-LD 校验（库内化）。
 - **护栏**：多语言站 hreflang 是硬检查（错配=国际 SEO 灾难）；未发布预览必须 noindex（防提前收录），发布时自动翻转。
 - **降级**：无硬门（findings 进质量环修复即可）。
-- **模型**：gemini-3-flash 档。
+- **模型**：as-built `deepseek-v4-flash`，fallback `doubao-seed-2.0-lite`；Gemini 仍是未接 targetCandidate。
 
 ## 10. 研究依据与设计修订（2026-07-14 补研；修订①②③待用户确认后定稿）
 

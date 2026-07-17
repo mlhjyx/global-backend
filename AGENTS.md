@@ -16,7 +16,7 @@
 
 - **NestJS 单体（模块化）+ Prisma + PostgreSQL**（多租户 **RLS**：`app_user` 连接 + `set_config('app.current_workspace_id')` + `current_workspace_id()` policy；owner 连接绕 RLS 供 relay/seed）。
 - **Temporal** 持久工作流（understanding / discovery / qualify）；**Transactional Outbox** + relay 发领域事件。
-- **模型网关 = new-api 中转站**（单一 OpenAI 兼容端点）。可用模型：`deepseek-v4-flash` / `deepseek-v4-pro` / `gemini-2.5-flash` / `gemini-2.5-pro`（gemini-2.0/3.x 不可用）。旧别名 `deepseek-chat`/`deepseek-reasoner` 官方 2026-07-24 关停，一律用显式 V4 型号。
+- **模型网关 = new-api 中转站**（单一 OpenAI 兼容端点）。当前已接文本模型 = DeepSeek 直连 `deepseek-v4-flash` / `deepseek-v4-pro`，以及方舟 11 个：`doubao-seed-2.0-pro` / `doubao-seed-2.0-lite` / `doubao-seed-2.0-mini` / `doubao-seed-2.0-code` / `kimi-k2.6` / `kimi-k2.7-code` / `glm-5.2` / `glm-latest` / `minimax-m2.7` / `minimax-m3` / `kimi-k3`（2026-07-17 通道批测 11/11 成功；这只证明连通，不代替 task-shaped 能力评测）。GPT、Gemini、Claude 通道尚未接入，后期接入后须按 ADR-016 评测晋级。旧别名 `deepseek-chat`/`deepseek-reasoner` 官方 2026-07-24 关停，一律用显式 V4 型号。
 - **发现四层**：L0 Tool → L1 ProviderAdapter（按 SourceClass）→ L2 AI Task（有界任务契约，**非超级 Agent**）→ L3 Temporal Workflow。**ToolBroker** 是唯一确定性执行闸门（allowedTools 白名单 + 预算 reserve-settle + 限流 + source_policy + 幂等 + trace）。
 - **MCP = 传输非授权**，第一步不做；第三方 MCP 内化到 ProviderAdapter 后面。
 - **Site Builder** = NestJS bounded context + Temporal 固定 DAG + 有界 AI Task + `@global/contracts` SiteSpec + Astro 静态渲染；不使用自由 Planner。素材/KB 对象进 MinIO，KB 使用 Docling + BGE-M3；当前 renderer 构建产物仍是本地路径，不得把目标态 immutable Release 写成 as-built。

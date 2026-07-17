@@ -72,6 +72,136 @@ interface StoredFact {
   evidence: EvidenceRefV2;
 }
 
+async function verifyImmutableLedgerRls(args: {
+  owner: PrismaClient;
+  app: PrismaService;
+  workspaceId: string;
+  otherWorkspaceId: string;
+  siteId: string;
+}): Promise<void> {
+  const { owner, app, workspaceId, otherWorkspaceId, siteId } = args;
+  const [sourceCount, refCount, firstSnapshot, firstRef] = await Promise.all([
+    owner.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
+    owner.brandProfileEvidenceRef.count({ where: { siteId } }),
+    owner.siteEvidenceSourceSnapshot.findFirstOrThrow({ where: { siteId } }),
+    owner.brandProfileEvidenceRef.findFirstOrThrow({ where: { siteId } }),
+  ]);
+  const visibleA = await app.withWorkspace(workspaceId, (tx) =>
+    tx.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
+  );
+  const visibleB = await app.withWorkspace(otherWorkspaceId, (tx) =>
+    tx.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
+  );
+  const visibleUnset = await app.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*) AS count
+      FROM site_evidence_source_snapshot
+     WHERE site_id = ${siteId}::uuid`;
+  const visibleRefsA = await app.withWorkspace(workspaceId, (tx) =>
+    tx.brandProfileEvidenceRef.count({ where: { siteId } }),
+  );
+  const visibleRefsB = await app.withWorkspace(otherWorkspaceId, (tx) =>
+    tx.brandProfileEvidenceRef.count({ where: { siteId } }),
+  );
+  const visibleRefsUnset = await app.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*) AS count
+      FROM brand_profile_evidence_ref
+     WHERE site_id = ${siteId}::uuid`;
+  check(visibleA === sourceCount, "workspace A can read its snapshots");
+  check(visibleB === 0, "workspace B cannot read workspace A snapshots");
+  check(
+    Number(visibleUnset[0]?.count ?? -1) === 0,
+    "unset workspace sees zero snapshots",
+  );
+  check(visibleRefsA === refCount, "workspace A can read its evidence refs");
+  check(
+    visibleRefsB === 0,
+    "workspace B cannot read workspace A evidence refs",
+  );
+  check(
+    Number(visibleRefsUnset[0]?.count ?? -1) === 0,
+    "unset workspace sees zero evidence refs",
+  );
+
+  let crossTenantRejected = false;
+  try {
+    await app.withWorkspace(otherWorkspaceId, (tx) =>
+      tx.siteEvidenceSourceSnapshot.create({
+        data: {
+          id: randomUUID(),
+          workspaceId: otherWorkspaceId,
+          siteId,
+          sourceKey: "cross-tenant-negative",
+          sourceType: "intake",
+          sourceRole: "fact_candidate",
+          contentHash: "a".repeat(64),
+          normalizationVersion: "evidence-text/1",
+          snapshotText: "cross tenant fixture text",
+          provenance: { test: true },
+          dedupeKey: "b".repeat(64),
+        },
+      }),
+    );
+  } catch {
+    crossTenantRejected = true;
+  }
+  check(crossTenantRejected, "cross-tenant snapshot provenance is rejected");
+
+  let crossTenantRefRejected = false;
+  try {
+    await app.withWorkspace(otherWorkspaceId, (tx) =>
+      tx.brandProfileEvidenceRef.create({
+        data: {
+          id: randomUUID(),
+          workspaceId: otherWorkspaceId,
+          siteId,
+          brandProfileId: firstRef.brandProfileId,
+          factIndex: 999,
+          factKey: "cross_tenant_negative",
+          sourceSnapshotId: firstRef.sourceSnapshotId,
+          sourceContentHash: firstRef.sourceContentHash,
+          quote: firstRef.quote,
+          quoteStart: firstRef.quoteStart,
+          quoteEnd: firstRef.quoteEnd,
+          quotePrefix: firstRef.quotePrefix,
+          quoteSuffix: firstRef.quoteSuffix,
+        },
+      }),
+    );
+  } catch {
+    crossTenantRefRejected = true;
+  }
+  check(
+    crossTenantRefRejected,
+    "cross-tenant evidence ref provenance is rejected",
+  );
+
+  let updateRejected = false;
+  try {
+    await app.withWorkspace(workspaceId, (tx) =>
+      tx.siteEvidenceSourceSnapshot.update({
+        where: { id: firstSnapshot.id },
+        data: { sourceKey: "tampered" },
+      }),
+    );
+  } catch {
+    updateRejected = true;
+  }
+  check(updateRejected, "app_user cannot mutate a frozen source snapshot");
+
+  let refUpdateRejected = false;
+  try {
+    await app.withWorkspace(workspaceId, (tx) =>
+      tx.brandProfileEvidenceRef.update({
+        where: { id: firstRef.id },
+        data: { factKey: "tampered" },
+      }),
+    );
+  } catch {
+    refUpdateRejected = true;
+  }
+  check(refUpdateRejected, "app_user cannot mutate a frozen evidence ref");
+}
+
 async function main(): Promise<void> {
   requireDevelopmentDatabase();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -169,7 +299,81 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log("② real SearXNG + Crawl4AI + provenance metadata");
+    console.log("② real PostgreSQL RLS/FK/immutability for both ledgers");
+    const ledgerText = "Verified Evidence 2.0 immutable ledger fixture.";
+    const ledgerHash = sha256(ledgerText);
+    const ledgerSnapshotId = randomUUID();
+    const ledgerProfileId = randomUUID();
+    const ledgerRefId = randomUUID();
+    const ledgerEvidence: EvidenceRefV2 = {
+      version: 2,
+      evidenceRefId: ledgerRefId,
+      sourceId: ledgerSnapshotId,
+      sourceType: "intake",
+      sourceRole: "fact_candidate",
+      hashAlgorithm: "sha256",
+      contentHash: ledgerHash,
+      quote: ledgerText,
+      selector: { start: 0, end: Array.from(ledgerText).length },
+    };
+    await owner.$transaction(async (tx) => {
+      await tx.siteEvidenceSourceSnapshot.create({
+        data: {
+          id: ledgerSnapshotId,
+          workspaceId,
+          siteId,
+          sourceKey: "verify:rls-ledger",
+          sourceType: "intake",
+          sourceRole: "fact_candidate",
+          contentHash: ledgerHash,
+          normalizationVersion: "evidence-text/1",
+          snapshotText: ledgerText,
+          provenance: { kind: "rls_verifier_fixture" },
+          dedupeKey: sha256(`verify:rls-ledger:${siteId}`),
+        },
+      });
+      await tx.brandProfile.create({
+        data: {
+          id: ledgerProfileId,
+          workspaceId,
+          siteId,
+          version: 1,
+          evidenceSchemaVersion: 2,
+          factSheet: [
+            {
+              key: "rls_fixture",
+              value: "Evidence ledger fixture",
+              evidence: ledgerEvidence,
+            },
+          ] as Prisma.InputJsonValue,
+          gaps: [] as Prisma.InputJsonValue,
+        },
+      });
+      await tx.brandProfileEvidenceRef.create({
+        data: {
+          id: ledgerRefId,
+          workspaceId,
+          siteId,
+          brandProfileId: ledgerProfileId,
+          factIndex: 0,
+          factKey: "rls_fixture",
+          sourceSnapshotId: ledgerSnapshotId,
+          sourceContentHash: ledgerHash,
+          quote: ledgerText,
+          quoteStart: 0,
+          quoteEnd: Array.from(ledgerText).length,
+        },
+      });
+    });
+    await verifyImmutableLedgerRls({
+      owner,
+      app,
+      workspaceId,
+      otherWorkspaceId,
+      siteId,
+    });
+
+    console.log("③ real SearXNG + Crawl4AI + provenance metadata");
     const broker = buildToolBroker({
       sourcePolicyReader: sourcePolicyReaderFrom(app),
     });
@@ -202,7 +406,7 @@ async function main(): Promise<void> {
     }
 
     console.log(
-      "③ real BGE-M3 + model gateway + full buildBrandProfile activity",
+      "④ real BGE-M3 + model gateway + full buildBrandProfile activity",
     );
     storage = new StorageService();
     await storage.onModuleInit();
@@ -281,7 +485,10 @@ async function main(): Promise<void> {
       where: { id: runIds[0] },
       data: { status: "succeeded", finishedAt: new Date() },
     });
-    check(first.version === 1, "first activity appended BrandProfile v1");
+    check(
+      first.version === 2,
+      "first activity appended BrandProfile v2 after the isolated RLS fixture",
+    );
     const profile = await owner.brandProfile.findFirstOrThrow({
       where: { siteId },
       orderBy: { version: "desc" },
@@ -340,7 +547,7 @@ async function main(): Promise<void> {
       );
     }
 
-    console.log("④ snapshot idempotency and honest BrandProfile append debt");
+    console.log("⑤ snapshot idempotency and honest BrandProfile append debt");
     const sourceCount = snapshots.length;
     const noResearchActivities = createSiteBuilderActivities({
       prisma: app,
@@ -353,8 +560,8 @@ async function main(): Promise<void> {
       buildRunId: await makeRun(),
     });
     check(
-      second.version === 2,
-      "rerun appends BrandProfile v2 (R4-B debt remains explicit)",
+      second.version === 3,
+      "rerun appends BrandProfile v3 (R4-B debt remains explicit)",
     );
     const sourceCountAfter = await owner.siteEvidenceSourceSnapshot.count({
       where: { siteId },
@@ -363,125 +570,6 @@ async function main(): Promise<void> {
       sourceCountAfter === sourceCount,
       "identical intake/KB snapshots dedupe without mutable upsert",
     );
-
-    console.log("⑤ RLS A/B/unset, cross-tenant FK and immutability");
-    const visibleA = await app.withWorkspace(workspaceId, (tx) =>
-      tx.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
-    );
-    const visibleB = await app.withWorkspace(otherWorkspaceId, (tx) =>
-      tx.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
-    );
-    const visibleUnset = await app.$queryRaw<{ count: bigint }[]>`
-      SELECT count(*) AS count
-        FROM site_evidence_source_snapshot
-       WHERE site_id = ${siteId}::uuid`;
-    const refCount = await owner.brandProfileEvidenceRef.count({
-      where: { siteId },
-    });
-    const visibleRefsA = await app.withWorkspace(workspaceId, (tx) =>
-      tx.brandProfileEvidenceRef.count({ where: { siteId } }),
-    );
-    const visibleRefsB = await app.withWorkspace(otherWorkspaceId, (tx) =>
-      tx.brandProfileEvidenceRef.count({ where: { siteId } }),
-    );
-    const visibleRefsUnset = await app.$queryRaw<{ count: bigint }[]>`
-      SELECT count(*) AS count
-        FROM brand_profile_evidence_ref
-       WHERE site_id = ${siteId}::uuid`;
-    check(visibleA === sourceCount, "workspace A can read its snapshots");
-    check(visibleB === 0, "workspace B cannot read workspace A snapshots");
-    check(
-      Number(visibleUnset[0]?.count ?? -1) === 0,
-      "unset workspace sees zero snapshots",
-    );
-    check(
-      visibleRefsA === refCount,
-      "workspace A can read its evidence refs",
-    );
-    check(
-      visibleRefsB === 0,
-      "workspace B cannot read workspace A evidence refs",
-    );
-    check(
-      Number(visibleRefsUnset[0]?.count ?? -1) === 0,
-      "unset workspace sees zero evidence refs",
-    );
-    let crossTenantRejected = false;
-    try {
-      await app.withWorkspace(otherWorkspaceId, (tx) =>
-        tx.siteEvidenceSourceSnapshot.create({
-          data: {
-            id: randomUUID(),
-            workspaceId: otherWorkspaceId,
-            siteId,
-            sourceKey: "cross-tenant-negative",
-            sourceType: "intake",
-            sourceRole: "fact_candidate",
-            contentHash: "a".repeat(64),
-            normalizationVersion: "evidence-text/1",
-            snapshotText: "cross tenant fixture text",
-            provenance: { test: true },
-            dedupeKey: "b".repeat(64),
-          },
-        }),
-      );
-    } catch {
-      crossTenantRejected = true;
-    }
-    check(crossTenantRejected, "cross-tenant snapshot provenance is rejected");
-    const firstRef = profile.evidenceRefs[0];
-    let crossTenantRefRejected = false;
-    try {
-      await app.withWorkspace(otherWorkspaceId, (tx) =>
-        tx.brandProfileEvidenceRef.create({
-          data: {
-            id: randomUUID(),
-            workspaceId: otherWorkspaceId,
-            siteId,
-            brandProfileId: profile.id,
-            factIndex: 999,
-            factKey: "cross_tenant_negative",
-            sourceSnapshotId: firstRef.sourceSnapshotId,
-            sourceContentHash: firstRef.sourceContentHash,
-            quote: firstRef.quote,
-            quoteStart: firstRef.quoteStart,
-            quoteEnd: firstRef.quoteEnd,
-            quotePrefix: firstRef.quotePrefix,
-            quoteSuffix: firstRef.quoteSuffix,
-          },
-        }),
-      );
-    } catch {
-      crossTenantRefRejected = true;
-    }
-    check(
-      crossTenantRefRejected,
-      "cross-tenant evidence ref provenance is rejected",
-    );
-    let updateRejected = false;
-    try {
-      await app.withWorkspace(workspaceId, (tx) =>
-        tx.siteEvidenceSourceSnapshot.update({
-          where: { id: snapshots[0].id },
-          data: { sourceKey: "tampered" },
-        }),
-      );
-    } catch {
-      updateRejected = true;
-    }
-    check(updateRejected, "app_user cannot mutate a frozen source snapshot");
-    let refUpdateRejected = false;
-    try {
-      await app.withWorkspace(workspaceId, (tx) =>
-        tx.brandProfileEvidenceRef.update({
-          where: { id: firstRef.id },
-          data: { factKey: "tampered" },
-        }),
-      );
-    } catch {
-      refUpdateRejected = true;
-    }
-    check(refUpdateRejected, "app_user cannot mutate a frozen evidence ref");
 
     console.log("\n🎉 verify-site-builder-r4-a1 all sections passed");
   } catch (error) {
@@ -545,7 +633,7 @@ async function main(): Promise<void> {
           "R4-A1 verifier passed but fixture cleanup failed",
         );
       }
-    } else if (!verificationError) {
+    } else {
       console.log("  ✅ isolated verification fixtures removed");
     }
   }

@@ -11,7 +11,7 @@
 ## 0. 定位与边界
 
 - **M1 = 把 M0 的「demo v0 快速通道」升级为「精装修管线」**：输入 = intake + 向导五组档案 + 上传素材 + KB；输出 = 新 SiteVersion（source=`build`）+ 预览。核心四阶段：P1 理解（KB 摄入 Temporal 化 ‖ brandProfile 全网研究）→ P2 素材 fan-out（图片管线 ‖ 多语种文案 ‖ 动效预设）→ P3 组装（designSpec → siteAssembly → 三重校验 → Astro 构建 → 预览）→ P4 质量环（≤3 轮）→ P5 事件收尾。
-- **一处口径张力（发现于设计提取，需拍板）**：01-prd §7 把「质量环（审核/SEO/审美）」列在 M2，而 02-architecture §4 把 P4 定义在精装修管线内。**推荐（D-M1-1）**：M1 含 P4 骨架，走「确定性优先」——qa（Playwright+Lighthouse，主体确定性）与 seo（确定性检查表）立即激活；**审美评审（需视觉模型）设计上自带「评审失败→该维弃权」降级（03 卡6），在 Google 通道接入前自动弃权**，通道就绪后零改码激活。这样既不违背 02 的管线完整性，也不把 M2 的模型评审成本提前。
+- **一处口径张力（发现于设计提取，需拍板）**：01-prd §7 把「质量环（审核/SEO/审美）」列在 M2，而 02-architecture §4 把 P4 定义在精装修管线内。**推荐（D-M1-1）**：M1 含 P4 骨架，走「确定性优先」——qa（Playwright+Lighthouse，主体确定性）与 seo（确定性检查表）立即激活；**审美评审（需视觉模型）设计上自带「评审失败→该维弃权」降级（03 卡6），在候选通过真实图像输入 capability probe 前自动弃权**，通道就绪后零改码激活。这样既不违背 02 的管线完整性，也不把 M2 的模型评审成本提前。
 - **不在 M1**：发布/域名/询盘后端（M2）、视频 Seedance 与店铺导入与 SEO 诊断（M3）、独立预览域名（等购域，2026-07-14 用户已定「后买、先本地路径预览跑通」，切换=改 `PREVIEW_URL_PATTERN` env 零代码）。
 - **生产化审计前置（2026-07-17 as-built 复核）**：M0/M1-a/M1-b 的**主干保留**，已确认问题按消费者与正确性分流。truth-sync、R0 contract、**R1-safety ①+②、R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2 与 R4-A1**均已完成；当前关键顺序是：**R4-A2 → R4-B-min → M1-d**。R3-B2 已完成本地 durable artifact/原子 pointer；R1-min 剩余生产对象存储 Release、跨节点恢复/回收与 unknown component 门仍须早于 M1-e 可见预览；MODEL-0/EVAL-bootstrap、DI-0 等可按各自消费者并行。
 
@@ -19,9 +19,9 @@
 
 | # | 假设 | 探法 | 结果 | 对设计的影响 |
 |---|---|---|---|---|
-| H1 | 设计目标候选模型 targetCandidate（claude-sonnet-5 / gemini-3.1-pro / gpt-image-2 / seedance）可用 | 网关 `/v1/models` + 逐名微量真调 | ❌ **四通道全未接**；且 `/v1/models` 列表不可信（列出的 gemini 全系 429 额度耗尽；未列出的 deepseek-v4 双档反而可直呼） | 模型路由必须**配置驱动、按名探活**；targetCandidate=用户接通道后经评测晋级+翻配置（ADR-016，非永久终选） |
-| H2 | 网关现有可用文本模型足以真跑 M1 全链文本任务 | `deepseek-v4-flash`/`deepseek-v4-pro` 直呼微调 | ✅ 双档 200（pro 当日一度「价格未配置」后恢复→网关配置是活动的，实现须探活不缓存结论）；⚠️ v4 是 reasoning 模型，`max_tokens` 过小时 content 为空 | M1 文本任务（brandProfile 综合/copy/assembly/fix/qa·seo 汇总）当下即可真测；调用层给足 token 预算 |
-| H3 | 图片/视觉/视频能力当下可用 | 同 H1 | ❌ `images/edits`（gpt-image-2）无通道；无任何活的多模态模型；veo 在列但同 Google 额度大概率 429 | imagePipeline 生成步与视觉质检、审美评审 = **capability-gated**，未就绪即显式跳过（`enhanceSkipped`/该维弃权），绝不拿文本模型硬顶 |
+| H1 | 设计目标候选模型 targetCandidate（claude-sonnet-5 / gemini-3.1-pro / gpt-image-2 / seedance）可用 | 网关 `/v1/models` + 逐名微量真调；2026-07-17 用户补充当前通道真值 | ❌ GPT/Gemini/Claude 通道尚未接入；✅ 当前文本集合为方舟 11 个 + DeepSeek 双档 | 模型路由必须**配置驱动、按名探活**；targetCandidate=用户接通道后经评测晋级+翻配置（ADR-016，非永久终选） |
+| H2 | 网关现有可用文本模型足以真跑 M1 全链文本任务 | DeepSeek 双档与方舟通道批测；具体任务再走 task-shaped probe | ✅ 方舟 11/11 连通，DeepSeek 双档已接；⚠️ 连通不证明 12k 结构化任务稳定，当前 R4-A1 复跑已观察到 DeepSeek 超时与 `glm-5.2` 空 content/`finish_reason=length` | currentRoute 只从已接集合选经具体任务评估的子集；调用层须给足 token/timeout 并对空 content 显式失败 |
+| H3 | 图片/视觉/视频能力当下可用 | 同 H1 | ⚠️ `images/edits`（gpt-image-2）无通道；`minimax-m3` 虽在已接文本清单，plan 端点真实图像输入尚未真探；视频另待 M3 | imagePipeline 生成步与视觉质检、审美评审 = **capability-gated**，未就绪即显式跳过（`enhanceSkipped`/该维弃权），绝不拿文本模型硬顶 |
 | H4 | Docling 能转真 PDF（M0 只软检） | 现造真 PDF 宣传册，按 `DoclingClient` 生产同形状 POST `/v1/convert/source` | ✅ status=success，全文精准转出 markdown | P1 资料解析可靠；M0 欠账在设计期即闭合 |
 | H5 | 图片管线本地依赖可行（历史探测环境为 Mac arm64） | npm registry 查 Sharp、另对 rembg 做后置研究 | ✅ Sharp 有预编译；rembg 镜像当时可得 | **当前 M1-c 只据此采用纯 Sharp**（重编码/EXIF/多尺寸）；rembg 探测仅留历史证据，不构成 M1-c 依赖或已落地能力 |
 | H6 | 品牌研究链路容器可用 | curl 健康探测 + egress 真机矩阵 | ✅ SearXNG:8081=200、Crawl4AI:11235=200；fake-IP-only DoH 回退下 `/md`+`/crawl` 公网可用，private/loopback/metadata/redirect 负向全绿 | P1 可复用 client；API 与 Crawl4AI 双层 pinning gate 已闭环，broad allow-internal 已移除 |
@@ -89,7 +89,7 @@
 | site_builder.image_qc / image_edit | seedream-5.0-lite（方舟已接真出图；图生图同端点，mask 保主体语义 M1-c 真探） | 确定性步兜底（`enhanceSkipped`） | gpt-image-2 `images/edits`（贵精档） |
 | site_builder.aesthetic_review | minimax-m3（plan 端点收图与否 M1-f 真探） | **该维弃权**（03 卡6 降级语义），不阻断出环 | gemini-3.1-pro / GPT-5.6 Terra |
 
-原则：**文本任务 = 配置默认 deepseek 双档（合法路由，非静默降级）；能力缺失任务（视觉/图编）= 显式跳过并落标记，绝不拿文本模型硬顶**。通道接入后翻 registry 配置 + 重启 worker 即切换（获客侧 #35 先例：旧进程持旧注册表须重启）。豆包视频中转坑（issue #2174/方案 B 直连方舟）与 M1 无关（视频=M3），仅在契约留降级位。
+原则：**文本任务 = currentRoute 使用已评测的 DeepSeek 主档与方舟 fallback 子集（合法路由，非静默降级）；能力缺失任务（视觉/图编）= 显式跳过并落标记，绝不拿文本模型硬顶**。通道接入后翻 registry 配置 + 重启 worker 即切换（获客侧 #35 先例：旧进程持旧注册表须重启）。豆包视频中转坑（issue #2174/方案 B 直连方舟）与 M1 无关（视频=M3），仅在契约留降级位。
 
 **MODEL-0 路由治理落地（v3.2 §23.4/§23.7，profile 化，非本文自封终选）**：Agent 只绑 **ModelProfile 语义档**（`structured.default/reasoning.high/copy.premium/text.bulk/multimodal.review/text.summary/image.*/video.*/…`）**不绑型号**（ADR-016）。`task-routes.ts` 从 `task→model string` 改 `task→profile + task budget`；保留 `SITE_BUILDER_MODEL_*` 紧急 model override，增 `SITE_BUILDER_PROFILE_*`；registry 解析后记录 `policyVersion` + model snapshot。建议文件布局（禁 provider fetch 散落）：`agents/model-profiles.ts`（profile/capability 类型）· `model-policy.registry.ts`（四态 + 流量模式/健康度/区域/价格/生命周期）· `model-capabilities.ts`（structured/vision/video/edit/async-job 静态声明）· `model-capability-probe.ts`（真 endpoint 验 IO/JSON/finish_reason/超时）· `model-promotion.service.ts`（**MODEL-0 不预建完整服务**，shadow/canary/rollback 状态机后期真流量才建）· `media-gateway/`（图/视频/语音异步任务）。**每 task 路由工程门**：固定 `maxTokens/timeout/reasoning effort/maxCost/fallback policy`；`finish_reason=length`、空 content、schema 不合、capability 不符**必须是显式错误码**；模型原始输出**先过 schema/事实/引用/安全门**再进 DB/Renderer；alias 运行时解析到 snapshot 存 ReleaseManifest（历史重放/回归定位）；Judge 尽量不与 candidate 同 provider（先确定性门再盲评，防高文风掩盖事实错）。分期晋级 MODEL-1（候选真探 + 6–12 样本 task-shaped eval）/MODEL-2（真流量前 30×3 + shadow/canary + 自动回退）见 §11。
 
@@ -109,7 +109,7 @@
 | # | 决策 | 推荐与理由 |
 |---|---|---|
 | D-M1-1 | M1 是否含 P4 质量环（01/02 口径张力） | **含，确定性优先**：qa/seo 主体是 Playwright/Lighthouse/检查表（今天就能真测且价值最大）；审美维 capability-gated 自动弃权，Google 通道来了零改码激活。管线形状一次成型，避免 M2 再动编排 |
-| D-M1-2 | 文本模型先用 deepseek 双档跑通全链 | **是**：不等通道；registry 配置化，接入后翻配置+重启即切终选。eval 基线在切换前后各跑一轮量化差异 |
+| D-M1-2 | 文本模型先用当前已接集合跑通全链 | **是**：currentRoute 采用已评测的 DeepSeek 主档与方舟 fallback 子集，不等 GPT/Gemini/Claude；registry 配置化，后续候选接入并通过评测后再翻配置。eval 基线在切换前后各跑一轮量化差异 |
 | D-M1-3 | gpt-image-2 生成步现在写吗 | **不写调用代码，也不在 M1-c 预建其 rembg/mask 步骤位**：当前无真实消费者与可验证通道；M1-c 只落 Sharp 的重编码/方向/sRGB/EXIF-GPS/质量门/裁切/多尺寸。生成式编辑进入 M1-c2/M3 时再随真实合同加 feature flag |
 | D-M1-4 | 组件库扩展幅度 | **补齐 04 §5 封闭 26 型**（D12/ADR-015，17→26）：契约是封闭枚举，P3 组装 prompt 需要完整菜单；现渲染器已注册 10 个，增量 16 个（M1-e-A）。ScrollVideoHero/Interactive3DHero 不进封闭库 |
 | D-M1-5 | M1 语种范围 | **en + de 真跑**（golden=德国市场先例），`ar`(RTL) 进渲染器单测但不进 M1 golden；语种是 options 参数非硬编码 |
@@ -120,7 +120,7 @@
 
 ## 6. 主动风险/权衡（没问但该知道）
 
-1. **模型单一供应商集中**：M1 期间全链文本压在 deepseek 一家——网关配置漂移（今天 v4-pro 就短暂「价格未配置」）或供应商故障=全管线停。缓解：AiTask 探活+显式失败+run 可重跑；通道多元化本身就是解药（用户侧清单）。
+1. **模型任务形状与主档集中风险**：部分主任务仍优先 DeepSeek，方舟 fallback 已降低单 provider 风险，但“通道连通”不代表长结构化任务稳定；网关配置漂移、超时或空 content 仍可让 build fail-closed。缓解：AiTask 探活+显式失败+run 可重跑；按 task-shaped eval 晋级更多现有候选，后续再接 GPT/Gemini/Claude。
 2. **P95<15min 与质量环相乘**：3 轮 × Astro 重构建（M0 单次 ~5-6s，M1 组件×语种×图片后会涨）+ 逐图处理。缓解：P2 素材并行 + content_hash 幂等跳过 + 增量 scope；verify-m1 落真实计时基线，超标再优化（不预优化）。
 3. **reasoning 模型结构化输出**：v4 双档思考吃 token、JSON 模式行为与非 reasoning 模型不同。缓解：generateStructured 统一封装 maxTokens 预算 + zod 重试 ≤2；eval harness 记录每 task 成功率。
 4. **后置 rembg 对工业产品图的分割质量未知**（管道/异形件/反光金属）。它不在 M1-c 范围；只有 M1-c2/M3 出现生成式背景重绘真实消费者后，才以独立 feature flag 和 Golden 图集 IoU/主体保护评测决定是否接入。
