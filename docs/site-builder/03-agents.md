@@ -97,7 +97,7 @@ AiTask<I, O>：
 
 ## 3. imagePipeline —— 图片管线
 
-- **状态**：M1-c 目标能力，**尚未落地**；它是确定性 Asset Processor，不新增 AI Task。当前施工路线以 **ADR-018 + [14](14-media-foundation-mf0.md)** 为准。
+- **状态**：M1-c 已于 2026-07-17 在当前交付分支落地并完成开发环境验证；它是确定性 Asset Processor，不新增 AI Task。是否进入 `main` 仍以 PR/CI/合并证据为准，合同与安全边界以 **ADR-018 + [14](14-media-foundation-mf0.md)** 为准。
 - **职责/触发**：P2；每张用户图（产品/工厂/团队/证书）→ 安全、可追溯、响应式的站点派生件。
 - **输入 → 输出**：`{assetId, kind, targetUsage(hero/grid/gallery…)}` → `AssetVariant[] + DerivedImageManifest`（AVIF/WebP/fallback，多尺寸，带 recipe/checksum/provenance）。
 - **M1-c 固定序（纯 Sharp）**：MIME/像素/解码炸弹检查 → 自动方向/sRGB → 解码重编码并剥 EXIF/GPS → 模糊/曝光/噪点质量门 → 安全裁切/focal point → 320/640/960/1440/1920 响应式导出 → `AssetVariant`/兼容 manifest 持久化。
@@ -114,7 +114,7 @@ AiTask<I, O>：
 - **Prompt 内化来源**：B2B 文案结构 ← `ecc:marketing-campaign`/`ecc:content-engine`（价值主张→痛点→证据→CTA 框架）；SEO 写法 ← `ecc:seo` skill 的 title/desc 规范；多语言 tone ← brandBrief.tone + 目标市场文化禁忌 checklist（固化为 per-market 附录）。
 - **工具**：无外部工具。
 - **护栏**：术语表强一致（glossary 注入）；禁绝对化宣称（"best/No.1"类）与虚构事实（只能引用 factSheet，引 ADR-017）；每语种输出过字符集/方向 sanity（阿语 RTL 标记）。
-- **内容预算与最小询盘合同（M1-d，v3.2 §26 回写）**：Copy 按 **slot / locale / Claim refs** 生成，**先过事实门再文风**（valueProps/differentiators/tone 只能从已通过 FactSheet 推导，不得把未闸门的自由结论当事实）；槽位长度=组件内容预算硬约束（超预算优先换变体/定向重写，禁 CSS 缩到不可读，见卡7兼容矩阵）。M1-d 同步定义**最小 inquiry / consent / outbox 合同**（实际公开接收随 M2）。依赖 R4-A/B-min、DI-0。
+- **内容预算与最小询盘合同（M1-d，v3.2 §26 回写）**：Copy 按 **slot / locale / Claim refs** 生成，**先过事实门再文风**（valueProps/differentiators/tone 只能从已通过 FactSheet 推导，不得把未闸门的自由结论当事实）；槽位长度=组件内容预算硬约束（超预算优先换变体/定向重写，禁 CSS 缩到不可读，见卡7兼容矩阵）。M1-d 同步定义**最小 inquiry / consent / outbox 合同**（实际公开接收随 M2）。硬前置是 **R3 + R4-A + R4-B-min**；DI-0 的设计消费者契约可并行推进并在 M1-e 前收口，不阻塞 M1-d 核心文案。
 - **降级**：某语种失败 → 该语种缺席本轮（站点先上已成语种），标记待重跑；**Demo 快路径 copy polish 失败 → 直接用 deterministic copy，不阻断 Demo 生成**（v3.2 §18.2）。
 - **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（reasoning low，fallback glm-5.2 / doubao-seed-2.0-pro），见 §0.4。目标 profile：`copy.premium`/`text.bulk`。
 

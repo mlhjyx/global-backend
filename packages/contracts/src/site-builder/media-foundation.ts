@@ -53,7 +53,6 @@ export type AssetVariantPosition =
   (typeof ASSET_VARIANT_POSITIONS)[number];
 
 export interface AssetVariantRecipe {
-  schemaVersion: "1.0";
   pipelineVersion: string;
   source: {
     /** 逻辑 Asset 原件的内容 SHA-256，始终参与身份。 */
@@ -61,6 +60,25 @@ export interface AssetVariantRecipe {
     /** 直接从原件派生时为 null；二次派生时同时固定 Variant ID 与内容。 */
     variant: { id: string; contentHash: string } | null;
   };
+  output: {
+    role: ImageVariantRole;
+    format: AssetVariantOutputFormat;
+    width: number;
+    height: number;
+    fit: AssetVariantFit;
+    position: AssetVariantPosition;
+    focalPoint: { x: number; y: number } | null;
+    quality: number;
+  };
+}
+
+/**
+ * M1-c recipe v2. The original `AssetVariantRecipe` is a shipped MF0-A API and remains source-
+ * compatible; v2 is explicitly discriminated because adding these required identity fields to
+ * the old interface would be a breaking, unversioned contract change.
+ */
+export interface AssetVariantRecipeV2 extends AssetVariantRecipe {
+  schemaVersion: "2.0";
   /** Every byte-affecting safety/resize/encoder choice is part of the identity. */
   operations: {
     autoOrient: true;
@@ -76,17 +94,9 @@ export interface AssetVariantRecipe {
       chromaSubsampling: "4:4:4" | "4:2:0" | null;
     };
   };
-  output: {
-    role: ImageVariantRole;
-    format: AssetVariantOutputFormat;
-    width: number;
-    height: number;
-    fit: AssetVariantFit;
-    position: AssetVariantPosition;
-    focalPoint: { x: number; y: number } | null;
-    quality: number;
-  };
 }
+
+export type AnyAssetVariantRecipe = AssetVariantRecipe | AssetVariantRecipeV2;
 
 export interface DerivedImageVariant {
   key: string;

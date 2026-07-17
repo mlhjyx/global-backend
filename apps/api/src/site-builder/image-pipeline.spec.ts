@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
@@ -217,7 +220,8 @@ describe('M1-c deterministic image policy', () => {
 
   it('renders the native codec work in a killable isolated child process', async () => {
     const input = await opaqueJpeg(640, 360);
-    const inspection = await inspectImageInput(input, 'image/jpeg');
+    const runner = new IsolatedImagePipelineRunner(30_000);
+    const inspection = await runner.inspect(input, 'image/jpeg');
     const [plan] = planImageVariants({
       assetKind: 'product_image',
       assetContentHash: sha256(input),
@@ -230,9 +234,52 @@ describe('M1-c deterministic image policy', () => {
         item.recipe.output.format === 'webp',
     );
 
-    const result = await new IsolatedImagePipelineRunner(30_000).render(input, [plan]);
+    const result = await runner.render(input, [plan]);
     const rendered = result.get(plan.recipeHash);
     expect(rendered?.info).toMatchObject({ mime: 'image/webp', width: 320, height: 320 });
     expect(rendered?.info.contentHash).toBe(sha256(rendered!.data));
+  });
+
+  it('rejects an already-cancelled child job without starting codec work', async () => {
+    const input = await opaqueJpeg(640, 360);
+    const controller = new AbortController();
+    const reason = new Error('activity cancelled');
+    controller.abort(reason);
+
+    await expect(
+      new IsolatedImagePipelineRunner(30_000).inspect(input, 'image/jpeg', controller.signal),
+    ).rejects.toBe(reason);
+  });
+
+  it('kills an in-flight child when the activity is cancelled and cleans scratch', async () => {
+    const input = await opaqueJpeg(640, 360);
+    const scratch = await mkdtemp(path.join(tmpdir(), 'm1c-cancel-'));
+    const controller = new AbortController();
+    const reason = new Error('activity cancelled in flight');
+    try {
+      const pending = new IsolatedImagePipelineRunner(30_000, scratch).inspect(
+        input,
+        'image/jpeg',
+        controller.signal,
+      );
+      setTimeout(() => controller.abort(reason), 1);
+      await expect(pending).rejects.toBe(reason);
+      expect(await readdir(scratch)).toEqual([]);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('kills a timed-out child and removes its private scratch directory', async () => {
+    const input = await opaqueJpeg(640, 360);
+    const scratch = await mkdtemp(path.join(tmpdir(), 'm1c-timeout-'));
+    try {
+      await expect(
+        new IsolatedImagePipelineRunner(1, scratch).inspect(input, 'image/jpeg'),
+      ).rejects.toThrow('image pipeline timed out after 1ms');
+      expect(await readdir(scratch)).toEqual([]);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 });

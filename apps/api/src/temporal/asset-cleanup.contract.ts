@@ -28,6 +28,8 @@ export interface CanonicalCleanupVariant {
   recipeHash: string;
   sourceVariantId: string | null;
   status: 'ready' | 'failed';
+  /** Producer-isolated non-canonical write, if one survived best-effort post-promote deletion. */
+  attemptKeys?: string[];
 }
 
 export interface CanonicalAssetCleanupCommand extends AssetCleanupCommandBase {
@@ -51,6 +53,7 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 // A cleanup performs Delete+HEAD twice and then a leaf-to-root DB settle. Keep the accepted plan
 // within the proven Temporal/transaction budget; M1-c is expected to create far fewer outputs.
 const MAX_VARIANTS = 128;
+const MAX_CLEANUP_OBJECTS = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -148,12 +151,15 @@ function parseCanonical(value: Record<string, unknown>): CanonicalAssetCleanupCo
   if (!Array.isArray(value.variants) || value.variants.length > MAX_VARIANTS) {
     throw new AssetCleanupContractError('canonical variants must be a bounded array');
   }
+  const carriesAttemptFields = value.variants.some(
+    (candidate) => isRecord(candidate) && ('attemptKey' in candidate || 'attemptKeys' in candidate),
+  );
   const seen = new Set<string>();
   const variants = value.variants.map((candidate, index): CanonicalCleanupVariant => {
     if (!isRecord(candidate)) throw new AssetCleanupContractError(`variants[${index}] must be an object`);
     requireExactKeys(
       candidate,
-      ['id', 'objectKey', 'contentHash', 'recipeHash', 'sourceVariantId', 'status'],
+      ['id', 'objectKey', 'contentHash', 'recipeHash', 'sourceVariantId', 'status', 'attemptKey', 'attemptKeys'],
       `variants[${index}]`,
     );
     const id = requireUuid(candidate.id, `variants[${index}].id`);
@@ -176,6 +182,37 @@ function parseCanonical(value: Record<string, unknown>): CanonicalAssetCleanupCo
       candidate.sourceVariantId === null
         ? null
         : requireUuid(candidate.sourceVariantId, `variants[${index}].sourceVariantId`);
+    const rawAttemptKeys = [
+      ...(candidate.attemptKey === undefined ? [] : [candidate.attemptKey]),
+      ...(Array.isArray(candidate.attemptKeys) ? candidate.attemptKeys : []),
+    ];
+    if (candidate.attemptKeys !== undefined && !Array.isArray(candidate.attemptKeys)) {
+      throw new AssetCleanupContractError(`variants[${index}] attemptKeys must be an array`);
+    }
+    if (rawAttemptKeys.length > 8 || new Set(rawAttemptKeys).size !== rawAttemptKeys.length) {
+      throw new AssetCleanupContractError(`variants[${index}] attempt keys must be unique and bounded`);
+    }
+    const attemptKeys: string[] = [];
+    for (const rawAttemptKey of rawAttemptKeys) {
+      const expectedAttemptPrefix =
+        `ws/${base.workspaceId}/${base.siteId}/variant-attempts/${base.assetId}/`;
+      const attemptSuffix =
+        typeof rawAttemptKey === 'string'
+          ? rawAttemptKey.slice(expectedAttemptPrefix.length).split('/')
+          : [];
+      const expectedFilename = `${recipeHash}.${candidate.objectKey.split('.').at(-1)}`;
+      if (
+        typeof rawAttemptKey !== 'string' ||
+        !rawAttemptKey.startsWith(expectedAttemptPrefix) ||
+        attemptSuffix.length !== 2 ||
+        attemptSuffix[1] !== expectedFilename
+      ) {
+        throw new AssetCleanupContractError(`variants[${index}] attempt key does not match provenance`);
+      }
+      const token = attemptSuffix[0];
+      requireUuid(token, `variants[${index}].attemptKey token`);
+      attemptKeys.push(rawAttemptKey);
+    }
     return {
       id,
       objectKey: candidate.objectKey,
@@ -183,9 +220,22 @@ function parseCanonical(value: Record<string, unknown>): CanonicalAssetCleanupCo
       recipeHash,
       sourceVariantId,
       status: candidate.status,
+      ...(attemptKeys.length > 0 ? { attemptKeys } : {}),
     };
   });
   const ids = new Set(variants.map((variant) => variant.id));
+  const objectCount = 1 + variants.length + variants.reduce(
+    (sum, variant) => sum + (variant.attemptKeys?.length ?? 0),
+    0,
+  );
+  // Before attempt objects existed, the accepted upper bound was 128 Variants plus canonical.
+  // Preserve replay for that exact legacy shape; attempt-aware commands use the tighter total.
+  const objectBudget = carriesAttemptFields ? MAX_CLEANUP_OBJECTS : MAX_CLEANUP_OBJECTS + 1;
+  if (objectCount > objectBudget) {
+    throw new AssetCleanupContractError(
+      `canonical cleanup plan exceeds ${objectBudget} total objects`,
+    );
+  }
   if (variants.some((variant) => variant.sourceVariantId && !ids.has(variant.sourceVariantId))) {
     throw new AssetCleanupContractError('canonical variant source is missing from the frozen plan');
   }

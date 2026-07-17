@@ -211,6 +211,35 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
     await acts.finalizeRefurbish(input);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
   });
+
+  it('兼容升级前已调度且没有 images 字段的 activity payload', async () => {
+    const { close } = spyBudget();
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: { updateMany },
+      site: { update: vi.fn(async () => ({})) },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+        })),
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await expect(acts.finalizeRefurbish({
+      ...INPUT,
+      kb: { processed: 1, failed: 0, degraded: false },
+      profile: { status: 'done', gaps: 0 },
+      build: { previewSlug: 'acme', versionId: 'v-legacy' },
+    })).resolves.toEqual({ previewSlug: 'acme' });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        steps: expect.arrayContaining([
+          expect.objectContaining({ key: 'image_pipeline', status: 'skipped_m1c' }),
+        ]),
+      }),
+    }));
+    expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
 });
 
 // FIX A/B 用最小 intake（buildDemoSpec/polishCopy 只取 company/products/targetMarkets）。

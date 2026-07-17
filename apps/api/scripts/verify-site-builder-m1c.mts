@@ -7,7 +7,7 @@
 import 'dotenv/config';
 import { createHash, randomUUID } from 'node:crypto';
 
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import sharp from 'sharp';
 
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -74,6 +74,20 @@ function canonical(value: unknown): unknown {
   return value;
 }
 
+function attemptKeys(metadata: unknown): string[] {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return [];
+  const value = metadata as Record<string, unknown>;
+  const keys = Array.isArray(value.attemptKeys)
+    ? value.attemptKeys.filter((key): key is string => typeof key === 'string')
+    : [];
+  const reservation = value.reservation;
+  if (reservation && typeof reservation === 'object' && !Array.isArray(reservation)) {
+    const key = (reservation as Record<string, unknown>).attemptKey;
+    if (typeof key === 'string') keys.push(key);
+  }
+  return [...new Set(keys)];
+}
+
 async function fixture(): Promise<Buffer> {
   return sharp({
     create: {
@@ -97,6 +111,7 @@ async function fixture(): Promise<Buffer> {
 
 async function main(): Promise<void> {
   requireDevelopmentTargets();
+  console.log('M1-c verifier starting against local development PostgreSQL + MinIO...');
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   const appA = new PrismaService();
   const appB = new PrismaService();
@@ -104,6 +119,7 @@ async function main(): Promise<void> {
   const isolatedRunner = new IsolatedImagePipelineRunner(120_000);
   let renderCalls = 0;
   const runner: ImagePipelineRunner = {
+    inspect: (...args) => isolatedRunner.inspect(...args),
     render: (...args) => {
       renderCalls += 1;
       return isolatedRunner.render(...args);
@@ -125,6 +141,7 @@ async function main(): Promise<void> {
 
   try {
     await Promise.all([owner.$connect(), appA.$connect(), appB.$connect()]);
+    console.log('  connected to owner/app RLS database clients');
     await storage.onModuleInit();
     const abandoned = await owner.workspace.findMany({
       where: { name: { startsWith: PREFIX } },
@@ -313,8 +330,8 @@ async function main(): Promise<void> {
 
     let injected = false;
     const responseLossStorage = Object.create(storage) as StorageService;
-    responseLossStorage.putBuffer = async (key, data, contentType) => {
-      await storage.putBuffer(key, data, contentType);
+    responseLossStorage.putBuffer = async (key, data, contentType, signal, options) => {
+      await storage.putBuffer(key, data, contentType, signal, options);
       if (!injected) {
         injected = true;
         throw new Error('simulated PUT response loss');
@@ -333,41 +350,38 @@ async function main(): Promise<void> {
       'existing hasPerson=true is preserved without pretending to detect people',
     );
 
-    let withWorkspaceCalls = 0;
-    const normalWithWorkspace = appA.withWorkspace.bind(appA);
-    const rollbackPrisma = {
-      withWorkspace: async <T>(
-        workspace: string,
-        fn: (tx: Prisma.TransactionClient) => Promise<T>,
-        options?: { maxWait?: number; timeout?: number },
-      ): Promise<T> => {
-        withWorkspaceCalls += 1;
-        // processAsset uses call 1 for Asset read, call 2 for ready-set probe, call 3 for persist.
-        if (withWorkspaceCalls !== 3) return normalWithWorkspace(workspace, fn, options);
-        return appA.$transaction(
-          async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspace}, true)`;
-            await fn(tx);
-            throw new Error('simulated commit-path rollback');
-          },
-          options,
-        );
-      },
-    } as PrismaService;
-    const rollbackService = new ImagePipelineService(rollbackPrisma, storage, runner);
-    let rolledBack = false;
+    let rowsBeforeFirstPut = 0;
+    let interruptedKey: string | null = null;
+    let failHeadAfterPut = false;
+    const interruptedStorage = Object.create(storage) as StorageService;
+    interruptedStorage.putBuffer = async (key, data, contentType, signal, options) => {
+      rowsBeforeFirstPut = await appA.withWorkspace(workspaceId, (tx) =>
+        tx.assetVariant.count({ where: { assetId: rollbackAssetId, status: 'processing' } }),
+      );
+      await storage.putBuffer(key, data, contentType, signal, options);
+      interruptedKey = key;
+      failHeadAfterPut = true;
+      throw new Error('simulated worker interruption after PUT');
+    };
+    interruptedStorage.head = async (key) => {
+      if (failHeadAfterPut && key === interruptedKey) {
+        failHeadAfterPut = false;
+        throw new Error('simulated connection loss after worker interruption');
+      }
+      return storage.head(key);
+    };
+    let interruptionSurfaced = false;
     try {
-      await rollbackService.processAsset({ workspaceId, siteId, assetId: rollbackAssetId });
+      await new ImagePipelineService(appA, interruptedStorage, runner).processAsset({
+        workspaceId,
+        siteId,
+        assetId: rollbackAssetId,
+      });
     } catch (error) {
-      rolledBack = /simulated commit-path rollback/.test(String(error));
+      interruptionSurfaced = /simulated connection loss/.test(String(error));
     }
-    check(rolledBack, 'DB rollback after object PUT is surfaced to the caller');
-    check(
-      (await appA.withWorkspace(workspaceId, (tx) =>
-        tx.assetVariant.count({ where: { assetId: rollbackAssetId } }),
-      )) === 0,
-      'rolled-back transaction publishes no Variant rows',
-    );
+    check(interruptionSurfaced, 'interruption after object PUT is surfaced to the caller');
+    check(rowsBeforeFirstPut === 15, 'all durable processing owners exist before the first object PUT');
     const rollbackInspection = await inspectImageInput(original, 'image/jpeg');
     const rollbackPlans = planImageVariants({
       assetKind: 'logo',
@@ -383,64 +397,31 @@ async function main(): Promise<void> {
         plan.recipe.output.format,
       ),
     );
-    check(
-      (await Promise.all(rollbackVariantKeys.map((key) => storage.head(key)))).every(
-        (head) => head === null,
-      ),
-      'ownership-aware compensation removes every unowned object after rollback',
-    );
-
-    let parkingCalls = 0;
-    const parkingPrisma = {
-      withWorkspace: async <T>(
-        workspace: string,
-        fn: (tx: Prisma.TransactionClient) => Promise<T>,
-        options?: { maxWait?: number; timeout?: number },
-      ): Promise<T> => {
-        parkingCalls += 1;
-        if (parkingCalls !== 3) return normalWithWorkspace(workspace, fn, options);
-        return appA.$transaction(
-          async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspace}, true)`;
-            await fn(tx);
-            throw new Error('simulated rollback with unavailable object delete');
-          },
-          options,
-        );
-      },
-    } as PrismaService;
-    const deleteFailureStorage = Object.create(storage) as StorageService;
-    deleteFailureStorage.delete = async () => {
-      throw new Error('simulated MinIO delete outage');
-    };
-    let parkedFailureSurfaced = false;
-    try {
-      await new ImagePipelineService(parkingPrisma, deleteFailureStorage, runner).processAsset({
-        workspaceId,
-        siteId,
-        assetId: rollbackAssetId,
-      });
-    } catch (error) {
-      parkedFailureSurfaced = /simulated rollback with unavailable object delete/.test(String(error));
-    }
-    check(parkedFailureSurfaced, 'rollback remains a visible failure when object deletion is unavailable');
     const parked = await appA.withWorkspace(workspaceId, (tx) =>
       tx.assetVariant.findMany({ where: { assetId: rollbackAssetId } }),
     );
-    for (const row of parked) objectKeys.add(row.objectKey);
+    for (const row of parked) {
+      objectKeys.add(row.objectKey);
+      for (const key of attemptKeys(row.metadata)) objectKeys.add(key);
+    }
     check(
       parked.length === 15 &&
-        parked.every(
-          (row) => row.status === 'failed' && row.error === 'IMAGE_VARIANT_ORPHAN_CLEANUP_REQUIRED',
-        ),
-      'delete outage parks every object as a durable failed Variant owner',
+        parked.every((row) => row.status === 'failed' && row.error?.startsWith('IMAGE_VARIANT_ATTEMPT_FAILED')),
+      'interrupted attempt leaves every canonical key under a durable failed Variant owner',
+    );
+    check(
+      interruptedKey !== null &&
+        parked.some((row) => attemptKeys(row.metadata).includes(interruptedKey!)) &&
+        await storage.head(interruptedKey) !== null &&
+        !rollbackVariantKeys.includes(interruptedKey),
+      'the interrupted write is isolated under the durable producer attempt owner, never canonical',
     );
     await serviceA.processAsset({ workspaceId, siteId, assetId: rollbackAssetId });
     check(
       (await appA.withWorkspace(workspaceId, (tx) =>
         tx.assetVariant.count({ where: { assetId: rollbackAssetId, status: 'ready' } }),
       )) === 15,
-      'normal retry verifies and promotes all parked Variant objects',
+      'normal retry takes over failed reservations and promotes the complete set',
     );
 
     let capacityRejected = false;
@@ -457,12 +438,57 @@ async function main(): Promise<void> {
       'capacity rejection creates no extra Variant or object ownership rows',
     );
 
-    const siteSummary = await serviceA.processSiteImages({ workspaceId, siteId });
+    const workset = await serviceA.listSiteImageIds({ workspaceId, siteId });
+    check(!workset.truncated && workset.assetIds.length === 5, 'image workset freezes the five current asset ids');
+    const updatedMemberId = workset.assetIds[2]!;
+    await owner.asset.update({ where: { id: updatedMemberId }, data: { meta: { updatedAfterWorkset: true } } });
+    const insertedAfterSnapshotId = randomUUID();
+    const lateBytes = Buffer.from('uploaded after the frozen image workset');
+    const lateHash = hash(lateBytes);
+    const lateKey = buildObjectKey(workspaceId, siteId, 'product_image', lateHash, 'jpg');
+    objectKeys.add(lateKey);
+    await storage.putBuffer(lateKey, lateBytes, 'image/jpeg');
+    await owner.asset.create({
+      data: {
+        id: insertedAfterSnapshotId,
+        workspaceId,
+        siteId,
+        kind: 'product_image',
+        filename: 'late.jpg',
+        mime: 'image/jpeg',
+        sizeBytes: lateBytes.length,
+        objectKey: lateKey,
+        contentHash: lateHash,
+        processingStatus: 'ready',
+      },
+    });
+    const siteSummary = { status: 'done' as 'done' | 'degraded', processed: 0, failed: 0 };
+    for (let offset = 0; offset < workset.assetIds.length; offset += 2) {
+      const batch = await serviceA.processSiteImages({
+        workspaceId,
+        siteId,
+        assetIds: workset.assetIds.slice(offset, offset + 2),
+        limit: 2,
+      });
+      if (batch.status === 'degraded') siteSummary.status = 'degraded';
+      siteSummary.processed += batch.processed;
+      siteSummary.failed += batch.failed;
+    }
     check(
       siteSummary.status === 'degraded' && siteSummary.failed === 2,
       'corrupt/capacity failures are isolated and reported as degraded',
     );
     check(siteSummary.processed === 3, 'healthy images still complete when a sibling image fails');
+    check(
+      (await appA.withWorkspace(workspaceId, (tx) =>
+          tx.assetVariant.count({ where: { assetId: insertedAfterSnapshotId! } }),
+        )) === 0,
+      'assets uploaded after workset capture stay outside the frozen id list',
+    );
+    check(
+      workset.assetIds.includes(updatedMemberId),
+      'an existing workset member remains scheduled after a later tuple update',
+    );
     check(
       (await appA.withWorkspace(otherWorkspaceId, (tx) => tx.assetVariant.count({ where: { assetId } }))) === 0,
       'FORCE RLS hides workspace A variants from workspace B',
@@ -477,9 +503,12 @@ async function main(): Promise<void> {
     try {
       const rows = await owner.assetVariant.findMany({
         where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } },
-        select: { objectKey: true },
+        select: { objectKey: true, metadata: true },
       });
-      for (const row of rows) objectKeys.add(row.objectKey);
+      for (const row of rows) {
+        objectKeys.add(row.objectKey);
+        for (const key of attemptKeys(row.metadata)) objectKeys.add(key);
+      }
       await owner.assetVariant.deleteMany({
         where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } },
       });
@@ -505,7 +534,14 @@ async function main(): Promise<void> {
   console.log(`\nM1-c verifier passed (${checks.length} assertions). Development only; no production deployment performed.`);
 }
 
-void main().catch((error) => {
+// Some AWS SDK/Prisma transports unref their sockets; keep the standalone verifier alive until
+// its top-level promise settles instead of letting Node exit with an unresolved top-level await.
+const keepAlive = setInterval(() => undefined, 1_000);
+try {
+  await main();
+} catch (error) {
   console.error(error);
   process.exitCode = 1;
-});
+} finally {
+  clearInterval(keepAlive);
+}

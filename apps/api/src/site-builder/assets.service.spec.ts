@@ -27,6 +27,7 @@ function matches(row: Row, where: Row): boolean {
     if (expected && typeof expected === 'object' && !(expected instanceof Date)) {
       const condition = expected as Row;
       if ('notIn' in condition) return !(condition.notIn as unknown[]).includes(row[key]);
+      if ('in' in condition) return (condition.in as unknown[]).includes(row[key]);
       if ('lte' in condition) return row[key] instanceof Date && row[key] <= condition.lte!;
     }
     return row[key] === expected;
@@ -50,7 +51,7 @@ function errorCode(error: unknown): string | undefined {
 }
 
 function makeService(opts: { siteExists?: boolean } = {}) {
-  const db: { assets: Record<string, unknown>[] } = { assets: [] };
+  const db: { assets: Record<string, unknown>[]; variants: Row[] } = { assets: [], variants: [] };
   const objects = new Map<string, Buffer>();
   const ops: string[] = [];
   const kbDeletes: string[] = [];
@@ -106,7 +107,15 @@ function makeService(opts: { siteExists?: boolean } = {}) {
         return { count: 0 };
       },
     },
-    assetVariant: { findMany: async () => [] },
+    assetVariant: {
+      findMany: async ({ where = {} }: { where?: Row } = {}) =>
+        db.variants.filter((row) => matches(row, where)),
+      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+        const selected = db.variants.filter((row) => matches(row, where));
+        for (const row of selected) applyData(row, data);
+        return { count: selected.length };
+      },
+    },
     outboxEvent: {
       create: async ({ data }: { data: Row }) => {
         outbox.push(data);
@@ -397,5 +406,30 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(s.outbox.at(-1)).toMatchObject({
       eventType: 'AssetObjectCleanupRequested',
     });
+  });
+
+  it('delete：图片 processing 租约存活时阻塞，过期后先冻结 failed 再进入清理账本', async () => {
+    const s = makeService();
+    const { assetId } = await presignAndUpload(s);
+    await s.service.commit(CTX, assetId);
+    const recipeHash = 'a'.repeat(64);
+    const variant = {
+      id: '33333333-3333-4333-8333-333333333333',
+      assetId,
+      objectKey: `ws/${CTX.workspaceId}/${SITE_ID}/variants/${assetId}/${recipeHash}.webp`,
+      contentHash: null,
+      recipeHash,
+      sourceVariantId: null,
+      status: 'processing',
+      metadata: { reservation: { token: 'producer', leaseUntil: new Date(Date.now() + 60_000).toISOString() } },
+    };
+    s.db.variants.push(variant);
+
+    const busy = await s.service.remove(CTX, assetId).catch((error: unknown) => error);
+    expect(errorCode(busy)).toBe('ASSET_BUSY');
+
+    (variant.metadata as { reservation: { leaseUntil: string } }).reservation.leaseUntil = new Date(0).toISOString();
+    await expect(s.service.remove(CTX, assetId)).resolves.toBeUndefined();
+    expect(variant).toMatchObject({ status: 'failed', error: 'IMAGE_VARIANT_LEASE_EXPIRED' });
   });
 });

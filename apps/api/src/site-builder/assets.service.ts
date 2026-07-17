@@ -438,10 +438,37 @@ export class AssetsService {
           recipeHash: true,
           sourceVariantId: true,
           status: true,
+          metadata: true,
         },
       });
-      if (variants.some((variant) => variant.status === 'processing')) {
+      const activeProcessing = variants.filter((variant) => {
+        if (variant.status !== 'processing') return false;
+        const metadata = variant.metadata;
+        const reservation =
+          metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+            ? (metadata as Record<string, unknown>).reservation
+            : null;
+        const leaseUntil =
+          reservation && typeof reservation === 'object' && !Array.isArray(reservation)
+            ? (reservation as Record<string, unknown>).leaseUntil
+            : null;
+        const parsedLease = typeof leaseUntil === 'string' ? Date.parse(leaseUntil) : Number.NaN;
+        return !Number.isFinite(parsedLease) || parsedLease > Date.now();
+      });
+      if (activeProcessing.length > 0) {
         throw assetConflict('ASSET_BUSY', 'asset has a processing variant');
+      }
+      const expiredProcessingIds = variants
+        .filter((variant) => variant.status === 'processing')
+        .map((variant) => variant.id);
+      if (expiredProcessingIds.length > 0) {
+        await tx.assetVariant.updateMany({
+          where: { id: { in: expiredProcessingIds }, status: 'processing' },
+          data: { status: 'failed', error: 'IMAGE_VARIANT_LEASE_EXPIRED' },
+        });
+        for (const variant of variants) {
+          if (expiredProcessingIds.includes(variant.id)) variant.status = 'failed';
+        }
       }
       const objectClass = this.isStagingKey(asset.objectKey) ? 'staging' : 'canonical';
       if (objectClass === 'canonical' && !asset.contentHash) {
@@ -461,10 +488,33 @@ export class AssetsService {
                 objectKey: asset.objectKey,
                 contentHash: asset.contentHash,
               },
-              variants: variants.map((variant) => ({
-                ...variant,
-                status: variant.status as 'ready' | 'failed',
-              })),
+              variants: variants.map((variant) => {
+                const metadata =
+                  variant.metadata && typeof variant.metadata === 'object' && !Array.isArray(variant.metadata)
+                    ? (variant.metadata as Record<string, unknown>)
+                    : {};
+                const reservation =
+                  metadata.reservation &&
+                  typeof metadata.reservation === 'object' &&
+                  !Array.isArray(metadata.reservation)
+                    ? (metadata.reservation as Record<string, unknown>)
+                    : {};
+                const attemptKeys = [
+                  ...(Array.isArray(metadata.attemptKeys)
+                    ? metadata.attemptKeys.filter((key): key is string => typeof key === 'string')
+                    : []),
+                  ...(typeof reservation.attemptKey === 'string' ? [reservation.attemptKey] : []),
+                ].filter((key, index, all) => all.indexOf(key) === index);
+                return {
+                  id: variant.id,
+                  objectKey: variant.objectKey,
+                  contentHash: variant.contentHash,
+                  recipeHash: variant.recipeHash,
+                  sourceVariantId: variant.sourceVariantId,
+                  status: variant.status as 'ready' | 'failed',
+                  ...(attemptKeys.length > 0 ? { attemptKeys } : {}),
+                };
+              }),
             })
           : null;
       const moved = await tx.asset.updateMany({
@@ -725,6 +775,7 @@ export class AssetsService {
         recipeHash: string;
         sourceVariantId: string | null;
         status: 'ready' | 'failed';
+        attemptKeys?: string[];
       }>;
     },
   ): Promise<void> {

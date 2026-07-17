@@ -4,10 +4,11 @@
 ## 2026-07-17 · Site Builder M1-c（纯 Sharp 确定性图片管线）
 
 - API 直接 exact pin `sharp@0.35.0`，pipeline identity 同时包含 libvips；输入按 20 MiB/40 MP/4 channels/单页严格解码，自动方向与 sRGB，输出默认剥离 EXIF/GPS/XMP。模糊/曝光/噪点记录为版本化 warning，不以未校准阈值主观拒绝可解码图片。
-- kind→role 与 explicit focal policy 版本化；只生成源裁切可承受的 320/640/960/1440/1920 档，绝不放大。每档 AVIF+WebP+JPEG/PNG fallback；recipe 纳入 encoder/alpha/background/kernel/withoutEnlargement 等全部字节影响参数，Sharp/libvips 在 cache=false、concurrency=1 的可杀子进程运行。
-- 首个真实 Variant writer 先核验 ready-set，完整重放零编码；否则在事务外编码、事务内锁父 Asset 与排序后的 canonical Variant keys，PUT 后回读 content-type/hash/bytes。响应丢失按对象真值收敛，数据库回滚后重新加锁并只删除无 owner 对象；删除不可用时用 failed Variant 持久认领孤儿，供 cleanup/重试收口。ready Variant 与 derivedKeys 同事务，单 Asset 预算 120 行低于 MF0-B cleanup 128 上限。
+- kind→role 与 explicit focal policy 版本化；只生成源裁切可承受的 320/640/960/1440/1920 档，绝不放大。每档 AVIF+WebP+JPEG/PNG fallback；共享 recipe 保留 MF0-A 旧 API/hash 行为，并以显式 V2 纳入 encoder/alpha/background/kernel/withoutEnlargement 等全部字节影响参数。inspection 与编码均在 cache=false、concurrency=1 且可超时终止的子进程运行；父协议、路径、输出字节和全 worker 并发有硬门，Ubuntu 编译子进程另加 `prlimit`，但不冒充生产容器/cgroup/独立 UID/禁网隔离。
+- 首个真实 Variant writer 先核验 ready-set，完整重放零编码；ready 账本缺对象时 fail-closed。否则在首个对象写前持久预占完整 recipe set 的 `processing` owner。对象先写带一日 lifecycle tag 的 producer-token 隔离 attempt key，只有重新锁定 Asset、校验 token 并取得 canonical key fence 后才能在 15 秒有界窗口内 promote，copy 去除 TTL tag；attempt key 进入 durable metadata/cleanup plan。响应丢失按对象真值收敛，失败只 CAS 自己的 owner；重试前以 8 路有界 IO 对账并压缩 attempt，settled cleanup 重放只重删冻结 attempt，cleanup IO 接 cancellation+110 秒 deadline。生产 lifecycle 默认 validate-only、缺失阻止启动，仅单一部署 owner 可管理。单 Asset 最多 120 行；新 cleanup 的 canonical+Variant+attempt 总对象≤128，历史无 attempt payload 兼容 128 Variant+canonical。
 - refurbish P2 正式调用图片活动：逐图失败隔离，步骤记录 done/degraded 与数量，取消穿透；既有 `hasPerson` 只保留不臆测，全部 `aiEdited=false`。Temporal 以 patch marker 兼容在途历史。
-- Ubuntu 开发环境真 PG/app_user FORCE RLS + MinIO 验证：同 asset 双 producer 同 key 只物化 30 行、对象/DB checksum 对账、EXIF/GPS/XMP 清零、sRGB、原图不变、重放 ID/hash 不变、PUT response loss 收敛、DB rollback ownership compensation、坏图隔离、A/B/unset RLS 与 fixture/object 清零。仅为开发验证，不代表生产部署。
+- refurbish 首个 Activity 一次物化≤512 个排序 Asset ID 的不可变 workset，后续每 Activity 最多两张；超限在 Sharp 前降级，旧 cursor history 仅作 replay。
+- Ubuntu 开发环境真 PG/app_user FORCE RLS + MinIO 验证 30 项断言：同 asset 双 producer 同 key 只物化 30 行、对象/DB checksum 对账、EXIF/GPS/XMP 清零、sRGB、原图不变、重放 ID/hash 不变、PUT response loss 收敛、首个对象写前完整 owner、中断只落 attempt key、接管、批间 INSERT 隔离与既有成员 UPDATE 不漏、坏图隔离、A/B/unset RLS 与 fixture/object 清零。仅为开发验证，不代表生产部署。
 - 明确未做：migration、MediaJob/AssetUsage、rembg、生成图、视频、Readdy/设计 Agent、公开 process/select API、SiteSpec variantId 与 Renderer `<picture>`；最后两项归 M1-e 消费者交付。
 
 ## 2026-07-17 · Site Builder MF0-B（引用守卫与 canonical/Variant 安全回收）

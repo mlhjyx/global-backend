@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type {
   AssetVariantOutputFormat,
-  AssetVariantRecipe,
+  AssetVariantRecipeV2,
   ImageVariantRole,
 } from '@global/contracts';
 import sharp from 'sharp';
@@ -62,7 +62,7 @@ export interface ImageInspection {
 }
 
 export interface PlannedImageVariant {
-  recipe: AssetVariantRecipe;
+  recipe: AssetVariantRecipeV2;
   recipeHash: string;
 }
 
@@ -238,7 +238,7 @@ export async function inspectImageInput(
 function encoderPolicy(
   format: AssetVariantOutputFormat,
   losslessAsset: boolean,
-): AssetVariantRecipe['operations']['encoder'] {
+): AssetVariantRecipeV2['operations']['encoder'] {
   if (format === 'png') {
     return { effort: 9, lossless: true, chromaSubsampling: null };
   }
@@ -285,8 +285,8 @@ export function planImageVariants(input: {
         Math.round(width / (cover && targetAspect !== null ? targetAspect : sourceAspect)),
       );
       for (const format of formats) {
-        const recipe: AssetVariantRecipe = {
-          schemaVersion: '1.0',
+        const recipe: AssetVariantRecipeV2 = {
+          schemaVersion: '2.0',
           pipelineVersion: IMAGE_PIPELINE_VERSION,
           source: { assetContentHash: input.assetContentHash, variant: null },
           operations: {
@@ -340,7 +340,7 @@ function cropForFocalPoint(
 
 function encode(
   pipeline: sharp.Sharp,
-  recipe: AssetVariantRecipe,
+  recipe: AssetVariantRecipeV2,
 ): sharp.Sharp {
   const { format, quality } = recipe.output;
   const { effort, lossless, chromaSubsampling } = recipe.operations.encoder;

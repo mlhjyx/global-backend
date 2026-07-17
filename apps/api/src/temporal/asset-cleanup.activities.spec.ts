@@ -91,7 +91,7 @@ describe('asset cleanup activity', () => {
 
     expect(h.prisma.withWorkspace).toHaveBeenCalledWith(WS, expect.any(Function));
     expect(h.storage.delete).toHaveBeenCalledTimes(2);
-    expect(h.storage.delete).toHaveBeenNthCalledWith(1, KEY);
+    expect(h.storage.delete).toHaveBeenNthCalledWith(1, KEY, expect.any(AbortSignal));
     expect(h.storage.head).toHaveBeenCalledTimes(2);
   });
 

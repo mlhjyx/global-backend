@@ -88,7 +88,7 @@ export interface SiteBuilderActivityDeps {
   /** 品牌 web 研究的唯一出网闸门（缺省=研究降级 researchDegraded，不裸出网）。 */
   broker?: ExecutionBroker;
   /** M1-c deterministic Sharp writer; absent in narrow unit tests means an honest degraded step. */
-  imagePipeline?: Pick<ImagePipelineService, 'processSiteImages'>;
+  imagePipeline?: Pick<ImagePipelineService, 'listSiteImageIds' | 'processSiteImages'>;
 }
 
 export interface RefurbishActivityInput {
@@ -96,6 +96,12 @@ export interface RefurbishActivityInput {
   siteId: string;
   buildRunId: string;
   scope?: BuildScopeInput;
+  /** M1-c internal bounded-batch cursor; absent on all pre-M1-c histories. */
+  imageCursor?: string | null;
+  imageUpperBound?: string | null;
+  /** M1-c workset batches are explicit immutable IDs; absent on legacy cursor histories. */
+  imageAssetIds?: string[];
+  imageBatchLimit?: number;
 }
 
 export interface KbRecoveryCandidate {
@@ -117,7 +123,8 @@ export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   kb: { processed: number; failed: number; degraded: boolean };
   /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
   profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
-  images: Pick<SiteImagePipelineSummary, 'status' | 'processed' | 'failed' | 'variants'>;
+  /** Optional only at the Activity wire boundary so pre-M1-c scheduled payloads remain replayable. */
+  images?: Pick<SiteImagePipelineSummary, 'status' | 'processed' | 'failed' | 'variants'>;
   build: { previewSlug: string; versionId: string };
 }
 
@@ -397,6 +404,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       return processQueuedForSite(input.workspaceId, input.siteId);
     },
 
+    /** P2：在首个短 Activity 中冻结本 build 的图片成员集合。 */
+    async listImages(input: RefurbishActivityInput): Promise<{ assetIds: string[]; truncated: boolean }> {
+      if (!imagePipeline) throw new Error('image pipeline unavailable');
+      return imagePipeline.listSiteImageIds({ workspaceId: input.workspaceId, siteId: input.siteId });
+    },
+
     /** P2：每张 ready 图片独立失败隔离；Sharp 在可杀子进程内运行。 */
     async processImages(input: RefurbishActivityInput): Promise<SiteImagePipelineSummary> {
       if (!imagePipeline) {
@@ -418,7 +431,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       heartbeatTimer?.unref();
       try {
         return await imagePipeline.processSiteImages(
-          { workspaceId: input.workspaceId, siteId: input.siteId },
+          {
+            workspaceId: input.workspaceId,
+            siteId: input.siteId,
+            afterAssetId: input.imageCursor,
+            upperBound: input.imageUpperBound,
+            assetIds: input.imageAssetIds,
+            limit: input.imageBatchLimit,
+          },
           activity?.cancellationSignal,
         );
       } finally {
@@ -777,7 +797,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
     /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb/profile 实况与骨架跳过项）。 */
     async finalizeRefurbish(input: RefurbishFinalizeInput): Promise<{ previewSlug: string }> {
-      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, images, build } = input;
+      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, build } = input;
+      const images = input.images ?? {
+        status: 'skipped_m1c' as const,
+        processed: 0,
+        failed: 0,
+        variants: 0,
+      };
       await prisma.withWorkspace(workspaceId, async (tx) => {
         // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
         // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。

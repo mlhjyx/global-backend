@@ -10,7 +10,7 @@ import type { Mock } from 'vitest';
 
 vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
 
-import { acts, resetActivities } from './testing/temporal-workflow.mock';
+import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { refurbishWorkflow } from './refurbish.workflow';
 
 const INPUT = { workspaceId: 'ws-1', siteId: 'site-1', buildRunId: 'run-1' };
@@ -25,6 +25,7 @@ function primeHappyPath() {
     researchDegraded: false,
     model: 'deepseek-v4-pro',
   });
+  acts.listImages.mockResolvedValue({ assetIds: ['asset-1', 'asset-2'], truncated: false });
   acts.processImages.mockResolvedValue({
     status: 'done',
     processed: 2,
@@ -58,6 +59,18 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
   });
 
+  it('旧历史 replay（patched=false）保持原命令序列且 finalize 使用兼容摘要', async () => {
+    primeHappyPath();
+    setPatched(() => false);
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.processImages).not.toHaveBeenCalled();
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
+      images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
+    }));
+  });
+
   it('finalize 收到 kb 摘要（degraded=false）、profile 摘要（done+gaps）与 build 产物', async () => {
     primeHappyPath();
     await refurbishWorkflow(INPUT);
@@ -70,6 +83,90 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
         build: { previewSlug: 'acme-abc123', versionId: 'ver-1' },
       }),
     );
+  });
+
+  it('图片按冻结 ID workset 分成有限 activity，并累计真实摘要', async () => {
+    primeHappyPath();
+    acts.listImages.mockResolvedValue({ assetIds: ['asset-1', 'asset-2', 'asset-3'], truncated: false });
+    acts.processImages
+      .mockResolvedValueOnce({
+        status: 'done', processed: 2, failed: 0, variants: 30,
+        items: [],
+      })
+      .mockResolvedValueOnce({
+        status: 'degraded', processed: 0, failed: 1, variants: 0,
+        items: [],
+      });
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.processImages).toHaveBeenCalledTimes(2);
+    expect(acts.processImages).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      imageAssetIds: ['asset-3'], imageBatchLimit: 2,
+    }));
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
+      images: { status: 'degraded', processed: 2, failed: 1, variants: 30 },
+    }));
+  });
+
+  it('已记录 pipeline patch、未记录 batches patch 的历史仍只调一次旧 activity', async () => {
+    primeHappyPath();
+    setPatched((patchId) => patchId !== 'site-builder-m1c-image-batches-v1');
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.listImages).not.toHaveBeenCalled();
+    expect(acts.processImages).toHaveBeenCalledTimes(1);
+    expect(acts.processImages).toHaveBeenCalledWith(INPUT);
+  });
+
+  it('旧 cursor 批次历史 replay 保持原命令和摘要行为', async () => {
+    primeHappyPath();
+    setPatched((patchId) => patchId !== 'site-builder-m1c-image-workset-v1');
+    acts.processImages.mockResolvedValue({
+      status: 'done', processed: 1, failed: 0, variants: 3,
+      nextCursor: 'asset-a', upperBound: 'asset-z', items: [],
+    });
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.processImages).toHaveBeenCalledTimes(2);
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
+      images: { status: 'degraded', processed: 2, failed: 0, variants: 6 },
+    }));
+  });
+
+  it('512 张冻结 workset 恰好按 256 个 activity 有界完成', async () => {
+    primeHappyPath();
+    acts.listImages.mockResolvedValue({
+      assetIds: Array.from({ length: 512 }, (_, index) => `asset-${String(index).padStart(4, '0')}`),
+      truncated: false,
+    });
+    acts.processImages.mockImplementation(async (input: { imageAssetIds: string[] }) => {
+      return {
+        status: 'done', processed: input.imageAssetIds.length, failed: 0,
+        variants: input.imageAssetIds.length * 3, items: [],
+      };
+    });
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.processImages).toHaveBeenCalledTimes(256);
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
+      images: { status: 'done', processed: 512, failed: 0, variants: 1536 },
+    }));
+  });
+
+  it('workset 超过 512 张时在启动 Sharp activity 前诚实降级', async () => {
+    primeHappyPath();
+    acts.listImages.mockResolvedValue({ assetIds: [], truncated: true });
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.processImages).not.toHaveBeenCalled();
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
+      images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
+    }));
   });
 
   it('研究降级（researchDegraded=true）→ profile.status=degraded（仅凭 KB 出 Brief 的诚实标记）', async () => {
