@@ -70,6 +70,7 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
   it('exposes a versioned, hashable evaluator contract for model reports', () => {
     expect(BRAND_PROFILE_EVALUATOR_VERSION).toBe('brand-profile-evaluator/2');
     expect(canonicalJson({ b: 2, a: [true, null] })).toBe('{"a":[true,null],"b":2}');
+    expect(canonicalJson({ ä: 3, z: 2, A: 1 })).toBe('{"A":1,"z":2,"ä":3}');
     expect(sha256CanonicalJson({ b: 2, a: [true, null] })).toBe(
       sha256CanonicalJson({ a: [true, null], b: 2 }),
     );
