@@ -138,6 +138,36 @@ describe('researchBrand — 正常链路', () => {
     expect(invocations.every((c) => c.toolId === 'searxng.search')).toBe(true);
     expect(out.sources.every((s) => s.sourceType === 'web_research')).toBe(true);
   });
+
+  it('🔴 C4：第三方搜索 title/snippet/路径中的具名个人不进入冻结候选', async () => {
+    const { broker } = brokerWith(async (toolId) =>
+      toolId === 'searxng.search'
+        ? {
+            data: {
+              results: [
+                {
+                  title: 'Acme appoints Jane Smith as CEO',
+                  url: 'https://news.example/people/jane-smith?author=Jane+Smith',
+                  content: 'CEO Jane Smith announced a new pump factory.',
+                },
+              ],
+            },
+          }
+        : { data: { url: 'https://acme.example', text: 'pumps', contentHash: 'h' } },
+    );
+
+    const out = await researchBrand({ broker }, ARGS);
+    const hint = out.sources.find((source) => source.sourceType === 'web_research');
+
+    expect(hint).toMatchObject({
+      url: 'https://news.example/',
+      title: undefined,
+      sourceRole: 'research_hint',
+      parserVersion: 'searxng-origin-hint/1',
+    });
+    expect(hint?.content).not.toMatch(/Jane Smith|CEO|new pump factory/i);
+    expect(hint?.content).toContain('Acme GmbH');
+  });
 });
 
 describe('researchBrand — fail-safe 降级', () => {
