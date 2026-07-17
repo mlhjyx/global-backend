@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DoclingClient } from './docling.client';
 import { EmbeddingsClient } from './embeddings.client';
 import { KbIngestError } from './kb-errors';
@@ -9,6 +9,149 @@ afterEach(() => {
 });
 
 describe('R2-A2 typed KB dependency errors', () => {
+  beforeEach(() => {
+    vi.stubEnv('EMBEDDINGS_API_KEY', 'embedding-test-token');
+  });
+
+  it('embedding 默认复用统一 New API 地址，但只使用专用 Bearer token 和本机别名', async () => {
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api:3000/v1');
+    vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['hello'])).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://new-api:3000/v1/embeddings',
+      expect.objectContaining({
+        headers: {
+          authorization: 'Bearer embedding-test-token',
+          'content-type': 'application/json',
+        },
+      }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
+      model: 'site-builder-bge-m3-local',
+    });
+  });
+
+  it('embedding 专用 token 也不能把租户 KB 发往任意远程覆盖地址', async () => {
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api:3000/v1');
+    vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
+    vi.stubEnv('EMBEDDINGS_URL', 'https://embedding-proxy.example/v1/');
+    vi.stubEnv('EMBEDDINGS_API_KEY', 'embedding-test-token');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['raw tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+      stage: 'embedding',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('embedding 专用 Key 为空时 fail-closed，不把 KB 内容交给通用网关 token', async () => {
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api:3000/v1');
+    vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
+    vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['raw tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+      stage: 'embedding',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('embedding 忽略任意模型覆盖，始终请求本机专用别名', async () => {
+    vi.stubEnv('EMBEDDINGS_MODEL', 'bge-m3');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new EmbeddingsClient().embed(['hello']);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
+      model: 'site-builder-bge-m3-local',
+    });
+  });
+
+  it('break-glass 只允许精确本机 Ollama 地址，无 token 时使用上游 bge-m3', async () => {
+    vi.stubEnv('EMBEDDINGS_URL', 'http://127.0.0.1:11434/v1');
+    vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    vi.stubEnv('EMBEDDINGS_MODEL', 'remote-model-must-be-ignored');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new EmbeddingsClient().embed(['break glass']);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/v1/embeddings',
+      expect.objectContaining({ headers: { 'content-type': 'application/json' } }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
+      model: 'bge-m3',
+    });
+  });
+
+  it('非 allowlist 的直连地址即使有专用 token 也失败关闭', async () => {
+    vi.stubEnv('EMBEDDINGS_URL', 'http://ollama.remote.example:11434/v1');
+    vi.stubEnv('EMBEDDINGS_API_KEY', 'embedding-test-token');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['must not leave host'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403])('embedding 网关 %i 是终止型凭证/授权配置错误', async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('token rejected', { status })),
+    );
+
+    await expect(new EmbeddingsClient().embed(['tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+      stage: 'embedding',
+    });
+  });
+
+  it.each([429, 500, 503])('embedding 网关 %i 保持可重试依赖错误', async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('temporary failure', { status })),
+    );
+
+    await expect(new EmbeddingsClient().embed(['tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_UNAVAILABLE',
+      disposition: 'retryable',
+      stage: 'embedding',
+    });
+  });
+
   it('Docling 泛 400 不足以证明文档损坏，按 dependency retryable 处理', async () => {
     vi.stubGlobal(
       'fetch',

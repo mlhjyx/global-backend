@@ -9,6 +9,7 @@
     "worker": "node dist/temporal/worker.js",
     "test": "vitest run",
     "mg:check": "node scripts/mg-check.cjs",
+    "new-api:ensure-embeddings": "node --import tsx scripts/ensure-new-api-embeddings.mts",
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {

@@ -1,0 +1,387 @@
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  LOCAL_EMBEDDING_CHANNEL_NAME,
+  LOCAL_EMBEDDING_MODEL_ALIAS,
+  mergeEmbeddingEnv,
+  provisionLocalEmbeddingGateway,
+  writeEmbeddingEnv,
+} from '../src/site-builder/new-api-embeddings-bootstrap';
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+
+describe('New API local embedding bootstrap', () => {
+  it('只更新 embedding 配置并保留通用网关配置', () => {
+    const output = mergeEmbeddingEnv(
+      [
+        'MODEL_GATEWAY_KEY=general-secret',
+        'EMBEDDINGS_URL=http://localhost:11434/v1',
+        'EMBEDDINGS_MODEL=bge-m3',
+        'EMBEDDINGS_DIM=1024',
+      ].join('\n'),
+      { apiKey: 'sk-dedicated-secret' },
+      'http://localhost:3001/v1',
+    );
+
+    expect(output).toContain('MODEL_GATEWAY_KEY=general-secret');
+    expect(output).toContain('EMBEDDINGS_URL=http://localhost:3001/v1');
+    expect(output).toContain('EMBEDDINGS_API_KEY=sk-dedicated-secret');
+    expect(output).toContain(`EMBEDDINGS_MODEL=${LOCAL_EMBEDDING_MODEL_ALIAS}`);
+    expect(output).not.toContain('EMBEDDINGS_MODEL=bge-m3\n');
+  });
+
+  it('用 0600 临时文件原子替换已有 env，不在宽权限 inode 上写入专用 token', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'new-api-embedding-env-'));
+    const path = join(directory, '.env');
+    try {
+      await writeFile(path, 'MODEL_GATEWAY_KEY=general-secret\n', {
+        mode: 0o644,
+      });
+      await chmod(path, 0o644);
+      const before = await stat(path);
+
+      await writeEmbeddingEnv(path, { apiKey: 'sk-dedicated-secret' }, 'http://localhost:3001/v1');
+
+      const after = await stat(path);
+      expect(after.ino).not.toBe(before.ino);
+      expect(after.mode & 0o777).toBe(0o600);
+      expect(await readFile(path, 'utf8')).toContain('EMBEDDINGS_API_KEY=sk-dedicated-secret');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('即使 New API 返回短页，也按 total 继续枚举后续 channel/token', async () => {
+    const channel = {
+      id: 7,
+      name: LOCAL_EMBEDDING_CHANNEL_NAME,
+      status: 1,
+      type: 1,
+      base_url: 'http://embeddings:11434',
+      models: LOCAL_EMBEDDING_MODEL_ALIAS,
+      group: 'default',
+      model_mapping: JSON.stringify({
+        [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+      }),
+    };
+    const token = {
+      id: 2,
+      name: 'Site Builder Local Embeddings',
+      status: 1,
+      expired_time: -1,
+      unlimited_quota: true,
+      model_limits_enabled: true,
+      model_limits: LOCAL_EMBEDDING_MODEL_ALIAS,
+      group: '',
+      cross_group_retry: false,
+    };
+    const requestedPages: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/channel/?')) {
+        const page = new URL(url).searchParams.get('p') ?? '';
+        requestedPages.push(`channel:${page}`);
+        return json({
+          success: true,
+          data: {
+            total: 2,
+            items: page === '1' ? [{ id: 1, name: 'other', models: 'gpt-5.6-terra' }] : [channel],
+          },
+        });
+      }
+      if (url.includes('/api/token/?')) {
+        const page = new URL(url).searchParams.get('p') ?? '';
+        requestedPages.push(`token:${page}`);
+        return json({
+          success: true,
+          data: {
+            total: 2,
+            items: page === '1' ? [{ id: 1, name: 'other' }] : [token],
+          },
+        });
+      }
+      if (url.endsWith('/api/token/2/key')) {
+        return json({ success: true, data: { key: 'dedicated-secret' } });
+      }
+      if (url.endsWith('/v1/models')) {
+        return json({ data: [{ id: LOCAL_EMBEDDING_MODEL_ALIAS }] });
+      }
+      if (url.endsWith('/v1/embeddings')) {
+        return json({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] });
+      }
+      throw new Error(`unexpected request ${url}`);
+    });
+
+    await expect(
+      provisionLocalEmbeddingGateway(
+        {
+          adminBaseUrl: 'http://new-api:3000',
+          adminAccessToken: 'admin-secret',
+          adminUserId: 1,
+        },
+        fetchMock,
+      ),
+    ).resolves.toMatchObject({ channelId: 7, tokenId: 2 });
+    expect(requestedPages).toEqual([
+      'channel:1',
+      'channel:2',
+      'token:1',
+      'token:2',
+      'token:1',
+      'token:2',
+    ]);
+  });
+
+  it('并发执行引导时串行化 read-create，只创建一条本机通道和专用令牌', async () => {
+    const channels: Record<string, unknown>[] = [];
+    const tokens: Record<string, unknown>[] = [];
+    let channelPosts = 0;
+    let tokenPosts = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/channel/?')) {
+        return json({
+          success: true,
+          data: { items: [...channels], total: channels.length },
+        });
+      }
+      if (url.endsWith('/api/channel/') && init?.method === 'POST') {
+        channelPosts += 1;
+        const id = 6 + channelPosts;
+        const body = JSON.parse(String(init.body));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        channels.push({ id, status: 1, ...body.channel });
+        return json({ success: true });
+      }
+      if (url.includes('/api/token/?')) {
+        return json({
+          success: true,
+          data: { items: [...tokens], total: tokens.length },
+        });
+      }
+      if (url.endsWith('/api/token/') && init?.method === 'POST') {
+        tokenPosts += 1;
+        const body = JSON.parse(String(init.body));
+        tokens.push({ id: 2, status: 1, ...body });
+        return json({ success: true });
+      }
+      if (url.endsWith('/api/token/2/key')) {
+        return json({ success: true, data: { key: 'dedicated-secret' } });
+      }
+      if (url.endsWith('/v1/models')) {
+        return json({ data: [{ id: LOCAL_EMBEDDING_MODEL_ALIAS }] });
+      }
+      if (url.endsWith('/v1/embeddings')) {
+        return json({
+          data: [{ index: 0, embedding: Array(1024).fill(0.1) }],
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+    });
+    const config = {
+      adminBaseUrl: 'http://new-api:3000',
+      adminAccessToken: 'admin-secret',
+      adminUserId: 1,
+    };
+
+    await expect(
+      Promise.all([
+        provisionLocalEmbeddingGateway(config, fetchMock),
+        provisionLocalEmbeddingGateway(config, fetchMock),
+      ]),
+    ).resolves.toHaveLength(2);
+    expect(channelPosts).toBe(1);
+    expect(tokenPosts).toBe(1);
+  });
+
+  it('幂等创建本机别名通道、模型受限令牌，并完成真 endpoint 形状检查', async () => {
+    const channels: Record<string, unknown>[] = [];
+    const tokens: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/channel/?')) {
+        expect(new URL(url).searchParams.get('p')).toBe('1');
+        return json({
+          success: true,
+          data: { items: channels, total: channels.length },
+        });
+      }
+      if (url.endsWith('/api/channel/') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        channels.push({ id: 7, status: 1, ...body.channel });
+        return json({ success: true });
+      }
+      if (url.includes('/api/token/?')) {
+        expect(new URL(url).searchParams.get('p')).toBe('1');
+        return json({
+          success: true,
+          data: { items: tokens, total: tokens.length },
+        });
+      }
+      if (url.endsWith('/api/token/') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        tokens.push({ id: 2, status: 1, ...body });
+        return json({ success: true });
+      }
+      if (url.endsWith('/api/token/2/key') && init?.method === 'POST') {
+        return json({ success: true, data: { key: 'dedicated-secret' } });
+      }
+      if (url.endsWith('/v1/models')) {
+        return json({
+          object: 'list',
+          data: [{ id: LOCAL_EMBEDDING_MODEL_ALIAS, object: 'model' }],
+        });
+      }
+      if (url.endsWith('/v1/embeddings')) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.model).toBe(LOCAL_EMBEDDING_MODEL_ALIAS);
+        return json({
+          data: [{ index: 0, embedding: Array(1024).fill(0.1) }],
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+    });
+
+    const result = await provisionLocalEmbeddingGateway(
+      {
+        adminBaseUrl: 'http://new-api:3000',
+        adminAccessToken: 'admin-secret',
+        adminUserId: 1,
+      },
+      fetchMock,
+    );
+
+    expect(result).toMatchObject({
+      channelId: 7,
+      tokenId: 2,
+      apiKey: 'sk-dedicated-secret',
+      createdChannel: true,
+      createdToken: true,
+      vectorDimension: 1024,
+    });
+    expect(channels[0]).toMatchObject({
+      name: LOCAL_EMBEDDING_CHANNEL_NAME,
+      base_url: 'http://embeddings:11434',
+      models: LOCAL_EMBEDDING_MODEL_ALIAS,
+      model_mapping: JSON.stringify({
+        [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+      }),
+    });
+    expect(tokens[0]).toMatchObject({
+      model_limits_enabled: true,
+      model_limits: LOCAL_EMBEDDING_MODEL_ALIAS,
+      cross_group_retry: false,
+    });
+  });
+
+  it('发现第二条同别名或远程上游时失败关闭，不静默挑一路', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/channel/?')) {
+        return json({
+          success: true,
+          data: {
+            total: 2,
+            items: [
+              {
+                id: 7,
+                name: LOCAL_EMBEDDING_CHANNEL_NAME,
+                status: 1,
+                type: 1,
+                base_url: 'http://embeddings:11434',
+                models: LOCAL_EMBEDDING_MODEL_ALIAS,
+                group: 'default',
+                model_mapping: JSON.stringify({
+                  [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+                }),
+              },
+              {
+                id: 8,
+                name: 'remote collision',
+                status: 1,
+                type: 1,
+                base_url: 'https://remote.example',
+                models: LOCAL_EMBEDDING_MODEL_ALIAS,
+                group: 'default',
+                model_mapping: '',
+              },
+            ],
+          },
+        });
+      }
+      throw new Error(`unexpected request ${url}`);
+    });
+
+    await expect(
+      provisionLocalEmbeddingGateway(
+        {
+          adminBaseUrl: 'http://new-api:3000',
+          adminAccessToken: 'admin-secret',
+          adminUserId: 1,
+        },
+        fetchMock,
+      ),
+    ).rejects.toThrow(/exactly one local channel/i);
+  });
+
+  it('专用令牌若还能看到其他模型则拒绝就绪', async () => {
+    const channel = {
+      id: 7,
+      name: LOCAL_EMBEDDING_CHANNEL_NAME,
+      status: 1,
+      type: 1,
+      base_url: 'http://embeddings:11434',
+      models: LOCAL_EMBEDDING_MODEL_ALIAS,
+      group: 'default',
+      model_mapping: JSON.stringify({
+        [LOCAL_EMBEDDING_MODEL_ALIAS]: 'bge-m3',
+      }),
+    };
+    const token = {
+      id: 2,
+      name: 'Site Builder Local Embeddings',
+      status: 1,
+      expired_time: -1,
+      unlimited_quota: true,
+      model_limits_enabled: true,
+      model_limits: LOCAL_EMBEDDING_MODEL_ALIAS,
+      group: '',
+      cross_group_retry: false,
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/channel/?')) {
+        return json({ success: true, data: { items: [channel], total: 1 } });
+      }
+      if (url.includes('/api/token/?')) {
+        return json({ success: true, data: { items: [token], total: 1 } });
+      }
+      if (url.endsWith('/api/token/2/key')) {
+        return json({ success: true, data: { key: 'dedicated-secret' } });
+      }
+      if (url.endsWith('/v1/models')) {
+        return json({
+          data: [{ id: LOCAL_EMBEDDING_MODEL_ALIAS }, { id: 'gpt-5.6-terra' }],
+        });
+      }
+      throw new Error(`unexpected request ${url}`);
+    });
+
+    await expect(
+      provisionLocalEmbeddingGateway(
+        {
+          adminBaseUrl: 'http://new-api:3000',
+          adminAccessToken: 'admin-secret',
+          adminUserId: 1,
+        },
+        fetchMock,
+      ),
+    ).rejects.toThrow(/must expose only/i);
+  });
+});

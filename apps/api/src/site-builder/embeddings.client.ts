@@ -3,6 +3,7 @@ import { KbIngestError } from './kb-errors';
 
 const EMBED_TIMEOUT_MS = 120_000; // CPU 推理留足余量
 const DEFAULT_DIM = 1024; // BGE-M3（D14）
+export const LOCAL_EMBEDDING_MODEL_ALIAS = 'site-builder-bge-m3-local';
 
 interface EmbeddingsResponse {
   data?: { index?: number; embedding?: number[] }[];
@@ -12,33 +13,97 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function firstNonBlank(...values: (string | undefined)[]): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+type LocalEmbeddingEndpointKind = 'gateway' | 'ollama';
+
+function localEmbeddingEndpointKind(baseUrl: string): LocalEmbeddingEndpointKind | undefined {
+  try {
+    const url = new URL(baseUrl);
+    const commonSafeUrl =
+      url.protocol === 'http:' &&
+      url.pathname.replace(/\/$/, '') === '/v1' &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === '';
+    if (!commonSafeUrl) return undefined;
+    if (
+      (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.port === '3001') ||
+      (url.hostname === 'new-api' && url.port === '3000')
+    ) {
+      return 'gateway';
+    }
+    if (
+      ['localhost', '127.0.0.1', '[::1]', 'embeddings'].includes(url.hostname) &&
+      url.port === '11434'
+    ) {
+      return 'ollama';
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function requestSignal(external?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(EMBED_TIMEOUT_MS);
   return external ? AbortSignal.any([external, timeout]) : timeout;
 }
 
 /**
- * 自托管 embedding 客户端（D14：BGE-M3，OpenAI 兼容 /embeddings 端点，数据不出域）。
+ * 自托管 embedding 客户端（D14：BGE-M3，经统一 New API 的 OpenAI 兼容
+ * /embeddings 端点访问；模型仍在本机运行，数据不出域）。
  * 维度硬校验：错维度绝不落库（混向量空间是静默毒药）。
  */
 @Injectable()
 export class EmbeddingsClient {
-  readonly model = process.env.EMBEDDINGS_MODEL ?? 'bge-m3';
   /** 行级 embed_version：换模型/量化档按版本重嵌，不混空间（02 §12）。 */
   readonly version = process.env.EMBEDDINGS_VERSION ?? 'bge-m3:2026-07';
   readonly dim = Number(process.env.EMBEDDINGS_DIM) || DEFAULT_DIM;
-  private readonly baseUrl = (process.env.EMBEDDINGS_URL ?? 'http://localhost:11434/v1').replace(
-    /\/$/,
-    '',
-  );
+  private readonly baseUrl = (
+    firstNonBlank(process.env.EMBEDDINGS_URL, process.env.MODEL_GATEWAY_URL) ??
+    'http://localhost:3001/v1'
+  ).replace(/\/$/, '');
+  private readonly endpointKind = localEmbeddingEndpointKind(this.baseUrl);
+  private readonly localBreakGlass = this.endpointKind === 'ollama';
+  // 网关路径固定请求只由 bootstrap 声明的私有别名；只有严格 allowlist 的本机
+  // Ollama break-glass 才使用上游名，不能用 EMBEDDINGS_MODEL 改投远端模型。
+  readonly model = this.localBreakGlass ? 'bge-m3' : LOCAL_EMBEDDING_MODEL_ALIAS;
+  private readonly apiKey = firstNonBlank(process.env.EMBEDDINGS_API_KEY);
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
+    if (!this.endpointKind) {
+      throw new KbIngestError(
+        'KB_EMBEDDING_CONFIGURATION_INVALID',
+        'terminal',
+        'embedding',
+        'EMBEDDINGS_URL must be the approved local New API or Ollama endpoint',
+      );
+    }
+    if (!this.localBreakGlass && !this.apiKey) {
+      throw new KbIngestError(
+        'KB_EMBEDDING_CONFIGURATION_INVALID',
+        'terminal',
+        'embedding',
+        'EMBEDDINGS_API_KEY must be a dedicated New API token limited to site-builder-bge-m3-local',
+      );
+    }
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/embeddings`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+        },
         body: JSON.stringify({ model: this.model, input: texts }),
         signal: requestSignal(signal),
       });
@@ -53,9 +118,12 @@ export class EmbeddingsClient {
     }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      const configurationError = res.status === 401 || res.status === 403;
       throw new KbIngestError(
-        'KB_EMBEDDING_UNAVAILABLE',
-        'retryable',
+        configurationError
+          ? 'KB_EMBEDDING_CONFIGURATION_INVALID'
+          : 'KB_EMBEDDING_UNAVAILABLE',
+        configurationError ? 'terminal' : 'retryable',
         'embedding',
         `embeddings endpoint ${res.status}: ${body.slice(0, 300)}`,
       );
