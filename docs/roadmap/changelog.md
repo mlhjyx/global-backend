@@ -1,6 +1,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R3-A（BuildRun 数据库背书）
+
+- `site_build_run` 改以 `(site_id,workspace_id)` 复合外键绑定 Site，父 workspace 更新为 `NO ACTION`、禁止隐式搬迁 run；validated CHECK 固定 `queued/running/succeeded/failed/cancelled`，部分唯一索引保证每个 Site 最多一个 active run。
+- 新增 nullable `temporal_workflow_id`；独立数据迁移只为已知 `demo_v0/refurbish` kind 生成确定性 workflow ID，未知 kind 保持 NULL，交由其 owner 显式处理。
+- schema 迁移以 5 秒 lock timeout / 60 秒 statement timeout 取得表锁并 fail-closed 预检孤儿/跨 workspace provenance、非法状态和重复 active；不自动修归属、不改状态、不任选 run 取消。
+- Ubuntu 开发环境验证：隔离空库 49 migrations 全量 deploy；三类脏旧库均阻止升级；`global_dev` 真 owner/app_user/FORCE RLS、双连接单飞、复合 FK/CHECK/父归属更新负例与 nullable ACK 前语义全绿，夹具已清理。仅为开发验证，不代表生产部署。
+- 评审后 timeout 加固改变了尚未提交但已在开发库试跑的 060/061 字节；没有静默改 `_prisma_migrations` checksum，而是先做 0600 dump，再由最终 49 migrations 重建候选库、恢复除迁移账本外的数据。60 张业务表逐表 count+内容 hash 与旧库完全一致、49/49 checksum 与 schema diff 全绿后原子切换；旧库 `global_dev_pre_r3_checksum_20260717` 与 `/global/backups/global_dev_pre_r3_checksum_20260717.dump` 保留回退，不涉及生产。
+
 ## 2026-07-17 · Site Builder M1-c（纯 Sharp 确定性图片管线）
 
 - API 直接 exact pin `sharp@0.35.0`，pipeline identity 同时包含 libvips；输入按 20 MiB/40 MP/4 channels/单页严格解码，自动方向与 sRGB，输出默认剥离 EXIF/GPS/XMP。模糊/曝光/噪点记录为版本化 warning，不以未校准阈值主观拒绝可解码图片。
