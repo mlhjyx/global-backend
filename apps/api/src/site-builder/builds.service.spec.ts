@@ -1,75 +1,139 @@
+import { HttpException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import {
-  BadRequestException,
-  HttpException,
-  NotFoundException,
-} from '@nestjs/common';
 import { BuildsService } from './builds.service';
-import type { RefurbishLauncher } from './refurbish-launcher';
+import type {
+  RefurbishLaunchResult,
+  RefurbishLauncher,
+} from './refurbish-launcher';
 
-const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
+const CTX = {
+  userId: 'u1',
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  roles: [],
+};
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
+const ACK: RefurbishLaunchResult = {
+  workflowId: 'site-refurbish-run-1',
+  firstExecutionRunId: 'temporal-run-1',
+};
 
 interface FakeDb {
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
+  idempotencies: Record<string, unknown>[];
 }
 
 function makeService(
   opts: {
     siteExists?: boolean;
     existingRuns?: Record<string, unknown>[];
+    existingIdempotencies?: Record<string, unknown>[];
     launcher?: Partial<RefurbishLauncher>;
-    beforeCancelCas?: (run: Record<string, unknown>, data: Record<string, unknown>) => void;
+    failAckUpdate?: boolean;
+    beforeCancelCas?: (run: Record<string, unknown>) => void;
   } = {},
 ) {
   const db: FakeDb = {
-    sites: opts.siteExists === false ? [] : [{ id: SITE_ID, workspaceId: CTX.workspaceId }],
+    sites:
+      opts.siteExists === false
+        ? []
+        : [{ id: SITE_ID, workspaceId: CTX.workspaceId }],
     runs: [...(opts.existingRuns ?? [])],
+    idempotencies: [...(opts.existingIdempotencies ?? [])],
   };
-  let seq = 0;
+  let seq = db.runs.length;
   const tx = {
-    $executeRaw: async () => 0, // advisory lock no-op（intake 先例同款 fake）
+    $executeRaw: async () => 0,
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
-        db.sites.find((s) => s.id === where.id) ?? null,
+        db.sites.find((site) => site.id === where.id) ?? null,
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
+        const row = db.sites.find((site) => site.id === where.id);
+        if (!row) throw new Error('missing site');
+        Object.assign(row, data);
+        return row;
+      },
+    },
+    siteVersion: { updateMany: async () => ({ count: 0 }) },
+    idempotencyKey: {
+      findUnique: async ({ where }: { where: Record<string, unknown> }) => {
+        const key = where.workspaceId_endpoint_key as Record<string, unknown>;
+        return (
+          db.idempotencies.find(
+            (row) =>
+              row.workspaceId === key.workspaceId &&
+              row.endpoint === key.endpoint &&
+              row.key === key.key,
+          ) ?? null
+        );
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `idem-${db.idempotencies.length + 1}`, ...data };
+        db.idempotencies.push(row);
+        return row;
+      },
     },
     siteBuildRun: {
       findUnique: async ({ where }: { where: { id: string } }) =>
-        db.runs.find((r) => r.id === where.id) ?? null,
+        db.runs.find((run) => run.id === where.id) ?? null,
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-        if (where.scope && typeof where.scope === 'object' && 'path' in (where.scope as object)) {
+        if (where.scope) {
           const want = (where.scope as { equals: string }).equals;
-          const notStatus = (where.NOT as { status?: string } | undefined)?.status;
           return (
             db.runs.find(
-              (r) =>
-                r.siteId === where.siteId &&
-                (r.scope as { idempotencyKey?: string } | null)?.idempotencyKey === want &&
-                (!notStatus || r.status !== notStatus),
+              (run) =>
+                (!where.siteId || run.siteId === where.siteId) &&
+                (run.scope as { idempotencyKey?: string } | null)
+                  ?.idempotencyKey === want,
             ) ?? null
           );
         }
         const statuses = (where.status as { in: string[] } | undefined)?.in;
         return (
           db.runs.find(
-            (r) => r.siteId === where.siteId && (!statuses || statuses.includes(r.status as string)),
+            (run) =>
+              run.siteId === where.siteId &&
+              (!statuses || statuses.includes(run.status as string)),
           ) ?? null
         );
       },
-      count: async ({ where }: { where: { siteId: string; createdAt?: { gte: Date } } }) =>
-        db.runs.filter(
-          (r) =>
-            r.siteId === where.siteId &&
-            (!where.createdAt || (r.createdAt as Date) >= where.createdAt.gte),
-        ).length,
+      count: async ({ where }: { where: Record<string, unknown> }) => {
+        const createdAt = where.createdAt as { gte: Date } | undefined;
+        return db.runs.filter(
+          (run) =>
+            run.siteId === where.siteId &&
+            (!createdAt || (run.createdAt as Date) >= createdAt.gte) &&
+            !(run.status === 'failed' && run.temporalRunId == null),
+        ).length;
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `run-${++seq}`, status: 'queued', createdAt: new Date(), ...data };
+        const row = {
+          id: `run-${++seq}`,
+          status: 'queued',
+          temporalWorkflowId: null,
+          temporalRunId: null,
+          createdAt: new Date(),
+          ...data,
+        };
         db.runs.push(row);
         return row;
       },
-      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-        const row = db.runs.find((r) => r.id === where.id);
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
+        if (opts.failAckUpdate && 'temporalRunId' in data)
+          throw new Error('database unavailable');
+        const row = db.runs.find((run) => run.id === where.id);
         if (!row) throw new Error('missing run');
         Object.assign(row, data);
         return row;
@@ -81,170 +145,443 @@ function makeService(
         where: { id: string; kind?: string; status?: { in: string[] } };
         data: Record<string, unknown>;
       }) => {
-        const row = db.runs.find((r) => r.id === where.id);
+        const row = db.runs.find((run) => run.id === where.id);
         if (!row) return { count: 0 };
-        opts.beforeCancelCas?.(row, data);
+        opts.beforeCancelCas?.(row);
         if (where.kind && row.kind !== where.kind) return { count: 0 };
-        if (where.status?.in && !where.status.in.includes(row.status as string)) return { count: 0 };
+        if (where.status?.in && !where.status.in.includes(row.status as string))
+          return { count: 0 };
         Object.assign(row, data);
         return { count: 1 };
       },
     },
   };
   const prisma = {
-    withWorkspace: async <T>(_ws: string, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
+    withWorkspace: async <T>(
+      _workspaceId: string,
+      fn: (client: typeof tx) => Promise<T>,
+    ): Promise<T> => fn(tx),
   };
   const launched: string[] = [];
-  const cancelled: string[] = [];
+  const recovered: string[] = [];
+  const cancelled: Array<[string, string | null | undefined]> = [];
   const launcher: RefurbishLauncher = {
     launchRefurbish: async ({ buildRunId }) => {
       launched.push(buildRunId);
+      return { ...ACK, workflowId: `site-refurbish-${buildRunId}` };
     },
-    cancelRefurbish: async (buildRunId) => {
-      cancelled.push(buildRunId);
+    recoverRefurbish: async ({ buildRunId }) => {
+      recovered.push(buildRunId);
+      return { ...ACK, workflowId: `site-refurbish-${buildRunId}` };
+    },
+    cancelRefurbish: async (buildRunId, workflowId) => {
+      cancelled.push([buildRunId, workflowId]);
+      const run = db.runs.find((candidate) => candidate.id === buildRunId);
+      if (run) {
+        opts.beforeCancelCas?.(run);
+        if (['queued', 'running'].includes(run.status as string)) {
+          run.status = 'cancelled';
+          run.finishedAt = new Date();
+        }
+      }
+      return { terminalStatus: 'cancelled' };
     },
     ...opts.launcher,
   };
-  const service = new BuildsService(prisma as never, launcher);
-  return { service, db, launched, cancelled };
+  return {
+    service: new BuildsService(prisma as never, launcher),
+    db,
+    launched,
+    recovered,
+    cancelled,
+  };
 }
 
 const BASE = { scope: 'site' as const };
 
-describe('BuildsService.create（POST /sites/{id}/builds，07 §5 / 09 §2.2）', () => {
-  it('建 run（kind=refurbish, status=queued, scope 落 Json）并触发 launcher', async () => {
+describe('BuildsService.create', () => {
+  it('creates one run and returns only after the Temporal identity pair is durable', async () => {
     const { service, db, launched } = makeService();
-    const res = await service.create(CTX, SITE_ID, {
+
+    const response = await service.create(CTX, SITE_ID, {
       ...BASE,
-      options: { locales: ['en', 'de'] },
+      options: { stylePreset: 'precision-light', locales: ['en'] },
     });
-    expect(res.status).toBe('queued');
-    const run = db.runs[0] as Record<string, unknown>;
-    expect(res.buildId).toBe(run.id);
-    expect(run.kind).toBe('refurbish');
-    expect(run.workspaceId).toBe(CTX.workspaceId);
-    expect(run.scope).toMatchObject({ scope: 'site', options: { locales: ['en', 'de'] } });
-    expect(launched).toEqual([run.id]);
+
+    expect(response).toEqual({ buildId: 'run-1', status: 'queued' });
+    expect(db.runs[0]).toMatchObject({
+      kind: 'refurbish',
+      workspaceId: CTX.workspaceId,
+      siteId: SITE_ID,
+      scope: {
+        scope: 'site',
+        options: { stylePreset: 'precision-light', locales: ['en'] },
+      },
+      temporalWorkflowId: 'site-refurbish-run-1',
+      temporalRunId: 'temporal-run-1',
+    });
+    expect(launched).toEqual(['run-1']);
   });
 
-  it('站点不存在 → 404', async () => {
+  it('returns 404 when the site is not workspace-visible', async () => {
     const { service } = makeService({ siteExists: false });
-    await expect(service.create(CTX, SITE_ID, BASE)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.create(CTX, SITE_ID, BASE)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
-  it('已有 queued/running run → 409（同 site 单飞，02 §4）；terminal run 不挡', async () => {
-    const running = makeService({
-      existingRuns: [{ id: 'r0', siteId: SITE_ID, status: 'running', createdAt: new Date() }],
+  it('enforces one active build per site', async () => {
+    const { service } = makeService({
+      existingRuns: [
+        {
+          id: 'running-1',
+          siteId: SITE_ID,
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
     });
-    const err = await running.service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
-    expect(errorContract(err)).toMatchObject({ status: 409, code: 'BUILD_IN_PROGRESS' });
-    const done = makeService({
-      existingRuns: [{ id: 'r0', siteId: SITE_ID, status: 'succeeded', createdAt: new Date() }],
+    const error = await service.create(CTX, SITE_ID, BASE).catch((e) => e);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'BUILD_IN_PROGRESS',
     });
-    await expect(done.service.create(CTX, SITE_ID, BASE)).resolves.toMatchObject({
+  });
+
+  it('replays the same fingerprint to the same ACKed run without relaunch', async () => {
+    const { service, db, launched } = makeService();
+    const first = await service.create(CTX, SITE_ID, {
+      ...BASE,
+      idempotencyKey: 'same-request',
+    });
+
+    const replay = await service.create(CTX, SITE_ID, {
+      ...BASE,
+      idempotencyKey: 'same-request',
+    });
+
+    expect(replay).toEqual(first);
+    expect(db.runs).toHaveLength(1);
+    expect(db.idempotencies).toHaveLength(1);
+    expect(launched).toEqual(['run-1']);
+  });
+
+  it('rejects reuse of one key for a different normalized request', async () => {
+    const { service } = makeService();
+    await service.create(CTX, SITE_ID, {
+      ...BASE,
+      idempotencyKey: 'reused-key',
+    });
+
+    const error = await service
+      .create(CTX, SITE_ID, {
+        ...BASE,
+        idempotencyKey: 'reused-key',
+        options: { stylePreset: 'precision-light' },
+      })
+      .catch((e) => e);
+
+    expect(errorContract(error)).toEqual({
+      status: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED',
+    });
+  });
+
+  it('treats the siteId as request identity, not as an idempotency ledger partition', async () => {
+    const otherSiteId = '33333333-3333-4333-8333-333333333333';
+    const { service, db } = makeService();
+    db.sites.push({ id: otherSiteId, workspaceId: CTX.workspaceId });
+    await service.create(CTX, SITE_ID, {
+      ...BASE,
+      idempotencyKey: 'workspace-operation-key',
+    });
+
+    const error = await service
+      .create(CTX, otherSiteId, {
+        ...BASE,
+        idempotencyKey: 'workspace-operation-key',
+      })
+      .catch((caught) => caught);
+
+    expect(errorContract(error)).toEqual({
+      status: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED',
+    });
+    expect(db.runs).toHaveLength(1);
+  });
+
+  it('fails closed for a legacy key that has no request fingerprint', async () => {
+    const { service } = makeService({
+      existingRuns: [
+        {
+          id: 'legacy-run',
+          siteId: SITE_ID,
+          status: 'succeeded',
+          scope: { scope: 'site', idempotencyKey: 'legacy-key' },
+          createdAt: new Date(),
+        },
+      ],
+    });
+    const error = await service
+      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'legacy-key' })
+      .catch((e) => e);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED',
+    });
+  });
+
+  it('fails closed when a legacy key was used by another Site in the workspace', async () => {
+    const { service, db } = makeService({
+      existingRuns: [
+        {
+          id: 'legacy-other-site',
+          siteId: '33333333-3333-4333-8333-333333333333',
+          status: 'succeeded',
+          scope: { scope: 'site', idempotencyKey: 'legacy-cross-site' },
+          createdAt: new Date(),
+        },
+      ],
+    });
+    const error = await service
+      .create(CTX, SITE_ID, {
+        ...BASE,
+        idempotencyKey: 'legacy-cross-site',
+      })
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'IDEMPOTENCY_KEY_REUSED',
+    });
+    expect(db.runs).toHaveLength(1);
+  });
+
+  it('repairs the exact no-key queued request after an ambiguous start', async () => {
+    const { service, db, launched } = makeService({
+      existingRuns: [
+        {
+          id: 'ambiguous-no-key',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'queued',
+          temporalWorkflowId: null,
+          temporalRunId: null,
+          scope: { scope: 'site' },
+          createdAt: new Date(),
+        },
+      ],
+    });
+    await expect(service.create(CTX, SITE_ID, BASE)).resolves.toEqual({
+      buildId: 'ambiguous-no-key',
+      status: 'queued',
+    });
+    expect(db.runs).toHaveLength(1);
+    expect(launched).toEqual(['ambiguous-no-key']);
+  });
+
+  it('does not attach a different no-key request to an ambiguous queued run', async () => {
+    const { service, launched } = makeService({
+      existingRuns: [
+        {
+          id: 'ambiguous-different',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'queued',
+          temporalWorkflowId: null,
+          temporalRunId: null,
+          scope: {
+            scope: 'site',
+            options: { stylePreset: 'precision-light' },
+          },
+          createdAt: new Date(),
+        },
+      ],
+    });
+    const error = await service.create(CTX, SITE_ID, BASE).catch((e) => e);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'BUILD_IN_PROGRESS',
+    });
+    expect(launched).toEqual([]);
+  });
+
+  it('does not count failed rows without an acknowledged Temporal run against quota', async () => {
+    const failed = Array.from({ length: 10 }, (_, index) => ({
+      id: `failed-${index}`,
+      siteId: SITE_ID,
+      status: 'failed',
+      temporalRunId: null,
+      createdAt: new Date(),
+    }));
+    const { service } = makeService({ existingRuns: failed });
+    await expect(service.create(CTX, SITE_ID, BASE)).resolves.toMatchObject({
       status: 'queued',
     });
   });
 
-  it('scope=page/section 缺 targetId → 400（服务层兜底，不信 DTO）', async () => {
-    const { service } = makeService();
-    await expect(service.create(CTX, SITE_ID, { scope: 'page' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-  });
-
-  it('Idempotency-Key 命中既有 run → 原样返回，不新建不重启', async () => {
-    const { service, db, launched } = makeService();
-    const first = await service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'idem-1' });
-    // 首个 run 结束后同 key 重放：仍返回同一 run，而不是再建一个
-    await service.cancel(CTX, first.buildId);
-    const replay = await service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'idem-1' });
-    expect(replay.buildId).toBe(first.buildId);
-    expect(db.runs).toHaveLength(1);
-    expect(launched).toHaveLength(1);
-  });
-
-  it('当日配额用尽 → 429 QUOTA_EXCEEDED', async () => {
-    const today = new Date();
-    const runs = Array.from({ length: 10 }, (_, i) => ({
-      id: `old-${i}`,
+  it('counts acknowledged executions against the daily quota', async () => {
+    const runs = Array.from({ length: 10 }, (_, index) => ({
+      id: `used-${index}`,
       siteId: SITE_ID,
       status: 'failed',
-      createdAt: today,
+      temporalRunId: `temporal-${index}`,
+      createdAt: new Date(),
     }));
     const { service } = makeService({ existingRuns: runs });
-    const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(HttpException);
-    expect(errorContract(err)).toEqual({
+    const error = await service.create(CTX, SITE_ID, BASE).catch((e) => e);
+    expect(errorContract(error)).toEqual({
       status: 429,
       code: 'QUOTA_EXCEEDED',
       details: { remaining: 0 },
     });
   });
 
-  it('launch 失败后同 Idempotency-Key 重试 → 不命中 failed 重放，真正重发新 run（复审 C4）', async () => {
-    let failOnce = true;
+  it('keeps the original queued run after ambiguous start and safely retries the same key', async () => {
+    let unavailable = true;
     const { service, db } = makeService({
       launcher: {
-        launchRefurbish: async () => {
-          if (failOnce) {
-            failOnce = false;
-            throw new Error('temporal down');
-          }
+        launchRefurbish: async ({ buildRunId }) => {
+          if (unavailable) throw new Error('start response lost');
+          return {
+            workflowId: `site-refurbish-${buildRunId}`,
+            firstExecutionRunId: 'recovered-run',
+          };
+        },
+        recoverRefurbish: async ({ buildRunId }) => {
+          if (unavailable) throw new Error('describe unavailable');
+          return {
+            workflowId: `site-refurbish-${buildRunId}`,
+            firstExecutionRunId: 'recovered-run',
+          };
         },
       },
     });
+
     const firstError = await service
-      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' })
-      .catch((e: unknown) => e);
-    expect(errorContract(firstError).code).toBe('BUILD_LAUNCH_UNAVAILABLE');
-    const retry = await service.create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'retry-1' });
-    expect(retry.status).toBe('queued');
-    expect(db.runs).toHaveLength(2); // failed 行留档，新 run 真正重发
+      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'ack-loss' })
+      .catch((e) => e);
+    expect(errorContract(firstError)).toEqual({
+      status: 502,
+      code: 'BUILD_LAUNCH_UNAVAILABLE',
+      details: { buildId: 'run-1' },
+    });
+    expect(db.runs[0]).toMatchObject({
+      id: 'run-1',
+      status: 'queued',
+      temporalRunId: null,
+    });
+
+    unavailable = false;
+    const replay = await service.create(CTX, SITE_ID, {
+      ...BASE,
+      idempotencyKey: 'ack-loss',
+    });
+    expect(replay.buildId).toBe('run-1');
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]).toMatchObject({ temporalRunId: 'recovered-run' });
   });
 
-  it('launcher 抛错 → run 标 failed + 502（站点绝不删除，可重试）', async () => {
-    const { service, db } = makeService({
+  it('recovers a known execution when the initial start call loses its response', async () => {
+    const { service, recovered } = makeService({
       launcher: {
         launchRefurbish: async () => {
-          throw new Error('temporal unreachable');
+          throw new Error('transport down after send');
         },
       },
     });
-    const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
-    expect(errorContract(err)).toMatchObject({ status: 502, code: 'BUILD_LAUNCH_UNAVAILABLE' });
-    expect(db.sites).toHaveLength(1); // 🔴 refurbish 失败不删用户站（与 demo_v0 补偿相反）
-    expect((db.runs[0] as Record<string, unknown>).status).toBe('failed');
+    await expect(service.create(CTX, SITE_ID, BASE)).resolves.toEqual({
+      buildId: 'run-1',
+      status: 'queued',
+    });
+    expect(recovered).toEqual(['run-1']);
   });
 
-  it('launch failure CAS：不把并发 cancelled/worker terminal 反向覆盖成 failed', async () => {
+  it('returns 502 with the stable buildId when ACK persistence fails', async () => {
+    const { service, db } = makeService({ failAckUpdate: true });
+    const error = await service
+      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'ack-db' })
+      .catch((e) => e);
+    expect(errorContract(error)).toEqual({
+      status: 502,
+      code: 'BUILD_LAUNCH_UNAVAILABLE',
+      details: { buildId: 'run-1' },
+    });
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]).toMatchObject({ status: 'queued' });
+  });
+
+  it('rejects a launcher workflow identity that is not owned by this BuildRun', async () => {
     const { service, db } = makeService({
       launcher: {
-        launchRefurbish: async () => {
-          throw new Error('simulated ACK loss');
-        },
-      },
-      beforeCancelCas: (row, data) => {
-        if (data.status === 'failed') {
-          row.status = 'cancelled';
-          row.finishedAt = new Date('2026-07-17T00:00:00.000Z');
-        }
+        launchRefurbish: async () => ({
+          workflowId: 'site-refurbish-someone-else',
+          firstExecutionRunId: 'foreign-run',
+        }),
       },
     });
+    const error = await service
+      .create(CTX, SITE_ID, BASE)
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 502,
+      code: 'BUILD_LAUNCH_UNAVAILABLE',
+      details: { buildId: 'run-1' },
+    });
+    expect(db.runs[0]).toMatchObject({
+      temporalWorkflowId: null,
+      temporalRunId: null,
+    });
+  });
 
-    const err = await service.create(CTX, SITE_ID, BASE).catch((e: unknown) => e);
+  it('rejects persistence when the durable execution identity conflicts', async () => {
+    const endpoint = 'POST /api/v1/site-builder/sites/:id/builds';
+    const { service, db } = makeService({
+      existingRuns: [
+        {
+          id: 'conflict-run',
+          siteId: SITE_ID,
+          status: 'running',
+          temporalWorkflowId: 'different-workflow',
+          temporalRunId: null,
+          createdAt: new Date(),
+        },
+      ],
+      existingIdempotencies: [
+        {
+          workspaceId: CTX.workspaceId,
+          endpoint,
+          key: 'conflict-key',
+          requestHash:
+            'f80e8c2c1e0c834983f747e14a20245fce256be46b8053cda1382b790d34e60d',
+          response: { buildId: 'conflict-run' },
+        },
+      ],
+    });
+    // Use the service-computed hash rather than treating this fixture as a request mismatch.
+    db.idempotencies[0].requestHash = (
+      await import('./build-request-contract')
+    ).buildRequestHash(SITE_ID, BASE);
 
-    expect(errorContract(err)).toMatchObject({ status: 502, code: 'BUILD_LAUNCH_UNAVAILABLE' });
-    expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+    const error = await service
+      .create(CTX, SITE_ID, { ...BASE, idempotencyKey: 'conflict-key' })
+      .catch((e) => e);
+    expect(errorContract(error)).toMatchObject({
+      status: 502,
+      code: 'BUILD_LAUNCH_UNAVAILABLE',
+    });
+    expect(db.runs[0]).toMatchObject({
+      temporalWorkflowId: 'different-workflow',
+      temporalRunId: null,
+    });
   });
 });
 
-describe('BuildsService.get / cancel（07 §5）', () => {
-  it('get：返回 run；缺失 → 404', async () => {
+describe('BuildsService.get / cancel', () => {
+  it('returns a visible run and 404 for a missing run', async () => {
     const { service } = makeService({
       existingRuns: [
         {
-          id: 'r1',
+          id: 'run-visible',
           siteId: SITE_ID,
           status: 'running',
           phase: 'P1_understanding',
@@ -252,85 +589,282 @@ describe('BuildsService.get / cancel（07 §5）', () => {
         },
       ],
     });
-    const run = await service.get(CTX, 'r1');
-    expect(run).toMatchObject({ id: 'r1', phase: 'P1_understanding' });
-    await expect(service.get(CTX, 'nope')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.get(CTX, 'run-visible')).resolves.toMatchObject({
+      phase: 'P1_understanding',
+    });
+    await expect(service.get(CTX, 'missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
-  it('cancel：queued/running → cancelled + 通知 launcher；终态 → 409', async () => {
+  it('cancels by the persisted workflow identity', async () => {
     const { service, db, cancelled } = makeService({
       existingRuns: [
-        { id: 'r1', siteId: SITE_ID, kind: 'refurbish', status: 'running', createdAt: new Date() },
+        {
+          id: 'run-cancel',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          temporalWorkflowId: 'site-refurbish-run-cancel',
+          createdAt: new Date(),
+        },
       ],
     });
-    await service.cancel(CTX, 'r1');
-    expect((db.runs[0] as Record<string, unknown>).status).toBe('cancelled');
-    expect(cancelled).toEqual(['r1']);
-    const err = await service.cancel(CTX, 'r1').catch((e: unknown) => e);
-    expect(errorContract(err)).toMatchObject({ status: 409, code: 'BUILD_ALREADY_TERMINAL' });
+    await service.cancel(CTX, 'run-cancel');
+    expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+    expect(cancelled).toEqual([['run-cancel', 'site-refurbish-run-cancel']]);
   });
 
-  it('cancel：demo_v0 等不可取消类型 → 409 BUILD_NOT_CANCELLABLE', async () => {
-    const { service, cancelled } = makeService({
+  it('returns cancelled when workflow compensation wins the terminal CAS', async () => {
+    const { service, db } = makeService({
       existingRuns: [
-        { id: 'r1', siteId: SITE_ID, kind: 'demo_v0', status: 'running', createdAt: new Date() },
+        {
+          id: 'cancel-compensated',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
+      beforeCancelCas: (run) => {
+        run.status = 'cancelled';
+      },
+    });
+    await expect(service.cancel(CTX, 'cancel-compensated')).resolves.toEqual({
+      buildId: 'cancel-compensated',
+      status: 'cancelled',
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('rejects terminal and non-refurbish cancellations', async () => {
+    const terminal = makeService({
+      existingRuns: [
+        {
+          id: 'done',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'succeeded',
+          createdAt: new Date(),
+        },
       ],
     });
-    const err = await service.cancel(CTX, 'r1').catch((e: unknown) => e);
-    expect(errorContract(err)).toMatchObject({ status: 409, code: 'BUILD_NOT_CANCELLABLE' });
+    expect(
+      errorContract(await terminal.service.cancel(CTX, 'done').catch((e) => e)),
+    ).toMatchObject({ status: 409, code: 'BUILD_ALREADY_TERMINAL' });
+
+    const demo = makeService({
+      existingRuns: [
+        {
+          id: 'demo',
+          siteId: SITE_ID,
+          kind: 'demo_v0',
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(
+      errorContract(await demo.service.cancel(CTX, 'demo').catch((e) => e)),
+    ).toMatchObject({ status: 409, code: 'BUILD_NOT_CANCELLABLE' });
+  });
+
+  it('fails closed instead of cancelling a persisted foreign workflow identity', async () => {
+    const { service, db, cancelled } = makeService({
+      existingRuns: [
+        {
+          id: 'identity-corrupt',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          temporalWorkflowId: 'site-refurbish-another-build',
+          createdAt: new Date(),
+        },
+      ],
+    });
+    const error = await service
+      .cancel(CTX, 'identity-corrupt')
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'BUILD_NOT_CANCELLABLE',
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'running' });
     expect(cancelled).toEqual([]);
   });
 
-  it('cancel CAS：读后并发成功时不覆盖 terminal，也不通知 launcher', async () => {
+  it('does not overwrite a terminal state won between read and cancel CAS', async () => {
     const { service, db, cancelled } = makeService({
       existingRuns: [
-        { id: 'r1', siteId: SITE_ID, kind: 'refurbish', status: 'running', createdAt: new Date() },
+        {
+          id: 'race',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          createdAt: new Date(),
+        },
       ],
-      beforeCancelCas: (row) => {
-        row.status = 'succeeded';
-        row.finishedAt = new Date('2026-07-17T00:00:00.000Z');
+      beforeCancelCas: (run) => {
+        run.status = 'succeeded';
       },
     });
-
-    const err = await service.cancel(CTX, 'r1').catch((e: unknown) => e);
-
-    expect(errorContract(err)).toMatchObject({
+    const error = await service.cancel(CTX, 'race').catch((e) => e);
+    expect(errorContract(error)).toMatchObject({
       status: 409,
       code: 'BUILD_ALREADY_TERMINAL',
       details: { status: 'succeeded' },
     });
     expect(db.runs[0]).toMatchObject({ status: 'succeeded' });
-    expect(cancelled).toEqual([]);
+    expect(cancelled).toEqual([['race', undefined]]);
   });
 
-  it('cancel：launcher 取消失败不影响状态落库（best-effort）', async () => {
+  it('keeps the run active and returns 502 when Temporal does not acknowledge cancellation', async () => {
     const { service, db } = makeService({
       existingRuns: [
-        { id: 'r1', siteId: SITE_ID, kind: 'refurbish', status: 'queued', createdAt: new Date() },
+        {
+          id: 'cancel-best-effort',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'queued',
+          createdAt: new Date(),
+        },
       ],
       launcher: {
         cancelRefurbish: async () => {
-          throw new Error('handle gone');
+          throw new Error('Temporal unavailable');
         },
       },
     });
-    await service.cancel(CTX, 'r1');
-    expect((db.runs[0] as Record<string, unknown>).status).toBe('cancelled');
+    const error = await service
+      .cancel(CTX, 'cancel-best-effort')
+      .catch((caught) => caught);
+    expect(errorContract(error)).toEqual({
+      status: 502,
+      code: 'BUILD_CANCEL_UNAVAILABLE',
+      details: { buildId: 'cancel-best-effort' },
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'queued' });
+  });
+
+  it('redrives cancelled compensation after the workflow chain is conclusively closed', async () => {
+    const { service, db } = makeService({
+      existingRuns: [
+        {
+          id: 'cancel-without-compensation',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
+      launcher: {
+        cancelRefurbish: async () => ({ terminalStatus: 'cancelled' }),
+      },
+    });
+    const error = await service
+      .cancel(CTX, 'cancel-without-compensation')
+      .catch((caught) => caught);
+    expect(error).toEqual({
+      buildId: 'cancel-without-compensation',
+      status: 'cancelled',
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('redrives failed compensation and reports the repaired terminal truth', async () => {
+    const { service, db } = makeService({
+      existingRuns: [
+        {
+          id: 'failed-without-compensation',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
+      launcher: {
+        cancelRefurbish: async () => ({ terminalStatus: 'failed' }),
+      },
+    });
+    const error = await service
+      .cancel(CTX, 'failed-without-compensation')
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'BUILD_ALREADY_TERMINAL',
+      details: { status: 'failed' },
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('keeps active on a completed-chain invariant violation', async () => {
+    const { service, db } = makeService({
+      existingRuns: [
+        {
+          id: 'completed-but-active',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
+      launcher: {
+        cancelRefurbish: async () => ({ terminalStatus: 'completed' }),
+      },
+    });
+    const error = await service
+      .cancel(CTX, 'completed-but-active')
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 502,
+      code: 'BUILD_CANCEL_UNAVAILABLE',
+    });
+    expect(db.runs[0]).toMatchObject({ status: 'running' });
+  });
+
+  it('reports the DB terminal truth when cancel races a completed workflow', async () => {
+    const holder: { db?: FakeDb } = {};
+    const made = makeService({
+      existingRuns: [
+        {
+          id: 'cancel-rpc-terminal-race',
+          siteId: SITE_ID,
+          kind: 'refurbish',
+          status: 'running',
+          createdAt: new Date(),
+        },
+      ],
+      launcher: {
+        cancelRefurbish: async () => {
+          holder.db!.runs[0].status = 'succeeded';
+          throw new Error('workflow already completed');
+        },
+      },
+    });
+    holder.db = made.db;
+    const error = await made.service
+      .cancel(CTX, 'cancel-rpc-terminal-race')
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: 'BUILD_ALREADY_TERMINAL',
+      details: { status: 'succeeded' },
+    });
   });
 });
 
-function errorContract(err: unknown): {
+function errorContract(error: unknown): {
   status?: number;
   code?: string;
   details?: Record<string, unknown>;
 } {
-  if (!(err instanceof HttpException)) return {};
-  const body = err.getResponse() as {
+  if (!(error instanceof HttpException)) return {};
+  const response = error.getResponse() as {
     error?: { code?: string; details?: Record<string, unknown> };
   };
   return {
-    status: err.getStatus(),
-    code: body.error?.code,
-    ...(body.error?.details ? { details: body.error.details } : {}),
+    status: error.getStatus(),
+    code: response.error?.code,
+    ...(response.error?.details ? { details: response.error.details } : {}),
   };
 }

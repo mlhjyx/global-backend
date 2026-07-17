@@ -25,10 +25,28 @@ export interface RefurbishLaunchInput {
   scope?: BuildScopeInput;
 }
 
+export interface RefurbishLaunchResult {
+  workflowId: string;
+  firstExecutionRunId: string;
+}
+
+export interface RefurbishCancelResult {
+  terminalStatus: 'cancelled' | 'completed' | 'failed';
+}
+
+export function refurbishWorkflowId(buildRunId: string): string {
+  return `site-refurbish-${buildRunId}`;
+}
+
 export interface RefurbishLauncher {
-  launchRefurbish(input: RefurbishLaunchInput): Promise<void>;
-  /** best-effort 取消（run 状态已由 service 落库；handle 不在也不算错）。 */
-  cancelRefurbish(buildRunId: string): Promise<void>;
+  launchRefurbish(input: RefurbishLaunchInput): Promise<RefurbishLaunchResult>;
+  /** Describe an existing deterministic execution; never starts a new workflow. */
+  recoverRefurbish(input: RefurbishLaunchInput): Promise<RefurbishLaunchResult>;
+  /** Request cancellation and wait until the execution chain is closed. */
+  cancelRefurbish(
+    buildRunId: string,
+    workflowId?: string | null,
+  ): Promise<RefurbishCancelResult>;
 }
 
 export interface KbIngestLaunchInput {

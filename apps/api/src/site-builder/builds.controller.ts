@@ -11,36 +11,21 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiHeader,
   ApiOperation,
   ApiProperty,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequestContext } from '../auth/request-context';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { Enveloped, envelope } from '../common/envelope';
 import { BuildsService } from './builds.service';
-import type { BuildOptionsInput } from './refurbish-launcher';
-
-class CreateBuildDto {
-  @ApiProperty({ enum: ['site', 'page', 'section'] })
-  @IsIn(['site', 'page', 'section'])
-  scope!: 'site' | 'page' | 'section';
-
-  @ApiProperty({ required: false, description: 'scope=page/section 时的目标 id' })
-  @IsOptional()
-  @IsUUID()
-  targetId?: string;
-
-  @ApiProperty({ required: false, description: '{ stylePreset?, pages?, locales? }' })
-  @IsOptional()
-  @IsObject()
-  options?: BuildOptionsInput;
-}
+import { CreateBuildDto } from './dto/build.dto';
+import { IDEMPOTENCY_KEY_PATTERN_SOURCE } from './idempotency-key';
 
 class BuildActionResponseDto {
   @ApiProperty({ format: 'uuid' })
@@ -106,11 +91,16 @@ class BuildStatusResponseDto {
 
 const BUILD_ERROR_CODES = [
   'VALIDATION_ERROR',
+  'INVALID_IDEMPOTENCY_KEY',
+  'IDEMPOTENCY_KEY_REUSED',
   'NOT_FOUND',
   'BUILD_IN_PROGRESS',
+  'BUILD_SCOPE_UNAVAILABLE',
+  'BUILD_OPTION_UNAVAILABLE',
   'BUILD_NOT_CANCELLABLE',
   'BUILD_ALREADY_TERMINAL',
   'BUILD_LAUNCH_UNAVAILABLE',
+  'BUILD_CANCEL_UNAVAILABLE',
   'QUOTA_EXCEEDED',
 ] as const;
 
@@ -139,16 +129,84 @@ export class BuildsController {
 
   @Post('sites/:id/builds')
   @HttpCode(201)
-  @ApiOperation({ summary: '触发精装修构建（07 §5；409=进行中，429=当日配额）' })
+  @ApiOperation({
+    summary: '触发精装修构建（07 §5；409=进行中，429=当日配额）',
+  })
   @ApiEnvelope(BuildActionResponseDto, { status: 201 })
-  @ApiResponse({ status: 400, description: 'UUID 或 build scope 校验失败', schema: BUILD_ERROR_SCHEMA })
-  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 Site', schema: BUILD_ERROR_SCHEMA })
-  @ApiResponse({ status: 409, description: 'BUILD_IN_PROGRESS', schema: BUILD_ERROR_SCHEMA })
-  @ApiResponse({ status: 429, description: 'QUOTA_EXCEEDED；details.remaining 为剩余额度', schema: BUILD_ERROR_SCHEMA })
-  @ApiResponse({ status: 502, description: 'BUILD_LAUNCH_UNAVAILABLE；可安全重试', schema: BUILD_ERROR_SCHEMA })
+  @ApiBody({
+    description:
+      'R3-B1 当前可执行面：整站构建；page/section/pages/非 en 在实现前 fail-closed',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['scope'],
+      properties: {
+        scope: { type: 'string', enum: ['site'] },
+        options: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            stylePreset: {
+              type: 'string',
+              enum: ['modern-industrial', 'precision-light'],
+            },
+            locales: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 1,
+              uniqueItems: true,
+              items: { type: 'string', enum: ['en'] },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'UUID 或 build scope 校验失败',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 404,
+    description: '当前 workspace 不可见该 Site',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'BUILD_IN_PROGRESS 或 IDEMPOTENCY_KEY_REUSED',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 422,
+    description:
+      'BUILD_SCOPE_UNAVAILABLE 或 BUILD_OPTION_UNAVAILABLE；未实现能力 fail-closed',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'QUOTA_EXCEEDED；details.remaining 为剩余额度',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 502,
+    description:
+      'BUILD_LAUNCH_UNAVAILABLE；仅同一合法 Idempotency-Key 可安全重放',
+    schema: BUILD_ERROR_SCHEMA,
+  })
   // name 必须与 @Headers('idempotency-key') 推断名精确一致（含大小写）才会合并成单个 required:false 参数；
   // 大小写不一致会生成两个仅大小写不同的 header 参数，令 oasdiff 把契约与自身误判为破坏性变更（见 company.controller 同款约定）
-  @ApiHeader({ name: 'idempotency-key', required: false, description: '幂等键（客户端生成，如 uuid）' })
+  @ApiHeader({
+    name: 'idempotency-key',
+    required: false,
+    schema: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 128,
+      pattern: `^${IDEMPOTENCY_KEY_PATTERN_SOURCE}$`,
+    },
+    description: '幂等键；同 key 异请求返回 409',
+  })
   async create(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) siteId: string,
@@ -156,15 +214,26 @@ export class BuildsController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<Enveloped<{ buildId: string; status: string }>> {
     return envelope(
-      await this.builds.create(ctx, siteId, { ...dto, idempotencyKey: idempotencyKey ?? null }),
+      await this.builds.create(ctx, siteId, {
+        ...dto,
+        idempotencyKey: idempotencyKey ?? null,
+      }),
     );
   }
 
   @Get('builds/:id')
   @ApiOperation({ summary: '构建进度（轮询；SSE 事件流按 07 §5 后置）' })
   @ApiEnvelope(BuildStatusResponseDto)
-  @ApiResponse({ status: 400, description: 'Build UUID 格式错误', schema: BUILD_ERROR_SCHEMA })
-  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 Build', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({
+    status: 400,
+    description: 'Build UUID 格式错误',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 404,
+    description: '当前 workspace 不可见该 Build',
+    schema: BUILD_ERROR_SCHEMA,
+  })
   async get(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) buildId: string,
@@ -189,11 +258,25 @@ export class BuildsController {
   @HttpCode(200)
   @ApiOperation({ summary: '取消构建（终态 409）' })
   @ApiEnvelope(BuildActionResponseDto)
-  @ApiResponse({ status: 400, description: 'Build UUID 格式错误', schema: BUILD_ERROR_SCHEMA })
-  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 Build', schema: BUILD_ERROR_SCHEMA })
+  @ApiResponse({
+    status: 400,
+    description: 'Build UUID 格式错误',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 404,
+    description: '当前 workspace 不可见该 Build',
+    schema: BUILD_ERROR_SCHEMA,
+  })
   @ApiResponse({
     status: 409,
     description: 'BUILD_NOT_CANCELLABLE 或 BUILD_ALREADY_TERMINAL',
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 502,
+    description:
+      'BUILD_CANCEL_UNAVAILABLE；Temporal 未确认取消，run 保持 active，可按同 buildId 重试',
     schema: BUILD_ERROR_SCHEMA,
   })
   async cancel(

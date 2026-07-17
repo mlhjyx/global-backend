@@ -1,6 +1,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R3-B1（Build 请求合同、持久幂等与 Temporal ACK）
+
+- **Breaking correction（需 PR 标签 `breaking-change-approved`）**：Build API 改用有界 SiteSpec 字符串标识符、严格 options 与共享 Renderer preset 目录；机器契约只声明当前真实执行的整站/stylePreset/en，并收紧 `Idempotency-Key`。此前会被静默忽略却返回 201 的 page/section/pages/非 en 请求，现分别 fail-closed 为 `422 BUILD_SCOPE_UNAVAILABLE/BUILD_OPTION_UNAVAILABLE`。消费者必须停止发送未实现字段/非法 key，并从本版 OpenAPI 重新生成客户端。
+- `Idempotency-Key` 统一为 1–128 位安全字符，按 workspace+Build 操作持久 `requestHash`；siteId 进入请求指纹而非账本分区，同 key 换 Site/换参数均 409。跨 Site 同 key 并发先取 key 锁再取 site 锁，避免 P2002 泄漏或重复副作用。
+- Temporal 使用确定性 workflowId、`REJECT_DUPLICATE + USE_EXISTING` 与 describe 恢复；只有 workflowId+firstExecutionRunId 双 ID 持久化后才返回 201。ACK 不明保留原 queued run，同 key 或无 key 的完全相同规范化请求都收敛同一执行链，不误标 failed、不另起 run；正式客户端仍必须带 key。
+- 取消改为等待 Temporal 执行链关闭及不可取消补偿完成后才释放 DB active 单飞门；取消未确认/未关闭返回 `502 BUILD_CANCEL_UNAVAILABLE` 并保持 active，避免新旧 workflow 并行。取消与失败补偿分终态，旧 run 只有 CAS 赢得 active ownership 才可回写 Site 状态；若补偿因 DB 故障耗尽重试，后续同 buildId 取消会在确认执行链已关闭后以同站锁+CAS redrive 最小终态事务，不永久卡 active。
+- Ubuntu 开发环境以真 PostgreSQL/app_user/FORCE RLS + 真 Temporal 验证双 ID 对账、同请求重放、异请求 409、跨 Site 同 key 并发恰一胜、取消与夹具清零；仅代表开发验证，不代表生产部署。R3-B2 继续真实 scope/options 与单调 step/progress/replay，costSummary 仍归 R4-B-min。
+
 ## 2026-07-17 · Site Builder R3-A（BuildRun 数据库背书）
 
 - `site_build_run` 改以 `(site_id,workspace_id)` 复合外键绑定 Site，父 workspace 更新为 `NO ACTION`、禁止隐式搬迁 run；validated CHECK 固定 `queued/running/succeeded/failed/cancelled`，部分唯一索引保证每个 Site 最多一个 active run。

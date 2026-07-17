@@ -6157,18 +6157,59 @@
             "name": "idempotency-key",
             "required": false,
             "in": "header",
-            "description": "幂等键（客户端生成，如 uuid）",
+            "description": "幂等键；同 key 异请求返回 409",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._:-]{1,128}$"
             }
           }
         ],
         "requestBody": {
           "required": true,
+          "description": "R3-B1 当前可执行面：整站构建；page/section/pages/非 en 在实现前 fail-closed",
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateBuildDto"
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scope"
+                ],
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "site"
+                    ]
+                  },
+                  "options": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "stylePreset": {
+                        "type": "string",
+                        "enum": [
+                          "modern-industrial",
+                          "precision-light"
+                        ]
+                      },
+                      "locales": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "en"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -6213,11 +6254,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6256,11 +6302,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6279,7 +6330,7 @@
             }
           },
           "409": {
-            "description": "BUILD_IN_PROGRESS",
+            "description": "BUILD_IN_PROGRESS 或 IDEMPOTENCY_KEY_REUSED",
             "content": {
               "application/json": {
                 "schema": {
@@ -6299,11 +6350,64 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "BUILD_SCOPE_UNAVAILABLE 或 BUILD_OPTION_UNAVAILABLE；未实现能力 fail-closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6342,11 +6446,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6365,7 +6474,7 @@
             }
           },
           "502": {
-            "description": "BUILD_LAUNCH_UNAVAILABLE；可安全重试",
+            "description": "BUILD_LAUNCH_UNAVAILABLE；仅同一合法 Idempotency-Key 可安全重放",
             "content": {
               "application/json": {
                 "schema": {
@@ -6385,11 +6494,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6472,11 +6586,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6515,11 +6634,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6602,11 +6726,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6645,11 +6774,16 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -6688,11 +6822,64 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
                             "NOT_FOUND",
                             "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "BUILD_CANCEL_UNAVAILABLE；Temporal 未确认取消，run 保持 active，可按同 buildId 重试",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
                         },
@@ -8154,30 +8341,6 @@
         "required": [
           "buildId",
           "status"
-        ]
-      },
-      "CreateBuildDto": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "site",
-              "page",
-              "section"
-            ]
-          },
-          "targetId": {
-            "type": "string",
-            "description": "scope=page/section 时的目标 id"
-          },
-          "options": {
-            "type": "object",
-            "description": "{ stylePreset?, pages?, locales? }"
-          }
-        },
-        "required": [
-          "scope"
         ]
       },
       "BuildStatusResponseDto": {
