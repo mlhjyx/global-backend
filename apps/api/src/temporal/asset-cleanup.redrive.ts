@@ -1,8 +1,4 @@
-import {
-  AssetCleanupCommand,
-  assetCleanupPayload,
-  parseAssetCleanupCommand,
-} from './asset-cleanup.contract';
+import { AssetCleanupCommand, matchesAssetCleanupPayload, parseAssetCleanupCommand } from './asset-cleanup.contract';
 import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -37,40 +33,34 @@ const REDRIVABLE_STATUSES: ReadonlySet<CleanupExecutionStatus> = new Set([
   'TIMED_OUT',
 ]);
 
-function shallowEqual(left: unknown, right: Record<string, unknown>): boolean {
-  if (!left || typeof left !== 'object' || Array.isArray(left)) return false;
-  const record = left as Record<string, unknown>;
-  const leftKeys = Object.keys(record).sort();
-  const rightKeys = Object.keys(right).sort();
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every((key, index) => key === rightKeys[index] && record[key] === right[key])
-  );
-}
-
 /** Fail-closed validation shared by the operator script and its tests. */
-export function validateAssetCleanupRedriveEvent(
-  event: AssetCleanupRedriveEvent,
-): AssetCleanupCommand {
+export function validateAssetCleanupRedriveEvent(event: AssetCleanupRedriveEvent): AssetCleanupCommand {
   if (
     event.eventType !== 'AssetObjectCleanupRequested' ||
-    event.schemaVersion !== 1 ||
+    ![1, 2].includes(event.schemaVersion) ||
     event.aggregateType !== 'Asset'
   ) {
     throw new Error('event is not a supported asset cleanup command');
   }
   const payload = event.payload as Record<string, unknown> | null;
+  if (
+    (payload?.objectClass === 'staging' && event.schemaVersion !== 1) ||
+    (payload?.objectClass === 'canonical' && event.schemaVersion !== 2)
+  ) {
+    throw new Error('cleanup event schemaVersion does not match objectClass');
+  }
   const command = parseAssetCleanupCommand({
     eventId: event.eventId,
     workspaceId: event.workspaceId,
     assetId: event.aggregateId,
     siteId: payload?.siteId,
-    objectKey: payload?.objectKey,
     objectClass: payload?.objectClass,
     reason: payload?.reason,
-    notBefore: payload?.notBefore,
+    ...(payload?.objectClass === 'staging'
+      ? { objectKey: payload?.objectKey, notBefore: payload?.notBefore }
+      : { canonical: payload?.canonical, variants: payload?.variants }),
   });
-  if (payload?.assetId !== event.aggregateId || !shallowEqual(payload, assetCleanupPayload(command))) {
+  if (payload?.assetId !== event.aggregateId || !matchesAssetCleanupPayload(payload, command)) {
     throw new Error('cleanup event payload does not exactly match its aggregate provenance');
   }
   return command;
@@ -88,6 +78,10 @@ export async function queueAssetCleanupRedrive(input: {
   eventId: string;
   executionStatus: () => Promise<CleanupExecutionStatus>;
 }): Promise<{ command: AssetCleanupCommand; previousStatus: CleanupExecutionStatus }> {
+  // Temporal describe is external I/O; keep it outside the short RLS transaction. Terminal
+  // statuses are immutable, and the pending-event check below prevents double requeue.
+  const previousStatus = await input.executionStatus();
+  assertAssetCleanupRedrivable(previousStatus);
   return input.prisma.withWorkspace(input.workspaceId, async (tx) => {
     const lock = await tx.$queryRaw<{ locked: boolean }[]>(Prisma.sql`
       SELECT pg_try_advisory_xact_lock(hashtextextended(${input.eventId}, 0)) AS locked
@@ -110,9 +104,10 @@ export async function queueAssetCleanupRedrive(input: {
       },
     });
     if (!event) throw new Error('cleanup event is not visible in the requested workspace');
+    if (event.publishedAt === null && event.parkedAt === null) {
+      throw new Error('cleanup event is already queued for relay');
+    }
     const command = validateAssetCleanupRedriveEvent(event);
-    const previousStatus = await input.executionStatus();
-    assertAssetCleanupRedrivable(previousStatus);
 
     const moved = await tx.outboxEvent.updateMany({
       where: {

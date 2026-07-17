@@ -1,9 +1,19 @@
-import { BadGatewayException, ConflictException, HttpException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  ConflictException,
+  HttpException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { AssetsService } from './assets.service';
+import { AssetReferenceScanError } from './asset-reference';
 
-const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
+const CTX = {
+  userId: 'u1',
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  roles: [],
+};
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('r2-asset')]);
 
@@ -43,12 +53,23 @@ function applyData(row: Row, data: Row): void {
   }
 }
 
-function makeService(options: {
-  assertPresignOutsideTransaction?: boolean;
-  failCopy?: boolean;
-  failDelete?: boolean;
-  uniqueCollisionOnFinalize?: boolean;
-} = {}) {
+function makeService(
+  options: {
+    assertPresignOutsideTransaction?: boolean;
+    failCopy?: boolean;
+    copyThenThrow?: boolean;
+    failDelete?: boolean;
+    failFinalizeAfterCopy?: boolean;
+    uniqueCollisionOnFinalize?: boolean;
+    usages?: Array<{
+      source: 'site_spec' | 'profile';
+      page: string;
+      component: string;
+      fieldPath: string;
+    }>;
+    scanError?: Error;
+  } = {},
+) {
   const assets: Row[] = [];
   const outbox: Row[] = [];
   const objects = new Map<string, Buffer>();
@@ -57,6 +78,11 @@ function makeService(options: {
   let uniqueCollisionPending = options.uniqueCollisionOnFinalize ?? false;
 
   const tx = {
+    $executeRaw: async () => {
+      operations.push('db:key-lock');
+      return 1;
+    },
+    $queryRaw: async () => assets.filter((row) => !row.deletedAt).map((row) => ({ id: row.id })),
     site: { findUnique: async () => ({ id: SITE_ID }) },
     asset: {
       create: async ({ data }: { data: Row }) => {
@@ -67,17 +93,17 @@ function makeService(options: {
           leaseUntil: null,
           retryAt: null,
           deletedAt: null,
+          cleanupEventId: null,
+          cleanupCompletedAt: null,
           error: null,
           ...data,
         };
         assets.push(row);
         return row;
       },
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        assets.find((row) => row.id === where.id) ?? null,
+      findUnique: async ({ where }: { where: { id: string } }) => assets.find((row) => row.id === where.id) ?? null,
       findFirst: async ({ where }: { where: Row }) => assets.find((row) => matches(row, where)) ?? null,
-      findMany: async ({ where = {} }: { where?: Row } = {}) =>
-        assets.filter((row) => matches(row, where)),
+      findMany: async ({ where = {} }: { where?: Row } = {}) => assets.filter((row) => matches(row, where)),
       update: async ({ where, data }: { where: { id: string }; data: Row }) => {
         const row = assets.find((candidate) => candidate.id === where.id);
         if (!row) throw new Error('asset missing');
@@ -87,6 +113,9 @@ function makeService(options: {
       },
       updateMany: async ({ where, data }: { where: Row; data: Row }) => {
         const selected = assets.filter((row) => matches(row, where));
+        if (options.failFinalizeAfterCopy && selected.length > 0 && typeof data.objectKey === 'string') {
+          throw new Error('forced database finalize failure');
+        }
         if (
           uniqueCollisionPending &&
           selected.length > 0 &&
@@ -101,7 +130,9 @@ function makeService(options: {
             processingStatus: 'ready',
           };
           assets.push(winner);
-          throw Object.assign(new Error('unique constraint'), { code: 'P2002' });
+          throw Object.assign(new Error('unique constraint'), {
+            code: 'P2002',
+          });
         }
         for (const row of selected) applyData(row, data);
         if (selected.length > 0 && data.objectKey) operations.push('db:finalize');
@@ -114,6 +145,7 @@ function makeService(options: {
       },
     },
     kbDocument: { deleteMany: async () => ({ count: 0 }) },
+    assetVariant: { findMany: async () => [] },
     outboxEvent: {
       create: async ({ data }: { data: Row }) => {
         outbox.push(data);
@@ -136,7 +168,10 @@ function makeService(options: {
       if (options.assertPresignOutsideTransaction && inTransaction) {
         throw new Error('presign called inside database transaction');
       }
-      return { url: `https://minio.local/${key}`, expiresAt: new Date(Date.now() + 900_000) };
+      return {
+        url: `https://minio.local/${key}`,
+        expiresAt: new Date(Date.now() + 900_000),
+      };
     },
     head: async (key: string) => (objects.has(key) ? { size: objects.get(key)!.length } : null),
     hashObject: async (key: string) => {
@@ -149,9 +184,10 @@ function makeService(options: {
       };
     },
     copy: async (from: string, to: string) => {
-      operations.push('storage:copy');
+      operations.push(`storage:copy:${inTransaction ? 'in-tx' : 'outside-tx'}`);
       if (options.failCopy) throw new Error('temporary MinIO failure');
       objects.set(to, objects.get(from)!);
+      if (options.copyThenThrow) throw new Error('copy response lost after server-side success');
     },
     delete: async (key: string) => {
       operations.push(`storage:delete:${key}`);
@@ -160,7 +196,16 @@ function makeService(options: {
     },
   };
 
-  const service = new AssetsService(prisma as never, storage as never);
+  const service = new AssetsService(
+    prisma as never,
+    storage as never,
+    {
+      scan: async () => {
+        if (options.scanError) throw options.scanError;
+        return options.usages ?? [];
+      },
+    } as never,
+  );
   return { service, assets, outbox, objects, operations, storage };
 }
 
@@ -328,16 +373,51 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(row.processingStatus).toBe('failed_retryable');
   });
 
-  it('persists canonical truth and defers staging deletion to durable cleanup', async () => {
+  it('holds the same-key database fence through copy and canonical finalize', async () => {
     const s = makeService();
     const { signed } = await uploaded(s);
 
     await s.service.commit(CTX, signed.assetId);
 
-    expect(s.operations.map((op) => op.split(':').slice(0, 2).join(':'))).toEqual([
-      'storage:copy',
-      'db:finalize',
-    ]);
+    expect(s.operations).toEqual(['db:key-lock', 'storage:copy:in-tx', 'db:finalize']);
+  });
+
+  it('compensates an unowned canonical copy when database finalize fails', async () => {
+    const s = makeService({ failFinalizeAfterCopy: true });
+    const { signed, row } = await uploaded(s);
+    const stagingKey = String(row.objectKey);
+
+    await expect(s.service.commit(CTX, signed.assetId)).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    const canonicalCopies = [...s.objects.keys()].filter((key) => key !== stagingKey);
+    expect(canonicalCopies).toEqual([]);
+    expect(s.objects.has(stagingKey)).toBe(true);
+    expect(row.processingStatus).toBe('failed_retryable');
+  });
+
+  it('treats a thrown copy response as ambiguous and compensates a server-side success', async () => {
+    const s = makeService({ copyThenThrow: true });
+    const { signed, row } = await uploaded(s);
+    const stagingKey = String(row.objectKey);
+
+    await expect(s.service.commit(CTX, signed.assetId)).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect([...s.objects.keys()].filter((key) => key !== stagingKey)).toEqual([]);
+    expect(s.objects.has(stagingKey)).toBe(true);
+    expect(row.processingStatus).toBe('failed_retryable');
+  });
+
+  it('blocks DELETE when post-copy compensation failed until commit is retried', async () => {
+    const s = makeService({ copyThenThrow: true, failDelete: true });
+    const { signed, row } = await uploaded(s);
+
+    await expect(s.service.commit(CTX, signed.assetId)).rejects.toBeInstanceOf(BadGatewayException);
+    expect(String(row.error)).toContain('canonical_copy_compensation_pending');
+
+    const error = await s.service.remove(CTX, signed.assetId).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as HttpException).getResponse()).toMatchObject({ error: { code: 'ASSET_BUSY' } });
+    expect(row.deletedAt).toBeNull();
   });
 
   it('reconciles a final unique race into an explicit duplicate state', async () => {
@@ -372,7 +452,7 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(s.operations.some((op) => op.startsWith('storage:delete'))).toBe(false);
   });
 
-  it('tombstones a canonical asset and parks cleanup without deleting the object', async () => {
+  it('tombstones a canonical asset and emits a strict v2 cleanup plan without storage IO', async () => {
     const s = makeService();
     const { signed, row } = await uploaded(s);
     await s.service.commit(CTX, signed.assetId);
@@ -385,17 +465,113 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect(row.deletedAt).toBeInstanceOf(Date);
     expect(s.assets).toContain(row);
     expect(s.objects.has(canonicalKey)).toBe(true);
-    expect(s.operations.filter((op) => op.startsWith('storage:delete'))).toHaveLength(
-      deletesBeforeRemove,
-    );
+    expect(s.operations.filter((op) => op.startsWith('storage:delete'))).toHaveLength(deletesBeforeRemove);
     expect(s.outbox.at(-1)).toMatchObject({
       eventType: 'AssetObjectCleanupRequested',
-      parkedAt: expect.any(Date),
+      schemaVersion: 2,
+      parkedAt: null,
       payload: {
-        objectKey: canonicalKey,
         objectClass: 'canonical',
-        blockedUntil: 'site_spec_asset_reference_scanner',
+        canonical: { objectKey: canonicalKey, contentHash: row.contentHash },
+        variants: [],
       },
     });
+    expect(Object.keys((s.outbox.at(-1)?.payload ?? {}) as Row).sort()).toEqual([
+      'assetId',
+      'canonical',
+      'objectClass',
+      'reason',
+      'siteId',
+      'variants',
+    ]);
+  });
+
+  it('returns stable ASSET_IN_USE usages and leaves DB/object/outbox untouched', async () => {
+    const usage = {
+      source: 'profile' as const,
+      page: '$profile',
+      component: 'brand',
+      fieldPath: '/brand/logoAssetId',
+    };
+    const s = makeService({ usages: [usage] });
+    const { signed, row } = await uploaded(s);
+    await s.service.commit(CTX, signed.assetId);
+    const outboxBefore = s.outbox.length;
+    const objectKey = String(row.objectKey);
+
+    const error = await s.service.remove(CTX, signed.assetId).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as HttpException).getResponse()).toEqual({
+      error: {
+        code: 'ASSET_IN_USE',
+        message: 'asset is referenced by the active site or profile',
+        details: { usages: [usage] },
+      },
+    });
+    expect(row.deletedAt).toBeNull();
+    expect(row.processingStatus).toBe('ready');
+    expect(s.objects.has(objectKey)).toBe(true);
+    expect(s.outbox).toHaveLength(outboxBefore);
+  });
+
+  it('maps an unverifiable active reference surface to a stable fail-closed conflict', async () => {
+    const s = makeService({ scanError: new AssetReferenceScanError('stored SiteSpec is malformed') });
+    const { signed, row } = await uploaded(s);
+    await s.service.commit(CTX, signed.assetId);
+    const outboxBefore = s.outbox.length;
+    const objectKey = String(row.objectKey);
+
+    const error = await s.service.remove(CTX, signed.assetId).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as HttpException).getResponse()).toEqual({
+      error: {
+        code: 'ASSET_STATE_CONFLICT',
+        message: 'active site references cannot be verified; repair the site state before deleting this asset',
+      },
+    });
+    expect(row.deletedAt).toBeNull();
+    expect(s.objects.has(objectKey)).toBe(true);
+    expect(s.outbox).toHaveLength(outboxBefore);
+  });
+
+  it('blocks same-hash reuse until the old canonical cleanup is durably settled', async () => {
+    const s = makeService();
+    const first = await uploaded(s);
+    await s.service.commit(CTX, first.signed.assetId);
+    await s.service.remove(CTX, first.signed.assetId);
+
+    const second = await uploaded(s);
+    const error = await s.service.commit(CTX, second.signed.assetId).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      error: { code: 'ASSET_BUSY' },
+    });
+    expect(second.row.processingStatus).toBe('failed_retryable');
+    expect(s.objects.has(String(second.row.objectKey))).toBe(true);
+  });
+
+  it('checks every same-key tombstone instead of trusting an older settled owner', async () => {
+    const s = makeService();
+    const first = await uploaded(s);
+    await s.service.commit(CTX, first.signed.assetId);
+    await s.service.remove(CTX, first.signed.assetId);
+    first.row.cleanupCompletedAt = new Date();
+
+    const second = await uploaded(s);
+    await s.service.commit(CTX, second.signed.assetId);
+    await s.service.remove(CTX, second.signed.assetId);
+
+    const third = await uploaded(s);
+    const error = await s.service.commit(CTX, third.signed.assetId).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      error: { code: 'ASSET_BUSY' },
+    });
+    expect(second.row.cleanupCompletedAt).toBeNull();
+    expect(third.row.processingStatus).toBe('failed_retryable');
   });
 });

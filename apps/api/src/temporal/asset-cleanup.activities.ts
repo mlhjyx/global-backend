@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../site-builder/storage.service';
 import {
   AssetCleanupCommand,
+  CanonicalAssetCleanupCommand,
+  StagingAssetCleanupCommand,
   matchesAssetCleanupPayload,
   parseAssetCleanupCommand,
 } from './asset-cleanup.contract';
@@ -19,7 +21,7 @@ function invalidProvenance(message: string): ApplicationFailure {
 }
 
 function assetStateAllowsCleanup(
-  command: AssetCleanupCommand,
+  command: StagingAssetCleanupCommand,
   asset: {
     objectKey: string;
     processingStatus: string;
@@ -39,15 +41,157 @@ function assetStateAllowsCleanup(
   }
   if (command.reason === 'asset_deleted') {
     return (
-      asset.objectKey === command.objectKey &&
-      asset.processingStatus === 'deleted' &&
-      asset.deletedAt instanceof Date
+      asset.objectKey === command.objectKey && asset.processingStatus === 'deleted' && asset.deletedAt instanceof Date
     );
   }
   return asset.objectKey === command.objectKey && asset.processingStatus === command.reason;
 }
 
+function canonicalVariantDeleteOrder(command: CanonicalAssetCleanupCommand) {
+  const remaining = new Map(command.variants.map((variant) => [variant.id, variant]));
+  const ordered: typeof command.variants = [];
+  while (remaining.size > 0) {
+    const parentIds = new Set(
+      [...remaining.values()]
+        .map((variant) => variant.sourceVariantId)
+        .filter((value): value is string => value !== null && remaining.has(value)),
+    );
+    const leaves = [...remaining.values()]
+      .filter((variant) => !parentIds.has(variant.id))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (leaves.length === 0) throw invalidProvenance('canonical variant graph contains a cycle');
+    for (const leaf of leaves) {
+      ordered.push(leaf);
+      remaining.delete(leaf.id);
+    }
+  }
+  return ordered;
+}
+
+function sameVariantPlan(
+  command: CanonicalAssetCleanupCommand,
+  rows: Array<{
+    id: string;
+    objectKey: string;
+    contentHash: string | null;
+    recipeHash: string;
+    sourceVariantId: string | null;
+    status: string;
+  }>,
+): boolean {
+  return (
+    rows.length === command.variants.length &&
+    rows.every((row, index) => {
+      const expected = command.variants[index];
+      return (
+        expected !== undefined &&
+        row.id === expected.id &&
+        row.objectKey === expected.objectKey &&
+        row.contentHash === expected.contentHash &&
+        row.recipeHash === expected.recipeHash &&
+        row.sourceVariantId === expected.sourceVariantId &&
+        row.status === expected.status
+      );
+    })
+  );
+}
+
 export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupActivityDeps) {
+  async function validateCanonicalCleanupTx(
+    tx: Parameters<Parameters<PrismaService['withWorkspace']>[1]>[0],
+    command: CanonicalAssetCleanupCommand,
+  ): Promise<{ completed: boolean }> {
+    const [event, asset, variants, foreignAsset, foreignVariant] = await Promise.all([
+      tx.outboxEvent.findUnique({
+        where: { eventId: command.eventId },
+        select: {
+          eventId: true,
+          workspaceId: true,
+          eventType: true,
+          schemaVersion: true,
+          aggregateType: true,
+          aggregateId: true,
+          payload: true,
+        },
+      }),
+      tx.asset.findUnique({
+        where: { id: command.assetId },
+        select: {
+          id: true,
+          siteId: true,
+          objectKey: true,
+          contentHash: true,
+          processingStatus: true,
+          deletedAt: true,
+          cleanupEventId: true,
+          cleanupCompletedAt: true,
+        },
+      }),
+      tx.assetVariant.findMany({
+        where: { assetId: command.assetId },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          objectKey: true,
+          contentHash: true,
+          recipeHash: true,
+          sourceVariantId: true,
+          status: true,
+        },
+      }),
+      tx.asset.findFirst({
+        where: {
+          objectKey: command.canonical.objectKey,
+          deletedAt: null,
+          NOT: { id: command.assetId },
+        },
+        select: { id: true },
+      }),
+      command.variants.length === 0
+        ? Promise.resolve(null)
+        : tx.assetVariant.findFirst({
+            where: {
+              objectKey: {
+                in: command.variants.map((variant) => variant.objectKey),
+              },
+              NOT: { assetId: command.assetId },
+            },
+            select: { id: true },
+          }),
+    ]);
+    if (
+      !event ||
+      event.workspaceId !== command.workspaceId ||
+      event.eventType !== 'AssetObjectCleanupRequested' ||
+      event.schemaVersion !== 2 ||
+      event.aggregateType !== 'Asset' ||
+      event.aggregateId !== command.assetId ||
+      !matchesAssetCleanupPayload(event.payload, command)
+    ) {
+      throw invalidProvenance('canonical cleanup Outbox event does not match command');
+    }
+    if (
+      !asset ||
+      asset.siteId !== command.siteId ||
+      asset.cleanupEventId !== command.eventId ||
+      asset.processingStatus !== 'deleted' ||
+      !(asset.deletedAt instanceof Date)
+    ) {
+      throw invalidProvenance('canonical cleanup Asset ownership is missing or inconsistent');
+    }
+    if (asset.cleanupCompletedAt instanceof Date) return { completed: true };
+    if (
+      asset.objectKey !== command.canonical.objectKey ||
+      asset.contentHash !== command.canonical.contentHash ||
+      foreignAsset ||
+      foreignVariant ||
+      !sameVariantPlan(command, variants)
+    ) {
+      throw invalidProvenance('canonical cleanup frozen object plan no longer matches DB provenance');
+    }
+    return { completed: false };
+  }
+
   return {
     async cleanupStagingAssetObject(input: AssetCleanupCommand): Promise<{
       eventId: string;
@@ -59,6 +203,9 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
         command = parseAssetCleanupCommand(input);
       } catch (error) {
         throw invalidProvenance(error instanceof Error ? error.message : String(error));
+      }
+      if (command.objectClass !== 'staging') {
+        throw invalidProvenance('staging activity received a canonical command');
       }
 
       await prisma.withWorkspace(command.workspaceId, async (tx) => {
@@ -87,7 +234,10 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
             },
           }),
           tx.asset.findFirst({
-            where: { objectKey: command.objectKey, NOT: { id: command.assetId } },
+            where: {
+              objectKey: command.objectKey,
+              NOT: { id: command.assetId },
+            },
             select: { id: true },
           }),
         ]);
@@ -104,12 +254,7 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
         ) {
           throw invalidProvenance('cleanup Outbox event does not match workflow command');
         }
-        if (
-          !asset ||
-          asset.siteId !== command.siteId ||
-          foreignOwner ||
-          !assetStateAllowsCleanup(command, asset)
-        ) {
+        if (!asset || asset.siteId !== command.siteId || foreignOwner || !assetStateAllowsCleanup(command, asset)) {
           throw invalidProvenance('cleanup Asset provenance is missing, active, or inconsistent');
         }
       });
@@ -120,7 +265,110 @@ export function createAssetCleanupActivities({ prisma, storage }: AssetCleanupAc
       if (await storage.head(command.objectKey)) {
         throw new Error(`staging object still exists after delete: ${command.eventId}`);
       }
-      return { eventId: command.eventId, objectKey: command.objectKey, deleted: true };
+      return {
+        eventId: command.eventId,
+        objectKey: command.objectKey,
+        deleted: true,
+      };
+    },
+
+    async cleanupCanonicalAssetObjects(input: AssetCleanupCommand): Promise<{
+      eventId: string;
+      deleted: true;
+      alreadySettled: boolean;
+    }> {
+      let command: CanonicalAssetCleanupCommand;
+      try {
+        const parsed = parseAssetCleanupCommand(input);
+        if (parsed.objectClass !== 'canonical') throw new Error('canonical command required');
+        command = parsed;
+      } catch (error) {
+        throw invalidProvenance(error instanceof Error ? error.message : String(error));
+      }
+
+      const alreadySettled = await prisma.withWorkspace(
+        command.workspaceId,
+        async (tx) => (await validateCanonicalCleanupTx(tx, command)).completed,
+      );
+      if (alreadySettled) {
+        return {
+          eventId: command.eventId,
+          deleted: true,
+          alreadySettled: true,
+        };
+      }
+
+      for (const object of [...canonicalVariantDeleteOrder(command), command.canonical]) {
+        await storage.delete(object.objectKey);
+        if (await storage.head(object.objectKey)) {
+          throw new Error(`canonical cleanup object still exists: ${command.eventId}`);
+        }
+      }
+      return { eventId: command.eventId, deleted: true, alreadySettled: false };
+    },
+
+    async settleCanonicalAssetCleanup(input: AssetCleanupCommand): Promise<{
+      eventId: string;
+      settled: true;
+      variantsDeleted: number;
+    }> {
+      const parsed = parseAssetCleanupCommand(input);
+      if (parsed.objectClass !== 'canonical') {
+        throw invalidProvenance('canonical settle received a staging command');
+      }
+      const command = parsed;
+      const alreadySettled = await prisma.withWorkspace(
+        command.workspaceId,
+        async (tx) => (await validateCanonicalCleanupTx(tx, command)).completed,
+      );
+      if (alreadySettled) {
+        return { eventId: command.eventId, settled: true, variantsDeleted: 0 };
+      }
+      for (const object of [...command.variants, command.canonical]) {
+        if (await storage.head(object.objectKey)) {
+          throw new Error(`canonical cleanup cannot settle while object exists: ${command.eventId}`);
+        }
+      }
+      return prisma.withWorkspace(
+        command.workspaceId,
+        async (tx) => {
+          const state = await validateCanonicalCleanupTx(tx, command);
+          if (state.completed) {
+            return {
+              eventId: command.eventId,
+              settled: true as const,
+              variantsDeleted: 0,
+            };
+          }
+
+          let variantsDeleted = 0;
+          for (const variant of canonicalVariantDeleteOrder(command)) {
+            const removed = await tx.assetVariant.deleteMany({
+              where: { id: variant.id, assetId: command.assetId },
+            });
+            if (removed.count !== 1) {
+              throw invalidProvenance(`canonical settle could not remove Variant ${variant.id}`);
+            }
+            variantsDeleted += 1;
+          }
+          const settled = await tx.asset.updateMany({
+            where: {
+              id: command.assetId,
+              cleanupEventId: command.eventId,
+              cleanupCompletedAt: null,
+              deletedAt: { not: null },
+            },
+            data: { cleanupCompletedAt: new Date() },
+          });
+          if (settled.count !== 1) throw invalidProvenance('canonical settle CAS lost ownership');
+          return {
+            eventId: command.eventId,
+            settled: true as const,
+            variantsDeleted,
+          };
+        },
+        { timeout: 60_000 },
+      );
     },
   };
 }

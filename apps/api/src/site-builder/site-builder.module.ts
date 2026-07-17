@@ -18,6 +18,7 @@ import { KbService } from './kb.service';
 import { SitesController } from './sites.controller';
 import { SitesService } from './sites.service';
 import { StorageService } from './storage.service';
+import { SiteSpecAssetReferenceScanner } from './site-spec-asset-reference-scanner';
 
 /**
  * 独立站建设（docs/site-builder/02 §1）。M0：intake + 站点档案 + 素材/KB 地基。
@@ -25,13 +26,7 @@ import { StorageService } from './storage.service';
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [
-    IntakeController,
-    SitesController,
-    AssetsController,
-    KbController,
-    BuildsController,
-  ],
+  controllers: [IntakeController, SitesController, AssetsController, KbController, BuildsController],
   providers: [
     IntakeService,
     SitesService,
@@ -39,6 +34,7 @@ import { StorageService } from './storage.service';
     BuildsService,
     KbService,
     StorageService,
+    SiteSpecAssetReferenceScanner,
     EmbeddingsClient,
     DoclingClient,
     { provide: DEMO_V0_LAUNCHER, useClass: TemporalDemoV0Launcher },

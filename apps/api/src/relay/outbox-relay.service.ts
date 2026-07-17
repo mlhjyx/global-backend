@@ -10,19 +10,10 @@ import {
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
-import {
-  matchesAssetCleanupPayload,
-  parseAssetCleanupCommand,
-} from '../temporal/asset-cleanup.contract';
+import { matchesAssetCleanupPayload, parseAssetCleanupCommand } from '../temporal/asset-cleanup.contract';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { seedSanctions } from '../sanctions/sanctions-seed';
-import {
-  INTEGRATION_EVENTS,
-  INTERNAL_COMMANDS,
-  PULL_SINK,
-  WEBHOOK_SINK,
-  toEnvelope,
-} from './event-registry';
+import { INTEGRATION_EVENTS, INTERNAL_COMMANDS, PULL_SINK, WEBHOOK_SINK, toEnvelope } from './event-registry';
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -50,6 +41,13 @@ const BATCH_SIZE = 20;
 /** lastError 截断长度：错误体可能是整页 HTML，不让它撑爆行。 */
 const MAX_ERROR_LEN = 500;
 
+class NonRetryableOutboxCommandError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableOutboxCommandError';
+  }
+}
+
 /** 路由/派送用到的 outbox_event 行（含 BigInt 主键）。 */
 interface OutboxEventRecord {
   id: bigint;
@@ -72,7 +70,12 @@ interface OutboxEventRecord {
 /** fetch 的最小可注入面（单测 mock 用，绝不真发网络）。 */
 type FetchLike = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal },
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    signal: AbortSignal;
+  },
 ) => Promise<{ ok: boolean; status: number }>;
 
 @Injectable()
@@ -99,7 +102,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     // 平台配置播种（data_provider 无 RLS，owner 连接写入）。失败要**大声**：seed 静默失败意味着
     // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
     await new DiscoveryProviderRegistry().seed(this.db).catch((err) => {
-      this.logger.error(`provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`);
+      this.logger.error(
+        `provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`,
+      );
     });
     // 制裁名单源 + source_policy seed（第五门，DISABLED；API-only 部署也需登记 source_policy 供 broker 门）。
     await seedSanctions(this.db).catch((err) => {
@@ -162,6 +167,14 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           data: { publishedAt: new Date() },
         });
       } catch (err) {
+        if (err instanceof NonRetryableOutboxCommandError) {
+          await this.db.outboxEvent.update({
+            where: { id: ev.id },
+            data: { parkedAt: new Date() },
+          });
+          this.logger.error(`invalid internal command ${ev.eventId} parked: ${err.message}`);
+          return;
+        }
         this.logger.error(`dispatch failed for event ${ev.eventId}: ${String(err)}`);
       }
       return;
@@ -171,7 +184,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.db.$transaction(async (tx) => {
           await tx.outboxDelivery.createMany({
-            data: sinks.map((sink) => ({ workspaceId: ev.workspaceId, eventId: ev.eventId, sink })),
+            data: sinks.map((sink) => ({
+              workspaceId: ev.workspaceId,
+              eventId: ev.eventId,
+              sink,
+            })),
             skipDuplicates: true,
           });
           await tx.outboxEvent.update({
@@ -312,7 +329,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         // 原子成对（E）：EXPIRED 置位与 ClaimExpired 事件同事务——两步分离时若在中间崩溃，
         // 状态已翻但事件永久丢失（ClaimExpired 是对外交付事件，丢失 = SaaS 漏收到期通知）。
         await this.db.$transaction([
-          this.db.claim.update({ where: { id: c.id }, data: { status: 'EXPIRED' } }),
+          this.db.claim.update({
+            where: { id: c.id },
+            data: { status: 'EXPIRED' },
+          }),
           this.db.outboxEvent.create({
             data: {
               workspaceId: c.workspaceId,
@@ -354,6 +374,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private async dispatch(ev: {
     eventId: string;
     eventType: string;
+    schemaVersion: number;
     workspaceId: string;
     aggregateId: string;
     payload: unknown;
@@ -366,7 +387,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           taskQueue: UNDERSTANDING_TASK_QUEUE,
           workflowId: `understanding-${ev.aggregateId}`,
           args: [
-            { workspaceId: ev.workspaceId, companyId: ev.aggregateId, website: payload.website ?? '' },
+            {
+              workspaceId: ev.workspaceId,
+              companyId: ev.aggregateId,
+              website: payload.website ?? '',
+            },
           ],
         },
         `understanding workflow for company ${ev.aggregateId}`,
@@ -405,7 +430,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     if (ev.eventType === 'DeletionRequested') {
       // 收口⑥ PR-B：起 GDPR Art.17 删除编排。workflowId=deletion-<requestId> 唯一，重放合并到在跑实例。
-      const payload = (ev.payload ?? {}) as { subjectType?: string; subjectId?: string };
+      const payload = (ev.payload ?? {}) as {
+        subjectType?: string;
+        subjectId?: string;
+      };
       await this.startWorkflowIdempotent(
         DELETION_WORKFLOW,
         {
@@ -425,21 +453,33 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     if (ev.eventType === 'AssetObjectCleanupRequested') {
       const payload = (ev.payload ?? {}) as Record<string, unknown>;
-      if (payload.assetId !== ev.aggregateId) {
-        throw new Error('cleanup payload assetId must match Outbox aggregateId');
-      }
-      const command = parseAssetCleanupCommand({
-        eventId: ev.eventId,
-        workspaceId: ev.workspaceId,
-        assetId: ev.aggregateId,
-        siteId: payload.siteId,
-        objectKey: payload.objectKey,
-        objectClass: payload.objectClass,
-        reason: payload.reason,
-        notBefore: payload.notBefore,
-      });
-      if (!matchesAssetCleanupPayload(payload, command)) {
-        throw new Error('cleanup Outbox payload contains unknown or mismatched fields');
+      let command: ReturnType<typeof parseAssetCleanupCommand>;
+      try {
+        if (payload.assetId !== ev.aggregateId) {
+          throw new Error('cleanup payload assetId must match Outbox aggregateId');
+        }
+        if (
+          (payload.objectClass === 'staging' && ev.schemaVersion !== 1) ||
+          (payload.objectClass === 'canonical' && ev.schemaVersion !== 2)
+        ) {
+          throw new Error('cleanup Outbox schemaVersion does not match objectClass');
+        }
+        command = parseAssetCleanupCommand({
+          eventId: ev.eventId,
+          workspaceId: ev.workspaceId,
+          assetId: ev.aggregateId,
+          siteId: payload.siteId,
+          objectClass: payload.objectClass,
+          reason: payload.reason,
+          ...(payload.objectClass === 'staging'
+            ? { objectKey: payload.objectKey, notBefore: payload.notBefore }
+            : { canonical: payload.canonical, variants: payload.variants }),
+        });
+        if (!matchesAssetCleanupPayload(payload, command)) {
+          throw new Error('cleanup Outbox payload contains unknown or mismatched fields');
+        }
+      } catch (error) {
+        throw new NonRetryableOutboxCommandError(error instanceof Error ? error.message : String(error));
       }
       await this.startWorkflowIdempotent(
         ASSET_OBJECT_CLEANUP_WORKFLOW,
@@ -448,7 +488,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           workflowId: ev.eventId,
           args: [command],
         },
-        `asset staging cleanup for event ${ev.eventId}`,
+        `asset ${command.objectClass} cleanup for event ${ev.eventId}`,
       );
     }
   }

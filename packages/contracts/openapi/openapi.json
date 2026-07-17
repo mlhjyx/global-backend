@@ -5899,7 +5899,7 @@
             }
           },
           "409": {
-            "description": "Asset 正由 commit/KB worker 持有",
+            "description": "Asset 正被 Profile/active SiteSpec 引用，或由 commit/KB/Variant worker 持有",
             "content": {
               "application/json": {
                 "schema": {
@@ -5926,7 +5926,8 @@
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
                             "ASSET_STORAGE_UNAVAILABLE",
-                            "ASSET_COMMIT_UNAVAILABLE"
+                            "ASSET_COMMIT_UNAVAILABLE",
+                            "ASSET_IN_USE"
                           ]
                         },
                         "message": {
@@ -5934,7 +5935,45 @@
                         },
                         "details": {
                           "type": "object",
-                          "additionalProperties": true
+                          "description": "ASSET_IN_USE 时包含稳定的 usages 引用清单。",
+                          "additionalProperties": true,
+                          "properties": {
+                            "usages": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "source",
+                                  "page",
+                                  "component",
+                                  "fieldPath"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                  "source": {
+                                    "type": "string",
+                                    "enum": [
+                                      "profile",
+                                      "site_spec"
+                                    ]
+                                  },
+                                  "siteVersionId": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "page": {
+                                    "type": "string"
+                                  },
+                                  "component": {
+                                    "type": "string"
+                                  },
+                                  "fieldPath": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -5949,7 +5988,7 @@
             "bearer": []
           }
         ],
-        "summary": "软删除素材；canonical 清理等待 MF-0 引用扫描器",
+        "summary": "引用守卫通过后软删除素材；对象由异步清理回收",
         "tags": [
           "SiteBuilder"
         ]

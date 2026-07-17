@@ -5,12 +5,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
-import {
-  buildDemoSpec,
-  DEMO_SPEC_VERSION,
-  DemoCopyPolish,
-  sanitizePolish,
-} from '../site-builder/demo-spec';
+import { buildDemoSpec, DEMO_SPEC_VERSION, DemoCopyPolish, sanitizePolish } from '../site-builder/demo-spec';
 import type { IntakeInput } from '../site-builder/intake.service';
 import type { KbService } from '../site-builder/kb.service';
 import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
@@ -30,6 +25,7 @@ import {
 import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
 import { buildKbDigest } from '../site-builder/agents/kb-digest';
 import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
+import { lockSiteSpecAssetsForActivation } from '../site-builder/asset-reference-gate';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 
@@ -203,22 +199,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
     let stage = 'list-queued';
     activity?.heartbeat({ siteId, stage });
-    const heartbeatTimer = activity
-      ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000)
-      : undefined;
+    const heartbeatTimer = activity ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000) : undefined;
     heartbeatTimer?.unref();
     try {
-      return await kb.processQueued(
-        { userId: 'system', workspaceId, roles: [] },
-        siteId,
-        {
-          signal: activity?.cancellationSignal,
-          heartbeat: (nextStage) => {
-            stage = nextStage;
-            activity?.heartbeat({ siteId, stage });
-          },
+      return await kb.processQueued({ userId: 'system', workspaceId, roles: [] }, siteId, {
+        signal: activity?.cancellationSignal,
+        heartbeat: (nextStage) => {
+          stage = nextStage;
+          activity?.heartbeat({ siteId, stage });
         },
-      );
+      });
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
     }
@@ -274,6 +264,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         });
 
         await prisma.withWorkspace(workspaceId, async (tx) => {
+          await lockSiteSpecAssetsForActivation(tx, { workspaceId, siteId, spec: doc });
           await tx.siteVersion.update({
             where: { id: version.id },
             data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
@@ -395,9 +386,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     },
 
     /** P1：消化该站 queued KB 文档（fail-safe：workflow 侧降级不阻断构建）。 */
-    async ingestPendingKb(
-      input: RefurbishActivityInput,
-    ): Promise<{ processed: number; failed: number }> {
+    async ingestPendingKb(input: RefurbishActivityInput): Promise<{ processed: number; failed: number }> {
       return processQueuedForSite(input.workspaceId, input.siteId);
     },
 
@@ -541,9 +530,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         throw new Error(`run ${buildRunId} not running (cancelled?) — skip brand profile`);
       }
       const intake = site.intake as unknown as IntakeInput;
-      const profile = sanitizeProfileForPrompt(
-        (site.profile as Record<string, unknown> | null) ?? undefined,
-      );
+      const profile = sanitizeProfileForPrompt((site.profile as Record<string, unknown> | null) ?? undefined);
 
       const digestDocs = kb?.digestSources
         ? await kb.digestSources({ userId: 'system', workspaceId, roles: [] }, siteId)
@@ -567,10 +554,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         );
       }
 
-      const result = await runAiTask<
-        Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
-        BrandProfileOutput
-      >(
+      const result = await runAiTask<Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0], BrandProfileOutput>(
         BRAND_PROFILE_TASK,
         {
           companyName: intake.company.nameEn ?? intake.company.nameZh,
@@ -675,8 +659,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           });
           break;
         } catch (err) {
-          const isVersionClash =
-            err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+          const isVersionClash = err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
           if (isVersionClash && attempt < 4) continue; // 并发撞版本→重算，不让整活动 attempt 重跑
           throw err;
         }
@@ -695,9 +678,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
-    async assembleAndBuild(
-      input: RefurbishActivityInput,
-    ): Promise<{ previewSlug: string; versionId: string }> {
+    async assembleAndBuild(input: RefurbishActivityInput): Promise<{ previewSlug: string; versionId: string }> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       const { site, existing } = await prisma.withWorkspace(workspaceId, async (tx) => {
@@ -789,6 +770,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         if (published.count === 0) {
           throw new Error(`run ${buildRunId} not publishable (cancelled?) — pointer untouched`);
         }
+        const targetVersion = await tx.siteVersion.findFirst({
+          where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
+          select: { spec: true },
+        });
+        if (!targetVersion) throw new Error(`site version ${build.versionId} is not activatable`);
+        await lockSiteSpecAssetsForActivation(tx, {
+          workspaceId,
+          siteId,
+          spec: targetVersion.spec,
+        });
         // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
         await tx.site.update({
           where: { id: siteId },

@@ -3,8 +3,8 @@
 > **薄版媒体合同的裁决已在别处，本文只做施工级展开。** 决策真值 = [00-decisions MF-0 裁决](00-decisions-and-coordination.md)（2026-07-15）+ [`docs/adr/registry.md` ADR-018](../adr/registry.md)（MF-0 媒体地基·薄版）；契约周边真值 = [02-architecture §8](02-architecture.md)（素材与版权基线）+ [04-sitespec-contract §4](04-sitespec-contract.md)（资产引用约定）+ DQ-1 `@global/contracts`（SiteSpec 1.0.0）。本文**非权威**、不自封"单一入口"；它把 ADR-018 的两句薄合同展开成可施工的表结构、扫描器、处理矩阵与分期触发条件，并把 v3.2 §20–§21 里关于图片/视频/音频的实质设计**回写归档**，好让 v3.2 归档时零内容损失。
 >
 > **严格分层（勿混淆 as-built 与 target）**：
-> - **当前 as-built（MF0-A，2026-07-17）**：`AssetVariant` additive 表、复合租户/站点/Asset provenance、RLS/FORCE RLS、单输出 recipe hash 与 `derivedKeys` 纯兼容投影已落；`MediaJob`/`AssetUsage`/`SiteRelease` 仍不存在。删除扫描器、409 与 canonical/Variant 异步回收属于紧接的 MF0-B，**尚未落地**。
-> - **M1-c as-built 目标**（本文 §4，near-term，**尚未落地**）：MF0-B 收口后再落纯 Sharp 确定性图片管线并写 `AssetVariant`；不得把 MF0-A 当成整个 MF-0 已完成。
+> - **当前 as-built（MF0-A + MF0-B，2026-07-17）**：`AssetVariant` 数据地基、Profile + 当前 `activeVersionId` 引用守卫、共享 Asset 行锁、`409 ASSET_IN_USE`、严格 canonical/Variant Temporal 回收与历史 parked 对账已落；`MediaJob`/`AssetUsage`/`SiteRelease`、Sharp writer 仍不存在。
+> - **M1-c as-built 目标**（本文 §4，near-term，**尚未落地**）：MF0-B 已收口，下一项落纯 Sharp 确定性图片管线并写 `AssetVariant`。
 > - **MF-1 目标**（本文 §6，事件触发补建，YAGNI）：`MediaJob`/`AssetUsage`——**接生成式/异步媒体或跨 Release 持久反查的第一个真实消费者前**才落，不提前建。
 > - **M3 目标**（本文 §7–§8，远期，全为 target）：视频与音频（VideoBrief/Shot/Seedance/旁白/播放/ReleaseManifest 媒体组合）。
 
@@ -25,7 +25,7 @@
 | 阶段 | 新增 | 触发条件（何时才落） | 合并门 |
 |---|---|---|---|
 | **MF0-A ✅** | `AssetVariant` + RLS/FORCE RLS + recipe/checksum/provenance + derivedKeys 纯兼容投影 | 2026-07-17 | 真 PostgreSQL A/B RLS、复合 FK/CHECK、并发 recipe、空库迁移与 schema diff |
-| **MF0-B** | `SiteSpecAssetReferenceScanner` + Profile 引用面 + 删除 409 + 并发写侧门 + canonical/Variant 严格异步回收 | MF0-A 后立即施工（阻断 M1-c） | §3 + 真 PostgreSQL 并发、MinIO/Temporal/redrive/历史 parked 对账 |
+| **MF0-B ✅** | `SiteSpecAssetReferenceScanner` + Profile 引用面 + 删除 409 + 并发写侧门 + canonical/Variant 严格异步回收 | 2026-07-17 | §3 + 真 PostgreSQL 并发、MinIO/Temporal/replay/历史 parked 对账 |
 | **M1-c** | 无新表；纯 Sharp 处理 + 写 `AssetVariant` | MF0-A/B 全部合并后 | §4 处理矩阵 + v3.2 §20.7 合并门 |
 | **MF-1** | `MediaJob` / `AssetUsage` | **第一个**生成式/异步 MediaJob 消费者，**或**第一个需跨 Release 持久反查 AssetUsage 的消费者出现前 | Job↔Variant 事务边界 + 补偿/对账 + rights |
 | **M3** | 视频/音频/字幕 Variant 种类 + 视频 provider adapter | 视频真实消费者；**MF-1 必须先于任何视频 provider adapter 合并** | §7 全部门 + 主体/时序/成本门 |
@@ -55,12 +55,17 @@
 MF-0-thin 阶段的删除保护是一个**确定性扫描器**，不是 `AssetUsage` 表（那是 MF-1）：
 
 - **输入**：待删 `assetId`。
-- **扫描面**：所有 **active draft / published** SiteSpec 里的 `AssetRef`（04 §4 约定：`props.image = {assetId, usage, focalPoint?}`、视频同理 `videoRef`；🔴 禁外链 URL 直嵌，见 ADR-014）。
-- **命中即拒**：返回 **HTTP 409** + **结构化引用列表**（稳定的 `page`/`component`/`fieldPath`）。替换流程 = **先改 spec 再删**，不允许先删造成悬空引用。
-- **覆盖要求**：扫描器必须**单元测试**且与 SiteSpec **1.0.0 合同同步**——覆盖 1.0.0 全部 `AssetRef` 位置（image/logo/cert/video/poster 等）。合同升 minor 新增引用位时扫描器同步扩。
+- **当前扫描面**：Profile 三个正式引用面（`brand.logoAssetId`、认证 `certificateAssetIds`、客户案例 `assetIds`）+ `Site.activeVersionId` 指向的**唯一当前 SiteVersion**。当前 schema 没有 preview/published 双指针；历史版本不阻止删除，但未来重新激活时必须在切指针事务内重新验证。
+- **SiteSpec 1.0.0**：manifest 的 UUID、kind、hash 必须与同站 ready/checksummed Asset 对账；开放 `root.props`/`content[].props` 采用有界递归，并按媒体字段语义识别 `assetId`/`*AssetId`/`*AssetIds` 与 `videoRef` 引用，明确排除组件 `id`、`offeringRef` 等业务 UUID。任何语义媒体引用未进 manifest、畸形 envelope/page/puck/block、重复大小写 UUID、未知版本、超深/超量均 fail-closed。
+- **命中即拒**：返回 **HTTP 409 `ASSET_IN_USE`** + `details.usages[]`；每项稳定含 `source/page/component/fieldPath`，SiteSpec 项另带 `siteVersionId`。替换流程 = **先改 Profile/Spec 再删**。
+- **并发不变量**：Profile PATCH、activeVersion 指针切换、Variant INSERT/UPDATE 与 DELETE 使用同一 Asset 行锁纪律；Variant 另有 DB trigger backstop。任一顺序都不能让引用写与 tombstone 同时成功。
 - **接口不变式**：MF-1 上线后由**同一接口**切换到 `AssetUsage` 查询实现，**调用方无感**（先扫描器、后反查表，API 契约稳定）。
 
-> 对象清理**不在 DB 事务内执行**（MinIO 对象、Variant 行、checksum 三者可对账；先事务删行、后异步清对象）。
+> DELETE 事务只写 tombstone、不可变 schema v2 cleanup plan 与 Outbox，不做 MinIO IO。Temporal 两轮按 Variant 叶→根、canonical 最后执行 Delete+HEAD，随后在重新核对 Outbox/Asset/冻结计划后删 Variant 行并 durable settle。canonical key 在旧 cleanup settle 前禁止复用；settle 后旧事件完整重放为 no-op。历史 v1 parked 事件默认 dry-run，eligible 才生成带 `causationId` 的 v2 successor，不篡改旧事件。
+
+> commit 的 canonical copy 位于同 content-key advisory transaction 内；当前 Asset 行同时 `FOR UPDATE`，避免 DELETE 穿过 copy/finalize 窗口。若 copy 成功而后续数据库 finalize/commit 失败，会在同 key 锁下确认无 owner 后 Delete+HEAD 补偿；补偿失败则在 retryable Asset 上持久标记并阻止 DELETE，直到重试 commit 收口。
+
+> **迁移 rollout**：050000 先 additive 建 cleanup ownership 与 trigger；051000 将迁移前未绑定 tombstone 标为 `cleanupLegacyUnbound`、禁止新写伪造该标记，并把 lifecycle CHECK 收为 validated。operator 对账会清除 eligible 的标记；referenced/busy/inconsistent 保持隔离并需人工处置。Ubuntu `global_dev` 的 46 migrations、validated constraint、schema diff=0 与真服务验证仅代表开发环境，不代表生产部署。
 
 ## 4. 图片处理矩阵：纯 Sharp 确定性算法（M1-c · v3.2 §20.4 回写）
 

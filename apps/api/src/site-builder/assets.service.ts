@@ -6,7 +6,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Asset } from '@prisma/client';
+import { Asset, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
@@ -22,6 +22,10 @@ import {
   sniffMime,
 } from './object-key';
 import { StorageService } from './storage.service';
+import { lockAssetForDeletion } from './asset-reference-gate';
+import { AssetReferenceScanError, type AssetReferenceUsage } from './asset-reference';
+import { SiteSpecAssetReferenceScanner } from './site-spec-asset-reference-scanner';
+import { parseAssetCleanupCommand } from '../temporal/asset-cleanup.contract';
 
 /** 声明大小的容差：直传字节数与 presign 声明差异超过此比例+固定余量即拒。 */
 const SIZE_TOLERANCE_RATIO = 1.05;
@@ -29,6 +33,7 @@ const SIZE_TOLERANCE_BYTES = 1024;
 const MAGIC_HEAD_BYTES = 16;
 const COMMIT_LEASE_MS = 15 * 60 * 1000;
 const COMMIT_RETRY_DELAY_MS = 30 * 1000;
+const CANONICAL_COMPENSATION_PENDING = 'canonical_copy_compensation_pending';
 /** presignPut 固定有效期；cleanup 还会追加代码固定的在途宽限与二次删除窗口。 */
 const PRESIGN_PUT_TTL_MS = 15 * 60 * 1000;
 
@@ -41,6 +46,7 @@ type AssetPublicErrorCode =
   | 'ASSET_DUPLICATE'
   | 'ASSET_STATE_CONFLICT'
   | 'ASSET_BUSY'
+  | 'ASSET_IN_USE'
   | 'ASSET_STORAGE_UNAVAILABLE'
   | 'ASSET_COMMIT_UNAVAILABLE';
 
@@ -48,41 +54,40 @@ function assetErrorBody(
   code: AssetPublicErrorCode,
   message: string,
   details?: Record<string, unknown>,
-): { error: { code: AssetPublicErrorCode; message: string; details?: Record<string, unknown> } } {
+): {
+  error: {
+    code: AssetPublicErrorCode;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+} {
   return { error: { code, message, ...(details ? { details } : {}) } };
 }
 
 function assetValidationError(reason: string, message: string): UnprocessableEntityException {
-  return new UnprocessableEntityException(
-    assetErrorBody('ASSET_VALIDATION_FAILED', message, { reason }),
-  );
+  return new UnprocessableEntityException(assetErrorBody('ASSET_VALIDATION_FAILED', message, { reason }));
 }
 
 function assetConflict(
   code: Extract<
     AssetPublicErrorCode,
-    'ASSET_UPLOAD_INCOMPLETE' | 'ASSET_DUPLICATE' | 'ASSET_STATE_CONFLICT' | 'ASSET_BUSY'
+    'ASSET_UPLOAD_INCOMPLETE' | 'ASSET_DUPLICATE' | 'ASSET_STATE_CONFLICT' | 'ASSET_BUSY' | 'ASSET_IN_USE'
   >,
   message: string,
+  details?: Record<string, unknown>,
 ): ConflictException {
-  return new ConflictException(assetErrorBody(code, message));
+  return new ConflictException(assetErrorBody(code, message, details));
 }
 
 function assetStorageUnavailable(): BadGatewayException {
   return new BadGatewayException(
-    assetErrorBody(
-      'ASSET_STORAGE_UNAVAILABLE',
-      'asset storage is temporarily unavailable; retry later',
-    ),
+    assetErrorBody('ASSET_STORAGE_UNAVAILABLE', 'asset storage is temporarily unavailable; retry later'),
   );
 }
 
 function assetCommitUnavailable(): ServiceUnavailableException {
   return new ServiceUnavailableException(
-    assetErrorBody(
-      'ASSET_COMMIT_UNAVAILABLE',
-      'asset commit is temporarily unavailable; retry later',
-    ),
+    assetErrorBody('ASSET_COMMIT_UNAVAILABLE', 'asset commit is temporarily unavailable; retry later'),
   );
 }
 
@@ -108,6 +113,7 @@ export class AssetsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly referenceScanner: SiteSpecAssetReferenceScanner = new SiteSpecAssetReferenceScanner(),
   ) {}
 
   async presign(ctx: RequestContext, siteId: string, input: PresignInput): Promise<PresignResult> {
@@ -145,7 +151,10 @@ export class AssetsService {
       throw assetStorageUnavailable();
     }
     await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const site = await tx.site.findUnique({ where: { id: siteId }, select: { id: true } });
+      const site = await tx.site.findUnique({
+        where: { id: siteId },
+        select: { id: true },
+      });
       if (!site) throw new NotFoundException('site not found');
       await tx.asset.create({
         data: {
@@ -171,7 +180,10 @@ export class AssetsService {
    */
   async commit(ctx: RequestContext, assetId: string): Promise<Asset> {
     const asset = await this.claimCommit(ctx, assetId);
-    const fence = { token: asset.leaseToken!, attempt: asset.processingAttempt };
+    const fence = {
+      token: asset.leaseToken!,
+      attempt: asset.processingAttempt,
+    };
     const stagingKey = asset.objectKey;
     let head: Awaited<ReturnType<StorageService['head']>>;
     try {
@@ -189,13 +201,7 @@ export class AssetsService {
     const max = maxBytesForKind(kind);
     const declaredCap = asset.sizeBytes * SIZE_TOLERANCE_RATIO + SIZE_TOLERANCE_BYTES;
     if (head.size > max || head.size > declaredCap) {
-      await this.markTerminalWithCleanup(
-        ctx,
-        asset,
-        fence,
-        'rejected',
-        `uploaded size ${head.size} exceeds limit`,
-      );
+      await this.markTerminalWithCleanup(ctx, asset, fence, 'rejected', `uploaded size ${head.size} exceeds limit`);
       throw assetValidationError('size_mismatch', 'uploaded asset exceeds its declared size');
     }
 
@@ -222,63 +228,97 @@ export class AssetsService {
 
     const ext = extForMime(asset.mime) ?? 'bin';
     const canonicalKey = buildObjectKey(ctx.workspaceId, asset.siteId, kind, sha256, ext);
-    const duplicate = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.asset.findFirst({
-        where: { objectKey: canonicalKey, deletedAt: null, NOT: { id: assetId } },
-        select: { id: true },
-      }),
-    );
-    if (duplicate) {
-      await this.markTerminalWithCleanup(
-        ctx,
-        asset,
-        fence,
-        'duplicate',
-        `duplicate content of asset ${duplicate.id}`,
-        sha256,
-      );
-      throw assetConflict('ASSET_DUPLICATE', 'asset content has already been uploaded');
-    }
-
-    try {
-      // canonical key 来自内容哈希；同源重试/并发 copy 到同一 key 是幂等的。
-      await this.storage.copy(stagingKey, canonicalKey);
-    } catch (err) {
-      await this.markRetryable(ctx, asset, fence, err);
-      throw assetStorageUnavailable();
-    }
-
     const nextStatus = KB_QUEUED_KINDS.has(kind) ? 'queued' : 'ready';
-    let committed: Asset | null;
+    await this.markCanonicalCopyPending(ctx, asset, fence, canonicalKey);
+    let copyAttempted = false;
+    let copyErrored = false;
+    let outcome:
+      | { kind: 'committed'; asset: Asset }
+      | { kind: 'duplicate'; ownerId: string }
+      | { kind: 'busy' }
+      | { kind: 'state_conflict' };
     try {
-      committed = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-        const moved = await tx.asset.updateMany({
-          where: {
-            id: assetId,
-            processingStatus: 'committing',
-            processingAttempt: fence.attempt,
-            leaseToken: fence.token,
-            deletedAt: null,
-          },
-          data: {
-            objectKey: canonicalKey,
-            contentHash: sha256,
-            processingStatus: nextStatus,
-            leaseToken: null,
-            leaseUntil: null,
-            retryAt: null,
-            error: null,
-          },
-        });
-        if (moved.count !== 1) return null;
-        await this.createCleanupIntent(tx, ctx, asset, stagingKey, 'staging', 'commit_succeeded');
-        return tx.asset.findUnique({ where: { id: assetId } });
-      });
+      outcome = await this.prisma.withWorkspace(
+        ctx.workspaceId,
+        async (tx) => {
+          // Serialize every producer of one content-addressed key. The durable cleanup state below
+          // also excludes an old cleanup that has passed provenance checks but not yet settled.
+          await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended(${canonicalKey}, 0))
+        `);
+          const claimed = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id
+            FROM asset
+            WHERE workspace_id = ${ctx.workspaceId}::uuid
+              AND id = ${assetId}::uuid
+              AND processing_status = 'committing'
+              AND processing_attempt = ${fence.attempt}
+              AND lease_token = ${fence.token}::uuid
+              AND deleted_at IS NULL
+            FOR UPDATE
+          `);
+          if (!claimed.some((row) => row.id === assetId)) return { kind: 'state_conflict' as const };
+          const owners = await tx.asset.findMany({
+            where: {
+              objectKey: canonicalKey,
+              NOT: { id: assetId },
+              OR: [{ deletedAt: null }, { cleanupCompletedAt: null }],
+            },
+            select: { id: true, deletedAt: true, cleanupCompletedAt: true },
+          });
+          const activeOwner = owners.find((owner) => !owner.deletedAt);
+          if (activeOwner) return { kind: 'duplicate' as const, ownerId: activeOwner.id };
+          if (owners.some((owner) => owner.deletedAt && !owner.cleanupCompletedAt)) {
+            return { kind: 'busy' as const };
+          }
+
+          try {
+            // Copy only after the authoritative same-key gate. Keeping this short storage call in
+            // the key-scoped transaction prevents copy→cleanup→finalize from publishing a missing
+            // object; DELETE itself never performs storage I/O in its transaction.
+            copyAttempted = true;
+            await this.storage.copy(stagingKey, canonicalKey);
+          } catch (error) {
+            copyErrored = true;
+            throw error;
+          }
+          const moved = await tx.asset.updateMany({
+            where: {
+              id: assetId,
+              processingStatus: 'committing',
+              processingAttempt: fence.attempt,
+              leaseToken: fence.token,
+              deletedAt: null,
+            },
+            data: {
+              objectKey: canonicalKey,
+              contentHash: sha256,
+              processingStatus: nextStatus,
+              leaseToken: null,
+              leaseUntil: null,
+              retryAt: null,
+              error: null,
+            },
+          });
+          if (moved.count !== 1) return { kind: 'state_conflict' as const };
+          await this.createCleanupIntent(tx, ctx, asset, stagingKey, 'staging', 'commit_succeeded');
+          const committed = await tx.asset.findUnique({
+            where: { id: assetId },
+          });
+          if (!committed) return { kind: 'state_conflict' as const };
+          return { kind: 'committed' as const, asset: committed };
+        },
+        { timeout: 60_000 },
+      );
     } catch (err) {
       if (this.isUniqueConstraintError(err)) {
         const winner = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
           tx.asset.findFirst({
-            where: { objectKey: canonicalKey, deletedAt: null, NOT: { id: assetId } },
+            where: {
+              objectKey: canonicalKey,
+              deletedAt: null,
+              NOT: { id: assetId },
+            },
             select: { id: true },
           }),
         );
@@ -294,14 +334,41 @@ export class AssetsService {
           throw assetConflict('ASSET_DUPLICATE', 'asset content has already been uploaded');
         }
       }
+      if (copyAttempted) {
+        const compensated = await this.compensateUnownedCanonicalCopy(ctx, canonicalKey);
+        await this.markRetryable(
+          ctx,
+          asset,
+          fence,
+          compensated
+            ? err
+            : new Error(`${CANONICAL_COMPENSATION_PENDING}: retry commit before deleting this asset`),
+        );
+        throw copyErrored ? assetStorageUnavailable() : assetCommitUnavailable();
+      }
       await this.markRetryable(ctx, asset, fence, err);
       throw assetCommitUnavailable();
     }
 
-    if (!committed) {
+    if (outcome.kind === 'duplicate') {
+      await this.markTerminalWithCleanup(
+        ctx,
+        asset,
+        fence,
+        'duplicate',
+        `duplicate content of asset ${outcome.ownerId}`,
+        sha256,
+      );
+      throw assetConflict('ASSET_DUPLICATE', 'asset content has already been uploaded');
+    }
+    if (outcome.kind === 'busy') {
+      await this.markRetryable(ctx, asset, fence, new Error('canonical key is awaiting cleanup settlement'));
+      throw assetConflict('ASSET_BUSY', 'matching content is still being safely cleaned up');
+    }
+    if (outcome.kind === 'state_conflict') {
       throw assetConflict('ASSET_STATE_CONFLICT', 'asset state changed; refresh and retry');
     }
-    return committed;
+    return outcome.asset;
   }
 
   async list(ctx: RequestContext, siteId: string, kind?: string): Promise<Asset[]> {
@@ -309,7 +376,10 @@ export class AssetsService {
       throw assetValidationError('unsupported_kind', 'unsupported asset kind');
     }
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const site = await tx.site.findUnique({ where: { id: siteId }, select: { id: true } });
+      const site = await tx.site.findUnique({
+        where: { id: siteId },
+        select: { id: true },
+      });
       if (!site) throw new NotFoundException('site not found');
       return tx.asset.findMany({
         where: { siteId, deletedAt: null, ...(kind ? { kind } : {}) },
@@ -318,16 +388,85 @@ export class AssetsService {
     });
   }
 
-  /**
-   * 删除只做 DB tombstone + durable cleanup intent。MF-0 引用扫描器落地前，
-   * canonical intent 明确 parked；staging 由 Temporal 在 URL 到期后继续等待固定在途窗口，
-   * 并以首删 + durable settle + 二次删除收口，不把“仅到期”当成无在途 PUT 的证明。
-   */
+  /** DELETE performs reference checks, tombstone and a strict durable cleanup intent only.
+   * Storage I/O remains in Temporal; canonical cleanup is enabled by MF0-B. */
   async remove(ctx: RequestContext, assetId: string): Promise<void> {
     await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      if (
+        !(await lockAssetForDeletion(tx, {
+          workspaceId: ctx.workspaceId,
+          assetId,
+        }))
+      ) {
+        throw new NotFoundException('asset not found');
+      }
       const asset = await tx.asset.findUnique({ where: { id: assetId } });
       if (!asset || asset.deletedAt) throw new NotFoundException('asset not found');
+      if (
+        asset.processingStatus === 'failed_retryable' &&
+        asset.error?.startsWith(CANONICAL_COMPENSATION_PENDING)
+      ) {
+        throw assetConflict('ASSET_BUSY', 'retry asset commit before deleting its pending canonical copy');
+      }
+      let usages: AssetReferenceUsage[];
+      try {
+        usages = await this.referenceScanner.scan(tx, {
+          siteId: asset.siteId,
+          assetId: asset.id,
+        });
+      } catch (error) {
+        if (error instanceof AssetReferenceScanError) {
+          throw assetConflict(
+            'ASSET_STATE_CONFLICT',
+            'active site references cannot be verified; repair the site state before deleting this asset',
+          );
+        }
+        throw error;
+      }
+      if (usages.length > 0) {
+        throw assetConflict('ASSET_IN_USE', 'asset is referenced by the active site or profile', {
+          usages,
+        });
+      }
+      const variants = await tx.assetVariant.findMany({
+        where: { assetId },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          objectKey: true,
+          contentHash: true,
+          recipeHash: true,
+          sourceVariantId: true,
+          status: true,
+        },
+      });
+      if (variants.some((variant) => variant.status === 'processing')) {
+        throw assetConflict('ASSET_BUSY', 'asset has a processing variant');
+      }
       const objectClass = this.isStagingKey(asset.objectKey) ? 'staging' : 'canonical';
+      if (objectClass === 'canonical' && !asset.contentHash) {
+        throw assetConflict('ASSET_STATE_CONFLICT', 'canonical asset lacks a checksum');
+      }
+      const cleanupEventId = randomUUID();
+      const canonicalCommand =
+        objectClass === 'canonical'
+          ? parseAssetCleanupCommand({
+              eventId: cleanupEventId,
+              workspaceId: ctx.workspaceId,
+              siteId: asset.siteId,
+              assetId: asset.id,
+              objectClass: 'canonical',
+              reason: 'asset_deleted',
+              canonical: {
+                objectKey: asset.objectKey,
+                contentHash: asset.contentHash,
+              },
+              variants: variants.map((variant) => ({
+                ...variant,
+                status: variant.status as 'ready' | 'failed',
+              })),
+            })
+          : null;
       const moved = await tx.asset.updateMany({
         // 与 commit/KB claim 做同一行 CAS：进行中的 worker 必须先完成或释放，
         // 否则 delete 可能在 copy 已完成、canonical 尚未回写的窗口制造不可追踪孤儿。
@@ -343,6 +482,8 @@ export class AssetsService {
           leaseUntil: null,
           retryAt: null,
           processingErrorCode: null,
+          cleanupEventId,
+          cleanupCompletedAt: null,
         },
       });
       if (moved.count !== 1) {
@@ -350,7 +491,21 @@ export class AssetsService {
       }
       // chunk 由 KbDocument FK 级联；同事务移除检索面，避免已删资料继续被命中。
       await tx.kbDocument.deleteMany({ where: { assetId } });
-      await this.createCleanupIntent(tx, ctx, asset, asset.objectKey, objectClass, 'asset_deleted');
+      await this.createCleanupIntent(
+        tx,
+        ctx,
+        asset,
+        asset.objectKey,
+        objectClass,
+        'asset_deleted',
+        cleanupEventId,
+        canonicalCommand?.objectClass === 'canonical'
+          ? {
+              canonical: canonicalCommand.canonical,
+              variants: canonicalCommand.variants,
+            }
+          : undefined,
+      );
     });
   }
 
@@ -455,6 +610,60 @@ export class AssetsService {
     }
   }
 
+  private async markCanonicalCopyPending(
+    ctx: RequestContext,
+    asset: Asset,
+    fence: { token: string; attempt: number },
+    canonicalKey: string,
+  ): Promise<void> {
+    const moved = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.asset.updateMany({
+        where: {
+          id: asset.id,
+          processingStatus: 'committing',
+          processingAttempt: fence.attempt,
+          leaseToken: fence.token,
+          deletedAt: null,
+        },
+        data: { error: `${CANONICAL_COMPENSATION_PENDING}:${canonicalKey}` },
+      }),
+    );
+    if (moved.count !== 1) {
+      throw assetConflict('ASSET_STATE_CONFLICT', 'asset state changed; refresh and retry');
+    }
+  }
+
+  /**
+   * A storage copy is outside PostgreSQL rollback semantics. If a later DB statement/commit fails,
+   * reacquire the same content-key fence and remove the copy only when no live or unsettled owner
+   * appeared. A failed compensation is made durable on the retryable Asset so DELETE cannot hide it.
+   */
+  private async compensateUnownedCanonicalCopy(ctx: RequestContext, canonicalKey: string): Promise<boolean> {
+    try {
+      return await this.prisma.withWorkspace(
+        ctx.workspaceId,
+        async (tx) => {
+          await tx.$executeRaw(Prisma.sql`
+            SELECT pg_advisory_xact_lock(hashtextextended(${canonicalKey}, 0))
+          `);
+          const owner = await tx.asset.findFirst({
+            where: {
+              objectKey: canonicalKey,
+              OR: [{ deletedAt: null }, { cleanupCompletedAt: null }],
+            },
+            select: { id: true },
+          });
+          if (owner) return true;
+          await this.storage.delete(canonicalKey);
+          return (await this.storage.head(canonicalKey)) === null;
+        },
+        { timeout: 60_000 },
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private async markTerminalWithCleanup(
     ctx: RequestContext,
     asset: Asset,
@@ -506,28 +715,41 @@ export class AssetsService {
     objectKey: string,
     objectClass: 'staging' | 'canonical',
     reason: string,
+    eventId?: string,
+    canonicalPlan?: {
+      canonical: { objectKey: string; contentHash: string };
+      variants: Array<{
+        id: string;
+        objectKey: string;
+        contentHash: string | null;
+        recipeHash: string;
+        sourceVariantId: string | null;
+        status: 'ready' | 'failed';
+      }>;
+    },
   ): Promise<void> {
     await tx.outboxEvent.create({
       data: {
+        ...(eventId ? { eventId } : {}),
         workspaceId: ctx.workspaceId,
         eventType: 'AssetObjectCleanupRequested',
-        schemaVersion: 1,
+        schemaVersion: objectClass === 'canonical' ? 2 : 1,
         aggregateType: 'Asset',
         aggregateId: asset.id,
         privacyClassification: 'INTERNAL',
-        parkedAt: objectClass === 'canonical' ? new Date() : null,
+        parkedAt: null,
         payload: {
           assetId: asset.id,
           siteId: asset.siteId,
-          objectKey,
           objectClass,
           reason,
           ...(objectClass === 'staging'
-            ? { notBefore: new Date(asset.createdAt.getTime() + PRESIGN_PUT_TTL_MS).toISOString() }
+            ? {
+                objectKey,
+                notBefore: new Date(asset.createdAt.getTime() + PRESIGN_PUT_TTL_MS).toISOString(),
+              }
             : {}),
-          ...(objectClass === 'canonical'
-            ? { blockedUntil: 'site_spec_asset_reference_scanner' }
-            : {}),
+          ...(objectClass === 'canonical' ? canonicalPlan : {}),
         },
       },
     });

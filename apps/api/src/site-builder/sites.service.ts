@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma, Site } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
@@ -15,6 +11,8 @@ import {
   ProfileResult,
   ProfileVersionConflictException,
 } from './profile-contract';
+import { extractProfileAssetReferences } from './asset-reference';
+import { AssetReferenceGateError, lockLiveAssetsForReference } from './asset-reference-gate';
 
 /** 站点列表/详情/建站向导档案（07 §2）。租户隔离由 withWorkspace + RLS 兜底。 */
 @Injectable()
@@ -22,9 +20,7 @@ export class SitesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(ctx: RequestContext): Promise<Site[]> {
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.site.findMany({ orderBy: { createdAt: 'asc' } }),
-    );
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) => tx.site.findMany({ orderBy: { createdAt: 'asc' } }));
   }
 
   async get(ctx: RequestContext, siteId: string): Promise<Site> {
@@ -35,10 +31,7 @@ export class SitesService {
     return site;
   }
 
-  async getProfile(
-    ctx: RequestContext,
-    siteId: string,
-  ): Promise<ProfileResult> {
+  async getProfile(ctx: RequestContext, siteId: string): Promise<ProfileResult> {
     const site = await this.get(ctx, siteId);
     const profile = ((site.profile as Profile | null) ?? {}) as Profile;
     assertReadableProfileState(profile, site.profileVersionId);
@@ -62,19 +55,12 @@ export class SitesService {
       });
       if (!site) throw new NotFoundException('site not found');
       if (site.profileVersionId !== precondition.expectedVersionId) {
-        throw new ProfileVersionConflictException(
-          site.profileVersionId,
-          siteId,
-          precondition,
-        );
+        throw new ProfileVersionConflictException(site.profileVersionId, siteId, precondition);
       }
 
-      const merged = mergeProfile(
-        site.profile as Record<string, unknown> | null,
-        patch,
-      );
+      const merged = mergeProfile(site.profile as Record<string, unknown> | null, patch);
       assertValidProfileState(merged);
-      await this.assertAssetReferences(tx, siteId, merged);
+      await this.assertAssetReferences(tx, ctx.workspaceId, siteId, merged);
 
       const nextVersionId = nextProfileVersionId();
       const changed = await tx.site.updateMany({
@@ -91,11 +77,7 @@ export class SitesService {
           select: { profileVersionId: true },
         });
         if (!current) throw new NotFoundException('site not found');
-        throw new ProfileVersionConflictException(
-          current.profileVersionId,
-          siteId,
-          precondition,
-        );
+        throw new ProfileVersionConflictException(current.profileVersionId, siteId, precondition);
       }
       return { ...merged, versionId: nextVersionId };
     });
@@ -104,78 +86,51 @@ export class SitesService {
   /** Asset UUIDs are not capabilities: all references must resolve through current workspace RLS and site. */
   private async assertAssetReferences(
     tx: Prisma.TransactionClient,
+    workspaceId: string,
     siteId: string,
     patch: Profile,
   ): Promise<void> {
-    const references: Array<{ id: string; kind?: string; path: string }> = [];
-    const brand = patch.brand as { logoAssetId?: string } | null | undefined;
-    if (brand?.logoAssetId) {
-      references.push({
-        id: brand.logoAssetId,
-        kind: 'logo',
-        path: '/brand/logoAssetId',
-      });
-    }
-
-    const trust = patch.trustAssets as
-      | {
-          certifications?: Array<{ certificateAssetIds?: string[] }>;
-          customerCases?: Array<{ assetIds?: string[] }>;
-        }
-      | null
-      | undefined;
-    for (const [certificationIndex, certification] of (
-      trust?.certifications ?? []
-    ).entries()) {
-      for (const [assetIndex, id] of (
-        certification.certificateAssetIds ?? []
-      ).entries()) {
-        references.push({
-          id,
-          kind: 'cert',
-          path: `/trustAssets/certifications/${certificationIndex}/certificateAssetIds/${assetIndex}`,
-        });
-      }
-    }
-    for (const [caseIndex, customerCase] of (
-      trust?.customerCases ?? []
-    ).entries()) {
-      for (const [assetIndex, id] of (customerCase.assetIds ?? []).entries()) {
-        references.push({
-          id,
-          path: `/trustAssets/customerCases/${caseIndex}/assetIds/${assetIndex}`,
-        });
-      }
-    }
+    const references = extractProfileAssetReferences(patch);
     if (references.length === 0) return;
-
-    const assets = await tx.asset.findMany({
-      where: {
-        id: { in: [...new Set(references.map((reference) => reference.id))] },
+    let assets: Awaited<ReturnType<typeof lockLiveAssetsForReference>>;
+    try {
+      assets = await lockLiveAssetsForReference(tx, {
+        workspaceId,
         siteId,
-        deletedAt: null,
-      },
-      select: { id: true, kind: true },
-    });
+        assetIds: references.map((reference) => reference.assetId),
+      });
+    } catch (error) {
+      if (!(error instanceof AssetReferenceGateError)) throw error;
+      const missing = references.find((reference) => error.assetIds.includes(reference.assetId))!;
+      throw this.invalidProfileAssetReference(missing);
+    }
     const found = new Map(assets.map((asset) => [asset.id, asset.kind]));
     for (const reference of references) {
       if (
-        !found.has(reference.id) ||
-        (reference.kind && found.get(reference.id) !== reference.kind)
+        !found.has(reference.assetId) ||
+        (reference.expectedKind && found.get(reference.assetId) !== reference.expectedKind)
       ) {
-        throw new UnprocessableEntityException({
-          error: {
-            code: 'PROFILE_VALIDATION_FAILED',
-            message: 'profile asset reference is invalid',
-            details: {
-              field: 'assetId',
-              path: reference.path,
-              assetId: reference.id,
-              expectedKind: reference.kind ?? 'any',
-            },
-          },
-        });
+        throw this.invalidProfileAssetReference(reference);
       }
     }
+  }
+
+  private invalidProfileAssetReference(reference: {
+    assetId: string;
+    expectedKind?: string;
+    fieldPath: string;
+  }): UnprocessableEntityException {
+    return new UnprocessableEntityException({
+      error: {
+        code: 'PROFILE_VALIDATION_FAILED',
+        message: 'profile asset reference is invalid',
+        details: {
+          field: 'assetId',
+          path: reference.fieldPath,
+          assetId: reference.assetId,
+          expectedKind: reference.expectedKind ?? 'any',
+        },
+      },
+    });
   }
 }

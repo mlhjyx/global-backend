@@ -1,9 +1,6 @@
 import { ApplicationFailure, log, proxyActivities, sleep } from '@temporalio/workflow';
 import type { createAssetCleanupActivities } from './asset-cleanup.activities';
-import {
-  AssetCleanupCommand,
-  parseAssetCleanupCommand,
-} from './asset-cleanup.contract';
+import { AssetCleanupCommand, parseAssetCleanupCommand } from './asset-cleanup.contract';
 
 type AssetCleanupActivities = ReturnType<typeof createAssetCleanupActivities>;
 
@@ -18,7 +15,7 @@ export const ASSET_CLEANUP_IN_FLIGHT_GRACE_MS = 15 * 60 * 1000;
 export const ASSET_CLEANUP_SETTLE_MS = 5 * 60 * 1000;
 
 const activities = proxyActivities<AssetCleanupActivities>({
-  startToCloseTimeout: '1 minute',
+  startToCloseTimeout: '2 minutes',
   retry: {
     initialInterval: '5 seconds',
     backoffCoefficient: 2,
@@ -33,10 +30,7 @@ interface AssetCleanupTiming {
 }
 
 /** Internal workflow runner. Timing is supplied only by code-owned workflow entrypoints. */
-export async function runAssetObjectCleanup(
-  input: AssetCleanupCommand,
-  timing: AssetCleanupTiming,
-) {
+export async function runAssetObjectCleanup(input: AssetCleanupCommand, timing: AssetCleanupTiming) {
   let command: AssetCleanupCommand;
   try {
     command = parseAssetCleanupCommand(input);
@@ -46,12 +40,20 @@ export async function runAssetObjectCleanup(
       'ASSET_CLEANUP_PAYLOAD_INVALID',
     );
   }
-  const waitMs = Date.parse(command.notBefore) + timing.inFlightGraceMs - Date.now();
-  if (waitMs > 0) await sleep(waitMs);
   try {
-    await activities.cleanupStagingAssetObject(command);
-    await sleep(timing.settleMs);
-    return await activities.cleanupStagingAssetObject(command);
+    if (command.objectClass === 'staging') {
+      const waitMs = Date.parse(command.notBefore) + timing.inFlightGraceMs - Date.now();
+      if (waitMs > 0) await sleep(waitMs);
+      await activities.cleanupStagingAssetObject(command);
+      await sleep(timing.settleMs);
+      return await activities.cleanupStagingAssetObject(command);
+    }
+    const first = await activities.cleanupCanonicalAssetObjects(command);
+    if (!first.alreadySettled) {
+      await sleep(timing.settleMs);
+      await activities.cleanupCanonicalAssetObjects(command);
+    }
+    return await activities.settleCanonicalAssetCleanup(command);
   } catch (error) {
     const candidate = error as {
       type?: unknown;
@@ -63,7 +65,7 @@ export async function runAssetObjectCleanup(
       (typeof candidate.type === 'string' && candidate.type) ||
       (typeof candidate.name === 'string' && candidate.name) ||
       'ASSET_CLEANUP_FAILED';
-    log.error('asset staging cleanup failed', {
+    log.error('asset object cleanup failed', {
       eventId: command.eventId,
       workspaceId: command.workspaceId,
       objectClass: command.objectClass,

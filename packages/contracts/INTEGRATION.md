@@ -39,8 +39,8 @@
    - 正式客户端必须携带 `Idempotency-Key`；同键同请求重放首次结果，同键异请求返回 `409 IDEMPOTENCY_KEY_REUSED`。
    - 当前返回：`{ "data": { "siteId", "buildId", "status": "generating_demo" } }`；不再返回 `mode`。
 2. `GET /api/v1/site-builder/sites` 或 `GET /api/v1/site-builder/sites/{id}` 轮询站点；`status=ready` 后 `previewUrl` 可用。异步终态失败为 `setup_failed`，站点和 intake 会保留，用户可重试。
-3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。当前组内 schema 与乐观并发仍属 R2-A3 待收口，不要依赖 last-write-wins 行为。
-4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；SiteSpec 引用扫描与 `409 ASSET_IN_USE` 是 MF-0-thin 目标，当前尚未落地。
+3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。五组使用严格 schema 与 UUID ETag/CAS；PATCH 必须携带 `If-Match` 或 `baseVersionId`，不得依赖 last-write-wins。
+4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；被 Profile 或当前 active SiteSpec 引用时返回 `409 ASSET_IN_USE`，`details.usages[]` 含 `source/page/component/fieldPath`（SiteSpec 可含 `siteVersionId`）。客户端必须先替换引用再删除。
 5. `GET /api/v1/site-builder/sites/{id}/kb/status` 查询文档、chunk 与资料缺口。
 6. 精装修构建：`POST /api/v1/site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /api/v1/site-builder/builds/{id}`，取消用 `POST /api/v1/site-builder/builds/{id}/cancel`。更完整的 targetId/options/trace/progress/cost 契约仍待 R3。
 

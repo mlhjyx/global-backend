@@ -152,21 +152,36 @@ export const piiExtension = Prisma.defineExtension({
   },
   client: {
     /** 重挂 withWorkspace（$extends 剥掉自定义方法）：设租户 RLS 上下文的事务包装。 */
-    async withWorkspace<T>(workspaceId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    async withWorkspace<T>(
+      workspaceId: string,
+      fn: (tx: Prisma.TransactionClient) => Promise<T>,
+      options?: { maxWait?: number; timeout?: number },
+    ): Promise<T> {
       const ctx = Prisma.getExtensionContext(this) as unknown as {
-        $transaction: (cb: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
+        $transaction: (
+          cb: (tx: Prisma.TransactionClient) => Promise<T>,
+          options?: { maxWait?: number; timeout?: number },
+        ) => Promise<T>;
       };
       return ctx.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
         return fn(tx);
-      });
+      }, options);
     },
     /** NestJS 生命周期（$extends 会剥掉，故在 client 组件重挂，保持既有连接行为）。 */
     async onModuleInit(): Promise<void> {
-      await (Prisma.getExtensionContext(this) as unknown as { $connect: () => Promise<void> }).$connect();
+      await (
+        Prisma.getExtensionContext(this) as unknown as {
+          $connect: () => Promise<void>;
+        }
+      ).$connect();
     },
     async onModuleDestroy(): Promise<void> {
-      await (Prisma.getExtensionContext(this) as unknown as { $disconnect: () => Promise<void> }).$disconnect();
+      await (
+        Prisma.getExtensionContext(this) as unknown as {
+          $disconnect: () => Promise<void>;
+        }
+      ).$disconnect();
     },
   },
 });
