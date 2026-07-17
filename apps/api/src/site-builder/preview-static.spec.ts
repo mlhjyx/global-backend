@@ -16,7 +16,8 @@ describe('previewStaticOptions', () => {
         (option) =>
           option.serveRoot === '/preview' &&
           option.renderPath === '/__no_preview_spa_fallback__' &&
-          option.serveStaticOptions?.fallthrough === true,
+          option.serveStaticOptions?.fallthrough === true &&
+          option.serveStaticOptions.dotfiles === 'deny',
       ),
     ).toBe(true);
   });

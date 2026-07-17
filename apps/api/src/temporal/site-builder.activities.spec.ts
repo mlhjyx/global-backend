@@ -240,8 +240,14 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
   it('发布成功 → close(buildRunId, {force:true})', async () => {
     const { close } = spyBudget();
     const tx = {
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      site: { update: vi.fn(async () => ({})) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        update: vi.fn(async () => ({})),
+      },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
@@ -264,8 +270,14 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
     const { close } = spyBudget();
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
-      siteBuildRun: { updateMany },
-      site: { update: vi.fn(async () => ({})) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        update: vi.fn(async () => ({})),
+      },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
@@ -313,8 +325,15 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
     const update = vi.fn(async () => ({}));
     const updateMany = vi.fn(async () => ({ count: 0 }));
     const tx = {
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      site: { update, updateMany },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: 'changed-version' })),
+        update,
+        updateMany,
+      },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
@@ -341,9 +360,10 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       expect(updateMany).toHaveBeenCalledWith({
         where: {
           id: 'site-1',
-          activeVersionId: {
-            in: ['base-version', 'candidate-version'],
-          },
+          OR: [
+            { activeVersionId: 'base-version' },
+            { activeVersionId: 'candidate-version' },
+          ],
         },
         data: { activeVersionId: 'candidate-version', status: 'ready' },
       });
@@ -374,8 +394,15 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       writeFile(path.join(staging, 'index.html'), 'candidate-preview'),
     ]);
     const tx = {
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      site: { update: vi.fn(async () => ({})) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: 'base-version' })),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
@@ -403,6 +430,93 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       await expect(
         readFile(path.join(root, '.rollback', 'run-1', 'index.html')),
       ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('pointer commit 持续失败时以持久 publication base 回滚 DB 并标记候选失败', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-pointer-fail-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const staging = path.join(root, '.staging', 'run-1');
+    await mkdir(staging, { recursive: true });
+    await writeFile(path.join(staging, 'index.html'), 'candidate-preview');
+    const runUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: runUpdateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: 'base-version' })),
+        updateMany: siteUpdateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+        update: vi.fn(async () => ({})),
+        updateMany: versionUpdateMany,
+      },
+    };
+    const pointerFailure = new Error('pointer rename unavailable');
+    const promotePreview = vi.fn(async () => ({
+      commit: async () => {
+        throw pointerFailure;
+      },
+      rollback: async () => undefined,
+    }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      promotePreview,
+    });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).rejects.toBe(pointerFailure);
+      expect(siteUpdateMany).toHaveBeenNthCalledWith(2, {
+        where: { id: 'site-1', activeVersionId: 'candidate-version' },
+        data: { activeVersionId: 'base-version', status: 'ready' },
+      });
+      expect(runUpdateMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'succeeded',
+            scope: expect.objectContaining({
+              publicationBaseVersionId: 'base-version',
+            }),
+          }),
+        }),
+      );
+      expect(runUpdateMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: { id: 'run-1', status: 'succeeded' },
+          data: expect.objectContaining({
+            status: 'failed',
+            error: 'preview pointer promotion failed',
+          }),
+        }),
+      );
+      expect(versionUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'candidate-version',
+          buildRunId: 'run-1',
+          buildStatus: 'succeeded',
+        },
+        data: { buildStatus: 'failed' },
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

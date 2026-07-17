@@ -9,7 +9,13 @@ export function previewStaticOptions(
     serveRoot: '/preview',
     // Disable the package's catch-all sendFile route so an active-root miss reaches legacy.
     renderPath: '/__no_preview_spa_fallback__',
-    serveStaticOptions: { index: ['index.html'], fallthrough: true },
+    // The fallback mounts the legacy root, so internal .staging/.versions/.active paths must be
+    // rejected explicitly rather than relying on express-static's current default.
+    serveStaticOptions: {
+      index: ['index.html'],
+      fallthrough: true,
+      dotfiles: 'deny' as const,
+    },
   } satisfies Omit<ServeStaticModuleOptions, 'rootPath'>;
   return [
     { ...common, rootPath: path.join(root, '.active') },

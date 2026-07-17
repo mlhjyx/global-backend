@@ -116,6 +116,8 @@ export interface SiteBuilderActivityDeps {
   >;
   /** Renderer seam for deterministic cancellation-race tests; production uses the real Astro build. */
   renderSiteSpec?: typeof buildSiteSpecWithTemporaryFile;
+  /** Preview pointer seam for deterministic post-commit reconciliation tests. */
+  promotePreview?: typeof preparePreviewPromotion;
 }
 
 export interface RefurbishActivityInput {
@@ -208,6 +210,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ownerDb,
     imagePipeline,
     renderSiteSpec = buildSiteSpecWithTemporaryFile,
+    promotePreview = preparePreviewPromotion,
   } = deps;
   const log = new Logger('SiteBuilderActivities');
 
@@ -1066,11 +1069,58 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         variants: 0,
       };
       let promotion: PreviewPromotion | undefined;
+      let publicationBaseVersionId: string | null | undefined;
       try {
         await prisma.withWorkspace(workspaceId, async (tx) => {
           // Serialize terminal publication with progress writes. This also fences an ACK-lost
           // progress retry that arrives after the run becomes terminal.
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+          const [runBefore, siteBefore] = await Promise.all([
+            tx.siteBuildRun.findUnique({
+              where: { id: buildRunId },
+              select: { status: true, scope: true },
+            }),
+            tx.site.findUnique({
+              where: { id: siteId },
+              select: { activeVersionId: true },
+            }),
+          ]);
+          if (!runBefore || !siteBefore) {
+            throw new Error(`run ${buildRunId} publication state is missing`);
+          }
+          const storedScope =
+            runBefore.scope &&
+            typeof runBefore.scope === 'object' &&
+            !Array.isArray(runBefore.scope)
+              ? runBefore.scope
+              : {};
+          const hasStoredPublicationBase = Object.prototype.hasOwnProperty.call(
+            storedScope,
+            'publicationBaseVersionId',
+          );
+          const storedPublicationBase = (
+            storedScope as Record<string, Prisma.JsonValue>
+          ).publicationBaseVersionId;
+          if (
+            hasStoredPublicationBase &&
+            storedPublicationBase !== null &&
+            typeof storedPublicationBase !== 'string'
+          ) {
+            throw new Error(`run ${buildRunId} has corrupt publication base`);
+          }
+          const inputHasBase = Boolean(
+            input.scope &&
+            Object.prototype.hasOwnProperty.call(input.scope, 'baseVersionId'),
+          );
+          publicationBaseVersionId = input.progressV1
+            ? hasStoredPublicationBase
+              ? (storedPublicationBase as string | null)
+              : runBefore.status === 'running'
+                ? inputHasBase
+                  ? (input.scope?.baseVersionId ?? null)
+                  : siteBefore.activeVersionId
+                : undefined
+            : undefined;
           // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
           // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
           const published = await tx.siteBuildRun.updateMany({
@@ -1080,6 +1130,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               phase: 'P5_publish',
               progress: 1,
               finishedAt: new Date(),
+              ...(!hasStoredPublicationBase &&
+              publicationBaseVersionId !== undefined
+                ? {
+                    scope: {
+                      ...storedScope,
+                      publicationBaseVersionId,
+                    } as Prisma.InputJsonValue,
+                  }
+                : {}),
               ...(input.progressV1
                 ? {}
                 : {
@@ -1128,13 +1187,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             spec: targetVersion.spec,
           });
           // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
-          if (input.scope?.baseVersionId) {
+          if (publicationBaseVersionId !== undefined) {
             const activated = await tx.site.updateMany({
               where: {
                 id: siteId,
-                activeVersionId: {
-                  in: [input.scope.baseVersionId, build.versionId],
-                },
+                OR: [
+                  { activeVersionId: publicationBaseVersionId },
+                  { activeVersionId: build.versionId },
+                ],
               },
               data: { activeVersionId: build.versionId, status: 'ready' },
             });
@@ -1166,7 +1226,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   `site version ${build.versionId} has unexpected preview artifact`,
                 );
               }
-              promotion = await preparePreviewPromotion({
+              promotion = await promotePreview({
                 root: previewRoot(),
                 slug: build.previewSlug,
                 buildRunId,
@@ -1196,7 +1256,52 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         // DB activeVersionId/artifactKey are committed before the only served-pointer mutation.
         // A crash or rename failure leaves the old pointer visible; Temporal retries this Activity
         // and reconstructs the pending link from the durable immutable version directory.
-        await promotion.commit();
+        try {
+          await promotion.commit();
+        } catch (pointerError) {
+          if (publicationBaseVersionId !== undefined) {
+            try {
+              await prisma.withWorkspace(workspaceId, async (tx) => {
+                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+                await tx.site.updateMany({
+                  where: { id: siteId, activeVersionId: build.versionId },
+                  data: {
+                    activeVersionId: publicationBaseVersionId,
+                    status: publicationBaseVersionId ? 'ready' : 'draft',
+                  },
+                });
+                const failed = await tx.siteBuildRun.updateMany({
+                  where: { id: buildRunId, status: 'succeeded' },
+                  data: {
+                    status: 'failed',
+                    error: 'preview pointer promotion failed',
+                    finishedAt: new Date(),
+                  },
+                });
+                if (failed.count === 1) {
+                  await tx.siteVersion.updateMany({
+                    where: {
+                      id: build.versionId,
+                      buildRunId,
+                      buildStatus: 'succeeded',
+                    },
+                    data: { buildStatus: 'failed' },
+                  });
+                }
+              });
+            } catch (reconcileError) {
+              log.error(
+                `preview pointer reconciliation failed for run ${buildRunId}: ${String(reconcileError)}`,
+              );
+              throw new AggregateError(
+                [pointerError, reconcileError],
+                'preview pointer promotion and reconciliation failed',
+                { cause: reconcileError },
+              );
+            }
+          }
+          throw pointerError;
+        }
       }
       // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
       budgetLedger.close(buildRunId, { force: true });
