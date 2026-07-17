@@ -145,13 +145,14 @@ export async function refurbishWorkflow(
     const build = await activities.assembleAndBuild(input);
     return await activities.finalizeRefurbish({ ...input, kb, profile, images, build });
   } catch (err) {
-    try {
-      // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即
-      // 抛 CancelledFailure——补偿必须在不可取消作用域里跑，否则站点永久卡 building。
-      await CancellationScope.nonCancellable(() => activities.compensateRefurbish(input));
-    } catch {
-      // 补偿 best-effort：绝不吞换原始错误
-    }
+    // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即
+    // 抛 CancelledFailure。补偿失败必须传播，防止 API 把未持久化的取消误作成功。
+    await CancellationScope.nonCancellable(() =>
+      activities.compensateRefurbish({
+        ...input,
+        terminalStatus: isCancellation(err) ? 'cancelled' : 'failed',
+      }),
+    );
     throw err;
   }
 }

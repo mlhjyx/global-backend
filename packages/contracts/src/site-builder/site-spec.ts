@@ -17,6 +17,17 @@
 /** 当前 SiteSpec 版本（semver，见 04 §8）。 */
 export const SITE_SPEC_VERSION = '1.0.0';
 
+/** API-facing SiteSpec identifiers are bounded strings, not database UUIDs. */
+export const SITE_SPEC_IDENTIFIER_PATTERN_SOURCE =
+  '[A-Za-z0-9][A-Za-z0-9._:-]{0,127}';
+
+/** Runtime presets that are implemented by the renderer today. */
+export const SITE_SPEC_STYLE_PRESETS = [
+  'modern-industrial',
+  'precision-light',
+] as const;
+export type SiteSpecStylePreset = (typeof SITE_SPEC_STYLE_PRESETS)[number];
+
 /** Puck 兼容组件块：`{ type, props: { id?, ... } }`（04 §2）。 */
 export interface PuckBlock {
   type: string;

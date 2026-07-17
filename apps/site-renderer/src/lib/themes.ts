@@ -1,3 +1,5 @@
+import type { SiteSpecStylePreset } from '@global/contracts';
+
 /**
  * 风格预设 = token 包（04 §6）。M0 两个行业预设；字体用系统栈，
  * 自托管字体对（GDPR 判例，02 §8）随 M1 落。切 preset=秒级重渲染。
@@ -18,9 +20,10 @@ export interface ThemeTokens {
   motionIntensity: 'none' | 'subtle' | 'normal';
 }
 
-const SANS = "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+const SANS =
+  "-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 
-export const THEME_PRESETS: Record<string, ThemeTokens> = {
+export const THEME_PRESETS: Record<SiteSpecStylePreset, ThemeTokens> = {
   // 深钢蓝 + 高对比：机械/泵阀/金属加工类制造业
   'modern-industrial': {
     colors: {
@@ -58,7 +61,10 @@ export function themeToCssVars(
   preset: string,
   overrides: Record<string, string> = {},
 ): Record<string, string> {
-  const tokens = THEME_PRESETS[preset] ?? THEME_PRESETS['modern-industrial'];
+  const selected = Object.prototype.hasOwnProperty.call(THEME_PRESETS, preset)
+    ? (preset as SiteSpecStylePreset)
+    : 'modern-industrial';
+  const tokens = THEME_PRESETS[selected];
   const vars: Record<string, string> = {
     '--c-primary': tokens.colors.primary,
     '--c-secondary': tokens.colors.secondary,

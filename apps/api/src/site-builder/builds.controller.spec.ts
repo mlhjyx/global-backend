@@ -3,9 +3,82 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BuildsController } from './builds.controller';
 
-const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
+const CTX = {
+  userId: 'u1',
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  roles: [],
+};
 
 describe('BuildsController public progress response', () => {
+  it('exports the strict build request and idempotency contract', () => {
+    const spec = JSON.parse(
+      readFileSync(
+        resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
+        'utf8',
+      ),
+    ) as {
+      paths: Record<
+        string,
+        {
+          post: {
+            parameters: Array<{
+              name: string;
+              schema: Record<string, unknown>;
+            }>;
+            responses: Record<string, unknown>;
+            requestBody: {
+              content: {
+                'application/json': { schema: Record<string, unknown> };
+              };
+            };
+          };
+        }
+      >;
+      components: {
+        schemas: Record<
+          string,
+          { properties: Record<string, Record<string, unknown>> }
+        >;
+      };
+    };
+    const operation = spec.paths['/api/v1/site-builder/sites/{id}/builds'].post;
+    const idempotency = operation.parameters.find(
+      (parameter) => parameter.name === 'idempotency-key',
+    );
+    expect(idempotency?.schema).toMatchObject({
+      type: 'string',
+      minLength: 1,
+      maxLength: 128,
+      pattern: '^[A-Za-z0-9._:-]{1,128}$',
+    });
+    expect(operation.responses).toHaveProperty('422');
+    expect(operation.requestBody.content['application/json'].schema).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      required: ['scope'],
+      properties: {
+        scope: { type: 'string', enum: ['site'] },
+        options: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            stylePreset: {
+              type: 'string',
+              enum: ['modern-industrial', 'precision-light'],
+            },
+            locales: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 1,
+              uniqueItems: true,
+              items: { type: 'string', enum: ['en'] },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('does not expose persisted raw worker/provider errors', async () => {
     const builds = {
       get: async () => ({
@@ -23,7 +96,10 @@ describe('BuildsController public progress response', () => {
     };
     const controller = new BuildsController(builds as never);
 
-    const response = await controller.get(CTX, '22222222-2222-4222-8222-222222222222');
+    const response = await controller.get(
+      CTX,
+      '22222222-2222-4222-8222-222222222222',
+    );
 
     expect(response.data.error).toBe('build failed');
     expect(JSON.stringify(response)).not.toContain('10.0.0.7');
@@ -47,24 +123,34 @@ describe('BuildsController public progress response', () => {
     };
     const controller = new BuildsController(builds as never);
 
-    const response = await controller.get(CTX, '22222222-2222-4222-8222-222222222222');
+    const response = await controller.get(
+      CTX,
+      '22222222-2222-4222-8222-222222222222',
+    );
 
     expect(response.data.error).toBeNull();
   });
 
   it('exports the non-null progress shape as strings plus a step array', () => {
     const spec = JSON.parse(
-      readFileSync(resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'), 'utf8'),
+      readFileSync(
+        resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
+        'utf8',
+      ),
     ) as {
       components: {
         schemas: {
           BuildStatusResponseDto: {
-            properties: Record<string, { type?: string; nullable?: boolean; items?: unknown }>;
+            properties: Record<
+              string,
+              { type?: string; nullable?: boolean; items?: unknown }
+            >;
           };
         };
       };
     };
-    const properties = spec.components.schemas.BuildStatusResponseDto.properties;
+    const properties =
+      spec.components.schemas.BuildStatusResponseDto.properties;
 
     expect(properties.phase).toMatchObject({ type: 'string', nullable: true });
     expect(properties.error).toMatchObject({ type: 'string', nullable: true });

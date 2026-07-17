@@ -341,8 +341,10 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     brandProfile?: unknown;
     siteVersion?: unknown;
     steps?: unknown;
+    transitionCount?: number;
   }) {
-    const runUpdate = vi.fn(async () => ({}));
+    const runUpdate = vi.fn(async () => ({ count: over.transitionCount ?? 1 }));
+    const siteUpdate = vi.fn(async () => ({}));
     const findFirst = vi.fn(async () => over.brandProfile ?? null);
     const svFindFirst = vi.fn(async () => over.siteVersion ?? null);
     const tx = {
@@ -355,7 +357,7 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
           id: 'site-1',
           activeVersionId: null,
         })),
-        update: vi.fn(async () => ({})),
+        update: siteUpdate,
       },
       siteBuildRun: {
         findUnique: vi.fn(async () => ({
@@ -365,11 +367,11 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
           finishedAt: null,
           steps: over.steps ?? PENDING_STEPS,
         })),
-        update: runUpdate,
+        updateMany: runUpdate,
       },
       brandProfile: { findFirst },
     };
-    return { tx, runUpdate, findFirst, svFindFirst };
+    return { tx, runUpdate, siteUpdate, findFirst, svFindFirst };
   }
 
   it('转 failed 时 always force close', async () => {
@@ -377,6 +379,18 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const { tx } = compensateTx({});
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
     await acts.compensateRefurbish(INPUT);
+    expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
+  it('DB 补偿失败会传播，交给 Temporal 重试且绝不伪装成功', async () => {
+    const { close } = spyBudget();
+    const failure = new Error('database unavailable');
+    const acts = createSiteBuilderActivities({
+      prisma: {
+        withWorkspace: vi.fn().mockRejectedValue(failure),
+      } as unknown as PrismaService,
+    });
+    await expect(acts.compensateRefurbish(INPUT)).rejects.toBe(failure);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
   });
 
@@ -452,6 +466,27 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     expect(findFirst).not.toHaveBeenCalled();
     expect(svFindFirst).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
+  it('取消补偿 CAS 为 cancelled，且不记录 failure error', async () => {
+    spyBudget();
+    const { tx, runUpdate, siteUpdate } = compensateTx({});
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await acts.compensateRefurbish({ ...INPUT, terminalStatus: 'cancelled' });
+    expect(runUpdate.mock.calls[0][0].data).toMatchObject({
+      status: 'cancelled',
+      error: null,
+    });
+    expect(siteUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('terminal CAS 丢失时不回写 Site，防止旧补偿覆盖新 run', async () => {
+    spyBudget();
+    const { tx, runUpdate, siteUpdate } = compensateTx({ transitionCount: 0 });
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await acts.compensateRefurbish(INPUT);
+    expect(runUpdate).toHaveBeenCalledOnce();
+    expect(siteUpdate).not.toHaveBeenCalled();
   });
 
   it('startedAt 为 null（无从归属）→ brand_profile:aborted，不发探测查询', async () => {

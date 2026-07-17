@@ -1682,10 +1682,10 @@ M0、M1-a、M1-b 的架构主干可以保留，但 main 上存在真实问题。
 | R2-5 | M0/M1-a KB | processQueued | 单文档异常被吞并直接标 failed，Temporal 活动仍成功；所谓“持久重试”对瞬时故障不成立 | MinIO、Docling、embedding 短暂故障变永久失败 | M1-c 前 |
 | R2-6 | M0/M1-a KB | ingestText + KbDocument | assetId 无唯一约束；重试可为同一资产生成重复文档和向量 | 检索重复、删除和成本失真 | M1-c 前 |
 | R2-7 | M0 | profile patch | 只校验五个顶层组名，不校验组内 schema、数量、URL 和总大小；并发 read-merge-write 可丢另一组更新 | 大 JSON、脏数据、提示注入面、向导丢数据 | 公开 intake 前；可与 M1-c 并行 |
-| R3-1 | M1-a | builds.controller.ts | page / section 的 targetId 被强制 UUID，但当前 SiteSpec pageId 和 block id 是字符串，且没有对应 UUID 表 | 局部重建 API 实际不可用 | M1-d 前 |
-| R3-2 | M1-a | CreateBuildDto | options 只有 IsObject，没有 stylePreset、pages、locales 的嵌套白名单和数量限制 | 无效 scope 进入工作流和日志 | M1-d 前 |
-| R3-3 | M1-a | BuildsService | Idempotency-Key 无长度/格式约束，存于 JSON；失败重试也计入当日配额 | 存储滥用、故障时配额被耗尽 | M1-d 前 |
-| R3-4 | M1-a | temporal-refurbish-launcher.ts | SiteBuildRun.temporalRunId 从未写入；AlreadyStarted / ACK 模糊没有按同 workflowId 当成功处理；R3-A 已先加 nullable `temporalWorkflowId` 承载正式 workflow identity | 无法精确追踪，启动结果不确定时误标 failed | R3-B / M1-d 前 |
+| R3-1 ✅ B1 | M1-a | builds.controller.ts | targetId 已改有界 SiteSpec 字符串；page/section 真消费前明确 422 unavailable | 不再以 UUID 假约束或静默整站重建 | B1 已完成；真实局部构建归 B2 |
+| R3-2 ✅ B1 | M1-a | CreateBuildDto | 严格嵌套 DTO、preset 目录、pages/locales 上限与规范化已落；未实现选项 422 | 无效/未实现选项不进工作流 | B1 已完成；真实消费归 B2 |
+| R3-3 ✅ B1 | M1-a | BuildsService | 安全 key + requestHash 幂等账本；同 key 异请求 409，旧 JSON key fail-closed | ACK-loss 不重建 run、不误耗配额 | B1 已完成 |
+| R3-4 ✅ B1 | M1-a | temporal-refurbish-launcher.ts | 持久 workflowId+firstExecutionRunId；REJECT_DUPLICATE/USE_EXISTING + describe 恢复 | 启动结果不确定时收敛同一执行链 | B1 已完成 |
 | R3-5 | M1-a | build run steps | 只有 begin/finalize 完整写 steps，中间进度不落库 | 前端轮询看不到真实进度；故障定位困难 | 随每阶段接线补 |
 | R4-1 | M1-b | enforceEvidenceGate | 普通事实没有 quote 也可通过；quote 只检查“存在于来源”，不检查数字、实体或 claim 是否被支持 | 可用真实 URL / 无关引文给虚构事实洗白 | M1-d 前 |
 | R4-2 | M1-b | brand-research.ts | 搜索结果只取 snippet，却作为 web_research evidence 交给 FactSheet | 搜索摘要可能错配、截断或过时，不应直接发布 | M1-d 前 |
@@ -1761,13 +1761,8 @@ KB 要求：
 ### 24.6 R3：M1-a 修复
 
 - **R3-A 已于 2026-07-17 完成**：`SiteBuildRun` 复合租户 provenance FK、合法状态 CHECK、每站 active 部分唯一索引与 nullable workflow identity 已落；迁移对脏历史 fail-closed。Ubuntu 仅作开发验证，不代表生产部署。
-- **R3-B 尚待完成**：以下 API、Idempotency-Key、Temporal ACK 与增量进度项仍是 M1-d 前置，不能因 R3-A 合并而标成整个 R3 完成。
-- targetId 改为有界标识符，和 SiteSpec pageId / block id 契约一致；不要假装它是数据库 UUID。
-- BuildOptions 使用明确 DTO / schema：stylePreset 必须命中目录；pages 是已存在 pageId；locales 是去重 BCP-47 列表并有上限。
-- Idempotency-Key 限长、限字符；后续可提升为显式列和唯一索引，避免 JSON path 查询。
-- launcher 将 Temporal firstExecutionRunId / workflowId 回写 SiteBuildRun；WorkflowExecutionAlreadyStarted 对同 buildRunId 视为幂等成功。
-- cancel 保持“DB 先封住发布 + Temporal best-effort cancel”，同时清本 run staging；finalize 的状态守卫继续保留。
-- 每个 activity 完成后增量更新 phase、progress、step、cost，而不是只在终点写一整块。
+- **R3-B1 已于 2026-07-17 当前交付分支完成**：有界 targetId、严格 BuildOptions、共享 preset 目录、IdempotencyKey requestHash 账本、Temporal workflowId/firstExecutionRunId ACK 与恢复均已落地；page/section/pages/non-en 在真实消费前 422 fail-closed。取消等待 Temporal 执行链关闭与补偿完成后才释放 active 单飞门，未确认/未关闭时保持 active。真 PostgreSQL/app_user/FORCE RLS + 真 Temporal 已在 Ubuntu 开发环境验证，不代表生产部署。
+- **R3-B2 尚待完成**：真实 page/section/pages/locales 消费；每个 Activity 后单调持久 phase/progress/step，重试不得倒退，取消/补偿须终态化未完成 step。`costSummary` 由 R4-B-min 提供真实聚合，B2 不造假。
 
 ### 24.7 R4：M1-b 修复
 

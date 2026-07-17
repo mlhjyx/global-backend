@@ -102,8 +102,9 @@ GET /sites/{id}/kb/status → { "documents": 5, "chunks": 182,
 ## 5. 构建（精装修）〔🟢 M0：POST/GET/cancel · 🎯 M1-a：R3 契约补强〕
 
 ```
-POST /sites/{id}/builds  { "scope":"site|page|section", "targetId"?,
-                           "options": { "stylePreset"?, "pages"?: [...], "locales"?: ["en","de"] } }
+POST /sites/{id}/builds  { "scope":"site",
+                           "options"?: { "stylePreset"?: "modern-industrial|precision-light",
+                                         "locales"?: ["en"] } }
   → { "buildId":"bld_…", "status":"queued" }     // 409=已有 run(BUILD_IN_PROGRESS)；429=当日配额(QUOTA_EXCEEDED)
   // Idempotency-Key 头：重放返回第一次 buildId（§0）
 GET  /builds/{id} → { buildId, siteId, kind, status, phase:"P2_assets", progress:0.42,
@@ -111,18 +112,19 @@ GET  /builds/{id} → { buildId, siteId, kind, status, phase:"P2_assets", progre
                       steps:[{ name, status, attempt, startedAt, finishedAt, error? }],
                       costSummary:{…}, error, startedAt, finishedAt }   // GET 只读，绝不启动模型/构建/修复/外部调用
 GET  /builds/{id}/events   // SSE：phase/progress/step/finished/failed（前端也可轮询上一条）；🎯 事件流后置
-POST /builds/{id}/cancel   // DB 先封发布 + Temporal best-effort cancel + 清本 run staging；终态 409
+POST /builds/{id}/cancel   // 等 Temporal 执行链关闭/补偿完成后才释放 DB 单飞门；终态 409，未关闭 502
 ```
 
 **参数契约（§8.4 回写）**：`GET /builds/{id}` 须返回 `siteId`、`previewUrl`、`targetReleaseId`、`degraded`、`warnings` 与 `steps` 的时序/attempt/error，供工作台真实进度与降级展示。
 
-> ⚠️ **as-built 待对齐（R3，`12` §24.2/§24.6/§26 回写；M1-d 前修；依赖已合并 DQ-1，不重做 SiteSpec）**——现 `builds.controller.ts` 与 `CreateBuildDto`/`BuildsService` 有下列缺陷，以本稿目标契约为准：
+> ✅ **R3-B1 as-built（2026-07-17 当前交付分支）**：Build 请求边界、持久幂等与 Temporal ACK 已对齐；R3-B2 的真实局部构建/增量进度仍未完成，不能把 B1 写成整个 R3-B 完成。
+> **Breaking correction**：本 PR 必须携带 `breaking-change-approved`；客户端须从新版 OpenAPI 重新生成，并停止发送 page/section/targetId/pages/非 en 或不符合安全字符集的 key。
 >
-> - **R3-1 `targetId`**：现被强制 `@IsUUID()`，但 SiteSpec `pageId`/block id 是**字符串**且无对应 UUID 表 → page/section 局部重建实际不可用。改为**有界标识符**，与 SiteSpec pageId/block id 契约一致（未命中→404 / `UNKNOWN_COMPONENT`）。
-> - **R3-2 `options`**：现仅 `@IsObject()`、无嵌套白名单。改为明确 DTO——`stylePreset` 命中目录、`pages` 为已存在 pageId、`locales` 去重 BCP-47 且有上限；无效 scope 不得进工作流/日志。
-> - **R3-3 `Idempotency-Key` / launch ACK**：现无长度/格式约束、存于 JSON，且**失败重试也计当日配额**；并发同键请求还可能在首请求拿到 Temporal ACK 前过早重放 201。改为**限长限字符**（后续升为显式列 + 唯一索引），失败重试**不计**配额；重放必须核验持久 launch ACK，或以同 workflowId 补启动并收敛 ACK 后才返回成功。
-> - **run trace / 进度**：launcher 回写 Temporal `firstExecutionRunId`/`workflowId`，`WorkflowExecutionAlreadyStarted` 对同 buildRunId **视为幂等成功**（不误标 failed）；每个 activity 完成后**增量**写 `phase/progress/step/cost`（非仅终点一次，R3-5）。
-> - **run DB provenance（R3-6）**：R2-A4 已让 re-intake/refurbish 共用 site advisory lock，但 `SiteBuildRun` 仍需 `(siteId,workspaceId)` 复合 FK、status CHECK 与每站 `queued/running` 部分唯一索引，作为 owner/内部写与未来多入口的数据库最终防线。
+> - `targetId` 已从伪 UUID 改为 1–128 位 SiteSpec 标识符；当前 page/section 执行器尚未消费目标，因此合法请求明确返回 `422 BUILD_SCOPE_UNAVAILABLE`，绝不假 201。未来目标不存在用 `404 BUILD_TARGET_NOT_FOUND`；`422 UNKNOWN_COMPONENT` 只表示组件 type/variant 未注册，二者不得混写。
+> - `options` 已是嵌套严格 DTO：preset 只允许 `modern-industrial|precision-light`，pages 1–32 且唯一，locales 1–8 并做 BCP-47 规范化。当前只有 stylePreset 与单一 `en` 被执行器真实消费；pages 或非 `en` locale 返回 `422 BUILD_OPTION_UNAVAILABLE`。
+> - `Idempotency-Key` 限定为 1–128 位安全字符，并以现有 `IdempotencyKey.requestHash` 账本核验完整规范化请求。同 key 同请求返回原 build；同 key 异请求返回 `409 IDEMPOTENCY_KEY_REUSED`；旧 JSON-only key 因无法证明同请求而 fail-closed。
+> - `201` 只在 `temporalWorkflowId + firstExecutionRunId` 均持久化后返回。start/describe ACK 不明时保留同一 queued run，同 key 重试恢复同一执行，不误标 failed、不新建第二条 run；无 key 的同请求也会收敛到该 queued run，但正式客户端仍必须带 key。取消补偿若因 DB 故障耗尽重试，按同 buildId 重试会在确认 Temporal 已关闭后 redrive 受同站锁/CAS 保护的最小终态事务。
+> - **R3-B2 待做**：每个 activity 完成后单调增量写 `phase/progress/step`，并实现 page/section/pages/locales 的真实消费。`costSummary` 继续保持 nullable，真实成本归 R4-B-min，B2 不伪造。
 
 ## 6. Spec 编辑与版本（人工微调，免跑管线）〔🎯 M1〕
 

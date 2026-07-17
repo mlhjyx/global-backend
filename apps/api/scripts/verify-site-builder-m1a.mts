@@ -10,12 +10,13 @@
  * 尾段：brand_profile RLS A/B 隔离（app_user + is_superuser guard）。
  *
  * 依赖：cd /global/backend && docker compose -p global up -d postgres minio embeddings docling。
- * 跑：cd /global/backend/apps/api && node --import tsx scripts/verify-site-builder-m1a.mts
+ * 跑：cd /global/backend/apps/api && ALLOW_DEV_DB_VERIFIER=true \
+ *   node --import tsx scripts/verify-site-builder-m1a.mts
  */
 import 'dotenv/config';
 import 'reflect-metadata';
 import { PrismaClient } from '@prisma/client';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -31,6 +32,46 @@ import { createSiteBuilderActivities, previewRoot } from '../src/temporal/site-b
 
 function ok(section: string, message: string): void {
   console.log(`  ✅ ${section} ${message}`);
+}
+
+function requireDevelopmentTargets(): void {
+  if (
+    process.env.ALLOW_DEV_DB_VERIFIER !== 'true' ||
+    process.env.NODE_ENV === 'production'
+  ) {
+    throw new Error(
+      'refusing M1-a verifier: require ALLOW_DEV_DB_VERIFIER=true and non-production NODE_ENV',
+    );
+  }
+  for (const name of ['S3_ACCESS_KEY', 'S3_SECRET_KEY'] as const) {
+    if (!process.env[name]) {
+      throw new Error(`${name} is required before the M1-a verifier creates fixtures`);
+    }
+  }
+  for (const [name, raw, requiredPath] of [
+    ['DATABASE_URL', process.env.DATABASE_URL, '/global_dev'],
+    ['APP_DATABASE_URL', process.env.APP_DATABASE_URL, '/global_dev'],
+    ['S3_ENDPOINT', process.env.S3_ENDPOINT ?? 'http://localhost:9000', null],
+    ['DOCLING_URL', process.env.DOCLING_URL ?? 'http://localhost:5001', null],
+    [
+      'EMBEDDINGS_URL',
+      process.env.EMBEDDINGS_URL ?? 'http://localhost:11434/v1',
+      null,
+    ],
+  ] as const) {
+    if (!raw) throw new Error(`${name} is required`);
+    const target = new URL(raw);
+    if (
+      !['localhost', '127.0.0.1', '::1', '[::1]'].includes(
+        target.hostname.toLowerCase(),
+      ) ||
+      (requiredPath !== null && target.pathname !== requiredPath)
+    ) {
+      throw new Error(
+        `refusing ${name} target ${target.hostname}${target.pathname}; require local development service`,
+      );
+    }
+  }
 }
 
 /** 最小合法 PDF（真实文件，与设计前真探 H4 同源构造）。 */
@@ -78,25 +119,40 @@ async function expectHttp(
 }
 
 async function main(): Promise<void> {
+  requireDevelopmentTargets();
   const prisma = new PrismaService();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+  const storage = new StorageService();
+  const wsA = randomUUID();
+  const wsB = randomUUID();
+  let siteId: string | undefined;
+  let previewSlug: string | undefined;
+  const objectKeys = new Set<string>();
+  try {
   await Promise.all([prisma.$connect(), owner.$connect()]);
 
   // RLS 验证前置守卫（memory: rls-verify-app-user）
-  const su = await prisma.$queryRaw<{ is_superuser: string }[]>`
-    SELECT current_setting('is_superuser') AS is_superuser`;
-  if (su[0]?.is_superuser === 'on') {
-    console.error('💥 app 连接是 superuser——RLS 证明失效，中止。');
-    process.exit(1);
+  const [appRole] = await prisma.$queryRaw<
+    Array<{ currentUser: string; isSuper: boolean; bypassRls: boolean }>
+  >`SELECT current_user AS "currentUser", rolsuper AS "isSuper", rolbypassrls AS "bypassRls"
+    FROM pg_roles WHERE rolname = current_user`;
+  if (appRole?.currentUser !== 'app_user' || appRole.isSuper || appRole.bypassRls) {
+    throw new Error('app connection must be non-superuser app_user without BYPASSRLS');
+  }
+  const [ownerRole] = await owner.$queryRaw<
+    Array<{ isSuper: boolean; bypassRls: boolean }>
+  >`SELECT rolsuper AS "isSuper", rolbypassrls AS "bypassRls"
+    FROM pg_roles WHERE rolname = current_user`;
+  if (!ownerRole?.isSuper && !ownerRole?.bypassRls) {
+    throw new Error(
+      'owner connection must be superuser or BYPASSRLS for cleanup',
+    );
   }
 
-  const storage = new StorageService();
   await storage.onModuleInit();
   const kb = new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), storage);
   const assets = new AssetsService(prisma, storage);
 
-  const wsA = randomUUID();
-  const wsB = randomUUID();
   const ctxA = { userId: 'verify', workspaceId: wsA, roles: [] };
   const ctxB = { userId: 'verify', workspaceId: wsB, roles: [] };
   void ctxB;
@@ -123,7 +179,7 @@ async function main(): Promise<void> {
     websiteUrl: null,
     businessEmail: 'sales@verifym1a.com',
   });
-  const siteId = created.siteId;
+  siteId = created.siteId;
   // intake 自带的 demo_v0 run 仍 queued（verify 用 noop launcher）——同站单飞闸会正确
   // 把它算作在飞。真实时序里 demo 先完成，这里等价地置为终态。
   await prisma.withWorkspace(wsA, async (tx) => {
@@ -140,8 +196,16 @@ async function main(): Promise<void> {
   const builds = new BuildsService(prisma as never, {
     launchRefurbish: async (input) => {
       launchedRefurbish.push(input);
+      return {
+        workflowId: `site-refurbish-${input.buildRunId}`,
+        firstExecutionRunId: `verify-run-${input.buildRunId}`,
+      };
     },
-    cancelRefurbish: async () => undefined,
+    recoverRefurbish: async (input) => ({
+      workflowId: `site-refurbish-${input.buildRunId}`,
+      firstExecutionRunId: `verify-run-${input.buildRunId}`,
+    }),
+    cancelRefurbish: async () => ({ terminalStatus: 'cancelled' }),
   });
   const b1 = await builds.create(ctxA, siteId, { scope: 'site', idempotencyKey: 'verify-m1a-1' });
   if (b1.status !== 'queued' || launchedRefurbish.length !== 1) {
@@ -173,6 +237,7 @@ async function main(): Promise<void> {
     profile: { status: 'failed', gaps: 0 },
     build,
   });
+  previewSlug = fin.previewSlug;
   const buildMs = Date.now() - t0;
   const after = await prisma.withWorkspace(wsA, async (tx) => ({
     site: await tx.site.findUnique({ where: { id: siteId } }),
@@ -229,8 +294,14 @@ async function main(): Promise<void> {
     mime: 'application/pdf',
   });
   const staging = `ws/${wsA}/${siteId}/uploads/${presign.assetId}`;
+  objectKeys.add(staging);
   await storage.putBuffer(staging, pdf, 'application/pdf');
   const committed = await assets.commit(ctxA, presign.assetId);
+  const committedAsset = await owner.asset.findUnique({
+    where: { id: presign.assetId },
+    select: { objectKey: true },
+  });
+  if (committedAsset) objectKeys.add(committedAsset.objectKey);
   if (committed.processingStatus !== 'queued') throw new Error('doc not queued');
   const ingest = await activities.processQueuedKbDocs({ workspaceId: wsA, siteId });
   if (ingest.processed !== 1 || ingest.failed !== 0) {
@@ -259,11 +330,43 @@ async function main(): Promise<void> {
   if (seenByA !== 1) throw new Error('A cannot see own brand_profile row');
   ok('rls', 'A 可见自己 1 行，B 零可见');
 
-  // 清理（级联删 site 下所有派生）
-  await prisma.withWorkspace(wsA, (tx) => tx.site.delete({ where: { id: siteId } }));
-  await owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } });
-  await Promise.all([prisma.$disconnect(), owner.$disconnect()]);
   console.log('\n🎉 verify-site-builder-m1a 全段通过');
+  } finally {
+    if (siteId) {
+      try {
+        const [siteToDelete, assetsToDelete, variantsToDelete] = await Promise.all([
+          owner.site.findUnique({ where: { id: siteId }, select: { slug: true } }),
+          owner.asset.findMany({ where: { siteId }, select: { objectKey: true } }),
+          owner.assetVariant.findMany({ where: { siteId }, select: { objectKey: true } }),
+        ]);
+        previewSlug ??= siteToDelete?.slug;
+        for (const row of [...assetsToDelete, ...variantsToDelete]) objectKeys.add(row.objectKey);
+      } catch {
+        // Connection/setup failures may occur before fixtures exist.
+      }
+    }
+    for (const result of await Promise.allSettled([
+      ...[...objectKeys].map((key) => storage.delete(key)),
+      ...(previewSlug
+        ? [rm(path.join(previewRoot(), previewSlug), { recursive: true, force: true })]
+        : []),
+      owner.workspace.deleteMany({ where: { id: { in: [wsA, wsB] } } }),
+    ])) {
+      if (result.status === 'rejected') {
+        console.error('M1-a verifier cleanup step failed:', result.reason);
+        process.exitCode = 1;
+      }
+    }
+    for (const result of await Promise.allSettled([
+      prisma.$disconnect(),
+      owner.$disconnect(),
+    ])) {
+      if (result.status === 'rejected') {
+        console.error('M1-a verifier disconnect failed:', result.reason);
+        process.exitCode = 1;
+      }
+    }
+  }
 }
 
 main().catch((err) => {

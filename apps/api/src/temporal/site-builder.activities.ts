@@ -104,6 +104,10 @@ export interface RefurbishActivityInput {
   imageBatchLimit?: number;
 }
 
+export interface RefurbishCompensationInput extends RefurbishActivityInput {
+  terminalStatus?: 'failed' | 'cancelled';
+}
+
 export interface KbRecoveryCandidate {
   workspaceId: string;
   siteId: string;
@@ -864,23 +868,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      * 站点状态回滚（有 activeVersion=ready，否则 draft）。**绝不删除站点/既有版本**——
      * 删站补偿只属于 demo_v0（站点因注册而生）。
      */
-    async compensateRefurbish(input: RefurbishActivityInput): Promise<void> {
+    async compensateRefurbish(input: RefurbishCompensationInput): Promise<void> {
       const { workspaceId, siteId, buildRunId } = input;
+      const terminalStatus = input.terminalStatus ?? 'failed';
       try {
         await prisma.withWorkspace(workspaceId, async (tx) => {
           await tx.siteVersion.updateMany({
             where: { buildRunId, buildStatus: 'building' },
             data: { buildStatus: 'failed' },
           });
-          const site = await tx.site.findUnique({ where: { id: siteId } });
-          if (site) {
-            await tx.site.update({
-              where: { id: siteId },
-              data: { status: site.activeVersionId ? 'ready' : 'draft' },
-            });
-          }
           const run = await tx.siteBuildRun.findUnique({ where: { id: buildRunId } });
-          if (run && run.status !== 'succeeded' && run.status !== 'cancelled') {
+          if (run && ['queued', 'running'].includes(run.status)) {
             // 改动 3：转 failed 时补写 steps（观测性）——否则 API 显示「failed 但六步全 pending」。
             // brand_profile 落库无 buildRunId 列，用 createdAt>=startedAt 归属探测（单站单活跃 run，claim 守卫）；
             // startedAt 缺失（无从归属）→ 不查，保守判 aborted（不误认领旧版本）。
@@ -894,20 +892,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const assembleBuildDone = !!(await tx.siteVersion.findFirst({
               where: { buildRunId, buildStatus: 'succeeded' },
             }));
-            await tx.siteBuildRun.update({
-              where: { id: buildRunId },
+            const transitioned = await tx.siteBuildRun.updateMany({
+              where: { id: buildRunId, status: { in: ['queued', 'running'] } },
               data: {
-                status: 'failed',
-                error: run.error ?? 'refurbish failed (compensated)',
+                status: terminalStatus,
+                error:
+                  terminalStatus === 'failed'
+                    ? (run.error ?? 'refurbish failed (compensated)')
+                    : null,
                 finishedAt: run.finishedAt ?? new Date(),
                 steps: buildCompensatedSteps(brandProfileDone, assembleBuildDone) as Prisma.InputJsonValue,
               },
             });
+            // The terminal CAS and Site rollback share one transaction. Only the run that
+            // actually owned the active slot may change Site status; stale compensation is inert.
+            if (transitioned.count === 1) {
+              const site = await tx.site.findUnique({ where: { id: siteId } });
+              if (site) {
+                await tx.site.update({
+                  where: { id: siteId },
+                  data: { status: site.activeVersionId ? 'ready' : 'draft' },
+                });
+              }
+            }
           }
         });
         log.warn(`refurbish ${buildRunId} compensated — site ${siteId} preserved`);
       } catch (err) {
         log.error(`compensateRefurbish failed for run ${buildRunId}: ${String(err)}`);
+        throw err;
       } finally {
         // 预算门收尾（改动 1）：run 终点强制关账，即便补偿 DB 工作失败也释放账户（force 无视 refs）。
         budgetLedger.close(buildRunId, { force: true });

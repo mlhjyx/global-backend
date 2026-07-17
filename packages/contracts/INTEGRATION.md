@@ -42,7 +42,16 @@
 3. `GET|PATCH /api/v1/site-builder/sites/{id}/profile` 读取/分组保存建站档案。五组使用严格 schema 与 UUID ETag/CAS；PATCH 必须携带 `If-Match` 或 `baseVersionId`，不得依赖 last-write-wins。
 4. 素材三步：`POST /api/v1/site-builder/sites/{id}/assets/presign` → 客户端 `PUT` 直传 → `POST /api/v1/site-builder/assets/{assetId}/commit`；随后用 `GET /api/v1/site-builder/sites/{id}/assets` 查询。删除为 `DELETE /api/v1/site-builder/assets/{assetId}`；被 Profile 或当前 active SiteSpec 引用时返回 `409 ASSET_IN_USE`，`details.usages[]` 含 `source/page/component/fieldPath`（SiteSpec 可含 `siteVersionId`）。客户端必须先替换引用再删除。
 5. `GET /api/v1/site-builder/sites/{id}/kb/status` 查询文档、chunk 与资料缺口。
-6. 精装修构建：`POST /api/v1/site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /api/v1/site-builder/builds/{id}`，取消用 `POST /api/v1/site-builder/builds/{id}/cancel`。更完整的 targetId/options/trace/progress/cost 契约仍待 R3。
+6. 精装修构建：`POST /api/v1/site-builder/sites/{id}/builds` 已声明可选 `idempotency-key`，返回 `{data:{buildId,status}}`；轮询 `GET /api/v1/site-builder/builds/{id}`，取消用 `POST /api/v1/site-builder/builds/{id}/cancel`。R3-B1 请求/ACK 合同见下；真实局部 scope 与增量进度仍待 R3-B2，成本真值待 R4-B-min。
+
+### Site Builder build · R3-B1 契约（2026-07-17）
+
+- **Breaking correction / 迁移动作**：对应 PR 必须带 `breaking-change-approved`。升级方先停止发送 page/section/targetId/pages/非 en 与非法 key，再执行 `pnpm --filter @global/contracts gen` 重新生成客户端；不得继续依赖旧 OpenAPI 中“已声明但运行时静默忽略”的字段。
+- 正式客户端 **MUST** 为可重试构建携带 `idempotency-key`（1–128 位：字母、数字、`.`、`_`、`:`、`-`）。同 key + 同一规范化请求返回原 `buildId`；同 key + 异请求（包括换 Site）返回 `409 IDEMPOTENCY_KEY_REUSED`。
+- `201` 只表示后端已把 Temporal `workflowId + firstExecutionRunId` 双 ID 持久化；不表示构建已经完成。`502 BUILD_LAUNCH_UNAVAILABLE` 时，只有携带原 key 的原请求可以安全重放；无 key 时先查询 build/site，不得盲目换 key 重试。
+- 当前机器契约只声明 `scope:"site"`、`stylePreset:"modern-industrial"|"precision-light"` 与单一 `locales:["en"]`。合法 page/section 请求返回 `422 BUILD_SCOPE_UNAVAILABLE`；`options.pages` 或非 `en` locale 返回 `422 BUILD_OPTION_UNAVAILABLE`，不会静默整站重建。
+- `targetId` 是 SiteSpec 标识符字符串（1–128 位），不是数据库 UUID。局部构建在 R3-B2 真正落地前不可用。
+- 取消只有在 Temporal 执行链已关闭、不可取消补偿完成后才释放 DB active 单飞门；`502 BUILD_CANCEL_UNAVAILABLE` 表示 run 仍保持 active，客户端按同一 `buildId` 重试取消，不能据此启动新构建。若补偿因 DB 故障耗尽重试，重试会在确认执行链已关闭后 redrive 受同站锁/CAS 保护的终态事务。
 
 **SiteSpec / DQ-1**：`@global/contracts` 导出的 `SiteSpec` 1.0.0 是 API 生产端与 Astro Renderer 的唯一共享 TypeScript 真值；前端若需要编辑/物化 Spec，应等待相应 REST 端点进入 OpenAPI，不能直接把内部类型等同于已发布 API。DQ-1 是 type-only；运行时 Zod 与 1.1.0 仍是后续。
 

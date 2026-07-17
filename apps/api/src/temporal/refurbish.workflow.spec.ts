@@ -246,6 +246,9 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
     expect(acts.assembleAndBuild).not.toHaveBeenCalled();
     expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
     expect(acts.compensateRefurbish).toHaveBeenCalledTimes(1);
+    expect(acts.compensateRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({ ...INPUT, terminalStatus: 'cancelled' }),
+    );
   });
 
   it('brandProfile 期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {
@@ -259,6 +262,9 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
     expect(acts.assembleAndBuild).not.toHaveBeenCalled();
     expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
     expect(acts.compensateRefurbish).toHaveBeenCalledTimes(1);
+    expect(acts.compensateRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({ ...INPUT, terminalStatus: 'cancelled' }),
+    );
   });
 
   it('assembleAndBuild 抛错 → compensateRefurbish 恰一次 + 原错误上抛；finalize 不调', async () => {
@@ -268,18 +274,20 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
     await expect(refurbishWorkflow(INPUT)).rejects.toThrow('astro boom');
 
     expect(acts.compensateRefurbish).toHaveBeenCalledTimes(1);
-    expect(acts.compensateRefurbish).toHaveBeenCalledWith(expect.objectContaining(INPUT));
+    expect(acts.compensateRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({ ...INPUT, terminalStatus: 'failed' }),
+    );
     expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
     // 🔴 雷区守：refurbish 失败绝不走 demo 的删站补偿
     expect(acts.cleanupFailedDemo).not.toHaveBeenCalled();
   });
 
-  it('补偿自身失败 → 仍上抛原始错误（补偿 best-effort 不吞不换错误）', async () => {
+  it('补偿自身失败 → 上抛补偿错误，禁止把未持久化取消误作成功', async () => {
     primeHappyPath();
     acts.assembleAndBuild.mockRejectedValue(new Error('astro boom'));
     acts.compensateRefurbish.mockRejectedValue(new Error('compensate boom'));
 
-    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('astro boom');
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('compensate boom');
   });
 
   it('KB 摄入期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {
