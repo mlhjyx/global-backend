@@ -14,7 +14,7 @@ describe('R2-A2 typed KB dependency errors', () => {
   });
 
   it('embedding 默认复用统一 New API 地址，但只使用专用 Bearer token 和本机别名', async () => {
-    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api.internal:3000/v1');
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api:3000/v1');
     vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
     const fetchMock = vi.fn(
       async () =>
@@ -27,7 +27,7 @@ describe('R2-A2 typed KB dependency errors', () => {
 
     await expect(new EmbeddingsClient().embed(['hello'])).resolves.toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://new-api.internal:3000/v1/embeddings',
+      'http://new-api:3000/v1/embeddings',
       expect.objectContaining({
         headers: {
           authorization: 'Bearer embedding-test-token',
@@ -40,34 +40,24 @@ describe('R2-A2 typed KB dependency errors', () => {
     });
   });
 
-  it('embedding 专用地址和 Key 可显式覆盖统一网关配置', async () => {
-    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api.internal:3000/v1');
+  it('embedding 专用 token 也不能把租户 KB 发往任意远程覆盖地址', async () => {
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api:3000/v1');
     vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
-    vi.stubEnv('EMBEDDINGS_URL', 'http://embedding-proxy.internal/v1/');
+    vi.stubEnv('EMBEDDINGS_URL', 'https://embedding-proxy.example/v1/');
     vi.stubEnv('EMBEDDINGS_API_KEY', 'embedding-test-token');
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-    );
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(new EmbeddingsClient().embed(['hello'])).resolves.toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://embedding-proxy.internal/v1/embeddings',
-      expect.objectContaining({
-        headers: {
-          authorization: 'Bearer embedding-test-token',
-          'content-type': 'application/json',
-        },
-      }),
-    );
+    await expect(new EmbeddingsClient().embed(['raw tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+      stage: 'embedding',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('embedding 专用 Key 为空时 fail-closed，不把 KB 内容交给通用网关 token', async () => {
-    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api.internal:3000/v1');
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api:3000/v1');
     vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
     vi.stubEnv('EMBEDDINGS_API_KEY', '');
     const fetchMock = vi.fn();
@@ -123,9 +113,9 @@ describe('R2-A2 typed KB dependency errors', () => {
     });
   });
 
-  it('非 allowlist 的直连地址即使叫 Ollama 也必须有专用 token', async () => {
+  it('非 allowlist 的直连地址即使有专用 token 也失败关闭', async () => {
     vi.stubEnv('EMBEDDINGS_URL', 'http://ollama.remote.example:11434/v1');
-    vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    vi.stubEnv('EMBEDDINGS_API_KEY', 'embedding-test-token');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
