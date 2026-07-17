@@ -18,14 +18,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { AssetsService } from '../src/site-builder/assets.service';
 import { StorageService } from '../src/site-builder/storage.service';
 
-const JPEG = Buffer.concat([
-  Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
-  Buffer.from('r2-a1-real-minio-verification'),
-]);
-const RETRY_JPEG = Buffer.concat([
-  Buffer.from([0xff, 0xd8, 0xff, 0xe1]),
-  Buffer.from('r2-a1-distinct-retry-payload'),
-]);
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('r2-a1-real-minio-verification')]);
+const RETRY_JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1]), Buffer.from('r2-a1-distinct-retry-payload')]);
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -148,12 +142,10 @@ async function main(): Promise<void> {
     releaseFirst.resolve();
     const ready = await firstCommit;
     touchedKeys.add(ready.objectKey);
-    if (ready.processingStatus !== 'ready')
-      throw new Error(`commit ended ${ready.processingStatus}`);
+    if (ready.processingStatus !== 'ready') throw new Error(`commit ended ${ready.processingStatus}`);
     if (!(await storage.head(staging.objectKey)))
       throw new Error('staging object was deleted before the presigned PUT expiry gate');
-    if (!(await storage.head(ready.objectKey)))
-      throw new Error('canonical object missing after commit');
+    if (!(await storage.head(ready.objectKey))) throw new Error('canonical object missing after commit');
     ok('CAS/fencing', 'commit/delete losers blocked; canonical committed before staging cleanup');
 
     const stagingIntent = await appDb.withWorkspace(workspaceId, (tx) =>
@@ -229,8 +221,7 @@ async function main(): Promise<void> {
       await failingAssets.commit(ctx, retrySigned.assetId);
       throw new Error('copy failure injection unexpectedly succeeded');
     } catch (err) {
-      if (err instanceof Error && err.message === 'copy failure injection unexpectedly succeeded')
-        throw err;
+      if (err instanceof Error && err.message === 'copy failure injection unexpectedly succeeded') throw err;
     }
     const retryable = await appDb.withWorkspace(workspaceId, (tx) =>
       tx.asset.findUniqueOrThrow({ where: { id: retrySigned.assetId } }),
@@ -254,7 +245,7 @@ async function main(): Promise<void> {
       throw new Error('retry staging was deleted before its upload URL expired');
     ok('retry', 'transient failure retained staging; second fenced attempt finalized safely');
 
-    // 删除 ready 资产：DB/Kb 面先 tombstone，canonical 保留，命令 parked 等 MF-0。
+    // 删除 ready 资产：DB/Kb 面先 tombstone，canonical 留给 MF0-B Temporal 异步回收。
     await baseAssets.remove(ctx, signed.assetId);
     const tombstone = await appDb.withWorkspace(workspaceId, (tx) =>
       tx.asset.findUniqueOrThrow({ where: { id: signed.assetId } }),
@@ -262,8 +253,7 @@ async function main(): Promise<void> {
     if (tombstone.processingStatus !== 'deleted' || !tombstone.deletedAt) {
       throw new Error(`asset not tombstoned: ${JSON.stringify(tombstone)}`);
     }
-    if (!(await storage.head(ready.objectKey)))
-      throw new Error('canonical object was deleted before scanner');
+    if (!(await storage.head(ready.objectKey))) throw new Error('canonical object was deleted before scanner');
     const canonicalIntent = await appDb.withWorkspace(workspaceId, (tx) =>
       tx.outboxEvent.findFirst({
         where: {
@@ -275,9 +265,11 @@ async function main(): Promise<void> {
     );
     const canonicalPayload = canonicalIntent?.payload as Record<string, unknown> | undefined;
     if (
-      !canonicalIntent?.parkedAt ||
+      canonicalIntent?.schemaVersion !== 2 ||
+      canonicalIntent?.parkedAt ||
       canonicalPayload?.objectClass !== 'canonical' ||
-      canonicalPayload?.blockedUntil !== 'site_spec_asset_reference_scanner'
+      !canonicalPayload?.canonical ||
+      !Array.isArray(canonicalPayload?.variants)
     ) {
       throw new Error(`canonical cleanup gate missing: ${JSON.stringify(canonicalPayload)}`);
     }
@@ -285,7 +277,7 @@ async function main(): Promise<void> {
     if (listedAfterDelete.some((asset) => asset.id === signed.assetId)) {
       throw new Error('tombstoned asset leaked through list');
     }
-    ok('tombstone', 'canonical retained; cleanup parked behind SiteSpec reference scanner');
+    ok('tombstone', 'canonical retained in DELETE transaction; strict MF0-B cleanup queued');
 
     try {
       await baseAssets.list(otherCtx, siteId);
@@ -295,9 +287,7 @@ async function main(): Promise<void> {
     }
     ok('tenant isolation', 'other workspace receives the same hidden-site 404');
 
-    console.log(
-      '\n🎉 R2-A1 开发环境真服务验证全绿（PostgreSQL/RLS + MinIO；A4 cleanup 另验）。',
-    );
+    console.log('\n🎉 R2-A1 开发环境真服务验证全绿（PostgreSQL/RLS + MinIO；A4 cleanup 另验）。');
   } finally {
     // verifier-only cleanup：生产路径仍遵守 tombstone/outbox，不调用这里的 owner/直接对象清理。
     for (const key of touchedKeys) await storage.delete(key).catch(() => undefined);
@@ -307,9 +297,7 @@ async function main(): Promise<void> {
         where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } },
       })
       .catch(() => undefined);
-    await owner.workspace
-      .deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
-      .catch(() => undefined);
+    await owner.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } }).catch(() => undefined);
     await Promise.all([appDb.$disconnect(), owner.$disconnect()]);
   }
 }

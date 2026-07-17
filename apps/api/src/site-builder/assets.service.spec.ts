@@ -9,7 +9,11 @@ import {
 import { createHash } from 'node:crypto';
 import { AssetsService } from './assets.service';
 
-const CTX = { userId: 'u1', workspaceId: '11111111-1111-4111-8111-111111111111', roles: [] };
+const CTX = {
+  userId: 'u1',
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  roles: [],
+};
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
 
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fakejpegbody')]);
@@ -52,10 +56,12 @@ function makeService(opts: { siteExists?: boolean } = {}) {
   const kbDeletes: string[] = [];
   const outbox: Row[] = [];
   const tx = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => db.assets.filter((row) => !row.deletedAt).map((row) => ({ id: row.id })),
     site: {
       findUnique: async ({ where }: { where: { id: string } }) => {
         ops.push(`site:find:${where.id}`);
-        return opts.siteExists === false ? null : { id: where.id };
+        return opts.siteExists === false ? null : { id: where.id, profile: null, activeVersionId: null };
       },
     },
     asset: {
@@ -67,15 +73,15 @@ function makeService(opts: { siteExists?: boolean } = {}) {
           leaseUntil: null,
           retryAt: null,
           deletedAt: null,
+          cleanupEventId: null,
+          cleanupCompletedAt: null,
           ...data,
         });
         return db.assets[db.assets.length - 1];
       },
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        db.assets.find((a) => a.id === where.id) ?? null,
+      findUnique: async ({ where }: { where: { id: string } }) => db.assets.find((a) => a.id === where.id) ?? null,
       findFirst: async ({ where }: { where: Row }) => db.assets.find((a) => matches(a, where)) ?? null,
-      findMany: async ({ where = {} }: { where?: Row } = {}) =>
-        db.assets.filter((a) => matches(a, where)),
+      findMany: async ({ where = {} }: { where?: Row } = {}) => db.assets.filter((a) => matches(a, where)),
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = db.assets.find((a) => a.id === where.id);
         if (!row) throw new Error('missing');
@@ -100,6 +106,7 @@ function makeService(opts: { siteExists?: boolean } = {}) {
         return { count: 0 };
       },
     },
+    assetVariant: { findMany: async () => [] },
     outboxEvent: {
       create: async ({ data }: { data: Row }) => {
         outbox.push(data);
@@ -113,7 +120,10 @@ function makeService(opts: { siteExists?: boolean } = {}) {
   const storage = {
     presignPut: async (key: string) => {
       ops.push(`presignPut:${key}`);
-      return { url: `https://minio.local/put/${key}`, expiresAt: new Date(Date.now() + 900_000) };
+      return {
+        url: `https://minio.local/put/${key}`,
+        expiresAt: new Date(Date.now() + 900_000),
+      };
     },
     presignGet: async (key: string) => `https://minio.local/get/${key}`,
     head: async (key: string) => (objects.has(key) ? { size: objects.get(key)!.length } : null),
@@ -147,7 +157,12 @@ function makeService(opts: { siteExists?: boolean } = {}) {
 async function presignAndUpload(
   s: ReturnType<typeof makeService>,
   body: Buffer = JPEG,
-  input = { kind: 'product_image', filename: 'a.jpg', size: body.length, mime: 'image/jpeg' },
+  input = {
+    kind: 'product_image',
+    filename: 'a.jpg',
+    size: body.length,
+    mime: 'image/jpeg',
+  },
 ) {
   const res = await s.service.presign(CTX, SITE_ID, input);
   const row = s.db.assets.find((a) => a.id === res.assetId) as Record<string, unknown>;
@@ -167,19 +182,21 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(res.uploadUrl).toContain('/put/');
     const row = s.db.assets[0] as Record<string, unknown>;
     expect(row.processingStatus).toBe('pending_upload');
-    expect(String(row.objectKey)).toBe(
-      `ws/${CTX.workspaceId}/${SITE_ID}/uploads/${res.assetId}`,
-    );
+    expect(String(row.objectKey)).toBe(`ws/${CTX.workspaceId}/${SITE_ID}/uploads/${res.assetId}`);
   });
 
   it('presign：非法 kind / 白名单外 mime / 超限大小 → 422', async () => {
     const s = makeService();
     const base = { filename: 'a', size: 100, mime: 'image/jpeg' };
+    await expect(s.service.presign(CTX, SITE_ID, { ...base, kind: 'weird' })).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
     await expect(
-      s.service.presign(CTX, SITE_ID, { ...base, kind: 'weird' }),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
-    await expect(
-      s.service.presign(CTX, SITE_ID, { ...base, kind: 'doc', mime: 'text/html' }),
+      s.service.presign(CTX, SITE_ID, {
+        ...base,
+        kind: 'doc',
+        mime: 'text/html',
+      }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     await expect(
       s.service.presign(CTX, SITE_ID, {
@@ -197,9 +214,7 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
       }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
 
-    const error = await s.service
-      .presign(CTX, SITE_ID, { ...base, kind: 'weird' })
-      .catch((caught: unknown) => caught);
+    const error = await s.service.presign(CTX, SITE_ID, { ...base, kind: 'weird' }).catch((caught: unknown) => caught);
     expect(errorCode(error)).toBe('ASSET_VALIDATION_FAILED');
   });
 
@@ -218,7 +233,9 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
 
   it('presign：对象存储故障 → 502 ASSET_STORAGE_UNAVAILABLE，不回显 SDK 文本', async () => {
     const s = makeService();
-    const svc = s.service as unknown as { storage: { presignPut: () => Promise<never> } };
+    const svc = s.service as unknown as {
+      storage: { presignPut: () => Promise<never> };
+    };
     svc.storage.presignPut = async () => {
       throw new Error('S3 endpoint http://storage.internal accessKey=secret');
     };
@@ -247,7 +264,9 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(row.objectKey).toBe(`ws/${CTX.workspaceId}/${SITE_ID}/product_image/${hash}.jpg`);
     expect(s.ops.some((o) => o.startsWith('copy:'))).toBe(true);
     expect(s.ops.filter((o) => o.startsWith('delete:'))).toHaveLength(0); // 由 durable cleanup 延后清理
-    expect(s.outbox.at(-1)).toMatchObject({ eventType: 'AssetObjectCleanupRequested' });
+    expect(s.outbox.at(-1)).toMatchObject({
+      eventType: 'AssetObjectCleanupRequested',
+    });
   });
 
   it('commit：doc 类进 KB 队列（processingStatus=queued）', async () => {
@@ -296,7 +315,9 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     const row = s.db.assets.find((a) => a.id === assetId) as Record<string, unknown>;
     expect(row.processingStatus).toBe('rejected');
     expect(s.objects.size).toBe(1); // 预签名失效后由 durable cleanup 清 staging
-    expect(s.outbox.at(-1)).toMatchObject({ eventType: 'AssetObjectCleanupRequested' });
+    expect(s.outbox.at(-1)).toMatchObject({
+      eventType: 'AssetObjectCleanupRequested',
+    });
   });
 
   it('commit：内容重复（同 canonical key 已存在）→ 本行 duplicate + 409 带既有 assetId', async () => {
@@ -360,16 +381,21 @@ describe('AssetsService（上传三步 presign→PUT→commit，07 §3 / 06 §2�
     expect(errorCode(error)).toBe('ASSET_VALIDATION_FAILED');
   });
 
-  it('delete：tombstone + 级联清 KB；scanner 前不删 canonical 对象', async () => {
+  it('delete：引用门通过后 tombstone + 级联清 KB；对象留给 Temporal', async () => {
     const s = makeService();
     const { assetId } = await presignAndUpload(s);
     await s.service.commit(CTX, assetId);
     const before = s.ops.filter((o) => o.startsWith('delete:')).length;
     await s.service.remove(CTX, assetId);
     const row = s.db.assets.find((a) => a.id === assetId);
-    expect(row).toMatchObject({ processingStatus: 'deleted', deletedAt: expect.any(Date) });
+    expect(row).toMatchObject({
+      processingStatus: 'deleted',
+      deletedAt: expect.any(Date),
+    });
     expect(s.ops.filter((o) => o.startsWith('delete:'))).toHaveLength(before);
     expect(s.kbDeletes).toEqual([assetId]);
-    expect(s.outbox.at(-1)).toMatchObject({ eventType: 'AssetObjectCleanupRequested' });
+    expect(s.outbox.at(-1)).toMatchObject({
+      eventType: 'AssetObjectCleanupRequested',
+    });
   });
 });

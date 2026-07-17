@@ -1,6 +1,14 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder MF0-B（引用守卫与 canonical/Variant 安全回收）
+
+- Profile 三个正式 Asset 引用面与当前 `Site.activeVersionId` SiteVersion 进入同一 fail-closed scanner；SiteSpec 1.0.0 manifest UUID/kind/hash 与 ready Asset 对账，开放 props 按媒体字段语义有界扫描，缺 manifest/畸形/未知/超预算拒绝。Profile/active 指针/Variant/DELETE 共用 Asset 行锁，Variant trigger 作 DB backstop；DELETE 命中返回稳定 `409 ASSET_IN_USE` usages。
+- canonical producer 按 key advisory xact lock 串行，事务内拒绝任一 active/unsettled owner后 copy+fenced 激活；关闭同 hash 多 tombstone 与 `copy→旧 cleanup→finalize` 误删窗口。DELETE 同事务只写 tombstone、cleanup ownership 与严格 schema v2 frozen plan；Temporal 两轮 Variant 叶→根/canonical 最后 Delete+HEAD，再重验 provenance、删 Variant 行并 durable settle。settle 响应丢失和旧事件重放均不会触碰后来 replacement。
+- copy 成功但数据库 finalize/commit 失败时，producer 会重取同 key 锁，仅在无 owner 时 Delete+HEAD 补偿；补偿失败持久标记 retryable Asset 并阻止 DELETE，避免留下不可追踪 canonical 孤儿。
+- 历史 schema v1 parked 对账默认 dry-run、单实例 advisory lock、稳定游标与逐项 poison 隔离；eligible 生成带 `causationId` 的 v2 successor，不篡改旧事件。050000 保持已应用字节不变；051000 显式 quarantine 迁移前 unbound tombstone、禁止新写伪造 legacy 标记，并将 lifecycle CHECK 收为 validated。
+- Ubuntu 开发环境验证：46 migrations up-to-date、schema diff=0、lifecycle validated；真 PG RLS/双连接验证 Profile/activeVersion/Variant/delete 顺序与 props-only gate；真 PG 历史对账六分类 dry/apply/rerun；真 MinIO+Temporal canonical+多层 Variant 清理、settle、同 hash replacement 全绿。仅为开发环境，不代表生产部署。Sharp writer、MediaJob/AssetUsage、rembg、生成式图片与视频均未加入。
+
 ## 2026-07-17 · Site Builder MF0-A（AssetVariant 数据地基）
 
 - 新增 additive `asset_variant`：workspace/site/Asset 直接 scope，父 Asset 与 source Variant 复合 FK 锁 provenance；单输出 `(asset_id,recipe_hash)` 幂等、canonical object key/hash/正尺寸/状态 payload CHECK、显式 app_user CRUD、ENABLE+FORCE RLS。

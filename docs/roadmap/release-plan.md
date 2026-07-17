@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-16 truth-sync（#125）与 R0 contract closeout（#126）更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B 更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -11,7 +11,7 @@
 - DOC-12 的主要内容分发由 #119/#120 完成；2026-07-16 truth-sync 已收口项目级状态与接入说明，未把 dated proposal 升级成权威。
 - #121 已完成 intake 无条件建站/触发 demo 的**行为层**修复；#123 完成禁虚构身份；#124 完成 businessEmail 隔离、LLM 真取消超时和异步失败保站。
 - #126 已完成 R0 contract closeout：intake 幂等、`buildId`、去 `mode`、稳定错误码、Temporal 启动证据与 OpenAPI 同步均已落地并验证。
-- R1-safety 与 R2-A1–A4 正确性门已于 2026-07-17 完成。Profile 已具备五组严格有界 schema、独立 UUID ETag/CAS、稳定 428/409/412、同站 Asset 引用门；旧脏 JSON读路径 fail-closed，Prompt/证据入口覆盖 SMTPUTF8/IDN 邮箱与电话净化。A4 接通 staging-only cleanup：Outbox→Temporal 以事件/资产双 provenance，在 presigned PUT 到期后固定等待 15 分钟受支持在途窗口，首删后 durable settle 5 分钟并二次删除+HEAD；窗口由生产代码固定，客户端/Outbox 不可缩短。该机制覆盖到期前授权、窗口内完成的 PUT 复活竞态，不把“仅到期”写成绝对保证；canonical 继续 parked 到 MF-0 scanner。Asset/KB/Build 公共错误已稳定化并脱敏，Build cancel 改 CAS，失败 cleanup 有结构化告警与 guarded redrive。以上均为 Ubuntu 开发环境验收，不代表生产部署。
+- R1-safety、R2-A1–A4 与 MF0-A/B 已于 2026-07-17 完成。Profile 严格 schema/UUID ETag/CAS、staging cleanup 固定在途/settle 双删、AssetVariant 地基、Profile+当前 activeVersion 引用守卫、共享并发门、canonical/Variant schema v2 回收和历史 parked 对账均已落地。Ubuntu 开发环境已验证 46 migrations、validated lifecycle、schema diff=0、真 PG/RLS 并发/对账与真 MinIO+Temporal cleanup/replay；不代表生产部署。
 
 ### 当前关键路径与退出门
 
@@ -19,8 +19,8 @@
 2. **R2-A 正确性门（拆分 PR）✅**：R2-A1 Asset、R2-A2 KB、R2-A3 Profile schema/乐观并发、R2-A4 staging cleanup/公共错误码/跨系统集成均已收口；canonical 删除明确不属于 A4。禁止回退成 migration/API/状态机 mega PR。
 3. **MF-0-thin（连续两个独立交付，总范围不缩水）**：
    - **MF0-A ✅ 2026-07-17 完成**：`AssetVariant` + RLS/FORCE RLS、单输出 recipe/checksum/复合 provenance、ready+checksummed source 门、MIME→规范扩展名精确绑定的 Variant 专属对象键、不可改写行身份/来源账本与 RLS-safe 脏升级 fail-closed 预检、`derivedKeys` 响应式共享合同及纯兼容投影；真 PostgreSQL A/B/unset 隔离、并发 unique、增量/空库 44 migrations 与 schema diff=0 已验证。仅为 Ubuntu 开发环境，不代表生产部署。
-   - **MF0-B（下一项）**：SiteSpec+Profile 引用扫描器、删除 409、删除与 spec/Variant 写入共享并发门，以及 provenance 严格的 canonical+Variant 异步回收/历史 parked 对账。在 MF0-B 完成前，只允许自动清理 staging，不把 canonical object 删除描述为安全能力。
-4. **M1-c**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
+   - **MF0-B ✅ 2026-07-17 完成**：Profile+当前 activeVersion SiteSpec 引用扫描、删除 409、共享 Asset 锁/Variant trigger、同 hash producer barrier、严格 canonical+Variant Temporal 回收、legacy quarantine 与 parked 对账；真 PG/MinIO/Temporal/replay 已验。
+4. **M1-c（下一项）**：纯 Sharp 确定性图片管线；不加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage 预建。
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 

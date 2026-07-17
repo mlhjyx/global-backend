@@ -1324,6 +1324,9 @@ model Asset {
   retryAt             DateTime? @map("retry_at")
   processingErrorCode String?   @map("processing_error_code")
   deletedAt           DateTime? @map("deleted_at") // tombstone；canonical 清理由 MF-0 scanner 后的消费者执行
+  cleanupEventId      String?   @map("cleanup_event_id") @db.Uuid // 部分唯一索引见 MF0-B migration
+  cleanupCompletedAt  DateTime? @map("cleanup_completed_at") // canonical 对象与冻结 variants 均确认删除后的 durable settle；staging 完成态由 Temporal execution 记录
+  cleanupLegacyUnbound Boolean  @default(false) @map("cleanup_legacy_unbound") // migration 前 tombstone 隔离标记；新写不得置 true
   meta                Json? // 尺寸/EXIF 已剥离标记/来源等
   error               String?
   createdAt           DateTime  @default(now()) @map("created_at")

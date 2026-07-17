@@ -40,9 +40,7 @@ function isLoopbackHost(hostname: string): boolean {
 
 function requireExplicitDevelopmentTargets(): void {
   if (process.env.ALLOW_DEV_DB_VERIFIER !== 'true' || process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'refusing KB verifier: require ALLOW_DEV_DB_VERIFIER=true and non-production NODE_ENV',
-    );
+    throw new Error('refusing KB verifier: require ALLOW_DEV_DB_VERIFIER=true and non-production NODE_ENV');
   }
   const databaseUrls = [process.env.DATABASE_URL, process.env.APP_DATABASE_URL];
   for (const raw of databaseUrls) {
@@ -65,18 +63,10 @@ function requireExplicitDevelopmentTargets(): void {
     }
   }
   const temporalAddress = process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
-  const temporalUrl = new URL(
-    temporalAddress.includes('://') ? temporalAddress : `grpc://${temporalAddress}`,
-  );
+  const temporalUrl = new URL(temporalAddress.includes('://') ? temporalAddress : `grpc://${temporalAddress}`);
   const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
-  if (
-    !isLoopbackHost(temporalUrl.hostname) ||
-    temporalUrl.port !== '7233' ||
-    temporalNamespace !== 'default'
-  ) {
-    throw new Error(
-      'refusing KB verifier Temporal target: require loopback:7233 and default development namespace',
-    );
+  if (!isLoopbackHost(temporalUrl.hostname) || temporalUrl.port !== '7233' || temporalNamespace !== 'default') {
+    throw new Error('refusing KB verifier Temporal target: require loopback:7233 and default development namespace');
   }
 }
 
@@ -102,10 +92,7 @@ async function isolateRecoverySchedule(): Promise<() => Promise<void>> {
     if (isolated.info.runningActions.length > 0) {
       throw new Error('KB recovery workflow is already running; wait for it before verifier');
     }
-    ok(
-      'schedule isolation',
-      pausedByVerifier ? 'recovery paused temporarily' : 'recovery already paused',
-    );
+    ok('schedule isolation', pausedByVerifier ? 'recovery paused temporarily' : 'recovery already paused');
   } catch (err) {
     if (err instanceof ScheduleNotFoundError) {
       return async () => connection.close();
@@ -131,23 +118,14 @@ function makeProbePdf(text: string): Buffer {
     Buffer.from(
       '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
     ),
-    Buffer.concat([
-      Buffer.from(`<< /Length ${stream.length} >>\nstream\n`),
-      stream,
-      Buffer.from('\nendstream'),
-    ]),
+    Buffer.concat([Buffer.from(`<< /Length ${stream.length} >>\nstream\n`), stream, Buffer.from('\nendstream')]),
     Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
   ];
   let buf = Buffer.from('%PDF-1.4\n');
   const offsets: number[] = [];
   objs.forEach((obj, index) => {
     offsets.push(buf.length);
-    buf = Buffer.concat([
-      buf,
-      Buffer.from(`${index + 1} 0 obj\n`),
-      obj,
-      Buffer.from('\nendobj\n'),
-    ]);
+    buf = Buffer.concat([buf, Buffer.from(`${index + 1} 0 obj\n`), obj, Buffer.from('\nendobj\n')]);
   });
   const xref = buf.length;
   let tail = `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
@@ -175,11 +153,7 @@ async function main(): Promise<void> {
   const assets = new AssetsService(appDb, storage);
   let verificationError: unknown;
 
-  async function uploadDoc(
-    filename: string,
-    mime: string,
-    body: Buffer,
-  ): Promise<{ id: string; objectKey: string }> {
+  async function uploadDoc(filename: string, mime: string, body: Buffer): Promise<{ id: string; objectKey: string }> {
     const signed = await assets.presign(ctxA, siteA, {
       kind: 'doc',
       filename,
@@ -194,9 +168,7 @@ async function main(): Promise<void> {
     if (!ext) throw new Error(`unsupported verifier mime: ${mime}`);
     // commit 的 canonical key 由 body hash 确定；在 copy 之前预登记，覆盖
     // “copy 已成功但 DB fenced 回写/返回前失败”的对象清理窗口。
-    touchedKeys.add(
-      buildObjectKey(wsA, siteA, 'doc', createHash('sha256').update(body).digest('hex'), ext),
-    );
+    touchedKeys.add(buildObjectKey(wsA, siteA, 'doc', createHash('sha256').update(body).digest('hex'), ext));
     const put = await fetch(signed.uploadUrl, {
       method: 'PUT',
       headers: { 'content-type': mime },
@@ -300,8 +272,9 @@ async function main(): Promise<void> {
       'text/markdown',
       Buffer.from('# Valve\n\nLease takeover proof for industrial valve documentation.'),
     );
-    const committedAttempt = await appDb.withWorkspace(wsA, async (tx) =>
-      (await tx.asset.findUniqueOrThrow({ where: { id: zombie.id } })).processingAttempt,
+    const committedAttempt = await appDb.withWorkspace(
+      wsA,
+      async (tx) => (await tx.asset.findUniqueOrThrow({ where: { id: zombie.id } })).processingAttempt,
     );
     const oldEmbedded = deferred<void>();
     const releaseOld = deferred<void>();
@@ -347,9 +320,7 @@ async function main(): Promise<void> {
     };
     const retryKb = new KbService(appDb, embeddings, docling, unavailableStorage);
     const failed = await retryKb.processAsset(ctxA, siteA, retry.id);
-    const retryRow = await appDb.withWorkspace(wsA, (tx) =>
-      tx.asset.findUniqueOrThrow({ where: { id: retry.id } }),
-    );
+    const retryRow = await appDb.withWorkspace(wsA, (tx) => tx.asset.findUniqueOrThrow({ where: { id: retry.id } }));
     if (
       failed.outcome !== 'retry_scheduled' ||
       retryRow.processingStatus !== 'queued' ||
@@ -366,11 +337,7 @@ async function main(): Promise<void> {
     ok('retry/redrive', 'typed code persisted, canonical retained, second attempt ready');
 
     console.log('⑤ 真损坏 PDF → failed_terminal（无 retry）');
-    const corrupt = await uploadDoc(
-      'corrupt.pdf',
-      'application/pdf',
-      Buffer.from('%PDF-1.4\nbroken'),
-    );
+    const corrupt = await uploadDoc('corrupt.pdf', 'application/pdf', Buffer.from('%PDF-1.4\nbroken'));
     const corruptResult = await baseKb.processAsset(ctxA, siteA, corrupt.id);
     const corruptRows = await appDb.withWorkspace(wsA, async (tx) => ({
       asset: await tx.asset.findUniqueOrThrow({ where: { id: corrupt.id } }),
@@ -399,8 +366,8 @@ async function main(): Promise<void> {
       throw new Error('stranded queued asset not found by recovery scan');
     }
     if (
-      (await recoveryActivities.processKbAsset({ workspaceId: wsA, siteId: siteA, assetId: stranded.id }))
-        .outcome !== 'ready'
+      (await recoveryActivities.processKbAsset({ workspaceId: wsA, siteId: siteA, assetId: stranded.id })).outcome !==
+      'ready'
     ) {
       throw new Error('recovery candidate did not finish');
     }
@@ -465,7 +432,7 @@ async function main(): Promise<void> {
     if (deletedSurface.docs !== 0 || deletedSurface.chunks !== 0) {
       throw new Error(`KB cascade failed: ${JSON.stringify(deletedSurface)}`);
     }
-    ok('delete', 'document and chunks removed; canonical object remains parked for A4/MF-0');
+    ok('delete', 'document and chunks removed; canonical object queued for MF0-B async cleanup');
   } catch (err) {
     verificationError = err;
   } finally {
@@ -481,8 +448,7 @@ async function main(): Promise<void> {
     }
 
     let ownerCounts:
-      | { workspaces: number; sites: number; assets: number; documents: number; chunks: number }
-      | undefined;
+      { workspaces: number; sites: number; assets: number; documents: number; chunks: number } | undefined;
     try {
       const [workspaces, sites, assetsCount, documents, chunks] = await Promise.all([
         owner.workspace.count({ where: { id: { in: workspaceIds } } }),
@@ -493,9 +459,7 @@ async function main(): Promise<void> {
       ]);
       ownerCounts = { workspaces, sites, assets: assetsCount, documents, chunks };
       if (Object.values(ownerCounts).some((count) => count !== 0)) {
-        cleanupErrors.push(
-          new Error(`database fixture residue remains: ${JSON.stringify(ownerCounts)}`),
-        );
+        cleanupErrors.push(new Error(`database fixture residue remains: ${JSON.stringify(ownerCounts)}`));
       }
     } catch (err) {
       cleanupErrors.push(new Error(`database residue verification failed: ${String(err)}`, { cause: err }));
@@ -525,9 +489,7 @@ async function main(): Promise<void> {
           );
         }
       } catch (err) {
-        cleanupErrors.push(
-          new Error(`object residue verification failed for ${key}: ${String(err)}`, { cause: err }),
-        );
+        cleanupErrors.push(new Error(`object residue verification failed for ${key}: ${String(err)}`, { cause: err }));
       }
     }
 
@@ -540,9 +502,7 @@ async function main(): Promise<void> {
     try {
       await restoreRecoverySchedule();
     } catch (err) {
-      cleanupErrors.push(
-        new Error(`recovery Schedule restore failed: ${String(err)}`, { cause: err }),
-      );
+      cleanupErrors.push(new Error(`recovery Schedule restore failed: ${String(err)}`, { cause: err }));
     }
 
     const failures = [verificationError, ...cleanupErrors].filter(
@@ -551,10 +511,7 @@ async function main(): Promise<void> {
     if (failures.length > 0) {
       throw new AggregateError(failures, 'R2-A2 verification and/or cleanup failed');
     }
-    ok(
-      'cleanup',
-      `owner residue=${JSON.stringify(ownerCounts)}; object residue=0/${touchedKeys.size}`,
-    );
+    ok('cleanup', `owner residue=${JSON.stringify(ownerCounts)}; object residue=0/${touchedKeys.size}`);
   }
 }
 

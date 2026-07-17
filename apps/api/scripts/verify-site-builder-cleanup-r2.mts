@@ -12,10 +12,7 @@ import { OutboxRelayService } from '../src/relay/outbox-relay.service';
 import { StorageService } from '../src/site-builder/storage.service';
 import { TemporalClient } from '../src/temporal/temporal.client';
 import { createAssetCleanupActivities } from '../src/temporal/asset-cleanup.activities';
-import {
-  CleanupExecutionStatus,
-  queueAssetCleanupRedrive,
-} from '../src/temporal/asset-cleanup.redrive';
+import { CleanupExecutionStatus, queueAssetCleanupRedrive } from '../src/temporal/asset-cleanup.redrive';
 
 const execFileAsync = promisify(execFile);
 const faultInjection = process.argv.includes('--fault-injection');
@@ -41,9 +38,7 @@ function guardDevelopmentTargets(): void {
   if (!isLoopback(s3.hostname) || (s3.port || '80') !== '9000') {
     throw new Error('cleanup verifier requires loopback MinIO :9000');
   }
-  const temporalUrl = new URL(
-    temporalAddress.includes('://') ? temporalAddress : `grpc://${temporalAddress}`,
-  );
+  const temporalUrl = new URL(temporalAddress.includes('://') ? temporalAddress : `grpc://${temporalAddress}`);
   if (!isLoopback(temporalUrl.hostname) || temporalUrl.port !== '7233' || temporalNamespace !== 'default') {
     throw new Error('cleanup verifier requires loopback Temporal :7233 default namespace');
   }
@@ -65,7 +60,8 @@ async function assertMinioContainer(): Promise<void> {
     '{{ index .Config.Labels "com.docker.compose.project" }}:{{ index .Config.Labels "com.docker.compose.service" }}',
     'global-minio',
   ]);
-  if (stdout.trim() !== 'global:minio') throw new Error('global-minio is not the expected global:minio compose service');
+  if (stdout.trim() !== 'global:minio')
+    throw new Error('global-minio is not the expected global:minio compose service');
 }
 
 async function main(): Promise<void> {
@@ -90,7 +86,13 @@ async function main(): Promise<void> {
   const cleanupCanonicalKey = `ws/${workspaceId}/${siteId}/product_image/${'a'.repeat(64)}.jpg`;
   const redriveCanonicalKey = `ws/${workspaceId}/${siteId}/product_image/${'b'.repeat(64)}.jpg`;
   const blockedCanonicalKey = `ws/${workspaceId}/${siteId}/product_image/${'c'.repeat(64)}.jpg`;
-  const touchedKeys = [cleanupStagingKey, redriveStagingKey, cleanupCanonicalKey, redriveCanonicalKey, blockedCanonicalKey];
+  const touchedKeys = [
+    cleanupStagingKey,
+    redriveStagingKey,
+    cleanupCanonicalKey,
+    redriveCanonicalKey,
+    blockedCanonicalKey,
+  ];
   const taskQueue = `r2-a4-cleanup-verify-${randomUUID()}`;
   const attempts = new Map<string, number>();
   const transportFailures = new Map<string, number>();
@@ -121,11 +123,10 @@ async function main(): Promise<void> {
           // script-only workflow's durable settle must then reach a second delete/recheck.
           resurrectionPromise = new Promise<void>((resolve, reject) => {
             setTimeout(() => {
-              storage.putBuffer(key, Buffer.from('completed-after-first-delete'), 'image/jpeg')
-                .then(async () => {
-                  resurrectionObserved = Boolean(await storage.head(key));
-                  resolve();
-                }, reject);
+              storage.putBuffer(key, Buffer.from('completed-after-first-delete'), 'image/jpeg').then(async () => {
+                resurrectionObserved = Boolean(await storage.head(key));
+                resolve();
+              }, reject);
             }, 500);
           });
         }
@@ -153,9 +154,7 @@ async function main(): Promise<void> {
       connection: nativeConnection,
       namespace: temporalNamespace,
       taskQueue,
-      workflowsPath: fileURLToPath(
-        new URL('./workflows/asset-cleanup-verifier.workflow.ts', import.meta.url),
-      ),
+      workflowsPath: fileURLToPath(new URL('./workflows/asset-cleanup-verifier.workflow.ts', import.meta.url)),
       activities: createAssetCleanupActivities({ prisma: app, storage: verifierStorage }),
     });
     workerRun = worker.run();
@@ -167,12 +166,49 @@ async function main(): Promise<void> {
       ],
     });
     await app.withWorkspace(workspaceId, async (tx) => {
-      await tx.site.create({ data: { id: siteId, workspaceId, name: 'R2-A4 Verify', slug: `r2-a4-${siteId}`, intake: {} } });
+      await tx.site.create({
+        data: { id: siteId, workspaceId, name: 'R2-A4 Verify', slug: `r2-a4-${siteId}`, intake: {} },
+      });
       await tx.asset.createMany({
         data: [
-          { id: cleanupAssetId, workspaceId, siteId, kind: 'product_image', filename: 'cleanup.jpg', mime: 'image/jpeg', sizeBytes: 4, objectKey: cleanupCanonicalKey, contentHash: 'a'.repeat(64), processingStatus: 'ready' },
-          { id: redriveAssetId, workspaceId, siteId, kind: 'product_image', filename: 'redrive.jpg', mime: 'image/jpeg', sizeBytes: 4, objectKey: redriveCanonicalKey, contentHash: 'b'.repeat(64), processingStatus: 'ready' },
-          { id: canonicalAssetId, workspaceId, siteId, kind: 'product_image', filename: 'blocked.jpg', mime: 'image/jpeg', sizeBytes: 4, objectKey: blockedCanonicalKey, contentHash: 'c'.repeat(64), processingStatus: 'deleted', deletedAt: new Date() },
+          {
+            id: cleanupAssetId,
+            workspaceId,
+            siteId,
+            kind: 'product_image',
+            filename: 'cleanup.jpg',
+            mime: 'image/jpeg',
+            sizeBytes: 4,
+            objectKey: cleanupCanonicalKey,
+            contentHash: 'a'.repeat(64),
+            processingStatus: 'ready',
+          },
+          {
+            id: redriveAssetId,
+            workspaceId,
+            siteId,
+            kind: 'product_image',
+            filename: 'redrive.jpg',
+            mime: 'image/jpeg',
+            sizeBytes: 4,
+            objectKey: redriveCanonicalKey,
+            contentHash: 'b'.repeat(64),
+            processingStatus: 'ready',
+          },
+          {
+            id: canonicalAssetId,
+            workspaceId,
+            siteId,
+            kind: 'product_image',
+            filename: 'blocked.jpg',
+            mime: 'image/jpeg',
+            sizeBytes: 4,
+            objectKey: blockedCanonicalKey,
+            contentHash: 'c'.repeat(64),
+            processingStatus: 'deleted',
+            deletedAt: new Date(),
+            cleanupEventId: canonicalEventId,
+          },
         ],
       });
     });
@@ -188,23 +224,75 @@ async function main(): Promise<void> {
     const redriveNotBefore = new Date(Date.now() - 1_000).toISOString();
     await app.withWorkspace(workspaceId, async (tx) => {
       for (const data of [
-        { eventId: cleanupEventId, aggregateId: cleanupAssetId, objectKey: cleanupStagingKey, notBefore: cleanupNotBefore },
-        { eventId: redriveEventId, aggregateId: redriveAssetId, objectKey: redriveStagingKey, notBefore: redriveNotBefore },
+        {
+          eventId: cleanupEventId,
+          aggregateId: cleanupAssetId,
+          objectKey: cleanupStagingKey,
+          notBefore: cleanupNotBefore,
+        },
+        {
+          eventId: redriveEventId,
+          aggregateId: redriveAssetId,
+          objectKey: redriveStagingKey,
+          notBefore: redriveNotBefore,
+        },
       ]) {
-        await tx.outboxEvent.create({ data: { eventId: data.eventId, workspaceId, eventType: 'AssetObjectCleanupRequested', schemaVersion: 1, aggregateType: 'Asset', aggregateId: data.aggregateId, privacyClassification: 'INTERNAL', payload: { assetId: data.aggregateId, siteId, objectKey: data.objectKey, objectClass: 'staging', reason: 'commit_succeeded', notBefore: data.notBefore } } });
+        await tx.outboxEvent.create({
+          data: {
+            eventId: data.eventId,
+            workspaceId,
+            eventType: 'AssetObjectCleanupRequested',
+            schemaVersion: 1,
+            aggregateType: 'Asset',
+            aggregateId: data.aggregateId,
+            privacyClassification: 'INTERNAL',
+            payload: {
+              assetId: data.aggregateId,
+              siteId,
+              objectKey: data.objectKey,
+              objectClass: 'staging',
+              reason: 'commit_succeeded',
+              notBefore: data.notBefore,
+            },
+          },
+        });
       }
-      await tx.outboxEvent.create({ data: { eventId: canonicalEventId, workspaceId, eventType: 'AssetObjectCleanupRequested', schemaVersion: 1, aggregateType: 'Asset', aggregateId: canonicalAssetId, privacyClassification: 'INTERNAL', parkedAt: new Date(), payload: { assetId: canonicalAssetId, siteId, objectKey: blockedCanonicalKey, objectClass: 'canonical', reason: 'asset_deleted', blockedUntil: 'site_spec_asset_reference_scanner' } } });
+      await tx.outboxEvent.create({
+        data: {
+          eventId: canonicalEventId,
+          workspaceId,
+          eventType: 'AssetObjectCleanupRequested',
+          schemaVersion: 1,
+          aggregateType: 'Asset',
+          aggregateId: canonicalAssetId,
+          privacyClassification: 'INTERNAL',
+          parkedAt: new Date(),
+          payload: {
+            assetId: canonicalAssetId,
+            siteId,
+            objectKey: blockedCanonicalKey,
+            objectClass: 'canonical',
+            reason: 'asset_deleted',
+            blockedUntil: 'site_spec_asset_reference_scanner',
+          },
+        },
+      });
     });
 
     const relayTemporal = {
-      client: { workflow: { start: async (type: string, options: Record<string, unknown>) => {
-        const handle = await temporal.client.workflow.start(type, { ...options, taskQueue } as never);
-        workflowHandles.set(String(options.workflowId), handle as never);
-        return handle;
-      } } },
+      client: {
+        workflow: {
+          start: async (type: string, options: Record<string, unknown>) => {
+            const handle = await temporal.client.workflow.start(type, { ...options, taskQueue } as never);
+            workflowHandles.set(String(options.workflowId), handle as never);
+            return handle;
+          },
+        },
+      },
     };
     const relay = new OutboxRelayService(relayTemporal as never, owner);
-    const route = async (eventId: string) => relay.routeEvent(await owner.outboxEvent.findUniqueOrThrow({ where: { eventId } }) as never);
+    const route = async (eventId: string) =>
+      relay.routeEvent((await owner.outboxEvent.findUniqueOrThrow({ where: { eventId } })) as never);
 
     await route(cleanupEventId);
     await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -218,7 +306,11 @@ async function main(): Promise<void> {
       await execFileAsync('docker', ['start', 'global-minio']);
       minioStopped = false;
       await waitFor('MinIO recovery', async () => {
-        try { return Boolean(await storage.head(cleanupCanonicalKey)); } catch { return false; }
+        try {
+          return Boolean(await storage.head(cleanupCanonicalKey));
+        } catch {
+          return false;
+        }
       });
     }
     await workflowHandles.get(cleanupEventId)!.result();
@@ -226,7 +318,10 @@ async function main(): Promise<void> {
     if (!resurrectionObserved || (successfulDeletes.get(cleanupStagingKey) ?? 0) < 2) {
       throw new Error('settle/recheck did not prove deletion of an object revived after first delete');
     }
-    if (faultInjection && ((attempts.get(cleanupStagingKey) ?? 0) < 2 || (transportFailures.get(cleanupStagingKey) ?? 0) < 1)) {
+    if (
+      faultInjection &&
+      ((attempts.get(cleanupStagingKey) ?? 0) < 2 || (transportFailures.get(cleanupStagingKey) ?? 0) < 1)
+    ) {
       throw new Error('Temporal did not retry after the proven MinIO transport failure');
     }
 
@@ -234,31 +329,60 @@ async function main(): Promise<void> {
     await route(redriveEventId);
     const firstRedriveHandle = workflowHandles.get(redriveEventId)!;
     await firstRedriveHandle.result().then(
-      () => { throw new Error('forced cleanup execution unexpectedly completed'); },
+      () => {
+        throw new Error('forced cleanup execution unexpectedly completed');
+      },
       () => undefined,
     );
-    if ((await firstRedriveHandle.describe()).status.name !== 'FAILED') throw new Error('forced cleanup execution did not fail');
+    if ((await firstRedriveHandle.describe()).status.name !== 'FAILED')
+      throw new Error('forced cleanup execution did not fail');
     forcedNonRetryable.delete(redriveStagingKey);
     const redrive = await queueAssetCleanupRedrive({
       prisma: app,
       workspaceId,
       eventId: redriveEventId,
-      executionStatus: async () => (await temporal.client.workflow.getHandle(redriveEventId).describe()).status.name as CleanupExecutionStatus,
+      executionStatus: async () =>
+        (await temporal.client.workflow.getHandle(redriveEventId).describe()).status.name as CleanupExecutionStatus,
     });
     if (redrive.previousStatus !== 'FAILED') throw new Error('guarded redrive did not observe FAILED');
     await route(redriveEventId);
     const secondRedriveHandle = workflowHandles.get(redriveEventId)!;
-    if (secondRedriveHandle.firstExecutionRunId === firstRedriveHandle.firstExecutionRunId) throw new Error('redrive did not create a new run');
+    if (secondRedriveHandle.firstExecutionRunId === firstRedriveHandle.firstExecutionRunId)
+      throw new Error('redrive did not create a new run');
     await secondRedriveHandle.result();
 
-    if (await storage.head(cleanupStagingKey) || await storage.head(redriveStagingKey)) throw new Error('staging object survived completed cleanup');
-    if (!(await storage.head(cleanupCanonicalKey)) || !(await storage.head(redriveCanonicalKey))) throw new Error('canonical object changed');
-    const blocked = await app.withWorkspace(workspaceId, (tx) => tx.outboxEvent.findUniqueOrThrow({ where: { eventId: canonicalEventId } }));
-    if (!blocked.parkedAt || blocked.publishedAt || !(await storage.head(blockedCanonicalKey))) throw new Error('canonical cleanup escaped MF-0 gate');
-    const hidden = await app.withWorkspace(otherWorkspaceId, (tx) => tx.outboxEvent.findUnique({ where: { eventId: cleanupEventId } }));
+    if ((await storage.head(cleanupStagingKey)) || (await storage.head(redriveStagingKey)))
+      throw new Error('staging object survived completed cleanup');
+    if (!(await storage.head(cleanupCanonicalKey)) || !(await storage.head(redriveCanonicalKey)))
+      throw new Error('canonical object changed');
+    const blocked = await app.withWorkspace(workspaceId, (tx) =>
+      tx.outboxEvent.findUniqueOrThrow({ where: { eventId: canonicalEventId } }),
+    );
+    if (!blocked.parkedAt || blocked.publishedAt || !(await storage.head(blockedCanonicalKey)))
+      throw new Error('canonical cleanup escaped MF-0 gate');
+    const hidden = await app.withWorkspace(otherWorkspaceId, (tx) =>
+      tx.outboxEvent.findUnique({ where: { eventId: cleanupEventId } }),
+    );
     if (hidden) throw new Error('cross-workspace cleanup event was visible');
 
-    console.log(JSON.stringify({ ok: true, environment: 'ubuntu-development', taskQueue, checks: ['app_user_force_rls', 'dedicated_verifier_only_worker', 'relay_temporal_minio', 'durable_expiry_grace_timer', 'real_minio_post_delete_revival_settle_redelete', ...(faultInjection ? ['real_minio_retry_recovery'] : []), 'failed_guarded_redrive_new_run', 'canonical_parked', 'cross_tenant_hidden'] }));
+    console.log(
+      JSON.stringify({
+        ok: true,
+        environment: 'ubuntu-development',
+        taskQueue,
+        checks: [
+          'app_user_force_rls',
+          'dedicated_verifier_only_worker',
+          'relay_temporal_minio',
+          'durable_expiry_grace_timer',
+          'real_minio_post_delete_revival_settle_redelete',
+          ...(faultInjection ? ['real_minio_retry_recovery'] : []),
+          'failed_guarded_redrive_new_run',
+          'canonical_parked',
+          'cross_tenant_hidden',
+        ],
+      }),
+    );
   } catch (error) {
     verificationError = error;
   } finally {
@@ -271,7 +395,9 @@ async function main(): Promise<void> {
       try {
         const status = (await handle.describe()).status.name;
         if (status === 'RUNNING') await handle.terminate('R2-A4 verifier cleanup');
-      } catch { /* closed/not-found */ }
+      } catch {
+        /* closed/not-found */
+      }
     }
     if (worker) {
       worker.shutdown();
@@ -305,8 +431,11 @@ async function main(): Promise<void> {
           owner.asset.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
           owner.outboxEvent.count({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } }),
         ]);
-        if (workspaces || sites || assets || events) throw new Error(`database residue: ${JSON.stringify({ workspaces, sites, assets, events })}`);
-      } catch (error) { cleanupErrors.push(error); }
+        if (workspaces || sites || assets || events)
+          throw new Error(`database residue: ${JSON.stringify({ workspaces, sites, assets, events })}`);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
     }
     await temporal.onModuleDestroy().catch((error) => cleanupErrors.push(error));
     await app.$disconnect().catch((error) => cleanupErrors.push(error));

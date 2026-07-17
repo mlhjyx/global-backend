@@ -5114,6 +5114,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5159,6 +5160,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5204,6 +5206,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5249,6 +5252,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5338,6 +5342,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5383,6 +5388,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5428,6 +5434,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5473,6 +5480,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5518,6 +5526,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5563,6 +5572,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5671,6 +5681,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5716,6 +5727,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5761,6 +5773,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5835,6 +5848,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5880,6 +5894,7 @@
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",
+                            "ASSET_IN_USE",
                             "ASSET_STORAGE_UNAVAILABLE",
                             "ASSET_COMMIT_UNAVAILABLE"
                           ]
@@ -5899,46 +5914,112 @@
             }
           },
           "409": {
-            "description": "Asset 正由 commit/KB worker 持有",
+            "description": "Asset 正被 Profile/active SiteSpec 引用，或由 commit/KB/Variant worker 持有",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "error"
-                  ],
-                  "properties": {
-                    "error": {
+                  "oneOf": [
+                    {
                       "type": "object",
                       "required": [
-                        "code",
-                        "message"
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "object",
+                          "required": [
+                            "code",
+                            "message",
+                            "details"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "ASSET_IN_USE"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "details": {
+                              "type": "object",
+                              "required": [
+                                "usages"
+                              ],
+                              "additionalProperties": false,
+                              "properties": {
+                                "usages": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "source",
+                                      "page",
+                                      "component",
+                                      "fieldPath"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "source": {
+                                        "type": "string",
+                                        "enum": [
+                                          "profile",
+                                          "site_spec"
+                                        ]
+                                      },
+                                      "siteVersionId": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                      },
+                                      "page": {
+                                        "type": "string"
+                                      },
+                                      "component": {
+                                        "type": "string"
+                                      },
+                                      "fieldPath": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
                       ],
                       "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "VALIDATION_ERROR",
-                            "NOT_FOUND",
-                            "ASSET_VALIDATION_FAILED",
-                            "ASSET_UPLOAD_INCOMPLETE",
-                            "ASSET_DUPLICATE",
-                            "ASSET_STATE_CONFLICT",
-                            "ASSET_BUSY",
-                            "ASSET_STORAGE_UNAVAILABLE",
-                            "ASSET_COMMIT_UNAVAILABLE"
-                          ]
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {
+                        "error": {
                           "type": "object",
-                          "additionalProperties": true
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "ASSET_BUSY",
+                                "ASSET_STATE_CONFLICT"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
                         }
                       }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -5949,7 +6030,7 @@
             "bearer": []
           }
         ],
-        "summary": "软删除素材；canonical 清理等待 MF-0 引用扫描器",
+        "summary": "引用守卫通过后软删除素材；对象由异步清理回收",
         "tags": [
           "SiteBuilder"
         ]

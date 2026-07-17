@@ -15,7 +15,9 @@ import { piiExtension } from '../compliance/pii-crypto.extension';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
-    super({ datasourceUrl: process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL });
+    super({
+      datasourceUrl: process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL,
+    });
     return this.$extends(piiExtension) as unknown as PrismaService;
   }
 
@@ -31,10 +33,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   async withWorkspace<T>(
     workspaceId: string,
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
+    options?: { maxWait?: number; timeout?: number },
   ): Promise<T> {
     return this.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
       return fn(tx);
-    });
+    }, options);
   }
 }

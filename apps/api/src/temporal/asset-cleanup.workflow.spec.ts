@@ -2,12 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const temporal = vi.hoisted(() => ({
   cleanup: vi.fn(),
+  cleanupCanonical: vi.fn(),
+  settleCanonical: vi.fn(),
   sleep: vi.fn(async () => undefined),
   logError: vi.fn(),
 }));
 
 vi.mock('@temporalio/workflow', () => ({
-  proxyActivities: () => ({ cleanupStagingAssetObject: temporal.cleanup }),
+  proxyActivities: () => ({
+    cleanupStagingAssetObject: temporal.cleanup,
+    cleanupCanonicalAssetObjects: temporal.cleanupCanonical,
+    settleCanonicalAssetCleanup: temporal.settleCanonical,
+  }),
   sleep: temporal.sleep,
   log: { error: temporal.logError },
   ApplicationFailure: class MockApplicationFailure extends Error {
@@ -40,7 +46,20 @@ const INPUT = {
 describe('assetObjectCleanupWorkflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    temporal.cleanup.mockResolvedValue({ eventId: INPUT.eventId, deleted: true });
+    temporal.cleanup.mockResolvedValue({
+      eventId: INPUT.eventId,
+      deleted: true,
+    });
+    temporal.cleanupCanonical.mockResolvedValue({
+      eventId: INPUT.eventId,
+      deleted: true,
+      alreadySettled: false,
+    });
+    temporal.settleCanonical.mockResolvedValue({
+      eventId: INPUT.eventId,
+      settled: true,
+      variantsDeleted: 0,
+    });
   });
 
   it('waits through the fixed in-flight grace, deletes, settles durably, then rechecks/deletes', async () => {
@@ -80,16 +99,47 @@ describe('assetObjectCleanupWorkflow', () => {
 
   it('rejects canonical payload before timer or activity', async () => {
     await expect(
-      assetObjectCleanupWorkflow({ ...INPUT, objectClass: 'canonical' } as never),
+      assetObjectCleanupWorkflow({
+        ...INPUT,
+        objectClass: 'canonical',
+      } as never),
     ).rejects.toMatchObject({ nonRetryable: true });
 
     expect(temporal.sleep).not.toHaveBeenCalled();
     expect(temporal.cleanup).not.toHaveBeenCalled();
   });
 
+  it('deletes a canonical plan twice across durable settle, then commits DB settlement', async () => {
+    const hash = 'a'.repeat(64);
+    const canonical = {
+      eventId: INPUT.eventId,
+      workspaceId: INPUT.workspaceId,
+      siteId: INPUT.siteId,
+      assetId: INPUT.assetId,
+      objectClass: 'canonical' as const,
+      reason: 'asset_deleted' as const,
+      canonical: {
+        objectKey: `ws/${INPUT.workspaceId}/${INPUT.siteId}/product_image/${hash}.jpg`,
+        contentHash: hash,
+      },
+      variants: [],
+    };
+
+    await assetObjectCleanupWorkflow(canonical);
+
+    expect(temporal.cleanupCanonical).toHaveBeenCalledTimes(2);
+    expect(temporal.sleep).toHaveBeenCalledWith(5 * 60 * 1000);
+    expect(temporal.settleCanonical).toHaveBeenCalledWith(canonical);
+    expect(temporal.cleanup).not.toHaveBeenCalled();
+  });
+
   it('rejects client or Outbox attempts to shorten code-owned cleanup windows', async () => {
     await expect(
-      assetObjectCleanupWorkflow({ ...INPUT, inFlightGraceMs: 0, settleMs: 0 } as never),
+      assetObjectCleanupWorkflow({
+        ...INPUT,
+        inFlightGraceMs: 0,
+        settleMs: 0,
+      } as never),
     ).rejects.toMatchObject({ nonRetryable: true });
 
     expect(temporal.sleep).not.toHaveBeenCalled();
@@ -100,12 +150,15 @@ describe('assetObjectCleanupWorkflow', () => {
     const failure = Object.assign(new Error('S3 secret and object key must not be logged'), {
       cause: { type: 'ASSET_CLEANUP_STORAGE_UNAVAILABLE' },
     });
-    temporal.cleanup.mockResolvedValueOnce({ eventId: INPUT.eventId, deleted: true });
+    temporal.cleanup.mockResolvedValueOnce({
+      eventId: INPUT.eventId,
+      deleted: true,
+    });
     temporal.cleanup.mockRejectedValueOnce(failure);
 
     await expect(assetObjectCleanupWorkflow(INPUT)).rejects.toBe(failure);
 
-    expect(temporal.logError).toHaveBeenCalledWith('asset staging cleanup failed', {
+    expect(temporal.logError).toHaveBeenCalledWith('asset object cleanup failed', {
       eventId: INPUT.eventId,
       workspaceId: INPUT.workspaceId,
       objectClass: 'staging',
