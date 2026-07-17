@@ -1,0 +1,175 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+function repositoryFile(relativePath: string): string {
+  return readFileSync(
+    fileURLToPath(new URL(`../../../../${relativePath}`, import.meta.url)),
+    "utf8",
+  );
+}
+
+const migrationPath =
+  "packages/db/prisma/migrations/20260717040000_site_builder_asset_variant_mf0/migration.sql";
+const hardeningMigrationPath =
+  "packages/db/prisma/migrations/20260717041000_site_builder_asset_variant_provenance_hardening/migration.sql";
+const ledgerIdentityMigrationPath =
+  "packages/db/prisma/migrations/20260717042000_site_builder_asset_variant_ledger_identity/migration.sql";
+const sourceReadinessMigrationPath =
+  "packages/db/prisma/migrations/20260717043000_site_builder_asset_variant_source_readiness/migration.sql";
+const upgradeValidationMigrationPath =
+  "packages/db/prisma/migrations/20260717044000_site_builder_asset_variant_upgrade_validation/migration.sql";
+const rlsSafeUpgradeMigrationPath =
+  "packages/db/prisma/migrations/20260717045000_site_builder_asset_variant_rls_safe_upgrade/migration.sql";
+
+describe("MF0-A AssetVariant migration integrity", () => {
+  it("adds the tenant-scoped materialized variant and its complete provenance", () => {
+    const sql = repositoryFile(migrationPath);
+
+    expect(sql).toContain('CREATE TABLE "asset_variant"');
+    for (const column of [
+      "workspace_id",
+      "site_id",
+      "asset_id",
+      "variant_type",
+      "mime",
+      "width",
+      "height",
+      "duration_ms",
+      "bitrate_kbps",
+      "size_bytes",
+      "object_key",
+      "content_hash",
+      "pipeline_version",
+      "recipe_hash",
+      "source_variant_id",
+      "status",
+      "error",
+      "metadata",
+    ]) {
+      expect(sql).toContain(`"${column}"`);
+    }
+
+    expect(sql).toContain(
+      'UNIQUE ("asset_id", "recipe_hash")',
+    );
+    expect(sql).toContain('UNIQUE ("object_key")');
+    expect(sql).toContain(
+      'FOREIGN KEY ("asset_id", "workspace_id", "site_id")',
+    );
+    expect(sql).toContain(
+      'REFERENCES "asset"("id", "workspace_id", "site_id")',
+    );
+    expect(sql).toContain(
+      'FOREIGN KEY ("source_variant_id", "workspace_id", "site_id", "asset_id")',
+    );
+    expect(sql).toContain(
+      'REFERENCES "asset_variant"("id", "workspace_id", "site_id", "asset_id")',
+    );
+  });
+
+  it("enforces materialization state, hashes, dimensions and canonical object-key scope", () => {
+    const sql = repositoryFile(migrationPath);
+
+    expect(sql).toMatch(/status.+processing.+ready.+failed/is);
+    expect(sql).toMatch(/content_hash.+\^\[0-9a-f\]\{64\}\$/is);
+    expect(sql).toMatch(/recipe_hash.+\^\[0-9a-f\]\{64\}\$/is);
+    expect(sql).toMatch(/status.+ready.+content_hash.+IS NOT NULL/is);
+    expect(sql).toMatch(/width.+IS NULL.+width.+> 0/is);
+    expect(sql).toMatch(/height.+IS NULL.+height.+> 0/is);
+    expect(sql).toMatch(/size_bytes.+IS NULL.+size_bytes.+> 0/is);
+    expect(sql).toMatch(/object_key.+workspace_id.+site_id/is);
+    expect(sql).toMatch(/object_key.+uploads/is);
+  });
+
+  it("enables and forces RLS with symmetric tenant checks and explicit app grants", () => {
+    const sql = repositoryFile(migrationPath);
+
+    expect(sql).toContain('ALTER TABLE "asset_variant" ENABLE ROW LEVEL SECURITY');
+    expect(sql).toContain('ALTER TABLE "asset_variant" FORCE ROW LEVEL SECURITY');
+    expect(sql).toMatch(
+      /CREATE POLICY "asset_variant_tenant_isolation"[\s\S]+USING \("workspace_id" = current_workspace_id\(\)\)[\s\S]+WITH CHECK \("workspace_id" = current_workspace_id\(\)\)/,
+    );
+    expect(sql).toContain(
+      'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "asset_variant" TO app_user',
+    );
+    expect(sql).not.toMatch(
+      /DISABLE ROW LEVEL SECURITY|NO FORCE ROW LEVEL SECURITY/i,
+    );
+  });
+
+  it("keeps Prisma and SQL in one additive schema", () => {
+    const schema = repositoryFile("packages/db/prisma/schema.prisma");
+
+    expect(schema).toContain("model AssetVariant {");
+    expect(schema).toMatch(/variants\s+AssetVariant\[\]/);
+    expect(schema).toContain("@@unique([assetId, recipeHash]");
+    expect(schema).toContain("@@map(\"asset_variant\")");
+    expect(schema).not.toContain("model MediaJob {");
+    expect(schema).not.toContain("model AssetUsage {");
+  });
+
+  it("hardens object identity, ready image dimensions, and source retention forward-only", () => {
+    const sql = repositoryFile(hardeningMigrationPath);
+
+    expect(sql).toMatch(
+      /object_key.+variants.+asset_id.+recipe_hash/is,
+    );
+    expect(sql).toMatch(
+      /status.+ready.+mime.+image\/.+width.+IS NOT NULL.+height.+IS NOT NULL/is,
+    );
+    expect(sql).toContain(
+      'DROP CONSTRAINT "asset_variant_source_scope_fkey"',
+    );
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "asset_variant_source_scope_fkey"[\s\S]+ON DELETE NO ACTION ON UPDATE NO ACTION/,
+    );
+    expect(sql).toMatch(
+      /CREATE (?:OR REPLACE )?FUNCTION enforce_asset_variant_provenance_immutable/,
+    );
+    expect(sql).toMatch(/CREATE TRIGGER asset_variant_provenance_immutable/);
+  });
+
+  it("freezes the surrogate identity and creation timestamp forward-only", () => {
+    const sql = repositoryFile(ledgerIdentityMigrationPath);
+
+    expect(sql).toMatch(/NEW\."id"[\s\S]+OLD\."id"/);
+    expect(sql).toMatch(/NEW\."created_at"[\s\S]+OLD\."created_at"/);
+    expect(sql).toContain("AssetVariant ledger identity is immutable after insert");
+  });
+
+  it("requires every derived Variant source to be ready and checksummed", () => {
+    const sql = repositoryFile(sourceReadinessMigrationPath);
+
+    expect(sql).toMatch(/source_variant_id[\s\S]+status[\s\S]+ready/i);
+    expect(sql).toMatch(/source_variant_id[\s\S]+content_hash[\s\S]+IS NOT NULL/i);
+    expect(sql).toMatch(/BEFORE INSERT OR UPDATE ON "asset_variant"/i);
+    expect(sql).toContain("AssetVariant source must be ready and checksummed");
+  });
+
+  it("fails dirty upgrades and binds canonical extensions to MIME", () => {
+    const sql = repositoryFile(upgradeValidationMigrationPath);
+
+    expect(sql).toMatch(
+      /JOIN[\s\S]+source_variant_id[\s\S]+status[\s\S]+ready[\s\S]+RAISE EXCEPTION/is,
+    );
+    for (const [mime, extension] of [
+      ["image/avif", ".avif"],
+      ["image/webp", ".webp"],
+      ["image/jpeg", ".jpg"],
+      ["image/png", ".png"],
+    ]) {
+      expect(sql).toContain(`'${mime}'`);
+      expect(sql).toContain(`'${extension}'`);
+    }
+  });
+
+  it("makes the historical scan fail closed when the migration role cannot bypass RLS", () => {
+    const sql = repositoryFile(rlsSafeUpgradeMigrationPath);
+
+    expect(sql).toMatch(/SET LOCAL row_security\s*=\s*off/i);
+    expect(sql).toMatch(
+      /SET LOCAL row_security[\s\S]+JOIN[\s\S]+source_variant_id[\s\S]+RAISE EXCEPTION/is,
+    );
+  });
+});
