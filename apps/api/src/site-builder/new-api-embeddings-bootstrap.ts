@@ -1,4 +1,6 @@
-import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { open, readFile, rename, unlink } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 
 export const LOCAL_EMBEDDING_MODEL_ALIAS = 'site-builder-bge-m3-local';
 export const LOCAL_EMBEDDING_UPSTREAM_MODEL = 'bge-m3';
@@ -359,8 +361,23 @@ export async function writeEmbeddingEnv(
 ): Promise<void> {
   const source = await readFile(path, 'utf8');
   const output = mergeEmbeddingEnv(source, result, gatewayUrl);
-  await writeFile(path, output, { mode: 0o600 });
-  await chmod(path, 0o600);
+  const temporaryPath = join(
+    dirname(path),
+    `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(temporaryPath, 'wx', 0o600);
+    await handle.writeFile(output, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, path);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 export function mergeEmbeddingEnv(
