@@ -99,6 +99,43 @@ describe('R2-A2 typed KB dependency errors', () => {
     });
   });
 
+  it('break-glass 只允许精确本机 Ollama 地址，无 token 时使用上游 bge-m3', async () => {
+    vi.stubEnv('EMBEDDINGS_URL', 'http://127.0.0.1:11434/v1');
+    vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    vi.stubEnv('EMBEDDINGS_MODEL', 'remote-model-must-be-ignored');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new EmbeddingsClient().embed(['break glass']);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/v1/embeddings',
+      expect.objectContaining({ headers: { 'content-type': 'application/json' } }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
+      model: 'bge-m3',
+    });
+  });
+
+  it('非 allowlist 的直连地址即使叫 Ollama 也必须有专用 token', async () => {
+    vi.stubEnv('EMBEDDINGS_URL', 'http://ollama.remote.example:11434/v1');
+    vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['must not leave host'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('Docling 泛 400 不足以证明文档损坏，按 dependency retryable 处理', async () => {
     vi.stubGlobal(
       'fetch',
