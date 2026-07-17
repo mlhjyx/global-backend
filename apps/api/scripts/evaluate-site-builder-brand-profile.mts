@@ -41,6 +41,49 @@ const CAPABILITY_PROBE_SCHEMA = {
   properties: { status: { type: 'string', const: 'ok' } },
 } as const;
 
+interface EvalUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  calls?: number;
+}
+
+interface EvalProbe {
+  requestedModel: string;
+  accepted: boolean;
+  elapsedMs: number;
+  provider?: string;
+  resolvedModel?: string;
+  usage?: EvalUsage;
+  error?: string;
+}
+
+interface EvalRun {
+  model: string;
+  requestedModel: string;
+  fixtureId: string;
+  targetMarkets: string[];
+  materialCompleteness: BrandProfileEvalFixture['materialCompleteness'];
+  attempt: number;
+  acceptedArtifact: boolean;
+  elapsedMs: number;
+  provider?: string;
+  resolvedModel?: string;
+  acceptedFactCount?: number;
+  rejectedFactCount?: number;
+  missingAcceptedTerms?: string[];
+  forbiddenOutputTerms?: string[];
+  modelSnapshot?: unknown;
+  fallbackIndex?: number;
+  usage?: EvalUsage;
+  acceptedArtifactCost: {
+    reportedCostUsd: null;
+    inputTokens: number;
+    outputTokens: number;
+    note: string;
+  };
+  error?: string;
+}
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
@@ -97,7 +140,7 @@ async function probeCandidate(
   gateway: RouterModelGateway,
   route: TaskRoute,
   requestedModel: string,
-): Promise<Record<string, unknown>> {
+): Promise<EvalProbe> {
   const started = performance.now();
   try {
     const result = await gateway.generateStructured<{ status: 'ok' }>(
@@ -152,8 +195,8 @@ const models = (process.env.MODEL_EVAL_MODELS ?? 'gpt-5.6-terra,claude-sonnet-5'
 if (models.length === 0) throw new Error('MODEL_EVAL_MODELS must contain at least one model');
 
 const fixtures = await loadFixtures();
-const runs: Array<Record<string, unknown>> = [];
-const probes: Array<Record<string, unknown>> = [];
+const runs: EvalRun[] = [];
+const probes: EvalProbe[] = [];
 
 for (const model of models) {
   const route = candidateRoute(model);
@@ -239,7 +282,7 @@ const summary = models.map((model) => {
     p95LatencyMs: percentile95(latencies),
     attemptedTokenTotals: rows.reduce(
       (total, row) => {
-        const usage = row.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        const usage = row.usage;
         return {
           inputTokens: total.inputTokens + (usage?.inputTokens ?? 0),
           outputTokens: total.outputTokens + (usage?.outputTokens ?? 0),
@@ -249,7 +292,7 @@ const summary = models.map((model) => {
     ),
     acceptedArtifactTokenTotals: accepted.reduce(
       (total, row) => {
-        const usage = row.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        const usage = row.usage;
         return {
           inputTokens: total.inputTokens + (usage?.inputTokens ?? 0),
           outputTokens: total.outputTokens + (usage?.outputTokens ?? 0),
