@@ -10,6 +10,7 @@ import { Client, Connection } from '@temporalio/client';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { buildDemoSpec } from '../src/site-builder/demo-spec';
+import { buildSiteSpecWithTemporaryFile } from '../src/site-builder/renderer-build';
 import { previewRoot } from '../src/temporal/site-builder.activities';
 import { createSiteBuilderActivities } from '../src/temporal/site-builder.activities';
 
@@ -51,11 +52,14 @@ const app = new PrismaService();
 const workspaceId = randomUUID();
 const pageSiteId = randomUUID();
 const cancelSiteId = randomUUID();
+const renderCancelSiteId = randomUUID();
 const pageRunId = randomUUID();
 const cancelRunId = randomUUID();
+const renderCancelRunId = randomUUID();
 const taskQueue = `r3b2-verify-${randomUUID()}`;
 const pageSlug = `r3-b2-page-${pageSiteId}`;
 const cancelSlug = `r3-b2-cancel-${cancelSiteId}`;
+const renderCancelSlug = `r3-b2-render-cancel-${renderCancelSiteId}`;
 let nativeConnection: NativeConnection | undefined;
 let clientConnection: Connection | undefined;
 let worker: Worker | undefined;
@@ -82,6 +86,13 @@ try {
         workspaceId,
         name: 'Cancel',
         slug: cancelSlug,
+        intake,
+      },
+      {
+        id: renderCancelSiteId,
+        workspaceId,
+        name: 'Render Cancel',
+        slug: renderCancelSlug,
         intake,
       },
     ],
@@ -130,6 +141,14 @@ try {
         status: 'queued',
         scope: { scope: 'site' },
       },
+      {
+        id: renderCancelRunId,
+        workspaceId,
+        siteId: renderCancelSiteId,
+        kind: 'refurbish',
+        status: 'queued',
+        scope: { scope: 'site' },
+      },
     ],
   });
 
@@ -159,6 +178,14 @@ try {
   nativeConnection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
   });
+  let rendererEnteredResolve!: () => void;
+  const rendererEntered = new Promise<void>((resolve) => {
+    rendererEnteredResolve = resolve;
+  });
+  let rendererFinishedResolve!: () => void;
+  const rendererFinished = new Promise<void>((resolve) => {
+    rendererFinishedResolve = resolve;
+  });
   worker = await Worker.create({
     connection: nativeConnection,
     namespace: process.env.TEMPORAL_NAMESPACE,
@@ -166,7 +193,26 @@ try {
     workflowsPath: fileURLToPath(
       new URL('../src/temporal/workflows.ts', import.meta.url),
     ),
-    activities: createSiteBuilderActivities({ prisma: app, kb: kb as never }),
+    activities: createSiteBuilderActivities({
+      prisma: app,
+      kb: kb as never,
+      renderSiteSpec: async (spec, output) => {
+        if (output.outDir.endsWith(renderCancelRunId)) {
+          rendererEnteredResolve();
+          // Deliberately ignore Temporal cancellation and recreate output after compensation,
+          // modeling a non-cooperative child renderer that finishes late.
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          await mkdir(output.outDir, { recursive: true });
+          await writeFile(
+            path.join(output.outDir, 'index.html'),
+            'late candidate',
+          );
+          rendererFinishedResolve();
+          return;
+        }
+        await buildSiteSpecWithTemporaryFile(spec, output);
+      },
+    }),
   });
   workerRun = worker.run();
   clientConnection = await Connection.connect({
@@ -287,6 +333,57 @@ try {
     'cancel compensation terminalizes every unfinished step attempt',
   );
 
+  console.log(
+    '③ cancellation during a non-cooperative renderer fences late completion',
+  );
+  const renderCancelHandle = await client.workflow.start('refurbishWorkflow', {
+    taskQueue,
+    workflowId: `site-refurbish-${renderCancelRunId}`,
+    args: [
+      {
+        workspaceId,
+        siteId: renderCancelSiteId,
+        buildRunId: renderCancelRunId,
+        scope: { scope: 'site' },
+      },
+    ],
+  });
+  await rendererEntered;
+  await renderCancelHandle.cancel();
+  await renderCancelHandle.result().catch(() => undefined);
+  await rendererFinished;
+  for (let poll = 0; poll < 100; poll += 1) {
+    const late = await app.withWorkspace(workspaceId, async (tx) => ({
+      run: await tx.siteBuildRun.findUniqueOrThrow({
+        where: { id: renderCancelRunId },
+      }),
+      versions: await tx.siteVersion.findMany({
+        where: { buildRunId: renderCancelRunId },
+      }),
+    }));
+    const stagingExists = await access(
+      path.join(previewRoot(), '.staging', renderCancelRunId),
+    ).then(
+      () => true,
+      () => false,
+    );
+    if (
+      late.run.status === 'cancelled' &&
+      late.versions.length === 1 &&
+      late.versions.every((version) => version.buildStatus === 'failed') &&
+      !stagingExists
+    ) {
+      check(
+        true,
+        'late renderer leaves only a failed candidate and no staging artifact',
+      );
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (poll === 99)
+      throw new Error('late renderer did not converge to fenced cleanup');
+  }
+
   console.log('\nR3-B2 real Temporal development verification passed.');
 } finally {
   worker?.shutdown();
@@ -296,9 +393,17 @@ try {
   await Promise.allSettled([
     rm(`${previewRoot()}/${pageSlug}`, { recursive: true, force: true }),
     rm(`${previewRoot()}/${cancelSlug}`, { recursive: true, force: true }),
+    rm(`${previewRoot()}/${renderCancelSlug}`, {
+      recursive: true,
+      force: true,
+    }),
   ]);
   await owner.site
-    .deleteMany({ where: { id: { in: [pageSiteId, cancelSiteId] } } })
+    .deleteMany({
+      where: {
+        id: { in: [pageSiteId, cancelSiteId, renderCancelSiteId] },
+      },
+    })
     .catch(() => undefined);
   await owner.workspace
     .deleteMany({ where: { id: workspaceId } })

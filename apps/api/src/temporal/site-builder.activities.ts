@@ -114,6 +114,8 @@ export interface SiteBuilderActivityDeps {
     ImagePipelineService,
     'listSiteImageIds' | 'processSiteImages'
   >;
+  /** Renderer seam for deterministic cancellation-race tests; production uses the real Astro build. */
+  renderSiteSpec?: typeof buildSiteSpecWithTemporaryFile;
 }
 
 export interface RefurbishActivityInput {
@@ -194,7 +196,15 @@ export function previewBasePath(slug: string): string {
 }
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
-  const { prisma, gateway, kb, broker, ownerDb, imagePipeline } = deps;
+  const {
+    prisma,
+    gateway,
+    kb,
+    broker,
+    ownerDb,
+    imagePipeline,
+    renderSiteSpec = buildSiteSpecWithTemporaryFile,
+  } = deps;
   const log = new Logger('SiteBuilderActivities');
 
   // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
@@ -991,17 +1001,45 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         await rm(outDir, { recursive: true, force: true });
       }
       await mkdir(outDir, { recursive: true });
-      await buildSiteSpecWithTemporaryFile(doc, {
+      await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(site.slug),
       });
 
-      await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.siteVersion.update({
-          where: { id: version.id },
+      const accepted = await prisma.withWorkspace(workspaceId, async (tx) => {
+        // Serialize renderer completion with cancellation/failure compensation. Cancellation can
+        // arrive while Astro ignores the Activity signal; a late renderer must not resurrect a
+        // successful version after compensation has terminalized the run.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+        const run = await tx.siteBuildRun.findUnique({
+          where: { id: buildRunId },
+          select: { status: true },
+        });
+        if (!run || run.status !== 'running') {
+          await tx.siteVersion.updateMany({
+            where: { id: version.id, buildStatus: 'building' },
+            data: { buildStatus: 'failed' },
+          });
+          return false;
+        }
+        const completed = await tx.siteVersion.updateMany({
+          where: {
+            id: version.id,
+            buildRunId,
+            buildStatus: 'building',
+          },
           data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
         });
+        return completed.count === 1;
       });
+      if (!accepted) {
+        if (input.progressV1) {
+          await rm(outDir, { recursive: true, force: true });
+        }
+        throw new Error(
+          `run ${buildRunId} no longer running — rendered candidate discarded`,
+        );
+      }
       return { previewSlug: site.slug, versionId: version.id };
     },
 
@@ -1170,10 +1208,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           // Must be acquired before the terminal CAS to avoid a lock-order inversion with
           // recordBuildProgress (advisory lock → SiteBuildRun update).
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
-          await tx.siteVersion.updateMany({
-            where: { buildRunId, buildStatus: 'building' },
-            data: { buildStatus: 'failed' },
-          });
           const run = await tx.siteBuildRun.findUnique({
             where: { id: buildRunId },
           });
@@ -1212,6 +1246,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             // The terminal CAS and Site rollback share one transaction. Only the run that
             // actually owned the active slot may change Site status; stale compensation is inert.
             if (transitioned.count === 1) {
+              // Renderer completion uses the same advisory lock. Whichever side wins, a run that
+              // really transitions terminal cannot retain a successful but unpublished candidate.
+              await tx.siteVersion.updateMany({
+                where: {
+                  buildRunId,
+                  buildStatus: { in: ['building', 'succeeded'] },
+                },
+                data: { buildStatus: 'failed' },
+              });
               if (input.progressV1) {
                 const terminalSteps = await terminalizeBuildProgress(tx, {
                   workspaceId,
