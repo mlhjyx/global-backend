@@ -75,6 +75,22 @@ describe('freezeEvidenceSource — Evidence 2.0 frozen corpus', () => {
     );
   });
 
+  it('redacts camel-case credential query values without redacting benign keys', () => {
+    const source = freezeEvidenceSource({
+      sourceKey: 'storefront:https://acme.example/catalog',
+      sourceType: 'storefront',
+      sourceRole: 'fact_candidate',
+      rawText: 'Pumps up to 400 bar.',
+      displayUrl:
+        'https://acme.example/catalog?apiKey=secret-1&accessToken=secret-2&clientSecret=secret-3&authorizationCode=secret-4&hockey=keep',
+      provenance: { parserVersion: 'crawl4ai/1' },
+    });
+
+    expect(source.displayUrl).toBe(
+      'https://acme.example/catalog?apiKey=%5Bredacted%5D&accessToken=%5Bredacted%5D&clientSecret=%5Bredacted%5D&authorizationCode=%5Bredacted%5D&hockey=keep',
+    );
+  });
+
   it('redacts PII in URL path/query metadata and drops overlong display URLs', () => {
     const source = freezeEvidenceSource({
       sourceKey: 'web_research:directory',
