@@ -18,7 +18,8 @@ function requestSignal(external?: AbortSignal): AbortSignal {
 }
 
 /**
- * 自托管 embedding 客户端（D14：BGE-M3，OpenAI 兼容 /embeddings 端点，数据不出域）。
+ * 自托管 embedding 客户端（D14：BGE-M3，经统一 New API 的 OpenAI 兼容
+ * /embeddings 端点访问；模型仍在本机运行，数据不出域）。
  * 维度硬校验：错维度绝不落库（混向量空间是静默毒药）。
  */
 @Injectable()
@@ -27,10 +28,12 @@ export class EmbeddingsClient {
   /** 行级 embed_version：换模型/量化档按版本重嵌，不混空间（02 §12）。 */
   readonly version = process.env.EMBEDDINGS_VERSION ?? 'bge-m3:2026-07';
   readonly dim = Number(process.env.EMBEDDINGS_DIM) || DEFAULT_DIM;
-  private readonly baseUrl = (process.env.EMBEDDINGS_URL ?? 'http://localhost:11434/v1').replace(
-    /\/$/,
-    '',
-  );
+  private readonly baseUrl = (
+    process.env.EMBEDDINGS_URL ??
+    process.env.MODEL_GATEWAY_URL ??
+    'http://localhost:3001/v1'
+  ).replace(/\/$/, '');
+  private readonly apiKey = process.env.EMBEDDINGS_API_KEY ?? process.env.MODEL_GATEWAY_KEY;
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
@@ -38,7 +41,10 @@ export class EmbeddingsClient {
     try {
       res = await fetch(`${this.baseUrl}/embeddings`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+        },
         body: JSON.stringify({ model: this.model, input: texts }),
         signal: requestSignal(signal),
       });

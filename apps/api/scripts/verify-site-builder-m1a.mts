@@ -55,7 +55,7 @@ function requireDevelopmentTargets(): void {
     ['DOCLING_URL', process.env.DOCLING_URL ?? 'http://localhost:5001', null],
     [
       'EMBEDDINGS_URL',
-      process.env.EMBEDDINGS_URL ?? 'http://localhost:11434/v1',
+      process.env.EMBEDDINGS_URL ?? process.env.MODEL_GATEWAY_URL ?? 'http://localhost:3001/v1',
       null,
     ],
   ] as const) {

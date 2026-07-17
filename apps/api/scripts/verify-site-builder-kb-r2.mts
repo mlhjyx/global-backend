@@ -55,7 +55,10 @@ function requireExplicitDevelopmentTargets(): void {
   for (const [name, raw] of [
     ['S3_ENDPOINT', process.env.S3_ENDPOINT ?? 'http://localhost:9000'],
     ['DOCLING_URL', process.env.DOCLING_URL ?? 'http://localhost:5001'],
-    ['EMBEDDINGS_URL', process.env.EMBEDDINGS_URL ?? 'http://localhost:11434/v1'],
+    [
+      'EMBEDDINGS_URL',
+      process.env.EMBEDDINGS_URL ?? process.env.MODEL_GATEWAY_URL ?? 'http://localhost:3001/v1',
+    ],
   ] as const) {
     const url = new URL(raw);
     if (!isLoopbackHost(url.hostname)) {

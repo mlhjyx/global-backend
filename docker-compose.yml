@@ -94,7 +94,9 @@ services:
   # BGE-M3, 1024-dim, 100+ languages; company data never leaves the host).
   # CPU-only is fine for KB-sized batches. First boot pulls the model (~1.2GB)
   # into the volume — healthcheck only goes green once the model is present.
-  # OpenAI-compatible endpoint: http://localhost:11434/v1/embeddings
+  # Ollama upstream: http://embeddings:11434/v1/embeddings (inside Compose).
+  # Application traffic goes through new-api at http://localhost:3001/v1/embeddings;
+  # loopback :11434 is retained for local health checks and break-glass diagnostics only.
   embeddings:
     image: ollama/ollama:latest
     container_name: global-embeddings
