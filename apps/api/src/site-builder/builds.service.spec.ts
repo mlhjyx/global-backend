@@ -5,6 +5,7 @@ import type {
   RefurbishLaunchResult,
   RefurbishLauncher,
 } from './refurbish-launcher';
+import { buildDemoSpec } from './demo-spec';
 
 const CTX = {
   userId: 'u1',
@@ -20,6 +21,7 @@ const ACK: RefurbishLaunchResult = {
 interface FakeDb {
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
+  steps: Record<string, unknown>[];
   idempotencies: Record<string, unknown>[];
 }
 
@@ -31,14 +33,22 @@ function makeService(
     launcher?: Partial<RefurbishLauncher>;
     failAckUpdate?: boolean;
     beforeCancelCas?: (run: Record<string, unknown>) => void;
+    activeSpec?: ReturnType<typeof buildDemoSpec>;
   } = {},
 ) {
   const db: FakeDb = {
     sites:
       opts.siteExists === false
         ? []
-        : [{ id: SITE_ID, workspaceId: CTX.workspaceId }],
+        : [
+            {
+              id: SITE_ID,
+              workspaceId: CTX.workspaceId,
+              activeVersionId: opts.activeSpec ? 'active-version' : null,
+            },
+          ],
     runs: [...(opts.existingRuns ?? [])],
+    steps: [],
     idempotencies: [...(opts.existingIdempotencies ?? [])],
   };
   let seq = db.runs.length;
@@ -60,7 +70,41 @@ function makeService(
         return row;
       },
     },
-    siteVersion: { updateMany: async () => ({ count: 0 }) },
+    siteVersion: {
+      findFirst: async () =>
+        opts.activeSpec
+          ? { id: 'active-version', spec: opts.activeSpec }
+          : null,
+      updateMany: async () => ({ count: 0 }),
+    },
+    siteBuildStep: {
+      findMany: async ({ where }: { where: { buildRunId: string } }) =>
+        db.steps.filter((step) => step.buildRunId === where.buildRunId),
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { buildRunId: string; status?: { in: string[] } };
+        data: Record<string, unknown>;
+      }) => {
+        let count = 0;
+        for (const step of db.steps) {
+          if (
+            step.buildRunId === where.buildRunId &&
+            (!where.status?.in || where.status.in.includes(step.status as string))
+          ) {
+            Object.assign(step, data);
+            count += 1;
+          }
+        }
+        return { count };
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `step-${db.steps.length + 1}`, ...data };
+        db.steps.push(row);
+        return row;
+      },
+    },
     idempotencyKey: {
       findUnique: async ({ where }: { where: Record<string, unknown> }) => {
         const key = where.workspaceId_endpoint_key as Record<string, unknown>;
@@ -163,11 +207,14 @@ function makeService(
     ): Promise<T> => fn(tx),
   };
   const launched: string[] = [];
+  const launchedInputs: Array<Record<string, unknown>> = [];
   const recovered: string[] = [];
   const cancelled: Array<[string, string | null | undefined]> = [];
   const launcher: RefurbishLauncher = {
-    launchRefurbish: async ({ buildRunId }) => {
+    launchRefurbish: async (input) => {
+      const { buildRunId } = input;
       launched.push(buildRunId);
+      launchedInputs.push(input as unknown as Record<string, unknown>);
       return { ...ACK, workflowId: `site-refurbish-${buildRunId}` };
     },
     recoverRefurbish: async ({ buildRunId }) => {
@@ -192,6 +239,7 @@ function makeService(
     service: new BuildsService(prisma as never, launcher),
     db,
     launched,
+    launchedInputs,
     recovered,
     cancelled,
   };
@@ -200,6 +248,18 @@ function makeService(
 const BASE = { scope: 'site' as const };
 
 describe('BuildsService.create', () => {
+  const activeSpec = buildDemoSpec({
+    siteName: 'Acme',
+    intake: {
+      company: { nameZh: '安可', nameEn: 'Acme' },
+      industry: 'pumps',
+      products: ['pumps'],
+      targetMarkets: ['DE'],
+      hasWebsite: false,
+      businessEmail: 'sales@acme.test',
+    },
+  });
+
   it('creates one run and returns only after the Temporal identity pair is durable', async () => {
     const { service, db, launched } = makeService();
 
@@ -228,6 +288,60 @@ describe('BuildsService.create', () => {
     await expect(service.create(CTX, SITE_ID, BASE)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('accepts active page/section targets and freezes their exact base SiteVersion', async () => {
+    for (const request of [
+      { scope: 'page' as const, targetId: 'products' },
+      { scope: 'section' as const, targetId: 'AboutBlock-demo-1' },
+      { scope: 'site' as const, options: { pages: ['home', 'contact'] } },
+    ]) {
+      const { service, db, launchedInputs } = makeService({ activeSpec });
+      await expect(
+        service.create(CTX, SITE_ID, request),
+      ).resolves.toMatchObject({ status: 'queued' });
+      expect(db.runs[0].scope).toEqual({
+        ...request,
+        baseVersionId: 'active-version',
+      });
+      expect(launchedInputs[0]).toMatchObject({
+        scope: { ...request, baseVersionId: 'active-version' },
+      });
+    }
+  });
+
+  it('returns stable 404 before launch when the active target does not exist', async () => {
+    const { service, launched } = makeService({ activeSpec });
+    const error = await service
+      .create(CTX, SITE_ID, {
+        scope: 'page',
+        targetId: 'missing-page',
+      })
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 404,
+      code: 'BUILD_TARGET_NOT_FOUND',
+    });
+    expect(launched).toEqual([]);
+  });
+
+  it('fails closed when a section identifier is ambiguous in the active SiteSpec', async () => {
+    const duplicate = structuredClone(activeSpec);
+    duplicate.pages[1].puck.content.push(
+      structuredClone(duplicate.pages[0].puck.content[0]),
+    );
+    const { service } = makeService({ activeSpec: duplicate });
+    const targetId = duplicate.pages[0].puck.content[0].props.id as string;
+    const error = await service
+      .create(CTX, SITE_ID, {
+        scope: 'section',
+        targetId,
+      })
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 422,
+      code: 'BUILD_TARGET_AMBIGUOUS',
+    });
   });
 
   it('enforces one active build per site', async () => {
@@ -263,6 +377,20 @@ describe('BuildsService.create', () => {
     expect(replay).toEqual(first);
     expect(db.runs).toHaveLength(1);
     expect(db.idempotencies).toHaveLength(1);
+    expect(launched).toEqual(['run-1']);
+  });
+
+  it('replays a durable partial-build key even if the active pointer later changes', async () => {
+    const { service, db, launched } = makeService({ activeSpec });
+    const request = {
+      scope: 'page' as const,
+      targetId: 'products',
+      idempotencyKey: 'partial-replay',
+    };
+    const first = await service.create(CTX, SITE_ID, request);
+    db.sites[0].activeVersionId = null;
+    const replay = await service.create(CTX, SITE_ID, request);
+    expect(replay).toEqual(first);
     expect(launched).toEqual(['run-1']);
   });
 
@@ -769,6 +897,8 @@ describe('BuildsService.get / cancel', () => {
       status: 'cancelled',
     });
     expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+    expect(db.steps).toHaveLength(6);
+    expect(db.steps.every((step) => step.status === 'aborted')).toBe(true);
   });
 
   it('redrives failed compensation and reports the repaired terminal truth', async () => {
@@ -795,6 +925,8 @@ describe('BuildsService.get / cancel', () => {
       details: { status: 'failed' },
     });
     expect(db.runs[0]).toMatchObject({ status: 'failed' });
+    expect(db.steps).toHaveLength(6);
+    expect(db.steps.every((step) => step.status === 'aborted')).toBe(true);
   });
 
   it('keeps active on a completed-chain invariant violation', async () => {

@@ -57,7 +57,13 @@ describe('BuildsController public progress response', () => {
       additionalProperties: false,
       required: ['scope'],
       properties: {
-        scope: { type: 'string', enum: ['site'] },
+        scope: { type: 'string', enum: ['site', 'page', 'section'] },
+        targetId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          description: 'page/section 必填；site 禁止',
+        },
         options: {
           type: 'object',
           additionalProperties: false,
@@ -72,6 +78,13 @@ describe('BuildsController public progress response', () => {
               maxItems: 1,
               uniqueItems: true,
               items: { type: 'string', enum: ['en'] },
+            },
+            pages: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 32,
+              uniqueItems: true,
+              items: { type: 'string' },
             },
           },
         },

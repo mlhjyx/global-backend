@@ -65,7 +65,8 @@ apps/api/src/site-builder/
 |---|---|---|
 | `site` | status(draft/building/ready/published), active_version_id, locales, style_preset | 每 workspace 可多站（先限 1） |
 | `site_version` | spec(jsonb=SiteSpec), artifact_key, build_status, source_run_id | 版本化：回滚=切指针 |
-| `site_build_run` | phase, progress, steps(jsonb), cost_summary, temporal_run_id, error | 一次精装修管线 |
+| `site_build_run` | phase, progress, steps(jsonb 读模型), cost_summary, temporal_run_id, error | 一次精装修管线 |
+| `site_build_step` | build_run_id, key, item_key, attempt, status, phase, progress, degraded, error_code | R3-B2 一等可恢复步骤真值（FORCE RLS） |
 | `asset` | kind(logo/product_image/factory_image/cert/doc/video/generated), object_key, derived_keys(jsonb), processing_status, content_hash, meta | content_hash 幂等；EXIF 已剥离后落库 |
 | `kb_document` / `kb_chunk` | source(intake/wizard/upload/storefront/web_research), embedding(pgvector) | 知识库 |
 | `brand_profile` | value_props, tone, glossary, keywords, competitors, evidence(jsonb), version | Brand Brief 落库，版本化 |

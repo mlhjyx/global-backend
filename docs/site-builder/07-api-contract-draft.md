@@ -117,14 +117,14 @@ POST /builds/{id}/cancel   // 等 Temporal 执行链关闭/补偿完成后才释
 
 **参数契约（§8.4 回写）**：`GET /builds/{id}` 须返回 `siteId`、`previewUrl`、`targetReleaseId`、`degraded`、`warnings` 与 `steps` 的时序/attempt/error，供工作台真实进度与降级展示。
 
-> ✅ **R3-B1 as-built（2026-07-17 当前交付分支）**：Build 请求边界、持久幂等与 Temporal ACK 已对齐；R3-B2 的真实局部构建/增量进度仍未完成，不能把 B1 写成整个 R3-B 完成。
-> **Breaking correction**：本 PR 必须携带 `breaking-change-approved`；客户端须从新版 OpenAPI 重新生成，并停止发送 page/section/targetId/pages/非 en 或不符合安全字符集的 key。
+> ✅ **R3-B1/B2 as-built（2026-07-17 当前交付分支）**：B1 已对齐 Build 请求边界、持久幂等与 Temporal ACK；B2 已把可证明的 page/section/pages 局部消费与增量进度落地。非 en 仍依赖 M1-d，不能把合同字段存在写成多语种已完成。
+> **B1 breaking correction / B2 expansion**：B1 PR 已携带 `breaking-change-approved`，客户端须从新版 OpenAPI 重新生成并停止发送非 `en` 或不符合安全字符集的 key；B2 起可按下列约束发送 `page`/`section`/`options.pages`，不得再把这些请求降级成整站构建。
 >
-> - `targetId` 已从伪 UUID 改为 1–128 位 SiteSpec 标识符；当前 page/section 执行器尚未消费目标，因此合法请求明确返回 `422 BUILD_SCOPE_UNAVAILABLE`，绝不假 201。未来目标不存在用 `404 BUILD_TARGET_NOT_FOUND`；`422 UNKNOWN_COMPONENT` 只表示组件 type/variant 未注册，二者不得混写。
-> - `options` 已是嵌套严格 DTO：preset 只允许 `modern-industrial|precision-light`，pages 1–32 且唯一，locales 1–8 并做 BCP-47 规范化。当前只有 stylePreset 与单一 `en` 被执行器真实消费；pages 或非 `en` locale 返回 `422 BUILD_OPTION_UNAVAILABLE`。
+> - `targetId` 是 1–128 位 SiteSpec 标识符；page/section 必须存在于 active SiteSpec，缺失返回 `404 BUILD_TARGET_NOT_FOUND`，重复返回 `422 BUILD_TARGET_AMBIGUOUS`，脏 active spec 返回 `422 BUILD_ACTIVE_SPEC_INVALID`。`422 UNKNOWN_COMPONENT` 只表示组件 type/variant 未注册，二者不得混写。
+> - `options` 是嵌套严格 DTO：preset 只允许 `modern-industrial|precision-light`，pages 1–32 且唯一，locales 1–8 并做 BCP-47 规范化。`options.pages` 只与 scope=site 组合；stylePreset 是全站副作用，不得与 page/section/pages 局部构建组合。非 `en` locale 在 M1-d 前仍返回 `422 BUILD_OPTION_UNAVAILABLE`。
 > - `Idempotency-Key` 限定为 1–128 位安全字符，并以现有 `IdempotencyKey.requestHash` 账本核验完整规范化请求。同 key 同请求返回原 build；同 key 异请求返回 `409 IDEMPOTENCY_KEY_REUSED`；旧 JSON-only key 因无法证明同请求而 fail-closed。
 > - `201` 只在 `temporalWorkflowId + firstExecutionRunId` 均持久化后返回。start/describe ACK 不明时保留同一 queued run，同 key 重试恢复同一执行，不误标 failed、不新建第二条 run；无 key 的同请求也会收敛到该 queued run，但正式客户端仍必须带 key。取消补偿若因 DB 故障耗尽重试，按同 buildId 重试会在确认 Temporal 已关闭后 redrive 受同站锁/CAS 保护的最小终态事务。
-> - **R3-B2 待做**：每个 activity 完成后单调增量写 `phase/progress/step`，并实现 page/section/pages/locales 的真实消费。`costSummary` 继续保持 nullable，真实成本归 R4-B-min，B2 不伪造。
+> - **R3-B2 已落地**：`SiteBuildStep` 是 attempt 真值，`SiteBuildRun.steps` 是公共读模型；phase/progress 只前进，旧 attempt 迟到不可覆盖，取消/失败终态化未完成 step。page/section/pages 冻结接收时的 active base version，只合并目标 page/block 和对应 copy keys，发布时 active pointer CAS 不允许覆盖期间发生的人工编辑。非 en 的真实消费随 M1-d；`costSummary` 继续保持 nullable，真实成本归 R4-B-min，B2 不伪造。
 
 ## 6. Spec 编辑与版本（人工微调，免跑管线）〔🎯 M1〕
 

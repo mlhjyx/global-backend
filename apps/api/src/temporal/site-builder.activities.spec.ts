@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context as ActivityContext } from '@temporalio/activity';
 import type { PrismaClient } from '@prisma/client';
@@ -26,7 +29,14 @@ const INPUT: RefurbishActivityInput = {
   buildRunId: 'run-1',
 };
 
-const REFURBISH_KEYS = ['kb_ingest', 'brand_profile', 'image_pipeline', 'copy', 'assemble_build', 'quality_loop'];
+const REFURBISH_KEYS = [
+  'kb_ingest',
+  'brand_profile',
+  'image_pipeline',
+  'copy',
+  'assemble_build',
+  'quality_loop',
+];
 
 const PENDING_STEPS = [
   { key: 'kb_ingest', status: 'pending' },
@@ -39,8 +49,11 @@ const PENDING_STEPS = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function fakePrisma(tx: any): PrismaService {
+  const client = { $executeRaw: vi.fn(async () => 0), ...tx };
   return {
-    withWorkspace: vi.fn(async (_ws: string, fn: (t: unknown) => unknown) => fn(tx)),
+    withWorkspace: vi.fn(async (_ws: string, fn: (t: unknown) => unknown) =>
+      fn(client),
+    ),
   } as unknown as PrismaService;
 }
 
@@ -50,7 +63,10 @@ function spyBudget() {
   return { open, close };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe('processKbAsset — Temporal heartbeat/cancellation', () => {
   it('worker Activity context 的取消信号与阶段 heartbeat 会传入单素材处理器', async () => {
@@ -149,7 +165,10 @@ describe('listKbRecoveryCandidates — expired lease fairness', () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 10,
-        orderBy: expect.arrayContaining([{ processingStatus: 'asc' }, { leaseUntil: { sort: 'asc', nulls: 'last' } }]),
+        orderBy: expect.arrayContaining([
+          { processingStatus: 'asc' },
+          { leaseUntil: { sort: 'asc', nulls: 'last' } },
+        ]),
       }),
     );
   });
@@ -163,14 +182,19 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
         findUnique: vi.fn(async () => ({ id: 'site-1' })),
         update: vi.fn(async () => ({})),
       },
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'queued' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
     await acts.beginRefurbishRun(INPUT);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
     expect(open).toHaveBeenCalledWith('run-1', siteBuildBudgetCents());
     // close 在 open 之前（清残留再开新账）
-    expect(close.mock.invocationCallOrder[0]).toBeLessThan(open.mock.invocationCallOrder[0]);
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
+      open.mock.invocationCallOrder[0],
+    );
   });
 
   it('认领失败（count=0）→ 抛错且 open 不被调用（失败 claim 先抛）', async () => {
@@ -180,11 +204,35 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
         findUnique: vi.fn(async () => ({ id: 'site-1' })),
         update: vi.fn(),
       },
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 0 })) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'failed' })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
-    await expect(acts.beginRefurbishRun(INPUT)).rejects.toThrow(/not claimable/);
+    await expect(acts.beginRefurbishRun(INPUT)).rejects.toThrow(
+      /not claimable/,
+    );
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('running activity retry does not reset startedAt, phase, progress or steps', async () => {
+    const { open } = spyBudget();
+    const updateMany = vi.fn();
+    const tx = {
+      site: {
+        findUnique: vi.fn(async () => ({ id: 'site-1' })),
+        update: vi.fn(async () => ({})),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+        updateMany,
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await acts.beginRefurbishRun(INPUT);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalled();
   });
 });
 
@@ -192,8 +240,14 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
   it('发布成功 → close(buildRunId, {force:true})', async () => {
     const { close } = spyBudget();
     const tx = {
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      site: { update: vi.fn(async () => ({})) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        update: vi.fn(async () => ({})),
+      },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
@@ -216,8 +270,14 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
     const { close } = spyBudget();
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
-      siteBuildRun: { updateMany },
-      site: { update: vi.fn(async () => ({})) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        update: vi.fn(async () => ({})),
+      },
       siteVersion: {
         findFirst: vi.fn(async () => ({
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
@@ -225,20 +285,319 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
-    await expect(acts.finalizeRefurbish({
-      ...INPUT,
-      kb: { processed: 1, failed: 0, degraded: false },
-      profile: { status: 'done', gaps: 0 },
-      build: { previewSlug: 'acme', versionId: 'v-legacy' },
-    })).resolves.toEqual({ previewSlug: 'acme' });
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        steps: expect.arrayContaining([
-          expect.objectContaining({ key: 'image_pipeline', status: 'skipped_m1c' }),
-        ]),
+    await expect(
+      acts.finalizeRefurbish({
+        ...INPUT,
+        kb: { processed: 1, failed: 0, degraded: false },
+        profile: { status: 'done', gaps: 0 },
+        build: { previewSlug: 'acme', versionId: 'v-legacy' },
       }),
-    }));
+    ).resolves.toEqual({ previewSlug: 'acme' });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              key: 'image_pipeline',
+              status: 'skipped_m1c',
+            }),
+          ]),
+        }),
+      }),
+    );
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
+  it('局部构建发布时 active pointer 已变化则 CAS 失败且不覆盖新版本', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-cas-preview-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const live = path.join(root, 'acme');
+    const staging = path.join(root, '.staging', 'run-1');
+    await Promise.all([
+      mkdir(live, { recursive: true }),
+      mkdir(staging, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(path.join(live, 'index.html'), 'active-preview'),
+      writeFile(path.join(staging, 'index.html'), 'candidate-preview'),
+    ]);
+    const update = vi.fn(async () => ({}));
+    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: 'changed-version' })),
+        update,
+        updateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          scope: {
+            scope: 'page',
+            targetId: 'products',
+            baseVersionId: 'base-version',
+          },
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).rejects.toThrow('active SiteVersion changed');
+      expect(updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'site-1',
+          OR: [
+            { activeVersionId: 'base-version' },
+            { activeVersionId: 'candidate-version' },
+          ],
+        },
+        data: { activeVersionId: 'candidate-version', status: 'ready' },
+      });
+      expect(update).not.toHaveBeenCalled();
+      expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe(
+        'active-preview',
+      );
+      expect(await readFile(path.join(staging, 'index.html'), 'utf8')).toBe(
+        'candidate-preview',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('预览提升后的事务写入失败会恢复原 live 目录', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-tx-preview-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const live = path.join(root, 'acme');
+    const staging = path.join(root, '.staging', 'run-1');
+    await Promise.all([
+      mkdir(live, { recursive: true }),
+      mkdir(staging, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(path.join(live, 'index.html'), 'active-preview'),
+      writeFile(path.join(staging, 'index.html'), 'candidate-preview'),
+    ]);
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: 'base-version' })),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+        update: vi.fn(async () => {
+          throw new Error('artifact DB write failed');
+        }),
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).rejects.toThrow('artifact DB write failed');
+      expect(await readFile(path.join(live, 'index.html'), 'utf8')).toBe(
+        'active-preview',
+      );
+      await expect(
+        readFile(path.join(root, '.rollback', 'run-1', 'index.html')),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('pointer commit 持续失败时以持久 publication base 回滚 DB 并标记候选失败', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-pointer-fail-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const staging = path.join(root, '.staging', 'run-1');
+    await mkdir(staging, { recursive: true });
+    await writeFile(path.join(staging, 'index.html'), 'candidate-preview');
+    const runUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const siteFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ activeVersionId: 'base-version' })
+      .mockResolvedValueOnce({ activeVersionId: 'candidate-version' });
+    const runFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'running', scope: {} })
+      .mockResolvedValueOnce({ status: 'succeeded' });
+    const tx = {
+      siteBuildRun: {
+        findUnique: runFindUnique,
+        updateMany: runUpdateMany,
+      },
+      site: {
+        findUnique: siteFindUnique,
+        updateMany: siteUpdateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+        findUnique: vi.fn(async () => ({
+          buildStatus: 'succeeded',
+          artifactKey: `local:${path.join(root, '.versions', 'run-1')}`,
+        })),
+        update: vi.fn(async () => ({})),
+        updateMany: versionUpdateMany,
+      },
+    };
+    const pointerFailure = new Error('pointer rename unavailable');
+    const promotePreview = vi.fn(async () => ({
+      commit: async () => {
+        throw pointerFailure;
+      },
+      rollback: async () => undefined,
+      abandon: async () => undefined,
+    }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      promotePreview,
+    });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).rejects.toBe(pointerFailure);
+      expect(siteUpdateMany).toHaveBeenNthCalledWith(2, {
+        where: { id: 'site-1', activeVersionId: 'candidate-version' },
+        data: { activeVersionId: 'base-version', status: 'ready' },
+      });
+      expect(runUpdateMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'succeeded',
+            scope: expect.objectContaining({
+              publicationBaseVersionId: 'base-version',
+            }),
+          }),
+        }),
+      );
+      expect(runUpdateMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: { id: 'run-1', status: 'succeeded' },
+          data: expect.objectContaining({
+            status: 'failed',
+            error: 'preview pointer promotion failed',
+          }),
+        }),
+      );
+      expect(versionUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'candidate-version',
+          buildRunId: 'run-1',
+          buildStatus: 'succeeded',
+        },
+        data: { buildStatus: 'failed' },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('旧 finalize retry 发现更新 build 已接管时不覆盖新的 served pointer', async () => {
+    const { close } = spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-stale-publish-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const staging = path.join(root, '.staging', 'run-1');
+    await mkdir(staging, { recursive: true });
+    await writeFile(path.join(staging, 'index.html'), 'candidate-preview');
+    const siteFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ activeVersionId: 'base-version' })
+      .mockResolvedValueOnce({ activeVersionId: 'newer-version' });
+    const runFindUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'running', scope: {} })
+      .mockResolvedValueOnce({ status: 'succeeded' });
+    const tx = {
+      siteBuildRun: {
+        findUnique: runFindUnique,
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: siteFindUnique,
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: `local:${staging}`,
+        })),
+        findUnique: vi.fn(async () => ({
+          buildStatus: 'succeeded',
+          artifactKey: `local:${path.join(root, '.versions', 'run-1')}`,
+        })),
+        update: vi.fn(async () => ({})),
+      },
+    };
+    const commit = vi.fn(async () => undefined);
+    const abandon = vi.fn(async () => undefined);
+    const promotePreview = vi.fn(async () => ({
+      commit,
+      rollback: async () => undefined,
+      abandon,
+    }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      promotePreview,
+    });
+    try {
+      await expect(
+        acts.finalizeRefurbish({
+          ...INPUT,
+          progressV1: true,
+          kb: { processed: 0, failed: 0, degraded: false },
+          profile: { status: 'done', gaps: 0 },
+          build: { previewSlug: 'acme', versionId: 'candidate-version' },
+        }),
+      ).resolves.toEqual({ previewSlug: 'acme' });
+      expect(abandon).toHaveBeenCalledOnce();
+      expect(commit).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledWith('run-1', { force: true });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -298,7 +657,9 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
       prisma: assembleStopAfterPolishPrisma(site),
       gateway,
     });
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop-after-polish');
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
+      'stop-after-polish',
+    );
     expect(generateStructured).toHaveBeenCalledTimes(1);
     const ctxArg = generateStructured.mock.calls[0][1] as {
       workspaceId: string;
@@ -325,10 +686,103 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     budgetLedger.close('run-1', { force: true }); // 清理，避免跨用例泄漏
   });
 
+  it('R3-B2 assemble 入口不把已记录的 0.65 进度写回旧 0.5', async () => {
+    spyBudget();
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    let call = 0;
+    const prisma = {
+      withWorkspace: vi.fn(
+        async (_workspaceId: string, fn: (tx: unknown) => unknown) => {
+          call += 1;
+          if (call > 1) throw new Error('stop-after-read');
+          return fn({
+            siteBuildRun: { updateMany },
+            site: {
+              findUnique: vi.fn(async () => ({
+                id: 'site-1',
+                name: 'Acme',
+                slug: 'acme',
+                intake: INTAKE,
+                stylePreset: 'modern-industrial',
+                activeVersionId: null,
+              })),
+            },
+            siteVersion: { findFirst: vi.fn(async () => null) },
+          });
+        },
+      ),
+    } as unknown as PrismaService;
+    const acts = createSiteBuilderActivities({ prisma });
+    await expect(
+      acts.assembleAndBuild({ ...INPUT, progressV1: true }),
+    ).rejects.toThrow('stop-after-read');
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'run-1', status: 'running' },
+      data: { phase: 'P3_assembly', progress: 0.65 },
+    });
+  });
+
+  it('renderer 期间取消后不把迟到候选写 succeeded，并清理 run staging', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r3b2-render-cancel-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    let runStatus = 'running';
+    const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(async () => ({ status: runStatus })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          name: 'Acme',
+          slug: 'acme',
+          intake: INTAKE,
+          stylePreset: 'modern-industrial',
+          activeVersionId: null,
+        })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => null),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        aggregate: vi.fn(async () => ({ _max: { version: null } })),
+        create: vi.fn(async () => ({ id: 'version-1' })),
+        updateMany: versionUpdateMany,
+      },
+    };
+    const renderSiteSpec = vi.fn(
+      async (_spec: unknown, output: { outDir: string; basePath: string }) => {
+        await writeFile(path.join(output.outDir, 'index.html'), 'candidate');
+        runStatus = 'cancelled';
+      },
+    );
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      renderSiteSpec,
+    });
+    try {
+      await expect(
+        acts.assembleAndBuild({ ...INPUT, progressV1: true }),
+      ).rejects.toThrow('rendered candidate discarded');
+      expect(versionUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'version-1', buildStatus: 'building' },
+        data: { buildStatus: 'failed' },
+      });
+      await expect(
+        readFile(path.join(root, '.staging', 'run-1', 'index.html')),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('buildBrandProfile 账户未预开 → 入口立账（即便随后 gateway 缺席抛错）', async () => {
     expect(budgetLedger.remainingCents('run-1')).toBe(Infinity);
     const acts = createSiteBuilderActivities({ prisma: {} as PrismaService }); // 无 gateway
-    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(/gateway unavailable/);
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
+      /gateway unavailable/,
+    );
     expect(budgetLedger.remainingCents('run-1')).toBe(siteBuildBudgetCents());
     budgetLedger.close('run-1', { force: true });
   });
@@ -362,7 +816,10 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
       siteBuildRun: {
         findUnique: vi.fn(async () => ({
           status: over.runStatus ?? 'running',
-          startedAt: over.startedAt === undefined ? new Date('2026-07-14T00:00:00.000Z') : over.startedAt,
+          startedAt:
+            over.startedAt === undefined
+              ? new Date('2026-07-14T00:00:00.000Z')
+              : over.startedAt,
           error: null,
           finishedAt: null,
           steps: over.steps ?? PENDING_STEPS,
@@ -418,8 +875,12 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     };
     expect(data.status).toBe('failed');
     expect(data.steps.map((s) => s.key)).toEqual(REFURBISH_KEYS);
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
-    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe('done');
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'done',
+    );
+    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe(
+      'done',
+    );
     expect(
       data.steps
         .filter((s) => s.key !== 'brand_profile' && s.key !== 'assemble_build')
@@ -438,9 +899,17 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const data = runUpdate.mock.calls[0][0].data as {
       steps: { key: string; status: string }[];
     };
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
-    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe('aborted');
-    expect(data.steps.filter((s) => s.key !== 'brand_profile').every((s) => s.status === 'aborted')).toBe(true);
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'done',
+    );
+    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe(
+      'aborted',
+    );
+    expect(
+      data.steps
+        .filter((s) => s.key !== 'brand_profile')
+        .every((s) => s.status === 'aborted'),
+    ).toBe(true);
   });
 
   it('brandProfile 缺席 → brand_profile:aborted（全部 aborted）', async () => {
@@ -451,7 +920,9 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const data = runUpdate.mock.calls[0][0].data as {
       steps: { key: string; status: string }[];
     };
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('aborted');
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'aborted',
+    );
     expect(data.steps.every((s) => s.status === 'aborted')).toBe(true);
   });
 
@@ -489,6 +960,20 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     expect(siteUpdate).not.toHaveBeenCalled();
   });
 
+  it('terminal CAS 赢时把本 run 的 building/succeeded 未发布候选统一标 failed', async () => {
+    spyBudget();
+    const { tx } = compensateTx({ siteVersion: { id: 'candidate' } });
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await acts.compensateRefurbish(INPUT);
+    expect(tx.siteVersion.updateMany).toHaveBeenCalledWith({
+      where: {
+        buildRunId: 'run-1',
+        buildStatus: { in: ['building', 'succeeded'] },
+      },
+      data: { buildStatus: 'failed' },
+    });
+  });
+
   it('startedAt 为 null（无从归属）→ brand_profile:aborted，不发探测查询', async () => {
     spyBudget();
     const { tx, runUpdate, findFirst } = compensateTx({
@@ -501,7 +986,9 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const data = runUpdate.mock.calls[0][0].data as {
       steps: { key: string; status: string }[];
     };
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('aborted');
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'aborted',
+    );
   });
 });
 
@@ -512,22 +999,36 @@ describe('buildCompensatedSteps — 纯函数（两个 DB 可核验完成位）'
     expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
     expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe('done');
     expect(
-      steps.filter((s) => s.key !== 'brand_profile' && s.key !== 'assemble_build').every((s) => s.status === 'aborted'),
+      steps
+        .filter((s) => s.key !== 'brand_profile' && s.key !== 'assemble_build')
+        .every((s) => s.status === 'aborted'),
     ).toBe(true);
   });
 
   it('(true,false) → brand_profile done、assemble_build aborted，其余 aborted', () => {
     const steps = buildCompensatedSteps(true, false);
     expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
-    expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe('aborted');
-    expect(steps.filter((s) => s.key !== 'brand_profile').every((s) => s.status === 'aborted')).toBe(true);
+    expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe(
+      'aborted',
+    );
+    expect(
+      steps
+        .filter((s) => s.key !== 'brand_profile')
+        .every((s) => s.status === 'aborted'),
+    ).toBe(true);
   });
 
   it('(false,true) → assemble_build done、brand_profile aborted，其余 aborted', () => {
     const steps = buildCompensatedSteps(false, true);
     expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe('done');
-    expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe('aborted');
-    expect(steps.filter((s) => s.key !== 'assemble_build').every((s) => s.status === 'aborted')).toBe(true);
+    expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'aborted',
+    );
+    expect(
+      steps
+        .filter((s) => s.key !== 'assemble_build')
+        .every((s) => s.status === 'aborted'),
+    ).toBe(true);
   });
 
   it('(false,false) → 6 步全 aborted，键序不变', () => {
@@ -573,7 +1074,9 @@ describe('R0-5 polishCopy — 传真 AbortSignal（超时即 abort 底层 fetch�
       prisma: assembleStopAfterPolishPrisma(site),
       gateway,
     });
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop-after-polish');
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
+      'stop-after-polish',
+    );
     const inputArg = generateStructured.mock.calls[0][0] as {
       signal?: unknown;
     };
