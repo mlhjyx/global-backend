@@ -8,9 +8,16 @@ import type { Mock } from 'vitest';
  * （🔴 绝不 cleanupFailedDemo——那个补偿会删整站，只属于 demo_v0）。
  */
 
-vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
+vi.mock(
+  '@temporalio/workflow',
+  () => import('./testing/temporal-workflow.mock'),
+);
 
-import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
+import {
+  acts,
+  resetActivities,
+  setPatched,
+} from './testing/temporal-workflow.mock';
 import { refurbishWorkflow } from './refurbish.workflow';
 
 const INPUT = { workspaceId: 'ws-1', siteId: 'site-1', buildRunId: 'run-1' };
@@ -25,7 +32,10 @@ function primeHappyPath() {
     researchDegraded: false,
     model: 'deepseek-v4-pro',
   });
-  acts.listImages.mockResolvedValue({ assetIds: ['asset-1', 'asset-2'], truncated: false });
+  acts.listImages.mockResolvedValue({
+    assetIds: ['asset-1', 'asset-2'],
+    truncated: false,
+  });
   acts.processImages.mockResolvedValue({
     status: 'done',
     processed: 2,
@@ -33,10 +43,15 @@ function primeHappyPath() {
     variants: 45,
     items: [],
   });
-  acts.assembleAndBuild.mockResolvedValue({ previewSlug: 'acme-abc123', versionId: 'ver-1' });
-  acts.finalizeRefurbish.mockImplementation(async (arg: Record<string, unknown>) => ({
-    previewSlug: (arg.build as { previewSlug: string }).previewSlug,
-  }));
+  acts.assembleAndBuild.mockResolvedValue({
+    previewSlug: 'acme-abc123',
+    versionId: 'ver-1',
+  });
+  acts.finalizeRefurbish.mockImplementation(
+    async (arg: Record<string, unknown>) => ({
+      previewSlug: (arg.build as { previewSlug: string }).previewSlug,
+    }),
+  );
   acts.compensateRefurbish.mockResolvedValue(undefined);
 }
 
@@ -50,13 +65,38 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
 
     const out = await refurbishWorkflow(INPUT);
 
-    expect(firstOrder(acts.beginRefurbishRun)).toBeLessThan(firstOrder(acts.ingestPendingKb));
-    expect(firstOrder(acts.ingestPendingKb)).toBeLessThan(firstOrder(acts.buildBrandProfile));
-    expect(firstOrder(acts.buildBrandProfile)).toBeLessThan(firstOrder(acts.processImages));
-    expect(firstOrder(acts.processImages)).toBeLessThan(firstOrder(acts.assembleAndBuild));
-    expect(firstOrder(acts.assembleAndBuild)).toBeLessThan(firstOrder(acts.finalizeRefurbish));
+    expect(firstOrder(acts.beginRefurbishRun)).toBeLessThan(
+      firstOrder(acts.ingestPendingKb),
+    );
+    expect(firstOrder(acts.ingestPendingKb)).toBeLessThan(
+      firstOrder(acts.buildBrandProfile),
+    );
+    expect(firstOrder(acts.buildBrandProfile)).toBeLessThan(
+      firstOrder(acts.processImages),
+    );
+    expect(firstOrder(acts.processImages)).toBeLessThan(
+      firstOrder(acts.assembleAndBuild),
+    );
+    expect(firstOrder(acts.assembleAndBuild)).toBeLessThan(
+      firstOrder(acts.finalizeRefurbish),
+    );
     expect(acts.compensateRefurbish).not.toHaveBeenCalled();
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
+    const events = acts.recordRefurbishProgress.mock.calls.map(
+      ([event]) =>
+        event as {
+          progress: number;
+          phase: string;
+        },
+    );
+    expect(events.length).toBeGreaterThan(6);
+    expect(events.map((event) => event.progress)).toEqual(
+      [...events.map((event) => event.progress)].sort((a, b) => a - b),
+    );
+    expect(events.at(-1)).toMatchObject({
+      phase: 'P5_publish',
+      progress: 0.95,
+    });
   });
 
   it('旧历史 replay（patched=false）保持原命令序列且 finalize 使用兼容摘要', async () => {
@@ -66,9 +106,18 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
     await refurbishWorkflow(INPUT);
 
     expect(acts.processImages).not.toHaveBeenCalled();
-    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
-      images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
-    }));
+    expect(acts.recordRefurbishProgress).not.toHaveBeenCalled();
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
+      }),
+    );
+    expect(acts.finalizeRefurbish.mock.calls[0][0]).not.toHaveProperty(
+      'progressV1',
+    );
+    expect(acts.assembleAndBuild.mock.calls[0][0]).not.toHaveProperty(
+      'progressV1',
+    );
   });
 
   it('finalize 收到 kb 摘要（degraded=false）、profile 摘要（done+gaps）与 build 产物', async () => {
@@ -87,26 +136,41 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
 
   it('图片按冻结 ID workset 分成有限 activity，并累计真实摘要', async () => {
     primeHappyPath();
-    acts.listImages.mockResolvedValue({ assetIds: ['asset-1', 'asset-2', 'asset-3'], truncated: false });
+    acts.listImages.mockResolvedValue({
+      assetIds: ['asset-1', 'asset-2', 'asset-3'],
+      truncated: false,
+    });
     acts.processImages
       .mockResolvedValueOnce({
-        status: 'done', processed: 2, failed: 0, variants: 30,
+        status: 'done',
+        processed: 2,
+        failed: 0,
+        variants: 30,
         items: [],
       })
       .mockResolvedValueOnce({
-        status: 'degraded', processed: 0, failed: 1, variants: 0,
+        status: 'degraded',
+        processed: 0,
+        failed: 1,
+        variants: 0,
         items: [],
       });
 
     await refurbishWorkflow(INPUT);
 
     expect(acts.processImages).toHaveBeenCalledTimes(2);
-    expect(acts.processImages).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      imageAssetIds: ['asset-3'], imageBatchLimit: 2,
-    }));
-    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
-      images: { status: 'degraded', processed: 2, failed: 1, variants: 30 },
-    }));
+    expect(acts.processImages).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        imageAssetIds: ['asset-3'],
+        imageBatchLimit: 2,
+      }),
+    );
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: { status: 'degraded', processed: 2, failed: 1, variants: 30 },
+      }),
+    );
   });
 
   it('已记录 pipeline patch、未记录 batches patch 的历史仍只调一次旧 activity', async () => {
@@ -124,37 +188,54 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
     primeHappyPath();
     setPatched((patchId) => patchId !== 'site-builder-m1c-image-workset-v1');
     acts.processImages.mockResolvedValue({
-      status: 'done', processed: 1, failed: 0, variants: 3,
-      nextCursor: 'asset-a', upperBound: 'asset-z', items: [],
+      status: 'done',
+      processed: 1,
+      failed: 0,
+      variants: 3,
+      nextCursor: 'asset-a',
+      upperBound: 'asset-z',
+      items: [],
     });
 
     await refurbishWorkflow(INPUT);
 
     expect(acts.processImages).toHaveBeenCalledTimes(2);
-    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
-      images: { status: 'degraded', processed: 2, failed: 0, variants: 6 },
-    }));
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: { status: 'degraded', processed: 2, failed: 0, variants: 6 },
+      }),
+    );
   });
 
   it('512 张冻结 workset 恰好按 256 个 activity 有界完成', async () => {
     primeHappyPath();
     acts.listImages.mockResolvedValue({
-      assetIds: Array.from({ length: 512 }, (_, index) => `asset-${String(index).padStart(4, '0')}`),
+      assetIds: Array.from(
+        { length: 512 },
+        (_, index) => `asset-${String(index).padStart(4, '0')}`,
+      ),
       truncated: false,
     });
-    acts.processImages.mockImplementation(async (input: { imageAssetIds: string[] }) => {
-      return {
-        status: 'done', processed: input.imageAssetIds.length, failed: 0,
-        variants: input.imageAssetIds.length * 3, items: [],
-      };
-    });
+    acts.processImages.mockImplementation(
+      async (input: { imageAssetIds: string[] }) => {
+        return {
+          status: 'done',
+          processed: input.imageAssetIds.length,
+          failed: 0,
+          variants: input.imageAssetIds.length * 3,
+          items: [],
+        };
+      },
+    );
 
     await refurbishWorkflow(INPUT);
 
     expect(acts.processImages).toHaveBeenCalledTimes(256);
-    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
-      images: { status: 'done', processed: 512, failed: 0, variants: 1536 },
-    }));
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: { status: 'done', processed: 512, failed: 0, variants: 1536 },
+      }),
+    );
   });
 
   it('workset 超过 512 张时在启动 Sharp activity 前诚实降级', async () => {
@@ -164,9 +245,11 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
     await refurbishWorkflow(INPUT);
 
     expect(acts.processImages).not.toHaveBeenCalled();
-    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(expect.objectContaining({
-      images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
-    }));
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: { status: 'degraded', processed: 0, failed: 0, variants: 0 },
+      }),
+    );
   });
 
   it('研究降级（researchDegraded=true）→ profile.status=degraded（仅凭 KB 出 Brief 的诚实标记）', async () => {
@@ -188,8 +271,12 @@ describe('refurbishWorkflow — happy path（P1 → P3 → P5）', () => {
     primeHappyPath();
     const scoped = { ...INPUT, scope: { scope: 'site' as const } };
     await refurbishWorkflow(scoped);
-    expect(acts.beginRefurbishRun).toHaveBeenCalledWith(expect.objectContaining(scoped));
-    expect(acts.assembleAndBuild).toHaveBeenCalledWith(expect.objectContaining(scoped));
+    expect(acts.beginRefurbishRun).toHaveBeenCalledWith(
+      expect.objectContaining(scoped),
+    );
+    expect(acts.assembleAndBuild).toHaveBeenCalledWith(
+      expect.objectContaining({ ...scoped, progressV1: true }),
+    );
   });
 });
 
@@ -202,7 +289,9 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
 
     expect(acts.assembleAndBuild).toHaveBeenCalledTimes(1);
     expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
-      expect.objectContaining({ kb: { processed: 0, failed: 0, degraded: true } }),
+      expect.objectContaining({
+        kb: { processed: 0, failed: 0, degraded: true },
+      }),
     );
     expect(out).toEqual({ previewSlug: 'acme-abc123' });
   });
@@ -238,10 +327,14 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
   it('图片处理期间收到取消 → 取消穿透，绝不继续 assemble/publish', async () => {
     primeHappyPath();
     acts.processImages.mockRejectedValue(
-      Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' }),
+      Object.assign(new Error('workflow cancelled'), {
+        name: 'CancelledFailure',
+      }),
     );
 
-    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('workflow cancelled');
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow(
+      'workflow cancelled',
+    );
 
     expect(acts.assembleAndBuild).not.toHaveBeenCalled();
     expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
@@ -254,10 +347,14 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
   it('brandProfile 期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {
     primeHappyPath();
     acts.buildBrandProfile.mockRejectedValue(
-      Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' }),
+      Object.assign(new Error('workflow cancelled'), {
+        name: 'CancelledFailure',
+      }),
     );
 
-    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('workflow cancelled');
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow(
+      'workflow cancelled',
+    );
 
     expect(acts.assembleAndBuild).not.toHaveBeenCalled();
     expect(acts.finalizeRefurbish).not.toHaveBeenCalled();
@@ -282,6 +379,16 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
     expect(acts.cleanupFailedDemo).not.toHaveBeenCalled();
   });
 
+  it('old-history failure keeps the legacy compensation command payload', async () => {
+    primeHappyPath();
+    setPatched(() => false);
+    acts.assembleAndBuild.mockRejectedValue(new Error('legacy astro boom'));
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('legacy astro boom');
+    expect(acts.compensateRefurbish.mock.calls[0][0]).not.toHaveProperty(
+      'progressV1',
+    );
+  });
+
   it('补偿自身失败 → 上抛补偿错误，禁止把未持久化取消误作成功', async () => {
     primeHappyPath();
     acts.assembleAndBuild.mockRejectedValue(new Error('astro boom'));
@@ -293,10 +400,14 @@ describe('refurbishWorkflow — fail-safe 与补偿', () => {
   it('KB 摄入期间收到取消（CancelledFailure）→ 穿透不降级：assemble/finalize 不跑，补偿仍执行', async () => {
     primeHappyPath();
     acts.ingestPendingKb.mockRejectedValue(
-      Object.assign(new Error('workflow cancelled'), { name: 'CancelledFailure' }),
+      Object.assign(new Error('workflow cancelled'), {
+        name: 'CancelledFailure',
+      }),
     );
 
-    await expect(refurbishWorkflow(INPUT)).rejects.toThrow('workflow cancelled');
+    await expect(refurbishWorkflow(INPUT)).rejects.toThrow(
+      'workflow cancelled',
+    );
 
     expect(acts.assembleAndBuild).not.toHaveBeenCalled();
     expect(acts.finalizeRefurbish).not.toHaveBeenCalled();

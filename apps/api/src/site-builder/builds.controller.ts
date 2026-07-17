@@ -61,12 +61,15 @@ class BuildStatusResponseDto {
         key: { type: 'string' },
         status: { type: 'string' },
         attempt: { type: 'integer', minimum: 1 },
+        progress: { type: 'number', minimum: 0, maximum: 1 },
+        degraded: { type: 'boolean' },
+        itemCount: { type: 'integer', minimum: 0 },
         startedAt: { type: 'string', format: 'date-time', nullable: true },
         finishedAt: { type: 'string', format: 'date-time', nullable: true },
+        errorCode: { type: 'string', nullable: true },
         error: { type: 'string', nullable: true },
       },
-      // R3-5 会把各阶段的有界观测字段（processed/failed/gaps 等）逐步升格；
-      // R2 先准确声明数组基形，避免把运行时数组错误生成为单个 object。
+      // 旧 history 的 processed/failed/gaps 等字段继续兼容；R3-B2 的稳定字段显式声明。
       additionalProperties: true,
     },
   })
@@ -97,6 +100,9 @@ const BUILD_ERROR_CODES = [
   'BUILD_IN_PROGRESS',
   'BUILD_SCOPE_UNAVAILABLE',
   'BUILD_OPTION_UNAVAILABLE',
+  'BUILD_TARGET_NOT_FOUND',
+  'BUILD_TARGET_AMBIGUOUS',
+  'BUILD_ACTIVE_SPEC_INVALID',
   'BUILD_NOT_CANCELLABLE',
   'BUILD_ALREADY_TERMINAL',
   'BUILD_LAUNCH_UNAVAILABLE',
@@ -135,13 +141,19 @@ export class BuildsController {
   @ApiEnvelope(BuildActionResponseDto, { status: 201 })
   @ApiBody({
     description:
-      'R3-B1 当前可执行面：整站构建；page/section/pages/非 en 在实现前 fail-closed',
+      'R3-B2：整站或 active SiteSpec 的 page/section/pages 局部构建；非 en 仍 fail-closed',
     schema: {
       type: 'object',
       additionalProperties: false,
       required: ['scope'],
       properties: {
-        scope: { type: 'string', enum: ['site'] },
+        scope: { type: 'string', enum: ['site', 'page', 'section'] },
+        targetId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          description: 'page/section 必填；site 禁止',
+        },
         options: {
           type: 'object',
           additionalProperties: false,
@@ -157,6 +169,13 @@ export class BuildsController {
               uniqueItems: true,
               items: { type: 'string', enum: ['en'] },
             },
+            pages: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 32,
+              uniqueItems: true,
+              items: { type: 'string' },
+            },
           },
         },
       },
@@ -169,7 +188,7 @@ export class BuildsController {
   })
   @ApiResponse({
     status: 404,
-    description: '当前 workspace 不可见该 Site',
+    description: '当前 workspace 不可见该 Site，或 BUILD_TARGET_NOT_FOUND',
     schema: BUILD_ERROR_SCHEMA,
   })
   @ApiResponse({
@@ -180,7 +199,7 @@ export class BuildsController {
   @ApiResponse({
     status: 422,
     description:
-      'BUILD_SCOPE_UNAVAILABLE 或 BUILD_OPTION_UNAVAILABLE；未实现能力 fail-closed',
+      'BUILD_OPTION_UNAVAILABLE、BUILD_TARGET_AMBIGUOUS 或 BUILD_ACTIVE_SPEC_INVALID；未实现能力 fail-closed',
     schema: BUILD_ERROR_SCHEMA,
   })
   @ApiResponse({

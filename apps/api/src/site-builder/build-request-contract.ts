@@ -106,18 +106,16 @@ export function normalizeBuildRequest(
     if (raw.locales !== undefined) options.locales = locales(raw.locales);
   }
 
-  // The current assembler rebuilds the whole Site and only consumes stylePreset/en.
-  // Reject unsupported requests rather than silently returning a misleading 201.
-  if (input.scope !== 'site') {
-    unavailable(
-      'BUILD_SCOPE_UNAVAILABLE',
-      `${input.scope} builds are not implemented yet`,
-    );
-  }
-  if (options.pages) {
+  if (options.pages && input.scope !== 'site') {
     unavailable(
       'BUILD_OPTION_UNAVAILABLE',
-      'options.pages is not implemented yet',
+      'options.pages can only be used with scope=site',
+    );
+  }
+  if (options.stylePreset && (input.scope !== 'site' || options.pages)) {
+    unavailable(
+      'BUILD_OPTION_UNAVAILABLE',
+      'stylePreset changes the whole Site and cannot be combined with a partial build',
     );
   }
   if (

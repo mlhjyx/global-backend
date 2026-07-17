@@ -21,6 +21,14 @@ import {
   normalizeBuildRequest,
 } from './build-request-contract';
 import { normalizeIdempotencyKey } from './idempotency-key';
+import {
+  assertActiveBuildTargets,
+  BuildActiveSpecInvalidError,
+  BuildTargetAmbiguousError,
+  BuildTargetNotFoundError,
+} from './build-scope';
+import type { SiteSpec } from '@global/contracts';
+import { terminalizeBuildProgress } from './build-progress';
 
 /** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。配错值 fail-closed 回默认。 */
 const parsedDailyLimit = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
@@ -43,6 +51,9 @@ type BuildErrorCode =
   | 'BUILD_ALREADY_TERMINAL'
   | 'BUILD_LAUNCH_UNAVAILABLE'
   | 'BUILD_CANCEL_UNAVAILABLE'
+  | 'BUILD_TARGET_NOT_FOUND'
+  | 'BUILD_TARGET_AMBIGUOUS'
+  | 'BUILD_ACTIVE_SPEC_INVALID'
   | 'QUOTA_EXCEEDED'
   | 'IDEMPOTENCY_KEY_REUSED';
 
@@ -91,6 +102,11 @@ function sameStoredRequest(
   }
 }
 
+function storedBaseVersionId(value: Prisma.JsonValue | null): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return typeof value.baseVersionId === 'string' ? value.baseVersionId : undefined;
+}
+
 /**
  * 精装修构建 run（07 §5 / 09 §2.2）。同 site 单飞（02 §4）+ 当日配额 +
  * Idempotency-Key 以请求指纹重放。只有 Temporal workflowId + firstExecutionRunId
@@ -133,7 +149,6 @@ export class BuildsService {
 
         const site = await tx.site.findUnique({ where: { id: siteId } });
         if (!site) throw new NotFoundException('site not found');
-
         if (idempotencyKey) {
           const prior = await tx.idempotencyKey.findUnique({
             where: {
@@ -185,6 +200,52 @@ export class BuildsService {
           }
         }
 
+        // A durable idempotency replay above is independent of today's active pointer. Only a
+        // genuinely new partial request validates the current active SiteSpec.
+        let baseVersionId: string | undefined;
+        if (request.scope !== 'site' || request.options?.pages) {
+          const active = site.activeVersionId
+            ? await tx.siteVersion.findFirst({
+                where: {
+                  id: site.activeVersionId,
+                  siteId,
+                  buildStatus: 'succeeded',
+                },
+                select: { id: true, spec: true },
+              })
+            : null;
+          try {
+            assertActiveBuildTargets(
+              (active?.spec ?? null) as unknown as SiteSpec | null,
+              request,
+            );
+          } catch (error) {
+            if (error instanceof BuildTargetNotFoundError) {
+              throw buildHttpError(
+                HttpStatus.NOT_FOUND,
+                'BUILD_TARGET_NOT_FOUND',
+                error.message,
+              );
+            }
+            if (error instanceof BuildTargetAmbiguousError) {
+              throw buildHttpError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                'BUILD_TARGET_AMBIGUOUS',
+                error.message,
+              );
+            }
+            if (error instanceof BuildActiveSpecInvalidError) {
+              throw buildHttpError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                'BUILD_ACTIVE_SPEC_INVALID',
+                error.message,
+              );
+            }
+            throw error;
+          }
+          baseVersionId = active?.id;
+        }
+
         const active = await tx.siteBuildRun.findFirst({
           where: { siteId, status: { in: ACTIVE_STATUSES } },
         });
@@ -234,7 +295,10 @@ export class BuildsService {
               siteId,
               kind: 'refurbish',
               status: 'queued',
-              scope: request as unknown as Prisma.InputJsonValue,
+              scope: {
+                ...request,
+                ...(baseVersionId ? { baseVersionId } : {}),
+              } as unknown as Prisma.InputJsonValue,
             },
           });
         } catch (error) {
@@ -281,11 +345,15 @@ export class BuildsService {
       return { buildId: run.id, status: run.status };
     }
 
+    const baseVersionId = storedBaseVersionId(run.scope);
     const launchInput = {
       workspaceId: ctx.workspaceId,
       siteId,
       buildRunId: run.id,
-      scope: request,
+      scope: {
+        ...request,
+        ...(baseVersionId ? { baseVersionId } : {}),
+      },
     };
     let launch: { workflowId: string; firstExecutionRunId: string };
     try {
@@ -482,7 +550,11 @@ export class BuildsService {
         repaired = await this.prisma.withWorkspace(
           ctx.workspaceId,
           async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildId}`}))`;
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-${cancellable.siteId}`}))`;
+            const before = await tx.siteBuildRun.findUnique({
+              where: { id: buildId },
+            });
             await tx.siteVersion.updateMany({
               where: { buildRunId: buildId, buildStatus: 'building' },
               data: { buildStatus: 'failed' },
@@ -499,6 +571,18 @@ export class BuildsService {
               },
             });
             if (transitioned.count === 1) {
+              const terminalSteps = await terminalizeBuildProgress(tx, {
+                workspaceId: ctx.workspaceId,
+                buildRunId: buildId,
+                phase: (before?.phase ?? 'P1_understanding') as Parameters<
+                  typeof terminalizeBuildProgress
+                >[1]['phase'],
+                progress: before?.progress ?? 0,
+              });
+              await tx.siteBuildRun.update({
+                where: { id: buildId },
+                data: { steps: terminalSteps },
+              });
               const site = await tx.site.findUnique({
                 where: { id: cancellable.siteId },
               });

@@ -26,7 +26,14 @@ const INPUT: RefurbishActivityInput = {
   buildRunId: 'run-1',
 };
 
-const REFURBISH_KEYS = ['kb_ingest', 'brand_profile', 'image_pipeline', 'copy', 'assemble_build', 'quality_loop'];
+const REFURBISH_KEYS = [
+  'kb_ingest',
+  'brand_profile',
+  'image_pipeline',
+  'copy',
+  'assemble_build',
+  'quality_loop',
+];
 
 const PENDING_STEPS = [
   { key: 'kb_ingest', status: 'pending' },
@@ -39,8 +46,11 @@ const PENDING_STEPS = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function fakePrisma(tx: any): PrismaService {
+  const client = { $executeRaw: vi.fn(async () => 0), ...tx };
   return {
-    withWorkspace: vi.fn(async (_ws: string, fn: (t: unknown) => unknown) => fn(tx)),
+    withWorkspace: vi.fn(async (_ws: string, fn: (t: unknown) => unknown) =>
+      fn(client),
+    ),
   } as unknown as PrismaService;
 }
 
@@ -149,7 +159,10 @@ describe('listKbRecoveryCandidates — expired lease fairness', () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 10,
-        orderBy: expect.arrayContaining([{ processingStatus: 'asc' }, { leaseUntil: { sort: 'asc', nulls: 'last' } }]),
+        orderBy: expect.arrayContaining([
+          { processingStatus: 'asc' },
+          { leaseUntil: { sort: 'asc', nulls: 'last' } },
+        ]),
       }),
     );
   });
@@ -163,14 +176,19 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
         findUnique: vi.fn(async () => ({ id: 'site-1' })),
         update: vi.fn(async () => ({})),
       },
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'queued' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
     await acts.beginRefurbishRun(INPUT);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
     expect(open).toHaveBeenCalledWith('run-1', siteBuildBudgetCents());
     // close 在 open 之前（清残留再开新账）
-    expect(close.mock.invocationCallOrder[0]).toBeLessThan(open.mock.invocationCallOrder[0]);
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
+      open.mock.invocationCallOrder[0],
+    );
   });
 
   it('认领失败（count=0）→ 抛错且 open 不被调用（失败 claim 先抛）', async () => {
@@ -180,11 +198,35 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
         findUnique: vi.fn(async () => ({ id: 'site-1' })),
         update: vi.fn(),
       },
-      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 0 })) },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'failed' })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
-    await expect(acts.beginRefurbishRun(INPUT)).rejects.toThrow(/not claimable/);
+    await expect(acts.beginRefurbishRun(INPUT)).rejects.toThrow(
+      /not claimable/,
+    );
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('running activity retry does not reset startedAt, phase, progress or steps', async () => {
+    const { open } = spyBudget();
+    const updateMany = vi.fn();
+    const tx = {
+      site: {
+        findUnique: vi.fn(async () => ({ id: 'site-1' })),
+        update: vi.fn(async () => ({})),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+        updateMany,
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await acts.beginRefurbishRun(INPUT);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalled();
   });
 });
 
@@ -225,20 +267,61 @@ describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
       },
     };
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
-    await expect(acts.finalizeRefurbish({
-      ...INPUT,
-      kb: { processed: 1, failed: 0, degraded: false },
-      profile: { status: 'done', gaps: 0 },
-      build: { previewSlug: 'acme', versionId: 'v-legacy' },
-    })).resolves.toEqual({ previewSlug: 'acme' });
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        steps: expect.arrayContaining([
-          expect.objectContaining({ key: 'image_pipeline', status: 'skipped_m1c' }),
-        ]),
+    await expect(
+      acts.finalizeRefurbish({
+        ...INPUT,
+        kb: { processed: 1, failed: 0, degraded: false },
+        profile: { status: 'done', gaps: 0 },
+        build: { previewSlug: 'acme', versionId: 'v-legacy' },
       }),
-    }));
+    ).resolves.toEqual({ previewSlug: 'acme' });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              key: 'image_pipeline',
+              status: 'skipped_m1c',
+            }),
+          ]),
+        }),
+      }),
+    );
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
+  it('局部构建发布时 active pointer 已变化则 CAS 失败且不覆盖新版本', async () => {
+    spyBudget();
+    const update = vi.fn(async () => ({}));
+    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const tx = {
+      siteBuildRun: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      site: { update, updateMany },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+        })),
+      },
+    };
+    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    await expect(
+      acts.finalizeRefurbish({
+        ...INPUT,
+        scope: {
+          scope: 'page',
+          targetId: 'products',
+          baseVersionId: 'base-version',
+        },
+        kb: { processed: 0, failed: 0, degraded: false },
+        profile: { status: 'done', gaps: 0 },
+        build: { previewSlug: 'acme', versionId: 'candidate-version' },
+      }),
+    ).rejects.toThrow('active SiteVersion changed');
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'site-1', activeVersionId: 'base-version' },
+      data: { activeVersionId: 'candidate-version', status: 'ready' },
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 });
 
@@ -298,7 +381,9 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
       prisma: assembleStopAfterPolishPrisma(site),
       gateway,
     });
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop-after-polish');
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
+      'stop-after-polish',
+    );
     expect(generateStructured).toHaveBeenCalledTimes(1);
     const ctxArg = generateStructured.mock.calls[0][1] as {
       workspaceId: string;
@@ -325,10 +410,42 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     budgetLedger.close('run-1', { force: true }); // 清理，避免跨用例泄漏
   });
 
+  it('R3-B2 assemble 入口不把已记录的 0.65 进度写回旧 0.5', async () => {
+    spyBudget();
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    let call = 0;
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => unknown) => {
+        call += 1;
+        if (call > 1) throw new Error('stop-after-read');
+        return fn({
+          siteBuildRun: { updateMany },
+          site: {
+            findUnique: vi.fn(async () => ({
+              id: 'site-1', name: 'Acme', slug: 'acme', intake: INTAKE,
+              stylePreset: 'modern-industrial', activeVersionId: null,
+            })),
+          },
+          siteVersion: { findFirst: vi.fn(async () => null) },
+        });
+      }),
+    } as unknown as PrismaService;
+    const acts = createSiteBuilderActivities({ prisma });
+    await expect(
+      acts.assembleAndBuild({ ...INPUT, progressV1: true }),
+    ).rejects.toThrow('stop-after-read');
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'run-1', status: 'running' },
+      data: { phase: 'P3_assembly', progress: 0.65 },
+    });
+  });
+
   it('buildBrandProfile 账户未预开 → 入口立账（即便随后 gateway 缺席抛错）', async () => {
     expect(budgetLedger.remainingCents('run-1')).toBe(Infinity);
     const acts = createSiteBuilderActivities({ prisma: {} as PrismaService }); // 无 gateway
-    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(/gateway unavailable/);
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
+      /gateway unavailable/,
+    );
     expect(budgetLedger.remainingCents('run-1')).toBe(siteBuildBudgetCents());
     budgetLedger.close('run-1', { force: true });
   });
@@ -362,7 +479,10 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
       siteBuildRun: {
         findUnique: vi.fn(async () => ({
           status: over.runStatus ?? 'running',
-          startedAt: over.startedAt === undefined ? new Date('2026-07-14T00:00:00.000Z') : over.startedAt,
+          startedAt:
+            over.startedAt === undefined
+              ? new Date('2026-07-14T00:00:00.000Z')
+              : over.startedAt,
           error: null,
           finishedAt: null,
           steps: over.steps ?? PENDING_STEPS,
@@ -418,8 +538,12 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     };
     expect(data.status).toBe('failed');
     expect(data.steps.map((s) => s.key)).toEqual(REFURBISH_KEYS);
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
-    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe('done');
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'done',
+    );
+    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe(
+      'done',
+    );
     expect(
       data.steps
         .filter((s) => s.key !== 'brand_profile' && s.key !== 'assemble_build')
@@ -438,9 +562,17 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const data = runUpdate.mock.calls[0][0].data as {
       steps: { key: string; status: string }[];
     };
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
-    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe('aborted');
-    expect(data.steps.filter((s) => s.key !== 'brand_profile').every((s) => s.status === 'aborted')).toBe(true);
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'done',
+    );
+    expect(data.steps.find((s) => s.key === 'assemble_build')?.status).toBe(
+      'aborted',
+    );
+    expect(
+      data.steps
+        .filter((s) => s.key !== 'brand_profile')
+        .every((s) => s.status === 'aborted'),
+    ).toBe(true);
   });
 
   it('brandProfile 缺席 → brand_profile:aborted（全部 aborted）', async () => {
@@ -451,7 +583,9 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const data = runUpdate.mock.calls[0][0].data as {
       steps: { key: string; status: string }[];
     };
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('aborted');
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'aborted',
+    );
     expect(data.steps.every((s) => s.status === 'aborted')).toBe(true);
   });
 
@@ -501,7 +635,9 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const data = runUpdate.mock.calls[0][0].data as {
       steps: { key: string; status: string }[];
     };
-    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe('aborted');
+    expect(data.steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'aborted',
+    );
   });
 });
 
@@ -512,22 +648,36 @@ describe('buildCompensatedSteps — 纯函数（两个 DB 可核验完成位）'
     expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
     expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe('done');
     expect(
-      steps.filter((s) => s.key !== 'brand_profile' && s.key !== 'assemble_build').every((s) => s.status === 'aborted'),
+      steps
+        .filter((s) => s.key !== 'brand_profile' && s.key !== 'assemble_build')
+        .every((s) => s.status === 'aborted'),
     ).toBe(true);
   });
 
   it('(true,false) → brand_profile done、assemble_build aborted，其余 aborted', () => {
     const steps = buildCompensatedSteps(true, false);
     expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe('done');
-    expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe('aborted');
-    expect(steps.filter((s) => s.key !== 'brand_profile').every((s) => s.status === 'aborted')).toBe(true);
+    expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe(
+      'aborted',
+    );
+    expect(
+      steps
+        .filter((s) => s.key !== 'brand_profile')
+        .every((s) => s.status === 'aborted'),
+    ).toBe(true);
   });
 
   it('(false,true) → assemble_build done、brand_profile aborted，其余 aborted', () => {
     const steps = buildCompensatedSteps(false, true);
     expect(steps.find((s) => s.key === 'assemble_build')?.status).toBe('done');
-    expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe('aborted');
-    expect(steps.filter((s) => s.key !== 'assemble_build').every((s) => s.status === 'aborted')).toBe(true);
+    expect(steps.find((s) => s.key === 'brand_profile')?.status).toBe(
+      'aborted',
+    );
+    expect(
+      steps
+        .filter((s) => s.key !== 'assemble_build')
+        .every((s) => s.status === 'aborted'),
+    ).toBe(true);
   });
 
   it('(false,false) → 6 步全 aborted，键序不变', () => {
@@ -573,7 +723,9 @@ describe('R0-5 polishCopy — 传真 AbortSignal（超时即 abort 底层 fetch�
       prisma: assembleStopAfterPolishPrisma(site),
       gateway,
     });
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow('stop-after-polish');
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
+      'stop-after-polish',
+    );
     const inputArg = generateStructured.mock.calls[0][0] as {
       signal?: unknown;
     };

@@ -98,7 +98,8 @@ export class CreateBuildDto {
     minLength: 1,
     maxLength: 128,
     pattern: `^${SITE_SPEC_IDENTIFIER_PATTERN_SOURCE}$`,
-    description: 'SiteSpec page/block identifier；page/section 暂未开放执行',
+    description:
+      'SiteSpec page/block identifier；局部构建要求目标存在于 active version',
   })
   @IsOptional()
   @Matches(IDENTIFIER)

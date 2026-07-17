@@ -1,5 +1,13 @@
-import { CancellationScope, isCancellation, patched, proxyActivities } from '@temporalio/workflow';
-import type { createSiteBuilderActivities, RefurbishActivityInput } from './site-builder.activities';
+import {
+  CancellationScope,
+  isCancellation,
+  patched,
+  proxyActivities,
+} from '@temporalio/workflow';
+import type {
+  createSiteBuilderActivities,
+  RefurbishActivityInput,
+} from './site-builder.activities';
 
 type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
 const MAX_IMAGE_BATCHES_PER_BUILD = 256;
@@ -29,15 +37,43 @@ export async function refurbishWorkflow(
 ): Promise<{ previewSlug: string }> {
   try {
     await activities.beginRefurbishRun(input);
+    const progressV1 = patched('site-builder-r3b2-progress-v1');
+    const progress = async (
+      event: Parameters<SiteBuilderActivities['recordRefurbishProgress']>[0],
+    ): Promise<void> => {
+      if (progressV1) await activities.recordRefurbishProgress(event);
+    };
 
     let kb = { processed: 0, failed: 0, degraded: true };
+    await progress({
+      ...input,
+      key: 'kb_ingest',
+      status: 'running',
+      phase: 'P1_understanding',
+      progress: 0.08,
+    });
     try {
       const r = await kbActivities.ingestPendingKb(input);
       kb = { ...r, degraded: false };
+      await progress({
+        ...input,
+        key: 'kb_ingest',
+        status: r.failed ? 'degraded' : 'done',
+        phase: 'P1_understanding',
+        progress: 0.18,
+      });
     } catch (err) {
       // 🔴 取消必须穿透（Codex P2 / 复审 C1）：吞掉=取消窗口内照样发布
       if (isCancellation(err)) throw err;
       // 其余失败 fail-safe：摄入失败不阻断构建（文档留 queued，可重触发）
+      await progress({
+        ...input,
+        key: 'kb_ingest',
+        status: 'degraded',
+        phase: 'P1_understanding',
+        progress: 0.18,
+        errorCode: 'KB_INGEST_DEGRADED',
+      });
     }
 
     // P1 brandProfile（M1-b）：失败不阻断构建（M1-d 前无下游硬依赖；copy 落地后走模板兜底）。
@@ -46,11 +82,36 @@ export async function refurbishWorkflow(
       status: 'failed',
       gaps: 0,
     };
+    await progress({
+      ...input,
+      key: 'brand_profile',
+      status: 'running',
+      phase: 'P1_understanding',
+      progress: 0.2,
+    });
     try {
       const p = await activities.buildBrandProfile(input);
-      profile = { status: p.researchDegraded ? 'degraded' : 'done', gaps: p.gapsCount };
+      profile = {
+        status: p.researchDegraded ? 'degraded' : 'done',
+        gaps: p.gapsCount,
+      };
+      await progress({
+        ...input,
+        key: 'brand_profile',
+        status: p.researchDegraded ? 'degraded' : 'done',
+        phase: 'P1_understanding',
+        progress: 0.32,
+      });
     } catch (err) {
       if (isCancellation(err)) throw err;
+      await progress({
+        ...input,
+        key: 'brand_profile',
+        status: 'failed',
+        phase: 'P1_understanding',
+        progress: 0.32,
+        errorCode: 'BRAND_PROFILE_FAILED',
+      });
     }
 
     let images: {
@@ -59,16 +120,30 @@ export async function refurbishWorkflow(
       failed: number;
       variants: number;
     } = { status: 'degraded', processed: 0, failed: 0, variants: 0 };
+    await progress({
+      ...input,
+      key: 'image_pipeline',
+      status: 'running',
+      phase: 'P2_assets',
+      progress: 0.35,
+    });
     if (patched('site-builder-m1c-image-pipeline-v1')) {
       try {
         if (patched('site-builder-m1c-image-batches-v1')) {
           if (patched('site-builder-m1c-image-workset-v1')) {
             const workset = await kbActivities.listImages(input);
-            if (workset.truncated || workset.assetIds.length > MAX_IMAGE_BATCHES_PER_BUILD * 2) {
+            if (
+              workset.truncated ||
+              workset.assetIds.length > MAX_IMAGE_BATCHES_PER_BUILD * 2
+            ) {
               throw new Error('image workset exceeds the per-build limit');
             }
             images = { status: 'done', processed: 0, failed: 0, variants: 0 };
-            for (let offset = 0; offset < workset.assetIds.length; offset += 2) {
+            for (
+              let offset = 0;
+              offset < workset.assetIds.length;
+              offset += 2
+            ) {
               const assetIds = workset.assetIds.slice(offset, offset + 2);
               const summary: {
                 status: 'done' | 'degraded';
@@ -83,14 +158,31 @@ export async function refurbishWorkflow(
                 imageBatchLimit: 2,
               });
               if (summary.processed + summary.failed !== assetIds.length) {
-                throw new Error('image batch summary does not cover its frozen workset slice');
+                throw new Error(
+                  'image batch summary does not cover its frozen workset slice',
+                );
               }
               images = {
-                status: images.status === 'degraded' || summary.status === 'degraded' ? 'degraded' : 'done',
+                status:
+                  images.status === 'degraded' || summary.status === 'degraded'
+                    ? 'degraded'
+                    : 'done',
                 processed: images.processed + summary.processed,
                 failed: images.failed + summary.failed,
                 variants: images.variants + summary.variants,
               };
+              await progress({
+                ...input,
+                key: 'image_pipeline',
+                itemKey: assetIds.join(','),
+                status: summary.status === 'degraded' ? 'degraded' : 'done',
+                phase: 'P2_assets',
+                progress:
+                  0.35 +
+                  0.2 *
+                    ((offset + assetIds.length) /
+                      Math.max(1, workset.assetIds.length)),
+              });
             }
           } else {
             // Replay-only path for histories that recorded the original cursor batching patch.
@@ -121,7 +213,11 @@ export async function refurbishWorkflow(
               };
               upperBound = summary.upperBound ?? upperBound;
               const nextCursor: string | null = summary.nextCursor ?? null;
-              if (nextCursor !== null && cursor !== null && nextCursor <= cursor) {
+              if (
+                nextCursor !== null &&
+                cursor !== null &&
+                nextCursor <= cursor
+              ) {
                 throw new Error('image batch cursor did not advance');
               }
               cursor = nextCursor;
@@ -142,17 +238,68 @@ export async function refurbishWorkflow(
       }
     }
 
-    const build = await activities.assembleAndBuild(input);
-    return await activities.finalizeRefurbish({ ...input, kb, profile, images, build });
+    await progress({
+      ...input,
+      key: 'image_pipeline',
+      status: images.status === 'degraded' ? 'degraded' : 'done',
+      phase: 'P2_assets',
+      progress: 0.55,
+      ...(images.status === 'degraded'
+        ? { errorCode: 'IMAGE_PIPELINE_DEGRADED' }
+        : {}),
+    });
+    await progress({
+      ...input,
+      key: 'copy',
+      status: 'skipped',
+      phase: 'P3_assembly',
+      progress: 0.6,
+    });
+
+    await progress({
+      ...input,
+      key: 'assemble_build',
+      status: 'running',
+      phase: 'P3_assembly',
+      progress: 0.65,
+    });
+    const build = await activities.assembleAndBuild({
+      ...input,
+      ...(progressV1 ? { progressV1: true } : {}),
+    });
+    await progress({
+      ...input,
+      key: 'assemble_build',
+      status: 'done',
+      phase: 'P3_assembly',
+      progress: 0.9,
+    });
+    await progress({
+      ...input,
+      key: 'quality_loop',
+      status: 'skipped',
+      phase: 'P5_publish',
+      progress: 0.95,
+    });
+    return await activities.finalizeRefurbish({
+      ...input,
+      kb,
+      profile,
+      images,
+      build,
+      ...(progressV1 ? { progressV1: true } : {}),
+    });
   } catch (err) {
     // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即
     // 抛 CancelledFailure。补偿失败必须传播，防止 API 把未持久化的取消误作成功。
-    await CancellationScope.nonCancellable(() =>
-      activities.compensateRefurbish({
+    await CancellationScope.nonCancellable(() => {
+      const progressV1 = patched('site-builder-r3b2-progress-v1');
+      return activities.compensateRefurbish({
         ...input,
         terminalStatus: isCancellation(err) ? 'cancelled' : 'failed',
-      }),
-    );
+        ...(progressV1 ? { progressV1: true } : {}),
+      });
+    });
     throw err;
   }
 }

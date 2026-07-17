@@ -16,6 +16,8 @@ export interface BuildScopeInput {
   scope: 'site' | 'page' | 'section';
   targetId?: string | null;
   options?: BuildOptionsInput;
+  /** Internal immutable base for partial builds; never accepted from the public DTO. */
+  baseVersionId?: string;
 }
 
 export interface RefurbishLaunchInput {

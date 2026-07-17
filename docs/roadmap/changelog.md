@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-17 · Site Builder R3-B2（局部 SiteSpec 消费与单调 Build 进度）
+
+- `scope=page|section` 与 `options.pages` 现在冻结请求时的 active `baseVersionId` 并做确定性局部合并：只替换命中的 page/block 及其引用文案键，未选择页面、全站主题、assets 与其余 CopyBundle 保持不变；发布时以 active pointer CAS 防止覆盖并发人工编辑。缺目标 404、重复目标/脏 active spec 422。`stylePreset` 属全站副作用，禁止与局部请求组合。非 `en` 仍 422，真实多语种 CopyBundle/Renderer 路径归 M1-d，不以英文复制冒充翻译。
+- 新增 RLS/FORCE RLS 的 `SiteBuildStep` 一等真值表；Temporal patch 保护旧历史命令序列，新执行按 Activity/图片批次增量落 attempt/status/phase/progress。BuildRun phase/progress 只前进，旧 attempt 迟到不可覆盖，begin replay 不重写 `startedAt`，成功/失败/取消均终态化未完成步骤；`SiteBuildRun.steps` 继续作为有界公共读模型，`costSummary` 保持 null 归 R4-B-min。
+- 验证：155 files / 1614 tests 全绿、API build、lint 0 error；独立空库 50 migrations；真 PostgreSQL `app_user`/FORCE RLS 验证跨租户不可见与 attempt fencing；隔离 Temporal namespace/worker 验证 page 局部构建和 KB Activity 中取消补偿，临时 namespace/数据库/预览均清理。仅代表 Ubuntu 开发环境，不代表生产部署。
+
 ## 2026-07-17 · Site Builder R3-B1（Build 请求合同、持久幂等与 Temporal ACK）
 
 - **Breaking correction（需 PR 标签 `breaking-change-approved`）**：Build API 改用有界 SiteSpec 字符串标识符、严格 options 与共享 Renderer preset 目录；机器契约只声明当前真实执行的整站/stylePreset/en，并收紧 `Idempotency-Key`。此前会被静默忽略却返回 201 的 page/section/pages/非 en 请求，现分别 fail-closed 为 `422 BUILD_SCOPE_UNAVAILABLE/BUILD_OPTION_UNAVAILABLE`。消费者必须停止发送未实现字段/非法 key，并从本版 OpenAPI 重新生成客户端。

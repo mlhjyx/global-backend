@@ -6168,7 +6168,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "R3-B1 当前可执行面：整站构建；page/section/pages/非 en 在实现前 fail-closed",
+          "description": "R3-B2：整站或 active SiteSpec 的 page/section/pages 局部构建；非 en 仍 fail-closed",
           "content": {
             "application/json": {
               "schema": {
@@ -6181,8 +6181,16 @@
                   "scope": {
                     "type": "string",
                     "enum": [
-                      "site"
+                      "site",
+                      "page",
+                      "section"
                     ]
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "page/section 必填；site 禁止"
                   },
                   "options": {
                     "type": "object",
@@ -6205,6 +6213,15 @@
                           "enum": [
                             "en"
                           ]
+                        }
+                      },
+                      "pages": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
                         }
                       }
                     }
@@ -6260,6 +6277,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6282,7 +6302,7 @@
             }
           },
           "404": {
-            "description": "当前 workspace 不可见该 Site",
+            "description": "当前 workspace 不可见该 Site，或 BUILD_TARGET_NOT_FOUND",
             "content": {
               "application/json": {
                 "schema": {
@@ -6308,6 +6328,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6356,6 +6379,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6378,7 +6404,7 @@
             }
           },
           "422": {
-            "description": "BUILD_SCOPE_UNAVAILABLE 或 BUILD_OPTION_UNAVAILABLE；未实现能力 fail-closed",
+            "description": "BUILD_OPTION_UNAVAILABLE、BUILD_TARGET_AMBIGUOUS 或 BUILD_ACTIVE_SPEC_INVALID；未实现能力 fail-closed",
             "content": {
               "application/json": {
                 "schema": {
@@ -6404,6 +6430,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6452,6 +6481,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6500,6 +6532,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6592,6 +6627,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6640,6 +6678,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6732,6 +6773,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6780,6 +6824,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6828,6 +6875,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -6876,6 +6926,9 @@
                             "BUILD_IN_PROGRESS",
                             "BUILD_SCOPE_UNAVAILABLE",
                             "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
@@ -8383,6 +8436,18 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "progress": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "degraded": {
+                  "type": "boolean"
+                },
+                "itemCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "startedAt": {
                   "type": "string",
                   "format": "date-time",
@@ -8391,6 +8456,10 @@
                 "finishedAt": {
                   "type": "string",
                   "format": "date-time",
+                  "nullable": true
+                },
+                "errorCode": {
+                  "type": "string",
                   "nullable": true
                 },
                 "error": {

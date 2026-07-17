@@ -5,7 +5,12 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
-import { buildDemoSpec, DEMO_SPEC_VERSION, DemoCopyPolish, sanitizePolish } from '../site-builder/demo-spec';
+import {
+  buildDemoSpec,
+  DEMO_SPEC_VERSION,
+  DemoCopyPolish,
+  sanitizePolish,
+} from '../site-builder/demo-spec';
 import type { IntakeInput } from '../site-builder/intake.service';
 import type { KbService } from '../site-builder/kb.service';
 import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
@@ -26,10 +31,21 @@ import {
   sanitizeProfileForPrompt,
   scrubPii,
 } from '../site-builder/agents/brand-profile';
-import { researchBrand, ResearchSource } from '../site-builder/agents/brand-research';
+import {
+  researchBrand,
+  ResearchSource,
+} from '../site-builder/agents/brand-research';
 import { buildKbDigest } from '../site-builder/agents/kb-digest';
 import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
 import { lockSiteSpecAssetsForActivation } from '../site-builder/asset-reference-gate';
+import { applyBuildScope } from '../site-builder/build-scope';
+import type { SiteSpec } from '@global/contracts';
+import {
+  BuildProgressEvent,
+  recordBuildProgress,
+  terminalizeBuildProgress,
+} from '../site-builder/build-progress';
+import type { NormalizedBuildRequest } from '../site-builder/build-request-contract';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 
@@ -59,8 +75,10 @@ export function buildCompensatedSteps(
   assembleBuildDone: boolean,
 ): { key: string; status: string }[] {
   return REFURBISH_STEP_KEYS.map((key) => {
-    if (key === 'brand_profile') return { key, status: brandProfileDone ? 'done' : 'aborted' };
-    if (key === 'assemble_build') return { key, status: assembleBuildDone ? 'done' : 'aborted' };
+    if (key === 'brand_profile')
+      return { key, status: brandProfileDone ? 'done' : 'aborted' };
+    if (key === 'assemble_build')
+      return { key, status: assembleBuildDone ? 'done' : 'aborted' };
     return { key, status: 'aborted' };
   });
 }
@@ -88,7 +106,10 @@ export interface SiteBuilderActivityDeps {
   /** 品牌 web 研究的唯一出网闸门（缺省=研究降级 researchDegraded，不裸出网）。 */
   broker?: ExecutionBroker;
   /** M1-c deterministic Sharp writer; absent in narrow unit tests means an honest degraded step. */
-  imagePipeline?: Pick<ImagePipelineService, 'listSiteImageIds' | 'processSiteImages'>;
+  imagePipeline?: Pick<
+    ImagePipelineService,
+    'listSiteImageIds' | 'processSiteImages'
+  >;
 }
 
 export interface RefurbishActivityInput {
@@ -96,6 +117,8 @@ export interface RefurbishActivityInput {
   siteId: string;
   buildRunId: string;
   scope?: BuildScopeInput;
+  /** Patch-gated wire flag; absent on pre-R3-B2 histories. */
+  progressV1?: boolean;
   /** M1-c internal bounded-batch cursor; absent on all pre-M1-c histories. */
   imageCursor?: string | null;
   imageUpperBound?: string | null;
@@ -106,7 +129,11 @@ export interface RefurbishActivityInput {
 
 export interface RefurbishCompensationInput extends RefurbishActivityInput {
   terminalStatus?: 'failed' | 'cancelled';
+  progressV1?: boolean;
 }
+
+export interface RefurbishProgressInput
+  extends RefurbishActivityInput, BuildProgressEvent {}
 
 export interface KbRecoveryCandidate {
   workspaceId: string;
@@ -128,18 +155,25 @@ export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
   profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
   /** Optional only at the Activity wire boundary so pre-M1-c scheduled payloads remain replayable. */
-  images?: Pick<SiteImagePipelineSummary, 'status' | 'processed' | 'failed' | 'variants'>;
+  images?: Pick<
+    SiteImagePipelineSummary,
+    'status' | 'processed' | 'failed' | 'variants'
+  >;
   build: { previewSlug: string; versionId: string };
+  progressV1?: boolean;
 }
 
 /** 本地预览产物根目录（M0 雏形；M1 迁对象存储 + 边缘节点，05 §1）。 */
 export function previewRoot(): string {
-  return process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites');
+  return (
+    process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites')
+  );
 }
 
 /** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
 export function previewBasePath(slug: string): string {
-  const pattern = process.env.PREVIEW_URL_PATTERN ?? 'http://localhost:3000/preview/{slug}/';
+  const pattern =
+    process.env.PREVIEW_URL_PATTERN ?? 'http://localhost:3000/preview/{slug}/';
   try {
     return new URL(pattern.replace('{slug}', slug)).pathname;
   } catch {
@@ -156,7 +190,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   // 重启后（Temporal 把 begin 当已完成缓存、不重放）后续活动会发现无账户 → reserve 返回不限额 →
   // 预算门被绕过。故镜像 discovery.activities 的 ensureRunBudget，在每个耗费活动入口重新立账。
   // finalize/compensate 的 close(force) 无视引用计数，仍能完全关账。
-  const ensureRunBudget = (runId: string): void => budgetLedger.open(runId, siteBuildBudgetCents());
+  const ensureRunBudget = (runId: string): void =>
+    budgetLedger.open(runId, siteBuildBudgetCents());
 
   async function polishCopy(
     workspaceId: string,
@@ -217,16 +252,22 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
     let stage = 'list-queued';
     activity?.heartbeat({ siteId, stage });
-    const heartbeatTimer = activity ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000) : undefined;
+    const heartbeatTimer = activity
+      ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000)
+      : undefined;
     heartbeatTimer?.unref();
     try {
-      return await kb.processQueued({ userId: 'system', workspaceId, roles: [] }, siteId, {
-        signal: activity?.cancellationSignal,
-        heartbeat: (nextStage) => {
-          stage = nextStage;
-          activity?.heartbeat({ siteId, stage });
+      return await kb.processQueued(
+        { userId: 'system', workspaceId, roles: [] },
+        siteId,
+        {
+          signal: activity?.cancellationSignal,
+          heartbeat: (nextStage) => {
+            stage = nextStage;
+            activity?.heartbeat({ siteId, stage });
+          },
         },
-      });
+      );
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
     }
@@ -234,13 +275,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
   return {
     /** demo v0：模板选择 → 轻文案（可选）→ SiteSpec → Astro 构建 → 预览就绪。 */
-    async generateDemoV0(input: DemoV0ActivityInput): Promise<{ previewSlug: string }> {
+    async generateDemoV0(
+      input: DemoV0ActivityInput,
+    ): Promise<{ previewSlug: string }> {
       const { workspaceId, siteId, buildRunId } = input;
 
       const site = await prisma.withWorkspace(workspaceId, async (tx) => {
         await tx.siteBuildRun.update({
           where: { id: buildRunId },
-          data: { status: 'running', phase: 'demo_v0', startedAt: new Date(), progress: 0.1 },
+          data: {
+            status: 'running',
+            phase: 'demo_v0',
+            startedAt: new Date(),
+            progress: 0.1,
+          },
         });
         return tx.site.findUnique({ where: { id: siteId } });
       });
@@ -258,7 +306,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
         const version = await prisma.withWorkspace(workspaceId, async (tx) => {
           // Temporal 重试的上一次尝试可能残留 building 版本行（复审 LOW）——按 runId 清理
-          await tx.siteVersion.deleteMany({ where: { buildRunId, buildStatus: 'building' } });
+          await tx.siteVersion.deleteMany({
+            where: { buildRunId, buildStatus: 'building' },
+          });
           const nextVersion = await allocateNextSiteVersion(tx, siteId);
           return tx.siteVersion.create({
             data: {
@@ -282,7 +332,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         });
 
         await prisma.withWorkspace(workspaceId, async (tx) => {
-          await lockSiteSpecAssetsForActivation(tx, { workspaceId, siteId, spec: doc });
+          await lockSiteSpecAssetsForActivation(tx, {
+            workspaceId,
+            siteId,
+            spec: doc,
+          });
           await tx.siteVersion.update({
             where: { id: version.id },
             data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
@@ -310,7 +364,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               },
             );
           } catch (err) {
-            log.warn(`intake kb ingest failed for site ${siteId}: ${String(err)}`);
+            log.warn(
+              `intake kb ingest failed for site ${siteId}: ${String(err)}`,
+            );
           }
         }
 
@@ -322,7 +378,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             where: { id: buildRunId },
             data: { status: 'failed', error: message, finishedAt: new Date() },
           });
-          await tx.site.update({ where: { id: siteId }, data: { status: 'draft' } });
+          await tx.site.update({
+            where: { id: siteId },
+            data: { status: 'draft' },
+          });
         });
         throw err;
       }
@@ -335,32 +394,40 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      */
     async cleanupFailedDemo(input: DemoV0ActivityInput): Promise<void> {
       try {
-        const applied = await prisma.withWorkspace(input.workspaceId, async (tx) => {
-          // Codex P1：条件守卫——仅当本 run 仍是该站**最新** demo_v0 run 时才置 setup_failed。
-          // 否则若 Temporal 丢失本 cleanup 的完成 ack 触发迟到重试，而用户此间已 re-intake（复用
-          // setup_failed 站、新 run 已跑到 ready），无条件 update 会 clobber 掉那个成功的站。
-          const latest = await tx.siteBuildRun.findFirst({
-            where: { siteId: input.siteId, kind: 'demo_v0' },
-            orderBy: { createdAt: 'desc' },
-            select: { id: true },
-          });
-          if (latest?.id !== input.buildRunId) return false; // 更新的 run 已接管，本次 cleanup 作废
-          // Codex P2：清本 run 残留的 building 版本（旧版靠删站 cascade 带走；保留站后须显式收尾，
-          // 否则终态失败留下永久 in-progress 版本行——下次 re-intake 用新 runId 只清自己那批）。
-          await tx.siteVersion.updateMany({
-            where: { buildRunId: input.buildRunId, buildStatus: 'building' },
-            data: { buildStatus: 'failed' },
-          });
-          await tx.site.update({ where: { id: input.siteId }, data: { status: 'setup_failed' } });
-          return true;
-        });
+        const applied = await prisma.withWorkspace(
+          input.workspaceId,
+          async (tx) => {
+            // Codex P1：条件守卫——仅当本 run 仍是该站**最新** demo_v0 run 时才置 setup_failed。
+            // 否则若 Temporal 丢失本 cleanup 的完成 ack 触发迟到重试，而用户此间已 re-intake（复用
+            // setup_failed 站、新 run 已跑到 ready），无条件 update 会 clobber 掉那个成功的站。
+            const latest = await tx.siteBuildRun.findFirst({
+              where: { siteId: input.siteId, kind: 'demo_v0' },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true },
+            });
+            if (latest?.id !== input.buildRunId) return false; // 更新的 run 已接管，本次 cleanup 作废
+            // Codex P2：清本 run 残留的 building 版本（旧版靠删站 cascade 带走；保留站后须显式收尾，
+            // 否则终态失败留下永久 in-progress 版本行——下次 re-intake 用新 runId 只清自己那批）。
+            await tx.siteVersion.updateMany({
+              where: { buildRunId: input.buildRunId, buildStatus: 'building' },
+              data: { buildStatus: 'failed' },
+            });
+            await tx.site.update({
+              where: { id: input.siteId },
+              data: { status: 'setup_failed' },
+            });
+            return true;
+          },
+        );
         log.warn(
           applied
             ? `demo v0 terminally failed — site ${input.siteId} kept as setup_failed, retryable via re-intake`
             : `demo v0 cleanup skipped — site ${input.siteId} already taken over by a newer run`,
         );
       } catch (err) {
-        log.error(`cleanupFailedDemo failed for site ${input.siteId}: ${String(err)}`);
+        log.error(
+          `cleanupFailedDemo failed for site ${input.siteId}: ${String(err)}`,
+        );
       }
     },
 
@@ -374,27 +441,39 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         if (!site) throw new Error(`site ${siteId} not found`);
         // 状态守卫（复审 C2）：cancelled/failed 终态不可被覆写成 running；
         // 'running' 也可再认领=Temporal 结果丢失重试的幂等位。count=0 即进补偿路径。
-        const claimed = await tx.siteBuildRun.updateMany({
-          where: { id: buildRunId, status: { in: ['queued', 'running'] } },
-          data: {
-            status: 'running',
-            phase: 'P1_understanding',
-            progress: 0.05,
-            startedAt: new Date(),
-            steps: [
-              { key: 'kb_ingest', status: 'pending' },
-              { key: 'brand_profile', status: 'pending' },
-              { key: 'image_pipeline', status: 'pending' },
-              { key: 'copy', status: 'pending_m1d' },
-              { key: 'assemble_build', status: 'pending' },
-              { key: 'quality_loop', status: 'pending_m1f' },
-            ] as Prisma.InputJsonValue,
-          },
+        const run = await tx.siteBuildRun.findUnique({
+          where: { id: buildRunId },
+          select: { status: true },
         });
+        const claimed =
+          run?.status === 'queued'
+            ? await tx.siteBuildRun.updateMany({
+                where: { id: buildRunId, status: 'queued' },
+                data: {
+                  status: 'running',
+                  phase: 'P1_understanding',
+                  progress: 0.05,
+                  startedAt: new Date(),
+                  steps: [
+                    { key: 'kb_ingest', status: 'queued' },
+                    { key: 'brand_profile', status: 'queued' },
+                    { key: 'image_pipeline', status: 'queued' },
+                    { key: 'copy', status: 'queued' },
+                    { key: 'assemble_build', status: 'queued' },
+                    { key: 'quality_loop', status: 'queued' },
+                  ] as Prisma.InputJsonValue,
+                },
+              })
+            : { count: run?.status === 'running' ? 1 : 0 };
         if (claimed.count === 0) {
-          throw new Error(`run ${buildRunId} not claimable (cancelled or terminal) — aborting`);
+          throw new Error(
+            `run ${buildRunId} not claimable (cancelled or terminal) — aborting`,
+          );
         }
-        await tx.site.update({ where: { id: siteId }, data: { status: 'building' } });
+        await tx.site.update({
+          where: { id: siteId },
+          data: { status: 'building' },
+        });
       });
       // 预算门真接线（改动 1）：认领成功后才开账（失败 claim 上一步已抛）。close-then-open 清跨-retry
       // 残留账户 + wasExhausted 打标（镜像 discovery resetRunBudget，ledger 进程内无 GC，重试从干净态起）。
@@ -403,21 +482,42 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       budgetLedger.open(buildRunId, siteBuildBudgetCents());
     },
 
+    async recordRefurbishProgress(
+      input: RefurbishProgressInput,
+    ): Promise<void> {
+      await recordBuildProgress(prisma, input, input);
+    },
+
     /** P1：消化该站 queued KB 文档（fail-safe：workflow 侧降级不阻断构建）。 */
-    async ingestPendingKb(input: RefurbishActivityInput): Promise<{ processed: number; failed: number }> {
+    async ingestPendingKb(
+      input: RefurbishActivityInput,
+    ): Promise<{ processed: number; failed: number }> {
       return processQueuedForSite(input.workspaceId, input.siteId);
     },
 
     /** P2：在首个短 Activity 中冻结本 build 的图片成员集合。 */
-    async listImages(input: RefurbishActivityInput): Promise<{ assetIds: string[]; truncated: boolean }> {
+    async listImages(
+      input: RefurbishActivityInput,
+    ): Promise<{ assetIds: string[]; truncated: boolean }> {
       if (!imagePipeline) throw new Error('image pipeline unavailable');
-      return imagePipeline.listSiteImageIds({ workspaceId: input.workspaceId, siteId: input.siteId });
+      return imagePipeline.listSiteImageIds({
+        workspaceId: input.workspaceId,
+        siteId: input.siteId,
+      });
     },
 
     /** P2：每张 ready 图片独立失败隔离；Sharp 在可杀子进程内运行。 */
-    async processImages(input: RefurbishActivityInput): Promise<SiteImagePipelineSummary> {
+    async processImages(
+      input: RefurbishActivityInput,
+    ): Promise<SiteImagePipelineSummary> {
       if (!imagePipeline) {
-        return { status: 'degraded', processed: 0, failed: 0, variants: 0, items: [] };
+        return {
+          status: 'degraded',
+          processed: 0,
+          failed: 0,
+          variants: 0,
+          items: [],
+        };
       }
       let activity: ActivityContext | undefined;
       try {
@@ -428,7 +528,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       activity?.heartbeat({ siteId: input.siteId, stage: 'image-pipeline' });
       const heartbeatTimer = activity
         ? setInterval(
-            () => activity?.heartbeat({ siteId: input.siteId, stage: 'image-pipeline' }),
+            () =>
+              activity?.heartbeat({
+                siteId: input.siteId,
+                stage: 'image-pipeline',
+              }),
             5_000,
           )
         : undefined;
@@ -474,7 +578,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       let stage = 'claim';
       activity?.heartbeat({ assetId: input.assetId, stage });
       const heartbeatTimer = activity
-        ? setInterval(() => activity?.heartbeat({ assetId: input.assetId, stage }), 5_000)
+        ? setInterval(
+            () => activity?.heartbeat({ assetId: input.assetId, stage }),
+            5_000,
+          )
         : undefined;
       heartbeatTimer?.unref();
       try {
@@ -499,7 +606,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      * 周期 recovery 的受信只读扫描器：只列有界 due queued / expired processing。
      * 高 attempt/长等待发结构化告警；不在 owner 连接上做任何租户写入。
      */
-    async listKbRecoveryCandidates(input: { limit: number }): Promise<KbRecoveryCandidate[]> {
+    async listKbRecoveryCandidates(input: {
+      limit: number;
+    }): Promise<KbRecoveryCandidate[]> {
       if (!ownerDb) return [];
       const now = new Date();
       const limit = Math.max(1, Math.min(input.limit, 500));
@@ -571,29 +680,41 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      * - 模型全链失败=活动抛错，workflow 侧 fail-safe（构建继续，步骤标 failed）；
      * - Temporal 结果丢失重试会追加新版本行——append-only 设计下无害（读侧恒取最新版）。
      */
-    async buildBrandProfile(input: RefurbishActivityInput): Promise<BrandProfileSummary> {
+    async buildBrandProfile(
+      input: RefurbishActivityInput,
+    ): Promise<BrandProfileSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       if (!gateway) throw new Error('brand profile: model gateway unavailable');
 
       // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
       // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
-      const { site, run } = await prisma.withWorkspace(workspaceId, async (tx) => ({
-        site: await tx.site.findUnique({ where: { id: siteId } }),
-        run: await tx.siteBuildRun.findUnique({
-          where: { id: buildRunId },
-          select: { status: true },
+      const { site, run } = await prisma.withWorkspace(
+        workspaceId,
+        async (tx) => ({
+          site: await tx.site.findUnique({ where: { id: siteId } }),
+          run: await tx.siteBuildRun.findUnique({
+            where: { id: buildRunId },
+            select: { status: true },
+          }),
         }),
-      }));
+      );
       if (!site) throw new Error(`site ${siteId} not found`);
       if (!run || run.status !== 'running') {
-        throw new Error(`run ${buildRunId} not running (cancelled?) — skip brand profile`);
+        throw new Error(
+          `run ${buildRunId} not running (cancelled?) — skip brand profile`,
+        );
       }
       const intake = site.intake as unknown as IntakeInput;
-      const profile = sanitizeProfileForPrompt((site.profile as Record<string, unknown> | null) ?? undefined);
+      const profile = sanitizeProfileForPrompt(
+        (site.profile as Record<string, unknown> | null) ?? undefined,
+      );
 
       const digestDocs = kb?.digestSources
-        ? await kb.digestSources({ userId: 'system', workspaceId, roles: [] }, siteId)
+        ? await kb.digestSources(
+            { userId: 'system', workspaceId, roles: [] },
+            siteId,
+          )
         : [];
       const kbDigest = buildKbDigest(digestDocs);
 
@@ -614,7 +735,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         );
       }
 
-      const result = await runAiTask<Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0], BrandProfileOutput>(
+      const result = await runAiTask<
+        Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+        BrandProfileOutput
+      >(
         BRAND_PROFILE_TASK,
         {
           companyName: intake.company.nameEn ?? intake.company.nameZh,
@@ -647,7 +771,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         kbText: kbDigest,
         urlText,
       };
-      const gated = enforceEvidenceGate(result.data.factSheet ?? [], { corpus });
+      const gated = enforceEvidenceGate(result.data.factSheet ?? [], {
+        corpus,
+      });
       const gaps: GapItem[] = [
         ...gated.gaps,
         ...(result.data.gaps ?? []).map((g) => ({
@@ -662,13 +788,19 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         ...f,
         value: scrubPii(f.value),
         evidence: f.evidence
-          ? { ...f.evidence, quote: f.evidence.quote ? scrubPii(f.evidence.quote) : undefined }
+          ? {
+              ...f.evidence,
+              quote: f.evidence.quote ? scrubPii(f.evidence.quote) : undefined,
+            }
           : undefined,
       });
       const clean = {
         valueProps: (result.data.valueProps ?? []).map(scrubPii),
         tone: result.data.tone
-          ? { voice: scrubPii(result.data.tone.voice), style: (result.data.tone.style ?? []).map(scrubPii) }
+          ? {
+              voice: scrubPii(result.data.tone.voice),
+              style: (result.data.tone.style ?? []).map(scrubPii),
+            }
           : null,
         glossary: (result.data.glossary ?? []).map((g) => ({
           term: scrubPii(g.term),
@@ -695,9 +827,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               select: { status: true },
             });
             if (!live || live.status !== 'running') {
-              throw new Error(`run ${buildRunId} no longer running — skip brand profile write`);
+              throw new Error(
+                `run ${buildRunId} no longer running — skip brand profile write`,
+              );
             }
-            const agg = await tx.brandProfile.aggregate({ where: { siteId }, _max: { version: true } });
+            const agg = await tx.brandProfile.aggregate({
+              where: { siteId },
+              _max: { version: true },
+            });
             const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
             await tx.brandProfile.create({
               data: {
@@ -719,7 +856,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           });
           break;
         } catch (err) {
-          const isVersionClash = err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+          const isVersionClash =
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002';
           if (isVersionClash && attempt < 4) continue; // 并发撞版本→重算，不让整活动 attempt 重跑
           throw err;
         }
@@ -738,36 +877,81 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
-    async assembleAndBuild(input: RefurbishActivityInput): Promise<{ previewSlug: string; versionId: string }> {
+    async assembleAndBuild(
+      input: RefurbishActivityInput,
+    ): Promise<{ previewSlug: string; versionId: string }> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
-      const { site, existing } = await prisma.withWorkspace(workspaceId, async (tx) => {
-        // cancelled 后不再推进（复审 C2）
-        const advanced = await tx.siteBuildRun.updateMany({
-          where: { id: buildRunId, status: 'running' },
-          data: { phase: 'P3_assembly', progress: 0.5 },
-        });
-        if (advanced.count === 0) {
-          throw new Error(`run ${buildRunId} no longer running (cancelled?) — aborting assemble`);
-        }
-        return {
-          site: await tx.site.findUnique({ where: { id: siteId } }),
-          // Temporal 结果丢失重试的幂等位（Codex P2）：本 run 已有成功版本→复用，不再建第二个
-          existing: await tx.siteVersion.findFirst({
-            where: { buildRunId, buildStatus: 'succeeded' },
-          }),
-        };
-      });
+      const partialBuild =
+        input.scope?.scope === 'page' ||
+        input.scope?.scope === 'section' ||
+        Boolean(input.scope?.options?.pages);
+      const baseVersionId = input.scope?.baseVersionId;
+      if (partialBuild && !baseVersionId) {
+        throw new Error('partial build is missing its immutable base SiteVersion');
+      }
+      const { site, existing, activeSpec } = await prisma.withWorkspace(
+        workspaceId,
+        async (tx) => {
+          // cancelled 后不再推进（复审 C2）
+          const advanced = await tx.siteBuildRun.updateMany({
+            where: { id: buildRunId, status: 'running' },
+            data: {
+              phase: 'P3_assembly',
+              progress: input.progressV1 ? 0.65 : 0.5,
+            },
+          });
+          if (advanced.count === 0) {
+            throw new Error(
+              `run ${buildRunId} no longer running (cancelled?) — aborting assemble`,
+            );
+          }
+          const currentSite = await tx.site.findUnique({
+            where: { id: siteId },
+          });
+          return {
+            site: currentSite,
+            activeSpec: baseVersionId
+              ? ((
+                  await tx.siteVersion.findFirst({
+                    where: {
+                      id: baseVersionId,
+                      siteId,
+                      buildStatus: 'succeeded',
+                    },
+                    select: { spec: true },
+                  })
+                )?.spec ?? null)
+              : null,
+            // Temporal 结果丢失重试的幂等位（Codex P2）：本 run 已有成功版本→复用，不再建第二个
+            existing: await tx.siteVersion.findFirst({
+              where: { buildRunId, buildStatus: 'succeeded' },
+            }),
+          };
+        },
+      );
       if (!site) throw new Error(`site ${siteId} not found`);
       if (existing) return { previewSlug: site.slug, versionId: existing.id };
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
       const polish = await polishCopy(workspaceId, intake, buildRunId);
-      const doc = buildDemoSpec({ siteName: site.name, intake, stylePreset, polish });
+      const candidate = buildDemoSpec({
+        siteName: site.name,
+        intake,
+        stylePreset,
+        polish,
+      });
+      const doc = applyBuildScope(
+        activeSpec as unknown as SiteSpec | null,
+        candidate,
+        (input.scope ?? { scope: 'site' }) as NormalizedBuildRequest,
+      );
 
       const version = await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.siteVersion.deleteMany({ where: { buildRunId, buildStatus: 'building' } });
+        await tx.siteVersion.deleteMany({
+          where: { buildRunId, buildStatus: 'building' },
+        });
         const nextVersion = await allocateNextSiteVersion(tx, siteId);
         return tx.siteVersion.create({
           data: {
@@ -800,8 +984,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     },
 
     /** P5 收尾：指针切新版本 + run 落 succeeded（steps 记 kb/profile 实况与骨架跳过项）。 */
-    async finalizeRefurbish(input: RefurbishFinalizeInput): Promise<{ previewSlug: string }> {
-      const { workspaceId, siteId, buildRunId, kb: kbSummary, profile, build } = input;
+    async finalizeRefurbish(
+      input: RefurbishFinalizeInput,
+    ): Promise<{ previewSlug: string }> {
+      const {
+        workspaceId,
+        siteId,
+        buildRunId,
+        kb: kbSummary,
+        profile,
+        build,
+      } = input;
       const images = input.images ?? {
         status: 'skipped_m1c' as const,
         processed: 0,
@@ -809,6 +1002,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         variants: 0,
       };
       await prisma.withWorkspace(workspaceId, async (tx) => {
+        // Serialize terminal publication with progress writes. This also fences an ACK-lost
+        // progress retry that arrives after the run becomes terminal.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
         // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
         // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
         const published = await tx.siteBuildRun.updateMany({
@@ -818,45 +1014,68 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             phase: 'P5_publish',
             progress: 1,
             finishedAt: new Date(),
-            steps: [
-              {
-                key: 'kb_ingest',
-                status: kbSummary.degraded ? 'degraded' : 'done',
-                processed: kbSummary.processed,
-                failed: kbSummary.failed,
-              },
-              { key: 'brand_profile', status: profile.status, gaps: profile.gaps },
-              {
-                key: 'image_pipeline',
-                status: images.status,
-                processed: images.processed,
-                failed: images.failed,
-                variants: images.variants,
-              },
-              { key: 'copy', status: 'skipped_m1d' },
-              { key: 'assemble_build', status: 'done' },
-              { key: 'quality_loop', status: 'skipped_m1f' },
-            ] as Prisma.InputJsonValue,
+            ...(input.progressV1
+              ? {}
+              : {
+                  steps: [
+                    {
+                      key: 'kb_ingest',
+                      status: kbSummary.degraded ? 'degraded' : 'done',
+                      processed: kbSummary.processed,
+                      failed: kbSummary.failed,
+                    },
+                    {
+                      key: 'brand_profile',
+                      status: profile.status,
+                      gaps: profile.gaps,
+                    },
+                    {
+                      key: 'image_pipeline',
+                      status: images.status,
+                      processed: images.processed,
+                      failed: images.failed,
+                      variants: images.variants,
+                    },
+                    { key: 'copy', status: 'skipped_m1d' },
+                    { key: 'assemble_build', status: 'done' },
+                    { key: 'quality_loop', status: 'skipped_m1f' },
+                  ] as Prisma.InputJsonValue,
+                }),
           },
         });
         if (published.count === 0) {
-          throw new Error(`run ${buildRunId} not publishable (cancelled?) — pointer untouched`);
+          throw new Error(
+            `run ${buildRunId} not publishable (cancelled?) — pointer untouched`,
+          );
         }
         const targetVersion = await tx.siteVersion.findFirst({
           where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
           select: { spec: true },
         });
-        if (!targetVersion) throw new Error(`site version ${build.versionId} is not activatable`);
+        if (!targetVersion)
+          throw new Error(`site version ${build.versionId} is not activatable`);
         await lockSiteSpecAssetsForActivation(tx, {
           workspaceId,
           siteId,
           spec: targetVersion.spec,
         });
         // 守卫通过才切指针（同事务：守卫失败=整体回滚，站点纹丝不动）
-        await tx.site.update({
-          where: { id: siteId },
-          data: { activeVersionId: build.versionId, status: 'ready' },
-        });
+        if (input.scope?.baseVersionId) {
+          const activated = await tx.site.updateMany({
+            where: { id: siteId, activeVersionId: input.scope.baseVersionId },
+            data: { activeVersionId: build.versionId, status: 'ready' },
+          });
+          if (activated.count !== 1) {
+            throw new Error(
+              'active SiteVersion changed during partial build — pointer untouched',
+            );
+          }
+        } else {
+          await tx.site.update({
+            where: { id: siteId },
+            data: { activeVersionId: build.versionId, status: 'ready' },
+          });
+        }
       });
       // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
       budgetLedger.close(buildRunId, { force: true });
@@ -868,16 +1087,23 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
      * 站点状态回滚（有 activeVersion=ready，否则 draft）。**绝不删除站点/既有版本**——
      * 删站补偿只属于 demo_v0（站点因注册而生）。
      */
-    async compensateRefurbish(input: RefurbishCompensationInput): Promise<void> {
+    async compensateRefurbish(
+      input: RefurbishCompensationInput,
+    ): Promise<void> {
       const { workspaceId, siteId, buildRunId } = input;
       const terminalStatus = input.terminalStatus ?? 'failed';
       try {
         await prisma.withWorkspace(workspaceId, async (tx) => {
+          // Must be acquired before the terminal CAS to avoid a lock-order inversion with
+          // recordBuildProgress (advisory lock → SiteBuildRun update).
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
           await tx.siteVersion.updateMany({
             where: { buildRunId, buildStatus: 'building' },
             data: { buildStatus: 'failed' },
           });
-          const run = await tx.siteBuildRun.findUnique({ where: { id: buildRunId } });
+          const run = await tx.siteBuildRun.findUnique({
+            where: { id: buildRunId },
+          });
           if (run && ['queued', 'running'].includes(run.status)) {
             // 改动 3：转 failed 时补写 steps（观测性）——否则 API 显示「failed 但六步全 pending」。
             // brand_profile 落库无 buildRunId 列，用 createdAt>=startedAt 归属探测（单站单活跃 run，claim 守卫）；
@@ -892,6 +1118,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const assembleBuildDone = !!(await tx.siteVersion.findFirst({
               where: { buildRunId, buildStatus: 'succeeded' },
             }));
+            const legacySteps = input.progressV1
+              ? null
+              : (buildCompensatedSteps(
+                  brandProfileDone,
+                  assembleBuildDone,
+                ) as Prisma.InputJsonValue);
             const transitioned = await tx.siteBuildRun.updateMany({
               where: { id: buildRunId, status: { in: ['queued', 'running'] } },
               data: {
@@ -901,12 +1133,26 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     ? (run.error ?? 'refurbish failed (compensated)')
                     : null,
                 finishedAt: run.finishedAt ?? new Date(),
-                steps: buildCompensatedSteps(brandProfileDone, assembleBuildDone) as Prisma.InputJsonValue,
+                ...(legacySteps ? { steps: legacySteps } : {}),
               },
             });
             // The terminal CAS and Site rollback share one transaction. Only the run that
             // actually owned the active slot may change Site status; stale compensation is inert.
             if (transitioned.count === 1) {
+              if (input.progressV1) {
+                const terminalSteps = await terminalizeBuildProgress(tx, {
+                  workspaceId,
+                  buildRunId,
+                  phase: (run.phase ?? 'P1_understanding') as Parameters<
+                    typeof terminalizeBuildProgress
+                  >[1]['phase'],
+                  progress: run.progress,
+                });
+                await tx.siteBuildRun.update({
+                  where: { id: buildRunId },
+                  data: { steps: terminalSteps },
+                });
+              }
               const site = await tx.site.findUnique({ where: { id: siteId } });
               if (site) {
                 await tx.site.update({
@@ -917,9 +1163,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             }
           }
         });
-        log.warn(`refurbish ${buildRunId} compensated — site ${siteId} preserved`);
+        log.warn(
+          `refurbish ${buildRunId} compensated — site ${siteId} preserved`,
+        );
       } catch (err) {
-        log.error(`compensateRefurbish failed for run ${buildRunId}: ${String(err)}`);
+        log.error(
+          `compensateRefurbish failed for run ${buildRunId}: ${String(err)}`,
+        );
         throw err;
       } finally {
         // 预算门收尾（改动 1）：run 终点强制关账，即便补偿 DB 工作失败也释放账户（force 无视 refs）。

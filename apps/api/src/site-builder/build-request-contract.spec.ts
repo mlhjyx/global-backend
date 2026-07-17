@@ -53,28 +53,48 @@ describe('normalizeBuildRequest', () => {
     }
   });
 
-  it('distinguishes valid-but-unimplemented page/section scope with 422', () => {
+  it('accepts valid page/section scope for the active SiteSpec consumer', () => {
     for (const scope of ['page', 'section'] as const) {
+      expect(normalizeBuildRequest({ scope, targetId: 'home:hero-1' })).toEqual(
+        {
+          scope,
+          targetId: 'home:hero-1',
+        },
+      );
+    }
+  });
+
+  it('rejects option combinations that would escape the requested scope', () => {
+    const cases = [
+      { scope: 'page', targetId: 'home', options: { pages: ['home'] } },
+      {
+        scope: 'section',
+        targetId: 'hero',
+        options: { stylePreset: 'modern-industrial' },
+      },
+      {
+        scope: 'site',
+        options: { pages: ['home'], stylePreset: 'precision-light' },
+      },
+    ];
+    for (const input of cases) {
       const error = (() => {
         try {
-          normalizeBuildRequest({ scope, targetId: 'home:hero-1' });
+          normalizeBuildRequest(input as never);
         } catch (caught) {
           return caught;
         }
       })();
-      expect(contract(error)).toEqual({
+      expect(contract(error)).toMatchObject({
         status: 422,
         body: {
-          error: {
-            code: 'BUILD_SCOPE_UNAVAILABLE',
-            message: `${scope} builds are not implemented yet`,
-          },
+          error: { code: 'BUILD_OPTION_UNAVAILABLE' },
         },
       });
     }
   });
 
-  it('validates pages before returning the explicit unavailable response', () => {
+  it('validates and accepts pages for deterministic partial rebuilding', () => {
     for (const pages of [[], ['home', 'home'], ['bad id']]) {
       const error = (() => {
         try {
@@ -89,19 +109,14 @@ describe('normalizeBuildRequest', () => {
       });
     }
 
-    const unavailable = (() => {
-      try {
-        normalizeBuildRequest({
-          scope: 'site',
-          options: { pages: ['home', 'products'] },
-        });
-      } catch (caught) {
-        return caught;
-      }
-    })();
-    expect(contract(unavailable)).toMatchObject({
-      status: 422,
-      body: { error: { code: 'BUILD_OPTION_UNAVAILABLE' } },
+    expect(
+      normalizeBuildRequest({
+        scope: 'site',
+        options: { pages: ['home', 'products'] },
+      }),
+    ).toEqual({
+      scope: 'site',
+      options: { pages: ['home', 'products'] },
     });
   });
 
