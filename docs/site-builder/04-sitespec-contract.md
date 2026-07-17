@@ -274,21 +274,30 @@ export interface DesignDNA {
 
 **TemplateFamily / DesignBrief**（`template-family.ts` / `design-brief.ts` 目标）承载 `blueprints` / `componentVariants` / `adjacencyRules`（§5.3）/ `contentBudgets`（§5.2）/ `variationSeed`（受控差异化）等——`catalogVersion` / `familyVersion` / `variationSeed` **必须落入构建工件保证可重放**，同一 SiteBuildRun 内不因重试漂移。完整字段见 v3.2 §15.3–15.4 与 03-agents。
 
-### 11.4 EvidenceRef：Evidence 2.0（v3.2 §24.7 / PR R4-A，早于 M1-d）
+### 11.4 EvidenceRef：Evidence 2.0（v3.2 §24.7 / R4-A1 已完成，R4-A2 待完成）
 
-Evidence 从"只贴 sourceType"升级为**引用精确 source/chunk**（`design-source.ts` 或 fact 层目标）：
+R4-A1 已把 Evidence 从“只贴 sourceType”升级为**引用精确冻结 source/chunk**的共享内部合同（`@global/contracts` `site-builder/evidence.ts`）：
 
 ```ts
-export interface EvidenceRef {
+export interface EvidenceRefV2 {
+  version: 2;
+  evidenceRefId: string;
   sourceId: string;
   sourceType: 'intake' | 'upload' | 'storefront' | 'web_research';
-  contentHash: string;   // 冻结语料 hash
-  quote: string;         // 必须命中 sourceId 对应冻结语料
-  assetId?: string; url?: string; fetchedAt?: string;
+  sourceRole: 'fact_candidate' | 'research_hint';
+  hashAlgorithm: 'sha256';
+  contentHash: string;
+  quote: string;
+  selector: { start: number; end: number; prefix?: string; suffix?: string };
+  assetId?: string;
+  url?: string;
+  fetchedAt?: string;
 }
 ```
 
-硬规则（择要）：FactSheet 每条事实**必须有 quote 且命中冻结语料**；value 里的数字/单位/认证代码/专名须在 quote 中一致出现，否则降 gap；**web 搜索 snippet 只作 research_hint，绝不直接成 publishable fact**；认证必须引用 ready 的 cert Asset 或人工 verified（🔴 与 ADR-017 禁虚构身份同源）。
+**R4-A1 as-built**：模型前冻结经 PII 清洗/规范化/有界截断的 source snapshot；KB provenance 精确到 doc/asset/chunk/hash；每条新 FactSheet 事实必须带 8–512 code point 的 quote，服务端按 source/type/完整 SHA-256/精确 quote 重新水合 selector 后才写入不可变关系表。该内部合同不改 SiteSpec 1.0.0，也不改变公开 OpenAPI；旧 BrandProfile v1 继续可读、不伪造回填。
+
+**R4-A2 待完成**：value 内数字/单位/认证代码/专名与 quote 的语义一致性；`research_hint`/搜索 snippet 不可直接 publish；认证必须引用 ready cert Asset 或人工 verified；最终关联公共 Claim/Evidence 且满足 APPROVED 发布门。故 `EvidenceRefV2` 只证明“引用了哪段冻结语料”，不单独证明事实为真或可发布。
 
 ### 11.5 ModelProfile：Agent 只绑 profile 不绑型号（v3.2 §23.4，ADR-016）
 

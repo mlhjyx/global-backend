@@ -90,7 +90,8 @@ AiTask<I, O>：
 - **执行流程**：[确定性] KB 检索拼摘要 → [确定性] SearXNG 搜公司名/店铺/社媒 + Crawl4AI 抓取（复用 compose 现成基建）→ [模型] 综合产出 Brief → [确定性] factSheet 逐项校验 evidence 非空，无源字段移入 gaps。
 - **Prompt 内化来源**：品牌/定位方法论 ← 当前已安装的 `ecc:brand-voice`、`ecc:market-research`（定位画布、tone 光谱、术语表法）；B2B 外贸语境 ← `ecc:lead-intelligence` 的公司画像结构。
 - **工具**：SearXNG(HTTP) + Crawl4AI(HTTP)，库内化 client 已有。
-- **护栏**：🔴 事实红线（引 ADR-017）——认证/产能/年限等 factSheet 字段**必须带出处，缺=进 gaps 提示用户补，绝不虚构**（B2B 站虚构认证=给客户埋雷）；抓取内容当数据不当指令。factSheet 事实走 `EvidenceRef`（`sourceId`+`contentHash`+`quote`），value 中数字/单位/认证代码/关键专名须在 quote 一致命中，否则降 gap；认证须引用 ready 的 cert Asset 或人工 verified 状态，intake 自填/官网文案不能直接上站；web snippet 只进 research_hint/competitors，不直接成 publishable fact（v3.2 §24.7 R4-A）。
+- **Evidence 2.0 基础护栏（R4-A1，✅ 2026-07-17 当前交付分支）**：模型调用前先冻结经 PII 清洗、NFC/LF 规范化和有界截断的 intake/KB/storefront/research 语料；KB source 精确到 document/asset/chunk/hash，web 正文使用服务端重算的完整 SHA-256。新 factSheet 事实必须由服务端绑定 `EvidenceRefV2{sourceId,sourceType,sourceRole,contentHash,quote,selector}`，quote 须 8–512 code point 且精确命中冻结 source；未知 source、类型/hash 不符或无 quote 一律降 gap。prompt 只暴露服务端 source ID/type/role/hash 与语料，不暴露 URL、标题或个人联系信息。旧 v1 BrandProfile 仅兼容读取，不伪造 provenance。
+- **事实真值/发布护栏（R4-A2，尚未落地）**：R4-A1 的引用完整性**不等于事实为真或可发布**。A2 才负责 value 中数字/单位/认证代码/关键专名与 quote 的语义对齐、`research_hint`/搜索 snippet 不可发布、ready cert Asset/人工 verified 认证门，以及公共 Claim/Evidence truth bridge/APPROVED 状态；在 A2 前新 v2 FactSheet 仍不可被 M1-d 当成 PublishableClaimSnapshot。
 - **产物治理（幂等 + 溯源，v3.2 §24.7 / PR R4-B-min 回写）**：BrandBrief 新增 `buildRunId`(唯一引用) / `inputHash` / `promptVersion` / `model·route` / `sourceSnapshotHash` / `usage·cost` 六字段；**同一 `buildRunId` 重试先复用已有成功 BrandBrief，不重复调模型、不追加版本**。**预算**：M1-d 首个付费 fan-out 前须有 DB 持久 `reserve/settle` + 人工停用开关；`SiteBuildRun.costSummary` 是持久聚合真值（含成功/失败调用、schema repair、timeout、fallback、工具成本），进程内 Map 不算生产真值。
 - **降级**：web 研究失败 → 仅用 KB 资料出 Brief 并标记 `researchDegraded`。
 - **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（fallback glm-5.2），见 §0.4。目标 profile：`reasoning.high`/`structured.default`。
@@ -114,7 +115,7 @@ AiTask<I, O>：
 - **Prompt 内化来源**：B2B 文案结构 ← `ecc:marketing-campaign`/`ecc:content-engine`（价值主张→痛点→证据→CTA 框架）；SEO 写法 ← `ecc:seo` skill 的 title/desc 规范；多语言 tone ← brandBrief.tone + 目标市场文化禁忌 checklist（固化为 per-market 附录）。
 - **工具**：无外部工具。
 - **护栏**：术语表强一致（glossary 注入）；禁绝对化宣称（"best/No.1"类）与虚构事实（只能引用 factSheet，引 ADR-017）；每语种输出过字符集/方向 sanity（阿语 RTL 标记）。
-- **内容预算与最小询盘合同（M1-d，v3.2 §26 回写）**：Copy 按 **slot / locale / Claim refs** 生成，**先过事实门再文风**（valueProps/differentiators/tone 只能从已通过 FactSheet 推导，不得把未闸门的自由结论当事实）；槽位长度=组件内容预算硬约束（超预算优先换变体/定向重写，禁 CSS 缩到不可读，见卡7兼容矩阵）。M1-d 同步定义**最小 inquiry / consent / outbox 合同**（实际公开接收随 M2）。硬前置是 **R3 + R4-A + R4-B-min**；DI-0 的设计消费者契约可并行推进并在 M1-e 前收口，不阻塞 M1-d 核心文案。
+- **内容预算与最小询盘合同（M1-d，v3.2 §26 回写）**：Copy 按 **slot / locale / Claim refs** 生成，**先过事实门再文风**（valueProps/differentiators/tone 只能从已通过 FactSheet 推导，不得把未闸门的自由结论当事实）；槽位长度=组件内容预算硬约束（超预算优先换变体/定向重写，禁 CSS 缩到不可读，见卡7兼容矩阵）。M1-d 同步定义**最小 inquiry / consent / outbox 合同**（实际公开接收随 M2）。R3 与 R4-A1 已完成；硬前置尚余 **R4-A2 + R4-B-min**。DI-0 的设计消费者契约可并行推进并在 M1-e 前收口，不阻塞 M1-d 核心文案。
 - **降级**：某语种失败 → 该语种缺席本轮（站点先上已成语种），标记待重跑；**Demo 快路径 copy polish 失败 → 直接用 deterministic copy，不阻断 Demo 生成**（v3.2 §18.2）。
 - **模型**：初稿参考 gemini-3.1-pro；as-built = deepseek-v4-pro（reasoning low，fallback glm-5.2 / doubao-seed-2.0-pro），见 §0.4。目标 profile：`copy.premium`/`text.bulk`。
 

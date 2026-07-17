@@ -43,8 +43,9 @@ Temporal 固定 DAG → 有界 AI Task / Docling / BGE-M3 → SiteSpec 1.0.0
 ```
 
 - 类型边界：`@global/contracts` 的 `SiteSpec` 1.0.0 是 API 生产端与 Astro 消费端唯一共享类型（DQ-1/#117）；运行时 Zod 门与 1.1.0 目标字段尚未落地，不得写成 as-built。
-- #121 已去 intake **行为分叉**，#123/#124 已落事实安全、隐私、可取消超时和失败保站，#126 已完成持久幂等、`buildId`、稳定错误码、Temporal 启动证据和 code-first OpenAPI。R2-A1 已把 Asset commit 改为 CAS+attempt/token/lease fencing，canonical 状态与 cleanup intent 同事务落库，duplicate/failed_retryable/tombstone 成为显式状态。当前 renderer 产物键仍是 `local:` 路径；不可变 Release 尚属目标态。
-- 当前关键路径：R1-safety ①临时 SiteSpec/Renderer env 隔离与 ② Crawl/robots 全链 egress/SSRF、R2-A1 Asset 均已于 2026-07-17 落地；下一步 R2-A2 KB → R2-A3 Profile → R2-A4 cleanup/integration → MF-0-thin（含引用扫描器与删除 409）→ M1-c（纯 Sharp）。A4 前 `AssetObjectCleanupRequested` 刻意 parked；引用扫描器落地前不得把 canonical object 自动清理写成安全能力。
+- #121/#123/#124/#126 已收口 intake 行为、事实安全、隐私、可取消超时、失败保站、幂等合同与 OpenAPI；R1-safety、R2-A1–A4、MF0-A/B、M1-c 与 R3-A/B1/B2 均已落地。R3-B2 的 renderer 产物仍是 `local:` durable artifact，并通过数据库 CAS 后的原子 symlink pointer 切换本地预览；这不等于 ADR-013 的生产对象存储不可变 Release、跨节点恢复/回收，后者仍属 R1-min。
+- R4-A1 已新增内部 `EvidenceRefV2` 合同、不可变 `SiteEvidenceSourceSnapshot`/`BrandProfileEvidenceRef`、FORCE RLS 与复合 provenance FK。P1 Activity 在模型前冻结经 PII 清洗和规范化的 intake/KB/storefront/research 语料，KB 精确到 chunk hash；新事实必须精确绑定 source/type/SHA-256/quote/Unicode selector。旧 v1 BrandProfile 不伪造回填；公开 OpenAPI 未变化。R4-A1 只证明引用完整性，不证明事实真值或可发布性。
+- 当前关键路径：**R4-A2 Claim/Evidence truth bridge → R4-B-min → M1-d**。value/quote 语义对齐、`research_hint` 不可发布、cert Asset/人工 verified 发布门与 APPROVED Claim 消费均属 A2；BrandProfile 重试幂等和成本真值属 B-min。R1-min 的生产 Release 边界仍须在 M1-e 可见预览前完成。
 - 🔴 **抓取 egress as-built**：Compose 已移除 broad allow-internal；Crawl4AI 固定不可变镜像 digest，保留 seed global-unicast 守卫和浏览器 pinning proxy。Ubuntu fake-IP 仅在系统答案全部位于 `198.18.0.0/15` 时经固定 Cloudflare DoH 回退；private/loopback/metadata/保留或混合答案 fail-closed。API 的 Crawl/robots/`http.get` 在每一跳解析、校验并钉扎连接，限制 redirect、超时、响应大小且跨域剥离凭证。公网与 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机矩阵已全绿；loopback 端口绑定仍保留为 defense-in-depth。
 
 ## 2. Bounded Contexts（9 个）

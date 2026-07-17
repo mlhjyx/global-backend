@@ -71,8 +71,8 @@ Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost /
 
 - **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
 - **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
-- **as-built 审计基线（`main@a7fa49c`，#127）**：M0 快路径、Astro 渲染器、DQ-1 SiteSpec 1.0.0、素材/KB/构建端点已存在；#121/#123/#124 已完成无条件 demo、禁虚构身份、businessEmail 隔离、可取消超时和失败保站；#126 完成 intake 幂等合同与 OpenAPI；#127 完成 R1-safety ① 构建隔离。
-- **当前施工**：R1-safety ①+② 已完成构建隔离与 API/Crawl4AI/robots 全链 egress，并通过真机矩阵；关键路径进入拆分后的 R2-A → MF-0-thin → M1-c 纯 Sharp。R1-min 原子预览余项仍须在 M1-e 前完成。
+- **as-built 审计基线（R4-A1 交付分支基于 `main@24decd10`）**：M0 快路径、Astro 渲染器、DQ-1 SiteSpec 1.0.0、素材/KB/构建端点，以及 R0、R1-safety、R2-A1–A4、MF0-A/B、M1-c、R3-A/B1/B2 均已落地。R3-B2 已提供本地 durable artifact + 原子 symlink pointer，但生产对象存储不可变 Release、跨节点恢复/回收与 unknown component 门仍属 R1-min。
+- **当前施工**：R4-A1 已冻结 intake/KB/storefront/research 来源并落 EvidenceRef v2 的精确 source/hash/quote/provenance 基础；它不改变公开 API，也不等于公共 Claim 已 APPROVED 或事实已可发布。关键路径下一步为 R4-A2 truth bridge → R4-B-min → M1-d；R4-A2 才负责 value/quote 语义对齐、snippet 发布降级与认证 Asset/人工 verified 门。
 - **权威规则**：承重决策只进 ADR-013~019；具体产品/施工真值在 Site Builder 00–14。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
 
 ## 5. 业务层级四层（PDR-002，已收敛=交付包 TA-003，待 A/B 会签）
