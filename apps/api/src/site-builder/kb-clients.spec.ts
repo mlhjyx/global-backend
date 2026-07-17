@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DoclingClient } from './docling.client';
 import { EmbeddingsClient } from './embeddings.client';
 import { KbIngestError } from './kb-errors';
@@ -9,7 +9,11 @@ afterEach(() => {
 });
 
 describe('R2-A2 typed KB dependency errors', () => {
-  it('embedding 默认复用统一 New API 地址和 Bearer token', async () => {
+  beforeEach(() => {
+    vi.stubEnv('EMBEDDINGS_API_KEY', 'embedding-test-token');
+  });
+
+  it('embedding 默认复用统一 New API 地址，但只使用专用 Bearer token 和本机别名', async () => {
     vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api.internal:3000/v1');
     vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
     const fetchMock = vi.fn(
@@ -26,11 +30,14 @@ describe('R2-A2 typed KB dependency errors', () => {
       'http://new-api.internal:3000/v1/embeddings',
       expect.objectContaining({
         headers: {
-          authorization: 'Bearer gateway-test-token',
+          authorization: 'Bearer embedding-test-token',
           'content-type': 'application/json',
         },
       }),
     );
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
+      model: 'site-builder-bge-m3-local',
+    });
   });
 
   it('embedding 专用地址和 Key 可显式覆盖统一网关配置', async () => {
@@ -59,10 +66,23 @@ describe('R2-A2 typed KB dependency errors', () => {
     );
   });
 
-  it('embedding 专用 Key 为空时回退统一网关 token', async () => {
+  it('embedding 专用 Key 为空时 fail-closed，不把 KB 内容交给通用网关 token', async () => {
     vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api.internal:3000/v1');
     vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
     vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['raw tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+      stage: 'embedding',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('embedding 忽略任意模型覆盖，始终请求本机专用别名', async () => {
+    vi.stubEnv('EMBEDDINGS_MODEL', 'bge-m3');
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -72,16 +92,11 @@ describe('R2-A2 typed KB dependency errors', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(new EmbeddingsClient().embed(['hello'])).resolves.toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://new-api.internal:3000/v1/embeddings',
-      expect.objectContaining({
-        headers: {
-          authorization: 'Bearer gateway-test-token',
-          'content-type': 'application/json',
-        },
-      }),
-    );
+    await new EmbeddingsClient().embed(['hello']);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({
+      model: 'site-builder-bge-m3-local',
+    });
   });
 
   it('Docling 泛 400 不足以证明文档损坏，按 dependency retryable 处理', async () => {
