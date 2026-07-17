@@ -136,6 +136,32 @@ describe('R2-A2 typed KB dependency errors', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([401, 403])('embedding 网关 %i 是终止型凭证/授权配置错误', async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('token rejected', { status })),
+    );
+
+    await expect(new EmbeddingsClient().embed(['tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_CONFIGURATION_INVALID',
+      disposition: 'terminal',
+      stage: 'embedding',
+    });
+  });
+
+  it.each([429, 500, 503])('embedding 网关 %i 保持可重试依赖错误', async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('temporary failure', { status })),
+    );
+
+    await expect(new EmbeddingsClient().embed(['tenant KB'])).rejects.toMatchObject({
+      code: 'KB_EMBEDDING_UNAVAILABLE',
+      disposition: 'retryable',
+      stage: 'embedding',
+    });
+  });
+
   it('Docling 泛 400 不足以证明文档损坏，按 dependency retryable 处理', async () => {
     vi.stubGlobal(
       'fetch',
