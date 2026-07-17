@@ -108,6 +108,7 @@ describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
 
     expect(out.data.headline).toBe('Precision pumps');
     expect(out.model).toBe('model-a');
+    expect(out.provider).toBe('gateway');
     expect(calls[0]).toMatchObject({
       task: 'site_builder.brand_profile',
       prompt: 'Company: Acme GmbH',

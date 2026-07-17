@@ -141,11 +141,12 @@ export function evaluateBrandProfileOutput(
   output: BrandProfileOutput,
 ): BrandProfileEvalOutcome {
   const gated = enforceEvidenceGateV2(output.factSheet, { sources: prepared.frozenSources });
-  // Do not let a source quote satisfy a required output fact. The evidence
-  // gate proves that the quote exists, not that it semantically supports a
-  // different model-provided value (for example 300 bar citing 160 bar).
+  // Do not let a source quote or fact label satisfy a required output fact.
+  // The evidence gate proves that a quote exists, not that it semantically
+  // supports a different model-provided value (for example 300 bar citing
+  // 160 bar under a key that also says "160 bar").
   const assertedFactText = gated.factSheet
-    .flatMap((item) => [item.key, item.value])
+    .map((item) => item.value)
     .join('\n')
     .toLocaleLowerCase('en-US');
   const outputText = modelOutputText(output);

@@ -34,6 +34,8 @@ export interface AiTaskRunResult<TOut> {
   data: TOut;
   /** 实际服务的模型（回退链命中哪个）。 */
   model: string;
+  /** Provider identifier that served the successful response. */
+  provider: string;
   usage: { inputTokens: number; outputTokens: number; calls: number };
   /** Resolved profile, lifecycle, data handling and cost ceiling used for this run. */
   routePolicy: ModelExecutionPolicySnapshot;
@@ -157,6 +159,7 @@ export async function runAiTask<TIn, TOut>(
       return {
         data: result.data,
         model: result.model,
+        provider: result.provider,
         usage,
         routePolicy,
         modelSnapshot,

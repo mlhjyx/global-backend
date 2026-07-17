@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { OpenAICompatibleProvider } from '../src/model-gateway/providers/openai-compatible.provider';
+import { ProviderOutputError } from '../src/model-gateway/providers/provider-output-error';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import { AiTaskError, runAiTask } from '../src/site-builder/agents/ai-task';
 import {
@@ -33,6 +34,12 @@ const FIXTURE_DIR = join(
   '../test/fixtures/golden-companies/brand-profile',
 );
 const EVAL_WORKSPACE_ID = '00000000-0000-4000-8000-000000000001';
+const CAPABILITY_PROBE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status'],
+  properties: { status: { type: 'string', const: 'ok' } },
+} as const;
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -86,6 +93,51 @@ function gatewayFor(model: string): RouterModelGateway {
   return new RouterModelGateway(new ModelRouter(registry));
 }
 
+async function probeCandidate(
+  gateway: RouterModelGateway,
+  route: TaskRoute,
+  requestedModel: string,
+): Promise<Record<string, unknown>> {
+  const started = performance.now();
+  try {
+    const result = await gateway.generateStructured<{ status: 'ok' }>(
+      {
+        task: 'site_builder.brand_profile.capability_probe',
+        prompt: 'Return exactly {"status":"ok"}.',
+        schema: CAPABILITY_PROBE_SCHEMA,
+        model: requestedModel,
+        maxTokens: 128,
+        maxCostCents: route.maxCostCents,
+      },
+      {
+        workspaceId: EVAL_WORKSPACE_ID,
+        runId: `model1-probe:${requestedModel}`,
+        modelPolicy: { ...route.policy, fallbackIndex: 0 },
+      },
+    );
+    if (result.provider === 'stub' || result.data.status !== 'ok') {
+      throw new Error('capability probe returned an unusable response');
+    }
+    return {
+      requestedModel,
+      accepted: true,
+      elapsedMs: Math.round(performance.now() - started),
+      provider: result.provider,
+      resolvedModel: result.model,
+      usage: result.usage,
+    };
+  } catch (error) {
+    const usage = error instanceof ProviderOutputError ? error.usage : undefined;
+    return {
+      requestedModel,
+      accepted: false,
+      elapsedMs: Math.round(performance.now() - started),
+      usage,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function percentile95(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -101,10 +153,14 @@ if (models.length === 0) throw new Error('MODEL_EVAL_MODELS must contain at leas
 
 const fixtures = await loadFixtures();
 const runs: Array<Record<string, unknown>> = [];
+const probes: Array<Record<string, unknown>> = [];
 
 for (const model of models) {
   const route = candidateRoute(model);
   const gateway = gatewayFor(model);
+  const probe = await probeCandidate(gateway, route, model);
+  probes.push(probe);
+  if (probe.accepted !== true) continue;
   for (const fixture of fixtures) {
     const prepared = prepareBrandProfileEvalFixture(fixture);
     for (let attempt = 1; attempt <= repeats; attempt += 1) {
@@ -118,6 +174,9 @@ for (const model of models) {
         const outcome = evaluateBrandProfileOutput(prepared, result.data);
         runs.push({
           model,
+          requestedModel: model,
+          provider: result.provider,
+          resolvedModel: result.model,
           fixtureId: fixture.id,
           targetMarkets: fixture.targetMarkets,
           materialCompleteness: fixture.materialCompleteness,
@@ -142,6 +201,7 @@ for (const model of models) {
         const usage = error instanceof AiTaskError ? error.usage : undefined;
         runs.push({
           model,
+          requestedModel: model,
           fixtureId: fixture.id,
           targetMarkets: fixture.targetMarkets,
           materialCompleteness: fixture.materialCompleteness,
@@ -164,12 +224,15 @@ for (const model of models) {
 
 const summary = models.map((model) => {
   const rows = runs.filter((run) => run.model === model);
+  const capabilityProbe = probes.find((probe) => probe.requestedModel === model);
   const accepted = rows.filter((run) => run.acceptedArtifact === true);
   const latencies = rows
     .map((run) => run.elapsedMs)
     .filter((value): value is number => typeof value === 'number');
   return {
     model,
+    capabilityProbe,
+    matrixSkipped: capabilityProbe?.accepted !== true,
     runs: rows.length,
     acceptedArtifacts: accepted.length,
     hardFailures: rows.length - accepted.length,
@@ -203,6 +266,7 @@ const report = JSON.stringify(
     generatedAt: new Date().toISOString(),
     repeats,
     fixtureCount: fixtures.length,
+    probes,
     summary,
     runs,
   },
@@ -213,4 +277,6 @@ const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
 if (reportPath) await writeFile(reportPath, `${report}\n`, { encoding: 'utf8', flag: 'wx' });
 console.log(report);
 
-if (runs.some((run) => run.acceptedArtifact !== true)) process.exitCode = 1;
+if (probes.some((probe) => probe.accepted !== true) || runs.some((run) => run.acceptedArtifact !== true)) {
+  process.exitCode = 1;
+}

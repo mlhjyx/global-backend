@@ -48,20 +48,20 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   async generateText(input: GenerateTextInput): Promise<ModelResult<string>> {
     const model = input.model ?? this.cfg.model;
-    const { content, usage } = await this.chat(
+    const { content, usage, model: resolvedModel } = await this.chat(
       [
         { role: 'system', content: input.system ?? '' },
         { role: 'user', content: input.prompt },
       ],
       { model, maxTokens: input.maxTokens, temperature: input.temperature, reasoningEffort: input.reasoningEffort, signal: input.signal },
     );
-    return { data: content, provider: this.id, model, usage };
+    return { data: content, provider: this.id, model: resolvedModel ?? model, usage };
   }
 
   async generateStructured<T = unknown>(input: GenerateStructuredInput): Promise<ModelResult<T>> {
     const model = input.model ?? this.cfg.model;
     const system = `${input.system ?? ''}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(input.schema)}`;
-    const { content, usage, finishReason } = await this.chat(
+    const { content, usage, finishReason, model: resolvedModel } = await this.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: input.prompt },
@@ -80,7 +80,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     // 剥 markdown 围栏（真机实证：glm-5.2 在 json_object 模式下仍偶发 ```json…``` 包裹）。
     const payload = stripJsonFence(content);
     try {
-      return { data: JSON.parse(payload) as T, provider: this.id, model, usage };
+      return { data: JSON.parse(payload) as T, provider: this.id, model: resolvedModel ?? model, usage };
     } catch (err) {
       // JSON 解析失败三种同根因（都花了 token → 均带 usage 供网关结算，改动 2）：
       // ① finish_reason=length = 输出中途截断（真机实证：v4-pro「Unterminated string」）——显式指向 maxTokens。
@@ -131,6 +131,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
     content: string;
     usage?: { inputTokens?: number; outputTokens?: number };
     finishReason?: string;
+    /** OpenAI-compatible gateways may expose the post-alias/upstream model here. */
+    model?: string;
   }> {
     const timeoutMs = Number(process.env.MODEL_TIMEOUT_MS) || 180_000;
     // 自身超时 + 调用方 signal（如 ai-task 的 per-task 超时）合并——任一触发即 abort fetch，
@@ -154,11 +156,13 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const json = (await res.json()) as {
       choices?: { message?: { content?: string }; finish_reason?: string }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
+      model?: string;
     };
     return {
       content: json.choices?.[0]?.message?.content ?? '',
       usage: { inputTokens: json.usage?.prompt_tokens, outputTokens: json.usage?.completion_tokens },
       finishReason: json.choices?.[0]?.finish_reason,
+      model: json.model?.trim() || undefined,
     };
   }
 }

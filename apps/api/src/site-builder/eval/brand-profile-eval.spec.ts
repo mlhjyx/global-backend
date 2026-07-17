@@ -105,9 +105,10 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     expect(outcome.forbiddenOutputTerms).toEqual(['ISO 9001']);
   });
 
-  it('does not allow a source quote to satisfy a required value the model did not assert', () => {
+  it('does not allow a source quote or fact label to satisfy a required value the model did not assert', () => {
     const prepared = prepareBrandProfileEvalFixture(richFixture);
     const output = outputFor(prepared);
+    output.factSheet[1].key = 'maximum pressure (160 bar)';
     output.factSheet[1].value = 'The DP dosing series supports discharge pressure up to 300 bar.';
 
     const outcome = evaluateBrandProfileOutput(prepared, output);
