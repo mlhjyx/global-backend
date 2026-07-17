@@ -59,6 +59,31 @@ describe('R2-A2 typed KB dependency errors', () => {
     );
   });
 
+  it('embedding 专用 Key 为空时回退统一网关 token', async () => {
+    vi.stubEnv('MODEL_GATEWAY_URL', 'http://new-api.internal:3000/v1');
+    vi.stubEnv('MODEL_GATEWAY_KEY', 'gateway-test-token');
+    vi.stubEnv('EMBEDDINGS_API_KEY', '');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ index: 0, embedding: Array(1024).fill(0.1) }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EmbeddingsClient().embed(['hello'])).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://new-api.internal:3000/v1/embeddings',
+      expect.objectContaining({
+        headers: {
+          authorization: 'Bearer gateway-test-token',
+          'content-type': 'application/json',
+        },
+      }),
+    );
+  });
+
   it('Docling 泛 400 不足以证明文档损坏，按 dependency retryable 处理', async () => {
     vi.stubGlobal(
       'fetch',

@@ -12,6 +12,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function firstNonBlank(...values: (string | undefined)[]): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
 function requestSignal(external?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(EMBED_TIMEOUT_MS);
   return external ? AbortSignal.any([external, timeout]) : timeout;
@@ -29,11 +37,13 @@ export class EmbeddingsClient {
   readonly version = process.env.EMBEDDINGS_VERSION ?? 'bge-m3:2026-07';
   readonly dim = Number(process.env.EMBEDDINGS_DIM) || DEFAULT_DIM;
   private readonly baseUrl = (
-    process.env.EMBEDDINGS_URL ??
-    process.env.MODEL_GATEWAY_URL ??
+    firstNonBlank(process.env.EMBEDDINGS_URL, process.env.MODEL_GATEWAY_URL) ??
     'http://localhost:3001/v1'
   ).replace(/\/$/, '');
-  private readonly apiKey = process.env.EMBEDDINGS_API_KEY ?? process.env.MODEL_GATEWAY_KEY;
+  private readonly apiKey = firstNonBlank(
+    process.env.EMBEDDINGS_API_KEY,
+    process.env.MODEL_GATEWAY_KEY,
+  );
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (texts.length === 0) return [];
