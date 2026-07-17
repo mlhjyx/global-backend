@@ -62,6 +62,16 @@ function boundedKbText(text: string, remaining: number): string {
   return `${normalized.slice(0, limit - marker.length).join("")}${TRUNCATION_MARKER}`;
 }
 
+function evidenceOrigin(rawUrl: string | undefined): string | undefined {
+  const sanitized = sanitizeEvidenceUrl(rawUrl);
+  if (!sanitized) return undefined;
+  try {
+    return `${new URL(sanitized).origin}/`;
+  } catch {
+    return undefined;
+  }
+}
+
 export function prepareBrandEvidenceSources(input: {
   siteId: string;
   profileVersionId: string;
@@ -97,17 +107,20 @@ export function prepareBrandEvidenceSources(input: {
   const kb: FrozenEvidenceSource[] = [];
   let used = 0;
   for (const doc of input.kb) {
+    const sourceType = kbSourceType(doc.source);
+    // Legacy ready rows may predate the C4 minimization contract and contain
+    // arbitrary third-party page text. Do not duplicate them into the immutable
+    // evidence ledger; live research is re-derived below as an origin-only hint.
+    if (sourceType === "web_research") continue;
     const body = boundedKbText(doc.text, KB_TOTAL_CODE_POINTS - used);
     if (!body) break;
     used += Array.from(body).length;
-    const sourceType = kbSourceType(doc.source);
     const title = sanitizeEvidenceMetadataText(doc.title);
     kb.push(
       freezeEvidenceSource({
         sourceKey: `kb_document:${doc.documentId}:chunks:${doc.chunks.map((chunk) => chunk.id).join(",")}`,
         sourceType,
-        sourceRole:
-          sourceType === "web_research" ? "research_hint" : "fact_candidate",
+        sourceRole: "fact_candidate",
         rawText: body,
         upstreamContentHash: doc.upstreamContentHash ?? undefined,
         provenance: {
@@ -123,19 +136,29 @@ export function prepareBrandEvidenceSources(input: {
     if (used >= KB_TOTAL_CODE_POINTS) break;
   }
 
+  const companyName =
+    input.intake.company.nameEn ?? input.intake.company.nameZh;
   const research = input.research.map((source) => {
-    const displayUrl = sanitizeEvidenceUrl(source.url);
+    const isWebResearch = source.sourceType === "web_research";
+    const displayUrl = isWebResearch
+      ? evidenceOrigin(source.url)
+      : sanitizeEvidenceUrl(source.url);
     // C4: third-party search titles are arbitrary page data and may name people.
     // researchBrand emits no title; ignore one defensively if another caller adds it.
     const title =
-      source.sourceType === "web_research"
+      isWebResearch
         ? undefined
         : sanitizeEvidenceMetadataText(source.title);
+    const snapshotText = isWebResearch
+      ? displayUrl
+        ? `Search index references ${companyName} at external origin ${new URL(displayUrl).host}. Raw third-party page metadata omitted by policy.`
+        : `Search index references ${companyName}. Raw third-party page metadata omitted by policy.`
+      : source.content;
     return freezeEvidenceSource({
       sourceKey: `${source.sourceType}:${displayUrl ?? `invalid-url:${source.upstreamContentHash}`}`,
       sourceType: source.sourceType,
       sourceRole: source.sourceRole,
-      rawText: source.content,
+      rawText: snapshotText,
       upstreamContentHash: source.upstreamContentHash,
       displayUrl,
       fetchedAt: source.fetchedAt,
@@ -145,7 +168,9 @@ export function prepareBrandEvidenceSources(input: {
             ? "storefront_crawl"
             : "search_origin_hint",
         ...(title ? { title } : {}),
-        parserVersion: source.parserVersion,
+        parserVersion: isWebResearch
+          ? "evidence-web-origin-hint/1"
+          : source.parserVersion,
         providerContentHash: source.providerContentHash,
       },
     });
