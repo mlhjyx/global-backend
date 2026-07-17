@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 interface SchemaNode {
-  oneOf?: SchemaNode[];
   properties?: Record<string, SchemaNode>;
   enum?: string[];
   required?: string[];
@@ -29,12 +28,11 @@ describe('Asset DELETE generated OpenAPI', () => {
     };
     const response = document.paths['/api/v1/site-builder/assets/{id}'].delete.responses['409'];
     const schema = response.content['application/json'].schema;
-    const inUse = schema.oneOf!.find(
-      (candidate) => candidate.properties?.error.properties?.code.enum?.[0] === 'ASSET_IN_USE',
-    )!;
-    const usage = inUse.properties!.error.properties!.details.properties!.usages.items!;
+    const error = schema.properties!.error;
+    const usage = error.properties!.details.properties!.usages.items!;
 
-    expect(inUse.properties!.error.required).toContain('details');
+    expect(error.required).toEqual(['code', 'message']);
+    expect(error.properties!.code.enum).toContain('ASSET_IN_USE');
     expect(usage.required).toEqual(['source', 'page', 'component', 'fieldPath']);
     expect(usage.additionalProperties).toBe(false);
     expect(usage.properties!.source.enum).toEqual(['profile', 'site_spec']);

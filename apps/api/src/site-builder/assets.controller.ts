@@ -108,7 +108,6 @@ const ASSET_ERROR_CODES = [
   'ASSET_DUPLICATE',
   'ASSET_STATE_CONFLICT',
   'ASSET_BUSY',
-  'ASSET_IN_USE',
   'ASSET_STORAGE_UNAVAILABLE',
   'ASSET_COMMIT_UNAVAILABLE',
 ] as const;
@@ -130,41 +129,38 @@ const ASSET_ERROR_SCHEMA = {
 };
 
 const ASSET_DELETE_CONFLICT_SCHEMA: SchemaObject = {
-  oneOf: [
-    {
+  type: 'object',
+  required: ['error'],
+  properties: {
+    error: {
       type: 'object',
-      required: ['error'],
-      additionalProperties: false,
+      required: ['code', 'message'],
       properties: {
-        error: {
+        code: {
+          type: 'string',
+          enum: [...ASSET_ERROR_CODES, 'ASSET_IN_USE'],
+        },
+        message: { type: 'string' },
+        details: {
           type: 'object',
-          required: ['code', 'message', 'details'],
-          additionalProperties: false,
+          description: 'ASSET_IN_USE 时包含稳定的 usages 引用清单。',
+          additionalProperties: true,
           properties: {
-            code: { type: 'string', enum: ['ASSET_IN_USE'] },
-            message: { type: 'string' },
-            details: {
-              type: 'object',
-              required: ['usages'],
-              additionalProperties: false,
-              properties: {
-                usages: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    required: ['source', 'page', 'component', 'fieldPath'],
-                    additionalProperties: false,
-                    properties: {
-                      source: {
-                        type: 'string',
-                        enum: ['profile', 'site_spec'],
-                      },
-                      siteVersionId: { type: 'string', format: 'uuid' },
-                      page: { type: 'string' },
-                      component: { type: 'string' },
-                      fieldPath: { type: 'string' },
-                    },
+            usages: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['source', 'page', 'component', 'fieldPath'],
+                additionalProperties: false,
+                properties: {
+                  source: {
+                    type: 'string',
+                    enum: ['profile', 'site_spec'],
                   },
+                  siteVersionId: { type: 'string', format: 'uuid' },
+                  page: { type: 'string' },
+                  component: { type: 'string' },
+                  fieldPath: { type: 'string' },
                 },
               },
             },
@@ -172,24 +168,7 @@ const ASSET_DELETE_CONFLICT_SCHEMA: SchemaObject = {
         },
       },
     },
-    {
-      type: 'object',
-      required: ['error'],
-      properties: {
-        error: {
-          type: 'object',
-          required: ['code', 'message'],
-          properties: {
-            code: {
-              type: 'string',
-              enum: ['ASSET_BUSY', 'ASSET_STATE_CONFLICT'],
-            },
-            message: { type: 'string' },
-          },
-        },
-      },
-    },
-  ],
+  },
 };
 
 function publicAssetErrorCode(status: string, storedCode: string | null): string | null {
