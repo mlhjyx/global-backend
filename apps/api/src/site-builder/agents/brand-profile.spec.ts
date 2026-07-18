@@ -1544,7 +1544,7 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     expect(scrubPii(input)).toBe(input);
   });
 
-  it('落库清洗覆盖 fact key 与 gap field，而不只清洗 value/hint', () => {
+  it('公共 fact 继续清洗 PII，内部 gap 保留受控联系资料', () => {
     const sanitize = (
       brandProfileModule as typeof brandProfileModule & {
         sanitizeBrandProfilePersistenceOutput?: (
@@ -1590,8 +1590,8 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
       value: 'Call [redacted-phone]',
     });
     expect(out.gaps[0]).toMatchObject({
-      field: 'Question [redacted-email]',
-      hint: 'Call [redacted-phone]',
+      field: 'Question bob@example.com',
+      hint: 'Call +49 30 7654321',
     });
   });
 
@@ -1612,18 +1612,6 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
       name: 'glossary definition',
       over: {
         glossary: [{ term: 'Leadership', definition: 'CEO: Jane Smith' }],
-      },
-    },
-    {
-      name: 'gap hint',
-      over: {
-        gaps: [
-          {
-            field: 'leadership',
-            reason: 'needs_input' as const,
-            hint: 'Contact person: Jane Smith',
-          },
-        ],
       },
     },
   ])('落库前拒绝 $name 中的明确个人署名', ({ over }) => {
@@ -1754,23 +1742,24 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     ['missing_fact', 'What is the WeChat ID wxid_janesmith?'],
     ['contact_email', 'Please provide supporting details?'],
   ])(
-    '落库门仍拒绝实际个人标识或联系方式字段: %s / %s',
+    '落库门保留租户内部 gap 中的个人标识或联系方式: %s / %s',
     (field, hint) => {
-      expect(() =>
-        sanitizeBrandProfilePersistenceOutput(
-          {
-            valueProps: [],
-            tone: null,
-            glossary: [],
-            keywords: [],
-            differentiators: [],
-            competitors: [],
-            factSheet: [],
-            gaps: [{ field, reason: 'needs_input', hint }],
-          },
-          persistenceContext,
-        ),
-      ).toThrow(/explicit personal attribution|forbidden personnel role/i);
+      const output = sanitizeBrandProfilePersistenceOutput(
+        {
+          valueProps: [],
+          tone: null,
+          glossary: [],
+          keywords: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [],
+          gaps: [{ field, reason: 'needs_input', hint }],
+        },
+        persistenceContext,
+      );
+      expect(output.gaps).toEqual([
+        { field, reason: 'needs_input', hint },
+      ]);
     },
   );
 });
@@ -1906,7 +1895,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toContain('technical_parameters');
     expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/10');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
-      'brand-profile-route-validation/8',
+      'brand-profile-route-validation/9',
     );
   });
 
@@ -2014,7 +2003,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     'Can you confirm line:janesmith?',
     'Is this www.例子.公司/张三?',
     'What is the WeChat ID wxid_janesmith?',
-  ])('任务级失败门仍拒绝人员身份问题: %s', (question) => {
+  ])('任务级失败门允许租户内部 gap 携带人员身份: %s', (question) => {
     expect(() =>
       BRAND_PROFILE_TASK.validateOutput?.(input, {
         valueProps: [],
@@ -2025,7 +2014,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
         factSheet: [],
         gaps: [{ field: 'missing_fact', question }],
       }),
-    ).toThrow(/explicit personal attribution/i);
+    ).not.toThrow();
   });
 
   it.each(['ceo', 'contact_person', 'sales_manager', 'founder'])(
@@ -2046,7 +2035,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
   );
 
   it.each(['email', 'contact_email', 'phone', 'whatsapp'])(
-    '任务级失败门仍拒绝会把实际联系方式引入公共 gap 的 field: %s',
+    '任务级失败门允许租户内部 gap 标记联系方式字段: %s',
     (field) => {
       expect(() =>
         BRAND_PROFILE_TASK.validateOutput?.(input, {
@@ -2055,10 +2044,10 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
           keywords: [],
           differentiators: [],
           competitors: [],
-          factSheet: [],
-          gaps: [{ field, question: 'Please provide supporting details?' }],
-        }),
-      ).toThrow(/explicit personal attribution/i);
+        factSheet: [],
+        gaps: [{ field, question: 'Please provide supporting details?' }],
+      }),
+      ).not.toThrow();
     },
   );
 
@@ -2161,12 +2150,6 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
       name: 'glossary',
       over: {
         glossary: [{ term: 'Leadership', definition: 'CEO: Jane Smith' }],
-      },
-    },
-    {
-      name: 'gaps',
-      over: {
-        gaps: [{ field: 'leadership', question: 'Contact person: Jane Smith' }],
       },
     },
     {
