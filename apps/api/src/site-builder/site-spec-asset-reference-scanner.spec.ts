@@ -27,6 +27,7 @@ describe('SiteSpecAssetReferenceScanner', () => {
           };
         },
       },
+      brandProfileClaimBridge: { findMany: async () => [] },
     };
 
     const usages = await new SiteSpecAssetReferenceScanner().scan(tx as never, {
@@ -63,6 +64,7 @@ describe('SiteSpecAssetReferenceScanner', () => {
           spec: { specVersion: '1.0.0', assets: {}, pages: [] },
         }),
       },
+      brandProfileClaimBridge: { findMany: async () => [] },
     };
     await expect(
       new SiteSpecAssetReferenceScanner().scan(tx as never, {
@@ -78,6 +80,7 @@ describe('SiteSpecAssetReferenceScanner', () => {
         findUnique: async () => ({ profile: null, activeVersionId: 'missing' }),
       },
       siteVersion: { findFirst: async () => null },
+      brandProfileClaimBridge: { findMany: async () => [] },
     };
     await expect(
       new SiteSpecAssetReferenceScanner().scan(tx as never, {
@@ -85,5 +88,38 @@ describe('SiteSpecAssetReferenceScanner', () => {
         assetId: ASSET,
       }),
     ).rejects.toThrow(/active SiteVersion pointer/);
+  });
+
+  it('reports an immutable certification Claim bridge as an Asset usage', async () => {
+    const tx = {
+      site: {
+        findUnique: async () => ({ profile: null, activeVersionId: null }),
+      },
+      siteVersion: { findFirst: async () => null },
+      brandProfileClaimBridge: {
+        findMany: async () => [
+          {
+            brandProfileId: '22222222-2222-4222-8222-222222222222',
+            factIndex: 1,
+            claimId: '33333333-3333-4333-8333-333333333333',
+          },
+        ],
+      },
+    };
+
+    await expect(
+      new SiteSpecAssetReferenceScanner().scan(tx as never, {
+        siteId: 'site-1',
+        assetId: ASSET,
+      }),
+    ).resolves.toEqual([
+      {
+        source: 'claim_evidence',
+        page: '$claims',
+        component: 'certification',
+        fieldPath:
+          '/brandProfiles/22222222-2222-4222-8222-222222222222/facts/1/certAssetId',
+      },
+    ]);
   });
 });
