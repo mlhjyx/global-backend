@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { access } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import {
   SITE_BUILDER_MODEL_POLICY_VERSION,
   type ModelExecutionPolicySnapshot,
@@ -147,6 +148,18 @@ export async function assertEvaluationReportPathAvailable(
   if (await pathExists(reportPath)) {
     throw new Error(`evaluation report path already exists: ${reportPath}`);
   }
+}
+
+/**
+ * Prepare a fresh evidence directory before any paid call. The final writer
+ * must still use `flag: 'wx'`; this preflight only creates the parent and
+ * rejects a report path that is already occupied.
+ */
+export async function prepareEvaluationReportPath(
+  reportPath: string,
+): Promise<void> {
+  await mkdir(dirname(reportPath), { recursive: true });
+  await assertEvaluationReportPathAvailable(reportPath);
 }
 
 export interface EvaluationMatrixRowKey {

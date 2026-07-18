@@ -40,12 +40,12 @@ import {
   type BrandProfileEvalFixture,
 } from '../src/site-builder/eval/brand-profile-eval';
 import {
-  assertEvaluationReportPathAvailable,
   assertUniqueEvaluationValues,
   classifyEvaluationOutcome,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
+  prepareEvaluationReportPath,
   sha256CanonicalJson,
   sha256Bytes,
   sha256Text,
@@ -549,7 +549,7 @@ if (
   );
 }
 const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
-if (reportPath) await assertEvaluationReportPathAvailable(reportPath);
+if (reportPath) await prepareEvaluationReportPath(reportPath);
 const runs: EvalRun[] = [];
 const probes: EvalProbe[] = [];
 const evaluationRoute = candidateRoute(models[0]);
