@@ -55,6 +55,10 @@ interface StoredClaim {
   statement: string;
   status: ClaimStatus;
   validUntil: Date | null;
+  verifiedBy?: string | null;
+  verifiedAt?: Date | null;
+  verificationMethod?: string | null;
+  verificationProof?: Record<string, unknown> | null;
 }
 
 function factKey(brandProfileId: string, factIndex: number): string {
@@ -112,6 +116,13 @@ function makeHarness(
   let claimSequence = claims.length;
 
   const repository = {
+    getCompanyProfileIdForSite: async (
+      workspaceId: string,
+      siteId: string,
+    ) =>
+      fact.workspaceId === workspaceId && fact.siteId === siteId
+        ? fact.companyProfileId
+        : null,
     getFactContext: async (
       workspaceId: string,
       brandProfileId: string,
@@ -162,6 +173,10 @@ function makeHarness(
           statement: input.statement,
           status: input.status,
           validUntil: null,
+          verifiedBy: null,
+          verifiedAt: null,
+          verificationMethod: null,
+          verificationProof: null,
         });
         claimsByOrigin.set(input.claimOriginKey, claimId);
       }
@@ -385,6 +400,48 @@ describe("ClaimEvidenceBridgeService — approved-effective read gate", () => {
     expect(result.map((claim: StoredClaim) => claim.id)).toEqual([
       "approved-future",
       "approved-without-expiry",
+    ]);
+  });
+
+  it("fails closed for an unaudited certification but accepts durable human verification", async () => {
+    const base: Omit<StoredClaim, "id" | "verifiedBy" | "verifiedAt" | "verificationMethod" | "verificationProof"> = {
+      workspaceId: WORKSPACE_ID,
+      companyProfileId: COMPANY_PROFILE_ID,
+      type: "certification",
+      statement: "ISO 9001 certified",
+      status: "APPROVED",
+      validUntil: null,
+    };
+    const { service } = makeHarness({
+      claims: [
+        {
+          ...base,
+          id: "unaudited-certification",
+          verifiedBy: null,
+          verifiedAt: null,
+          verificationMethod: null,
+          verificationProof: null,
+        },
+        {
+          ...base,
+          id: "human-verified-certification",
+          verifiedBy: "reviewer-1",
+          verifiedAt: NOW,
+          verificationMethod: "human_review",
+          verificationProof: {
+            action: "claim_approval",
+            approvedVersion: 2,
+          },
+        },
+      ],
+    });
+
+    const result = await service.listApprovedEffectiveClaims(CTX, {
+      siteId: SITE_ID,
+    });
+
+    expect(result.map((claim: StoredClaim) => claim.id)).toEqual([
+      "human-verified-certification",
     ]);
   });
 });
