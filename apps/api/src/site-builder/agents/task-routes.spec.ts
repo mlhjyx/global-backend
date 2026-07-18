@@ -191,7 +191,9 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
 
 describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () => {
   it('任务只绑定语义 profile；仅 BrandProfile 晋级，其他任务保持 pre-MODEL-0 行为', () => {
-    expect(resolveTaskRoute('site_builder.brand_profile').profile).toBe('structured.default');
+    expect(resolveTaskRoute('site_builder.brand_profile').profile).toBe(
+      'structured.workspace_materials',
+    );
     expect(resolveTaskRoute('site_builder.copy').profile).toBe('copy.premium');
     expect(resolveTaskRoute('site_builder.qa_summarize').profile).toBe('text.summary');
     expect(modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec')).toEqual({
@@ -284,8 +286,8 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     expect(Object.isFrozen(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.pricing.rates)).toBe(true);
   });
 
-  it('16 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
-    expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(16);
+  it('17 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
+    expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(17);
     for (const profile of ['video.premium', 'speech.production', 'transcription', 'moderation.media'] as const) {
       expect(SITE_BUILDER_MODEL_PROFILES[profile].requiredCapabilities).not.toHaveLength(0);
       expect(modelPolicyRegistry.getCandidates(profile)).toEqual([]);
@@ -298,6 +300,15 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       dataScope: 'company_facts_only',
     });
     expect(modelPolicyRegistry.getProfile('structured.default').dataPolicy).toEqual({
+      transport: 'new_api_only',
+      region: 'gateway_controlled',
+      personalData: 'forbidden',
+      dataScope: 'company_facts_only',
+    });
+    expect(
+      modelPolicyRegistry.getProfile('structured.workspace_materials')
+        .dataPolicy,
+    ).toEqual({
       transport: 'new_api_only',
       region: 'gateway_controlled',
       personalData: 'workspace_controlled',
@@ -315,6 +326,15 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         activation: 'requires_task_evaluation',
       }),
     );
+    expect(
+      modelPolicyRegistry.getCandidates('structured.workspace_materials'),
+    ).toContainEqual(
+      expect.objectContaining({
+        state: 'targetCandidate',
+        route: { primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] },
+        activation: 'requires_task_evaluation',
+      }),
+    );
     expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe('gpt-5.6-terra');
     expect(resolveTaskRoute('site_builder.design_spec').primary).toBe('minimax-m3');
   });
@@ -325,6 +345,7 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
 
     expect({
       structured: targetRoute('structured.default'),
+      structuredWorkspace: targetRoute('structured.workspace_materials'),
       reasoning: targetRoute('reasoning.high'),
       copy: targetRoute('copy.premium'),
       summary: targetRoute('text.summary'),
@@ -336,6 +357,9 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       video: targetRoute('video.primary'),
     }).toEqual({
       structured: [{ primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] }],
+      structuredWorkspace: [
+        { primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] },
+      ],
       reasoning: [{ primary: 'gpt-5.6-sol', fallbacks: [] }],
       copy: [{ primary: 'claude-sonnet-5', fallbacks: ['gpt-5.6-terra'] }],
       summary: [{ primary: 'gemini-3.5-flash', fallbacks: ['gpt-5.6-terra'] }],
