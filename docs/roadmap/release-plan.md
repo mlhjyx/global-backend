@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-18 MF0-A/B + M1-c + R3-A + R3-B1/B2 + R4-A1 + MODEL-1 BrandProfile 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-18 MF0-A/B + M1-c + R3-A + R3-B1/B2 + R4-A1/A2 + MODEL-1 BrandProfile 更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -23,11 +23,12 @@
 4. **M1-c ✅ 2026-07-17 完成**：纯 Sharp 确定性图片管线；未加入 rembg、生成图、视频、Readdy、设计 Agent、MediaJob/AssetUsage、公开 process/select API 或 Renderer `<picture>`。Renderer 固定 Variant 消费仍归 M1-e。
 5. **R3-A ✅ 2026-07-17 完成**：BuildRun 复合租户 provenance FK（父 workspace 更新 `NO ACTION`）、合法状态 CHECK、每站 active 单飞部分唯一索引、nullable Temporal workflow identity 与确定性历史回填已落；迁移带有界锁/语句超时，对脏 provenance/状态/重复 active fail-closed。验证只发生在 Ubuntu 开发环境，不代表生产部署。
 6. **R3-B1/B2 ✅ 2026-07-17 当前交付分支**：B1 完成 Build API/严格 options/请求指纹幂等/Temporal 双 ID ACK；B2 完成 active SiteSpec 的 page/section/pages 确定性局部合并与 `SiteBuildStep` 单调 phase/progress/attempt/replay/终态。全站 `stylePreset` 禁止与局部 scope 混用；非 en 在 M1-d 前继续 422，不冒充已翻译。真 PostgreSQL+Temporal 在 Ubuntu 隔离开发环境验证，不代表生产部署。本地 durable artifact/原子 pointer 已完成，但不冒充生产 R1-min。
-7. **R4-A1 ✅ 2026-07-17 当前交付分支**：冻结有界 intake/KB/storefront/research 语料，落不可变、FORCE RLS 的 source snapshot 与事实级 EvidenceRef v2；服务端校验 source/type/SHA-256/精确 quote/Unicode selector，旧 BrandProfile v1 只兼容读取、不伪造回填。迁移 additive/forward-only，应用角色仅可读/追加；真 PostgreSQL/RLS + SearXNG/Crawl4AI/BGE-M3/DeepSeek 已验证且无公开 OpenAPI 变化。**下一施工顺序：R4-A2 → R4-B-min**（见 09 §10.6/§11），之后才进入 **M1-d 多 locale 文案 + CopyBundle**。A2 单独负责 Claim/Evidence truth bridge、value/quote 语义对齐、snippet 发布降级与 cert Asset/人工 verified 发布门；B-min 负责幂等和成本真值。
+7. **R4-A1 ✅ 2026-07-17 当前交付分支**：冻结有界 intake/KB/storefront/research 语料，落不可变、FORCE RLS 的 source snapshot 与事实级 EvidenceRef v2；服务端校验 source/type/SHA-256/精确 quote/Unicode selector，旧 BrandProfile v1 只兼容读取、不伪造回填。迁移 additive/forward-only，应用角色仅可读/追加；真 PostgreSQL/RLS + SearXNG/Crawl4AI/BGE-M3/DeepSeek 已验证且无公开 OpenAPI 变化。
+8. **R4-A2 ✅ 2026-07-18 当前交付分支**：确定性 value/quote 规则把数值/单位、认证代码与关键名称/型号不一致项降 gap，`research_hint` 永不投影；新 Site 原子关联 CompanyProfile，旧未关联 Site 不猜身份并 fail-closed。通过门的 BrandProfile fact 以包含 snapshot/role/asset 的稳定分域 key 复用共享 Claim/Evidence，并由不可变 FORCE RLS bridge + 数据库逐字段 trigger 锁定精确 EvidenceRef；三列 Site FK 阻止同租户跨公司边。生成 Claim 强制 `NEEDS_REVIEW`，审批以 status+version CAS 收口并用 digest 绑定批准内容；bridged/终态内容不可改写。认证分类在语义/持久化/读取门共用，须按稳定锁序取得同租户/同站 ready cert Asset；内部 approved-effective 对所有新桥接 Claim 重算人审 proof。真 PostgreSQL 已覆盖双审批竞争、同租户跨公司、Evidence 错配、审批摘要篡改、A/B/unset RLS 与 owner/app_user 修改负例；A1 真服务回归由 Terra 两轮产出 v2 11 facts/8 gaps、v3 9 facts/7 gaps并清理夹具。**下一施工顺序：R4-B-min → M1-d**（见 09 §10.6/§11）。A2 没有新增公开 API、SiteSpec/CopyBundle/正式 `PublishableClaimSnapshot` 或生产发布能力；B-min 仍负责 BrandProfile 整体幂等和持久成本真值。生产迁移前还须以恢复快照做尺寸/锁时长门，必要时安排维护窗口。
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 
-**MODEL 路由泳道（2026-07-18，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；BGE-M3 应用经 new-api 已完成。MODEL-0 registry 与 BrandProfile 评测基座已落；首个 MODEL-1 逐任务晋级以同形 6×2 报告证明 Terra/Responses、Sonnet/Messages 均 12/12，而 DeepSeek Pro/Chat 10/12，且 accepted-artifact 成本可核对，因此只把 `brand_profile` 切为 Terra→Sonnet，配任务硬门、原生协议、一键回 DeepSeek→GLM 与紧急 override。其他 6 个文本 task 继续按各自消费者补 capability/task-shaped 评测后独立晋级；图片/视频仍只登记 target，不因 GPT Image 2 单次探针或配置字符串可见而上线。禁止 mega switch；真实外部流量/高风险部署前走 MODEL-2。MODEL 泳道补账完成后仍回到 **R4-A2 → R4-B-min**。
+**MODEL 路由泳道（2026-07-18，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；BGE-M3 应用经 new-api 已完成。MODEL-0 registry 与 BrandProfile 评测基座已落；首个 MODEL-1 逐任务晋级以同形 6×2 报告证明 Terra/Responses、Sonnet/Messages 均 12/12，而 DeepSeek Pro/Chat 10/12，且 accepted-artifact 成本可核对，因此只把 `brand_profile` 切为 Terra→Sonnet，配任务硬门、原生协议、一键回 DeepSeek→GLM 与紧急 override。其他 6 个文本 task 继续按各自消费者补 capability/task-shaped 评测后独立晋级；图片/视频仍只登记 target，不因 GPT Image 2 单次探针或配置字符串可见而上线。禁止 mega switch；真实外部流量/高风险部署前走 MODEL-2。MODEL 泳道补账与 R4-A2 完成后，当前主序列进入 **R4-B-min**。
 
 ---
 
