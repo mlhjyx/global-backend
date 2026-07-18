@@ -194,6 +194,20 @@ const approvalBridgePrivilegeMigration =
         "utf8",
       )
     : "";
+const certAssetOrderedIndexMigrationDirs = readdirSync(migrationsDir).filter(
+  (entry) => /site_builder_r4a2_cert_asset_ordered_index$/.test(entry),
+);
+const certAssetOrderedIndexMigration =
+  certAssetOrderedIndexMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          certAssetOrderedIndexMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -549,6 +563,16 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     expect(approvalBridgeGuardMigration).toContain("FOR SHARE OF bridge");
     expect(approvalBridgePrivilegeMigration).not.toMatch(
       /GRANT\s+UPDATE[\s\S]+brand_profile_claim_bridge/i,
+    );
+  });
+
+  it("orders the cert Asset covering index for the scanner's bounded diagnostic query", () => {
+    expect(certAssetOrderedIndexMigrationDirs).toHaveLength(1);
+    expect(certAssetOrderedIndexMigration).toContain(
+      'DROP INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"',
+    );
+    expect(certAssetOrderedIndexMigration).toMatch(
+      /CREATE INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"[\s\S]+\("cert_asset_id", "site_id", "brand_profile_id", "fact_index"\)[\s\S]+WHERE "cert_asset_id" IS NOT NULL/i,
     );
   });
 });
