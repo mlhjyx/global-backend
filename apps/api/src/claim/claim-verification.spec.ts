@@ -40,6 +40,24 @@ describe("claim approval proof", () => {
         statement: "ISO 14001 certified",
       }),
     ).toBe(false);
+    expect(
+      hasValidClaimApprovalAudit({
+        ...audited,
+        verifiedBy: "forged-reviewer",
+      }),
+    ).toBe(false);
+    expect(
+      hasValidClaimApprovalAudit({
+        ...audited,
+        verifiedAt: new Date("2039-01-01T00:00:00.000Z"),
+      }),
+    ).toBe(false);
+    expect(
+      hasValidClaimApprovalAudit({
+        ...audited,
+        verificationMethod: "forged_method",
+      }),
+    ).toBe(false);
   });
 
   it("rejects a proof whose version does not equal the persisted claim version", () => {

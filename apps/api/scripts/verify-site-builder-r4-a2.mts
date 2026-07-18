@@ -637,31 +637,29 @@ async function main(): Promise<void> {
       certification && capability,
       "typed capability/certification Claims exist",
     );
-    const originalCapabilityProof = capability.verificationProof;
-    await owner.claim.update({
-      where: { id: capability.id },
-      data: {
-        verificationProof: {
-          action: "claim_approval",
-          approvedVersion: capability.version,
-          claimDigest: "0".repeat(64),
+    let auditMutationRejected: unknown;
+    try {
+      await owner.claim.update({
+        where: { id: capability.id },
+        data: {
+          verifiedBy: "forged-reviewer",
+          verifiedAt: new Date("2039-01-01T00:00:00.000Z"),
+          verificationMethod: "forged_method",
+          verificationProof: {
+            action: "claim_approval",
+            approvedVersion: capability.version,
+            claimDigest: "0".repeat(64),
+          },
         },
-      },
-    });
+      });
+    } catch (error) {
+      auditMutationRejected = error;
+    }
     check(
-      (await listApproved()).length === 1,
-      "tampered approval digest fails the internal publication gate",
+      /approval audit is immutable/.test(errorDetails(auditMutationRejected)),
+      "database rejects actor/time/method/proof mutation after approval",
     );
-    await owner.claim.update({
-      where: { id: capability.id },
-      data: {
-        verificationProof: originalCapabilityProof as Prisma.InputJsonValue,
-      },
-    });
-    check(
-      (await listApproved()).length === 2,
-      "restored exact approval digest restores eligibility",
-    );
+    check((await listApproved()).length === 2, "rejected audit tamper is inert");
     await reviewer.revoke(
       { workspaceId, userId: "human-reviewer", roles: [] },
       certification.id,
