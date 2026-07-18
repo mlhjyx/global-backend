@@ -1735,7 +1735,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 };
 
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
-export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/12';
+export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/13';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
   'brand-profile-route-validation/14';
 
@@ -1794,6 +1794,7 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
     '1a. 企业身份/商业角色也是事实：supplier、distributor、trader、assembler、manufacturer、OEM、brand owner 等不得互相升级或替换；仅可使用资料明确给出的角色，否则省略或写进 gaps。',
     '1b. business_role 只接受资料逐字出现的角色名词；不得把 supplies、distributes、trades、assembles、manufactures、exports、serves 等动作动词转换为 supplier、distributor、trader、assembler、manufacturer、exporter 等角色。',
     `2. factSheet 每项 evidence 必须给 sourceType、sourceId、contentHash、quote；sourceType 取 ${EVIDENCE_SOURCE_TYPES.join('|')} 之一。`,
+    '2a. contentHash 必须逐字复制为 64 位小写十六进制；不得添加 sha256: 前缀、不得缩写、不得使用省略号、不得改成大写。无法逐字复制完整 hash 时省略该 factSheet 项，不要写 fact。',
     '3. 每项 factSheet（不只认证或数字）都必须附 quote=同一 source_id 区块中的逐字原文片段，且 quote 至少 8 个字符，',
     '   sourceId/contentHash 必须逐字复制区块头；quote 不得改写、翻译或做标点/大小写归一。',
     '   找不到逐字原文的断言不要写进 factSheet，写进 gaps。',
