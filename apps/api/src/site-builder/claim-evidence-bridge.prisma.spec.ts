@@ -22,6 +22,7 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
         {
           key: "certifications",
           value: "ISO 9001 certified",
+          claimType: "certification",
           evidence: { evidenceRefId: "model-controlled-id-is-ignored" },
         },
       ],
@@ -82,6 +83,47 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
         where: { id: BRAND_PROFILE_ID, workspaceId: WORKSPACE_ID },
       }),
     );
+  });
+
+  it("fails closed when a v2 fact lacks its server-frozen claim type", async () => {
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      brandProfile: {
+        findFirst: vi.fn(async () => ({
+          id: BRAND_PROFILE_ID,
+          workspaceId: WORKSPACE_ID,
+          siteId: SITE_ID,
+          factSheet: [
+            {
+              key: "maximum_pressure",
+              value: "Maximum pressure: 400 bar",
+            },
+          ],
+          site: { companyProfileId: COMPANY_ID },
+          evidenceRefs: [
+            {
+              id: "ref-1",
+              factIndex: 0,
+              factKey: "maximum_pressure",
+              sourceSnapshotId: "99999999-9999-4999-8999-999999999999",
+              sourceContentHash: "a".repeat(64),
+              quote: "Maximum pressure: 400 bar",
+              quoteStart: 0,
+              quoteEnd: 25,
+              quotePrefix: null,
+              quoteSuffix: null,
+              sourceSnapshot: {
+                sourceRole: "fact_candidate",
+                provenance: {},
+              },
+            },
+          ],
+        })),
+      },
+    } as never);
+
+    await expect(
+      repository.getFactContext(WORKSPACE_ID, BRAND_PROFILE_ID, 0),
+    ).resolves.toBeNull();
   });
 
   it("returns null when JSON fact identity and the immutable evidence ref disagree", async () => {
