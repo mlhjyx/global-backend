@@ -28,7 +28,7 @@
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 
-**MODEL 路由泳道（2026-07-18，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；BGE-M3 应用经 new-api 已完成。MODEL-0 registry 与 BrandProfile 评测基座已落；首个 MODEL-1 逐任务晋级以同形 6×2 报告证明 Terra/Responses、Sonnet/Messages 均 12/12，而 DeepSeek Pro/Chat 10/12，且 accepted-artifact 成本可核对，因此只把 `brand_profile` 切为 Terra→Sonnet，配任务硬门、原生协议、一键回 DeepSeek→GLM 与紧急 override。其他 6 个文本 task 继续按各自消费者补 capability/task-shaped 评测后独立晋级；图片/视频仍只登记 target，不因 GPT Image 2 单次探针或配置字符串可见而上线。禁止 mega switch；真实外部流量/高风险部署前走 MODEL-2。MODEL 泳道补账与 R4-A2 完成后，当前主序列进入 **R4-B-min**。
+**MODEL 路由泳道（2026-07-19，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；BGE-M3 应用经 new-api 已完成。MODEL-0 registry 与 BrandProfile 评测基座已落；MODEL-1 fast-follow 以同一 final-code/source bundle 的 6×2 报告证明 Terra/Responses、Sonnet/Messages 均 12/12，完整 legacy DeepSeek Pro→GLM 路由也为 12/12。旧 23/24 candidate、失败/诊断/preflight 报告保留且不冒充成功；v20 精确记录 requested/reported/resolved model 与 transport。三路硬门全过后按 accepted-artifact 成本、失败门与 rollback 只把 `brand_profile` 保持为 Terra→Sonnet，配任务硬门、原生协议、一键回 DeepSeek→GLM 与紧急 override。其他 6 个文本 task 继续按各自消费者补 capability/task-shaped 评测后独立晋级；图片/视频仍只登记 target，不因 GPT Image 2 单次探针或配置字符串可见而上线。禁止 mega switch；真实外部流量/高风险部署前走 MODEL-2。MODEL fast-follow 与 R4-A2 完成后，当前主序列进入 **R4-B-min**。
 
 ---
 

@@ -6,7 +6,7 @@
 >
 > **环境迁移说明（2026-07-16）**：正文的本地实测产生于旧 Mac 会话，只保留为 dated evidence；当前开发根目录是 `/global/backend`，网关通道/价格/额度均为活动配置，不能把旧探测结果当 Ubuntu 当前可用性。运行时事实只认 `task-routes.ts` 的 `currentRoute`，候选需在当前环境重新探活与回归后才能晋级。
 >
-> **2026-07-18 supersession**：本研究的“不改 currentRoute/未做效果实测”只描述 2026-07-17 当时的 target 决策。随后 BrandProfile 已在 Ubuntu 当前 new-api 上完成同形 6×2：Terra/Responses 与 Sonnet/Messages 均 12/12，DeepSeek Pro/Chat 基线 10/12，并按成本/质量、失败门与 rollback 经 owner 批准为首个代码级 promotedRoute。其他 task 和媒体仍不得继承该结果；现役继续只认 `task-routes.ts`。
+> **2026-07-19 supersession**：本研究的“不改 currentRoute/未做效果实测”只描述 2026-07-17 当时的 target 决策。BrandProfile fast-follow 已在 Ubuntu 当前 new-api 上以 final-code 同形 6×2 证明 Terra/Responses 与 Sonnet/Messages 各 12/12；完整 legacy DeepSeek Pro→GLM 路由同样 12/12，旧 10/12 结论不再作为晋级依据。三路硬门全过后按 accepted-artifact 成本、原生 transport/provenance、失败门与 rollback 保持首个代码级 promotedRoute，active evidence id=`model1-brand-profile-20260719-v20`。其他 task 和媒体仍不得继承该结果；现役继续只认 `task-routes.ts`。
 
 ## 0A. 2026-07-17 已批准方案 1：质量优先目标组合（ADR-020）
 
