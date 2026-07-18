@@ -18,6 +18,12 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
     expect(route.timeoutMs).toBeGreaterThan(0);
     expect(route.maxTokens).toBeGreaterThanOrEqual(4000); // v4 是 reasoning 模型，预算过小 content 为空（H2）
     expect(route.maxCostCents).toBe(40);
+    expect(route.dataPolicy).toEqual({
+      transport: 'new_api_only',
+      region: 'gateway_controlled',
+      personalData: 'workspace_controlled',
+      dataScope: 'workspace_site_materials',
+    });
     expect(route.policy).toMatchObject({
       policyVersion: 'site-builder-model-policy/v2',
       routeState: 'promotedRoute',
@@ -68,6 +74,32 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
       SITE_BUILDER_MODEL_BRAND_PROFILE: 'gemini-3.1-pro',
     } as NodeJS.ProcessEnv);
     expect(route.primary).toBe('gemini-3.1-pro');
+    expect(route.policy).toMatchObject({
+      routeState: 'currentRoute',
+      source: 'env_override',
+      route: {
+        primary: 'gemini-3.1-pro',
+        fallbacks: ['claude-sonnet-5'],
+      },
+    });
+    expect(route.policy).not.toHaveProperty('promotionEvidenceId');
+  });
+
+  it('promoted task 的 fallback/profile 紧急覆盖也不能继承晋级证据', () => {
+    const route = resolveTaskRoute('site_builder.brand_profile', {
+      SITE_BUILDER_PROFILE_BRAND_PROFILE: 'reasoning.high',
+      SITE_BUILDER_FALLBACKS_BRAND_PROFILE: 'operator-fallback',
+    } as NodeJS.ProcessEnv);
+    expect(route.policy).toMatchObject({
+      profile: 'reasoning.high',
+      routeState: 'currentRoute',
+      source: 'env_override',
+      route: {
+        primary: 'gpt-5.6-terra',
+        fallbacks: ['operator-fallback'],
+      },
+    });
+    expect(route.policy).not.toHaveProperty('promotionEvidenceId');
   });
 
   it('SITE_BUILDER_FALLBACKS_<TASK> 覆盖回退链（逗号分隔，空段剔除）', () => {
@@ -264,6 +296,12 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       region: 'gateway_controlled',
       personalData: 'forbidden',
       dataScope: 'company_facts_only',
+    });
+    expect(modelPolicyRegistry.getProfile('structured.default').dataPolicy).toEqual({
+      transport: 'new_api_only',
+      region: 'gateway_controlled',
+      personalData: 'workspace_controlled',
+      dataScope: 'workspace_site_materials',
     });
     expect(modelPolicyRegistry.getProfile('embedding.private').dataPolicy.region).toBe('private_local');
   });
