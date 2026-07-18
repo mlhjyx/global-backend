@@ -53,7 +53,7 @@ interface TaskRouteBinding {
 
 const TASK_BINDINGS: Record<SiteBuilderTaskId, TaskRouteBinding> = {
   'site_builder.brand_profile': {
-    profile: 'structured.default',
+    profile: 'structured.workspace_materials',
     // H2：现役 reasoning 模型在 6000 token 时两跑截断；12000 是当前校准预算。
     maxTokens: 12_000,
     timeoutMs: 150_000,
@@ -162,13 +162,18 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
     : rollback
       ? 'rollback_override'
       : 'registry';
+  // An operator override deliberately leaves the evidence-bound promoted
+  // route. Keep the actual route in the trace, but never attribute an
+  // un-evaluated model/profile/fallback combination to the registry's
+  // promotion report.
+  const routeState = emergencyOverride ? 'currentRoute' : selectedPolicy.state;
   const policy: ModelExecutionPolicySnapshot = {
     policyVersion: modelPolicyRegistry.getPolicyVersion(),
     profile,
-    routeState: selectedPolicy.state,
+    routeState,
     lifecycle: selectedPolicy.lifecycle,
     source,
-    ...(selectedPolicy.state === 'promotedRoute'
+    ...(!emergencyOverride && selectedPolicy.state === 'promotedRoute'
       ? { promotionEvidenceId: selectedPolicy.promotionEvidenceId }
       : {}),
     dataPolicy: profileDefinition.dataPolicy,
