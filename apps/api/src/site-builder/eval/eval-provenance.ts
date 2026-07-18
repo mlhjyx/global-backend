@@ -162,6 +162,24 @@ export async function prepareEvaluationReportPath(
   await assertEvaluationReportPathAvailable(reportPath);
 }
 
+export interface DiagnosticRejectedOutput<T> {
+  model: string;
+  fixtureId: string;
+  attempt: number;
+  output: T;
+}
+
+/**
+ * Full artifacts are diagnostic-only. Candidate and baseline reports retain
+ * the privacy-safe artifact hash and never persist model output by default.
+ */
+export function captureDiagnosticRejectedOutput<T>(
+  enabled: boolean,
+  record: DiagnosticRejectedOutput<T>,
+): DiagnosticRejectedOutput<T> | undefined {
+  return enabled ? record : undefined;
+}
+
 export interface EvaluationMatrixRowKey {
   model: string;
   fixtureId: string;

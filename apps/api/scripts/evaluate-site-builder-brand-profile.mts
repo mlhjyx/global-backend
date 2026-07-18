@@ -41,6 +41,7 @@ import {
 } from '../src/site-builder/eval/brand-profile-eval';
 import {
   assertUniqueEvaluationValues,
+  captureDiagnosticRejectedOutput,
   classifyEvaluationOutcome,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
@@ -552,6 +553,12 @@ const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
 if (reportPath) await prepareEvaluationReportPath(reportPath);
 const runs: EvalRun[] = [];
 const probes: EvalProbe[] = [];
+const diagnosticRejectedOutputs: Array<{
+  model: string;
+  fixtureId: string;
+  attempt: number;
+  output: BrandProfileOutput;
+}> = [];
 const evaluationRoute = candidateRoute(models[0]);
 const expectedRunCount = models.length * fixtures.length * repeats;
 const timePlan: EvaluationTimePlan = {
@@ -765,6 +772,13 @@ if (preflightPassed) {
         }
       } catch (error) {
           if (diagnosticCaptureRejectedOutput && rejectedOutput) {
+            const captured = captureDiagnosticRejectedOutput(true, {
+              model,
+              fixtureId: fixture.id,
+              attempt,
+              output: rejectedOutput,
+            });
+            if (captured) diagnosticRejectedOutputs.push(captured);
             progress('diagnostic_rejected_output', {
               model,
               fixtureId: fixture.id,
@@ -926,6 +940,9 @@ const report = JSON.stringify(
       routeValidationBypassed: diagnosticRouteValidationBypass,
       rejectedOutputCaptured: diagnosticCaptureRejectedOutput,
     },
+    ...(diagnosticCaptureRejectedOutput
+      ? { diagnosticRejectedOutputs }
+      : {}),
     allFixtureCount: allFixtures.length,
     selectedFixtureIds: fixtures.map((fixture) => fixture.id),
     repeats,
