@@ -55,6 +55,9 @@ import {
 import type { NormalizedBuildRequest } from '../site-builder/build-request-contract';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
+import { ClaimEvidenceBridgeService } from '../site-builder/claim-evidence-bridge.service';
+import { PrismaClaimEvidenceBridgeRepository } from '../site-builder/claim-evidence-bridge.prisma';
+import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -737,6 +740,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           `run ${buildRunId} not running (cancelled?) — skip brand profile`,
         );
       }
+      if (!site.companyProfileId) {
+        throw new Error(
+          `SITE_COMPANY_PROFILE_LINK_REQUIRED: site ${siteId} has no verified CompanyProfile link`,
+        );
+      }
       const intake = site.intake as unknown as IntakeInput;
       const profile = sanitizeProfileForPrompt(
         (site.profile as Record<string, unknown> | null) ?? undefined,
@@ -934,9 +942,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
       const brandProfileId = randomUUID();
       let version = 0;
+      let persistedFactCount = 0;
+      let persistedGapsCount = 0;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
-          version = await prisma.withWorkspace(workspaceId, async (tx) => {
+          const persisted = await prisma.withWorkspace(workspaceId, async (tx) => {
             const live = await tx.siteBuildRun.findUnique({
               where: { id: buildRunId },
               select: { status: true },
@@ -951,6 +961,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               _max: { version: true },
             });
             const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
+            const bridgeRepository = new PrismaClaimEvidenceBridgeRepository(tx);
+            const certificationGate = await gateCertificationFactsForPersistence(
+              bridgeRepository,
+              {
+                workspaceId,
+                siteId,
+                facts: clean.factSheet,
+              },
+            );
+            const persistedGaps = [...clean.gaps, ...certificationGate.gaps];
             await tx.brandProfile.create({
               data: {
                 id: brandProfileId,
@@ -964,14 +984,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 keywords: clean.keywords as Prisma.InputJsonValue,
                 differentiators: clean.differentiators as Prisma.InputJsonValue,
                 competitors: clean.competitors as Prisma.InputJsonValue,
-                factSheet: clean.factSheet as unknown as Prisma.InputJsonValue,
-                gaps: clean.gaps as unknown as Prisma.InputJsonValue,
+                factSheet: certificationGate.factSheet as unknown as Prisma.InputJsonValue,
+                gaps: persistedGaps as unknown as Prisma.InputJsonValue,
                 researchDegraded: research.degraded,
               },
             });
-            if (clean.factSheet.length > 0) {
+            if (certificationGate.factSheet.length > 0) {
               await tx.brandProfileEvidenceRef.createMany({
-                data: clean.factSheet.map((fact, factIndex) => ({
+                data: certificationGate.factSheet.map((fact, factIndex) => ({
                   id: fact.evidence.evidenceRefId,
                   workspaceId,
                   siteId,
@@ -987,9 +1007,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   quoteSuffix: fact.evidence.selector.suffix,
                 })),
               });
+
+              const claimBridge = new ClaimEvidenceBridgeService(
+                bridgeRepository,
+              );
+              for (
+                let factIndex = 0;
+                factIndex < certificationGate.factSheet.length;
+                factIndex += 1
+              ) {
+                const projection = await claimBridge.projectFact(
+                  { userId: 'system', workspaceId, roles: [] },
+                  { siteId, brandProfileId, factIndex },
+                );
+                if (projection.kind !== 'projected') {
+                  throw new Error(
+                    `claim bridge rejected persisted fact ${factIndex}: ${projection.reason}`,
+                  );
+                }
+              }
             }
-            return next;
+            return {
+              version: next,
+              factCount: certificationGate.factSheet.length,
+              gapsCount: persistedGaps.length,
+            };
           });
+          version = persisted.version;
+          persistedFactCount = persisted.factCount;
+          persistedGapsCount = persisted.gapsCount;
           break;
         } catch (err) {
           const isVersionClash =
@@ -1001,12 +1047,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       }
 
       log.log(
-        `brand profile v${version} for site ${siteId}: ${clean.factSheet.length} facts, ${gaps.length} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
       );
       return {
         version,
-        factCount: clean.factSheet.length,
-        gapsCount: gaps.length,
+        factCount: persistedFactCount,
+        gapsCount: persistedGapsCount,
         researchDegraded: research.degraded,
         model: result.model,
       };
