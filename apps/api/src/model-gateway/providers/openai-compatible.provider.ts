@@ -9,12 +9,22 @@ import {
   ModelResult,
 } from '../types';
 
+/**
+ * The application still has one gateway credential and one logical model name.
+ * A gateway may, however, expose different vendor-native wire protocols behind
+ * that same endpoint. Keep the choice explicit per model: a caller must never
+ * infer it from a friendly model-name prefix at runtime.
+ */
+export type GatewayModelTransport = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
+
 export interface OpenAICompatConfig {
   id: string; // 'deepseek' | 'openai' | 'gemini' | 'volcengine'
   baseUrl: string;
   apiKey: string;
   model: string;
   embedModel?: string;
+  /** Optional, explicit protocol override for models that have passed a protocol probe. */
+  modelTransports?: Readonly<Record<string, GatewayModelTransport>>;
 }
 
 /** 剥 markdown 围栏（部分模型在 json_object 模式下仍偶发 ```json…``` 包裹结构化输出）。 */
@@ -48,7 +58,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   async generateText(input: GenerateTextInput): Promise<ModelResult<string>> {
     const model = input.model ?? this.cfg.model;
-    const { content, usage, model: resolvedModel } = await this.chat(
+    const { content, usage, model: resolvedModel } = await this.complete(
       [
         { role: 'system', content: input.system ?? '' },
         { role: 'user', content: input.prompt },
@@ -61,7 +71,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   async generateStructured<T = unknown>(input: GenerateStructuredInput): Promise<ModelResult<T>> {
     const model = input.model ?? this.cfg.model;
     const system = `${input.system ?? ''}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(input.schema)}`;
-    const { content, usage, finishReason, model: resolvedModel } = await this.chat(
+    const { content, usage, finishReason, model: resolvedModel } = await this.complete(
       [
         { role: 'system', content: system },
         { role: 'user', content: input.prompt },
@@ -69,11 +79,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
       { model, maxTokens: input.maxTokens, temperature: 0, json: true, reasoningEffort: input.reasoningEffort, signal: input.signal },
     );
     if (!content.trim()) {
-      // 显式空输出失败（M1 评测实证）：reasoning 模型 max_tokens 过小时思考吃光预算，
-      // finish_reason=length 且 content 为空——给可诊断错误，而非 JSON.parse('') 的 SyntaxError。
+      // Empty content is an explicit failure, not JSON.parse(''). A length
+      // finish can indicate an exhausted reasoning/output budget; a stop
+      // finish instead means the OpenAI-compatible response exposed no visible
+      // content despite completing, which is a distinct gateway/model issue.
       // 🔴 改动 2：携带 usage——空输出仍消耗了 token，网关 catch 据此结算（否则绕过硬预算上界）。
+      const cause =
+        finishReason === 'length'
+          ? 'reasoning budget exhausted or output truncated; check maxTokens/reasoningEffort'
+          : 'upstream returned no visible message content; inspect OpenAI-compatible content/reasoning mapping';
       throw new ProviderOutputError(
-        `${this.id} ${model}: empty content (finish_reason=${finishReason ?? 'unknown'}) — reasoning 预算耗尽或输出被截断，检查 maxTokens/reasoning_effort`,
+        `${this.id} ${model}: empty content (finish_reason=${finishReason ?? 'unknown'}) — ${cause}`,
         usage,
       );
     }
@@ -117,7 +133,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${this.cfg.apiKey}` };
   }
 
-  private async chat(
+  private async complete(
     messages: { role: string; content: string }[],
     opts: {
       model: string;
@@ -134,15 +150,46 @@ export class OpenAICompatibleProvider implements ModelProvider {
     /** OpenAI-compatible gateways may expose the post-alias/upstream model here. */
     model?: string;
   }> {
+    const transport = this.cfg.modelTransports?.[opts.model] ?? 'openai-chat-completions';
+    switch (transport) {
+      case 'openai-chat-completions':
+        return this.chatCompletions(messages, opts);
+      case 'openai-responses':
+        return this.responses(messages, opts);
+      case 'anthropic-messages':
+        return this.anthropicMessages(messages, opts);
+    }
+  }
+
+  /** Combines the process-wide ceiling with the task's per-call cancellation. */
+  private requestSignal(signal?: AbortSignal): AbortSignal {
     const timeoutMs = Number(process.env.MODEL_TIMEOUT_MS) || 180_000;
     // 自身超时 + 调用方 signal（如 ai-task 的 per-task 超时）合并——任一触发即 abort fetch，
     // 不留后台弃单继续消耗 vendor tokens（复审 Temporal F1）。
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const signal = opts.signal ? AbortSignal.any([timeoutSignal, opts.signal]) : timeoutSignal;
+    return signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal;
+  }
+
+  private async chatCompletions(
+    messages: { role: string; content: string }[],
+    opts: {
+      model: string;
+      maxTokens?: number;
+      temperature?: number;
+      json?: boolean;
+      reasoningEffort?: 'low' | 'medium' | 'high';
+      signal?: AbortSignal;
+    },
+  ): Promise<{
+    content: string;
+    usage?: { inputTokens?: number; outputTokens?: number };
+    finishReason?: string;
+    model?: string;
+  }> {
     const res = await fetch(`${this.cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
-      signal, // 模型调用必须有界（PRD 9.12）
+      signal: this.requestSignal(opts.signal), // 模型调用必须有界（PRD 9.12）
       body: JSON.stringify({
         model: opts.model,
         messages,
@@ -162,6 +209,149 @@ export class OpenAICompatibleProvider implements ModelProvider {
       content: json.choices?.[0]?.message?.content ?? '',
       usage: { inputTokens: json.usage?.prompt_tokens, outputTokens: json.usage?.completion_tokens },
       finishReason: json.choices?.[0]?.finish_reason,
+      model: json.model?.trim() || undefined,
+    };
+  }
+
+  /**
+   * GPT-family native Responses API. New API's helper `output_text` is not
+   * consistently populated, so the canonical source is the typed nested
+   * `output[].content[]` list; the helper remains a backward-compatible
+   * fallback. This has been capability-probed through the current gateway.
+   */
+  private async responses(
+    messages: { role: string; content: string }[],
+    opts: {
+      model: string;
+      maxTokens?: number;
+      temperature?: number;
+      json?: boolean;
+      reasoningEffort?: 'low' | 'medium' | 'high';
+      signal?: AbortSignal;
+    },
+  ): Promise<{
+    content: string;
+    usage?: { inputTokens?: number; outputTokens?: number };
+    finishReason?: string;
+    model?: string;
+  }> {
+    const res = await fetch(`${this.cfg.baseUrl}/responses`, {
+      method: 'POST',
+      headers: this.headers(),
+      signal: this.requestSignal(opts.signal),
+      body: JSON.stringify({
+        model: opts.model,
+        // New API transparently forwards the standard Responses message form.
+        input: messages,
+        max_output_tokens: opts.maxTokens,
+        temperature: opts.temperature ?? 0.2,
+        ...(opts.json ? { text: { format: { type: 'json_object' } } } : {}),
+        ...(opts.reasoningEffort ? { reasoning: { effort: opts.reasoningEffort } } : {}),
+      }),
+    });
+    if (!res.ok) throw new Error(`${this.id} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const json = (await res.json()) as {
+      output?: { content?: { type?: string; text?: string }[] }[];
+      output_text?: string;
+      status?: string;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      model?: string;
+    };
+    const nestedContent = (json.output ?? [])
+      .flatMap((item) => item.content ?? [])
+      .filter((item) => item.type === 'output_text' && typeof item.text === 'string')
+      .map((item) => item.text ?? '')
+      .join('');
+    const usage = { inputTokens: json.usage?.input_tokens, outputTokens: json.usage?.output_tokens };
+    if (json.status !== 'completed') {
+      throw new ProviderOutputError(
+        `${this.id} ${opts.model}: Responses request did not complete (status=${json.status ?? 'unknown'})`,
+        usage,
+      );
+    }
+    return {
+      content: nestedContent || json.output_text || '',
+      usage,
+      // Preserve the existing ProviderOutputError branch vocabulary.
+      finishReason: 'stop',
+      model: json.model?.trim() || undefined,
+    };
+  }
+
+  /**
+   * Claude is materially better served by its native Messages protocol. The
+   * gateway keeps the same base URL and credential, but this request must use
+   * Anthropic headers and read only `text` blocks (never expose thinking
+   * blocks as model output).
+   */
+  private async anthropicMessages(
+    messages: { role: string; content: string }[],
+    opts: {
+      model: string;
+      maxTokens?: number;
+      temperature?: number;
+      json?: boolean;
+      reasoningEffort?: 'low' | 'medium' | 'high';
+      signal?: AbortSignal;
+    },
+  ): Promise<{
+    content: string;
+    usage?: { inputTokens?: number; outputTokens?: number };
+    finishReason?: string;
+    model?: string;
+  }> {
+    if (opts.maxTokens === undefined) {
+      throw new Error(`${this.id} ${opts.model}: maxTokens is required for anthropic-messages transport`);
+    }
+    const system = messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n');
+    const conversation = messages
+      .filter((message) => message.role !== 'system')
+      .map((message) => ({
+        // Callers currently construct system/user messages only. Keep an
+        // explicit conversion boundary instead of leaking arbitrary roles.
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: message.content,
+      }));
+    const res = await fetch(`${this.cfg.baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      signal: this.requestSignal(opts.signal),
+      body: JSON.stringify({
+        model: opts.model,
+        ...(system ? { system } : {}),
+        messages: conversation,
+        max_tokens: opts.maxTokens,
+        temperature: opts.temperature ?? 0.2,
+      }),
+    });
+    if (!res.ok) throw new Error(`${this.id} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const json = (await res.json()) as {
+      content?: { type?: string; text?: string }[];
+      stop_reason?: string;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      model?: string;
+    };
+    const usage = { inputTokens: json.usage?.input_tokens, outputTokens: json.usage?.output_tokens };
+    if (json.stop_reason === 'max_tokens' || json.stop_reason === 'model_context_window_exceeded') {
+      throw new ProviderOutputError(
+        `${this.id} ${opts.model}: Claude response truncated (stop_reason=${json.stop_reason})`,
+        usage,
+      );
+    }
+    return {
+      content: (json.content ?? [])
+        .filter((item) => item.type === 'text' && typeof item.text === 'string')
+        .map((item) => item.text ?? '')
+        .join(''),
+      usage,
+      finishReason: json.stop_reason === 'end_turn' ? 'stop' : json.stop_reason,
       model: json.model?.trim() || undefined,
     };
   }

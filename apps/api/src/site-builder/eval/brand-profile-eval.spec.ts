@@ -11,6 +11,8 @@ import type { BrandProfileOutput } from '../agents/brand-profile';
 import { resolveTaskRoute } from '../agents/task-routes';
 import {
   canonicalJson,
+  EvaluationDeadlineError,
+  runWithEvaluationDeadline,
   sha256CanonicalJson,
   snapshotEvaluationExecutionPolicy,
 } from './eval-provenance';
@@ -83,6 +85,17 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
       reasoningEffort: null,
       modelPolicy: { profile: 'structured.default' },
     });
+  });
+
+  it('fails closed and aborts an evaluator probe that exceeds its deadline', async () => {
+    let signal: AbortSignal | undefined;
+    await expect(
+      runWithEvaluationDeadline(1, async (receivedSignal) => {
+        signal = receivedSignal;
+        return new Promise<never>(() => undefined);
+      }),
+    ).rejects.toBeInstanceOf(EvaluationDeadlineError);
+    expect(signal?.aborted).toBe(true);
   });
 
   it('keeps the documented six-fixture bootstrap coverage intact', () => {
