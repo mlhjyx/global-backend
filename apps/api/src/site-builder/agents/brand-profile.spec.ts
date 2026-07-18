@@ -267,6 +267,45 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
     ]);
     expect(out.refs).toHaveLength(1);
   });
+
+  it('rejects a product fact whose exact product value is absent from the quote', () => {
+    const out = evaluate({
+      key: 'main_products',
+      value: 'Industrial pumps',
+      quote: 'Precision bearings for industrial machinery.',
+    });
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.refs).toEqual([]);
+    expect(out.gaps).toEqual([
+      expect.objectContaining({
+        field: 'main_products',
+        reason: 'evidence_value_mismatch',
+      }),
+    ]);
+  });
+
+  it('accepts known numeric units with harmless source whitespace differences', () => {
+    const out = evaluate({
+      key: 'maximum_pressure',
+      value: 'Maximum working pressure: 160 bar',
+      quote: 'Maximum working pressure reaches 160bar.',
+    });
+
+    expect(out.gaps).toEqual([]);
+    expect(out.factSheet).toHaveLength(1);
+  });
+
+  it('accepts a CJK product model followed by the natural 型 suffix', () => {
+    const out = evaluate({
+      key: 'product_model',
+      value: '产品型号：泵王300',
+      quote: '主力产品是泵王300型高压泵。',
+    });
+
+    expect(out.gaps).toEqual([]);
+    expect(out.factSheet).toHaveLength(1);
+  });
 });
 
 describe('enforceEvidenceGate — D1 零虚构代码闸', () => {

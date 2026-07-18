@@ -251,11 +251,65 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
       skipDuplicates: true,
     });
   });
+
+  it("fails closed when a skipped bridge insert resolves to a different immutable identity", async () => {
+    const bridgeFindUnique = vi.fn(async () => ({
+      workspaceId: WORKSPACE_ID,
+      siteId: SITE_ID,
+      companyProfileId: COMPANY_ID,
+      brandProfileId: BRAND_PROFILE_ID,
+      evidenceRefId: "88888888-8888-4888-8888-888888888888",
+      factIndex: 0,
+      claimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      evidenceId: EVIDENCE_ID,
+      certAssetId: ASSET_ID,
+      bridgeKey: "d".repeat(64),
+    }));
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      claim: {
+        upsert: vi.fn(async () => ({ id: CLAIM_ID, status: "NEEDS_REVIEW" })),
+      },
+      evidence: { upsert: vi.fn(async () => ({ id: EVIDENCE_ID })) },
+      brandProfileClaimBridge: {
+        createMany: vi.fn(async () => ({ count: 0 })),
+        findUnique: bridgeFindUnique,
+      },
+    } as never);
+
+    await expect(
+      repository.projectPendingClaim({
+        workspaceId: WORKSPACE_ID,
+        siteId: SITE_ID,
+        companyProfileId: COMPANY_ID,
+        brandProfileId: BRAND_PROFILE_ID,
+        factIndex: 0,
+        type: "certification",
+        statement: "ISO 9001 certified",
+        status: "NEEDS_REVIEW",
+        claimOriginKey: "b".repeat(64),
+        evidenceOriginKey: "c".repeat(64),
+        bridgeKey: "d".repeat(64),
+        evidence: {
+          evidenceRefId: "88888888-8888-4888-8888-888888888888",
+          sourceSnapshotId: "99999999-9999-4999-8999-999999999999",
+          sourceRole: "fact_candidate",
+          sourceContentHash: "a".repeat(64),
+          quote: "ISO 9001 certified",
+          assetId: ASSET_ID,
+        },
+      }),
+    ).rejects.toThrow("BRIDGE_IDENTITY_CONFLICT");
+    expect(bridgeFindUnique).toHaveBeenCalledOnce();
+  });
 });
 
 describe("claimTypeForBrandFact", () => {
   it.each([
     ["certifications", "ISO 9001 certified", "certification"],
+    ["quality_system", "ISO9001", "certification"],
+    ["safety_standard", "IEC61508", "certification"],
+    ["automotive_quality", "IATF16949", "certification"],
+    ["aerospace_quality", "AS9100", "certification"],
     ["maximum_pressure", "Maximum pressure 400 bar", "param"],
     ["customer_case", "Delivered a verified customer project", "case"],
     ["main_products", "Industrial pumps", "capability"],
