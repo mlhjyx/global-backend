@@ -99,7 +99,6 @@ export class ClaimService {
                   AND bridge."company_profile_id" = ${claim.companyId}::uuid
                   AND ref."fact_key" = ${claim.factKey}
                 LIMIT 1
-                FOR SHARE OF bridge
               `
             : [];
         if (exactBridge.length === 0) {

@@ -540,13 +540,13 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
 
   it("locks the append-only bridge through a fixed security-definer trigger without granting UPDATE", () => {
     expect(approvalBridgePrivilegeMigrationDirs).toHaveLength(1);
-    expect(approvalBridgePrivilegeMigration).toContain(
-      "CREATE OR REPLACE FUNCTION reject_bridged_claim_identity_update()",
+    expect(approvalBridgePrivilegeMigration).toMatch(
+      /ALTER FUNCTION reject_bridged_claim_identity_update\(\)\s+SECURITY DEFINER/i,
     );
     expect(approvalBridgePrivilegeMigration).toMatch(
-      /LANGUAGE plpgsql\s+SECURITY DEFINER\s+SET search_path = pg_catalog, public/i,
+      /ALTER FUNCTION reject_bridged_claim_identity_update\(\)\s+SET search_path TO pg_catalog, public/i,
     );
-    expect(approvalBridgePrivilegeMigration).toContain("FOR SHARE OF bridge");
+    expect(approvalBridgeGuardMigration).toContain("FOR SHARE OF bridge");
     expect(approvalBridgePrivilegeMigration).not.toMatch(
       /GRANT\s+UPDATE[\s\S]+brand_profile_claim_bridge/i,
     );
