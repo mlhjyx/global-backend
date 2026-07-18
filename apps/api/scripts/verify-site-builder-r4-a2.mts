@@ -351,6 +351,8 @@ async function main(): Promise<void> {
       sourceRole: "fact_candidate" | "research_hint";
       claimType: string;
       claimStatement: string;
+      provenanceAssetId?: string;
+      evidenceAssetId?: string;
     }) => {
       const sourceSnapshotId = randomUUID();
       const brandProfileId = randomUUID();
@@ -376,7 +378,12 @@ async function main(): Promise<void> {
             contentHash: sourceContentHash,
             normalizationVersion: "evidence-text/1",
             snapshotText,
-            provenance: { kind: "r4_a2_direct_insert_verifier" },
+            provenance: {
+              kind: "r4_a2_direct_insert_verifier",
+              ...(input.provenanceAssetId
+                ? { assetId: input.provenanceAssetId }
+                : {}),
+            },
             dedupeKey: sha256(`${siteId}:direct:${input.version}`),
           },
         });
@@ -387,7 +394,26 @@ async function main(): Promise<void> {
             siteId,
             version: input.version,
             evidenceSchemaVersion: 2,
-            factSheet: [{ key: factKey, value: factValue }],
+            factSheet: [
+              {
+                key: factKey,
+                value: factValue,
+                evidence: {
+                  version: 2,
+                  evidenceRefId,
+                  sourceId: sourceSnapshotId,
+                  sourceType: "upload",
+                  sourceRole: input.sourceRole,
+                  hashAlgorithm: "sha256",
+                  contentHash: sourceContentHash,
+                  quote,
+                  selector: {
+                    start: quoteStart,
+                    end: quoteStart + quote.length,
+                  },
+                },
+              },
+            ],
             gaps: [] as Prisma.InputJsonValue,
           },
         });
@@ -429,6 +455,7 @@ async function main(): Promise<void> {
             snippet: quote,
             quoteStart,
             quoteEnd: quoteStart + quote.length,
+            assetId: input.evidenceAssetId,
             confidence: 1,
           },
         });
@@ -856,6 +883,26 @@ async function main(): Promise<void> {
         errorDetails(wrongClaimTypeRejected),
       ),
       "database binds Claim type to deterministic BrandProfile classification",
+    );
+
+    const assetMismatchFixture = await createDirectBridgeFixture({
+      version: 13,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+      evidenceAssetId: certAssetId,
+    });
+    let assetMismatchRejected: unknown;
+    try {
+      await insertDirectBridge(assetMismatchFixture);
+    } catch (error) {
+      assetMismatchRejected = error;
+    }
+    check(
+      /Evidence asset does not match source provenance/.test(
+        errorDetails(assetMismatchRejected),
+      ),
+      "database binds non-cert Evidence asset to exact snapshot provenance",
     );
 
     let crossTenantRejected = false;
