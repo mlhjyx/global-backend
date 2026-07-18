@@ -355,6 +355,10 @@ describe("claimTypeForBrandFact", () => {
     ["质量体系", "通过ISO9001标准", "certification"],
     ["合规", "符合CE", "certification"],
     ["maximum_pressure", "Maximum pressure 400 bar", "param"],
+    ["efficiency", "Efficiency reaches 95%", "param"],
+    ["operating_temperature", "Operating temperature 80℃", "param"],
+    ["tank_volume", "Tank volume 1.5 m³", "param"],
+    ["rated_torque", "Rated torque 50 N·m", "param"],
     ["customer_case", "Delivered a verified customer project", "case"],
     ["main_products", "Industrial pumps", "capability"],
   ])("maps %s to %s", (key, value, expected) => {
