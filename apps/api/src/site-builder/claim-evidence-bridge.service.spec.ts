@@ -484,7 +484,11 @@ describe("ClaimEvidenceBridgeService — approved-effective read gate", () => {
           verifiedBy: "reviewer-1",
           verifiedAt: NOW,
           verificationMethod: "human_review",
-          verificationProof: buildClaimApprovalProof(verifiedIdentity, 2),
+          verificationProof: buildClaimApprovalProof(verifiedIdentity, 2, {
+            verifiedBy: "reviewer-1",
+            verifiedAt: NOW,
+            verificationMethod: "human_review",
+          }),
         },
       ],
     });

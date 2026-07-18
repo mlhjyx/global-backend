@@ -44,6 +44,8 @@ export class ClaimService {
       }
 
       const nextVersion = claim.version + 1;
+      const verifiedAt = new Date();
+      const verificationMethod = 'human_review' as const;
       const transition = await tx.claim.updateMany({
         where: { id: claimId, status: 'NEEDS_REVIEW', version: claim.version },
         data: target === 'APPROVED'
@@ -51,9 +53,13 @@ export class ClaimService {
               status: target,
               version: { increment: 1 },
               verifiedBy: ctx.userId,
-              verifiedAt: new Date(),
-              verificationMethod: 'human_review',
-              verificationProof: buildClaimApprovalProof(claim, nextVersion),
+              verifiedAt,
+              verificationMethod,
+              verificationProof: buildClaimApprovalProof(claim, nextVersion, {
+                verifiedBy: ctx.userId,
+                verifiedAt,
+                verificationMethod,
+              }),
             }
           : { status: target, version: { increment: 1 } },
       });

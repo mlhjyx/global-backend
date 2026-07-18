@@ -92,6 +92,7 @@ describe("ClaimService — durable human verification audit", () => {
         verificationMethod: "human_review",
         verificationProof: {
           action: "claim_approval",
+          proofVersion: 2,
           approvedVersion: 5,
           claimDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
         },

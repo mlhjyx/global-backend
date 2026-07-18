@@ -18,18 +18,22 @@ const CLAIM = {
 
 describe("claim approval proof", () => {
   it("binds the approved version to the exact persisted claim identity", () => {
-    const proof = buildClaimApprovalProof(CLAIM, 5);
+    const approvalAudit = {
+      verifiedBy: "reviewer-42",
+      verifiedAt: new Date("2026-07-18T12:00:00.000Z"),
+      verificationMethod: "human_review" as const,
+    };
+    const proof = buildClaimApprovalProof(CLAIM, 5, approvalAudit);
     const audited = {
       ...CLAIM,
       version: 5,
-      verifiedBy: "reviewer-42",
-      verifiedAt: new Date("2026-07-18T12:00:00.000Z"),
-      verificationMethod: "human_review",
+      ...approvalAudit,
       verificationProof: proof,
     };
 
     expect(proof).toEqual({
       action: "claim_approval",
+      proofVersion: 2,
       approvedVersion: 5,
       claimDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
@@ -68,7 +72,11 @@ describe("claim approval proof", () => {
         verifiedBy: "reviewer-42",
         verifiedAt: new Date("2026-07-18T12:00:00.000Z"),
         verificationMethod: "human_review",
-        verificationProof: buildClaimApprovalProof(CLAIM, 5),
+        verificationProof: buildClaimApprovalProof(CLAIM, 5, {
+          verifiedBy: "reviewer-42",
+          verifiedAt: new Date("2026-07-18T12:00:00.000Z"),
+          verificationMethod: "human_review",
+        }),
       }),
     ).toBe(false);
   });
