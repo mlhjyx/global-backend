@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
-import { ProviderOutputError } from './providers/provider-output-error';
+import {
+  ProviderOutputError,
+  TaskOutputValidationError,
+} from './providers/provider-output-error';
 import { BudgetLedger, BudgetExceededError } from '../tools/budget';
 import { ModelResult } from './types';
 import { AiTraceSink } from './ai-trace.sink';
@@ -257,7 +260,7 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     expect(budget.remainingCents('run-1')).toBe(400);
   });
 
-  it('ProviderOutputError 但无 usage（0 token）→ 不结算，全链失败留 finally settle(0)', async () => {
+  it('ProviderOutputError 无 usage → 按 callCount × 声明上限保守结算', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 500);
     const gw = gatewayWith(
@@ -269,7 +272,7 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     await expect(
       gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
     ).rejects.toBeInstanceOf(ProviderOutputError);
-    expect(budget.remainingCents('run-1')).toBe(500); // centsFromTokens=null → 不 settle
+    expect(budget.remainingCents('run-1')).toBe(480); // usage 缺失仍已发生 1 次调用 → 兜底 20¢
   });
 
   it('普通 Error（非 ProviderOutputError）→ 维持旧行为不计费（全额退还）', async () => {
@@ -346,5 +349,201 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
     expect((error as ProviderOutputError).callCount).toBe(2);
     // 合并 1_050_000 token = 105¢（旧行为裸 Error → 网关记 0¢ 剩 500，两次调用白烧）→ 剩 395
     expect(budget.remainingCents('run-1')).toBe(395);
+  });
+});
+
+describe('RouterModelGateway — task-level deterministic output gate', () => {
+  it('schema-valid output rejected by the task gate is traced as ERROR with usage', async () => {
+    const budget = new BudgetLedger();
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: { x: 1 } as never,
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budget = budget;
+
+    const error = await gw.generateStructured(
+      {
+        task: 'site_builder.brand_profile',
+        prompt: 'p',
+        schema: { required: ['x'] },
+        validateOutput: () => {
+          throw new Error('unsupported evidence');
+        },
+      },
+      { workspaceId: 'ws-1' },
+    ).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 7, outputTokens: 3 });
+    expect((error as ProviderOutputError).callCount).toBe(1);
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        inputTokens: 7,
+        outputTokens: 3,
+        errorMessage: expect.stringContaining('unsupported evidence'),
+      }),
+    );
+    expect(trace.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'OK' }),
+    );
+  });
+
+  it('a task-gate rejection after schema repair preserves both calls and merged usage', async () => {
+    const budget = new BudgetLedger();
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: {} as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 2, outputTokens: 1 },
+      })
+      .mockResolvedValueOnce({
+        data: { x: 1 } as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 5, outputTokens: 4 },
+      });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budget = budget;
+
+    const error = await gw.generateStructured(
+      {
+        task: 'site_builder.brand_profile',
+        prompt: 'p',
+        schema: { required: ['x'] },
+        validateOutput: () => {
+          throw new Error('unsupported evidence after repair');
+        },
+      },
+      { workspaceId: 'ws-1' },
+    ).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 7, outputTokens: 5 });
+    expect((error as ProviderOutputError).callCount).toBe(2);
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        inputTokens: 7,
+        outputTokens: 5,
+      }),
+    );
+    expect(trace.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'OK' }),
+    );
+  });
+
+  it('a first-call task-gate rejection without usage settles one declared call ceiling', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 200);
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: { x: 1 } as never,
+      provider: 'fake',
+      model: 'm',
+    });
+    const gw = gatewayWith(provider, budget);
+
+    await expect(
+      gw.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: { required: ['x'] },
+          maxCostCents: 40,
+          validateOutput: () => {
+            throw new Error('unsupported evidence');
+          },
+        },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+
+    expect(budget.remainingCents('run-1')).toBe(160);
+  });
+
+  it('a post-repair task-gate rejection without usage settles two declared call ceilings', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 200);
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: {} as never,
+        provider: 'fake',
+        model: 'm',
+      })
+      .mockResolvedValueOnce({
+        data: { x: 1 } as never,
+        provider: 'fake',
+        model: 'm',
+      });
+    const gw = gatewayWith(provider, budget);
+
+    const error = await gw.generateStructured(
+      {
+        task: 'site_builder.brand_profile',
+        prompt: 'p',
+        schema: { required: ['x'] },
+        maxCostCents: 40,
+        validateOutput: () => {
+          throw new Error('unsupported evidence after repair');
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    ).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as ProviderOutputError).callCount).toBe(2);
+    expect(budget.remainingCents('run-1')).toBe(120);
+  });
+
+  it('returns a task-gate rejection directly instead of hiding it behind the dev stub', async () => {
+    const budget = new BudgetLedger();
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const real = fakeProvider();
+    (real.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: { x: 1 } as never,
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+    const stub = fakeProvider();
+    (stub as { id: string }).id = 'stub';
+    const router = { route: () => [real, stub] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budget = budget;
+
+    const error = await gw.generateStructured(
+      {
+        task: 'site_builder.brand_profile',
+        prompt: 'p',
+        schema: { required: ['x'] },
+        validateOutput: () => {
+          throw new Error('unsupported evidence');
+        },
+      },
+      { workspaceId: 'ws-1' },
+    ).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(TaskOutputValidationError);
+    expect((error as TaskOutputValidationError).usage).toEqual({
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+    expect(stub.generateStructured).not.toHaveBeenCalled();
+    expect(trace.record).toHaveBeenCalledTimes(1);
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ERROR', provider: 'fake' }),
+    );
   });
 });

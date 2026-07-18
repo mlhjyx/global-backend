@@ -5,7 +5,10 @@ import { ModelProvider } from './model-provider';
 import { AiTraceSink } from './ai-trace.sink';
 import { checkAgainstSchema } from './schema-validate';
 import { BudgetLedger, BudgetExceededError, budgetLedger, DEFAULT_LLM_EST_CENTS } from '../tools/budget';
-import { ProviderOutputError } from './providers/provider-output-error';
+import {
+  ProviderOutputError,
+  TaskOutputValidationError,
+} from './providers/provider-output-error';
 import { getTask } from '../ai-tasks/task-registry';
 
 /**
@@ -66,10 +69,25 @@ export class RouterModelGateway extends ModelGateway {
 
   generateStructured<T = unknown>(input: GenerateStructuredInput, ctx: AiContext): Promise<ModelResult<T>> {
     return this.run('generateStructured', input, ctx, async (p) => {
+      const validateTaskOutput = (result: ModelResult<T>): ModelResult<T> => {
+        try {
+          input.validateOutput?.(result.data);
+          return result;
+        } catch (err) {
+          throw new TaskOutputValidationError(
+            `task output hard gate rejected: ${err instanceof Error ? err.message : String(err)}`,
+            result.usage,
+            {
+              cause: err,
+              callCount: result.callCount ?? 1,
+            },
+          );
+        }
+      };
       const first = await p.generateStructured<T>(input, ctx);
       if (p.id === 'stub') return first; // stub 输出不参与 schema 校验（dev 兜底）
       const check = checkAgainstSchema(input.schema, first.data);
-      if (check.valid) return first;
+      if (check.valid) return validateTaskOutput(first);
       // 修复重试：把校验错误反馈给模型，仅一次（PRD 9.6 校验-修复循环）。
       let repair: ModelResult<T>;
       try {
@@ -103,11 +121,11 @@ export class RouterModelGateway extends ModelGateway {
       }
       // usage 合并：重试消耗也要入账。callCount=2 → 无 usage 上报时 settle 按**两次**兜底（否则少记一次、
       // 退还预留的另一半，40¢ 上限跑一个修复过的 20¢ 任务仍剩 20¢，硬上界失效，#82 P2）。
-      return {
+      return validateTaskOutput({
         ...repair,
         usage: mergeStructuredUsage(first.usage, repair.usage),
         callCount: 2,
-      };
+      });
     });
   }
 
@@ -190,8 +208,12 @@ export class RouterModelGateway extends ModelGateway {
           // 改动 2：provider 消费了 token 却输出不可用（空/截断/非 JSON）→ 结算真实消耗，
           // 否则全链失败 finally settle(0) 会把真实 token 记 0¢、绕过硬预算上界。单次 settle 语义不变
           // （[real 抛带 usage, stub 成功]：real 先 settle → settled 置位 → stub 成功 settle no-op，只记 real）。
-          const c = err instanceof ProviderOutputError ? centsFromTokens(err.usage) : null;
+          const c =
+            err instanceof ProviderOutputError
+              ? (centsFromTokens(err.usage) ?? baseCents * err.callCount)
+              : null;
           if (c != null) settle(c);
+          const failedUsage = err instanceof ProviderOutputError ? err.usage : undefined;
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,
@@ -201,9 +223,12 @@ export class RouterModelGateway extends ModelGateway {
             status: 'ERROR',
             errorMessage: String(err),
             latencyMs: Date.now() - started,
+            inputTokens: failedUsage?.inputTokens,
+            outputTokens: failedUsage?.outputTokens,
             correlationId: ctx.correlationId,
             modelPolicy: ctx.modelPolicy,
           });
+          if (err instanceof TaskOutputValidationError) throw err;
           lastErr = err; // try the next provider (fallback)
         }
       }

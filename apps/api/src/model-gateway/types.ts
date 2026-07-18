@@ -49,6 +49,12 @@ export interface GenerateStructuredInput {
   system?: string;
   model?: string;
   schema: Record<string, unknown>; // JSON Schema the output must satisfy
+  /**
+   * Optional task-level deterministic output gate. The router executes it after
+   * schema validation/repair but before recording an OK trace, so a rejected
+   * artifact remains an observable, billable failed attempt.
+   */
+  validateOutput?: (data: unknown) => void;
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Per-call ceiling from the resolved task policy; takes precedence over legacy registry defaults. */

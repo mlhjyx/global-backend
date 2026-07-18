@@ -1,0 +1,1891 @@
+{
+  "schemaVersion": "site-builder-model1-brand-profile-report/v3",
+  "generatedAt": "2026-07-17T23:17:30.261Z",
+  "repeats": 2,
+  "fixtureCount": 6,
+  "timePlan": {
+    "taskId": "site_builder.brand_profile",
+    "profile": "structured.default",
+    "maxTokens": 12000,
+    "perProbeTimeoutMs": 150000,
+    "perFixtureAttemptTimeoutMs": 150000,
+    "candidateCount": 2,
+    "fixtureCount": 6,
+    "repeats": 2,
+    "expectedRunCount": 24,
+    "absoluteMaximumWallClockMs": 3900000
+  },
+  "taskContract": {
+    "taskId": "site_builder.brand_profile",
+    "promptVersion": "brand-profile/3",
+    "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+    "evaluatorVersion": "brand-profile-evaluator/2",
+    "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26"
+  },
+  "fixtureContracts": [
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/3",
+      "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+      "evaluatorVersion": "brand-profile-evaluator/2",
+      "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+      "fixtureId": "auto-parts-rich",
+      "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+      "promptSha256": "430cae802ab4ad36f3e29a3379e3499cdd633b7d0fb043e63e1d4684fea92be2"
+    },
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/3",
+      "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+      "evaluatorVersion": "brand-profile-evaluator/2",
+      "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+      "fixtureId": "auto-parts-sparse",
+      "fixtureSha256": "23257da1a72e8fa830fdb2cd6a33d7d5babb1ad9220d1e9c2b1f6757b5d1816f",
+      "promptSha256": "efd1ffd5af17d5c9c7e8b6a74dd2c5e51aa683b7890694c8101c2bb633e34409"
+    },
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/3",
+      "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+      "evaluatorVersion": "brand-profile-evaluator/2",
+      "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+      "fixtureId": "industrial-pump-rich",
+      "fixtureSha256": "c8554a5ec56cb8d1f65075b989104063f1298a8af784b0cd503b2838376e76a9",
+      "promptSha256": "2185e619b67973fe105637d8a3f9a4f60c4fe21bd4b8a014283fda5d1b75d58c"
+    },
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/3",
+      "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+      "evaluatorVersion": "brand-profile-evaluator/2",
+      "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+      "fixtureId": "industrial-pump-sparse",
+      "fixtureSha256": "402eed21b20da14f73616b58fb7dbd3ff6dd2f0d639d562308ae5730eb8039e5",
+      "promptSha256": "d6151ef0ea6a9f2b9c8d8154ed7ab3bbdd060498f18c2b7352db3d5c9ec75e49"
+    },
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/3",
+      "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+      "evaluatorVersion": "brand-profile-evaluator/2",
+      "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+      "fixtureId": "lab-instrument-rich",
+      "fixtureSha256": "08b4d1e16868c438f83adf527f91a48290943df83f039d78e09f222bd2d06445",
+      "promptSha256": "17823225ec749d87ed9218fbd013891b9d51ce5e06a309f454b595a6d7ac9595"
+    },
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/3",
+      "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+      "evaluatorVersion": "brand-profile-evaluator/2",
+      "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+      "fixtureId": "lab-instrument-sparse",
+      "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+      "promptSha256": "cbcdb27f0703724e5bac47b891c86118420fb6543023e560dd4b70e3974f88bd"
+    }
+  ],
+  "probes": [
+    {
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "accepted": true,
+      "elapsedMs": 2411,
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "usage": {
+        "inputTokens": 76,
+        "outputTokens": 12
+      }
+    },
+    {
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "accepted": true,
+      "elapsedMs": 2289,
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "usage": {
+        "inputTokens": 181,
+        "outputTokens": 14
+      }
+    }
+  ],
+  "summary": [
+    {
+      "model": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "capabilityProbe": {
+        "requestedModel": "gpt-5.6-terra",
+        "transport": "openai-responses",
+        "accepted": true,
+        "elapsedMs": 2411,
+        "provider": "new-api-eval",
+        "resolvedModel": "gpt-5.6-terra",
+        "usage": {
+          "inputTokens": 76,
+          "outputTokens": 12
+        }
+      },
+      "matrixSkipped": false,
+      "runs": 12,
+      "acceptedArtifacts": 12,
+      "hardFailures": 0,
+      "p95LatencyMs": 41217,
+      "attemptedTokenTotals": {
+        "inputTokens": 27444,
+        "outputTokens": 12260
+      },
+      "acceptedArtifactTokenTotals": {
+        "inputTokens": 27444,
+        "outputTokens": 12260
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "capabilityProbe": {
+        "requestedModel": "claude-sonnet-5",
+        "transport": "anthropic-messages",
+        "accepted": true,
+        "elapsedMs": 2289,
+        "provider": "new-api-eval",
+        "resolvedModel": "claude-sonnet-5",
+        "usage": {
+          "inputTokens": 181,
+          "outputTokens": 14
+        }
+      },
+      "matrixSkipped": false,
+      "runs": 12,
+      "acceptedArtifacts": 12,
+      "hardFailures": 0,
+      "p95LatencyMs": 36237,
+      "attemptedTokenTotals": {
+        "inputTokens": 20616,
+        "outputTokens": 39279
+      },
+      "acceptedArtifactTokenTotals": {
+        "inputTokens": 20616,
+        "outputTokens": 39279
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "auto-parts-rich",
+      "targetMarkets": [
+        "US",
+        "GB",
+        "PL"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 20894,
+      "acceptedFactCount": 4,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "11286b7102ff559466ec2980be1b64e2036579d4774fac0bb1578e0d3762e9e8",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-rich",
+        "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+        "promptSha256": "430cae802ab4ad36f3e29a3379e3499cdd633b7d0fb043e63e1d4684fea92be2"
+      },
+      "usage": {
+        "inputTokens": 1078,
+        "outputTokens": 1057,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1078,
+        "outputTokens": 1057,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "auto-parts-rich",
+      "targetMarkets": [
+        "US",
+        "GB",
+        "PL"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 22849,
+      "acceptedFactCount": 7,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "87578047c9a30bab23553008927d722c8f1cf074f9c6f46dcd635a7be7096dbe",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-rich",
+        "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+        "promptSha256": "430cae802ab4ad36f3e29a3379e3499cdd633b7d0fb043e63e1d4684fea92be2"
+      },
+      "usage": {
+        "inputTokens": 1374,
+        "outputTokens": 1185,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1374,
+        "outputTokens": 1185,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "auto-parts-sparse",
+      "targetMarkets": [
+        "US",
+        "MX"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 24645,
+      "acceptedFactCount": 5,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "339b5d3b9009bd17a3fbe33eb44a71c735fea3519be3240b83106e254fb655a8",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-sparse",
+        "fixtureSha256": "23257da1a72e8fa830fdb2cd6a33d7d5babb1ad9220d1e9c2b1f6757b5d1816f",
+        "promptSha256": "efd1ffd5af17d5c9c7e8b6a74dd2c5e51aa683b7890694c8101c2bb633e34409"
+      },
+      "usage": {
+        "inputTokens": 996,
+        "outputTokens": 986,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 996,
+        "outputTokens": 986,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "auto-parts-sparse",
+      "targetMarkets": [
+        "US",
+        "MX"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 20597,
+      "acceptedFactCount": 5,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "e36c01ede1a54079cf34b51c907cff2aeca7f4890006c8003fb040db795ff205",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-sparse",
+        "fixtureSha256": "23257da1a72e8fa830fdb2cd6a33d7d5babb1ad9220d1e9c2b1f6757b5d1816f",
+        "promptSha256": "efd1ffd5af17d5c9c7e8b6a74dd2c5e51aa683b7890694c8101c2bb633e34409"
+      },
+      "usage": {
+        "inputTokens": 5703,
+        "outputTokens": 888,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 5703,
+        "outputTokens": 888,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "industrial-pump-rich",
+      "targetMarkets": [
+        "DE",
+        "NL",
+        "AT"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 27205,
+      "acceptedFactCount": 7,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "02c3213d22097977442975e148765a6d8c0fb0d8ba4da03f7d0bd9f0bfb0f052",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-rich",
+        "fixtureSha256": "c8554a5ec56cb8d1f65075b989104063f1298a8af784b0cd503b2838376e76a9",
+        "promptSha256": "2185e619b67973fe105637d8a3f9a4f60c4fe21bd4b8a014283fda5d1b75d58c"
+      },
+      "usage": {
+        "inputTokens": 1074,
+        "outputTokens": 1405,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1074,
+        "outputTokens": 1405,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "industrial-pump-rich",
+      "targetMarkets": [
+        "DE",
+        "NL",
+        "AT"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 18660,
+      "acceptedFactCount": 5,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "ef0ea56a272a9bf40bb1b7abfbbd92d23af0ce39237ebaa4cc0e704cad1532b6",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-rich",
+        "fixtureSha256": "c8554a5ec56cb8d1f65075b989104063f1298a8af784b0cd503b2838376e76a9",
+        "promptSha256": "2185e619b67973fe105637d8a3f9a4f60c4fe21bd4b8a014283fda5d1b75d58c"
+      },
+      "usage": {
+        "inputTokens": 5781,
+        "outputTokens": 915,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 5781,
+        "outputTokens": 915,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "industrial-pump-sparse",
+      "targetMarkets": [
+        "US",
+        "CA"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 15949,
+      "acceptedFactCount": 3,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "f469e597e5b702a3bc692acacb1455b46df0894e4d135a121f02d439896a86ce",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-sparse",
+        "fixtureSha256": "402eed21b20da14f73616b58fb7dbd3ff6dd2f0d639d562308ae5730eb8039e5",
+        "promptSha256": "d6151ef0ea6a9f2b9c8d8154ed7ab3bbdd060498f18c2b7352db3d5c9ec75e49"
+      },
+      "usage": {
+        "inputTokens": 991,
+        "outputTokens": 781,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 991,
+        "outputTokens": 781,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "industrial-pump-sparse",
+      "targetMarkets": [
+        "US",
+        "CA"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 29776,
+      "acceptedFactCount": 6,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "397fd65214d92029ddd4aa8d463d987e775cf1cdce6a1bb194f9b6e14e3061fd",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-sparse",
+        "fixtureSha256": "402eed21b20da14f73616b58fb7dbd3ff6dd2f0d639d562308ae5730eb8039e5",
+        "promptSha256": "d6151ef0ea6a9f2b9c8d8154ed7ab3bbdd060498f18c2b7352db3d5c9ec75e49"
+      },
+      "usage": {
+        "inputTokens": 991,
+        "outputTokens": 1116,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 991,
+        "outputTokens": 1116,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "lab-instrument-rich",
+      "targetMarkets": [
+        "US",
+        "JP",
+        "KR"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 23230,
+      "acceptedFactCount": 7,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "d27b26a36552669259c9e3816d6b9fc1c777605063e1836c575364350526908f",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-rich",
+        "fixtureSha256": "08b4d1e16868c438f83adf527f91a48290943df83f039d78e09f222bd2d06445",
+        "promptSha256": "17823225ec749d87ed9218fbd013891b9d51ce5e06a309f454b595a6d7ac9595"
+      },
+      "usage": {
+        "inputTokens": 1385,
+        "outputTokens": 1200,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1385,
+        "outputTokens": 1200,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "lab-instrument-rich",
+      "targetMarkets": [
+        "US",
+        "JP",
+        "KR"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 41217,
+      "acceptedFactCount": 5,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "e857894a09cf24c07f6126908f0ee8911b833fa4d2b182be6848b3a2720aff42",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-rich",
+        "fixtureSha256": "08b4d1e16868c438f83adf527f91a48290943df83f039d78e09f222bd2d06445",
+        "promptSha256": "17823225ec749d87ed9218fbd013891b9d51ce5e06a309f454b595a6d7ac9595"
+      },
+      "usage": {
+        "inputTokens": 5807,
+        "outputTokens": 977,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 5807,
+        "outputTokens": 977,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "lab-instrument-sparse",
+      "targetMarkets": [
+        "US",
+        "SG"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 18674,
+      "acceptedFactCount": 5,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "9cbbd57cef88b7751e6ea351290e0eccf5b4967dff9111dbe0384f2a30f6a318",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-sparse",
+        "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+        "promptSha256": "cbcdb27f0703724e5bac47b891c86118420fb6543023e560dd4b70e3974f88bd"
+      },
+      "usage": {
+        "inputTokens": 1280,
+        "outputTokens": 896,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1280,
+        "outputTokens": 896,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-responses",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "fixtureId": "lab-instrument-sparse",
+      "targetMarkets": [
+        "US",
+        "SG"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 20468,
+      "acceptedFactCount": 4,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "gpt-5.6-terra",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "a84ae974f212c0c09e515b0ea9207fe79fc26ec8ef7c6a7adde810b05447e962",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-sparse",
+        "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+        "promptSha256": "cbcdb27f0703724e5bac47b891c86118420fb6543023e560dd4b70e3974f88bd"
+      },
+      "usage": {
+        "inputTokens": 984,
+        "outputTokens": 854,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 984,
+        "outputTokens": 854,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "auto-parts-rich",
+      "targetMarkets": [
+        "US",
+        "GB",
+        "PL"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 16903,
+      "acceptedFactCount": 8,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "9e57276b12421938ff18e4309730a7a72bac8927f543095c409ef094f08e717e",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-rich",
+        "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+        "promptSha256": "430cae802ab4ad36f3e29a3379e3499cdd633b7d0fb043e63e1d4684fea92be2"
+      },
+      "usage": {
+        "inputTokens": 1770,
+        "outputTokens": 2159,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1770,
+        "outputTokens": 2159,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "auto-parts-rich",
+      "targetMarkets": [
+        "US",
+        "GB",
+        "PL"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 29107,
+      "acceptedFactCount": 4,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "5993786329fd1905bb3f627cbb60f2a426e3f54683d3c3fdbbecf052e0351895",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-rich",
+        "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+        "promptSha256": "430cae802ab4ad36f3e29a3379e3499cdd633b7d0fb043e63e1d4684fea92be2"
+      },
+      "usage": {
+        "inputTokens": 1786,
+        "outputTokens": 3579,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1786,
+        "outputTokens": 3579,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "auto-parts-sparse",
+      "targetMarkets": [
+        "US",
+        "MX"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 31217,
+      "acceptedFactCount": 6,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "60bc57dda6de1ea50c2b220b294dcd03266fdbf8fb52d9675430fbb584d6274f",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-sparse",
+        "fixtureSha256": "23257da1a72e8fa830fdb2cd6a33d7d5babb1ad9220d1e9c2b1f6757b5d1816f",
+        "promptSha256": "efd1ffd5af17d5c9c7e8b6a74dd2c5e51aa683b7890694c8101c2bb633e34409"
+      },
+      "usage": {
+        "inputTokens": 1653,
+        "outputTokens": 4159,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1653,
+        "outputTokens": 4159,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "auto-parts-sparse",
+      "targetMarkets": [
+        "US",
+        "MX"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 27981,
+      "acceptedFactCount": 6,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "5882241506052251cf4de59f4065d35d55eda5139b4661234e1f1dbe65bbe14b",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "auto-parts-sparse",
+        "fixtureSha256": "23257da1a72e8fa830fdb2cd6a33d7d5babb1ad9220d1e9c2b1f6757b5d1816f",
+        "promptSha256": "efd1ffd5af17d5c9c7e8b6a74dd2c5e51aa683b7890694c8101c2bb633e34409"
+      },
+      "usage": {
+        "inputTokens": 1653,
+        "outputTokens": 3270,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1653,
+        "outputTokens": 3270,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "industrial-pump-rich",
+      "targetMarkets": [
+        "DE",
+        "NL",
+        "AT"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 36237,
+      "acceptedFactCount": 4,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "4138c63c2298b673d466c78fa1d4c42c474235e11995784fd427e5eb36d28760",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-rich",
+        "fixtureSha256": "c8554a5ec56cb8d1f65075b989104063f1298a8af784b0cd503b2838376e76a9",
+        "promptSha256": "2185e619b67973fe105637d8a3f9a4f60c4fe21bd4b8a014283fda5d1b75d58c"
+      },
+      "usage": {
+        "inputTokens": 1782,
+        "outputTokens": 4377,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1782,
+        "outputTokens": 4377,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "industrial-pump-rich",
+      "targetMarkets": [
+        "DE",
+        "NL",
+        "AT"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 19753,
+      "acceptedFactCount": 10,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "0a2760d3a48f77318743209042b6de2a2bd65ce51b306a4b8f50a4b27c345efa",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-rich",
+        "fixtureSha256": "c8554a5ec56cb8d1f65075b989104063f1298a8af784b0cd503b2838376e76a9",
+        "promptSha256": "2185e619b67973fe105637d8a3f9a4f60c4fe21bd4b8a014283fda5d1b75d58c"
+      },
+      "usage": {
+        "inputTokens": 1766,
+        "outputTokens": 2410,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1766,
+        "outputTokens": 2410,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "industrial-pump-sparse",
+      "targetMarkets": [
+        "US",
+        "CA"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 16969,
+      "acceptedFactCount": 7,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "f404c4222280b48ce53d6a0f8c2d770c9ff19e833c66761c913985ed3e42764e",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-sparse",
+        "fixtureSha256": "402eed21b20da14f73616b58fb7dbd3ff6dd2f0d639d562308ae5730eb8039e5",
+        "promptSha256": "d6151ef0ea6a9f2b9c8d8154ed7ab3bbdd060498f18c2b7352db3d5c9ec75e49"
+      },
+      "usage": {
+        "inputTokens": 1647,
+        "outputTokens": 1880,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1647,
+        "outputTokens": 1880,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "industrial-pump-sparse",
+      "targetMarkets": [
+        "US",
+        "CA"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 25881,
+      "acceptedFactCount": 6,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "3a935f18aa8c0be5a14d276edfe7dd219304861f5994bffd97cf668a8798eaea",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "industrial-pump-sparse",
+        "fixtureSha256": "402eed21b20da14f73616b58fb7dbd3ff6dd2f0d639d562308ae5730eb8039e5",
+        "promptSha256": "d6151ef0ea6a9f2b9c8d8154ed7ab3bbdd060498f18c2b7352db3d5c9ec75e49"
+      },
+      "usage": {
+        "inputTokens": 1650,
+        "outputTokens": 3221,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1650,
+        "outputTokens": 3221,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "lab-instrument-rich",
+      "targetMarkets": [
+        "US",
+        "JP",
+        "KR"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 32069,
+      "acceptedFactCount": 5,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "5d4daed683c89493da845b9740fb1a1d6f659517e70bcd2b7c3e2cc9e0699d81",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-rich",
+        "fixtureSha256": "08b4d1e16868c438f83adf527f91a48290943df83f039d78e09f222bd2d06445",
+        "promptSha256": "17823225ec749d87ed9218fbd013891b9d51ce5e06a309f454b595a6d7ac9595"
+      },
+      "usage": {
+        "inputTokens": 1806,
+        "outputTokens": 4038,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1806,
+        "outputTokens": 4038,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "lab-instrument-rich",
+      "targetMarkets": [
+        "US",
+        "JP",
+        "KR"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 22921,
+      "acceptedFactCount": 7,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "a76b3caa6f79377d38d7d4d728ed0d21c7fb0249fcabca77c3acf420d13be2e0",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-rich",
+        "fixtureSha256": "08b4d1e16868c438f83adf527f91a48290943df83f039d78e09f222bd2d06445",
+        "promptSha256": "17823225ec749d87ed9218fbd013891b9d51ce5e06a309f454b595a6d7ac9595"
+      },
+      "usage": {
+        "inputTokens": 1789,
+        "outputTokens": 1884,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1789,
+        "outputTokens": 1884,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "lab-instrument-sparse",
+      "targetMarkets": [
+        "US",
+        "SG"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 34721,
+      "acceptedFactCount": 6,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "e6ed316db097db72494a9ccbd59e1bbfba1318fceccc1986ec349a70dc975ab8",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-sparse",
+        "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+        "promptSha256": "cbcdb27f0703724e5bac47b891c86118420fb6543023e560dd4b70e3974f88bd"
+      },
+      "usage": {
+        "inputTokens": 1657,
+        "outputTokens": 4267,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1657,
+        "outputTokens": 4267,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "fixtureId": "lab-instrument-sparse",
+      "targetMarkets": [
+        "US",
+        "SG"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 2,
+      "acceptedArtifact": true,
+      "elapsedMs": 32046,
+      "acceptedFactCount": 6,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v1",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "bb7c375b068b4ef097d78b582563924ffc185f774df401124cc0af64f0d2d24a",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/3",
+        "outputSchemaSha256": "6ce6db80e1e94d8470f9151849d689f56667ae5f378cf46b7080f19362bf78ad",
+        "evaluatorVersion": "brand-profile-evaluator/2",
+        "evaluatorRubricSha256": "8e64c98996fcea762276e9a49383cd2586b4f46acd21fee608638284c6c84e26",
+        "fixtureId": "lab-instrument-sparse",
+        "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+        "promptSha256": "cbcdb27f0703724e5bac47b891c86118420fb6543023e560dd4b70e3974f88bd"
+      },
+      "usage": {
+        "inputTokens": 1657,
+        "outputTokens": 4035,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1657,
+        "outputTokens": 4035,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    }
+  ]
+}

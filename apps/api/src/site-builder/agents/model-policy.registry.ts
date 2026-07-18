@@ -87,6 +87,8 @@ export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
   taskId: 'site_builder.brand_profile',
   evaluatedAt: '2026-07-17T23:17:30.261Z',
   reportSchemaVersion: 'site-builder-model1-brand-profile-report/v3',
+  reportArtifactPath:
+    'docs/evidence/model-routing/model1-brand-profile-20260718-v1/candidate-report.json',
   reportSha256:
     '5e74deedad9c192ce4bb39b25496d69a6d8d81a83cf8a552f49c24a39682c49a',
   fixtureCount: 6,
@@ -95,6 +97,8 @@ export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
     model: 'deepseek-v4-pro',
     transport: 'openai-chat-completions',
     evaluatedAt: '2026-07-18T06:09:11.533Z',
+    reportArtifactPath:
+      'docs/evidence/model-routing/model1-brand-profile-20260718-v1/current-route-baseline-report.json',
     reportSha256:
       '7b3152b5b39caf5006af90bbc917b5a114ff2843ca039f3c69c78b8b15eeedf9',
     acceptedArtifacts: 10,

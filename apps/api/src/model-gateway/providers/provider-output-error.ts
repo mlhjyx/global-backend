@@ -19,3 +19,20 @@ export class ProviderOutputError extends Error {
     this.callCount = opts?.callCount ?? 1;
   }
 }
+
+/**
+ * A provider returned a schema-valid artifact, but the caller's deterministic
+ * business gate rejected it. Unlike a provider-format failure, retrying another
+ * provider (especially the dev stub) cannot make that same model attempt valid;
+ * the error must return to the AiTask model fallback loop after trace/settle.
+ */
+export class TaskOutputValidationError extends ProviderOutputError {
+  constructor(
+    message: string,
+    usage?: { inputTokens?: number; outputTokens?: number },
+    opts?: { cause?: unknown; callCount?: number },
+  ) {
+    super(message, usage, opts);
+    this.name = 'TaskOutputValidationError';
+  }
+}

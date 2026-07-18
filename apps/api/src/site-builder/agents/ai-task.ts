@@ -137,6 +137,12 @@ export async function runAiTask<TIn, TOut>(
             prompt,
             system: def.system,
             schema: def.outputSchema,
+            ...(def.validateOutput
+              ? {
+                  validateOutput: (output: unknown) =>
+                    def.validateOutput?.(rawInput, output as TOut),
+                }
+              : {}),
             model,
             maxTokens: route.maxTokens,
             maxCostCents: route.maxCostCents,
@@ -158,7 +164,6 @@ export async function runAiTask<TIn, TOut>(
         // 🔴 stub 兜底绝不写真实产物：dev 网关瞬时失败会 fallback 到 stub（罐头输出）。
         throw new Error('stub provider refused (fake data must never pass as real)');
       }
-      def.validateOutput?.(rawInput, result.data);
       return {
         data: result.data,
         model: result.model,
