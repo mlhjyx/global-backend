@@ -415,7 +415,6 @@ async function probeCandidate(
             prompt: 'Return exactly {"status":"ok"}.',
             schema: CAPABILITY_PROBE_SCHEMA,
             model: requestedModel,
-            maxTokens: 128,
             ...evaluationProbePolicy(route),
             signal,
           },

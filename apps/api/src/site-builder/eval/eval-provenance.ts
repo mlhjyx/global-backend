@@ -464,10 +464,12 @@ export function snapshotEvaluationExecutionPolicy(
 
 /** Capability probes inherit the material task knobs that affect visibility. */
 export function evaluationProbePolicy(route: TaskRoute): {
+  maxTokens: number;
   maxCostCents: number;
   reasoningEffort?: TaskRoute['reasoningEffort'];
 } {
   return {
+    maxTokens: Math.min(route.maxTokens, 1024),
     maxCostCents: route.maxCostCents,
     ...(route.reasoningEffort
       ? { reasoningEffort: route.reasoningEffort }
