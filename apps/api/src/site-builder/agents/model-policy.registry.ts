@@ -181,6 +181,21 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
       description: 'Return the validated deterministic safe blueprint.',
     },
   },
+  'structured.workspace_materials': {
+    profile: SITE_BUILDER_MODEL_PROFILES['structured.workspace_materials'],
+    candidates: [
+      target(
+        'gpt-5.6-terra',
+        ['claude-sonnet-5'],
+        'requires_task_evaluation',
+      ),
+    ],
+    deterministicFallback: {
+      id: 'approved-company-facts',
+      description:
+        'Keep only evidence-bound public company facts and owner-facing gaps.',
+    },
+  },
   'reasoning.high': {
     profile: SITE_BUILDER_MODEL_PROFILES['reasoning.high'],
     candidates: [target('gpt-5.6-sol', [], 'requires_task_evaluation', 'Only after two complex repair failures.')],

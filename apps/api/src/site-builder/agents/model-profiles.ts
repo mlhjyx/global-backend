@@ -42,9 +42,15 @@ const profiles = {
   'structured.default': {
     id: 'structured.default',
     requiredCapabilities: ['text_generation', 'structured_output'],
+    dataPolicy: GATEWAY_COMPANY_FACTS_ONLY,
+    description: 'Evidence-constrained structured text and SiteSpec assembly.',
+  },
+  'structured.workspace_materials': {
+    id: 'structured.workspace_materials',
+    requiredCapabilities: ['text_generation', 'structured_output'],
     dataPolicy: GATEWAY_WORKSPACE_SITE_MATERIALS,
     description:
-      'Evidence-constrained structured text over tenant-controlled Site Builder material; deterministic publication gates remain authoritative.',
+      'BrandProfile-only processing of tenant-controlled Site Builder material; deterministic publication gates remain authoritative.',
   },
   'reasoning.high': {
     id: 'reasoning.high',
