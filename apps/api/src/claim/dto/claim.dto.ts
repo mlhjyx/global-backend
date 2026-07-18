@@ -17,6 +17,7 @@ interface ClaimRow {
   id: string;
   companyId: string;
   type: string;
+  factKey: string | null;
   statement: string;
   status: string;
   confidence: number | null;
@@ -34,6 +35,14 @@ export class ClaimDto {
 
   @ApiProperty({ example: 'certification' })
   type!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '机器投影 Claim 的规范化事实键；手工或历史 Claim 为 null',
+    example: 'quality_certifications',
+  })
+  factKey!: string | null;
 
   @ApiProperty({ example: '产品通过 ISO 9001 与 CE 认证' })
   statement!: string;
@@ -58,6 +67,7 @@ export class ClaimDto {
       id: c.id,
       companyId: c.companyId,
       type: c.type,
+      factKey: c.factKey,
       statement: c.statement,
       status: c.status,
       confidence: c.confidence,

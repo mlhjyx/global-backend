@@ -17,6 +17,7 @@ function makeService(
     companyId: "33333333-3333-4333-8333-333333333333",
     sourceId: null,
     originKey: "a".repeat(64),
+    factKey: "certifications",
     type: "certification",
     statement: "ISO 9001 certified",
     status,
@@ -92,7 +93,7 @@ describe("ClaimService — durable human verification audit", () => {
         verificationMethod: "human_review",
         verificationProof: {
           action: "claim_approval",
-          proofVersion: 2,
+          proofVersion: 3,
           approvedVersion: 5,
           claimDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
         },

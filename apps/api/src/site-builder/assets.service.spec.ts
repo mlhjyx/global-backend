@@ -107,6 +107,9 @@ function makeService(opts: { siteExists?: boolean } = {}) {
         return { count: 0 };
       },
     },
+    brandProfileClaimBridge: {
+      findMany: async () => [],
+    },
     assetVariant: {
       findMany: async ({ where = {} }: { where?: Row } = {}) =>
         db.variants.filter((row) => matches(row, where)),

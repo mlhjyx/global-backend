@@ -32,6 +32,98 @@ const hardeningMigration =
         "utf8",
       )
     : "";
+const originMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_evidence_origin_exactness$/.test(entry),
+);
+const originMigration =
+  originMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(migrationsDir, originMigrationDirs[0]!, "migration.sql"),
+        "utf8",
+      )
+    : "";
+const cascadeMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_site_company_deferred_delete$/.test(entry),
+);
+const cascadeMigration =
+  cascadeMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(migrationsDir, cascadeMigrationDirs[0]!, "migration.sql"),
+        "utf8",
+      )
+    : "";
+const timezoneMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_evidence_fetched_at_utc$/.test(entry),
+);
+const timezoneMigration =
+  timezoneMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(migrationsDir, timezoneMigrationDirs[0]!, "migration.sql"),
+        "utf8",
+      )
+    : "";
+const siteWorkspaceMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_site_workspace_cascade$/.test(entry),
+);
+const siteWorkspaceMigration =
+  siteWorkspaceMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          siteWorkspaceMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
+const classifierMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_claim_type_token_boundaries$/.test(entry),
+);
+const classifierMigration =
+  classifierMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(migrationsDir, classifierMigrationDirs[0]!, "migration.sql"),
+        "utf8",
+      )
+    : "";
+const unicodeClassifierMigrationDirs = readdirSync(migrationsDir).filter(
+  (entry) => /site_builder_r4a2_claim_type_unicode_boundaries$/.test(entry),
+);
+const unicodeClassifierMigration =
+  unicodeClassifierMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          unicodeClassifierMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
+const approvalAuditMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_claim_approval_audit_hardening$/.test(entry),
+);
+const approvalAuditMigration =
+  approvalAuditMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          approvalAuditMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
+const claimFactKeyMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_claim_fact_key$/.test(entry),
+);
+const claimFactKeyMigration =
+  claimFactKeyMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(migrationsDir, claimFactKeyMigrationDirs[0]!, "migration.sql"),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -181,6 +273,143 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     );
     expect(hardeningMigration).toMatch(
       /quote_start" IS NULL AND "quote_end" IS NULL[\s\S]+"quote_start" IS NOT NULL AND "quote_end" IS NOT NULL/,
+    );
+  });
+
+  it("binds optional EvidenceRefV2 URL/fetch-time origin at both JSON and Evidence layers", () => {
+    expect(originMigrationDirs).toHaveLength(1);
+    expect(originMigration).toContain(
+      "CREATE FUNCTION assert_brand_profile_claim_evidence_origin_v2",
+    );
+    for (const field of [
+      "display_url",
+      "fetched_at",
+      "source_url",
+      "url",
+      "fetchedAt",
+    ]) {
+      expect(originMigration).toContain(field);
+    }
+    expect(originMigration).toContain(
+      "claim bridge Evidence origin does not match source snapshot",
+    );
+  });
+
+  it("keeps workspace cascade deletion while deferring the Site-to-Company check", () => {
+    expect(cascadeMigrationDirs).toHaveLength(1);
+    expect(schema).toMatch(
+      /companyProfile\s+CompanyProfile\?\s+@relation\([^\n]+onDelete: NoAction/,
+    );
+    expect(cascadeMigration).toMatch(
+      /FOREIGN KEY \("company_profile_id", "workspace_id"\)[\s\S]+ON DELETE NO ACTION[\s\S]+DEFERRABLE INITIALLY DEFERRED/,
+    );
+  });
+
+  it("normalizes ISO-Z EvidenceRef fetch times before comparing timestamp columns", () => {
+    expect(timezoneMigrationDirs).toHaveLength(1);
+    expect(timezoneMigration).toContain(
+      "CREATE OR REPLACE FUNCTION assert_brand_profile_claim_evidence_origin_v2",
+    );
+    expect(timezoneMigration).toMatch(
+      /::timestamptz\s+AT TIME ZONE 'UTC'/,
+    );
+  });
+
+  it("cascades Site before Workspace deletion without inventing legacy tenant anchors", () => {
+    expect(siteWorkspaceMigrationDirs).toHaveLength(1);
+    expect(siteWorkspaceMigration).toMatch(
+      /CREATE FUNCTION cascade_workspace_sites\(\)[\s\S]+DELETE FROM "site" WHERE "workspace_id" = OLD\."id"/,
+    );
+    expect(siteWorkspaceMigration).toContain(
+      "CREATE TRIGGER workspace_sites_cascade",
+    );
+  });
+
+  it("keeps the SQL claim classifier aligned on complete case tokens", () => {
+    expect(classifierMigrationDirs).toHaveLength(1);
+    expect(classifierMigration).toContain(
+      "CREATE OR REPLACE FUNCTION claim_type_for_brand_fact_v1",
+    );
+    expect(classifierMigration).toMatch(
+      /normalized_key[\s\S]+\(\^\|\[\^a-z0-9\]\)\(case\|customer\|client\|project\)\(\[\^a-z0-9\]\|\$\)/,
+    );
+    expect(classifierMigration).toContain("案例|客户|项目");
+  });
+
+  it("treats non-ASCII letters as letters at claim-type token boundaries", () => {
+    expect(unicodeClassifierMigrationDirs).toHaveLength(1);
+    expect(unicodeClassifierMigration).toContain(
+      "CREATE OR REPLACE FUNCTION claim_type_for_brand_fact_v1",
+    );
+    expect(unicodeClassifierMigration).toContain(
+      "(^|[^[:alnum:]])(case|customer|client|project)([^[:alnum:]]|$)",
+    );
+    expect(unicodeClassifierMigration).toContain(
+      "normalized_key ~ '(certif|certificate|accredit|compliance",
+    );
+    expect(unicodeClassifierMigration).toContain(
+      "ELSIF normalized_key ~",
+    );
+    expect(unicodeClassifierMigration).not.toContain(
+      "(ce|fda|ul|rohs|reach|gmp|tüv)",
+    );
+  });
+
+  it("requires a complete immutable v2 audit on every new APPROVED transition", () => {
+    expect(approvalAuditMigrationDirs).toHaveLength(1);
+    expect(approvalAuditMigration).toContain(
+      'DROP CONSTRAINT "claim_human_verification_check"',
+    );
+    for (const column of [
+      '"verified_by" IS NOT NULL',
+      '"verified_at" IS NOT NULL',
+      '"verification_method" IS NOT NULL',
+      '"verification_proof" IS NOT NULL',
+    ]) {
+      expect(approvalAuditMigration).toContain(column);
+    }
+    expect(approvalAuditMigration).toMatch(
+      /OLD\."status" = 'NEEDS_REVIEW'[\s\S]+NEW\."status" = 'APPROVED'/,
+    );
+    expect(approvalAuditMigration).toContain(
+      `NEW."verification_proof" ->> 'claimDigest' ~ '^[0-9a-f]{64}$'`,
+    );
+    expect(approvalAuditMigration).not.toMatch(
+      /IF\s+audit_changed\s+AND\s+NOT\s*\(/i,
+    );
+  });
+
+  it("backfills a canonical immutable Claim fact key and requires v3 for new approvals", () => {
+    expect(claimFactKeyMigrationDirs).toHaveLength(1);
+    expect(schema).toMatch(/factKey\s+String\?\s+@map\("fact_key"\)/);
+    expect(claimFactKeyMigration).toContain('ADD COLUMN "fact_key" TEXT');
+    expect(claimFactKeyMigration).toContain("SET LOCAL lock_timeout = '5s'");
+    expect(claimFactKeyMigration).toMatch(
+      /origin-keyed Claim is missing its exact bridge fact key/i,
+    );
+    expect(claimFactKeyMigration).toMatch(
+      /origin-keyed Claim has ambiguous normalized bridge fact keys/i,
+    );
+    expect(claimFactKeyMigration).toMatch(
+      /approved bridged Claim still carries a v2 proof/i,
+    );
+    expect(claimFactKeyMigration).toMatch(
+      /"origin_key" IS NULL AND "fact_key" IS NULL[\s\S]+"origin_key" IS NOT NULL AND "fact_key" IS NOT NULL/,
+    );
+    expect(claimFactKeyMigration).toContain(
+      '"fact_key" = normalize_brand_claim_identity("fact_key")',
+    );
+    expect(claimFactKeyMigration).toContain(
+      'claim_row."fact_key" IS DISTINCT FROM normalize_brand_claim_identity(ref_row."fact_key")',
+    );
+    expect(claimFactKeyMigration).toMatch(
+      /NEW\."workspace_id", NEW\."company_id", NEW\."source_id", NEW\."origin_key",\s+NEW\."fact_key"/,
+    );
+    expect(claimFactKeyMigration).toContain(
+      `NEW."verification_proof" -> 'proofVersion' = '3'::jsonb`,
+    );
+    expect(claimFactKeyMigration).toContain(
+      "Claim approval requires a complete v3 human verification proof",
     );
   });
 });

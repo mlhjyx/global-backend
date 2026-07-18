@@ -238,6 +238,7 @@ model Claim {
   companyId          String      @map("company_id") @db.Uuid
   sourceId           String?     @map("source_id") @db.Uuid
   originKey          String?     @map("origin_key") @db.VarChar(64)
+  factKey            String?     @map("fact_key")
   type               String // capability | certification | case | param | value_prop ...
   statement          String
   status             ClaimStatus @default(EXTRACTED)
@@ -1280,7 +1281,7 @@ model Site {
   brandProfiles           BrandProfile[]
   evidenceSourceSnapshots SiteEvidenceSourceSnapshot[]
   claimBridges            BrandProfileClaimBridge[]
-  companyProfile          CompanyProfile?              @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "site_company_profile_workspace_fkey")
+  companyProfile          CompanyProfile?              @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction, map: "site_company_profile_workspace_fkey")
 
   @@unique([slug])
   @@unique([id, workspaceId], map: "site_id_workspace_id_key")

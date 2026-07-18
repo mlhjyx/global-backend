@@ -1,6 +1,6 @@
 import type { SiteSpec } from '@global/contracts';
 
-export type AssetReferenceSource = 'site_spec' | 'profile';
+export type AssetReferenceSource = 'site_spec' | 'profile' | 'claim_evidence';
 
 export interface AssetReferenceUsage {
   source: AssetReferenceSource;

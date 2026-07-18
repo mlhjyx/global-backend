@@ -11,8 +11,58 @@ const BRAND_PROFILE_ID = "44444444-4444-4444-8444-444444444444";
 const CLAIM_ID = "55555555-5555-4555-8555-555555555555";
 const EVIDENCE_ID = "66666666-6666-4666-8666-666666666666";
 const ASSET_ID = "77777777-7777-4777-8777-777777777777";
+const SOURCE_URL = "https://example.test/evidence/iso-9001";
+const FETCHED_AT = new Date("2026-07-18T08:15:30.000Z");
 
 describe("PrismaClaimEvidenceBridgeRepository", () => {
+  it("prelocks existing projected Claims once in database UUID order", async () => {
+    const queryRaw = vi.fn(async () => [
+      { id: "11111111-1111-4111-8111-111111111111" },
+      { id: "99999999-9999-4999-8999-999999999999" },
+    ]);
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      $queryRaw: queryRaw,
+    } as never);
+
+    await expect(
+      repository.lockExistingClaimsForOrigins(
+        WORKSPACE_ID,
+        COMPANY_ID,
+        ["b".repeat(64), "a".repeat(64), "b".repeat(64)],
+      ),
+    ).resolves.toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "99999999-9999-4999-8999-999999999999",
+    ]);
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    const query = queryRaw.mock.calls[0][0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql).toMatch(
+      /WHERE "workspace_id" = \?::uuid[\s\S]+"company_id" = \?::uuid[\s\S]+"origin_key" IN \(\?,\?\)[\s\S]+ORDER BY "id"[\s\S]+FOR UPDATE/,
+    );
+    expect(query.values).toEqual([
+      WORKSPACE_ID,
+      COMPANY_ID,
+      "a".repeat(64),
+      "b".repeat(64),
+    ]);
+  });
+
+  it("does not issue an invalid IN () prelock query for an empty projection", async () => {
+    const queryRaw = vi.fn();
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      $queryRaw: queryRaw,
+    } as never);
+
+    await expect(
+      repository.lockExistingClaimsForOrigins(WORKSPACE_ID, COMPANY_ID, []),
+    ).resolves.toEqual([]);
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
   it("reconstructs a fact only from the exact persisted ref/snapshot edge", async () => {
     const findFirst = vi.fn(async () => ({
       id: BRAND_PROFILE_ID,
@@ -42,6 +92,8 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
           sourceSnapshot: {
             sourceRole: "fact_candidate",
             provenance: { assetId: ASSET_ID },
+            displayUrl: SOURCE_URL,
+            fetchedAt: FETCHED_AT,
           },
         },
       ],
@@ -76,6 +128,8 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
         quotePrefix: "The ",
         quoteSuffix: " company",
         assetId: ASSET_ID,
+        sourceUrl: SOURCE_URL,
+        fetchedAt: FETCHED_AT,
       },
     });
     expect(findFirst).toHaveBeenCalledWith(
@@ -155,6 +209,7 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
   it("uses no-op upserts and an append-only bridge insert without downgrading an existing Claim", async () => {
     const claimUpsert = vi.fn(async () => ({
       id: CLAIM_ID,
+      factKey: "certifications",
       status: "APPROVED",
     }));
     const evidenceUpsert = vi.fn(async () => ({ id: EVIDENCE_ID }));
@@ -171,6 +226,7 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
       companyProfileId: COMPANY_ID,
       brandProfileId: BRAND_PROFILE_ID,
       factIndex: 0,
+      factKey: "certifications",
       type: "certification",
       statement: "ISO 9001 certified",
       status: "NEEDS_REVIEW",
@@ -188,20 +244,33 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
         quotePrefix: "The ",
         quoteSuffix: " company",
         assetId: ASSET_ID,
+        sourceUrl: SOURCE_URL,
+        fetchedAt: FETCHED_AT,
       },
     });
 
     expect(result).toEqual({
       claimId: CLAIM_ID,
       evidenceId: EVIDENCE_ID,
+      factKey: "certifications",
       status: "APPROVED",
       reused: false,
     });
     expect(claimUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: {} }),
+      expect.objectContaining({
+        update: {},
+        create: expect.objectContaining({ factKey: "certifications" }),
+        select: { factKey: true, id: true, status: true },
+      }),
     );
     expect(evidenceUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: {} }),
+      expect.objectContaining({
+        update: {},
+        create: expect.objectContaining({
+          sourceUrl: SOURCE_URL,
+          fetchedAt: FETCHED_AT,
+        }),
+      }),
     );
     expect(bridgeCreateMany).toHaveBeenCalledWith({
       data: [
@@ -254,6 +323,7 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
       claim: {
         upsert: vi.fn(async () => ({
           id: CLAIM_ID,
+          factKey: "main_products",
           status: "NEEDS_REVIEW",
         })),
       },
@@ -267,6 +337,7 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
       companyProfileId: COMPANY_ID,
       brandProfileId: BRAND_PROFILE_ID,
       factIndex: 0,
+      factKey: "main_products",
       type: "capability",
       statement: "Industrial pumps",
       status: "NEEDS_REVIEW",
@@ -294,6 +365,86 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
     });
   });
 
+  it("rejects reuse when an existing Claim exposes a different normalized fact key", async () => {
+    const evidenceUpsert = vi.fn();
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      claim: {
+        upsert: vi.fn(async () => ({
+          id: CLAIM_ID,
+          factKey: "operating_pressure",
+          status: "NEEDS_REVIEW",
+        })),
+      },
+      evidence: { upsert: evidenceUpsert },
+    } as never);
+
+    await expect(
+      repository.projectPendingClaim({
+        workspaceId: WORKSPACE_ID,
+        siteId: SITE_ID,
+        companyProfileId: COMPANY_ID,
+        brandProfileId: BRAND_PROFILE_ID,
+        factIndex: 0,
+        factKey: "maximum_pressure",
+        type: "param",
+        statement: "Maximum pressure 400 bar",
+        status: "NEEDS_REVIEW",
+        claimOriginKey: "b".repeat(64),
+        evidenceOriginKey: "c".repeat(64),
+        bridgeKey: "d".repeat(64),
+        evidence: {
+          evidenceRefId: "88888888-8888-4888-8888-888888888888",
+          sourceSnapshotId: "99999999-9999-4999-8999-999999999999",
+          sourceRole: "fact_candidate",
+          sourceContentHash: "a".repeat(64),
+          quote: "Maximum pressure 400 bar",
+        },
+      }),
+    ).rejects.toThrow("CLAIM_IDENTITY_CONFLICT");
+    expect(evidenceUpsert).not.toHaveBeenCalled();
+  });
+
+  it("carries factKey through approved-effective reads after bridge deletion", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        id: CLAIM_ID,
+        workspaceId: WORKSPACE_ID,
+        companyId: COMPANY_ID,
+        sourceId: null,
+        originKey: "b".repeat(64),
+        factKey: "maximum_pressure",
+        type: "param",
+        statement: "Maximum pressure 400 bar",
+        status: "APPROVED",
+        version: 2,
+        validUntil: null,
+        verifiedBy: "reviewer-1",
+        verifiedAt: FETCHED_AT,
+        verificationMethod: "human_review",
+        verificationProof: { proofVersion: 3 },
+        claimBridges: [],
+      },
+    ]);
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      claim: { findMany },
+    } as never);
+
+    await expect(
+      repository.listClaimsForCompany(WORKSPACE_ID, COMPANY_ID, SITE_ID),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: CLAIM_ID,
+        factKey: "maximum_pressure",
+        hasSiteBridge: false,
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ factKey: true }),
+      }),
+    );
+  });
+
   it("fails closed when a skipped bridge insert resolves to a different immutable identity", async () => {
     const bridgeFindUnique = vi.fn(async () => ({
       workspaceId: WORKSPACE_ID,
@@ -309,7 +460,11 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
     }));
     const repository = new PrismaClaimEvidenceBridgeRepository({
       claim: {
-        upsert: vi.fn(async () => ({ id: CLAIM_ID, status: "NEEDS_REVIEW" })),
+        upsert: vi.fn(async () => ({
+          id: CLAIM_ID,
+          factKey: "certifications",
+          status: "NEEDS_REVIEW",
+        })),
       },
       evidence: { upsert: vi.fn(async () => ({ id: EVIDENCE_ID })) },
       brandProfileClaimBridge: {
@@ -325,6 +480,7 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
         companyProfileId: COMPANY_ID,
         brandProfileId: BRAND_PROFILE_ID,
         factIndex: 0,
+        factKey: "certifications",
         type: "certification",
         statement: "ISO 9001 certified",
         status: "NEEDS_REVIEW",
@@ -360,6 +516,17 @@ describe("claimTypeForBrandFact", () => {
     ["tank_volume", "Tank volume 1.5 m³", "param"],
     ["rated_torque", "Rated torque 50 N·m", "param"],
     ["customer_case", "Delivered a verified customer project", "case"],
+    ["capability", "We showcase precision engineering", "capability"],
+    ["customization", "Client-specific custom engineering", "capability"],
+    ["support", "Project-ready pump support", "capability"],
+    ["customer关系", "Public capability", "capability"],
+    ["capability", "Powerful after-sales service", "capability"],
+    ["capability", "Capacity building support", "capability"],
+    ["design", "Lightweight design", "capability"],
+    ["capability", "We reach customers in 50 countries", "capability"],
+    ["export_markets", "Reach global buyers", "capability"],
+    ["capability", "Our services reach Europe", "capability"],
+    ["environmental_compliance", "REACH compliant", "certification"],
     ["main_products", "Industrial pumps", "capability"],
   ])("maps %s to %s", (key, value, expected) => {
     expect(claimTypeForBrandFact(key, value)).toBe(expected);

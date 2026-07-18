@@ -30,18 +30,25 @@ function optionalString(value: unknown): string | undefined {
 }
 
 export function claimTypeForBrandFact(key: string, value: string): string {
-  const normalized = `${key} ${value}`
+  const normalizedKey = key.normalize("NFKC").toLocaleLowerCase("en-US");
+  const normalized = `${normalizedKey} ${value}`
     .normalize("NFKC")
     .toLocaleLowerCase("en-US");
   if (isCertificationClaim({ key, value })) {
     return "certification";
   }
-  if (/case|customer|client|project|案例|客户|项目/u.test(normalized)) {
+  // Case is a fact category, so derive it from the producer's key rather than
+  // incidental prose such as "showcase" or "project-ready" in the value.
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:case|customer|client|project)(?:$|[^\p{L}\p{N}])|案例|客户|项目/iu.test(
+      normalizedKey,
+    )
+  ) {
     return "case";
   }
   if (
-    /pressure|capacity|frequency|voltage|power|speed|temperature|dimension|weight|性能|参数|压力|产能|频率|电压|功率|转速|温度|尺寸|重量/u.test(
-      normalized,
+    /(?:^|[^\p{L}\p{N}])(?:pressure|capacity|frequency|voltage|power|speed|temperature|dimension|weight|efficiency|torque|volume|output|specification|specifications)(?:$|[^\p{L}\p{N}])|性能|参数|压力|产能|频率|电压|功率|转速|温度|尺寸|重量/iu.test(
+      normalizedKey,
     ) ||
     /\d+(?:[.,]\d+)?\s*(?:%|‰|℃|℉|°\s*[cf]|bar|mbar|pa|kpa|mpa|psi|hz|khz|mhz|ghz|rpm|v|mv|kv|a|ma|w|kw|mw|wh|kwh|mah|nm|um|μm|mm|cm|m|km|in|ft|mg|g|kg|lb|oz|ml|l|m[23²³]|l\s*[/⁄]\s*min|n\s*[.·]\s*m)(?![\p{L}\p{N}])/iu.test(
       normalized,
@@ -103,7 +110,12 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
             quotePrefix: true,
             quoteSuffix: true,
             sourceSnapshot: {
-              select: { sourceRole: true, provenance: true },
+              select: {
+                sourceRole: true,
+                provenance: true,
+                displayUrl: true,
+                fetchedAt: true,
+              },
             },
           },
         },
@@ -152,6 +164,8 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
         quotePrefix: ref.quotePrefix ?? undefined,
         quoteSuffix: ref.quoteSuffix ?? undefined,
         assetId: optionalString(provenance.assetId),
+        sourceUrl: ref.sourceSnapshot.displayUrl ?? undefined,
+        fetchedAt: ref.sourceSnapshot.fetchedAt ?? undefined,
       },
     };
   }
@@ -171,6 +185,26 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
     return rows[0] ?? null;
   }
 
+  async lockExistingClaimsForOrigins(
+    workspaceId: string,
+    companyProfileId: string,
+    claimOriginKeys: readonly string[],
+  ): Promise<string[]> {
+    const orderedOriginKeys = [...new Set(claimOriginKeys)].sort();
+    if (orderedOriginKeys.length === 0) return [];
+
+    const rows = await this.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id"
+        FROM "claim"
+       WHERE "workspace_id" = ${workspaceId}::uuid
+         AND "company_id" = ${companyProfileId}::uuid
+         AND "origin_key" IN (${Prisma.join(orderedOriginKeys)})
+       ORDER BY "id"
+       FOR UPDATE
+    `);
+    return rows.map((row) => row.id);
+  }
+
   async projectPendingClaim(
     input: PendingClaimProjectionInput,
   ): Promise<PendingClaimProjectionResult> {
@@ -185,14 +219,18 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
         workspaceId: input.workspaceId,
         companyId: input.companyProfileId,
         originKey: input.claimOriginKey,
+        factKey: input.factKey,
         type: input.type,
         statement: input.statement,
         status: "NEEDS_REVIEW",
         confidence: 1,
       },
       update: {},
-      select: { id: true, status: true },
+      select: { factKey: true, id: true, status: true },
     });
+    if (claim.factKey !== input.factKey) {
+      throw new Error("CLAIM_IDENTITY_CONFLICT");
+    }
     const evidence = await this.tx.evidence.upsert({
       where: {
         claimId_originKey: {
@@ -212,6 +250,8 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
         quotePrefix: input.evidence.quotePrefix,
         quoteSuffix: input.evidence.quoteSuffix,
         assetId: input.evidence.assetId,
+        sourceUrl: input.evidence.sourceUrl,
+        fetchedAt: input.evidence.fetchedAt,
         confidence: 1,
       },
       update: {},
@@ -291,6 +331,7 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
     return {
       claimId: claim.id,
       evidenceId: evidence.id,
+      factKey: claim.factKey,
       status: claim.status as BridgeClaimStatus,
       reused: inserted.count === 0,
     };
@@ -299,6 +340,7 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
   async listClaimsForCompany(
     workspaceId: string,
     companyProfileId: string,
+    siteId: string,
   ): Promise<ApprovedEffectiveClaim[]> {
     const claims = await this.tx.claim.findMany({
       where: { workspaceId, companyId: companyProfileId },
@@ -309,6 +351,7 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
         companyId: true,
         sourceId: true,
         originKey: true,
+        factKey: true,
         type: true,
         statement: true,
         status: true,
@@ -318,6 +361,19 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
         verifiedAt: true,
         verificationMethod: true,
         verificationProof: true,
+        claimBridges: {
+          where: { siteId },
+          select: {
+            certAssetId: true,
+            certAsset: {
+              select: {
+                kind: true,
+                processingStatus: true,
+                deletedAt: true,
+              },
+            },
+          },
+        },
       },
     });
     return claims.map((claim) => ({
@@ -326,6 +382,7 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
       companyProfileId: claim.companyId,
       sourceId: claim.sourceId,
       originKey: claim.originKey,
+      factKey: claim.factKey,
       type: claim.type,
       statement: claim.statement,
       status: claim.status as BridgeClaimStatus,
@@ -335,6 +392,14 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
       verifiedAt: claim.verifiedAt,
       verificationMethod: claim.verificationMethod,
       verificationProof: verificationProof(claim.verificationProof),
+      hasSiteBridge: claim.claimBridges.length > 0,
+      certificationProofValid: claim.claimBridges.some(
+        (bridge) =>
+          bridge.certAssetId !== null &&
+          bridge.certAsset?.kind === "cert" &&
+          bridge.certAsset.processingStatus === "ready" &&
+          bridge.certAsset.deletedAt === null,
+      ),
     }));
   }
 }

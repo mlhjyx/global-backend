@@ -31,6 +31,8 @@ export interface ClaimEvidenceFactContext {
     quotePrefix?: string;
     quoteSuffix?: string;
     assetId?: string;
+    sourceUrl?: string;
+    fetchedAt?: Date;
   };
 }
 
@@ -49,6 +51,7 @@ export interface ApprovedEffectiveClaim {
   companyProfileId: string;
   sourceId: string | null;
   originKey: string | null;
+  factKey: string | null;
   type: string;
   statement: string;
   status: BridgeClaimStatus;
@@ -58,6 +61,8 @@ export interface ApprovedEffectiveClaim {
   verifiedAt: Date | null;
   verificationMethod: string | null;
   verificationProof: Record<string, unknown> | null;
+  hasSiteBridge: boolean;
+  certificationProofValid: boolean;
 }
 
 export interface PendingClaimProjectionInput {
@@ -66,6 +71,7 @@ export interface PendingClaimProjectionInput {
   companyProfileId: string;
   brandProfileId: string;
   factIndex: number;
+  factKey: string;
   type: string;
   statement: string;
   status: "NEEDS_REVIEW";
@@ -80,6 +86,8 @@ export interface PendingClaimProjectionInput {
     quotePrefix?: string;
     quoteSuffix?: string;
     assetId?: string;
+    sourceUrl?: string;
+    fetchedAt?: Date;
   };
   claimOriginKey: string;
   evidenceOriginKey: string;
@@ -89,6 +97,7 @@ export interface PendingClaimProjectionInput {
 export interface PendingClaimProjectionResult {
   claimId: string;
   evidenceId: string;
+  factKey: string;
   status: BridgeClaimStatus;
   reused: boolean;
 }
@@ -109,12 +118,18 @@ export interface ClaimEvidenceBridgeRepository {
     siteId: string,
   ): Promise<string | null>;
   getAsset(assetId: string): Promise<ClaimEvidenceAsset | null>;
+  lockExistingClaimsForOrigins(
+    workspaceId: string,
+    companyProfileId: string,
+    claimOriginKeys: readonly string[],
+  ): Promise<string[]>;
   projectPendingClaim(
     input: PendingClaimProjectionInput,
   ): Promise<PendingClaimProjectionResult>;
   listClaimsForCompany(
     workspaceId: string,
     companyProfileId: string,
+    siteId: string,
   ): Promise<ApprovedEffectiveClaim[]>;
 }
 
@@ -127,7 +142,7 @@ export interface ProjectClaimFactInput {
 export type ProjectClaimFactResult =
   | {
       kind: "projected";
-      claim: { id: string; status: BridgeClaimStatus };
+      claim: { id: string; factKey: string; status: BridgeClaimStatus };
       evidence: { id: string };
       reused: boolean;
     }
@@ -142,7 +157,7 @@ export type ProjectClaimFactResult =
 
 const KEY_VERSION = "claim-evidence-bridge/1";
 
-function normalizeIdentityPart(value: string): string {
+export function normalizeClaimIdentityPart(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ");
 }
 
@@ -153,6 +168,93 @@ function domainHash(domain: string, parts: readonly unknown[]): string {
       "utf8",
     )
     .digest("hex");
+}
+
+export interface ClaimOriginIdentityInput {
+  workspaceId: string;
+  companyProfileId: string;
+  factKey: string;
+  claimType: string;
+  statement: string;
+}
+
+/**
+ * Single canonical identity contract for both lock planning and Claim upsert.
+ * Any producer that orders a projection batch must use this exact function.
+ */
+export function claimOriginIdentity(
+  input: ClaimOriginIdentityInput,
+): {
+  normalizedFactKey: string;
+  normalizedType: string;
+  normalizedStatement: string;
+  claimOriginKey: string;
+} {
+  const normalizedFactKey = normalizeClaimIdentityPart(input.factKey);
+  const normalizedType = normalizeClaimIdentityPart(input.claimType);
+  const normalizedStatement = normalizeClaimIdentityPart(input.statement);
+  return {
+    normalizedFactKey,
+    normalizedType,
+    normalizedStatement,
+    claimOriginKey: domainHash("claim-origin", [
+      input.workspaceId,
+      input.companyProfileId,
+      normalizedFactKey,
+      normalizedType,
+      normalizedStatement,
+    ]),
+  };
+}
+
+export interface ClaimEvidenceOriginKeyInput {
+  claimOriginKey: string;
+  workspaceId: string;
+  siteId: string;
+  sourceSnapshotId: string;
+  sourceRole: "fact_candidate" | "research_hint";
+  assetId?: string;
+  sourceContentHash: string;
+  quote: string;
+  quoteStart?: number;
+  quoteEnd?: number;
+  quotePrefix?: string;
+  quoteSuffix?: string;
+  sourceUrl?: string;
+  fetchedAt?: Date | string;
+}
+
+/** Canonical Evidence identity shared by projection lock planning and upsert. */
+export function claimEvidenceOriginKey(
+  input: ClaimEvidenceOriginKeyInput,
+): string {
+  const fetchedAt = (() => {
+    if (input.fetchedAt == null) return null;
+    const parsed =
+      input.fetchedAt instanceof Date
+        ? input.fetchedAt
+        : new Date(input.fetchedAt);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error("invalid Evidence fetchedAt");
+    }
+    return parsed.toISOString();
+  })();
+  return domainHash("evidence-origin", [
+    input.claimOriginKey,
+    input.workspaceId,
+    input.siteId,
+    input.sourceSnapshotId,
+    input.sourceRole,
+    input.assetId ?? null,
+    input.sourceContentHash,
+    input.quote,
+    input.quoteStart ?? null,
+    input.quoteEnd ?? null,
+    input.quotePrefix ?? null,
+    input.quoteSuffix ?? null,
+    input.sourceUrl ?? null,
+    fetchedAt,
+  ]);
 }
 
 function isCertificationFact(fact: ClaimEvidenceFactContext): boolean {
@@ -226,30 +328,34 @@ export class ClaimEvidenceBridgeService {
       }
     }
 
-    const normalizedFactKey = normalizeIdentityPart(fact.factKey);
-    const normalizedType = normalizeIdentityPart(fact.claimType);
-    const normalizedStatement = normalizeIdentityPart(fact.value);
-    const claimOriginKey = domainHash("claim-origin", [
-      fact.workspaceId,
-      fact.companyProfileId,
+    const {
       normalizedFactKey,
       normalizedType,
       normalizedStatement,
-    ]);
-    const evidenceOriginKey = domainHash("evidence-origin", [
       claimOriginKey,
-      fact.workspaceId,
-      fact.siteId,
-      fact.evidenceRef.sourceSnapshotId,
-      fact.evidenceRef.sourceRole,
-      fact.evidenceRef.assetId ?? null,
-      fact.evidenceRef.sourceContentHash,
-      fact.evidenceRef.quote,
-      fact.evidenceRef.quoteStart ?? null,
-      fact.evidenceRef.quoteEnd ?? null,
-      fact.evidenceRef.quotePrefix ?? null,
-      fact.evidenceRef.quoteSuffix ?? null,
-    ]);
+    } = claimOriginIdentity({
+      workspaceId: fact.workspaceId,
+      companyProfileId: fact.companyProfileId,
+      factKey: fact.factKey,
+      claimType: fact.claimType,
+      statement: fact.value,
+    });
+    const evidenceOriginKey = claimEvidenceOriginKey({
+      claimOriginKey,
+      workspaceId: fact.workspaceId,
+      siteId: fact.siteId,
+      sourceSnapshotId: fact.evidenceRef.sourceSnapshotId,
+      sourceRole: fact.evidenceRef.sourceRole,
+      assetId: fact.evidenceRef.assetId,
+      sourceContentHash: fact.evidenceRef.sourceContentHash,
+      quote: fact.evidenceRef.quote,
+      quoteStart: fact.evidenceRef.quoteStart,
+      quoteEnd: fact.evidenceRef.quoteEnd,
+      quotePrefix: fact.evidenceRef.quotePrefix,
+      quoteSuffix: fact.evidenceRef.quoteSuffix,
+      sourceUrl: fact.evidenceRef.sourceUrl,
+      fetchedAt: fact.evidenceRef.fetchedAt,
+    });
     const bridgeKey = domainHash("brand-profile-claim-edge", [
       fact.workspaceId,
       fact.siteId,
@@ -267,6 +373,7 @@ export class ClaimEvidenceBridgeService {
       companyProfileId: fact.companyProfileId,
       brandProfileId: fact.brandProfileId,
       factIndex: fact.factIndex,
+      factKey: normalizedFactKey,
       type: normalizedType,
       statement: normalizedStatement,
       status: "NEEDS_REVIEW",
@@ -281,6 +388,8 @@ export class ClaimEvidenceBridgeService {
         quotePrefix: fact.evidenceRef.quotePrefix,
         quoteSuffix: fact.evidenceRef.quoteSuffix,
         assetId: fact.evidenceRef.assetId,
+        sourceUrl: fact.evidenceRef.sourceUrl,
+        fetchedAt: fact.evidenceRef.fetchedAt,
       },
       claimOriginKey,
       evidenceOriginKey,
@@ -289,7 +398,11 @@ export class ClaimEvidenceBridgeService {
 
     return {
       kind: "projected",
-      claim: { id: projected.claimId, status: projected.status },
+      claim: {
+        id: projected.claimId,
+        factKey: projected.factKey,
+        status: projected.status,
+      },
       evidence: { id: projected.evidenceId },
       reused: projected.reused,
     };
@@ -308,23 +421,28 @@ export class ClaimEvidenceBridgeService {
     const claims = await this.repository.listClaimsForCompany(
       ctx.workspaceId,
       companyProfileId,
+      input.siteId,
     );
     const now = this.now();
-    return claims.filter(
-      (claim) =>
+    return claims.filter((claim) => {
+      const certification = isCertificationClaim({
+        type: claim.type,
+        value: claim.statement,
+      });
+      return (
         claim.workspaceId === ctx.workspaceId &&
         claim.companyProfileId === companyProfileId &&
         claim.status === "APPROVED" &&
         isFutureOrUnbounded(claim.validUntil, now) &&
+        (claim.originKey == null || claim.hasSiteBridge) &&
+        (!certification || claim.certificationProofValid) &&
         ((claim.originKey == null &&
-          !isCertificationClaim({
-            type: claim.type,
-            value: claim.statement,
-          })) ||
+          !certification) ||
           hasValidClaimApprovalAudit({
             ...claim,
             companyId: claim.companyProfileId,
-          })),
-    );
+          }))
+      );
+    });
   }
 }

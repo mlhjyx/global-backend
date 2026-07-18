@@ -54,6 +54,7 @@ interface StoredClaim {
   companyProfileId: string;
   sourceId?: string | null;
   originKey?: string | null;
+  factKey?: string | null;
   type: string;
   statement: string;
   status: ClaimStatus;
@@ -64,6 +65,7 @@ interface StoredClaim {
   verificationMethod?: string | null;
   verificationProof?: Record<string, unknown> | null;
   certificationProofValid?: boolean;
+  hasSiteBridge?: boolean;
 }
 
 function factKey(brandProfileId: string, factIndex: number): string {
@@ -140,6 +142,7 @@ function makeHarness(
       companyProfileId: string;
       brandProfileId: string;
       factIndex: number;
+      factKey: string;
       type: string;
       statement: string;
       status: ClaimStatus;
@@ -152,7 +155,12 @@ function makeHarness(
       const key = `${input.workspaceId}:${input.bridgeKey}`;
       const prior = bridgesByKey.get(key);
       if (prior)
-        return { ...prior, status: "NEEDS_REVIEW" as const, reused: true };
+        return {
+          ...prior,
+          factKey: input.factKey,
+          status: "NEEDS_REVIEW" as const,
+          reused: true,
+        };
 
       // Force concurrent callers to cross an async boundary before the unique-key recheck.
       await Promise.resolve();
@@ -160,6 +168,7 @@ function makeHarness(
       if (concurrentWinner) {
         return {
           ...concurrentWinner,
+          factKey: input.factKey,
           status: "NEEDS_REVIEW" as const,
           reused: true,
         };
@@ -174,6 +183,7 @@ function makeHarness(
           companyProfileId: input.companyProfileId,
           sourceId: null,
           originKey: input.claimOriginKey,
+          factKey: input.factKey,
           type: input.type,
           statement: input.statement,
           status: input.status,
@@ -193,7 +203,13 @@ function makeHarness(
         evidenceByOrigin.set(input.evidenceOriginKey, evidenceId);
       }
       bridgesByKey.set(key, { claimId, evidenceId });
-      return { claimId, evidenceId, status: input.status, reused: false };
+      return {
+        claimId,
+        evidenceId,
+        factKey: input.factKey,
+        status: input.status,
+        reused: false,
+      };
     },
     listClaimsForCompany: async (
       workspaceId: string,
@@ -206,6 +222,8 @@ function makeHarness(
       ).map((claim) => ({
         ...claim,
         certificationProofValid: claim.certificationProofValid ?? false,
+        hasSiteBridge:
+          claim.hasSiteBridge ?? claim.certificationProofValid ?? false,
       })),
   };
 
@@ -243,9 +261,10 @@ describe("ClaimEvidenceBridgeService — fact projection", () => {
 
     expect(result).toMatchObject({
       kind: "projected",
-      claim: { status: "NEEDS_REVIEW" },
+      claim: { factKey: "main_products", status: "NEEDS_REVIEW" },
     });
     expect(db.claims).toHaveLength(1);
+    expect(db.claims[0].factKey).toBe("main_products");
     expect(db.claims[0].status).toBe("NEEDS_REVIEW");
   });
 
@@ -319,6 +338,39 @@ describe("ClaimEvidenceBridgeService — fact projection", () => {
     expect(db.claims).toHaveLength(1);
     expect(db.evidence).toHaveLength(2);
     expect(db.bridgesByKey).toHaveProperty("size", 3);
+  });
+
+  it("canonicalizes whitespace in factKey before identity, persistence and reuse", async () => {
+    const { service, db } = makeHarness({
+      fact: { factKey: "  maximum\tpressure  ", claimType: "param" },
+    });
+    const retryBrandProfileId = "77777777-7777-4777-8777-777777777777";
+    const originalFact = db.facts.get(factKey(BRAND_PROFILE_ID, 0))!;
+    db.facts.set(factKey(retryBrandProfileId, 0), {
+      ...originalFact,
+      brandProfileId: retryBrandProfileId,
+      factKey: "maximum pressure",
+      evidenceRef: {
+        ...originalFact.evidenceRef,
+        evidenceRefId: "evidence-ref-whitespace-retry",
+      },
+    });
+
+    const first = await service.projectFact(CTX, projectionRef());
+    const retry = await service.projectFact(CTX, {
+      ...projectionRef(),
+      brandProfileId: retryBrandProfileId,
+    });
+
+    expect(first.claim.id).toBe(retry.claim.id);
+    expect(first.claim.factKey).toBe("maximum pressure");
+    expect(retry.claim.factKey).toBe("maximum pressure");
+    expect(db.claims).toHaveLength(1);
+    expect(db.claims[0].factKey).toBe("maximum pressure");
+    expect(db.projectionInputs).toEqual([
+      expect.objectContaining({ factKey: "maximum pressure" }),
+      expect.objectContaining({ factKey: "maximum pressure" }),
+    ]);
   });
 });
 
@@ -534,6 +586,42 @@ describe("ClaimEvidenceBridgeService — approved-effective read gate", () => {
             verifiedAt: NOW,
             verificationMethod: "human_review",
           }),
+        },
+      ],
+    });
+
+    await expect(
+      service.listApprovedEffectiveClaims(CTX, { siteId: SITE_ID }),
+    ).resolves.toEqual([]);
+  });
+
+  it("excludes a bridged non-certification Claim after its exact Site evidence edge is gone", async () => {
+    const identity = {
+      id: "orphaned-capability",
+      workspaceId: WORKSPACE_ID,
+      companyId: COMPANY_PROFILE_ID,
+      sourceId: null,
+      originKey: "e".repeat(64),
+      type: "capability",
+      statement: "Manufactures industrial pumps",
+      validUntil: null,
+    };
+    const { service } = makeHarness({
+      claims: [
+        {
+          ...identity,
+          companyProfileId: identity.companyId,
+          status: "APPROVED",
+          version: 2,
+          verifiedBy: "reviewer-1",
+          verifiedAt: NOW,
+          verificationMethod: "human_review",
+          verificationProof: buildClaimApprovalProof(identity, 2, {
+            verifiedBy: "reviewer-1",
+            verifiedAt: NOW,
+            verificationMethod: "human_review",
+          }),
+          hasSiteBridge: false,
         },
       ],
     });

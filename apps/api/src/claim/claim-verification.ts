@@ -6,6 +6,7 @@ interface ClaimApprovalIdentity {
   companyId: string;
   sourceId: string | null;
   originKey: string | null;
+  factKey: string | null;
   type: string;
   statement: string;
   validUntil: Date | null;
@@ -29,7 +30,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function claimApprovalDigest(
+function claimApprovalDigestV2(
   claim: ClaimApprovalIdentity,
   approvedVersion: number,
   audit: ClaimApprovalAuditIdentity,
@@ -55,21 +56,48 @@ function claimApprovalDigest(
     .digest("hex");
 }
 
+function claimApprovalDigestV3(
+  claim: ClaimApprovalIdentity,
+  approvedVersion: number,
+  audit: ClaimApprovalAuditIdentity,
+): string {
+  return createHash("sha256")
+    .update(
+      `claim-approval/3\u0000${JSON.stringify([
+        claim.id,
+        claim.workspaceId,
+        claim.companyId,
+        claim.sourceId,
+        claim.originKey,
+        claim.factKey,
+        claim.type,
+        claim.statement,
+        claim.validUntil?.toISOString() ?? null,
+        approvedVersion,
+        audit.verifiedBy,
+        audit.verifiedAt.toISOString(),
+        audit.verificationMethod,
+      ])}`,
+      "utf8",
+    )
+    .digest("hex");
+}
+
 export function buildClaimApprovalProof(
   claim: ClaimApprovalIdentity,
   approvedVersion: number,
   audit: ClaimApprovalAuditIdentity,
 ): {
   action: "claim_approval";
-  proofVersion: 2;
+  proofVersion: 3;
   approvedVersion: number;
   claimDigest: string;
 } {
   return {
     action: "claim_approval",
-    proofVersion: 2,
+    proofVersion: 3,
     approvedVersion,
-    claimDigest: claimApprovalDigest(claim, approvedVersion, audit),
+    claimDigest: claimApprovalDigestV3(claim, approvedVersion, audit),
   };
 }
 
@@ -83,17 +111,25 @@ export function hasValidClaimApprovalAudit(claim: AuditedClaim): boolean {
     claim.verificationMethod !== "human_review" ||
     !isRecord(proof) ||
     proof.action !== "claim_approval" ||
-    proof.proofVersion !== 2 ||
     proof.approvedVersion !== claim.version
   ) {
     return false;
   }
+  const audit = {
+    verifiedBy: claim.verifiedBy,
+    verifiedAt: claim.verifiedAt,
+    verificationMethod: claim.verificationMethod,
+  } as const;
+  if (proof.proofVersion === 3) {
+    return proof.claimDigest === claimApprovalDigestV3(claim, claim.version, audit);
+  }
+  // v2 predates factKey. It remains readable only for genuinely legacy/manual
+  // Claims; an origin-keyed bridge Claim must be re-reviewed under v3 rather
+  // than inheriting an audit that did not bind its semantic key.
   return (
-    proof.claimDigest ===
-    claimApprovalDigest(claim, claim.version, {
-      verifiedBy: claim.verifiedBy,
-      verifiedAt: claim.verifiedAt,
-      verificationMethod: claim.verificationMethod,
-    })
+    proof.proofVersion === 2 &&
+    claim.originKey === null &&
+    claim.factKey === null &&
+    proof.claimDigest === claimApprovalDigestV2(claim, claim.version, audit)
   );
 }

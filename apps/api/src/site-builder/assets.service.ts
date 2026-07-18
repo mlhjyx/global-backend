@@ -424,7 +424,7 @@ export class AssetsService {
         throw error;
       }
       if (usages.length > 0) {
-        throw assetConflict('ASSET_IN_USE', 'asset is referenced by the active site or profile', {
+        throw assetConflict('ASSET_IN_USE', 'asset is referenced by the active site, profile, or Claim evidence', {
           usages,
         });
       }

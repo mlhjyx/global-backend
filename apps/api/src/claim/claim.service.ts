@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { ClaimStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { buildClaimApprovalProof } from './claim-verification';
@@ -77,7 +78,11 @@ export class ClaimService {
             eventType: 'ClaimApproved',
             aggregateType: 'Claim',
             aggregateId: claimId,
-            payload: { companyId: claim.companyId, type: claim.type },
+            payload: {
+              companyId: claim.companyId,
+              factKey: claim.factKey,
+              type: claim.type,
+            },
           },
         });
         // 完整度 Gate（5.2.7）：审批达到最低阈值后企业才可用（REVIEW → ACTIVE）
@@ -171,7 +176,11 @@ export class ClaimService {
           eventType: 'ClaimRevoked',
           aggregateType: 'Claim',
           aggregateId: claimId,
-          payload: { companyId: claim.companyId, type: claim.type },
+          payload: {
+            companyId: claim.companyId,
+            factKey: claim.factKey,
+            type: claim.type,
+          },
         },
       });
       return updated;
@@ -189,7 +198,13 @@ export class ClaimService {
       const claimIds = [...new Set(conflicts.flatMap((c) => [c.claimAId, c.claimBId]))];
       const claims = await tx.claim.findMany({
         where: { id: { in: claimIds } },
-        select: { id: true, statement: true, status: true, type: true },
+        select: {
+          id: true,
+          factKey: true,
+          statement: true,
+          status: true,
+          type: true,
+        },
       });
       const byId = new Map(claims.map((c) => [c.id, c]));
       return conflicts.map((c) => ({
@@ -210,16 +225,110 @@ export class ClaimService {
       if (conflict.status !== 'OPEN') {
         throw new ConflictException({ error: { code: 'INVALID_STATE', message: 'conflict already resolved' } });
       }
+      const winnerId = keep === 'a' ? conflict.claimAId : conflict.claimBId;
       const loserId = keep === 'a' ? conflict.claimBId : conflict.claimAId;
-      await tx.claim.updateMany({ where: { id: loserId }, data: { status: 'REVOKED' } });
-      return tx.knowledgeConflict.update({
-        where: { id: conflictId },
+      // Lock both alternatives in database UUID order before validating or
+      // changing either. This serializes concurrent winner revoke/expiry with
+      // resolution and gives every resolver the same lock order.
+      const claims = await tx.$queryRaw<
+        Array<{
+          id: string;
+          workspaceId: string;
+          companyId: string;
+          factKey: string | null;
+          type: string;
+          status: ClaimStatus;
+          version: number;
+        }>
+      >`
+        SELECT "id",
+               "workspace_id" AS "workspaceId",
+               "company_id" AS "companyId",
+               "fact_key" AS "factKey",
+               "type",
+               "status"::text AS "status",
+               "version"
+          FROM "claim"
+         WHERE "id" IN (${winnerId}::uuid, ${loserId}::uuid)
+         ORDER BY "id"
+         FOR UPDATE`;
+      const winner = claims.find((claim) => claim.id === winnerId);
+      const loser = claims.find((claim) => claim.id === loserId);
+      if (
+        conflict.workspaceId !== ctx.workspaceId ||
+        !winner ||
+        !loser ||
+        winner.workspaceId !== ctx.workspaceId ||
+        loser.workspaceId !== ctx.workspaceId ||
+        winner.companyId !== conflict.companyId ||
+        loser.companyId !== conflict.companyId ||
+        winner.type !== conflict.claimType ||
+        loser.type !== conflict.claimType ||
+        winner.status === 'REVOKED' ||
+        winner.status === 'EXPIRED'
+      ) {
+        throw new ConflictException({
+          error: {
+            code: 'CONFLICT_IDENTITY_MISMATCH',
+            message: 'conflict Claims do not match its tenant/company/type or kept Claim is terminal',
+          },
+        });
+      }
+      const resolvedAt = new Date();
+      const conflictCas = await tx.knowledgeConflict.updateMany({
+        where: { id: conflictId, status: 'OPEN' },
         data: {
           status: 'RESOLVED',
           resolution: keep === 'a' ? 'kept_a' : 'kept_b',
           resolvedBy: ctx.userId,
-          resolvedAt: new Date(),
+          resolvedAt,
         },
+      });
+      if (conflictCas.count !== 1) {
+        throw new ConflictException({
+          error: {
+            code: 'VERSION_CONFLICT',
+            message: 'conflict changed concurrently',
+          },
+        });
+      }
+
+      if (loser.status !== 'REVOKED' && loser.status !== 'EXPIRED') {
+        const loserCas = await tx.claim.updateMany({
+          where: {
+            id: loser.id,
+            status: loser.status,
+            version: loser.version,
+          },
+          data: { status: 'REVOKED', version: { increment: 1 } },
+        });
+        if (loserCas.count !== 1) {
+          throw new ConflictException({
+            error: {
+              code: 'VERSION_CONFLICT',
+              message: 'conflict Claim changed concurrently',
+            },
+          });
+        }
+        if (loser.status === 'APPROVED') {
+          await tx.outboxEvent.create({
+            data: {
+              workspaceId: ctx.workspaceId,
+              eventType: 'ClaimRevoked',
+              aggregateType: 'Claim',
+              aggregateId: loser.id,
+              payload: {
+                companyId: loser.companyId,
+                factKey: loser.factKey,
+                type: loser.type,
+              },
+            },
+          });
+        }
+      }
+
+      return tx.knowledgeConflict.findUniqueOrThrow({
+        where: { id: conflictId },
       });
     });
   }

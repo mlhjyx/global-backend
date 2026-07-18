@@ -9,7 +9,10 @@ import {
 import { assertValidProfileState } from './profile-contract';
 import type { Profile } from './profile-merge';
 
-type ScannerTx = Pick<Prisma.TransactionClient, 'site' | 'siteVersion'>;
+type ScannerTx = Pick<
+  Prisma.TransactionClient,
+  'site' | 'siteVersion' | 'brandProfileClaimBridge'
+>;
 
 /** Current MF0-B implementation; MF-1 may replace its internals with AssetUsage. */
 @Injectable()
@@ -29,6 +32,23 @@ export class SiteSpecAssetReferenceScanner {
       }
     }
     const usages = profileUsagesForAsset(site.profile, input.assetId);
+    const claimBridges = await tx.brandProfileClaimBridge.findMany({
+      where: { siteId: input.siteId, certAssetId: input.assetId },
+      orderBy: [{ brandProfileId: 'asc' }, { factIndex: 'asc' }],
+      // One reference is sufficient to fail deletion closed. Keep the stable
+      // diagnostics useful without allowing append-only historical bridge
+      // versions to create an unbounded query/response surface.
+      take: 100,
+      select: { brandProfileId: true, factIndex: true },
+    });
+    usages.push(
+      ...claimBridges.map((bridge) => ({
+        source: 'claim_evidence' as const,
+        page: '$claims',
+        component: 'certification',
+        fieldPath: `/brandProfiles/${bridge.brandProfileId}/facts/${bridge.factIndex}/certAssetId`,
+      })),
+    );
     if (site.activeVersionId) {
       const active = await tx.siteVersion.findFirst({
         where: { id: site.activeVersionId, siteId: input.siteId },

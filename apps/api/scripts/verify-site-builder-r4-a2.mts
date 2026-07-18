@@ -16,7 +16,11 @@ import {
   PrismaClaimEvidenceBridgeRepository,
   claimTypeForBrandFact,
 } from "../src/site-builder/claim-evidence-bridge.prisma";
-import { ClaimEvidenceBridgeService } from "../src/site-builder/claim-evidence-bridge.service";
+import {
+  ClaimEvidenceBridgeService,
+  normalizeClaimIdentityPart,
+} from "../src/site-builder/claim-evidence-bridge.service";
+import { IntakeService } from "../src/site-builder/intake.service";
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`assertion failed: ${message}`);
@@ -68,6 +72,7 @@ async function main(): Promise<void> {
   const app = new PrismaService();
   const workspaceId = randomUUID();
   const otherWorkspaceId = randomUUID();
+  const firstIntakeWorkspaceId = randomUUID();
   const companyProfileId = randomUUID();
   const sameWorkspaceCompanyProfileId = randomUUID();
   const otherCompanyProfileId = randomUUID();
@@ -80,6 +85,8 @@ async function main(): Promise<void> {
   const capabilityText =
     "Industrial pumps reach a maximum pressure of 400 bar.";
   const certText = "The company holds an ISO 9001 certified quality system.";
+  const capabilityDisplayUrl = "https://example.test/products/pumps";
+  const capabilityFetchedAt = new Date("2026-07-18T08:15:30.000Z");
   let verificationError: unknown;
 
   try {
@@ -144,6 +151,90 @@ async function main(): Promise<void> {
         mutationPrivileges[0]?.sourceSnapshotUpdate === false,
       "app_user cannot mutate public Evidence or frozen BrandProfile provenance",
     );
+
+    console.log("② first-write tenant provisioning");
+    check(
+      (await owner.workspace.count({ where: { id: firstIntakeWorkspaceId } })) ===
+        0,
+      "first Site Builder intake starts without a local Workspace anchor",
+    );
+    const intake = new IntakeService(app, {
+      launchDemoV0: async ({ buildRunId }: { buildRunId: string }) => ({
+        firstExecutionRunId: `verify-r4-a2-${buildRunId}`,
+      }),
+      recoverDemoV0: async ({ buildRunId }: { buildRunId: string }) => ({
+        firstExecutionRunId: `verify-r4-a2-${buildRunId}`,
+      }),
+    } as never);
+    const intakeResult = await intake.create(
+      {
+        workspaceId: firstIntakeWorkspaceId,
+        userId: "verify-r4-a2",
+        roles: [],
+      },
+      {
+        company: { nameZh: "R4-A2 首请求", nameEn: "R4-A2 First Write" },
+        industry: "isic-2813",
+        products: ["industrial pump"],
+        targetMarkets: ["DE"],
+        hasWebsite: false,
+        websiteUrl: null,
+        businessEmail: "verify@example.test",
+      },
+      "verify-r4-a2-first-intake",
+    );
+    const firstIntakeSite = await owner.site.findUniqueOrThrow({
+      where: { id: intakeResult.siteId },
+      select: { workspaceId: true, companyProfileId: true },
+    });
+    check(
+      firstIntakeSite.workspaceId === firstIntakeWorkspaceId &&
+        firstIntakeSite.companyProfileId !== null &&
+        (await owner.workspace.count({
+          where: { id: firstIntakeWorkspaceId },
+        })) === 1,
+      "first Site Builder intake JIT-provisions Workspace and binds CompanyProfile",
+    );
+
+    const cascadeWorkspaceId = randomUUID();
+    const cascadeCompanyId = randomUUID();
+    const cascadeSiteId = randomUUID();
+    await owner.workspace.create({ data: { id: cascadeWorkspaceId } });
+    await owner.companyProfile.create({
+      data: {
+        id: cascadeCompanyId,
+        workspaceId: cascadeWorkspaceId,
+        name: "R4-A2 Workspace Cascade",
+      },
+    });
+    await owner.site.create({
+      data: {
+        id: cascadeSiteId,
+        workspaceId: cascadeWorkspaceId,
+        companyProfileId: cascadeCompanyId,
+        name: "R4-A2 Workspace Cascade",
+        slug: `verify-r4-a2-cascade-${cascadeSiteId.slice(0, 8)}`,
+        intake: { company: { nameZh: "R4-A2 删除链" } },
+      },
+    });
+    let directCompanyDeleteRejected: unknown;
+    try {
+      await owner.companyProfile.delete({ where: { id: cascadeCompanyId } });
+    } catch (error) {
+      directCompanyDeleteRejected = error;
+    }
+    check(
+      directCompanyDeleteRejected !== undefined,
+      "standalone CompanyProfile delete remains blocked while Site references it",
+    );
+    await owner.workspace.delete({ where: { id: cascadeWorkspaceId } });
+    check(
+      (await owner.site.count({ where: { id: cascadeSiteId } })) === 0 &&
+        (await owner.companyProfile.count({
+          where: { id: cascadeCompanyId },
+        })) === 0,
+      "Workspace delete cascades Site before CompanyProfile",
+    );
     for (const [key, value] of [
       ["certifications", "ISO 9001 certified"],
       ["质量体系", "通过ISO9001标准"],
@@ -152,6 +243,16 @@ async function main(): Promise<void> {
       ["operating_temperature", "Operating temperature 80℃"],
       ["tank_volume", "Tank volume 1.5 m³"],
       ["rated_torque", "Rated torque 50 N·m"],
+      ["capability", "We showcase precision engineering"],
+      ["customization", "Client-specific custom engineering"],
+      ["support", "Project-ready pump support"],
+      ["customer关系", "Public capability"],
+      ["capability", "Powerful after-sales service"],
+      ["capability", "Capacity building support"],
+      ["design", "Lightweight design"],
+      ["capability", "We reach customers in 50 countries"],
+      ["export_markets", "Reach global buyers"],
+      ["environmental_compliance", "REACH compliant"],
       ["main_products", "Industrial pumps"],
     ] as const) {
       const databaseType = await owner.$queryRaw<{ claimType: string }[]>`
@@ -162,7 +263,7 @@ async function main(): Promise<void> {
       );
     }
 
-    console.log("② isolated tenant graph and exact frozen facts");
+    console.log("③ isolated tenant graph and exact frozen facts");
     await owner.workspace.createMany({
       data: [
         { id: workspaceId, name: "verify-r4-a2" },
@@ -236,6 +337,8 @@ async function main(): Promise<void> {
           contentHash: sha256(capabilityText),
           normalizationVersion: "evidence-text/1",
           snapshotText: capabilityText,
+          displayUrl: capabilityDisplayUrl,
+          fetchedAt: capabilityFetchedAt,
           provenance: { kind: "r4_a2_verifier" },
           dedupeKey: sha256(`${siteId}:capability`),
         },
@@ -262,6 +365,8 @@ async function main(): Promise<void> {
           contentHash: sha256(capabilityText),
           normalizationVersion: "evidence-text/1",
           snapshotText: capabilityText,
+          displayUrl: capabilityDisplayUrl,
+          fetchedAt: capabilityFetchedAt,
           provenance: { kind: "r4_a2_verifier_alternate_source" },
           dedupeKey: sha256(`${siteId}:capability:alternate-source`),
         },
@@ -314,6 +419,8 @@ async function main(): Promise<void> {
                         ),
                       ).length + Array.from(capabilityQuote).length,
                   },
+                  url: capabilityDisplayUrl,
+                  fetchedAt: capabilityFetchedAt.toISOString(),
                 },
               },
               {
@@ -392,6 +499,12 @@ async function main(): Promise<void> {
       provenanceAssetId?: string;
       evidenceAssetId?: string;
       evidenceVersion?: number;
+      sourceDisplayUrl?: string;
+      sourceFetchedAt?: Date;
+      factUrl?: string;
+      factFetchedAt?: string;
+      evidenceSourceUrl?: string;
+      evidenceFetchedAt?: Date;
     }) => {
       const sourceSnapshotId = randomUUID();
       const brandProfileId = randomUUID();
@@ -399,6 +512,7 @@ async function main(): Promise<void> {
       const claimId = randomUUID();
       const evidenceId = randomUUID();
       const factKey = input.factKey ?? "maximum_pressure";
+      const canonicalFactKey = normalizeClaimIdentityPart(factKey);
       const factValue = input.factValue ?? "Maximum pressure: 400 bar";
       const snapshotText = `Verified ${factValue.toLowerCase()}.`;
       const quote = factValue.toLowerCase();
@@ -417,6 +531,8 @@ async function main(): Promise<void> {
             contentHash: sourceContentHash,
             normalizationVersion: "evidence-text/1",
             snapshotText,
+            displayUrl: input.sourceDisplayUrl,
+            fetchedAt: input.sourceFetchedAt,
             provenance: {
               kind: "r4_a2_direct_insert_verifier",
               ...(input.provenanceAssetId
@@ -451,6 +567,10 @@ async function main(): Promise<void> {
                     start: quoteStart,
                     end: quoteStart + quote.length,
                   },
+                  ...(input.factUrl ? { url: input.factUrl } : {}),
+                  ...(input.factFetchedAt
+                    ? { fetchedAt: input.factFetchedAt }
+                    : {}),
                 },
               },
             ],
@@ -478,6 +598,7 @@ async function main(): Promise<void> {
             workspaceId,
             companyId: companyProfileId,
             originKey: sha256(`${brandProfileId}:direct-claim`),
+            factKey: canonicalFactKey,
             type: input.claimType,
             statement: input.claimStatement,
             status: "NEEDS_REVIEW",
@@ -496,6 +617,8 @@ async function main(): Promise<void> {
             quoteStart,
             quoteEnd: quoteStart + quote.length,
             assetId: input.evidenceAssetId,
+            sourceUrl: input.evidenceSourceUrl,
+            fetchedAt: input.evidenceFetchedAt,
             confidence: 1,
           },
         });
@@ -514,9 +637,12 @@ async function main(): Promise<void> {
       evidenceRefId: string;
       claimId: string;
       evidenceId: string;
-    }): Promise<void> => {
-      await app.withWorkspace(workspaceId, (tx) =>
-        tx.$executeRaw`
+    }, nonUtcSession = false): Promise<void> => {
+      await app.withWorkspace(workspaceId, async (tx) => {
+        if (nonUtcSession) {
+          await tx.$executeRaw`SET LOCAL TIME ZONE 'Asia/Shanghai'`;
+        }
+        await tx.$executeRaw`
           INSERT INTO brand_profile_claim_bridge (
             id, workspace_id, site_id, company_profile_id, brand_profile_id,
             evidence_ref_id, fact_index, claim_id, evidence_id, bridge_key
@@ -526,8 +652,8 @@ async function main(): Promise<void> {
             ${fixture.evidenceRefId}::uuid, 0, ${fixture.claimId}::uuid,
             ${fixture.evidenceId}::uuid,
             ${sha256(`${fixture.brandProfileId}:direct-edge`)}
-          )`,
-      );
+          )`;
+      });
     };
 
     console.log("③ atomic projection, replay reuse and NEEDS_REVIEW default");
@@ -567,6 +693,17 @@ async function main(): Promise<void> {
       })) === 2,
       "two exact public Evidence rows were created",
     );
+    const capabilityEvidence = await owner.evidence.findFirstOrThrow({
+      where: {
+        claim: { companyId: companyProfileId, type: "param" },
+        originKey: { not: null },
+      },
+    });
+    check(
+      capabilityEvidence.sourceUrl === capabilityDisplayUrl &&
+        capabilityEvidence.fetchedAt?.getTime() === capabilityFetchedAt.getTime(),
+      "public Evidence freezes source URL and fetch time from the snapshot",
+    );
     check(
       (await owner.brandProfileClaimBridge.count({
         where: { brandProfileId: firstProfileId },
@@ -575,6 +712,123 @@ async function main(): Promise<void> {
     );
 
     const reviewer = new ClaimService(app);
+    const approvalGuardClaimId = randomUUID();
+    await owner.claim.create({
+      data: {
+        id: approvalGuardClaimId,
+        workspaceId,
+        companyId: companyProfileId,
+        type: "capability",
+        statement: "Approval guard negative fixture",
+        status: "NEEDS_REVIEW",
+        version: 1,
+      },
+    });
+    const approvalBypassAttempts = [
+      Prisma.sql`
+        UPDATE "claim"
+           SET "status" = 'APPROVED', "version" = 2
+         WHERE "id" = ${approvalGuardClaimId}::uuid`,
+      Prisma.sql`
+        UPDATE "claim"
+           SET "status" = 'APPROVED', "version" = 2,
+               "verified_by" = 'forged-reviewer',
+               "verified_at" = CURRENT_TIMESTAMP
+         WHERE "id" = ${approvalGuardClaimId}::uuid`,
+      Prisma.sql`
+        UPDATE "claim"
+           SET "status" = 'APPROVED', "version" = 2,
+               "verified_by" = 'forged-reviewer',
+               "verified_at" = CURRENT_TIMESTAMP,
+               "verification_method" = 'human_review',
+               "verification_proof" = ${JSON.stringify({
+                 action: "claim_approval",
+                 proofVersion: 2,
+                 approvedVersion: 2,
+               })}::jsonb
+         WHERE "id" = ${approvalGuardClaimId}::uuid`,
+      Prisma.sql`
+        UPDATE "claim"
+           SET "status" = 'APPROVED', "version" = 2,
+               "verified_by" = 'forged-reviewer',
+               "verified_at" = CURRENT_TIMESTAMP,
+               "verification_method" = 'human_review',
+               "verification_proof" = ${JSON.stringify({
+                 action: "claim_approval",
+                 proofVersion: 3,
+                 approvedVersion: 2,
+               })}::jsonb
+         WHERE "id" = ${approvalGuardClaimId}::uuid`,
+      Prisma.sql`
+        UPDATE "claim"
+           SET "status" = 'APPROVED', "version" = 2,
+               "verified_by" = 'forged-reviewer',
+               "verified_at" = CURRENT_TIMESTAMP,
+               "verification_method" = 'human_review',
+               "verification_proof" = ${JSON.stringify({
+                 action: "claim_approval",
+                 proofVersion: "3",
+                 approvedVersion: "2",
+                 claimDigest: "0".repeat(64),
+               })}::jsonb
+         WHERE "id" = ${approvalGuardClaimId}::uuid`,
+      Prisma.sql`
+        UPDATE "claim"
+           SET "status" = 'APPROVED', "version" = 2,
+               "verified_by" = 'forged-reviewer',
+               "verified_at" = CURRENT_TIMESTAMP,
+               "verification_method" = 'human_review',
+               "verification_proof" = ${JSON.stringify({
+                 action: "claim_approval",
+                 proofVersion: 3,
+                 approvedVersion: 3,
+                 claimDigest: "0".repeat(64),
+               })}::jsonb
+         WHERE "id" = ${approvalGuardClaimId}::uuid`,
+    ];
+    const rejectedApprovalMutations: unknown[] = [];
+    for (const bypassAttempt of approvalBypassAttempts) {
+      try {
+        await app.withWorkspace(workspaceId, (tx) =>
+          tx.$executeRaw(bypassAttempt),
+        );
+      } catch (error) {
+        rejectedApprovalMutations.push(error);
+      }
+    }
+    check(
+      rejectedApprovalMutations.length === approvalBypassAttempts.length &&
+        (await owner.claim.findUniqueOrThrow({
+          where: { id: approvalGuardClaimId },
+        })).status === "NEEDS_REVIEW",
+      "app_user cannot approve with missing, partial, legacy-v2 or malformed v3 proof",
+    );
+    const insertedApprovedClaimId = randomUUID();
+    let directApprovedInsertRejected: unknown;
+    try {
+      await app.withWorkspace(workspaceId, (tx) =>
+        tx.$executeRaw`
+          INSERT INTO "claim" (
+            "id", "workspace_id", "company_id", "type", "statement",
+            "status", "version", "updated_at"
+          ) VALUES (
+            ${insertedApprovedClaimId}::uuid, ${workspaceId}::uuid,
+            ${companyProfileId}::uuid, 'capability',
+            'Direct approved insert negative fixture', 'APPROVED', 1,
+            CURRENT_TIMESTAMP
+          )`,
+      );
+    } catch (error) {
+      directApprovedInsertRejected = error;
+    }
+    check(
+      /must transition from NEEDS_REVIEW/.test(
+        errorDetails(directApprovedInsertRejected),
+      ) &&
+        (await owner.claim.count({ where: { id: insertedApprovedClaimId } })) ===
+          0,
+      "app_user cannot insert a new legacy-shaped APPROVED Claim",
+    );
     const pendingCapability = firstClaims.find((claim) => claim.type === "param");
     const pendingCertification = firstClaims.find(
       (claim) => claim.type === "certification",
@@ -717,6 +971,71 @@ async function main(): Promise<void> {
       certification && capability,
       "typed capability/certification Claims exist",
     );
+    const retentionFixture = await createDirectBridgeFixture({
+      version: 90,
+      sourceRole: "fact_candidate",
+      claimType: "capability",
+      claimStatement: "Manufactures precision retention-test pumps",
+      factKey: "　ｃａｐａｂｉｌｉｔｙ　",
+      factValue: "Manufactures precision retention-test pumps",
+      frozenClaimType: "capability",
+    });
+    await insertDirectBridge(retentionFixture);
+    const retentionClaim = await owner.claim.findUniqueOrThrow({
+      where: { id: retentionFixture.claimId },
+    });
+    check(
+      retentionClaim.factKey === "capability",
+      "direct bridge binds Claim.factKey to the NFKC-normalized frozen ref key",
+    );
+    await reviewer.transition(
+      { workspaceId, userId: "retention-reviewer", roles: [] },
+      retentionClaim.id,
+      "APPROVED",
+      retentionClaim.version,
+    );
+    check(
+      (await listApproved()).some((claim) => claim.id === retentionClaim.id),
+      "approved non-certification is effective while its exact Site bridge exists",
+    );
+    await owner.brandProfile.delete({
+      where: { id: retentionFixture.brandProfileId },
+    });
+    check(
+      (await owner.brandProfileClaimBridge.count({
+        where: { claimId: retentionClaim.id },
+      })) === 0 &&
+        !(await listApproved()).some((claim) => claim.id === retentionClaim.id),
+      "owner retention cascade removes bridge and makes non-certification ineffective",
+    );
+    await owner.asset.update({
+      where: { id: certAssetId },
+      data: {
+        processingStatus: "deleted",
+        deletedAt: new Date(),
+        cleanupEventId: randomUUID(),
+        cleanupCompletedAt: null,
+      },
+    });
+    const afterCertTombstone = await listApproved();
+    check(
+      afterCertTombstone.length === 1 &&
+        afterCertTombstone[0]?.id === capability.id,
+      "tombstoned cert Asset makes an approved certification ineffective",
+    );
+    await owner.asset.update({
+      where: { id: certAssetId },
+      data: {
+        processingStatus: "ready",
+        deletedAt: null,
+        cleanupEventId: null,
+        cleanupCompletedAt: null,
+      },
+    });
+    check(
+      (await listApproved()).length === 2,
+      "restored live cert Asset restores certification eligibility",
+    );
     let auditMutationRejected: unknown;
     try {
       await owner.claim.update({
@@ -773,7 +1092,79 @@ async function main(): Promise<void> {
     );
     check(otherVisible.length === 0, "legacy unlinked Site reads fail closed");
 
-    console.log("⑤ RLS isolation, immutable trigger and composite FK");
+    console.log("⑤ conflict resolution CAS and revoke outbox");
+    const conflictClaimAId = randomUUID();
+    const conflictClaimBId = randomUUID();
+    await owner.claim.createMany({
+      data: [conflictClaimAId, conflictClaimBId].map((id, index) => ({
+        id,
+        workspaceId,
+        companyId: companyProfileId,
+        type: "capability",
+        statement: `Conflicting verified capability ${index + 1}`,
+        status: "NEEDS_REVIEW",
+        version: 1,
+      })),
+    });
+    for (const id of [conflictClaimAId, conflictClaimBId]) {
+      await reviewer.transition(
+        { workspaceId, userId: "fixture-reviewer", roles: [] },
+        id,
+        "APPROVED",
+        1,
+      );
+    }
+    const conflictId = randomUUID();
+    await owner.knowledgeConflict.create({
+      data: {
+        id: conflictId,
+        workspaceId,
+        companyId: companyProfileId,
+        claimAId: conflictClaimAId,
+        claimBId: conflictClaimBId,
+        claimType: "capability",
+      },
+    });
+    const conflictResults = await Promise.allSettled([
+      reviewer.resolveConflict(
+        { workspaceId, userId: "conflict-reviewer-a", roles: [] },
+        conflictId,
+        "a",
+      ),
+      reviewer.resolveConflict(
+        { workspaceId, userId: "conflict-reviewer-b", roles: [] },
+        conflictId,
+        "b",
+      ),
+    ]);
+    check(
+      conflictResults.filter((result) => result.status === "fulfilled")
+        .length === 1,
+      "concurrent opposite conflict decisions have exactly one winner",
+    );
+    const conflictClaims = await owner.claim.findMany({
+      where: { id: { in: [conflictClaimAId, conflictClaimBId] } },
+    });
+    check(
+      conflictClaims.filter(
+        (claim) => claim.status === "REVOKED" && claim.version === 3,
+      ).length === 1 &&
+        conflictClaims.filter(
+          (claim) => claim.status === "APPROVED" && claim.version === 2,
+        ).length === 1,
+      "conflict loser is versioned and the winner remains approved",
+    );
+    check(
+      (await owner.outboxEvent.count({
+        where: {
+          eventType: "ClaimRevoked",
+          aggregateId: { in: [conflictClaimAId, conflictClaimBId] },
+        },
+      })) === 1,
+      "conflict resolution emits exactly one ClaimRevoked event",
+    );
+
+    console.log("⑥ RLS isolation, immutable trigger and composite FK");
     const visibleA = await app.withWorkspace(workspaceId, (tx) =>
       tx.brandProfileClaimBridge.count({ where: { siteId } }),
     );
@@ -827,6 +1218,19 @@ async function main(): Promise<void> {
     check(
       ownerClaimMutationRejected,
       "owner cannot mutate bridged Claim identity",
+    );
+    let ownerClaimFactKeyMutationRejected = false;
+    try {
+      await owner.claim.update({
+        where: { id: firstBridge.claimId },
+        data: { factKey: "mutated_fact_key" },
+      });
+    } catch {
+      ownerClaimFactKeyMutationRejected = true;
+    }
+    check(
+      ownerClaimFactKeyMutationRejected,
+      "owner cannot mutate bridged Claim.factKey",
     );
     let ownerEvidenceMutationRejected = false;
     try {
@@ -1014,6 +1418,97 @@ async function main(): Promise<void> {
       "database binds embedded EvidenceRefV2 metadata to frozen source/ref",
     );
 
+    const sourceOriginUrl = "https://example.test/origin/verified";
+    const sourceOriginFetchedAt = new Date("2026-07-18T09:30:00.000Z");
+    const forgedUrlFixture = await createDirectBridgeFixture({
+      version: 16,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+      sourceDisplayUrl: sourceOriginUrl,
+      factUrl: "https://attacker.invalid/substituted-origin",
+      evidenceSourceUrl: sourceOriginUrl,
+    });
+    let forgedUrlRejected: unknown;
+    try {
+      await insertDirectBridge(forgedUrlFixture);
+    } catch (error) {
+      forgedUrlRejected = error;
+    }
+    check(
+      /optional origin metadata is not exact/.test(
+        errorDetails(forgedUrlRejected),
+      ),
+      "database rejects a forged embedded EvidenceRefV2 URL",
+    );
+
+    const forgedFetchedAtFixture = await createDirectBridgeFixture({
+      version: 17,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+      sourceFetchedAt: sourceOriginFetchedAt,
+      factFetchedAt: "2026-07-18T09:31:00.000Z",
+      evidenceFetchedAt: sourceOriginFetchedAt,
+    });
+    let forgedFetchedAtRejected: unknown;
+    try {
+      await insertDirectBridge(forgedFetchedAtFixture);
+    } catch (error) {
+      forgedFetchedAtRejected = error;
+    }
+    check(
+      /optional origin metadata is not exact/.test(
+        errorDetails(forgedFetchedAtRejected),
+      ),
+      "database rejects a forged embedded EvidenceRefV2 fetchedAt",
+    );
+
+    const forgedEvidenceOriginFixture = await createDirectBridgeFixture({
+      version: 18,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+      sourceDisplayUrl: sourceOriginUrl,
+      sourceFetchedAt: sourceOriginFetchedAt,
+      factUrl: sourceOriginUrl,
+      factFetchedAt: sourceOriginFetchedAt.toISOString(),
+      evidenceSourceUrl: "https://attacker.invalid/evidence-origin",
+      evidenceFetchedAt: new Date("2026-07-18T09:31:00.000Z"),
+    });
+    let forgedEvidenceOriginRejected: unknown;
+    try {
+      await insertDirectBridge(forgedEvidenceOriginFixture);
+    } catch (error) {
+      forgedEvidenceOriginRejected = error;
+    }
+    check(
+      /Evidence origin does not match source snapshot/.test(
+        errorDetails(forgedEvidenceOriginRejected),
+      ),
+      "database rejects forged public Evidence URL/fetch time",
+    );
+
+    const nonUtcOriginFixture = await createDirectBridgeFixture({
+      version: 19,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+      sourceDisplayUrl: sourceOriginUrl,
+      sourceFetchedAt: sourceOriginFetchedAt,
+      factUrl: sourceOriginUrl,
+      factFetchedAt: sourceOriginFetchedAt.toISOString(),
+      evidenceSourceUrl: sourceOriginUrl,
+      evidenceFetchedAt: sourceOriginFetchedAt,
+    });
+    await insertDirectBridge(nonUtcOriginFixture, true);
+    check(
+      (await owner.brandProfileClaimBridge.count({
+        where: { brandProfileId: nonUtcOriginFixture.brandProfileId },
+      })) === 1,
+      "ISO-Z fetchedAt remains valid under a non-UTC database session",
+    );
+
     const forgedClassificationFixture = await createDirectBridgeFixture({
       version: 15,
       sourceRole: "fact_candidate",
@@ -1065,6 +1560,7 @@ async function main(): Promise<void> {
         workspaceId,
         companyId: sameWorkspaceCompanyProfileId,
         originKey: sha256(`${crossCompanyBrandProfileId}:other-company-claim`),
+        factKey: normalizeClaimIdentityPart(crossCompanyRef.factKey),
         type: "param",
         statement: "Maximum pressure: 400 bar",
         status: "NEEDS_REVIEW",
@@ -1085,6 +1581,8 @@ async function main(): Promise<void> {
         quoteEnd: crossCompanyRef.quoteEnd,
         quotePrefix: crossCompanyRef.quotePrefix,
         quoteSuffix: crossCompanyRef.quoteSuffix,
+        sourceUrl: capabilityDisplayUrl,
+        fetchedAt: capabilityFetchedAt,
         confidence: 1,
       },
     });
@@ -1148,7 +1646,9 @@ async function main(): Promise<void> {
     );
     await cleanup("workspaces", () =>
       owner.workspace.deleteMany({
-        where: { id: { in: [workspaceId, otherWorkspaceId] } },
+        where: {
+          id: { in: [workspaceId, otherWorkspaceId, firstIntakeWorkspaceId] },
+        },
       }),
     );
     await cleanup("residual fixture assertion", async () => {

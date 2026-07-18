@@ -30,6 +30,7 @@ const BASE_INTAKE: IntakeInput = {
 };
 
 interface FakeDb {
+  workspaces: Record<string, unknown>[];
   companyProfiles: Record<string, unknown>[];
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
@@ -67,7 +68,13 @@ function makeService(
     ackPersistError?: Error;
   } = {},
 ) {
-  const db: FakeDb = { companyProfiles: [], sites: [], runs: [], keys: [] };
+  const db: FakeDb = {
+    workspaces: [],
+    companyProfiles: [],
+    sites: [],
+    runs: [],
+    keys: [],
+  };
   let companyProfileSeq = 0;
   let siteSeq = 0;
   let runSeq = 0;
@@ -96,8 +103,20 @@ function makeService(
 
   const tx = {
     $executeRaw: async () => 0,
+    workspace: {
+      upsert: async ({ where, create }: { where: { id: string }; create: { id: string } }) => {
+        const existing = db.workspaces.find((workspace) => workspace.id === where.id);
+        if (existing) return existing;
+        const row = { ...create };
+        db.workspaces.push(row);
+        return row;
+      },
+    },
     companyProfile: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
+        if (!db.workspaces.some((workspace) => workspace.id === data.workspaceId)) {
+          throw new Error("fake company_profile_workspace_fkey violation");
+        }
         const row = { id: `company-${++companyProfileSeq}`, ...data };
         db.companyProfiles.push(row);
         return row;
@@ -261,6 +280,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
 
     await callCreate(service, CTX, BASE_INTAKE, "claim-bridge-intake");
 
+    expect(db.workspaces).toEqual([{ id: CTX.workspaceId }]);
     expect(db.companyProfiles).toEqual([
       expect.objectContaining({
         id: "company-1",

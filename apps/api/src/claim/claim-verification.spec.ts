@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   buildClaimApprovalProof,
@@ -10,6 +11,7 @@ const CLAIM = {
   companyId: "33333333-3333-4333-8333-333333333333",
   sourceId: null,
   originKey: "a".repeat(64),
+  factKey: "certifications",
   type: "certification",
   statement: "ISO 9001 certified",
   validUntil: null,
@@ -33,11 +35,17 @@ describe("claim approval proof", () => {
 
     expect(proof).toEqual({
       action: "claim_approval",
-      proofVersion: 2,
+      proofVersion: 3,
       approvedVersion: 5,
       claimDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(hasValidClaimApprovalAudit(audited)).toBe(true);
+    expect(
+      hasValidClaimApprovalAudit({
+        ...audited,
+        factKey: "quality_certifications",
+      }),
+    ).toBe(false);
     expect(
       hasValidClaimApprovalAudit({
         ...audited,
@@ -62,6 +70,67 @@ describe("claim approval proof", () => {
         verificationMethod: "forged_method",
       }),
     ).toBe(false);
+  });
+
+  it("does not let a legacy v2 proof authorize an origin-keyed Claim with new fact semantics", () => {
+    expect(
+      hasValidClaimApprovalAudit({
+        ...CLAIM,
+        version: 5,
+        verifiedBy: "reviewer-42",
+        verifiedAt: new Date("2026-07-18T12:00:00.000Z"),
+        verificationMethod: "human_review",
+        verificationProof: {
+          action: "claim_approval",
+          proofVersion: 2,
+          approvedVersion: 5,
+          claimDigest: "a".repeat(64),
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a valid v2 proof readable only for a genuinely legacy Claim", () => {
+    const legacy = {
+      ...CLAIM,
+      originKey: null,
+      factKey: null,
+      version: 5,
+      verifiedBy: "reviewer-42",
+      verifiedAt: new Date("2026-07-18T12:00:00.000Z"),
+      verificationMethod: "human_review" as const,
+    };
+    const claimDigest = createHash("sha256")
+      .update(
+        `claim-approval/2\u0000${JSON.stringify([
+          legacy.id,
+          legacy.workspaceId,
+          legacy.companyId,
+          legacy.sourceId,
+          legacy.originKey,
+          legacy.type,
+          legacy.statement,
+          legacy.validUntil,
+          legacy.version,
+          legacy.verifiedBy,
+          legacy.verifiedAt.toISOString(),
+          legacy.verificationMethod,
+        ])}`,
+        "utf8",
+      )
+      .digest("hex");
+
+    expect(
+      hasValidClaimApprovalAudit({
+        ...legacy,
+        verificationProof: {
+          action: "claim_approval",
+          proofVersion: 2,
+          approvedVersion: legacy.version,
+          claimDigest,
+        },
+      }),
+    ).toBe(true);
   });
 
   it("rejects a proof whose version does not equal the persisted claim version", () => {

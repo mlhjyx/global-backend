@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context as ActivityContext } from '@temporalio/activity';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   createSiteBuilderActivities,
   buildCompensatedSteps,
   intakeToMarkdown,
+  runBrandProfilePersistenceWithRetry,
   RefurbishActivityInput,
   RefurbishFinalizeInput,
 } from './site-builder.activities';
@@ -66,6 +67,52 @@ function spyBudget() {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+describe('runBrandProfilePersistenceWithRetry', () => {
+  it('retries a deadlocked P2034 transaction and preserves the P2002 retry path', async () => {
+    const deadlock = new Prisma.PrismaClientKnownRequestError('deadlock', {
+      code: 'P2034',
+      clientVersion: 'test',
+    });
+    const uniqueClash = new Prisma.PrismaClientKnownRequestError('unique', {
+      code: 'P2002',
+      clientVersion: 'test',
+    });
+    const operation = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(deadlock)
+      .mockRejectedValueOnce(uniqueClash)
+      .mockResolvedValueOnce('persisted');
+
+    await expect(
+      runBrandProfilePersistenceWithRetry(operation),
+    ).resolves.toBe('persisted');
+    expect(operation).toHaveBeenCalledTimes(3);
+  });
+
+  it('bounds repeated P2034 retries and rethrows the final database error', async () => {
+    const deadlock = new Prisma.PrismaClientKnownRequestError('deadlock', {
+      code: 'P2034',
+      clientVersion: 'test',
+    });
+    const operation = vi.fn<() => Promise<never>>().mockRejectedValue(deadlock);
+
+    await expect(
+      runBrandProfilePersistenceWithRetry(operation, 3),
+    ).rejects.toBe(deadlock);
+    expect(operation).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry an unrelated persistence failure', async () => {
+    const failure = new Error('validation failed');
+    const operation = vi.fn<() => Promise<never>>().mockRejectedValue(failure);
+
+    await expect(runBrandProfilePersistenceWithRetry(operation)).rejects.toBe(
+      failure,
+    );
+    expect(operation).toHaveBeenCalledOnce();
+  });
 });
 
 describe('processKbAsset — Temporal heartbeat/cancellation', () => {

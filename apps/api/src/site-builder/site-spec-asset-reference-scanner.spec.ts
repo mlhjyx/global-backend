@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SiteSpecAssetReferenceScanner } from './site-spec-asset-reference-scanner';
 
 const ASSET = '11111111-1111-4111-8111-111111111111';
@@ -91,19 +91,20 @@ describe('SiteSpecAssetReferenceScanner', () => {
   });
 
   it('reports an immutable certification Claim bridge as an Asset usage', async () => {
+    const findClaimBridges = vi.fn(async () => [
+      {
+        brandProfileId: '22222222-2222-4222-8222-222222222222',
+        factIndex: 1,
+        claimId: '33333333-3333-4333-8333-333333333333',
+      },
+    ]);
     const tx = {
       site: {
         findUnique: async () => ({ profile: null, activeVersionId: null }),
       },
       siteVersion: { findFirst: async () => null },
       brandProfileClaimBridge: {
-        findMany: async () => [
-          {
-            brandProfileId: '22222222-2222-4222-8222-222222222222',
-            factIndex: 1,
-            claimId: '33333333-3333-4333-8333-333333333333',
-          },
-        ],
+        findMany: findClaimBridges,
       },
     };
 
@@ -121,5 +122,8 @@ describe('SiteSpecAssetReferenceScanner', () => {
           '/brandProfiles/22222222-2222-4222-8222-222222222222/facts/1/certAssetId',
       },
     ]);
+    expect(findClaimBridges).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 100 }),
+    );
   });
 });

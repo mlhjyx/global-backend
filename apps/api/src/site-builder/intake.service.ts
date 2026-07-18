@@ -169,6 +169,16 @@ export class IntakeService {
         // 同 workspace 的“幂等查/一站限制/建站/建 run/写 response”必须原子串行。
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-intake-${ctx.workspaceId}`}))`;
 
+        // SaaS owns tenant identity; this backend materializes only the FK
+        // anchor. Site Builder may be the first write for a freshly issued
+        // workspace token, so provision it in the same locked transaction
+        // before CompanyProfile (which has a real Workspace FK).
+        await tx.workspace.upsert({
+          where: { id: ctx.workspaceId },
+          update: {},
+          create: { id: ctx.workspaceId },
+        });
+
         if (idempotencyKey) {
           const prior = await tx.idempotencyKey.findUnique({
             where: {
