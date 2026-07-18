@@ -458,6 +458,10 @@ const PASSIVE_VOICE_SUBJECT_TAIL_PATTERN =
   /\b(?:is|was|are|were|be|been|being)\s*$/iu;
 const CLOSED_NON_PERSONAL_HOMOGRAPH_TEXT_PATTERN =
   /^(?:programmable logic controller(?: integration)?|curing agent|global partner network|brand owner|buyer-focused documentation|员工人数(?:是多少|为多少|有多少|多少)?[?？]?|有哪些代表产品[?？]?)$/iu;
+const NON_PERSONAL_AUDIENCE_MODIFIER_TAIL_PATTERN =
+  /^[-\s]+(?:focused|oriented|centric|focus)\b/iu;
+const NON_PERSONAL_AUDIENCE_MODIFIER_SUBJECT_PATTERN =
+  /^(?:focused|oriented|centric|focus)\b/iu;
 
 function isSafeNonPersonalAttributionSubject(
   subject: string | undefined,
@@ -541,6 +545,7 @@ function isClosedTechnicalRoleToken(
   const before = text.slice(Math.max(0, start - 40), start);
   const after = text.slice(end, Math.min(text.length, end + 32));
   return (
+    NON_PERSONAL_AUDIENCE_MODIFIER_TAIL_PATTERN.test(after) ||
     (role === 'controller' &&
       /\b(?:programmable logic|plc|motor|pressure|temperature|motion|machine|automation|industrial|electronic)\s+$/iu.test(
         before,
@@ -621,14 +626,14 @@ function explicitPersonalAttributionMatches(
   const pushUnsafeSubjects = (
     pattern: RegExp,
     rule: string,
-    predicate: (subject: string) => boolean =
+    predicate: (subject: string, match: RegExpMatchArray) => boolean =
       isExplicitPersonalAttributionSubject,
     segments: readonly string[] = [normalized],
   ): void => {
     for (const segment of segments) {
       for (const match of matchesForPattern(segment, pattern)) {
         const subject = match[1];
-        if (subject && predicate(subject)) {
+        if (subject && predicate(subject, match)) {
           matches.push({ rule, subject, matchedText: match[0] });
         }
       }
@@ -651,7 +656,13 @@ function explicitPersonalAttributionMatches(
   }
   pushUnsafeSubjects(PERSONAL_BYLINE_RELATION_PATTERN, 'byline');
   pushUnsafeSubjects(PERSONAL_BARE_BYLINE_PATTERN, 'bareByline');
-  pushUnsafeSubjects(PERSONAL_ROLE_LABEL_PATTERN, 'roleLabel');
+  pushUnsafeSubjects(
+    PERSONAL_ROLE_LABEL_PATTERN,
+    'roleLabel',
+    (subject) =>
+      !NON_PERSONAL_AUDIENCE_MODIFIER_SUBJECT_PATTERN.test(subject.trim()) &&
+      isExplicitPersonalAttributionSubject(subject),
+  );
   pushUnsafeSubjects(PERSONAL_POSTFIX_ROLE_PATTERN, 'postfixRole');
   pushUnsafeSubjects(
     PERSONAL_WHITESPACE_POSTFIX_ROLE_PATTERN,
@@ -1691,7 +1702,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
 export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/11';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
-  'brand-profile-route-validation/10';
+  'brand-profile-route-validation/11';
 
 /**
  * 品牌档案不需要的敏感档案组（复审 F2：contact 组含邮箱/电话——数据最小化 Art.5(1)(c)，
