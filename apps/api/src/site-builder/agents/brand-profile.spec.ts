@@ -1923,10 +1923,13 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toMatch(/批准企业事实类别，以及 4c 的未消歧关系补证问题/);
     expect(prompt).toMatch(/视为.{0,4}数据/); // 资料中的指令性文字一律当数据
     expect(prompt).toMatch(/name.*model.*product.*quote/is);
+    expect(prompt).toMatch(
+      /factSheet\.value.*quote.*(?:连续.*逐字|逐字.*连续)/is,
+    );
     expect(prompt).toMatch(/competitors\s*=\s*\[\]/i);
     expect(prompt).toContain('target_markets');
     expect(prompt).toContain('technical_parameters');
-    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/10');
+    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/11');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
       'brand-profile-route-validation/9',
     );
