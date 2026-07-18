@@ -152,6 +152,20 @@ const strictFactKeyMigration =
         "utf8",
       )
     : "";
+const approvalBridgeGuardMigrationDirs = readdirSync(migrationsDir).filter(
+  (entry) => /site_builder_r4a2_claim_approval_bridge_guard$/.test(entry),
+);
+const approvalBridgeGuardMigration =
+  approvalBridgeGuardMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          approvalBridgeGuardMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -470,6 +484,22 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     );
     expect(strictFactKeyMigration).not.toMatch(
       /UPDATE[\s\S]+SET[\s\S]+fact_key/i,
+    );
+  });
+
+  it("requires and locks a surviving exact bridge for origin-keyed approval transitions", () => {
+    expect(approvalBridgeGuardMigrationDirs).toHaveLength(1);
+    expect(approvalBridgeGuardMigration).toContain(
+      "CREATE OR REPLACE FUNCTION reject_bridged_claim_identity_update()",
+    );
+    expect(approvalBridgeGuardMigration).toMatch(
+      /NEW\."origin_key" IS NOT NULL[\s\S]+FROM "brand_profile_claim_bridge" bridge[\s\S]+JOIN "brand_profile_evidence_ref" ref[\s\S]+bridge\."claim_id" = NEW\."id"[\s\S]+ref\."fact_key" = NEW\."fact_key"[\s\S]+FOR SHARE OF bridge/i,
+    );
+    expect(approvalBridgeGuardMigration).toMatch(
+      /RAISE EXCEPTION 'origin-keyed Claim approval requires a surviving exact bridge'/,
+    );
+    expect(approvalBridgeGuardMigration).toMatch(
+      /NEW\."origin_key" IS NULL[\s\S]+NEW\."fact_key" IS NULL/,
     );
   });
 });
