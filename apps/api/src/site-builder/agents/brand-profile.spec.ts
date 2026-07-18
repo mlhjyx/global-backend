@@ -1934,7 +1934,9 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toMatch(/competitors\s*=\s*\[\]/i);
     expect(prompt).toContain('target_markets');
     expect(prompt).toContain('technical_parameters');
-    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/13');
+    expect(prompt).toMatch(/factSheet\.key.*只允许以下 exact keys/is);
+    expect(prompt).not.toContain('可用示例');
+    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/14');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
       'brand-profile-route-validation/14',
     );
