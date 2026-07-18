@@ -93,18 +93,31 @@ describe('MODEL evaluation provenance guards', () => {
         output,
       }),
     ).toBeUndefined();
-    expect(
-      captureDiagnosticRejectedOutput(true, {
-        model: 'claude-sonnet-5',
-        fixtureId: 'industrial-pump-rich',
-        attempt: 1,
-        output,
-      }),
-    ).toEqual({
+    const captured = captureDiagnosticRejectedOutput(true, {
       model: 'claude-sonnet-5',
       fixtureId: 'industrial-pump-rich',
       attempt: 1,
+      validationError:
+        'BrandProfile output hard gate rejected [valueProps/roleLabel:1]',
       output,
+    });
+    output.glossary[0].definition = 'mutated after validation';
+    expect(captured).toEqual({
+      model: 'claude-sonnet-5',
+      fixtureId: 'industrial-pump-rich',
+      attempt: 1,
+      validationError:
+        'BrandProfile output hard gate rejected [valueProps/roleLabel:1]',
+      output: {
+        valueProps: [],
+        glossary: [
+          {
+            term: 'Observed term',
+            definition: 'Pumps designed for chemical transfer.',
+          },
+        ],
+        gaps: [],
+      },
     });
   });
 
