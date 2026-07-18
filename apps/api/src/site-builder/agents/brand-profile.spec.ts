@@ -584,12 +584,12 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
       quote: 'Representative products: Industrial pumps',
     },
     {
-      key: 'target markets',
+      key: 'target_markets',
       value: 'Germany and France',
       quote: 'Target markets: Germany and France',
     },
     {
-      key: 'technical parameter',
+      key: 'technical_parameter',
       value: 'Maximum pressure: 400 bar',
       quote: 'Technical parameter — Maximum pressure: 400 bar',
     },

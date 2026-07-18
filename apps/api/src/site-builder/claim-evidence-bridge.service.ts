@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { RequestContext } from "../auth/request-context";
 import { hasValidClaimApprovalAudit } from "../claim/claim-verification";
 import { isCertificationClaim } from "./claim-classification";
+import { assertCanonicalClaimFactKey } from "./claim-fact-key";
 
 export type BridgeClaimStatus =
   | "INGESTED"
@@ -190,7 +191,7 @@ export function claimOriginIdentity(
   normalizedStatement: string;
   claimOriginKey: string;
 } {
-  const normalizedFactKey = normalizeClaimIdentityPart(input.factKey);
+  const normalizedFactKey = assertCanonicalClaimFactKey(input.factKey);
   const normalizedType = normalizeClaimIdentityPart(input.claimType);
   const normalizedStatement = normalizeClaimIdentityPart(input.statement);
   return {

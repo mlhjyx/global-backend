@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { EvidenceRefV2, EvidenceSourceRole } from '@global/contracts';
+import {
+  CANONICAL_CLAIM_FACT_KEY_SOURCE,
+  isCanonicalClaimFactKey,
+} from '../claim-fact-key';
 import type { SiteBuilderTaskDefinition } from './ai-task';
 import type { FrozenEvidenceSource } from './evidence-ref';
 import {
@@ -1339,6 +1343,14 @@ export function enforceEvidenceGateV2(
   const createEvidenceRefId = opts.createEvidenceRefId ?? randomUUID;
 
   for (const item of items) {
+    if (!isCanonicalClaimFactKey(item.key)) {
+      gaps.push({
+        field: item.key,
+        reason: 'unsupported_public_fact_key',
+        hint: `「${clampHint(item.key)}」不是严格 lower_snake_case 企业事实键，不能进入公共 Claim/Evidence`,
+      });
+      continue;
+    }
     if (isPersonBearingFact(item)) {
       gaps.push({
         field: 'personal_data',
@@ -1571,7 +1583,12 @@ export const BRAND_PROFILE_OUTPUT_SCHEMA: Record<string, unknown> = {
         required: ['key', 'value'],
         additionalProperties: false,
         properties: {
-          key: { type: 'string', maxLength: 120 },
+          key: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 120,
+            pattern: CANONICAL_CLAIM_FACT_KEY_SOURCE,
+          },
           value: { type: 'string', maxLength: 500 },
           evidence: evidenceJsonSchema,
         },
