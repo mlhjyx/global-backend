@@ -9,9 +9,11 @@ import {
   assertUniqueEvaluationValues,
   captureDiagnosticRejectedOutput,
   classifyEvaluationOutcome,
+  evaluationProbePolicy,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
+  isProvenUpstreamModelResolution,
   prepareEvaluationReportPath,
   routeForModelEvaluation,
   routeForTaskBaselineEvaluation,
@@ -89,6 +91,10 @@ describe('routeForModelEvaluation', () => {
       },
     });
     expect(baseline.policy).not.toHaveProperty('promotionEvidenceId');
+    expect(evaluationProbePolicy(baseline)).toEqual({
+      maxCostCents: 40,
+      reasoningEffort: 'low',
+    });
   });
 });
 
@@ -241,6 +247,30 @@ describe('MODEL evaluation provenance guards', () => {
       isExactUpstreamModelResolution({
         requestedModel: 'gpt-5.6-terra',
         resolvedModel: 'gpt-5.6-terra',
+        modelResolutionSource: 'requested_fallback',
+      }),
+    ).toBe(false);
+  });
+
+  it('distinguishes a proven versioned baseline alias from exact candidate identity', () => {
+    const versionedAlias = {
+      requestedModel: 'glm-5.2',
+      resolvedModel: 'glm-5-2-260617',
+      reportedModel: 'glm-5-2-260617',
+      modelResolutionSource: 'upstream_response' as const,
+    };
+    expect(isExactUpstreamModelResolution(versionedAlias)).toBe(false);
+    expect(isProvenUpstreamModelResolution(versionedAlias)).toBe(true);
+    expect(
+      isProvenUpstreamModelResolution({
+        ...versionedAlias,
+        resolvedModel: 'different-model',
+      }),
+    ).toBe(false);
+    expect(
+      isProvenUpstreamModelResolution({
+        requestedModel: 'glm-5.2',
+        resolvedModel: 'glm-5.2',
         modelResolutionSource: 'requested_fallback',
       }),
     ).toBe(false);
