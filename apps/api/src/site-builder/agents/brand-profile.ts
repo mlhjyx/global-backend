@@ -1686,7 +1686,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 };
 
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
-export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/10';
+export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/11';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
   'brand-profile-route-validation/9';
 
@@ -1750,6 +1750,7 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
     '   找不到逐字原文的断言不要写进 factSheet，写进 gaps。',
     '3a. key 含 name、model、product、company、brand 时，factSheet.value 的实质值必须逐字出现在 quote；',
     '    不得拼接、概括或翻译产品/名称。无法同时满足英文 value 与逐字 quote 时写进 gaps。',
+    '3b. 每项 factSheet.value 本身必须是 quote 中连续、逐字相同的原文片段；不得把同一 quote 的多个词组拼接、改词性、概括或推导为新句，无法做到就写进 gaps。',
     '4. factSheet.key 必须使用 lower_snake_case，只使用企业身份、产品/服务、能力、认证、市场、行业、工艺/设施、公司历史、人数汇总或技术参数类别。',
     '    可用示例：business_role、products、capabilities、certifications、target_markets、industries、manufacturing_processes、facilities、founded_year、employee_count、technical_parameters。',
     '4b. 只有缺失的上述批准企业事实类别，以及 4c 的未消歧关系补证问题，可写进 gaps，其他自由字段直接省略。',
