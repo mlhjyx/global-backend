@@ -2357,6 +2357,18 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
         ...base,
         glossary: [
           {
+            term: 'MX Series',
+            definition:
+              'Magnetic drive pump series designed for seal-less transfer of corrosive process media.',
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
             term: 'Design attribution',
             definition: 'Jane Smith designed the pump system.',
           },
