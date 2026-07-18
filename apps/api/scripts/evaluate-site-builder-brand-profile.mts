@@ -50,6 +50,7 @@ import {
   sha256CanonicalJson,
   sha256Bytes,
   sha256Text,
+  routeForTaskBaselineEvaluation,
   routeForTaskEvaluation,
   runWithEvaluationDeadline,
   sanitizeGatewayBaseUrl,
@@ -391,6 +392,7 @@ async function probeCandidate(
   gateway: RouterModelGateway,
   route: TaskRoute,
   requestedModel: string,
+  fallbackIndex = 0,
 ): Promise<EvalProbe> {
   const started = performance.now();
   const transport = transportForCandidate(requestedModel);
@@ -418,7 +420,7 @@ async function probeCandidate(
           {
             workspaceId: EVAL_WORKSPACE_ID,
             runId: `model1-probe:${requestedModel}`,
-            modelPolicy: { ...route.policy, fallbackIndex: 0 },
+            modelPolicy: { ...route.policy, fallbackIndex },
           },
         ),
     );
@@ -552,12 +554,40 @@ if (
 }
 const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
 if (reportPath) await prepareEvaluationReportPath(reportPath);
+if (evidenceRole === 'baseline' && models.length !== 1) {
+  throw new Error('baseline evaluation requires exactly one legacy route');
+}
 const runs: EvalRun[] = [];
 const probes: EvalProbe[] = [];
 const diagnosticRejectedOutputs: Array<
   DiagnosticRejectedOutput<BrandProfileOutput>
 > = [];
-const evaluationRoute = candidateRoute(models[0]);
+const modelExecutions = models.map((model) => {
+  const route =
+    evidenceRole === 'baseline'
+      ? routeForTaskBaselineEvaluation('site_builder.brand_profile')
+      : candidateRoute(model);
+  if (evidenceRole === 'baseline' && route.primary !== model) {
+    throw new Error(
+      `baseline MODEL_EVAL_MODELS must name the legacy primary ${route.primary}`,
+    );
+  }
+  return {
+    model,
+    route,
+    modelGateway: gatewayFor(model),
+    transport: transportForCandidate(model),
+  };
+});
+const routedModels = [
+  ...new Set(
+    modelExecutions.flatMap(({ route }) => [
+      route.primary,
+      ...route.fallbacks,
+    ]),
+  ),
+];
+const evaluationRoute = modelExecutions[0].route;
 const expectedRunCount = models.length * fixtures.length * repeats;
 const timePlan: EvaluationTimePlan = {
   taskId: BRAND_PROFILE_TASK.id,
@@ -572,9 +602,11 @@ const timePlan: EvaluationTimePlan = {
   // Every probe and fixture attempt is independently bounded by its own task
   // route. This is an upper safety bound, not a predicted completion time.
   absoluteMaximumWallClockMs:
-    models.length * (1 + fixtures.length * repeats) * evaluationRoute.timeoutMs,
+    routedModels.length *
+    (1 + fixtures.length * repeats) *
+    evaluationRoute.timeoutMs,
 };
-const gateway = await gatewaySnapshot(models);
+const gateway = await gatewaySnapshot(routedModels);
 const sourceFiles = await sourceFileFingerprints();
 progress('evaluation_started', {
   models,
@@ -613,30 +645,29 @@ function contractForFixture(
   return contract;
 }
 
-const modelExecutions = models.map((model) => ({
-  model,
-  route: candidateRoute(model),
-  modelGateway: gatewayFor(model),
-  transport: transportForCandidate(model),
-}));
-
 for (const { model, route, modelGateway, transport } of modelExecutions) {
   progress('model_started', {
     model,
     transport,
+    routeModels: [route.primary, ...route.fallbacks],
     expectedRuns: fixtures.length * repeats,
     timeoutMs: route.timeoutMs,
   });
-  const probe = gateway.requestedModelsPresent[model]
-    ? await probeCandidate(modelGateway, route, model)
-    : {
-        requestedModel: model,
-        transport,
-        accepted: false,
-        elapsedMs: 0,
-        error: 'requested model absent from current new-api model catalog',
-      };
-  probes.push(probe);
+  for (const [fallbackIndex, routeModel] of [
+    route.primary,
+    ...route.fallbacks,
+  ].entries()) {
+    const probe = gateway.requestedModelsPresent[routeModel]
+      ? await probeCandidate(modelGateway, route, routeModel, fallbackIndex)
+      : {
+          requestedModel: routeModel,
+          transport: transportForCandidate(routeModel),
+          accepted: false,
+          elapsedMs: 0,
+          error: 'requested model absent from current new-api model catalog',
+        };
+    probes.push(probe);
+  }
 }
 
 const preflightPassed = probes.every((probe) => probe.accepted === true);
@@ -723,10 +754,14 @@ if (preflightPassed) {
             });
           }
           const outcome = evaluateBrandProfileOutput(prepared, result.data);
+          const requestedModel = [
+            result.modelSnapshot.primary,
+            ...result.modelSnapshot.fallbacks,
+          ][result.fallbackIndex] ?? model;
           runs.push({
             model,
-            requestedModel: model,
-            transport,
+            requestedModel,
+            transport: transportForCandidate(requestedModel),
             provider: result.provider,
             resolvedModel: result.model,
             reportedModel: result.reportedModel,
@@ -794,10 +829,11 @@ if (preflightPassed) {
           const usage = error instanceof AiTaskError ? error.usage : undefined;
           const finalAttempt =
             error instanceof AiTaskError ? error.attempts.at(-1) : undefined;
+          const requestedModel = finalAttempt?.model ?? model;
           runs.push({
             model,
-            requestedModel: model,
-            transport,
+            requestedModel,
+            transport: transportForCandidate(requestedModel),
             provider: finalAttempt?.provider,
             resolvedModel: finalAttempt?.resolvedModel,
             reportedModel: finalAttempt?.reportedModel,

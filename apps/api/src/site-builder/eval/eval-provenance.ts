@@ -11,6 +11,7 @@ import {
   type SiteBuilderTaskId,
 } from '../agents/task-route-bindings';
 import { SITE_BUILDER_MODEL_PROFILES } from '../agents/model-profiles';
+import { modelPolicyRegistry } from '../agents/model-policy.registry';
 
 export interface EvaluationExecutionPolicy {
   /** Registry/env policy used by the gateway, including profile and data policy. */
@@ -378,6 +379,42 @@ export function routeForTaskEvaluation(
       routeState: 'currentRoute',
       lifecycle: 'active',
       source: 'env_override',
+      dataPolicy: { ...dataPolicy },
+      maxCostCents: binding.maxCostCents,
+      route,
+    },
+  };
+}
+
+/**
+ * A baseline replays the complete frozen pre-promotion production route. It is
+ * one route-shaped comparator: a primary failure may legitimately reach the
+ * configured fallback, but every run must record the model that actually
+ * served the accepted artifact.
+ */
+export function routeForTaskBaselineEvaluation(
+  taskId: SiteBuilderTaskId,
+): TaskRoute {
+  const binding = getSiteBuilderTaskRouteBinding(taskId);
+  const profile = SITE_BUILDER_MODEL_PROFILES[binding.profile];
+  const legacy = modelPolicyRegistry.getLegacyTaskPolicy(taskId);
+  const dataPolicy = { ...profile.dataPolicy };
+  const route = {
+    primary: legacy.route.primary,
+    fallbacks: [...legacy.route.fallbacks],
+  };
+  return {
+    ...binding,
+    profile: binding.profile,
+    primary: route.primary,
+    fallbacks: [...route.fallbacks],
+    dataPolicy,
+    policy: {
+      policyVersion: SITE_BUILDER_MODEL_POLICY_VERSION,
+      profile: binding.profile,
+      routeState: legacy.state,
+      lifecycle: legacy.lifecycle,
+      source: 'registry',
       dataPolicy: { ...dataPolicy },
       maxCostCents: binding.maxCostCents,
       route,
