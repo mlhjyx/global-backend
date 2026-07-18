@@ -43,6 +43,7 @@ import {
   assertEvaluationReportPathAvailable,
   assertUniqueEvaluationValues,
   inspectEvaluationMatrix,
+  inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
   sha256CanonicalJson,
   sha256Bytes,
@@ -584,7 +585,7 @@ const taskContract: EvalTaskContract = {
   evaluatorVersion: BRAND_PROFILE_EVALUATOR_VERSION,
   evaluatorRubricSha256: sha256CanonicalJson(BRAND_PROFILE_EVALUATOR_RUBRIC),
   fixtureSchemaVersion: BRAND_PROFILE_EVAL_FIXTURE_SCHEMA_VERSION,
-  evaluationPolicyVersion: 'brand-profile-evaluation-policy/2',
+  evaluationPolicyVersion: 'brand-profile-evaluation-policy/3',
   sourceFiles,
   sourceBundleSha256: sha256CanonicalJson(sourceFiles),
 };
@@ -877,6 +878,11 @@ const matrixIntegrity = inspectEvaluationMatrix(
   repeats,
   runs,
 );
+const finalSourceFiles = await sourceFileFingerprints();
+const sourceIntegrity = inspectEvaluationSourceBundle(
+  sourceFiles,
+  finalSourceFiles,
+);
 const diagnosticsEnabled =
   matrixScope !== 'full' ||
   diagnosticRouteValidationBypass ||
@@ -888,6 +894,7 @@ const promotionEligible =
   evidenceRole === 'candidate' &&
   !diagnosticsEnabled &&
   preflightPassed &&
+  sourceIntegrity.stable &&
   matrixIntegrity.complete &&
   artifactFailures === 0 &&
   probes.every(
@@ -902,7 +909,9 @@ const promotionEligible =
   );
 const status = !preflightPassed
   ? 'failed_preflight'
-  : !matrixIntegrity.complete
+  : !sourceIntegrity.stable
+    ? 'failed_source_drift'
+    : !matrixIntegrity.complete
     ? 'failed_incomplete_matrix'
     : artifactFailures > 0
       ? 'completed_with_failures'
@@ -930,6 +939,7 @@ const report = JSON.stringify(
     repeats,
     fixtureCount: fixtures.length,
     timePlan,
+    sourceIntegrity,
     matrixIntegrity,
     taskContract,
     fixtureContracts: [...fixtureContracts.values()],
@@ -955,6 +965,7 @@ console.log(report);
 
 if (
   !preflightPassed ||
+  !sourceIntegrity.stable ||
   !matrixIntegrity.complete ||
   artifactFailures > 0 ||
   (!diagnosticsEnabled && !promotionEligible)
