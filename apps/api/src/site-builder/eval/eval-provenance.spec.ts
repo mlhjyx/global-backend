@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { resolveTaskRoute } from '../agents/task-routes';
@@ -8,6 +11,7 @@ import {
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
+  prepareEvaluationReportPath,
   routeForModelEvaluation,
   routeForTaskEvaluation,
   sanitizeGatewayBaseUrl,
@@ -93,6 +97,23 @@ describe('MODEL evaluation provenance guards', () => {
         async () => false,
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it('creates a new report parent before paid calls while retaining no-overwrite semantics', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'model-eval-report-'));
+    const reportPath = join(root, 'new-evidence-id', 'candidate-report.json');
+
+    try {
+      await expect(
+        prepareEvaluationReportPath(reportPath),
+      ).resolves.toBeUndefined();
+      await writeFile(reportPath, '{}\n', { encoding: 'utf8', flag: 'wx' });
+      await expect(prepareEvaluationReportPath(reportPath)).rejects.toThrow(
+        /report path already exists/i,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('sanitizes gateway URL credentials, query and fragment while retaining the API base path', () => {
