@@ -352,6 +352,8 @@ describe("claimTypeForBrandFact", () => {
     ["safety_standard", "IEC61508", "certification"],
     ["automotive_quality", "IATF16949", "certification"],
     ["aerospace_quality", "AS9100", "certification"],
+    ["质量体系", "通过ISO9001标准", "certification"],
+    ["合规", "符合CE", "certification"],
     ["maximum_pressure", "Maximum pressure 400 bar", "param"],
     ["customer_case", "Delivered a verified customer project", "case"],
     ["main_products", "Industrial pumps", "capability"],
