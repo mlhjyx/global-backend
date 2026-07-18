@@ -346,6 +346,123 @@ async function main(): Promise<void> {
       return brandProfileId;
     };
 
+    const createDirectBridgeFixture = async (input: {
+      version: number;
+      sourceRole: "fact_candidate" | "research_hint";
+      claimType: string;
+      claimStatement: string;
+    }) => {
+      const sourceSnapshotId = randomUUID();
+      const brandProfileId = randomUUID();
+      const evidenceRefId = randomUUID();
+      const claimId = randomUUID();
+      const evidenceId = randomUUID();
+      const factKey = "maximum_pressure";
+      const factValue = "Maximum pressure: 400 bar";
+      const snapshotText = `Verified ${factValue.toLowerCase()}.`;
+      const quote = factValue.toLowerCase();
+      const quoteStart = snapshotText.indexOf(quote);
+      const sourceContentHash = sha256(snapshotText);
+
+      await owner.$transaction(async (tx) => {
+        await tx.siteEvidenceSourceSnapshot.create({
+          data: {
+            id: sourceSnapshotId,
+            workspaceId,
+            siteId,
+            sourceKey: `verify-r4-a2:direct:${input.version}`,
+            sourceType: "upload",
+            sourceRole: input.sourceRole,
+            contentHash: sourceContentHash,
+            normalizationVersion: "evidence-text/1",
+            snapshotText,
+            provenance: { kind: "r4_a2_direct_insert_verifier" },
+            dedupeKey: sha256(`${siteId}:direct:${input.version}`),
+          },
+        });
+        await tx.brandProfile.create({
+          data: {
+            id: brandProfileId,
+            workspaceId,
+            siteId,
+            version: input.version,
+            evidenceSchemaVersion: 2,
+            factSheet: [{ key: factKey, value: factValue }],
+            gaps: [] as Prisma.InputJsonValue,
+          },
+        });
+        await tx.brandProfileEvidenceRef.create({
+          data: {
+            id: evidenceRefId,
+            workspaceId,
+            siteId,
+            brandProfileId,
+            factIndex: 0,
+            factKey,
+            sourceSnapshotId,
+            sourceContentHash,
+            quote,
+            quoteStart,
+            quoteEnd: quoteStart + quote.length,
+          },
+        });
+        await tx.claim.create({
+          data: {
+            id: claimId,
+            workspaceId,
+            companyId: companyProfileId,
+            originKey: sha256(`${brandProfileId}:direct-claim`),
+            type: input.claimType,
+            statement: input.claimStatement,
+            status: "NEEDS_REVIEW",
+            confidence: 1,
+          },
+        });
+        await tx.evidence.create({
+          data: {
+            id: evidenceId,
+            workspaceId,
+            claimId,
+            originKey: sha256(`${brandProfileId}:direct-evidence`),
+            sourceSnapshotId,
+            sourceContentHash,
+            snippet: quote,
+            quoteStart,
+            quoteEnd: quoteStart + quote.length,
+            confidence: 1,
+          },
+        });
+      });
+
+      return {
+        brandProfileId,
+        evidenceRefId,
+        claimId,
+        evidenceId,
+      };
+    };
+
+    const insertDirectBridge = async (fixture: {
+      brandProfileId: string;
+      evidenceRefId: string;
+      claimId: string;
+      evidenceId: string;
+    }): Promise<void> => {
+      await app.withWorkspace(workspaceId, (tx) =>
+        tx.$executeRaw`
+          INSERT INTO brand_profile_claim_bridge (
+            id, workspace_id, site_id, company_profile_id, brand_profile_id,
+            evidence_ref_id, fact_index, claim_id, evidence_id, bridge_key
+          ) VALUES (
+            ${randomUUID()}::uuid, ${workspaceId}::uuid, ${siteId}::uuid,
+            ${companyProfileId}::uuid, ${fixture.brandProfileId}::uuid,
+            ${fixture.evidenceRefId}::uuid, 0, ${fixture.claimId}::uuid,
+            ${fixture.evidenceId}::uuid,
+            ${sha256(`${fixture.brandProfileId}:direct-edge`)}
+          )`,
+      );
+    };
+
     console.log("③ atomic projection, replay reuse and NEEDS_REVIEW default");
     const firstProfileId = await createProfile(1);
     const projectProfile = (brandProfileId: string) =>
@@ -684,6 +801,63 @@ async function main(): Promise<void> {
         errorDetails(exactEvidenceRejected),
       ),
       "database rejects Evidence that disagrees with its exact EvidenceRef",
+    );
+
+    const researchHintFixture = await createDirectBridgeFixture({
+      version: 10,
+      sourceRole: "research_hint",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+    });
+    let researchHintRejected: unknown;
+    try {
+      await insertDirectBridge(researchHintFixture);
+    } catch (error) {
+      researchHintRejected = error;
+    }
+    check(
+      /research_hint is not publishable/.test(
+        errorDetails(researchHintRejected),
+      ),
+      "database rejects exact research_hint evidence for every Claim type",
+    );
+
+    const unrelatedClaimFixture = await createDirectBridgeFixture({
+      version: 11,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Unrelated claim statement",
+    });
+    let unrelatedClaimRejected: unknown;
+    try {
+      await insertDirectBridge(unrelatedClaimFixture);
+    } catch (error) {
+      unrelatedClaimRejected = error;
+    }
+    check(
+      /Claim does not match its exact BrandProfile fact/.test(
+        errorDetails(unrelatedClaimRejected),
+      ),
+      "database binds Claim statement to its exact BrandProfile fact",
+    );
+
+    const wrongClaimTypeFixture = await createDirectBridgeFixture({
+      version: 12,
+      sourceRole: "fact_candidate",
+      claimType: "case",
+      claimStatement: "Maximum pressure: 400 bar",
+    });
+    let wrongClaimTypeRejected: unknown;
+    try {
+      await insertDirectBridge(wrongClaimTypeFixture);
+    } catch (error) {
+      wrongClaimTypeRejected = error;
+    }
+    check(
+      /Claim does not match its exact BrandProfile fact/.test(
+        errorDetails(wrongClaimTypeRejected),
+      ),
+      "database binds Claim type to deterministic BrandProfile classification",
     );
 
     let crossTenantRejected = false;
