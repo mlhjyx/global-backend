@@ -80,7 +80,7 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     expect(sha256CanonicalJson(outputFor(prepareBrandProfileEvalFixture(richFixture)))).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshotEvaluationExecutionPolicy(routeForTaskEvaluation('site_builder.brand_profile', 'gpt-5.6-terra'))).toMatchObject({
       maxTokens: 12_000,
-      timeoutMs: 150_000,
+      timeoutMs: 240_000,
       maxCostCents: 40,
       reasoningEffort: null,
       modelPolicy: { profile: 'structured.workspace_materials' },

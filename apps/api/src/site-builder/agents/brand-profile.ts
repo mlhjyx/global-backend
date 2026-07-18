@@ -425,7 +425,7 @@ const SAFE_ROLE_DEFINITIONS = new Set([
   'legal representative',
 ]);
 const SAFE_PUBLIC_TITLE_PHRASE_PATTERN =
-  /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){1,5}(?:series|pumps?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
+  /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){1,5}(?:series|pumps?|skids?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
 const SAFE_ATTRIBUTION_DEPARTMENT_PATTERN =
   /^(?:(?:advanced|customer|design|development|engineering|manufacturing|marketing|operations?|process|product|production|quality|regulatory|research|sales|software|technical)\s+){0,2}(?:committee|department|division|engineering|function|team)$/iu;
 const SAFE_NON_PERSONAL_MODIFIER_SOURCE =
@@ -1702,7 +1702,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
 export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/12';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
-  'brand-profile-route-validation/12';
+  'brand-profile-route-validation/13';
 
 /**
  * 品牌档案不需要的敏感档案组（复审 F2：contact 组含邮箱/电话——数据最小化 Art.5(1)(c)，
