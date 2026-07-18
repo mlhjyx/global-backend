@@ -1899,7 +1899,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toContain('technical_parameters');
     expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/12');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
-      'brand-profile-route-validation/13',
+      'brand-profile-route-validation/14',
     );
   });
 
