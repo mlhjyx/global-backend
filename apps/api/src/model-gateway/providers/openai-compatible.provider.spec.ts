@@ -183,7 +183,13 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       usage: { input_tokens: 101, output_tokens: 45 },
     });
 
-    const result = await responses.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 });
+    const result = await responses.generateStructured<{ ok: boolean }>({
+      task: 't',
+      prompt: 'p',
+      schema: {},
+      maxTokens: 456,
+      reasoningEffort: 'low',
+    });
 
     expect(result).toMatchObject({
       data: { ok: true },
@@ -195,6 +201,7 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       model: 'gpt-5.6-terra',
       max_output_tokens: 456,
       text: { format: { type: 'json_object' } },
+      reasoning: { effort: 'low' },
     });
     expect(lastRequestBody().input).toEqual([
       expect.objectContaining({ role: 'system' }),
@@ -239,6 +246,23 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       messages: [{ role: 'user', content: 'p' }],
     });
     expect(lastRequestBody().system).toContain('只返回符合以下 JSON Schema');
+  });
+
+  it('Claude Messages fails before fetch when the required max token limit is absent', async () => {
+    const messages = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'claude-sonnet-5',
+      modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(messages.generateText({ task: 't', prompt: 'p' })).rejects.toThrow(
+      'maxTokens is required for anthropic-messages transport',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -148,7 +148,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     usage?: { inputTokens?: number; outputTokens?: number };
     finishReason?: string;
     /** OpenAI-compatible gateways may expose the post-alias/upstream model here. */
-      model?: string;
+    model?: string;
   }> {
     const transport = this.cfg.modelTransports?.[opts.model] ?? 'openai-chat-completions';
     switch (transport) {
@@ -246,6 +246,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         max_output_tokens: opts.maxTokens,
         temperature: opts.temperature ?? 0.2,
         ...(opts.json ? { text: { format: { type: 'json_object' } } } : {}),
+        ...(opts.reasoningEffort ? { reasoning: { effort: opts.reasoningEffort } } : {}),
       }),
     });
     if (!res.ok) throw new Error(`${this.id} ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -292,6 +293,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
     finishReason?: string;
     model?: string;
   }> {
+    if (opts.maxTokens === undefined) {
+      throw new Error(`${this.id} ${opts.model}: maxTokens is required for anthropic-messages transport`);
+    }
     const system = messages
       .filter((message) => message.role === 'system')
       .map((message) => message.content)
