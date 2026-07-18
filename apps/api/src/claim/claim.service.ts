@@ -6,6 +6,24 @@ import { buildClaimApprovalProof } from './claim-verification';
 
 type ClaimTarget = 'APPROVED' | 'REVOKED';
 
+interface LockedClaimForTransition {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  sourceId: string | null;
+  originKey: string | null;
+  factKey: string | null;
+  type: string;
+  statement: string;
+  status: ClaimStatus;
+  validUntil: Date | null;
+  version: number;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  verificationMethod: string | null;
+  verificationProof: unknown;
+}
+
 @Injectable()
 export class ClaimService {
   constructor(private readonly prisma: PrismaService) {}
@@ -26,7 +44,28 @@ export class ClaimService {
    */
   async transition(ctx: RequestContext, claimId: string, target: ClaimTarget, expectedVersion?: number) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const claim = await tx.claim.findUnique({ where: { id: claimId } });
+      const [claim] = await tx.$queryRaw<LockedClaimForTransition[]>`
+        SELECT
+          c."id",
+          c."workspace_id" AS "workspaceId",
+          c."company_id" AS "companyId",
+          c."source_id" AS "sourceId",
+          c."origin_key" AS "originKey",
+          c."fact_key" AS "factKey",
+          c."type",
+          c."statement",
+          c."status",
+          c."valid_until" AS "validUntil",
+          c."version",
+          c."verified_by" AS "verifiedBy",
+          c."verified_at" AS "verifiedAt",
+          c."verification_method" AS "verificationMethod",
+          c."verification_proof" AS "verificationProof"
+        FROM "claim" c
+        WHERE c."id" = ${claimId}::uuid
+          AND c."workspace_id" = ${ctx.workspaceId}::uuid
+        FOR UPDATE OF c
+      `;
       if (!claim) {
         throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'claim not found' } });
       }
@@ -42,6 +81,35 @@ export class ClaimService {
         throw new ConflictException({
           error: { code: 'VERSION_CONFLICT', message: 'stale version', details: { current: claim.version } },
         });
+      }
+
+      if (target === 'APPROVED' && (claim.originKey !== null || claim.factKey !== null)) {
+        const exactBridge =
+          claim.originKey !== null && claim.factKey !== null
+            ? await tx.$queryRaw<Array<{ id: string }>>`
+                SELECT bridge."id"
+                FROM "brand_profile_claim_bridge" bridge
+                JOIN "brand_profile_evidence_ref" ref
+                  ON ref."id" = bridge."evidence_ref_id"
+                 AND ref."workspace_id" = bridge."workspace_id"
+                 AND ref."site_id" = bridge."site_id"
+                 AND ref."brand_profile_id" = bridge."brand_profile_id"
+                WHERE bridge."claim_id" = ${claim.id}::uuid
+                  AND bridge."workspace_id" = ${claim.workspaceId}::uuid
+                  AND bridge."company_profile_id" = ${claim.companyId}::uuid
+                  AND ref."fact_key" = ${claim.factKey}
+                LIMIT 1
+                FOR SHARE OF bridge
+              `
+            : [];
+        if (exactBridge.length === 0) {
+          throw new ConflictException({
+            error: {
+              code: 'CLAIM_BRIDGE_REQUIRED',
+              message: 'origin-keyed claim has no surviving exact Site evidence bridge',
+            },
+          });
+        }
       }
 
       const nextVersion = claim.version + 1;
