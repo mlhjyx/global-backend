@@ -7,6 +7,7 @@ import { resolveTaskRoute } from '../agents/task-routes';
 import {
   assertEvaluationReportPathAvailable,
   assertUniqueEvaluationValues,
+  captureDiagnosticRejectedOutput,
   classifyEvaluationOutcome,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
@@ -72,6 +73,41 @@ describe('routeForModelEvaluation', () => {
 });
 
 describe('MODEL evaluation provenance guards', () => {
+  it('persists the complete rejected artifact only for an explicit diagnostic capture', () => {
+    const output = {
+      valueProps: [],
+      glossary: [
+        {
+          term: 'Observed term',
+          definition: 'Pumps designed for chemical transfer.',
+        },
+      ],
+      gaps: [],
+    };
+
+    expect(
+      captureDiagnosticRejectedOutput(false, {
+        model: 'claude-sonnet-5',
+        fixtureId: 'industrial-pump-rich',
+        attempt: 1,
+        output,
+      }),
+    ).toBeUndefined();
+    expect(
+      captureDiagnosticRejectedOutput(true, {
+        model: 'claude-sonnet-5',
+        fixtureId: 'industrial-pump-rich',
+        attempt: 1,
+        output,
+      }),
+    ).toEqual({
+      model: 'claude-sonnet-5',
+      fixtureId: 'industrial-pump-rich',
+      attempt: 1,
+      output,
+    });
+  });
+
   it('detects source edits made while a paid evaluation is running', () => {
     const start = [{ path: 'task.ts', sha256: 'a'.repeat(64) }];
     expect(inspectEvaluationSourceBundle(start, start)).toMatchObject({
