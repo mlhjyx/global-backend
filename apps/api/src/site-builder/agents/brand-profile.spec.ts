@@ -315,6 +315,26 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
       value: 'Jane Smith',
       quote: 'President: Jane Smith.',
     },
+    {
+      key: 'owner',
+      value: 'Jane Smith',
+      quote: 'Owner: Jane Smith.',
+    },
+    {
+      key: 'manager',
+      value: 'Jane Smith',
+      quote: 'Manager: Jane Smith.',
+    },
+    {
+      key: 'director',
+      value: 'Jane Smith',
+      quote: 'Director: Jane Smith.',
+    },
+    {
+      key: 'employee_name',
+      value: 'Jane Smith',
+      quote: 'Employee name: Jane Smith.',
+    },
   ])('rejects personal data carried by $key/value', ({ key, value, quote }) => {
     const out = evaluate({ key, value, quote });
 
