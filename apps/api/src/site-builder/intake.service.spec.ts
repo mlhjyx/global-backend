@@ -102,6 +102,12 @@ function makeService(
         db.companyProfiles.push(row);
         return row;
       },
+      delete: async ({ where }: { where: { id: string } }) => {
+        const index = db.companyProfiles.findIndex(
+          (company) => company.id === where.id,
+        );
+        if (index >= 0) db.companyProfiles.splice(index, 1);
+      },
     },
     site: {
       findFirst: async ({ where }: { where: { workspaceId?: string } }) =>

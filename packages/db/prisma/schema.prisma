@@ -178,12 +178,15 @@ model CompanyProfile {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  offerings Offering[]
-  sources   KnowledgeSource[]
-  claims    Claim[]
-  icps      IcpDefinition[]
+  workspace    Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  offerings    Offering[]
+  sources      KnowledgeSource[]
+  claims       Claim[]
+  icps         IcpDefinition[]
+  sites        Site[]
+  claimBridges BrandProfileClaimBridge[]
 
+  @@unique([id, workspaceId], map: "company_profile_id_workspace_id_key")
   @@index([workspaceId])
   @@map("company_profile")
 }
@@ -230,40 +233,59 @@ model KnowledgeSource {
 }
 
 model Claim {
-  id          String      @id @default(uuid()) @db.Uuid
-  workspaceId String      @map("workspace_id") @db.Uuid
-  companyId   String      @map("company_id") @db.Uuid
-  sourceId    String?     @map("source_id") @db.Uuid
-  type        String // capability | certification | case | param | value_prop ...
-  statement   String
-  status      ClaimStatus @default(EXTRACTED)
-  confidence  Float?
-  validUntil  DateTime?   @map("valid_until")
-  version     Int         @default(1)
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
+  id                 String      @id @default(uuid()) @db.Uuid
+  workspaceId        String      @map("workspace_id") @db.Uuid
+  companyId          String      @map("company_id") @db.Uuid
+  sourceId           String?     @map("source_id") @db.Uuid
+  originKey          String?     @map("origin_key") @db.VarChar(64)
+  type               String // capability | certification | case | param | value_prop ...
+  statement          String
+  status             ClaimStatus @default(EXTRACTED)
+  confidence         Float?
+  validUntil         DateTime?   @map("valid_until")
+  verifiedBy         String?     @map("verified_by")
+  verifiedAt         DateTime?   @map("verified_at")
+  verificationMethod String?     @map("verification_method")
+  verificationProof  Json?       @map("verification_proof")
+  version            Int         @default(1)
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
 
-  company  CompanyProfile   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  source   KnowledgeSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
-  evidence Evidence[]
+  company      CompanyProfile            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source       KnowledgeSource?          @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  evidence     Evidence[]
+  claimBridges BrandProfileClaimBridge[]
 
+  @@unique([companyId, originKey], map: "claim_company_origin_key")
+  @@unique([id, workspaceId, companyId], map: "claim_id_workspace_company_key")
   @@index([workspaceId])
   @@index([companyId])
   @@map("claim")
 }
 
 model Evidence {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  claimId     String    @map("claim_id") @db.Uuid
-  sourceUrl   String?   @map("source_url")
-  snippet     String?
-  confidence  Float?
-  fetchedAt   DateTime? @map("fetched_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  claimId           String    @map("claim_id") @db.Uuid
+  originKey         String?   @map("origin_key") @db.VarChar(64)
+  sourceUrl         String?   @map("source_url")
+  sourceSnapshotId  String?   @map("source_snapshot_id") @db.Uuid
+  sourceContentHash String?   @map("source_content_hash") @db.VarChar(64)
+  snippet           String?
+  quoteStart        Int?      @map("quote_start")
+  quoteEnd          Int?      @map("quote_end")
+  quotePrefix       String?   @map("quote_prefix")
+  quoteSuffix       String?   @map("quote_suffix")
+  assetId           String?   @map("asset_id") @db.Uuid
+  confidence        Float?
+  fetchedAt         DateTime? @map("fetched_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
 
-  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claim        Claim                     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimBridges BrandProfileClaimBridge[]
 
+  @@unique([claimId, originKey], map: "evidence_claim_origin_key")
+  @@unique([id, workspaceId, claimId], map: "evidence_id_workspace_claim_key")
   @@index([workspaceId])
   @@index([claimId])
   @@map("evidence")
@@ -1237,6 +1259,7 @@ model BuyingCommitteeRole {
 model Site {
   id               String   @id @default(uuid()) @db.Uuid
   workspaceId      String   @map("workspace_id") @db.Uuid
+  companyProfileId String?  @map("company_profile_id") @db.Uuid
   name             String // 站点名（默认=公司英文名）
   slug             String // 预览子域 slug（随机不可枚举，06 §7）
   mode             String   @default("builder") // builder | diagnosis(M3)
@@ -1256,6 +1279,8 @@ model Site {
   documents               KbDocument[]
   brandProfiles           BrandProfile[]
   evidenceSourceSnapshots SiteEvidenceSourceSnapshot[]
+  claimBridges            BrandProfileClaimBridge[]
+  companyProfile          CompanyProfile?              @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "site_company_profile_workspace_fkey")
 
   @@unique([slug])
   @@unique([id, workspaceId], map: "site_id_workspace_id_key")
@@ -1303,7 +1328,7 @@ model SiteBuildRun {
   finishedAt         DateTime? @map("finished_at")
   createdAt          DateTime  @default(now()) @map("created_at")
 
-  site Site @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
+  site        Site            @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
   stepRecords SiteBuildStep[]
 
   @@unique([id, workspaceId])
@@ -1363,9 +1388,10 @@ model Asset {
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  site        Site           @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "asset_site_workspace_fkey")
-  kbDocuments KbDocument[]
-  variants    AssetVariant[]
+  site         Site                      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Cascade, map: "asset_site_workspace_fkey")
+  kbDocuments  KbDocument[]
+  variants     AssetVariant[]
+  claimBridges BrandProfileClaimBridge[]
 
   @@unique([id, workspaceId, siteId], map: "asset_id_workspace_id_site_id_key")
   // active object_key 的唯一性由 migration 中 WHERE deleted_at IS NULL 的部分唯一索引保证。
@@ -1478,6 +1504,7 @@ model BrandProfile {
 
   site         Site                      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_site_workspace_fkey")
   evidenceRefs BrandProfileEvidenceRef[]
+  claimBridges BrandProfileClaimBridge[]
 
   @@unique([siteId, version])
   @@unique([id, workspaceId, siteId], map: "brand_profile_id_workspace_site_key")
@@ -1532,8 +1559,42 @@ model BrandProfileEvidenceRef {
 
   brandProfile   BrandProfile               @relation(fields: [brandProfileId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_evidence_ref_profile_scope_fkey")
   sourceSnapshot SiteEvidenceSourceSnapshot @relation(fields: [sourceSnapshotId, workspaceId, siteId, sourceContentHash], references: [id, workspaceId, siteId, contentHash], onDelete: NoAction, onUpdate: NoAction, map: "brand_profile_evidence_ref_source_scope_hash_fkey")
+  claimBridges   BrandProfileClaimBridge[]
 
   @@unique([brandProfileId, factIndex], map: "brand_profile_evidence_ref_profile_fact_key")
+  @@unique([id, workspaceId, siteId, brandProfileId], map: "brand_profile_evidence_ref_scope_profile_key")
   @@index([workspaceId, siteId, sourceSnapshotId], map: "brand_profile_evidence_ref_workspace_site_source_idx")
   @@map("brand_profile_evidence_ref")
+}
+
+/// Immutable R4-A2 edge from one frozen BrandProfile fact to the public Claim/Evidence graph.
+/// Replays may add a new bridge row for a new BrandProfile version, but stable origin keys reuse
+/// the same Claim/Evidence rows. Certification asset proof is retained when present.
+model BrandProfileClaimBridge {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  siteId           String   @map("site_id") @db.Uuid
+  companyProfileId String   @map("company_profile_id") @db.Uuid
+  brandProfileId   String   @map("brand_profile_id") @db.Uuid
+  evidenceRefId    String   @map("evidence_ref_id") @db.Uuid
+  factIndex        Int      @map("fact_index")
+  claimId          String   @map("claim_id") @db.Uuid
+  evidenceId       String   @map("evidence_id") @db.Uuid
+  certAssetId      String?  @map("cert_asset_id") @db.Uuid
+  bridgeKey        String   @map("bridge_key") @db.VarChar(64)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  site           Site                    @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_site_scope_fkey")
+  companyProfile CompanyProfile          @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_company_scope_fkey")
+  brandProfile   BrandProfile            @relation(fields: [brandProfileId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_profile_scope_fkey")
+  evidenceRef    BrandProfileEvidenceRef @relation(fields: [evidenceRefId, workspaceId, siteId, brandProfileId], references: [id, workspaceId, siteId, brandProfileId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_evidence_ref_scope_fkey")
+  claim          Claim                   @relation(fields: [claimId, workspaceId, companyProfileId], references: [id, workspaceId, companyId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_claim_scope_fkey")
+  evidence       Evidence                @relation(fields: [evidenceId, workspaceId, claimId], references: [id, workspaceId, claimId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_evidence_scope_fkey")
+  certAsset      Asset?                  @relation(fields: [certAssetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "brand_profile_claim_bridge_cert_asset_scope_fkey")
+
+  @@unique([workspaceId, siteId, bridgeKey], map: "brand_profile_claim_bridge_scope_key")
+  @@unique([brandProfileId, evidenceRefId], map: "brand_profile_claim_bridge_profile_ref_key")
+  @@unique([brandProfileId, factIndex], map: "brand_profile_claim_bridge_profile_fact_key")
+  @@index([workspaceId, companyProfileId, claimId], map: "brand_profile_claim_bridge_company_claim_idx")
+  @@map("brand_profile_claim_bridge")
 }

@@ -208,14 +208,29 @@ export class IntakeService {
                 "corrupt site-builder intake idempotency reference",
               );
             }
-            return { response, run, wasCreated: false };
+            return {
+              response,
+              run,
+              wasCreated: false,
+              createdCompanyProfileId: null,
+            };
           }
         }
 
         const existing = await tx.site.findFirst({
           where: { workspaceId: ctx.workspaceId },
-          select: { id: true, status: true },
+          select: { id: true, status: true, companyProfileId: true },
         });
+        if (existing?.status === "setup_failed" && !existing.companyProfileId) {
+          // R4-A2: mutable intake/display names are not identity. A historical Site without an
+          // explicit tenant-scoped CompanyProfile edge must be repaired through an audited path.
+          throw new ConflictException(
+            structuredError(
+              "SITE_COMPANY_PROFILE_LINK_REQUIRED",
+              "site has no verified company profile link",
+            ),
+          );
+        }
         if (existing) {
           // Share the same per-site lock as POST /sites/:id/builds. A setup_failed re-intake
           // must not race a refurbish request into two active runs for one Site.
@@ -240,6 +255,18 @@ export class IntakeService {
           );
         }
 
+        const companyProfile = existing
+          ? null
+          : await tx.companyProfile.create({
+              data: {
+                workspaceId: ctx.workspaceId,
+                name: nameEn ?? input.company.nameZh,
+                website: input.hasWebsite ? input.websiteUrl : null,
+                industry: input.industry,
+                status: "DRAFT",
+              },
+              select: { id: true },
+            });
         const shared = {
           name: nameEn ?? input.company.nameZh,
           mode: "builder",
@@ -254,6 +281,7 @@ export class IntakeService {
           : await tx.site.create({
               data: {
                 workspaceId: ctx.workspaceId,
+                companyProfileId: companyProfile!.id,
                 slug: makeSlug(nameEn),
                 ...shared,
               },
@@ -283,7 +311,12 @@ export class IntakeService {
             },
           });
         }
-        return { response, run, wasCreated: !existing };
+        return {
+          response,
+          run,
+          wasCreated: !existing,
+          createdCompanyProfileId: companyProfile?.id ?? null,
+        };
       },
     );
 
@@ -334,6 +367,11 @@ export class IntakeService {
       await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
         if (prepared.wasCreated) {
           await tx.site.delete({ where: { id: prepared.response.siteId } });
+          if (prepared.createdCompanyProfileId) {
+            await tx.companyProfile.delete({
+              where: { id: prepared.createdCompanyProfileId },
+            });
+          }
         } else {
           await tx.site.update({
             where: { id: prepared.response.siteId },

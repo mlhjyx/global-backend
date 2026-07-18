@@ -44,7 +44,19 @@ export class ClaimService {
 
       const updated = await tx.claim.update({
         where: { id: claimId },
-        data: { status: target, version: { increment: 1 } },
+        data: target === 'APPROVED'
+          ? {
+              status: target,
+              version: { increment: 1 },
+              verifiedBy: ctx.userId,
+              verifiedAt: new Date(),
+              verificationMethod: 'human_review',
+              verificationProof: {
+                action: 'claim_approval',
+                approvedVersion: claim.version + 1,
+              },
+            }
+          : { status: target, version: { increment: 1 } },
       });
 
       if (target === 'APPROVED') {
