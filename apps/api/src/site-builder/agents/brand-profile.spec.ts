@@ -2454,7 +2454,21 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(() =>
       BRAND_PROFILE_TASK.validateOutput?.(input, {
         ...base,
+        valueProps: [
+          'Supply partner for chemical processing applications across Germany, the Netherlands, and Austria.',
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
         tone: { voice: 'CEO: Jane Smith', style: [] },
+      }),
+    ).toThrow(/explicit personal attribution/i);
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        valueProps: ['Supply partner for Jane Smith'],
       }),
     ).toThrow(/explicit personal attribution/i);
   });
