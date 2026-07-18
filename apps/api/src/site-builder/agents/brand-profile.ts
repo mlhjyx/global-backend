@@ -1735,7 +1735,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 };
 
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
-export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/13';
+export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/14';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
   'brand-profile-route-validation/14';
 
@@ -1801,8 +1801,9 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
     '3a. key 含 name、model、product、company、brand 时，factSheet.value 的实质值必须逐字出现在 quote；',
     '    不得拼接、概括或翻译产品/名称。无法同时满足英文 value 与逐字 quote 时写进 gaps。',
     '3b. 每项 factSheet.value 本身必须是 quote 中连续、逐字相同的原文片段；不得把同一 quote 的多个词组拼接、改词性、概括或推导为新句，无法做到就写进 gaps。',
-    '4. factSheet.key 必须使用 lower_snake_case，只使用企业身份、产品/服务、能力、认证、市场、行业、工艺/设施、公司历史、人数汇总或技术参数类别。',
-    '    可用示例：business_role、products、capabilities、certifications、target_markets、industries、manufacturing_processes、facilities、founded_year、employee_count、technical_parameters。',
+    '4. factSheet.key 必须使用 lower_snake_case，并且只允许以下 exact keys；这是封闭列表，不是示例：',
+    '   business_role、products、services、capabilities、certifications、compliance、target_markets、industries、applications、materials、manufacturing_processes、facilities、founded_year、employee_count、technical_parameters。',
+    '   产品型号、项目代号、尺寸范围和其他具体名称只能放在对应 value 中，不得据此创造 yoke_program、flange_program、diameter_range 等新 key。',
     '4b. 只有缺失的上述批准企业事实类别，以及 4c 的未消歧关系补证问题，可写进 gaps，其他自由字段直接省略。',
     '4c. 企业名称/品牌名称沿用系统已有 CompanyProfile，不写入 factSheet；未做组织消歧的客户/案例/项目事实也写进 gaps。',
     '4d. 本阶段没有 competitor 组织身份消歧与证据合同；必须输出 competitors=[]，不得填写任何竞品名称或定位。',
