@@ -1,0 +1,704 @@
+{
+  "schemaVersion": "site-builder-model1-brand-profile-report/v5",
+  "generatedAt": "2026-07-18T13:59:08.014Z",
+  "evidenceRole": "candidate",
+  "status": "failed_incomplete_matrix",
+  "promotionEligible": false,
+  "gateway": {
+    "providerId": "new-api-eval",
+    "baseUrl": "http://localhost:3001/v1",
+    "modelCatalogCount": 38,
+    "modelCatalogSha256": "96ff68253b20984d12dd5eada3f805af861b5324f90b7189b015ab8a00537328",
+    "modelCatalogTimeoutMs": 15000,
+    "requestedModelsPresent": {
+      "gpt-5.6-terra": true,
+      "claude-sonnet-5": true
+    }
+  },
+  "matrixScope": "full",
+  "diagnosticOptions": {
+    "routeValidationBypassed": false,
+    "rejectedOutputCaptured": false
+  },
+  "allFixtureCount": 6,
+  "selectedFixtureIds": [
+    "auto-parts-rich",
+    "auto-parts-sparse",
+    "industrial-pump-rich",
+    "industrial-pump-sparse",
+    "lab-instrument-rich",
+    "lab-instrument-sparse"
+  ],
+  "repeats": 2,
+  "fixtureCount": 6,
+  "timePlan": {
+    "taskId": "site_builder.brand_profile",
+    "profile": "structured.default",
+    "maxTokens": 12000,
+    "perProbeTimeoutMs": 150000,
+    "perFixtureAttemptTimeoutMs": 150000,
+    "candidateCount": 2,
+    "fixtureCount": 6,
+    "repeats": 2,
+    "expectedRunCount": 24,
+    "absoluteMaximumWallClockMs": 3900000
+  },
+  "matrixIntegrity": {
+    "expectedRunCount": 24,
+    "actualRunCount": 1,
+    "complete": false,
+    "duplicateKeys": [],
+    "missingKeys": [
+      "claude-sonnet-5\u0000auto-parts-rich\u00001",
+      "claude-sonnet-5\u0000auto-parts-rich\u00002",
+      "claude-sonnet-5\u0000auto-parts-sparse\u00001",
+      "claude-sonnet-5\u0000auto-parts-sparse\u00002",
+      "claude-sonnet-5\u0000industrial-pump-rich\u00001",
+      "claude-sonnet-5\u0000industrial-pump-rich\u00002",
+      "claude-sonnet-5\u0000industrial-pump-sparse\u00001",
+      "claude-sonnet-5\u0000industrial-pump-sparse\u00002",
+      "claude-sonnet-5\u0000lab-instrument-rich\u00001",
+      "claude-sonnet-5\u0000lab-instrument-rich\u00002",
+      "claude-sonnet-5\u0000lab-instrument-sparse\u00001",
+      "claude-sonnet-5\u0000lab-instrument-sparse\u00002",
+      "gpt-5.6-terra\u0000auto-parts-rich\u00002",
+      "gpt-5.6-terra\u0000auto-parts-sparse\u00001",
+      "gpt-5.6-terra\u0000auto-parts-sparse\u00002",
+      "gpt-5.6-terra\u0000industrial-pump-rich\u00001",
+      "gpt-5.6-terra\u0000industrial-pump-rich\u00002",
+      "gpt-5.6-terra\u0000industrial-pump-sparse\u00001",
+      "gpt-5.6-terra\u0000industrial-pump-sparse\u00002",
+      "gpt-5.6-terra\u0000lab-instrument-rich\u00001",
+      "gpt-5.6-terra\u0000lab-instrument-rich\u00002",
+      "gpt-5.6-terra\u0000lab-instrument-sparse\u00001",
+      "gpt-5.6-terra\u0000lab-instrument-sparse\u00002"
+    ],
+    "unexpectedKeys": []
+  },
+  "taskContract": {
+    "taskId": "site_builder.brand_profile",
+    "promptVersion": "brand-profile/10",
+    "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+    "outputSchemaSha256": "c78b5d1697081c293f6965508055852683118b1357ddb36cf8571549d5ff3ee1",
+    "routeValidationVersion": "brand-profile-route-validation/7",
+    "evaluatorVersion": "brand-profile-evaluator/8",
+    "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+    "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+    "evaluationPolicyVersion": "brand-profile-evaluation-policy/2",
+    "sourceFiles": [
+      {
+        "role": "task",
+        "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+        "sha256": "9033db07ed03aba5280b3085b06b5468a5d3b8907d91d2a2f7f8a60ed36a2ceb"
+      },
+      {
+        "role": "judge",
+        "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+        "sha256": "dc224eecbae928fb7013df214204d2d8ecd5e9bcacf0397c5874cf7a39836948"
+      },
+      {
+        "role": "harness",
+        "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+        "sha256": "2104e7db099f324c48936e108530ba30e1491f3eb341707908d66ed61d0d04f3"
+      },
+      {
+        "role": "provider",
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "97c60e5d45baaf905f1c5d5a5befaaa520dba6e57c91d9bcbcefae1b1a534e45"
+      },
+      {
+        "role": "transport_registry",
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "dfbbba428974b201a045e02e7b76baa4dc416586dc2039a33dec58651d20ba91"
+      },
+      {
+        "role": "task_runner",
+        "path": "apps/api/src/site-builder/agents/ai-task.ts",
+        "sha256": "36bf951d71e8ab58f2b3212be47b5c3ccb62f9ce209b5951edc381dff729c9fd"
+      },
+      {
+        "role": "gateway_router",
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "f442bee41e506ed8efa8d3dff929b83d01d13b2fbfb2c5c76213bc9b25a53678"
+      },
+      {
+        "role": "schema_validator",
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+      },
+      {
+        "role": "evaluation_provenance",
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "6ea545eb5cd287a144907d4722a17b85d6f4f8e4b054e5f74d981c4071035c3f"
+      },
+      {
+        "role": "task_route",
+        "path": "apps/api/src/site-builder/agents/task-routes.ts",
+        "sha256": "2bed537b836996071b3ea02974e24bc2c9adb1a57806cc05ab3eb595eebfb89d"
+      },
+      {
+        "role": "evidence_contract",
+        "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+        "sha256": "3d0eb8bceea433af4317dc059bd0016afd834b8c9d7a16fc0d09121737de5000"
+      },
+      {
+        "role": "pii_guard",
+        "path": "apps/api/src/site-builder/agents/pii.ts",
+        "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+      },
+      {
+        "role": "claim_classifier",
+        "path": "apps/api/src/site-builder/claim-classification.ts",
+        "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+      },
+      {
+        "role": "profile_registry",
+        "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+        "sha256": "04c8f969d56fa633baac6891392d7021ebfad6ad89570039a171b7c0003f2033"
+      },
+      {
+        "role": "provider_registry",
+        "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+        "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+      },
+      {
+        "role": "model_router",
+        "path": "apps/api/src/model-gateway/model-router.ts",
+        "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+      },
+      {
+        "role": "provider_error",
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "521aa9d3d72bbf5f24efff4e02bcfebde653d9be64d44e4e5c6cc989fae84cc6"
+      },
+      {
+        "role": "gateway_types",
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "a1bd90c5a06c79974c89c44a49d33395e5c508eac858a24d792e71e1724e66e2"
+      },
+      {
+        "role": "gateway_contract",
+        "path": "apps/api/src/model-gateway/model-gateway.ts",
+        "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+      },
+      {
+        "role": "provider_contract",
+        "path": "apps/api/src/model-gateway/model-provider.ts",
+        "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+      },
+      {
+        "role": "budget_ledger",
+        "path": "apps/api/src/tools/budget.ts",
+        "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+      },
+      {
+        "role": "task_registry",
+        "path": "apps/api/src/ai-tasks/task-registry.ts",
+        "sha256": "40bdcd334e2b167d45943c1abb78c100cd705baf0beafdc4a5d33fa9ff27cd55"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/index.js",
+        "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/evidence.js",
+        "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/media-foundation.js",
+        "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/model-policy.js",
+        "sha256": "6c3821daf2086b6901502c9f315e00c33c930cf41e85b91dd2e51c9005caf540"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/site-spec.js",
+        "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+      },
+      {
+        "role": "dependency_lock",
+        "path": "pnpm-lock.yaml",
+        "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+      }
+    ],
+    "sourceBundleSha256": "c8a3ab8a7a9433e78af71a9641e938565a99cb16f1674e4bae2dad9e41930121"
+  },
+  "fixtureContracts": [
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/10",
+      "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+      "outputSchemaSha256": "c78b5d1697081c293f6965508055852683118b1357ddb36cf8571549d5ff3ee1",
+      "routeValidationVersion": "brand-profile-route-validation/7",
+      "evaluatorVersion": "brand-profile-evaluator/8",
+      "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+      "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+      "evaluationPolicyVersion": "brand-profile-evaluation-policy/2",
+      "sourceFiles": [
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+          "sha256": "9033db07ed03aba5280b3085b06b5468a5d3b8907d91d2a2f7f8a60ed36a2ceb"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+          "sha256": "dc224eecbae928fb7013df214204d2d8ecd5e9bcacf0397c5874cf7a39836948"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+          "sha256": "2104e7db099f324c48936e108530ba30e1491f3eb341707908d66ed61d0d04f3"
+        },
+        {
+          "role": "provider",
+          "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+          "sha256": "97c60e5d45baaf905f1c5d5a5befaaa520dba6e57c91d9bcbcefae1b1a534e45"
+        },
+        {
+          "role": "transport_registry",
+          "path": "apps/api/src/model-gateway/model-transports.ts",
+          "sha256": "dfbbba428974b201a045e02e7b76baa4dc416586dc2039a33dec58651d20ba91"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "36bf951d71e8ab58f2b3212be47b5c3ccb62f9ce209b5951edc381dff729c9fd"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "f442bee41e506ed8efa8d3dff929b83d01d13b2fbfb2c5c76213bc9b25a53678"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "6ea545eb5cd287a144907d4722a17b85d6f4f8e4b054e5f74d981c4071035c3f"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "2bed537b836996071b3ea02974e24bc2c9adb1a57806cc05ab3eb595eebfb89d"
+        },
+        {
+          "role": "evidence_contract",
+          "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+          "sha256": "3d0eb8bceea433af4317dc059bd0016afd834b8c9d7a16fc0d09121737de5000"
+        },
+        {
+          "role": "pii_guard",
+          "path": "apps/api/src/site-builder/agents/pii.ts",
+          "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+        },
+        {
+          "role": "claim_classifier",
+          "path": "apps/api/src/site-builder/claim-classification.ts",
+          "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "04c8f969d56fa633baac6891392d7021ebfad6ad89570039a171b7c0003f2033"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "provider_error",
+          "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+          "sha256": "521aa9d3d72bbf5f24efff4e02bcfebde653d9be64d44e4e5c6cc989fae84cc6"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "a1bd90c5a06c79974c89c44a49d33395e5c508eac858a24d792e71e1724e66e2"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "task_registry",
+          "path": "apps/api/src/ai-tasks/task-registry.ts",
+          "sha256": "40bdcd334e2b167d45943c1abb78c100cd705baf0beafdc4a5d33fa9ff27cd55"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/index.js",
+          "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/evidence.js",
+          "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/media-foundation.js",
+          "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/model-policy.js",
+          "sha256": "6c3821daf2086b6901502c9f315e00c33c930cf41e85b91dd2e51c9005caf540"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/site-spec.js",
+          "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+        }
+      ],
+      "sourceBundleSha256": "c8a3ab8a7a9433e78af71a9641e938565a99cb16f1674e4bae2dad9e41930121",
+      "fixtureId": "auto-parts-rich",
+      "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+      "promptSha256": "8f50749e759af8015619a4d2357fa2fe52e001c667b7be65c9fb60766a0e43f0"
+    }
+  ],
+  "probes": [
+    {
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-chat-completions",
+      "accepted": true,
+      "elapsedMs": 3434,
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "reportedModel": "gpt-5.6-terra",
+      "modelResolutionSource": "upstream_response",
+      "usage": {
+        "inputTokens": 356,
+        "outputTokens": 9
+      }
+    },
+    {
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "accepted": true,
+      "elapsedMs": 7245,
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "reportedModel": "claude-sonnet-5",
+      "modelResolutionSource": "upstream_response",
+      "usage": {
+        "inputTokens": 208,
+        "outputTokens": 11
+      }
+    }
+  ],
+  "summary": [
+    {
+      "model": "gpt-5.6-terra",
+      "transport": "openai-chat-completions",
+      "capabilityProbe": {
+        "requestedModel": "gpt-5.6-terra",
+        "transport": "openai-chat-completions",
+        "accepted": true,
+        "elapsedMs": 3434,
+        "provider": "new-api-eval",
+        "resolvedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "modelResolutionSource": "upstream_response",
+        "usage": {
+          "inputTokens": 356,
+          "outputTokens": 9
+        }
+      },
+      "matrixSkipped": false,
+      "expectedRuns": 12,
+      "runs": 1,
+      "missingRuns": 11,
+      "acceptedArtifacts": 0,
+      "hardFailures": 12,
+      "p95LatencyMs": 22209,
+      "attemptedTokenTotals": {
+        "inputTokens": 1677,
+        "outputTokens": 2547
+      },
+      "acceptedArtifactTokenTotals": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "capabilityProbe": {
+        "requestedModel": "claude-sonnet-5",
+        "transport": "anthropic-messages",
+        "accepted": true,
+        "elapsedMs": 7245,
+        "provider": "new-api-eval",
+        "resolvedModel": "claude-sonnet-5",
+        "reportedModel": "claude-sonnet-5",
+        "modelResolutionSource": "upstream_response",
+        "usage": {
+          "inputTokens": 208,
+          "outputTokens": 11
+        }
+      },
+      "matrixSkipped": false,
+      "expectedRuns": 12,
+      "runs": 0,
+      "missingRuns": 12,
+      "acceptedArtifacts": 0,
+      "hardFailures": 12,
+      "p95LatencyMs": null,
+      "attemptedTokenTotals": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "acceptedArtifactTokenTotals": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "gpt-5.6-terra",
+      "requestedModel": "gpt-5.6-terra",
+      "transport": "openai-chat-completions",
+      "provider": "new-api-eval",
+      "resolvedModel": "gpt-5.6-terra",
+      "reportedModel": "gpt-5.6-terra",
+      "modelResolutionSource": "upstream_response",
+      "fixtureId": "auto-parts-rich",
+      "targetMarkets": [
+        "US",
+        "GB",
+        "PL"
+      ],
+      "materialCompleteness": "rich",
+      "attempt": 1,
+      "acceptedArtifact": false,
+      "elapsedMs": 22209,
+      "usage": {
+        "inputTokens": 1677,
+        "outputTokens": 2547,
+        "calls": 1
+      },
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v2",
+          "profile": "structured.default",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "forbidden",
+            "dataScope": "company_facts_only"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "gpt-5.6-terra",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 150000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "f70eecec20f05e1824b1f848eeaf80310e059e3af521e1f6f5db8f188bbe087d",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/10",
+        "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+        "outputSchemaSha256": "c78b5d1697081c293f6965508055852683118b1357ddb36cf8571549d5ff3ee1",
+        "routeValidationVersion": "brand-profile-route-validation/7",
+        "evaluatorVersion": "brand-profile-evaluator/8",
+        "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+        "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+        "evaluationPolicyVersion": "brand-profile-evaluation-policy/2",
+        "sourceFiles": [
+          {
+            "role": "task",
+            "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+            "sha256": "9033db07ed03aba5280b3085b06b5468a5d3b8907d91d2a2f7f8a60ed36a2ceb"
+          },
+          {
+            "role": "judge",
+            "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+            "sha256": "dc224eecbae928fb7013df214204d2d8ecd5e9bcacf0397c5874cf7a39836948"
+          },
+          {
+            "role": "harness",
+            "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+            "sha256": "2104e7db099f324c48936e108530ba30e1491f3eb341707908d66ed61d0d04f3"
+          },
+          {
+            "role": "provider",
+            "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+            "sha256": "97c60e5d45baaf905f1c5d5a5befaaa520dba6e57c91d9bcbcefae1b1a534e45"
+          },
+          {
+            "role": "transport_registry",
+            "path": "apps/api/src/model-gateway/model-transports.ts",
+            "sha256": "dfbbba428974b201a045e02e7b76baa4dc416586dc2039a33dec58651d20ba91"
+          },
+          {
+            "role": "task_runner",
+            "path": "apps/api/src/site-builder/agents/ai-task.ts",
+            "sha256": "36bf951d71e8ab58f2b3212be47b5c3ccb62f9ce209b5951edc381dff729c9fd"
+          },
+          {
+            "role": "gateway_router",
+            "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+            "sha256": "f442bee41e506ed8efa8d3dff929b83d01d13b2fbfb2c5c76213bc9b25a53678"
+          },
+          {
+            "role": "schema_validator",
+            "path": "apps/api/src/model-gateway/schema-validate.ts",
+            "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+          },
+          {
+            "role": "evaluation_provenance",
+            "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+            "sha256": "6ea545eb5cd287a144907d4722a17b85d6f4f8e4b054e5f74d981c4071035c3f"
+          },
+          {
+            "role": "task_route",
+            "path": "apps/api/src/site-builder/agents/task-routes.ts",
+            "sha256": "2bed537b836996071b3ea02974e24bc2c9adb1a57806cc05ab3eb595eebfb89d"
+          },
+          {
+            "role": "evidence_contract",
+            "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+            "sha256": "3d0eb8bceea433af4317dc059bd0016afd834b8c9d7a16fc0d09121737de5000"
+          },
+          {
+            "role": "pii_guard",
+            "path": "apps/api/src/site-builder/agents/pii.ts",
+            "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+          },
+          {
+            "role": "claim_classifier",
+            "path": "apps/api/src/site-builder/claim-classification.ts",
+            "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+          },
+          {
+            "role": "profile_registry",
+            "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+            "sha256": "04c8f969d56fa633baac6891392d7021ebfad6ad89570039a171b7c0003f2033"
+          },
+          {
+            "role": "provider_registry",
+            "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+            "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+          },
+          {
+            "role": "model_router",
+            "path": "apps/api/src/model-gateway/model-router.ts",
+            "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+          },
+          {
+            "role": "provider_error",
+            "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+            "sha256": "521aa9d3d72bbf5f24efff4e02bcfebde653d9be64d44e4e5c6cc989fae84cc6"
+          },
+          {
+            "role": "gateway_types",
+            "path": "apps/api/src/model-gateway/types.ts",
+            "sha256": "a1bd90c5a06c79974c89c44a49d33395e5c508eac858a24d792e71e1724e66e2"
+          },
+          {
+            "role": "gateway_contract",
+            "path": "apps/api/src/model-gateway/model-gateway.ts",
+            "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+          },
+          {
+            "role": "provider_contract",
+            "path": "apps/api/src/model-gateway/model-provider.ts",
+            "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+          },
+          {
+            "role": "budget_ledger",
+            "path": "apps/api/src/tools/budget.ts",
+            "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+          },
+          {
+            "role": "task_registry",
+            "path": "apps/api/src/ai-tasks/task-registry.ts",
+            "sha256": "40bdcd334e2b167d45943c1abb78c100cd705baf0beafdc4a5d33fa9ff27cd55"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/index.js",
+            "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/evidence.js",
+            "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/media-foundation.js",
+            "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/model-policy.js",
+            "sha256": "6c3821daf2086b6901502c9f315e00c33c930cf41e85b91dd2e51c9005caf540"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/site-spec.js",
+            "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+          },
+          {
+            "role": "dependency_lock",
+            "path": "pnpm-lock.yaml",
+            "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+          }
+        ],
+        "sourceBundleSha256": "c8a3ab8a7a9433e78af71a9641e938565a99cb16f1674e4bae2dad9e41930121",
+        "fixtureId": "auto-parts-rich",
+        "fixtureSha256": "50e9640021d259a328a505aec61cfd3a571399d2ccf4bc95b2a96c88b4121c96",
+        "promptSha256": "8f50749e759af8015619a4d2357fa2fe52e001c667b7be65c9fb60766a0e43f0"
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 1677,
+        "outputTokens": 2547,
+        "note": "A failed call can still consume tokens; new-api does not report costUsd for reconciliation."
+      },
+      "error": "AI task site_builder.brand_profile failed on all models: gpt-5.6-terra: task output hard gate rejected: BrandProfile output hard gate rejected 1 explicit personal attribution field(s) [gapQuestions/subjectAction:1] — (dev: stub fallback ⇒ 上游网关本次失败，真实根因见 ai_trace)"
+    }
+  ]
+}
