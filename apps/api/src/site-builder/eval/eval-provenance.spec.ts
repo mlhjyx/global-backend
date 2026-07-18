@@ -14,6 +14,7 @@ import {
   isExactUpstreamModelResolution,
   prepareEvaluationReportPath,
   routeForModelEvaluation,
+  routeForTaskBaselineEvaluation,
   routeForTaskEvaluation,
   sanitizeGatewayBaseUrl,
   sha256Bytes,
@@ -69,6 +70,25 @@ describe('routeForModelEvaluation', () => {
       },
     });
     expect(candidate.policy).not.toHaveProperty('promotionEvidenceId');
+  });
+
+  it('builds the baseline from the complete frozen legacy route', () => {
+    const baseline = routeForTaskBaselineEvaluation(
+      'site_builder.brand_profile',
+    );
+
+    expect(baseline).toMatchObject({
+      primary: 'deepseek-v4-pro',
+      fallbacks: ['glm-5.2'],
+      reasoningEffort: 'low',
+      profile: 'structured.workspace_materials',
+      policy: {
+        routeState: 'currentRoute',
+        source: 'registry',
+        route: { primary: 'deepseek-v4-pro', fallbacks: ['glm-5.2'] },
+      },
+    });
+    expect(baseline.policy).not.toHaveProperty('promotionEvidenceId');
   });
 });
 
