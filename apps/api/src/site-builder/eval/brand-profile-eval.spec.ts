@@ -82,7 +82,7 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
       maxTokens: 12_000,
       timeoutMs: 240_000,
       maxCostCents: 40,
-      reasoningEffort: null,
+      reasoningEffort: 'low',
       modelPolicy: { profile: 'structured.workspace_materials' },
     });
   });
