@@ -39,6 +39,11 @@ function makeService(
     const sql = strings.join("?");
     if (sql.includes('FROM "claim"')) return [{ ...claim }];
     if (sql.includes('FROM "brand_profile_claim_bridge"')) {
+      if (sql.includes("FOR SHARE OF bridge")) {
+        throw new Error(
+          "permission denied: append-only app_user cannot row-lock brand_profile_claim_bridge",
+        );
+      }
       return options.hasExactBridge === false ? [] : [{ id: "bridge-1" }];
     }
     return [];

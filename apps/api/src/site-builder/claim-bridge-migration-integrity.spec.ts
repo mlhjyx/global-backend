@@ -180,6 +180,20 @@ const certAssetIndexMigration =
         "utf8",
       )
     : "";
+const approvalBridgePrivilegeMigrationDirs = readdirSync(migrationsDir).filter(
+  (entry) => /site_builder_r4a2_claim_approval_bridge_privilege$/.test(entry),
+);
+const approvalBridgePrivilegeMigration =
+  approvalBridgePrivilegeMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          approvalBridgePrivilegeMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -521,6 +535,20 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     expect(certAssetIndexMigrationDirs).toHaveLength(1);
     expect(certAssetIndexMigration).toMatch(
       /CREATE INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"[\s\S]+ON "brand_profile_claim_bridge" \("cert_asset_id", "site_id"\)[\s\S]+INCLUDE \("brand_profile_id", "fact_index"\)[\s\S]+WHERE "cert_asset_id" IS NOT NULL/i,
+    );
+  });
+
+  it("locks the append-only bridge through a fixed security-definer trigger without granting UPDATE", () => {
+    expect(approvalBridgePrivilegeMigrationDirs).toHaveLength(1);
+    expect(approvalBridgePrivilegeMigration).toContain(
+      "CREATE OR REPLACE FUNCTION reject_bridged_claim_identity_update()",
+    );
+    expect(approvalBridgePrivilegeMigration).toMatch(
+      /LANGUAGE plpgsql\s+SECURITY DEFINER\s+SET search_path = pg_catalog, public/i,
+    );
+    expect(approvalBridgePrivilegeMigration).toContain("FOR SHARE OF bridge");
+    expect(approvalBridgePrivilegeMigration).not.toMatch(
+      /GRANT\s+UPDATE[\s\S]+brand_profile_claim_bridge/i,
     );
   });
 });
