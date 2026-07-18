@@ -8,13 +8,13 @@ import {
   type BrandProfileEvalFixture,
 } from './brand-profile-eval';
 import type { BrandProfileOutput } from '../agents/brand-profile';
-import { resolveTaskRoute } from '../agents/task-routes';
 import {
   canonicalJson,
   EvaluationDeadlineError,
   runWithEvaluationDeadline,
   sha256CanonicalJson,
   snapshotEvaluationExecutionPolicy,
+  routeForTaskEvaluation,
 } from './eval-provenance';
 
 const richFixture = JSON.parse(
@@ -70,7 +70,7 @@ function outputFor(
 
 describe('BrandProfile MODEL-1 fixture evaluator', () => {
   it('exposes a versioned, hashable evaluator contract for model reports', () => {
-    expect(BRAND_PROFILE_EVALUATOR_VERSION).toBe('brand-profile-evaluator/3');
+    expect(BRAND_PROFILE_EVALUATOR_VERSION).toBe('brand-profile-evaluator/8');
     expect(canonicalJson({ b: 2, a: [true, null] })).toBe('{"a":[true,null],"b":2}');
     expect(canonicalJson({ ä: 3, z: 2, A: 1 })).toBe('{"A":1,"z":2,"ä":3}');
     expect(sha256CanonicalJson({ b: 2, a: [true, null] })).toBe(
@@ -78,12 +78,12 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     );
     expect(BRAND_PROFILE_EVALUATOR_RUBRIC.acceptedFactGate).toContain('EvidenceRefV2');
     expect(sha256CanonicalJson(outputFor(prepareBrandProfileEvalFixture(richFixture)))).toMatch(/^[a-f0-9]{64}$/);
-    expect(snapshotEvaluationExecutionPolicy(resolveTaskRoute('site_builder.brand_profile', {}))).toMatchObject({
+    expect(snapshotEvaluationExecutionPolicy(routeForTaskEvaluation('site_builder.brand_profile', 'gpt-5.6-terra'))).toMatchObject({
       maxTokens: 12_000,
       timeoutMs: 150_000,
       maxCostCents: 40,
       reasoningEffort: null,
-      modelPolicy: { profile: 'structured.default' },
+      modelPolicy: { profile: 'structured.workspace_materials' },
     });
   });
 
