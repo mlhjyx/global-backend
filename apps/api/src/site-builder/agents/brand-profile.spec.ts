@@ -2004,6 +2004,10 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     'Is this x.com/janesmith?',
     'Is this instagram.com/janesmith?',
     'Is this t.me/janesmith?',
+    'Is this https://例子.公司/张三?',
+    'Is this https://xn--fsqu00a.xn--55qx5d/jane?',
+    'Is this https://localhost/user/jane?',
+    'Can you confirm telegram:janesmith?',
     'What is the WeChat ID wxid_janesmith?',
   ])('任务级失败门仍拒绝人员身份问题: %s', (question) => {
     expect(() =>
@@ -2060,6 +2064,10 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     { keywords: ['x.com/janesmith'] },
     { keywords: ['instagram.com/janesmith'] },
     { keywords: ['t.me/janesmith'] },
+    { keywords: ['https://例子.公司/张三'] },
+    { keywords: ['https://xn--fsqu00a.xn--55qx5d/jane'] },
+    { keywords: ['https://localhost/user/jane'] },
+    { keywords: ['telegram:janesmith'] },
     { differentiators: ['WeChat ID wxid_janesmith'] },
   ])('任务级失败门拒绝公共输出里的个人社交标识: %j', (over) => {
     expect(() =>
