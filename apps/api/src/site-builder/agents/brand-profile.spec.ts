@@ -1549,34 +1549,38 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
       brandProfileModule as typeof brandProfileModule & {
         sanitizeBrandProfilePersistenceOutput?: (
           input: Record<string, unknown>,
+          context: { companyName: string; products: string[] },
         ) => Record<string, unknown>;
       }
     ).sanitizeBrandProfilePersistenceOutput;
 
     expect(sanitize).toBeTypeOf('function');
     if (!sanitize) return;
-    const out = sanitize({
-      valueProps: [],
-      tone: null,
-      glossary: [],
-      keywords: [],
-      differentiators: [],
-      competitors: [],
-      factSheet: [
-        {
-          key: 'Support alice@example.com',
-          value: 'Call +49 30 1234567',
-          evidence: { evidenceRefId: 'ref-1' },
-        },
-      ],
-      gaps: [
-        {
-          field: 'Question bob@example.com',
-          reason: 'needs_input',
-          hint: 'Call +49 30 7654321',
-        },
-      ],
-    }) as {
+    const out = sanitize(
+      {
+        valueProps: [],
+        tone: null,
+        glossary: [],
+        keywords: [],
+        differentiators: [],
+        competitors: [],
+        factSheet: [
+          {
+            key: 'Support alice@example.com',
+            value: 'Call +49 30 1234567',
+            evidence: { evidenceRefId: 'ref-1' },
+          },
+        ],
+        gaps: [
+          {
+            field: 'Question bob@example.com',
+            reason: 'needs_input',
+            hint: 'Call +49 30 7654321',
+          },
+        ],
+      },
+      persistenceContext,
+    ) as {
       factSheet: { key: string; value: string }[];
       gaps: { field: string; hint: string }[];
     };
@@ -1624,32 +1628,38 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     },
   ])('落库前拒绝 $name 中的明确个人署名', ({ over }) => {
     expect(() =>
-      sanitizeBrandProfilePersistenceOutput({
-        valueProps: [],
-        tone: null,
-        glossary: [],
-        keywords: [],
-        differentiators: [],
-        competitors: [],
-        factSheet: [],
-        gaps: [],
-        ...over,
-      }),
+      sanitizeBrandProfilePersistenceOutput(
+        {
+          valueProps: [],
+          tone: null,
+          glossary: [],
+          keywords: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [],
+          gaps: [],
+          ...over,
+        },
+        persistenceContext,
+      ),
     ).toThrow(/explicit personal attribution|forbidden personnel role/i);
   });
 
   it.each(CLOSED_PERSONAL_ATTRIBUTION_TEXTS)('落库前拒绝闭集角色/署名关系: %s', (value) => {
     expect(() =>
-      sanitizeBrandProfilePersistenceOutput({
-        valueProps: [value],
-        tone: null,
-        glossary: [],
-        keywords: [],
-        differentiators: [],
-        competitors: [],
-        factSheet: [],
-        gaps: [],
-      }),
+      sanitizeBrandProfilePersistenceOutput(
+        {
+          valueProps: [value],
+          tone: null,
+          glossary: [],
+          keywords: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [],
+          gaps: [],
+        },
+        persistenceContext,
+      ),
     ).toThrow(/explicit personal attribution|forbidden personnel role/i);
   });
 
@@ -1665,24 +1675,28 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
   ])('落库前分别拒绝 fact value/quote 中的人员署名: %j', ({ value, quote }) => {
     const sanitize = sanitizeBrandProfilePersistenceOutput as unknown as (
       input: Record<string, unknown>,
+      context: { companyName: string; products: string[] },
     ) => Record<string, unknown>;
     expect(() =>
-      sanitize({
-        valueProps: [],
-        tone: null,
-        glossary: [],
-        keywords: [],
-        differentiators: [],
-        competitors: [],
-        factSheet: [
-          {
-            key: 'capability',
-            value,
-            evidence: { quote },
-          },
-        ],
-        gaps: [],
-      }),
+      sanitize(
+        {
+          valueProps: [],
+          tone: null,
+          glossary: [],
+          keywords: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [
+            {
+              key: 'capability',
+              value,
+              evidence: { quote },
+            },
+          ],
+          gaps: [],
+        },
+        persistenceContext,
+      ),
     ).toThrow(/explicit personal attribution/i);
   });
 
@@ -1690,16 +1704,19 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     '落库前拒绝未做组织身份消歧的 competitor: %s',
     (name) => {
       expect(() =>
-        sanitizeBrandProfilePersistenceOutput({
-          valueProps: [],
-          tone: null,
-          glossary: [],
-          keywords: [],
-          differentiators: [],
-          competitors: [{ name, positioning: 'Premium segment' }],
-          factSheet: [],
-          gaps: [],
-        }),
+        sanitizeBrandProfilePersistenceOutput(
+          {
+            valueProps: [],
+            tone: null,
+            glossary: [],
+            keywords: [],
+            differentiators: [],
+            competitors: [{ name, positioning: 'Premium segment' }],
+            factSheet: [],
+            gaps: [],
+          },
+          persistenceContext,
+        ),
       ).toThrow(/unresolved competitor identity/i);
     },
   );
@@ -1982,7 +1999,11 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     'What is the email john@example.com?',
     'Can you confirm +1 415 555 1212?',
     'Can you confirm @janesmith?',
+    'Can you confirm @张三?',
     'Is this linkedin.com/in/jane-smith?',
+    'Is this x.com/janesmith?',
+    'Is this instagram.com/janesmith?',
+    'Is this t.me/janesmith?',
     'What is the WeChat ID wxid_janesmith?',
   ])('任务级失败门仍拒绝人员身份问题: %s', (question) => {
     expect(() =>
@@ -2034,7 +2055,11 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
 
   it.each([
     { valueProps: ['Follow @janesmith'] },
+    { valueProps: ['Follow @张三'] },
     { keywords: ['linkedin.com/in/jane-smith'] },
+    { keywords: ['x.com/janesmith'] },
+    { keywords: ['instagram.com/janesmith'] },
+    { keywords: ['t.me/janesmith'] },
     { differentiators: ['WeChat ID wxid_janesmith'] },
   ])('任务级失败门拒绝公共输出里的个人社交标识: %j', (over) => {
     expect(() =>

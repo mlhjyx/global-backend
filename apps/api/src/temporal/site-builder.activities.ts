@@ -55,11 +55,16 @@ import {
 import type { NormalizedBuildRequest } from '../site-builder/build-request-contract';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
-import { ClaimEvidenceBridgeService } from '../site-builder/claim-evidence-bridge.service';
+import {
+  claimEvidenceOriginKey,
+  claimOriginIdentity,
+  ClaimEvidenceBridgeService,
+} from '../site-builder/claim-evidence-bridge.service';
 import {
   claimTypeForBrandFact,
   PrismaClaimEvidenceBridgeRepository,
 } from '../site-builder/claim-evidence-bridge.prisma';
+import { compareClaimProjectionOrder } from '../site-builder/claim-projection-order';
 import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
@@ -97,6 +102,31 @@ export function buildCompensatedSteps(
 }
 
 const POLISH_TIMEOUT_MS = 2_000; // R0-5：硬超时压到 2s 内不破 Demo 10s P95；超时即 abort 底层 fetch，不烧钱
+
+/**
+ * BrandProfile append and Claim projection share one transaction. PostgreSQL
+ * may abort it on a unique race (P2002) or deadlock (P2034); both are safe to
+ * replay because the aborted transaction has no durable writes.
+ */
+export async function runBrandProfilePersistenceWithRetry<T>(
+  operation: () => Promise<T>,
+  maxAttempts = 5,
+): Promise<T> {
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error('maxAttempts must be a positive integer');
+  }
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const retryable =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === 'P2002' || error.code === 'P2034');
+      if (!retryable || attempt === maxAttempts - 1) throw error;
+    }
+  }
+  throw new Error('unreachable BrandProfile persistence retry state');
+}
 
 export interface DemoV0ActivityInput {
   workspaceId: string;
@@ -748,6 +778,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           `SITE_COMPANY_PROFILE_LINK_REQUIRED: site ${siteId} has no verified CompanyProfile link`,
         );
       }
+      const companyProfileId = site.companyProfileId;
       const intake = site.intake as unknown as IntakeInput;
       const profile = sanitizeProfileForPrompt(
         (site.profile as Record<string, unknown> | null) ?? undefined,
@@ -875,21 +906,22 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const intakeSource = toPromptSource(prepared.intake);
       const kbSources = prepared.kb.map(toPromptSource);
       const researchSources = prepared.research.map(toPromptSource);
+      const brandProfileInput = {
+        companyName: intake.company.nameEn ?? intake.company.nameZh,
+        industry: intake.industry,
+        products: intake.products ?? [],
+        targetMarkets: intake.targetMarkets ?? [],
+        intakeSource,
+        kbSources,
+        research: researchSources,
+      };
 
       const result = await runAiTask<
         Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
         BrandProfileOutput
       >(
         BRAND_PROFILE_TASK,
-        {
-          companyName: intake.company.nameEn ?? intake.company.nameZh,
-          industry: intake.industry,
-          products: intake.products ?? [],
-          targetMarkets: intake.targetMarkets ?? [],
-          intakeSource,
-          kbSources,
-          research: researchSources,
-        },
+        brandProfileInput,
         { gateway, ctx: { workspaceId, runId: buildRunId } },
       );
 
@@ -925,21 +957,24 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       ];
 
       // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
-      const clean = sanitizeBrandProfilePersistenceOutput({
-        valueProps: result.data.valueProps ?? [],
-        tone: result.data.tone
-          ? {
-              voice: result.data.tone.voice,
-              style: result.data.tone.style ?? [],
-            }
-          : null,
-        glossary: result.data.glossary ?? [],
-        keywords: result.data.keywords ?? [],
-        differentiators: result.data.differentiators ?? [],
-        competitors: result.data.competitors ?? [],
-        factSheet: gated.factSheet,
-        gaps,
-      });
+      const clean = sanitizeBrandProfilePersistenceOutput(
+        {
+          valueProps: result.data.valueProps ?? [],
+          tone: result.data.tone
+            ? {
+                voice: result.data.tone.voice,
+                style: result.data.tone.style ?? [],
+              }
+            : null,
+          glossary: result.data.glossary ?? [],
+          keywords: result.data.keywords ?? [],
+          differentiators: result.data.differentiators ?? [],
+          competitors: result.data.competitors ?? [],
+          factSheet: gated.factSheet,
+          gaps,
+        },
+        brandProfileInput,
+      );
 
       // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
       // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
@@ -947,9 +982,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       let version = 0;
       let persistedFactCount = 0;
       let persistedGapsCount = 0;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        try {
-          const persisted = await prisma.withWorkspace(workspaceId, async (tx) => {
+      const persisted = await runBrandProfilePersistenceWithRetry(() =>
+        prisma.withWorkspace(workspaceId, async (tx) => {
             const live = await tx.siteBuildRun.findUnique({
               where: { id: buildRunId },
               select: { status: true },
@@ -980,6 +1014,48 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               claimType: claimTypeForBrandFact(fact.key, fact.value),
             }));
             const persistedGaps = [...clean.gaps, ...certificationGate.gaps];
+            const projectionOrder = persistedFactSheet
+              .map((fact, factIndex) => {
+                const identity = claimOriginIdentity({
+                  workspaceId,
+                  companyProfileId,
+                  factKey: fact.key,
+                  claimType: fact.claimType,
+                  statement: fact.value,
+                });
+                const evidenceOriginKey = claimEvidenceOriginKey({
+                  claimOriginKey: identity.claimOriginKey,
+                  workspaceId,
+                  siteId,
+                  sourceSnapshotId: fact.evidence.sourceId,
+                  sourceRole: fact.evidence.sourceRole,
+                  assetId: fact.evidence.assetId,
+                  sourceContentHash: fact.evidence.contentHash,
+                  quote: fact.evidence.quote,
+                  quoteStart: fact.evidence.selector.start,
+                  quoteEnd: fact.evidence.selector.end,
+                  quotePrefix: fact.evidence.selector.prefix,
+                  quoteSuffix: fact.evidence.selector.suffix,
+                  sourceUrl: fact.evidence.url,
+                  fetchedAt: fact.evidence.fetchedAt,
+                });
+                return {
+                  factIndex,
+                  sortKey: `${identity.claimOriginKey}:${evidenceOriginKey}`,
+                  claimOriginKey: identity.claimOriginKey,
+                };
+              })
+              .sort(compareClaimProjectionOrder);
+
+            // Conflict resolution locks Claim rows by UUID. Prelocking every
+            // existing target Claim in that same order prevents cross-path
+            // deadlocks; missing Claims are then inserted in canonical origin
+            // key order by the loop below.
+            await bridgeRepository.lockExistingClaimsForOrigins(
+              workspaceId,
+              companyProfileId,
+              projectionOrder.map((row) => row.claimOriginKey),
+            );
             await tx.brandProfile.create({
               data: {
                 id: brandProfileId,
@@ -1020,22 +1096,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               const claimBridge = new ClaimEvidenceBridgeService(
                 bridgeRepository,
               );
-              const projectionOrder = persistedFactSheet
-                .map((fact, factIndex) => ({
-                  factIndex,
-                  sortKey: JSON.stringify([
-                    claimTypeForBrandFact(fact.key, fact.value),
-                    fact.key.normalize('NFKC'),
-                    fact.value.normalize('NFKC'),
-                    fact.evidence.sourceId,
-                    fact.evidence.evidenceRefId,
-                  ]),
-                }))
-                .sort(
-                  (left, right) =>
-                    left.sortKey.localeCompare(right.sortKey) ||
-                    left.factIndex - right.factIndex,
-                );
               for (const { factIndex } of projectionOrder) {
                 const projection = await claimBridge.projectFact(
                   { userId: 'system', workspaceId, roles: [] },
@@ -1053,19 +1113,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               factCount: persistedFactSheet.length,
               gapsCount: persistedGaps.length,
             };
-          });
-          version = persisted.version;
-          persistedFactCount = persisted.factCount;
-          persistedGapsCount = persisted.gapsCount;
-          break;
-        } catch (err) {
-          const isVersionClash =
-            err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === 'P2002';
-          if (isVersionClash && attempt < 4) continue; // 并发撞版本→重算，不让整活动 attempt 重跑
-          throw err;
-        }
-      }
+          }),
+      );
+      version = persisted.version;
+      persistedFactCount = persisted.factCount;
+      persistedGapsCount = persisted.gapsCount;
 
       log.log(
         `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
