@@ -65,6 +65,8 @@ export type GapReason =
   | 'unverified_certification'
   | 'unsupported_quote'
   | 'evidence_source_mismatch'
+  | 'evidence_value_mismatch'
+  | 'research_hint_not_publishable'
   | 'needs_input';
 
 export interface GapItem {
@@ -131,6 +133,209 @@ const isCertificationClaim = (item: RawFactItem): boolean =>
   CERTIFICATION_CLAIM_PATTERNS.some(
     (re) => re.test(item.key) || re.test(item.value),
   );
+
+/**
+ * R4-A2 protects claim-bearing values independently from exact quote provenance.
+ * NFKC handles compatibility forms (for example full-width model codes), while
+ * retaining the actual number, unit and identifier: this gate deliberately does
+ * not convert units, round quantities, or infer equivalent names.
+ */
+function normalizeClaimAnchor(text: string): string {
+  return text
+    .normalize('NFKC')
+    .toLocaleLowerCase('und')
+    .replace(/[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeClaimKey(text: string): string {
+  return normalizeClaimAnchor(
+    text.normalize('NFKC').replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, '$1_$2'),
+  );
+}
+
+const CLAIM_NUMBER_PATTERN = /[+-]?\d+(?:[.,]\d+)*/gu;
+const CLAIM_NUMBER_SOURCE = '[+-]?\\d+(?:[.,]\\d+)*';
+const CLAIM_UNIT_SOURCE = [
+  '%',
+  '‰',
+  '℃',
+  '℉',
+  '°\\s*[cf]',
+  'bar',
+  'mbar',
+  'pa',
+  'kpa',
+  'mpa',
+  'psi',
+  'hz',
+  'khz',
+  'mhz',
+  'ghz',
+  'rpm',
+  'v',
+  'mv',
+  'kv',
+  'a',
+  'ma',
+  'w',
+  'kw',
+  'mw',
+  'wh',
+  'kwh',
+  'mah',
+  'nm',
+  'um',
+  'μm',
+  'mm',
+  'cm',
+  'm',
+  'km',
+  'in',
+  'inch(?:es)?',
+  'ft',
+  'mg',
+  'g',
+  'kg',
+  'lb(?:s)?',
+  'oz',
+  'ml',
+  'l',
+  'm[23²³]',
+  'l\\s*[/⁄]\\s*min',
+  'n\\s*[.·]\\s*m',
+  'kn',
+  'db',
+  'kb',
+  'mb',
+  'gb',
+  'tb',
+  'pcs',
+  'units?',
+].join('|');
+const CLAIM_NUMBER_WITH_UNIT_PATTERN = new RegExp(
+  `${CLAIM_NUMBER_SOURCE}\\s*(?:${CLAIM_UNIT_SOURCE})(?![\\p{L}\\p{N}])`,
+  'giu',
+);
+const CERTIFICATION_CODE_PATTERN =
+  /\b(?:iso|iec|en|din|iatf|as|api|astm|gb|ul)\s*[-:/]?\s*\d[\d.-]*(?::\d{4})?\b/giu;
+const CERTIFICATION_MARK_PATTERN =
+  /\b(?:ce|fda|ul|rohs|reach|gmp|tüv)\b/giu;
+const LATIN_MODEL_CODE_PATTERN =
+  /(?=[\p{L}\p{N}._/-]*\p{L})(?=[\p{L}\p{N}._/-]*\d)[\p{L}\p{N}]+(?:[._/-][\p{L}\p{N}]+)+/gu;
+const COMPACT_LATIN_MODEL_PATTERN =
+  /(?=[a-z\d]*[a-z])(?=[a-z\d]*\d)[a-z\d]+/giu;
+const MODEL_OR_NAME_KEY_PATTERN =
+  /(?:^|[_\s-])(?:name|model|sku|part[_\s-]?number|code)(?:$|[_\s-])|名称|型号|货号|编号|代码/iu;
+
+function addMatches(
+  anchors: Set<string>,
+  text: string,
+  pattern: RegExp,
+): void {
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const normalized = normalizeClaimAnchor(match[0]);
+    if (normalized) anchors.add(normalized);
+  }
+}
+
+function trimAnchorPunctuation(text: string): string {
+  return text
+    .replace(/^[\s'"`‘’“”()[\]{}<>]+/gu, '')
+    .replace(/[\s'"`‘’“”()[\]{}<>.,;!?]+$/gu, '')
+    .trim();
+}
+
+/** Extract only values for which a fuzzy/semantic match would be unsafe. */
+function protectedClaimAnchors(item: RawFactItem): string[] {
+  const value = normalizeClaimAnchor(item.value);
+  const anchors = new Set<string>();
+
+  addMatches(anchors, value, CLAIM_NUMBER_WITH_UNIT_PATTERN);
+  addMatches(anchors, value, CLAIM_NUMBER_PATTERN);
+  addMatches(anchors, value, CERTIFICATION_CODE_PATTERN);
+  addMatches(anchors, value, CERTIFICATION_MARK_PATTERN);
+  addMatches(anchors, value, LATIN_MODEL_CODE_PATTERN);
+  addMatches(anchors, value, COMPACT_LATIN_MODEL_PATTERN);
+
+  if (MODEL_OR_NAME_KEY_PATTERN.test(normalizeClaimKey(item.key))) {
+    const colon = Math.max(value.indexOf(':'), value.indexOf('：'));
+    const fieldValue = trimAnchorPunctuation(
+      colon >= 0 ? value.slice(colon + 1) : value,
+    );
+    if (fieldValue) anchors.add(fieldValue);
+  }
+
+  return [...anchors].sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
+function isLetterOrNumber(character: string | undefined): boolean {
+  return character != null && /[\p{L}\p{N}]/u.test(character);
+}
+
+function codePointBefore(text: string, codeUnitIndex: number): string | undefined {
+  return codeUnitIndex > 0
+    ? Array.from(text.slice(0, codeUnitIndex)).at(-1)
+    : undefined;
+}
+
+function codePointAfter(text: string, codeUnitIndex: number): string | undefined {
+  return Array.from(text.slice(codeUnitIndex))[0];
+}
+
+function hasNumericContinuation(
+  quote: string,
+  start: number,
+  anchor: string,
+): boolean {
+  const before = codePointBefore(quote, start);
+  const afterIndex = start + anchor.length;
+  const after = codePointAfter(quote, afterIndex);
+  const afterAfter =
+    after == null
+      ? undefined
+      : codePointAfter(quote, afterIndex + after.length);
+  return (
+    (/\d$/u.test(anchor) &&
+      (/[.,]/u.test(after ?? '') && /\d/u.test(afterAfter ?? ''))) ||
+    (/^\d/u.test(anchor) && /[+-]/u.test(before ?? ''))
+  );
+}
+
+/** Unicode-aware complete-token containment; unlike `includes`, 300 never matches 3000. */
+function quoteContainsCompleteAnchor(quote: string, anchor: string): boolean {
+  let fromIndex = 0;
+  while (fromIndex <= quote.length - anchor.length) {
+    const start = quote.indexOf(anchor, fromIndex);
+    if (start < 0) return false;
+    const before = codePointBefore(quote, start);
+    const after = codePointAfter(quote, start + anchor.length);
+    const anchorCodePoints = Array.from(anchor);
+    const startNeedsBoundary = isLetterOrNumber(anchorCodePoints[0]);
+    const endNeedsBoundary = isLetterOrNumber(anchorCodePoints.at(-1));
+    if (
+      (!startNeedsBoundary || !isLetterOrNumber(before)) &&
+      (!endNeedsBoundary || !isLetterOrNumber(after)) &&
+      !hasNumericContinuation(quote, start, anchor)
+    ) {
+      return true;
+    }
+    fromIndex = start + 1;
+  }
+  return false;
+}
+
+function quoteSupportsProtectedClaimValues(
+  item: RawFactItem,
+  quote: string,
+): boolean {
+  const normalizedQuote = normalizeClaimAnchor(quote);
+  return protectedClaimAnchors(item).every((anchor) =>
+    quoteContainsCompleteAnchor(normalizedQuote, anchor),
+  );
+}
 
 /** gap hint 里回显模型 value 的截断上限（复审 F4：value 无界，被拒内容逐版本持久化）。 */
 const HINT_VALUE_MAX = 120;
@@ -330,8 +535,8 @@ export function enforceEvidenceGateV2(
       continue;
     }
 
-    // A1 keeps the existing certification safeguard. Cert Asset/manual verified
-    // publishability is deliberately deferred to A2.
+    // Research output is discovery input only. Even an exact frozen quote cannot
+    // promote a research_hint into a publishable company fact.
     if (
       isCertificationClaim(item) &&
       resolved.ref.sourceType === 'web_research'
@@ -340,6 +545,24 @@ export function enforceEvidenceGateV2(
         field: item.key,
         reason: 'unverified_certification',
         hint: `「${clampHint(item.value)}」为认证类断言，仅有网络研究提示不足以上站——请上传证书文件`,
+      });
+      continue;
+    }
+
+    if (resolved.ref.sourceRole === 'research_hint') {
+      gaps.push({
+        field: item.key,
+        reason: 'research_hint_not_publishable',
+        hint: `「${clampHint(item.value)}」仅来自研究提示，不能作为可发布事实——请补充站主资料或上传件`,
+      });
+      continue;
+    }
+
+    if (!quoteSupportsProtectedClaimValues(item, resolved.ref.quote)) {
+      gaps.push({
+        field: item.key,
+        reason: 'evidence_value_mismatch',
+        hint: `「${clampHint(item.value)}」中的关键数值、单位、认证代码或名称/型号未被逐字原文完整支持`,
       });
       continue;
     }
