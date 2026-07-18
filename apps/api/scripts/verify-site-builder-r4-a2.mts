@@ -52,6 +52,13 @@ function requireDevelopmentDatabase(): void {
 const sha256 = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex");
 
+function errorDetails(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message} ${JSON.stringify(error)}`;
+  }
+  return String(error);
+}
+
 async function main(): Promise<void> {
   requireDevelopmentDatabase();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -59,11 +66,13 @@ async function main(): Promise<void> {
   const workspaceId = randomUUID();
   const otherWorkspaceId = randomUUID();
   const companyProfileId = randomUUID();
+  const sameWorkspaceCompanyProfileId = randomUUID();
   const otherCompanyProfileId = randomUUID();
   const siteId = randomUUID();
   const otherSiteId = randomUUID();
   const certAssetId = randomUUID();
   const capabilitySnapshotId = randomUUID();
+  const alternateCapabilitySnapshotId = randomUUID();
   const certSnapshotId = randomUUID();
   const capabilityText =
     "Industrial pumps reach a maximum pressure of 400 bar.";
@@ -107,6 +116,18 @@ async function main(): Promise<void> {
       privileges.map((row) => row.privilege).join(",") === "INSERT,SELECT",
       "app_user has SELECT+INSERT only on the immutable bridge",
     );
+    const mutationPrivileges = await owner.$queryRaw<
+      { evidenceUpdate: boolean; evidenceDelete: boolean; claimDelete: boolean }[]
+    >`
+      SELECT has_table_privilege('app_user', 'evidence', 'UPDATE') AS "evidenceUpdate",
+             has_table_privilege('app_user', 'evidence', 'DELETE') AS "evidenceDelete",
+             has_table_privilege('app_user', 'claim', 'DELETE') AS "claimDelete"`;
+    check(
+      mutationPrivileges[0]?.evidenceUpdate === false &&
+        mutationPrivileges[0]?.evidenceDelete === false &&
+        mutationPrivileges[0]?.claimDelete === false,
+      "app_user cannot update/delete Evidence or delete Claim",
+    );
 
     console.log("② isolated tenant graph and exact frozen facts");
     await owner.workspace.createMany({
@@ -121,6 +142,11 @@ async function main(): Promise<void> {
           id: companyProfileId,
           workspaceId,
           name: "R4-A2 Pump Verification",
+        },
+        {
+          id: sameWorkspaceCompanyProfileId,
+          workspaceId,
+          name: "R4-A2 Same Tenant Other Company",
         },
         {
           id: otherCompanyProfileId,
@@ -193,10 +219,26 @@ async function main(): Promise<void> {
           provenance: { kind: "r4_a2_verifier", assetId: certAssetId },
           dedupeKey: sha256(`${siteId}:certification`),
         },
+        {
+          id: alternateCapabilitySnapshotId,
+          workspaceId,
+          siteId,
+          sourceKey: "verify-r4-a2:capability:alternate-source",
+          sourceType: "upload",
+          sourceRole: "fact_candidate",
+          contentHash: sha256(capabilityText),
+          normalizationVersion: "evidence-text/1",
+          snapshotText: capabilityText,
+          provenance: { kind: "r4_a2_verifier_alternate_source" },
+          dedupeKey: sha256(`${siteId}:capability:alternate-source`),
+        },
       ],
     });
 
-    const createProfile = async (version: number): Promise<string> => {
+    const createProfile = async (
+      version: number,
+      capabilitySourceSnapshotId = capabilitySnapshotId,
+    ): Promise<string> => {
       const brandProfileId = randomUUID();
       const capabilityRefId = randomUUID();
       const certRefId = randomUUID();
@@ -217,7 +259,7 @@ async function main(): Promise<void> {
                 evidence: {
                   version: 2,
                   evidenceRefId: capabilityRefId,
-                  sourceId: capabilitySnapshotId,
+                  sourceId: capabilitySourceSnapshotId,
                   sourceType: "upload",
                   sourceRole: "fact_candidate",
                   hashAlgorithm: "sha256",
@@ -271,7 +313,7 @@ async function main(): Promise<void> {
           {
             id: capabilityRefId,
             factKey: "maximum_pressure",
-            sourceSnapshotId: capabilitySnapshotId,
+            sourceSnapshotId: capabilitySourceSnapshotId,
             sourceContentHash: sha256(capabilityText),
             quote: capabilityQuote,
             quoteStart: Array.from(
@@ -349,14 +391,50 @@ async function main(): Promise<void> {
     );
 
     const reviewer = new ClaimService(app);
-    for (const claim of firstClaims) {
-      await reviewer.transition(
+    const pendingCapability = firstClaims.find((claim) => claim.type === "param");
+    const pendingCertification = firstClaims.find(
+      (claim) => claim.type === "certification",
+    );
+    check(
+      pendingCapability && pendingCertification,
+      "typed pending capability/certification Claims exist",
+    );
+    const concurrentApprovals = await Promise.allSettled([
+      reviewer.transition(
         { workspaceId, userId: "human-reviewer", roles: [] },
-        claim.id,
+        pendingCapability.id,
         "APPROVED",
-        claim.version,
-      );
-    }
+        pendingCapability.version,
+      ),
+      reviewer.transition(
+        { workspaceId, userId: "competing-reviewer", roles: [] },
+        pendingCapability.id,
+        "APPROVED",
+        pendingCapability.version,
+      ),
+    ]);
+    check(
+      concurrentApprovals.filter((result) => result.status === "fulfilled")
+        .length === 1 &&
+        concurrentApprovals.filter((result) => result.status === "rejected")
+          .length === 1,
+      "concurrent approval has exactly one winner",
+    );
+    check(
+      (await owner.outboxEvent.count({
+        where: {
+          aggregateId: pendingCapability.id,
+          eventType: "ClaimApproved",
+        },
+      })) === 1,
+      "concurrent approval emits exactly one ClaimApproved event",
+    );
+    await reviewer.transition(
+      { workspaceId, userId: "human-reviewer", roles: [] },
+      pendingCertification.id,
+      "APPROVED",
+      pendingCertification.version,
+    );
     const approved = await owner.claim.findMany({
       where: { id: { in: firstClaims.map((claim) => claim.id) } },
     });
@@ -397,6 +475,28 @@ async function main(): Promise<void> {
       (await owner.brandProfileClaimBridge.count({ where: { siteId } })) === 4,
       "each BrandProfile version retains its own exact bridge edges",
     );
+    const thirdProfileId = await createProfile(
+      3,
+      alternateCapabilitySnapshotId,
+    );
+    const alternateSourceProjection = await projectProfile(thirdProfileId);
+    check(
+      alternateSourceProjection.every(
+        (result) =>
+          result.kind === "projected" && result.claim.status === "APPROVED",
+      ),
+      "alternate frozen source reuses reviewed Claim identities",
+    );
+    check(
+      (await owner.evidence.count({
+        where: { claimId: { in: firstClaims.map((claim) => claim.id) } },
+      })) === 3,
+      "same quote from a different source snapshot creates distinct Evidence",
+    );
+    check(
+      (await owner.brandProfileClaimBridge.count({ where: { siteId } })) === 6,
+      "three BrandProfile versions retain six exact bridge edges",
+    );
 
     console.log("④ approved-effective read gate and revocation/expiry");
     const listApproved = () =>
@@ -420,6 +520,31 @@ async function main(): Promise<void> {
       certification && capability,
       "typed capability/certification Claims exist",
     );
+    const originalCapabilityProof = capability.verificationProof;
+    await owner.claim.update({
+      where: { id: capability.id },
+      data: {
+        verificationProof: {
+          action: "claim_approval",
+          approvedVersion: capability.version,
+          claimDigest: "0".repeat(64),
+        },
+      },
+    });
+    check(
+      (await listApproved()).length === 1,
+      "tampered approval digest fails the internal publication gate",
+    );
+    await owner.claim.update({
+      where: { id: capability.id },
+      data: {
+        verificationProof: originalCapabilityProof as Prisma.InputJsonValue,
+      },
+    });
+    check(
+      (await listApproved()).length === 2,
+      "restored exact approval digest restores eligibility",
+    );
     await reviewer.revoke(
       { workspaceId, userId: "human-reviewer", roles: [] },
       certification.id,
@@ -437,11 +562,11 @@ async function main(): Promise<void> {
     check((await listApproved()).length === 1, "revoked Claim is excluded");
     await owner.claim.update({
       where: { id: capability.id },
-      data: { validUntil: new Date(Date.now() - 1_000) },
+      data: { status: "EXPIRED", version: { increment: 1 } },
     });
     check(
       (await listApproved()).length === 0,
-      "time-expired Claim is excluded",
+      "EXPIRED Claim is excluded",
     );
     const otherVisible = await app.withWorkspace(otherWorkspaceId, (tx) =>
       new ClaimEvidenceBridgeService(
@@ -464,14 +589,14 @@ async function main(): Promise<void> {
       SELECT count(*) AS count
         FROM brand_profile_claim_bridge
        WHERE site_id = ${siteId}::uuid`;
-    check(visibleA === 4, "workspace A reads its four bridge edges");
+    check(visibleA === 6, "workspace A reads its six bridge edges");
     check(visibleB === 0, "workspace B cannot read workspace A bridge edges");
     check(
       Number(visibleUnset[0]?.count ?? -1) === 0,
       "unset workspace sees zero bridge edges",
     );
     const firstBridge = await owner.brandProfileClaimBridge.findFirstOrThrow({
-      where: { siteId },
+      where: { siteId, certAssetId: null },
     });
     let appUpdateRejected = false;
     try {
@@ -495,6 +620,72 @@ async function main(): Promise<void> {
       ownerUpdateRejected = true;
     }
     check(ownerUpdateRejected, "owner is stopped by the immutable trigger");
+    let ownerClaimMutationRejected = false;
+    try {
+      await owner.claim.update({
+        where: { id: firstBridge.claimId },
+        data: { statement: "mutated after approval" },
+      });
+    } catch {
+      ownerClaimMutationRejected = true;
+    }
+    check(
+      ownerClaimMutationRejected,
+      "owner cannot mutate bridged Claim identity",
+    );
+    let ownerEvidenceMutationRejected = false;
+    try {
+      await owner.evidence.update({
+        where: { id: firstBridge.evidenceId },
+        data: { snippet: "mutated after bridge" },
+      });
+    } catch {
+      ownerEvidenceMutationRejected = true;
+    }
+    check(
+      ownerEvidenceMutationRejected,
+      "owner cannot mutate bridged Evidence provenance",
+    );
+
+    const exactRef = await owner.brandProfileEvidenceRef.findUniqueOrThrow({
+      where: { id: firstBridge.evidenceRefId },
+    });
+    const mismatchedEvidence = await owner.evidence.create({
+      data: {
+        workspaceId,
+        claimId: firstBridge.claimId,
+        originKey: sha256(`${firstBridge.id}:mismatched-evidence`),
+        sourceSnapshotId: exactRef.sourceSnapshotId,
+        sourceContentHash: exactRef.sourceContentHash,
+        snippet: "wrong",
+        quoteStart: 0,
+        quoteEnd: 5,
+        confidence: 1,
+      },
+    });
+    let exactEvidenceRejected: unknown;
+    try {
+      await owner.$executeRaw`
+        INSERT INTO brand_profile_claim_bridge (
+          id, workspace_id, site_id, company_profile_id, brand_profile_id,
+          evidence_ref_id, fact_index, claim_id, evidence_id, bridge_key
+        ) VALUES (
+          ${randomUUID()}::uuid, ${workspaceId}::uuid, ${siteId}::uuid,
+          ${companyProfileId}::uuid, ${firstBridge.brandProfileId}::uuid,
+          ${firstBridge.evidenceRefId}::uuid, ${firstBridge.factIndex},
+          ${firstBridge.claimId}::uuid, ${mismatchedEvidence.id}::uuid,
+          ${sha256(`${firstBridge.id}:mismatched-edge`)}
+        )`;
+    } catch (error) {
+      exactEvidenceRejected = error;
+    }
+    check(
+      /does not match its exact EvidenceRef/.test(
+        errorDetails(exactEvidenceRejected),
+      ),
+      "database rejects Evidence that disagrees with its exact EvidenceRef",
+    );
+
     let crossTenantRejected = false;
     try {
       await owner.site.update({
@@ -507,6 +698,68 @@ async function main(): Promise<void> {
     check(
       crossTenantRejected,
       "Site→CompanyProfile cross-tenant link is rejected",
+    );
+
+    const crossCompanyBrandProfileId = await createProfile(4);
+    const crossCompanyRef =
+      await owner.brandProfileEvidenceRef.findUniqueOrThrow({
+        where: {
+          brandProfileId_factIndex: {
+            brandProfileId: crossCompanyBrandProfileId,
+            factIndex: 0,
+          },
+        },
+      });
+    const crossCompanyClaim = await owner.claim.create({
+      data: {
+        workspaceId,
+        companyId: sameWorkspaceCompanyProfileId,
+        originKey: sha256(`${crossCompanyBrandProfileId}:other-company-claim`),
+        type: "param",
+        statement: "Maximum pressure: 400 bar",
+        status: "NEEDS_REVIEW",
+        confidence: 1,
+      },
+    });
+    const crossCompanyEvidence = await owner.evidence.create({
+      data: {
+        workspaceId,
+        claimId: crossCompanyClaim.id,
+        originKey: sha256(
+          `${crossCompanyBrandProfileId}:other-company-evidence`,
+        ),
+        sourceSnapshotId: crossCompanyRef.sourceSnapshotId,
+        sourceContentHash: crossCompanyRef.sourceContentHash,
+        snippet: crossCompanyRef.quote,
+        quoteStart: crossCompanyRef.quoteStart,
+        quoteEnd: crossCompanyRef.quoteEnd,
+        quotePrefix: crossCompanyRef.quotePrefix,
+        quoteSuffix: crossCompanyRef.quoteSuffix,
+        confidence: 1,
+      },
+    });
+    let sameTenantCrossCompanyRejected: unknown;
+    try {
+      await owner.$executeRaw`
+        INSERT INTO brand_profile_claim_bridge (
+          id, workspace_id, site_id, company_profile_id, brand_profile_id,
+          evidence_ref_id, fact_index, claim_id, evidence_id, bridge_key
+        ) VALUES (
+          ${randomUUID()}::uuid, ${workspaceId}::uuid, ${siteId}::uuid,
+          ${sameWorkspaceCompanyProfileId}::uuid,
+          ${crossCompanyBrandProfileId}::uuid, ${crossCompanyRef.id}::uuid,
+          ${crossCompanyRef.factIndex}, ${crossCompanyClaim.id}::uuid,
+          ${crossCompanyEvidence.id}::uuid,
+          ${sha256(`${crossCompanyBrandProfileId}:cross-company-edge`)}
+        )`;
+    } catch (error) {
+      sameTenantCrossCompanyRejected = error;
+    }
+    check(
+      /brand_profile_claim_bridge_site_scope_fkey/.test(
+        errorDetails(sameTenantCrossCompanyRejected),
+      ),
+      "same-tenant bridge cannot point at a company different from Site.companyProfileId",
     );
 
     console.log("\n🎉 verify-site-builder-r4-a2 all sections passed");
@@ -532,7 +785,15 @@ async function main(): Promise<void> {
     );
     await cleanup("companies", () =>
       owner.companyProfile.deleteMany({
-        where: { id: { in: [companyProfileId, otherCompanyProfileId] } },
+        where: {
+          id: {
+            in: [
+              companyProfileId,
+              sameWorkspaceCompanyProfileId,
+              otherCompanyProfileId,
+            ],
+          },
+        },
       }),
     );
     await cleanup("workspaces", () =>
@@ -544,7 +805,15 @@ async function main(): Promise<void> {
       const [sites, companies, bridges, claims] = await Promise.all([
         owner.site.count({ where: { id: { in: [siteId, otherSiteId] } } }),
         owner.companyProfile.count({
-          where: { id: { in: [companyProfileId, otherCompanyProfileId] } },
+          where: {
+            id: {
+              in: [
+                companyProfileId,
+                sameWorkspaceCompanyProfileId,
+                otherCompanyProfileId,
+              ],
+            },
+          },
         }),
         owner.brandProfileClaimBridge.count({ where: { siteId } }),
         owner.claim.count({ where: { companyId: companyProfileId } }),
