@@ -160,6 +160,20 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
       "CREATE TRIGGER bridged_evidence_immutable",
     );
     expect(hardeningMigration).toContain(
+      "CREATE TRIGGER brand_profile_claim_bridge_exact_evidence",
+    );
+    for (const exactField of [
+      "source_snapshot_id",
+      "source_content_hash",
+      "fact_index",
+      "quote_start",
+      "quote_end",
+      "cert_asset_id",
+      "processing_status",
+    ]) {
+      expect(hardeningMigration).toContain(exactField);
+    }
+    expect(hardeningMigration).toContain(
       'REVOKE UPDATE, DELETE ON TABLE "evidence" FROM app_user',
     );
     expect(hardeningMigration).toContain(
