@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto';
 import { access } from 'node:fs/promises';
-import type { ModelExecutionPolicySnapshot } from '@global/contracts';
+import {
+  SITE_BUILDER_MODEL_POLICY_VERSION,
+  type ModelExecutionPolicySnapshot,
+} from '@global/contracts';
 import type { TaskRoute } from '../agents/task-routes';
+import {
+  getSiteBuilderTaskRouteBinding,
+  type SiteBuilderTaskId,
+} from '../agents/task-route-bindings';
+import { SITE_BUILDER_MODEL_PROFILES } from '../agents/model-profiles';
 
 export interface EvaluationExecutionPolicy {
   /** Registry/env policy used by the gateway, including profile and data policy. */
@@ -206,6 +214,38 @@ export function routeForModelEvaluation(
       source: 'env_override',
       dataPolicy: { ...basePolicy.dataPolicy },
       route: { primary: model, fallbacks: [] },
+    },
+  };
+}
+
+/**
+ * Build a candidate route from immutable task semantics, not active promotion
+ * state. This keeps an evaluation report valid when its evidence id is later
+ * registered in the production policy registry.
+ */
+export function routeForTaskEvaluation(
+  taskId: SiteBuilderTaskId,
+  model: string,
+): TaskRoute {
+  const binding = getSiteBuilderTaskRouteBinding(taskId);
+  const profile = SITE_BUILDER_MODEL_PROFILES[binding.profile];
+  const dataPolicy = { ...profile.dataPolicy };
+  const route = { primary: model, fallbacks: [] };
+  return {
+    ...binding,
+    profile: binding.profile,
+    primary: model,
+    fallbacks: [],
+    dataPolicy,
+    policy: {
+      policyVersion: SITE_BUILDER_MODEL_POLICY_VERSION,
+      profile: binding.profile,
+      routeState: 'currentRoute',
+      lifecycle: 'active',
+      source: 'env_override',
+      dataPolicy: { ...dataPolicy },
+      maxCostCents: binding.maxCostCents,
+      route,
     },
   };
 }

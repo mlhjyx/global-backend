@@ -47,16 +47,13 @@ import {
   sha256CanonicalJson,
   sha256Bytes,
   sha256Text,
-  routeForModelEvaluation,
+  routeForTaskEvaluation,
   runWithEvaluationDeadline,
   sanitizeGatewayBaseUrl,
   snapshotEvaluationExecutionPolicy,
   type EvaluationExecutionPolicy,
 } from '../src/site-builder/eval/eval-provenance';
-import {
-  resolveTaskRoute,
-  type TaskRoute,
-} from '../src/site-builder/agents/task-routes';
+import type { TaskRoute } from '../src/site-builder/agents/task-routes';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const API_DIR = join(SCRIPT_DIR, '..');
@@ -104,6 +101,10 @@ const SOURCE_FILES = Object.freeze([
     path: 'apps/api/src/site-builder/agents/task-routes.ts',
   },
   {
+    role: 'task_route_binding',
+    path: 'apps/api/src/site-builder/agents/task-route-bindings.ts',
+  },
+  {
     role: 'evidence_contract',
     path: 'apps/api/src/site-builder/agents/evidence-ref.ts',
   },
@@ -135,7 +136,6 @@ const SOURCE_FILES = Object.freeze([
     path: 'apps/api/src/model-gateway/model-provider.ts',
   },
   { role: 'budget_ledger', path: 'apps/api/src/tools/budget.ts' },
-  { role: 'task_registry', path: 'apps/api/src/ai-tasks/task-registry.ts' },
   { role: 'contracts_runtime', path: 'packages/contracts/dist/index.js' },
   {
     role: 'contracts_runtime',
@@ -153,6 +153,7 @@ const SOURCE_FILES = Object.freeze([
     role: 'contracts_runtime',
     path: 'packages/contracts/dist/site-builder/site-spec.js',
   },
+  { role: 'contracts_manifest', path: 'packages/contracts/package.json' },
   { role: 'dependency_lock', path: 'pnpm-lock.yaml' },
 ] as const);
 const CAPABILITY_PROBE_SCHEMA = {
@@ -365,8 +366,7 @@ async function gatewaySnapshot(
 }
 
 function candidateRoute(model: string): TaskRoute {
-  const current = resolveTaskRoute('site_builder.brand_profile', {});
-  return routeForModelEvaluation(current, model);
+  return routeForTaskEvaluation('site_builder.brand_profile', model);
 }
 
 function gatewayFor(model: string): RouterModelGateway {

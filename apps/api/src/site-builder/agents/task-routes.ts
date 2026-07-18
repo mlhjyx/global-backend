@@ -12,18 +12,14 @@
 import type { ModelDataPolicy, ModelExecutionPolicySnapshot } from '@global/contracts';
 import { modelPolicyRegistry } from './model-policy.registry';
 import type { SiteBuilderModelProfileId } from './model-profiles';
+import {
+  getSiteBuilderTaskRouteBinding,
+  SITE_BUILDER_TASK_IDS,
+  type SiteBuilderTaskId,
+  type SiteBuilderTaskRouteBinding,
+} from './task-route-bindings';
 
-export const SITE_BUILDER_TASK_IDS = [
-  'site_builder.brand_profile',
-  'site_builder.copy',
-  'site_builder.design_spec',
-  'site_builder.assemble',
-  'site_builder.assembly_fix',
-  'site_builder.qa_summarize',
-  'site_builder.seo_review',
-] as const;
-
-export type SiteBuilderTaskId = (typeof SITE_BUILDER_TASK_IDS)[number];
+export { SITE_BUILDER_TASK_IDS, type SiteBuilderTaskId };
 
 export interface TaskRoute {
   profile: SiteBuilderModelProfileId;
@@ -41,62 +37,8 @@ export interface TaskRoute {
   reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
-const ASSEMBLE_TIMEOUT_MS = 180_000; // 组装超时预算（用户拍板：宁慢勿错，超时走回退链）
-
-interface TaskRouteBinding {
+type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
   profile: SiteBuilderModelProfileId;
-  maxTokens: number;
-  timeoutMs: number;
-  maxCostCents: number;
-  reasoningEffort?: TaskRoute['reasoningEffort'];
-}
-
-const TASK_BINDINGS: Record<SiteBuilderTaskId, TaskRouteBinding> = {
-  'site_builder.brand_profile': {
-    profile: 'structured.workspace_materials',
-    // H2：现役 reasoning 模型在 6000 token 时两跑截断；12000 是当前校准预算。
-    maxTokens: 12_000,
-    timeoutMs: 150_000,
-    // Matches the pre-MODEL-0 ai-task registry declaration.
-    maxCostCents: 40,
-  },
-  'site_builder.copy': {
-    profile: 'copy.premium',
-    maxTokens: 4000,
-    timeoutMs: 120_000,
-    maxCostCents: 20,
-    reasoningEffort: 'low',
-  },
-  'site_builder.design_spec': {
-    profile: 'structured.default',
-    maxTokens: 4000,
-    timeoutMs: 120_000,
-    maxCostCents: 20,
-  },
-  'site_builder.assemble': {
-    profile: 'structured.default',
-    maxTokens: 16_000,
-    timeoutMs: ASSEMBLE_TIMEOUT_MS,
-    maxCostCents: 20,
-  },
-  'site_builder.assembly_fix': {
-    profile: 'structured.default',
-    maxTokens: 8000,
-    timeoutMs: ASSEMBLE_TIMEOUT_MS,
-    maxCostCents: 20,
-  },
-  'site_builder.qa_summarize': {
-    profile: 'text.summary',
-    maxTokens: 3000,
-    timeoutMs: 90_000,
-    maxCostCents: 20,
-  },
-  'site_builder.seo_review': {
-    profile: 'text.summary',
-    maxTokens: 3000,
-    timeoutMs: 90_000,
-    maxCostCents: 20,
-  },
 };
 
 /** taskId → env 后缀：site_builder.brand_profile → BRAND_PROFILE。 */
@@ -121,8 +63,7 @@ function resolveRollbackOverride(suffix: string, env: NodeJS.ProcessEnv): boolea
 }
 
 export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessEnv = process.env): TaskRoute {
-  const binding = TASK_BINDINGS[taskId];
-  if (!binding) throw new Error(`unknown site_builder task: ${taskId}`);
+  const binding = getSiteBuilderTaskRouteBinding(taskId) as TaskRouteBinding;
   const suffix = envSuffix(taskId);
   assertNoProfileOverride(suffix, env);
   const activePolicy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
