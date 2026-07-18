@@ -57,6 +57,7 @@ export interface ApprovedEffectiveClaim {
 
 export interface PendingClaimProjectionInput {
   workspaceId: string;
+  siteId: string;
   companyProfileId: string;
   brandProfileId: string;
   factIndex: number;
@@ -269,6 +270,7 @@ export class ClaimEvidenceBridgeService {
 
     const projected = await this.repository.projectPendingClaim({
       workspaceId: fact.workspaceId,
+      siteId: fact.siteId,
       companyProfileId: fact.companyProfileId,
       brandProfileId: fact.brandProfileId,
       factIndex: fact.factIndex,

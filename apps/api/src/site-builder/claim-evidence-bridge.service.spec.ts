@@ -134,6 +134,7 @@ function makeHarness(
     getAsset: async (assetId: string) => assets.get(assetId) ?? null,
     projectPendingClaim: async (input: {
       workspaceId: string;
+      siteId: string;
       companyProfileId: string;
       brandProfileId: string;
       factIndex: number;
