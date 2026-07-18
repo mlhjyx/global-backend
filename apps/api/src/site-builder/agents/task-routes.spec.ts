@@ -29,7 +29,7 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
       routeState: 'promotedRoute',
       lifecycle: 'active',
       source: 'registry',
-      promotionEvidenceId: 'model1-brand-profile-20260718-v1',
+      promotionEvidenceId: 'model1-brand-profile-20260719-v20',
     });
   });
 
@@ -199,7 +199,7 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     });
     expect(modelPolicyRegistry.getActiveTaskPolicy('site_builder.brand_profile')).toMatchObject({
       state: 'promotedRoute',
-      promotionEvidenceId: 'model1-brand-profile-20260718-v1',
+      promotionEvidenceId: 'model1-brand-profile-20260719-v20',
     });
   });
 
@@ -242,17 +242,22 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
 
   it('BrandProfile promotion evidence 冻结候选、现役基线、协议与价格快照', () => {
     expect(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE).toMatchObject({
-      id: 'model1-brand-profile-20260718-v1',
+      id: 'model1-brand-profile-20260719-v20',
       reportSha256:
-        '5e74deedad9c192ce4bb39b25496d69a6d8d81a83cf8a552f49c24a39682c49a',
+        '76f30d38dc958e777b036a29f430963d185399b761e7de5d63f7189b303bad60',
       currentRouteBaseline: {
+        route: {
+          primary: 'deepseek-v4-pro',
+          fallbacks: ['glm-5.2'],
+        },
         model: 'deepseek-v4-pro',
-        acceptedArtifacts: 10,
-        hardFailures: 2,
-        attemptedCostUsd: 0.04428822,
-        acceptedArtifactUnitCostUsd: 0.004428822,
+        acceptedArtifacts: 12,
+        hardFailures: 0,
+        fallbackRuns: 0,
+        attemptedCostUsd: 0.06435825,
+        acceptedArtifactUnitCostUsd: 0.0053631875,
         reportSha256:
-          '7b3152b5b39caf5006af90bbc917b5a114ff2843ca039f3c69c78b8b15eeedf9',
+          '3aa408b68978779b4a81f3696f68c761adca453e5fafa9d513bf128d41b2d69b',
       },
       pricing: {
         rates: {
