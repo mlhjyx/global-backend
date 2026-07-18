@@ -429,7 +429,7 @@ const SAFE_ROLE_DEFINITIONS = new Set([
   'legal representative',
 ]);
 const SAFE_PUBLIC_TITLE_PHRASE_PATTERN =
-  /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){1,5}(?:series|pumps?|skids?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|shakers?|mixers?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
+  /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){0,5}(?:series|pumps?|skids?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|shakers?|mixers?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
 const SAFE_ATTRIBUTION_DEPARTMENT_PATTERN =
   /^(?:(?:advanced|customer|design|development|engineering|manufacturing|marketing|operations?|process|product|production|quality|regulatory|research|sales|software|technical)\s+){0,2}(?:committee|department|division|engineering|function|team)$/iu;
 const SAFE_NON_PERSONAL_MODIFIER_SOURCE =
