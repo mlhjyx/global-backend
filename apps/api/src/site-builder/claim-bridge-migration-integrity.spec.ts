@@ -138,6 +138,20 @@ const workspaceDeleteGuardMigration =
         "utf8",
       )
     : "";
+const strictFactKeyMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_strict_fact_key$/.test(entry),
+);
+const strictFactKeyMigration =
+  strictFactKeyMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          strictFactKeyMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -440,6 +454,22 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     );
     expect(claimFactKeyMigration).toContain(
       "Claim approval requires a complete v3 human verification proof",
+    );
+  });
+
+  it("rejects non-canonical fact keys at both frozen-ref and Claim database boundaries", () => {
+    expect(strictFactKeyMigrationDirs).toHaveLength(1);
+    expect(strictFactKeyMigration).toMatch(
+      /brand_profile_evidence_ref[\s\S]+fact_key[\s\S]+\^\[a-z\]\[a-z0-9\]\*\(_\[a-z0-9\]\+\)\*\$/,
+    );
+    expect(strictFactKeyMigration).toMatch(
+      /claim[\s\S]+fact_key[\s\S]+\^\[a-z\]\[a-z0-9\]\*\(_\[a-z0-9\]\+\)\*\$/,
+    );
+    expect(strictFactKeyMigration).toMatch(
+      /RAISE EXCEPTION[\s\S]+non-canonical BrandProfile EvidenceRef fact_key/i,
+    );
+    expect(strictFactKeyMigration).not.toMatch(
+      /UPDATE[\s\S]+SET[\s\S]+fact_key/i,
     );
   });
 });

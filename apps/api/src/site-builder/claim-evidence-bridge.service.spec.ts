@@ -340,37 +340,23 @@ describe("ClaimEvidenceBridgeService — fact projection", () => {
     expect(db.bridgesByKey).toHaveProperty("size", 3);
   });
 
-  it("canonicalizes whitespace in factKey before identity, persistence and reuse", async () => {
+  it.each([
+    "Maximum Pressure",
+    "maximum-pressure",
+    "maximum pressure",
+    " maximum_pressure",
+    "maximum_pressure ",
+  ])("rejects non-canonical factKey %j instead of silently normalizing it", async (invalidFactKey) => {
     const { service, db } = makeHarness({
-      fact: { factKey: "  maximum\tpressure  ", claimType: "param" },
-    });
-    const retryBrandProfileId = "77777777-7777-4777-8777-777777777777";
-    const originalFact = db.facts.get(factKey(BRAND_PROFILE_ID, 0))!;
-    db.facts.set(factKey(retryBrandProfileId, 0), {
-      ...originalFact,
-      brandProfileId: retryBrandProfileId,
-      factKey: "maximum pressure",
-      evidenceRef: {
-        ...originalFact.evidenceRef,
-        evidenceRefId: "evidence-ref-whitespace-retry",
-      },
+      fact: { factKey: invalidFactKey, claimType: "param" },
     });
 
-    const first = await service.projectFact(CTX, projectionRef());
-    const retry = await service.projectFact(CTX, {
-      ...projectionRef(),
-      brandProfileId: retryBrandProfileId,
-    });
-
-    expect(first.claim.id).toBe(retry.claim.id);
-    expect(first.claim.factKey).toBe("maximum pressure");
-    expect(retry.claim.factKey).toBe("maximum pressure");
-    expect(db.claims).toHaveLength(1);
-    expect(db.claims[0].factKey).toBe("maximum pressure");
-    expect(db.projectionInputs).toEqual([
-      expect.objectContaining({ factKey: "maximum pressure" }),
-      expect.objectContaining({ factKey: "maximum pressure" }),
-    ]);
+    await expect(
+      service.projectFact(CTX, projectionRef()),
+    ).rejects.toThrow(/lower_snake_case/);
+    expect(db.claims).toEqual([]);
+    expect(db.evidence).toEqual([]);
+    expect(db.projectionInputs).toEqual([]);
   });
 });
 

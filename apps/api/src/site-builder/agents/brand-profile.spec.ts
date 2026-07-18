@@ -767,6 +767,23 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
     });
   });
 
+  it.each(['Maximum Pressure', 'maximum-pressure', 'maximum pressure'])(
+    'rejects non-canonical fact key %s before creating Claim/Evidence',
+    (key) => {
+      const out = evaluate({
+        key,
+        value: 'Maximum working pressure: 300 bar',
+        quote: 'Maximum working pressure: 300 bar',
+      });
+
+      expect(out.factSheet).toEqual([]);
+      expect(out.refs).toEqual([]);
+      expect(out.gaps).toEqual([
+        expect.objectContaining({ reason: 'unsupported_public_fact_key' }),
+      ]);
+    },
+  );
+
   it.each([
     {
       key: 'customer',
@@ -1844,6 +1861,22 @@ describe('BRAND_PROFILE_OUTPUT_SCHEMA — C4 结构性排除个人字段', () =>
       }
     ).properties?.competitors;
     expect(competitors?.maxItems).toBe(0);
+  });
+
+  it('factSheet.key schema only accepts strict lower_snake_case', () => {
+    const keySchema = (
+      BRAND_PROFILE_OUTPUT_SCHEMA as {
+        properties?: {
+          factSheet?: {
+            items?: { properties?: { key?: { pattern?: string } } };
+          };
+        };
+      }
+    ).properties?.factSheet?.items?.properties?.key;
+
+    expect(keySchema?.pattern).toBe(
+      '^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$',
+    );
   });
 });
 
