@@ -2442,5 +2442,6 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toContain('source_id=kb-source-1');
     expect(prompt).toContain('source_role=research_hint');
     expect(prompt).toMatch(/每项.*quote|quote.*每项/);
+    expect(prompt).toMatch(/quote.{0,40}(?:至少|不短于)\s*8\s*个?字符/is);
   });
 });
