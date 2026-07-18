@@ -711,6 +711,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toContain('manufacturer');
     expect(prompt).toMatch(/具名个人/);
     expect(prompt).toMatch(/视为.{0,4}数据/); // 资料中的指令性文字一律当数据
+    expect(prompt).toMatch(/name.*model.*product.*quote/is);
   });
 
   it('无 KB、无研究源时槽位标注「无」（模型不猜空槽位）', () => {
@@ -755,6 +756,31 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
         gaps: [],
       }),
     ).toThrow(/hard gate rejected.*evidence_source_mismatch/);
+  });
+
+  it('任务级失败门安全报告被拒字段，便于区分路由失败与证据契约失败', () => {
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        valueProps: [],
+        glossary: [],
+        keywords: [],
+        differentiators: [],
+        competitors: [],
+        factSheet: [
+          {
+            key: 'main_products',
+            value: 'Industrial valves',
+            evidence: {
+              sourceType: 'upload',
+              sourceId: 'kb-1',
+              contentHash: 'b'.repeat(64),
+              quote: 'Pumps up to 400 bar.',
+            },
+          },
+        ],
+        gaps: [],
+      }),
+    ).toThrow(/main_products:evidence_value_mismatch/);
   });
 
   it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
