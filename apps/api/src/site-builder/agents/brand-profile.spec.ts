@@ -2329,6 +2329,42 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     ).not.toThrow();
   });
 
+  it('产品主体不因 designed 动词被误判为具名个人，但真实人名仍拒绝', () => {
+    const base = {
+      valueProps: [],
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      factSheet: [],
+      gaps: [],
+    };
+
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
+            term: 'Product terminology',
+            definition:
+              'Magnetic Drive Pumps designed for seal-less transfer of corrosive media.',
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
+            term: 'Design attribution',
+            definition: 'Jane Smith designed the pump system.',
+          },
+        ],
+      }),
+    ).toThrow(/explicit personal attribution/i);
+  });
+
   it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
     const prompt = buildBrandProfilePrompt({
       ...input,
