@@ -8,7 +8,7 @@ import type {
   ModelRouteSnapshot,
 } from '@global/contracts';
 
-import type { SiteBuilderTaskId } from './task-routes';
+import type { SiteBuilderTaskId } from './task-route-bindings';
 import { SITE_BUILDER_MODEL_PROFILES, type SiteBuilderModelProfileId } from './model-profiles';
 
 interface ProfilePolicy {

@@ -4,12 +4,16 @@ import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
 import { AiTraceSink } from './ai-trace.sink';
 import { checkAgainstSchema } from './schema-validate';
-import { BudgetLedger, BudgetExceededError, budgetLedger, DEFAULT_LLM_EST_CENTS } from '../tools/budget';
+import {
+  BudgetLedger,
+  BudgetExceededError,
+  budgetLedger,
+  DEFAULT_LLM_EST_CENTS,
+} from '../tools/budget';
 import {
   ProviderOutputError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
-import { getTask } from '../ai-tasks/task-registry';
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -17,7 +21,10 @@ import { getTask } from '../ai-tasks/task-registry';
  * 规模 run 中后段 fit 判定被静默截断。保守混合价 env 可调（LLM_CENTS_PER_MTOK，默认
  * 100¢/M tok ≈ $1/M——对 flash 档仍高估数倍，作预算上界足够诚实）。
  */
-function centsFromTokens(usage?: { inputTokens?: number; outputTokens?: number }): number | null {
+function centsFromTokens(usage?: {
+  inputTokens?: number;
+  outputTokens?: number;
+}): number | null {
   const tokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
   if (tokens <= 0) return null;
   const env = Number(process.env.LLM_CENTS_PER_MTOK);
@@ -39,7 +46,14 @@ function mergeStructuredUsage(
     outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
   };
 }
-import { AiContext, EmbedInput, GenerateStructuredInput, GenerateTextInput, ModelOp, ModelResult } from './types';
+import {
+  AiContext,
+  EmbedInput,
+  GenerateStructuredInput,
+  GenerateTextInput,
+  ModelOp,
+  ModelResult,
+} from './types';
 
 /**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
@@ -63,11 +77,19 @@ export class RouterModelGateway extends ModelGateway {
     super();
   }
 
-  generateText(input: GenerateTextInput, ctx: AiContext): Promise<ModelResult<string>> {
-    return this.run('generateText', input, ctx, (p) => p.generateText(input, ctx));
+  generateText(
+    input: GenerateTextInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<string>> {
+    return this.run('generateText', input, ctx, (p) =>
+      p.generateText(input, ctx),
+    );
   }
 
-  generateStructured<T = unknown>(input: GenerateStructuredInput, ctx: AiContext): Promise<ModelResult<T>> {
+  generateStructured<T = unknown>(
+    input: GenerateStructuredInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<T>> {
     return this.run('generateStructured', input, ctx, async (p) => {
       const validateTaskOutput = (result: ModelResult<T>): ModelResult<T> => {
         try {
@@ -80,6 +102,10 @@ export class RouterModelGateway extends ModelGateway {
             {
               cause: err,
               callCount: result.callCount ?? 1,
+              provider: result.provider,
+              model: result.model,
+              reportedModel: result.reportedModel,
+              modelResolutionSource: result.modelResolutionSource,
             },
           );
         }
@@ -102,10 +128,30 @@ export class RouterModelGateway extends ModelGateway {
         // FIX 1：修复调用抛错也要带上首调已消耗的 token（否则网关 catch 只结算修复那次、漏首调，少记绕硬顶）。
         throw new ProviderOutputError(
           `repair call failed: ${String(err)}`,
-          mergeStructuredUsage(first.usage, err instanceof ProviderOutputError ? err.usage : undefined),
+          mergeStructuredUsage(
+            first.usage,
+            err instanceof ProviderOutputError ? err.usage : undefined,
+          ),
           {
             cause: err,
-            callCount: 1 + (err instanceof ProviderOutputError ? err.callCount : 1),
+            callCount:
+              1 + (err instanceof ProviderOutputError ? err.callCount : 1),
+            provider:
+              err instanceof ProviderOutputError
+                ? (err.provider ?? first.provider)
+                : first.provider,
+            model:
+              err instanceof ProviderOutputError
+                ? (err.model ?? first.model)
+                : first.model,
+            reportedModel:
+              err instanceof ProviderOutputError
+                ? (err.reportedModel ?? first.reportedModel)
+                : first.reportedModel,
+            modelResolutionSource:
+              err instanceof ProviderOutputError
+                ? (err.modelResolutionSource ?? first.modelResolutionSource)
+                : first.modelResolutionSource,
           },
         );
       }
@@ -116,7 +162,13 @@ export class RouterModelGateway extends ModelGateway {
         throw new ProviderOutputError(
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join('; ')}`,
           mergeStructuredUsage(first.usage, repair.usage),
-          { callCount: 2 },
+          {
+            callCount: 2,
+            provider: repair.provider,
+            model: repair.model,
+            reportedModel: repair.reportedModel,
+            modelResolutionSource: repair.modelResolutionSource,
+          },
         );
       }
       // usage 合并：重试消耗也要入账。callCount=2 → 无 usage 上报时 settle 按**两次**兜底（否则少记一次、
@@ -140,18 +192,30 @@ export class RouterModelGateway extends ModelGateway {
     call: (p: ModelProvider) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
     const chain = this.router.route(op, input.task);
-    if (chain.length === 0) throw new Error(`no model provider for ${op}/${input.task}`);
+    if (chain.length === 0)
+      throw new Error(`no model provider for ${op}/${input.task}`);
 
     // 预算门（收口② D）：task.maxCostCents 从纯声明变真闸——reserve-then-settle，
     // 账户（runId ?? workspaceId）超限即抛 BudgetExceededError（调用不发生=真拦截）。
     // settle 优先级：costUsd（按实）→ token 折算（centsFromTokens）→ est 兜底。
-    const baseCents = input.maxCostCents ?? getTask(input.task)?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
+    const registeredTask =
+      input.maxCostCents === undefined
+        ? (await import('../ai-tasks/task-registry')).getTask(input.task)
+        : undefined;
+    const baseCents =
+      input.maxCostCents ??
+      registeredTask?.maxCostCents ??
+      DEFAULT_LLM_EST_CENTS;
     // generateStructured 可能做一次校验-修复重试（第二次模型调用，见下）——预留**两次**上限，否则账户仅够
     // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
-    const reserveCents = op === 'generateStructured' ? baseCents * 2 : baseCents;
+    const reserveCents =
+      op === 'generateStructured' ? baseCents * 2 : baseCents;
     let reservation: { runId: string; estCents: number };
     try {
-      reservation = this.budget.reserve(ctx.runId ?? ctx.workspaceId, reserveCents);
+      reservation = this.budget.reserve(
+        ctx.runId ?? ctx.workspaceId,
+        reserveCents,
+      );
     } catch (err) {
       // 预算拒绝必须可审计（对齐 ToolBroker 的 DENIED trace）：否则截断完全不可观测。
       if (err instanceof BudgetExceededError) {
@@ -187,7 +251,8 @@ export class RouterModelGateway extends ModelGateway {
           settle(
             costUsd != null
               ? Math.ceil(costUsd * 100)
-              : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1)),
+              : (centsFromTokens(result.usage) ??
+                  baseCents * (result.callCount ?? 1)),
           );
           this.trace?.record({
             workspaceId: ctx.workspaceId,
@@ -213,7 +278,8 @@ export class RouterModelGateway extends ModelGateway {
               ? (centsFromTokens(err.usage) ?? baseCents * err.callCount)
               : null;
           if (c != null) settle(c);
-          const failedUsage = err instanceof ProviderOutputError ? err.usage : undefined;
+          const failedUsage =
+            err instanceof ProviderOutputError ? err.usage : undefined;
           this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,
