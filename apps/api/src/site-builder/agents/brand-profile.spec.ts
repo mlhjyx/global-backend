@@ -276,6 +276,55 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
     ]);
   });
 
+  it.each([
+    {
+      key: 'employee_count',
+      value: 'Employees: 240',
+      quote: 'Employees: 240',
+    },
+    {
+      key: 'staff_count',
+      value: 'Staff count: 240',
+      quote: 'Staff count: 240',
+    },
+    {
+      key: 'representative_products',
+      value: 'Industrial pumps',
+      quote: 'Representative products: Industrial pumps',
+    },
+  ])('retains non-personal company fact $key', ({ key, value, quote }) => {
+    const out = evaluate({ key, value, quote });
+
+    expect(out.gaps).toEqual([]);
+    expect(out.factSheet).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      key: 'distributor_support',
+      value: 'Distributor contact sales@example.com',
+      quote: 'Distributor support is available.',
+    },
+    {
+      key: 'company_history',
+      value: 'Founded by Jane Smith',
+      quote: 'Founded by Jane Smith.',
+    },
+    {
+      key: 'president',
+      value: 'Jane Smith',
+      quote: 'President: Jane Smith.',
+    },
+  ])('rejects personal data carried by $key/value', ({ key, value, quote }) => {
+    const out = evaluate({ key, value, quote });
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.refs).toEqual([]);
+    expect(out.gaps).toEqual([
+      expect.objectContaining({ reason: 'personal_data_not_publishable' }),
+    ]);
+  });
+
   it('rejects PII in a quote even if a malformed upstream bypassed source freezing', () => {
     const source = {
       sourceKey: 'poisoned-source',
