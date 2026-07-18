@@ -69,6 +69,38 @@ export function sha256CanonicalJson(value: unknown): string {
   return sha256Text(canonicalJson(value));
 }
 
+export interface EvaluationSourceFingerprint {
+  path: string;
+  sha256: string;
+}
+
+export interface EvaluationSourceBundleIntegrity {
+  startBundleSha256: string;
+  endBundleSha256: string;
+  stable: boolean;
+  changedPaths: string[];
+}
+
+export function inspectEvaluationSourceBundle(
+  start: readonly EvaluationSourceFingerprint[],
+  end: readonly EvaluationSourceFingerprint[],
+): EvaluationSourceBundleIntegrity {
+  const startByPath = new Map(start.map((item) => [item.path, item.sha256]));
+  const endByPath = new Map(end.map((item) => [item.path, item.sha256]));
+  const changedPaths = [...new Set([...startByPath.keys(), ...endByPath.keys()])]
+    .filter((path) => startByPath.get(path) !== endByPath.get(path))
+    .sort();
+  const startBundleSha256 = sha256CanonicalJson(start);
+  const endBundleSha256 = sha256CanonicalJson(end);
+  return {
+    startBundleSha256,
+    endBundleSha256,
+    stable:
+      changedPaths.length === 0 && startBundleSha256 === endBundleSha256,
+    changedPaths,
+  };
+}
+
 export function sanitizeGatewayBaseUrl(raw: string): string {
   const url = new URL(raw);
   url.username = '';
