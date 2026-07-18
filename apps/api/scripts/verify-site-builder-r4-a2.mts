@@ -256,6 +256,7 @@ async function main(): Promise<void> {
               {
                 key: "maximum_pressure",
                 value: "Maximum pressure: 400 bar",
+                claimType: "param",
                 evidence: {
                   version: 2,
                   evidenceRefId: capabilityRefId,
@@ -285,6 +286,7 @@ async function main(): Promise<void> {
               {
                 key: "certifications",
                 value: "ISO 9001 certified",
+                claimType: "certification",
                 evidence: {
                   version: 2,
                   evidenceRefId: certRefId,
@@ -353,6 +355,7 @@ async function main(): Promise<void> {
       claimStatement: string;
       provenanceAssetId?: string;
       evidenceAssetId?: string;
+      evidenceVersion?: number;
     }) => {
       const sourceSnapshotId = randomUUID();
       const brandProfileId = randomUUID();
@@ -398,8 +401,9 @@ async function main(): Promise<void> {
               {
                 key: factKey,
                 value: factValue,
+                claimType: "param",
                 evidence: {
-                  version: 2,
+                  version: input.evidenceVersion ?? 2,
                   evidenceRefId,
                   sourceId: sourceSnapshotId,
                   sourceType: "upload",
@@ -543,15 +547,16 @@ async function main(): Promise<void> {
       pendingCapability && pendingCertification,
       "typed pending capability/certification Claims exist",
     );
+    const concurrentReviewers = ["human-reviewer", "competing-reviewer"] as const;
     const concurrentApprovals = await Promise.allSettled([
       reviewer.transition(
-        { workspaceId, userId: "human-reviewer", roles: [] },
+        { workspaceId, userId: concurrentReviewers[0], roles: [] },
         pendingCapability.id,
         "APPROVED",
         pendingCapability.version,
       ),
       reviewer.transition(
-        { workspaceId, userId: "competing-reviewer", roles: [] },
+        { workspaceId, userId: concurrentReviewers[1], roles: [] },
         pendingCapability.id,
         "APPROVED",
         pendingCapability.version,
@@ -564,6 +569,10 @@ async function main(): Promise<void> {
           .length === 1,
       "concurrent approval has exactly one winner",
     );
+    const winningReviewer = concurrentReviewers[
+      concurrentApprovals.findIndex((result) => result.status === "fulfilled")
+    ];
+    check(winningReviewer, "concurrent approval winner identity is observable");
     check(
       (await owner.outboxEvent.count({
         where: {
@@ -582,15 +591,23 @@ async function main(): Promise<void> {
     const approved = await owner.claim.findMany({
       where: { id: { in: firstClaims.map((claim) => claim.id) } },
     });
+    const approvedCapability = approved.find(
+      (claim) => claim.id === pendingCapability.id,
+    );
+    const approvedCertification = approved.find(
+      (claim) => claim.id === pendingCertification.id,
+    );
     check(
-      approved.every(
-        (claim) =>
-          claim.status === "APPROVED" &&
-          claim.verifiedBy === "human-reviewer" &&
-          claim.verifiedAt !== null &&
-          claim.verificationMethod === "human_review" &&
-          claim.verificationProof !== null,
-      ),
+      approvedCapability?.status === "APPROVED" &&
+        approvedCapability.verifiedBy === winningReviewer &&
+        approvedCapability.verifiedAt !== null &&
+        approvedCapability.verificationMethod === "human_review" &&
+        approvedCapability.verificationProof !== null &&
+        approvedCertification?.status === "APPROVED" &&
+        approvedCertification.verifiedBy === "human-reviewer" &&
+        approvedCertification.verifiedAt !== null &&
+        approvedCertification.verificationMethod === "human_review" &&
+        approvedCertification.verificationProof !== null,
       "approval persists actor/server time/method/proof",
     );
 
@@ -903,6 +920,26 @@ async function main(): Promise<void> {
         errorDetails(assetMismatchRejected),
       ),
       "database binds non-cert Evidence asset to exact snapshot provenance",
+    );
+
+    const metadataMismatchFixture = await createDirectBridgeFixture({
+      version: 14,
+      sourceRole: "fact_candidate",
+      claimType: "param",
+      claimStatement: "Maximum pressure: 400 bar",
+      evidenceVersion: 1,
+    });
+    let metadataMismatchRejected: unknown;
+    try {
+      await insertDirectBridge(metadataMismatchFixture);
+    } catch (error) {
+      metadataMismatchRejected = error;
+    }
+    check(
+      /EvidenceRefV2 metadata does not match frozen source/.test(
+        errorDetails(metadataMismatchRejected),
+      ),
+      "database binds embedded EvidenceRefV2 metadata to frozen source/ref",
     );
 
     let crossTenantRejected = false;
