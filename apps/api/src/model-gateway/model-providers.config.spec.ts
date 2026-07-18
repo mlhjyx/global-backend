@@ -31,12 +31,11 @@ function request(): { url: string; headers: Record<string, string> } {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('buildGatewayProvider — verified production model transports', () => {
-  it('Terra uses the verified native Responses endpoint', async () => {
+  it('Terra uses Chat Completions after the live Responses route proved protocol-unstable', async () => {
     mockResponse({
-      status: 'completed',
       model: 'gpt-5.6-terra',
-      output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
-      usage: { input_tokens: 1, output_tokens: 1 },
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
     });
     const provider = buildGatewayProvider(providerEnv());
     expect(provider).not.toBeNull();
@@ -47,7 +46,7 @@ describe('buildGatewayProvider — verified production model transports', () => 
       schema: {},
       maxTokens: 100,
     });
-    expect(request().url).toBe('http://gw.test/v1/responses');
+    expect(request().url).toBe('http://gw.test/v1/chat/completions');
   });
 
   it('Sonnet uses the verified native Messages endpoint and headers', async () => {
