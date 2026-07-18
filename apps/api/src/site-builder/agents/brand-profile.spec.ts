@@ -231,6 +231,7 @@ const SAFE_DETERMINED_NOUN_PHRASES = [
 );
 
 const SAFE_NON_PERSONAL_ATTRIBUTIONS = [
+  'Centrifugal process pumps and chemical transfer skids designed for industrial fluid handling applications.',
   'Led by Quality Engineering',
   'Written by Quality Engineering',
   'Quality Engineering leads production',
@@ -1898,7 +1899,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toContain('technical_parameters');
     expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/12');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
-      'brand-profile-route-validation/12',
+      'brand-profile-route-validation/13',
     );
   });
 
