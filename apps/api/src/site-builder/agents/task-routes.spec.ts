@@ -25,7 +25,7 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
       dataScope: 'workspace_site_materials',
     });
     expect(route.policy).toMatchObject({
-      policyVersion: 'site-builder-model-policy/v2',
+      policyVersion: 'site-builder-model-policy/v3',
       routeState: 'promotedRoute',
       lifecycle: 'active',
       source: 'registry',
