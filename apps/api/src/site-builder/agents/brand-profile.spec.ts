@@ -2399,6 +2399,18 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
         ...base,
         glossary: [
           {
+            term: 'Dosing pump',
+            definition:
+              'A pump designed to deliver precise, controlled volumes of fluid for chemical process applications.',
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
             term: 'MX Series',
             definition:
               'Magnetic drive pump series designed for seal-less transfer of corrosive process media.',
