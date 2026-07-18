@@ -9,6 +9,7 @@ import type {
   PendingClaimProjectionInput,
   PendingClaimProjectionResult,
 } from "./claim-evidence-bridge.service";
+import { isCertificationClaim } from "./claim-classification";
 
 type ClaimBridgeTx = Pick<
   Prisma.TransactionClient,
@@ -29,12 +30,10 @@ function optionalString(value: unknown): string | undefined {
 }
 
 export function claimTypeForBrandFact(key: string, value: string): string {
-  const normalized = `${key} ${value}`.normalize("NFKC").toLocaleLowerCase("en-US");
-  if (
-    /certif|certificate|accredit|认证|证书|资质|\b(?:iso|iec|iatf|ce|fda|ul|rohs|reach|gmp|tüv)\b/u.test(
-      normalized,
-    )
-  ) {
+  const normalized = `${key} ${value}`
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US");
+  if (isCertificationClaim({ key, value })) {
     return "certification";
   }
   if (/case|customer|client|project|案例|客户|项目/u.test(normalized)) {
@@ -54,14 +53,14 @@ export function claimTypeForBrandFact(key: string, value: string): string {
   return "capability";
 }
 
-function verificationProof(value: Prisma.JsonValue | null): Record<string, unknown> | null {
+function verificationProof(
+  value: Prisma.JsonValue | null,
+): Record<string, unknown> | null {
   return isRecord(value) ? value : null;
 }
 
 /** Prisma transaction adapter; callers keep this instance inside one workspace transaction. */
-export class PrismaClaimEvidenceBridgeRepository
-  implements ClaimEvidenceBridgeRepository
-{
+export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeRepository {
   constructor(private readonly tx: ClaimBridgeTx) {}
 
   async getCompanyProfileIdForSite(
@@ -226,15 +225,65 @@ export class PrismaClaimEvidenceBridgeRepository
           factIndex: input.factIndex,
           claimId: claim.id,
           evidenceId: evidence.id,
-          certAssetId:
-            input.type === "certification"
-              ? input.evidence.assetId
-              : undefined,
+          certAssetId: isCertificationClaim({
+            type: input.type,
+            value: input.statement,
+          })
+            ? input.evidence.assetId
+            : undefined,
           bridgeKey: input.bridgeKey,
         },
       ],
       skipDuplicates: true,
     });
+    if (inserted.count === 0) {
+      const existing = await this.tx.brandProfileClaimBridge.findUnique({
+        where: {
+          workspaceId_siteId_bridgeKey: {
+            workspaceId: input.workspaceId,
+            siteId: input.siteId,
+            bridgeKey: input.bridgeKey,
+          },
+        },
+        select: {
+          workspaceId: true,
+          siteId: true,
+          companyProfileId: true,
+          brandProfileId: true,
+          evidenceRefId: true,
+          factIndex: true,
+          claimId: true,
+          evidenceId: true,
+          certAssetId: true,
+          bridgeKey: true,
+        },
+      });
+      const expected = {
+        workspaceId: input.workspaceId,
+        siteId: input.siteId,
+        companyProfileId: input.companyProfileId,
+        brandProfileId: input.brandProfileId,
+        evidenceRefId: input.evidence.evidenceRefId,
+        factIndex: input.factIndex,
+        claimId: claim.id,
+        evidenceId: evidence.id,
+        certAssetId: isCertificationClaim({
+          type: input.type,
+          value: input.statement,
+        })
+          ? (input.evidence.assetId ?? null)
+          : null,
+        bridgeKey: input.bridgeKey,
+      };
+      if (
+        existing === null ||
+        Object.entries(expected).some(
+          ([key, value]) => existing[key as keyof typeof existing] !== value,
+        )
+      ) {
+        throw new Error("BRIDGE_IDENTITY_CONFLICT");
+      }
+    }
     return {
       claimId: claim.id,
       evidenceId: evidence.id,
@@ -254,9 +303,12 @@ export class PrismaClaimEvidenceBridgeRepository
         id: true,
         workspaceId: true,
         companyId: true,
+        sourceId: true,
+        originKey: true,
         type: true,
         statement: true,
         status: true,
+        version: true,
         validUntil: true,
         verifiedBy: true,
         verifiedAt: true,
@@ -268,9 +320,12 @@ export class PrismaClaimEvidenceBridgeRepository
       id: claim.id,
       workspaceId: claim.workspaceId,
       companyProfileId: claim.companyId,
+      sourceId: claim.sourceId,
+      originKey: claim.originKey,
       type: claim.type,
       statement: claim.statement,
       status: claim.status as BridgeClaimStatus,
+      version: claim.version,
       validUntil: claim.validUntil,
       verifiedBy: claim.verifiedBy,
       verifiedAt: claim.verifiedAt,

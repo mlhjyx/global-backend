@@ -1,26 +1,26 @@
-import { mkdir, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { Logger } from '@nestjs/common';
-import { Prisma, PrismaClient } from '@prisma/client';
-import { Context as ActivityContext } from '@temporalio/activity';
-import { PrismaService } from '../prisma/prisma.service';
-import { ModelGateway } from '../model-gateway/model-gateway';
+import { mkdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { Logger } from "@nestjs/common";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { Context as ActivityContext } from "@temporalio/activity";
+import { PrismaService } from "../prisma/prisma.service";
+import { ModelGateway } from "../model-gateway/model-gateway";
 import {
   buildDemoSpec,
   DEMO_SPEC_VERSION,
   DemoCopyPolish,
   sanitizePolish,
-} from '../site-builder/demo-spec';
-import type { IntakeInput } from '../site-builder/intake.service';
-import type { KbService } from '../site-builder/kb.service';
-import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
+} from "../site-builder/demo-spec";
+import type { IntakeInput } from "../site-builder/intake.service";
+import type { KbService } from "../site-builder/kb.service";
+import type { BuildScopeInput } from "../site-builder/refurbish-launcher";
 import type {
   ImagePipelineService,
   SiteImagePipelineSummary,
-} from '../site-builder/image-pipeline.service';
-import { allocateNextSiteVersion } from '../site-builder/version-alloc';
-import { runAiTask } from '../site-builder/agents/ai-task';
+} from "../site-builder/image-pipeline.service";
+import { allocateNextSiteVersion } from "../site-builder/version-alloc";
+import { runAiTask } from "../site-builder/agents/ai-task";
 import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
@@ -29,44 +29,47 @@ import {
   PromptEvidenceSource,
   sanitizeBrandProfilePersistenceOutput,
   sanitizeProfileForPrompt,
-} from '../site-builder/agents/brand-profile';
+} from "../site-builder/agents/brand-profile";
 import {
   researchBrand,
   ResearchSource,
-} from '../site-builder/agents/brand-research';
-import { prepareBrandEvidenceSources } from '../site-builder/agents/brand-evidence';
+} from "../site-builder/agents/brand-research";
+import { prepareBrandEvidenceSources } from "../site-builder/agents/brand-evidence";
 import {
   evidenceSourceDedupeKey,
   type FrozenEvidenceSource,
-} from '../site-builder/agents/evidence-ref';
-import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
+} from "../site-builder/agents/evidence-ref";
+import { buildSiteSpecWithTemporaryFile } from "../site-builder/renderer-build";
 import {
   preparePreviewPromotion,
   type PreviewPromotion,
-} from '../site-builder/preview-promotion';
-import { lockSiteSpecAssetsForActivation } from '../site-builder/asset-reference-gate';
-import { applyBuildScope } from '../site-builder/build-scope';
-import type { SiteSpec } from '@global/contracts';
+} from "../site-builder/preview-promotion";
+import { lockSiteSpecAssetsForActivation } from "../site-builder/asset-reference-gate";
+import { applyBuildScope } from "../site-builder/build-scope";
+import type { SiteSpec } from "@global/contracts";
 import {
   BuildProgressEvent,
   recordBuildProgress,
   terminalizeBuildProgress,
-} from '../site-builder/build-progress';
-import type { NormalizedBuildRequest } from '../site-builder/build-request-contract';
-import type { ExecutionBroker } from '../tools/tool-contract';
-import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
-import { ClaimEvidenceBridgeService } from '../site-builder/claim-evidence-bridge.service';
-import { PrismaClaimEvidenceBridgeRepository } from '../site-builder/claim-evidence-bridge.prisma';
-import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
+} from "../site-builder/build-progress";
+import type { NormalizedBuildRequest } from "../site-builder/build-request-contract";
+import type { ExecutionBroker } from "../tools/tool-contract";
+import { budgetLedger, siteBuildBudgetCents } from "../tools/budget";
+import { ClaimEvidenceBridgeService } from "../site-builder/claim-evidence-bridge.service";
+import {
+  claimTypeForBrandFact,
+  PrismaClaimEvidenceBridgeRepository,
+} from "../site-builder/claim-evidence-bridge.prisma";
+import { gateCertificationFactsForPersistence } from "../site-builder/claim-evidence-persistence-gate";
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
-  'kb_ingest',
-  'brand_profile',
-  'image_pipeline',
-  'copy',
-  'assemble_build',
-  'quality_loop',
+  "kb_ingest",
+  "brand_profile",
+  "image_pipeline",
+  "copy",
+  "assemble_build",
+  "quality_loop",
 ] as const;
 
 /**
@@ -85,11 +88,11 @@ export function buildCompensatedSteps(
   assembleBuildDone: boolean,
 ): { key: string; status: string }[] {
   return REFURBISH_STEP_KEYS.map((key) => {
-    if (key === 'brand_profile')
-      return { key, status: brandProfileDone ? 'done' : 'aborted' };
-    if (key === 'assemble_build')
-      return { key, status: assembleBuildDone ? 'done' : 'aborted' };
-    return { key, status: 'aborted' };
+    if (key === "brand_profile")
+      return { key, status: brandProfileDone ? "done" : "aborted" };
+    if (key === "assemble_build")
+      return { key, status: assembleBuildDone ? "done" : "aborted" };
+    return { key, status: "aborted" };
   });
 }
 
@@ -106,10 +109,10 @@ export interface SiteBuilderActivityDeps {
   gateway?: ModelGateway;
   /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
   kb?: {
-    ingestText: KbService['ingestText'];
-    processQueued: KbService['processQueued'];
-    processAsset: KbService['processAsset'];
-    digestSources?: KbService['digestSources'];
+    ingestText: KbService["ingestText"];
+    processQueued: KbService["processQueued"];
+    processAsset: KbService["processAsset"];
+    digestSources?: KbService["digestSources"];
   };
   /** KB recovery 只读跨租户枚举；实际读写仍由 KbService.withWorkspace 执行。 */
   ownerDb?: PrismaClient;
@@ -118,7 +121,7 @@ export interface SiteBuilderActivityDeps {
   /** M1-c deterministic Sharp writer; absent in narrow unit tests means an honest degraded step. */
   imagePipeline?: Pick<
     ImagePipelineService,
-    'listSiteImageIds' | 'processSiteImages'
+    "listSiteImageIds" | "processSiteImages"
   >;
   /** Renderer seam for deterministic cancellation-race tests; production uses the real Astro build. */
   renderSiteSpec?: typeof buildSiteSpecWithTemporaryFile;
@@ -142,7 +145,7 @@ export interface RefurbishActivityInput {
 }
 
 export interface RefurbishCompensationInput extends RefurbishActivityInput {
-  terminalStatus?: 'failed' | 'cancelled';
+  terminalStatus?: "failed" | "cancelled";
   progressV1?: boolean;
 }
 
@@ -167,11 +170,11 @@ export interface BrandProfileSummary {
 export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   kb: { processed: number; failed: number; degraded: boolean };
   /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
-  profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
+  profile: { status: "done" | "degraded" | "failed"; gaps: number };
   /** Optional only at the Activity wire boundary so pre-M1-c scheduled payloads remain replayable. */
   images?: Pick<
     SiteImagePipelineSummary,
-    'status' | 'processed' | 'failed' | 'variants'
+    "status" | "processed" | "failed" | "variants"
   >;
   build: { previewSlug: string; versionId: string };
   progressV1?: boolean;
@@ -180,16 +183,16 @@ export interface RefurbishFinalizeInput extends RefurbishActivityInput {
 /** 本地预览产物根目录（M0 雏形；M1 迁对象存储 + 边缘节点，05 §1）。 */
 export function previewRoot(): string {
   return (
-    process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites')
+    process.env.PREVIEW_DIR ?? path.join(process.cwd(), ".preview", "sites")
   );
 }
 
 function previewStagingDir(buildRunId: string): string {
-  return path.join(previewRoot(), '.staging', buildRunId);
+  return path.join(previewRoot(), ".staging", buildRunId);
 }
 
 function previewVersionDir(buildRunId: string): string {
-  return path.join(previewRoot(), '.versions', buildRunId);
+  return path.join(previewRoot(), ".versions", buildRunId);
 }
 
 function previewLiveDir(slug: string): string {
@@ -199,9 +202,9 @@ function previewLiveDir(slug: string): string {
 /** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
 export function previewBasePath(slug: string): string {
   const pattern =
-    process.env.PREVIEW_URL_PATTERN ?? 'http://localhost:3000/preview/{slug}/';
+    process.env.PREVIEW_URL_PATTERN ?? "http://localhost:3000/preview/{slug}/";
   try {
-    return new URL(pattern.replace('{slug}', slug)).pathname;
+    return new URL(pattern.replace("{slug}", slug)).pathname;
   } catch {
     return `/preview/${slug}/`;
   }
@@ -218,7 +221,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     renderSiteSpec = buildSiteSpecWithTemporaryFile,
     promotePreview = preparePreviewPromotion,
   } = deps;
-  const log = new Logger('SiteBuilderActivities');
+  const log = new Logger("SiteBuilderActivities");
 
   // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
   // 重复无害）。budgetLedger 是进程内单例、无 GC——若只在 beginRefurbishRun 开账，换 worker 或
@@ -239,21 +242,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       // 烧钱），signal 由网关合并进 AbortSignal.any 透传到 fetch。失败/超时/abort 一律回退确定性模板。
       const result = await gateway.generateStructured<DemoCopyPolish>(
         {
-          task: 'site_builder.demo_copy',
+          task: "site_builder.demo_copy",
           prompt: [
-            'Write concise English website copy for a B2B supplier landing page.',
+            "Write concise English website copy for a B2B supplier landing page.",
             `Company: ${intake.company.nameEn ?? intake.company.nameZh}`,
-            `Products: ${intake.products.join(', ')}`,
-            `Target markets (ISO country codes): ${intake.targetMarkets.join(', ')}`,
-            'Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).',
-            'Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.',
-          ].join('\n'),
+            `Products: ${intake.products.join(", ")}`,
+            `Target markets (ISO country codes): ${intake.targetMarkets.join(", ")}`,
+            "Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).",
+            "Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.",
+          ].join("\n"),
           schema: {
-            type: 'object',
+            type: "object",
             properties: {
-              headline: { type: 'string' },
-              subhead: { type: 'string' },
-              aboutBody: { type: 'string' },
+              headline: { type: "string" },
+              subhead: { type: "string" },
+              aboutBody: { type: "string" },
             },
             additionalProperties: false,
           },
@@ -285,7 +288,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     } catch {
       activity = undefined;
     }
-    let stage = 'list-queued';
+    let stage = "list-queued";
     activity?.heartbeat({ siteId, stage });
     const heartbeatTimer = activity
       ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000)
@@ -293,7 +296,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     heartbeatTimer?.unref();
     try {
       return await kb.processQueued(
-        { userId: 'system', workspaceId, roles: [] },
+        { userId: "system", workspaceId, roles: [] },
         siteId,
         {
           signal: activity?.cancellationSignal,
@@ -319,8 +322,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         await tx.siteBuildRun.update({
           where: { id: buildRunId },
           data: {
-            status: 'running',
-            phase: 'demo_v0',
+            status: "running",
+            phase: "demo_v0",
             startedAt: new Date(),
             progress: 0.1,
           },
@@ -342,7 +345,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         const version = await prisma.withWorkspace(workspaceId, async (tx) => {
           // Temporal 重试的上一次尝试可能残留 building 版本行（复审 LOW）——按 runId 清理
           await tx.siteVersion.deleteMany({
-            where: { buildRunId, buildStatus: 'building' },
+            where: { buildRunId, buildStatus: "building" },
           });
           const nextVersion = await allocateNextSiteVersion(tx, siteId);
           return tx.siteVersion.create({
@@ -350,10 +353,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               workspaceId,
               siteId,
               version: nextVersion,
-              source: 'demo_v0',
+              source: "demo_v0",
               spec: doc as unknown as Prisma.InputJsonValue,
               specVersion: DEMO_SPEC_VERSION,
-              buildStatus: 'building',
+              buildStatus: "building",
               buildRunId,
             },
           });
@@ -374,15 +377,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           });
           await tx.siteVersion.update({
             where: { id: version.id },
-            data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
+            data: { buildStatus: "succeeded", artifactKey: `local:${outDir}` },
           });
           await tx.site.update({
             where: { id: siteId },
-            data: { activeVersionId: version.id, status: 'ready' },
+            data: { activeVersionId: version.id, status: "ready" },
           });
           await tx.siteBuildRun.update({
             where: { id: buildRunId },
-            data: { status: 'succeeded', progress: 1, finishedAt: new Date() },
+            data: { status: "succeeded", progress: 1, finishedAt: new Date() },
           });
         });
 
@@ -390,10 +393,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         if (kb) {
           try {
             await kb.ingestText(
-              { userId: 'system', workspaceId, roles: [] },
+              { userId: "system", workspaceId, roles: [] },
               {
                 siteId,
-                source: 'intake',
+                source: "intake",
                 title: `注册引导资料 — ${site.name}`,
                 text: intakeToMarkdown(intake),
               },
@@ -411,11 +414,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         await prisma.withWorkspace(workspaceId, async (tx) => {
           await tx.siteBuildRun.update({
             where: { id: buildRunId },
-            data: { status: 'failed', error: message, finishedAt: new Date() },
+            data: { status: "failed", error: message, finishedAt: new Date() },
           });
           await tx.site.update({
             where: { id: siteId },
-            data: { status: 'draft' },
+            data: { status: "draft" },
           });
         });
         throw err;
@@ -436,20 +439,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             // 否则若 Temporal 丢失本 cleanup 的完成 ack 触发迟到重试，而用户此间已 re-intake（复用
             // setup_failed 站、新 run 已跑到 ready），无条件 update 会 clobber 掉那个成功的站。
             const latest = await tx.siteBuildRun.findFirst({
-              where: { siteId: input.siteId, kind: 'demo_v0' },
-              orderBy: { createdAt: 'desc' },
+              where: { siteId: input.siteId, kind: "demo_v0" },
+              orderBy: { createdAt: "desc" },
               select: { id: true },
             });
             if (latest?.id !== input.buildRunId) return false; // 更新的 run 已接管，本次 cleanup 作废
             // Codex P2：清本 run 残留的 building 版本（旧版靠删站 cascade 带走；保留站后须显式收尾，
             // 否则终态失败留下永久 in-progress 版本行——下次 re-intake 用新 runId 只清自己那批）。
             await tx.siteVersion.updateMany({
-              where: { buildRunId: input.buildRunId, buildStatus: 'building' },
-              data: { buildStatus: 'failed' },
+              where: { buildRunId: input.buildRunId, buildStatus: "building" },
+              data: { buildStatus: "failed" },
             });
             await tx.site.update({
               where: { id: input.siteId },
-              data: { status: 'setup_failed' },
+              data: { status: "setup_failed" },
             });
             return true;
           },
@@ -481,25 +484,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           select: { status: true },
         });
         const claimed =
-          run?.status === 'queued'
+          run?.status === "queued"
             ? await tx.siteBuildRun.updateMany({
-                where: { id: buildRunId, status: 'queued' },
+                where: { id: buildRunId, status: "queued" },
                 data: {
-                  status: 'running',
-                  phase: 'P1_understanding',
+                  status: "running",
+                  phase: "P1_understanding",
                   progress: 0.05,
                   startedAt: new Date(),
                   steps: [
-                    { key: 'kb_ingest', status: 'queued' },
-                    { key: 'brand_profile', status: 'queued' },
-                    { key: 'image_pipeline', status: 'queued' },
-                    { key: 'copy', status: 'queued' },
-                    { key: 'assemble_build', status: 'queued' },
-                    { key: 'quality_loop', status: 'queued' },
+                    { key: "kb_ingest", status: "queued" },
+                    { key: "brand_profile", status: "queued" },
+                    { key: "image_pipeline", status: "queued" },
+                    { key: "copy", status: "queued" },
+                    { key: "assemble_build", status: "queued" },
+                    { key: "quality_loop", status: "queued" },
                   ] as Prisma.InputJsonValue,
                 },
               })
-            : { count: run?.status === 'running' ? 1 : 0 };
+            : { count: run?.status === "running" ? 1 : 0 };
         if (claimed.count === 0) {
           throw new Error(
             `run ${buildRunId} not claimable (cancelled or terminal) — aborting`,
@@ -507,7 +510,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         }
         await tx.site.update({
           where: { id: siteId },
-          data: { status: 'building' },
+          data: { status: "building" },
         });
       });
       // 预算门真接线（改动 1）：认领成功后才开账（失败 claim 上一步已抛）。close-then-open 清跨-retry
@@ -534,7 +537,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     async listImages(
       input: RefurbishActivityInput,
     ): Promise<{ assetIds: string[]; truncated: boolean }> {
-      if (!imagePipeline) throw new Error('image pipeline unavailable');
+      if (!imagePipeline) throw new Error("image pipeline unavailable");
       return imagePipeline.listSiteImageIds({
         workspaceId: input.workspaceId,
         siteId: input.siteId,
@@ -547,7 +550,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ): Promise<SiteImagePipelineSummary> {
       if (!imagePipeline) {
         return {
-          status: 'degraded',
+          status: "degraded",
           processed: 0,
           failed: 0,
           variants: 0,
@@ -560,13 +563,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       } catch {
         activity = undefined;
       }
-      activity?.heartbeat({ siteId: input.siteId, stage: 'image-pipeline' });
+      activity?.heartbeat({ siteId: input.siteId, stage: "image-pipeline" });
       const heartbeatTimer = activity
         ? setInterval(
             () =>
               activity?.heartbeat({
                 siteId: input.siteId,
-                stage: 'image-pipeline',
+                stage: "image-pipeline",
               }),
             5_000,
           )
@@ -600,7 +603,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     /** 单素材 KB 活动：workflowId/input/DB fence 三者都绑定 assetId。 */
     async processKbAsset(input: KbRecoveryCandidate) {
       if (!kb?.processAsset) {
-        return { assetId: input.assetId, outcome: 'not_due' as const };
+        return { assetId: input.assetId, outcome: "not_due" as const };
       }
       // verifier/unit tests may invoke the activity function directly, outside a Temporal
       // Activity context. Production worker calls get heartbeat+cancellation propagation.
@@ -610,7 +613,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       } catch {
         activity = undefined;
       }
-      let stage = 'claim';
+      let stage = "claim";
       activity?.heartbeat({ assetId: input.assetId, stage });
       const heartbeatTimer = activity
         ? setInterval(
@@ -621,7 +624,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       heartbeatTimer?.unref();
       try {
         return await kb.processAsset(
-          { userId: 'system', workspaceId: input.workspaceId, roles: [] },
+          { userId: "system", workspaceId: input.workspaceId, roles: [] },
           input.siteId,
           input.assetId,
           {
@@ -649,25 +652,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const limit = Math.max(1, Math.min(input.limit, 500));
       const rows = await ownerDb.asset.findMany({
         where: {
-          kind: 'doc',
+          kind: "doc",
           contentHash: { not: null },
           deletedAt: null,
           OR: [
             {
-              processingStatus: 'queued',
+              processingStatus: "queued",
               OR: [{ retryAt: null }, { retryAt: { lte: now } }],
             },
-            { processingStatus: 'processing', leaseUntil: { lte: now } },
+            { processingStatus: "processing", leaseUntil: { lte: now } },
           ],
         },
         orderBy: [
           // `processing` sorts before `queued`, so an expired worker lease cannot be
           // starved forever by a sustained queued backlog before `take` is applied.
-          { processingStatus: 'asc' },
-          { leaseUntil: { sort: 'asc', nulls: 'last' } },
-          { retryAt: { sort: 'asc', nulls: 'first' } },
-          { createdAt: 'asc' },
-          { id: 'asc' },
+          { processingStatus: "asc" },
+          { leaseUntil: { sort: "asc", nulls: "last" } },
+          { retryAt: { sort: "asc", nulls: "first" } },
+          { createdAt: "asc" },
+          { id: "asc" },
         ],
         take: limit,
         select: {
@@ -687,7 +690,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         if (row.processingAttempt >= 5 || ageMs >= 60 * 60 * 1000) {
           log.warn(
             JSON.stringify({
-              event: 'site_builder_kb_recovery_alert',
+              event: "site_builder_kb_recovery_alert",
               assetId: row.id,
               workspaceId: row.workspaceId,
               siteId: row.siteId,
@@ -720,7 +723,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ): Promise<BrandProfileSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
-      if (!gateway) throw new Error('brand profile: model gateway unavailable');
+      if (!gateway) throw new Error("brand profile: model gateway unavailable");
 
       // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
       // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
@@ -735,7 +738,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         }),
       );
       if (!site) throw new Error(`site ${siteId} not found`);
-      if (!run || run.status !== 'running') {
+      if (!run || run.status !== "running") {
         throw new Error(
           `run ${buildRunId} not running (cancelled?) — skip brand profile`,
         );
@@ -752,7 +755,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       const digestDocs = kb?.digestSources
         ? await kb.digestSources(
-            { userId: 'system', workspaceId, roles: [] },
+            { userId: "system", workspaceId, roles: [] },
             siteId,
           )
         : [];
@@ -800,7 +803,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             where: { id: buildRunId },
             select: { status: true },
           });
-          if (!live || live.status !== 'running') {
+          if (!live || live.status !== "running") {
             throw new Error(
               `run ${buildRunId} no longer running — skip evidence snapshot write`,
             );
@@ -853,7 +856,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       ): PromptEvidenceSource => {
         const persisted = persistedFor(source);
         const title =
-          typeof source.provenance.title === 'string'
+          typeof source.provenance.title === "string"
             ? source.provenance.title
             : undefined;
         return {
@@ -895,13 +898,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           source.id,
           {
             sourceKey: source.sourceKey,
-            sourceType: source.sourceType as FrozenEvidenceSource['sourceType'],
-            sourceRole: source.sourceRole as FrozenEvidenceSource['sourceRole'],
-            hashAlgorithm: 'sha256',
+            sourceType: source.sourceType as FrozenEvidenceSource["sourceType"],
+            sourceRole: source.sourceRole as FrozenEvidenceSource["sourceRole"],
+            hashAlgorithm: "sha256",
             contentHash: source.contentHash,
             upstreamContentHash: source.upstreamContentHash ?? undefined,
             normalizationVersion:
-              source.normalizationVersion as FrozenEvidenceSource['normalizationVersion'],
+              source.normalizationVersion as FrozenEvidenceSource["normalizationVersion"],
             snapshotText: source.snapshotText,
             displayUrl: source.displayUrl ?? undefined,
             fetchedAt: source.fetchedAt?.toISOString(),
@@ -916,7 +919,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         ...gated.gaps,
         ...(result.data.gaps ?? []).map((g) => ({
           field: g.field,
-          reason: 'needs_input' as const,
+          reason: "needs_input" as const,
           hint: g.question,
         })),
       ];
@@ -946,93 +949,111 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       let persistedGapsCount = 0;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
-          const persisted = await prisma.withWorkspace(workspaceId, async (tx) => {
-            const live = await tx.siteBuildRun.findUnique({
-              where: { id: buildRunId },
-              select: { status: true },
-            });
-            if (!live || live.status !== 'running') {
-              throw new Error(
-                `run ${buildRunId} no longer running — skip brand profile write`,
+          const persisted = await prisma.withWorkspace(
+            workspaceId,
+            async (tx) => {
+              const live = await tx.siteBuildRun.findUnique({
+                where: { id: buildRunId },
+                select: { status: true },
+              });
+              if (!live || live.status !== "running") {
+                throw new Error(
+                  `run ${buildRunId} no longer running — skip brand profile write`,
+                );
+              }
+              const agg = await tx.brandProfile.aggregate({
+                where: { siteId },
+                _max: { version: true },
+              });
+              const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
+              const bridgeRepository = new PrismaClaimEvidenceBridgeRepository(
+                tx,
               );
-            }
-            const agg = await tx.brandProfile.aggregate({
-              where: { siteId },
-              _max: { version: true },
-            });
-            const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
-            const bridgeRepository = new PrismaClaimEvidenceBridgeRepository(tx);
-            const certificationGate = await gateCertificationFactsForPersistence(
-              bridgeRepository,
-              {
-                workspaceId,
-                siteId,
-                facts: clean.factSheet,
-              },
-            );
-            const persistedGaps = [...clean.gaps, ...certificationGate.gaps];
-            await tx.brandProfile.create({
-              data: {
-                id: brandProfileId,
-                workspaceId,
-                siteId,
-                version: next,
-                evidenceSchemaVersion: 2,
-                valueProps: clean.valueProps as Prisma.InputJsonValue,
-                tone: (clean.tone ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-                glossary: clean.glossary as Prisma.InputJsonValue,
-                keywords: clean.keywords as Prisma.InputJsonValue,
-                differentiators: clean.differentiators as Prisma.InputJsonValue,
-                competitors: clean.competitors as Prisma.InputJsonValue,
-                factSheet: certificationGate.factSheet as unknown as Prisma.InputJsonValue,
-                gaps: persistedGaps as unknown as Prisma.InputJsonValue,
-                researchDegraded: research.degraded,
-              },
-            });
-            if (certificationGate.factSheet.length > 0) {
-              await tx.brandProfileEvidenceRef.createMany({
-                data: certificationGate.factSheet.map((fact, factIndex) => ({
-                  id: fact.evidence.evidenceRefId,
+              const certificationGate =
+                await gateCertificationFactsForPersistence(bridgeRepository, {
                   workspaceId,
                   siteId,
-                  brandProfileId,
-                  factIndex,
-                  factKey: fact.key,
-                  sourceSnapshotId: fact.evidence.sourceId,
-                  sourceContentHash: fact.evidence.contentHash,
-                  quote: fact.evidence.quote,
-                  quoteStart: fact.evidence.selector.start,
-                  quoteEnd: fact.evidence.selector.end,
-                  quotePrefix: fact.evidence.selector.prefix,
-                  quoteSuffix: fact.evidence.selector.suffix,
-                })),
+                  facts: clean.factSheet,
+                });
+              const persistedGaps = [...clean.gaps, ...certificationGate.gaps];
+              await tx.brandProfile.create({
+                data: {
+                  id: brandProfileId,
+                  workspaceId,
+                  siteId,
+                  version: next,
+                  evidenceSchemaVersion: 2,
+                  valueProps: clean.valueProps as Prisma.InputJsonValue,
+                  tone: (clean.tone ??
+                    Prisma.JsonNull) as Prisma.InputJsonValue,
+                  glossary: clean.glossary as Prisma.InputJsonValue,
+                  keywords: clean.keywords as Prisma.InputJsonValue,
+                  differentiators:
+                    clean.differentiators as Prisma.InputJsonValue,
+                  competitors: clean.competitors as Prisma.InputJsonValue,
+                  factSheet:
+                    certificationGate.factSheet as unknown as Prisma.InputJsonValue,
+                  gaps: persistedGaps as unknown as Prisma.InputJsonValue,
+                  researchDegraded: research.degraded,
+                },
               });
+              if (certificationGate.factSheet.length > 0) {
+                await tx.brandProfileEvidenceRef.createMany({
+                  data: certificationGate.factSheet.map((fact, factIndex) => ({
+                    id: fact.evidence.evidenceRefId,
+                    workspaceId,
+                    siteId,
+                    brandProfileId,
+                    factIndex,
+                    factKey: fact.key,
+                    sourceSnapshotId: fact.evidence.sourceId,
+                    sourceContentHash: fact.evidence.contentHash,
+                    quote: fact.evidence.quote,
+                    quoteStart: fact.evidence.selector.start,
+                    quoteEnd: fact.evidence.selector.end,
+                    quotePrefix: fact.evidence.selector.prefix,
+                    quoteSuffix: fact.evidence.selector.suffix,
+                  })),
+                });
 
-              const claimBridge = new ClaimEvidenceBridgeService(
-                bridgeRepository,
-              );
-              for (
-                let factIndex = 0;
-                factIndex < certificationGate.factSheet.length;
-                factIndex += 1
-              ) {
-                const projection = await claimBridge.projectFact(
-                  { userId: 'system', workspaceId, roles: [] },
-                  { siteId, brandProfileId, factIndex },
+                const claimBridge = new ClaimEvidenceBridgeService(
+                  bridgeRepository,
                 );
-                if (projection.kind !== 'projected') {
-                  throw new Error(
-                    `claim bridge rejected persisted fact ${factIndex}: ${projection.reason}`,
+                const projectionOrder = certificationGate.factSheet
+                  .map((fact, factIndex) => ({
+                    factIndex,
+                    sortKey: JSON.stringify([
+                      claimTypeForBrandFact(fact.key, fact.value),
+                      fact.key.normalize("NFKC"),
+                      fact.value.normalize("NFKC"),
+                      fact.evidence.sourceId,
+                      fact.evidence.evidenceRefId,
+                    ]),
+                  }))
+                  .sort(
+                    (left, right) =>
+                      left.sortKey.localeCompare(right.sortKey) ||
+                      left.factIndex - right.factIndex,
                   );
+                for (const { factIndex } of projectionOrder) {
+                  const projection = await claimBridge.projectFact(
+                    { userId: "system", workspaceId, roles: [] },
+                    { siteId, brandProfileId, factIndex },
+                  );
+                  if (projection.kind !== "projected") {
+                    throw new Error(
+                      `claim bridge rejected persisted fact ${factIndex}: ${projection.reason}`,
+                    );
+                  }
                 }
               }
-            }
-            return {
-              version: next,
-              factCount: certificationGate.factSheet.length,
-              gapsCount: persistedGaps.length,
-            };
-          });
+              return {
+                version: next,
+                factCount: certificationGate.factSheet.length,
+                gapsCount: persistedGaps.length,
+              };
+            },
+          );
           version = persisted.version;
           persistedFactCount = persisted.factCount;
           persistedGapsCount = persisted.gapsCount;
@@ -1040,14 +1061,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         } catch (err) {
           const isVersionClash =
             err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === 'P2002';
+            err.code === "P2002";
           if (isVersionClash && attempt < 4) continue; // 并发撞版本→重算，不让整活动 attempt 重跑
           throw err;
         }
       }
 
       log.log(
-        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ", research degraded" : ""}`,
       );
       return {
         version,
@@ -1065,13 +1086,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       const partialBuild =
-        input.scope?.scope === 'page' ||
-        input.scope?.scope === 'section' ||
+        input.scope?.scope === "page" ||
+        input.scope?.scope === "section" ||
         Boolean(input.scope?.options?.pages);
       const baseVersionId = input.scope?.baseVersionId;
       if (partialBuild && !baseVersionId) {
         throw new Error(
-          'partial build is missing its immutable base SiteVersion',
+          "partial build is missing its immutable base SiteVersion",
         );
       }
       const { site, existing, activeSpec } = await prisma.withWorkspace(
@@ -1079,9 +1100,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         async (tx) => {
           // cancelled 后不再推进（复审 C2）
           const advanced = await tx.siteBuildRun.updateMany({
-            where: { id: buildRunId, status: 'running' },
+            where: { id: buildRunId, status: "running" },
             data: {
-              phase: 'P3_assembly',
+              phase: "P3_assembly",
               progress: input.progressV1 ? 0.65 : 0.5,
             },
           });
@@ -1101,7 +1122,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     where: {
                       id: baseVersionId,
                       siteId,
-                      buildStatus: 'succeeded',
+                      buildStatus: "succeeded",
                     },
                     select: { spec: true },
                   })
@@ -1109,7 +1130,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               : null,
             // Temporal 结果丢失重试的幂等位（Codex P2）：本 run 已有成功版本→复用，不再建第二个
             existing: await tx.siteVersion.findFirst({
-              where: { buildRunId, buildStatus: 'succeeded' },
+              where: { buildRunId, buildStatus: "succeeded" },
             }),
           };
         },
@@ -1129,12 +1150,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const doc = applyBuildScope(
         activeSpec as unknown as SiteSpec | null,
         candidate,
-        (input.scope ?? { scope: 'site' }) as NormalizedBuildRequest,
+        (input.scope ?? { scope: "site" }) as NormalizedBuildRequest,
       );
 
       const version = await prisma.withWorkspace(workspaceId, async (tx) => {
         await tx.siteVersion.deleteMany({
-          where: { buildRunId, buildStatus: 'building' },
+          where: { buildRunId, buildStatus: "building" },
         });
         const nextVersion = await allocateNextSiteVersion(tx, siteId);
         return tx.siteVersion.create({
@@ -1142,10 +1163,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             workspaceId,
             siteId,
             version: nextVersion,
-            source: 'build',
+            source: "build",
             spec: doc as unknown as Prisma.InputJsonValue,
             specVersion: DEMO_SPEC_VERSION,
-            buildStatus: 'building',
+            buildStatus: "building",
             buildRunId,
           },
         });
@@ -1175,10 +1196,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           where: { id: buildRunId },
           select: { status: true },
         });
-        if (!run || run.status !== 'running') {
+        if (!run || run.status !== "running") {
           await tx.siteVersion.updateMany({
-            where: { id: version.id, buildStatus: 'building' },
-            data: { buildStatus: 'failed' },
+            where: { id: version.id, buildStatus: "building" },
+            data: { buildStatus: "failed" },
           });
           return false;
         }
@@ -1186,9 +1207,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           where: {
             id: version.id,
             buildRunId,
-            buildStatus: 'building',
+            buildStatus: "building",
           },
-          data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
+          data: { buildStatus: "succeeded", artifactKey: `local:${outDir}` },
         });
         return completed.count === 1;
       });
@@ -1216,7 +1237,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         build,
       } = input;
       const images = input.images ?? {
-        status: 'skipped_m1c' as const,
+        status: "skipped_m1c" as const,
         processed: 0,
         failed: 0,
         variants: 0,
@@ -1244,13 +1265,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }
           const storedScope =
             runBefore.scope &&
-            typeof runBefore.scope === 'object' &&
+            typeof runBefore.scope === "object" &&
             !Array.isArray(runBefore.scope)
               ? runBefore.scope
               : {};
           const hasStoredPublicationBase = Object.prototype.hasOwnProperty.call(
             storedScope,
-            'publicationBaseVersionId',
+            "publicationBaseVersionId",
           );
           const storedPublicationBase = (
             storedScope as Record<string, Prisma.JsonValue>
@@ -1258,18 +1279,18 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           if (
             hasStoredPublicationBase &&
             storedPublicationBase !== null &&
-            typeof storedPublicationBase !== 'string'
+            typeof storedPublicationBase !== "string"
           ) {
             throw new Error(`run ${buildRunId} has corrupt publication base`);
           }
           const inputHasBase = Boolean(
             input.scope &&
-            Object.prototype.hasOwnProperty.call(input.scope, 'baseVersionId'),
+            Object.prototype.hasOwnProperty.call(input.scope, "baseVersionId"),
           );
           publicationBaseVersionId = input.progressV1
             ? hasStoredPublicationBase
               ? (storedPublicationBase as string | null)
-              : runBefore.status === 'running'
+              : runBefore.status === "running"
                 ? inputHasBase
                   ? (input.scope?.baseVersionId ?? null)
                   : siteBefore.activeVersionId
@@ -1278,10 +1299,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
           // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
           const published = await tx.siteBuildRun.updateMany({
-            where: { id: buildRunId, status: { in: ['running', 'succeeded'] } },
+            where: { id: buildRunId, status: { in: ["running", "succeeded"] } },
             data: {
-              status: 'succeeded',
-              phase: 'P5_publish',
+              status: "succeeded",
+              phase: "P5_publish",
               progress: 1,
               finishedAt: new Date(),
               ...(!hasStoredPublicationBase &&
@@ -1298,26 +1319,26 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 : {
                     steps: [
                       {
-                        key: 'kb_ingest',
-                        status: kbSummary.degraded ? 'degraded' : 'done',
+                        key: "kb_ingest",
+                        status: kbSummary.degraded ? "degraded" : "done",
                         processed: kbSummary.processed,
                         failed: kbSummary.failed,
                       },
                       {
-                        key: 'brand_profile',
+                        key: "brand_profile",
                         status: profile.status,
                         gaps: profile.gaps,
                       },
                       {
-                        key: 'image_pipeline',
+                        key: "image_pipeline",
                         status: images.status,
                         processed: images.processed,
                         failed: images.failed,
                         variants: images.variants,
                       },
-                      { key: 'copy', status: 'skipped_m1d' },
-                      { key: 'assemble_build', status: 'done' },
-                      { key: 'quality_loop', status: 'skipped_m1f' },
+                      { key: "copy", status: "skipped_m1d" },
+                      { key: "assemble_build", status: "done" },
+                      { key: "quality_loop", status: "skipped_m1f" },
                     ] as Prisma.InputJsonValue,
                   }),
             },
@@ -1328,7 +1349,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             );
           }
           const targetVersion = await tx.siteVersion.findFirst({
-            where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
+            where: { id: build.versionId, siteId, buildStatus: "succeeded" },
             select: { spec: true, artifactKey: true },
           });
           if (!targetVersion)
@@ -1350,17 +1371,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   { activeVersionId: build.versionId },
                 ],
               },
-              data: { activeVersionId: build.versionId, status: 'ready' },
+              data: { activeVersionId: build.versionId, status: "ready" },
             });
             if (activated.count !== 1) {
               throw new Error(
-                'active SiteVersion changed during partial build — pointer untouched',
+                "active SiteVersion changed during partial build — pointer untouched",
               );
             }
           } else {
             await tx.site.update({
               where: { id: siteId },
-              data: { activeVersionId: build.versionId, status: 'ready' },
+              data: { activeVersionId: build.versionId, status: "ready" },
             });
           }
           if (input.progressV1) {
@@ -1433,8 +1454,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const expectedArtifact = `local:${previewVersionDir(buildRunId)}`;
             if (
               siteNow?.activeVersionId !== build.versionId ||
-              runNow?.status !== 'succeeded' ||
-              versionNow?.buildStatus !== 'succeeded' ||
+              runNow?.status !== "succeeded" ||
+              versionNow?.buildStatus !== "succeeded" ||
               versionNow.artifactKey !== expectedArtifact
             ) {
               await promotion!.abandon();
@@ -1452,14 +1473,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   where: { id: siteId, activeVersionId: build.versionId },
                   data: {
                     activeVersionId: publicationBaseVersionId,
-                    status: publicationBaseVersionId ? 'ready' : 'draft',
+                    status: publicationBaseVersionId ? "ready" : "draft",
                   },
                 });
                 const failed = await tx.siteBuildRun.updateMany({
-                  where: { id: buildRunId, status: 'succeeded' },
+                  where: { id: buildRunId, status: "succeeded" },
                   data: {
-                    status: 'failed',
-                    error: 'preview pointer promotion failed',
+                    status: "failed",
+                    error: "preview pointer promotion failed",
                     finishedAt: new Date(),
                   },
                 });
@@ -1468,9 +1489,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     where: {
                       id: build.versionId,
                       buildRunId,
-                      buildStatus: 'succeeded',
+                      buildStatus: "succeeded",
                     },
-                    data: { buildStatus: 'failed' },
+                    data: { buildStatus: "failed" },
                   });
                 }
               });
@@ -1480,7 +1501,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               );
               throw new AggregateError(
                 [pointerError, reconcileError],
-                'preview pointer promotion and reconciliation failed',
+                "preview pointer promotion and reconciliation failed",
                 { cause: reconcileError },
               );
             }
@@ -1502,7 +1523,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishCompensationInput,
     ): Promise<void> {
       const { workspaceId, siteId, buildRunId } = input;
-      const terminalStatus = input.terminalStatus ?? 'failed';
+      const terminalStatus = input.terminalStatus ?? "failed";
       try {
         await prisma.withWorkspace(workspaceId, async (tx) => {
           // Must be acquired before the terminal CAS to avoid a lock-order inversion with
@@ -1511,7 +1532,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           const run = await tx.siteBuildRun.findUnique({
             where: { id: buildRunId },
           });
-          if (run && ['queued', 'running'].includes(run.status)) {
+          if (run && ["queued", "running"].includes(run.status)) {
             // 改动 3：转 failed 时补写 steps（观测性）——否则 API 显示「failed 但六步全 pending」。
             // brand_profile 落库无 buildRunId 列，用 createdAt>=startedAt 归属探测（单站单活跃 run，claim 守卫）；
             // startedAt 缺失（无从归属）→ 不查，保守判 aborted（不误认领旧版本）。
@@ -1523,7 +1544,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             // assemble_build 完成靠 siteVersion 行核验（FIX 2）：assembleAndBuild 真成功即留一条
             // succeeded 版本行，buildRunId 唯一定位本 run，无需 startedAt；缺则保守判 aborted。
             const assembleBuildDone = !!(await tx.siteVersion.findFirst({
-              where: { buildRunId, buildStatus: 'succeeded' },
+              where: { buildRunId, buildStatus: "succeeded" },
             }));
             const legacySteps = input.progressV1
               ? null
@@ -1532,12 +1553,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   assembleBuildDone,
                 ) as Prisma.InputJsonValue);
             const transitioned = await tx.siteBuildRun.updateMany({
-              where: { id: buildRunId, status: { in: ['queued', 'running'] } },
+              where: { id: buildRunId, status: { in: ["queued", "running"] } },
               data: {
                 status: terminalStatus,
                 error:
-                  terminalStatus === 'failed'
-                    ? (run.error ?? 'refurbish failed (compensated)')
+                  terminalStatus === "failed"
+                    ? (run.error ?? "refurbish failed (compensated)")
                     : null,
                 finishedAt: run.finishedAt ?? new Date(),
                 ...(legacySteps ? { steps: legacySteps } : {}),
@@ -1551,17 +1572,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               await tx.siteVersion.updateMany({
                 where: {
                   buildRunId,
-                  buildStatus: { in: ['building', 'succeeded'] },
+                  buildStatus: { in: ["building", "succeeded"] },
                 },
-                data: { buildStatus: 'failed' },
+                data: { buildStatus: "failed" },
               });
               if (input.progressV1) {
                 const terminalSteps = await terminalizeBuildProgress(tx, {
                   workspaceId,
                   buildRunId,
-                  phase: (run.phase ?? 'P1_understanding') as Parameters<
+                  phase: (run.phase ?? "P1_understanding") as Parameters<
                     typeof terminalizeBuildProgress
-                  >[1]['phase'],
+                  >[1]["phase"],
                   progress: run.progress,
                 });
                 await tx.siteBuildRun.update({
@@ -1573,7 +1594,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               if (site) {
                 await tx.site.update({
                   where: { id: siteId },
-                  data: { status: site.activeVersionId ? 'ready' : 'draft' },
+                  data: { status: site.activeVersionId ? "ready" : "draft" },
                 });
               }
             }
@@ -1608,16 +1629,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 /** intake JSON → KB 文档 markdown（结构化事实，供后续检索/factSheet）。 */
 export function intakeToMarkdown(intake: IntakeInput): string {
   return [
-    '# Company registration facts',
+    "# Company registration facts",
     `Company name (zh): ${intake.company.nameZh}`,
-    intake.company.nameEn ? `Company name (en): ${intake.company.nameEn}` : '',
+    intake.company.nameEn ? `Company name (en): ${intake.company.nameEn}` : "",
     `Industry: ${intake.industry}`,
-    `Main products: ${intake.products.join(', ')}`,
-    `Target markets: ${intake.targetMarkets.join(', ')}`,
+    `Main products: ${intake.products.join(", ")}`,
+    `Target markets: ${intake.targetMarkets.join(", ")}`,
     // R0-4（隐私红线，与 ADR-010 存储侧同源）：businessEmail 是联系信息，绝不进 KB embedding / 品牌 Prompt；
     // 留在受控结构化区 Site.intake（Copy 的 contact 槽按用途读取），不入通用检索语料。
-    intake.websiteUrl ? `Existing website: ${intake.websiteUrl}` : '',
+    intake.websiteUrl ? `Existing website: ${intake.websiteUrl}` : "",
   ]
     .filter(Boolean)
-    .join('\n');
+    .join("\n");
 }

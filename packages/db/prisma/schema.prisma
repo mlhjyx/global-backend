@@ -1284,6 +1284,7 @@ model Site {
 
   @@unique([slug])
   @@unique([id, workspaceId], map: "site_id_workspace_id_key")
+  @@unique([id, workspaceId, companyProfileId], map: "site_id_workspace_company_key")
   @@index([workspaceId])
   @@map("site")
 }
@@ -1584,7 +1585,7 @@ model BrandProfileClaimBridge {
   bridgeKey        String   @map("bridge_key") @db.VarChar(64)
   createdAt        DateTime @default(now()) @map("created_at")
 
-  site           Site                    @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_site_scope_fkey")
+  site           Site                    @relation(fields: [siteId, workspaceId, companyProfileId], references: [id, workspaceId, companyProfileId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_site_scope_fkey")
   companyProfile CompanyProfile          @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_company_scope_fkey")
   brandProfile   BrandProfile            @relation(fields: [brandProfileId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_profile_scope_fkey")
   evidenceRef    BrandProfileEvidenceRef @relation(fields: [evidenceRefId, workspaceId, siteId, brandProfileId], references: [id, workspaceId, siteId, brandProfileId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_claim_bridge_evidence_ref_scope_fkey")

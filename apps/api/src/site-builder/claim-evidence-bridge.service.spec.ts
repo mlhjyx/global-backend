@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildClaimApprovalProof } from "../claim/claim-verification";
 import { ClaimEvidenceBridgeService } from "./claim-evidence-bridge.service";
 
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
@@ -51,9 +52,12 @@ interface StoredClaim {
   id: string;
   workspaceId: string;
   companyProfileId: string;
+  sourceId?: string | null;
+  originKey?: string | null;
   type: string;
   statement: string;
   status: ClaimStatus;
+  version?: number;
   validUntil: Date | null;
   verifiedBy?: string | null;
   verifiedAt?: Date | null;
@@ -116,10 +120,7 @@ function makeHarness(
   let claimSequence = claims.length;
 
   const repository = {
-    getCompanyProfileIdForSite: async (
-      workspaceId: string,
-      siteId: string,
-    ) =>
+    getCompanyProfileIdForSite: async (workspaceId: string, siteId: string) =>
       fact.workspaceId === workspaceId && fact.siteId === siteId
         ? fact.companyProfileId
         : null,
@@ -170,9 +171,12 @@ function makeHarness(
           id: claimId,
           workspaceId: input.workspaceId,
           companyProfileId: input.companyProfileId,
+          sourceId: null,
+          originKey: input.claimOriginKey,
           type: input.type,
           statement: input.statement,
           status: input.status,
+          version: 1,
           validUntil: null,
           verifiedBy: null,
           verifiedAt: null,
@@ -426,12 +430,29 @@ describe("ClaimEvidenceBridgeService — approved-effective read gate", () => {
   });
 
   it("fails closed for an unaudited certification but accepts durable human verification", async () => {
-    const base: Omit<StoredClaim, "id" | "verifiedBy" | "verifiedAt" | "verificationMethod" | "verificationProof"> = {
+    const base: Omit<
+      StoredClaim,
+      | "id"
+      | "verifiedBy"
+      | "verifiedAt"
+      | "verificationMethod"
+      | "verificationProof"
+    > = {
       workspaceId: WORKSPACE_ID,
       companyProfileId: COMPANY_PROFILE_ID,
       type: "certification",
       statement: "ISO 9001 certified",
       status: "APPROVED",
+      validUntil: null,
+    };
+    const verifiedIdentity = {
+      id: "human-verified-certification",
+      workspaceId: WORKSPACE_ID,
+      companyId: COMPANY_PROFILE_ID,
+      sourceId: null,
+      originKey: null,
+      type: "certification",
+      statement: "ISO 9001 certified",
       validUntil: null,
     };
     const { service } = makeHarness({
@@ -446,14 +467,24 @@ describe("ClaimEvidenceBridgeService — approved-effective read gate", () => {
         },
         {
           ...base,
+          id: "compact-code-disguised-as-capability",
+          type: "capability",
+          statement: "ISO9001",
+          verifiedBy: null,
+          verifiedAt: null,
+          verificationMethod: null,
+          verificationProof: null,
+        },
+        {
+          ...base,
           id: "human-verified-certification",
+          sourceId: null,
+          originKey: null,
+          version: 2,
           verifiedBy: "reviewer-1",
           verifiedAt: NOW,
           verificationMethod: "human_review",
-          verificationProof: {
-            action: "claim_approval",
-            approvedVersion: 2,
-          },
+          verificationProof: buildClaimApprovalProof(verifiedIdentity, 2),
         },
       ],
     });

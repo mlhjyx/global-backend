@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { RequestContext } from "../auth/request-context";
+import { hasValidClaimApprovalAudit } from "../claim/claim-verification";
+import { isCertificationClaim } from "./claim-classification";
 
 export type BridgeClaimStatus =
   | "INGESTED"
@@ -45,9 +47,12 @@ export interface ApprovedEffectiveClaim {
   id: string;
   workspaceId: string;
   companyProfileId: string;
+  sourceId: string | null;
+  originKey: string | null;
   type: string;
   statement: string;
   status: BridgeClaimStatus;
+  version: number;
   validUntil: Date | null;
   verifiedBy: string | null;
   verifiedAt: Date | null;
@@ -151,13 +156,11 @@ function domainHash(domain: string, parts: readonly unknown[]): string {
 }
 
 function isCertificationFact(fact: ClaimEvidenceFactContext): boolean {
-  const type = normalizeIdentityPart(fact.claimType).toLocaleLowerCase("en-US");
-  const key = normalizeIdentityPart(fact.factKey).toLocaleLowerCase("en-US");
-  return (
-    type === "certification" ||
-    key === "certification" ||
-    key === "certifications"
-  );
+  return isCertificationClaim({
+    type: fact.claimType,
+    key: fact.factKey,
+    value: fact.value,
+  });
 }
 
 export function isPublishableCertificationAsset(
@@ -178,19 +181,6 @@ function isFutureOrUnbounded(validUntil: Date | null, now: Date): boolean {
   if (validUntil === null) return true;
   const validUntilMs = validUntil.getTime();
   return Number.isFinite(validUntilMs) && validUntilMs > now.getTime();
-}
-
-function hasDurableHumanVerification(
-  claim: ApprovedEffectiveClaim,
-): boolean {
-  return (
-    Boolean(claim.verifiedBy?.trim()) &&
-    claim.verifiedAt instanceof Date &&
-    Number.isFinite(claim.verifiedAt.getTime()) &&
-    claim.verificationMethod === "human_review" &&
-    claim.verificationProof !== null &&
-    typeof claim.verificationProof === "object"
-  );
 }
 
 /**
@@ -250,6 +240,9 @@ export class ClaimEvidenceBridgeService {
       claimOriginKey,
       fact.workspaceId,
       fact.siteId,
+      fact.evidenceRef.sourceSnapshotId,
+      fact.evidenceRef.sourceRole,
+      fact.evidenceRef.assetId ?? null,
       fact.evidenceRef.sourceContentHash,
       fact.evidenceRef.quote,
       fact.evidenceRef.quoteStart ?? null,
@@ -323,9 +316,15 @@ export class ClaimEvidenceBridgeService {
         claim.companyProfileId === companyProfileId &&
         claim.status === "APPROVED" &&
         isFutureOrUnbounded(claim.validUntil, now) &&
-        (normalizeIdentityPart(claim.type).toLocaleLowerCase("en-US") !==
-          "certification" ||
-          hasDurableHumanVerification(claim)),
+        ((claim.originKey == null &&
+          !isCertificationClaim({
+            type: claim.type,
+            value: claim.statement,
+          })) ||
+          hasValidClaimApprovalAudit({
+            ...claim,
+            companyId: claim.companyProfileId,
+          })),
     );
   }
 }

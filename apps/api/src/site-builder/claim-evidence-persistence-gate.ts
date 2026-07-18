@@ -1,8 +1,5 @@
-import type {
-  EvidenceFactItem,
-  GapItem,
-} from "./agents/brand-profile";
-import { claimTypeForBrandFact } from "./claim-evidence-bridge.prisma";
+import type { EvidenceFactItem, GapItem } from "./agents/brand-profile";
+import { isCertificationClaim } from "./claim-classification";
 import {
   isPublishableCertificationAsset,
   type ClaimEvidenceAsset,
@@ -35,13 +32,28 @@ export async function gateCertificationFactsForPersistence(
 ): Promise<{ factSheet: EvidenceFactItem[]; gaps: GapItem[] }> {
   const factSheet: EvidenceFactItem[] = [];
   const gaps: GapItem[] = [];
+  const certificationFacts = input.facts.filter((fact) =>
+    isCertificationClaim({ key: fact.key, value: fact.value }),
+  );
+  const assetIds = [
+    ...new Set(
+      certificationFacts.flatMap((fact) =>
+        fact.evidence.assetId ? [fact.evidence.assetId] : [],
+      ),
+    ),
+  ].sort();
+  const lockedAssets = new Map<string, ClaimEvidenceAsset | null>();
+  for (const assetId of assetIds) {
+    lockedAssets.set(assetId, await assets.getAsset(assetId));
+  }
+
   for (const fact of input.facts) {
-    if (claimTypeForBrandFact(fact.key, fact.value) !== "certification") {
+    if (!isCertificationClaim({ key: fact.key, value: fact.value })) {
       factSheet.push(fact);
       continue;
     }
     const asset = fact.evidence.assetId
-      ? await assets.getAsset(fact.evidence.assetId)
+      ? (lockedAssets.get(fact.evidence.assetId) ?? null)
       : null;
     if (
       !isPublishableCertificationAsset(asset, {
