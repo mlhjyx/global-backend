@@ -85,13 +85,12 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
     expect(route.policy).not.toHaveProperty('promotionEvidenceId');
   });
 
-  it('promoted task 的 fallback/profile 紧急覆盖也不能继承晋级证据', () => {
+  it('promoted task 的 fallback 紧急覆盖不能继承晋级证据', () => {
     const route = resolveTaskRoute('site_builder.brand_profile', {
-      SITE_BUILDER_PROFILE_BRAND_PROFILE: 'reasoning.high',
       SITE_BUILDER_FALLBACKS_BRAND_PROFILE: 'operator-fallback',
     } as NodeJS.ProcessEnv);
     expect(route.policy).toMatchObject({
-      profile: 'reasoning.high',
+      profile: 'structured.workspace_materials',
       routeState: 'currentRoute',
       source: 'env_override',
       route: {
@@ -109,22 +108,17 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
     expect(route.fallbacks).toEqual(['glm-5.2', 'deepseek-v4-pro']);
   });
 
-  it('SITE_BUILDER_PROFILE_<TASK> 覆盖语义档，不隐式改 currentRoute', () => {
-    const route = resolveTaskRoute('site_builder.copy', {
-      SITE_BUILDER_PROFILE_COPY: 'text.bulk',
-      SITE_BUILDER_MODEL_COPY: 'operator-emergency-model',
-    } as NodeJS.ProcessEnv);
-    expect(route.profile).toBe('text.bulk');
-    expect(route.primary).toBe('operator-emergency-model');
-    expect(route.fallbacks).toEqual(['glm-5.2', 'doubao-seed-2.0-pro']);
-    expect(route.policy).toMatchObject({
-      profile: 'text.bulk',
-      source: 'env_override',
-      route: {
-        primary: 'operator-emergency-model',
-        fallbacks: ['glm-5.2', 'doubao-seed-2.0-pro'],
-      },
-    });
+  it('SITE_BUILDER_PROFILE_<TASK> 不能改写任务能力与数据政策', () => {
+    expect(() =>
+      resolveTaskRoute('site_builder.brand_profile', {
+        SITE_BUILDER_PROFILE_BRAND_PROFILE: 'reasoning.high',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/profile override.*not supported/i);
+    expect(() =>
+      resolveTaskRoute('site_builder.copy', {
+        SITE_BUILDER_PROFILE_COPY: 'text.bulk',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/profile override.*not supported/i);
   });
 
   it('SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true 回到该任务冻结的 legacy currentRoute', () => {
@@ -176,12 +170,12 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
     ).toThrow(/has no promoted route/);
   });
 
-  it('未知 SITE_BUILDER_PROFILE_<TASK> fail-fast，绝不静默忽略', () => {
+  it('未知 SITE_BUILDER_PROFILE_<TASK> 同样 fail-fast，绝不静默忽略', () => {
     expect(() =>
       resolveTaskRoute('site_builder.copy', {
         SITE_BUILDER_PROFILE_COPY: 'typo.profile',
       } as NodeJS.ProcessEnv),
-    ).toThrow(/unknown Site Builder model profile/);
+    ).toThrow(/profile override.*not supported/i);
   });
 
   it('未知 task 抛错（fail-fast，不静默用错路由）', () => {
