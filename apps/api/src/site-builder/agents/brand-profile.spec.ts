@@ -2398,6 +2398,34 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     ).toThrow(/explicit personal attribution/i);
   });
 
+  it('面向买家/角色的语气修饰词不是个人标签，但具名角色关系仍拒绝', () => {
+    const base = {
+      valueProps: [],
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      factSheet: [],
+      gaps: [],
+    };
+
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        tone: {
+          voice: 'Professional, technical, and buyer-focused',
+          style: ['Engineer-oriented documentation'],
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        tone: { voice: 'CEO: Jane Smith', style: [] },
+      }),
+    ).toThrow(/explicit personal attribution/i);
+  });
+
   it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
     const prompt = buildBrandProfilePrompt({
       ...input,
