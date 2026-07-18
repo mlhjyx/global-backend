@@ -11,11 +11,11 @@ import { resolveTaskRoute, SITE_BUILDER_TASK_IDS } from './task-routes';
  * 配置驱动：接入新通道后翻 env + 重启 worker 即切换，不改代码。
  */
 describe('resolveTaskRoute — 逐任务生产策略', () => {
-  it('brand_profile：MODEL-1 晋级 Terra，Sonnet 原生协议回退', () => {
+  it('brand_profile：MODEL-1 晋级 Terra，Sonnet 原生协议回退，复杂结构化修复有 240s 单模型预算', () => {
     const route = resolveTaskRoute('site_builder.brand_profile');
     expect(route.primary).toBe('gpt-5.6-terra');
     expect(route.fallbacks).toEqual(['claude-sonnet-5']);
-    expect(route.timeoutMs).toBeGreaterThan(0);
+    expect(route.timeoutMs).toBe(240_000);
     expect(route.maxTokens).toBeGreaterThanOrEqual(4000); // v4 是 reasoning 模型，预算过小 content 为空（H2）
     expect(route.maxCostCents).toBe(40);
     expect(route.dataPolicy).toEqual({
