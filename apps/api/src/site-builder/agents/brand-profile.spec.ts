@@ -1927,10 +1927,14 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toMatch(
       /factSheet\.value.*quote.*(?:连续.*逐字|逐字.*连续)/is,
     );
+    expect(prompt).toMatch(
+      /contentHash.*64.*小写.*(?:不得.*(?:前缀|缩写|省略号|大写)|(?:前缀|缩写|省略号|大写).*不得)/is,
+    );
+    expect(prompt).toMatch(/无法逐字复制.*(?:省略|不要写).*fact/i);
     expect(prompt).toMatch(/competitors\s*=\s*\[\]/i);
     expect(prompt).toContain('target_markets');
     expect(prompt).toContain('technical_parameters');
-    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/12');
+    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/13');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
       'brand-profile-route-validation/14',
     );
