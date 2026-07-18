@@ -160,14 +160,14 @@ function isCertificationFact(fact: ClaimEvidenceFactContext): boolean {
   );
 }
 
-function hasPublishableCertAsset(
+export function isPublishableCertificationAsset(
   asset: ClaimEvidenceAsset | null,
-  fact: ClaimEvidenceFactContext,
+  scope: { workspaceId: string; siteId: string },
 ): boolean {
   return (
     asset !== null &&
-    asset.workspaceId === fact.workspaceId &&
-    asset.siteId === fact.siteId &&
+    asset.workspaceId === scope.workspaceId &&
+    asset.siteId === scope.siteId &&
     asset.kind === "cert" &&
     asset.processingStatus === "ready" &&
     asset.deletedAt === null
@@ -231,7 +231,7 @@ export class ClaimEvidenceBridgeService {
     if (isCertificationFact(fact)) {
       const assetId = fact.evidenceRef.assetId;
       const asset = assetId ? await this.repository.getAsset(assetId) : null;
-      if (!hasPublishableCertAsset(asset, fact)) {
+      if (!isPublishableCertificationAsset(asset, fact)) {
         return { kind: "gap", reason: "unverified_certification" };
       }
     }
