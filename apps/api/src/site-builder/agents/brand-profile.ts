@@ -1801,6 +1801,8 @@ const PERSONAL_SOCIAL_HANDLE_PATTERN =
   /(?<![\p{L}\p{N}._%+-])@[\p{L}\p{N}_](?:[\p{L}\p{N}_.-]{0,62}[\p{L}\p{N}_])?(?![\p{L}\p{N}._-])/iu;
 const PERSONAL_PROFILE_URL_PATTERN =
   /(?:https?:\/\/)?(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\/[a-z0-9_%./?=&+-]+/iu;
+const PERSONAL_URI_IDENTIFIER_PATTERN =
+  /(?:\bhttps?:\/\/|\b(?:telegram|tg|wechat|weixin|whatsapp)\s*:\s*)\S+/iu;
 const PERSONAL_MESSAGING_ID_PATTERN =
   /\b(?:wechat|weixin)\s*(?:id|账号|號|号)?\s*[:：]?\s*(?:wxid_[a-z0-9_-]+|[a-z][a-z0-9_-]{5,19})\b/iu;
 
@@ -1810,6 +1812,7 @@ function containsPersonalContactIdentifier(text: unknown): boolean {
   return (
     PERSONAL_SOCIAL_HANDLE_PATTERN.test(normalized) ||
     PERSONAL_PROFILE_URL_PATTERN.test(normalized) ||
+    PERSONAL_URI_IDENTIFIER_PATTERN.test(normalized) ||
     PERSONAL_MESSAGING_ID_PATTERN.test(normalized)
   );
 }
