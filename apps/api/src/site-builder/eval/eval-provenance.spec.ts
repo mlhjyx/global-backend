@@ -4,6 +4,7 @@ import { resolveTaskRoute } from '../agents/task-routes';
 import {
   assertEvaluationReportPathAvailable,
   assertUniqueEvaluationValues,
+  classifyEvaluationOutcome,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
@@ -49,7 +50,7 @@ describe('routeForModelEvaluation', () => {
       fallbacks: [],
       profile: 'structured.workspace_materials',
       maxTokens: 12_000,
-      timeoutMs: 150_000,
+      timeoutMs: 240_000,
       maxCostCents: 40,
       dataPolicy: {
         personalData: 'workspace_controlled',
@@ -152,5 +153,35 @@ describe('MODEL evaluation provenance guards', () => {
         modelResolutionSource: 'requested_fallback',
       }),
     ).toBe(false);
+  });
+
+  it('accepts a complete baseline without misrepresenting it as promotion evidence', () => {
+    expect(
+      classifyEvaluationOutcome({
+        evidenceRole: 'baseline',
+        diagnosticsEnabled: false,
+        preflightPassed: true,
+        sourceStable: true,
+        matrixComplete: true,
+        artifactFailures: 0,
+        provenanceExact: true,
+      }),
+    ).toEqual({
+      status: 'completed_baseline',
+      promotionEligible: false,
+      shouldFail: false,
+    });
+
+    expect(
+      classifyEvaluationOutcome({
+        evidenceRole: 'baseline',
+        diagnosticsEnabled: false,
+        preflightPassed: true,
+        sourceStable: true,
+        matrixComplete: true,
+        artifactFailures: 1,
+        provenanceExact: true,
+      }),
+    ).toMatchObject({ status: 'completed_with_failures', shouldFail: true });
   });
 });
