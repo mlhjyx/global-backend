@@ -21,12 +21,18 @@ export interface SiteBuilderTaskRouteBinding {
 }
 
 const ASSEMBLE_TIMEOUT_MS = 180_000;
+// BrandProfile can legitimately use the gateway's single schema-repair call.
+// The task-shaped Sonnet matrix observed 73s + 79s for that pair, so the old
+// 150s aggregate deadline aborted a successful repair three seconds early.
+// 240s leaves measured headroom while bounding primary + fallback to 8 minutes,
+// below the refurbish Activity's 10-minute start-to-close deadline.
+const BRAND_PROFILE_TIMEOUT_MS = 240_000;
 
 const TASK_BINDINGS = Object.freeze({
   'site_builder.brand_profile': Object.freeze({
     profile: 'structured.workspace_materials',
     maxTokens: 12_000,
-    timeoutMs: 150_000,
+    timeoutMs: BRAND_PROFILE_TIMEOUT_MS,
     maxCostCents: 40,
   }),
   'site_builder.copy': Object.freeze({
