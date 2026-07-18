@@ -539,6 +539,21 @@ function isClosedCjkNonPersonalRoleToken(
   return /^产品/u.test(text.slice(end));
 }
 
+function isClosedNonPersonalPartnerPositioning(
+  text: string,
+  match: RegExpMatchArray,
+): boolean {
+  const start = match.index ?? 0;
+  const before = text.slice(Math.max(0, start - 32), start);
+  const tail = text.slice(start, Math.min(text.length, start + 96));
+  return (
+    /\bsupply\s*$/iu.test(before) &&
+    /^partner\s+for\s+(?:chemical|industrial|manufacturing|process(?:ing)?)\b/iu.test(
+      tail,
+    )
+  );
+}
+
 function isClosedTechnicalRoleToken(
   text: string,
   match: RegExpMatchArray,
@@ -558,7 +573,9 @@ function isClosedTechnicalRoleToken(
       /\b(?:curing|cleaning|chemical|foaming|release|software)\s+$/iu.test(
         before,
       )) ||
-    (role === 'partner' && /^[-\s]+(?:network|ecosystem|program)\b/iu.test(after)) ||
+    (role === 'partner' &&
+      (/^[-\s]+(?:network|ecosystem|program)\b/iu.test(after) ||
+        isClosedNonPersonalPartnerPositioning(text, match))) ||
     (role === 'buyer' && /^[-\s]+(?:focused|oriented|centric)\b/iu.test(after))
   );
 }
@@ -663,7 +680,8 @@ function explicitPersonalAttributionMatches(
   pushUnsafeSubjects(
     PERSONAL_ROLE_LABEL_PATTERN,
     'roleLabel',
-    (subject) =>
+    (subject, match) =>
+      !isClosedNonPersonalPartnerPositioning(normalized, match) &&
       !NON_PERSONAL_AUDIENCE_MODIFIER_SUBJECT_PATTERN.test(subject.trim()) &&
       isExplicitPersonalAttributionSubject(subject),
   );
