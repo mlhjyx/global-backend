@@ -353,6 +353,55 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
 });
 
 describe('RouterModelGateway — task-level deterministic output gate', () => {
+  it('repairs one schema-valid task-gate rejection when the task explicitly opts in', async () => {
+    const budget = new BudgetLedger();
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: { quote: 'flange program FL-88' } as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 7, outputTokens: 3 },
+      })
+      .mockResolvedValueOnce({
+        data: { quote: 'Flange program FL-88' } as never,
+        provider: 'fake',
+        model: 'm',
+        usage: { inputTokens: 5, outputTokens: 2 },
+      });
+    const router = { route: () => [provider] } as unknown as ModelRouter;
+    const gw = new RouterModelGateway(router, trace);
+    gw.budget = budget;
+
+    const result = await gw.generateStructured(
+      {
+        task: 'site_builder.brand_profile',
+        prompt: 'p',
+        schema: { required: ['quote'] },
+        repairTaskOutput: true,
+        validateOutput: (data) => {
+          if ((data as { quote?: string }).quote !== 'Flange program FL-88') {
+            throw new Error('products:unsupported_quote');
+          }
+        },
+      },
+      { workspaceId: 'ws-1' },
+    );
+
+    expect(result.data).toEqual({ quote: 'Flange program FL-88' });
+    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 5 });
+    expect(result.callCount).toBe(2);
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    expect(
+      (provider.generateStructured as ReturnType<typeof vi.fn>).mock.calls[1][0]
+        .prompt,
+    ).toContain('products:unsupported_quote');
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'OK', inputTokens: 12, outputTokens: 5 }),
+    );
+  });
+
   it('schema-valid output rejected by the task gate is traced as ERROR with usage', async () => {
     const budget = new BudgetLedger();
     const trace = { record: vi.fn() } as unknown as AiTraceSink;

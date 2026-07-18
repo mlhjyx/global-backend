@@ -18,9 +18,10 @@ export const BRAND_PROFILE_EVAL_FIXTURE_SCHEMA_VERSION = 'brand-profile-eval-fix
  * also stores a hash of the declarative rubric below, so candidate evidence
  * cannot be compared across an unnoticed evaluator-contract change.
  */
-export const BRAND_PROFILE_EVALUATOR_VERSION = 'brand-profile-evaluator/3' as const;
+export const BRAND_PROFILE_EVALUATOR_VERSION = 'brand-profile-evaluator/10' as const;
 export const BRAND_PROFILE_EVALUATOR_RUBRIC = {
-  acceptedFactGate: 'EvidenceRefV2 source/hash/quote binding plus protected value/quote truth',
+  acceptedFactGate:
+    'approved public company fact key plus EvidenceRefV2 source/hash/quote binding and protected value/quote truth',
   requiredFactTerms: 'match accepted fact values only',
   forbiddenOutputTerms: 'match publishable output only; gaps are excluded',
   acceptance: 'minimum accepted facts, zero rejected facts, all required terms, zero forbidden terms',

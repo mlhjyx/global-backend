@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "site-builder-model1-evaluation-incident/v1",
+  "occurredAt": "2026-07-18T19:09:57.656Z",
+  "evidenceRole": "candidate",
+  "promotionEligible": false,
+  "matrixProgress": {
+    "completedRuns": 7,
+    "expectedRunCount": 24
+  },
+  "failedRun": {
+    "requestedModel": "gpt-5.6-terra",
+    "transport": "openai-chat-completions",
+    "fixtureId": "industrial-pump-sparse",
+    "attempt": 1,
+    "acceptedArtifact": false,
+    "error": "AI task site_builder.brand_profile failed on all models: gpt-5.6-terra: new-api-eval gpt-5.6-terra: empty content (finish_reason=stop) — upstream returned no visible message content; inspect OpenAI-compatible content/reasoning mapping — (dev: stub fallback ⇒ 上游网关本次失败，真实根因见 ai_trace)"
+  },
+  "reportPersistence": {
+    "persisted": false,
+    "requestedPath": "docs/evidence/model-routing/model1-brand-profile-20260719-v5/candidate-report.json",
+    "errorCode": "ENOENT",
+    "reason": "The evaluator checked that the report file did not exist but did not create its parent directory before paid calls. The parent-directory preflight was added after this incident."
+  },
+  "integrityNote": "This is an incident record reconstructed from the evaluator's exact terminal events. It is not a complete evaluator report and must not be used as promotion evidence."
+}

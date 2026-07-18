@@ -11,19 +11,15 @@
 
 import type { ModelDataPolicy, ModelExecutionPolicySnapshot } from '@global/contracts';
 import { modelPolicyRegistry } from './model-policy.registry';
-import { SITE_BUILDER_MODEL_PROFILES, type SiteBuilderModelProfileId } from './model-profiles';
+import type { SiteBuilderModelProfileId } from './model-profiles';
+import {
+  getSiteBuilderTaskRouteBinding,
+  SITE_BUILDER_TASK_IDS,
+  type SiteBuilderTaskId,
+  type SiteBuilderTaskRouteBinding,
+} from './task-route-bindings';
 
-export const SITE_BUILDER_TASK_IDS = [
-  'site_builder.brand_profile',
-  'site_builder.copy',
-  'site_builder.design_spec',
-  'site_builder.assemble',
-  'site_builder.assembly_fix',
-  'site_builder.qa_summarize',
-  'site_builder.seo_review',
-] as const;
-
-export type SiteBuilderTaskId = (typeof SITE_BUILDER_TASK_IDS)[number];
+export { SITE_BUILDER_TASK_IDS, type SiteBuilderTaskId };
 
 export interface TaskRoute {
   profile: SiteBuilderModelProfileId;
@@ -41,62 +37,8 @@ export interface TaskRoute {
   reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
-const ASSEMBLE_TIMEOUT_MS = 180_000; // 组装超时预算（用户拍板：宁慢勿错，超时走回退链）
-
-interface TaskRouteBinding {
+type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
   profile: SiteBuilderModelProfileId;
-  maxTokens: number;
-  timeoutMs: number;
-  maxCostCents: number;
-  reasoningEffort?: TaskRoute['reasoningEffort'];
-}
-
-const TASK_BINDINGS: Record<SiteBuilderTaskId, TaskRouteBinding> = {
-  'site_builder.brand_profile': {
-    profile: 'structured.default',
-    // H2：现役 reasoning 模型在 6000 token 时两跑截断；12000 是当前校准预算。
-    maxTokens: 12_000,
-    timeoutMs: 150_000,
-    // Matches the pre-MODEL-0 ai-task registry declaration.
-    maxCostCents: 40,
-  },
-  'site_builder.copy': {
-    profile: 'copy.premium',
-    maxTokens: 4000,
-    timeoutMs: 120_000,
-    maxCostCents: 20,
-    reasoningEffort: 'low',
-  },
-  'site_builder.design_spec': {
-    profile: 'structured.default',
-    maxTokens: 4000,
-    timeoutMs: 120_000,
-    maxCostCents: 20,
-  },
-  'site_builder.assemble': {
-    profile: 'structured.default',
-    maxTokens: 16_000,
-    timeoutMs: ASSEMBLE_TIMEOUT_MS,
-    maxCostCents: 20,
-  },
-  'site_builder.assembly_fix': {
-    profile: 'structured.default',
-    maxTokens: 8000,
-    timeoutMs: ASSEMBLE_TIMEOUT_MS,
-    maxCostCents: 20,
-  },
-  'site_builder.qa_summarize': {
-    profile: 'text.summary',
-    maxTokens: 3000,
-    timeoutMs: 90_000,
-    maxCostCents: 20,
-  },
-  'site_builder.seo_review': {
-    profile: 'text.summary',
-    maxTokens: 3000,
-    timeoutMs: 90_000,
-    maxCostCents: 20,
-  },
 };
 
 /** taskId → env 后缀：site_builder.brand_profile → BRAND_PROFILE。 */
@@ -104,22 +46,12 @@ function envSuffix(taskId: SiteBuilderTaskId): string {
   return taskId.split('.')[1].toUpperCase();
 }
 
-/**
- * Profile is an independent operational override. It changes the semantic
- * policy binding only; MODEL-0 deliberately keeps the task's current model
- * snapshot and existing `SITE_BUILDER_MODEL_*` behavior untouched.
- */
-function resolveProfileOverride(
-  suffix: string,
-  defaultProfile: SiteBuilderModelProfileId,
-  env: NodeJS.ProcessEnv,
-): SiteBuilderModelProfileId {
-  const profile = env[`SITE_BUILDER_PROFILE_${suffix}`]?.trim();
-  if (!profile) return defaultProfile;
-  if (!Object.hasOwn(SITE_BUILDER_MODEL_PROFILES, profile)) {
-    throw new Error(`unknown Site Builder model profile: ${profile}`);
+function assertNoProfileOverride(suffix: string, env: NodeJS.ProcessEnv): void {
+  if (env[`SITE_BUILDER_PROFILE_${suffix}`] !== undefined) {
+    throw new Error(
+      `SITE_BUILDER_PROFILE_${suffix} profile override is not supported`,
+    );
   }
-  return profile as SiteBuilderModelProfileId;
 }
 
 function resolveRollbackOverride(suffix: string, env: NodeJS.ProcessEnv): boolean {
@@ -131,9 +63,9 @@ function resolveRollbackOverride(suffix: string, env: NodeJS.ProcessEnv): boolea
 }
 
 export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessEnv = process.env): TaskRoute {
-  const binding = TASK_BINDINGS[taskId];
-  if (!binding) throw new Error(`unknown site_builder task: ${taskId}`);
+  const binding = getSiteBuilderTaskRouteBinding(taskId) as TaskRouteBinding;
   const suffix = envSuffix(taskId);
+  assertNoProfileOverride(suffix, env);
   const activePolicy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
   const rollback = resolveRollbackOverride(suffix, env);
   if (rollback && activePolicy.state !== 'promotedRoute') {
@@ -143,7 +75,7 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
     ? modelPolicyRegistry.getLegacyTaskPolicy(taskId)
     : activePolicy;
   const selectedRoute = selectedPolicy.route;
-  const profile = resolveProfileOverride(suffix, binding.profile, env);
+  const profile = binding.profile;
   const primary = env[`SITE_BUILDER_MODEL_${suffix}`]?.trim();
   const fallbacksRaw = env[`SITE_BUILDER_FALLBACKS_${suffix}`];
   const fallbacks = fallbacksRaw
@@ -154,7 +86,6 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
   const resolvedFallbacks = fallbacks || [...selectedRoute.fallbacks];
   const profileDefinition = modelPolicyRegistry.getProfile(profile);
   const emergencyOverride =
-    profile !== binding.profile ||
     primary !== undefined ||
     fallbacksRaw !== undefined;
   const source = emergencyOverride
@@ -162,13 +93,18 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
     : rollback
       ? 'rollback_override'
       : 'registry';
+  // An operator override deliberately leaves the evidence-bound promoted
+  // route. Keep the actual route in the trace, but never attribute an
+  // un-evaluated model/profile/fallback combination to the registry's
+  // promotion report.
+  const routeState = emergencyOverride ? 'currentRoute' : selectedPolicy.state;
   const policy: ModelExecutionPolicySnapshot = {
     policyVersion: modelPolicyRegistry.getPolicyVersion(),
     profile,
-    routeState: selectedPolicy.state,
+    routeState,
     lifecycle: selectedPolicy.lifecycle,
     source,
-    ...(selectedPolicy.state === 'promotedRoute'
+    ...(!emergencyOverride && selectedPolicy.state === 'promotedRoute'
       ? { promotionEvidenceId: selectedPolicy.promotionEvidenceId }
       : {}),
     dataPolicy: profileDefinition.dataPolicy,

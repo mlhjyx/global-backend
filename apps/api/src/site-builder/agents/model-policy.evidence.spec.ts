@@ -22,9 +22,39 @@ interface EvaluationSummary {
 interface EvaluationReport {
   schemaVersion: string;
   generatedAt: string;
+  evidenceRole: 'candidate' | 'baseline';
+  status: string;
+  promotionEligible: boolean;
   fixtureCount: number;
   repeats: number;
-  runs: unknown[];
+  sourceIntegrity: {
+    startBundleSha256: string;
+    endBundleSha256: string;
+    stable: boolean;
+    changedPaths: string[];
+  };
+  matrixIntegrity: {
+    expectedRunCount: number;
+    actualRunCount: number;
+    complete: boolean;
+    duplicateKeys: string[];
+    missingKeys: string[];
+    unexpectedKeys: string[];
+  };
+  probes: Array<{
+    requestedModel: string;
+    reportedModel: string;
+    resolvedModel: string;
+    modelResolutionSource: string;
+    accepted: boolean;
+  }>;
+  runs: Array<{
+    requestedModel: string;
+    reportedModel: string;
+    resolvedModel: string;
+    modelResolutionSource: string;
+    acceptedArtifact: boolean;
+  }>;
   summary: EvaluationSummary[];
 }
 
@@ -88,6 +118,9 @@ describe('BrandProfile MODEL-1 immutable evidence artifacts', () => {
     expect(candidate).toMatchObject({
       schemaVersion: evidence.reportSchemaVersion,
       generatedAt: evidence.evaluatedAt,
+      evidenceRole: 'candidate',
+      status: 'completed_eligible',
+      promotionEligible: true,
       fixtureCount: evidence.fixtureCount,
       repeats: evidence.repeats,
     });
@@ -115,6 +148,9 @@ describe('BrandProfile MODEL-1 immutable evidence artifacts', () => {
     expect(baseline).toMatchObject({
       schemaVersion: evidence.reportSchemaVersion,
       generatedAt: evidence.currentRouteBaseline.evaluatedAt,
+      evidenceRole: 'baseline',
+      status: 'completed_baseline',
+      promotionEligible: false,
       fixtureCount: evidence.fixtureCount,
       repeats: evidence.repeats,
     });
@@ -137,6 +173,52 @@ describe('BrandProfile MODEL-1 immutable evidence artifacts', () => {
         },
       }),
     );
+
+    expect(candidate.sourceIntegrity).toEqual(baseline.sourceIntegrity);
+    expect(candidate.sourceIntegrity).toMatchObject({
+      stable: true,
+      changedPaths: [],
+    });
+    expect(candidate.sourceIntegrity.startBundleSha256).toBe(
+      candidate.sourceIntegrity.endBundleSha256,
+    );
+    for (const report of [candidate, baseline]) {
+      expect(report.matrixIntegrity).toMatchObject({
+        complete: true,
+        duplicateKeys: [],
+        missingKeys: [],
+        unexpectedKeys: [],
+      });
+      expect(report.matrixIntegrity.actualRunCount).toBe(
+        report.matrixIntegrity.expectedRunCount,
+      );
+      expect(report.probes.every((probe) => probe.accepted)).toBe(true);
+      expect(
+        report.probes.every(
+          (probe) =>
+            probe.modelResolutionSource === 'upstream_response' &&
+            probe.reportedModel === probe.resolvedModel,
+        ),
+      ).toBe(true);
+      expect(report.runs.every((run) => run.acceptedArtifact)).toBe(true);
+      expect(
+        report.runs.every(
+          (run) =>
+            run.modelResolutionSource === 'upstream_response' &&
+            run.reportedModel === run.resolvedModel,
+        ),
+      ).toBe(true);
+    }
+    expect(
+      candidate.runs.every(
+        (run) => run.requestedModel === run.reportedModel,
+      ),
+    ).toBe(true);
+    expect(
+      candidate.probes.every(
+        (probe) => probe.requestedModel === probe.reportedModel,
+      ),
+    ).toBe(true);
   });
 
   it('stores only hashes/metrics/errors, never model正文、prompt 或 credentials', () => {

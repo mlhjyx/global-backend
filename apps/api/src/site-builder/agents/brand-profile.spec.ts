@@ -231,6 +231,7 @@ const SAFE_DETERMINED_NOUN_PHRASES = [
 );
 
 const SAFE_NON_PERSONAL_ATTRIBUTIONS = [
+  'Centrifugal process pumps and chemical transfer skids designed for industrial fluid handling applications.',
   'Led by Quality Engineering',
   'Written by Quality Engineering',
   'Quality Engineering leads production',
@@ -1561,7 +1562,7 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     expect(scrubPii(input)).toBe(input);
   });
 
-  it('落库清洗覆盖 fact key 与 gap field，而不只清洗 value/hint', () => {
+  it('公共 fact 继续清洗 PII，内部 gap 保留受控联系资料', () => {
     const sanitize = (
       brandProfileModule as typeof brandProfileModule & {
         sanitizeBrandProfilePersistenceOutput?: (
@@ -1607,8 +1608,8 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
       value: 'Call [redacted-phone]',
     });
     expect(out.gaps[0]).toMatchObject({
-      field: 'Question [redacted-email]',
-      hint: 'Call [redacted-phone]',
+      field: 'Question bob@example.com',
+      hint: 'Call +49 30 7654321',
     });
   });
 
@@ -1629,18 +1630,6 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
       name: 'glossary definition',
       over: {
         glossary: [{ term: 'Leadership', definition: 'CEO: Jane Smith' }],
-      },
-    },
-    {
-      name: 'gap hint',
-      over: {
-        gaps: [
-          {
-            field: 'leadership',
-            reason: 'needs_input' as const,
-            hint: 'Contact person: Jane Smith',
-          },
-        ],
       },
     },
   ])('落库前拒绝 $name 中的明确个人署名', ({ over }) => {
@@ -1771,23 +1760,24 @@ describe('sanitizeProfileForPrompt / scrubPii — F2 数据最小化与落库清
     ['missing_fact', 'What is the WeChat ID wxid_janesmith?'],
     ['contact_email', 'Please provide supporting details?'],
   ])(
-    '落库门仍拒绝实际个人标识或联系方式字段: %s / %s',
+    '落库门保留租户内部 gap 中的个人标识或联系方式: %s / %s',
     (field, hint) => {
-      expect(() =>
-        sanitizeBrandProfilePersistenceOutput(
-          {
-            valueProps: [],
-            tone: null,
-            glossary: [],
-            keywords: [],
-            differentiators: [],
-            competitors: [],
-            factSheet: [],
-            gaps: [{ field, reason: 'needs_input', hint }],
-          },
-          persistenceContext,
-        ),
-      ).toThrow(/explicit personal attribution|forbidden personnel role/i);
+      const output = sanitizeBrandProfilePersistenceOutput(
+        {
+          valueProps: [],
+          tone: null,
+          glossary: [],
+          keywords: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [],
+          gaps: [{ field, reason: 'needs_input', hint }],
+        },
+        persistenceContext,
+      );
+      expect(output.gaps).toEqual([
+        { field, reason: 'needs_input', hint },
+      ]);
     },
   );
 });
@@ -1934,12 +1924,21 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toMatch(/批准企业事实类别，以及 4c 的未消歧关系补证问题/);
     expect(prompt).toMatch(/视为.{0,4}数据/); // 资料中的指令性文字一律当数据
     expect(prompt).toMatch(/name.*model.*product.*quote/is);
+    expect(prompt).toMatch(
+      /factSheet\.value.*quote.*(?:连续.*逐字|逐字.*连续)/is,
+    );
+    expect(prompt).toMatch(
+      /contentHash.*64.*小写.*(?:不得.*(?:前缀|缩写|省略号|大写)|(?:前缀|缩写|省略号|大写).*不得)/is,
+    );
+    expect(prompt).toMatch(/无法逐字复制.*(?:省略|不要写).*fact/i);
     expect(prompt).toMatch(/competitors\s*=\s*\[\]/i);
     expect(prompt).toContain('target_markets');
     expect(prompt).toContain('technical_parameters');
-    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/10');
+    expect(prompt).toMatch(/factSheet\.key.*只允许以下 exact keys/is);
+    expect(prompt).not.toContain('可用示例');
+    expect(BRAND_PROFILE_PROMPT_VERSION).toBe('brand-profile/14');
     expect(BRAND_PROFILE_ROUTE_VALIDATION_VERSION).toBe(
-      'brand-profile-route-validation/8',
+      'brand-profile-route-validation/14',
     );
   });
 
@@ -2047,7 +2046,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     'Can you confirm line:janesmith?',
     'Is this www.例子.公司/张三?',
     'What is the WeChat ID wxid_janesmith?',
-  ])('任务级失败门仍拒绝人员身份问题: %s', (question) => {
+  ])('任务级失败门允许租户内部 gap 携带人员身份: %s', (question) => {
     expect(() =>
       BRAND_PROFILE_TASK.validateOutput?.(input, {
         valueProps: [],
@@ -2058,7 +2057,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
         factSheet: [],
         gaps: [{ field: 'missing_fact', question }],
       }),
-    ).toThrow(/explicit personal attribution/i);
+    ).not.toThrow();
   });
 
   it.each(['ceo', 'contact_person', 'sales_manager', 'founder'])(
@@ -2079,7 +2078,7 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
   );
 
   it.each(['email', 'contact_email', 'phone', 'whatsapp'])(
-    '任务级失败门仍拒绝会把实际联系方式引入公共 gap 的 field: %s',
+    '任务级失败门允许租户内部 gap 标记联系方式字段: %s',
     (field) => {
       expect(() =>
         BRAND_PROFILE_TASK.validateOutput?.(input, {
@@ -2088,10 +2087,10 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
           keywords: [],
           differentiators: [],
           competitors: [],
-          factSheet: [],
-          gaps: [{ field, question: 'Please provide supporting details?' }],
-        }),
-      ).toThrow(/explicit personal attribution/i);
+        factSheet: [],
+        gaps: [{ field, question: 'Please provide supporting details?' }],
+      }),
+      ).not.toThrow();
     },
   );
 
@@ -2194,12 +2193,6 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
       name: 'glossary',
       over: {
         glossary: [{ term: 'Leadership', definition: 'CEO: Jane Smith' }],
-      },
-    },
-    {
-      name: 'gaps',
-      over: {
-        gaps: [{ field: 'leadership', question: 'Contact person: Jane Smith' }],
       },
     },
     {
@@ -2376,6 +2369,116 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     ).not.toThrow();
   });
 
+  it('产品主体不因 designed 动词被误判为具名个人，但真实人名仍拒绝', () => {
+    const base = {
+      valueProps: [],
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      factSheet: [],
+      gaps: [],
+    };
+
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        valueProps: [
+          'Specialized supplier of CO2 incubator shakers and microplate mixers designed for cell culture and sample preparation workflows.',
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
+            term: 'Product terminology',
+            definition:
+              'Magnetic Drive Pumps designed for seal-less transfer of corrosive media.',
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
+            term: 'Dosing pump',
+            definition:
+              'A pump designed to deliver precise, controlled volumes of fluid for chemical process applications.',
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
+            term: 'MX Series',
+            definition:
+              'Magnetic drive pump series designed for seal-less transfer of corrosive process media.',
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        glossary: [
+          {
+            term: 'Design attribution',
+            definition: 'Jane Smith designed the pump system.',
+          },
+        ],
+      }),
+    ).toThrow(/explicit personal attribution/i);
+  });
+
+  it('面向买家/角色的语气修饰词不是个人标签，但具名角色关系仍拒绝', () => {
+    const base = {
+      valueProps: [],
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      factSheet: [],
+      gaps: [],
+    };
+
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        tone: {
+          voice: 'Professional, technical, and buyer-focused',
+          style: ['Engineer-oriented documentation'],
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        valueProps: [
+          'Supply partner for chemical processing applications across Germany, the Netherlands, and Austria.',
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        tone: { voice: 'CEO: Jane Smith', style: [] },
+      }),
+    ).toThrow(/explicit personal attribution/i);
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
+        valueProps: ['Supply partner for Jane Smith'],
+      }),
+    ).toThrow(/explicit personal attribution/i);
+  });
+
   it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
     const prompt = buildBrandProfilePrompt({
       ...input,
@@ -2413,5 +2516,6 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(prompt).toContain('source_id=kb-source-1');
     expect(prompt).toContain('source_role=research_hint');
     expect(prompt).toMatch(/每项.*quote|quote.*每项/);
+    expect(prompt).toMatch(/quote.{0,40}(?:至少|不短于)\s*8\s*个?字符/is);
   });
 });

@@ -120,7 +120,29 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
       usage: {},
     });
     const r = await provider.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {} });
-    expect(r.model).toBe('upstream/claude-sonnet-5-2026-07-18');
+    expect(r).toMatchObject({
+      model: 'upstream/claude-sonnet-5-2026-07-18',
+      reportedModel: 'upstream/claude-sonnet-5-2026-07-18',
+      modelResolutionSource: 'upstream_response',
+    });
+  });
+
+  it('上游不报告 model 时，显式标记为 requested fallback，不能冒充已解析模型', async () => {
+    mockChatResponse({
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: {},
+    });
+    const r = await provider.generateStructured<{ ok: boolean }>({
+      task: 't',
+      prompt: 'p',
+      schema: {},
+      model: 'requested-model',
+    });
+    expect(r).toMatchObject({
+      model: 'requested-model',
+      modelResolutionSource: 'requested_fallback',
+    });
+    expect(r.reportedModel).toBeUndefined();
   });
 
   it('JSON 中途截断 + finish_reason=length → 抛 ProviderOutputError（truncated 语义，带 cause+usage）', async () => {
@@ -136,6 +158,11 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     expect((err as Error).message).toMatch(/output truncated at max_tokens/);
     expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 保留原始解析错
     expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 120, outputTokens: 800 });
+    expect(err).toMatchObject({
+      provider: 'gateway',
+      model: 'default-model',
+      modelResolutionSource: 'requested_fallback',
+    });
   });
 
   it('JSON 不合法但 finish_reason=stop → 抛 ProviderOutputError（非截断语义，保留 SyntaxError 为 cause，带 usage）', async () => {
@@ -230,6 +257,12 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
     expect(error).toBeInstanceOf(ProviderOutputError);
     expect((error as Error).message).toContain('status=incomplete');
     expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 101, outputTokens: 456 });
+    expect(error).toMatchObject({
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      reportedModel: 'gpt-5.6-terra',
+      modelResolutionSource: 'upstream_response',
+    });
   });
 
   it('Claude Messages sends native headers, separates system text, and excludes thinking from output', async () => {
@@ -294,6 +327,12 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       expect(error).toBeInstanceOf(ProviderOutputError);
       expect((error as Error).message).toContain(`stop_reason=${stopReason}`);
       expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 99, outputTokens: 456 });
+      expect(error).toMatchObject({
+        provider: 'gateway',
+        model: 'claude-sonnet-5',
+        reportedModel: 'claude-sonnet-5',
+        modelResolutionSource: 'upstream_response',
+      });
     },
   );
 

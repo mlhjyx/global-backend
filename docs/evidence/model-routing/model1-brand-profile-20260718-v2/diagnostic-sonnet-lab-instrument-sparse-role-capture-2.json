@@ -1,0 +1,655 @@
+{
+  "schemaVersion": "site-builder-model1-brand-profile-report/v5",
+  "generatedAt": "2026-07-18T17:15:14.560Z",
+  "evidenceRole": "diagnostic",
+  "status": "completed_diagnostic",
+  "promotionEligible": false,
+  "gateway": {
+    "providerId": "new-api-eval",
+    "baseUrl": "http://localhost:3001/v1",
+    "modelCatalogCount": 38,
+    "modelCatalogSha256": "96ff68253b20984d12dd5eada3f805af861b5324f90b7189b015ab8a00537328",
+    "modelCatalogTimeoutMs": 15000,
+    "requestedModelsPresent": {
+      "claude-sonnet-5": true
+    }
+  },
+  "matrixScope": "diagnostic",
+  "diagnosticOptions": {
+    "routeValidationBypassed": false,
+    "rejectedOutputCaptured": true
+  },
+  "allFixtureCount": 6,
+  "selectedFixtureIds": [
+    "lab-instrument-sparse"
+  ],
+  "repeats": 1,
+  "fixtureCount": 1,
+  "timePlan": {
+    "taskId": "site_builder.brand_profile",
+    "profile": "structured.workspace_materials",
+    "maxTokens": 12000,
+    "perProbeTimeoutMs": 240000,
+    "perFixtureAttemptTimeoutMs": 240000,
+    "candidateCount": 1,
+    "fixtureCount": 1,
+    "repeats": 1,
+    "expectedRunCount": 1,
+    "absoluteMaximumWallClockMs": 480000
+  },
+  "sourceIntegrity": {
+    "startBundleSha256": "010b361220cd2aa37c8e81db205c5f62223fed2d34475aae7192741f6df23265",
+    "endBundleSha256": "010b361220cd2aa37c8e81db205c5f62223fed2d34475aae7192741f6df23265",
+    "stable": true,
+    "changedPaths": []
+  },
+  "matrixIntegrity": {
+    "expectedRunCount": 1,
+    "actualRunCount": 1,
+    "complete": true,
+    "duplicateKeys": [],
+    "missingKeys": [],
+    "unexpectedKeys": []
+  },
+  "taskContract": {
+    "taskId": "site_builder.brand_profile",
+    "promptVersion": "brand-profile/12",
+    "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+    "outputSchemaSha256": "c78b5d1697081c293f6965508055852683118b1357ddb36cf8571549d5ff3ee1",
+    "routeValidationVersion": "brand-profile-route-validation/14",
+    "evaluatorVersion": "brand-profile-evaluator/10",
+    "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+    "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+    "evaluationPolicyVersion": "brand-profile-evaluation-policy/3",
+    "sourceFiles": [
+      {
+        "role": "task",
+        "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+        "sha256": "b25537092ec5f45d97ecf20983f794189bba18b4003eb065dc572a4f41f2c006"
+      },
+      {
+        "role": "judge",
+        "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+        "sha256": "a5edd75efefa5a99bdcc2c335c560bdac3719793be35b3939901c8da4fd6cb6b"
+      },
+      {
+        "role": "harness",
+        "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+        "sha256": "0fce1cf516c0bc29644f51ec2e467834096c357679e903613484e590bbfbe725"
+      },
+      {
+        "role": "provider",
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "97c60e5d45baaf905f1c5d5a5befaaa520dba6e57c91d9bcbcefae1b1a534e45"
+      },
+      {
+        "role": "transport_registry",
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "dfbbba428974b201a045e02e7b76baa4dc416586dc2039a33dec58651d20ba91"
+      },
+      {
+        "role": "task_runner",
+        "path": "apps/api/src/site-builder/agents/ai-task.ts",
+        "sha256": "f6e047432b9fbbfb64554447f270f5366af7c74f641d27eb3cc1d25ec7c8a7db"
+      },
+      {
+        "role": "gateway_router",
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "7da7acf2a1f8e32277f1e3d35283f7270bf980b9934d38188cc6d9c850969e61"
+      },
+      {
+        "role": "schema_validator",
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+      },
+      {
+        "role": "evaluation_provenance",
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "d0d0327820b1913830ebf8f0e808353f7d387f22efe2a51792a0b23e0a5a7cca"
+      },
+      {
+        "role": "task_route",
+        "path": "apps/api/src/site-builder/agents/task-routes.ts",
+        "sha256": "d56f958b61097c7d4edf22473099a15acfa427d0a41a4ce5bd4a0d8a1e512f59"
+      },
+      {
+        "role": "task_route_binding",
+        "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+        "sha256": "d6f652725a6542d05046253d81856967c567d3db61dcf303197e7538ef09f2d4"
+      },
+      {
+        "role": "evidence_contract",
+        "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+        "sha256": "3d0eb8bceea433af4317dc059bd0016afd834b8c9d7a16fc0d09121737de5000"
+      },
+      {
+        "role": "pii_guard",
+        "path": "apps/api/src/site-builder/agents/pii.ts",
+        "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+      },
+      {
+        "role": "claim_classifier",
+        "path": "apps/api/src/site-builder/claim-classification.ts",
+        "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+      },
+      {
+        "role": "profile_registry",
+        "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+        "sha256": "51e3d1ad8d62101190c22e42fe12910b732b0991ed0b2fec9f8f7406edebb0e8"
+      },
+      {
+        "role": "provider_registry",
+        "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+        "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+      },
+      {
+        "role": "model_router",
+        "path": "apps/api/src/model-gateway/model-router.ts",
+        "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+      },
+      {
+        "role": "provider_error",
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "521aa9d3d72bbf5f24efff4e02bcfebde653d9be64d44e4e5c6cc989fae84cc6"
+      },
+      {
+        "role": "gateway_types",
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "a1bd90c5a06c79974c89c44a49d33395e5c508eac858a24d792e71e1724e66e2"
+      },
+      {
+        "role": "gateway_contract",
+        "path": "apps/api/src/model-gateway/model-gateway.ts",
+        "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+      },
+      {
+        "role": "provider_contract",
+        "path": "apps/api/src/model-gateway/model-provider.ts",
+        "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+      },
+      {
+        "role": "budget_ledger",
+        "path": "apps/api/src/tools/budget.ts",
+        "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/index.js",
+        "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/evidence.js",
+        "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/media-foundation.js",
+        "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/model-policy.js",
+        "sha256": "576a2e3238a1396d0cb7f9bfda4060e33b75256d0acc15b34455b2fc19ff85fb"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/site-spec.js",
+        "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+      },
+      {
+        "role": "contracts_manifest",
+        "path": "packages/contracts/package.json",
+        "sha256": "7c458d20693c2636cebfb7b59f89d6b3487bc4df37fc5c764c5fcc0a6dccfe22"
+      },
+      {
+        "role": "dependency_lock",
+        "path": "pnpm-lock.yaml",
+        "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+      }
+    ],
+    "sourceBundleSha256": "010b361220cd2aa37c8e81db205c5f62223fed2d34475aae7192741f6df23265"
+  },
+  "fixtureContracts": [
+    {
+      "taskId": "site_builder.brand_profile",
+      "promptVersion": "brand-profile/12",
+      "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+      "outputSchemaSha256": "c78b5d1697081c293f6965508055852683118b1357ddb36cf8571549d5ff3ee1",
+      "routeValidationVersion": "brand-profile-route-validation/14",
+      "evaluatorVersion": "brand-profile-evaluator/10",
+      "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+      "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+      "evaluationPolicyVersion": "brand-profile-evaluation-policy/3",
+      "sourceFiles": [
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+          "sha256": "b25537092ec5f45d97ecf20983f794189bba18b4003eb065dc572a4f41f2c006"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+          "sha256": "a5edd75efefa5a99bdcc2c335c560bdac3719793be35b3939901c8da4fd6cb6b"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+          "sha256": "0fce1cf516c0bc29644f51ec2e467834096c357679e903613484e590bbfbe725"
+        },
+        {
+          "role": "provider",
+          "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+          "sha256": "97c60e5d45baaf905f1c5d5a5befaaa520dba6e57c91d9bcbcefae1b1a534e45"
+        },
+        {
+          "role": "transport_registry",
+          "path": "apps/api/src/model-gateway/model-transports.ts",
+          "sha256": "dfbbba428974b201a045e02e7b76baa4dc416586dc2039a33dec58651d20ba91"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "f6e047432b9fbbfb64554447f270f5366af7c74f641d27eb3cc1d25ec7c8a7db"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "7da7acf2a1f8e32277f1e3d35283f7270bf980b9934d38188cc6d9c850969e61"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "d0d0327820b1913830ebf8f0e808353f7d387f22efe2a51792a0b23e0a5a7cca"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "d56f958b61097c7d4edf22473099a15acfa427d0a41a4ce5bd4a0d8a1e512f59"
+        },
+        {
+          "role": "task_route_binding",
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "d6f652725a6542d05046253d81856967c567d3db61dcf303197e7538ef09f2d4"
+        },
+        {
+          "role": "evidence_contract",
+          "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+          "sha256": "3d0eb8bceea433af4317dc059bd0016afd834b8c9d7a16fc0d09121737de5000"
+        },
+        {
+          "role": "pii_guard",
+          "path": "apps/api/src/site-builder/agents/pii.ts",
+          "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+        },
+        {
+          "role": "claim_classifier",
+          "path": "apps/api/src/site-builder/claim-classification.ts",
+          "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "51e3d1ad8d62101190c22e42fe12910b732b0991ed0b2fec9f8f7406edebb0e8"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "provider_error",
+          "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+          "sha256": "521aa9d3d72bbf5f24efff4e02bcfebde653d9be64d44e4e5c6cc989fae84cc6"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "a1bd90c5a06c79974c89c44a49d33395e5c508eac858a24d792e71e1724e66e2"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/index.js",
+          "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/evidence.js",
+          "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/media-foundation.js",
+          "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/model-policy.js",
+          "sha256": "576a2e3238a1396d0cb7f9bfda4060e33b75256d0acc15b34455b2fc19ff85fb"
+        },
+        {
+          "role": "contracts_runtime",
+          "path": "packages/contracts/dist/site-builder/site-spec.js",
+          "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+        },
+        {
+          "role": "contracts_manifest",
+          "path": "packages/contracts/package.json",
+          "sha256": "7c458d20693c2636cebfb7b59f89d6b3487bc4df37fc5c764c5fcc0a6dccfe22"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+        }
+      ],
+      "sourceBundleSha256": "010b361220cd2aa37c8e81db205c5f62223fed2d34475aae7192741f6df23265",
+      "fixtureId": "lab-instrument-sparse",
+      "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+      "promptSha256": "89d5f228b6f57e701b53dc655659a59f21205ac7becc2ed20b3e13b777079cea"
+    }
+  ],
+  "probes": [
+    {
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "accepted": true,
+      "elapsedMs": 5509,
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "reportedModel": "claude-sonnet-5",
+      "modelResolutionSource": "upstream_response",
+      "usage": {
+        "inputTokens": 208,
+        "outputTokens": 11
+      }
+    }
+  ],
+  "summary": [
+    {
+      "model": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "capabilityProbe": {
+        "requestedModel": "claude-sonnet-5",
+        "transport": "anthropic-messages",
+        "accepted": true,
+        "elapsedMs": 5509,
+        "provider": "new-api-eval",
+        "resolvedModel": "claude-sonnet-5",
+        "reportedModel": "claude-sonnet-5",
+        "modelResolutionSource": "upstream_response",
+        "usage": {
+          "inputTokens": 208,
+          "outputTokens": 11
+        }
+      },
+      "matrixSkipped": false,
+      "expectedRuns": 1,
+      "runs": 1,
+      "missingRuns": 0,
+      "acceptedArtifacts": 1,
+      "hardFailures": 0,
+      "p95LatencyMs": 34278,
+      "attemptedTokenTotals": {
+        "inputTokens": 2235,
+        "outputTokens": 3431
+      },
+      "acceptedArtifactTokenTotals": {
+        "inputTokens": 2235,
+        "outputTokens": 3431
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "claude-sonnet-5",
+      "requestedModel": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "provider": "new-api-eval",
+      "resolvedModel": "claude-sonnet-5",
+      "reportedModel": "claude-sonnet-5",
+      "modelResolutionSource": "upstream_response",
+      "fixtureId": "lab-instrument-sparse",
+      "targetMarkets": [
+        "US",
+        "SG"
+      ],
+      "materialCompleteness": "sparse",
+      "attempt": 1,
+      "acceptedArtifact": true,
+      "elapsedMs": 34278,
+      "acceptedFactCount": 2,
+      "rejectedFactCount": 0,
+      "missingAcceptedTerms": [],
+      "forbiddenOutputTerms": [],
+      "modelSnapshot": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      },
+      "fallbackIndex": 0,
+      "executionPolicy": {
+        "modelPolicy": {
+          "policyVersion": "site-builder-model-policy/v3",
+          "profile": "structured.workspace_materials",
+          "routeState": "currentRoute",
+          "lifecycle": "active",
+          "source": "env_override",
+          "dataPolicy": {
+            "transport": "new_api_only",
+            "region": "gateway_controlled",
+            "personalData": "workspace_controlled",
+            "dataScope": "workspace_site_materials"
+          },
+          "maxCostCents": 40,
+          "route": {
+            "primary": "claude-sonnet-5",
+            "fallbacks": []
+          }
+        },
+        "maxTokens": 12000,
+        "timeoutMs": 240000,
+        "maxCostCents": 40,
+        "reasoningEffort": null
+      },
+      "artifactSha256": "6eca50d6116087c4fcbb831de9fcab5216b950faf1ccc180a3a102340d0d4968",
+      "taskContract": {
+        "taskId": "site_builder.brand_profile",
+        "promptVersion": "brand-profile/12",
+        "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+        "outputSchemaSha256": "c78b5d1697081c293f6965508055852683118b1357ddb36cf8571549d5ff3ee1",
+        "routeValidationVersion": "brand-profile-route-validation/14",
+        "evaluatorVersion": "brand-profile-evaluator/10",
+        "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+        "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+        "evaluationPolicyVersion": "brand-profile-evaluation-policy/3",
+        "sourceFiles": [
+          {
+            "role": "task",
+            "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+            "sha256": "b25537092ec5f45d97ecf20983f794189bba18b4003eb065dc572a4f41f2c006"
+          },
+          {
+            "role": "judge",
+            "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+            "sha256": "a5edd75efefa5a99bdcc2c335c560bdac3719793be35b3939901c8da4fd6cb6b"
+          },
+          {
+            "role": "harness",
+            "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+            "sha256": "0fce1cf516c0bc29644f51ec2e467834096c357679e903613484e590bbfbe725"
+          },
+          {
+            "role": "provider",
+            "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+            "sha256": "97c60e5d45baaf905f1c5d5a5befaaa520dba6e57c91d9bcbcefae1b1a534e45"
+          },
+          {
+            "role": "transport_registry",
+            "path": "apps/api/src/model-gateway/model-transports.ts",
+            "sha256": "dfbbba428974b201a045e02e7b76baa4dc416586dc2039a33dec58651d20ba91"
+          },
+          {
+            "role": "task_runner",
+            "path": "apps/api/src/site-builder/agents/ai-task.ts",
+            "sha256": "f6e047432b9fbbfb64554447f270f5366af7c74f641d27eb3cc1d25ec7c8a7db"
+          },
+          {
+            "role": "gateway_router",
+            "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+            "sha256": "7da7acf2a1f8e32277f1e3d35283f7270bf980b9934d38188cc6d9c850969e61"
+          },
+          {
+            "role": "schema_validator",
+            "path": "apps/api/src/model-gateway/schema-validate.ts",
+            "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+          },
+          {
+            "role": "evaluation_provenance",
+            "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+            "sha256": "d0d0327820b1913830ebf8f0e808353f7d387f22efe2a51792a0b23e0a5a7cca"
+          },
+          {
+            "role": "task_route",
+            "path": "apps/api/src/site-builder/agents/task-routes.ts",
+            "sha256": "d56f958b61097c7d4edf22473099a15acfa427d0a41a4ce5bd4a0d8a1e512f59"
+          },
+          {
+            "role": "task_route_binding",
+            "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+            "sha256": "d6f652725a6542d05046253d81856967c567d3db61dcf303197e7538ef09f2d4"
+          },
+          {
+            "role": "evidence_contract",
+            "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+            "sha256": "3d0eb8bceea433af4317dc059bd0016afd834b8c9d7a16fc0d09121737de5000"
+          },
+          {
+            "role": "pii_guard",
+            "path": "apps/api/src/site-builder/agents/pii.ts",
+            "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+          },
+          {
+            "role": "claim_classifier",
+            "path": "apps/api/src/site-builder/claim-classification.ts",
+            "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+          },
+          {
+            "role": "profile_registry",
+            "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+            "sha256": "51e3d1ad8d62101190c22e42fe12910b732b0991ed0b2fec9f8f7406edebb0e8"
+          },
+          {
+            "role": "provider_registry",
+            "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+            "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+          },
+          {
+            "role": "model_router",
+            "path": "apps/api/src/model-gateway/model-router.ts",
+            "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+          },
+          {
+            "role": "provider_error",
+            "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+            "sha256": "521aa9d3d72bbf5f24efff4e02bcfebde653d9be64d44e4e5c6cc989fae84cc6"
+          },
+          {
+            "role": "gateway_types",
+            "path": "apps/api/src/model-gateway/types.ts",
+            "sha256": "a1bd90c5a06c79974c89c44a49d33395e5c508eac858a24d792e71e1724e66e2"
+          },
+          {
+            "role": "gateway_contract",
+            "path": "apps/api/src/model-gateway/model-gateway.ts",
+            "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+          },
+          {
+            "role": "provider_contract",
+            "path": "apps/api/src/model-gateway/model-provider.ts",
+            "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+          },
+          {
+            "role": "budget_ledger",
+            "path": "apps/api/src/tools/budget.ts",
+            "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/index.js",
+            "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/evidence.js",
+            "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/media-foundation.js",
+            "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/model-policy.js",
+            "sha256": "576a2e3238a1396d0cb7f9bfda4060e33b75256d0acc15b34455b2fc19ff85fb"
+          },
+          {
+            "role": "contracts_runtime",
+            "path": "packages/contracts/dist/site-builder/site-spec.js",
+            "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+          },
+          {
+            "role": "contracts_manifest",
+            "path": "packages/contracts/package.json",
+            "sha256": "7c458d20693c2636cebfb7b59f89d6b3487bc4df37fc5c764c5fcc0a6dccfe22"
+          },
+          {
+            "role": "dependency_lock",
+            "path": "pnpm-lock.yaml",
+            "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+          }
+        ],
+        "sourceBundleSha256": "010b361220cd2aa37c8e81db205c5f62223fed2d34475aae7192741f6df23265",
+        "fixtureId": "lab-instrument-sparse",
+        "fixtureSha256": "545ceb92c867be4acf5a24fa1280eb3a75854296e9a725418a3fe44df1050781",
+        "promptSha256": "89d5f228b6f57e701b53dc655659a59f21205ac7becc2ed20b3e13b777079cea"
+      },
+      "usage": {
+        "inputTokens": 2235,
+        "outputTokens": 3431,
+        "calls": 1
+      },
+      "acceptedArtifactCost": {
+        "reportedCostUsd": null,
+        "inputTokens": 2235,
+        "outputTokens": 3431,
+        "note": "new-api response does not report costUsd; token totals are retained for later price reconciliation."
+      }
+    }
+  ]
+}

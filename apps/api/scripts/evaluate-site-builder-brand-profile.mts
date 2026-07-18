@@ -25,29 +25,144 @@ import {
 import { ProviderOutputError } from '../src/model-gateway/providers/provider-output-error';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import { AiTaskError, runAiTask } from '../src/site-builder/agents/ai-task';
-import { BRAND_PROFILE_PROMPT_VERSION } from '../src/site-builder/agents/brand-profile';
+import {
+  BRAND_PROFILE_PROMPT_VERSION,
+  BRAND_PROFILE_ROUTE_VALIDATION_VERSION,
+  type BrandProfileOutput,
+} from '../src/site-builder/agents/brand-profile';
 import {
   BRAND_PROFILE_EVALUATOR_RUBRIC,
   BRAND_PROFILE_EVALUATOR_VERSION,
+  BRAND_PROFILE_EVAL_FIXTURE_SCHEMA_VERSION,
   BRAND_PROFILE_TASK,
   evaluateBrandProfileOutput,
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from '../src/site-builder/eval/brand-profile-eval';
 import {
+  assertUniqueEvaluationValues,
+  captureDiagnosticRejectedOutput,
+  classifyEvaluationOutcome,
+  evaluationProbePolicy,
+  inspectEvaluationMatrix,
+  inspectEvaluationSourceBundle,
+  isExactUpstreamModelResolution,
+  isProvenUpstreamModelResolution,
+  prepareEvaluationReportPath,
   sha256CanonicalJson,
+  sha256Bytes,
   sha256Text,
+  routeForTaskBaselineEvaluation,
+  routeForTaskEvaluation,
   runWithEvaluationDeadline,
+  sanitizeGatewayBaseUrl,
   snapshotEvaluationExecutionPolicy,
+  type DiagnosticRejectedOutput,
   type EvaluationExecutionPolicy,
 } from '../src/site-builder/eval/eval-provenance';
-import { resolveTaskRoute, type TaskRoute } from '../src/site-builder/agents/task-routes';
+import type { TaskRoute } from '../src/site-builder/agents/task-routes';
 
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const API_DIR = join(SCRIPT_DIR, '..');
+const REPO_DIR = join(API_DIR, '../..');
 const FIXTURE_DIR = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../test/fixtures/golden-companies/brand-profile',
+  API_DIR,
+  'test/fixtures/golden-companies/brand-profile',
 );
 const EVAL_WORKSPACE_ID = '00000000-0000-4000-8000-000000000001';
+const EVAL_PROVIDER_ID = 'new-api-eval';
+const GATEWAY_CATALOG_TIMEOUT_MS = 15_000;
+const SOURCE_FILES = Object.freeze([
+  { role: 'task', path: 'apps/api/src/site-builder/agents/brand-profile.ts' },
+  {
+    role: 'judge',
+    path: 'apps/api/src/site-builder/eval/brand-profile-eval.ts',
+  },
+  {
+    role: 'harness',
+    path: 'apps/api/scripts/evaluate-site-builder-brand-profile.mts',
+  },
+  {
+    role: 'provider',
+    path: 'apps/api/src/model-gateway/providers/openai-compatible.provider.ts',
+  },
+  {
+    role: 'transport_registry',
+    path: 'apps/api/src/model-gateway/model-transports.ts',
+  },
+  { role: 'task_runner', path: 'apps/api/src/site-builder/agents/ai-task.ts' },
+  {
+    role: 'gateway_router',
+    path: 'apps/api/src/model-gateway/router-model-gateway.ts',
+  },
+  {
+    role: 'schema_validator',
+    path: 'apps/api/src/model-gateway/schema-validate.ts',
+  },
+  {
+    role: 'evaluation_provenance',
+    path: 'apps/api/src/site-builder/eval/eval-provenance.ts',
+  },
+  {
+    role: 'task_route',
+    path: 'apps/api/src/site-builder/agents/task-routes.ts',
+  },
+  {
+    role: 'task_route_binding',
+    path: 'apps/api/src/site-builder/agents/task-route-bindings.ts',
+  },
+  {
+    role: 'evidence_contract',
+    path: 'apps/api/src/site-builder/agents/evidence-ref.ts',
+  },
+  { role: 'pii_guard', path: 'apps/api/src/site-builder/agents/pii.ts' },
+  {
+    role: 'claim_classifier',
+    path: 'apps/api/src/site-builder/claim-classification.ts',
+  },
+  {
+    role: 'profile_registry',
+    path: 'apps/api/src/site-builder/agents/model-profiles.ts',
+  },
+  {
+    role: 'provider_registry',
+    path: 'apps/api/src/model-gateway/model-provider.registry.ts',
+  },
+  { role: 'model_router', path: 'apps/api/src/model-gateway/model-router.ts' },
+  {
+    role: 'provider_error',
+    path: 'apps/api/src/model-gateway/providers/provider-output-error.ts',
+  },
+  { role: 'gateway_types', path: 'apps/api/src/model-gateway/types.ts' },
+  {
+    role: 'gateway_contract',
+    path: 'apps/api/src/model-gateway/model-gateway.ts',
+  },
+  {
+    role: 'provider_contract',
+    path: 'apps/api/src/model-gateway/model-provider.ts',
+  },
+  { role: 'budget_ledger', path: 'apps/api/src/tools/budget.ts' },
+  { role: 'contracts_runtime', path: 'packages/contracts/dist/index.js' },
+  {
+    role: 'contracts_runtime',
+    path: 'packages/contracts/dist/site-builder/evidence.js',
+  },
+  {
+    role: 'contracts_runtime',
+    path: 'packages/contracts/dist/site-builder/media-foundation.js',
+  },
+  {
+    role: 'contracts_runtime',
+    path: 'packages/contracts/dist/site-builder/model-policy.js',
+  },
+  {
+    role: 'contracts_runtime',
+    path: 'packages/contracts/dist/site-builder/site-spec.js',
+  },
+  { role: 'contracts_manifest', path: 'packages/contracts/package.json' },
+  { role: 'dependency_lock', path: 'pnpm-lock.yaml' },
+] as const);
 const CAPABILITY_PROBE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -68,9 +183,15 @@ interface EvalUsage {
 interface EvalTaskContract {
   taskId: string;
   promptVersion: string;
+  inputSchemaSha256: string;
   outputSchemaSha256: string;
+  routeValidationVersion: string;
   evaluatorVersion: string;
   evaluatorRubricSha256: string;
+  fixtureSchemaVersion: string;
+  evaluationPolicyVersion: string;
+  sourceFiles: Array<{ role: string; path: string; sha256: string }>;
+  sourceBundleSha256: string;
 }
 
 interface EvalFixtureContract extends EvalTaskContract {
@@ -86,6 +207,8 @@ interface EvalProbe {
   elapsedMs: number;
   provider?: string;
   resolvedModel?: string;
+  reportedModel?: string;
+  modelResolutionSource?: 'upstream_response' | 'requested_fallback';
   usage?: EvalUsage;
   error?: string;
 }
@@ -102,6 +225,8 @@ interface EvalRun {
   elapsedMs: number;
   provider?: string;
   resolvedModel?: string;
+  reportedModel?: string;
+  modelResolutionSource?: 'upstream_response' | 'requested_fallback';
   acceptedFactCount?: number;
   rejectedFactCount?: number;
   missingAcceptedTerms?: string[];
@@ -122,6 +247,15 @@ interface EvalRun {
   error?: string;
 }
 
+interface GatewaySnapshot {
+  providerId: string;
+  baseUrl: string;
+  modelCatalogCount: number;
+  modelCatalogSha256: string;
+  modelCatalogTimeoutMs: number;
+  requestedModelsPresent: Record<string, boolean>;
+}
+
 interface EvaluationTimePlan {
   taskId: string;
   profile: string;
@@ -136,12 +270,14 @@ interface EvaluationTimePlan {
 }
 
 /**
- * Keep stdout as one final JSON report. A partial matrix is never evidence for
- * promotion, so it is intentionally not written as a report. Stderr instead
+ * Keep stdout as one final JSON report. A partial matrix is explicitly marked
+ * ineligible and cannot satisfy the immutable promotion-evidence spec. Stderr
  * receives a JSON line at each bounded unit of work for liveness monitoring.
  */
 function progress(event: string, details: Record<string, unknown> = {}): void {
-  process.stderr.write(`${JSON.stringify({ event, at: new Date().toISOString(), ...details })}\n`);
+  process.stderr.write(
+    `${JSON.stringify({ event, at: new Date().toISOString(), ...details })}\n`,
+  );
 }
 
 function required(name: string): string {
@@ -161,33 +297,90 @@ function positiveInt(name: string, fallback: number): number {
 }
 
 async function loadFixtures(): Promise<BrandProfileEvalFixture[]> {
-  const names = (await readdir(FIXTURE_DIR)).filter((name) => name.endsWith('.json')).sort();
+  const names = (await readdir(FIXTURE_DIR))
+    .filter((name) => name.endsWith('.json'))
+    .sort();
   const fixtures = await Promise.all(
-    names.map(async (name) => JSON.parse(await readFile(join(FIXTURE_DIR, name), 'utf8')) as BrandProfileEvalFixture),
+    names.map(
+      async (name) =>
+        JSON.parse(
+          await readFile(join(FIXTURE_DIR, name), 'utf8'),
+        ) as BrandProfileEvalFixture,
+    ),
   );
-  if (fixtures.length !== 6) throw new Error(`expected exactly 6 BrandProfile fixtures, found ${fixtures.length}`);
+  if (fixtures.length !== 6)
+    throw new Error(
+      `expected exactly 6 BrandProfile fixtures, found ${fixtures.length}`,
+    );
+  assertUniqueEvaluationValues(
+    'committed BrandProfile fixture ids',
+    fixtures.map((fixture) => fixture.id),
+  );
+  for (const fixture of fixtures) {
+    assertUniqueEvaluationValues(
+      `${fixture.id} source ids`,
+      fixture.sources.map((source) => source.id),
+    );
+  }
   return fixtures;
 }
 
-function candidateRoute(model: string): TaskRoute {
-  const current = resolveTaskRoute('site_builder.brand_profile', {});
+async function sourceFileFingerprints(): Promise<
+  Array<{ role: string; path: string; sha256: string }>
+> {
+  return Promise.all(
+    SOURCE_FILES.map(async ({ role, path }) => ({
+      role,
+      path,
+      sha256: sha256Bytes(await readFile(join(REPO_DIR, path))),
+    })),
+  );
+}
+
+async function gatewaySnapshot(
+  models: readonly string[],
+): Promise<GatewaySnapshot> {
+  const rawBaseUrl = required('MODEL_GATEWAY_URL');
+  const baseUrl = sanitizeGatewayBaseUrl(rawBaseUrl);
+  const response = await fetch(`${baseUrl}/models`, {
+    headers: { Authorization: `Bearer ${required('MODEL_GATEWAY_KEY')}` },
+    signal: AbortSignal.timeout(GATEWAY_CATALOG_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `new-api model catalog probe failed with HTTP ${response.status}`,
+    );
+  }
+  const payload = (await response.json()) as { data?: Array<{ id?: unknown }> };
+  const ids = (payload.data ?? [])
+    .map((item) => item.id)
+    .filter(
+      (id): id is string => typeof id === 'string' && id.trim().length > 0,
+    )
+    .map((id) => id.trim())
+    .sort();
+  assertUniqueEvaluationValues('new-api model catalog ids', ids);
   return {
-    ...current,
-    primary: model,
-    fallbacks: [],
-    policy: {
-      ...current.policy,
-      source: 'env_override',
-      route: { primary: model, fallbacks: [] },
-    },
+    providerId: EVAL_PROVIDER_ID,
+    baseUrl,
+    modelCatalogCount: ids.length,
+    modelCatalogSha256: sha256CanonicalJson(ids),
+    modelCatalogTimeoutMs: GATEWAY_CATALOG_TIMEOUT_MS,
+    requestedModelsPresent: Object.fromEntries(
+      models.map((model) => [model, ids.includes(model)]),
+    ),
   };
+}
+
+function candidateRoute(model: string): TaskRoute {
+  return routeForTaskEvaluation('site_builder.brand_profile', model);
 }
 
 function gatewayFor(model: string): RouterModelGateway {
   const registry = new ModelProviderRegistry();
   registry.register(
     new OpenAICompatibleProvider({
-      id: 'new-api-eval',
+      id: EVAL_PROVIDER_ID,
       baseUrl: required('MODEL_GATEWAY_URL'),
       apiKey: required('MODEL_GATEWAY_KEY'),
       model,
@@ -201,31 +394,36 @@ async function probeCandidate(
   gateway: RouterModelGateway,
   route: TaskRoute,
   requestedModel: string,
+  fallbackIndex = 0,
 ): Promise<EvalProbe> {
   const started = performance.now();
   const transport = transportForCandidate(requestedModel);
-  progress('capability_probe_started', { model: requestedModel, transport, timeoutMs: route.timeoutMs });
+  progress('capability_probe_started', {
+    model: requestedModel,
+    transport,
+    timeoutMs: route.timeoutMs,
+  });
   try {
     const result = await runWithEvaluationDeadline(
       // A probe is still an operation for this task: inherit the task's
       // calibrated timeout rather than inventing a global fixed number.
       route.timeoutMs,
-      (signal) => gateway.generateStructured<{ status: 'ok' }>(
-        {
-          task: 'site_builder.brand_profile.capability_probe',
-          prompt: 'Return exactly {"status":"ok"}.',
-          schema: CAPABILITY_PROBE_SCHEMA,
-          model: requestedModel,
-          maxTokens: 128,
-          maxCostCents: route.maxCostCents,
-          signal,
-        },
-        {
-          workspaceId: EVAL_WORKSPACE_ID,
-          runId: `model1-probe:${requestedModel}`,
-          modelPolicy: { ...route.policy, fallbackIndex: 0 },
-        },
-      ),
+      (signal) =>
+        gateway.generateStructured<{ status: 'ok' }>(
+          {
+            task: 'site_builder.brand_profile.capability_probe',
+            prompt: 'Return exactly {"status":"ok"}.',
+            schema: CAPABILITY_PROBE_SCHEMA,
+            model: requestedModel,
+            ...evaluationProbePolicy(route),
+            signal,
+          },
+          {
+            workspaceId: EVAL_WORKSPACE_ID,
+            runId: `model1-probe:${requestedModel}`,
+            modelPolicy: { ...route.policy, fallbackIndex },
+          },
+        ),
     );
     if (result.provider === 'stub' || result.data.status !== 'ok') {
       throw new Error('capability probe returned an unusable response');
@@ -237,21 +435,44 @@ async function probeCandidate(
       elapsedMs: Math.round(performance.now() - started),
       provider: result.provider,
       resolvedModel: result.model,
+      reportedModel: result.reportedModel,
+      modelResolutionSource: result.modelResolutionSource,
       usage: result.usage,
     };
-    progress('capability_probe_completed', { model: requestedModel, transport, accepted: true, elapsedMs: probe.elapsedMs });
+    progress('capability_probe_completed', {
+      model: requestedModel,
+      transport,
+      accepted: true,
+      elapsedMs: probe.elapsedMs,
+    });
     return probe;
   } catch (error) {
-    const usage = error instanceof ProviderOutputError ? error.usage : undefined;
+    const usage =
+      error instanceof ProviderOutputError ? error.usage : undefined;
     const probe = {
       requestedModel,
       transport,
       accepted: false,
       elapsedMs: Math.round(performance.now() - started),
+      provider:
+        error instanceof ProviderOutputError ? error.provider : undefined,
+      resolvedModel:
+        error instanceof ProviderOutputError ? error.model : undefined,
+      reportedModel:
+        error instanceof ProviderOutputError ? error.reportedModel : undefined,
+      modelResolutionSource:
+        error instanceof ProviderOutputError
+          ? error.modelResolutionSource
+          : undefined,
       usage,
       error: error instanceof Error ? error.message : String(error),
     };
-    progress('capability_probe_completed', { model: requestedModel, transport, accepted: false, elapsedMs: probe.elapsedMs });
+    progress('capability_probe_completed', {
+      model: requestedModel,
+      transport,
+      accepted: false,
+      elapsedMs: probe.elapsedMs,
+    });
     return probe;
   }
 }
@@ -259,20 +480,115 @@ async function probeCandidate(
 function percentile95(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)];
+  return sorted[
+    Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)
+  ];
 }
 
 const repeats = positiveInt('MODEL_EVAL_REPEATS', 2);
-const models = (process.env.MODEL_EVAL_MODELS ?? 'gpt-5.6-terra,claude-sonnet-5')
+const models = (
+  process.env.MODEL_EVAL_MODELS ?? 'gpt-5.6-terra,claude-sonnet-5'
+)
   .split(',')
   .map((model) => model.trim())
   .filter(Boolean);
-if (models.length === 0) throw new Error('MODEL_EVAL_MODELS must contain at least one model');
+if (models.length === 0)
+  throw new Error('MODEL_EVAL_MODELS must contain at least one model');
+assertUniqueEvaluationValues('MODEL_EVAL_MODELS', models);
 
-const fixtures = await loadFixtures();
+const allFixtures = await loadFixtures();
+const requestedFixtureIds = (process.env.MODEL_EVAL_FIXTURES ?? '')
+  .split(',')
+  .map((fixtureId) => fixtureId.trim())
+  .filter(Boolean);
+assertUniqueEvaluationValues('MODEL_EVAL_FIXTURES', requestedFixtureIds);
+const fixtures =
+  requestedFixtureIds.length === 0
+    ? allFixtures
+    : allFixtures.filter((fixture) => requestedFixtureIds.includes(fixture.id));
+const unknownFixtureIds = requestedFixtureIds.filter(
+  (fixtureId) => !allFixtures.some((fixture) => fixture.id === fixtureId),
+);
+if (unknownFixtureIds.length > 0) {
+  throw new Error(
+    `unknown MODEL_EVAL_FIXTURES: ${unknownFixtureIds.join(', ')}`,
+  );
+}
+if (fixtures.length === 0) {
+  throw new Error('MODEL_EVAL_FIXTURES must select at least one fixture');
+}
+const matrixScope = requestedFixtureIds.length === 0 ? 'full' : 'diagnostic';
+const diagnosticRouteValidationBypass =
+  process.env.MODEL_EVAL_DIAGNOSTIC_BYPASS_ROUTE_VALIDATION === 'true';
+const diagnosticCaptureRejectedOutput =
+  process.env.MODEL_EVAL_DIAGNOSTIC_CAPTURE_REJECTED_OUTPUT === 'true';
+const evidenceRole =
+  process.env.MODEL_EVAL_EVIDENCE_ROLE?.trim() ||
+  (matrixScope === 'diagnostic' ? 'diagnostic' : 'candidate');
+if (!['candidate', 'baseline', 'diagnostic'].includes(evidenceRole)) {
+  throw new Error(
+    'MODEL_EVAL_EVIDENCE_ROLE must be candidate, baseline or diagnostic',
+  );
+}
+if (
+  diagnosticRouteValidationBypass &&
+  (matrixScope !== 'diagnostic' ||
+    fixtures.length !== 1 ||
+    models.length !== 1 ||
+    repeats !== 1)
+) {
+  throw new Error(
+    'MODEL_EVAL_DIAGNOSTIC_BYPASS_ROUTE_VALIDATION requires one selected fixture, one model and one repeat',
+  );
+}
+if (
+  diagnosticCaptureRejectedOutput &&
+  (matrixScope !== 'diagnostic' ||
+    fixtures.length !== 1 ||
+    models.length !== 1 ||
+    repeats !== 1 ||
+    diagnosticRouteValidationBypass)
+) {
+  throw new Error(
+    'MODEL_EVAL_DIAGNOSTIC_CAPTURE_REJECTED_OUTPUT requires one selected fixture, one model, one repeat and route validation enabled',
+  );
+}
+const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
+if (reportPath) await prepareEvaluationReportPath(reportPath);
+if (evidenceRole === 'baseline' && models.length !== 1) {
+  throw new Error('baseline evaluation requires exactly one legacy route');
+}
 const runs: EvalRun[] = [];
 const probes: EvalProbe[] = [];
-const evaluationRoute = candidateRoute(models[0]);
+const diagnosticRejectedOutputs: Array<
+  DiagnosticRejectedOutput<BrandProfileOutput>
+> = [];
+const modelExecutions = models.map((model) => {
+  const route =
+    evidenceRole === 'baseline'
+      ? routeForTaskBaselineEvaluation('site_builder.brand_profile')
+      : candidateRoute(model);
+  if (evidenceRole === 'baseline' && route.primary !== model) {
+    throw new Error(
+      `baseline MODEL_EVAL_MODELS must name the legacy primary ${route.primary}`,
+    );
+  }
+  return {
+    model,
+    route,
+    modelGateway: gatewayFor(model),
+    transport: transportForCandidate(model),
+  };
+});
+const routedModels = [
+  ...new Set(
+    modelExecutions.flatMap(({ route }) => [
+      route.primary,
+      ...route.fallbacks,
+    ]),
+  ),
+];
+const evaluationRoute = modelExecutions[0].route;
 const expectedRunCount = models.length * fixtures.length * repeats;
 const timePlan: EvaluationTimePlan = {
   taskId: BRAND_PROFILE_TASK.id,
@@ -286,15 +602,31 @@ const timePlan: EvaluationTimePlan = {
   expectedRunCount,
   // Every probe and fixture attempt is independently bounded by its own task
   // route. This is an upper safety bound, not a predicted completion time.
-  absoluteMaximumWallClockMs: models.length * (1 + fixtures.length * repeats) * evaluationRoute.timeoutMs,
+  absoluteMaximumWallClockMs:
+    routedModels.length *
+    (1 + fixtures.length * repeats) *
+    evaluationRoute.timeoutMs,
 };
-progress('evaluation_started', { models, ...timePlan });
+const gateway = await gatewaySnapshot(routedModels);
+const sourceFiles = await sourceFileFingerprints();
+progress('evaluation_started', {
+  models,
+  gatewayBaseUrl: gateway.baseUrl,
+  gatewayModelCatalogCount: gateway.modelCatalogCount,
+  ...timePlan,
+});
 const taskContract: EvalTaskContract = {
   taskId: BRAND_PROFILE_TASK.id,
   promptVersion: BRAND_PROFILE_PROMPT_VERSION,
+  inputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_TASK.inputSchema),
   outputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_TASK.outputSchema),
+  routeValidationVersion: BRAND_PROFILE_ROUTE_VALIDATION_VERSION,
   evaluatorVersion: BRAND_PROFILE_EVALUATOR_VERSION,
   evaluatorRubricSha256: sha256CanonicalJson(BRAND_PROFILE_EVALUATOR_RUBRIC),
+  fixtureSchemaVersion: BRAND_PROFILE_EVAL_FIXTURE_SCHEMA_VERSION,
+  evaluationPolicyVersion: 'brand-profile-evaluation-policy/3',
+  sourceFiles,
+  sourceBundleSha256: sha256CanonicalJson(sourceFiles),
 };
 const fixtureContracts = new Map<string, EvalFixtureContract>();
 
@@ -314,108 +646,240 @@ function contractForFixture(
   return contract;
 }
 
-for (const model of models) {
-  const route = candidateRoute(model);
-  const gateway = gatewayFor(model);
-  const transport = transportForCandidate(model);
-  progress('model_started', { model, transport, expectedRuns: fixtures.length * repeats, timeoutMs: route.timeoutMs });
-  const probe = await probeCandidate(gateway, route, model);
-  probes.push(probe);
-  if (probe.accepted !== true) {
-    progress('model_skipped', { model, reason: 'capability_probe_failed' });
-    continue;
+for (const { model, route, modelGateway, transport } of modelExecutions) {
+  progress('model_started', {
+    model,
+    transport,
+    routeModels: [route.primary, ...route.fallbacks],
+    expectedRuns: fixtures.length * repeats,
+    timeoutMs: route.timeoutMs,
+  });
+  for (const [fallbackIndex, routeModel] of [
+    route.primary,
+    ...route.fallbacks,
+  ].entries()) {
+    const probe = gateway.requestedModelsPresent[routeModel]
+      ? await probeCandidate(modelGateway, route, routeModel, fallbackIndex)
+      : {
+          requestedModel: routeModel,
+          transport: transportForCandidate(routeModel),
+          accepted: false,
+          elapsedMs: 0,
+          error: 'requested model absent from current new-api model catalog',
+        };
+    probes.push(probe);
   }
-  for (const fixture of fixtures) {
-    const prepared = prepareBrandProfileEvalFixture(fixture);
-    const fixtureContract = contractForFixture(fixture, prepared.input);
-    for (let attempt = 1; attempt <= repeats; attempt += 1) {
-      const started = performance.now();
-      progress('run_started', {
-        model,
-        transport,
-        fixtureId: fixture.id,
-        attempt,
-        completedRuns: runs.length,
-        expectedRunCount,
-        timeoutMs: route.timeoutMs,
-      });
-      try {
-        const result = await runAiTask(BRAND_PROFILE_TASK, prepared.input, {
-          gateway,
-          ctx: { workspaceId: EVAL_WORKSPACE_ID, runId: `model1-eval:${model}:${fixture.id}:${attempt}` },
-          route,
-        });
-        const outcome = evaluateBrandProfileOutput(prepared, result.data);
-        runs.push({
+}
+
+const preflightPassed = probes.every((probe) => probe.accepted === true);
+if (!preflightPassed) {
+  progress('matrix_skipped', { reason: 'capability_probe_failed' });
+}
+
+if (preflightPassed) {
+  matrix: for (const {
+    model,
+    route,
+    modelGateway,
+    transport,
+  } of modelExecutions) {
+    for (const fixture of fixtures) {
+      const prepared = prepareBrandProfileEvalFixture(fixture);
+      const fixtureContract = contractForFixture(fixture, prepared.input);
+      for (let attempt = 1; attempt <= repeats; attempt += 1) {
+        const started = performance.now();
+        progress('run_started', {
           model,
-          requestedModel: model,
           transport,
-          provider: result.provider,
-          resolvedModel: result.model,
           fixtureId: fixture.id,
-          targetMarkets: fixture.targetMarkets,
-          materialCompleteness: fixture.materialCompleteness,
           attempt,
-          acceptedArtifact: outcome.acceptedArtifact,
-          elapsedMs: Math.round(performance.now() - started),
-          acceptedFactCount: outcome.acceptedFactCount,
-          rejectedFactCount: outcome.rejectedFactCount,
-          missingAcceptedTerms: outcome.missingAcceptedTerms,
-          forbiddenOutputTerms: outcome.forbiddenOutputTerms,
-          modelSnapshot: result.modelSnapshot,
-          fallbackIndex: result.fallbackIndex,
-          executionPolicy: snapshotEvaluationExecutionPolicy(route, result.routePolicy),
-          artifactSha256: sha256CanonicalJson(result.data),
-          taskContract: fixtureContract,
-          usage: result.usage,
-          acceptedArtifactCost: {
-            reportedCostUsd: null,
-            inputTokens: result.usage.inputTokens,
-            outputTokens: result.usage.outputTokens,
-            note: 'new-api response does not report costUsd; token totals are retained for later price reconciliation.',
-          },
+          completedRuns: runs.length,
+          expectedRunCount,
+          timeoutMs: route.timeoutMs,
         });
-        progress('run_completed', {
-          model,
-          fixtureId: fixture.id,
-          attempt,
-          acceptedArtifact: outcome.acceptedArtifact,
-          elapsedMs: runs.at(-1)?.elapsedMs,
+        let rejectedDiagnostic:
+          | DiagnosticRejectedOutput<BrandProfileOutput>
+          | undefined;
+        let evaluatedArtifactSha256: string | undefined;
+        try {
+          const task = {
+            ...BRAND_PROFILE_TASK,
+            validateOutput: (
+              input: Parameters<
+                NonNullable<typeof BRAND_PROFILE_TASK.validateOutput>
+              >[0],
+              output: BrandProfileOutput,
+            ) => {
+              evaluatedArtifactSha256 = sha256CanonicalJson(output);
+              if (diagnosticRouteValidationBypass) return;
+              try {
+                BRAND_PROFILE_TASK.validateOutput?.(input, output);
+              } catch (error) {
+                rejectedDiagnostic = captureDiagnosticRejectedOutput(
+                  diagnosticCaptureRejectedOutput,
+                  {
+                    model,
+                    fixtureId: fixture.id,
+                    attempt,
+                    validationError:
+                      error instanceof Error ? error.message : String(error),
+                    output,
+                  },
+                );
+                throw error;
+              }
+            },
+          };
+          const result = await runAiTask(task, prepared.input, {
+            gateway: modelGateway,
+            ctx: {
+              workspaceId: EVAL_WORKSPACE_ID,
+              runId: `model1-eval:${model}:${fixture.id}:${attempt}`,
+            },
+            route,
+          });
+          if (diagnosticRouteValidationBypass) {
+            progress('diagnostic_gaps', {
+              model,
+              fixtureId: fixture.id,
+              attempt,
+              gaps: result.data.gaps,
+            });
+          }
+          if (diagnosticCaptureRejectedOutput) {
+            progress('diagnostic_validated_output', {
+              model,
+              fixtureId: fixture.id,
+              attempt,
+              gaps: result.data.gaps,
+            });
+          }
+          const outcome = evaluateBrandProfileOutput(prepared, result.data);
+          const requestedModel = [
+            result.modelSnapshot.primary,
+            ...result.modelSnapshot.fallbacks,
+          ][result.fallbackIndex] ?? model;
+          runs.push({
+            model,
+            requestedModel,
+            transport: transportForCandidate(requestedModel),
+            provider: result.provider,
+            resolvedModel: result.model,
+            reportedModel: result.reportedModel,
+            modelResolutionSource: result.modelResolutionSource,
+            fixtureId: fixture.id,
+            targetMarkets: fixture.targetMarkets,
+            materialCompleteness: fixture.materialCompleteness,
+            attempt,
+            acceptedArtifact: outcome.acceptedArtifact,
+            elapsedMs: Math.round(performance.now() - started),
+            acceptedFactCount: outcome.acceptedFactCount,
+            rejectedFactCount: outcome.rejectedFactCount,
+            missingAcceptedTerms: outcome.missingAcceptedTerms,
+            forbiddenOutputTerms: outcome.forbiddenOutputTerms,
+            modelSnapshot: result.modelSnapshot,
+            fallbackIndex: result.fallbackIndex,
+            executionPolicy: snapshotEvaluationExecutionPolicy(
+              route,
+              result.routePolicy,
+            ),
+            artifactSha256:
+              evaluatedArtifactSha256 ?? sha256CanonicalJson(result.data),
+            taskContract: fixtureContract,
+            usage: result.usage,
+            acceptedArtifactCost: {
+              reportedCostUsd: null,
+              inputTokens: result.usage.inputTokens,
+              outputTokens: result.usage.outputTokens,
+              note: 'new-api response does not report costUsd; token totals are retained for later price reconciliation.',
+            },
+          });
+          progress('run_completed', {
+            model,
+            fixtureId: fixture.id,
+            attempt,
+            acceptedArtifact: outcome.acceptedArtifact,
+            acceptedFactCount: outcome.acceptedFactCount,
+            rejectedFactCount: outcome.rejectedFactCount,
+            missingAcceptedTerms: outcome.missingAcceptedTerms,
+            forbiddenOutputTerms: outcome.forbiddenOutputTerms,
+            elapsedMs: runs.at(-1)?.elapsedMs,
           completedRuns: runs.length,
           expectedRunCount,
         });
+        if (evidenceRole === 'candidate' && !outcome.acceptedArtifact) {
+          progress('matrix_fail_fast', {
+            model,
+            fixtureId: fixture.id,
+            attempt,
+            reason: 'candidate_artifact_rejected',
+          });
+          break matrix;
+        }
       } catch (error) {
-        const usage = error instanceof AiTaskError ? error.usage : undefined;
-        runs.push({
-          model,
-          requestedModel: model,
-          transport,
-          fixtureId: fixture.id,
-          targetMarkets: fixture.targetMarkets,
-          materialCompleteness: fixture.materialCompleteness,
-          attempt,
-          acceptedArtifact: false,
-          elapsedMs: Math.round(performance.now() - started),
-          usage,
-          executionPolicy: snapshotEvaluationExecutionPolicy(route),
-          taskContract: fixtureContract,
-          acceptedArtifactCost: {
-            reportedCostUsd: null,
-            inputTokens: usage?.inputTokens ?? 0,
-            outputTokens: usage?.outputTokens ?? 0,
-            note: 'A failed call can still consume tokens; new-api does not report costUsd for reconciliation.',
-          },
-          error: error instanceof Error ? error.message : String(error),
-        });
-        progress('run_completed', {
-          model,
-          fixtureId: fixture.id,
-          attempt,
-          acceptedArtifact: false,
-          elapsedMs: runs.at(-1)?.elapsedMs,
+          if (rejectedDiagnostic) {
+            diagnosticRejectedOutputs.push(rejectedDiagnostic);
+            progress('diagnostic_rejected_output', {
+              model,
+              fixtureId: fixture.id,
+              attempt,
+              validationError: rejectedDiagnostic.validationError,
+              gaps: rejectedDiagnostic.output.gaps,
+            });
+          }
+          const usage = error instanceof AiTaskError ? error.usage : undefined;
+          const finalAttempt =
+            error instanceof AiTaskError ? error.attempts.at(-1) : undefined;
+          const requestedModel = finalAttempt?.model ?? model;
+          runs.push({
+            model,
+            requestedModel,
+            transport: transportForCandidate(requestedModel),
+            provider: finalAttempt?.provider,
+            resolvedModel: finalAttempt?.resolvedModel,
+            reportedModel: finalAttempt?.reportedModel,
+            modelResolutionSource: finalAttempt?.modelResolutionSource,
+            fixtureId: fixture.id,
+            targetMarkets: fixture.targetMarkets,
+            materialCompleteness: fixture.materialCompleteness,
+            attempt,
+            acceptedArtifact: false,
+            elapsedMs: Math.round(performance.now() - started),
+            usage,
+            executionPolicy: snapshotEvaluationExecutionPolicy(route),
+            artifactSha256: evaluatedArtifactSha256,
+            taskContract: fixtureContract,
+            acceptedArtifactCost: {
+              reportedCostUsd: null,
+              inputTokens: usage?.inputTokens ?? 0,
+              outputTokens: usage?.outputTokens ?? 0,
+              note: 'A failed call can still consume tokens; new-api does not report costUsd for reconciliation.',
+            },
+            error: error instanceof Error ? error.message : String(error),
+          });
+          progress('run_completed', {
+            model,
+            fixtureId: fixture.id,
+            attempt,
+            acceptedArtifact: false,
+            error:
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : String(error).slice(0, 500),
+            elapsedMs: runs.at(-1)?.elapsedMs,
           completedRuns: runs.length,
           expectedRunCount,
         });
+        if (evidenceRole === 'candidate') {
+          progress('matrix_fail_fast', {
+            model,
+            fixtureId: fixture.id,
+            attempt,
+            reason: 'candidate_run_failed',
+          });
+          break matrix;
+        }
+      }
       }
     }
   }
@@ -423,7 +887,9 @@ for (const model of models) {
 
 const summary = models.map((model) => {
   const rows = runs.filter((run) => run.model === model);
-  const capabilityProbe = probes.find((probe) => probe.requestedModel === model);
+  const capabilityProbe = probes.find(
+    (probe) => probe.requestedModel === model,
+  );
   const accepted = rows.filter((run) => run.acceptedArtifact === true);
   const latencies = rows
     .map((run) => run.elapsedMs)
@@ -433,9 +899,12 @@ const summary = models.map((model) => {
     transport: transportForCandidate(model),
     capabilityProbe,
     matrixSkipped: capabilityProbe?.accepted !== true,
+    expectedRuns: fixtures.length * repeats,
     runs: rows.length,
+    missingRuns: fixtures.length * repeats - rows.length,
     acceptedArtifacts: accepted.length,
-    hardFailures: rows.length - accepted.length,
+    // A failed probe or incomplete matrix is a failure, never a misleading 0/0.
+    hardFailures: fixtures.length * repeats - accepted.length,
     p95LatencyMs: percentile95(latencies),
     attemptedTokenTotals: rows.reduce(
       (total, row) => {
@@ -460,13 +929,73 @@ const summary = models.map((model) => {
   };
 });
 
+const matrixIntegrity = inspectEvaluationMatrix(
+  models,
+  fixtures.map((fixture) => fixture.id),
+  repeats,
+  runs,
+);
+const finalSourceFiles = await sourceFileFingerprints();
+const sourceIntegrity = inspectEvaluationSourceBundle(
+  sourceFiles,
+  finalSourceFiles,
+);
+const diagnosticsEnabled =
+  matrixScope !== 'full' ||
+  diagnosticRouteValidationBypass ||
+  diagnosticCaptureRejectedOutput;
+const artifactFailures = runs.filter(
+  (run) => run.acceptedArtifact !== true,
+).length;
+const acceptsResolution =
+  evidenceRole === 'baseline'
+    ? isProvenUpstreamModelResolution
+    : isExactUpstreamModelResolution;
+const provenanceExact =
+  probes.every(
+    (probe) =>
+      probe.provider === EVAL_PROVIDER_ID &&
+      acceptsResolution(probe),
+  ) &&
+  runs.every(
+    (run) =>
+      run.provider === EVAL_PROVIDER_ID &&
+      acceptsResolution(run),
+  );
+const outcome = classifyEvaluationOutcome({
+  evidenceRole,
+  diagnosticsEnabled,
+  preflightPassed,
+  sourceStable: sourceIntegrity.stable,
+  matrixComplete: matrixIntegrity.complete,
+  artifactFailures,
+  provenanceExact,
+});
+const { promotionEligible, status } = outcome;
+
 const report = JSON.stringify(
   {
-    schemaVersion: 'site-builder-model1-brand-profile-report/v3',
+    schemaVersion: 'site-builder-model1-brand-profile-report/v5',
     generatedAt: new Date().toISOString(),
+    evidenceRole,
+    status,
+    promotionEligible,
+    gateway,
+    matrixScope,
+    diagnosticOptions: {
+      routeValidationBypassed: diagnosticRouteValidationBypass,
+      rejectedOutputCaptured: diagnosticCaptureRejectedOutput,
+    },
+    ...(diagnosticCaptureRejectedOutput
+      ? { diagnosticRejectedOutputs }
+      : {}),
+    allFixtureCount: allFixtures.length,
+    selectedFixtureIds: fixtures.map((fixture) => fixture.id),
     repeats,
     fixtureCount: fixtures.length,
     timePlan,
+    sourceIntegrity,
+    matrixIntegrity,
     taskContract,
     fixtureContracts: [...fixtureContracts.values()],
     probes,
@@ -476,17 +1005,19 @@ const report = JSON.stringify(
   null,
   2,
 );
-const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
-if (reportPath) await writeFile(reportPath, `${report}\n`, { encoding: 'utf8', flag: 'wx' });
+if (reportPath)
+  await writeFile(reportPath, `${report}\n`, { encoding: 'utf8', flag: 'wx' });
 progress('evaluation_completed', {
   reportPath: reportPath ?? null,
   completedRuns: runs.length,
   expectedRunCount,
   probeFailures: probes.filter((probe) => probe.accepted !== true).length,
-  artifactFailures: runs.filter((run) => run.acceptedArtifact !== true).length,
+  artifactFailures,
+  status,
+  promotionEligible,
 });
 console.log(report);
 
-if (probes.some((probe) => probe.accepted !== true) || runs.some((run) => run.acceptedArtifact !== true)) {
+if (outcome.shouldFail) {
   process.exitCode = 1;
 }

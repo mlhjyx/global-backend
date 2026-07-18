@@ -428,6 +428,8 @@ const SAFE_ROLE_DEFINITIONS = new Set([
   'contact person',
   'legal representative',
 ]);
+const SAFE_PUBLIC_TITLE_PHRASE_PATTERN =
+  /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){0,5}(?:series|pumps?|skids?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|shakers?|mixers?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
 const SAFE_ATTRIBUTION_DEPARTMENT_PATTERN =
   /^(?:(?:advanced|customer|design|development|engineering|manufacturing|marketing|operations?|process|product|production|quality|regulatory|research|sales|software|technical)\s+){0,2}(?:committee|department|division|engineering|function|team)$/iu;
 const SAFE_NON_PERSONAL_MODIFIER_SOURCE =
@@ -460,6 +462,10 @@ const PASSIVE_VOICE_SUBJECT_TAIL_PATTERN =
   /\b(?:is|was|are|were|be|been|being)\s*$/iu;
 const CLOSED_NON_PERSONAL_HOMOGRAPH_TEXT_PATTERN =
   /^(?:programmable logic controller(?: integration)?|curing agent|global partner network|brand owner|buyer-focused documentation|员工人数(?:是多少|为多少|有多少|多少)?[?？]?|有哪些代表产品[?？]?)$/iu;
+const NON_PERSONAL_AUDIENCE_MODIFIER_TAIL_PATTERN =
+  /^[-\s]+(?:focused|oriented|centric|focus)\b/iu;
+const NON_PERSONAL_AUDIENCE_MODIFIER_SUBJECT_PATTERN =
+  /^(?:focused|oriented|centric|focus)\b/iu;
 
 function isSafeNonPersonalAttributionSubject(
   subject: string | undefined,
@@ -474,6 +480,7 @@ function isSafeNonPersonalAttributionSubject(
     SAFE_ROLE_DEFINITIONS.has(normalized) ||
     SAFE_DETERMINED_NON_PERSONAL_NOUN_PHRASE_PATTERN.test(canonical) ||
     SAFE_NON_PERSONAL_NOUN_PHRASE_PATTERN.test(normalized) ||
+    SAFE_PUBLIC_TITLE_PHRASE_PATTERN.test(canonical) ||
     SAFE_CERTIFICATION_BODY_SUBJECTS.has(normalized) ||
     SAFE_ATTRIBUTION_DEPARTMENT_PATTERN.test(normalized)
   );
@@ -532,6 +539,21 @@ function isClosedCjkNonPersonalRoleToken(
   return /^产品/u.test(text.slice(end));
 }
 
+function isClosedNonPersonalPartnerPositioning(
+  text: string,
+  match: RegExpMatchArray,
+): boolean {
+  const start = match.index ?? 0;
+  const before = text.slice(Math.max(0, start - 32), start);
+  const tail = text.slice(start, Math.min(text.length, start + 96));
+  return (
+    /\bsupply\s*$/iu.test(before) &&
+    /^partner\s+for\s+(?:chemical|industrial|manufacturing|process(?:ing)?)\b/iu.test(
+      tail,
+    )
+  );
+}
+
 function isClosedTechnicalRoleToken(
   text: string,
   match: RegExpMatchArray,
@@ -542,6 +564,7 @@ function isClosedTechnicalRoleToken(
   const before = text.slice(Math.max(0, start - 40), start);
   const after = text.slice(end, Math.min(text.length, end + 32));
   return (
+    NON_PERSONAL_AUDIENCE_MODIFIER_TAIL_PATTERN.test(after) ||
     (role === 'controller' &&
       /\b(?:programmable logic|plc|motor|pressure|temperature|motion|machine|automation|industrial|electronic)\s+$/iu.test(
         before,
@@ -550,7 +573,9 @@ function isClosedTechnicalRoleToken(
       /\b(?:curing|cleaning|chemical|foaming|release|software)\s+$/iu.test(
         before,
       )) ||
-    (role === 'partner' && /^[-\s]+(?:network|ecosystem|program)\b/iu.test(after)) ||
+    (role === 'partner' &&
+      (/^[-\s]+(?:network|ecosystem|program)\b/iu.test(after) ||
+        isClosedNonPersonalPartnerPositioning(text, match))) ||
     (role === 'buyer' && /^[-\s]+(?:focused|oriented|centric)\b/iu.test(after))
   );
 }
@@ -622,14 +647,14 @@ function explicitPersonalAttributionMatches(
   const pushUnsafeSubjects = (
     pattern: RegExp,
     rule: string,
-    predicate: (subject: string) => boolean =
+    predicate: (subject: string, match: RegExpMatchArray) => boolean =
       isExplicitPersonalAttributionSubject,
     segments: readonly string[] = [normalized],
   ): void => {
     for (const segment of segments) {
       for (const match of matchesForPattern(segment, pattern)) {
         const subject = match[1];
-        if (subject && predicate(subject)) {
+        if (subject && predicate(subject, match)) {
           matches.push({ rule, subject, matchedText: match[0] });
         }
       }
@@ -652,7 +677,14 @@ function explicitPersonalAttributionMatches(
   }
   pushUnsafeSubjects(PERSONAL_BYLINE_RELATION_PATTERN, 'byline');
   pushUnsafeSubjects(PERSONAL_BARE_BYLINE_PATTERN, 'bareByline');
-  pushUnsafeSubjects(PERSONAL_ROLE_LABEL_PATTERN, 'roleLabel');
+  pushUnsafeSubjects(
+    PERSONAL_ROLE_LABEL_PATTERN,
+    'roleLabel',
+    (subject, match) =>
+      !isClosedNonPersonalPartnerPositioning(normalized, match) &&
+      !NON_PERSONAL_AUDIENCE_MODIFIER_SUBJECT_PATTERN.test(subject.trim()) &&
+      isExplicitPersonalAttributionSubject(subject),
+  );
   pushUnsafeSubjects(PERSONAL_POSTFIX_ROLE_PATTERN, 'postfixRole');
   pushUnsafeSubjects(
     PERSONAL_WHITESPACE_POSTFIX_ROLE_PATTERN,
@@ -1244,10 +1276,15 @@ type BrandProfileIdentityContext = Pick<
   'companyName' | 'products'
 >;
 
-/** Scrub every model-controlled free-text field before JSON/relational persistence. */
+/**
+ * Scrub public BrandProfile projections before persistence. `gaps` are a
+ * workspace-internal follow-up channel: preserve their controlled identity and
+ * contact data so acquisition/research context is not destroyed. They are not
+ * eligible for Claim/FactSheet/SiteSpec publication.
+ */
 export function sanitizeBrandProfilePersistenceOutput(
   input: BrandProfilePersistenceOutput,
-  context: BrandProfileIdentityContext,
+  _context: BrandProfileIdentityContext,
 ): BrandProfilePersistenceOutput {
   assertNoUnresolvedCompetitors(input.competitors);
   const freeTexts = [
@@ -1273,18 +1310,6 @@ export function sanitizeBrandProfilePersistenceOutput(
       [item.key, item.value, item.evidence.quote].some(
         containsPersonalContactIdentifier,
       ),
-    ) ||
-    input.gaps.some(
-      (item) => {
-        const hintRule = gapQuestionPersonalAttributionRule(
-          context,
-          item.hint,
-        );
-        return (
-          personalGapFieldRule(item.field) !== null ||
-          (hintRule !== null && hintRule !== 'pii')
-        );
-      },
     )
   ) {
     throw new Error(
@@ -1314,11 +1339,7 @@ export function sanitizeBrandProfilePersistenceOutput(
       key: scrubPii(item.key),
       value: scrubPii(item.value),
     })),
-    gaps: input.gaps.map((item) => ({
-      ...item,
-      field: scrubPii(item.field),
-      hint: scrubPii(item.hint),
-    })),
+    gaps: input.gaps.map((item) => ({ ...item })),
   };
 }
 
@@ -1714,9 +1735,9 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 };
 
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
-export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/10';
+export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/14';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
-  'brand-profile-route-validation/8';
+  'brand-profile-route-validation/14';
 
 /**
  * 品牌档案不需要的敏感档案组（复审 F2：contact 组含邮箱/电话——数据最小化 Art.5(1)(c)，
@@ -1773,13 +1794,16 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
     '1a. 企业身份/商业角色也是事实：supplier、distributor、trader、assembler、manufacturer、OEM、brand owner 等不得互相升级或替换；仅可使用资料明确给出的角色，否则省略或写进 gaps。',
     '1b. business_role 只接受资料逐字出现的角色名词；不得把 supplies、distributes、trades、assembles、manufactures、exports、serves 等动作动词转换为 supplier、distributor、trader、assembler、manufacturer、exporter 等角色。',
     `2. factSheet 每项 evidence 必须给 sourceType、sourceId、contentHash、quote；sourceType 取 ${EVIDENCE_SOURCE_TYPES.join('|')} 之一。`,
-    '3. 每项 factSheet（不只认证或数字）都必须附 quote=同一 source_id 区块中的逐字原文片段，',
+    '2a. contentHash 必须逐字复制为 64 位小写十六进制；不得添加 sha256: 前缀、不得缩写、不得使用省略号、不得改成大写。无法逐字复制完整 hash 时省略该 factSheet 项，不要写 fact。',
+    '3. 每项 factSheet（不只认证或数字）都必须附 quote=同一 source_id 区块中的逐字原文片段，且 quote 至少 8 个字符，',
     '   sourceId/contentHash 必须逐字复制区块头；quote 不得改写、翻译或做标点/大小写归一。',
     '   找不到逐字原文的断言不要写进 factSheet，写进 gaps。',
     '3a. key 含 name、model、product、company、brand 时，factSheet.value 的实质值必须逐字出现在 quote；',
     '    不得拼接、概括或翻译产品/名称。无法同时满足英文 value 与逐字 quote 时写进 gaps。',
-    '4. factSheet.key 必须使用 lower_snake_case，只使用企业身份、产品/服务、能力、认证、市场、行业、工艺/设施、公司历史、人数汇总或技术参数类别。',
-    '    可用示例：business_role、products、capabilities、certifications、target_markets、industries、manufacturing_processes、facilities、founded_year、employee_count、technical_parameters。',
+    '3b. 每项 factSheet.value 本身必须是 quote 中连续、逐字相同的原文片段；不得把同一 quote 的多个词组拼接、改词性、概括或推导为新句，无法做到就写进 gaps。',
+    '4. factSheet.key 必须使用 lower_snake_case，并且只允许以下 exact keys；这是封闭列表，不是示例：',
+    '   business_role、products、services、capabilities、certifications、compliance、target_markets、industries、applications、materials、manufacturing_processes、facilities、founded_year、employee_count、technical_parameters。',
+    '   产品型号、项目代号、尺寸范围和其他具体名称只能放在对应 value 中，不得据此创造 yoke_program、flange_program、diameter_range 等新 key。',
     '4b. 只有缺失的上述批准企业事实类别，以及 4c 的未消歧关系补证问题，可写进 gaps，其他自由字段直接省略。',
     '4c. 企业名称/品牌名称沿用系统已有 CompanyProfile，不写入 factSheet；未做组织消歧的客户/案例/项目事实也写进 gaps。',
     '4d. 本阶段没有 competitor 组织身份消歧与证据合同；必须输出 competitors=[]，不得填写任何竞品名称或定位。',
@@ -1802,18 +1826,6 @@ function promptSources(input: BrandProfileInput): PromptEvidenceSource[] {
   return [input.intakeSource, ...input.kbSources, ...input.research];
 }
 
-const PERSONNEL_AGGREGATE_GAP_QUESTION_PATTERN =
-  /^(?:(?:what|which)\b(?=[^?\n]{0,180}\b(?:employee[- ]count|staff[- ]count|team[- ]size|headcount|number of employees)\b)[^?\n]{1,180}|how many\s+(?:employees?|staff(?: members?)?|team members?|people)\s+(?:does the company have|are there)|please\s+(?:provide|confirm)\b(?=[^?\n]{0,160}\b(?:employee[- ]count|staff[- ]count|team[- ]size|headcount|number of employees)\b)[^?\n]{1,160}|(?:can|could) you\s+(?:provide|confirm)\b(?=[^?\n]{0,160}\b(?:employee[- ]count|staff[- ]count|team[- ]size|headcount|number of employees)\b)[^?\n]{1,160}|(?:员工人数|员工总数|职工人数|团队人数|团队规模|人员数量)(?:是多少|为多少|有多少|多少))\s*[?？]$/iu;
-const PERSONNEL_AGGREGATE_ROLE_LABEL_MATCH_PATTERN =
-  /\b(?:employee|staff)[- ]+count\b/iu;
-const LATIN_PERSON_NAME_IN_TEXT_PATTERN = new RegExp(
-  `(?<![\\p{L}\\p{M}'’.-])(${LATIN_PERSON_SUBJECT_SOURCE.replace('{0,3}?', '{1,3}')})(?![\\p{L}\\p{M}'’.-])`,
-  'gu',
-);
-const SAFE_PUBLIC_TITLE_PHRASE_PATTERN =
-  /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){1,5}(?:pumps?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
-const PERSONAL_CONTACT_GAP_KEY_PATTERN =
-  /(?:^|_)(?:email|e_mail|phone|telephone|mobile|whatsapp|wechat)(?:$|_)/u;
 const PERSONAL_SOCIAL_HANDLE_PATTERN =
   /@[\p{L}\p{N}_](?:[\p{L}\p{N}_.-]{0,62}[\p{L}\p{N}_])?(?![\p{L}\p{N}._-])/iu;
 const PERSONAL_PROFILE_URL_PATTERN =
@@ -1836,71 +1848,6 @@ function containsPersonalContactIdentifier(text: unknown): boolean {
     PERSONAL_URI_IDENTIFIER_PATTERN.test(normalized) ||
     PERSONAL_MESSAGING_ID_PATTERN.test(normalized)
   );
-}
-
-function canonicalAttributionSubject(value: string | undefined): string {
-  return (value ?? '')
-    .normalize('NFKC')
-    .trim()
-    .replace(/\s+/gu, ' ')
-    .toLocaleLowerCase('und');
-}
-
-function canonicalGapQuestionCompanySubject(value: string | undefined): string {
-  return canonicalAttributionSubject(value).replace(
-    /^(?:how does|does|when was|when did|what does|what did|where does|where did)\s+/u,
-    '',
-  );
-}
-
-const SAFE_GENERIC_COMPANY_GAP_SUBJECTS = new Set([
-  'company',
-  'the company',
-  'business',
-  'the business',
-  'organization',
-  'the organization',
-]);
-
-function isSafeGapQuestionCompanySubject(
-  input: BrandProfileIdentityContext,
-  subject: string | undefined,
-): boolean {
-  const canonical = canonicalGapQuestionCompanySubject(subject);
-  return (
-    canonical === canonicalAttributionSubject(input.companyName) ||
-    SAFE_GENERIC_COMPANY_GAP_SUBJECTS.has(canonical)
-  );
-}
-
-function hasLikelyPersonalNameInAggregateQuestion(
-  input: BrandProfileIdentityContext,
-  text: string,
-): boolean {
-  const knownEntities = [input.companyName, ...input.products].map(
-    canonicalAttributionSubject,
-  );
-  return matchesForPattern(
-    text.normalize('NFKC'),
-    LATIN_PERSON_NAME_IN_TEXT_PATTERN,
-  ).some((match) => {
-    const subject = match[1];
-    const canonicalSubject = canonicalAttributionSubject(subject);
-    const withoutQuestionOpener = canonicalSubject.replace(
-      /^(?:does|do|did|is|are|was|were|can|could|what|which|who|how|when|where|why|please)\s+/u,
-      '',
-    );
-    return (
-      Boolean(subject) &&
-      !knownEntities.some(
-        (entity) =>
-          entity === canonicalSubject ||
-          entity === withoutQuestionOpener ||
-          entity.startsWith(`${withoutQuestionOpener} `),
-      ) &&
-      containsLikelyPersonalName('employee_count', subject)
-    );
-  });
 }
 
 function containsLikelyPersonalNameInFreeOutput(
@@ -1936,113 +1883,19 @@ function containsLikelyPersonalNameInUnboundFreeText(text: string): boolean {
   );
 }
 
-function personalGapFieldRule(
-  field: string | null | undefined,
-): string | null {
-  if (typeof field !== 'string') return null;
-  const normalized = normalizeClaimKey(field).replace(/[\s-]+/gu, '_');
-  if (PERSONNEL_AGGREGATE_KEY_PATTERN.test(normalized)) return null;
-  if (PERSONAL_CONTACT_GAP_KEY_PATTERN.test(normalized)) {
-    return 'personalContactKey';
-  }
-  return PERSONAL_EXACT_KEYS.has(normalized) ||
-    PERSONAL_ROLE_KEY_PATTERN.test(normalized) ||
-    PERSONAL_FACT_KEY_PATTERN.test(normalized)
-    ? null
-    : containsLikelyPersonalNameInUnboundFreeText(field)
-      ? 'nameSpan'
-      : null;
-}
-
-const SAFE_ENGLISH_GAP_QUESTION_SUBJECTS = new Set([
-  'who',
-  'which',
-  'what',
-]);
-const SAFE_CJK_GAP_QUESTION_SUBJECTS = new Set(['谁', '哪位', '何人']);
-
-function gapQuestionPersonalAttributionRule(
-  input: BrandProfileIdentityContext,
-  text: string | null | undefined,
-): string | null {
-  if (typeof text !== 'string') return null;
-  if (containsPersonalContactIdentifier(text)) return 'contactIdentifier';
-  if (scrubPii(text) !== text) return 'pii';
-  const isPersonnelAggregateQuestion =
-    PERSONNEL_AGGREGATE_GAP_QUESTION_PATTERN.test(
-      text.normalize('NFKC').trim(),
-    );
-  if (
-    hasLikelyPersonalNameInAggregateQuestion(input, text)
-  ) {
-    return 'nameSpan';
-  }
-  const hasRoleBoundSingleName = matchesForPattern(
-    text.normalize('NFKC'),
-    new RegExp(
-      `\\b${PERSONAL_RELATION_ROLE_SOURCE}\\b\\s*(?:[:：—-]\\s*)?(${LATIN_PERSON_SUBJECT_SOURCE})`,
-      'giu',
-    ),
-  ).some((match) => LATIN_SINGLE_NAME_PATTERN.test(match[1] ?? ''));
-  if (hasRoleBoundSingleName) return 'nameSpan';
-  const isQuestion = /[?？]\s*$/u.test(text);
-  if (isQuestion) {
-    const namedAttribution = explicitPersonalAttributionMatches(text).find(
-      (candidate) => {
-        const subject = candidate.subject?.normalize('NFKC').trim();
-        if (!subject) return false;
-        if (candidate.rule === 'cjk') {
-          return !SAFE_CJK_GAP_QUESTION_SUBJECTS.has(subject);
-        }
-        const canonical = canonicalAttributionSubject(subject);
-        return (
-          !SAFE_ENGLISH_GAP_QUESTION_SUBJECTS.has(canonical) &&
-          !isSafeGapQuestionCompanySubject(input, subject) &&
-          containsLikelyPersonalNameInUnboundFreeText(subject)
-        );
-      },
-    );
-    return namedAttribution ? namedAttribution.rule : null;
-  }
-  const match = explicitPersonalAttributionMatches(text).find(
-    (candidate) =>
-      !(
-        (candidate.rule === 'subjectAction' &&
-          isSafeGapQuestionCompanySubject(input, candidate.subject)) ||
-        (isPersonnelAggregateQuestion &&
-          candidate.rule === 'roleLabel' &&
-          PERSONNEL_AGGREGATE_ROLE_LABEL_MATCH_PATTERN.test(
-            candidate.matchedText ?? '',
-          ))
-      ),
-  );
-  if (match) return match.rule;
-  if (
-    containsForbiddenPersonalRoleToken(text, {
-      allowBrandOwner: true,
-      allowPersonnelAggregateCount: isPersonnelAggregateQuestion,
-    })
-  ) {
-    return 'roleToken';
-  }
-  return containsLikelyPersonalNameInFreeOutput(input, text)
-    ? 'nameSpan'
-    : null;
-}
-
 function routeOutputPersonalDataRule(
   input: BrandProfileIdentityContext,
   scope: string,
   text: string | null | undefined,
 ): string | null {
+  // `gaps` are tenant-authenticated internal follow-up data, not a public
+  // projection. Preserve names/contact identifiers here; publication still
+  // requires the independent Claim/FactSheet/SiteSpec authorization gates.
+  if (scope === 'gapFields' || scope === 'gapQuestions') return null;
   if (typeof text === 'string' && containsPersonalContactIdentifier(text)) {
     return 'contactIdentifier';
   }
   if (typeof text === 'string' && scrubPii(text) !== text) return 'pii';
-  if (scope === 'gapFields') return personalGapFieldRule(text);
-  if (scope === 'gapQuestions') {
-    return gapQuestionPersonalAttributionRule(input, text);
-  }
   const explicitRule = explicitPersonalAttributionRule(text);
   if (explicitRule) return explicitRule;
   if (
@@ -2129,6 +1982,7 @@ export const BRAND_PROFILE_TASK: SiteBuilderTaskDefinition<
   BrandProfileOutput
 > = {
   id: 'site_builder.brand_profile',
+  repairTaskOutput: true,
   inputSchema: BRAND_PROFILE_INPUT_SCHEMA,
   outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA,
   buildPrompt: buildBrandProfilePrompt,

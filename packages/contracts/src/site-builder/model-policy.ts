@@ -34,10 +34,13 @@ export interface ModelDataPolicy {
   transport: 'new_api_only' | 'none';
   /** Current known handling location for the selected route. */
   region: 'gateway_controlled' | 'private_local' | 'not_applicable';
-  /** Site Builder tasks must not send personal data to model providers. */
-  personalData: 'forbidden';
-  /** The non-personal data scope a profile is allowed to process. */
-  dataScope: 'company_facts_only' | 'not_applicable';
+  /** Whether a task forbids personal data or may process tenant-controlled workspace material. */
+  personalData: 'forbidden' | 'workspace_controlled';
+  /** The bounded input scope a profile is allowed to process. */
+  dataScope:
+    | 'company_facts_only'
+    | 'workspace_site_materials'
+    | 'not_applicable';
 }
 
 export interface ModelProfileDefinition {
@@ -80,7 +83,7 @@ export interface ModelCandidateRoute {
   notes?: string;
 }
 
-export const SITE_BUILDER_MODEL_POLICY_VERSION = 'site-builder-model-policy/v2' as const;
+export const SITE_BUILDER_MODEL_POLICY_VERSION = 'site-builder-model-policy/v3' as const;
 
 /**
  * Immutable-at-execution evidence of the resolved policy. `route` is the

@@ -398,7 +398,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       return resolveTaskRoute('site_builder.brand_profile').timeoutMs;
     },
     description:
-      '独立站建设：从 KB digest + 站主档案 + 联网研究综合品牌档案（价值主张/语气/词表/差异化/竞品定位/factSheet+evidence/gaps）。逐项证据分级溯源，认证类断言网络单源不上站；不输出任何具名个人。输出与提示词详见 site-builder/agents/brand-profile.ts（模型路由由 site-builder/agents/task-routes.ts 配置驱动）。',
+      '独立站建设：从 KB digest + 站主档案 + 联网研究综合品牌档案（价值主张/语气/词表/差异化/竞品定位/factSheet+evidence/gaps）。逐项证据分级溯源，认证类断言网络单源不上站；workspace gaps 可保留待核实姓名/身份与联系方式，限 AuthGuard+RLS 内部使用。Claim/FactSheet/SiteSpec 不得使用这些内部个人资料自动公开，必须另行具备证据与发布授权。输出与提示词详见 site-builder/agents/brand-profile.ts（模型路由由 site-builder/agents/task-routes.ts 配置驱动）。',
     outputSchema: { type: 'object' }, // 真 schema 在任务模块内随调用传入（网关按请求 schema 校验）
     get model() {
       return resolveTaskRoute('site_builder.brand_profile').primary;

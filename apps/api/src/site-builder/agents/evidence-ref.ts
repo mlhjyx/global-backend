@@ -80,6 +80,41 @@ function codePoints(text: string): string[] {
   return Array.from(text);
 }
 
+function foldAsciiCase(text: string): string {
+  return text.replace(/[A-Z]/g, (character) => character.toLowerCase());
+}
+
+/**
+ * Exact matching remains primary. If a model changed only ASCII letter case,
+ * recover the frozen source spelling only when the same-length slice is
+ * unique. Whitespace, punctuation, digits and all non-ASCII code points must
+ * already be identical; ambiguity remains fail-closed.
+ */
+function resolveExactQuoteSlice(
+  snapshotText: string,
+  quote: string,
+): { quote: string; codeUnitStart: number } | null {
+  const exactStart = snapshotText.indexOf(quote);
+  if (exactStart >= 0) return { quote, codeUnitStart: exactStart };
+
+  const foldedQuote = foldAsciiCase(quote);
+  let match: { quote: string; codeUnitStart: number } | null = null;
+  for (
+    let codeUnitStart = 0;
+    codeUnitStart <= snapshotText.length - quote.length;
+    codeUnitStart += 1
+  ) {
+    const candidate = snapshotText.slice(
+      codeUnitStart,
+      codeUnitStart + quote.length,
+    );
+    if (foldAsciiCase(candidate) !== foldedQuote) continue;
+    if (match) return null;
+    match = { quote: candidate, codeUnitStart };
+  }
+  return match;
+}
+
 function stripControlCharacters(text: string): string {
   return codePoints(text)
     .filter((character) => {
@@ -231,10 +266,11 @@ export function resolveEvidenceReference(
   if (source.contentHash !== input.contentHash) {
     return { ok: false, reason: "source_hash_mismatch" };
   }
-  const quoteCodeUnitStart = source.snapshotText.indexOf(input.quote);
-  if (quoteCodeUnitStart < 0) {
+  const resolvedQuote = resolveExactQuoteSlice(source.snapshotText, input.quote);
+  if (!resolvedQuote) {
     return { ok: false, reason: "unsupported_quote" };
   }
+  const quoteCodeUnitStart = resolvedQuote.codeUnitStart;
   const start = codePoints(
     source.snapshotText.slice(0, quoteCodeUnitStart),
   ).length;
@@ -261,7 +297,7 @@ export function resolveEvidenceReference(
       sourceRole: source.sourceRole,
       hashAlgorithm: EVIDENCE_HASH_ALGORITHM,
       contentHash: source.contentHash,
-      quote: input.quote,
+      quote: resolvedQuote.quote,
       selector: {
         start,
         end,

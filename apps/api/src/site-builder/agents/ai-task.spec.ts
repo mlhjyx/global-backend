@@ -97,6 +97,8 @@ const okResult = (model: string): ModelResult<EchoOut> => ({
   data: { headline: 'Precision pumps' },
   provider: 'gateway',
   model,
+  reportedModel: `upstream/${model}`,
+  modelResolutionSource: 'upstream_response',
   usage: { inputTokens: 10, outputTokens: 5 },
 });
 
@@ -122,6 +124,10 @@ describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
     expect(out.data.headline).toBe('Precision pumps');
     expect(out.model).toBe('model-a');
     expect(out.provider).toBe('gateway');
+    expect(out).toMatchObject({
+      reportedModel: 'upstream/model-a',
+      modelResolutionSource: 'upstream_response',
+    });
     expect(calls[0]).toMatchObject({
       task: 'site_builder.brand_profile',
       prompt: 'Company: Acme GmbH',
@@ -290,12 +296,37 @@ describe('runAiTask — 回退链与显式失败', () => {
 
   it('全链失败也把 provider 已报告的 token 使用量交给调用者', async () => {
     const { gateway } = gatewayReturning(async (input) => {
-      throw new ProviderOutputError(`${input.model} invalid JSON`, { inputTokens: 7, outputTokens: 3 });
+      throw new ProviderOutputError(
+        `${input.model} invalid JSON`,
+        { inputTokens: 7, outputTokens: 3 },
+        {
+          provider: 'new-api-eval',
+          model: input.model,
+          reportedModel: input.model,
+          modelResolutionSource: 'upstream_response',
+        },
+      );
     });
     const err = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE }).catch((e) => e);
 
     expect(err).toBeInstanceOf(AiTaskError);
     expect((err as AiTaskError).usage).toEqual({ inputTokens: 14, outputTokens: 6, calls: 2 });
+    expect((err as AiTaskError).attempts).toEqual([
+      expect.objectContaining({
+        model: 'model-a',
+        provider: 'new-api-eval',
+        resolvedModel: 'model-a',
+        reportedModel: 'model-a',
+        modelResolutionSource: 'upstream_response',
+      }),
+      expect.objectContaining({
+        model: 'model-b',
+        provider: 'new-api-eval',
+        resolvedModel: 'model-b',
+        reportedModel: 'model-b',
+        modelResolutionSource: 'upstream_response',
+      }),
+    ]);
   });
 
   it('全链失败时保留 schema-repair 代表的每一次 provider 调用', async () => {

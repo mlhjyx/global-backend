@@ -14,6 +14,13 @@ const GATEWAY_COMPANY_FACTS_ONLY = Object.freeze({
   dataScope: 'company_facts_only',
 } as const satisfies ModelDataPolicy);
 
+const GATEWAY_WORKSPACE_SITE_MATERIALS = Object.freeze({
+  transport: 'new_api_only',
+  region: 'gateway_controlled',
+  personalData: 'workspace_controlled',
+  dataScope: 'workspace_site_materials',
+} as const satisfies ModelDataPolicy);
+
 const PRIVATE_LOCAL_EMBEDDING_POLICY = Object.freeze({
   transport: 'new_api_only',
   region: 'private_local',
@@ -37,6 +44,13 @@ const profiles = {
     requiredCapabilities: ['text_generation', 'structured_output'],
     dataPolicy: GATEWAY_COMPANY_FACTS_ONLY,
     description: 'Evidence-constrained structured text and SiteSpec assembly.',
+  },
+  'structured.workspace_materials': {
+    id: 'structured.workspace_materials',
+    requiredCapabilities: ['text_generation', 'structured_output'],
+    dataPolicy: GATEWAY_WORKSPACE_SITE_MATERIALS,
+    description:
+      'BrandProfile-only processing of tenant-controlled Site Builder material; deterministic publication gates remain authoritative.',
   },
   'reasoning.high': {
     id: 'reasoning.high',

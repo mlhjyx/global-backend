@@ -45,7 +45,7 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 
 | task id | 对应卡 | active primary | fallbacks | state / maxTokens / timeout |
 |---|---|---|---|---|
-| `site_builder.brand_profile` | 卡2 | gpt-5.6-terra（Responses） | claude-sonnet-5（Messages） | promoted；12k / 150s；可回 DeepSeek Pro→GLM |
+| `site_builder.brand_profile` | 卡2 | gpt-5.6-terra（Responses） | claude-sonnet-5（Messages） | promoted；12k / 240s；可回 DeepSeek Pro→GLM |
 | `site_builder.copy` | 卡4 | deepseek-v4-pro（reasoning low） | glm-5.2, doubao-seed-2.0-pro | current；4k / 120s |
 | `site_builder.design_spec` | 卡6（生成） | minimax-m3 | doubao-seed-2.0-pro | current；4k / 120s |
 | `site_builder.assemble` | 卡7（组装） | glm-5.2 | deepseek-v4-pro | current；16k / 180s |

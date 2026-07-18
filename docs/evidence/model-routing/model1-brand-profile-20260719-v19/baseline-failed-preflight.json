@@ -1,0 +1,300 @@
+{
+  "schemaVersion": "site-builder-model1-brand-profile-report/v5",
+  "generatedAt": "2026-07-18T21:34:17.727Z",
+  "evidenceRole": "baseline",
+  "status": "failed_preflight",
+  "promotionEligible": false,
+  "gateway": {
+    "providerId": "new-api-eval",
+    "baseUrl": "http://localhost:3001/v1",
+    "modelCatalogCount": 38,
+    "modelCatalogSha256": "96ff68253b20984d12dd5eada3f805af861b5324f90b7189b015ab8a00537328",
+    "modelCatalogTimeoutMs": 15000,
+    "requestedModelsPresent": {
+      "deepseek-v4-pro": true,
+      "glm-5.2": true
+    }
+  },
+  "matrixScope": "full",
+  "diagnosticOptions": {
+    "routeValidationBypassed": false,
+    "rejectedOutputCaptured": false
+  },
+  "allFixtureCount": 6,
+  "selectedFixtureIds": [
+    "auto-parts-rich",
+    "auto-parts-sparse",
+    "industrial-pump-rich",
+    "industrial-pump-sparse",
+    "lab-instrument-rich",
+    "lab-instrument-sparse"
+  ],
+  "repeats": 2,
+  "fixtureCount": 6,
+  "timePlan": {
+    "taskId": "site_builder.brand_profile",
+    "profile": "structured.workspace_materials",
+    "maxTokens": 12000,
+    "perProbeTimeoutMs": 240000,
+    "perFixtureAttemptTimeoutMs": 240000,
+    "candidateCount": 1,
+    "fixtureCount": 6,
+    "repeats": 2,
+    "expectedRunCount": 12,
+    "absoluteMaximumWallClockMs": 6240000
+  },
+  "sourceIntegrity": {
+    "startBundleSha256": "c3f5cdd10b7c0a2562be634d032bc79ae42d559e4b00a90995c14ec1cda87b64",
+    "endBundleSha256": "c3f5cdd10b7c0a2562be634d032bc79ae42d559e4b00a90995c14ec1cda87b64",
+    "stable": true,
+    "changedPaths": []
+  },
+  "matrixIntegrity": {
+    "expectedRunCount": 12,
+    "actualRunCount": 0,
+    "complete": false,
+    "duplicateKeys": [],
+    "missingKeys": [
+      "deepseek-v4-pro\u0000auto-parts-rich\u00001",
+      "deepseek-v4-pro\u0000auto-parts-rich\u00002",
+      "deepseek-v4-pro\u0000auto-parts-sparse\u00001",
+      "deepseek-v4-pro\u0000auto-parts-sparse\u00002",
+      "deepseek-v4-pro\u0000industrial-pump-rich\u00001",
+      "deepseek-v4-pro\u0000industrial-pump-rich\u00002",
+      "deepseek-v4-pro\u0000industrial-pump-sparse\u00001",
+      "deepseek-v4-pro\u0000industrial-pump-sparse\u00002",
+      "deepseek-v4-pro\u0000lab-instrument-rich\u00001",
+      "deepseek-v4-pro\u0000lab-instrument-rich\u00002",
+      "deepseek-v4-pro\u0000lab-instrument-sparse\u00001",
+      "deepseek-v4-pro\u0000lab-instrument-sparse\u00002"
+    ],
+    "unexpectedKeys": []
+  },
+  "taskContract": {
+    "taskId": "site_builder.brand_profile",
+    "promptVersion": "brand-profile/14",
+    "inputSchemaSha256": "a187b501804291336a31f94a6a09251c071358cd99da3fde27afa63376c232c9",
+    "outputSchemaSha256": "133d8cd05402b618b084d3f64dfe2c485cb456db0ce110cb86284729cb49d1a8",
+    "routeValidationVersion": "brand-profile-route-validation/14",
+    "evaluatorVersion": "brand-profile-evaluator/10",
+    "evaluatorRubricSha256": "c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c",
+    "fixtureSchemaVersion": "brand-profile-eval-fixture/v1",
+    "evaluationPolicyVersion": "brand-profile-evaluation-policy/3",
+    "sourceFiles": [
+      {
+        "role": "task",
+        "path": "apps/api/src/site-builder/agents/brand-profile.ts",
+        "sha256": "f3df0781db496bd19fc3690336a8f9eca93788c24d15bd6b7f933eadc5aaef49"
+      },
+      {
+        "role": "judge",
+        "path": "apps/api/src/site-builder/eval/brand-profile-eval.ts",
+        "sha256": "a5edd75efefa5a99bdcc2c335c560bdac3719793be35b3939901c8da4fd6cb6b"
+      },
+      {
+        "role": "harness",
+        "path": "apps/api/scripts/evaluate-site-builder-brand-profile.mts",
+        "sha256": "9de6970bca8c1d26fe3cca505fd812662efe90999392eb61df22f66eddce78a4"
+      },
+      {
+        "role": "provider",
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "5c9ff3c4c6aa5e84a8532db0b59b799caf6fcca9ccf3d9531fb98a0fa0fb6159"
+      },
+      {
+        "role": "transport_registry",
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "f0076524d4089a0f2dbf3d4ab18af66c0aed15ca66c1ee3d0c9cbdb8f65fcf9c"
+      },
+      {
+        "role": "task_runner",
+        "path": "apps/api/src/site-builder/agents/ai-task.ts",
+        "sha256": "a700b6f5d05de13a2b20b753653fbaf212cb35ad37273effb94ece6f06c1d468"
+      },
+      {
+        "role": "gateway_router",
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "0b17d4e9510b7d90c84663f9858e25f64d67d958a4f18f6fff3cc3a884e89e15"
+      },
+      {
+        "role": "schema_validator",
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "13cec08bf87bd8b2bf7c74f9217f2b020ce27cc906e3c3b0afbffdb0c81fd034"
+      },
+      {
+        "role": "evaluation_provenance",
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "a60d398a6c3b332e8a8d9edb5d67e2003cc38521ddd7a136af8e67b9d0eb3a9a"
+      },
+      {
+        "role": "task_route",
+        "path": "apps/api/src/site-builder/agents/task-routes.ts",
+        "sha256": "d56f958b61097c7d4edf22473099a15acfa427d0a41a4ce5bd4a0d8a1e512f59"
+      },
+      {
+        "role": "task_route_binding",
+        "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+        "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+      },
+      {
+        "role": "evidence_contract",
+        "path": "apps/api/src/site-builder/agents/evidence-ref.ts",
+        "sha256": "2587057aff62517722cddd56b2ce3d3b35cba285fa0eda5834f67f556307504b"
+      },
+      {
+        "role": "pii_guard",
+        "path": "apps/api/src/site-builder/agents/pii.ts",
+        "sha256": "f635558064146dcfee3f61c584c8eff1b8f9ab8a77080de8bf6ff3de83f2b103"
+      },
+      {
+        "role": "claim_classifier",
+        "path": "apps/api/src/site-builder/claim-classification.ts",
+        "sha256": "5cebcfd006ba8c15841de7a783a4a2f3ea254929514d268acc9a36f307720fe3"
+      },
+      {
+        "role": "profile_registry",
+        "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+        "sha256": "51e3d1ad8d62101190c22e42fe12910b732b0991ed0b2fec9f8f7406edebb0e8"
+      },
+      {
+        "role": "provider_registry",
+        "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+        "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+      },
+      {
+        "role": "model_router",
+        "path": "apps/api/src/model-gateway/model-router.ts",
+        "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+      },
+      {
+        "role": "provider_error",
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "b6a0770b740eaedcda9ba44eee775bc8e4f7d3d4fc6add60a7fad67577b0592c"
+      },
+      {
+        "role": "gateway_types",
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "1665fa07d4720f784a7b44f8fe7abe34e397104d7435a26684a763aabba1bad3"
+      },
+      {
+        "role": "gateway_contract",
+        "path": "apps/api/src/model-gateway/model-gateway.ts",
+        "sha256": "1d609ee32d215dbb96cde0280540292f60ba7cad1fd7c0031b070a1d21cf3b89"
+      },
+      {
+        "role": "provider_contract",
+        "path": "apps/api/src/model-gateway/model-provider.ts",
+        "sha256": "2065dfb04c9c7df33b6c0c3aa559bdfabfcbe937daa1799d5e0f88b2e9add95d"
+      },
+      {
+        "role": "budget_ledger",
+        "path": "apps/api/src/tools/budget.ts",
+        "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/index.js",
+        "sha256": "f6f39c20bbf33b8faa0b89fb7f07d2d2e74c39eace7e4f0a58555324cdcd2ab0"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/evidence.js",
+        "sha256": "0eb35545a5945fbd896c14fd443a17686fe64dcc27df503980838a34c1410b95"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/media-foundation.js",
+        "sha256": "12a6ec13dcf95f7a51af95329e03c09e782e8bfe81f6088db23ece36e54764a2"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/model-policy.js",
+        "sha256": "576a2e3238a1396d0cb7f9bfda4060e33b75256d0acc15b34455b2fc19ff85fb"
+      },
+      {
+        "role": "contracts_runtime",
+        "path": "packages/contracts/dist/site-builder/site-spec.js",
+        "sha256": "5aa5ca911fdf80821be99e7f448b3b278ee10b8292032aae8cf4c17941f20e0d"
+      },
+      {
+        "role": "contracts_manifest",
+        "path": "packages/contracts/package.json",
+        "sha256": "7c458d20693c2636cebfb7b59f89d6b3487bc4df37fc5c764c5fcc0a6dccfe22"
+      },
+      {
+        "role": "dependency_lock",
+        "path": "pnpm-lock.yaml",
+        "sha256": "7b6e6d167dcaee4f4d3721b2eb35f237fd3b945a6f7fedd2bc103300d07d6f77"
+      }
+    ],
+    "sourceBundleSha256": "c3f5cdd10b7c0a2562be634d032bc79ae42d559e4b00a90995c14ec1cda87b64"
+  },
+  "fixtureContracts": [],
+  "probes": [
+    {
+      "requestedModel": "deepseek-v4-pro",
+      "transport": "openai-chat-completions",
+      "accepted": true,
+      "elapsedMs": 1635,
+      "provider": "new-api-eval",
+      "resolvedModel": "deepseek-v4-pro",
+      "reportedModel": "deepseek-v4-pro",
+      "modelResolutionSource": "upstream_response",
+      "usage": {
+        "inputTokens": 80,
+        "outputTokens": 31
+      }
+    },
+    {
+      "requestedModel": "glm-5.2",
+      "transport": "openai-chat-completions",
+      "accepted": false,
+      "elapsedMs": 3271,
+      "provider": "new-api-eval",
+      "resolvedModel": "glm-5.2",
+      "reportedModel": "glm-5.2",
+      "modelResolutionSource": "upstream_response",
+      "usage": {
+        "inputTokens": 66,
+        "outputTokens": 128
+      },
+      "error": "new-api-eval glm-5.2: empty content (finish_reason=length) — reasoning budget exhausted or output truncated; check maxTokens/reasoningEffort"
+    }
+  ],
+  "summary": [
+    {
+      "model": "deepseek-v4-pro",
+      "transport": "openai-chat-completions",
+      "capabilityProbe": {
+        "requestedModel": "deepseek-v4-pro",
+        "transport": "openai-chat-completions",
+        "accepted": true,
+        "elapsedMs": 1635,
+        "provider": "new-api-eval",
+        "resolvedModel": "deepseek-v4-pro",
+        "reportedModel": "deepseek-v4-pro",
+        "modelResolutionSource": "upstream_response",
+        "usage": {
+          "inputTokens": 80,
+          "outputTokens": 31
+        }
+      },
+      "matrixSkipped": false,
+      "expectedRuns": 12,
+      "runs": 0,
+      "missingRuns": 12,
+      "acceptedArtifacts": 0,
+      "hardFailures": 12,
+      "p95LatencyMs": null,
+      "attemptedTokenTotals": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      },
+      "acceptedArtifactTokenTotals": {
+        "inputTokens": 0,
+        "outputTokens": 0
+      }
+    }
+  ],
+  "runs": []
+}

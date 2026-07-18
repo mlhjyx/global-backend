@@ -18,10 +18,16 @@ export interface ModelUsage {
   costUsd?: number;
 }
 
+export type ModelResolutionSource = 'upstream_response' | 'requested_fallback';
+
 export interface ModelResult<T> {
   data: T;
   provider: string; // which provider served it
   model: string;
+  /** Model identifier reported by the upstream response, when present. */
+  reportedModel?: string;
+  /** Distinguishes upstream proof from a local requested-model fallback. */
+  modelResolutionSource?: ModelResolutionSource;
   usage?: ModelUsage;
   /** 本次结果实际发生的模型调用数（generateStructured 校验-修复重试=2；缺省视为 1）——
    *  供**无 usage 上报**时按调用数结算预算，防修复调用被少记（否则退还预留的另一半，硬上界形同虚设）。 */
@@ -55,6 +61,12 @@ export interface GenerateStructuredInput {
    * artifact remains an observable, billable failed attempt.
    */
   validateOutput?: (data: unknown) => void;
+  /**
+   * Permit the router's single structured-output repair call to correct a
+   * schema-valid artifact rejected by the deterministic task gate. The repair
+   * remains subject to the same schema and task gate; callers must opt in.
+   */
+  repairTaskOutput?: boolean;
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Per-call ceiling from the resolved task policy; takes precedence over legacy registry defaults. */

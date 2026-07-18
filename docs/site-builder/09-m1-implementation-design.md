@@ -75,7 +75,7 @@
 
 ## 3. 模型路由与四通道现实
 
-> **2026-07-18 路由裁决/首个逐任务晋级**：本节旧 targetCandidate/“四通道”清单保留为施工历史；目标组合由 ADR-020 与 02 §6 覆盖，现役唯一认 `task-routes.ts`。BrandProfile 已在同一 6×2 fixture 上证明 Terra/Responses 12/12、Sonnet/Messages 12/12，而现役 DeepSeek Pro/Chat 10/12；结合可核对 accepted-artifact 成本、任务失败门与 rollback，经 owner 批准成为首个代码级 `promotedRoute`=`gpt-5.6-terra → claude-sonnet-5`。其他 task、图片、视频仍未继承该结论。该并行 MODEL 泳道不改变当前 **R4-B-min → M1-d** 的施工顺序，也不等于已生产部署或完成真实流量 canary。
+> **2026-07-19 路由裁决/首个逐任务晋级 fast-follow**：本节旧 targetCandidate/“四通道”清单保留为施工历史；目标组合由 ADR-020 与 02 §6 覆盖，现役唯一认 `task-routes.ts`。final-code 同一 6×2 source bundle 下，BrandProfile 候选 Terra/Responses 12/12、Sonnet/Messages 12/12；完整 legacy DeepSeek Pro→GLM 路由也为 12/12（GLM probe 通过、正文 fallback 0 次）。因此不再用旧 10/12 基线失败作晋级理由，而以三路全过硬门后的 accepted-artifact 成本、原生 transport/provenance、任务失败门与 rollback 保持首个代码级 `promotedRoute`=`gpt-5.6-terra → claude-sonnet-5`。active evidence id=`model1-brand-profile-20260719-v20`；旧失败/诊断报告全部保留。其他 task、图片、视频仍未继承该结论。该并行 MODEL 泳道不改变当前 **R4-B-min → M1-d** 的施工顺序，也不等于已生产部署或完成真实流量 canary。
 
 旧“四通道升级位”表已从施工入口撤下，只在 [10 §0](10-model-selection-study.md#0-2026-07-14-dated-结论按任务路由保留为历史实测证据) 保留 dated provenance；其中 `gemini-3.1-pro`、Luna、旧 `gemini-3-flash` 等不再是可执行 target。下面抄录 `task-routes.ts` 的 active route；目标组合只看 ADR-020/02 §6，两者之间必须逐 task 经过 ADR-016 promotion 门。
 

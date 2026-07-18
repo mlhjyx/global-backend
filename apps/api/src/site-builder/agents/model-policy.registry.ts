@@ -8,7 +8,7 @@ import type {
   ModelRouteSnapshot,
 } from '@global/contracts';
 
-import type { SiteBuilderTaskId } from './task-routes';
+import type { SiteBuilderTaskId } from './task-route-bindings';
 import { SITE_BUILDER_MODEL_PROFILES, type SiteBuilderModelProfileId } from './model-profiles';
 
 interface ProfilePolicy {
@@ -83,33 +83,37 @@ const LEGACY_TASK_POLICIES: Record<SiteBuilderTaskId, ModelCurrentRoute> = {
 };
 
 export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
-  id: 'model1-brand-profile-20260718-v1',
+  id: 'model1-brand-profile-20260719-v20',
   taskId: 'site_builder.brand_profile',
-  evaluatedAt: '2026-07-17T23:17:30.261Z',
-  reportSchemaVersion: 'site-builder-model1-brand-profile-report/v3',
+  evaluatedAt: '2026-07-18T22:08:04.248Z',
+  reportSchemaVersion: 'site-builder-model1-brand-profile-report/v5',
   reportArtifactPath:
-    'docs/evidence/model-routing/model1-brand-profile-20260718-v1/candidate-report.json',
+    'docs/evidence/model-routing/model1-brand-profile-20260719-v20/candidate-report.json',
   reportSha256:
-    '5e74deedad9c192ce4bb39b25496d69a6d8d81a83cf8a552f49c24a39682c49a',
+    '76f30d38dc958e777b036a29f430963d185399b761e7de5d63f7189b303bad60',
   fixtureCount: 6,
   repeats: 2,
   currentRouteBaseline: Object.freeze({
+    route: Object.freeze({
+      primary: 'deepseek-v4-pro',
+      fallbacks: Object.freeze(['glm-5.2']),
+    }),
     model: 'deepseek-v4-pro',
     transport: 'openai-chat-completions',
-    evaluatedAt: '2026-07-18T06:09:11.533Z',
+    evaluatedAt: '2026-07-18T21:50:32.598Z',
     reportArtifactPath:
-      'docs/evidence/model-routing/model1-brand-profile-20260718-v1/current-route-baseline-report.json',
+      'docs/evidence/model-routing/model1-brand-profile-20260719-v20/current-route-baseline-report.json',
     reportSha256:
-      '7b3152b5b39caf5006af90bbc917b5a114ff2843ca039f3c69c78b8b15eeedf9',
-    acceptedArtifacts: 10,
-    hardFailures: 2,
-    p95LatencyMs: 57_415,
-    attemptedInputTokens: 13_340,
-    attemptedOutputTokens: 44_236,
-    attemptedCostUsd: 0.04428822,
-    acceptedArtifactUnitCostUsd: 0.004428822,
-    failureSlice:
-      'lab-instrument-rich: missing 96-well and one rejected fact in both attempts',
+      '3aa408b68978779b4a81f3696f68c761adca453e5fafa9d513bf128d41b2d69b',
+    acceptedArtifacts: 12,
+    hardFailures: 0,
+    fallbackRuns: 0,
+    p95LatencyMs: 123_099,
+    attemptedInputTokens: 18_192,
+    attemptedOutputTokens: 64_879,
+    attemptedCostUsd: 0.06435825,
+    acceptedArtifactUnitCostUsd: 0.0053631875,
+    failureSlice: null,
   }),
   routes: Object.freeze([
     Object.freeze({
@@ -117,20 +121,20 @@ export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
       transport: 'openai-responses',
       acceptedArtifacts: 12,
       hardFailures: 0,
-      p95LatencyMs: 41_217,
-      inputTokens: 27_444,
-      outputTokens: 12_260,
-      acceptedArtifactCostUsd: 0.025251,
+      p95LatencyMs: 57_449,
+      inputTokens: 27_753,
+      outputTokens: 15_469,
+      acceptedArtifactCostUsd: 0.03014175,
     }),
     Object.freeze({
       model: 'claude-sonnet-5',
       transport: 'anthropic-messages',
       acceptedArtifacts: 12,
       hardFailures: 0,
-      p95LatencyMs: 36_237,
-      inputTokens: 20_616,
-      outputTokens: 39_279,
-      acceptedArtifactCostUsd: 0.11718594,
+      p95LatencyMs: 59_082,
+      inputTokens: 32_384,
+      outputTokens: 58_373,
+      acceptedArtifactCostUsd: 0.17509446,
     }),
   ]),
   pricing: Object.freeze({
@@ -179,6 +183,21 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
     deterministicFallback: {
       id: 'safe-blueprint',
       description: 'Return the validated deterministic safe blueprint.',
+    },
+  },
+  'structured.workspace_materials': {
+    profile: SITE_BUILDER_MODEL_PROFILES['structured.workspace_materials'],
+    candidates: [
+      target(
+        'gpt-5.6-terra',
+        ['claude-sonnet-5'],
+        'requires_task_evaluation',
+      ),
+    ],
+    deterministicFallback: {
+      id: 'approved-company-facts',
+      description:
+        'Keep only evidence-bound public company facts and owner-facing gaps.',
     },
   },
   'reasoning.high': {

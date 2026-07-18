@@ -3,7 +3,7 @@
 
 ## 2026-07-18 · MODEL-1 BrandProfile 首个逐任务晋级
 
-- 真实 new-api 同形 6×2 评测固定 prompt/schema/evaluator 与协议：Terra/Responses、Sonnet/Messages 均 12/12 accepted、0 hard failure；现役 DeepSeek Pro/Chat 为 10/12，两个 `lab-instrument-rich` attempt 都漏必需 `96-well` 且有事实被证据门拒绝。候选/基线报告 SHA-256 与 TeamoRouter 价格快照写入 evidence id `model1-brand-profile-20260718-v1`；Terra accepted-artifact 单位成本 $0.00210425，比含两次拒绝尝试的 DeepSeek 基线 $0.004428822 低约 52.49%，故 owner 批准 Terra 主、Sonnet 回退。
+- 真实 new-api 同形 6×2 评测固定 prompt/schema/evaluator 与协议：Terra/Responses、Sonnet/Messages 均 12/12 accepted、0 hard failure；当时 DeepSeek Pro/Chat 为 10/12。候选/基线报告与价格快照写入 evidence id `model1-brand-profile-20260718-v1`，故 owner 批准 Terra 主、Sonnet 回退。**2026-07-19 fast-follow 已 supersede 此 active evidence**：v20 final-code candidate 24/24、完整 legacy route baseline 12/12；旧 v1 只保留为历史裁决输入，不再作为当前 baseline 真值。
 - 生产 provider 复用已验证的 model→transport 显式映射；BrandProfile `promotedRoute` 有 provider/schema/截断/超时回退及 EvidenceRef v2 任务硬门，失败 usage 不丢。`SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE=true` 可回冻结 DeepSeek Pro→GLM，原紧急 model/fallback override 优先级不变，route policy/trace 记录实际快照与来源。
 - 仅 BrandProfile 代码路由晋级；其余 6 个文本 task、图片和视频均未继承。GPT Image 2 单次 `/images/generations` 真探不等于 MediaGateway、edit/mask 或生产消费者上线；本记录也不代表生产部署、真实租户 canary、locale/视觉覆盖或 R4-B-min 持久成本真值完成。
 
