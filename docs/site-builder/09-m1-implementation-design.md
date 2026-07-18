@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | H1 | ADR-020 targetCandidate 在当前网关的可用边界 | 网关 `/v1/models`；本轮按用户要求不做模型效果实测 | ✅ 通用令牌 39 个可调用型号；Terra/Sol/Sonnet 5/Gemini 3.5 Flash/GPT Image 2 可见；BGE-M3 仅以私有别名 + 专用令牌可见；❌ 三个 Gemini 图片/Omni 型号不可见；所有 Site Builder currentRoute 未切 | 型号可见≠能力/质量晋级；配置驱动、逐 task capability probe + Golden Set 后才 promotion |
 | H2 | 网关现有可用文本模型足以真跑 M1 全链文本任务 | DeepSeek 双档与方舟通道批测；具体任务再走 task-shaped probe | ✅ 方舟 11/11 连通，DeepSeek 双档已接；R4-A1 最终真跑由 DeepSeek Pro 完成两轮结构化 Activity，但此前同任务也观察到 DeepSeek 超时与 `glm-5.2` 空 content/`finish_reason=length`，证明连通不等于稳定 | currentRoute 只从已接集合选经具体任务评估的子集；调用层须给足 token/timeout 并对空 content 显式失败 |
-| H3 | 图片/视觉/视频能力当下可用 | 同 H1 | ⚠️ `images/edits`（gpt-image-2）无通道；`minimax-m3` 虽在已接文本清单，plan 端点真实图像输入尚未真探；视频另待 M3 | imagePipeline 生成步与视觉质检、审美评审 = **capability-gated**，未就绪即显式跳过（`enhanceSkipped`/该维弃权），绝不拿文本模型硬顶 |
+| H3 | 图片/视觉/视频能力当下可用 | 同 H1 | ⚠️ `gpt-image-2` 经 new-api `/images/generations` 已真生成 1024² PNG，但 `images/edits`/mask、生产 MediaGateway 与真实消费者仍不存在；`minimax-m3` 虽在已接文本清单，plan 端点真实图像输入尚未真探；视频另待 M3 | 单次生成探针只登记 capability evidence，不激活 imagePipeline；生成/编辑与视觉质检仍 **capability-gated**，未就绪即显式跳过，绝不拿文本模型硬顶 |
 | H4 | Docling 能转真 PDF（M0 只软检） | 现造真 PDF 宣传册，按 `DoclingClient` 生产同形状 POST `/v1/convert/source` | ✅ status=success，全文精准转出 markdown | P1 资料解析可靠；M0 欠账在设计期即闭合 |
 | H5 | 图片管线本地依赖可行（历史探测环境为 Mac arm64） | npm registry 查 Sharp、另对 rembg 做后置研究 | ✅ Sharp 有预编译；rembg 镜像当时可得 | **当前 M1-c 只据此采用纯 Sharp**（重编码/EXIF/多尺寸）；rembg 探测仅留历史证据，不构成 M1-c 依赖或已落地能力 |
 | H6 | 品牌研究链路容器可用 | curl 健康探测 + egress 真机矩阵 | ✅ SearXNG:8081=200、Crawl4AI:11235=200；fake-IP-only DoH 回退下 `/md`+`/crawl` 公网可用，private/loopback/metadata/redirect 负向全绿 | P1 可复用 client；API 与 Crawl4AI 双层 pinning gate 已闭环，broad allow-internal 已移除 |
@@ -75,19 +75,19 @@
 
 ## 3. 模型路由与四通道现实
 
-> **2026-07-17 路由裁决**：本节旧 targetCandidate/“四通道”清单保留为施工历史；目标组合已由 ADR-020 与 02 §6 覆盖，currentRoute 仍只认 `task-routes.ts`。目标文本中枢=`gpt-5.6-terra`，海外文案=`claude-sonnet-5`，高难修复=`gpt-5.6-sol`，审美/媒体 QA=`gemini-3.5-flash`；图片/视频/BGE 见 02 §6。该裁决不改变 R4-A2 → R4-B-min → M1-d 的施工顺序，也不等于已切生产路由。
+> **2026-07-18 路由裁决/首个逐任务晋级**：本节旧 targetCandidate/“四通道”清单保留为施工历史；目标组合由 ADR-020 与 02 §6 覆盖，现役唯一认 `task-routes.ts`。BrandProfile 已在同一 6×2 fixture 上证明 Terra/Responses 12/12、Sonnet/Messages 12/12，而现役 DeepSeek Pro/Chat 10/12；结合可核对 accepted-artifact 成本、任务失败门与 rollback，经 owner 批准成为首个代码级 `promotedRoute`=`gpt-5.6-terra → claude-sonnet-5`。其他 task、图片、视频仍未继承该结论。该并行 MODEL 泳道不改变 R4-A2 → R4-B-min → M1-d 的施工顺序，也不等于已生产部署或完成真实流量 canary。
 
-旧“四通道升级位”表已从施工入口撤下，只在 [10 §0](10-model-selection-study.md#0-2026-07-14-dated-结论按任务路由保留为历史实测证据) 保留 dated provenance；其中 `gemini-3.1-pro`、Luna、旧 `gemini-3-flash` 等不再是可执行 target。下面只抄录 `task-routes.ts` 的 currentRoute；目标组合只看 ADR-020/02 §6，两者之间必须经过 ADR-016 promotion 门。
+旧“四通道升级位”表已从施工入口撤下，只在 [10 §0](10-model-selection-study.md#0-2026-07-14-dated-结论按任务路由保留为历史实测证据) 保留 dated provenance；其中 `gemini-3.1-pro`、Luna、旧 `gemini-3-flash` 等不再是可执行 target。下面抄录 `task-routes.ts` 的 active route；目标组合只看 ADR-020/02 §6，两者之间必须逐 task 经过 ADR-016 promotion 门。
 
-| task | currentRoute | fallback |
-|---|---|---|
-| `brand_profile` | `deepseek-v4-pro` | `glm-5.2` |
-| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` |
-| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` |
-| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` |
-| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` |
+| task | active primary | fallback | state |
+|---|---|---|---|
+| `brand_profile` | `gpt-5.6-terra`（Responses） | `claude-sonnet-5`（Messages） | `promotedRoute`；`SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE=true` → DeepSeek Pro→GLM |
+| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` | `currentRoute` |
+| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` | `currentRoute` |
+| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` | `currentRoute` |
+| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` | `currentRoute` |
 
-原则：**文本任务只走已登记的 currentRoute/fallback；能力缺失的视觉/图编任务显式跳过并落标记，绝不拿文本模型硬顶**。通道接入不会自动切路由；只有 task-shaped 评测通过后翻 registry 配置并重启 worker。
+原则：**文本任务只走已登记的 active route/fallback；能力缺失的视觉/图编任务显式跳过并落标记，绝不拿文本模型硬顶**。通道接入不会自动切路由；只有 task-shaped 评测、成本/质量门、失败门、owner 批准与 rollback 齐全后，才以独立 PR 手工翻 registry 并重启 worker。
 
 **MODEL-0 路由治理落地（v3.2 §23.4/§23.7，profile 化，非本文自封终选）**：Agent 只绑 **ModelProfile 语义档**（`structured.default/reasoning.high/copy.premium/text.bulk/multimodal.review/text.summary/image.*/video.*/…`）**不绑型号**（ADR-016）。`task-routes.ts` 从 `task→model string` 改 `task→profile + task budget`；保留 `SITE_BUILDER_MODEL_*` 紧急 model override，增 `SITE_BUILDER_PROFILE_*`；registry 解析后记录 `policyVersion` + model snapshot。建议文件布局（禁 provider fetch 散落）：`agents/model-profiles.ts`（profile/capability 类型）· `model-policy.registry.ts`（四态 + 流量模式/健康度/区域/价格/生命周期）· `model-capabilities.ts`（structured/vision/video/edit/async-job 静态声明）· `model-capability-probe.ts`（真 endpoint 验 IO/JSON/finish_reason/超时）· `model-promotion.service.ts`（**MODEL-0 不预建完整服务**，shadow/canary/rollback 状态机后期真流量才建）· `media-gateway/`（图/视频/语音异步任务）。**每 task 路由工程门**：固定 `maxTokens/timeout/reasoning effort/maxCost/fallback policy`；`finish_reason=length`、空 content、schema 不合、capability 不符**必须是显式错误码**；模型原始输出**先过 schema/事实/引用/安全门**再进 DB/Renderer；alias 运行时解析到 snapshot 存 ReleaseManifest（历史重放/回归定位）；Judge 尽量不与 candidate 同 provider（先确定性门再盲评，防高文风掩盖事实错）。分期晋级 MODEL-1（候选真探 + 6–12 样本 task-shaped eval）/MODEL-2（真流量前 30×3 + shadow/canary + 自动回退）见 §11。
 
@@ -107,8 +107,8 @@
 | # | 决策 | 推荐与理由 |
 |---|---|---|
 | D-M1-1 | M1 是否含 P4 质量环（01/02 口径张力） | **含，确定性优先**：qa/seo 主体是 Playwright/Lighthouse/检查表；审美维 capability-gated 自动弃权。Gemini 3.5 Flash 虽已在网关可见，仍须视觉输入探针和评测后激活，不能“见到型号即零门槛切换” |
-| D-M1-2 | 文本模型先用 currentRoute 跑通全链 | **是**：currentRoute 保持已评测的 DeepSeek 主档与方舟 fallback 子集；ADR-020 目标组合不改 as-built。registry 配置化，候选通过评测后再翻配置；eval 基线在切换前后各跑一轮量化差异 |
-| D-M1-3 | gpt-image-2 生成步现在写吗 | **不写调用代码，也不在 M1-c 预建其 rembg/mask 步骤位**：当前无真实消费者与可验证通道；M1-c 只落 Sharp 的重编码/方向/sRGB/EXIF-GPS/质量门/裁切/多尺寸。生成式编辑进入 M1-c2/M3 时再随真实合同加 feature flag |
+| D-M1-2 | 文本模型逐 task 从 currentRoute 晋级 | **是**：BrandProfile 已用同形 6×2 基线证明 Terra/Sonnet 通过而 DeepSeek Pro 有 2 次硬失败，故只翻该 task；其他任务继续保持 DeepSeek/方舟 currentRoute，必须各自补消费者、评测、失败门和 rollback 后再切 |
+| D-M1-3 | gpt-image-2 生成步现在写吗 | **不写调用代码，也不在 M1-c 预建其 rembg/mask 步骤位**：`/images/generations` 单次真探已通过，但仍无真实消费者、MediaGateway、edit/mask 合同与主体保护评测；M1-c 只落 Sharp 的重编码/方向/sRGB/EXIF-GPS/质量门/裁切/多尺寸。生成式编辑进入 M1-c2/M3 时再随真实合同加 feature flag |
 | D-M1-4 | 组件库扩展幅度 | **补齐 04 §5 封闭 26 型**（D12/ADR-015，17→26）：契约是封闭枚举，P3 组装 prompt 需要完整菜单；现渲染器已注册 10 个，增量 16 个（M1-e-A）。ScrollVideoHero/Interactive3DHero 不进封闭库 |
 | D-M1-5 | M1 语种范围 | **en + de 真跑**（golden=德国市场先例），`ar`(RTL) 进渲染器单测但不进 M1 golden；语种是 options 参数非硬编码 |
 | D-M1-6 | 进度推送 | **轮询 `GET /builds/{id}` 先行**，SSE 端点 M1 末段可选（07 允许轮询替代；SaaS 前端未接，YAGNI） |

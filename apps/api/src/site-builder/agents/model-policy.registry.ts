@@ -1,6 +1,7 @@
 import { SITE_BUILDER_MODEL_POLICY_VERSION } from '@global/contracts';
 import type {
   DeterministicFallback,
+  ModelActiveRoute,
   ModelCandidateRoute,
   ModelCurrentRoute,
   ModelProfileDefinition,
@@ -9,8 +10,6 @@ import type {
 
 import type { SiteBuilderTaskId } from './task-routes';
 import { SITE_BUILDER_MODEL_PROFILES, type SiteBuilderModelProfileId } from './model-profiles';
-
-type CurrentTaskModelPolicy = ModelCurrentRoute;
 
 interface ProfilePolicy {
   profile: ModelProfileDefinition;
@@ -32,11 +31,11 @@ const target = (
 });
 
 /**
- * Exact pre-MODEL-0 routes, moved verbatim from task-routes.ts. This map is the
- * only production input used by resolveCurrentTaskRoute; target candidates are
- * intentionally not selectable here.
+ * Exact pre-MODEL-0 routes, retained as task-local rollback snapshots. They are
+ * never deleted when a task is promoted, so one env switch can restore the
+ * previously proven route without editing code or relying on historical docs.
  */
-const CURRENT_TASK_POLICIES: Record<SiteBuilderTaskId, CurrentTaskModelPolicy> = {
+const LEGACY_TASK_POLICIES: Record<SiteBuilderTaskId, ModelCurrentRoute> = {
   'site_builder.brand_profile': {
     state: 'currentRoute',
     lifecycle: 'active',
@@ -83,9 +82,87 @@ const CURRENT_TASK_POLICIES: Record<SiteBuilderTaskId, CurrentTaskModelPolicy> =
   },
 };
 
+export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
+  id: 'model1-brand-profile-20260718-v1',
+  taskId: 'site_builder.brand_profile',
+  evaluatedAt: '2026-07-17T23:17:30.261Z',
+  reportSchemaVersion: 'site-builder-model1-brand-profile-report/v3',
+  reportArtifactPath:
+    'docs/evidence/model-routing/model1-brand-profile-20260718-v1/candidate-report.json',
+  reportSha256:
+    '5e74deedad9c192ce4bb39b25496d69a6d8d81a83cf8a552f49c24a39682c49a',
+  fixtureCount: 6,
+  repeats: 2,
+  currentRouteBaseline: Object.freeze({
+    model: 'deepseek-v4-pro',
+    transport: 'openai-chat-completions',
+    evaluatedAt: '2026-07-18T06:09:11.533Z',
+    reportArtifactPath:
+      'docs/evidence/model-routing/model1-brand-profile-20260718-v1/current-route-baseline-report.json',
+    reportSha256:
+      '7b3152b5b39caf5006af90bbc917b5a114ff2843ca039f3c69c78b8b15eeedf9',
+    acceptedArtifacts: 10,
+    hardFailures: 2,
+    p95LatencyMs: 57_415,
+    attemptedInputTokens: 13_340,
+    attemptedOutputTokens: 44_236,
+    attemptedCostUsd: 0.04428822,
+    acceptedArtifactUnitCostUsd: 0.004428822,
+    failureSlice:
+      'lab-instrument-rich: missing 96-well and one rejected fact in both attempts',
+  }),
+  routes: Object.freeze([
+    Object.freeze({
+      model: 'gpt-5.6-terra',
+      transport: 'openai-responses',
+      acceptedArtifacts: 12,
+      hardFailures: 0,
+      p95LatencyMs: 41_217,
+      inputTokens: 27_444,
+      outputTokens: 12_260,
+      acceptedArtifactCostUsd: 0.025251,
+    }),
+    Object.freeze({
+      model: 'claude-sonnet-5',
+      transport: 'anthropic-messages',
+      acceptedArtifacts: 12,
+      hardFailures: 0,
+      p95LatencyMs: 36_237,
+      inputTokens: 20_616,
+      outputTokens: 39_279,
+      acceptedArtifactCostUsd: 0.11718594,
+    }),
+  ]),
+  pricing: Object.freeze({
+    capturedAt: '2026-07-18T13:49:52+08:00',
+    source: 'https://teamorouter.com/zh/pricing',
+    unit: 'USD per 1M tokens',
+    rates: Object.freeze({
+      'gpt-5.6-terra': Object.freeze({ input: 0.25, output: 1.5 }),
+      'claude-sonnet-5': Object.freeze({ input: 0.54, output: 2.7 }),
+      'deepseek-v4-pro': Object.freeze({ input: 0.435, output: 0.87 }),
+    }),
+  }),
+});
+
+/** Only BrandProfile has completed a task-shaped MODEL-1 promotion gate. */
+const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
+  ...LEGACY_TASK_POLICIES,
+  'site_builder.brand_profile': {
+    state: 'promotedRoute',
+    lifecycle: 'active',
+    route: {
+      primary: 'gpt-5.6-terra',
+      fallbacks: ['claude-sonnet-5'],
+    },
+    promotionEvidenceId: BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.id,
+  },
+};
+
 /**
- * ADR-020 registrations. None is a promoted route: MODEL-1/2 must first prove
- * protocol capability and task-shaped quality, then explicitly change policy.
+ * ADR-020 profile-level registrations. A task promotion does not promote every
+ * other task sharing that profile; those candidates remain non-routable until
+ * each task has its own evidence record.
  */
 const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   deterministic: {
@@ -227,12 +304,29 @@ function cloneRoute(route: ModelRouteSnapshot): ModelRouteSnapshot {
  * MODEL-0: candidate evaluation and traffic promotion belong to MODEL-1/2.
  */
 export class ModelPolicyRegistry {
-  resolveCurrentTaskRoute(taskId: SiteBuilderTaskId): ModelRouteSnapshot {
-    return cloneRoute(CURRENT_TASK_POLICIES[taskId].route);
+  resolveActiveTaskRoute(taskId: SiteBuilderTaskId): ModelRouteSnapshot {
+    return cloneRoute(ACTIVE_TASK_POLICIES[taskId].route);
   }
 
-  getCurrentTaskPolicy(taskId: SiteBuilderTaskId): ModelCurrentRoute {
-    const policy = CURRENT_TASK_POLICIES[taskId];
+  getActiveTaskPolicy(taskId: SiteBuilderTaskId): ModelActiveRoute {
+    const policy = ACTIVE_TASK_POLICIES[taskId];
+    if (policy.state === 'promotedRoute') {
+      return {
+        state: policy.state,
+        lifecycle: policy.lifecycle,
+        route: cloneRoute(policy.route),
+        promotionEvidenceId: policy.promotionEvidenceId,
+      };
+    }
+    return {
+      state: policy.state,
+      lifecycle: policy.lifecycle,
+      route: cloneRoute(policy.route),
+    };
+  }
+
+  getLegacyTaskPolicy(taskId: SiteBuilderTaskId): ModelCurrentRoute {
+    const policy = LEGACY_TASK_POLICIES[taskId];
     return {
       state: policy.state,
       lifecycle: policy.lifecycle,

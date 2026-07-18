@@ -1,4 +1,5 @@
 import { AiTaskContract } from './task-contract';
+import { resolveTaskRoute } from '../site-builder/agents/task-routes';
 
 /**
  * Registry of domain AI Tasks (PRD 9.3 catalog). Each new task in the AI 获客
@@ -388,12 +389,20 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'site_builder.brand_profile',
     // 品牌 web 研究的两条出网通道（Broker allowedTools 白名单据此裁决，09 §2.4 / C1-C3）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
-    maxCostCents: 40,
-    timeoutMs: 120000,
+    // Site Builder 的 route/budget/timeout 唯一真值在 task-routes；getter 避免本通用
+    // ToolBroker 合同复制第二份会随 MODEL promotion/rollback 漂移的快照。
+    get maxCostCents() {
+      return resolveTaskRoute('site_builder.brand_profile').maxCostCents;
+    },
+    get timeoutMs() {
+      return resolveTaskRoute('site_builder.brand_profile').timeoutMs;
+    },
     description:
       '独立站建设：从 KB digest + 站主档案 + 联网研究综合品牌档案（价值主张/语气/词表/差异化/竞品定位/factSheet+evidence/gaps）。逐项证据分级溯源，认证类断言网络单源不上站；不输出任何具名个人。输出与提示词详见 site-builder/agents/brand-profile.ts（模型路由由 site-builder/agents/task-routes.ts 配置驱动）。',
     outputSchema: { type: 'object' }, // 真 schema 在任务模块内随调用传入（网关按请求 schema 校验）
-    model: 'deepseek-v4-pro',
+    get model() {
+      return resolveTaskRoute('site_builder.brand_profile').primary;
+    },
     risk: 'medium', // 内部品牌资产，上站文案另有 copy 侧 factSheet 闸
     humanGate: false,
   },

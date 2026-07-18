@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { modelPolicyRegistry } from './model-policy.registry';
+import {
+  BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE,
+  modelPolicyRegistry,
+} from './model-policy.registry';
 import { SITE_BUILDER_MODEL_PROFILES } from './model-profiles';
 import { resolveTaskRoute, SITE_BUILDER_TASK_IDS } from './task-routes';
 
@@ -7,19 +10,20 @@ import { resolveTaskRoute, SITE_BUILDER_TASK_IDS } from './task-routes';
  * site_builder per-task 模型路由（09 §3 终版定档表的代码化，02 §6 唯一真值）。
  * 配置驱动：接入新通道后翻 env + 重启 worker 即切换，不改代码。
  */
-describe('resolveTaskRoute — 终版定档默认值（09 §3）', () => {
-  it('brand_profile：主选 deepseek-v4-pro，回退 glm-5.2', () => {
+describe('resolveTaskRoute — 逐任务生产策略', () => {
+  it('brand_profile：MODEL-1 晋级 Terra，Sonnet 原生协议回退', () => {
     const route = resolveTaskRoute('site_builder.brand_profile');
-    expect(route.primary).toBe('deepseek-v4-pro');
-    expect(route.fallbacks).toEqual(['glm-5.2']);
+    expect(route.primary).toBe('gpt-5.6-terra');
+    expect(route.fallbacks).toEqual(['claude-sonnet-5']);
     expect(route.timeoutMs).toBeGreaterThan(0);
     expect(route.maxTokens).toBeGreaterThanOrEqual(4000); // v4 是 reasoning 模型，预算过小 content 为空（H2）
     expect(route.maxCostCents).toBe(40);
     expect(route.policy).toMatchObject({
-      policyVersion: 'site-builder-model-policy/v1',
-      routeState: 'currentRoute',
+      policyVersion: 'site-builder-model-policy/v2',
+      routeState: 'promotedRoute',
       lifecycle: 'active',
       source: 'registry',
+      promotionEvidenceId: 'model1-brand-profile-20260718-v1',
     });
   });
 
@@ -91,6 +95,55 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
     });
   });
 
+  it('SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true 回到该任务冻结的 legacy currentRoute', () => {
+    const route = resolveTaskRoute('site_builder.brand_profile', {
+      SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE: 'true',
+    } as NodeJS.ProcessEnv);
+    expect(route.primary).toBe('deepseek-v4-pro');
+    expect(route.fallbacks).toEqual(['glm-5.2']);
+    expect(route.policy).toMatchObject({
+      routeState: 'currentRoute',
+      lifecycle: 'active',
+      source: 'rollback_override',
+      route: {
+        primary: 'deepseek-v4-pro',
+        fallbacks: ['glm-5.2'],
+      },
+    });
+    expect(route.policy).not.toHaveProperty('promotionEvidenceId');
+  });
+
+  it('紧急 model/fallback 覆盖优先于 rollback，trace 仍记录实际快照', () => {
+    const route = resolveTaskRoute('site_builder.brand_profile', {
+      SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE: 'true',
+      SITE_BUILDER_MODEL_BRAND_PROFILE: 'operator-primary',
+      SITE_BUILDER_FALLBACKS_BRAND_PROFILE: 'operator-fallback',
+    } as NodeJS.ProcessEnv);
+    expect(route.primary).toBe('operator-primary');
+    expect(route.fallbacks).toEqual(['operator-fallback']);
+    expect(route.policy).toMatchObject({
+      routeState: 'currentRoute',
+      source: 'env_override',
+      route: {
+        primary: 'operator-primary',
+        fallbacks: ['operator-fallback'],
+      },
+    });
+  });
+
+  it('rollback 值非法或用于尚未晋级的 task 时 fail-fast', () => {
+    expect(() =>
+      resolveTaskRoute('site_builder.brand_profile', {
+        SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE: 'yes',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/must be true or false/);
+    expect(() =>
+      resolveTaskRoute('site_builder.copy', {
+        SITE_BUILDER_MODEL_ROLLBACK_COPY: 'true',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/has no promoted route/);
+  });
+
   it('未知 SITE_BUILDER_PROFILE_<TASK> fail-fast，绝不静默忽略', () => {
     expect(() =>
       resolveTaskRoute('site_builder.copy', {
@@ -104,29 +157,33 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
   });
 });
 
-describe('MODEL-0 profile binding and candidate isolation', () => {
-  it('任务只绑定语义 profile，当前模型快照保持 pre-MODEL-0 行为', () => {
+describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () => {
+  it('任务只绑定语义 profile；仅 BrandProfile 晋级，其他任务保持 pre-MODEL-0 行为', () => {
     expect(resolveTaskRoute('site_builder.brand_profile').profile).toBe('structured.default');
     expect(resolveTaskRoute('site_builder.copy').profile).toBe('copy.premium');
     expect(resolveTaskRoute('site_builder.qa_summarize').profile).toBe('text.summary');
-    expect(modelPolicyRegistry.resolveCurrentTaskRoute('site_builder.design_spec')).toEqual({
+    expect(modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec')).toEqual({
       primary: 'minimax-m3',
       fallbacks: ['doubao-seed-2.0-pro'],
     });
-    expect(modelPolicyRegistry.getCurrentTaskPolicy('site_builder.design_spec')).toMatchObject({
+    expect(modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec')).toMatchObject({
       state: 'currentRoute',
+    });
+    expect(modelPolicyRegistry.getActiveTaskPolicy('site_builder.brand_profile')).toMatchObject({
+      state: 'promotedRoute',
+      promotionEvidenceId: 'model1-brand-profile-20260718-v1',
     });
   });
 
-  it('全部 currentRoute 快照逐项保持 pre-MODEL-0 行为', () => {
+  it('active route 快照只切 BrandProfile，其他 task 逐项保持 pre-MODEL-0 行为', () => {
     expect(
       Object.fromEntries(
-        SITE_BUILDER_TASK_IDS.map((taskId) => [taskId, modelPolicyRegistry.resolveCurrentTaskRoute(taskId)]),
+        SITE_BUILDER_TASK_IDS.map((taskId) => [taskId, modelPolicyRegistry.resolveActiveTaskRoute(taskId)]),
       ),
     ).toEqual({
       'site_builder.brand_profile': {
-        primary: 'deepseek-v4-pro',
-        fallbacks: ['glm-5.2'],
+        primary: 'gpt-5.6-terra',
+        fallbacks: ['claude-sonnet-5'],
       },
       'site_builder.copy': {
         primary: 'deepseek-v4-pro',
@@ -155,6 +212,46 @@ describe('MODEL-0 profile binding and candidate isolation', () => {
     });
   });
 
+  it('BrandProfile promotion evidence 冻结候选、现役基线、协议与价格快照', () => {
+    expect(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE).toMatchObject({
+      id: 'model1-brand-profile-20260718-v1',
+      reportSha256:
+        '5e74deedad9c192ce4bb39b25496d69a6d8d81a83cf8a552f49c24a39682c49a',
+      currentRouteBaseline: {
+        model: 'deepseek-v4-pro',
+        acceptedArtifacts: 10,
+        hardFailures: 2,
+        attemptedCostUsd: 0.04428822,
+        acceptedArtifactUnitCostUsd: 0.004428822,
+        reportSha256:
+          '7b3152b5b39caf5006af90bbc917b5a114ff2843ca039f3c69c78b8b15eeedf9',
+      },
+      pricing: {
+        rates: {
+          'gpt-5.6-terra': { input: 0.25, output: 1.5 },
+          'claude-sonnet-5': { input: 0.54, output: 2.7 },
+          'deepseek-v4-pro': { input: 0.435, output: 0.87 },
+        },
+      },
+    });
+    expect(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.routes).toEqual([
+      expect.objectContaining({
+        model: 'gpt-5.6-terra',
+        transport: 'openai-responses',
+        acceptedArtifacts: 12,
+        hardFailures: 0,
+      }),
+      expect.objectContaining({
+        model: 'claude-sonnet-5',
+        transport: 'anthropic-messages',
+        acceptedArtifacts: 12,
+        hardFailures: 0,
+      }),
+    ]);
+    expect(Object.isFrozen(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE)).toBe(true);
+    expect(Object.isFrozen(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.pricing.rates)).toBe(true);
+  });
+
   it('16 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
     expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(16);
     for (const profile of ['video.premium', 'speech.production', 'transcription', 'moderation.media'] as const) {
@@ -171,7 +268,7 @@ describe('MODEL-0 profile binding and candidate isolation', () => {
     expect(modelPolicyRegistry.getProfile('embedding.private').dataPolicy.region).toBe('private_local');
   });
 
-  it('ADR-020 targets remain registered candidates and cannot replace currentRoute', () => {
+  it('ADR-020 profile targets remain registered candidates；只有有 task 证据的 BrandProfile 可晋级', () => {
     const target = modelPolicyRegistry.getCandidates('structured.default');
     expect(target).toContainEqual(
       expect.objectContaining({
@@ -180,7 +277,8 @@ describe('MODEL-0 profile binding and candidate isolation', () => {
         activation: 'requires_task_evaluation',
       }),
     );
-    expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe('deepseek-v4-pro');
+    expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe('gpt-5.6-terra');
+    expect(resolveTaskRoute('site_builder.design_spec').primary).toBe('minimax-m3');
   });
 
   it('registers every ADR-020 target portfolio route without activating it', () => {
@@ -234,9 +332,11 @@ describe('MODEL-0 profile binding and candidate isolation', () => {
   });
 
   it('returns defensive copies, so callers cannot mutate the registered policy', () => {
-    const current = modelPolicyRegistry.resolveCurrentTaskRoute('site_builder.brand_profile');
+    const current = modelPolicyRegistry.resolveActiveTaskRoute('site_builder.brand_profile');
     (current.fallbacks as string[]).push('not-a-policy-model');
-    expect(modelPolicyRegistry.resolveCurrentTaskRoute('site_builder.brand_profile').fallbacks).toEqual(['glm-5.2']);
+    expect(modelPolicyRegistry.resolveActiveTaskRoute('site_builder.brand_profile').fallbacks).toEqual([
+      'claude-sonnet-5',
+    ]);
 
     const candidates = modelPolicyRegistry.getCandidates('structured.default');
     (candidates[0].route.fallbacks as string[]).push('not-a-policy-model');

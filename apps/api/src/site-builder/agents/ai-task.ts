@@ -25,6 +25,8 @@ export interface SiteBuilderTaskDefinition<TIn, TOut> {
   /** 输出契约（透传网关 generateStructured 做校验+修复重试）。 */
   outputSchema: Record<string, unknown>;
   buildPrompt: (input: TIn) => string;
+  /** 确定性任务硬门；抛错即拒绝本模型产物并进入回退链。 */
+  validateOutput?: (input: TIn, output: TOut) => void;
   system?: string;
   /** 供 TS 侧标注输出类型（运行时校验靠 outputSchema）。 */
   __out?: TOut;
@@ -135,6 +137,12 @@ export async function runAiTask<TIn, TOut>(
             prompt,
             system: def.system,
             schema: def.outputSchema,
+            ...(def.validateOutput
+              ? {
+                  validateOutput: (output: unknown) =>
+                    def.validateOutput?.(rawInput, output as TOut),
+                }
+              : {}),
             model,
             maxTokens: route.maxTokens,
             maxCostCents: route.maxCostCents,

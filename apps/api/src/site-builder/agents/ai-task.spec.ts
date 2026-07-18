@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
+import type { ModelProvider } from '../../model-gateway/model-provider';
+import { ModelRouter } from '../../model-gateway/model-router';
+import { RouterModelGateway } from '../../model-gateway/router-model-gateway';
 import type { AiContext, GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
 import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
 import { AiTaskError, runAiTask, SiteBuilderTaskDefinition } from './ai-task';
@@ -74,7 +77,17 @@ function gatewayReturning(impl: (input: GenerateStructuredInput, ctx: AiContext)
     generateStructured: vi.fn(async (input: GenerateStructuredInput, ctx: AiContext) => {
       calls.push(input);
       contexts.push(ctx);
-      return impl(input, ctx);
+      const result = await impl(input, ctx);
+      try {
+        input.validateOutput?.(result.data);
+      } catch (err) {
+        throw new ProviderOutputError(
+          `task output hard gate rejected: ${err instanceof Error ? err.message : String(err)}`,
+          result.usage,
+          { cause: err, callCount: result.callCount ?? 1 },
+        );
+      }
+      return result;
     }),
   } as unknown as ModelGateway;
   return { gateway, calls, contexts };
@@ -159,6 +172,83 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(out.fallbackIndex).toBe(1);
     expect(calls.map((c) => c.model)).toEqual(['model-a', 'model-b']);
     expect(contexts.map((ctx) => ctx.modelPolicy?.fallbackIndex)).toEqual([0, 1]);
+  });
+
+  it('任务级确定性输出门拒绝主选 → 计入已花 usage 后换回退模型', async () => {
+    const guardedDef: SiteBuilderTaskDefinition<EchoIn, EchoOut> = {
+      ...DEF,
+      validateOutput: (_input, output) => {
+        if (output.headline === 'unsupported claim') {
+          throw new Error('task output hard gate rejected');
+        }
+      },
+    };
+    const { gateway, calls, contexts } = gatewayReturning(async (input) => ({
+      ...okResult(input.model ?? '?'),
+      data: {
+        headline:
+          input.model === 'model-a'
+            ? 'unsupported claim'
+            : 'Precision pumps',
+      },
+    }));
+
+    const out = await runAiTask(guardedDef, { name: 'Acme' }, {
+      gateway,
+      ctx: CTX,
+      route: ROUTE,
+    });
+    expect(calls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
+    expect(contexts.map((ctx) => ctx.modelPolicy?.fallbackIndex)).toEqual([0, 1]);
+    expect(out.model).toBe('model-b');
+    expect(out.usage).toEqual({ inputTokens: 20, outputTokens: 10, calls: 2 });
+  });
+
+  it('dev real+stub 链把硬门错误直接交回 AiTask，保留 real usage 后切模型', async () => {
+    const guardedDef: SiteBuilderTaskDefinition<EchoIn, EchoOut> = {
+      ...DEF,
+      validateOutput: (_input, output) => {
+        if (output.headline === 'unsupported claim') {
+          throw new Error('task output hard gate rejected');
+        }
+      },
+    };
+    const real = {
+      id: 'gateway',
+      generateStructured: vi.fn(async (input: GenerateStructuredInput) => ({
+        data: {
+          headline:
+            input.model === 'model-a'
+              ? 'unsupported claim'
+              : 'Precision pumps',
+        },
+        provider: 'gateway',
+        model: input.model ?? 'unknown',
+        usage: { inputTokens: 10, outputTokens: 5 },
+      })),
+    } as unknown as ModelProvider;
+    const stub = {
+      id: 'stub',
+      generateStructured: vi.fn(async () => ({
+        data: { headline: 'stub junk' },
+        provider: 'stub',
+        model: 'stub-v0',
+      })),
+    } as unknown as ModelProvider;
+    const router = { route: () => [real, stub] } as unknown as ModelRouter;
+    const gateway = new RouterModelGateway(router);
+
+    const out = await runAiTask(guardedDef, { name: 'Acme' }, {
+      gateway,
+      ctx: CTX,
+      route: ROUTE,
+    });
+
+    expect(real.generateStructured).toHaveBeenCalledTimes(2);
+    expect(stub.generateStructured).not.toHaveBeenCalled();
+    expect(out.model).toBe('model-b');
+    expect(out.fallbackIndex).toBe(1);
+    expect(out.usage).toEqual({ inputTokens: 20, outputTokens: 10, calls: 2 });
   });
 
   it('保留主选不可用输出已消耗的 token，再由回退返回', async () => {

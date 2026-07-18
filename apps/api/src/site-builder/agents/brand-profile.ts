@@ -5,7 +5,11 @@ import type {
 } from '@global/contracts';
 import type { SiteBuilderTaskDefinition } from './ai-task';
 import type { FrozenEvidenceSource } from './evidence-ref';
-import { resolveEvidenceReference } from './evidence-ref';
+import {
+  EVIDENCE_HASH_ALGORITHM,
+  EVIDENCE_NORMALIZATION_VERSION,
+  resolveEvidenceReference,
+} from './evidence-ref';
 import { scrubPii } from './pii';
 
 /**
@@ -663,6 +667,46 @@ export function buildBrandProfilePrompt(input: BrandProfileInput): string {
   ].join('\n');
 }
 
+function promptSources(input: BrandProfileInput): PromptEvidenceSource[] {
+  return [input.intakeSource, ...input.kbSources, ...input.research];
+}
+
+/**
+ * MODEL-1 生产失败门：任何会被 EvidenceRef v2 永久硬门降级的断言都不接受为主选产物；
+ * AiTask 会保留该次 usage 并尝试任务登记的 fallback。
+ */
+export function validateBrandProfileRouteOutput(
+  input: BrandProfileInput,
+  output: BrandProfileOutput,
+): void {
+  const sources = new Map<string, FrozenEvidenceSource>(
+    promptSources(input).map((source) => [
+      source.sourceId,
+      {
+        sourceKey: source.sourceId,
+        sourceType: source.sourceType,
+        sourceRole: source.sourceRole,
+        hashAlgorithm: EVIDENCE_HASH_ALGORITHM,
+        contentHash: source.contentHash,
+        normalizationVersion: EVIDENCE_NORMALIZATION_VERSION,
+        snapshotText: source.content,
+        ...(source.url ? { displayUrl: source.url } : {}),
+        ...(source.fetchedAt ? { fetchedAt: source.fetchedAt } : {}),
+        provenance: { routeValidation: true },
+      },
+    ]),
+  );
+  const gated = enforceEvidenceGateV2(output.factSheet ?? [], { sources });
+  if (gated.gaps.length > 0) {
+    const reasons = [...new Set(gated.gaps.map((gap) => gap.reason))].join(
+      ',',
+    );
+    throw new Error(
+      `BrandProfile output hard gate rejected ${gated.gaps.length} asserted fact(s): ${reasons}`,
+    );
+  }
+}
+
 export const BRAND_PROFILE_TASK: SiteBuilderTaskDefinition<
   BrandProfileInput,
   BrandProfileOutput
@@ -671,4 +715,5 @@ export const BRAND_PROFILE_TASK: SiteBuilderTaskDefinition<
   inputSchema: BRAND_PROFILE_INPUT_SCHEMA,
   outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA,
   buildPrompt: buildBrandProfilePrompt,
+  validateOutput: validateBrandProfileRouteOutput,
 };

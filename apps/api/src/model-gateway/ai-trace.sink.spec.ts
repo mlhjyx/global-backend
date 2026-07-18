@@ -55,4 +55,41 @@ describe('AiTraceSink', () => {
       }),
     });
   });
+
+  it('persists rejected-attempt tokens without creating a second usage-ledger row', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-error-1' }));
+    const usageLedgerCreate = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          aiTrace: { create: aiTraceCreate },
+          usageLedger: { create: usageLedgerCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const sink = new AiTraceSink(prisma);
+
+    sink.record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'site_builder.brand_profile',
+      op: 'generateStructured',
+      provider: 'new-api',
+      model: 'gpt-5.6-terra',
+      status: 'ERROR',
+      errorMessage: 'task output hard gate rejected',
+      latencyMs: 12,
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+
+    await vi.waitFor(() => expect(aiTraceCreate).toHaveBeenCalledTimes(1));
+    expect(aiTraceCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: 'ERROR',
+        inputTokens: 7,
+        outputTokens: 3,
+      }),
+    });
+    expect(usageLedgerCreate).not.toHaveBeenCalled();
+  });
 });

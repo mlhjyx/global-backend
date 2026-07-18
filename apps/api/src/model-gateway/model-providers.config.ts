@@ -1,4 +1,5 @@
 import { ModelProvider } from './model-provider';
+import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from './model-transports';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 
 /**
@@ -17,6 +18,7 @@ export function buildGatewayProvider(env: NodeJS.ProcessEnv = process.env): Mode
     apiKey,
     // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',
+    modelTransports: VERIFIED_GATEWAY_MODEL_TRANSPORTS,
   });
 }
 

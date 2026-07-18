@@ -243,19 +243,19 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ## 6. 模型路由（currentRoute 与 ADR-020 目标组合分层）
 
-> **代码事实优先**：`task-routes.ts` 的 7 个文本 task 是 `currentRoute`；下方 ADR-020 表是用户批准的质量优先 `targetCandidate`，不是已切换的 `promotedRoute`。本轮选择不以官网价格为主约束，而以任务效果、模型特性、结构化稳定性、多语言质量、多模态能力和安全边界为主；但 promotion 仍须 ADR-016 的真实 endpoint capability probe、Golden Set、shadow/canary 和可回滚证据。外部依据与历史实测见 [10-model-selection-study.md](10-model-selection-study.md)。
+> **代码事实优先**：`task-routes.ts` 是现役唯一真值；7 个文本 task 中只有 BrandProfile 经真实 endpoint 协议探针、同形 6×2 Golden、成本/质量、失败门和 rollback 成为代码级 `promotedRoute`，其余仍是 `currentRoute`。下方 ADR-020 表是用户批准的整组质量优先 target portfolio，不表示其他 task 已切换。本轮选择以任务效果、结构化稳定性、成本可核对、协议与安全边界为门；真实外部流量/高风险部署前仍须 MODEL-2 shadow/canary。外部依据与历史实测见 [10-model-selection-study.md](10-model-selection-study.md)。
 
-**currentRoute（as-built，不变）**：
+**active route（as-built）**：
 
-| task | primary | fallback |
-|---|---|---|
-| `brand_profile` | `deepseek-v4-pro` | `glm-5.2` |
-| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` |
-| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` |
-| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` |
-| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` |
+| task | primary | fallback | state |
+|---|---|---|---|
+| `brand_profile` | `gpt-5.6-terra`（Responses） | `claude-sonnet-5`（Messages） | `promotedRoute`；可回 DeepSeek Pro→GLM |
+| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` | `currentRoute` |
+| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` | `currentRoute` |
+| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` | `currentRoute` |
+| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` | `currentRoute` |
 
-**ADR-020 质量优先目标组合（approved targetCandidate）**：
+**ADR-020 质量优先目标组合（approved target portfolio；除 BrandProfile 外仍待逐 task 晋级）**：
 
 | 任务 | 目标主模型 | 唯一模型回退 / 降级 | 不可绕过的规则 |
 |---|---|---|---|
