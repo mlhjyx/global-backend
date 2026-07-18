@@ -124,6 +124,20 @@ const claimFactKeyMigration =
         "utf8",
       )
     : "";
+const workspaceDeleteGuardMigrationDirs = readdirSync(migrationsDir).filter(
+  (entry) => /site_builder_r4a2_workspace_delete_guard$/.test(entry),
+);
+const workspaceDeleteGuardMigration =
+  workspaceDeleteGuardMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          workspaceDeleteGuardMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -322,6 +336,22 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     );
     expect(siteWorkspaceMigration).toContain(
       "CREATE TRIGGER workspace_sites_cascade",
+    );
+  });
+
+  it("fails closed instead of physically cascading object-backed Sites on Workspace deletion", () => {
+    expect(workspaceDeleteGuardMigrationDirs).toHaveLength(1);
+    expect(workspaceDeleteGuardMigration).toContain(
+      "DROP TRIGGER IF EXISTS workspace_sites_cascade ON \"workspace\"",
+    );
+    expect(workspaceDeleteGuardMigration).toContain(
+      "DROP FUNCTION IF EXISTS cascade_workspace_sites()",
+    );
+    expect(workspaceDeleteGuardMigration).toMatch(
+      /EXISTS\s*\([\s\S]+FROM "site"[\s\S]+"workspace_id" = OLD\."id"[\s\S]+RAISE EXCEPTION[\s\S]+Workspace deletion requires explicit Site\/object cleanup/i,
+    );
+    expect(workspaceDeleteGuardMigration).not.toMatch(
+      /DELETE FROM "site" WHERE "workspace_id" = OLD\."id"/i,
     );
   });
 
