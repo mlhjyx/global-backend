@@ -572,7 +572,7 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
       'DROP INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"',
     );
     expect(certAssetOrderedIndexMigration).toMatch(
-      /CREATE INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"[\s\S]+\("cert_asset_id", "site_id", "brand_profile_id", "fact_index"\)[\s\S]+WHERE "cert_asset_id" IS NOT NULL/i,
+      /CREATE INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"[\s\S]+\(\s*"cert_asset_id"\s*,\s*"site_id"\s*,\s*"brand_profile_id"\s*,\s*"fact_index"\s*\)[\s\S]+WHERE "cert_asset_id" IS NOT NULL/i,
     );
   });
 });
