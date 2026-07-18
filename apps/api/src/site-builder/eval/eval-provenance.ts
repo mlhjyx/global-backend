@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { access } from 'node:fs/promises';
 import type { ModelExecutionPolicySnapshot } from '@global/contracts';
 import type { TaskRoute } from '../agents/task-routes';
 
@@ -35,7 +36,9 @@ export function canonicalJson(value: unknown): string {
       // between development and CI. JavaScript's relational string comparison
       // is stable Unicode code-unit ordering.
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`);
+      .map(
+        ([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`,
+      );
     return `{${entries.join(',')}}`;
   }
 
@@ -50,8 +53,161 @@ export function sha256Text(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function sha256Bytes(value: Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 export function sha256CanonicalJson(value: unknown): string {
   return sha256Text(canonicalJson(value));
+}
+
+export function sanitizeGatewayBaseUrl(raw: string): string {
+  const url = new URL(raw);
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return url.href.replace(/\/$/, '');
+}
+
+export function assertUniqueEvaluationValues(
+  name: string,
+  values: readonly string[],
+): void {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) duplicates.add(value);
+    seen.add(value);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(
+      `${name} contains duplicate values: ${[...duplicates].join(', ')}`,
+    );
+  }
+}
+
+type EvaluationPathExists = (path: string) => Promise<boolean>;
+
+const evaluationPathExists: EvaluationPathExists = async (path) => {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+};
+
+/** Prevent a known `writeFile(..., flag: 'wx')` collision before paid calls. */
+export async function assertEvaluationReportPathAvailable(
+  reportPath: string,
+  pathExists: EvaluationPathExists = evaluationPathExists,
+): Promise<void> {
+  if (await pathExists(reportPath)) {
+    throw new Error(`evaluation report path already exists: ${reportPath}`);
+  }
+}
+
+export interface EvaluationMatrixRowKey {
+  model: string;
+  fixtureId: string;
+  attempt: number;
+}
+
+export interface EvaluationMatrixIntegrity {
+  expectedRunCount: number;
+  actualRunCount: number;
+  complete: boolean;
+  duplicateKeys: string[];
+  missingKeys: string[];
+  unexpectedKeys: string[];
+}
+
+export interface EvaluationModelResolution {
+  requestedModel: string;
+  resolvedModel?: string;
+  reportedModel?: string;
+  modelResolutionSource?: 'upstream_response' | 'requested_fallback';
+}
+
+export function isExactUpstreamModelResolution(
+  resolution: EvaluationModelResolution,
+): boolean {
+  return (
+    resolution.modelResolutionSource === 'upstream_response' &&
+    resolution.reportedModel === resolution.requestedModel &&
+    resolution.resolvedModel === resolution.reportedModel
+  );
+}
+
+function evaluationRunKey(row: EvaluationMatrixRowKey): string {
+  return `${row.model}\u0000${row.fixtureId}\u0000${row.attempt}`;
+}
+
+export function inspectEvaluationMatrix(
+  models: readonly string[],
+  fixtureIds: readonly string[],
+  repeats: number,
+  rows: readonly EvaluationMatrixRowKey[],
+): EvaluationMatrixIntegrity {
+  const expected = new Set<string>();
+  for (const model of models) {
+    for (const fixtureId of fixtureIds) {
+      for (let attempt = 1; attempt <= repeats; attempt += 1) {
+        expected.add(evaluationRunKey({ model, fixtureId, attempt }));
+      }
+    }
+  }
+
+  const actual = new Set<string>();
+  const duplicateKeys = new Set<string>();
+  for (const row of rows) {
+    const key = evaluationRunKey(row);
+    if (actual.has(key)) duplicateKeys.add(key);
+    actual.add(key);
+  }
+  const missingKeys = [...expected].filter((key) => !actual.has(key)).sort();
+  const unexpectedKeys = [...actual].filter((key) => !expected.has(key)).sort();
+  return {
+    expectedRunCount: expected.size,
+    actualRunCount: rows.length,
+    complete:
+      duplicateKeys.size === 0 &&
+      missingKeys.length === 0 &&
+      unexpectedKeys.length === 0 &&
+      rows.length === expected.size,
+    duplicateKeys: [...duplicateKeys].sort(),
+    missingKeys,
+    unexpectedKeys,
+  };
+}
+
+/**
+ * A MODEL-1 evaluation is independent evidence, not traffic under the active
+ * promotion. Preserve the real task profile/budgets while removing the old
+ * promotion id so a new report cannot become self-referential.
+ */
+export function routeForModelEvaluation(
+  baseRoute: TaskRoute,
+  model: string,
+): TaskRoute {
+  const { promotionEvidenceId: _promotionEvidenceId, ...basePolicy } =
+    baseRoute.policy;
+  return {
+    ...baseRoute,
+    primary: model,
+    fallbacks: [],
+    dataPolicy: { ...baseRoute.dataPolicy },
+    policy: {
+      ...basePolicy,
+      routeState: 'currentRoute',
+      lifecycle: 'active',
+      source: 'env_override',
+      dataPolicy: { ...basePolicy.dataPolicy },
+      route: { primary: model, fallbacks: [] },
+    },
+  };
 }
 
 /**
