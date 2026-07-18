@@ -204,6 +204,53 @@ describe("PrismaClaimEvidenceBridgeRepository", () => {
     });
     expect(queryRaw).toHaveBeenCalledOnce();
   });
+
+  it("retains a non-cert source Asset on Evidence without mislabeling it as cert proof", async () => {
+    const evidenceUpsert = vi.fn(async () => ({ id: EVIDENCE_ID }));
+    const bridgeCreateMany = vi.fn(async () => ({ count: 1 }));
+    const repository = new PrismaClaimEvidenceBridgeRepository({
+      claim: {
+        upsert: vi.fn(async () => ({
+          id: CLAIM_ID,
+          status: "NEEDS_REVIEW",
+        })),
+      },
+      evidence: { upsert: evidenceUpsert },
+      brandProfileClaimBridge: { createMany: bridgeCreateMany },
+    } as never);
+
+    await repository.projectPendingClaim({
+      workspaceId: WORKSPACE_ID,
+      siteId: SITE_ID,
+      companyProfileId: COMPANY_ID,
+      brandProfileId: BRAND_PROFILE_ID,
+      factIndex: 0,
+      type: "capability",
+      statement: "Industrial pumps",
+      status: "NEEDS_REVIEW",
+      claimOriginKey: "b".repeat(64),
+      evidenceOriginKey: "c".repeat(64),
+      bridgeKey: "d".repeat(64),
+      evidence: {
+        evidenceRefId: "88888888-8888-4888-8888-888888888888",
+        sourceSnapshotId: "99999999-9999-4999-8999-999999999999",
+        sourceRole: "fact_candidate",
+        sourceContentHash: "a".repeat(64),
+        quote: "Industrial pumps",
+        assetId: ASSET_ID,
+      },
+    });
+
+    expect(evidenceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ assetId: ASSET_ID }),
+      }),
+    );
+    expect(bridgeCreateMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ certAssetId: undefined })],
+      skipDuplicates: true,
+    });
+  });
 });
 
 describe("claimTypeForBrandFact", () => {

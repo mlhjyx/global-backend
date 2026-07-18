@@ -226,7 +226,10 @@ export class PrismaClaimEvidenceBridgeRepository
           factIndex: input.factIndex,
           claimId: claim.id,
           evidenceId: evidence.id,
-          certAssetId: input.evidence.assetId,
+          certAssetId:
+            input.type === "certification"
+              ? input.evidence.assetId
+              : undefined,
           bridgeKey: input.bridgeKey,
         },
       ],
