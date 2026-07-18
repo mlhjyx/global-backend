@@ -1240,10 +1240,15 @@ type BrandProfileIdentityContext = Pick<
   'companyName' | 'products'
 >;
 
-/** Scrub every model-controlled free-text field before JSON/relational persistence. */
+/**
+ * Scrub public BrandProfile projections before persistence. `gaps` are a
+ * workspace-internal follow-up channel: preserve their controlled identity and
+ * contact data so acquisition/research context is not destroyed. They are not
+ * eligible for Claim/FactSheet/SiteSpec publication.
+ */
 export function sanitizeBrandProfilePersistenceOutput(
   input: BrandProfilePersistenceOutput,
-  context: BrandProfileIdentityContext,
+  _context: BrandProfileIdentityContext,
 ): BrandProfilePersistenceOutput {
   assertNoUnresolvedCompetitors(input.competitors);
   const freeTexts = [
@@ -1269,18 +1274,6 @@ export function sanitizeBrandProfilePersistenceOutput(
       [item.key, item.value, item.evidence.quote].some(
         containsPersonalContactIdentifier,
       ),
-    ) ||
-    input.gaps.some(
-      (item) => {
-        const hintRule = gapQuestionPersonalAttributionRule(
-          context,
-          item.hint,
-        );
-        return (
-          personalGapFieldRule(item.field) !== null ||
-          (hintRule !== null && hintRule !== 'pii')
-        );
-      },
     )
   ) {
     throw new Error(
@@ -1310,11 +1303,7 @@ export function sanitizeBrandProfilePersistenceOutput(
       key: scrubPii(item.key),
       value: scrubPii(item.value),
     })),
-    gaps: input.gaps.map((item) => ({
-      ...item,
-      field: scrubPii(item.field),
-      hint: scrubPii(item.hint),
-    })),
+    gaps: input.gaps.map((item) => ({ ...item })),
   };
 }
 
@@ -1699,7 +1688,7 @@ export const BRAND_PROFILE_INPUT_SCHEMA: Record<string, unknown> = {
 /** prompt=版本化代码资产（用户数据只进标注槽位，指令区与资料区硬隔离——C2/D4）。 */
 export const BRAND_PROFILE_PROMPT_VERSION = 'brand-profile/10';
 export const BRAND_PROFILE_ROUTE_VALIDATION_VERSION =
-  'brand-profile-route-validation/8';
+  'brand-profile-route-validation/9';
 
 /**
  * 品牌档案不需要的敏感档案组（复审 F2：contact 组含邮箱/电话——数据最小化 Art.5(1)(c)，
@@ -1785,18 +1774,8 @@ function promptSources(input: BrandProfileInput): PromptEvidenceSource[] {
   return [input.intakeSource, ...input.kbSources, ...input.research];
 }
 
-const PERSONNEL_AGGREGATE_GAP_QUESTION_PATTERN =
-  /^(?:(?:what|which)\b(?=[^?\n]{0,180}\b(?:employee[- ]count|staff[- ]count|team[- ]size|headcount|number of employees)\b)[^?\n]{1,180}|how many\s+(?:employees?|staff(?: members?)?|team members?|people)\s+(?:does the company have|are there)|please\s+(?:provide|confirm)\b(?=[^?\n]{0,160}\b(?:employee[- ]count|staff[- ]count|team[- ]size|headcount|number of employees)\b)[^?\n]{1,160}|(?:can|could) you\s+(?:provide|confirm)\b(?=[^?\n]{0,160}\b(?:employee[- ]count|staff[- ]count|team[- ]size|headcount|number of employees)\b)[^?\n]{1,160}|(?:员工人数|员工总数|职工人数|团队人数|团队规模|人员数量)(?:是多少|为多少|有多少|多少))\s*[?？]$/iu;
-const PERSONNEL_AGGREGATE_ROLE_LABEL_MATCH_PATTERN =
-  /\b(?:employee|staff)[- ]+count\b/iu;
-const LATIN_PERSON_NAME_IN_TEXT_PATTERN = new RegExp(
-  `(?<![\\p{L}\\p{M}'’.-])(${LATIN_PERSON_SUBJECT_SOURCE.replace('{0,3}?', '{1,3}')})(?![\\p{L}\\p{M}'’.-])`,
-  'gu',
-);
 const SAFE_PUBLIC_TITLE_PHRASE_PATTERN =
   /^(?:[\p{L}\p{M}\p{N}'’.-]+\s+){1,5}(?:pumps?|valves?|controllers?|systems?|parts?|components?|equipment|solutions?|services?|technolog(?:y|ies)|materials?|machines?|instruments?|tools?|yokes?|flanges?|assemblies|management|engineering|manufacturing|production|automation|machining|inspection|integration|quality|safety|compliance|certifications?)$/iu;
-const PERSONAL_CONTACT_GAP_KEY_PATTERN =
-  /(?:^|_)(?:email|e_mail|phone|telephone|mobile|whatsapp|wechat)(?:$|_)/u;
 const PERSONAL_SOCIAL_HANDLE_PATTERN =
   /@[\p{L}\p{N}_](?:[\p{L}\p{N}_.-]{0,62}[\p{L}\p{N}_])?(?![\p{L}\p{N}._-])/iu;
 const PERSONAL_PROFILE_URL_PATTERN =
@@ -1819,71 +1798,6 @@ function containsPersonalContactIdentifier(text: unknown): boolean {
     PERSONAL_URI_IDENTIFIER_PATTERN.test(normalized) ||
     PERSONAL_MESSAGING_ID_PATTERN.test(normalized)
   );
-}
-
-function canonicalAttributionSubject(value: string | undefined): string {
-  return (value ?? '')
-    .normalize('NFKC')
-    .trim()
-    .replace(/\s+/gu, ' ')
-    .toLocaleLowerCase('und');
-}
-
-function canonicalGapQuestionCompanySubject(value: string | undefined): string {
-  return canonicalAttributionSubject(value).replace(
-    /^(?:how does|does|when was|when did|what does|what did|where does|where did)\s+/u,
-    '',
-  );
-}
-
-const SAFE_GENERIC_COMPANY_GAP_SUBJECTS = new Set([
-  'company',
-  'the company',
-  'business',
-  'the business',
-  'organization',
-  'the organization',
-]);
-
-function isSafeGapQuestionCompanySubject(
-  input: BrandProfileIdentityContext,
-  subject: string | undefined,
-): boolean {
-  const canonical = canonicalGapQuestionCompanySubject(subject);
-  return (
-    canonical === canonicalAttributionSubject(input.companyName) ||
-    SAFE_GENERIC_COMPANY_GAP_SUBJECTS.has(canonical)
-  );
-}
-
-function hasLikelyPersonalNameInAggregateQuestion(
-  input: BrandProfileIdentityContext,
-  text: string,
-): boolean {
-  const knownEntities = [input.companyName, ...input.products].map(
-    canonicalAttributionSubject,
-  );
-  return matchesForPattern(
-    text.normalize('NFKC'),
-    LATIN_PERSON_NAME_IN_TEXT_PATTERN,
-  ).some((match) => {
-    const subject = match[1];
-    const canonicalSubject = canonicalAttributionSubject(subject);
-    const withoutQuestionOpener = canonicalSubject.replace(
-      /^(?:does|do|did|is|are|was|were|can|could|what|which|who|how|when|where|why|please)\s+/u,
-      '',
-    );
-    return (
-      Boolean(subject) &&
-      !knownEntities.some(
-        (entity) =>
-          entity === canonicalSubject ||
-          entity === withoutQuestionOpener ||
-          entity.startsWith(`${withoutQuestionOpener} `),
-      ) &&
-      containsLikelyPersonalName('employee_count', subject)
-    );
-  });
 }
 
 function containsLikelyPersonalNameInFreeOutput(
@@ -1919,113 +1833,19 @@ function containsLikelyPersonalNameInUnboundFreeText(text: string): boolean {
   );
 }
 
-function personalGapFieldRule(
-  field: string | null | undefined,
-): string | null {
-  if (typeof field !== 'string') return null;
-  const normalized = normalizeClaimKey(field).replace(/[\s-]+/gu, '_');
-  if (PERSONNEL_AGGREGATE_KEY_PATTERN.test(normalized)) return null;
-  if (PERSONAL_CONTACT_GAP_KEY_PATTERN.test(normalized)) {
-    return 'personalContactKey';
-  }
-  return PERSONAL_EXACT_KEYS.has(normalized) ||
-    PERSONAL_ROLE_KEY_PATTERN.test(normalized) ||
-    PERSONAL_FACT_KEY_PATTERN.test(normalized)
-    ? null
-    : containsLikelyPersonalNameInUnboundFreeText(field)
-      ? 'nameSpan'
-      : null;
-}
-
-const SAFE_ENGLISH_GAP_QUESTION_SUBJECTS = new Set([
-  'who',
-  'which',
-  'what',
-]);
-const SAFE_CJK_GAP_QUESTION_SUBJECTS = new Set(['谁', '哪位', '何人']);
-
-function gapQuestionPersonalAttributionRule(
-  input: BrandProfileIdentityContext,
-  text: string | null | undefined,
-): string | null {
-  if (typeof text !== 'string') return null;
-  if (containsPersonalContactIdentifier(text)) return 'contactIdentifier';
-  if (scrubPii(text) !== text) return 'pii';
-  const isPersonnelAggregateQuestion =
-    PERSONNEL_AGGREGATE_GAP_QUESTION_PATTERN.test(
-      text.normalize('NFKC').trim(),
-    );
-  if (
-    hasLikelyPersonalNameInAggregateQuestion(input, text)
-  ) {
-    return 'nameSpan';
-  }
-  const hasRoleBoundSingleName = matchesForPattern(
-    text.normalize('NFKC'),
-    new RegExp(
-      `\\b${PERSONAL_RELATION_ROLE_SOURCE}\\b\\s*(?:[:：—-]\\s*)?(${LATIN_PERSON_SUBJECT_SOURCE})`,
-      'giu',
-    ),
-  ).some((match) => LATIN_SINGLE_NAME_PATTERN.test(match[1] ?? ''));
-  if (hasRoleBoundSingleName) return 'nameSpan';
-  const isQuestion = /[?？]\s*$/u.test(text);
-  if (isQuestion) {
-    const namedAttribution = explicitPersonalAttributionMatches(text).find(
-      (candidate) => {
-        const subject = candidate.subject?.normalize('NFKC').trim();
-        if (!subject) return false;
-        if (candidate.rule === 'cjk') {
-          return !SAFE_CJK_GAP_QUESTION_SUBJECTS.has(subject);
-        }
-        const canonical = canonicalAttributionSubject(subject);
-        return (
-          !SAFE_ENGLISH_GAP_QUESTION_SUBJECTS.has(canonical) &&
-          !isSafeGapQuestionCompanySubject(input, subject) &&
-          containsLikelyPersonalNameInUnboundFreeText(subject)
-        );
-      },
-    );
-    return namedAttribution ? namedAttribution.rule : null;
-  }
-  const match = explicitPersonalAttributionMatches(text).find(
-    (candidate) =>
-      !(
-        (candidate.rule === 'subjectAction' &&
-          isSafeGapQuestionCompanySubject(input, candidate.subject)) ||
-        (isPersonnelAggregateQuestion &&
-          candidate.rule === 'roleLabel' &&
-          PERSONNEL_AGGREGATE_ROLE_LABEL_MATCH_PATTERN.test(
-            candidate.matchedText ?? '',
-          ))
-      ),
-  );
-  if (match) return match.rule;
-  if (
-    containsForbiddenPersonalRoleToken(text, {
-      allowBrandOwner: true,
-      allowPersonnelAggregateCount: isPersonnelAggregateQuestion,
-    })
-  ) {
-    return 'roleToken';
-  }
-  return containsLikelyPersonalNameInFreeOutput(input, text)
-    ? 'nameSpan'
-    : null;
-}
-
 function routeOutputPersonalDataRule(
   input: BrandProfileIdentityContext,
   scope: string,
   text: string | null | undefined,
 ): string | null {
+  // `gaps` are tenant-authenticated internal follow-up data, not a public
+  // projection. Preserve names/contact identifiers here; publication still
+  // requires the independent Claim/FactSheet/SiteSpec authorization gates.
+  if (scope === 'gapFields' || scope === 'gapQuestions') return null;
   if (typeof text === 'string' && containsPersonalContactIdentifier(text)) {
     return 'contactIdentifier';
   }
   if (typeof text === 'string' && scrubPii(text) !== text) return 'pii';
-  if (scope === 'gapFields') return personalGapFieldRule(text);
-  if (scope === 'gapQuestions') {
-    return gapQuestionPersonalAttributionRule(input, text);
-  }
   const explicitRule = explicitPersonalAttributionRule(text);
   if (explicitRule) return explicitRule;
   if (
