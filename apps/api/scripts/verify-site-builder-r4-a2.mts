@@ -12,7 +12,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { ClaimService } from "../src/claim/claim.service";
 import { PrismaService } from "../src/prisma/prisma.service";
-import { PrismaClaimEvidenceBridgeRepository } from "../src/site-builder/claim-evidence-bridge.prisma";
+import {
+  PrismaClaimEvidenceBridgeRepository,
+  claimTypeForBrandFact,
+} from "../src/site-builder/claim-evidence-bridge.prisma";
 import { ClaimEvidenceBridgeService } from "../src/site-builder/claim-evidence-bridge.service";
 
 function check(condition: unknown, message: string): asserts condition {
@@ -117,17 +120,47 @@ async function main(): Promise<void> {
       "app_user has SELECT+INSERT only on the immutable bridge",
     );
     const mutationPrivileges = await owner.$queryRaw<
-      { evidenceUpdate: boolean; evidenceDelete: boolean; claimDelete: boolean }[]
+      {
+        evidenceUpdate: boolean;
+        evidenceDelete: boolean;
+        claimDelete: boolean;
+        brandProfileUpdate: boolean;
+        evidenceRefUpdate: boolean;
+        sourceSnapshotUpdate: boolean;
+      }[]
     >`
       SELECT has_table_privilege('app_user', 'evidence', 'UPDATE') AS "evidenceUpdate",
              has_table_privilege('app_user', 'evidence', 'DELETE') AS "evidenceDelete",
-             has_table_privilege('app_user', 'claim', 'DELETE') AS "claimDelete"`;
+             has_table_privilege('app_user', 'claim', 'DELETE') AS "claimDelete",
+             has_table_privilege('app_user', 'brand_profile', 'UPDATE') AS "brandProfileUpdate",
+             has_table_privilege('app_user', 'brand_profile_evidence_ref', 'UPDATE') AS "evidenceRefUpdate",
+             has_table_privilege('app_user', 'site_evidence_source_snapshot', 'UPDATE') AS "sourceSnapshotUpdate"`;
     check(
       mutationPrivileges[0]?.evidenceUpdate === false &&
         mutationPrivileges[0]?.evidenceDelete === false &&
-        mutationPrivileges[0]?.claimDelete === false,
-      "app_user cannot update/delete Evidence or delete Claim",
+        mutationPrivileges[0]?.claimDelete === false &&
+        mutationPrivileges[0]?.brandProfileUpdate === false &&
+        mutationPrivileges[0]?.evidenceRefUpdate === false &&
+        mutationPrivileges[0]?.sourceSnapshotUpdate === false,
+      "app_user cannot mutate public Evidence or frozen BrandProfile provenance",
     );
+    for (const [key, value] of [
+      ["certifications", "ISO 9001 certified"],
+      ["质量体系", "通过ISO9001标准"],
+      ["合规", "符合CE"],
+      ["efficiency", "Efficiency reaches 95%"],
+      ["operating_temperature", "Operating temperature 80℃"],
+      ["tank_volume", "Tank volume 1.5 m³"],
+      ["rated_torque", "Rated torque 50 N·m"],
+      ["main_products", "Industrial pumps"],
+    ] as const) {
+      const databaseType = await owner.$queryRaw<{ claimType: string }[]>`
+        SELECT claim_type_for_brand_fact_v1(${key}, ${value}) AS "claimType"`;
+      check(
+        databaseType[0]?.claimType === claimTypeForBrandFact(key, value),
+        `TypeScript/PostgreSQL claim classifier parity: ${key}`,
+      );
+    }
 
     console.log("② isolated tenant graph and exact frozen facts");
     await owner.workspace.createMany({
@@ -353,6 +386,9 @@ async function main(): Promise<void> {
       sourceRole: "fact_candidate" | "research_hint";
       claimType: string;
       claimStatement: string;
+      factKey?: string;
+      factValue?: string;
+      frozenClaimType?: string;
       provenanceAssetId?: string;
       evidenceAssetId?: string;
       evidenceVersion?: number;
@@ -362,8 +398,8 @@ async function main(): Promise<void> {
       const evidenceRefId = randomUUID();
       const claimId = randomUUID();
       const evidenceId = randomUUID();
-      const factKey = "maximum_pressure";
-      const factValue = "Maximum pressure: 400 bar";
+      const factKey = input.factKey ?? "maximum_pressure";
+      const factValue = input.factValue ?? "Maximum pressure: 400 bar";
       const snapshotText = `Verified ${factValue.toLowerCase()}.`;
       const quote = factValue.toLowerCase();
       const quoteStart = snapshotText.indexOf(quote);
@@ -401,7 +437,7 @@ async function main(): Promise<void> {
               {
                 key: factKey,
                 value: factValue,
-                claimType: "param",
+                claimType: input.frozenClaimType ?? "param",
                 evidence: {
                   version: input.evidenceVersion ?? 2,
                   evidenceRefId,
@@ -805,6 +841,42 @@ async function main(): Promise<void> {
       ownerEvidenceMutationRejected,
       "owner cannot mutate bridged Evidence provenance",
     );
+    let ownerProfileMutationRejected = false;
+    try {
+      await owner.brandProfile.update({
+        where: { id: firstBridge.brandProfileId },
+        data: { researchDegraded: true },
+      });
+    } catch {
+      ownerProfileMutationRejected = true;
+    }
+    check(ownerProfileMutationRejected, "owner cannot mutate bridged BrandProfile");
+    let ownerRefMutationRejected = false;
+    try {
+      await owner.brandProfileEvidenceRef.update({
+        where: { id: firstBridge.evidenceRefId },
+        data: { factKey: "mutated_fact_key" },
+      });
+    } catch {
+      ownerRefMutationRejected = true;
+    }
+    check(ownerRefMutationRejected, "owner cannot mutate bridged EvidenceRef");
+    const bridgedRef = await owner.brandProfileEvidenceRef.findUniqueOrThrow({
+      where: { id: firstBridge.evidenceRefId },
+    });
+    let ownerSnapshotMutationRejected = false;
+    try {
+      await owner.siteEvidenceSourceSnapshot.update({
+        where: { id: bridgedRef.sourceSnapshotId },
+        data: { sourceKey: "mutated-source-key" },
+      });
+    } catch {
+      ownerSnapshotMutationRejected = true;
+    }
+    check(
+      ownerSnapshotMutationRejected,
+      "owner cannot mutate bridged source snapshot",
+    );
 
     const exactRef = await owner.brandProfileEvidenceRef.findUniqueOrThrow({
       where: { id: firstBridge.evidenceRefId },
@@ -940,6 +1012,28 @@ async function main(): Promise<void> {
         errorDetails(metadataMismatchRejected),
       ),
       "database binds embedded EvidenceRefV2 metadata to frozen source/ref",
+    );
+
+    const forgedClassificationFixture = await createDirectBridgeFixture({
+      version: 15,
+      sourceRole: "fact_candidate",
+      factKey: "certifications",
+      factValue: "ISO 9001 certified",
+      frozenClaimType: "capability",
+      claimType: "capability",
+      claimStatement: "ISO 9001 certified",
+    });
+    let forgedClassificationRejected: unknown;
+    try {
+      await insertDirectBridge(forgedClassificationFixture);
+    } catch (error) {
+      forgedClassificationRejected = error;
+    }
+    check(
+      /frozen Claim classification does not match fact semantics/.test(
+        errorDetails(forgedClassificationRejected),
+      ),
+      "database rejects a forged non-certification type for certification fact",
     );
 
     let crossTenantRejected = false;
