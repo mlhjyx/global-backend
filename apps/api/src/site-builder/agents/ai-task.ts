@@ -35,6 +35,8 @@ export interface SiteBuilderTaskDefinition<TIn, TOut> {
   buildPrompt: (input: TIn) => string;
   /** 确定性任务硬门；抛错即拒绝本模型产物并进入回退链。 */
   validateOutput?: (input: TIn, output: TOut) => void;
+  /** 允许网关把首次硬门拒绝原因反馈给同一模型做唯一一次修复。 */
+  repairTaskOutput?: boolean;
   system?: string;
   /** 供 TS 侧标注输出类型（运行时校验靠 outputSchema）。 */
   __out?: TOut;
@@ -181,6 +183,7 @@ export async function runAiTask<TIn, TOut>(
                     def.validateOutput?.(rawInput, output as TOut),
                 }
               : {}),
+            ...(def.repairTaskOutput ? { repairTaskOutput: true } : {}),
             model,
             maxTokens: route.maxTokens,
             maxCostCents: route.maxCostCents,

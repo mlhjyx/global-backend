@@ -60,7 +60,8 @@ import {
  * Adds the gateway-level guarantees business code relies on:
  * - every call is traced (ai_trace + usage_ledger, PRD 9.10) — fire-and-forget
  * - structured outputs are validated against the task schema, with ONE repair
- *   retry that feeds the validation errors back to the model (PRD 9.6)
+ *   retry that feeds schema errors, or an explicitly opted-in task-gate error,
+ *   back to the same model (PRD 9.6)
  */
 @Injectable()
 export class RouterModelGateway extends ModelGateway {
@@ -113,14 +114,32 @@ export class RouterModelGateway extends ModelGateway {
       const first = await p.generateStructured<T>(input, ctx);
       if (p.id === 'stub') return first; // stub 输出不参与 schema 校验（dev 兜底）
       const check = checkAgainstSchema(input.schema, first.data);
-      if (check.valid) return validateTaskOutput(first);
-      // 修复重试：把校验错误反馈给模型，仅一次（PRD 9.6 校验-修复循环）。
+      let repairReason: string;
+      let repairKind: 'JSON Schema' | '任务确定性硬门';
+      if (check.valid) {
+        try {
+          return validateTaskOutput(first);
+        } catch (error) {
+          if (
+            !input.repairTaskOutput ||
+            !(error instanceof TaskOutputValidationError)
+          ) {
+            throw error;
+          }
+          repairKind = '任务确定性硬门';
+          repairReason = error.message;
+        }
+      } else {
+        repairKind = 'JSON Schema';
+        repairReason = (check.errors ?? []).join('\n');
+      }
+      // 修复重试：schema 或任务硬门只共享这唯一一次调用，绝不形成开放循环。
       let repair: ModelResult<T>;
       try {
         repair = await p.generateStructured<T>(
           {
             ...input,
-            prompt: `${input.prompt}\n\n上一次输出未通过 JSON Schema 校验，错误：\n${(check.errors ?? []).join('\n')}\n请修正后重新只输出合法 JSON。`,
+            prompt: `${input.prompt}\n\n上一次输出未通过${repairKind}校验，错误：\n${repairReason}\n请只修正被拒字段，不得新增、猜测或放宽任何事实；重新只输出同时通过 JSON Schema 和任务硬门的合法 JSON。`,
           },
           ctx,
         );

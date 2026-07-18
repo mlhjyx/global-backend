@@ -1981,6 +1981,7 @@ export const BRAND_PROFILE_TASK: SiteBuilderTaskDefinition<
   BrandProfileOutput
 > = {
   id: 'site_builder.brand_profile',
+  repairTaskOutput: true,
   inputSchema: BRAND_PROFILE_INPUT_SCHEMA,
   outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA,
   buildPrompt: buildBrandProfilePrompt,

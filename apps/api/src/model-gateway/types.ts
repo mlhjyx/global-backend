@@ -61,6 +61,12 @@ export interface GenerateStructuredInput {
    * artifact remains an observable, billable failed attempt.
    */
   validateOutput?: (data: unknown) => void;
+  /**
+   * Permit the router's single structured-output repair call to correct a
+   * schema-valid artifact rejected by the deterministic task gate. The repair
+   * remains subject to the same schema and task gate; callers must opt in.
+   */
+  repairTaskOutput?: boolean;
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Per-call ceiling from the resolved task policy; takes precedence over legacy registry defaults. */
