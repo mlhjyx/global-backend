@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
+import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../src/model-gateway/model-transports';
 import {
   OpenAICompatibleProvider,
   type GatewayModelTransport,
@@ -54,18 +55,8 @@ const CAPABILITY_PROBE_SCHEMA = {
   properties: { status: { type: 'string', const: 'ok' } },
 } as const;
 
-/**
- * These are evaluation-only protocol selections, established by real gateway
- * probes. Production keeps its existing provider configuration until a later
- * per-task promotion PR explicitly activates a tested route.
- */
-const EVALUATION_TRANSPORTS: Readonly<Record<string, GatewayModelTransport>> = Object.freeze({
-  'gpt-5.6-terra': 'openai-responses',
-  'claude-sonnet-5': 'anthropic-messages',
-});
-
 function transportForCandidate(model: string): GatewayModelTransport {
-  return EVALUATION_TRANSPORTS[model] ?? 'openai-chat-completions';
+  return VERIFIED_GATEWAY_MODEL_TRANSPORTS[model] ?? 'openai-chat-completions';
 }
 
 interface EvalUsage {
@@ -200,7 +191,7 @@ function gatewayFor(model: string): RouterModelGateway {
       baseUrl: required('MODEL_GATEWAY_URL'),
       apiKey: required('MODEL_GATEWAY_KEY'),
       model,
-      modelTransports: EVALUATION_TRANSPORTS,
+      modelTransports: VERIFIED_GATEWAY_MODEL_TRANSPORTS,
     }),
   );
   return new RouterModelGateway(new ModelRouter(registry));

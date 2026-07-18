@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-18 · MODEL-1 BrandProfile 首个逐任务晋级
+
+- 真实 new-api 同形 6×2 评测固定 prompt/schema/evaluator 与协议：Terra/Responses、Sonnet/Messages 均 12/12 accepted、0 hard failure；现役 DeepSeek Pro/Chat 为 10/12，两个 `lab-instrument-rich` attempt 都漏必需 `96-well` 且有事实被证据门拒绝。候选/基线报告 SHA-256 与 TeamoRouter 价格快照写入 evidence id `model1-brand-profile-20260718-v1`；Terra accepted-artifact 单位成本 $0.00210425，比含两次拒绝尝试的 DeepSeek 基线 $0.004428822 低约 52.49%，故 owner 批准 Terra 主、Sonnet 回退。
+- 生产 provider 复用已验证的 model→transport 显式映射；BrandProfile `promotedRoute` 有 provider/schema/截断/超时回退及 EvidenceRef v2 任务硬门，失败 usage 不丢。`SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE=true` 可回冻结 DeepSeek Pro→GLM，原紧急 model/fallback override 优先级不变，route policy/trace 记录实际快照与来源。
+- 仅 BrandProfile 代码路由晋级；其余 6 个文本 task、图片和视频均未继承。GPT Image 2 单次 `/images/generations` 真探不等于 MediaGateway、edit/mask 或生产消费者上线；本记录也不代表生产部署、真实租户 canary、locale/视觉覆盖或 R4-B-min 持久成本真值完成。
+
 ## 2026-07-17 · Site Builder R3-B2（局部 SiteSpec 消费与单调 Build 进度）
 
 - `scope=page|section` 与 `options.pages` 现在冻结请求时的 active `baseVersionId` 并做确定性局部合并：只替换命中的 page/block 及其引用文案键，未选择页面、全站主题、assets 与其余 CopyBundle 保持不变；发布时以 active pointer CAS 防止覆盖并发人工编辑。新执行先渲染到 run-scoped staging，再移入不直接服务的 immutable 本地版本目录；数据库提交后以单次原子 symlink rename 切换 `.active/<slug>`，因此 CAS/事务失败不泄露候选且成功切换无目录缺口。Site 级 advisory lock 覆盖最终数据库复核与 pointer rename；旧 Activity retry 若发现更新 build 已接管，只丢弃自己的 pending link，不会回写旧预览。提交后进程崩溃由 Temporal Activity retry 根据 durable artifactKey 重建 pending pointer；生产对象存储 Release、跨节点恢复与回收仍归 R1-min。缺目标 404、重复目标/脏 active spec 422。`stylePreset` 属全站副作用，禁止与局部请求组合。非 `en` 仍 422，真实多语种 CopyBundle/Renderer 路径归 M1-d，不以英文复制冒充翻译。

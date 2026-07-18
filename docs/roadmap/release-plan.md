@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-17 MF0-A/B + M1-c + R3-A + R3-B1/B2 + R4-A1 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-18 MF0-A/B + M1-c + R3-A + R3-B1/B2 + R4-A1 + MODEL-1 BrandProfile 更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -27,7 +27,7 @@
 
 并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 
-**MODEL 路由泳道（2026-07-17 决策同步，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；它不改 `task-routes.ts` 的 currentRoute。先以独立小 PR 将同一自托管 BGE-M3 的应用调用改经 new-api（保留 1024 维/`embed_version`，真 endpoint + 回滚验证），再按消费者逐项做 MODEL-1 capability probe 与 6–12 样本评测；文本、图片、视频各自独立晋级/回退，禁止一次 mega switch。M3 视频可纳入 Seedance 2.0 目标路由，但不进入 M1 关键路径。
+**MODEL 路由泳道（2026-07-18，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；BGE-M3 应用经 new-api 已完成。MODEL-0 registry 与 BrandProfile 评测基座已落；首个 MODEL-1 逐任务晋级以同形 6×2 报告证明 Terra/Responses、Sonnet/Messages 均 12/12，而 DeepSeek Pro/Chat 10/12，且 accepted-artifact 成本可核对，因此只把 `brand_profile` 切为 Terra→Sonnet，配任务硬门、原生协议、一键回 DeepSeek→GLM 与紧急 override。其他 6 个文本 task 继续按各自消费者补 capability/task-shaped 评测后独立晋级；图片/视频仍只登记 target，不因 GPT Image 2 单次探针或配置字符串可见而上线。禁止 mega switch；真实外部流量/高风险部署前走 MODEL-2。MODEL 泳道补账完成后仍回到 **R4-A2 → R4-B-min**。
 
 ---
 

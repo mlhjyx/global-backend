@@ -1,7 +1,7 @@
 # Site Builder Agent 详细设计 v1
 
 > 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型路由）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent（对应 as-built 7 个 task id，见 §0.4）。**
-> Agent 卡**只绑定 `modelProfile`，不绑定供应商型号**。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 `currentRoute` 为准（见 §0.4）；ADR-020 型号组合是已批准 `targetCandidate`，须经 ADR-016 的能力探针/评测/晋级后才成为 promotedRoute。换型号只改 ModelPolicyRegistry，并保存 model snapshot；不得散落回卡片。
+> Agent 卡**只绑定 `modelProfile`，不绑定供应商型号**。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 active route 为准（见 §0.4）；ADR-020 是已批准 target portfolio，但只有 BrandProfile 已经逐任务评测成为代码级 `promotedRoute`，其余仍待。换型号只改 ModelPolicyRegistry，并保存 model snapshot；不得散落回卡片。
 > **卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
 
 ## 0. 统一运行时契约（AiTask 基类，所有 agent 共用）
@@ -33,7 +33,7 @@ AiTask<I, O>：
 
 task 只引用稳定的 **`modelProfile`**（16 档：`deterministic` / `structured.default` / `reasoning.high` / `copy.premium` / `text.bulk` / `multimodal.review` / `text.summary` / `image.precise_edit` / `image.bulk.creative` / `image.premium.design` / `video.primary` / `video.premium` / `speech.production` / `transcription` / `moderation.media` / `embedding.private`），由 registry 映射到当下 snapshot。换型号不改 Agent 卡；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 以支持历史重放与回归定位。
 
-ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonnet-5`，`reasoning.high → gpt-5.6-sol / deterministic safe blueprint`，`copy.premium → claude-sonnet-5 / gpt-5.6-terra`，`multimodal.review|text.summary → gemini-3.5-flash / gpt-5.6-terra`；图片/视频/embedding 的映射见 02 §6。该映射不是 §0.4 的 as-built 替代品。
+ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonnet-5`，`reasoning.high → gpt-5.6-sol / deterministic safe blueprint`，`copy.premium → claude-sonnet-5 / gpt-5.6-terra`，`multimodal.review|text.summary → gemini-3.5-flash / gpt-5.6-terra`；图片/视频/embedding 的映射见 02 §6。profile target 不是整档自动切换指令；目前只有 BrandProfile 用该 structured.default 组合完成逐 task 晋级。
 
 ### 0.3 每次执行记录（可观测，v3.2 §5.3 回写）
 
@@ -41,19 +41,19 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 
 ### 0.4 as-built 路由表与新增 task 边界（v3.2 §2.1/§23.5 回写）
 
-**as-built（`task-routes.ts`，7 个 task id，`currentRoute`，非永久终选）**：
+**as-built（`task-routes.ts`，7 个 task id，逐 task active route，非永久终选）**：
 
-| task id | 对应卡 | current primary | fallbacks | maxTokens / timeout |
+| task id | 对应卡 | active primary | fallbacks | state / maxTokens / timeout |
 |---|---|---|---|---|
-| `site_builder.brand_profile` | 卡2 | deepseek-v4-pro | glm-5.2 | 12k / 150s |
-| `site_builder.copy` | 卡4 | deepseek-v4-pro（reasoning low） | glm-5.2, doubao-seed-2.0-pro | 4k / 120s |
-| `site_builder.design_spec` | 卡6（生成） | minimax-m3 | doubao-seed-2.0-pro | 4k / 120s |
-| `site_builder.assemble` | 卡7（组装） | glm-5.2 | deepseek-v4-pro | 16k / 180s |
-| `site_builder.assembly_fix` | 卡7（修复） | glm-5.2 | deepseek-v4-pro | 8k / 180s |
-| `site_builder.qa_summarize` | 卡8 | deepseek-v4-flash | doubao-seed-2.0-lite | 3k / 90s |
-| `site_builder.seo_review` | 卡9 | deepseek-v4-flash | doubao-seed-2.0-lite | 3k / 90s |
+| `site_builder.brand_profile` | 卡2 | gpt-5.6-terra（Responses） | claude-sonnet-5（Messages） | promoted；12k / 150s；可回 DeepSeek Pro→GLM |
+| `site_builder.copy` | 卡4 | deepseek-v4-pro（reasoning low） | glm-5.2, doubao-seed-2.0-pro | current；4k / 120s |
+| `site_builder.design_spec` | 卡6（生成） | minimax-m3 | doubao-seed-2.0-pro | current；4k / 120s |
+| `site_builder.assemble` | 卡7（组装） | glm-5.2 | deepseek-v4-pro | current；16k / 180s |
+| `site_builder.assembly_fix` | 卡7（修复） | glm-5.2 | deepseek-v4-pro | current；8k / 180s |
+| `site_builder.qa_summarize` | 卡8 | deepseek-v4-flash | doubao-seed-2.0-lite | current；3k / 90s |
+| `site_builder.seo_review` | 卡9 | deepseek-v4-flash | doubao-seed-2.0-lite | current；3k / 90s |
 
-- **卡片旧标注（gemini-3.1-pro / claude-sonnet-5 / gpt-image-2 等）与 as-built 路由不一致**：以本表为准；回退链=合法路由（AiTask 基类逐模型尝试），非静默降级。
+- **卡片旧标注（gemini-3.1-pro / gpt-image-2 等）与 as-built 路由不一致**：以本表为准；回退链=合法路由（AiTask 基类逐模型尝试），非静默降级。BrandProfile 的 EvidenceRef v2 任务硬门失败也会进入 Sonnet fallback。
 - **未落地为 task 的卡**：卡3 imagePipeline（M1-c 纯 Sharp 确定性，无模型 task；生成式媒体 task 进 M1-c2/M3，引 ADR-018）、卡5 motionVideo（M3）、卡6 的 **aestheticReview 目前无独立路由**——`site_builder.aesthetic_review` 到 M1-f 才增（v3.2 §2.1）。
 - **新增 task 复用 AiTask/MediaGateway，不新增自治框架**（v3.2 §23.5）：M1-f 增 `site_builder.aesthetic_review`；M1-d 可增 `site_builder.localize`；媒体 image/video/audio task 进 M1-c2/M3。均走同一 AiTask 基类 + MediaGateway，**不另建 Agent runtime**。
 

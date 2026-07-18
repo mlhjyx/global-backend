@@ -38,7 +38,9 @@
 
 作用 = 尽快发现**结构、事实、响应式与"没效果"问题**；**不**用于宣称统计显著、永久终选或跨行业胜率。
 
-**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 EU 目标市场 rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；每个候选先经过真实结构化能力 probe，probe 与每个 fixture attempt 均继承该 Task 路由的 `timeoutMs`，而不是套一个全局秒数；失败即记录并跳过整个 fixture 矩阵。最终 JSON 报告只在完整矩阵结束后生成，避免半途结果被误用；运行中的每个 probe/fixture 会以 JSON Lines 写入 stderr，供操作员确认仍有进展。**传输协议也是候选契约的一部分**：2026-07-18（Asia/Shanghai；UTC 日期为 2026-07-17）真网关对照已证明 Terra 的 `chat/completions` 会间歇给出 200/`stop`/role-only 空正文，而同一任务通过 `responses` 有可解析嵌套正文；Sonnet 的原生 `messages` 同样可返回 text（thinking 块不进入产物）。因此报告逐 probe/run 固定 transport；只允许已实测的 `gpt-5.6-terra → openai-responses`、`claude-sonnet-5 → anthropic-messages` 进入本次评测，未登记模型仍默认 OpenAI Chat，**这不是生产启用或能力声明**。BrandProfile 当前没有 locale 输入，故该样本**不**构成 de-DE 本地化验证。桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
+**当前 as-built 的最小子集**：6 个 `brand-profile` fixture 已提交在 `apps/api/test/fixtures/golden-companies/brand-profile/`，均为无个人数据的合成文本资料，且至少包含一个 EU 目标市场 rich 样本。它们可用生产 BrandProfile AiTask 与证据门执行模型候选评测；每个候选先经过真实结构化能力 probe，probe 与每个 fixture attempt 均继承该 Task 路由的 `timeoutMs`，而不是套一个全局秒数；失败即记录并跳过整个 fixture 矩阵。最终 JSON 报告只在完整矩阵结束后生成，避免半途结果被误用；运行中的每个 probe/fixture 会以 JSON Lines 写入 stderr，供操作员确认仍有进展。**传输协议也是候选契约的一部分**：2026-07-18（Asia/Shanghai；UTC 日期为 2026-07-17）真网关对照已证明 Terra 的 `chat/completions` 会间歇给出 200/`stop`/role-only 空正文，而同一任务通过 `responses` 有可解析嵌套正文；Sonnet 的原生 `messages` 同样可返回 text（thinking 块不进入产物）。因此报告逐 probe/run 固定 transport；只允许已实测的 `gpt-5.6-terra → openai-responses`、`claude-sonnet-5 → anthropic-messages` 进入本次评测，未登记模型仍默认 OpenAI Chat。#147 只建立协议/评测证据，未启用生产；后续 BrandProfile 独立晋级才把同一已验证映射注入生产 provider。BrandProfile 当前没有 locale 输入，故该样本**不**构成 de-DE 本地化验证。桌面/移动截图、视觉偏好、RTL smoke 以及其余 AI Task 的 fixture 仍是后续消费者出现后的工作，不能由这 6 个文本 fixture 冒充覆盖。
+
+**2026-07-18 BrandProfile 手工晋级记录（代码级，非生产部署声明）**：候选锁定报告 `site-builder-model1-brand-profile-report/v3` 的 SHA-256=`5e74deedad9c192ce4bb39b25496d69a6d8d81a83cf8a552f49c24a39682c49a`；同一 prompt/schema/evaluator 下，Terra/Responses 与 Sonnet/Messages 均为 **12/12 accepted、0 hard failure**，P95 分别 41,217/36,237ms。现役 DeepSeek Pro/Chat 同形基线报告 SHA-256=`7b3152b5b39caf5006af90bbc917b5a114ff2843ca039f3c69c78b8b15eeedf9`，为 **10/12 accepted、2 hard failures、P95 57,415ms**；两次失败均在 `lab-instrument-rich` 丢失必需 `96-well` 事实并产生 1 个被证据门拒绝的 fact。价格快照取自 2026-07-18 的 `https://teamorouter.com/zh/pricing`：Terra 输入/输出 $0.25/$1.50、Sonnet $0.54/$2.70、DeepSeek Pro $0.435/$0.87（每 1M tokens）。Terra 12 件 accepted artifact 合计 $0.025251、单位 $0.00210425；Sonnet 合计 $0.11718594；DeepSeek 基线含两次拒绝的尝试成本为 $0.04428822、每件 accepted artifact $0.004428822，因此 Terra 单位成本约低 **52.49%**。故按“硬门全过后最低 accepted-artifact 成本”选择 **Terra 主、Sonnet 回退**。registry 固定 evidence id=`model1-brand-profile-20260718-v1`；主选 provider/schema/截断/超时或 BrandProfile EvidenceRef v2 硬门失败即进入 Sonnet，`SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE=true` 可回到 DeepSeek Pro→GLM。其他 6 个文本 task 与全部图片/视频仍未晋级；本记录不宣称部署、真实租户流量、视觉/locale 覆盖或 R4-B-min 持久成本真值已完成。
 
 ### 1.2 视觉子集：6 扩 12（M1-g）
 
@@ -219,7 +221,7 @@ export interface DesignEvaluation {
 
 ### 3.2 MODEL-1 / MODEL-2 分期
 
-- **MODEL-1（候选接通时）**：真实 endpoint 先跑 **capability probe（失败即停）**，不把官方规格当租户可用事实；probe 同时验证**模型 × 协议 × 响应字段映射**，不能把 HTTP 200 或 `/v1/models` 可见当作结构化能力；每 task 用 **6–12 代表样本 × 固定 prompt/schema/rubric × 2 次**，**先判 schema/事实/身份/延迟/成本，再做偏好比较**；通过者 = `evaluatedCandidate`（保留报告，不进用户路径）。默认晋级原则 = **"满足所有硬门的最低 accepted-artifact 成本"**，只有高价值页面证明可见质量增益才用 premium。
+- **MODEL-1（候选接通/无真实外部流量的代码级晋级）**：真实 endpoint 先跑 **capability probe（失败即停）**，不把官方规格当租户可用事实；probe 同时验证**模型 × 协议 × 响应字段映射**，不能把 HTTP 200 或 `/v1/models` 可见当作结构化能力；每 task 用 **6–12 代表样本 × 固定 prompt/schema/rubric × 2 次**，**先判 schema/事实/身份/延迟/成本，再做偏好比较**。报告完成默认只得到 `evaluatedCandidate`；只有任务硬门、相对现役质量/成本门、owner 明确批准、生产协议映射、失败门和任务级 rollback 同时具备，才允许用独立 PR 手工写成 `promotedRoute`，绝不自动晋级。默认选择原则 = **"满足所有硬门的最低 accepted-artifact 成本"**，只有高价值页面证明可见质量增益才用 premium。
 - **MODEL-2（有真实流量或高风险生产切换前）**：扩至 **≥ 30 样本 × 3 次 + 100% shadow**；经批准进 **5%→25%→100% canary**（每档样本/时间门由当时流量与风险写入 ADR，不假装已有统计基础）；任一事实/身份硬失败、P95、provider error 或 accepted-cost regression **触发自动回 `promotedRoute`**。
 
 ### 3.3 全阶段硬门阈值（6 条）
@@ -236,7 +238,7 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 
 ### 3.5 晋级判定
 
-启动集只能把候选标为 `evaluatedCandidate`。成为 `promotedRoute` 前必须（v3.2 §27.8）：① 永久硬门全过；② 主要质量显著优于现路由，或质量非劣且 accepted-artifact 成本更低，或解锁必要 capability；③ 开工时 ADR 明确样本量/成本预算/流量档/回退阈值/owner；④ 报告按 **task / locale / archetype / 资料完整度 / provider failure 切片**，不能用总平均掩盖高风险子集。**"最贵/最新"不是晋级理由**。
+启动集报告本身只能把候选标为 `evaluatedCandidate`。成为 `promotedRoute` 前必须（v3.2 §27.8）：① 永久硬门全过；② 主要质量显著优于现路由，或质量非劣且 accepted-artifact 成本更低，或解锁必要 capability；③ 开工时 ADR 明确样本量/成本预算/流量档/回退阈值/owner；④ 报告按 **task / locale / archetype / 资料完整度 / provider failure 切片**，不能用总平均掩盖高风险子集；⑤ 生产 transport、失败门、可回滚开关与实际 route snapshot 一并落地。**"最贵/最新"不是晋级理由**。BrandProfile 的上述晋级记录满足当前合成文本子集门，但在真实租户流量或高风险部署前仍须进入 MODEL-2，不能把代码合并冒充生产 canary 完成。
 
 ### 3.6 Judge 反串谋与可重放
 
@@ -349,8 +351,8 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 - [ ] 6 Bootstrap fixture ≥4/6 成对偏好胜出，性能/事实/a11y 无回退；扩 12 后设多人盲测门。
 
 ### DoD-4 模型、运维与公开发布前门
-- [ ] MODEL-0 保持 currentRoute；Agent 卡不散落型号。（ADR-016）
-- [ ] MODEL-1 候选完成 capability probe + 6-12 样本报告；仅 evaluatedCandidate 可申请 30×3/shadow/canary，未批不改 promotedRoute。
+- [x] MODEL-0 的 profile/能力/策略 registry 已落；Agent 卡不散落型号。（ADR-016）
+- [x] BrandProfile 完成 capability probe + 6×2 候选/现役同形报告并经 owner 批准为代码级 `promotedRoute`；有任务失败门、原生协议与 rollback。其余 task 仍逐项待评测，不能继承本结论。
 - [ ] 每 Release 可追溯 model snapshot/routePolicy/prompt/schema/rubric/accepted-artifact cost。
 - [ ] PublishReview / 域名 ownership+tombstone / 询盘隐私+滥用 / Claim 过期维护 / taken-down+appeal 在首次公开发布前可用。（06）
 - [ ] Readdy/字体/图标/图片/视频/音乐许可来源撤权可审计；Tier B 原始输出不入生产 RAG/训练。（ADR-019）

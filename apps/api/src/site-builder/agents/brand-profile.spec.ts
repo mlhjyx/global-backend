@@ -555,6 +555,31 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     );
   });
 
+  it('任务级失败门拒绝无法绑定冻结来源的 fact，供 AiTask 切到 Sonnet fallback', () => {
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        valueProps: [],
+        glossary: [],
+        keywords: [],
+        differentiators: [],
+        competitors: [],
+        factSheet: [
+          {
+            key: 'business_role',
+            value: 'Manufacturer',
+            evidence: {
+              sourceType: 'intake',
+              sourceId: 'unknown-source',
+              contentHash: 'f'.repeat(64),
+              quote: 'Acme is a manufacturer',
+            },
+          },
+        ],
+        gaps: [],
+      }),
+    ).toThrow(/hard gate rejected.*evidence_source_mismatch/);
+  });
+
   it('Evidence 2.0 prompt exposes only frozen source IDs/hashes and requires exact quotes for every fact', () => {
     const prompt = buildBrandProfilePrompt({
       ...input,

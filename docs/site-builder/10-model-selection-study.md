@@ -5,6 +5,8 @@
 > 🔴 **治理定位**：模型选型分状态治理见 §0.2（四态路由 + Agent 绑定 ModelProfile，决策见 ADR-016）。本文的"主力/首选/升级位"是**评测队列候选或已接通 currentRoute，非生产终选**；晋级只经评测（Golden Set 回归 + 成本/质量门），非采购承诺或永久定档。
 >
 > **环境迁移说明（2026-07-16）**：正文的本地实测产生于旧 Mac 会话，只保留为 dated evidence；当前开发根目录是 `/global/backend`，网关通道/价格/额度均为活动配置，不能把旧探测结果当 Ubuntu 当前可用性。运行时事实只认 `task-routes.ts` 的 `currentRoute`，候选需在当前环境重新探活与回归后才能晋级。
+>
+> **2026-07-18 supersession**：本研究的“不改 currentRoute/未做效果实测”只描述 2026-07-17 当时的 target 决策。随后 BrandProfile 已在 Ubuntu 当前 new-api 上完成同形 6×2：Terra/Responses 与 Sonnet/Messages 均 12/12，DeepSeek Pro/Chat 基线 10/12，并按成本/质量、失败门与 rollback 经 owner 批准为首个代码级 promotedRoute。其他 task 和媒体仍不得继承该结果；现役继续只认 `task-routes.ts`。
 
 ## 0A. 2026-07-17 已批准方案 1：质量优先目标组合（ADR-020）
 

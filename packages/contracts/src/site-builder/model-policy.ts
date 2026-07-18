@@ -58,6 +58,16 @@ export interface ModelCurrentRoute {
   route: ModelRouteSnapshot;
 }
 
+/** A task route that passed its recorded promotion gate and is now active. */
+export interface ModelPromotedRoute {
+  state: 'promotedRoute';
+  lifecycle: 'active';
+  route: ModelRouteSnapshot;
+  promotionEvidenceId: string;
+}
+
+export type ModelActiveRoute = ModelCurrentRoute | ModelPromotedRoute;
+
 /** Candidate registration is deliberately not a traffic-switch instruction. */
 export type ModelCandidateActivation = 'registry_only' | 'requires_task_evaluation' | 'requires_media_gateway';
 
@@ -70,7 +80,7 @@ export interface ModelCandidateRoute {
   notes?: string;
 }
 
-export const SITE_BUILDER_MODEL_POLICY_VERSION = 'site-builder-model-policy/v1' as const;
+export const SITE_BUILDER_MODEL_POLICY_VERSION = 'site-builder-model-policy/v2' as const;
 
 /**
  * Immutable-at-execution evidence of the resolved policy. `route` is the
@@ -79,9 +89,11 @@ export const SITE_BUILDER_MODEL_POLICY_VERSION = 'site-builder-model-policy/v1' 
 export interface ModelExecutionPolicySnapshot {
   policyVersion: string;
   profile: string;
-  routeState: 'currentRoute';
+  routeState: 'currentRoute' | 'promotedRoute';
   lifecycle: 'active';
-  source: 'registry' | 'env_override';
+  source: 'registry' | 'env_override' | 'rollback_override';
+  /** Present only when the selected base policy is a recorded promotion. */
+  promotionEvidenceId?: string;
   dataPolicy: ModelDataPolicy;
   maxCostCents: number;
   route: ModelRouteSnapshot;

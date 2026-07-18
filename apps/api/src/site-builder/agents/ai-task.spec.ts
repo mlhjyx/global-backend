@@ -161,6 +161,35 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(contexts.map((ctx) => ctx.modelPolicy?.fallbackIndex)).toEqual([0, 1]);
   });
 
+  it('任务级确定性输出门拒绝主选 → 计入已花 usage 后换回退模型', async () => {
+    const guardedDef: SiteBuilderTaskDefinition<EchoIn, EchoOut> = {
+      ...DEF,
+      validateOutput: (_input, output) => {
+        if (output.headline === 'unsupported claim') {
+          throw new Error('task output hard gate rejected');
+        }
+      },
+    };
+    const { gateway, calls } = gatewayReturning(async (input) => ({
+      ...okResult(input.model ?? '?'),
+      data: {
+        headline:
+          input.model === 'model-a'
+            ? 'unsupported claim'
+            : 'Precision pumps',
+      },
+    }));
+
+    const out = await runAiTask(guardedDef, { name: 'Acme' }, {
+      gateway,
+      ctx: CTX,
+      route: ROUTE,
+    });
+    expect(calls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
+    expect(out.model).toBe('model-b');
+    expect(out.usage).toEqual({ inputTokens: 20, outputTokens: 10, calls: 2 });
+  });
+
   it('保留主选不可用输出已消耗的 token，再由回退返回', async () => {
     const { gateway } = gatewayReturning(async (input) => {
       if (input.model === 'model-a') {

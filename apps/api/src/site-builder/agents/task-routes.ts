@@ -4,7 +4,8 @@
  * 配置驱动（D-M1-2）：任务只绑定 ModelProfile + budget；现役模型快照由
  * ModelPolicyRegistry 解析。通道接入后仍可翻 env
  * `SITE_BUILDER_MODEL_<TASK>` / `SITE_BUILDER_FALLBACKS_<TASK>` + 重启 worker 即切换，
- * 不改代码（获客侧 #35 先例：旧进程持旧注册表须重启）。
+ * `SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true` 则回到该任务冻结的 legacy currentRoute。
+ * 紧急 model/fallback override 优先于 rollback（获客侧 #35 先例：旧进程持旧注册表须重启）。
  * 回退链语义=合法路由（AiTask 基类逐模型尝试），非静默降级。
  */
 
@@ -121,13 +122,27 @@ function resolveProfileOverride(
   return profile as SiteBuilderModelProfileId;
 }
 
+function resolveRollbackOverride(suffix: string, env: NodeJS.ProcessEnv): boolean {
+  const name = `SITE_BUILDER_MODEL_ROLLBACK_${suffix}`;
+  const raw = env[name]?.trim().toLowerCase();
+  if (!raw || raw === 'false') return false;
+  if (raw === 'true') return true;
+  throw new Error(`${name} must be true or false`);
+}
+
 export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessEnv = process.env): TaskRoute {
   const binding = TASK_BINDINGS[taskId];
   if (!binding) throw new Error(`unknown site_builder task: ${taskId}`);
-  const currentPolicy = modelPolicyRegistry.getCurrentTaskPolicy(taskId);
-  const currentRoute = currentPolicy.route;
-
   const suffix = envSuffix(taskId);
+  const activePolicy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
+  const rollback = resolveRollbackOverride(suffix, env);
+  if (rollback && activePolicy.state !== 'promotedRoute') {
+    throw new Error(`${taskId} has no promoted route to roll back`);
+  }
+  const selectedPolicy = rollback
+    ? modelPolicyRegistry.getLegacyTaskPolicy(taskId)
+    : activePolicy;
+  const selectedRoute = selectedPolicy.route;
   const profile = resolveProfileOverride(suffix, binding.profile, env);
   const primary = env[`SITE_BUILDER_MODEL_${suffix}`]?.trim();
   const fallbacksRaw = env[`SITE_BUILDER_FALLBACKS_${suffix}`];
@@ -135,17 +150,27 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
     ?.split(',')
     .map((m) => m.trim())
     .filter(Boolean);
-  const resolvedPrimary = primary || currentRoute.primary;
-  const resolvedFallbacks = fallbacks || [...currentRoute.fallbacks];
+  const resolvedPrimary = primary || selectedRoute.primary;
+  const resolvedFallbacks = fallbacks || [...selectedRoute.fallbacks];
   const profileDefinition = modelPolicyRegistry.getProfile(profile);
-  const source =
-    profile !== binding.profile || primary !== undefined || fallbacksRaw !== undefined ? 'env_override' : 'registry';
+  const emergencyOverride =
+    profile !== binding.profile ||
+    primary !== undefined ||
+    fallbacksRaw !== undefined;
+  const source = emergencyOverride
+    ? 'env_override'
+    : rollback
+      ? 'rollback_override'
+      : 'registry';
   const policy: ModelExecutionPolicySnapshot = {
     policyVersion: modelPolicyRegistry.getPolicyVersion(),
     profile,
-    routeState: currentPolicy.state,
-    lifecycle: currentPolicy.lifecycle,
+    routeState: selectedPolicy.state,
+    lifecycle: selectedPolicy.lifecycle,
     source,
+    ...(selectedPolicy.state === 'promotedRoute'
+      ? { promotionEvidenceId: selectedPolicy.promotionEvidenceId }
+      : {}),
     dataPolicy: profileDefinition.dataPolicy,
     maxCostCents: binding.maxCostCents,
     route: { primary: resolvedPrimary, fallbacks: [...resolvedFallbacks] },
