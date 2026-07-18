@@ -42,6 +42,7 @@ import {
 import {
   assertEvaluationReportPathAvailable,
   assertUniqueEvaluationValues,
+  classifyEvaluationOutcome,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
@@ -890,13 +891,7 @@ const diagnosticsEnabled =
 const artifactFailures = runs.filter(
   (run) => run.acceptedArtifact !== true,
 ).length;
-const promotionEligible =
-  evidenceRole === 'candidate' &&
-  !diagnosticsEnabled &&
-  preflightPassed &&
-  sourceIntegrity.stable &&
-  matrixIntegrity.complete &&
-  artifactFailures === 0 &&
+const provenanceExact =
   probes.every(
     (probe) =>
       probe.provider === EVAL_PROVIDER_ID &&
@@ -907,19 +902,16 @@ const promotionEligible =
       run.provider === EVAL_PROVIDER_ID &&
       isExactUpstreamModelResolution(run),
   );
-const status = !preflightPassed
-  ? 'failed_preflight'
-  : !sourceIntegrity.stable
-    ? 'failed_source_drift'
-    : !matrixIntegrity.complete
-    ? 'failed_incomplete_matrix'
-    : artifactFailures > 0
-      ? 'completed_with_failures'
-      : diagnosticsEnabled
-        ? 'completed_diagnostic'
-        : promotionEligible
-          ? 'completed_eligible'
-          : 'completed_unproven_provenance';
+const outcome = classifyEvaluationOutcome({
+  evidenceRole,
+  diagnosticsEnabled,
+  preflightPassed,
+  sourceStable: sourceIntegrity.stable,
+  matrixComplete: matrixIntegrity.complete,
+  artifactFailures,
+  provenanceExact,
+});
+const { promotionEligible, status } = outcome;
 
 const report = JSON.stringify(
   {
@@ -963,12 +955,6 @@ progress('evaluation_completed', {
 });
 console.log(report);
 
-if (
-  !preflightPassed ||
-  !sourceIntegrity.stable ||
-  !matrixIntegrity.complete ||
-  artifactFailures > 0 ||
-  (!diagnosticsEnabled && !promotionEligible)
-) {
+if (outcome.shouldFail) {
   process.exitCode = 1;
 }

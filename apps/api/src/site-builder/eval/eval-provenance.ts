@@ -171,6 +171,77 @@ export interface EvaluationModelResolution {
   modelResolutionSource?: 'upstream_response' | 'requested_fallback';
 }
 
+export type EvaluationEvidenceRole = 'candidate' | 'baseline' | 'diagnostic';
+
+export interface EvaluationOutcomeInput {
+  evidenceRole: EvaluationEvidenceRole;
+  diagnosticsEnabled: boolean;
+  preflightPassed: boolean;
+  sourceStable: boolean;
+  matrixComplete: boolean;
+  artifactFailures: number;
+  provenanceExact: boolean;
+}
+
+export interface EvaluationOutcome {
+  status:
+    | 'failed_preflight'
+    | 'failed_source_drift'
+    | 'failed_incomplete_matrix'
+    | 'completed_with_failures'
+    | 'completed_diagnostic'
+    | 'completed_eligible'
+    | 'completed_baseline'
+    | 'completed_unproven_provenance';
+  promotionEligible: boolean;
+  shouldFail: boolean;
+}
+
+export function classifyEvaluationOutcome(
+  input: EvaluationOutcomeInput,
+): EvaluationOutcome {
+  const completeEvidence =
+    !input.diagnosticsEnabled &&
+    input.preflightPassed &&
+    input.sourceStable &&
+    input.matrixComplete &&
+    input.artifactFailures === 0 &&
+    input.provenanceExact;
+  const promotionEligible =
+    input.evidenceRole === 'candidate' && completeEvidence;
+  const baselineComplete =
+    input.evidenceRole === 'baseline' && completeEvidence;
+
+  const status = !input.preflightPassed
+    ? 'failed_preflight'
+    : !input.sourceStable
+      ? 'failed_source_drift'
+      : !input.matrixComplete
+        ? 'failed_incomplete_matrix'
+        : input.artifactFailures > 0
+          ? 'completed_with_failures'
+          : input.diagnosticsEnabled
+            ? 'completed_diagnostic'
+            : promotionEligible
+              ? 'completed_eligible'
+              : baselineComplete
+                ? 'completed_baseline'
+                : 'completed_unproven_provenance';
+
+  return {
+    status,
+    promotionEligible,
+    shouldFail:
+      !input.preflightPassed ||
+      !input.sourceStable ||
+      !input.matrixComplete ||
+      input.artifactFailures > 0 ||
+      (!input.diagnosticsEnabled &&
+        !promotionEligible &&
+        !baselineComplete),
+  };
+}
+
 export function isExactUpstreamModelResolution(
   resolution: EvaluationModelResolution,
 ): boolean {
