@@ -6,6 +6,7 @@ import {
   GenerateTextInput,
   HealthStatus,
   ModelOp,
+  ModelResolutionSource,
   ModelResult,
 } from '../types';
 
@@ -32,6 +33,26 @@ export function stripJsonFence(content: string): string {
   const trimmed = content.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   return fenced ? fenced[1].trim() : trimmed;
+}
+
+function resolutionProvenance(
+  requestedModel: string,
+  reportedModel?: string,
+): {
+  model: string;
+  reportedModel?: string;
+  modelResolutionSource: ModelResolutionSource;
+} {
+  return reportedModel
+    ? {
+        model: reportedModel,
+        reportedModel,
+        modelResolutionSource: 'upstream_response',
+      }
+    : {
+        model: requestedModel,
+        modelResolutionSource: 'requested_fallback',
+      };
 }
 
 /**
@@ -65,7 +86,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       ],
       { model, maxTokens: input.maxTokens, temperature: input.temperature, reasoningEffort: input.reasoningEffort, signal: input.signal },
     );
-    return { data: content, provider: this.id, model: resolvedModel ?? model, usage };
+    return { data: content, provider: this.id, ...resolutionProvenance(model, resolvedModel), usage };
   }
 
   async generateStructured<T = unknown>(input: GenerateStructuredInput): Promise<ModelResult<T>> {
@@ -91,12 +112,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${model}: empty content (finish_reason=${finishReason ?? 'unknown'}) — ${cause}`,
         usage,
+        { provider: this.id, ...resolutionProvenance(model, resolvedModel) },
       );
     }
     // 剥 markdown 围栏（真机实证：glm-5.2 在 json_object 模式下仍偶发 ```json…``` 包裹）。
     const payload = stripJsonFence(content);
     try {
-      return { data: JSON.parse(payload) as T, provider: this.id, model: resolvedModel ?? model, usage };
+      return {
+        data: JSON.parse(payload) as T,
+        provider: this.id,
+        ...resolutionProvenance(model, resolvedModel),
+        usage,
+      };
     } catch (err) {
       // JSON 解析失败三种同根因（都花了 token → 均带 usage 供网关结算，改动 2）：
       // ① finish_reason=length = 输出中途截断（真机实证：v4-pro「Unterminated string」）——显式指向 maxTokens。
@@ -104,7 +131,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         throw new ProviderOutputError(
           `${this.id} ${model}: output truncated at max_tokens (finish_reason=length), JSON incomplete — raise maxTokens`,
           usage,
-          { cause: err },
+          { cause: err, provider: this.id, ...resolutionProvenance(model, resolvedModel) },
         );
       }
       // ② 非截断的解析失败（模型返回非 JSON 文本）——保留原始 SyntaxError 为 cause，不误报截断。
@@ -112,7 +139,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${model}: structured output is not valid JSON — ${detail}`,
         usage,
-        { cause: err },
+        { cause: err, provider: this.id, ...resolutionProvenance(model, resolvedModel) },
       );
     }
   }
@@ -126,7 +153,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
     });
     if (!res.ok) throw new Error(`${this.id} embed ${res.status}: ${await res.text()}`);
     const json = (await res.json()) as { data: { embedding: number[] }[] };
-    return { data: json.data.map((d) => d.embedding), provider: this.id, model: this.cfg.embedModel };
+    return {
+      data: json.data.map((d) => d.embedding),
+      provider: this.id,
+      model: this.cfg.embedModel,
+      modelResolutionSource: 'requested_fallback',
+    };
   }
 
   private headers(): Record<string, string> {
@@ -267,6 +299,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${opts.model}: Responses request did not complete (status=${json.status ?? 'unknown'})`,
         usage,
+        { provider: this.id, ...resolutionProvenance(opts.model, json.model?.trim() || undefined) },
       );
     }
     return {
@@ -343,6 +376,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${opts.model}: Claude response truncated (stop_reason=${json.stop_reason})`,
         usage,
+        { provider: this.id, ...resolutionProvenance(opts.model, json.model?.trim() || undefined) },
       );
     }
     return {

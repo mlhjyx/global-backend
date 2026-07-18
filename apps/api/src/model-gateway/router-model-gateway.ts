@@ -80,6 +80,10 @@ export class RouterModelGateway extends ModelGateway {
             {
               cause: err,
               callCount: result.callCount ?? 1,
+              provider: result.provider,
+              model: result.model,
+              reportedModel: result.reportedModel,
+              modelResolutionSource: result.modelResolutionSource,
             },
           );
         }
@@ -106,6 +110,22 @@ export class RouterModelGateway extends ModelGateway {
           {
             cause: err,
             callCount: 1 + (err instanceof ProviderOutputError ? err.callCount : 1),
+            provider:
+              err instanceof ProviderOutputError
+                ? (err.provider ?? first.provider)
+                : first.provider,
+            model:
+              err instanceof ProviderOutputError
+                ? (err.model ?? first.model)
+                : first.model,
+            reportedModel:
+              err instanceof ProviderOutputError
+                ? (err.reportedModel ?? first.reportedModel)
+                : first.reportedModel,
+            modelResolutionSource:
+              err instanceof ProviderOutputError
+                ? (err.modelResolutionSource ?? first.modelResolutionSource)
+                : first.modelResolutionSource,
           },
         );
       }
@@ -116,7 +136,13 @@ export class RouterModelGateway extends ModelGateway {
         throw new ProviderOutputError(
           `structured output failed schema validation after repair: ${(recheck.errors ?? []).join('; ')}`,
           mergeStructuredUsage(first.usage, repair.usage),
-          { callCount: 2 },
+          {
+            callCount: 2,
+            provider: repair.provider,
+            model: repair.model,
+            reportedModel: repair.reportedModel,
+            modelResolutionSource: repair.modelResolutionSource,
+          },
         );
       }
       // usage 合并：重试消耗也要入账。callCount=2 → 无 usage 上报时 settle 按**两次**兜底（否则少记一次、

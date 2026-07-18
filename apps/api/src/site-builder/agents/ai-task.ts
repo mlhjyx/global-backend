@@ -1,6 +1,11 @@
 import type { ModelGateway } from '../../model-gateway/model-gateway';
 import { checkAgainstSchema } from '../../model-gateway/schema-validate';
-import type { AiContext, ModelResult, ModelUsage } from '../../model-gateway/types';
+import type {
+  AiContext,
+  ModelResolutionSource,
+  ModelResult,
+  ModelUsage,
+} from '../../model-gateway/types';
 import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
 import { resolveTaskRoute, SiteBuilderTaskId, TaskRoute } from './task-routes';
 import type { ModelExecutionPolicySnapshot, ModelRouteSnapshot } from '@global/contracts';
@@ -38,6 +43,9 @@ export interface AiTaskRunResult<TOut> {
   model: string;
   /** Provider identifier that served the successful response. */
   provider: string;
+  /** Upstream-reported identifier; absent when only the request is known. */
+  reportedModel?: string;
+  modelResolutionSource?: ModelResolutionSource;
   usage: { inputTokens: number; outputTokens: number; calls: number };
   /** Resolved profile, lifecycle, data handling and cost ceiling used for this run. */
   routePolicy: ModelExecutionPolicySnapshot;
@@ -47,10 +55,19 @@ export interface AiTaskRunResult<TOut> {
   fallbackIndex: number;
 }
 
+export interface AiTaskAttempt {
+  model: string;
+  error: string;
+  provider?: string;
+  resolvedModel?: string;
+  reportedModel?: string;
+  modelResolutionSource?: ModelResolutionSource;
+}
+
 export class AiTaskError extends Error {
   constructor(
     readonly taskId: string,
-    readonly attempts: { model: string; error: string }[],
+    readonly attempts: AiTaskAttempt[],
     /** Token usage spent on unsuccessful attempts, where the provider reported it. */
     readonly usage: { inputTokens: number; outputTokens: number; calls: number },
   ) {
@@ -114,7 +131,7 @@ export async function runAiTask<TIn, TOut>(
     primary: routePolicy.route.primary,
     fallbacks: [...routePolicy.route.fallbacks],
   };
-  const attempts: { model: string; error: string }[] = [];
+  const attempts: AiTaskAttempt[] = [];
   let usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 
   for (const [fallbackIndex, model] of [route.primary, ...route.fallbacks].entries()) {
@@ -168,6 +185,8 @@ export async function runAiTask<TIn, TOut>(
         data: result.data,
         model: result.model,
         provider: result.provider,
+        reportedModel: result.reportedModel,
+        modelResolutionSource: result.modelResolutionSource,
         usage,
         routePolicy,
         modelSnapshot,
@@ -182,6 +201,14 @@ export async function runAiTask<TIn, TOut>(
       attempts.push({
         model,
         error: err instanceof Error ? err.message : String(err),
+        ...(err instanceof ProviderOutputError
+          ? {
+              provider: err.provider,
+              resolvedModel: err.model,
+              reportedModel: err.reportedModel,
+              modelResolutionSource: err.modelResolutionSource,
+            }
+          : {}),
       });
     } finally {
       clearTimeout(timer);

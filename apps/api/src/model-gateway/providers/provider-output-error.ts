@@ -7,16 +7,24 @@ export class ProviderOutputError extends Error {
   readonly usage?: { inputTokens?: number; outputTokens?: number };
   /** Number of provider requests represented by this error (schema repair may be two). */
   readonly callCount: number;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly reportedModel?: string;
+  readonly modelResolutionSource?: ModelResolutionSource;
 
   constructor(
     message: string,
     usage?: { inputTokens?: number; outputTokens?: number },
-    opts?: { cause?: unknown; callCount?: number },
+    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, opts);
     this.name = 'ProviderOutputError';
     this.usage = usage;
     this.callCount = opts?.callCount ?? 1;
+    this.provider = opts?.provider;
+    this.model = opts?.model;
+    this.reportedModel = opts?.reportedModel;
+    this.modelResolutionSource = opts?.modelResolutionSource;
   }
 }
 
@@ -30,9 +38,17 @@ export class TaskOutputValidationError extends ProviderOutputError {
   constructor(
     message: string,
     usage?: { inputTokens?: number; outputTokens?: number },
-    opts?: { cause?: unknown; callCount?: number },
+    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, usage, opts);
     this.name = 'TaskOutputValidationError';
   }
+}
+import type { ModelResolutionSource } from '../types';
+
+export interface ProviderErrorProvenance {
+  provider?: string;
+  model?: string;
+  reportedModel?: string;
+  modelResolutionSource?: ModelResolutionSource;
 }
