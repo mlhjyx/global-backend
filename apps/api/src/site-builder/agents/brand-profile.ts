@@ -68,6 +68,7 @@ export type GapReason =
   | 'evidence_source_mismatch'
   | 'evidence_value_mismatch'
   | 'research_hint_not_publishable'
+  | 'personal_data_not_publishable'
   | 'needs_input';
 
 export interface GapItem {
@@ -207,12 +208,18 @@ const CERTIFICATION_CODE_PATTERN =
   /\b(?:iso|iec|en|din|iatf|as|api|astm|gb|ul)\s*[-:/]?\s*\d[\d.-]*(?::\d{4})?\b/giu;
 const CERTIFICATION_MARK_PATTERN =
   /\b(?:ce|fda|ul|rohs|reach|gmp|tüv)\b/giu;
+const CERTIFICATION_ORGANIZATION_PATTERN =
+  /(?<![a-z0-9])(?:iso|iec|en|din|iatf|as|api|astm|gb|ul)(?![a-z0-9])/giu;
+const CERTIFICATION_WORD_ANCHOR_PATTERN =
+  /(?<![\p{L}\p{N}])(?:certified|certification|certificate|accredited|accreditation)(?![\p{L}\p{N}])|认证|证书|资质/giu;
 const LATIN_MODEL_CODE_PATTERN =
   /(?=[\p{L}\p{N}._/-]*\p{L})(?=[\p{L}\p{N}._/-]*\d)[\p{L}\p{N}]+(?:[._/-][\p{L}\p{N}]+)+/gu;
 const COMPACT_LATIN_MODEL_PATTERN =
   /(?=[a-z\d]*[a-z])(?=[a-z\d]*\d)[a-z\d]+/giu;
 const MODEL_OR_NAME_KEY_PATTERN =
   /(?:^|[_\s-])(?:name|model|sku|part[_\s-]?number|code|company|brand|product(?:s)?|product[_\s-]?name)(?:$|[_\s-])|名称|型号|货号|编号|代码|公司|品牌|产品/iu;
+const PERSONAL_FACT_KEY_PATTERN =
+  /(?:^|[_\s-])(?:person|people|contact(?:[_\s-]?person)?|founder|co[_\s-]?founder|ceo|chief[_\s-]?executive(?:[_\s-]?officer)?|team|member|staff|owner|director|manager|representative)(?:$|[_\s-])|联系人|创始人|联合创始人|首席执行官|法定代表人|法人代表|负责人|团队|成员|员工|董事|经理/iu;
 
 const CLAIM_UNIT_CANONICAL_PATTERN = new RegExp(
   `(${CLAIM_NUMBER_SOURCE})\\s*(${CLAIM_UNIT_SOURCE})(?![\\p{L}\\p{N}])`,
@@ -278,6 +285,10 @@ function protectedClaimAnchors(item: RawFactItem): string[] {
   addMatches(anchors, value, CLAIM_NUMBER_PATTERN);
   addMatches(anchors, value, CERTIFICATION_CODE_PATTERN);
   addMatches(anchors, value, CERTIFICATION_MARK_PATTERN);
+  if (isCertificationClaim(item)) {
+    addMatches(anchors, value, CERTIFICATION_ORGANIZATION_PATTERN);
+    addMatches(anchors, value, CERTIFICATION_WORD_ANCHOR_PATTERN);
+  }
   addMatches(anchors, value, LATIN_MODEL_CODE_PATTERN);
   addMatches(anchors, value, COMPACT_LATIN_MODEL_PATTERN);
 
@@ -546,6 +557,25 @@ export function enforceEvidenceGateV2(
   const createEvidenceRefId = opts.createEvidenceRefId ?? randomUUID;
 
   for (const item of items) {
+    if (PERSONAL_FACT_KEY_PATTERN.test(normalizeClaimKey(item.key))) {
+      gaps.push({
+        field: item.key,
+        reason: 'personal_data_not_publishable',
+        hint: `「${clampHint(item.value)}」属于人员/联系方式事实，不能进入可发布品牌档案`,
+      });
+      continue;
+    }
+    if (
+      item.evidence?.quote &&
+      scrubPii(item.evidence.quote) !== item.evidence.quote
+    ) {
+      gaps.push({
+        field: item.key,
+        reason: 'personal_data_not_publishable',
+        hint: `「${clampHint(item.value)}」的证据原文含邮箱或电话，不能进入公共 Claim/Evidence`,
+      });
+      continue;
+    }
     const resolved = resolveEvidenceReference(item.evidence, opts.sources, {
       evidenceRefId: createEvidenceRefId(),
     });
