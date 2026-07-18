@@ -132,6 +132,143 @@ describe('enforceEvidenceGateV2 — all new facts bind exact frozen evidence', (
   });
 });
 
+describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
+  const evaluate = (input: {
+    key: string;
+    value: string;
+    quote: string;
+    sourceRole?: 'fact_candidate' | 'research_hint';
+  }) => {
+    const sourceRole = input.sourceRole ?? 'fact_candidate';
+    const frozen = freezeEvidenceSource({
+      sourceKey: `truth-gate:${input.key}:${sourceRole}`,
+      sourceType: sourceRole === 'research_hint' ? 'web_research' : 'upload',
+      sourceRole,
+      rawText: input.quote,
+      ...(sourceRole === 'research_hint'
+        ? {
+            displayUrl: 'https://directory.example/acme',
+            provenance: { parserVersion: 'searxng-snippet/1' },
+          }
+        : {
+            provenance: {
+              documentId: 'truth-gate-document',
+              chunkIds: ['truth-gate-chunk'],
+            },
+          }),
+    });
+
+    return enforceEvidenceGateV2(
+      [
+        fact({
+          key: input.key,
+          value: input.value,
+          evidence: {
+            sourceType: frozen.sourceType,
+            sourceId: 'truth-gate-source',
+            contentHash: frozen.contentHash,
+            quote: input.quote,
+          },
+        }),
+      ],
+      {
+        sources: new Map([['truth-gate-source', frozen]]),
+        createEvidenceRefId: () => 'truth-gate-ref',
+      },
+    );
+  };
+
+  it.each([
+    {
+      name: 'pressure value 300 bar cannot cite a 160 bar quote',
+      key: 'maximum_pressure',
+      value: 'Maximum working pressure: 300 bar',
+      quote: 'Maximum working pressure: 160 bar.',
+    },
+    {
+      name: 'frequency value 60 Hz cannot cite a 50 Hz quote',
+      key: 'rated_frequency',
+      value: 'Rated frequency: 60 Hz',
+      quote: 'Rated frequency: 50 Hz.',
+    },
+    {
+      name: 'ISO 14001 cannot cite an ISO 9001 quote',
+      key: 'certifications',
+      value: 'ISO 14001 certified',
+      quote: 'ISO 9001 certified quality system.',
+    },
+    {
+      name: 'a product model cannot cite a different product model',
+      key: 'product_model',
+      value: 'Product model: PX-900',
+      quote: 'Flagship product model: PX-300.',
+    },
+    {
+      name: 'Unicode normalization must not turn a model prefix into an exact token match',
+      key: 'product_model',
+      value: 'Product model: ＡＢＣ-300',
+      quote: 'Product model: ABC-3000.',
+    },
+    {
+      name: 'CJK-adjacent digits still require a complete product-model token',
+      key: 'product_model',
+      value: '产品型号：泵王300',
+      quote: '主力产品型号：泵王3000。',
+    },
+  ])('$name', ({ key, value, quote }) => {
+    const out = evaluate({ key, value, quote });
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.refs).toEqual([]);
+    expect(out.gaps).toEqual([
+      expect.objectContaining({
+        field: key,
+        reason: 'evidence_value_mismatch',
+      }),
+    ]);
+  });
+
+  it('an exact quote from research_hint remains non-publishable and is downgraded to a gap', () => {
+    const out = evaluate({
+      key: 'trade_fairs',
+      value: 'Exhibited at EuroBLECH 2024',
+      quote: 'Exhibited at EuroBLECH 2024',
+      sourceRole: 'research_hint',
+    });
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.refs).toEqual([]);
+    expect(out.gaps).toEqual([
+      expect.objectContaining({
+        field: 'trade_fairs',
+        reason: 'research_hint_not_publishable',
+      }),
+    ]);
+  });
+
+  it('accepts a fact_candidate whose protected value is supported by the exact quote', () => {
+    const out = evaluate({
+      key: 'maximum_pressure',
+      value: 'Maximum pressure reaches 160 bar',
+      quote: 'The PX-300 maximum working pressure reaches 160 bar.',
+    });
+
+    expect(out.gaps).toEqual([]);
+    expect(out.factSheet).toEqual([
+      expect.objectContaining({
+        key: 'maximum_pressure',
+        value: 'Maximum pressure reaches 160 bar',
+        evidence: expect.objectContaining({
+          evidenceRefId: 'truth-gate-ref',
+          sourceRole: 'fact_candidate',
+          quote: 'The PX-300 maximum working pressure reaches 160 bar.',
+        }),
+      }),
+    ]);
+    expect(out.refs).toHaveLength(1);
+  });
+});
+
 describe('enforceEvidenceGate — D1 零虚构代码闸', () => {
   it('非认证 upload 事实（来源语料非空）通过', () => {
     const { factSheet, gaps } = enforceEvidenceGate([fact()], {

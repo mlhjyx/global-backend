@@ -30,6 +30,7 @@ const BASE_INTAKE: IntakeInput = {
 };
 
 interface FakeDb {
+  companyProfiles: Record<string, unknown>[];
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
   keys: Record<string, unknown>[];
@@ -61,18 +62,33 @@ function makeService(
   opts: {
     existingSite?: boolean;
     existingStatus?: string;
+    existingCompanyProfileId?: string | null;
     launcher?: DemoV0Launcher;
     ackPersistError?: Error;
   } = {},
 ) {
-  const db: FakeDb = { sites: [], runs: [], keys: [] };
+  const db: FakeDb = { companyProfiles: [], sites: [], runs: [], keys: [] };
+  let companyProfileSeq = 0;
   let siteSeq = 0;
   let runSeq = 0;
 
   if (opts.existingSite) {
+    const companyProfileId =
+      opts.existingCompanyProfileId === undefined
+        ? "company-existing"
+        : opts.existingCompanyProfileId;
+    if (companyProfileId) {
+      db.companyProfiles.push({
+        id: companyProfileId,
+        workspaceId: CTX.workspaceId,
+        name: "Acme Pump Co., Ltd.",
+        status: "DRAFT",
+      });
+    }
     db.sites.push({
       id: "site-existing",
       workspaceId: CTX.workspaceId,
+      companyProfileId,
       slug: "existing-slug",
       status: opts.existingStatus ?? "ready",
     });
@@ -80,6 +96,13 @@ function makeService(
 
   const tx = {
     $executeRaw: async () => 0,
+    companyProfile: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `company-${++companyProfileSeq}`, ...data };
+        db.companyProfiles.push(row);
+        return row;
+      },
+    },
     site: {
       findFirst: async ({ where }: { where: { workspaceId?: string } }) =>
         db.sites.find((site) => site.workspaceId === where.workspaceId) ?? null,
@@ -227,6 +250,71 @@ async function expectHttpError(
 }
 
 describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
+  it("R4-A2：新 intake 在同一 workspace 事务原子创建 CompanyProfile 并绑定 Site", async () => {
+    const { service, db } = makeService();
+
+    await callCreate(service, CTX, BASE_INTAKE, "claim-bridge-intake");
+
+    expect(db.companyProfiles).toEqual([
+      expect.objectContaining({
+        id: "company-1",
+        workspaceId: CTX.workspaceId,
+        name: "Acme Pump Co., Ltd.",
+        website: null,
+        industry: "isic-2813",
+        status: "DRAFT",
+      }),
+    ]);
+    expect(db.sites).toEqual([
+      expect.objectContaining({
+        id: "site-1",
+        workspaceId: CTX.workspaceId,
+        companyProfileId: "company-1",
+      }),
+    ]);
+  });
+
+  it("R4-A2：setup_failed 重入只复用已绑定 CompanyProfile，不按 intake 名称重建或重配", async () => {
+    const { service, db } = makeService({
+      existingSite: true,
+      existingStatus: "setup_failed",
+    });
+
+    await callCreate(service, CTX, BASE_INTAKE, "setup-retry-with-profile");
+
+    expect(db.companyProfiles).toEqual([
+      expect.objectContaining({ id: "company-existing" }),
+    ]);
+    expect(db.sites[0]).toMatchObject({
+      id: "site-existing",
+      companyProfileId: "company-existing",
+      status: "building",
+    });
+    expect(db.runs).toHaveLength(1);
+  });
+
+  it("R4-A2：旧 setup_failed Site 没有可证明的 CompanyProfile link 时 fail-closed，不猜测回填", async () => {
+    const { service, db } = makeService({
+      existingSite: true,
+      existingStatus: "setup_failed",
+      existingCompanyProfileId: null,
+    });
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, "legacy-unlinked-site"),
+      HttpStatus.CONFLICT,
+      "SITE_COMPANY_PROFILE_LINK_REQUIRED",
+    );
+    expect(db.companyProfiles).toHaveLength(0);
+    expect(db.runs).toHaveLength(0);
+    expect(db.keys).toHaveLength(0);
+    expect(db.sites[0]).toMatchObject({
+      id: "site-existing",
+      companyProfileId: null,
+      status: "setup_failed",
+    });
+  });
+
   it("无 key：原子建 Site + demo run，返回 buildId/generating_demo，ACK 后落 temporalRunId", async () => {
     const { service, db, launches } = makeService();
     const result = await callCreate(service, CTX, BASE_INTAKE);
