@@ -246,6 +246,29 @@ function trimAnchorPunctuation(text: string): string {
     .trim();
 }
 
+/**
+ * A standalone numeric anchor can be omitted only when another protected
+ * anchor contains the same complete number. A raw substring check makes 300
+ * disappear inside 1300bar, weakening the value/quote truth gate.
+ */
+function containsCompleteNumericAnchor(
+  container: string,
+  numericAnchor: string,
+): boolean {
+  let fromIndex = 0;
+  while (fromIndex <= container.length - numericAnchor.length) {
+    const start = container.indexOf(numericAnchor, fromIndex);
+    if (start < 0) return false;
+    const before = codePointBefore(container, start);
+    const after = codePointAfter(container, start + numericAnchor.length);
+    if (!/[\d.,]/u.test(before ?? '') && !/[\d.,]/u.test(after ?? '')) {
+      return true;
+    }
+    fromIndex = start + 1;
+  }
+  return false;
+}
+
 /** Extract only values for which a fuzzy/semantic match would be unsafe. */
 function protectedClaimAnchors(item: RawFactItem): string[] {
   const value = normalizeClaimAnchor(item.value);
@@ -272,7 +295,9 @@ function protectedClaimAnchors(item: RawFactItem): string[] {
       (anchor) =>
         !/^[-+]?\d+(?:[.,]\d+)*$/u.test(anchor) ||
         !canonical.some(
-          (other) => other.length > anchor.length && other.includes(anchor),
+          (other) =>
+            other.length > anchor.length &&
+            containsCompleteNumericAnchor(other, anchor),
         ),
     )
     .sort((a, b) => b.length - a.length || a.localeCompare(b));
