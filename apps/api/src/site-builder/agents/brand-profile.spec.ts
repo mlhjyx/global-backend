@@ -216,6 +216,12 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
       value: '产品型号：泵王300',
       quote: '主力产品型号：泵王3000。',
     },
+    {
+      name: 'a standalone model number is not covered by a larger pressure number',
+      key: 'specifications',
+      value: 'Model 300; maximum pressure 1300 bar',
+      quote: 'Maximum pressure 1300 bar.',
+    },
   ])('$name', ({ key, value, quote }) => {
     const out = evaluate({ key, value, quote });
 
