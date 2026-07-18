@@ -43,9 +43,11 @@ import {
   assertUniqueEvaluationValues,
   captureDiagnosticRejectedOutput,
   classifyEvaluationOutcome,
+  evaluationProbePolicy,
   inspectEvaluationMatrix,
   inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
+  isProvenUpstreamModelResolution,
   prepareEvaluationReportPath,
   sha256CanonicalJson,
   sha256Bytes,
@@ -414,7 +416,7 @@ async function probeCandidate(
             schema: CAPABILITY_PROBE_SCHEMA,
             model: requestedModel,
             maxTokens: 128,
-            maxCostCents: route.maxCostCents,
+            ...evaluationProbePolicy(route),
             signal,
           },
           {
@@ -946,16 +948,20 @@ const diagnosticsEnabled =
 const artifactFailures = runs.filter(
   (run) => run.acceptedArtifact !== true,
 ).length;
+const acceptsResolution =
+  evidenceRole === 'baseline'
+    ? isProvenUpstreamModelResolution
+    : isExactUpstreamModelResolution;
 const provenanceExact =
   probes.every(
     (probe) =>
       probe.provider === EVAL_PROVIDER_ID &&
-      isExactUpstreamModelResolution(probe),
+      acceptsResolution(probe),
   ) &&
   runs.every(
     (run) =>
       run.provider === EVAL_PROVIDER_ID &&
-      isExactUpstreamModelResolution(run),
+      acceptsResolution(run),
   );
 const outcome = classifyEvaluationOutcome({
   evidenceRole,

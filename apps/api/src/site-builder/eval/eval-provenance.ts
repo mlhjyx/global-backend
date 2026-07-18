@@ -285,6 +285,22 @@ export function isExactUpstreamModelResolution(
   );
 }
 
+/**
+ * A frozen baseline may intentionally request a stable alias whose upstream
+ * response reports a versioned identifier. The alias is proven only when the
+ * upstream supplied both reported and resolved identities and they agree.
+ */
+export function isProvenUpstreamModelResolution(
+  resolution: EvaluationModelResolution,
+): boolean {
+  return (
+    resolution.modelResolutionSource === 'upstream_response' &&
+    typeof resolution.reportedModel === 'string' &&
+    resolution.reportedModel.length > 0 &&
+    resolution.resolvedModel === resolution.reportedModel
+  );
+}
+
 function evaluationRunKey(row: EvaluationMatrixRowKey): string {
   return `${row.model}\u0000${row.fixtureId}\u0000${row.attempt}`;
 }
@@ -443,6 +459,19 @@ export function snapshotEvaluationExecutionPolicy(
     timeoutMs: route.timeoutMs,
     maxCostCents: route.maxCostCents,
     reasoningEffort: route.reasoningEffort ?? null,
+  };
+}
+
+/** Capability probes inherit the material task knobs that affect visibility. */
+export function evaluationProbePolicy(route: TaskRoute): {
+  maxCostCents: number;
+  reasoningEffort?: TaskRoute['reasoningEffort'];
+} {
+  return {
+    maxCostCents: route.maxCostCents,
+    ...(route.reasoningEffort
+      ? { reasoningEffort: route.reasoningEffort }
+      : {}),
   };
 }
 
