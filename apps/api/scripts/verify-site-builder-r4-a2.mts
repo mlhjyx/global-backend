@@ -11,15 +11,14 @@ import "reflect-metadata";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { ClaimService } from "../src/claim/claim.service";
+import { buildClaimApprovalProof } from "../src/claim/claim-verification";
 import { PrismaService } from "../src/prisma/prisma.service";
 import {
   PrismaClaimEvidenceBridgeRepository,
   claimTypeForBrandFact,
 } from "../src/site-builder/claim-evidence-bridge.prisma";
-import {
-  ClaimEvidenceBridgeService,
-  normalizeClaimIdentityPart,
-} from "../src/site-builder/claim-evidence-bridge.service";
+import { ClaimEvidenceBridgeService } from "../src/site-builder/claim-evidence-bridge.service";
+import { assertCanonicalClaimFactKey } from "../src/site-builder/claim-fact-key";
 import { IntakeService } from "../src/site-builder/intake.service";
 
 function check(condition: unknown, message: string): asserts condition {
@@ -78,6 +77,9 @@ async function main(): Promise<void> {
   const otherCompanyProfileId = randomUUID();
   const siteId = randomUUID();
   const otherSiteId = randomUUID();
+  const guardedWorkspaceId = randomUUID();
+  const guardedCompanyId = randomUUID();
+  const guardedSiteId = randomUUID();
   const certAssetId = randomUUID();
   const capabilitySnapshotId = randomUUID();
   const alternateCapabilitySnapshotId = randomUUID();
@@ -87,6 +89,8 @@ async function main(): Promise<void> {
   const certText = "The company holds an ISO 9001 certified quality system.";
   const capabilityDisplayUrl = "https://example.test/products/pumps";
   const capabilityFetchedAt = new Date("2026-07-18T08:15:30.000Z");
+  let firstIntakeSiteId: string | null = null;
+  let firstIntakeCompanyProfileId: string | null = null;
   let verificationError: unknown;
 
   try {
@@ -154,8 +158,9 @@ async function main(): Promise<void> {
 
     console.log("② first-write tenant provisioning");
     check(
-      (await owner.workspace.count({ where: { id: firstIntakeWorkspaceId } })) ===
-        0,
+      (await owner.workspace.count({
+        where: { id: firstIntakeWorkspaceId },
+      })) === 0,
       "first Site Builder intake starts without a local Workspace anchor",
     );
     const intake = new IntakeService(app, {
@@ -187,6 +192,8 @@ async function main(): Promise<void> {
       where: { id: intakeResult.siteId },
       select: { workspaceId: true, companyProfileId: true },
     });
+    firstIntakeSiteId = intakeResult.siteId;
+    firstIntakeCompanyProfileId = firstIntakeSite.companyProfileId;
     check(
       firstIntakeSite.workspaceId === firstIntakeWorkspaceId &&
         firstIntakeSite.companyProfileId !== null &&
@@ -196,30 +203,27 @@ async function main(): Promise<void> {
       "first Site Builder intake JIT-provisions Workspace and binds CompanyProfile",
     );
 
-    const cascadeWorkspaceId = randomUUID();
-    const cascadeCompanyId = randomUUID();
-    const cascadeSiteId = randomUUID();
-    await owner.workspace.create({ data: { id: cascadeWorkspaceId } });
+    await owner.workspace.create({ data: { id: guardedWorkspaceId } });
     await owner.companyProfile.create({
       data: {
-        id: cascadeCompanyId,
-        workspaceId: cascadeWorkspaceId,
-        name: "R4-A2 Workspace Cascade",
+        id: guardedCompanyId,
+        workspaceId: guardedWorkspaceId,
+        name: "R4-A2 Workspace Delete Guard",
       },
     });
     await owner.site.create({
       data: {
-        id: cascadeSiteId,
-        workspaceId: cascadeWorkspaceId,
-        companyProfileId: cascadeCompanyId,
-        name: "R4-A2 Workspace Cascade",
-        slug: `verify-r4-a2-cascade-${cascadeSiteId.slice(0, 8)}`,
+        id: guardedSiteId,
+        workspaceId: guardedWorkspaceId,
+        companyProfileId: guardedCompanyId,
+        name: "R4-A2 Workspace Delete Guard",
+        slug: `verify-r4-a2-guard-${guardedSiteId.slice(0, 8)}`,
         intake: { company: { nameZh: "R4-A2 删除链" } },
       },
     });
     let directCompanyDeleteRejected: unknown;
     try {
-      await owner.companyProfile.delete({ where: { id: cascadeCompanyId } });
+      await owner.companyProfile.delete({ where: { id: guardedCompanyId } });
     } catch (error) {
       directCompanyDeleteRejected = error;
     }
@@ -227,13 +231,27 @@ async function main(): Promise<void> {
       directCompanyDeleteRejected !== undefined,
       "standalone CompanyProfile delete remains blocked while Site references it",
     );
-    await owner.workspace.delete({ where: { id: cascadeWorkspaceId } });
+    let workspaceDeleteRejected: unknown;
+    try {
+      await owner.workspace.delete({ where: { id: guardedWorkspaceId } });
+    } catch (error) {
+      workspaceDeleteRejected = error;
+    }
     check(
-      (await owner.site.count({ where: { id: cascadeSiteId } })) === 0 &&
+      workspaceDeleteRejected !== undefined &&
+        (await owner.site.count({ where: { id: guardedSiteId } })) === 1 &&
         (await owner.companyProfile.count({
-          where: { id: cascadeCompanyId },
-        })) === 0,
-      "Workspace delete cascades Site before CompanyProfile",
+          where: { id: guardedCompanyId },
+        })) === 1,
+      "Workspace delete fails closed while Site/object provenance remains",
+    );
+    await owner.site.delete({ where: { id: guardedSiteId } });
+    await owner.companyProfile.delete({ where: { id: guardedCompanyId } });
+    await owner.workspace.delete({ where: { id: guardedWorkspaceId } });
+    check(
+      (await owner.workspace.count({ where: { id: guardedWorkspaceId } })) ===
+        0,
+      "Workspace delete succeeds only after explicit Site cleanup",
     );
     for (const [key, value] of [
       ["certifications", "ISO 9001 certified"],
@@ -512,7 +530,7 @@ async function main(): Promise<void> {
       const claimId = randomUUID();
       const evidenceId = randomUUID();
       const factKey = input.factKey ?? "maximum_pressure";
-      const canonicalFactKey = normalizeClaimIdentityPart(factKey);
+      const canonicalFactKey = assertCanonicalClaimFactKey(factKey);
       const factValue = input.factValue ?? "Maximum pressure: 400 bar";
       const snapshotText = `Verified ${factValue.toLowerCase()}.`;
       const quote = factValue.toLowerCase();
@@ -632,12 +650,15 @@ async function main(): Promise<void> {
       };
     };
 
-    const insertDirectBridge = async (fixture: {
-      brandProfileId: string;
-      evidenceRefId: string;
-      claimId: string;
-      evidenceId: string;
-    }, nonUtcSession = false): Promise<void> => {
+    const insertDirectBridge = async (
+      fixture: {
+        brandProfileId: string;
+        evidenceRefId: string;
+        claimId: string;
+        evidenceId: string;
+      },
+      nonUtcSession = false,
+    ): Promise<void> => {
       await app.withWorkspace(workspaceId, async (tx) => {
         if (nonUtcSession) {
           await tx.$executeRaw`SET LOCAL TIME ZONE 'Asia/Shanghai'`;
@@ -687,6 +708,68 @@ async function main(): Promise<void> {
       orderBy: { type: "asc" },
     });
     check(firstClaims.length === 2, "two public Claims were created");
+    const invalidRefProfileId = randomUUID();
+    await owner.brandProfile.create({
+      data: {
+        id: invalidRefProfileId,
+        workspaceId,
+        siteId,
+        version: 89,
+        evidenceSchemaVersion: 2,
+        factSheet: [] as Prisma.InputJsonValue,
+        gaps: [] as Prisma.InputJsonValue,
+      },
+    });
+    let invalidRefFactKeyRejected: unknown;
+    try {
+      await owner.brandProfileEvidenceRef.create({
+        data: {
+          workspaceId,
+          siteId,
+          brandProfileId: invalidRefProfileId,
+          factIndex: 0,
+          factKey: "maximum-pressure",
+          sourceSnapshotId: capabilitySnapshotId,
+          sourceContentHash: sha256(capabilityText),
+          quote: "maximum pressure of 400 bar",
+          quoteStart: capabilityText.indexOf("maximum pressure of 400 bar"),
+          quoteEnd:
+            capabilityText.indexOf("maximum pressure of 400 bar") +
+            "maximum pressure of 400 bar".length,
+        },
+      });
+    } catch (error) {
+      invalidRefFactKeyRejected = error;
+    }
+    check(
+      /brand_profile_evidence_ref_fact_key_canonical_check/.test(
+        errorDetails(invalidRefFactKeyRejected),
+      ),
+      "database rejects a non-canonical frozen EvidenceRef fact key",
+    );
+    await owner.brandProfile.delete({ where: { id: invalidRefProfileId } });
+    let invalidClaimFactKeyRejected: unknown;
+    try {
+      await owner.claim.create({
+        data: {
+          workspaceId,
+          companyId: companyProfileId,
+          originKey: sha256("invalid-claim-fact-key"),
+          factKey: "maximum-pressure",
+          type: "param",
+          statement: "Maximum pressure: 400 bar",
+          status: "NEEDS_REVIEW",
+        },
+      });
+    } catch (error) {
+      invalidClaimFactKeyRejected = error;
+    }
+    check(
+      /claim_fact_key_canonical_check/.test(
+        errorDetails(invalidClaimFactKeyRejected),
+      ),
+      "database rejects a non-canonical Claim fact key",
+    );
     check(
       (await owner.evidence.count({
         where: { claimId: { in: firstClaims.map((claim) => claim.id) } },
@@ -701,7 +784,8 @@ async function main(): Promise<void> {
     });
     check(
       capabilityEvidence.sourceUrl === capabilityDisplayUrl &&
-        capabilityEvidence.fetchedAt?.getTime() === capabilityFetchedAt.getTime(),
+        capabilityEvidence.fetchedAt?.getTime() ===
+          capabilityFetchedAt.getTime(),
       "public Evidence freezes source URL and fetch time from the snapshot",
     );
     check(
@@ -798,16 +882,20 @@ async function main(): Promise<void> {
     }
     check(
       rejectedApprovalMutations.length === approvalBypassAttempts.length &&
-        (await owner.claim.findUniqueOrThrow({
-          where: { id: approvalGuardClaimId },
-        })).status === "NEEDS_REVIEW",
+        (
+          await owner.claim.findUniqueOrThrow({
+            where: { id: approvalGuardClaimId },
+          })
+        ).status === "NEEDS_REVIEW",
       "app_user cannot approve with missing, partial, legacy-v2 or malformed v3 proof",
     );
     const insertedApprovedClaimId = randomUUID();
     let directApprovedInsertRejected: unknown;
     try {
-      await app.withWorkspace(workspaceId, (tx) =>
-        tx.$executeRaw`
+      await app.withWorkspace(
+        workspaceId,
+        (tx) =>
+          tx.$executeRaw`
           INSERT INTO "claim" (
             "id", "workspace_id", "company_id", "type", "statement",
             "status", "version", "updated_at"
@@ -825,11 +913,14 @@ async function main(): Promise<void> {
       /must transition from NEEDS_REVIEW/.test(
         errorDetails(directApprovedInsertRejected),
       ) &&
-        (await owner.claim.count({ where: { id: insertedApprovedClaimId } })) ===
-          0,
+        (await owner.claim.count({
+          where: { id: insertedApprovedClaimId },
+        })) === 0,
       "app_user cannot insert a new legacy-shaped APPROVED Claim",
     );
-    const pendingCapability = firstClaims.find((claim) => claim.type === "param");
+    const pendingCapability = firstClaims.find(
+      (claim) => claim.type === "param",
+    );
     const pendingCertification = firstClaims.find(
       (claim) => claim.type === "certification",
     );
@@ -837,7 +928,10 @@ async function main(): Promise<void> {
       pendingCapability && pendingCertification,
       "typed pending capability/certification Claims exist",
     );
-    const concurrentReviewers = ["human-reviewer", "competing-reviewer"] as const;
+    const concurrentReviewers = [
+      "human-reviewer",
+      "competing-reviewer",
+    ] as const;
     const concurrentApprovals = await Promise.allSettled([
       reviewer.transition(
         { workspaceId, userId: concurrentReviewers[0], roles: [] },
@@ -852,16 +946,22 @@ async function main(): Promise<void> {
         pendingCapability.version,
       ),
     ]);
+    const concurrentApprovalSummary = concurrentApprovals.map((result) =>
+      result.status === "fulfilled"
+        ? "fulfilled"
+        : errorDetails(result.reason).replace(/\s+/g, " ").slice(0, 500),
+    );
     check(
       concurrentApprovals.filter((result) => result.status === "fulfilled")
         .length === 1 &&
         concurrentApprovals.filter((result) => result.status === "rejected")
           .length === 1,
-      "concurrent approval has exactly one winner",
+      `concurrent approval has exactly one winner (${concurrentApprovalSummary.join(" | ")})`,
     );
-    const winningReviewer = concurrentReviewers[
-      concurrentApprovals.findIndex((result) => result.status === "fulfilled")
-    ];
+    const winningReviewer =
+      concurrentReviewers[
+        concurrentApprovals.findIndex((result) => result.status === "fulfilled")
+      ];
     check(winningReviewer, "concurrent approval winner identity is observable");
     check(
       (await owner.outboxEvent.count({
@@ -948,6 +1048,26 @@ async function main(): Promise<void> {
       (await owner.brandProfileClaimBridge.count({ where: { siteId } })) === 6,
       "three BrandProfile versions retain six exact bridge edges",
     );
+    const certLookupPlan = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      return tx.$queryRaw<Array<{ "QUERY PLAN": string }>>`
+        EXPLAIN (COSTS OFF)
+        SELECT "brand_profile_id", "fact_index"
+        FROM "brand_profile_claim_bridge"
+        WHERE "cert_asset_id" = ${certAssetId}::uuid
+          AND "site_id" = ${siteId}::uuid
+        ORDER BY "brand_profile_id", "fact_index"
+        LIMIT 100
+      `;
+    });
+    check(
+      certLookupPlan.some((row) =>
+        row["QUERY PLAN"].includes(
+          "brand_profile_claim_bridge_cert_asset_lookup_idx",
+        ),
+      ),
+      "certification Asset reference scan uses the partial covering index",
+    );
 
     console.log("④ approved-effective read gate and revocation/expiry");
     const listApproved = () =>
@@ -976,7 +1096,7 @@ async function main(): Promise<void> {
       sourceRole: "fact_candidate",
       claimType: "capability",
       claimStatement: "Manufactures precision retention-test pumps",
-      factKey: "　ｃａｐａｂｉｌｉｔｙ　",
+      factKey: "capability",
       factValue: "Manufactures precision retention-test pumps",
       frozenClaimType: "capability",
     });
@@ -986,7 +1106,7 @@ async function main(): Promise<void> {
     });
     check(
       retentionClaim.factKey === "capability",
-      "direct bridge binds Claim.factKey to the NFKC-normalized frozen ref key",
+      "direct bridge binds Claim.factKey to the exact canonical frozen ref key",
     );
     await reviewer.transition(
       { workspaceId, userId: "retention-reviewer", roles: [] },
@@ -1007,6 +1127,67 @@ async function main(): Promise<void> {
       })) === 0 &&
         !(await listApproved()).some((claim) => claim.id === retentionClaim.id),
       "owner retention cascade removes bridge and makes non-certification ineffective",
+    );
+    const orphanFixture = await createDirectBridgeFixture({
+      version: 91,
+      sourceRole: "fact_candidate",
+      claimType: "capability",
+      claimStatement: "Manufactures orphan-approval test pumps",
+      factKey: "capability",
+      factValue: "Manufactures orphan-approval test pumps",
+      frozenClaimType: "capability",
+    });
+    await insertDirectBridge(orphanFixture);
+    const orphanClaim = await owner.claim.findUniqueOrThrow({
+      where: { id: orphanFixture.claimId },
+    });
+    await owner.brandProfile.delete({
+      where: { id: orphanFixture.brandProfileId },
+    });
+    let orphanServiceApprovalRejected: unknown;
+    try {
+      await reviewer.transition(
+        { workspaceId, userId: "orphan-reviewer", roles: [] },
+        orphanClaim.id,
+        "APPROVED",
+        orphanClaim.version,
+      );
+    } catch (error) {
+      orphanServiceApprovalRejected = error;
+    }
+    check(
+      /CLAIM_BRIDGE_REQUIRED/.test(errorDetails(orphanServiceApprovalRejected)),
+      "application rejects approval after the exact Site bridge is gone",
+    );
+    const orphanVerifiedAt = new Date();
+    const orphanProof = buildClaimApprovalProof(
+      orphanClaim,
+      orphanClaim.version + 1,
+      {
+        verifiedBy: "direct-owner-reviewer",
+        verifiedAt: orphanVerifiedAt,
+        verificationMethod: "human_review",
+      },
+    );
+    let orphanDirectApprovalRejected: unknown;
+    try {
+      await owner.claim.update({
+        where: { id: orphanClaim.id },
+        data: {
+          status: "APPROVED",
+          version: { increment: 1 },
+          verifiedBy: "direct-owner-reviewer",
+          verifiedAt: orphanVerifiedAt,
+          verificationMethod: "human_review",
+          verificationProof: orphanProof,
+        },
+      });
+    } catch (error) {
+      orphanDirectApprovalRejected = error;
+    }
+    check(
+      /surviving exact bridge/.test(errorDetails(orphanDirectApprovalRejected)),
+      "database rejects direct approval after the exact Site bridge is gone",
     );
     await owner.asset.update({
       where: { id: certAssetId },
@@ -1058,7 +1239,10 @@ async function main(): Promise<void> {
       /approval audit is immutable/.test(errorDetails(auditMutationRejected)),
       "database rejects actor/time/method/proof mutation after approval",
     );
-    check((await listApproved()).length === 2, "rejected audit tamper is inert");
+    check(
+      (await listApproved()).length === 2,
+      "rejected audit tamper is inert",
+    );
     await reviewer.revoke(
       { workspaceId, userId: "human-reviewer", roles: [] },
       certification.id,
@@ -1078,10 +1262,7 @@ async function main(): Promise<void> {
       where: { id: capability.id },
       data: { status: "EXPIRED", version: { increment: 1 } },
     });
-    check(
-      (await listApproved()).length === 0,
-      "EXPIRED Claim is excluded",
-    );
+    check((await listApproved()).length === 0, "EXPIRED Claim is excluded");
     const otherVisible = await app.withWorkspace(otherWorkspaceId, (tx) =>
       new ClaimEvidenceBridgeService(
         new PrismaClaimEvidenceBridgeRepository(tx),
@@ -1254,7 +1435,10 @@ async function main(): Promise<void> {
     } catch {
       ownerProfileMutationRejected = true;
     }
-    check(ownerProfileMutationRejected, "owner cannot mutate bridged BrandProfile");
+    check(
+      ownerProfileMutationRejected,
+      "owner cannot mutate bridged BrandProfile",
+    );
     let ownerRefMutationRejected = false;
     try {
       await owner.brandProfileEvidenceRef.update({
@@ -1560,7 +1744,7 @@ async function main(): Promise<void> {
         workspaceId,
         companyId: sameWorkspaceCompanyProfileId,
         originKey: sha256(`${crossCompanyBrandProfileId}:other-company-claim`),
-        factKey: normalizeClaimIdentityPart(crossCompanyRef.factKey),
+        factKey: assertCanonicalClaimFactKey(crossCompanyRef.factKey),
         type: "param",
         statement: "Maximum pressure: 400 bar",
         status: "NEEDS_REVIEW",
@@ -1629,7 +1813,18 @@ async function main(): Promise<void> {
       }
     };
     await cleanup("sites", () =>
-      owner.site.deleteMany({ where: { id: { in: [siteId, otherSiteId] } } }),
+      owner.site.deleteMany({
+        where: {
+          id: {
+            in: [
+              siteId,
+              otherSiteId,
+              guardedSiteId,
+              ...(firstIntakeSiteId ? [firstIntakeSiteId] : []),
+            ],
+          },
+        },
+      }),
     );
     await cleanup("companies", () =>
       owner.companyProfile.deleteMany({
@@ -1639,6 +1834,10 @@ async function main(): Promise<void> {
               companyProfileId,
               sameWorkspaceCompanyProfileId,
               otherCompanyProfileId,
+              guardedCompanyId,
+              ...(firstIntakeCompanyProfileId
+                ? [firstIntakeCompanyProfileId]
+                : []),
             ],
           },
         },
@@ -1647,13 +1846,31 @@ async function main(): Promise<void> {
     await cleanup("workspaces", () =>
       owner.workspace.deleteMany({
         where: {
-          id: { in: [workspaceId, otherWorkspaceId, firstIntakeWorkspaceId] },
+          id: {
+            in: [
+              workspaceId,
+              otherWorkspaceId,
+              firstIntakeWorkspaceId,
+              guardedWorkspaceId,
+            ],
+          },
         },
       }),
     );
     await cleanup("residual fixture assertion", async () => {
       const [sites, companies, bridges, claims] = await Promise.all([
-        owner.site.count({ where: { id: { in: [siteId, otherSiteId] } } }),
+        owner.site.count({
+          where: {
+            id: {
+              in: [
+                siteId,
+                otherSiteId,
+                guardedSiteId,
+                ...(firstIntakeSiteId ? [firstIntakeSiteId] : []),
+              ],
+            },
+          },
+        }),
         owner.companyProfile.count({
           where: {
             id: {
@@ -1661,6 +1878,10 @@ async function main(): Promise<void> {
                 companyProfileId,
                 sameWorkspaceCompanyProfileId,
                 otherCompanyProfileId,
+                guardedCompanyId,
+                ...(firstIntakeCompanyProfileId
+                  ? [firstIntakeCompanyProfileId]
+                  : []),
               ],
             },
           },
