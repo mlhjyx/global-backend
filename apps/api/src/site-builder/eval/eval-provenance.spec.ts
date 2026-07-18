@@ -5,6 +5,7 @@ import {
   assertEvaluationReportPathAvailable,
   assertUniqueEvaluationValues,
   inspectEvaluationMatrix,
+  inspectEvaluationSourceBundle,
   isExactUpstreamModelResolution,
   routeForModelEvaluation,
   routeForTaskEvaluation,
@@ -66,6 +67,18 @@ describe('routeForModelEvaluation', () => {
 });
 
 describe('MODEL evaluation provenance guards', () => {
+  it('detects source edits made while a paid evaluation is running', () => {
+    const start = [{ path: 'task.ts', sha256: 'a'.repeat(64) }];
+    expect(inspectEvaluationSourceBundle(start, start)).toMatchObject({
+      stable: true,
+    });
+    expect(
+      inspectEvaluationSourceBundle(start, [
+        { path: 'task.ts', sha256: 'b'.repeat(64) },
+      ]),
+    ).toMatchObject({ stable: false });
+  });
+
   it('rejects an occupied report path before any paid model call', async () => {
     await expect(
       assertEvaluationReportPathAvailable(
