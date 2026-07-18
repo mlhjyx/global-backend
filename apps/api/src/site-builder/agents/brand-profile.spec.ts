@@ -2377,6 +2377,14 @@ describe('buildBrandProfilePrompt — 模板槽位与硬规则', () => {
     expect(() =>
       BRAND_PROFILE_TASK.validateOutput?.(input, {
         ...base,
+        valueProps: [
+          'Specialized supplier of CO2 incubator shakers and microplate mixers designed for cell culture and sample preparation workflows.',
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      BRAND_PROFILE_TASK.validateOutput?.(input, {
+        ...base,
         glossary: [
           {
             term: 'Product terminology',
