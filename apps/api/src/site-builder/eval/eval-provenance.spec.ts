@@ -92,6 +92,7 @@ describe('routeForModelEvaluation', () => {
     });
     expect(baseline.policy).not.toHaveProperty('promotionEvidenceId');
     expect(evaluationProbePolicy(baseline)).toEqual({
+      maxTokens: 1024,
       maxCostCents: 40,
       reasoningEffort: 'low',
     });
