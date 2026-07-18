@@ -166,6 +166,20 @@ const approvalBridgeGuardMigration =
         "utf8",
       )
     : "";
+const certAssetIndexMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_cert_asset_lookup_index$/.test(entry),
+);
+const certAssetIndexMigration =
+  certAssetIndexMigrationDirs.length === 1
+    ? readFileSync(
+        path.join(
+          migrationsDir,
+          certAssetIndexMigrationDirs[0]!,
+          "migration.sql",
+        ),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -500,6 +514,13 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     );
     expect(approvalBridgeGuardMigration).toMatch(
       /NEW\."origin_key" IS NULL[\s\S]+NEW\."fact_key" IS NULL/,
+    );
+  });
+
+  it("adds a partial covering index for certification Asset delete scans", () => {
+    expect(certAssetIndexMigrationDirs).toHaveLength(1);
+    expect(certAssetIndexMigration).toMatch(
+      /CREATE INDEX "brand_profile_claim_bridge_cert_asset_lookup_idx"[\s\S]+ON "brand_profile_claim_bridge" \("cert_asset_id", "site_id"\)[\s\S]+INCLUDE \("brand_profile_id", "fact_index"\)[\s\S]+WHERE "cert_asset_id" IS NOT NULL/i,
     );
   });
 });
