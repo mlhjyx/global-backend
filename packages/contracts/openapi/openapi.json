@@ -5935,7 +5935,7 @@
                         },
                         "details": {
                           "type": "object",
-                          "description": "ASSET_IN_USE 时包含稳定的 usages 引用清单。",
+                          "description": "ASSET_IN_USE 时包含稳定、有界的 usages 引用样本清单。",
                           "additionalProperties": true,
                           "properties": {
                             "usages": {
@@ -5954,7 +5954,8 @@
                                     "type": "string",
                                     "enum": [
                                       "profile",
-                                      "site_spec"
+                                      "site_spec",
+                                      "claim_evidence"
                                     ]
                                   },
                                   "siteVersionId": {
@@ -7206,6 +7207,12 @@
             "type": "string",
             "example": "certification"
           },
+          "factKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "机器投影 Claim 的规范化事实键；手工或历史 Claim 为 null",
+            "example": "quality_certifications"
+          },
           "statement": {
             "type": "string",
             "example": "产品通过 ISO 9001 与 CE 认证"
@@ -7246,6 +7253,7 @@
           "id",
           "companyId",
           "type",
+          "factKey",
           "statement",
           "status",
           "confidence",

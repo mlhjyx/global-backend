@@ -70,7 +70,7 @@ function outputFor(
 
 describe('BrandProfile MODEL-1 fixture evaluator', () => {
   it('exposes a versioned, hashable evaluator contract for model reports', () => {
-    expect(BRAND_PROFILE_EVALUATOR_VERSION).toBe('brand-profile-evaluator/2');
+    expect(BRAND_PROFILE_EVALUATOR_VERSION).toBe('brand-profile-evaluator/3');
     expect(canonicalJson({ b: 2, a: [true, null] })).toBe('{"a":[true,null],"b":2}');
     expect(canonicalJson({ ä: 3, z: 2, A: 1 })).toBe('{"A":1,"z":2,"ä":3}');
     expect(sha256CanonicalJson({ b: 2, a: [true, null] })).toBe(
@@ -152,7 +152,7 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
 
     const outcome = evaluateBrandProfileOutput(prepared, output);
     expect(outcome.acceptedArtifact).toBe(false);
-    expect(outcome.rejectedFactCount).toBe(0);
+    expect(outcome.rejectedFactCount).toBe(1);
     expect(outcome.missingAcceptedTerms).toEqual(['160 bar']);
   });
 
@@ -180,8 +180,19 @@ describe('BrandProfile MODEL-1 fixture evaluator', () => {
     const prepared = prepareBrandProfileEvalFixture(fixture);
     const output = outputFor(prepared);
     output.valueProps = ['Grounded operating data for chemical processing.'];
-    output.factSheet[1].evidence!.quote =
-      'the MX magnetic drive series is designed for seal-less transfer of corrosive process media';
+    const catalog = prepared.frozenSources.get('catalog-1');
+    if (!catalog) throw new Error('catalog fixture source missing');
+    output.factSheet.push({
+      key: 'operating_design',
+      value: 'Seal-less transfer',
+      evidence: {
+        sourceType: 'upload',
+        sourceId: 'catalog-1',
+        contentHash: catalog.contentHash,
+        quote:
+          'the MX magnetic drive series is designed for seal-less transfer of corrosive process media',
+      },
+    });
 
     expect(evaluateBrandProfileOutput(prepared, output).acceptedArtifact).toBe(true);
   });

@@ -319,36 +319,59 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private async expireDueClaims(): Promise<void> {
     this.expireCounter = (this.expireCounter + 1) % 30;
     if (this.expireCounter !== 0) return;
+    const now = new Date();
     const expired = await this.db.claim.findMany({
-      where: { status: 'APPROVED', validUntil: { lt: new Date() } },
-      select: { id: true, workspaceId: true, companyId: true, type: true },
+      where: { status: 'APPROVED', validUntil: { lt: now } },
+      select: {
+        id: true,
+        workspaceId: true,
+        companyId: true,
+        factKey: true,
+        type: true,
+        version: true,
+      },
       take: 100,
     });
+    let expiredCount = 0;
     for (const c of expired) {
       try {
-        // 原子成对（E）：EXPIRED 置位与 ClaimExpired 事件同事务——两步分离时若在中间崩溃，
-        // 状态已翻但事件永久丢失（ClaimExpired 是对外交付事件，丢失 = SaaS 漏收到期通知）。
-        await this.db.$transaction([
-          this.db.claim.update({
-            where: { id: c.id },
-            data: { status: 'EXPIRED' },
-          }),
-          this.db.outboxEvent.create({
+        // 原子成对（E）：CAS 状态翻转与 ClaimExpired 同事务。读后若人工 revoke/
+        // re-approve 已推进 status/version，CAS 失手且不伪造过期事件。
+        const changed = await this.db.$transaction(async (tx) => {
+          const update = await tx.claim.updateMany({
+            where: {
+              id: c.id,
+              status: 'APPROVED',
+              version: c.version,
+              validUntil: { lt: now },
+            },
+            data: { status: 'EXPIRED', version: { increment: 1 } },
+          });
+          if (update.count === 0) return false;
+          await tx.outboxEvent.create({
             data: {
               workspaceId: c.workspaceId,
               eventType: 'ClaimExpired',
               aggregateType: 'Claim',
               aggregateId: c.id,
-              payload: { companyId: c.companyId, type: c.type },
+              payload: {
+                companyId: c.companyId,
+                factKey: c.factKey,
+                type: c.type,
+              },
             },
-          }),
-        ]);
+          });
+          return true;
+        });
+        if (changed) expiredCount += 1;
       } catch (err) {
         // 单条失败不阻断本批其余 claim；未翻状态的下轮扫描仍会重试。
         this.logger.error(`claim expiry failed for ${c.id} (下轮重试): ${String(err)}`);
       }
     }
-    if (expired.length) this.logger.log(`expired ${expired.length} claims past validUntil`);
+    if (expiredCount) {
+      this.logger.log(`expired ${expiredCount} claims past validUntil`);
+    }
   }
 
   /**

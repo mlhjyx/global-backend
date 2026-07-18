@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context as ActivityContext } from '@temporalio/activity';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   createSiteBuilderActivities,
   buildCompensatedSteps,
   intakeToMarkdown,
+  runBrandProfilePersistenceWithRetry,
   RefurbishActivityInput,
   RefurbishFinalizeInput,
 } from './site-builder.activities';
@@ -66,6 +67,52 @@ function spyBudget() {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+describe('runBrandProfilePersistenceWithRetry', () => {
+  it('retries a deadlocked P2034 transaction and preserves the P2002 retry path', async () => {
+    const deadlock = new Prisma.PrismaClientKnownRequestError('deadlock', {
+      code: 'P2034',
+      clientVersion: 'test',
+    });
+    const uniqueClash = new Prisma.PrismaClientKnownRequestError('unique', {
+      code: 'P2002',
+      clientVersion: 'test',
+    });
+    const operation = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(deadlock)
+      .mockRejectedValueOnce(uniqueClash)
+      .mockResolvedValueOnce('persisted');
+
+    await expect(
+      runBrandProfilePersistenceWithRetry(operation),
+    ).resolves.toBe('persisted');
+    expect(operation).toHaveBeenCalledTimes(3);
+  });
+
+  it('bounds repeated P2034 retries and rethrows the final database error', async () => {
+    const deadlock = new Prisma.PrismaClientKnownRequestError('deadlock', {
+      code: 'P2034',
+      clientVersion: 'test',
+    });
+    const operation = vi.fn<() => Promise<never>>().mockRejectedValue(deadlock);
+
+    await expect(
+      runBrandProfilePersistenceWithRetry(operation, 3),
+    ).rejects.toBe(deadlock);
+    expect(operation).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry an unrelated persistence failure', async () => {
+    const failure = new Error('validation failed');
+    const operation = vi.fn<() => Promise<never>>().mockRejectedValue(failure);
+
+    await expect(runBrandProfilePersistenceWithRetry(operation)).rejects.toBe(
+      failure,
+    );
+    expect(operation).toHaveBeenCalledOnce();
+  });
 });
 
 describe('processKbAsset — Temporal heartbeat/cancellation', () => {
@@ -784,6 +831,37 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
       /gateway unavailable/,
     );
     expect(budgetLedger.remainingCents('run-1')).toBe(siteBuildBudgetCents());
+    budgetLedger.close('run-1', { force: true });
+  });
+
+  it('buildBrandProfile 对旧的未关联 CompanyProfile Site 在任何模型/研究调用前 fail-closed', async () => {
+    const gateway = { generateStructured: vi.fn() };
+    const broker = { execute: vi.fn() };
+    const prisma = fakePrisma({
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          companyProfileId: null,
+          intake: INTAKE,
+          profile: null,
+          profileVersionId: null,
+        })),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+      },
+    });
+    const acts = createSiteBuilderActivities({
+      prisma,
+      gateway: gateway as never,
+      broker: broker as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
+      'SITE_COMPANY_PROFILE_LINK_REQUIRED',
+    );
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
+    expect(broker.execute).not.toHaveBeenCalled();
     budgetLedger.close('run-1', { force: true });
   });
 });

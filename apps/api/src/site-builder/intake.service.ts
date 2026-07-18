@@ -169,6 +169,16 @@ export class IntakeService {
         // 同 workspace 的“幂等查/一站限制/建站/建 run/写 response”必须原子串行。
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-intake-${ctx.workspaceId}`}))`;
 
+        // SaaS owns tenant identity; this backend materializes only the FK
+        // anchor. Site Builder may be the first write for a freshly issued
+        // workspace token, so provision it in the same locked transaction
+        // before CompanyProfile (which has a real Workspace FK).
+        await tx.workspace.upsert({
+          where: { id: ctx.workspaceId },
+          update: {},
+          create: { id: ctx.workspaceId },
+        });
+
         if (idempotencyKey) {
           const prior = await tx.idempotencyKey.findUnique({
             where: {
@@ -208,14 +218,29 @@ export class IntakeService {
                 "corrupt site-builder intake idempotency reference",
               );
             }
-            return { response, run, wasCreated: false };
+            return {
+              response,
+              run,
+              wasCreated: false,
+              createdCompanyProfileId: null,
+            };
           }
         }
 
         const existing = await tx.site.findFirst({
           where: { workspaceId: ctx.workspaceId },
-          select: { id: true, status: true },
+          select: { id: true, status: true, companyProfileId: true },
         });
+        if (existing?.status === "setup_failed" && !existing.companyProfileId) {
+          // R4-A2: mutable intake/display names are not identity. A historical Site without an
+          // explicit tenant-scoped CompanyProfile edge must be repaired through an audited path.
+          throw new ConflictException(
+            structuredError(
+              "SITE_COMPANY_PROFILE_LINK_REQUIRED",
+              "site has no verified company profile link",
+            ),
+          );
+        }
         if (existing) {
           // Share the same per-site lock as POST /sites/:id/builds. A setup_failed re-intake
           // must not race a refurbish request into two active runs for one Site.
@@ -240,6 +265,18 @@ export class IntakeService {
           );
         }
 
+        const companyProfile = existing
+          ? null
+          : await tx.companyProfile.create({
+              data: {
+                workspaceId: ctx.workspaceId,
+                name: nameEn ?? input.company.nameZh,
+                website: input.hasWebsite ? input.websiteUrl : null,
+                industry: input.industry,
+                status: "DRAFT",
+              },
+              select: { id: true },
+            });
         const shared = {
           name: nameEn ?? input.company.nameZh,
           mode: "builder",
@@ -254,6 +291,7 @@ export class IntakeService {
           : await tx.site.create({
               data: {
                 workspaceId: ctx.workspaceId,
+                companyProfileId: companyProfile!.id,
                 slug: makeSlug(nameEn),
                 ...shared,
               },
@@ -283,7 +321,12 @@ export class IntakeService {
             },
           });
         }
-        return { response, run, wasCreated: !existing };
+        return {
+          response,
+          run,
+          wasCreated: !existing,
+          createdCompanyProfileId: companyProfile?.id ?? null,
+        };
       },
     );
 
@@ -334,6 +377,11 @@ export class IntakeService {
       await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
         if (prepared.wasCreated) {
           await tx.site.delete({ where: { id: prepared.response.siteId } });
+          if (prepared.createdCompanyProfileId) {
+            await tx.companyProfile.delete({
+              where: { id: prepared.createdCompanyProfileId },
+            });
+          }
         } else {
           await tx.site.update({
             where: { id: prepared.response.siteId },

@@ -143,7 +143,7 @@ const ASSET_DELETE_CONFLICT_SCHEMA: SchemaObject = {
         message: { type: 'string' },
         details: {
           type: 'object',
-          description: 'ASSET_IN_USE 时包含稳定的 usages 引用清单。',
+          description: 'ASSET_IN_USE 时包含稳定、有界的 usages 引用样本清单。',
           additionalProperties: true,
           properties: {
             usages: {
@@ -155,7 +155,7 @@ const ASSET_DELETE_CONFLICT_SCHEMA: SchemaObject = {
                 properties: {
                   source: {
                     type: 'string',
-                    enum: ['profile', 'site_spec'],
+                    enum: ['profile', 'site_spec', 'claim_evidence'],
                   },
                   siteVersionId: { type: 'string', format: 'uuid' },
                   page: { type: 'string' },

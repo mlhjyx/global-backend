@@ -505,7 +505,7 @@ describe('AssetsService R2-A1 correctness gate', () => {
     expect((error as HttpException).getResponse()).toEqual({
       error: {
         code: 'ASSET_IN_USE',
-        message: 'asset is referenced by the active site or profile',
+        message: 'asset is referenced by the active site, profile, or Claim evidence',
         details: { usages: [usage] },
       },
     });

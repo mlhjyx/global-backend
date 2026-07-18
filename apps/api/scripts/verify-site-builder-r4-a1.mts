@@ -242,6 +242,7 @@ async function main(): Promise<void> {
   const app = new PrismaService();
   const workspaceId = randomUUID();
   const otherWorkspaceId = randomUUID();
+  const companyProfileId = randomUUID();
   const siteId = randomUUID();
   const runIds: string[] = [];
   let storage: StorageService | undefined;
@@ -308,10 +309,20 @@ async function main(): Promise<void> {
         { id: otherWorkspaceId, name: "verify-r4-a1-other" },
       ],
     });
+    await owner.companyProfile.create({
+      data: {
+        id: companyProfileId,
+        workspaceId,
+        name: "KSB SE & Co. KGaA",
+        website: "https://www.ksb.com",
+        industry: "industrial pumps and valves",
+      },
+    });
     await owner.site.create({
       data: {
         id: siteId,
         workspaceId,
+        companyProfileId,
         name: "KSB Evidence 2.0 Verification",
         slug: `verify-r4-a1-${siteId.slice(0, 8)}`,
         status: "building",
@@ -643,23 +654,27 @@ async function main(): Promise<void> {
     await cleanup("site cascade", () =>
       owner.site.deleteMany({ where: { id: siteId } }),
     );
+    await cleanup("company cascade", () =>
+      owner.companyProfile.deleteMany({ where: { id: companyProfileId } }),
+    );
     await cleanup("workspaces", () =>
       owner.workspace.deleteMany({
         where: { id: { in: [workspaceId, otherWorkspaceId] } },
       }),
     );
     await cleanup("residual fixture assertion", async () => {
-      const [sites, workspaces, refs, snapshots] = await Promise.all([
+      const [sites, companies, workspaces, refs, snapshots] = await Promise.all([
         owner.site.count({ where: { id: siteId } }),
+        owner.companyProfile.count({ where: { id: companyProfileId } }),
         owner.workspace.count({
           where: { id: { in: [workspaceId, otherWorkspaceId] } },
         }),
         owner.brandProfileEvidenceRef.count({ where: { siteId } }),
         owner.siteEvidenceSourceSnapshot.count({ where: { siteId } }),
       ]);
-      if (sites + workspaces + refs + snapshots !== 0) {
+      if (sites + companies + workspaces + refs + snapshots !== 0) {
         throw new Error(
-          `cleanup verification found residual R4-A1 fixtures: sites=${sites}, workspaces=${workspaces}, refs=${refs}, snapshots=${snapshots}`,
+          `cleanup verification found residual R4-A1 fixtures: sites=${sites}, companies=${companies}, workspaces=${workspaces}, refs=${refs}, snapshots=${snapshots}`,
         );
       }
     });
@@ -686,7 +701,12 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error("💥 R4-A1 verification failed:", error);
-  process.exitCode = 1;
-});
+// AbortSignal.timeout uses an unref'ed timer. Keep the one-shot verifier alive
+// until every awaited network/model stage either resolves or reaches its bound.
+const verifierKeepAlive = setInterval(() => undefined, 1_000);
+void main()
+  .catch((error) => {
+    console.error("💥 R4-A1 verification failed:", error);
+    process.exitCode = 1;
+  })
+  .finally(() => clearInterval(verifierKeepAlive));

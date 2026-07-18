@@ -35,7 +35,11 @@ describe('Asset DELETE generated OpenAPI', () => {
     expect(error.properties!.code.enum).toContain('ASSET_IN_USE');
     expect(usage.required).toEqual(['source', 'page', 'component', 'fieldPath']);
     expect(usage.additionalProperties).toBe(false);
-    expect(usage.properties!.source.enum).toEqual(['profile', 'site_spec']);
+    expect(usage.properties!.source.enum).toEqual([
+      'profile',
+      'site_spec',
+      'claim_evidence',
+    ]);
     expect(usage.properties!.siteVersionId).toMatchObject({
       type: 'string',
       format: 'uuid',
