@@ -166,6 +166,7 @@ export interface DiagnosticRejectedOutput<T> {
   model: string;
   fixtureId: string;
   attempt: number;
+  validationError: string;
   output: T;
 }
 
@@ -177,7 +178,7 @@ export function captureDiagnosticRejectedOutput<T>(
   enabled: boolean,
   record: DiagnosticRejectedOutput<T>,
 ): DiagnosticRejectedOutput<T> | undefined {
-  return enabled ? record : undefined;
+  return enabled ? structuredClone(record) : undefined;
 }
 
 export interface EvaluationMatrixRowKey {

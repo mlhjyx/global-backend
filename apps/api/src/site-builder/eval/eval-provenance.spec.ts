@@ -90,6 +90,7 @@ describe('MODEL evaluation provenance guards', () => {
         model: 'claude-sonnet-5',
         fixtureId: 'industrial-pump-rich',
         attempt: 1,
+        validationError: 'not persisted',
         output,
       }),
     ).toBeUndefined();

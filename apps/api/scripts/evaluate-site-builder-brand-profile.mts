@@ -54,6 +54,7 @@ import {
   runWithEvaluationDeadline,
   sanitizeGatewayBaseUrl,
   snapshotEvaluationExecutionPolicy,
+  type DiagnosticRejectedOutput,
   type EvaluationExecutionPolicy,
 } from '../src/site-builder/eval/eval-provenance';
 import type { TaskRoute } from '../src/site-builder/agents/task-routes';
@@ -553,12 +554,9 @@ const reportPath = process.env.MODEL_EVAL_REPORT_PATH?.trim();
 if (reportPath) await prepareEvaluationReportPath(reportPath);
 const runs: EvalRun[] = [];
 const probes: EvalProbe[] = [];
-const diagnosticRejectedOutputs: Array<{
-  model: string;
-  fixtureId: string;
-  attempt: number;
-  output: BrandProfileOutput;
-}> = [];
+const diagnosticRejectedOutputs: Array<
+  DiagnosticRejectedOutput<BrandProfileOutput>
+> = [];
 const evaluationRoute = candidateRoute(models[0]);
 const expectedRunCount = models.length * fixtures.length * repeats;
 const timePlan: EvaluationTimePlan = {
@@ -667,7 +665,9 @@ if (preflightPassed) {
           expectedRunCount,
           timeoutMs: route.timeoutMs,
         });
-        let rejectedOutput: BrandProfileOutput | undefined;
+        let rejectedDiagnostic:
+          | DiagnosticRejectedOutput<BrandProfileOutput>
+          | undefined;
         let evaluatedArtifactSha256: string | undefined;
         try {
           const task = {
@@ -683,7 +683,17 @@ if (preflightPassed) {
               try {
                 BRAND_PROFILE_TASK.validateOutput?.(input, output);
               } catch (error) {
-                if (diagnosticCaptureRejectedOutput) rejectedOutput = output;
+                rejectedDiagnostic = captureDiagnosticRejectedOutput(
+                  diagnosticCaptureRejectedOutput,
+                  {
+                    model,
+                    fixtureId: fixture.id,
+                    attempt,
+                    validationError:
+                      error instanceof Error ? error.message : String(error),
+                    output,
+                  },
+                );
                 throw error;
               }
             },
@@ -771,19 +781,14 @@ if (preflightPassed) {
           break matrix;
         }
       } catch (error) {
-          if (diagnosticCaptureRejectedOutput && rejectedOutput) {
-            const captured = captureDiagnosticRejectedOutput(true, {
-              model,
-              fixtureId: fixture.id,
-              attempt,
-              output: rejectedOutput,
-            });
-            if (captured) diagnosticRejectedOutputs.push(captured);
+          if (rejectedDiagnostic) {
+            diagnosticRejectedOutputs.push(rejectedDiagnostic);
             progress('diagnostic_rejected_output', {
               model,
               fixtureId: fixture.id,
               attempt,
-              gaps: rejectedOutput.gaps,
+              validationError: rejectedDiagnostic.validationError,
+              gaps: rejectedDiagnostic.output.gaps,
             });
           }
           const usage = error instanceof AiTaskError ? error.usage : undefined;
