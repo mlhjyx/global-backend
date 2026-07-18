@@ -43,7 +43,7 @@ export function claimTypeForBrandFact(key: string, value: string): string {
     /pressure|capacity|frequency|voltage|power|speed|temperature|dimension|weight|性能|参数|压力|产能|频率|电压|功率|转速|温度|尺寸|重量/u.test(
       normalized,
     ) ||
-    /\d\s*(?:%|bar|mbar|pa|kpa|mpa|psi|hz|khz|mhz|ghz|rpm|v|kv|a|kw|mw|mm|cm|km|kg|lb|l|m[23²³])\b/iu.test(
+    /\d+(?:[.,]\d+)?\s*(?:%|‰|℃|℉|°\s*[cf]|bar|mbar|pa|kpa|mpa|psi|hz|khz|mhz|ghz|rpm|v|mv|kv|a|ma|w|kw|mw|wh|kwh|mah|nm|um|μm|mm|cm|m|km|in|ft|mg|g|kg|lb|oz|ml|l|m[23²³]|l\s*[/⁄]\s*min|n\s*[.·]\s*m)(?![\p{L}\p{N}])/iu.test(
       normalized,
     )
   ) {
@@ -119,6 +119,10 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
       ref.factIndex !== factIndex ||
       typeof fact.key !== "string" ||
       typeof fact.value !== "string" ||
+      typeof fact.claimType !== "string" ||
+      !["certification", "case", "param", "value_prop", "capability"].includes(
+        fact.claimType,
+      ) ||
       fact.key !== ref.factKey ||
       (ref.sourceSnapshot.sourceRole !== "fact_candidate" &&
         ref.sourceSnapshot.sourceRole !== "research_hint")
@@ -135,7 +139,7 @@ export class PrismaClaimEvidenceBridgeRepository implements ClaimEvidenceBridgeR
       brandProfileId: profile.id,
       factIndex,
       factKey: ref.factKey,
-      claimType: claimTypeForBrandFact(ref.factKey, fact.value),
+      claimType: fact.claimType,
       value: fact.value,
       evidenceRef: {
         evidenceRefId: ref.id,

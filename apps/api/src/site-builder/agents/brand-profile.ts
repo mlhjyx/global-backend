@@ -218,8 +218,40 @@ const COMPACT_LATIN_MODEL_PATTERN =
   /(?=[a-z\d]*[a-z])(?=[a-z\d]*\d)[a-z\d]+/giu;
 const MODEL_OR_NAME_KEY_PATTERN =
   /(?:^|[_\s-])(?:name|model|sku|part[_\s-]?number|code|company|brand|product(?:s)?|product[_\s-]?name)(?:$|[_\s-])|名称|型号|货号|编号|代码|公司|品牌|产品/iu;
+const PERSONNEL_AGGREGATE_KEY_PATTERN =
+  /^(?:employee|staff|team)_(?:count|size)$/u;
+const SAFE_ENTITY_NAME_KEYS = new Set([
+  'company_name',
+  'legal_name',
+  'trade_name',
+  'business_name',
+  'brand_name',
+  'product_name',
+  'model_name',
+  'site_name',
+]);
+const PERSONAL_EXACT_KEYS = new Set([
+  'owner',
+  'manager',
+  'director',
+  'representative',
+]);
 const PERSONAL_FACT_KEY_PATTERN =
-  /(?:^|[_\s-])(?:person|people|contact(?:[_\s-]?person)?|founder|co[_\s-]?founder|ceo|chief[_\s-]?executive(?:[_\s-]?officer)?|team|member|staff|owner|director|manager|representative)(?:$|[_\s-])|联系人|创始人|联合创始人|首席执行官|法定代表人|法人代表|负责人|团队|成员|员工|董事|经理/iu;
+  /(?:^|_)(?:person|people|contact|contact_person|founder|co_founder|ceo|chief_executive(?:_officer)?|team|member|staff|president|chair(?:man|woman|person)?|executive|leadership|board(?:_member)?|owner_name|director_name|manager_name|legal_representative|representative_name)(?:$|_)|联系人|创始人|联合创始人|首席执行官|法定代表人|法人代表|负责人姓名|团队成员|员工姓名|董事姓名|经理姓名/iu;
+const PERSONAL_FACT_VALUE_PATTERN =
+  /\b(?:founded|co-founded)\s+by\b|\b(?:founder|co-founder|ceo|chief executive(?: officer)?|president|chair(?:man|woman|person)?|board member|managing director|contact person|legal representative)\s*[:：-]?\s+\p{Lu}[\p{L}'’-]+(?:\s+\p{Lu}[\p{L}'’-]+)+|(?:创始人|联合创始人|首席执行官|法定代表人|法人代表|负责人|联系人)[：:]?\s*[\p{L}·]{2,}/iu;
+
+function isPersonBearingFact(item: RawFactItem): boolean {
+  const normalizedKey = normalizeClaimKey(item.key).replace(/[\s-]+/gu, '_');
+  if (PERSONNEL_AGGREGATE_KEY_PATTERN.test(normalizedKey)) return false;
+  if (SAFE_ENTITY_NAME_KEYS.has(normalizedKey)) return false;
+  return (
+    PERSONAL_EXACT_KEYS.has(normalizedKey) ||
+    /(?:^|_)(?:person|people)(?:$|_)|_name$/u.test(normalizedKey) ||
+    PERSONAL_FACT_KEY_PATTERN.test(normalizedKey) ||
+    PERSONAL_FACT_VALUE_PATTERN.test(item.value.normalize('NFKC'))
+  );
+}
 
 const CLAIM_UNIT_CANONICAL_PATTERN = new RegExp(
   `(${CLAIM_NUMBER_SOURCE})\\s*(${CLAIM_UNIT_SOURCE})(?![\\p{L}\\p{N}])`,
@@ -557,7 +589,7 @@ export function enforceEvidenceGateV2(
   const createEvidenceRefId = opts.createEvidenceRefId ?? randomUUID;
 
   for (const item of items) {
-    if (PERSONAL_FACT_KEY_PATTERN.test(normalizeClaimKey(item.key))) {
+    if (isPersonBearingFact(item)) {
       gaps.push({
         field: item.key,
         reason: 'personal_data_not_publishable',
@@ -566,8 +598,9 @@ export function enforceEvidenceGateV2(
       continue;
     }
     if (
-      item.evidence?.quote &&
-      scrubPii(item.evidence.quote) !== item.evidence.quote
+      [item.key, item.value, item.evidence?.quote].some(
+        (text) => text != null && scrubPii(text) !== text,
+      )
     ) {
       gaps.push({
         field: item.key,

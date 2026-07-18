@@ -1,9 +1,9 @@
 const CERTIFICATION_WORD_PATTERN =
   /certif|certificate|accredit|认证|证书|资质/iu;
 const CERTIFICATION_CODE_PATTERN =
-  /(?:^|[^\p{L}\p{N}])(?:iso|iec|en|din|iatf|as|api|astm|gb|ul)\s*[-:/]?\s*\d[\d.-]*(?=$|[^\p{L}\p{N}])/iu;
+  /(?:^|[^a-z0-9])(?:iso|iec|en|din|iatf|as|api|astm|gb|ul)\s*[-:/]?\s*\d[\d.-]*(?=$|[^a-z0-9])/iu;
 const CERTIFICATION_MARK_PATTERN =
-  /(?:^|[^\p{L}\p{N}])(?:ce|fda|ul|rohs|reach|gmp|tüv)(?=$|[^\p{L}\p{N}])/iu;
+  /(?:^|[^a-z0-9])(?:ce|fda|ul|rohs|reach|gmp|tüv)(?=$|[^a-z0-9])/iu;
 
 /** Shared classifier for semantic, persistence and publication gates. */
 export function isCertificationClaim(input: {

@@ -973,6 +973,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 facts: clean.factSheet,
               },
             );
+            const persistedFactSheet = certificationGate.factSheet.map((fact) => ({
+              ...fact,
+              // Server-owned and frozen with the append-only BrandProfile fact.
+              // Bridge readers must not reinterpret history after classifier changes.
+              claimType: claimTypeForBrandFact(fact.key, fact.value),
+            }));
             const persistedGaps = [...clean.gaps, ...certificationGate.gaps];
             await tx.brandProfile.create({
               data: {
@@ -987,14 +993,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 keywords: clean.keywords as Prisma.InputJsonValue,
                 differentiators: clean.differentiators as Prisma.InputJsonValue,
                 competitors: clean.competitors as Prisma.InputJsonValue,
-                factSheet: certificationGate.factSheet as unknown as Prisma.InputJsonValue,
+                factSheet: persistedFactSheet as unknown as Prisma.InputJsonValue,
                 gaps: persistedGaps as unknown as Prisma.InputJsonValue,
                 researchDegraded: research.degraded,
               },
             });
-            if (certificationGate.factSheet.length > 0) {
+            if (persistedFactSheet.length > 0) {
               await tx.brandProfileEvidenceRef.createMany({
-                data: certificationGate.factSheet.map((fact, factIndex) => ({
+                data: persistedFactSheet.map((fact, factIndex) => ({
                   id: fact.evidence.evidenceRefId,
                   workspaceId,
                   siteId,
@@ -1014,7 +1020,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               const claimBridge = new ClaimEvidenceBridgeService(
                 bridgeRepository,
               );
-              const projectionOrder = certificationGate.factSheet
+              const projectionOrder = persistedFactSheet
                 .map((fact, factIndex) => ({
                   factIndex,
                   sortKey: JSON.stringify([
@@ -1044,7 +1050,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             }
             return {
               version: next,
-              factCount: certificationGate.factSheet.length,
+              factCount: persistedFactSheet.length,
               gapsCount: persistedGaps.length,
             };
           });
