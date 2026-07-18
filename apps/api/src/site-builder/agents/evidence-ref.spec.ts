@@ -180,6 +180,51 @@ describe('resolveEvidenceReference — exact quote/hash/source binding', () => {
     ).toMatchObject({ ok: false, reason: 'unsupported_quote' });
   });
 
+  it('recovers one unique ASCII-case-only quote as the exact frozen source slice', () => {
+    const snapshotText = 'Approved note: Flange program FL-88 supports 160 mm.';
+    const source = uploadSource({
+      snapshotText,
+      contentHash: sha256(snapshotText),
+    });
+    const resolved = resolveEvidenceReference(
+      {
+        sourceId: 'source-1',
+        sourceType: 'upload',
+        contentHash: source.contentHash,
+        quote: 'flange program FL-88',
+      },
+      new Map([['source-1', source]]),
+      { evidenceRefId: 'ref-1' },
+    );
+
+    expect(resolved).toMatchObject({
+      ok: true,
+      ref: {
+        quote: 'Flange program FL-88',
+        selector: { start: 15, end: 35 },
+      },
+    });
+
+    const ambiguousText =
+      'Flange program FL-88; alternate FLANGE PROGRAM FL-88.';
+    const ambiguous = uploadSource({
+      snapshotText: ambiguousText,
+      contentHash: sha256(ambiguousText),
+    });
+    expect(
+      resolveEvidenceReference(
+        {
+          sourceId: 'source-2',
+          sourceType: 'upload',
+          contentHash: ambiguous.contentHash,
+          quote: 'flange program FL-88',
+        },
+        new Map([['source-2', ambiguous]]),
+        { evidenceRefId: 'ref-2' },
+      ),
+    ).toMatchObject({ ok: false, reason: 'unsupported_quote' });
+  });
+
   it('rejects a real source ID paired with the wrong frozen hash or source type', () => {
     const source = uploadSource();
     const sources = new Map([['source-1', source]]);
