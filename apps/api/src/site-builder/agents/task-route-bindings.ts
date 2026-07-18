@@ -34,6 +34,7 @@ const TASK_BINDINGS = Object.freeze({
     maxTokens: 12_000,
     timeoutMs: BRAND_PROFILE_TIMEOUT_MS,
     maxCostCents: 40,
+    reasoningEffort: 'low',
   }),
   'site_builder.copy': Object.freeze({
     profile: 'copy.premium',
