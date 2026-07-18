@@ -29,12 +29,12 @@ describe('compareClaimProjectionOrder', () => {
     expect(localeCompare).not.toHaveBeenCalled();
   });
 
-  it('derives the same canonical Claim origin/order key across whitespace variants', () => {
+  it('derives the same canonical Claim origin/order key while rejecting non-canonical fact keys', () => {
     const scope = {
       workspaceId: '11111111-1111-4111-8111-111111111111',
       companyProfileId: '22222222-2222-4222-8222-222222222222',
       claimType: ' param ',
-      factKey: ' maximum\tpressure ',
+      factKey: 'maximum_pressure',
       statement: ' 400\n bar ',
     };
 
@@ -42,20 +42,22 @@ describe('compareClaimProjectionOrder', () => {
     const canonical = claimOriginIdentity({
       ...scope,
       claimType: 'param',
-      factKey: 'maximum pressure',
       statement: '400 bar',
     });
 
     expect(spaced).toEqual(canonical);
     expect(spaced).toMatchObject({
-      normalizedFactKey: 'maximum pressure',
+      normalizedFactKey: 'maximum_pressure',
       normalizedType: 'param',
       normalizedStatement: '400 bar',
     });
     expect(spaced.claimOriginKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(() =>
+      claimOriginIdentity({ ...scope, factKey: ' maximum\tpressure ' }),
+    ).toThrow('strict lower_snake_case');
 
     const rows = [
-      { sortKey: claimOriginIdentity({ ...scope, factKey: ' z ' }).claimOriginKey, factIndex: 1 },
+      { sortKey: claimOriginIdentity({ ...scope, factKey: 'z' }).claimOriginKey, factIndex: 1 },
       { sortKey: claimOriginIdentity({ ...scope, factKey: 'a' }).claimOriginKey, factIndex: 0 },
     ];
     expect(rows.sort(compareClaimProjectionOrder).map((row) => row.sortKey)).toEqual(
