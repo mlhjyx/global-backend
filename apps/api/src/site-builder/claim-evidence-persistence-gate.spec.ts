@@ -114,4 +114,57 @@ describe("gateCertificationFactsForPersistence", () => {
     expect(result).toEqual({ factSheet: [capability], gaps: [] });
     expect(getAsset).not.toHaveBeenCalled();
   });
+
+  it("treats compact certification codes such as ISO9001 as certification claims", async () => {
+    const getAsset = vi.fn();
+
+    const result = await gateCertificationFactsForPersistence(
+      { getAsset },
+      {
+        workspaceId: WORKSPACE_ID,
+        siteId: SITE_ID,
+        facts: [
+          fact({ key: "quality_management", value: "ISO9001 compliant" }),
+        ] as never,
+      },
+    );
+
+    expect(result.factSheet).toEqual([]);
+    expect(result.gaps).toEqual([
+      expect.objectContaining({ reason: "unverified_certification" }),
+    ]);
+  });
+
+  it("locks multiple certification Assets once in stable UUID order", async () => {
+    const firstAssetId = "11111111-1111-4111-8111-111111111119";
+    const secondAssetId = "99999999-9999-4999-8999-999999999999";
+    const locked: string[] = [];
+    const getAsset = vi.fn(async (assetId: string) => {
+      locked.push(assetId);
+      return {
+        id: assetId,
+        workspaceId: WORKSPACE_ID,
+        siteId: SITE_ID,
+        kind: "cert",
+        processingStatus: "ready",
+        deletedAt: null,
+      };
+    });
+
+    const result = await gateCertificationFactsForPersistence(
+      { getAsset },
+      {
+        workspaceId: WORKSPACE_ID,
+        siteId: SITE_ID,
+        facts: [
+          fact({ value: "ISO 14001 certified", assetId: secondAssetId }),
+          fact({ value: "ISO 9001 certified", assetId: firstAssetId }),
+          fact({ value: "ISO 9001 certified", assetId: firstAssetId }),
+        ] as never,
+      },
+    );
+
+    expect(result.factSheet).toHaveLength(3);
+    expect(locked).toEqual([firstAssetId, secondAssetId]);
+  });
 });

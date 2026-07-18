@@ -290,6 +290,27 @@ describe("ClaimEvidenceBridgeService — fact projection", () => {
       expect(input.evidenceOriginKey).toMatch(/^[0-9a-f]{64}$/);
       expect(input.bridgeKey).toMatch(/^[0-9a-f]{64}$/);
     }
+
+    const otherSourceProfileId = "66666666-6666-4666-8666-666666666666";
+    db.facts.set(factKey(otherSourceProfileId, 0), {
+      ...originalFact,
+      brandProfileId: otherSourceProfileId,
+      evidenceRef: {
+        ...originalFact.evidenceRef,
+        evidenceRefId: "evidence-ref-other-source",
+        sourceSnapshotId: "source-snapshot-2",
+      },
+    });
+    const otherSource = await service.projectFact(CTX, {
+      ...projectionRef(),
+      brandProfileId: otherSourceProfileId,
+    });
+
+    expect(otherSource.claim.id).toBe(first.claim.id);
+    expect(otherSource.evidence.id).not.toBe(first.evidence.id);
+    expect(db.claims).toHaveLength(1);
+    expect(db.evidence).toHaveLength(2);
+    expect(db.bridgesByKey).toHaveProperty("size", 3);
   });
 });
 

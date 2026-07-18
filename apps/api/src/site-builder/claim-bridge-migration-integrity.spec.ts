@@ -19,6 +19,19 @@ const migration =
         "utf8",
       )
     : "";
+const hardeningMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4a2_claim_bridge_hardening$/.test(entry),
+);
+const hardeningMigration =
+  hardeningMigrationDirs.length === 1 &&
+  existsSync(
+    path.join(migrationsDir, hardeningMigrationDirs[0]!, "migration.sql"),
+  )
+    ? readFileSync(
+        path.join(migrationsDir, hardeningMigrationDirs[0]!, "migration.sql"),
+        "utf8",
+      )
+    : "";
 
 describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
   it("ships one additive R4-A2 migration and leaves historical Site links nullable", () => {
@@ -127,5 +140,33 @@ describe("R4-A2 Claim/Evidence truth bridge database invariants", () => {
     }
     expect(migration).toMatch(/verification_method[\s\S]+human_review/i);
     expect(migration).toMatch(/REVOKED[\s\S]+verified_by[\s\S]+verified_at/i);
+  });
+
+  it("hardens the exact graph after the additive migration was applied", () => {
+    expect(hardeningMigrationDirs).toHaveLength(1);
+    expect(schema).toContain(
+      '@@unique([id, workspaceId, companyProfileId], map: "site_id_workspace_company_key")',
+    );
+    expect(schema).toMatch(
+      /site\s+Site\s+@relation\(fields: \[siteId, workspaceId, companyProfileId\], references: \[id, workspaceId, companyProfileId\]/,
+    );
+    expect(hardeningMigration).toContain(
+      'FOREIGN KEY ("site_id", "workspace_id", "company_profile_id")',
+    );
+    expect(hardeningMigration).toContain(
+      "CREATE TRIGGER bridged_claim_identity_immutable",
+    );
+    expect(hardeningMigration).toContain(
+      "CREATE TRIGGER bridged_evidence_immutable",
+    );
+    expect(hardeningMigration).toContain(
+      'REVOKE UPDATE, DELETE ON TABLE "evidence" FROM app_user',
+    );
+    expect(hardeningMigration).toContain(
+      'REVOKE DELETE ON TABLE "claim" FROM app_user',
+    );
+    expect(hardeningMigration).toMatch(
+      /quote_start" IS NULL AND "quote_end" IS NULL[\s\S]+"quote_start" IS NOT NULL AND "quote_end" IS NOT NULL/,
+    );
   });
 });
