@@ -7,6 +7,7 @@ import {
   inspectEvaluationMatrix,
   isExactUpstreamModelResolution,
   routeForModelEvaluation,
+  routeForTaskEvaluation,
   sanitizeGatewayBaseUrl,
   sha256Bytes,
 } from './eval-provenance';
@@ -31,6 +32,33 @@ describe('routeForModelEvaluation', () => {
         lifecycle: 'active',
         source: 'env_override',
         route: { primary: 'deepseek-v4-pro', fallbacks: [] },
+      },
+    });
+    expect(candidate.policy).not.toHaveProperty('promotionEvidenceId');
+  });
+
+  it('builds the BrandProfile candidate route without active promotion registry state', () => {
+    const candidate = routeForTaskEvaluation(
+      'site_builder.brand_profile',
+      'gpt-5.6-terra',
+    );
+
+    expect(candidate).toMatchObject({
+      primary: 'gpt-5.6-terra',
+      fallbacks: [],
+      profile: 'structured.workspace_materials',
+      maxTokens: 12_000,
+      timeoutMs: 150_000,
+      maxCostCents: 40,
+      dataPolicy: {
+        personalData: 'workspace_controlled',
+        dataScope: 'workspace_site_materials',
+      },
+      policy: {
+        policyVersion: 'site-builder-model-policy/v3',
+        routeState: 'currentRoute',
+        source: 'env_override',
+        route: { primary: 'gpt-5.6-terra', fallbacks: [] },
       },
     });
     expect(candidate.policy).not.toHaveProperty('promotionEvidenceId');
