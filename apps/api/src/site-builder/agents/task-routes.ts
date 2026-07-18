@@ -11,7 +11,7 @@
 
 import type { ModelDataPolicy, ModelExecutionPolicySnapshot } from '@global/contracts';
 import { modelPolicyRegistry } from './model-policy.registry';
-import { SITE_BUILDER_MODEL_PROFILES, type SiteBuilderModelProfileId } from './model-profiles';
+import type { SiteBuilderModelProfileId } from './model-profiles';
 
 export const SITE_BUILDER_TASK_IDS = [
   'site_builder.brand_profile',
@@ -104,22 +104,12 @@ function envSuffix(taskId: SiteBuilderTaskId): string {
   return taskId.split('.')[1].toUpperCase();
 }
 
-/**
- * Profile is an independent operational override. It changes the semantic
- * policy binding only; MODEL-0 deliberately keeps the task's current model
- * snapshot and existing `SITE_BUILDER_MODEL_*` behavior untouched.
- */
-function resolveProfileOverride(
-  suffix: string,
-  defaultProfile: SiteBuilderModelProfileId,
-  env: NodeJS.ProcessEnv,
-): SiteBuilderModelProfileId {
-  const profile = env[`SITE_BUILDER_PROFILE_${suffix}`]?.trim();
-  if (!profile) return defaultProfile;
-  if (!Object.hasOwn(SITE_BUILDER_MODEL_PROFILES, profile)) {
-    throw new Error(`unknown Site Builder model profile: ${profile}`);
+function assertNoProfileOverride(suffix: string, env: NodeJS.ProcessEnv): void {
+  if (env[`SITE_BUILDER_PROFILE_${suffix}`] !== undefined) {
+    throw new Error(
+      `SITE_BUILDER_PROFILE_${suffix} profile override is not supported`,
+    );
   }
-  return profile as SiteBuilderModelProfileId;
 }
 
 function resolveRollbackOverride(suffix: string, env: NodeJS.ProcessEnv): boolean {
@@ -134,6 +124,7 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
   const binding = TASK_BINDINGS[taskId];
   if (!binding) throw new Error(`unknown site_builder task: ${taskId}`);
   const suffix = envSuffix(taskId);
+  assertNoProfileOverride(suffix, env);
   const activePolicy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
   const rollback = resolveRollbackOverride(suffix, env);
   if (rollback && activePolicy.state !== 'promotedRoute') {
@@ -143,7 +134,7 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
     ? modelPolicyRegistry.getLegacyTaskPolicy(taskId)
     : activePolicy;
   const selectedRoute = selectedPolicy.route;
-  const profile = resolveProfileOverride(suffix, binding.profile, env);
+  const profile = binding.profile;
   const primary = env[`SITE_BUILDER_MODEL_${suffix}`]?.trim();
   const fallbacksRaw = env[`SITE_BUILDER_FALLBACKS_${suffix}`];
   const fallbacks = fallbacksRaw
@@ -154,7 +145,6 @@ export function resolveTaskRoute(taskId: SiteBuilderTaskId, env: NodeJS.ProcessE
   const resolvedFallbacks = fallbacks || [...selectedRoute.fallbacks];
   const profileDefinition = modelPolicyRegistry.getProfile(profile);
   const emergencyOverride =
-    profile !== binding.profile ||
     primary !== undefined ||
     fallbacksRaw !== undefined;
   const source = emergencyOverride
