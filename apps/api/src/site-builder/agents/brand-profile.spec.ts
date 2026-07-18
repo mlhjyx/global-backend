@@ -199,6 +199,12 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
       quote: 'ISO 9001 certified quality system.',
     },
     {
+      name: 'an unnumbered ISO assertion cannot cite a quote that omits ISO',
+      key: 'certifications',
+      value: 'ISO certified quality system',
+      quote: 'Certified quality system.',
+    },
+    {
       name: 'a product model cannot cite a different product model',
       key: 'product_model',
       value: 'Product model: PX-900',
@@ -250,6 +256,60 @@ describe('enforceEvidenceGateV2 — R4-A2 value/quote truth gate', () => {
         field: 'trade_fairs',
         reason: 'research_hint_not_publishable',
       }),
+    ]);
+  });
+
+  it('rejects person-bearing fact keys even when the name is present in an exact upload quote', () => {
+    const out = evaluate({
+      key: 'founder',
+      value: 'Jane Smith',
+      quote: 'Founder: Jane Smith.',
+    });
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.refs).toEqual([]);
+    expect(out.gaps).toEqual([
+      expect.objectContaining({
+        field: 'founder',
+        reason: 'personal_data_not_publishable',
+      }),
+    ]);
+  });
+
+  it('rejects PII in a quote even if a malformed upstream bypassed source freezing', () => {
+    const source = {
+      sourceKey: 'poisoned-source',
+      sourceType: 'upload' as const,
+      sourceRole: 'fact_candidate' as const,
+      hashAlgorithm: 'sha256' as const,
+      contentHash: 'a'.repeat(64),
+      normalizationVersion: 'evidence-text/1' as const,
+      snapshotText: 'Contact sales@example.com for distributor support.',
+      provenance: { documentId: 'poisoned-document' },
+    };
+    const out = enforceEvidenceGateV2(
+      [
+        fact({
+          key: 'distributor_support',
+          value: 'Distributor support available',
+          evidence: {
+            sourceType: 'upload',
+            sourceId: 'poisoned-source',
+            contentHash: source.contentHash,
+            quote: source.snapshotText,
+          },
+        }),
+      ],
+      {
+        sources: new Map([['poisoned-source', source]]),
+        createEvidenceRefId: () => 'poisoned-ref',
+      },
+    );
+
+    expect(out.factSheet).toEqual([]);
+    expect(out.refs).toEqual([]);
+    expect(out.gaps).toEqual([
+      expect.objectContaining({ reason: 'personal_data_not_publishable' }),
     ]);
   });
 
