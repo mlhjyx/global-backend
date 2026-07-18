@@ -262,11 +262,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
       .filter((item) => item.type === 'output_text' && typeof item.text === 'string')
       .map((item) => item.text ?? '')
       .join('');
+    const usage = { inputTokens: json.usage?.input_tokens, outputTokens: json.usage?.output_tokens };
+    if (json.status !== 'completed') {
+      throw new ProviderOutputError(
+        `${this.id} ${opts.model}: Responses request did not complete (status=${json.status ?? 'unknown'})`,
+        usage,
+      );
+    }
     return {
       content: nestedContent || json.output_text || '',
-      usage: { inputTokens: json.usage?.input_tokens, outputTokens: json.usage?.output_tokens },
+      usage,
       // Preserve the existing ProviderOutputError branch vocabulary.
-      finishReason: json.status === 'completed' ? 'stop' : json.status,
+      finishReason: 'stop',
       model: json.model?.trim() || undefined,
     };
   }
@@ -331,12 +338,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
       usage?: { input_tokens?: number; output_tokens?: number };
       model?: string;
     };
+    const usage = { inputTokens: json.usage?.input_tokens, outputTokens: json.usage?.output_tokens };
+    if (json.stop_reason === 'max_tokens' || json.stop_reason === 'model_context_window_exceeded') {
+      throw new ProviderOutputError(
+        `${this.id} ${opts.model}: Claude response truncated (stop_reason=${json.stop_reason})`,
+        usage,
+      );
+    }
     return {
       content: (json.content ?? [])
         .filter((item) => item.type === 'text' && typeof item.text === 'string')
         .map((item) => item.text ?? '')
         .join(''),
-      usage: { inputTokens: json.usage?.input_tokens, outputTokens: json.usage?.output_tokens },
+      usage,
       finishReason: json.stop_reason === 'end_turn' ? 'stop' : json.stop_reason,
       model: json.model?.trim() || undefined,
     };

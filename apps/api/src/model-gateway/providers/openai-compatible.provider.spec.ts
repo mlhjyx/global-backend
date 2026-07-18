@@ -209,6 +209,29 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
     ]);
   });
 
+  it('GPT Responses rejects incomplete structured output even when the partial text is valid JSON', async () => {
+    const responses = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'gpt-5.6-terra',
+      modelTransports: { 'gpt-5.6-terra': 'openai-responses' },
+    });
+    mockChatResponse({
+      model: 'gpt-5.6-terra',
+      status: 'incomplete',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+      usage: { input_tokens: 101, output_tokens: 456 },
+    });
+
+    const error = await responses
+      .generateStructured({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 })
+      .catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as Error).message).toContain('status=incomplete');
+    expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 101, outputTokens: 456 });
+  });
+
   it('Claude Messages sends native headers, separates system text, and excludes thinking from output', async () => {
     const messages = new OpenAICompatibleProvider({
       id: 'gateway',
@@ -247,6 +270,32 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
     });
     expect(lastRequestBody().system).toContain('只返回符合以下 JSON Schema');
   });
+
+  it.each(['max_tokens', 'model_context_window_exceeded'])(
+    'Claude Messages rejects %s output even when the partial text is valid JSON',
+    async (stopReason) => {
+      const messages = new OpenAICompatibleProvider({
+        id: 'gateway',
+        baseUrl: 'http://gw.test/v1',
+        apiKey: 'k',
+        model: 'claude-sonnet-5',
+        modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+      });
+      mockChatResponse({
+        model: 'claude-sonnet-5',
+        stop_reason: stopReason,
+        content: [{ type: 'text', text: '{"ok":true}' }],
+        usage: { input_tokens: 99, output_tokens: 456 },
+      });
+
+      const error = await messages
+        .generateStructured({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 })
+        .catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect((error as Error).message).toContain(`stop_reason=${stopReason}`);
+      expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 99, outputTokens: 456 });
+    },
+  );
 
   it('Claude Messages fails before fetch when the required max token limit is absent', async () => {
     const messages = new OpenAICompatibleProvider({
