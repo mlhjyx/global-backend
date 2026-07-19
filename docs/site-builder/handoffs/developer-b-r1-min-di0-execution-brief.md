@@ -225,6 +225,17 @@ B 不得猜测最终 R4-B schema。A 的 PR 合并后，B 必须 fetch 并 rebas
 
 R1-min 可以读取最终 BuildRun 状态，但不得重置预算、重造成本真值或引入第二套 task-attempt ledger。DI-0 不得把设计合同绑定到某个 promoted model。
 
+### 7.1 A 当前交付分支冻结的稳定接口（合并前预告）
+
+以下接口已在 `codex/r4-b-min` 形成并通过真 PostgreSQL verifier；B 仍须等该 PR 实际合并、fetch/rebase 后以 `origin/main` 为准核验，不能把本段当作提前开工授权：
+
+- `SiteBuildBudget` 与 BuildRun 1:1，公开真值为 `cap/reserved/chargedMicrousd`、`paidCallsEnabled`、`disabledReason`、`exhaustedAt`；R1-min 不得重开已关闭的付费门。
+- `SiteBuildTaskAttempt` 以 `(buildRunId,taskId)` 唯一，lease/fence 保护 logical task；`SiteBuildSpend` 以 `(buildRunId,operationKey)` 唯一，保护 physical model/tool operation。B 不得新增平行 attempt/spend ledger。
+- `BrandProfile.taskAttemptId` 唯一绑定成功 attempt；R1-min 不得修改 BrandProfile 的 replay/provenance 语义。
+- `SiteBuildRun.costSummary` 的稳定版本是 `site-builder-cost-summary/v1`；它只在终态 reconcile 后由付费账本写入，reported/calculated/estimated/unknown 保持分层。R1-min 可以读取或随 Release 快照引用，但不得重算、覆盖或把 estimated/unknown 政名为真实成本。
+- cancel request 会在 Temporal ACK 前先把 `paidCallsEnabled=false`、`disabledReason=cancellation_requested`；R1-min 的 artifact/release 清理不得依赖重新开放付费调用。
+- R4-B-min 未新增 R1 Release/artifact schema，也未改变 MODEL-1 promoted route、transport 或 evidence id；DI-0 继续只消费任务能力合同，不绑定具体模型。
+
 ## 8. 停止门与 B1 实现授权
 
 出现以下任一情况，B 必须在 B0 结束后停止并请求复核：

@@ -1331,9 +1331,13 @@ model SiteBuildRun {
   createdAt          DateTime  @default(now()) @map("created_at")
 
   site Site @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
-  stepRecords SiteBuildStep[]
+  stepRecords  SiteBuildStep[]
+  budget       SiteBuildBudget?
+  spendRecords SiteBuildSpend[]
+  taskAttempts SiteBuildTaskAttempt[]
 
   @@unique([id, workspaceId])
+  @@unique([id, workspaceId, siteId], map: "site_build_run_id_workspace_site_key")
   @@index([workspaceId, siteId])
   @@map("site_build_run")
 }
@@ -1361,6 +1365,95 @@ model SiteBuildStep {
   @@unique([buildRunId, key, itemKey, attempt])
   @@index([workspaceId, buildRunId])
   @@map("site_build_step")
+}
+
+/// Durable per-build hard budget. `chargedMicrousd` is the amount consumed from
+/// the hard cap; reported/calculated/estimated truth remains separated on SiteBuildSpend.
+model SiteBuildBudget {
+  buildRunId       String    @id @map("build_run_id") @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  siteId           String    @map("site_id") @db.Uuid
+  capMicrousd      BigInt    @map("cap_microusd")
+  reservedMicrousd BigInt    @default(0) @map("reserved_microusd")
+  chargedMicrousd  BigInt    @default(0) @map("charged_microusd")
+  paidCallsEnabled Boolean   @default(true) @map("paid_calls_enabled")
+  disabledReason   String?   @map("disabled_reason")
+  exhaustedAt      DateTime? @map("exhausted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  buildRun SiteBuildRun @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_budget_run_scope_fkey")
+
+  @@unique([buildRunId, workspaceId, siteId], map: "site_build_budget_scope_key")
+  @@index([workspaceId, buildRunId], map: "site_build_budget_workspace_run_idx")
+  @@map("site_build_budget")
+}
+
+/// One durable logical AI task attempt per build. A new Temporal Activity attempt
+/// must acquire a new fence; prior paid-operation rows remain replay-only.
+model SiteBuildTaskAttempt {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  siteId      String   @map("site_id") @db.Uuid
+  buildRunId  String   @map("build_run_id") @db.Uuid
+  taskId      String   @map("task_id")
+  status      String   @default("CLAIMED")
+  attemptNo   Int      @default(1) @map("attempt_no")
+  fenceToken  String   @map("fence_token") @db.Uuid
+  leaseUntil  DateTime @map("lease_until")
+  inputHash   String?  @map("input_hash") @db.VarChar(64)
+  inputJson   Json?    @map("input_json")
+  outputJson  Json?    @map("output_json")
+  resultJson  Json?    @map("result_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  buildRun     SiteBuildRun     @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_task_attempt_run_scope_fkey")
+  spendRecords SiteBuildSpend[]
+  brandProfile BrandProfile?
+
+  @@unique([buildRunId, taskId], map: "site_build_task_attempt_run_task_key")
+  @@unique([id, workspaceId, siteId], map: "site_build_task_attempt_scope_key")
+  @@index([workspaceId, buildRunId], map: "site_build_task_attempt_workspace_run_idx")
+  @@map("site_build_task_attempt")
+}
+
+/// Physical model/tool operation ledger. A stable operation key makes every retry,
+/// replay and ambiguous acknowledgement resolve to one row and never spend twice.
+model SiteBuildSpend {
+  id                     String    @id @default(uuid()) @db.Uuid
+  workspaceId            String    @map("workspace_id") @db.Uuid
+  siteId                 String    @map("site_id") @db.Uuid
+  buildRunId             String    @map("build_run_id") @db.Uuid
+  taskAttemptId          String?   @map("task_attempt_id") @db.Uuid
+  operationKey           String    @map("operation_key") @db.VarChar(64)
+  kind                   String
+  taskId                 String    @map("task_id")
+  subject                String
+  status                 String    @default("RESERVED")
+  reservationMicrousd    BigInt    @map("reservation_microusd")
+  budgetChargeMicrousd   BigInt    @default(0) @map("budget_charge_microusd")
+  reportedCostMicrousd   BigInt?   @map("reported_cost_microusd")
+  calculatedCostMicrousd BigInt?   @map("calculated_cost_microusd")
+  estimatedCostMicrousd  BigInt?   @map("estimated_cost_microusd")
+  costBasis              String?   @map("cost_basis")
+  inputTokens            Int?      @map("input_tokens")
+  outputTokens           Int?      @map("output_tokens")
+  callCount              Int?      @map("call_count")
+  resultJson             Json?     @map("result_json")
+  meta                   Json?
+  errorCode              String?   @map("error_code")
+  fenceToken             String?   @map("fence_token") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at")
+  settledAt              DateTime? @map("settled_at")
+
+  buildRun    SiteBuildRun          @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
+  taskAttempt SiteBuildTaskAttempt? @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
+
+  @@unique([buildRunId, operationKey], map: "site_build_spend_run_operation_key")
+  @@index([workspaceId, buildRunId, kind, status], map: "site_build_spend_workspace_run_kind_status_idx")
+  @@index([taskAttemptId], map: "site_build_spend_task_attempt_idx")
+  @@map("site_build_spend")
 }
 
 /// 素材：presign→PUT 直传→commit 三步（07 §3）。active object_key 由部分唯一索引守护。
@@ -1502,14 +1595,17 @@ model BrandProfile {
   gaps                  Json? // 待补资料清单 → GET /sites/{id}/kb/status
   researchDegraded      Boolean  @default(false) @map("research_degraded") // web 研究失败仅 KB 出 Brief
   evidenceSchemaVersion Int      @default(1) @map("evidence_schema_version") // 1=legacy inline citation; 2=EvidenceRef frozen provenance
+  taskAttemptId         String?  @unique(map: "brand_profile_task_attempt_id_key") @map("task_attempt_id") @db.Uuid
   createdAt             DateTime @default(now()) @map("created_at")
 
   site         Site                      @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "brand_profile_site_workspace_fkey")
+  taskAttempt  SiteBuildTaskAttempt?     @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "brand_profile_task_attempt_scope_fkey")
   evidenceRefs BrandProfileEvidenceRef[]
   claimBridges BrandProfileClaimBridge[]
 
   @@unique([siteId, version])
   @@unique([id, workspaceId, siteId], map: "brand_profile_id_workspace_site_key")
+  @@unique([taskAttemptId, workspaceId, siteId], map: "brand_profile_task_attempt_scope_key")
   @@index([workspaceId])
   @@map("brand_profile")
 }

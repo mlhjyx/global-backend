@@ -11,6 +11,7 @@ import {
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger } from './budget';
 import { RateLimiter } from './rate-limiter';
+import type { ToolResult } from './tool-contract';
 
 function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>) {
   const registry = registerBuiltinTools(new ToolRegistry());
@@ -30,6 +31,51 @@ function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean
  * 空集即拒），故必须声明 site_builder；searxng 是 none（短路放行），加是语义一致/前瞻。
  */
 describe('site_builder 用途门 · searxng/crawl4ai allowedPurpose', () => {
+  it('paid replay drops search titles, snippets, paths and query PII', () => {
+    const replay = searxngSearchTool.durableReplayResult?.({
+      data: {
+        results: [
+          {
+            title: 'Jane Smith appointed CEO',
+            content: 'Contact jane@example.com',
+            url: 'https://news.example/people/jane-smith?author=Jane+Smith',
+          },
+        ],
+      },
+      costCents: 0,
+    } as ToolResult<{ results: never[] }>);
+
+    expect(replay).toEqual({
+      data: { results: [{ url: 'https://news.example/' }] },
+      costCents: 0,
+    });
+    expect(JSON.stringify(replay)).not.toMatch(/Jane|CEO|jane@example|people/i);
+  });
+
+  it('paid replay applies the Evidence 2.0 scrubber to storefront payloads', () => {
+    const replay = crawl4aiFetchTool.durableReplayResult?.({
+      data: {
+        url: 'https://sales:secret@acme.example/about?email=jane@example.com#team',
+        text: 'Call +49 30 1234567 or email jane@example.com for pumps.',
+        contentHash: 'raw-hash',
+      },
+      costCents: 1,
+      provenance: {
+        sourceUrl:
+          'https://sales:secret@acme.example/about?email=jane@example.com#team',
+        fetchedAt: '2026-07-19T00:00:00.000Z',
+        contentHash: 'raw-hash',
+        parserVersion: 'crawl4ai/1',
+      },
+    });
+
+    expect(replay?.data.text).toContain('[redacted-email]');
+    expect(replay?.data.text).toContain('[redacted-phone]');
+    expect(JSON.stringify(replay)).not.toMatch(
+      /sales:secret|jane@example|\+49 30 1234567|#team/,
+    );
+  });
+
   it('searxng.search.allowedPurpose 含 site_builder（与 discovery 并列）', () => {
     expect(searxngSearchTool.compliance.allowedPurpose).toEqual(['discovery', 'site_builder']);
   });

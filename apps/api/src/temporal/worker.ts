@@ -37,6 +37,7 @@ import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
+import { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -45,6 +46,7 @@ import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 async function main(): Promise<void> {
   const prisma = new PrismaService();
   await prisma.$connect();
+  const costLedger = new SiteBuildCostLedger(prisma);
   const siteBuilderStorage = new StorageService();
   const imagePipeline = new ImagePipelineService(
     prisma,
@@ -97,6 +99,7 @@ async function main(): Promise<void> {
   if (gatewayProvider) registry.register(gatewayProvider);
   if (stubAllowed()) registry.register(new StubModelProvider());
   const gateway = new RouterModelGateway(new ModelRouter(registry), new AiTraceSink(prisma));
+  gateway.paidLedger = costLedger;
 
   const connection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
@@ -105,7 +108,7 @@ async function main(): Promise<void> {
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
-  const broker = buildToolBroker({ sourcePolicyReader });
+  const broker = buildToolBroker({ sourcePolicyReader, paidLedger: costLedger });
   const taxonomy = new TaxonomyResolver(prisma, gateway); // discovery + external-intent sweep 共享一实例
   // 第五门制裁筛查引擎（worker 侧）：qualify 活动 screen 公司名 + 刷新活动重建索引。手工构造（非 Nest DI）；
   // 平台表无 RLS、app_user 只读 → prisma 读即可。DISABLED（Phase 1 默认）→ 空索引 → not_screened，no-op。
@@ -145,6 +148,7 @@ async function main(): Promise<void> {
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({
         prisma,
+        costLedger,
         ownerDb,
         gateway,
         broker,

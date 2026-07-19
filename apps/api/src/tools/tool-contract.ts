@@ -4,6 +4,8 @@
  * 产物统一带 provenance，延续字段级 Evidence。
  */
 
+import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
+
 export type ToolCategory =
   | 'search' // 元搜索（searxng）
   | 'fetch' // 抓取（crawl4ai）
@@ -61,6 +63,8 @@ export interface ComplianceMeta {
 /** 执行上下文——由 Broker 注入，工具只读取，不自造。 */
 export interface ToolContext {
   workspaceId: string;
+  /** Required with paidCost so the database ledger can enforce exact BuildRun scope. */
+  siteId?: string;
   runId?: string;
   taskContractId?: string; // 发起此调用的 AI Task（用于 allowedTools 校验与 Trace）
   correlationId?: string;
@@ -72,6 +76,8 @@ export interface ToolContext {
   purpose?: string | string[];
   /** Broker 查过的 source_policy 快照（工具据此避免重复查库）。 */
   sourcePolicySnapshot?: Record<string, unknown>;
+  /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
+  paidCost?: Omit<PaidCostContext, 'siteId'>;
 }
 
 export interface ToolResult<T = unknown> {
@@ -114,6 +120,12 @@ export interface Tool<I = unknown, O = unknown> {
   };
   /** 纯函数：由归一化 input 派生稳定幂等键（与 raw_source_record 去重统一）。 */
   idempotencyKey(input: I): string;
+  /**
+   * Optional fail-closed durable replay projection. Paid ToolBroker calls only
+   * persist this bounded/scrubbed shape; raw provider payloads are never copied
+   * into the spend ledger. Missing/null means the operation cannot replay data.
+   */
+  durableReplayResult?(result: ToolResult<O>): ToolResult<O> | null;
   /** 探测后端可用性/延迟（Registry 健康路由与熔断依据）。 */
   healthCheck(): Promise<{ healthy: boolean; detail?: string }>;
   /** 唯一执行实现。权限/预算/合规不在此判断——Broker 已在调用前强制。 */

@@ -15,6 +15,7 @@ import {
 } from './site-builder.activities';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 import type { ModelGateway } from '../model-gateway/model-gateway';
+import { PaidOperationUnknownError } from '../site-builder/site-build-cost-ledger';
 
 /**
  * M1-b fast-follow 改动 1（预算门接线）+ 改动 3（补偿路径 steps 回填）。
@@ -222,6 +223,34 @@ describe('listKbRecoveryCandidates — expired lease fairness', () => {
 });
 
 describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
+  it('R4-B: a claimed run creates its durable database budget before returning', async () => {
+    spyBudget();
+    const ensureBudget = vi.fn(async () => undefined);
+    const tx = {
+      site: {
+        findUnique: vi.fn(async () => ({ id: 'site-1' })),
+        update: vi.fn(async () => ({})),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'queued' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: { ensureBudget } as never,
+    });
+
+    await acts.beginRefurbishRun(INPUT);
+
+    expect(ensureBudget).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      capMicrousd: siteBuildBudgetCents() * 10_000,
+    });
+  });
+
   it('认领成功 → close(force) 后 open(buildRunId, siteBuildBudgetCents())', async () => {
     const { open, close } = spyBudget();
     const tx = {
@@ -284,6 +313,58 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
 });
 
 describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
+  it('R4-B: persists the stable terminal cost summary on the succeeded BuildRun', async () => {
+    spyBudget();
+    const costSummary = {
+      schemaVersion: 'site-builder-cost-summary/v1',
+      currency: 'USD',
+      unit: 'microusd',
+    };
+    const closeAndSummarize = vi.fn(async () => costSummary);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        update: vi.fn(async () => ({})),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+        })),
+      },
+    };
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: {
+        ensureBudget: vi.fn(async () => undefined),
+        closeAndSummarize,
+      } as never,
+    });
+
+    await acts.finalizeRefurbish({
+      ...INPUT,
+      kb: { processed: 1, failed: 0, degraded: false },
+      profile: { status: 'done', gaps: 0 },
+      build: { previewSlug: 'acme', versionId: 'v-1' },
+    });
+
+    expect(closeAndSummarize).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      reason: 'run_succeeded',
+    });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ costSummary }),
+      }),
+    );
+  });
+
   it('发布成功 → close(buildRunId, {force:true})', async () => {
     const { close } = spyBudget();
     const tx = {
@@ -703,6 +784,7 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
     const acts = createSiteBuilderActivities({
       prisma: assembleStopAfterPolishPrisma(site),
       gateway,
+      costLedger: {} as never,
     });
     await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
       'stop-after-polish',
@@ -711,9 +793,63 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
     const ctxArg = generateStructured.mock.calls[0][1] as {
       workspaceId: string;
       runId?: string;
+      paidCost?: {
+        durableReplayResult?: (
+          result: Record<string, unknown>,
+        ) => Record<string, unknown>;
+      };
     };
     expect(ctxArg.runId).toBe('run-1'); // 归账键：refurbish demo_copy 计入 buildRunId 上限
     expect(ctxArg.workspaceId).toBe('ws-1');
+    expect(ctxArg).toMatchObject({
+      paidCost: {
+        siteId: 'site-1',
+        scopeKey: 'assemble-demo-copy',
+      },
+    });
+    const durableReplayResult = ctxArg.paidCost?.durableReplayResult;
+    expect(durableReplayResult).toBeTypeOf('function');
+    expect(
+      durableReplayResult?.({
+        data: {
+          headline: 'Trusted Pump Manufacturer',
+          subhead: 'Reliable pumps for global buyers',
+        },
+        provider: 'new-api',
+        model: 'gpt-5.6-terra',
+      }),
+    ).toEqual({
+      data: { subhead: 'Reliable pumps for global buyers' },
+      provider: 'new-api',
+      model: 'gpt-5.6-terra',
+    });
+  });
+
+  it('does not publish a degraded template after paid demo-copy acknowledgement ambiguity', async () => {
+    spyBudget();
+    const site = {
+      id: 'site-1',
+      name: 'Acme',
+      slug: 'acme',
+      stylePreset: 'clean',
+      intake: INTAKE,
+    };
+    const ambiguity = new PaidOperationUnknownError(
+      'a'.repeat(64),
+      'DURABLE_REPLAY_UNAVAILABLE',
+    );
+    const gateway = {
+      generateStructured: vi.fn(async () => {
+        throw ambiguity;
+      }),
+    };
+    const acts = createSiteBuilderActivities({
+      prisma: assembleStopAfterPolishPrisma(site),
+      gateway: gateway as never,
+      costLedger: {} as never,
+    });
+
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toBe(ambiguity);
   });
 });
 
@@ -834,6 +970,65 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     budgetLedger.close('run-1', { force: true });
   });
 
+  it('R4-B: BrandProfile fails closed before I/O when no durable ledger is installed', async () => {
+    spyBudget();
+    const gateway = { generateStructured: vi.fn() };
+    const prisma = {
+      withWorkspace: vi.fn(async () => {
+        throw new Error('database must not be reached');
+      }),
+    } as unknown as PrismaService;
+    const acts = createSiteBuilderActivities({
+      prisma,
+      gateway: gateway as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
+      'PERSISTENT_LEDGER_UNAVAILABLE',
+    );
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it('R4-B: completed logical BrandProfile attempts replay without database, research or model I/O', async () => {
+    spyBudget();
+    const summary = {
+      version: 4,
+      factCount: 3,
+      gapsCount: 1,
+      researchDegraded: false,
+      model: 'gpt-5.6-terra',
+    };
+    const claimTaskAttempt = vi.fn(async () => ({
+      kind: 'completed' as const,
+      result: summary,
+    }));
+    const prisma = {
+      withWorkspace: vi.fn(async () => {
+        throw new Error('database must not be reached after replay');
+      }),
+    } as unknown as PrismaService;
+    const gateway = { generateStructured: vi.fn() };
+    const broker = { invoke: vi.fn() };
+    const acts = createSiteBuilderActivities({
+      prisma,
+      gateway: gateway as never,
+      broker: broker as never,
+      costLedger: { claimTaskAttempt } as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).resolves.toEqual(summary);
+    expect(claimTaskAttempt).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      taskId: 'site_builder.brand_profile',
+    });
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(broker.invoke).not.toHaveBeenCalled();
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
+  });
+
   it('buildBrandProfile 对旧的未关联 CompanyProfile Site 在任何模型/研究调用前 fail-closed', async () => {
     const gateway = { generateStructured: vi.fn() };
     const broker = { execute: vi.fn() };
@@ -855,6 +1050,16 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
       prisma,
       gateway: gateway as never,
       broker: broker as never,
+      costLedger: {
+        claimTaskAttempt: vi.fn(async () => ({
+          kind: 'claimed',
+          attempt: {
+            id: 'attempt-1',
+            fenceToken: 'fence-1',
+          },
+        })),
+        releaseTask: vi.fn(async () => undefined),
+      } as never,
     });
 
     await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
@@ -863,6 +1068,172 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     expect(gateway.generateStructured).not.toHaveBeenCalled();
     expect(broker.execute).not.toHaveBeenCalled();
     budgetLedger.close('run-1', { force: true });
+  });
+});
+
+describe('R4-B BrandProfile paid attempt recovery', () => {
+  it('freezes input, stores model output, and atomically commits profile plus task success', async () => {
+    spyBudget();
+    const snapshot = {
+      id: 'snapshot-1',
+      sourceKey: 'intake',
+      sourceType: 'intake',
+      sourceRole: 'fact_candidate',
+      contentHash: 'a'.repeat(64),
+      upstreamContentHash: null,
+      normalizationVersion: 'brand-evidence-normalization/v1',
+      snapshotText: 'Company name: Acme',
+      displayUrl: null,
+      fetchedAt: null,
+      provenance: {},
+      dedupeKey: 'dedupe-1',
+    };
+    const brandProfileCreate = vi.fn(async () => ({ id: 'profile-1' }));
+    const attemptUpdate = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          companyProfileId: 'company-profile-1',
+          profileVersionId: null,
+          intake: INTAKE,
+          profile: null,
+        })),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+      },
+      siteEvidenceSourceSnapshot: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+        findMany: vi.fn(async (args: { where: { dedupeKey?: { in: string[] } } }) => [
+          {
+            ...snapshot,
+            dedupeKey: args.where.dedupeKey?.in[0] ?? snapshot.dedupeKey,
+          },
+        ]),
+      },
+      brandProfile: {
+        aggregate: vi.fn(async () => ({ _max: { version: null } })),
+        create: brandProfileCreate,
+      },
+      brandProfileEvidenceRef: { createMany: vi.fn() },
+      siteBuildTaskAttempt: { updateMany: attemptUpdate },
+    };
+    const gateway = {
+      generateStructured: vi.fn(async (_input, ctx) => {
+        const durableReplayResult = ctx.paidCost?.durableReplayResult;
+        expect(durableReplayResult).toBeTypeOf('function');
+        expect(() =>
+          durableReplayResult?.({
+            data: {
+              valueProps: ['Contact Jane Doe at jane@example.com'],
+              keywords: [],
+              glossary: [],
+              differentiators: [],
+              competitors: [],
+              factSheet: [],
+              gaps: [],
+            },
+            provider: 'new-api',
+            model: 'gpt-5.6-terra',
+          }),
+        ).toThrow(/BrandProfile output hard gate rejected/);
+        return {
+        data: {
+          valueProps: [],
+          keywords: [],
+          glossary: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [],
+          gaps: [],
+        },
+        provider: 'new-api',
+        model: 'gpt-5.6-terra',
+        reportedModel: 'gpt-5.6-terra',
+        modelResolutionSource: 'upstream_response',
+        usage: { inputTokens: 11, outputTokens: 7 },
+        };
+      }),
+    };
+    const freezeTaskInput = vi.fn(async (_fence, candidate) => ({
+      inputHash: 'b'.repeat(64),
+      input: candidate,
+      replayed: false,
+    }));
+    const storeTaskOutput = vi.fn(async () => undefined);
+    const completeTask = vi.fn(async () => undefined);
+    const releaseTask = vi.fn(async () => undefined);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      gateway: gateway as never,
+      costLedger: {
+        claimTaskAttempt: vi.fn(async () => ({
+          kind: 'claimed',
+          attempt: {
+            id: 'attempt-1',
+            status: 'CLAIMED',
+            fenceToken: 'fence-1',
+          },
+        })),
+        freezeTaskInput,
+        storeTaskOutput,
+        completeTask,
+        releaseTask,
+      } as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).resolves.toEqual({
+      version: 1,
+      factCount: 0,
+      gapsCount: 0,
+      researchDegraded: true,
+      model: 'gpt-5.6-terra',
+    });
+    expect(freezeTaskInput).toHaveBeenCalledWith(
+      {
+        workspaceId: 'ws-1',
+        attemptId: 'attempt-1',
+        fenceToken: 'fence-1',
+      },
+      expect.objectContaining({
+        taskInput: expect.objectContaining({ companyName: 'Acme' }),
+        researchDegraded: true,
+      }),
+    );
+    expect(gateway.generateStructured).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        paidCost: {
+          siteId: 'site-1',
+          taskAttemptId: 'attempt-1',
+          fenceToken: 'fence-1',
+          scopeKey: expect.stringContaining('attempt-1:model:0:'),
+          durableReplayResult: expect.any(Function),
+        },
+      }),
+    );
+    expect(storeTaskOutput).toHaveBeenCalledBefore(brandProfileCreate);
+    expect(brandProfileCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ taskAttemptId: 'attempt-1' }),
+      }),
+    );
+    expect(attemptUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'attempt-1',
+          fenceToken: 'fence-1',
+          status: 'MODEL_SUCCEEDED',
+        }),
+        data: expect.objectContaining({
+          status: 'SUCCEEDED',
+          resultJson: expect.objectContaining({ version: 1 }),
+        }),
+      }),
+    );
+    expect(completeTask).not.toHaveBeenCalled();
+    expect(releaseTask).not.toHaveBeenCalled();
   });
 });
 
@@ -915,6 +1286,38 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
     await acts.compensateRefurbish(INPUT);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
+  it('R4-B: failed compensation closes paid calls and persists the same versioned summary', async () => {
+    spyBudget();
+    const { tx, runUpdate } = compensateTx({});
+    const costSummary = {
+      schemaVersion: 'site-builder-cost-summary/v1',
+      currency: 'USD',
+      unit: 'microusd',
+    };
+    const closeAndSummarize = vi.fn(async () => costSummary);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: {
+        ensureBudget: vi.fn(async () => undefined),
+        closeAndSummarize,
+      } as never,
+    });
+
+    await acts.compensateRefurbish(INPUT);
+
+    expect(closeAndSummarize).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      reason: 'run_failed',
+    });
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ costSummary }),
+      }),
+    );
   });
 
   it('DB 补偿失败会传播，交给 Temporal 重试且绝不伪装成功', async () => {

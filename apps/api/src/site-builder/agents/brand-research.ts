@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { EvidenceSourceRole } from '@global/contracts';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import {
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+  type PaidCostContext,
+} from '../site-build-cost-ledger';
 
 /**
  * 品牌 web 研究（09 §2.4 / 合规 C1-C4）：站主自身公司的联网画像补充。
@@ -31,7 +36,9 @@ export interface ResearchSource {
 
 export interface BrandResearchArgs {
   workspaceId: string;
+  siteId?: string;
   runId?: string;
+  paidCost?: Omit<PaidCostContext, 'siteId'>;
   companyName: string;
   industry?: string;
   websiteUrl?: string;
@@ -49,6 +56,15 @@ const STOREFRONT_MAX_CHARS = 20_000;
 
 const sha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
+
+function rethrowPaidBoundary(error: unknown): void {
+  if (
+    error instanceof PaidOperationUnknownError ||
+    error instanceof PaidCallDeniedError
+  ) {
+    throw error;
+  }
+}
 
 function hostOf(url: string | undefined): string | null {
   if (!url) return null;
@@ -87,7 +103,9 @@ export async function researchBrand(
 ): Promise<{ sources: ResearchSource[]; degraded: boolean }> {
   const ctx = {
     workspaceId: args.workspaceId,
+    ...(args.siteId ? { siteId: args.siteId } : {}),
     runId: args.runId,
+    ...(args.paidCost ? { paidCost: args.paidCost } : {}),
     taskContractId: TASK_CONTRACT_ID,
     correlationId: args.runId,
     // 改动 4：本次出网用途=站点建设。searxng/crawl4ai 均已声明 site_builder（crawl4ai 是 advisory 门，
@@ -122,7 +140,8 @@ export async function researchBrand(
           parserVersion: r.provenance?.parserVersion ?? 'crawl4ai/1',
         });
       }
-    } catch {
+    } catch (error) {
+      rethrowPaidBoundary(error);
       degraded = true;
     }
   }
@@ -160,7 +179,8 @@ export async function researchBrand(
         parserVersion: 'searxng-origin-hint/1',
       });
     }
-  } catch {
+  } catch (error) {
+    rethrowPaidBoundary(error);
     degraded = true;
   }
 

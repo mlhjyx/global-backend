@@ -5,6 +5,7 @@ import { ModelRouter } from '../../model-gateway/model-router';
 import { RouterModelGateway } from '../../model-gateway/router-model-gateway';
 import type { AiContext, GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
 import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
+import { PaidOperationUnknownError } from '../site-build-cost-ledger';
 import { AiTaskError, runAiTask, SiteBuilderTaskDefinition } from './ai-task';
 import type { TaskRoute } from './task-routes';
 
@@ -359,5 +360,65 @@ describe('runAiTask — 回退链与显式失败', () => {
     } as unknown as ModelGateway;
     await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE });
     expect(seen[0]).toMatchObject({ workspaceId: 'ws-1', runId: 'run-1' });
+  });
+
+  it('R4-B: each task fallback gets a distinct durable paid-operation scope', async () => {
+    const { gateway, contexts } = gatewayReturning(async (input) => {
+      if (input.model === 'model-a') throw new Error('primary down');
+      return okResult(input.model ?? '?');
+    });
+
+    await runAiTask(DEF, { name: 'Acme' }, {
+      gateway,
+      route: ROUTE,
+      ctx: {
+        ...CTX,
+        paidCost: {
+          siteId: 'site-1',
+          taskAttemptId: 'attempt-1',
+          fenceToken: 'fence-1',
+          scopeKey: 'brand-profile-attempt-1',
+        },
+      },
+    });
+
+    expect(contexts.map((ctx) => ctx.paidCost)).toEqual([
+      {
+        siteId: 'site-1',
+        taskAttemptId: 'attempt-1',
+        fenceToken: 'fence-1',
+        scopeKey: 'brand-profile-attempt-1:model:0:model-a',
+      },
+      {
+        siteId: 'site-1',
+        taskAttemptId: 'attempt-1',
+        fenceToken: 'fence-1',
+        scopeKey: 'brand-profile-attempt-1:model:1:model-b',
+      },
+    ]);
+  });
+
+  it('R4-B: settlement acknowledgement unknown never advances to another paid model', async () => {
+    const { gateway, calls } = gatewayReturning(async (input) => {
+      if (input.model === 'model-a') {
+        throw new PaidOperationUnknownError('a'.repeat(64), 'SETTLEMENT_ACK_UNKNOWN');
+      }
+      return okResult(input.model ?? '?');
+    });
+
+    await expect(
+      runAiTask(DEF, { name: 'Acme' }, {
+        gateway,
+        route: ROUTE,
+        ctx: {
+          ...CTX,
+          paidCost: {
+            siteId: 'site-1',
+            scopeKey: 'attempt-1',
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+    expect(calls.map((call) => call.model)).toEqual(['model-a']);
   });
 });

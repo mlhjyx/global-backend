@@ -3,6 +3,15 @@ import { ToolRegistry } from './tool-registry';
 import { BudgetLedger, BudgetExceededError, budgetLedger } from './budget';
 import { RateLimiter, rateLimiter } from './rate-limiter';
 import { getTask } from '../ai-tasks/task-registry';
+import {
+  legacyToolCostMeasurement,
+  paidOperationKey,
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+  type PaidCostMeasurement,
+  type PaidOperationReservation,
+  type SiteBuildCostLedger,
+} from '../site-builder/site-build-cost-ledger';
 
 /**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
@@ -34,6 +43,8 @@ export interface BrokerDeps {
   traceRecorder?: (t: ToolTrace) => void;
   /** now() 注入，便于测试。 */
   now?: () => number;
+  /** R4-B durable ledger. Any paidCost context fails closed when this is absent. */
+  paidLedger?: SiteBuildCostLedger;
 }
 
 export interface ToolTrace {
@@ -172,20 +183,107 @@ export class ToolBroker implements ExecutionBroker {
     }
     // 注：robots 由抓取类工具内部 isAllowedByRobots 强制（已实现），此处不重复。
 
-    // 3) 预算 reserve（reserve-then-settle）。超限也要留 DENIED trace（审计可见）。
+    // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the durable
+    // database ledger; all other legacy callers retain the process-local ledger.
     const runId = ctx.runId ?? ctx.workspaceId;
-    let reservation: { runId: string; estCents: number };
-    try {
-      reservation = this.budget.reserve(runId, tool.cost.estimatedCents);
-    } catch (err) {
-      if (err instanceof BudgetExceededError) {
-        this.trace(ctx, tool, 'DENIED', `budget exceeded: ${err.message.slice(0, 150)}`, 0, now() - started);
+    let reservation: { runId: string; estCents: number } | undefined;
+    let paidScope: PaidOperationReservation | undefined;
+    if (ctx.paidCost) {
+      if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
+        this.trace(
+          ctx,
+          tool,
+          'DENIED',
+          'persistent paid ledger unavailable',
+          0,
+          now() - started,
+        );
+        throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
       }
-      throw err;
+      paidScope = {
+        workspaceId: ctx.workspaceId,
+        siteId: ctx.siteId,
+        buildRunId: ctx.runId,
+        taskAttemptId: ctx.paidCost.taskAttemptId,
+        fenceToken: ctx.paidCost.fenceToken,
+        operationKey: paidOperationKey([
+          ctx.runId,
+          ctx.paidCost.scopeKey,
+          'tool',
+          tool.id,
+          tool.version,
+          tool.idempotencyKey(input),
+        ]),
+        kind: 'tool',
+        taskId: ctx.taskContractId ?? 'internal',
+        subject: `${tool.id}@${tool.version}`,
+        reservationMicrousd: tool.cost.estimatedCents * 10_000,
+        meta: {
+          toolId: tool.id,
+          toolVersion: tool.version,
+          idempotencyKey: tool.idempotencyKey(input),
+        },
+      };
+      const paidDecision = await this.deps.paidLedger.reserveOperation(
+        paidScope,
+      );
+      if (paidDecision.kind === 'replay') {
+        if (
+          paidDecision.status === 'SUCCEEDED' &&
+          paidDecision.result &&
+          Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
+        ) {
+          const replay = tool.durableReplayResult?.(
+            paidDecision.result as unknown as ToolResult<O>,
+          );
+          if (replay) return replay;
+          throw new PaidOperationUnknownError(
+            paidScope.operationKey,
+            'REPLAY_PAYLOAD_UNAVAILABLE',
+          );
+        }
+        throw new Error(
+          `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? 'recorded_failure'}`,
+        );
+      }
+    } else {
+      try {
+        reservation = this.budget.reserve(
+          runId,
+          tool.cost.estimatedCents,
+        );
+      } catch (err) {
+        if (err instanceof BudgetExceededError) {
+          this.trace(
+            ctx,
+            tool,
+            'DENIED',
+            `budget exceeded: ${err.message.slice(0, 150)}`,
+            0,
+            now() - started,
+          );
+        }
+        throw err;
+      }
     }
 
     // 4) 限流（令牌桶 + 每域延迟）
-    const release = await this.limiter.acquire(toolId, now());
+    let release: (() => void) | undefined;
+    try {
+      release = await this.limiter.acquire(toolId, now());
+    } catch (error) {
+      if (paidScope) {
+        await this.settlePersistentOperation({
+          scope: paidScope,
+          status: 'RELEASED',
+          measurement: this.notIncurredMeasurement(),
+          errorCode: 'NOT_EXECUTED',
+        });
+      } else if (reservation) {
+        this.budget.settle(reservation, 0);
+      }
+      throw error;
+    }
     const domain = extractDomain(input);
     if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
       await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
@@ -193,17 +291,110 @@ export class ToolBroker implements ExecutionBroker {
 
     // 5) 执行 + 6) settle + 7) trace
     try {
-      const result = await tool.execute(input, ctx);
-      this.budget.settle(reservation, result.costCents);
+      let result: ToolResult<O>;
+      try {
+        result = await tool.execute(input, ctx);
+      } catch (err) {
+        if (paidScope) {
+          await this.settlePersistentOperation({
+            scope: paidScope,
+            status: 'FAILED',
+            // Once execute() starts, an upstream may have consumed quota even if
+            // no response arrived. Charge the reservation but keep cost unknown.
+            measurement: this.unknownMeasurement(
+              paidScope.reservationMicrousd,
+            ),
+            errorCode: 'TOOL_CALL_ERROR',
+          });
+        } else if (reservation) {
+          this.budget.settle(reservation, 0); // legacy non-site behavior
+        }
+        this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
+        throw err;
+      }
+
+      // A settlement failure is intentionally outside the execute() catch: the
+      // external call has succeeded and must not be relabelled or repeated.
+      if (paidScope) {
+        const durableReplay = tool.durableReplayResult?.(result) ?? null;
+        await this.settlePersistentOperation({
+          scope: paidScope,
+          status: 'SUCCEEDED',
+          measurement: legacyToolCostMeasurement(
+            result.costCents,
+            paidScope.reservationMicrousd,
+          ),
+          ...(durableReplay
+            ? {
+                result: durableReplay as unknown as Record<string, unknown>,
+              }
+            : {}),
+          meta: {
+            toolId: tool.id,
+            toolVersion: tool.version,
+            degraded: result.degraded ?? false,
+            replayPayload: durableReplay ? 'scrubbed' : 'omitted',
+          },
+        });
+      } else if (reservation) {
+        this.budget.settle(reservation, result.costCents);
+      }
       this.trace(ctx, tool, 'OK', undefined, result.costCents, now() - started, tool.idempotencyKey(input), result.degraded);
       return result;
-    } catch (err) {
-      this.budget.settle(reservation, 0); // 失败不计费（对齐 PRD 7.4.8 失败不计费）
-      this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
-      throw err;
     } finally {
-      release();
+      release?.();
     }
+  }
+
+  private notIncurredMeasurement(): PaidCostMeasurement {
+    return {
+      basis: 'not_incurred',
+      budgetChargeMicrousd: 0,
+      reportedCostMicrousd: null,
+      calculatedCostMicrousd: null,
+      estimatedCostMicrousd: null,
+      inputTokens: null,
+      outputTokens: null,
+      callCount: 1,
+      meta: { reason: 'execution_not_started' },
+    };
+  }
+
+  private async settlePersistentOperation(
+    input: Parameters<SiteBuildCostLedger['settleOperation']>[0],
+  ): Promise<void> {
+    let decision: string;
+    try {
+      decision = await this.deps.paidLedger!.settleOperation(input);
+    } catch (error) {
+      if (error instanceof PaidOperationUnknownError) throw error;
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        'SETTLEMENT_ACK_UNKNOWN',
+      );
+    }
+    if (decision !== 'SETTLED') {
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        `SETTLEMENT_${decision}`,
+      );
+    }
+  }
+
+  private unknownMeasurement(
+    reservationMicrousd: number,
+  ): PaidCostMeasurement {
+    return {
+      basis: 'unknown',
+      budgetChargeMicrousd: reservationMicrousd,
+      reportedCostMicrousd: null,
+      calculatedCostMicrousd: null,
+      estimatedCostMicrousd: null,
+      inputTokens: null,
+      outputTokens: null,
+      callCount: 1,
+      meta: { reason: 'tool_failed_after_execution_started' },
+    };
   }
 
   private trace(

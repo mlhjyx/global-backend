@@ -21,6 +21,7 @@ const ACK: RefurbishLaunchResult = {
 interface FakeDb {
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
+  budgets: Record<string, unknown>[];
   steps: Record<string, unknown>[];
   idempotencies: Record<string, unknown>[];
 }
@@ -48,12 +49,26 @@ function makeService(
             },
           ],
     runs: [...(opts.existingRuns ?? [])],
+    budgets: (opts.existingRuns ?? [])
+      .filter((run) => run.kind === 'refurbish')
+      .map((run) => ({
+        buildRunId: run.id,
+        workspaceId: CTX.workspaceId,
+        siteId: run.siteId,
+        capMicrousd: 5_000_000n,
+        reservedMicrousd: 0n,
+        chargedMicrousd: 0n,
+        paidCallsEnabled: true,
+        disabledReason: null,
+        exhaustedAt: null,
+      })),
     steps: [],
     idempotencies: [...(opts.existingIdempotencies ?? [])],
   };
   let seq = db.runs.length;
   const tx = {
     $executeRaw: async () => 0,
+    $queryRaw: async () => [{ reconciled: 0 }],
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         db.sites.find((site) => site.id === where.id) ?? null,
@@ -122,6 +137,63 @@ function makeService(
         db.idempotencies.push(row);
         return row;
       },
+    },
+    siteBuildBudget: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        db.budgets.push({
+          reservedMicrousd: 0n,
+          chargedMicrousd: 0n,
+          paidCallsEnabled: true,
+          disabledReason: null,
+          exhaustedAt: null,
+          ...data,
+        });
+        return data;
+      },
+      findUnique: async ({ where }: { where: { buildRunId: string } }) =>
+        db.budgets.find(
+          (budget) => budget.buildRunId === where.buildRunId,
+        ) ?? null,
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: {
+          buildRunId: string;
+          paidCallsEnabled?: boolean;
+          OR?: Array<{
+            paidCallsEnabled?: boolean;
+            disabledReason?: { in: string[] };
+          }>;
+        };
+        data: Record<string, unknown>;
+      }) => {
+        const row = db.budgets.find(
+          (budget) => budget.buildRunId === where.buildRunId,
+        );
+        if (
+          !row ||
+          (where.paidCallsEnabled !== undefined &&
+            row.paidCallsEnabled !== where.paidCallsEnabled) ||
+          (where.OR &&
+            !where.OR.some(
+              (clause) =>
+                (clause.paidCallsEnabled === undefined ||
+                  row.paidCallsEnabled === clause.paidCallsEnabled) &&
+                (!clause.disabledReason ||
+                  clause.disabledReason.in.includes(
+                    row.disabledReason as string,
+                  )),
+            ))
+        ) {
+          return { count: 0 };
+        }
+        Object.assign(row, data);
+        return { count: 1 };
+      },
+    },
+    siteBuildSpend: {
+      findMany: async () => [],
     },
     siteBuildRun: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -280,6 +352,15 @@ describe('BuildsService.create', () => {
       temporalWorkflowId: 'site-refurbish-run-1',
       temporalRunId: 'temporal-run-1',
     });
+    expect(db.budgets).toEqual([
+      expect.objectContaining({
+        buildRunId: 'run-1',
+        workspaceId: CTX.workspaceId,
+        siteId: SITE_ID,
+        capMicrousd: 5_000_000n,
+        paidCallsEnabled: true,
+      }),
+    ]);
     expect(launched).toEqual(['run-1']);
   });
 
@@ -872,6 +953,10 @@ describe('BuildsService.get / cancel', () => {
       details: { buildId: 'cancel-best-effort' },
     });
     expect(db.runs[0]).toMatchObject({ status: 'queued' });
+    expect(db.budgets[0]).toMatchObject({
+      paidCallsEnabled: false,
+      disabledReason: 'cancellation_requested',
+    });
   });
 
   it('redrives cancelled compensation after the workflow chain is conclusively closed', async () => {
@@ -897,6 +982,15 @@ describe('BuildsService.get / cancel', () => {
       status: 'cancelled',
     });
     expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+    expect(db.runs[0].costSummary).toMatchObject({
+      schemaVersion: 'site-builder-cost-summary/v1',
+      budget: {
+        reservedMicrousd: 0,
+        paidCallsEnabled: false,
+        disabledReason: 'cancellation_requested',
+      },
+      operations: { unknown: 0 },
+    });
     expect(db.steps).toHaveLength(6);
     expect(db.steps.every((step) => step.status === 'aborted')).toBe(true);
   });

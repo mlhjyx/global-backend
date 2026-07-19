@@ -20,7 +20,10 @@ import type {
   SiteImagePipelineSummary,
 } from '../site-builder/image-pipeline.service';
 import { allocateNextSiteVersion } from '../site-builder/version-alloc';
-import { runAiTask } from '../site-builder/agents/ai-task';
+import {
+  runAiTask,
+  type AiTaskRunResult,
+} from '../site-builder/agents/ai-task';
 import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
@@ -66,6 +69,10 @@ import {
 } from '../site-builder/claim-evidence-bridge.prisma';
 import { compareClaimProjectionOrder } from '../site-builder/claim-projection-order';
 import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
+import {
+  PaidOperationUnknownError,
+  SiteBuildCostLedger,
+} from '../site-builder/site-build-cost-ledger';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -136,6 +143,8 @@ export interface DemoV0ActivityInput {
 
 export interface SiteBuilderActivityDeps {
   prisma: PrismaService;
+  /** R4-B durable budget, spend and task-attempt ledger. */
+  costLedger?: SiteBuildCostLedger;
   gateway?: ModelGateway;
   /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
   kb?: {
@@ -243,6 +252,7 @@ export function previewBasePath(slug: string): string {
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const {
     prisma,
+    costLedger,
     gateway,
     kb,
     broker,
@@ -261,10 +271,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const ensureRunBudget = (runId: string): void =>
     budgetLedger.open(runId, siteBuildBudgetCents());
 
+  const terminalCostSummary = async (
+    workspaceId: string,
+    siteId: string,
+    buildRunId: string,
+    reason: 'run_succeeded' | 'run_failed' | 'run_cancelled',
+  ) => {
+    if (!costLedger) return undefined;
+    await costLedger.ensureBudget({
+      workspaceId,
+      siteId,
+      buildRunId,
+      capMicrousd: siteBuildBudgetCents() * 10_000,
+    });
+    return costLedger.closeAndSummarize({
+      workspaceId,
+      siteId,
+      buildRunId,
+      reason,
+    });
+  };
+
   async function polishCopy(
     workspaceId: string,
     intake: IntakeInput,
     runId?: string,
+    siteId?: string,
+    paidScopeKey?: string,
   ): Promise<DemoCopyPolish | undefined> {
     if (!gateway) return undefined;
     try {
@@ -297,11 +330,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         // FIX A（Codex P2）：带 runId 归账——refurbish 路径 assembleAndBuild→polishCopy 的
         // demo_copy 调用必须计入 buildRunId 上限（gateway 按 ctx.runId ?? ctx.workspaceId 归账）；
         // demo_v0 路径未开账户，gateway 命中未开账户=不限额，行为不变。
-        { workspaceId, runId },
+        {
+          workspaceId,
+          runId,
+          ...(costLedger && runId && siteId && paidScopeKey
+            ? {
+                paidCost: {
+                  siteId,
+                  scopeKey: paidScopeKey,
+                  durableReplayResult: (providerResult) => ({
+                    ...providerResult,
+                    data: sanitizePolish(
+                      providerResult.data &&
+                        typeof providerResult.data === 'object' &&
+                        !Array.isArray(providerResult.data)
+                        ? (providerResult.data as DemoCopyPolish)
+                        : undefined,
+                    ),
+                  }),
+                },
+              }
+            : {}),
+        },
       );
       // 确定性防造假闸（Codex P2）：模型若无视提示编造年限/认证，弃字段回退模板
       return sanitizePolish(result.data ?? undefined);
-    } catch {
+    } catch (error) {
+      if (error instanceof PaidOperationUnknownError) throw error;
       return undefined; // 超时/失败=模板默认文案（fail-safe，不阻塞 demo）
     }
   }
@@ -548,6 +603,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       // ⚠️ 只能在活动里（worker 进程持有 ledger 单例）；workflow sandbox 不可触碰。
       budgetLedger.close(buildRunId, { force: true });
       budgetLedger.open(buildRunId, siteBuildBudgetCents());
+      await costLedger?.ensureBudget({
+        workspaceId,
+        siteId,
+        buildRunId,
+        capMicrousd: siteBuildBudgetCents() * 10_000,
+      });
     },
 
     async recordRefurbishProgress(
@@ -754,6 +815,26 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       if (!gateway) throw new Error('brand profile: model gateway unavailable');
+      if (!costLedger) throw new Error('PERSISTENT_LEDGER_UNAVAILABLE');
+
+      const taskClaim = await costLedger.claimTaskAttempt({
+        workspaceId,
+        siteId,
+        buildRunId,
+        taskId: BRAND_PROFILE_TASK.id,
+      });
+      if (taskClaim.kind === 'completed') {
+        return taskClaim.result as unknown as BrandProfileSummary;
+      }
+      const attempt = taskClaim.attempt;
+      const taskFence = {
+        workspaceId,
+        attemptId: attempt.id,
+        fenceToken: attempt.fenceToken,
+      };
+      let taskCompleted = false;
+
+      try {
 
       // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
       // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
@@ -800,7 +881,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           { broker },
           {
             workspaceId,
+            siteId,
             runId: buildRunId,
+            paidCost: {
+              taskAttemptId: attempt.id,
+              fenceToken: attempt.fenceToken,
+              scopeKey: `${attempt.id}:research`,
+            },
             companyName: intake.company.nameEn ?? intake.company.nameZh,
             industry: intake.industry,
             websiteUrl: intake.websiteUrl ?? undefined,
@@ -906,7 +993,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const intakeSource = toPromptSource(prepared.intake);
       const kbSources = prepared.kb.map(toPromptSource);
       const researchSources = prepared.research.map(toPromptSource);
-      const brandProfileInput = {
+      const candidateBrandProfileInput = {
         companyName: intake.company.nameEn ?? intake.company.nameZh,
         industry: intake.industry,
         products: intake.products ?? [],
@@ -916,17 +1003,43 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         research: researchSources,
       };
 
-      const result = await runAiTask<
-        Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
-        BrandProfileOutput
-      >(
-        BRAND_PROFILE_TASK,
-        brandProfileInput,
-        { gateway, ctx: { workspaceId, runId: buildRunId } },
+      const frozen = await costLedger.freezeTaskInput(taskFence, {
+        taskInput: candidateBrandProfileInput,
+        researchDegraded: research.degraded,
+      });
+      const frozenEnvelope = frozen.input as unknown as {
+        taskInput: typeof candidateBrandProfileInput;
+        researchDegraded: boolean;
+      };
+      const brandProfileInput = frozenEnvelope.taskInput;
+      const researchDegraded = frozenEnvelope.researchDegraded;
+
+      // The paid gateway must receive its domain persistence gate before the
+      // provider call. A raw BrandProfile output is never a durable replay
+      // payload: evidence and PII gates run first, and recovery keeps only a
+      // controlled gap category instead of model-authored follow-up text.
+      const frozenSourceIds = [
+        ...new Set(
+          [
+            brandProfileInput.intakeSource,
+            ...brandProfileInput.kbSources,
+            ...brandProfileInput.research,
+          ].map((source) => source.sourceId),
+        ),
+      ];
+      const frozenPersistedSources = await prisma.withWorkspace(
+        workspaceId,
+        (tx) =>
+          tx.siteEvidenceSourceSnapshot.findMany({
+            where: { siteId, id: { in: frozenSourceIds } },
+          }),
       );
+      if (frozenPersistedSources.length !== frozenSourceIds.length) {
+        throw new Error('frozen BrandProfile evidence source is missing');
+      }
 
       const frozenById = new Map<string, FrozenEvidenceSource>(
-        persistedSources.map((source) => [
+        frozenPersistedSources.map((source) => [
           source.id,
           {
             sourceKey: source.sourceKey,
@@ -944,37 +1057,111 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           },
         ]),
       );
-      const gated = enforceEvidenceGateV2(result.data.factSheet ?? [], {
-        sources: frozenById,
-      });
-      const gaps: GapItem[] = [
-        ...gated.gaps,
-        ...(result.data.gaps ?? []).map((g) => ({
-          field: g.field,
-          reason: 'needs_input' as const,
-          hint: g.question,
+      const projectBrandProfileOutput = (data: BrandProfileOutput) => {
+        const gated = enforceEvidenceGateV2(data.factSheet ?? [], {
+          sources: frozenById,
+        });
+        const gaps: GapItem[] = [
+          ...gated.gaps,
+          ...(data.gaps ?? []).map((gap) => ({
+            field: gap.field,
+            reason: 'needs_input' as const,
+            hint: gap.question,
+          })),
+        ];
+        return sanitizeBrandProfilePersistenceOutput(
+          {
+            valueProps: data.valueProps ?? [],
+            tone: data.tone
+              ? {
+                  voice: data.tone.voice,
+                  style: data.tone.style ?? [],
+                }
+              : null,
+            glossary: data.glossary ?? [],
+            keywords: data.keywords ?? [],
+            differentiators: data.differentiators ?? [],
+            competitors: data.competitors ?? [],
+            factSheet: gated.factSheet,
+            gaps,
+          },
+          brandProfileInput,
+        );
+      };
+      const toDurableBrandProfileData = (
+        clean: ReturnType<typeof projectBrandProfileOutput>,
+      ): BrandProfileOutput => ({
+        valueProps: clean.valueProps,
+        ...(clean.tone ? { tone: clean.tone } : {}),
+        glossary: clean.glossary,
+        keywords: clean.keywords,
+        differentiators: clean.differentiators,
+        competitors: clean.competitors,
+        factSheet: clean.factSheet,
+        gaps: clean.gaps.map((gap) => ({
+          field: gap.reason,
+          question: `Additional workspace evidence is required (${gap.reason}).`,
         })),
-      ];
+      });
+      const durableReplayResult = (
+        providerResult: Record<string, unknown>,
+      ): Record<string, unknown> => {
+        const data = providerResult.data;
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw new Error('BrandProfile durable replay has no object data');
+        }
+        const clean = projectBrandProfileOutput(data as BrandProfileOutput);
+        return {
+          ...providerResult,
+          data: toDurableBrandProfileData(clean),
+        };
+      };
 
-      // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
-      const clean = sanitizeBrandProfilePersistenceOutput(
-        {
-          valueProps: result.data.valueProps ?? [],
-          tone: result.data.tone
-            ? {
-                voice: result.data.tone.voice,
-                style: result.data.tone.style ?? [],
-              }
-            : null,
-          glossary: result.data.glossary ?? [],
-          keywords: result.data.keywords ?? [],
-          differentiators: result.data.differentiators ?? [],
-          competitors: result.data.competitors ?? [],
-          factSheet: gated.factSheet,
-          gaps,
-        },
-        brandProfileInput,
-      );
+      let result: AiTaskRunResult<BrandProfileOutput>;
+      let generatedModelOutput = false;
+      if (
+        attempt.status === 'MODEL_SUCCEEDED' &&
+        attempt.outputJson &&
+        typeof attempt.outputJson === 'object' &&
+        !Array.isArray(attempt.outputJson)
+      ) {
+        result =
+          attempt.outputJson as unknown as AiTaskRunResult<BrandProfileOutput>;
+      } else {
+        generatedModelOutput = true;
+        result = await runAiTask<
+          Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+          BrandProfileOutput
+        >(
+          BRAND_PROFILE_TASK,
+          brandProfileInput,
+          {
+            gateway,
+            ctx: {
+              workspaceId,
+              runId: buildRunId,
+              paidCost: {
+                siteId,
+                taskAttemptId: attempt.id,
+                fenceToken: attempt.fenceToken,
+                scopeKey: attempt.id,
+                durableReplayResult,
+              },
+            },
+          },
+        );
+      }
+
+      const clean = projectBrandProfileOutput(result.data);
+      if (generatedModelOutput) {
+        await costLedger.storeTaskOutput(
+          taskFence,
+          {
+            ...result,
+            data: toDurableBrandProfileData(clean),
+          } as unknown as Record<string, unknown>,
+        );
+      }
 
       // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
       // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
@@ -1061,6 +1248,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 id: brandProfileId,
                 workspaceId,
                 siteId,
+                taskAttemptId: attempt.id,
                 version: next,
                 evidenceSchemaVersion: 2,
                 valueProps: clean.valueProps as Prisma.InputJsonValue,
@@ -1071,7 +1259,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 competitors: clean.competitors as Prisma.InputJsonValue,
                 factSheet: persistedFactSheet as unknown as Prisma.InputJsonValue,
                 gaps: persistedGaps as unknown as Prisma.InputJsonValue,
-                researchDegraded: research.degraded,
+                researchDegraded,
               },
             });
             if (persistedFactSheet.length > 0) {
@@ -1108,11 +1296,30 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 }
               }
             }
-            return {
+            const summary: BrandProfileSummary = {
               version: next,
               factCount: persistedFactSheet.length,
               gapsCount: persistedGaps.length,
+              researchDegraded,
+              model: result.model,
             };
+            const completed = await tx.siteBuildTaskAttempt.updateMany({
+              where: {
+                id: attempt.id,
+                fenceToken: attempt.fenceToken,
+                status: 'MODEL_SUCCEEDED',
+                leaseUntil: { gt: new Date() },
+              },
+              data: {
+                status: 'SUCCEEDED',
+                resultJson: summary as unknown as Prisma.InputJsonObject,
+                leaseUntil: new Date(),
+              },
+            });
+            if (completed.count !== 1) {
+              throw new Error('paid task fence is stale or expired');
+            }
+            return summary;
           }),
       );
       version = persisted.version;
@@ -1120,15 +1327,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       persistedGapsCount = persisted.gapsCount;
 
       log.log(
-        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${researchDegraded ? ', research degraded' : ''}`,
       );
-      return {
-        version,
-        factCount: persistedFactCount,
-        gapsCount: persistedGapsCount,
-        researchDegraded: research.degraded,
-        model: result.model,
-      };
+      taskCompleted = true;
+      return persisted;
+      } finally {
+        if (!taskCompleted) await costLedger.releaseTask(taskFence);
+      }
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
@@ -1192,7 +1397,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
-      const polish = await polishCopy(workspaceId, intake, buildRunId);
+      const polish = await polishCopy(
+        workspaceId,
+        intake,
+        buildRunId,
+        siteId,
+        'assemble-demo-copy',
+      );
       const candidate = buildDemoSpec({
         siteName: site.name,
         intake,
@@ -1294,6 +1505,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         failed: 0,
         variants: 0,
       };
+      const costSummary = await terminalCostSummary(
+        workspaceId,
+        siteId,
+        buildRunId,
+        'run_succeeded',
+      );
       let promotion: PreviewPromotion | undefined;
       let publicationBaseVersionId: string | null | undefined;
       try {
@@ -1357,6 +1574,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               phase: 'P5_publish',
               progress: 1,
               finishedAt: new Date(),
+              ...(costSummary
+                ? {
+                    costSummary:
+                      costSummary as unknown as Prisma.InputJsonObject,
+                  }
+                : {}),
               ...(!hasStoredPublicationBase &&
               publicationBaseVersionId !== undefined
                 ? {
@@ -1577,6 +1800,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       const terminalStatus = input.terminalStatus ?? 'failed';
       try {
+        const costSummary = await terminalCostSummary(
+          workspaceId,
+          siteId,
+          buildRunId,
+          terminalStatus === 'cancelled' ? 'run_cancelled' : 'run_failed',
+        );
         await prisma.withWorkspace(workspaceId, async (tx) => {
           // Must be acquired before the terminal CAS to avoid a lock-order inversion with
           // recordBuildProgress (advisory lock → SiteBuildRun update).
@@ -1613,6 +1842,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     ? (run.error ?? 'refurbish failed (compensated)')
                     : null,
                 finishedAt: run.finishedAt ?? new Date(),
+                ...(costSummary
+                  ? {
+                      costSummary:
+                        costSummary as unknown as Prisma.InputJsonObject,
+                    }
+                  : {}),
                 ...(legacySteps ? { steps: legacySteps } : {}),
               },
             });
