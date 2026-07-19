@@ -117,7 +117,7 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 - **Prompt 内化来源**：B2B 文案结构 ← `ecc:marketing-campaign`/`ecc:content-engine`（价值主张→痛点→证据→CTA 框架）；SEO 写法 ← `ecc:seo` skill 的 title/desc 规范；多语言 tone ← brandBrief.tone + 目标市场文化禁忌 checklist（固化为 per-market 附录）。
 - **工具**：无外部工具。
 - **护栏**：术语表强一致（glossary 注入）；禁绝对化宣称（"best/No.1"类）与虚构事实（只能引用 factSheet，引 ADR-017）；每语种输出过字符集/方向 sanity（阿语 RTL 标记）。
-- **内容预算与最小询盘合同（M1-d，✅ 2026-07-19）**：Copy 按 **slot / locale / Claim refs** 生成，事实来源唯一为 immutable PublishableClaimSnapshot；无 exact Site bridge、撤销/到期/审批漂移均 fail-closed。槽位以 grapheme 硬预算和 restricted rich text 校验，超限不截断；`en/de-DE` 使用独立 R4-B task attempt，空 snapshot 使用可重放中性文案。SiteSpec 的 `copyBundleSet` 是新真值，legacy 字符串只在无新集合的旧行上读取。最小 inquiry / consent / future outbox payload 已定义，但表单仍 disabled，公网接收/投递属于 M2。DI-0 只能消费 slot budget/locale 合同，不得提供事实或改文案。
+- **内容预算与最小询盘合同（M1-d，✅ 2026-07-19）**：Copy 按 **slot / locale / Claim refs** 生成，事实来源唯一为 immutable PublishableClaimSnapshot；无 exact Site bridge、撤销/到期/审批漂移均 fail-closed。带 ref 的 slot 由代码重建为 Claim statement 逐字确定性表示，不接受模型追加或翻译断言；槽位以 grapheme 硬预算和 restricted rich text 校验，超限不截断。`en/de-DE` 使用独立 R4-B task attempt，空 snapshot 使用可重放中性文案；权威局部 build 必须覆盖完整 active locale 集。SiteSpec 的 `copyBundleSet` 是新真值，legacy 字符串只在无新集合的旧行上读取。最小 inquiry / consent / future outbox payload 已定义，但表单仍 disabled，公网接收/投递属于 M2。DI-0 只能消费 slot budget/locale 合同，不得提供事实或改文案。
 - **降级**：某语种失败 → 该语种缺席本轮（站点先上已成语种），标记待重跑；**Demo 快路径 copy polish 失败 → 直接用 deterministic copy，不阻断 Demo 生成**（v3.2 §18.2）。
 - **modelProfile**：高价值文案/本地化=`copy.premium`；低风险批量=`text.bulk`。as-built 型号只见 §0.4。
 
