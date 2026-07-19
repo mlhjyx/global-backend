@@ -74,7 +74,7 @@ describe("R3-A SiteBuildRun database invariants", () => {
   it("adds a nullable workflow identity and deterministic legacy backfill", () => {
     expect(schema).toContain("temporalWorkflowId String?");
     expect(schema).toMatch(
-      /site Site @relation\(fields: \[siteId, workspaceId\], references: \[id, workspaceId\][\s\S]+onUpdate: NoAction\)/,
+      /site\s+Site\s+@relation\(fields: \[siteId, workspaceId\], references: \[id, workspaceId\][\s\S]+onUpdate: NoAction\)/,
     );
     expect(migration).toContain('ADD COLUMN "temporal_workflow_id" TEXT');
     expect(backfill).toMatch(/kind = 'demo_v0'[\s\S]+site-demo-/);

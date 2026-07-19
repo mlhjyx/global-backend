@@ -75,9 +75,9 @@ describe('BuildsController public progress response', () => {
             locales: {
               type: 'array',
               minItems: 1,
-              maxItems: 1,
+              maxItems: 2,
               uniqueItems: true,
-              items: { type: 'string', enum: ['en'] },
+              items: { type: 'string', enum: ['en', 'de-DE'] },
             },
             pages: {
               type: 'array',
