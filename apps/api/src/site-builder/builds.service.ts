@@ -29,6 +29,7 @@ import {
 } from './build-scope';
 import type { SiteSpec } from '@global/contracts';
 import { terminalizeBuildProgress } from './build-progress';
+import { siteBuildBudgetCents } from '../tools/budget';
 
 /** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。配错值 fail-closed 回默认。 */
 const parsedDailyLimit = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
@@ -314,6 +315,15 @@ export class BuildsService {
           }
           throw error;
         }
+        await tx.siteBuildBudget.create({
+          data: {
+            workspaceId: ctx.workspaceId,
+            siteId,
+            buildRunId: created.id,
+            capMicrousd: BigInt(siteBuildBudgetCents() * 10_000),
+            paidCallsEnabled: true,
+          },
+        });
         if (idempotencyKey) {
           await tx.idempotencyKey.create({
             data: {
@@ -484,6 +494,13 @@ export class BuildsService {
             { buildId: run.id },
           );
         }
+        await tx.siteBuildBudget.updateMany({
+          where: { buildRunId: run.id, paidCallsEnabled: true },
+          data: {
+            paidCallsEnabled: false,
+            disabledReason: 'cancellation_requested',
+          },
+        });
         return { workflowId: run.temporalWorkflowId, siteId: run.siteId };
       },
     );
