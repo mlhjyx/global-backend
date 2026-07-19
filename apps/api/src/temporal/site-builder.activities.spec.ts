@@ -731,6 +731,7 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
     const acts = createSiteBuilderActivities({
       prisma: assembleStopAfterPolishPrisma(site),
       gateway,
+      costLedger: {} as never,
     });
     await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
       'stop-after-polish',
@@ -742,6 +743,12 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
     };
     expect(ctxArg.runId).toBe('run-1'); // 归账键：refurbish demo_copy 计入 buildRunId 上限
     expect(ctxArg.workspaceId).toBe('ws-1');
+    expect(ctxArg).toMatchObject({
+      paidCost: {
+        siteId: 'site-1',
+        scopeKey: 'assemble-demo-copy',
+      },
+    });
   });
 });
 
