@@ -12,7 +12,7 @@
 
 ## Codex 收口步骤
 
-1. 从最新 `main` 建 `codex/<topic>`，一个逻辑改动一个 PR。
+1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `/global/backend/.codex/worktrees/<topic>` 与 `codex/<topic>`，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
 3. 开 PR 后等待 `CI` 和 `Security`，触发 Codex review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；只在用户对当次 PR 明确授权后合并。

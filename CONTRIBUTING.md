@@ -6,8 +6,10 @@
 
 - **不在 `main` 上直接提交**。`main` 受保护，只经 PR 合入。
 - Codex 开发分支统一使用 `codex/<topic>`，从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
-- 正式 worktree 统一放在持久目录 `/global/wt/<topic>`；禁止使用 `/tmp`、`/private/tmp` 等会被重启或系统清理的目录。长任务按阶段 checkpoint commit + push，未提交工作区不承担备份职责。
+- `/global/backend` 只承载 `main`。正式 Codex worktree 统一放在 `/global/backend/.codex/worktrees/<topic>`，使用 `pnpm worktree:new <topic>` 从最新 `origin/main` 创建 `codex/<topic>`；禁止在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工目录。完整创建、迁移、恢复与清理规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。
+- 已有 `/global/wt/*` 不批量迁移：干净且确认仍需开发的才可用 `git worktree move` 迁入；脏、锁定、失联或承载 provenance 的现场原地冻结并先审计。工具管理且仍被活跃任务持有的 worktree 不得手工移动。
 - worktree 合并后**不要求立即删除**；删除仅是可选的本地空间/目录清理。只有在 PR 已合并、目标提交已进入 `main`、工作区干净且未跟踪文件已逐项归属后才可删除；需要回查、继续维护或留作开发现场时可以保留，并定期审计即可。
+- 项目内 worktree 位于父 `main` 工作区的 ignored 子树；禁止在 `/global/backend` 运行 `git clean -fdx`、递归删除 `.codex/` 或绕过 `git worktree move/remove` 手工搬删目录。
 
 ## 异常恢复审计（先取证，后重做）
 
@@ -17,7 +19,7 @@
 2. 核对 Git 层：本地/远端分支与 PR、commit、reflog、stash、未跟踪文件和失联 worktree 登记。
 3. 核对 Codex 持久层：任务 UI 的“已编辑文件”、本地 `/root/.codex/sessions/**/rollout-*.jsonl` 中成功的 `patch_apply_end`、任务附件与子任务记录。**UI 仍能展示 diff 就说明必须继续追查其持久来源**。
 4. 核对文件系统与服务层：原目录是否真的消失、是否只是未挂载/路径变化/权限问题；临时目录只作现场来源，不再作为恢复目标。
-5. 从最后可信 commit 在 `/global/wt/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。
+5. 从最后可信 commit 在 `/global/backend/.codex/worktrees/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。原现场无论位于 legacy `/global/wt` 还是工具目录都保持只读。
 6. 只有在“原始变更全部可追踪、后来正确修订未被覆盖、diff/check/build/test 通过”后才宣告恢复完成；恢复前的人工重写只能作为候选稿，不能冒充原始内容。
 
 恢复后立即 checkpoint commit + push；临时恢复 worktree 即使计划删除，也必须等 PR 合并、分支清理与独有文件审计完成后再做。

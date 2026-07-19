@@ -41,3 +41,7 @@ tmp/
 # Python infra verification cache
 __pycache__/
 *.py[cod]
+
+# repo-local Codex runtime state; policy lives in .codex/README.md
+/.codex/worktrees/
+/.codex/audits/
