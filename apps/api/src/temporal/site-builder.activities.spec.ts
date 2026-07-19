@@ -942,6 +942,16 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
       prisma,
       gateway: gateway as never,
       broker: broker as never,
+      costLedger: {
+        claimTaskAttempt: vi.fn(async () => ({
+          kind: 'claimed',
+          attempt: {
+            id: 'attempt-1',
+            fenceToken: 'fence-1',
+          },
+        })),
+        releaseTask: vi.fn(async () => undefined),
+      } as never,
     });
 
     await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(

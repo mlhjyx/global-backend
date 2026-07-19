@@ -20,7 +20,10 @@ import type {
   SiteImagePipelineSummary,
 } from '../site-builder/image-pipeline.service';
 import { allocateNextSiteVersion } from '../site-builder/version-alloc';
-import { runAiTask } from '../site-builder/agents/ai-task';
+import {
+  runAiTask,
+  type AiTaskRunResult,
+} from '../site-builder/agents/ai-task';
 import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
@@ -66,6 +69,7 @@ import {
 } from '../site-builder/claim-evidence-bridge.prisma';
 import { compareClaimProjectionOrder } from '../site-builder/claim-projection-order';
 import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
+import { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -136,6 +140,8 @@ export interface DemoV0ActivityInput {
 
 export interface SiteBuilderActivityDeps {
   prisma: PrismaService;
+  /** R4-B durable budget, spend and task-attempt ledger. */
+  costLedger?: SiteBuildCostLedger;
   gateway?: ModelGateway;
   /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
   kb?: {
@@ -243,6 +249,7 @@ export function previewBasePath(slug: string): string {
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const {
     prisma,
+    costLedger,
     gateway,
     kb,
     broker,
@@ -548,6 +555,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       // ⚠️ 只能在活动里（worker 进程持有 ledger 单例）；workflow sandbox 不可触碰。
       budgetLedger.close(buildRunId, { force: true });
       budgetLedger.open(buildRunId, siteBuildBudgetCents());
+      await costLedger?.ensureBudget({
+        workspaceId,
+        siteId,
+        buildRunId,
+        capMicrousd: siteBuildBudgetCents() * 10_000,
+      });
     },
 
     async recordRefurbishProgress(
@@ -754,6 +767,26 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       if (!gateway) throw new Error('brand profile: model gateway unavailable');
+      if (!costLedger) throw new Error('PERSISTENT_LEDGER_UNAVAILABLE');
+
+      const taskClaim = await costLedger.claimTaskAttempt({
+        workspaceId,
+        siteId,
+        buildRunId,
+        taskId: BRAND_PROFILE_TASK.id,
+      });
+      if (taskClaim.kind === 'completed') {
+        return taskClaim.result as unknown as BrandProfileSummary;
+      }
+      const attempt = taskClaim.attempt;
+      const taskFence = {
+        workspaceId,
+        attemptId: attempt.id,
+        fenceToken: attempt.fenceToken,
+      };
+      let taskCompleted = false;
+
+      try {
 
       // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
       // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
@@ -1122,13 +1155,19 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       log.log(
         `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
       );
-      return {
+      const summary = {
         version,
         factCount: persistedFactCount,
         gapsCount: persistedGapsCount,
         researchDegraded: research.degraded,
         model: result.model,
       };
+      await costLedger.completeTask(taskFence, summary);
+      taskCompleted = true;
+      return summary;
+      } finally {
+        if (!taskCompleted) await costLedger.releaseTask(taskFence);
+      }
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
