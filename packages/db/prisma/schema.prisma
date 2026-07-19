@@ -1330,7 +1330,7 @@ model SiteBuildRun {
   finishedAt         DateTime? @map("finished_at")
   createdAt          DateTime  @default(now()) @map("created_at")
 
-  site         Site                   @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
+  site Site @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
   stepRecords  SiteBuildStep[]
   budget       SiteBuildBudget?
   spendRecords SiteBuildSpend[]
