@@ -192,6 +192,14 @@ export async function runAiTask<TIn, TOut>(
           },
           {
             ...deps.ctx,
+            ...(deps.ctx.paidCost
+              ? {
+                  paidCost: {
+                    ...deps.ctx.paidCost,
+                    scopeKey: `${deps.ctx.paidCost.scopeKey}:model:${fallbackIndex}:${model}`,
+                  },
+                }
+              : {}),
             modelPolicy: {
               ...cloneRoutePolicy(routePolicy),
               fallbackIndex,

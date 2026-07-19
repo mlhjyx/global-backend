@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { EvidenceSourceRole } from '@global/contracts';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import type { PaidCostContext } from '../site-build-cost-ledger';
 
 /**
  * 品牌 web 研究（09 §2.4 / 合规 C1-C4）：站主自身公司的联网画像补充。
@@ -31,7 +32,9 @@ export interface ResearchSource {
 
 export interface BrandResearchArgs {
   workspaceId: string;
+  siteId?: string;
   runId?: string;
+  paidCost?: Omit<PaidCostContext, 'siteId'>;
   companyName: string;
   industry?: string;
   websiteUrl?: string;
@@ -87,7 +90,9 @@ export async function researchBrand(
 ): Promise<{ sources: ResearchSource[]; degraded: boolean }> {
   const ctx = {
     workspaceId: args.workspaceId,
+    ...(args.siteId ? { siteId: args.siteId } : {}),
     runId: args.runId,
+    ...(args.paidCost ? { paidCost: args.paidCost } : {}),
     taskContractId: TASK_CONTRACT_ID,
     correlationId: args.runId,
     // 改动 4：本次出网用途=站点建设。searxng/crawl4ai 均已声明 site_builder（crawl4ai 是 advisory 门，
