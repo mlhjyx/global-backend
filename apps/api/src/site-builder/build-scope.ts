@@ -172,8 +172,14 @@ export function applyBuildScope(
     }
     return {
       ...structuredClone(base),
+      site: candidate.copyBundleSet
+        ? structuredClone(candidate.site)
+        : structuredClone(base.site),
       pages: base.pages.map((page) => replacements.get(page.id) ?? page),
       copyBundles: mergeCopyKeys(base, candidate, keys),
+      ...(candidate.copyBundleSet
+        ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
+        : {}),
     };
   }
 
@@ -184,6 +190,9 @@ export function applyBuildScope(
   collectKeys(replacement.block, keys);
   return {
     ...structuredClone(base),
+    site: candidate.copyBundleSet
+      ? structuredClone(candidate.site)
+      : structuredClone(base.site),
     pages: base.pages.map((page) =>
       page.id !== current.page.id
         ? page
@@ -198,5 +207,8 @@ export function applyBuildScope(
           },
     ),
     copyBundles: mergeCopyKeys(base, candidate, keys),
+    ...(candidate.copyBundleSet
+      ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
+      : {}),
   };
 }
