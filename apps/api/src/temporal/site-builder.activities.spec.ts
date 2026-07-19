@@ -15,6 +15,7 @@ import {
 } from './site-builder.activities';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 import type { ModelGateway } from '../model-gateway/model-gateway';
+import { PaidOperationUnknownError } from '../site-builder/site-build-cost-ledger';
 
 /**
  * M1-b fast-follow 改动 1（预算门接线）+ 改动 3（补偿路径 steps 回填）。
@@ -792,6 +793,11 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
     const ctxArg = generateStructured.mock.calls[0][1] as {
       workspaceId: string;
       runId?: string;
+      paidCost?: {
+        durableReplayResult?: (
+          result: Record<string, unknown>,
+        ) => Record<string, unknown>;
+      };
     };
     expect(ctxArg.runId).toBe('run-1'); // 归账键：refurbish demo_copy 计入 buildRunId 上限
     expect(ctxArg.workspaceId).toBe('ws-1');
@@ -801,6 +807,49 @@ describe('polishCopy — 计入 run 预算账户（FIX A / Codex P2）', () => {
         scopeKey: 'assemble-demo-copy',
       },
     });
+    const durableReplayResult = ctxArg.paidCost?.durableReplayResult;
+    expect(durableReplayResult).toBeTypeOf('function');
+    expect(
+      durableReplayResult?.({
+        data: {
+          headline: 'Trusted Pump Manufacturer',
+          subhead: 'Reliable pumps for global buyers',
+        },
+        provider: 'new-api',
+        model: 'gpt-5.6-terra',
+      }),
+    ).toEqual({
+      data: { subhead: 'Reliable pumps for global buyers' },
+      provider: 'new-api',
+      model: 'gpt-5.6-terra',
+    });
+  });
+
+  it('does not publish a degraded template after paid demo-copy acknowledgement ambiguity', async () => {
+    spyBudget();
+    const site = {
+      id: 'site-1',
+      name: 'Acme',
+      slug: 'acme',
+      stylePreset: 'clean',
+      intake: INTAKE,
+    };
+    const ambiguity = new PaidOperationUnknownError(
+      'a'.repeat(64),
+      'DURABLE_REPLAY_UNAVAILABLE',
+    );
+    const gateway = {
+      generateStructured: vi.fn(async () => {
+        throw ambiguity;
+      }),
+    };
+    const acts = createSiteBuilderActivities({
+      prisma: assembleStopAfterPolishPrisma(site),
+      gateway: gateway as never,
+      costLedger: {} as never,
+    });
+
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toBe(ambiguity);
   });
 });
 
