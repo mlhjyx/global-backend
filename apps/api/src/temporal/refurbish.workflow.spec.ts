@@ -43,6 +43,16 @@ function primeHappyPath() {
     variants: 45,
     items: [],
   });
+  acts.generateCopyBundles.mockResolvedValue({
+    snapshotId: 'snapshot-1',
+    set: {
+      schemaVersion: 'site-builder-copy-bundle-set/v1',
+      sourceLocale: 'en',
+      bundles: {},
+    },
+    degradedLocales: [],
+    taskAttemptIds: {},
+  });
   acts.assembleAndBuild.mockResolvedValue({
     previewSlug: 'acme-abc123',
     versionId: 'ver-1',

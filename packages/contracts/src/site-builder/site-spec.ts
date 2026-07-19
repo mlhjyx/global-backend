@@ -14,17 +14,19 @@
  * 代码尚无消费者，随该层落地时再补，此处不预造（YAGNI）。
  */
 
+import type { CopyBundleSetV1 } from "./copy-bundle";
+
 /** 当前 SiteSpec 版本（semver，见 04 §8）。 */
-export const SITE_SPEC_VERSION = '1.0.0';
+export const SITE_SPEC_VERSION = "1.0.0";
 
 /** API-facing SiteSpec identifiers are bounded strings, not database UUIDs. */
 export const SITE_SPEC_IDENTIFIER_PATTERN_SOURCE =
-  '[A-Za-z0-9][A-Za-z0-9._:-]{0,127}';
+  "[A-Za-z0-9][A-Za-z0-9._:-]{0,127}";
 
 /** Runtime presets that are implemented by the renderer today. */
 export const SITE_SPEC_STYLE_PRESETS = [
-  'modern-industrial',
-  'precision-light',
+  "modern-industrial",
+  "precision-light",
 ] as const;
 export type SiteSpecStylePreset = (typeof SITE_SPEC_STYLE_PRESETS)[number];
 
@@ -67,10 +69,14 @@ export interface SiteSpec {
     theme: { preset: string; tokenOverrides?: Record<string, string> };
     nav: { labelKey: string; pageId: string }[];
     seoGlobal: { siteName: string };
+    /** Exact HTTPS host allowlist enforced against rendered HTML/CSS/JS. */
+    outboundDomains?: string[];
   };
   pages: SitePage[];
   /** assetId → 引用；生产端可为空对象（尚无资产），消费端按需读取。 */
   assets: Record<string, AssetRef>;
   /** locale → (textKey → 文案)（04 §3 结构/内容分离）。 */
   copyBundles: Record<string, Record<string, string>>;
+  /** M1-d authoritative immutable documents; legacy copyBundles is a one-cycle projection. */
+  copyBundleSet?: CopyBundleSetV1;
 }

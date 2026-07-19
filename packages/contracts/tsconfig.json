@@ -4,7 +4,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,
-    "types": []
+    "types": ["node"]
   },
   "include": ["src/index.ts", "src/site-builder"],
   "exclude": ["node_modules", "dist"]

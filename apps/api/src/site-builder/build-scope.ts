@@ -70,6 +70,17 @@ export function assertActiveBuildTargets(
     );
   }
   assertPartialSpecShape(active);
+  if (active.copyBundleSet) {
+    const activeLocales = sortedUnique(active.site.locales);
+    const requestedLocales = sortedUnique(request.options?.locales ?? ['en']);
+    if (
+      !activeLocales ||
+      !requestedLocales ||
+      JSON.stringify(requestedLocales) !== JSON.stringify(activeLocales)
+    ) {
+      throw new BuildActiveSpecInvalidError();
+    }
+  }
   const pages = pageMap(active);
   if (request.scope === 'page' || ids) {
     for (const id of ids ?? [request.targetId!]) {
@@ -139,6 +150,34 @@ function mergeCopyKeys(
   return merged;
 }
 
+function sortedUnique(values: readonly string[]): string[] | null {
+  const unique = [...new Set(values)].sort();
+  return unique.length === values.length ? unique : null;
+}
+
+function assertCompleteAuthoritativeLocaleSet(
+  active: SiteSpec,
+  candidate: SiteSpec,
+): void {
+  if (!candidate.copyBundleSet) return;
+  const activeLocales = sortedUnique(active.site.locales);
+  const candidateLocales = sortedUnique(candidate.site.locales);
+  const bundleLocales = sortedUnique(
+    Object.keys(candidate.copyBundleSet.bundles),
+  );
+  if (
+    !activeLocales ||
+    !candidateLocales ||
+    !bundleLocales ||
+    JSON.stringify(candidateLocales) !== JSON.stringify(activeLocales) ||
+    JSON.stringify(bundleLocales) !== JSON.stringify(activeLocales) ||
+    candidate.site.defaultLocale !== active.site.defaultLocale ||
+    candidate.copyBundleSet.sourceLocale !== active.site.defaultLocale
+  ) {
+    throw new BuildActiveSpecInvalidError();
+  }
+}
+
 /** Applies a generated candidate only to the requested active SiteSpec surface. */
 export function applyBuildScope(
   active: SiteSpec | null,
@@ -154,6 +193,7 @@ export function applyBuildScope(
   if (base.specVersion !== candidate.specVersion) {
     throw new Error('active and generated SiteSpec versions are incompatible');
   }
+  assertCompleteAuthoritativeLocaleSet(base, candidate);
 
   const activePages = pageMap(base);
   const candidatePages = pageMap(candidate);
@@ -172,8 +212,14 @@ export function applyBuildScope(
     }
     return {
       ...structuredClone(base),
+      site: candidate.copyBundleSet
+        ? structuredClone(candidate.site)
+        : structuredClone(base.site),
       pages: base.pages.map((page) => replacements.get(page.id) ?? page),
       copyBundles: mergeCopyKeys(base, candidate, keys),
+      ...(candidate.copyBundleSet
+        ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
+        : {}),
     };
   }
 
@@ -184,6 +230,9 @@ export function applyBuildScope(
   collectKeys(replacement.block, keys);
   return {
     ...structuredClone(base),
+    site: candidate.copyBundleSet
+      ? structuredClone(candidate.site)
+      : structuredClone(base.site),
     pages: base.pages.map((page) =>
       page.id !== current.page.id
         ? page
@@ -198,5 +247,8 @@ export function applyBuildScope(
           },
     ),
     copyBundles: mergeCopyKeys(base, candidate, keys),
+    ...(candidate.copyBundleSet
+      ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
+      : {}),
   };
 }

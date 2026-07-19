@@ -6,10 +6,16 @@
   "description": "SiteSpec(04 契约) → 静态站渲染器：Astro 构建，主题 token 驱动，组件封闭枚举",
   "scripts": {
     "build": "astro build",
-    "dev": "astro dev"
+    "dev": "astro dev",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource/noto-sans": "5.2.6",
+    "@fontsource/noto-sans-arabic": "5.2.7",
     "@global/contracts": "workspace:*",
     "astro": "^5.7.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
   }
 }

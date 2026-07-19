@@ -248,13 +248,37 @@ export async function refurbishWorkflow(
         ? { errorCode: 'IMAGE_PIPELINE_DEGRADED' }
         : {}),
     });
-    await progress({
-      ...input,
-      key: 'copy',
-      status: 'skipped',
-      phase: 'P3_assembly',
-      progress: 0.6,
-    });
+    let copy:
+      | Awaited<ReturnType<SiteBuilderActivities['generateCopyBundles']>>
+      | undefined;
+    if (patched('site-builder-m1d-copy-v1')) {
+      await progress({
+        ...input,
+        key: 'copy',
+        status: 'running',
+        phase: 'P3_assembly',
+        progress: 0.58,
+      });
+      copy = await activities.generateCopyBundles(input);
+      await progress({
+        ...input,
+        key: 'copy',
+        status: copy.degradedLocales.length > 0 ? 'degraded' : 'done',
+        phase: 'P3_assembly',
+        progress: 0.62,
+        ...(copy.degradedLocales.length > 0
+          ? { errorCode: 'COPY_OPTIONAL_LOCALE_DEGRADED' }
+          : {}),
+      });
+    } else {
+      await progress({
+        ...input,
+        key: 'copy',
+        status: 'skipped',
+        phase: 'P3_assembly',
+        progress: 0.6,
+      });
+    }
 
     await progress({
       ...input,
@@ -265,6 +289,7 @@ export async function refurbishWorkflow(
     });
     const build = await activities.assembleAndBuild({
       ...input,
+      ...(copy ? { copy } : {}),
       ...(progressV1 ? { progressV1: true } : {}),
     });
     await progress({
@@ -283,6 +308,7 @@ export async function refurbishWorkflow(
     });
     return await activities.finalizeRefurbish({
       ...input,
+      ...(copy ? { copy } : {}),
       kb,
       profile,
       images,

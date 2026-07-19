@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import {
   buildDemoSpec,
+  collectTextKeys,
   DEMO_SPEC_VERSION,
   DemoCopyPolish,
   sanitizePolish,
@@ -49,7 +50,12 @@ import {
 } from '../site-builder/preview-promotion';
 import { lockSiteSpecAssetsForActivation } from '../site-builder/asset-reference-gate';
 import { applyBuildScope } from '../site-builder/build-scope';
-import type { SiteSpec } from '@global/contracts';
+import {
+  copyBundleToLegacyStrings,
+  type CopyBundleSetV1,
+  type CopySlotType,
+  type SiteSpec,
+} from '@global/contracts';
 import {
   BuildProgressEvent,
   recordBuildProgress,
@@ -73,6 +79,19 @@ import {
   PaidOperationUnknownError,
   SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
+import {
+  CopyBundleService,
+  neutralCopySlotContent,
+  type CopySlotDefinition,
+  type CopySlotGenerator,
+} from '../site-builder/copy-bundle.service';
+import {
+  COPY_TASK,
+  type CopyTaskInput,
+  type CopyTaskOutput,
+} from '../site-builder/agents/copy';
+import { PublishableClaimSnapshotService } from '../site-builder/publishable-claim-snapshot.service';
+import { PrismaPublishableClaimSnapshotRepository } from '../site-builder/publishable-claim-snapshot.prisma';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -181,6 +200,15 @@ export interface RefurbishActivityInput {
   /** M1-c workset batches are explicit immutable IDs; absent on legacy cursor histories. */
   imageAssetIds?: string[];
   imageBatchLimit?: number;
+  /** Patch-gated M1-d immutable copy result passed from generation to assembly. */
+  copy?: CopyGenerationSummary;
+}
+
+export interface CopyGenerationSummary {
+  snapshotId: string;
+  set: CopyBundleSetV1;
+  degradedLocales: string[];
+  taskAttemptIds: Record<string, string>;
 }
 
 export interface RefurbishCompensationInput extends RefurbishActivityInput {
@@ -247,6 +275,57 @@ export function previewBasePath(slug: string): string {
   } catch {
     return `/preview/${slug}/`;
   }
+}
+
+function copySlotType(key: string): CopySlotType {
+  if (/^seo\..*\.title$/.test(key)) return 'seo_title';
+  if (/^seo\./.test(key)) return 'seo_description';
+  if (/(?:\.cta|\.submit)$/.test(key)) return 'cta_label';
+  if (/^inquiry\.field\./.test(key)) return 'form_label';
+  return 'plain_text';
+}
+
+function copySlotBudget(key: string, type: CopySlotType): number {
+  if (type === 'seo_title') return 60;
+  if (type === 'seo_description') return 160;
+  if (type === 'cta_label' || type === 'form_label') return 32;
+  if (/(?:\.body|\.subhead|\.desc|\.blurb|\.a\d+)$/.test(key)) return 420;
+  return 90;
+}
+
+function copySlotCatalog(
+  site: { name: string; intake: Prisma.JsonValue; stylePreset: string | null },
+): CopySlotDefinition[] {
+  const template = buildDemoSpec({
+    siteName: site.name,
+    intake: site.intake as unknown as IntakeInput,
+    stylePreset: site.stylePreset,
+  });
+  return collectTextKeys(template)
+    .sort()
+    .map((key) => {
+      const type = copySlotType(key);
+      return {
+        key,
+        type,
+        maxGraphemes: copySlotBudget(key, type),
+        factual: false,
+      };
+    });
+}
+
+export function neutralCopyOutput(
+  slots: readonly CopySlotDefinition[],
+  locale: string,
+): CopyTaskOutput {
+  return {
+    slots: Object.fromEntries(
+      slots.map((slot) => [
+        slot.key,
+        { content: neutralCopySlotContent(slot.key, locale), claimRefs: [] },
+      ]),
+    ),
+  };
 }
 
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
@@ -835,307 +914,307 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       let taskCompleted = false;
 
       try {
-
-      // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
-      // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
-      const { site, run } = await prisma.withWorkspace(
-        workspaceId,
-        async (tx) => ({
-          site: await tx.site.findUnique({ where: { id: siteId } }),
-          run: await tx.siteBuildRun.findUnique({
-            where: { id: buildRunId },
-            select: { status: true },
+        // 🔴 run 状态守卫（复审 Temporal F2）：镜像 assembleAndBuild——cancelled 后不再启动
+        // 昂贵的研究+模型调用（其余活动都有守卫，唯此前缺）。落库前另有二次守卫防 zombie 写版本。
+        const { site, run } = await prisma.withWorkspace(
+          workspaceId,
+          async (tx) => ({
+            site: await tx.site.findUnique({ where: { id: siteId } }),
+            run: await tx.siteBuildRun.findUnique({
+              where: { id: buildRunId },
+              select: { status: true },
+            }),
           }),
-        }),
-      );
-      if (!site) throw new Error(`site ${siteId} not found`);
-      if (!run || run.status !== 'running') {
-        throw new Error(
-          `run ${buildRunId} not running (cancelled?) — skip brand profile`,
         );
-      }
-      if (!site.companyProfileId) {
-        throw new Error(
-          `SITE_COMPANY_PROFILE_LINK_REQUIRED: site ${siteId} has no verified CompanyProfile link`,
-        );
-      }
-      const companyProfileId = site.companyProfileId;
-      const intake = site.intake as unknown as IntakeInput;
-      const profile = sanitizeProfileForPrompt(
-        (site.profile as Record<string, unknown> | null) ?? undefined,
-      );
-
-      const digestDocs = kb?.digestSources
-        ? await kb.digestSources(
-            { userId: 'system', workspaceId, roles: [] },
-            siteId,
-          )
-        : [];
-
-      let research: { sources: ResearchSource[]; degraded: boolean } = {
-        sources: [],
-        degraded: true, // broker 缺席=研究能力缺失，诚实标记降级（不裸出网硬顶）
-      };
-      if (broker) {
-        research = await researchBrand(
-          { broker },
-          {
-            workspaceId,
-            siteId,
-            runId: buildRunId,
-            paidCost: {
-              taskAttemptId: attempt.id,
-              fenceToken: attempt.fenceToken,
-              scopeKey: `${attempt.id}:research`,
-            },
-            companyName: intake.company.nameEn ?? intake.company.nameZh,
-            industry: intake.industry,
-            websiteUrl: intake.websiteUrl ?? undefined,
-          },
-        );
-      }
-
-      // A1: PII is scrubbed before these exact model-visible blocks are normalized,
-      // hashed and persisted. Upstream hashes remain separate provenance fields.
-      const prepared = prepareBrandEvidenceSources({
-        siteId,
-        profileVersionId: site.profileVersionId,
-        intake,
-        profile,
-        kb: digestDocs,
-        research: research.sources,
-      });
-      const frozenSources = [
-        prepared.intake,
-        ...prepared.kb,
-        ...prepared.research,
-      ];
-      const sourceEntries = frozenSources.map((source) => ({
-        source,
-        dedupeKey: evidenceSourceDedupeKey(siteId, source),
-      }));
-      const persistedSources = await prisma.withWorkspace(
-        workspaceId,
-        async (tx) => {
-          const live = await tx.siteBuildRun.findUnique({
-            where: { id: buildRunId },
-            select: { status: true },
-          });
-          if (!live || live.status !== 'running') {
-            throw new Error(
-              `run ${buildRunId} no longer running — skip evidence snapshot write`,
-            );
-          }
-          await tx.siteEvidenceSourceSnapshot.createMany({
-            data: sourceEntries.map(({ source, dedupeKey }) => ({
-              workspaceId,
-              siteId,
-              sourceKey: source.sourceKey,
-              sourceType: source.sourceType,
-              sourceRole: source.sourceRole,
-              hashAlgorithm: source.hashAlgorithm,
-              contentHash: source.contentHash,
-              upstreamContentHash: source.upstreamContentHash,
-              normalizationVersion: source.normalizationVersion,
-              snapshotText: source.snapshotText,
-              displayUrl: source.displayUrl,
-              fetchedAt: source.fetchedAt
-                ? new Date(source.fetchedAt)
-                : undefined,
-              provenance: source.provenance as Prisma.InputJsonObject,
-              dedupeKey,
-            })),
-            skipDuplicates: true,
-          });
-          return tx.siteEvidenceSourceSnapshot.findMany({
-            where: {
-              siteId,
-              dedupeKey: { in: sourceEntries.map((entry) => entry.dedupeKey) },
-            },
-          });
-        },
-      );
-      const persistedByDedupe = new Map(
-        persistedSources.map((source) => [source.dedupeKey, source]),
-      );
-      const persistedFor = (source: FrozenEvidenceSource) => {
-        const persisted = persistedByDedupe.get(
-          evidenceSourceDedupeKey(siteId, source),
-        );
-        if (!persisted) {
+        if (!site) throw new Error(`site ${siteId} not found`);
+        if (!run || run.status !== 'running') {
           throw new Error(
-            `evidence snapshot persistence lost source ${source.sourceKey}`,
+            `run ${buildRunId} not running (cancelled?) — skip brand profile`,
           );
         }
-        return persisted;
-      };
-      const toPromptSource = (
-        source: FrozenEvidenceSource,
-      ): PromptEvidenceSource => {
-        const persisted = persistedFor(source);
-        const title =
-          typeof source.provenance.title === 'string'
-            ? source.provenance.title
-            : undefined;
-        return {
-          sourceId: persisted.id,
-          sourceType: source.sourceType,
-          sourceRole: source.sourceRole,
-          contentHash: persisted.contentHash,
-          content: persisted.snapshotText,
-          ...(title ? { title } : {}),
-          ...(persisted.displayUrl ? { url: persisted.displayUrl } : {}),
-          ...(persisted.fetchedAt
-            ? { fetchedAt: persisted.fetchedAt.toISOString() }
-            : {}),
-        };
-      };
-      const intakeSource = toPromptSource(prepared.intake);
-      const kbSources = prepared.kb.map(toPromptSource);
-      const researchSources = prepared.research.map(toPromptSource);
-      const candidateBrandProfileInput = {
-        companyName: intake.company.nameEn ?? intake.company.nameZh,
-        industry: intake.industry,
-        products: intake.products ?? [],
-        targetMarkets: intake.targetMarkets ?? [],
-        intakeSource,
-        kbSources,
-        research: researchSources,
-      };
-
-      const frozen = await costLedger.freezeTaskInput(taskFence, {
-        taskInput: candidateBrandProfileInput,
-        researchDegraded: research.degraded,
-      });
-      const frozenEnvelope = frozen.input as unknown as {
-        taskInput: typeof candidateBrandProfileInput;
-        researchDegraded: boolean;
-      };
-      const brandProfileInput = frozenEnvelope.taskInput;
-      const researchDegraded = frozenEnvelope.researchDegraded;
-
-      // The paid gateway must receive its domain persistence gate before the
-      // provider call. A raw BrandProfile output is never a durable replay
-      // payload: evidence and PII gates run first, and recovery keeps only a
-      // controlled gap category instead of model-authored follow-up text.
-      const frozenSourceIds = [
-        ...new Set(
-          [
-            brandProfileInput.intakeSource,
-            ...brandProfileInput.kbSources,
-            ...brandProfileInput.research,
-          ].map((source) => source.sourceId),
-        ),
-      ];
-      const frozenPersistedSources = await prisma.withWorkspace(
-        workspaceId,
-        (tx) =>
-          tx.siteEvidenceSourceSnapshot.findMany({
-            where: { siteId, id: { in: frozenSourceIds } },
-          }),
-      );
-      if (frozenPersistedSources.length !== frozenSourceIds.length) {
-        throw new Error('frozen BrandProfile evidence source is missing');
-      }
-
-      const frozenById = new Map<string, FrozenEvidenceSource>(
-        frozenPersistedSources.map((source) => [
-          source.id,
-          {
-            sourceKey: source.sourceKey,
-            sourceType: source.sourceType as FrozenEvidenceSource['sourceType'],
-            sourceRole: source.sourceRole as FrozenEvidenceSource['sourceRole'],
-            hashAlgorithm: 'sha256',
-            contentHash: source.contentHash,
-            upstreamContentHash: source.upstreamContentHash ?? undefined,
-            normalizationVersion:
-              source.normalizationVersion as FrozenEvidenceSource['normalizationVersion'],
-            snapshotText: source.snapshotText,
-            displayUrl: source.displayUrl ?? undefined,
-            fetchedAt: source.fetchedAt?.toISOString(),
-            provenance: source.provenance as Record<string, unknown>,
-          },
-        ]),
-      );
-      const projectBrandProfileOutput = (data: BrandProfileOutput) => {
-        const gated = enforceEvidenceGateV2(data.factSheet ?? [], {
-          sources: frozenById,
-        });
-        const gaps: GapItem[] = [
-          ...gated.gaps,
-          ...(data.gaps ?? []).map((gap) => ({
-            field: gap.field,
-            reason: 'needs_input' as const,
-            hint: gap.question,
-          })),
-        ];
-        return sanitizeBrandProfilePersistenceOutput(
-          {
-            valueProps: data.valueProps ?? [],
-            tone: data.tone
-              ? {
-                  voice: data.tone.voice,
-                  style: data.tone.style ?? [],
-                }
-              : null,
-            glossary: data.glossary ?? [],
-            keywords: data.keywords ?? [],
-            differentiators: data.differentiators ?? [],
-            competitors: data.competitors ?? [],
-            factSheet: gated.factSheet,
-            gaps,
-          },
-          brandProfileInput,
-        );
-      };
-      const toDurableBrandProfileData = (
-        clean: ReturnType<typeof projectBrandProfileOutput>,
-      ): BrandProfileOutput => ({
-        valueProps: clean.valueProps,
-        ...(clean.tone ? { tone: clean.tone } : {}),
-        glossary: clean.glossary,
-        keywords: clean.keywords,
-        differentiators: clean.differentiators,
-        competitors: clean.competitors,
-        factSheet: clean.factSheet,
-        gaps: clean.gaps.map((gap) => ({
-          field: gap.reason,
-          question: `Additional workspace evidence is required (${gap.reason}).`,
-        })),
-      });
-      const durableReplayResult = (
-        providerResult: Record<string, unknown>,
-      ): Record<string, unknown> => {
-        const data = providerResult.data;
-        if (!data || typeof data !== 'object' || Array.isArray(data)) {
-          throw new Error('BrandProfile durable replay has no object data');
+        if (!site.companyProfileId) {
+          throw new Error(
+            `SITE_COMPANY_PROFILE_LINK_REQUIRED: site ${siteId} has no verified CompanyProfile link`,
+          );
         }
-        const clean = projectBrandProfileOutput(data as BrandProfileOutput);
-        return {
-          ...providerResult,
-          data: toDurableBrandProfileData(clean),
-        };
-      };
+        const companyProfileId = site.companyProfileId;
+        const intake = site.intake as unknown as IntakeInput;
+        const profile = sanitizeProfileForPrompt(
+          (site.profile as Record<string, unknown> | null) ?? undefined,
+        );
 
-      let result: AiTaskRunResult<BrandProfileOutput>;
-      let generatedModelOutput = false;
-      if (
-        attempt.status === 'MODEL_SUCCEEDED' &&
-        attempt.outputJson &&
-        typeof attempt.outputJson === 'object' &&
-        !Array.isArray(attempt.outputJson)
-      ) {
-        result =
-          attempt.outputJson as unknown as AiTaskRunResult<BrandProfileOutput>;
-      } else {
-        generatedModelOutput = true;
-        result = await runAiTask<
-          Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
-          BrandProfileOutput
-        >(
-          BRAND_PROFILE_TASK,
-          brandProfileInput,
-          {
+        const digestDocs = kb?.digestSources
+          ? await kb.digestSources(
+              { userId: 'system', workspaceId, roles: [] },
+              siteId,
+            )
+          : [];
+
+        let research: { sources: ResearchSource[]; degraded: boolean } = {
+          sources: [],
+          degraded: true, // broker 缺席=研究能力缺失，诚实标记降级（不裸出网硬顶）
+        };
+        if (broker) {
+          research = await researchBrand(
+            { broker },
+            {
+              workspaceId,
+              siteId,
+              runId: buildRunId,
+              paidCost: {
+                taskAttemptId: attempt.id,
+                fenceToken: attempt.fenceToken,
+                scopeKey: `${attempt.id}:research`,
+              },
+              companyName: intake.company.nameEn ?? intake.company.nameZh,
+              industry: intake.industry,
+              websiteUrl: intake.websiteUrl ?? undefined,
+            },
+          );
+        }
+
+        // A1: PII is scrubbed before these exact model-visible blocks are normalized,
+        // hashed and persisted. Upstream hashes remain separate provenance fields.
+        const prepared = prepareBrandEvidenceSources({
+          siteId,
+          profileVersionId: site.profileVersionId,
+          intake,
+          profile,
+          kb: digestDocs,
+          research: research.sources,
+        });
+        const frozenSources = [
+          prepared.intake,
+          ...prepared.kb,
+          ...prepared.research,
+        ];
+        const sourceEntries = frozenSources.map((source) => ({
+          source,
+          dedupeKey: evidenceSourceDedupeKey(siteId, source),
+        }));
+        const persistedSources = await prisma.withWorkspace(
+          workspaceId,
+          async (tx) => {
+            const live = await tx.siteBuildRun.findUnique({
+              where: { id: buildRunId },
+              select: { status: true },
+            });
+            if (!live || live.status !== 'running') {
+              throw new Error(
+                `run ${buildRunId} no longer running — skip evidence snapshot write`,
+              );
+            }
+            await tx.siteEvidenceSourceSnapshot.createMany({
+              data: sourceEntries.map(({ source, dedupeKey }) => ({
+                workspaceId,
+                siteId,
+                sourceKey: source.sourceKey,
+                sourceType: source.sourceType,
+                sourceRole: source.sourceRole,
+                hashAlgorithm: source.hashAlgorithm,
+                contentHash: source.contentHash,
+                upstreamContentHash: source.upstreamContentHash,
+                normalizationVersion: source.normalizationVersion,
+                snapshotText: source.snapshotText,
+                displayUrl: source.displayUrl,
+                fetchedAt: source.fetchedAt
+                  ? new Date(source.fetchedAt)
+                  : undefined,
+                provenance: source.provenance as Prisma.InputJsonObject,
+                dedupeKey,
+              })),
+              skipDuplicates: true,
+            });
+            return tx.siteEvidenceSourceSnapshot.findMany({
+              where: {
+                siteId,
+                dedupeKey: {
+                  in: sourceEntries.map((entry) => entry.dedupeKey),
+                },
+              },
+            });
+          },
+        );
+        const persistedByDedupe = new Map(
+          persistedSources.map((source) => [source.dedupeKey, source]),
+        );
+        const persistedFor = (source: FrozenEvidenceSource) => {
+          const persisted = persistedByDedupe.get(
+            evidenceSourceDedupeKey(siteId, source),
+          );
+          if (!persisted) {
+            throw new Error(
+              `evidence snapshot persistence lost source ${source.sourceKey}`,
+            );
+          }
+          return persisted;
+        };
+        const toPromptSource = (
+          source: FrozenEvidenceSource,
+        ): PromptEvidenceSource => {
+          const persisted = persistedFor(source);
+          const title =
+            typeof source.provenance.title === 'string'
+              ? source.provenance.title
+              : undefined;
+          return {
+            sourceId: persisted.id,
+            sourceType: source.sourceType,
+            sourceRole: source.sourceRole,
+            contentHash: persisted.contentHash,
+            content: persisted.snapshotText,
+            ...(title ? { title } : {}),
+            ...(persisted.displayUrl ? { url: persisted.displayUrl } : {}),
+            ...(persisted.fetchedAt
+              ? { fetchedAt: persisted.fetchedAt.toISOString() }
+              : {}),
+          };
+        };
+        const intakeSource = toPromptSource(prepared.intake);
+        const kbSources = prepared.kb.map(toPromptSource);
+        const researchSources = prepared.research.map(toPromptSource);
+        const candidateBrandProfileInput = {
+          companyName: intake.company.nameEn ?? intake.company.nameZh,
+          industry: intake.industry,
+          products: intake.products ?? [],
+          targetMarkets: intake.targetMarkets ?? [],
+          intakeSource,
+          kbSources,
+          research: researchSources,
+        };
+
+        const frozen = await costLedger.freezeTaskInput(taskFence, {
+          taskInput: candidateBrandProfileInput,
+          researchDegraded: research.degraded,
+        });
+        const frozenEnvelope = frozen.input as unknown as {
+          taskInput: typeof candidateBrandProfileInput;
+          researchDegraded: boolean;
+        };
+        const brandProfileInput = frozenEnvelope.taskInput;
+        const researchDegraded = frozenEnvelope.researchDegraded;
+
+        // The paid gateway must receive its domain persistence gate before the
+        // provider call. A raw BrandProfile output is never a durable replay
+        // payload: evidence and PII gates run first, and recovery keeps only a
+        // controlled gap category instead of model-authored follow-up text.
+        const frozenSourceIds = [
+          ...new Set(
+            [
+              brandProfileInput.intakeSource,
+              ...brandProfileInput.kbSources,
+              ...brandProfileInput.research,
+            ].map((source) => source.sourceId),
+          ),
+        ];
+        const frozenPersistedSources = await prisma.withWorkspace(
+          workspaceId,
+          (tx) =>
+            tx.siteEvidenceSourceSnapshot.findMany({
+              where: { siteId, id: { in: frozenSourceIds } },
+            }),
+        );
+        if (frozenPersistedSources.length !== frozenSourceIds.length) {
+          throw new Error('frozen BrandProfile evidence source is missing');
+        }
+
+        const frozenById = new Map<string, FrozenEvidenceSource>(
+          frozenPersistedSources.map((source) => [
+            source.id,
+            {
+              sourceKey: source.sourceKey,
+              sourceType:
+                source.sourceType as FrozenEvidenceSource['sourceType'],
+              sourceRole:
+                source.sourceRole as FrozenEvidenceSource['sourceRole'],
+              hashAlgorithm: 'sha256',
+              contentHash: source.contentHash,
+              upstreamContentHash: source.upstreamContentHash ?? undefined,
+              normalizationVersion:
+                source.normalizationVersion as FrozenEvidenceSource['normalizationVersion'],
+              snapshotText: source.snapshotText,
+              displayUrl: source.displayUrl ?? undefined,
+              fetchedAt: source.fetchedAt?.toISOString(),
+              provenance: source.provenance as Record<string, unknown>,
+            },
+          ]),
+        );
+        const projectBrandProfileOutput = (data: BrandProfileOutput) => {
+          const gated = enforceEvidenceGateV2(data.factSheet ?? [], {
+            sources: frozenById,
+          });
+          const gaps: GapItem[] = [
+            ...gated.gaps,
+            ...(data.gaps ?? []).map((gap) => ({
+              field: gap.field,
+              reason: 'needs_input' as const,
+              hint: gap.question,
+            })),
+          ];
+          return sanitizeBrandProfilePersistenceOutput(
+            {
+              valueProps: data.valueProps ?? [],
+              tone: data.tone
+                ? {
+                    voice: data.tone.voice,
+                    style: data.tone.style ?? [],
+                  }
+                : null,
+              glossary: data.glossary ?? [],
+              keywords: data.keywords ?? [],
+              differentiators: data.differentiators ?? [],
+              competitors: data.competitors ?? [],
+              factSheet: gated.factSheet,
+              gaps,
+            },
+            brandProfileInput,
+          );
+        };
+        const toDurableBrandProfileData = (
+          clean: ReturnType<typeof projectBrandProfileOutput>,
+        ): BrandProfileOutput => ({
+          valueProps: clean.valueProps,
+          ...(clean.tone ? { tone: clean.tone } : {}),
+          glossary: clean.glossary,
+          keywords: clean.keywords,
+          differentiators: clean.differentiators,
+          competitors: clean.competitors,
+          factSheet: clean.factSheet,
+          gaps: clean.gaps.map((gap) => ({
+            field: gap.reason,
+            question: `Additional workspace evidence is required (${gap.reason}).`,
+          })),
+        });
+        const durableReplayResult = (
+          providerResult: Record<string, unknown>,
+        ): Record<string, unknown> => {
+          const data = providerResult.data;
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            throw new Error('BrandProfile durable replay has no object data');
+          }
+          const clean = projectBrandProfileOutput(data as BrandProfileOutput);
+          return {
+            ...providerResult,
+            data: toDurableBrandProfileData(clean),
+          };
+        };
+
+        let result: AiTaskRunResult<BrandProfileOutput>;
+        let generatedModelOutput = false;
+        if (
+          attempt.status === 'MODEL_SUCCEEDED' &&
+          attempt.outputJson &&
+          typeof attempt.outputJson === 'object' &&
+          !Array.isArray(attempt.outputJson)
+        ) {
+          result =
+            attempt.outputJson as unknown as AiTaskRunResult<BrandProfileOutput>;
+        } else {
+          generatedModelOutput = true;
+          result = await runAiTask<
+            Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+            BrandProfileOutput
+          >(BRAND_PROFILE_TASK, brandProfileInput, {
             gateway,
             ctx: {
               workspaceId,
@@ -1148,29 +1227,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 durableReplayResult,
               },
             },
-          },
-        );
-      }
+          });
+        }
 
-      const clean = projectBrandProfileOutput(result.data);
-      if (generatedModelOutput) {
-        await costLedger.storeTaskOutput(
-          taskFence,
-          {
+        const clean = projectBrandProfileOutput(result.data);
+        if (generatedModelOutput) {
+          await costLedger.storeTaskOutput(taskFence, {
             ...result,
             data: toDurableBrandProfileData(clean),
-          } as unknown as Record<string, unknown>,
-        );
-      }
+          } as unknown as Record<string, unknown>);
+        }
 
-      // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
-      // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
-      const brandProfileId = randomUUID();
-      let version = 0;
-      let persistedFactCount = 0;
-      let persistedGapsCount = 0;
-      const persisted = await runBrandProfilePersistenceWithRetry(() =>
-        prisma.withWorkspace(workspaceId, async (tx) => {
+        // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
+        // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。
+        const brandProfileId = randomUUID();
+        let version = 0;
+        let persistedFactCount = 0;
+        let persistedGapsCount = 0;
+        const persisted = await runBrandProfilePersistenceWithRetry(() =>
+          prisma.withWorkspace(workspaceId, async (tx) => {
             const live = await tx.siteBuildRun.findUnique({
               where: { id: buildRunId },
               select: { status: true },
@@ -1185,21 +1260,23 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               _max: { version: true },
             });
             const next = (agg._max.version ?? 0) + 1; // max+1 单调不回收（version-alloc 同款）
-            const bridgeRepository = new PrismaClaimEvidenceBridgeRepository(tx);
-            const certificationGate = await gateCertificationFactsForPersistence(
-              bridgeRepository,
-              {
+            const bridgeRepository = new PrismaClaimEvidenceBridgeRepository(
+              tx,
+            );
+            const certificationGate =
+              await gateCertificationFactsForPersistence(bridgeRepository, {
                 workspaceId,
                 siteId,
                 facts: clean.factSheet,
-              },
+              });
+            const persistedFactSheet = certificationGate.factSheet.map(
+              (fact) => ({
+                ...fact,
+                // Server-owned and frozen with the append-only BrandProfile fact.
+                // Bridge readers must not reinterpret history after classifier changes.
+                claimType: claimTypeForBrandFact(fact.key, fact.value),
+              }),
             );
-            const persistedFactSheet = certificationGate.factSheet.map((fact) => ({
-              ...fact,
-              // Server-owned and frozen with the append-only BrandProfile fact.
-              // Bridge readers must not reinterpret history after classifier changes.
-              claimType: claimTypeForBrandFact(fact.key, fact.value),
-            }));
             const persistedGaps = [...clean.gaps, ...certificationGate.gaps];
             const projectionOrder = persistedFactSheet
               .map((fact, factIndex) => {
@@ -1257,7 +1334,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 keywords: clean.keywords as Prisma.InputJsonValue,
                 differentiators: clean.differentiators as Prisma.InputJsonValue,
                 competitors: clean.competitors as Prisma.InputJsonValue,
-                factSheet: persistedFactSheet as unknown as Prisma.InputJsonValue,
+                factSheet:
+                  persistedFactSheet as unknown as Prisma.InputJsonValue,
                 gaps: persistedGaps as unknown as Prisma.InputJsonValue,
                 researchDegraded,
               },
@@ -1321,19 +1399,222 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             }
             return summary;
           }),
-      );
-      version = persisted.version;
-      persistedFactCount = persisted.factCount;
-      persistedGapsCount = persisted.gapsCount;
+        );
+        version = persisted.version;
+        persistedFactCount = persisted.factCount;
+        persistedGapsCount = persisted.gapsCount;
 
-      log.log(
-        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${researchDegraded ? ', research degraded' : ''}`,
-      );
-      taskCompleted = true;
-      return persisted;
+        log.log(
+          `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${researchDegraded ? ', research degraded' : ''}`,
+        );
+        taskCompleted = true;
+        return persisted;
       } finally {
         if (!taskCompleted) await costLedger.releaseTask(taskFence);
       }
+    },
+
+    /** M1-d: freeze exact publishable Claims, then generate one fenced task per locale. */
+    async generateCopyBundles(
+      input: RefurbishActivityInput,
+    ): Promise<CopyGenerationSummary> {
+      const { workspaceId, siteId, buildRunId } = input;
+      ensureRunBudget(buildRunId);
+      if (!gateway) throw new Error('copy: model gateway unavailable');
+      if (!costLedger) throw new Error('PERSISTENT_LEDGER_UNAVAILABLE');
+
+      const { site, snapshot, snapshotId } = await prisma.withWorkspace(
+        workspaceId,
+        async (tx) => {
+          const repository = new PrismaPublishableClaimSnapshotRepository(tx);
+          const snapshotService = new PublishableClaimSnapshotService(
+            repository,
+          );
+          const captured = await snapshotService.capture(
+            { userId: 'system', workspaceId, roles: [] },
+            { siteId, buildRunId },
+          );
+          const stored = await tx.sitePublishableClaimSnapshot.findUnique({
+            where: { buildRunId },
+            select: { id: true },
+          });
+          const currentSite = await tx.site.findFirst({
+            where: { id: siteId, workspaceId },
+            select: { name: true, intake: true, stylePreset: true },
+          });
+          if (!stored || !currentSite) {
+            throw new Error('copy snapshot or Site disappeared during capture');
+          }
+          return {
+            site: currentSite,
+            snapshot: captured,
+            snapshotId: stored.id,
+          };
+        },
+      );
+      const locales = input.scope?.options?.locales ?? ['en'];
+      const slots = copySlotCatalog(site);
+      const taskAttemptIds: Record<string, string> = {};
+      const localeOutputs = new Map<string, Promise<CopyTaskOutput>>();
+      const pendingLocaleTasks = new Map<
+        string,
+        {
+          attemptId: string;
+          fence: {
+            workspaceId: string;
+            attemptId: string;
+            fenceToken: string;
+          };
+        }
+      >();
+
+      const executeLocale = (locale: string): Promise<CopyTaskOutput> => {
+        const existing = localeOutputs.get(locale);
+        if (existing) return existing;
+        const execution = (async () => {
+          const taskId = `${COPY_TASK.id}:${locale}`;
+          const taskClaim = await costLedger.claimTaskAttempt({
+            workspaceId,
+            siteId,
+            buildRunId,
+            taskId,
+          });
+          if (taskClaim.kind === 'completed') {
+            const replay = taskClaim.result as unknown as {
+              taskAttemptId: string;
+              slots: CopyTaskOutput['slots'];
+            };
+            if (!replay.taskAttemptId || !replay.slots) {
+              throw new Error(`completed ${taskId} result is malformed`);
+            }
+            taskAttemptIds[locale] = replay.taskAttemptId;
+            return { slots: replay.slots };
+          }
+
+          const attempt = taskClaim.attempt;
+          taskAttemptIds[locale] = attempt.id;
+          const fence = {
+            workspaceId,
+            attemptId: attempt.id,
+            fenceToken: attempt.fenceToken,
+          };
+          try {
+            const candidate: CopyTaskInput = {
+              locale,
+              sourceLocale: 'en',
+              snapshotDigest: snapshot.digest,
+              claims: snapshot.items,
+              slots,
+            };
+            const frozen = await costLedger.freezeTaskInput(
+              fence,
+              candidate as unknown as Record<string, unknown>,
+            );
+            const taskOutput =
+              snapshot.items.length === 0
+                ? neutralCopyOutput(slots, locale)
+                : (
+                    await runAiTask<CopyTaskInput, CopyTaskOutput>(
+                      COPY_TASK,
+                      frozen.input as unknown as CopyTaskInput,
+                      {
+                        gateway,
+                        ctx: {
+                          workspaceId,
+                          runId: buildRunId,
+                          paidCost: {
+                            siteId,
+                            taskAttemptId: attempt.id,
+                            fenceToken: attempt.fenceToken,
+                            scopeKey: `copy:${locale}`,
+                            durableReplayResult: (providerResult) =>
+                              providerResult,
+                          },
+                        },
+                      },
+                    )
+                  ).data;
+            pendingLocaleTasks.set(locale, {
+              attemptId: attempt.id,
+              fence,
+            });
+            return taskOutput;
+          } catch (error) {
+            await costLedger.releaseTask(fence);
+            throw error;
+          }
+        })();
+        localeOutputs.set(locale, execution);
+        return execution;
+      };
+
+      const generator: CopySlotGenerator = {
+        generateSlot: async ({ locale, slot }) => {
+          const output = await executeLocale(locale);
+          const generated = output.slots[slot.key];
+          if (!generated)
+            throw new Error(`model omitted copy slot ${slot.key}`);
+          return generated;
+        },
+      };
+      let generated;
+      try {
+        generated = await new CopyBundleService(generator).generate({
+          locales,
+          sourceLocale: 'en',
+          snapshotId,
+          snapshot,
+          slots,
+          approvedOutboundDomains: [],
+        });
+      } catch (error) {
+        await Promise.all(
+          [...pendingLocaleTasks.values()].map(({ fence }) =>
+            costLedger.releaseTask(fence),
+          ),
+        );
+        throw error;
+      }
+      const settledLocales = new Set<string>();
+      try {
+        for (const [locale, pending] of pendingLocaleTasks) {
+          const bundle = generated.set.bundles[locale];
+          if (!bundle) {
+            await costLedger.releaseTask(pending.fence);
+            settledLocales.add(locale);
+            continue;
+          }
+          const canonicalOutput: CopyTaskOutput = {
+            slots: Object.fromEntries(
+              Object.entries(bundle.slots).map(([key, slot]) => [
+                key,
+                { content: slot.content, claimRefs: slot.claimRefs },
+              ]),
+            ),
+          };
+          await costLedger.storeTaskOutput(
+            pending.fence,
+            canonicalOutput as unknown as Record<string, unknown>,
+          );
+          await costLedger.completeTask(pending.fence, {
+            taskAttemptId: pending.attemptId,
+            slots: canonicalOutput.slots,
+          });
+          settledLocales.add(locale);
+        }
+      } finally {
+        await Promise.all(
+          [...pendingLocaleTasks.entries()]
+            .filter(([locale]) => !settledLocales.has(locale))
+            .map(([, { fence }]) => costLedger.releaseTask(fence)),
+        );
+      }
+      return {
+        snapshotId,
+        set: generated.set,
+        degradedLocales: generated.degradedLocales,
+        taskAttemptIds,
+      };
     },
 
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
@@ -1397,19 +1678,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
-      const polish = await polishCopy(
-        workspaceId,
-        intake,
-        buildRunId,
-        siteId,
-        'assemble-demo-copy',
-      );
+      const polish = input.copy
+        ? undefined
+        : await polishCopy(
+            workspaceId,
+            intake,
+            buildRunId,
+            siteId,
+            'assemble-demo-copy',
+          );
       const candidate = buildDemoSpec({
         siteName: site.name,
         intake,
         stylePreset,
         polish,
       });
+      if (input.copy) {
+        const locales = Object.keys(input.copy.set.bundles);
+        candidate.site.defaultLocale = input.copy.set.sourceLocale;
+        candidate.site.locales = locales;
+        candidate.copyBundleSet = input.copy.set;
+        candidate.copyBundles = Object.fromEntries(
+          Object.entries(input.copy.set.bundles).map(([locale, bundle]) => [
+            locale,
+            copyBundleToLegacyStrings(bundle),
+          ]),
+        );
+      }
       const doc = applyBuildScope(
         activeSpec as unknown as SiteSpec | null,
         candidate,
@@ -1421,7 +1716,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           where: { buildRunId, buildStatus: 'building' },
         });
         const nextVersion = await allocateNextSiteVersion(tx, siteId);
-        return tx.siteVersion.create({
+        const created = await tx.siteVersion.create({
           data: {
             workspaceId,
             siteId,
@@ -1433,6 +1728,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             buildRunId,
           },
         });
+        if (input.copy) {
+          await tx.siteCopyBundle.createMany({
+            data: Object.entries(input.copy.set.bundles).map(
+              ([locale, bundle]) => {
+                const taskAttemptId = input.copy!.taskAttemptIds[locale];
+                if (!taskAttemptId) {
+                  throw new Error(`copy task attempt missing for ${locale}`);
+                }
+                return {
+                  workspaceId,
+                  siteId,
+                  siteVersionId: created.id,
+                  buildRunId,
+                  claimSnapshotId: input.copy!.snapshotId,
+                  taskAttemptId,
+                  locale,
+                  sourceLocale: bundle.sourceLocale,
+                  status: bundle.status,
+                  schemaVersion: bundle.schemaVersion,
+                  slotCatalogVersion: bundle.slotCatalogVersion,
+                  inputHash: bundle.inputHash,
+                  bundleDigest: bundle.digest,
+                  document: bundle as unknown as Prisma.InputJsonObject,
+                };
+              },
+            ),
+          });
+        }
+        return created;
       });
 
       // New R3-B2 histories render outside the slug served by the dev preview. finalizeRefurbish
@@ -1565,6 +1889,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   : siteBefore.activeVersionId
                 : undefined
             : undefined;
+          if (input.copy) {
+            const snapshotRepository =
+              new PrismaPublishableClaimSnapshotRepository(tx);
+            const snapshotService = new PublishableClaimSnapshotService(
+              snapshotRepository,
+            );
+            const frozen = await snapshotRepository.findByBuildRun(
+              workspaceId,
+              buildRunId,
+            );
+            const storedSnapshot =
+              await tx.sitePublishableClaimSnapshot.findUnique({
+                where: { buildRunId },
+                select: { id: true },
+              });
+            if (
+              !frozen ||
+              !storedSnapshot ||
+              storedSnapshot.id !== input.copy.snapshotId
+            ) {
+              throw new Error('COPY_CLAIM_SNAPSHOT_MISSING');
+            }
+            await snapshotService.assertCurrent(
+              { userId: 'system', workspaceId, roles: [] },
+              frozen,
+            );
+          }
           // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
           // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
           const published = await tx.siteBuildRun.updateMany({
@@ -1625,12 +1976,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }
           const targetVersion = await tx.siteVersion.findFirst({
             where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
-            select: { spec: true, artifactKey: true },
+            select: {
+              spec: true,
+              artifactKey: true,
+              copyBundles: {
+                select: { locale: true, bundleDigest: true },
+                orderBy: { locale: 'asc' },
+              },
+            },
           });
           if (!targetVersion)
             throw new Error(
               `site version ${build.versionId} is not activatable`,
             );
+          if (input.copy) {
+            const expected = Object.entries(input.copy.set.bundles)
+              .map(([locale, bundle]) => ({
+                locale,
+                bundleDigest: bundle.digest,
+              }))
+              .sort((left, right) => left.locale.localeCompare(right.locale));
+            if (
+              JSON.stringify(targetVersion.copyBundles) !==
+              JSON.stringify(expected)
+            ) {
+              throw new Error('COPY_BUNDLE_ACTIVATION_MISMATCH');
+            }
+          }
           await lockSiteSpecAssetsForActivation(tx, {
             workspaceId,
             siteId,

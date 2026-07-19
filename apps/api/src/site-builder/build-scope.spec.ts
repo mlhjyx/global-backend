@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildDemoSpec } from './demo-spec';
 import {
   applyBuildScope,
+  assertActiveBuildTargets,
   BuildActiveSpecInvalidError,
   BuildTargetAmbiguousError,
   BuildTargetNotFoundError,
@@ -17,6 +18,20 @@ const intake = {
 };
 const active = buildDemoSpec({ siteName: 'Old', intake });
 const candidate = buildDemoSpec({ siteName: 'New', intake });
+
+function authoritativeBundle(locale: string) {
+  return {
+    schemaVersion: 'site-builder-copy-bundle/v1' as const,
+    slotCatalogVersion: 'site-builder-copy-slots/v1' as const,
+    locale,
+    sourceLocale: 'en',
+    status: 'complete' as const,
+    claimSnapshot: { id: 'snapshot-1', digest: 'a'.repeat(64) },
+    inputHash: 'b'.repeat(64),
+    slots: {},
+    digest: 'c'.repeat(64),
+  };
+}
 
 describe('applyBuildScope', () => {
   it('returns the full candidate for an unfiltered site build', () => {
@@ -49,6 +64,43 @@ describe('applyBuildScope', () => {
       active.pages.find((page) => page.id === 'products'),
     );
     expect(out.copyBundles.en['seo.contact.title']).toBe('Contact — New');
+  });
+
+  it('rejects a partial build that would drop an active authoritative locale', () => {
+    const multilingual = structuredClone(active);
+    multilingual.site.locales = ['en', 'de-DE'];
+    multilingual.copyBundles['de-DE'] = {
+      'seo.home.title': 'Alte Startseite',
+    };
+    multilingual.copyBundleSet = {
+      schemaVersion: 'site-builder-copy-bundle-set/v1',
+      sourceLocale: 'en',
+      bundles: {
+        en: authoritativeBundle('en'),
+        'de-DE': authoritativeBundle('de-DE'),
+      },
+    };
+    const englishOnly = structuredClone(candidate);
+    englishOnly.copyBundleSet = {
+      schemaVersion: 'site-builder-copy-bundle-set/v1',
+      sourceLocale: 'en',
+      bundles: { en: authoritativeBundle('en') },
+    };
+
+    expect(() =>
+      applyBuildScope(multilingual, englishOnly, {
+        scope: 'page',
+        targetId: 'products',
+        options: { locales: ['en', 'de-DE'] },
+      }),
+    ).toThrow(BuildActiveSpecInvalidError);
+
+    expect(() =>
+      assertActiveBuildTargets(multilingual, {
+        scope: 'page',
+        targetId: 'products',
+      }),
+    ).toThrow(BuildActiveSpecInvalidError);
   });
 
   it('replaces one unique section without changing its sibling blocks', () => {

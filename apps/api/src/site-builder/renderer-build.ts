@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,7 @@ export interface RendererBuildInput {
   specPath: string;
   outDir: string;
   basePath: string;
+  allowedOutboundDomains?: string[];
 }
 
 export type RendererBuildExecutor = (
@@ -71,6 +72,86 @@ export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
     timeout: BUILD_TIMEOUT_MS,
     maxBuffer: MAX_BUILD_OUTPUT_BYTES,
   });
+  await assertRenderedOutboundDomains(
+    input.outDir,
+    input.allowedOutboundDomains ?? [],
+  );
+}
+
+const SCANNED_RENDER_EXTENSIONS = new Set([
+  '.html',
+  '.css',
+  '.js',
+  '.mjs',
+  '.json',
+  '.xml',
+  '.svg',
+  '.txt',
+]);
+const OUTBOUND_URL = /(?:https?:)?\/\/[^\s"'<>)}\\]+/giu;
+const MAX_SCANNED_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+/** Post-build gate covers HTML, CSS and bundled JS rather than trusting component props alone. */
+export async function assertRenderedOutboundDomains(
+  root: string,
+  allowedDomains: readonly string[],
+): Promise<void> {
+  const approved = new Set(
+    allowedDomains.map((domain) => domain.trim().toLowerCase()).filter(Boolean),
+  );
+  let scannedBytes = 0;
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const filePath = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error('RENDERER_OUTPUT_SYMLINK_FORBIDDEN');
+      }
+      if (entry.isDirectory()) {
+        await visit(filePath);
+        continue;
+      }
+      if (
+        !entry.isFile() ||
+        !SCANNED_RENDER_EXTENSIONS.has(path.extname(entry.name))
+      ) {
+        continue;
+      }
+      const value = await readFile(filePath, 'utf8');
+      scannedBytes += Buffer.byteLength(value);
+      if (scannedBytes > MAX_SCANNED_OUTPUT_BYTES) {
+        throw new Error('RENDERER_OUTPUT_SCAN_LIMIT_EXCEEDED');
+      }
+      for (const raw of value.match(OUTBOUND_URL) ?? []) {
+        let parsed: URL;
+        try {
+          parsed = new URL(raw.startsWith('//') ? `https:${raw}` : raw);
+        } catch {
+          throw new Error(`RENDERER_OUTBOUND_URL_INVALID: ${raw}`);
+        }
+        if (
+          parsed.protocol !== 'https:' ||
+          !approved.has(parsed.hostname.toLowerCase())
+        ) {
+          throw new Error(
+            `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname}`,
+          );
+        }
+      }
+    }
+  };
+  await visit(root);
+}
+
+function allowedOutboundDomains(spec: unknown): string[] {
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return [];
+  const site = (spec as Record<string, unknown>).site;
+  if (!site || typeof site !== 'object' || Array.isArray(site)) return [];
+  const domains = (site as Record<string, unknown>).outboundDomains;
+  return Array.isArray(domains) &&
+    domains.every((value) => typeof value === 'string')
+    ? domains
+    : [];
 }
 
 /**
@@ -95,6 +176,7 @@ export async function buildSiteSpecWithTemporaryFile(
       specPath,
       outDir: output.outDir,
       basePath: output.basePath,
+      allowedOutboundDomains: allowedOutboundDomains(spec),
     });
   } finally {
     await rm(tempDir, { recursive: true, force: true });

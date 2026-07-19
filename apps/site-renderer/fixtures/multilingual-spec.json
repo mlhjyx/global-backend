@@ -1,0 +1,36 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en", "de-DE", "ar"],
+    "theme": { "preset": "precision-light" },
+    "nav": [],
+    "seoGlobal": { "siteName": "Acme" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "puck": { "content": [], "root": {} },
+      "seo": { "titleKey": "title", "descriptionKey": "description" }
+    }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "title": "English",
+      "description": "English description",
+      "footer.tagline": "English footer"
+    },
+    "de-DE": {
+      "title": "Deutsch",
+      "description": "Deutsche Beschreibung",
+      "footer.tagline": "Deutsche Fußzeile"
+    },
+    "ar": {
+      "title": "العربية",
+      "description": "وصف عربي",
+      "footer.tagline": "تذييل عربي"
+    }
+  }
+}

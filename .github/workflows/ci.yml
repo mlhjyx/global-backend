@@ -49,6 +49,15 @@ jobs:
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
 
+      - name: Renderer locale contract test
+        run: pnpm --filter @global/site-renderer test
+
+      - name: Renderer multilingual smoke build
+        run: pnpm --filter @global/site-renderer build
+        env:
+          SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json
+          OUT_DIR: ${{ runner.temp }}/site-renderer-multilingual
+
   contracts:
     name: contracts · drift · lint · breaking
     runs-on: ubuntu-latest

@@ -2,7 +2,7 @@
 
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
-> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task（`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`），但当前离线 MODEL-1 评测只实现了有真实工作流消费者的 **BrandProfile 文本子集**；其余 task、截图与渲染组件尚无对应评测消费者，不能宣称已覆盖。**审美评审（aesthetic_review）、本地化（localize）、Claim 投影（claim_projection）、视频 QA、DesignEvaluation 契约、通用感检测、shadow/canary 自动化**是**目标态**（M1-d/e/f 与 M2/真实流量后落地），文中逐处标注。26 型封闭组件库是 v1 目标（ADR-015），当前 10 型 as-built。
+> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；BrandProfile 有 MODEL-1 task-shaped 评测。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**，不能宣称 copy MODEL-1 晋级。design/assemble/QA/审美等其余目标仍未覆盖；26 型封闭组件库仍是 M1-e 目标，当前 10 型 as-built。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 
@@ -348,7 +348,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ### DoD-3 M1-d~g 内容、设计与质量
 - [ ] 6 Family 各 ≥2 首页 + 2 内页 Blueprint，差异可解释；26 组件 schema/Astro/fixture/a11y/content budget/visual test 一致。（04 / 13）
 - [ ] Demo 无模型也有视觉锚点；sparse 不虚构、rich 正确利用产品/工厂/证书/地址。
-- [ ] Copy 只消费 PublishableClaimSnapshot；人工锁定 + locale 降级语义通过。
+- [x] Copy 只消费 PublishableClaimSnapshot；locale default 阻断、optional 省略/degraded 与空快照中性路径已覆盖。人工编辑锁定仍属后续编辑能力，不在 M1-d 冒充完成。
 - [ ] SiteSpec 三重门 / Renderer compatibility / 三断点 / Lighthouse / WCAG / 外呼域进 CI。
 - [ ] aesthetic review 不可用有显式降级；修复 ≤3 轮；安全 Family fallback 可重放。（ADR-013）
 - [ ] SiteReleaseManifest 可重建相同 artifact digest；回滚恢复完整文案/素材/代码/配置。

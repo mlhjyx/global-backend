@@ -1,9 +1,18 @@
-import { access, readFile, stat } from 'node:fs/promises';
+import {
+  access,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildRendererEnv,
   buildSiteSpecWithTemporaryFile,
+  assertRenderedOutboundDomains,
   type RendererBuildInput,
 } from './renderer-build';
 
@@ -37,6 +46,31 @@ describe('buildRendererEnv — Renderer 子进程最小环境', () => {
   });
 });
 
+describe('rendered outbound-domain gate', () => {
+  it('allows internal/self-hosted assets and explicitly approved HTTPS domains only', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'm1d-outbound-'));
+    try {
+      await writeFile(
+        path.join(dir, 'index.html'),
+        '<a href="/contact">local</a><img src="data:image/png;base64,x"><a href="https://docs.example.com/x">docs</a>',
+      );
+      await expect(
+        assertRenderedOutboundDomains(dir, ['docs.example.com']),
+      ).resolves.toBeUndefined();
+
+      await writeFile(
+        path.join(dir, 'app.js'),
+        'fetch("https://tracker.invalid/collect")',
+      );
+      await expect(
+        assertRenderedOutboundDomains(dir, ['docs.example.com']),
+      ).rejects.toThrowError(/RENDERER_OUTBOUND_DOMAIN_FORBIDDEN/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () => {
   it('构建期间使用 0600 随机临时文件，成功后删除整个临时目录', async () => {
     let observedPath = '';
@@ -44,7 +78,9 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
       observedPath = input.specPath;
       expect(path.basename(input.specPath)).toBe('site-spec.json');
       expect(await readFile(input.specPath, 'utf8')).toBe('{"safe":true}');
-      expect((await stat(path.dirname(input.specPath))).mode & 0o777).toBe(0o700);
+      expect((await stat(path.dirname(input.specPath))).mode & 0o777).toBe(
+        0o700,
+      );
       expect((await stat(input.specPath)).mode & 0o777).toBe(0o600);
     });
 
@@ -63,7 +99,9 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
     let observedPath = '';
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
-      expect(await readFile(input.specPath, 'utf8')).toBe('{"tenant":"content"}');
+      expect(await readFile(input.specPath, 'utf8')).toBe(
+        '{"tenant":"content"}',
+      );
       throw new Error('astro failed');
     });
 
