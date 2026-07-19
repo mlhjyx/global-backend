@@ -82,6 +82,38 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
   });
 
+  it('rejects a terminal UNKNOWN replay instead of authorizing a fallback provider', async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [
+        {
+          decision: 'REPLAY',
+          spend_id: '44444444-4444-4444-8444-444444444444',
+          spend_status: 'UNKNOWN',
+          cached_result: null,
+          cached_meta: { reportedCostMicrousd: 900_000 },
+          cached_error_code: 'ACTUAL_EXCEEDED_RESERVATION',
+        },
+      ]),
+    };
+    const ledger = new SiteBuildCostLedger(fakePrisma(tx));
+
+    const error = await ledger
+      .reserveOperation({
+        ...SCOPE,
+        operationKey: 'd'.repeat(64),
+        kind: 'model',
+        taskId: 'site_builder.brand_profile',
+        subject: 'gpt-5.6-terra',
+        reservationMicrousd: 800_000,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PaidOperationUnknownError);
+    expect((error as PaidOperationUnknownError).reason).toBe(
+      'ACTUAL_EXCEEDED_RESERVATION',
+    );
+  });
+
   it('maps budget exhaustion and invalid run state to a fail-closed denial', async () => {
     for (const decision of [
       'DENIED_BUDGET_EXHAUSTED',

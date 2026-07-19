@@ -116,6 +116,64 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     );
   });
 
+  it('persists only the caller-approved durable model replay projection', async () => {
+    const rawResult = {
+      data: {
+        valueProps: ['Contact Jane Doe at jane@example.com'],
+      },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
+    const model = provider(async () => rawResult);
+    const durableReplayResult = vi.fn(() => ({
+      data: { valueProps: ['[persistence-gated]'] },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }));
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+        },
+        {
+          ...paidModelContext,
+          paidCost: {
+            ...paidModelContext.paidCost,
+            durableReplayResult,
+          },
+        },
+      ),
+    ).resolves.toEqual(rawResult);
+
+    expect(durableReplayResult).toHaveBeenCalledWith(rawResult);
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'SUCCEEDED',
+        result: expect.objectContaining({
+          data: { valueProps: ['[persistence-gated]'] },
+        }),
+      }),
+    );
+    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
+      'jane@example.com',
+    );
+  });
+
   it('replays a cached provider result without calling or settling the provider again', async () => {
     const model = provider(async () => {
       throw new Error('must not execute');

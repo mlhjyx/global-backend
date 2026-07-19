@@ -15,6 +15,19 @@ const migration =
         'utf8',
       )
     : '';
+const hardCapMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+  /site_builder_r4b_hard_cap_guard$/.test(entry),
+);
+const hardCapMigration =
+  hardCapMigrationDirs.length === 1 &&
+  existsSync(
+    path.join(migrationsDir, hardCapMigrationDirs[0]!, 'migration.sql'),
+  )
+    ? readFileSync(
+        path.join(migrationsDir, hardCapMigrationDirs[0]!, 'migration.sql'),
+        'utf8',
+      )
+    : '';
 const schema = readFileSync(
   path.join(repo, 'packages/db/prisma/schema.prisma'),
   'utf8',
@@ -114,6 +127,21 @@ describe('R4-B persistent paid-call ledger database invariants', () => {
     expect(migration).toMatch(
       /SELECT\s+b\.\*\s+INTO\s+v_budget[\s\S]+FOR UPDATE/is,
     );
+  });
+
+  it('ships a forward-only settlement guard that cannot charge above the admitted reservation', () => {
+    expect(hardCapMigrationDirs).toHaveLength(1);
+    expect(hardCapMigration).toContain(
+      'CREATE OR REPLACE FUNCTION settle_site_build_spend',
+    );
+    expect(hardCapMigration).toMatch(
+      /p_budget_charge_microusd\s*>\s*v_spend\."reservation_microusd"/i,
+    );
+    expect(hardCapMigration).toMatch(
+      /"status"\s*=\s*'UNKNOWN'[\s\S]+"budget_charge_microusd"\s*=\s*v_spend\."reservation_microusd"/i,
+    );
+    expect(hardCapMigration).toContain("'ACTUAL_EXCEEDED_RESERVATION'");
+    expect(hardCapMigration).not.toMatch(/DROP\s+(?:TABLE|COLUMN|FUNCTION)/i);
   });
 
   it('forces tenant-symmetric RLS and grants no arbitrary deletes', () => {

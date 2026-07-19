@@ -1071,7 +1071,25 @@ describe('R4-B BrandProfile paid attempt recovery', () => {
       siteBuildTaskAttempt: { updateMany: attemptUpdate },
     };
     const gateway = {
-      generateStructured: vi.fn(async () => ({
+      generateStructured: vi.fn(async (_input, ctx) => {
+        const durableReplayResult = ctx.paidCost?.durableReplayResult;
+        expect(durableReplayResult).toBeTypeOf('function');
+        expect(() =>
+          durableReplayResult?.({
+            data: {
+              valueProps: ['Contact Jane Doe at jane@example.com'],
+              keywords: [],
+              glossary: [],
+              differentiators: [],
+              competitors: [],
+              factSheet: [],
+              gaps: [],
+            },
+            provider: 'new-api',
+            model: 'gpt-5.6-terra',
+          }),
+        ).toThrow(/BrandProfile output hard gate rejected/);
+        return {
         data: {
           valueProps: [],
           keywords: [],
@@ -1086,7 +1104,8 @@ describe('R4-B BrandProfile paid attempt recovery', () => {
         reportedModel: 'gpt-5.6-terra',
         modelResolutionSource: 'upstream_response',
         usage: { inputTokens: 11, outputTokens: 7 },
-      })),
+        };
+      }),
     };
     const freezeTaskInput = vi.fn(async (_fence, candidate) => ({
       inputHash: 'b'.repeat(64),
@@ -1141,6 +1160,7 @@ describe('R4-B BrandProfile paid attempt recovery', () => {
           taskAttemptId: 'attempt-1',
           fenceToken: 'fence-1',
           scopeKey: expect.stringContaining('attempt-1:model:0:'),
+          durableReplayResult: expect.any(Function),
         },
       }),
     );
