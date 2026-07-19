@@ -120,7 +120,16 @@ describe('normalizeBuildRequest', () => {
     });
   });
 
-  it('canonicalizes locales and rejects invalid, duplicate, or unsupported locale sets', () => {
+  it('accepts the frozen en/de-DE generation set and rejects invalid, missing-source, or renderer-only locales', () => {
+    expect(
+      normalizeBuildRequest({
+        scope: 'site',
+        options: { locales: ['en', 'de-DE'] },
+      }),
+    ).toEqual({
+      scope: 'site',
+      options: { locales: ['en', 'de-DE'] },
+    });
     for (const locales of [['not_a_tag'], ['en-US', 'en-us']]) {
       const error = (() => {
         try {
@@ -137,7 +146,7 @@ describe('normalizeBuildRequest', () => {
 
     const unavailable = (() => {
       try {
-        normalizeBuildRequest({ scope: 'site', options: { locales: ['de'] } });
+        normalizeBuildRequest({ scope: 'site', options: { locales: ['de-DE'] } });
       } catch (caught) {
         return caught;
       }
@@ -146,6 +155,12 @@ describe('normalizeBuildRequest', () => {
       status: 422,
       body: { error: { code: 'BUILD_OPTION_UNAVAILABLE' } },
     });
+
+    for (const locales of [['en', 'ar'], ['en', 'fr-FR']]) {
+      expect(() =>
+        normalizeBuildRequest({ scope: 'site', options: { locales } }),
+      ).toThrowError(/COPY_LOCALE_UNSUPPORTED|BUILD_OPTION_UNAVAILABLE/);
+    }
   });
 
   it('produces a stable request fingerprint after normalization', () => {
