@@ -947,6 +947,15 @@ describe('BuildsService.get / cancel', () => {
       status: 'cancelled',
     });
     expect(db.runs[0]).toMatchObject({ status: 'cancelled' });
+    expect(db.runs[0].costSummary).toMatchObject({
+      schemaVersion: 'site-builder-cost-summary/v1',
+      budget: {
+        reservedMicrousd: 0,
+        paidCallsEnabled: false,
+        disabledReason: 'cancellation_requested',
+      },
+      operations: { unknown: 0 },
+    });
     expect(db.steps).toHaveLength(6);
     expect(db.steps.every((step) => step.status === 'aborted')).toBe(true);
   });
