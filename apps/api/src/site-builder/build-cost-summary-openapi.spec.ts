@@ -28,6 +28,7 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
     const summaryProperty =
       document.components.schemas.BuildStatusResponseDto.properties!
         .costSummary;
+    expect(summaryProperty.type).toBe('object');
     expect(summaryProperty.nullable).toBe(true);
     const summary = summaryProperty.allOf?.[0] ?? summaryProperty;
 
