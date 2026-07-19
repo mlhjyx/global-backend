@@ -7,6 +7,7 @@ import {
   legacyToolCostMeasurement,
   paidOperationKey,
   PaidCallDeniedError,
+  PaidOperationUnknownError,
   type PaidCostMeasurement,
   type PaidOperationReservation,
   type SiteBuildCostLedger,
@@ -265,7 +266,7 @@ export class ToolBroker implements ExecutionBroker {
       release = await this.limiter.acquire(toolId, now());
     } catch (error) {
       if (paidScope) {
-        await this.deps.paidLedger!.settleOperation({
+        await this.settlePersistentOperation({
           scope: paidScope,
           status: 'RELEASED',
           measurement: this.notIncurredMeasurement(),
@@ -288,7 +289,7 @@ export class ToolBroker implements ExecutionBroker {
         result = await tool.execute(input, ctx);
       } catch (err) {
         if (paidScope) {
-          await this.deps.paidLedger!.settleOperation({
+          await this.settlePersistentOperation({
             scope: paidScope,
             status: 'FAILED',
             // Once execute() starts, an upstream may have consumed quota even if
@@ -308,7 +309,7 @@ export class ToolBroker implements ExecutionBroker {
       // A settlement failure is intentionally outside the execute() catch: the
       // external call has succeeded and must not be relabelled or repeated.
       if (paidScope) {
-        await this.deps.paidLedger!.settleOperation({
+        await this.settlePersistentOperation({
           scope: paidScope,
           status: 'SUCCEEDED',
           measurement: legacyToolCostMeasurement(
@@ -344,6 +345,27 @@ export class ToolBroker implements ExecutionBroker {
       callCount: 1,
       meta: { reason: 'execution_not_started' },
     };
+  }
+
+  private async settlePersistentOperation(
+    input: Parameters<SiteBuildCostLedger['settleOperation']>[0],
+  ): Promise<void> {
+    let decision: string;
+    try {
+      decision = await this.deps.paidLedger!.settleOperation(input);
+    } catch (error) {
+      if (error instanceof PaidOperationUnknownError) throw error;
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        'SETTLEMENT_ACK_UNKNOWN',
+      );
+    }
+    if (decision !== 'SETTLED') {
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        `SETTLEMENT_${decision}`,
+      );
+    }
   }
 
   private unknownMeasurement(

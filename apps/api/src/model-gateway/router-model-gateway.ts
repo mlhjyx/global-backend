@@ -18,6 +18,7 @@ import {
   modelCostMeasurement,
   paidOperationKey,
   PaidCallDeniedError,
+  PaidOperationUnknownError,
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
@@ -431,7 +432,7 @@ export class RouterModelGateway extends ModelGateway {
           callCount: providerError?.callCount,
           reservationMicrousd: scope.reservationMicrousd,
         });
-        await this.paidLedger.settleOperation({
+        await this.settlePersistentOperation({
           scope,
           status: 'FAILED',
           measurement,
@@ -485,7 +486,7 @@ export class RouterModelGateway extends ModelGateway {
         callCount: result.callCount,
         reservationMicrousd: scope.reservationMicrousd,
       });
-      await this.paidLedger.settleOperation({
+      await this.settlePersistentOperation({
         scope,
         status: 'SUCCEEDED',
         measurement,
@@ -519,5 +520,26 @@ export class RouterModelGateway extends ModelGateway {
       return result;
     }
     throw lastErr ?? new Error(`all paid providers failed for ${input.task}`);
+  }
+
+  private async settlePersistentOperation(
+    input: Parameters<SiteBuildCostLedger['settleOperation']>[0],
+  ): Promise<void> {
+    let decision: string;
+    try {
+      decision = await this.paidLedger!.settleOperation(input);
+    } catch (error) {
+      if (error instanceof PaidOperationUnknownError) throw error;
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        'SETTLEMENT_ACK_UNKNOWN',
+      );
+    }
+    if (decision !== 'SETTLED') {
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        `SETTLEMENT_${decision}`,
+      );
+    }
   }
 }

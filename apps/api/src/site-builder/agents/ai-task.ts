@@ -12,6 +12,10 @@ import type {
   ModelExecutionPolicySnapshot,
   ModelRouteSnapshot,
 } from '@global/contracts';
+import {
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+} from '../site-build-cost-ledger';
 
 /**
  * L2 AiTask 统一执行器（09 §2.4，镜像获客侧「有界任务契约，非超级 Agent」哲学）。
@@ -227,6 +231,15 @@ export async function runAiTask<TIn, TOut>(
         fallbackIndex,
       };
     } catch (err) {
+      // A durable paid-call gate or settlement ambiguity is a terminal task
+      // condition. Advancing to another model would spend again after an
+      // unknown acknowledgement boundary.
+      if (
+        err instanceof PaidCallDeniedError ||
+        err instanceof PaidOperationUnknownError
+      ) {
+        throw err;
+      }
       // A malformed/truncated provider response can have consumed tokens even
       // though it has no usable artifact. Keep that usage through a fallback
       // or final AiTaskError so evaluations and later cost reconciliation do
