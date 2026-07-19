@@ -222,6 +222,34 @@ describe('listKbRecoveryCandidates — expired lease fairness', () => {
 });
 
 describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
+  it('R4-B: a claimed run creates its durable database budget before returning', async () => {
+    spyBudget();
+    const ensureBudget = vi.fn(async () => undefined);
+    const tx = {
+      site: {
+        findUnique: vi.fn(async () => ({ id: 'site-1' })),
+        update: vi.fn(async () => ({})),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'queued' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: { ensureBudget } as never,
+    });
+
+    await acts.beginRefurbishRun(INPUT);
+
+    expect(ensureBudget).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      capMicrousd: siteBuildBudgetCents() * 10_000,
+    });
+  });
+
   it('认领成功 → close(force) 后 open(buildRunId, siteBuildBudgetCents())', async () => {
     const { open, close } = spyBudget();
     const tx = {
@@ -832,6 +860,65 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     );
     expect(budgetLedger.remainingCents('run-1')).toBe(siteBuildBudgetCents());
     budgetLedger.close('run-1', { force: true });
+  });
+
+  it('R4-B: BrandProfile fails closed before I/O when no durable ledger is installed', async () => {
+    spyBudget();
+    const gateway = { generateStructured: vi.fn() };
+    const prisma = {
+      withWorkspace: vi.fn(async () => {
+        throw new Error('database must not be reached');
+      }),
+    } as unknown as PrismaService;
+    const acts = createSiteBuilderActivities({
+      prisma,
+      gateway: gateway as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
+      'PERSISTENT_LEDGER_UNAVAILABLE',
+    );
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it('R4-B: completed logical BrandProfile attempts replay without database, research or model I/O', async () => {
+    spyBudget();
+    const summary = {
+      version: 4,
+      factCount: 3,
+      gapsCount: 1,
+      researchDegraded: false,
+      model: 'gpt-5.6-terra',
+    };
+    const claimTaskAttempt = vi.fn(async () => ({
+      kind: 'completed' as const,
+      result: summary,
+    }));
+    const prisma = {
+      withWorkspace: vi.fn(async () => {
+        throw new Error('database must not be reached after replay');
+      }),
+    } as unknown as PrismaService;
+    const gateway = { generateStructured: vi.fn() };
+    const broker = { invoke: vi.fn() };
+    const acts = createSiteBuilderActivities({
+      prisma,
+      gateway: gateway as never,
+      broker: broker as never,
+      costLedger: { claimTaskAttempt } as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).resolves.toEqual(summary);
+    expect(claimTaskAttempt).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      taskId: 'site_builder.brand_profile',
+    });
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(broker.invoke).not.toHaveBeenCalled();
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
 
   it('buildBrandProfile 对旧的未关联 CompanyProfile Site 在任何模型/研究调用前 fail-closed', async () => {
