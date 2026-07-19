@@ -255,21 +255,22 @@ BEGIN
     RAISE EXCEPTION 'invalid paid-call reservation';
   END IF;
 
-  SELECT b, r."status"
-    INTO v_budget, v_run_status
+  SELECT b.* INTO v_budget
   FROM "site_build_budget" b
-  JOIN "site_build_run" r
-    ON r."id" = b."build_run_id"
-   AND r."workspace_id" = b."workspace_id"
-   AND r."site_id" = b."site_id"
   WHERE b."build_run_id" = p_build_run_id
     AND b."workspace_id" = p_workspace_id
-  FOR UPDATE OF b;
+  FOR UPDATE;
 
   IF v_budget."build_run_id" IS NULL THEN
     RETURN QUERY SELECT 'DENIED_NO_BUDGET', NULL::UUID, NULL::TEXT, NULL::JSONB, NULL::JSONB, NULL::TEXT;
     RETURN;
   END IF;
+
+  SELECT r."status" INTO v_run_status
+  FROM "site_build_run" r
+  WHERE r."id" = v_budget."build_run_id"
+    AND r."workspace_id" = v_budget."workspace_id"
+    AND r."site_id" = v_budget."site_id";
 
   IF p_task_attempt_id IS NOT NULL THEN
     SELECT * INTO v_attempt
