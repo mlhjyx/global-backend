@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildDemoSpec } from './demo-spec';
 import {
   applyBuildScope,
+  assertActiveBuildTargets,
   BuildActiveSpecInvalidError,
   BuildTargetAmbiguousError,
   BuildTargetNotFoundError,
@@ -88,6 +89,14 @@ describe('applyBuildScope', () => {
 
     expect(() =>
       applyBuildScope(multilingual, englishOnly, {
+        scope: 'page',
+        targetId: 'products',
+        options: { locales: ['en', 'de-DE'] },
+      }),
+    ).toThrow(BuildActiveSpecInvalidError);
+
+    expect(() =>
+      assertActiveBuildTargets(multilingual, {
         scope: 'page',
         targetId: 'products',
       }),

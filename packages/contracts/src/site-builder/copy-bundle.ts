@@ -65,7 +65,10 @@ export interface CopyBundleReadableSiteSpec {
 
 export interface CopyBundleValidationContext {
   supportedLocales: readonly string[];
-  claims: ReadonlyMap<string, { protectedTokens: readonly string[] }>;
+  claims: ReadonlyMap<
+    string,
+    { statement: string; protectedTokens: readonly string[] }
+  >;
   approvedOutboundDomains: readonly string[];
 }
 
@@ -87,6 +90,7 @@ export type CopyBundleContractErrorCode =
   | "COPY_SLOT_BUDGET_EXCEEDED"
   | "COPY_CLAIM_REF_REQUIRED"
   | "COPY_CLAIM_REF_UNKNOWN"
+  | "COPY_FACT_ASSERTION_UNSUPPORTED"
   | "COPY_PROTECTED_FACT_CHANGED"
   | "COPY_RAW_HTML_FORBIDDEN"
   | "COPY_RICH_TEXT_FORBIDDEN"
@@ -262,10 +266,18 @@ function slotText(
       `factual slot ${key} has no Claim reference`,
     );
   }
+  if (new Set(slot.claimRefs).size !== slot.claimRefs.length) {
+    fail("COPY_BUNDLE_INVALID", `slot ${key} repeats a Claim reference`);
+  }
+  const citedClaims: Array<{
+    statement: string;
+    protectedTokens: readonly string[];
+  }> = [];
   for (const claimId of slot.claimRefs) {
     const claim = context.claims.get(claimId);
     if (!claim)
       fail("COPY_CLAIM_REF_UNKNOWN", `claim ${claimId} is not in the snapshot`);
+    citedClaims.push(claim);
     for (const token of claim.protectedTokens) {
       if (!text.includes(token)) {
         fail(
@@ -273,6 +285,17 @@ function slotText(
           `slot ${key} changed protected token ${token}`,
         );
       }
+    }
+  }
+  if (citedClaims.length > 0) {
+    const supportedText = citedClaims
+      .map((claim) => claim.statement.normalize("NFC"))
+      .join(" · ");
+    if (text.normalize("NFC") !== supportedText) {
+      fail(
+        "COPY_FACT_ASSERTION_UNSUPPORTED",
+        `slot ${key} is not the deterministic representation of its cited Claims`,
+      );
     }
   }
   return text;

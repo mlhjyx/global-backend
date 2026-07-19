@@ -95,7 +95,10 @@ export class CopyBundleService {
     const claims = new Map(
       input.snapshot.items.map((item) => [
         item.claimId,
-        { protectedTokens: protectedFactTokens(item) },
+        {
+          statement: item.statement,
+          protectedTokens: protectedFactTokens(item),
+        },
       ]),
     );
     const bundles: CopyBundleSetV1["bundles"] = {};
@@ -142,7 +145,12 @@ export class CopyBundleService {
                   type: slot.type,
                   maxGraphemes: slot.maxGraphemes,
                   factual: slot.factual,
-                  content: output.content,
+                  content:
+                    output.claimRefs.length > 0 && slot.type !== "rich_text"
+                      ? output.claimRefs
+                          .map((claimId) => claims.get(claimId)?.statement ?? "")
+                          .join(" · ")
+                      : output.content,
                   claimRefs: output.claimRefs,
                 },
               ]),

@@ -83,6 +83,7 @@ export const COPY_TASK: SiteBuilderTaskDefinition<
       `Write every requested slot in canonical locale ${input.locale}.`,
       `Source locale is ${input.sourceLocale}; do not fall back to it in the output.`,
       'Use a Claim only when its exact claimId is returned in claimRefs.',
+      'For any slot with claimRefs, content must be the cited Claim statement text byte-for-byte; join multiple statements with exactly " · ". Do not translate or embellish those statements.',
       'Numbers, units, company/model names, and certification identifiers must remain byte-for-byte unchanged.',
       'If no Claim supports a factual statement, write neutral non-factual copy and return no claimRefs.',
       'Do not emit HTML. Respect each maxGraphemes budget; do not truncate.',
