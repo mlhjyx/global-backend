@@ -833,7 +833,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           { broker },
           {
             workspaceId,
+            siteId,
             runId: buildRunId,
+            paidCost: {
+              taskAttemptId: attempt.id,
+              fenceToken: attempt.fenceToken,
+              scopeKey: `${attempt.id}:research`,
+            },
             companyName: intake.company.nameEn ?? intake.company.nameZh,
             industry: intake.industry,
             websiteUrl: intake.websiteUrl ?? undefined,
@@ -939,7 +945,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const intakeSource = toPromptSource(prepared.intake);
       const kbSources = prepared.kb.map(toPromptSource);
       const researchSources = prepared.research.map(toPromptSource);
-      const brandProfileInput = {
+      const candidateBrandProfileInput = {
         companyName: intake.company.nameEn ?? intake.company.nameZh,
         industry: intake.industry,
         products: intake.products ?? [],
@@ -949,17 +955,75 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         research: researchSources,
       };
 
-      const result = await runAiTask<
-        Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
-        BrandProfileOutput
-      >(
-        BRAND_PROFILE_TASK,
-        brandProfileInput,
-        { gateway, ctx: { workspaceId, runId: buildRunId } },
+      const frozen = await costLedger.freezeTaskInput(taskFence, {
+        taskInput: candidateBrandProfileInput,
+        researchDegraded: research.degraded,
+      });
+      const frozenEnvelope = frozen.input as unknown as {
+        taskInput: typeof candidateBrandProfileInput;
+        researchDegraded: boolean;
+      };
+      const brandProfileInput = frozenEnvelope.taskInput;
+      const researchDegraded = frozenEnvelope.researchDegraded;
+
+      let result: AiTaskRunResult<BrandProfileOutput>;
+      if (
+        attempt.status === 'MODEL_SUCCEEDED' &&
+        attempt.outputJson &&
+        typeof attempt.outputJson === 'object' &&
+        !Array.isArray(attempt.outputJson)
+      ) {
+        result =
+          attempt.outputJson as unknown as AiTaskRunResult<BrandProfileOutput>;
+      } else {
+        result = await runAiTask<
+          Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+          BrandProfileOutput
+        >(
+          BRAND_PROFILE_TASK,
+          brandProfileInput,
+          {
+            gateway,
+            ctx: {
+              workspaceId,
+              runId: buildRunId,
+              paidCost: {
+                siteId,
+                taskAttemptId: attempt.id,
+                fenceToken: attempt.fenceToken,
+                scopeKey: attempt.id,
+              },
+            },
+          },
+        );
+        await costLedger.storeTaskOutput(
+          taskFence,
+          result as unknown as Record<string, unknown>,
+        );
+      }
+
+      const frozenSourceIds = [
+        ...new Set(
+          [
+            brandProfileInput.intakeSource,
+            ...brandProfileInput.kbSources,
+            ...brandProfileInput.research,
+          ].map((source) => source.sourceId),
+        ),
+      ];
+      const frozenPersistedSources = await prisma.withWorkspace(
+        workspaceId,
+        (tx) =>
+          tx.siteEvidenceSourceSnapshot.findMany({
+            where: { siteId, id: { in: frozenSourceIds } },
+          }),
       );
+      if (frozenPersistedSources.length !== frozenSourceIds.length) {
+        throw new Error('frozen BrandProfile evidence source is missing');
+      }
 
       const frozenById = new Map<string, FrozenEvidenceSource>(
-        persistedSources.map((source) => [
+        frozenPersistedSources.map((source) => [
           source.id,
           {
             sourceKey: source.sourceKey,
@@ -1094,6 +1158,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 id: brandProfileId,
                 workspaceId,
                 siteId,
+                taskAttemptId: attempt.id,
                 version: next,
                 evidenceSchemaVersion: 2,
                 valueProps: clean.valueProps as Prisma.InputJsonValue,
@@ -1104,7 +1169,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 competitors: clean.competitors as Prisma.InputJsonValue,
                 factSheet: persistedFactSheet as unknown as Prisma.InputJsonValue,
                 gaps: persistedGaps as unknown as Prisma.InputJsonValue,
-                researchDegraded: research.degraded,
+                researchDegraded,
               },
             });
             if (persistedFactSheet.length > 0) {
@@ -1141,11 +1206,30 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 }
               }
             }
-            return {
+            const summary: BrandProfileSummary = {
               version: next,
               factCount: persistedFactSheet.length,
               gapsCount: persistedGaps.length,
+              researchDegraded,
+              model: result.model,
             };
+            const completed = await tx.siteBuildTaskAttempt.updateMany({
+              where: {
+                id: attempt.id,
+                fenceToken: attempt.fenceToken,
+                status: 'MODEL_SUCCEEDED',
+                leaseUntil: { gt: new Date() },
+              },
+              data: {
+                status: 'SUCCEEDED',
+                resultJson: summary as unknown as Prisma.InputJsonObject,
+                leaseUntil: new Date(),
+              },
+            });
+            if (completed.count !== 1) {
+              throw new Error('paid task fence is stale or expired');
+            }
+            return summary;
           }),
       );
       version = persisted.version;
@@ -1153,18 +1237,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       persistedGapsCount = persisted.gapsCount;
 
       log.log(
-        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${research.degraded ? ', research degraded' : ''}`,
+        `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${researchDegraded ? ', research degraded' : ''}`,
       );
-      const summary = {
-        version,
-        factCount: persistedFactCount,
-        gapsCount: persistedGapsCount,
-        researchDegraded: research.degraded,
-        model: result.model,
-      };
-      await costLedger.completeTask(taskFence, summary);
       taskCompleted = true;
-      return summary;
+      return persisted;
       } finally {
         if (!taskCompleted) await costLedger.releaseTask(taskFence);
       }
