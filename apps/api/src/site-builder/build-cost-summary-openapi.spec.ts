@@ -21,6 +21,9 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
     ) as {
       components: { schemas: Record<string, SchemaNode> };
     };
+    expect(
+      document.components.schemas.BuildStatusResponseDto.required,
+    ).toContain('costSummary');
     const summary =
       document.components.schemas.BuildStatusResponseDto.properties!
         .costSummary;
