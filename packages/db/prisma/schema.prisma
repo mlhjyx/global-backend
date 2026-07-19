@@ -1286,6 +1286,7 @@ model Site {
   evidenceSourceSnapshots   SiteEvidenceSourceSnapshot[]
   claimBridges              BrandProfileClaimBridge[]
   publishableClaimSnapshots SitePublishableClaimSnapshot[]
+  copyBundles               SiteCopyBundle[]
   companyProfile            CompanyProfile?                @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction, map: "site_company_profile_workspace_fkey")
 
   @@unique([slug])
@@ -1309,9 +1310,11 @@ model SiteVersion {
   buildRunId  String?  @map("build_run_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site        Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  copyBundles SiteCopyBundle[]
 
   @@unique([siteId, version])
+  @@unique([id, workspaceId, siteId], map: "site_version_id_workspace_site_key")
   @@index([workspaceId])
   @@map("site_version")
 }
@@ -1341,6 +1344,7 @@ model SiteBuildRun {
   spendRecords             SiteBuildSpend[]
   taskAttempts             SiteBuildTaskAttempt[]
   publishableClaimSnapshot SitePublishableClaimSnapshot?
+  copyBundles              SiteCopyBundle[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, siteId], map: "site_build_run_id_workspace_site_key")
@@ -1417,6 +1421,7 @@ model SiteBuildTaskAttempt {
   buildRun     SiteBuildRun     @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_task_attempt_run_scope_fkey")
   spendRecords SiteBuildSpend[]
   brandProfile BrandProfile?
+  copyBundles  SiteCopyBundle[]
 
   @@unique([buildRunId, taskId], map: "site_build_task_attempt_run_task_key")
   @@unique([id, workspaceId, siteId], map: "site_build_task_attempt_scope_key")
@@ -1726,7 +1731,9 @@ model SitePublishableClaimSnapshot {
   companyProfile CompanyProfile                     @relation(fields: [companyProfileId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction, map: "site_publishable_claim_snapshot_company_scope_fkey")
   buildRun       SiteBuildRun                       @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_publishable_claim_snapshot_run_scope_fkey")
   items          SitePublishableClaimSnapshotItem[]
+  copyBundles    SiteCopyBundle[]
 
+  @@unique([id, workspaceId, siteId], map: "site_publishable_claim_snapshot_id_workspace_site_key")
   @@unique([id, workspaceId, siteId, companyProfileId], map: "site_publishable_claim_snapshot_scope_key")
   @@unique([buildRunId, workspaceId, siteId], map: "site_publishable_claim_snapshot_run_scope_key")
   @@index([workspaceId, siteId, capturedAt], map: "site_publishable_claim_snapshot_workspace_site_captured_idx")
@@ -1778,4 +1785,37 @@ model SitePublishableClaimSnapshotItem {
   @@unique([snapshotId, ordinal], map: "site_publishable_claim_snapshot_item_ordinal_key")
   @@index([workspaceId, siteId, claimId], map: "site_publishable_claim_snapshot_item_workspace_site_claim_idx")
   @@map("site_publishable_claim_snapshot_item")
+}
+
+/// M1-d authoritative, immutable locale document. SiteSpec keeps a legacy string
+/// projection during one dual-read window, but facts/provenance live here.
+model SiteCopyBundle {
+  id                 String   @id @default(uuid()) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  siteId             String   @map("site_id") @db.Uuid
+  siteVersionId      String   @map("site_version_id") @db.Uuid
+  buildRunId         String   @map("build_run_id") @db.Uuid
+  claimSnapshotId    String   @map("claim_snapshot_id") @db.Uuid
+  taskAttemptId      String   @map("task_attempt_id") @db.Uuid
+  locale             String
+  sourceLocale       String   @map("source_locale")
+  status             String
+  schemaVersion      String   @map("schema_version")
+  slotCatalogVersion String   @map("slot_catalog_version")
+  inputHash          String   @map("input_hash") @db.VarChar(64)
+  bundleDigest       String   @map("bundle_digest") @db.VarChar(64)
+  document           Json
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  site          Site                         @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "site_copy_bundle_site_scope_fkey")
+  siteVersion   SiteVersion                  @relation(fields: [siteVersionId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_copy_bundle_version_scope_fkey")
+  buildRun      SiteBuildRun                 @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_copy_bundle_run_scope_fkey")
+  claimSnapshot SitePublishableClaimSnapshot @relation(fields: [claimSnapshotId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_copy_bundle_snapshot_scope_fkey")
+  taskAttempt   SiteBuildTaskAttempt         @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_copy_bundle_attempt_scope_fkey")
+
+  @@unique([siteVersionId, locale], map: "site_copy_bundle_version_locale_key")
+  @@unique([id, workspaceId, siteId], map: "site_copy_bundle_id_workspace_site_key")
+  @@index([workspaceId, siteId, locale], map: "site_copy_bundle_workspace_site_locale_idx")
+  @@index([buildRunId], map: "site_copy_bundle_build_run_idx")
+  @@map("site_copy_bundle")
 }
