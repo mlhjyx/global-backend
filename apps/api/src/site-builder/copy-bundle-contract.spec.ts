@@ -53,7 +53,15 @@ function draft(overrides: Partial<CopyBundleDraftV1> = {}): CopyBundleDraftV1 {
 
 const context = {
   supportedLocales: ["en", "de-DE", "ar"],
-  claims: new Map([[CLAIM_ID, { protectedTokens: ["ACME", "15 bar"] }]]),
+  claims: new Map([
+    [
+      CLAIM_ID,
+      {
+        statement: "ACME Pumpen mit 15 bar",
+        protectedTokens: ["ACME", "15 bar"],
+      },
+    ],
+  ]),
   approvedOutboundDomains: ["example.com"],
 };
 
@@ -135,6 +143,15 @@ describe("CopyBundle v1 contract", () => {
     value.slots["home.hero.headline"].content = "ACME Pumpen";
     expect(() => validateCopyBundle(value, context)).toThrowError(
       /COPY_PROTECTED_FACT_CHANGED/,
+    );
+  });
+
+  it("rejects new assertions appended to an otherwise supported factual slot", () => {
+    const value = draft();
+    value.slots["home.hero.headline"].content =
+      "ACME Pumpen mit 15 bar und zuverlässig";
+    expect(() => validateCopyBundle(value, context)).toThrowError(
+      /COPY_FACT_ASSERTION_UNSUPPORTED/,
     );
   });
 
