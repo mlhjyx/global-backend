@@ -44,7 +44,7 @@
 
 ## 5. 谁在做什么（滚动状态只查 Git，不固化临时分支）
 
-当前双人并行施工的任务边界、Developer B 的 R1-min/DI-0 只读交接、热点文件禁改面与 B1 开工门见 [Developer B 执行交接](handoffs/developer-b-r1-min-di0-execution-brief.md)。该 handoff 是任务执行约束，不替代本页、09、ADR、status 或现场 Git 状态。
+Developer B 当前只负责 R1-min；template-distillation／DI-0 由既有独立任务所有，B 不得写入其 worktree、分支或活跃文件。R1-min 的任务边界、冲突停止门与 B1 开工门见 [Developer B R1-min 执行交接](handoffs/developer-b-r1-min-execution-brief.md)。该 handoff 是任务执行约束，不替代本页、09、ADR、status 或现场 Git 状态。
 
 分支/worktree 是易变运行态，提交进文档会在合并后立即失真。开工前必须现场执行 `git worktree list`、`git branch -vv` 与各 worktree 的 `git status --short`，再把**本次认领**写进 PR 描述或协同评论；分支存在、旧锁记录或计划草案都不等于能力已开工/已落地。
 
