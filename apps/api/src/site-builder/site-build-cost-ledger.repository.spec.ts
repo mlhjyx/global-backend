@@ -109,7 +109,7 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(PaidOperationUnknownError);
-    expect((error as PaidOperationUnknownError).reason).toBe(
+    expect((error as PaidOperationUnknownError).errorCode).toBe(
       'ACTUAL_EXCEEDED_RESERVATION',
     );
   });

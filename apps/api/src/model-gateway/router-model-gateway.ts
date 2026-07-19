@@ -412,6 +412,12 @@ export class RouterModelGateway extends ModelGateway {
         ) {
           return decision.result as unknown as ModelResult<T>;
         }
+        if (decision.status === 'SUCCEEDED') {
+          throw new PaidOperationUnknownError(
+            scope.operationKey,
+            'DURABLE_REPLAY_UNAVAILABLE',
+          );
+        }
         lastErr = new Error(
           `paid provider operation replayed ${decision.status}: ${decision.errorCode ?? 'recorded_failure'}`,
         );
@@ -486,11 +492,36 @@ export class RouterModelGateway extends ModelGateway {
         callCount: result.callCount,
         reservationMicrousd: scope.reservationMicrousd,
       });
+      let durableResult: Record<string, unknown> | undefined;
+      try {
+        durableResult = paid.durableReplayResult?.(
+          result as unknown as Record<string, unknown>,
+        );
+      } catch (error) {
+        await this.settlePersistentOperation({
+          scope,
+          status: 'FAILED',
+          measurement,
+          meta: {
+            provider: result.provider,
+            requestedModel,
+            resolvedModel: result.model,
+            ...(result.reportedModel
+              ? { reportedModel: result.reportedModel }
+              : {}),
+            ...(result.modelResolutionSource
+              ? { modelResolutionSource: result.modelResolutionSource }
+              : {}),
+          },
+          errorCode: 'DURABLE_REPLAY_REJECTED',
+        });
+        throw error;
+      }
       await this.settlePersistentOperation({
         scope,
         status: 'SUCCEEDED',
         measurement,
-        result: result as unknown as Record<string, unknown>,
+        result: durableResult,
         meta: {
           provider: result.provider,
           requestedModel,

@@ -316,6 +316,13 @@ export interface PaidCostContext {
   scopeKey: string;
   taskAttemptId?: string;
   fenceToken?: string;
+  /**
+   * Explicit domain persistence gate for model replay. The gateway never
+   * stores a raw provider result when this projection is absent.
+   */
+  durableReplayResult?: (
+    result: Record<string, unknown>,
+  ) => Record<string, unknown>;
 }
 
 export interface PaidOperationReservation extends PaidOperationScope {
@@ -437,6 +444,12 @@ export class SiteBuildCostLedger {
     if (!row) throw new PaidCallDeniedError('EMPTY_RESERVE_RESULT');
     if (row.decision === 'EXECUTE') return { kind: 'execute' };
     if (row.decision === 'REPLAY') {
+      if (row.spend_status === 'UNKNOWN') {
+        throw new PaidOperationUnknownError(
+          input.operationKey,
+          row.cached_error_code ?? 'RECORDED_UNKNOWN',
+        );
+      }
       return {
         kind: 'replay',
         status: row.spend_status ?? 'UNKNOWN',

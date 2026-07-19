@@ -1000,42 +1000,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const brandProfileInput = frozenEnvelope.taskInput;
       const researchDegraded = frozenEnvelope.researchDegraded;
 
-      let result: AiTaskRunResult<BrandProfileOutput>;
-      if (
-        attempt.status === 'MODEL_SUCCEEDED' &&
-        attempt.outputJson &&
-        typeof attempt.outputJson === 'object' &&
-        !Array.isArray(attempt.outputJson)
-      ) {
-        result =
-          attempt.outputJson as unknown as AiTaskRunResult<BrandProfileOutput>;
-      } else {
-        result = await runAiTask<
-          Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
-          BrandProfileOutput
-        >(
-          BRAND_PROFILE_TASK,
-          brandProfileInput,
-          {
-            gateway,
-            ctx: {
-              workspaceId,
-              runId: buildRunId,
-              paidCost: {
-                siteId,
-                taskAttemptId: attempt.id,
-                fenceToken: attempt.fenceToken,
-                scopeKey: attempt.id,
-              },
-            },
-          },
-        );
-        await costLedger.storeTaskOutput(
-          taskFence,
-          result as unknown as Record<string, unknown>,
-        );
-      }
-
+      // The paid gateway must receive its domain persistence gate before the
+      // provider call. A raw BrandProfile output is never a durable replay
+      // payload: evidence and PII gates run first, and recovery keeps only a
+      // controlled gap category instead of model-authored follow-up text.
       const frozenSourceIds = [
         ...new Set(
           [
@@ -1075,37 +1043,111 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           },
         ]),
       );
-      const gated = enforceEvidenceGateV2(result.data.factSheet ?? [], {
-        sources: frozenById,
-      });
-      const gaps: GapItem[] = [
-        ...gated.gaps,
-        ...(result.data.gaps ?? []).map((g) => ({
-          field: g.field,
-          reason: 'needs_input' as const,
-          hint: g.question,
+      const projectBrandProfileOutput = (data: BrandProfileOutput) => {
+        const gated = enforceEvidenceGateV2(data.factSheet ?? [], {
+          sources: frozenById,
+        });
+        const gaps: GapItem[] = [
+          ...gated.gaps,
+          ...(data.gaps ?? []).map((gap) => ({
+            field: gap.field,
+            reason: 'needs_input' as const,
+            hint: gap.question,
+          })),
+        ];
+        return sanitizeBrandProfilePersistenceOutput(
+          {
+            valueProps: data.valueProps ?? [],
+            tone: data.tone
+              ? {
+                  voice: data.tone.voice,
+                  style: data.tone.style ?? [],
+                }
+              : null,
+            glossary: data.glossary ?? [],
+            keywords: data.keywords ?? [],
+            differentiators: data.differentiators ?? [],
+            competitors: data.competitors ?? [],
+            factSheet: gated.factSheet,
+            gaps,
+          },
+          brandProfileInput,
+        );
+      };
+      const toDurableBrandProfileData = (
+        clean: ReturnType<typeof projectBrandProfileOutput>,
+      ): BrandProfileOutput => ({
+        valueProps: clean.valueProps,
+        ...(clean.tone ? { tone: clean.tone } : {}),
+        glossary: clean.glossary,
+        keywords: clean.keywords,
+        differentiators: clean.differentiators,
+        competitors: clean.competitors,
+        factSheet: clean.factSheet,
+        gaps: clean.gaps.map((gap) => ({
+          field: gap.reason,
+          question: `Additional workspace evidence is required (${gap.reason}).`,
         })),
-      ];
+      });
+      const durableReplayResult = (
+        providerResult: Record<string, unknown>,
+      ): Record<string, unknown> => {
+        const data = providerResult.data;
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw new Error('BrandProfile durable replay has no object data');
+        }
+        const clean = projectBrandProfileOutput(data as BrandProfileOutput);
+        return {
+          ...providerResult,
+          data: toDurableBrandProfileData(clean),
+        };
+      };
 
-      // 🔴 落库前 PII 清洗（复审 F2）：自由文本字段里的邮箱/电话遮蔽（第三方页面/资料可能带入）
-      const clean = sanitizeBrandProfilePersistenceOutput(
-        {
-          valueProps: result.data.valueProps ?? [],
-          tone: result.data.tone
-            ? {
-                voice: result.data.tone.voice,
-                style: result.data.tone.style ?? [],
-              }
-            : null,
-          glossary: result.data.glossary ?? [],
-          keywords: result.data.keywords ?? [],
-          differentiators: result.data.differentiators ?? [],
-          competitors: result.data.competitors ?? [],
-          factSheet: gated.factSheet,
-          gaps,
-        },
-        brandProfileInput,
-      );
+      let result: AiTaskRunResult<BrandProfileOutput>;
+      let generatedModelOutput = false;
+      if (
+        attempt.status === 'MODEL_SUCCEEDED' &&
+        attempt.outputJson &&
+        typeof attempt.outputJson === 'object' &&
+        !Array.isArray(attempt.outputJson)
+      ) {
+        result =
+          attempt.outputJson as unknown as AiTaskRunResult<BrandProfileOutput>;
+      } else {
+        generatedModelOutput = true;
+        result = await runAiTask<
+          Parameters<typeof BRAND_PROFILE_TASK.buildPrompt>[0],
+          BrandProfileOutput
+        >(
+          BRAND_PROFILE_TASK,
+          brandProfileInput,
+          {
+            gateway,
+            ctx: {
+              workspaceId,
+              runId: buildRunId,
+              paidCost: {
+                siteId,
+                taskAttemptId: attempt.id,
+                fenceToken: attempt.fenceToken,
+                scopeKey: attempt.id,
+                durableReplayResult,
+              },
+            },
+          },
+        );
+      }
+
+      const clean = projectBrandProfileOutput(result.data);
+      if (generatedModelOutput) {
+        await costLedger.storeTaskOutput(
+          taskFence,
+          {
+            ...result,
+            data: toDurableBrandProfileData(clean),
+          } as unknown as Record<string, unknown>,
+        );
+      }
 
       // 版本追加：run 守卫（二次，防 zombie 写版本）+ P2002 并发撞版本→重算（复审 Temporal F2）。
       // aggregate+create 在独立事务，撞唯一约束整事务重试（interactive tx 内 create 失败会作废事务）。

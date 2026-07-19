@@ -284,10 +284,10 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     expect(settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'FAILED',
-        result: undefined,
         errorCode: 'DURABLE_REPLAY_REJECTED',
       }),
     );
+    expect(settleOperation.mock.calls[0]![0]).not.toHaveProperty('result');
     expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
       'jane@example.com',
     );
