@@ -107,6 +107,15 @@ describe('R4-B persistent paid-call ledger database invariants', () => {
     );
   });
 
+  it('does not combine a ROWTYPE record with scalar targets in one PL/pgSQL INTO list', () => {
+    expect(migration).not.toMatch(
+      /SELECT\s+b\s*,\s*r\."status"\s+INTO\s+v_budget\s*,\s*v_run_status/is,
+    );
+    expect(migration).toMatch(
+      /SELECT\s+b\.\*\s+INTO\s+v_budget[\s\S]+FOR UPDATE/is,
+    );
+  });
+
   it('forces tenant-symmetric RLS and grants no arbitrary deletes', () => {
     for (const table of [
       'site_build_budget',
