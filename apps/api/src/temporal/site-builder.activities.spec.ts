@@ -963,6 +963,152 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
   });
 });
 
+describe('R4-B BrandProfile paid attempt recovery', () => {
+  it('freezes input, stores model output, and atomically commits profile plus task success', async () => {
+    spyBudget();
+    const snapshot = {
+      id: 'snapshot-1',
+      sourceKey: 'intake',
+      sourceType: 'intake',
+      sourceRole: 'fact_candidate',
+      contentHash: 'a'.repeat(64),
+      upstreamContentHash: null,
+      normalizationVersion: 'brand-evidence-normalization/v1',
+      snapshotText: 'Company name: Acme',
+      displayUrl: null,
+      fetchedAt: null,
+      provenance: {},
+      dedupeKey: 'dedupe-1',
+    };
+    const brandProfileCreate = vi.fn(async () => ({ id: 'profile-1' }));
+    const attemptUpdate = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          companyProfileId: 'company-profile-1',
+          profileVersionId: null,
+          intake: INTAKE,
+          profile: null,
+        })),
+      },
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+      },
+      siteEvidenceSourceSnapshot: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+        findMany: vi.fn(async (args: { where: { dedupeKey?: { in: string[] } } }) => [
+          {
+            ...snapshot,
+            dedupeKey: args.where.dedupeKey?.in[0] ?? snapshot.dedupeKey,
+          },
+        ]),
+      },
+      brandProfile: {
+        aggregate: vi.fn(async () => ({ _max: { version: null } })),
+        create: brandProfileCreate,
+      },
+      brandProfileEvidenceRef: { createMany: vi.fn() },
+      siteBuildTaskAttempt: { updateMany: attemptUpdate },
+    };
+    const gateway = {
+      generateStructured: vi.fn(async () => ({
+        data: {
+          valueProps: [],
+          keywords: [],
+          glossary: [],
+          differentiators: [],
+          competitors: [],
+          factSheet: [],
+          gaps: [],
+        },
+        provider: 'new-api',
+        model: 'gpt-5.6-terra',
+        reportedModel: 'gpt-5.6-terra',
+        modelResolutionSource: 'upstream_response',
+        usage: { inputTokens: 11, outputTokens: 7 },
+      })),
+    };
+    const freezeTaskInput = vi.fn(async (_fence, candidate) => ({
+      inputHash: 'b'.repeat(64),
+      input: candidate,
+      replayed: false,
+    }));
+    const storeTaskOutput = vi.fn(async () => undefined);
+    const completeTask = vi.fn(async () => undefined);
+    const releaseTask = vi.fn(async () => undefined);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      gateway: gateway as never,
+      costLedger: {
+        claimTaskAttempt: vi.fn(async () => ({
+          kind: 'claimed',
+          attempt: {
+            id: 'attempt-1',
+            status: 'CLAIMED',
+            fenceToken: 'fence-1',
+          },
+        })),
+        freezeTaskInput,
+        storeTaskOutput,
+        completeTask,
+        releaseTask,
+      } as never,
+    });
+
+    await expect(acts.buildBrandProfile(INPUT)).resolves.toEqual({
+      version: 1,
+      factCount: 0,
+      gapsCount: 0,
+      researchDegraded: true,
+      model: 'gpt-5.6-terra',
+    });
+    expect(freezeTaskInput).toHaveBeenCalledWith(
+      {
+        workspaceId: 'ws-1',
+        attemptId: 'attempt-1',
+        fenceToken: 'fence-1',
+      },
+      expect.objectContaining({
+        taskInput: expect.objectContaining({ companyName: 'Acme' }),
+        researchDegraded: true,
+      }),
+    );
+    expect(gateway.generateStructured).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        paidCost: {
+          siteId: 'site-1',
+          taskAttemptId: 'attempt-1',
+          fenceToken: 'fence-1',
+          scopeKey: expect.stringContaining('attempt-1:model:0:'),
+        },
+      }),
+    );
+    expect(storeTaskOutput).toHaveBeenCalledBefore(brandProfileCreate);
+    expect(brandProfileCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ taskAttemptId: 'attempt-1' }),
+      }),
+    );
+    expect(attemptUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'attempt-1',
+          fenceToken: 'fence-1',
+          status: 'MODEL_SUCCEEDED',
+        }),
+        data: expect.objectContaining({
+          status: 'SUCCEEDED',
+          resultJson: expect.objectContaining({ version: 1 }),
+        }),
+      }),
+    );
+    expect(completeTask).not.toHaveBeenCalled();
+    expect(releaseTask).not.toHaveBeenCalled();
+  });
+});
+
 describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3）', () => {
   function compensateTx(over: {
     runStatus?: string;
