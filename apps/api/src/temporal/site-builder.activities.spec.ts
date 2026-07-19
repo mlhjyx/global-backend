@@ -9,10 +9,12 @@ import {
   createSiteBuilderActivities,
   buildCompensatedSteps,
   intakeToMarkdown,
+  neutralCopyOutput,
   runBrandProfilePersistenceWithRetry,
   RefurbishActivityInput,
   RefurbishFinalizeInput,
 } from './site-builder.activities';
+import type { CopySlotDefinition } from '@global/contracts';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { PaidOperationUnknownError } from '../site-builder/site-build-cost-ledger';
@@ -68,6 +70,46 @@ function spyBudget() {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+describe('neutralCopyOutput — M1-d empty fact snapshot', () => {
+  const slots: CopySlotDefinition[] = [
+    {
+      key: 'home.hero.headline',
+      type: 'plain',
+      required: true,
+      factual: true,
+      maxGraphemes: 80,
+    },
+    {
+      key: 'home.hero.cta',
+      type: 'cta',
+      required: true,
+      factual: false,
+      maxGraphemes: 30,
+    },
+  ];
+
+  it('emits deterministic neutral copy without Claim refs for every launch locale', () => {
+    expect(neutralCopyOutput(slots, 'en')).toEqual({
+      slots: {
+        'home.hero.headline': {
+          content: 'Practical solutions',
+          claimRefs: [],
+        },
+        'home.hero.cta': { content: 'Get in touch', claimRefs: [] },
+      },
+    });
+    expect(neutralCopyOutput(slots, 'de-DE')).toEqual({
+      slots: {
+        'home.hero.headline': {
+          content: 'Praktische Lösungen',
+          claimRefs: [],
+        },
+        'home.hero.cta': { content: 'Kontakt aufnehmen', claimRefs: [] },
+      },
+    });
+  });
 });
 
 describe('runBrandProfilePersistenceWithRetry', () => {

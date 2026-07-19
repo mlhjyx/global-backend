@@ -316,6 +316,56 @@ function copySlotCatalog(
     });
 }
 
+function neutralCopySlot(key: string, locale: string): string {
+  const german = locale === 'de-DE';
+  if (/^nav\.home$/.test(key)) return german ? 'Startseite' : 'Home';
+  if (/^nav\.products$/.test(key)) return german ? 'Lösungen' : 'Solutions';
+  if (/^nav\.contact$/.test(key)) return german ? 'Kontakt' : 'Contact';
+  if (/\.cta$|\.submit$/.test(key))
+    return german ? 'Kontakt aufnehmen' : 'Get in touch';
+  if (/^inquiry\.field\.name$/.test(key)) return 'Name';
+  if (/^inquiry\.field\.email$/.test(key))
+    return german ? 'Geschäftliche E-Mail' : 'Work email';
+  if (/^inquiry\.field\.message$/.test(key))
+    return german ? 'Ihre Anfrage' : 'Your inquiry';
+  if (/^inquiry\.m0\.note$/.test(key)) {
+    return german
+      ? 'Das Anfrageformular wird mit der Veröffentlichung aktiviert.'
+      : 'The inquiry form is enabled when the site is published.';
+  }
+  if (/^seo\..*\.title$/.test(key))
+    return german ? 'Unternehmenswebsite' : 'Company website';
+  if (/^seo\./.test(key)) {
+    return german
+      ? 'Informieren Sie sich über verfügbare Lösungen und Kontaktmöglichkeiten.'
+      : 'Explore available solutions and ways to get in touch.';
+  }
+  if (/\.title$|\.headline$/.test(key))
+    return german ? 'Praktische Lösungen' : 'Practical solutions';
+  if (/^faq\.q/.test(key))
+    return german
+      ? 'Wie erhalte ich weitere Informationen?'
+      : 'How can I learn more?';
+  if (/^products\.p\d+\.name$/.test(key)) return german ? 'Lösung' : 'Solution';
+  return german
+    ? 'Weitere Informationen sind auf Anfrage verfügbar.'
+    : 'Further information is available on request.';
+}
+
+export function neutralCopyOutput(
+  slots: readonly CopySlotDefinition[],
+  locale: string,
+): CopyTaskOutput {
+  return {
+    slots: Object.fromEntries(
+      slots.map((slot) => [
+        slot.key,
+        { content: neutralCopySlot(slot.key, locale), claimRefs: [] },
+      ]),
+    ),
+  };
+}
+
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const {
     prisma,
@@ -1488,34 +1538,40 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               fence,
               candidate as unknown as Record<string, unknown>,
             );
-            const result = await runAiTask<CopyTaskInput, CopyTaskOutput>(
-              COPY_TASK,
-              frozen.input as unknown as CopyTaskInput,
-              {
-                gateway,
-                ctx: {
-                  workspaceId,
-                  runId: buildRunId,
-                  paidCost: {
-                    siteId,
-                    taskAttemptId: attempt.id,
-                    fenceToken: attempt.fenceToken,
-                    scopeKey: `copy:${locale}`,
-                    durableReplayResult: (providerResult) => providerResult,
-                  },
-                },
-              },
-            );
+            const taskOutput =
+              snapshot.items.length === 0
+                ? neutralCopyOutput(slots, locale)
+                : (
+                    await runAiTask<CopyTaskInput, CopyTaskOutput>(
+                      COPY_TASK,
+                      frozen.input as unknown as CopyTaskInput,
+                      {
+                        gateway,
+                        ctx: {
+                          workspaceId,
+                          runId: buildRunId,
+                          paidCost: {
+                            siteId,
+                            taskAttemptId: attempt.id,
+                            fenceToken: attempt.fenceToken,
+                            scopeKey: `copy:${locale}`,
+                            durableReplayResult: (providerResult) =>
+                              providerResult,
+                          },
+                        },
+                      },
+                    )
+                  ).data;
             await costLedger.storeTaskOutput(
               fence,
-              result.data as unknown as Record<string, unknown>,
+              taskOutput as unknown as Record<string, unknown>,
             );
             await costLedger.completeTask(fence, {
               taskAttemptId: attempt.id,
-              slots: result.data.slots,
+              slots: taskOutput.slots,
             });
             completed = true;
-            return result.data;
+            return taskOutput;
           } finally {
             if (!completed) await costLedger.releaseTask(fence);
           }
