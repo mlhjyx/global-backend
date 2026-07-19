@@ -6,7 +6,7 @@ import type { ModelResult } from '../model-gateway/types';
 import { ToolBroker } from '../tools/tool-broker';
 import { ToolRegistry } from '../tools/tool-registry';
 import { RateLimiter } from '../tools/rate-limiter';
-import type { Tool } from '../tools/tool-contract';
+import type { Tool, ToolResult } from '../tools/tool-contract';
 import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
@@ -234,6 +234,10 @@ function paidTool(execute: () => Promise<unknown>): Tool {
     },
     capabilities: { produces: ['domain'], accepts: ['domain'] },
     idempotencyKey: () => 'crawl-key',
+    durableReplayResult: (result: ToolResult<{ text: string }>) => ({
+      ...result,
+      data: { text: '[scrubbed-replay]' },
+    }),
     healthCheck: async () => ({ healthy: true }),
     execute: async () => ({ data: await execute(), costCents: 2 }),
   } as Tool;
@@ -290,6 +294,10 @@ describe('ToolBroker persistent paid-call gate', () => {
     expect(paidLedger.settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'SUCCEEDED',
+        result: {
+          data: { text: '[scrubbed-replay]' },
+          costCents: 2,
+        },
         measurement: expect.objectContaining({
           basis: 'legacy_estimate',
           estimatedCostMicrousd: 20_000,
@@ -320,7 +328,10 @@ describe('ToolBroker persistent paid-call gate', () => {
 
     await expect(
       broker.invoke('crawl4ai.fetch', { url: 'https://example.com' }, paidToolContext),
-    ).resolves.toEqual({ data: { text: 'cached' }, costCents: 2 });
+    ).resolves.toEqual({
+      data: { text: '[scrubbed-replay]' },
+      costCents: 2,
+    });
     expect(execute).not.toHaveBeenCalled();
     expect(paidLedger.settleOperation).not.toHaveBeenCalled();
   });
