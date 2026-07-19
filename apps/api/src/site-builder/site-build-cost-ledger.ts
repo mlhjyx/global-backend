@@ -183,6 +183,7 @@ interface SummaryBudgetRow {
 interface SummarySpendRow {
   kind: string;
   status: string;
+  costBasis?: string | null;
   budgetChargeMicrousd: bigint;
   reportedCostMicrousd: bigint | null;
   calculatedCostMicrousd: bigint | null;
@@ -241,7 +242,9 @@ export function buildSiteBuildCostSummary(
       estimatedCostMicrousd: sumBigInt(
         (row) => row.estimatedCostMicrousd,
       ),
-      unknownOperations: operationCount('UNKNOWN'),
+      unknownOperations: spends.filter(
+        (row) => row.costBasis === 'unknown' || row.status === 'UNKNOWN',
+      ).length,
     },
     usage: {
       inputTokens: spends.reduce(
@@ -518,6 +521,68 @@ export class SiteBuildCostLedger {
           disabledReason: reason.slice(0, 80),
         },
       });
+    });
+  }
+
+  async closeAndSummarize(input: {
+    workspaceId: string;
+    siteId: string;
+    buildRunId: string;
+    reason: string;
+  }): Promise<SiteBuildCostSummary> {
+    const reason = input.reason.trim().slice(0, 80);
+    if (!reason) throw new Error('terminal paid-call reason is required');
+
+    return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
+      await tx.$queryRaw<Array<{ reconciled: number }>>`
+        SELECT reconcile_site_build_spend(
+          ${input.workspaceId}::uuid,
+          ${input.buildRunId}::uuid
+        ) AS reconciled
+      `;
+      await tx.siteBuildBudget.updateMany({
+        where: {
+          buildRunId: input.buildRunId,
+          paidCallsEnabled: true,
+        },
+        data: {
+          paidCallsEnabled: false,
+          disabledReason: reason,
+        },
+      });
+      const [budget, spends] = await Promise.all([
+        tx.siteBuildBudget.findUnique({
+          where: { buildRunId: input.buildRunId },
+          select: {
+            capMicrousd: true,
+            reservedMicrousd: true,
+            chargedMicrousd: true,
+            paidCallsEnabled: true,
+            disabledReason: true,
+            exhaustedAt: true,
+          },
+        }),
+        tx.siteBuildSpend.findMany({
+          where: { buildRunId: input.buildRunId },
+          select: {
+            kind: true,
+            status: true,
+            costBasis: true,
+            budgetChargeMicrousd: true,
+            reportedCostMicrousd: true,
+            calculatedCostMicrousd: true,
+            estimatedCostMicrousd: true,
+            inputTokens: true,
+            outputTokens: true,
+            callCount: true,
+          },
+          orderBy: { operationKey: 'asc' },
+        }),
+      ]);
+      if (!budget) {
+        throw new PaidCallDeniedError('DENIED_NO_BUDGET');
+      }
+      return buildSiteBuildCostSummary(budget, spends);
     });
   }
 
