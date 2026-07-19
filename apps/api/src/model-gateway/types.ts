@@ -1,4 +1,5 @@
 import type { ModelExecutionTrace } from '@global/contracts';
+import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
 
 /** Context threaded into every model call — for routing, tenancy, cost, trace. */
 export interface AiContext {
@@ -10,6 +11,8 @@ export interface AiContext {
   correlationId?: string;
   /** Optional Site Builder policy evidence; copied to every gateway trace row. */
   modelPolicy?: ModelExecutionTrace;
+  /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
+  paidCost?: PaidCostContext;
 }
 
 export interface ModelUsage {

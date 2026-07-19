@@ -307,6 +307,14 @@ export interface PaidOperationScope {
   fenceToken?: string;
 }
 
+/** Stable logical namespace threaded through ModelGateway and ToolBroker. */
+export interface PaidCostContext {
+  siteId: string;
+  scopeKey: string;
+  taskAttemptId?: string;
+  fenceToken?: string;
+}
+
 export interface PaidOperationReservation extends PaidOperationScope {
   operationKey: string;
   kind: 'model' | 'tool';

@@ -14,6 +14,13 @@ import {
   ProviderOutputError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
+import {
+  modelCostMeasurement,
+  paidOperationKey,
+  PaidCallDeniedError,
+  type PaidOperationReservation,
+  type SiteBuildCostLedger,
+} from '../site-builder/site-build-cost-ledger';
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -70,6 +77,8 @@ export class RouterModelGateway extends ModelGateway {
    * 进程级单例，测试可替换。不走 Nest DI（worker 侧手动构造网关，保持两处组装一致）。
    */
   budget: BudgetLedger = budgetLedger;
+  /** Worker installs the durable R4-B ledger; paid contexts fail closed without it. */
+  paidLedger?: SiteBuildCostLedger;
 
   constructor(
     private readonly router: ModelRouter,
@@ -229,6 +238,16 @@ export class RouterModelGateway extends ModelGateway {
     // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
     const reserveCents =
       op === 'generateStructured' ? baseCents * 2 : baseCents;
+    if (ctx.paidCost) {
+      return this.runPersistent(
+        op,
+        input,
+        ctx,
+        chain,
+        call,
+        reserveCents,
+      );
+    }
     let reservation: { runId: string; estCents: number };
     try {
       reservation = this.budget.reserve(
@@ -321,5 +340,184 @@ export class RouterModelGateway extends ModelGateway {
     } finally {
       settle(0); // 全链失败不计费（对齐 PRD 7.4.8）；成功路径已按实/按上限结算
     }
+  }
+
+  private async runPersistent<T>(
+    op: ModelOp,
+    input: { task: string; model?: string; maxCostCents?: number },
+    ctx: AiContext,
+    chain: readonly ModelProvider[],
+    call: (provider: ModelProvider) => Promise<ModelResult<T>>,
+    reserveCents: number,
+  ): Promise<ModelResult<T>> {
+    const paid = ctx.paidCost!;
+    if (!this.paidLedger || !ctx.runId) {
+      throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
+    }
+
+    let lastErr: unknown;
+    for (const [providerIndex, provider] of chain.entries()) {
+      const requestedModel = input.model ?? 'provider-default';
+      const scope: PaidOperationReservation = {
+        workspaceId: ctx.workspaceId,
+        siteId: paid.siteId,
+        buildRunId: ctx.runId,
+        taskAttemptId: paid.taskAttemptId,
+        fenceToken: paid.fenceToken,
+        operationKey: paidOperationKey([
+          ctx.runId,
+          paid.scopeKey,
+          op,
+          provider.id,
+          String(providerIndex),
+          requestedModel,
+        ]),
+        kind: 'model',
+        taskId: input.task,
+        subject: `${requestedModel}@${provider.id}`,
+        reservationMicrousd: reserveCents * 10_000,
+        meta: {
+          op,
+          provider: provider.id,
+          requestedModel,
+          ...(ctx.modelPolicy ? { modelPolicy: ctx.modelPolicy } : {}),
+        },
+      };
+      let decision;
+      try {
+        decision = await this.paidLedger.reserveOperation(scope);
+      } catch (error) {
+        if (error instanceof PaidCallDeniedError) {
+          this.trace?.record({
+            workspaceId: ctx.workspaceId,
+            task: input.task,
+            op,
+            provider: 'budget-gate',
+            model: requestedModel,
+            status: 'ERROR',
+            errorMessage: `paid call denied before execution: ${error.decision}`,
+            latencyMs: 0,
+            correlationId: ctx.correlationId,
+            modelPolicy: ctx.modelPolicy,
+          });
+        }
+        throw error;
+      }
+      if (decision.kind === 'replay') {
+        if (
+          decision.status === 'SUCCEEDED' &&
+          decision.result &&
+          Object.prototype.hasOwnProperty.call(decision.result, 'data')
+        ) {
+          return decision.result as unknown as ModelResult<T>;
+        }
+        lastErr = new Error(
+          `paid provider operation replayed ${decision.status}: ${decision.errorCode ?? 'recorded_failure'}`,
+        );
+        continue;
+      }
+
+      const started = Date.now();
+      let result: ModelResult<T>;
+      try {
+        result = await call(provider);
+      } catch (error) {
+        const providerError = error instanceof ProviderOutputError ? error : null;
+        const measurement = modelCostMeasurement({
+          taskId: input.task,
+          requestedModel,
+          resolvedModel: providerError?.model,
+          usage: providerError?.usage,
+          callCount: providerError?.callCount,
+          reservationMicrousd: scope.reservationMicrousd,
+        });
+        await this.paidLedger.settleOperation({
+          scope,
+          status: 'FAILED',
+          measurement,
+          meta: {
+            provider: providerError?.provider ?? provider.id,
+            requestedModel,
+            ...(providerError?.model
+              ? { resolvedModel: providerError.model }
+              : {}),
+            ...(providerError?.reportedModel
+              ? { reportedModel: providerError.reportedModel }
+              : {}),
+            ...(providerError?.modelResolutionSource
+              ? {
+                  modelResolutionSource:
+                    providerError.modelResolutionSource,
+                }
+              : {}),
+          },
+          errorCode: providerError
+            ? 'PROVIDER_OUTPUT_ERROR'
+            : 'PROVIDER_CALL_ERROR',
+        });
+        this.trace?.record({
+          workspaceId: ctx.workspaceId,
+          task: input.task,
+          op,
+          provider: provider.id,
+          model: requestedModel,
+          status: 'ERROR',
+          errorMessage: String(error),
+          latencyMs: Date.now() - started,
+          inputTokens: providerError?.usage?.inputTokens,
+          outputTokens: providerError?.usage?.outputTokens,
+          correlationId: ctx.correlationId,
+          modelPolicy: ctx.modelPolicy,
+        });
+        if (error instanceof TaskOutputValidationError) throw error;
+        lastErr = error;
+        continue;
+      }
+
+      // Keep provider execution and success settlement in separate failure
+      // domains: a database ACK failure must never be rewritten as a provider
+      // failure (which would double-settle or trigger a second paid call).
+      const measurement = modelCostMeasurement({
+        taskId: input.task,
+        requestedModel,
+        resolvedModel: result.model,
+        usage: result.usage,
+        callCount: result.callCount,
+        reservationMicrousd: scope.reservationMicrousd,
+      });
+      await this.paidLedger.settleOperation({
+        scope,
+        status: 'SUCCEEDED',
+        measurement,
+        result: result as unknown as Record<string, unknown>,
+        meta: {
+          provider: result.provider,
+          requestedModel,
+          resolvedModel: result.model,
+          ...(result.reportedModel
+            ? { reportedModel: result.reportedModel }
+            : {}),
+          ...(result.modelResolutionSource
+            ? { modelResolutionSource: result.modelResolutionSource }
+            : {}),
+        },
+      });
+      this.trace?.record({
+        workspaceId: ctx.workspaceId,
+        task: input.task,
+        op,
+        provider: result.provider,
+        model: result.model,
+        status: 'OK',
+        latencyMs: Date.now() - started,
+        inputTokens: result.usage?.inputTokens,
+        outputTokens: result.usage?.outputTokens,
+        costUsd: result.usage?.costUsd,
+        correlationId: ctx.correlationId,
+        modelPolicy: ctx.modelPolicy,
+      });
+      return result;
+    }
+    throw lastErr ?? new Error(`all paid providers failed for ${input.task}`);
   }
 }

@@ -4,6 +4,8 @@
  * 产物统一带 provenance，延续字段级 Evidence。
  */
 
+import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
+
 export type ToolCategory =
   | 'search' // 元搜索（searxng）
   | 'fetch' // 抓取（crawl4ai）
@@ -61,6 +63,8 @@ export interface ComplianceMeta {
 /** 执行上下文——由 Broker 注入，工具只读取，不自造。 */
 export interface ToolContext {
   workspaceId: string;
+  /** Required with paidCost so the database ledger can enforce exact BuildRun scope. */
+  siteId?: string;
   runId?: string;
   taskContractId?: string; // 发起此调用的 AI Task（用于 allowedTools 校验与 Trace）
   correlationId?: string;
@@ -72,6 +76,8 @@ export interface ToolContext {
   purpose?: string | string[];
   /** Broker 查过的 source_policy 快照（工具据此避免重复查库）。 */
   sourcePolicySnapshot?: Record<string, unknown>;
+  /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
+  paidCost?: Omit<PaidCostContext, 'siteId'>;
 }
 
 export interface ToolResult<T = unknown> {
