@@ -110,6 +110,26 @@ describe('neutralCopyOutput — M1-d empty fact snapshot', () => {
       },
     });
   });
+
+  it('validates the complete locale bundle before marking its task attempt succeeded', async () => {
+    const source = await readFile(
+      new URL('./site-builder.activities.ts', import.meta.url),
+      'utf8',
+    );
+    const activity = source.indexOf('async generateCopyBundles(');
+    const validation = source.indexOf(
+      'await new CopyBundleService(generator).generate',
+      activity,
+    );
+    const completion = source.indexOf(
+      'await costLedger.completeTask',
+      activity,
+    );
+
+    expect(activity).toBeGreaterThanOrEqual(0);
+    expect(validation).toBeGreaterThan(activity);
+    expect(completion).toBeGreaterThan(validation);
+  });
 });
 
 describe('runBrandProfilePersistenceWithRetry', () => {

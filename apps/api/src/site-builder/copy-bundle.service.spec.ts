@@ -47,6 +47,32 @@ function generator(failLocale?: string): CopySlotGenerator {
   };
 }
 
+function snapshotWithClaim(statement: string) {
+  return {
+    ...snapshot,
+    items: [
+      {
+        claimId: "66666666-6666-4666-8666-666666666666",
+        claimVersion: 1,
+        factKey: "rated_pressure",
+        claimType: "capability",
+        statement,
+        validUntil: null,
+        approvedBy: "reviewer-1",
+        approvedAt: NOW.toISOString(),
+        bridgeId: "bridge-1",
+        brandProfileId: "profile-1",
+        evidenceRefId: "ref-1",
+        evidenceId: "evidence-1",
+        sourceSnapshotId: "source-1",
+        sourceContentHash: "a".repeat(64),
+        quote: statement,
+        selector: { start: 0, end: statement.length },
+      },
+    ],
+  };
+}
+
 describe("CopyBundleService", () => {
   it("generates every locale and slot from the frozen Claim snapshot only", async () => {
     const model = generator();
@@ -104,29 +130,9 @@ describe("CopyBundleService", () => {
 
   it("replaces model embellishment with the exact cited Claim statement", async () => {
     const claimId = "66666666-6666-4666-8666-666666666666";
-    const factualSnapshot = {
-      ...snapshot,
-      items: [
-        {
-          claimId,
-          claimVersion: 1,
-          factKey: "rated_pressure",
-          claimType: "capability",
-          statement: "Industrial pumps up to 400 bar",
-          validUntil: null,
-          approvedBy: "reviewer-1",
-          approvedAt: NOW.toISOString(),
-          bridgeId: "bridge-1",
-          brandProfileId: "profile-1",
-          evidenceRefId: "ref-1",
-          evidenceId: "evidence-1",
-          sourceSnapshotId: "source-1",
-          sourceContentHash: "a".repeat(64),
-          quote: "Industrial pumps up to 400 bar",
-          selector: { start: 0, end: 30 },
-        },
-      ],
-    };
+    const factualSnapshot = snapshotWithClaim(
+      "Industrial pumps up to 400 bar",
+    );
     const model: CopySlotGenerator = {
       generateSlot: vi.fn(async () => ({
         content: "Industrial pumps up to 400 bar with market-leading reliability",
@@ -152,5 +158,37 @@ describe("CopyBundleService", () => {
     expect(result.set.bundles.en.slots["home.hero.headline"].content).toBe(
       "Industrial pumps up to 400 bar",
     );
+  });
+
+  it("uses deterministic neutral copy when no Claim supports a slot", async () => {
+    const model: CopySlotGenerator = {
+      generateSlot: vi.fn(async () => ({
+        content: "Market-leading pumps for every application",
+        claimRefs: [],
+      })),
+    };
+    const result = await new CopyBundleService(model, () => NOW).generate({
+      locales: ["en"],
+      sourceLocale: "en",
+      snapshotId: "55555555-5555-4555-8555-555555555555",
+      snapshot: snapshotWithClaim(
+        "A deliberately long approved statement that cannot fit inside the SEO title budget",
+      ),
+      slots: [
+        {
+          key: "seo.home.title",
+          type: "seo_title",
+          maxGraphemes: 60,
+          factual: false,
+        },
+      ],
+      approvedOutboundDomains: [],
+    });
+
+    expect(result.set.bundles.en.slots["seo.home.title"]).toMatchObject({
+      factual: false,
+      content: "Company website",
+      claimRefs: [],
+    });
   });
 });
