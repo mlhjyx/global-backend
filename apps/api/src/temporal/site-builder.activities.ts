@@ -69,7 +69,10 @@ import {
 } from '../site-builder/claim-evidence-bridge.prisma';
 import { compareClaimProjectionOrder } from '../site-builder/claim-projection-order';
 import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
-import { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
+import {
+  PaidOperationUnknownError,
+  SiteBuildCostLedger,
+} from '../site-builder/site-build-cost-ledger';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -335,6 +338,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 paidCost: {
                   siteId,
                   scopeKey: paidScopeKey,
+                  durableReplayResult: (providerResult) => ({
+                    ...providerResult,
+                    data: sanitizePolish(
+                      providerResult.data &&
+                        typeof providerResult.data === 'object' &&
+                        !Array.isArray(providerResult.data)
+                        ? (providerResult.data as DemoCopyPolish)
+                        : undefined,
+                    ),
+                  }),
                 },
               }
             : {}),
@@ -342,7 +355,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       );
       // 确定性防造假闸（Codex P2）：模型若无视提示编造年限/认证，弃字段回退模板
       return sanitizePolish(result.data ?? undefined);
-    } catch {
+    } catch (error) {
+      if (error instanceof PaidOperationUnknownError) throw error;
       return undefined; // 超时/失败=模板默认文案（fail-safe，不阻塞 demo）
     }
   }
