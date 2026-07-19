@@ -18,3 +18,4 @@ export * from "./site-builder/media-foundation";
 export * from "./site-builder/evidence";
 export * from "./site-builder/model-policy";
 export * from "./site-builder/copy-bundle";
+export * from "./site-builder/locales";
