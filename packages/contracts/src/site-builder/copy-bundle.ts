@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 export const COPY_BUNDLE_SCHEMA_VERSION =
   "site-builder-copy-bundle/v1" as const;
 export const COPY_SLOT_CATALOG_VERSION = "site-builder-copy-slots/v1" as const;
+export const COPY_BUNDLE_SET_SCHEMA_VERSION =
+  "site-builder-copy-bundle-set/v1" as const;
 
 export const COPY_SLOT_TYPES = [
   "plain_text",
@@ -50,6 +52,17 @@ export interface CopyBundleV1 extends CopyBundleDraftV1 {
   digest: string;
 }
 
+export interface CopyBundleSetV1 {
+  schemaVersion: typeof COPY_BUNDLE_SET_SCHEMA_VERSION;
+  sourceLocale: string;
+  bundles: Record<string, CopyBundleV1>;
+}
+
+export interface CopyBundleReadableSiteSpec {
+  copyBundles: Record<string, Record<string, string>>;
+  copyBundleSet?: CopyBundleSetV1;
+}
+
 export interface CopyBundleValidationContext {
   supportedLocales: readonly string[];
   claims: ReadonlyMap<string, { protectedTokens: readonly string[] }>;
@@ -77,7 +90,8 @@ export type CopyBundleContractErrorCode =
   | "COPY_PROTECTED_FACT_CHANGED"
   | "COPY_RAW_HTML_FORBIDDEN"
   | "COPY_RICH_TEXT_FORBIDDEN"
-  | "COPY_OUTBOUND_DOMAIN_FORBIDDEN";
+  | "COPY_OUTBOUND_DOMAIN_FORBIDDEN"
+  | "COPY_LOCALE_MISSING";
 
 export class CopyBundleContractError extends Error {
   constructor(
@@ -350,4 +364,32 @@ export function copyBundleToLegacyStrings(
         : (slot.content as string),
     ]),
   );
+}
+
+/**
+ * One-cycle dual read: the v1 set is authoritative when present. A missing
+ * locale therefore fails loudly and never falls through to stale legacy text.
+ */
+export function resolveSiteCopyBundle(
+  spec: CopyBundleReadableSiteSpec,
+  locale: string,
+): Record<string, string> {
+  if (spec.copyBundleSet) {
+    const bundle = spec.copyBundleSet.bundles[locale];
+    if (!bundle) {
+      fail(
+        "COPY_LOCALE_MISSING",
+        `locale ${locale} is absent from CopyBundleSet v1`,
+      );
+    }
+    return copyBundleToLegacyStrings(bundle);
+  }
+  const legacy = spec.copyBundles[locale];
+  if (!legacy) {
+    fail(
+      "COPY_LOCALE_MISSING",
+      `locale ${locale} is absent from legacy copyBundles`,
+    );
+  }
+  return legacy;
 }
