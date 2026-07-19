@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import {
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+} from '../site-build-cost-ledger';
 import { researchBrand } from './brand-research';
 
 /**
@@ -211,6 +215,18 @@ describe('researchBrand — 正常链路', () => {
 });
 
 describe('researchBrand — fail-safe 降级', () => {
+  it.each([
+    new PaidOperationUnknownError('operation-key', 'ACK_UNKNOWN'),
+    new PaidCallDeniedError('DENIED_BUDGET_EXHAUSTED'),
+  ])('R4-B: paid boundary errors propagate instead of spending after degradation', async (error) => {
+    const { broker, invocations } = brokerWith(async () => {
+      throw error;
+    });
+
+    await expect(researchBrand({ broker }, ARGS)).rejects.toBe(error);
+    expect(invocations).toHaveLength(1);
+  });
+
   it('搜索抛错 → degraded=true，官网源仍返回', async () => {
     const { broker } = brokerWith(async (toolId) => {
       if (toolId === 'searxng.search') throw new Error('searxng down');
