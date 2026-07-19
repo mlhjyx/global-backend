@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { EvidenceSourceRole } from '@global/contracts';
 import type { ExecutionBroker } from '../../tools/tool-contract';
-import type { PaidCostContext } from '../site-build-cost-ledger';
+import {
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+  type PaidCostContext,
+} from '../site-build-cost-ledger';
 
 /**
  * 品牌 web 研究（09 §2.4 / 合规 C1-C4）：站主自身公司的联网画像补充。
@@ -52,6 +56,15 @@ const STOREFRONT_MAX_CHARS = 20_000;
 
 const sha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
+
+function rethrowPaidBoundary(error: unknown): void {
+  if (
+    error instanceof PaidOperationUnknownError ||
+    error instanceof PaidCallDeniedError
+  ) {
+    throw error;
+  }
+}
 
 function hostOf(url: string | undefined): string | null {
   if (!url) return null;
@@ -127,7 +140,8 @@ export async function researchBrand(
           parserVersion: r.provenance?.parserVersion ?? 'crawl4ai/1',
         });
       }
-    } catch {
+    } catch (error) {
+      rethrowPaidBoundary(error);
       degraded = true;
     }
   }
@@ -165,7 +179,8 @@ export async function researchBrand(
         parserVersion: 'searxng-origin-hint/1',
       });
     }
-  } catch {
+  } catch (error) {
+    rethrowPaidBoundary(error);
     degraded = true;
   }
 
