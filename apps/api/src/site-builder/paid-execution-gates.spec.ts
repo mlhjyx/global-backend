@@ -244,6 +244,55 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it('records a rejected durable projection as a paid failure without retaining raw output', async () => {
+    const rawResult = {
+      data: { contact: 'jane@example.com' },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
+    const projectionError = new Error('persistence gate rejected PII');
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const gateway = new RouterModelGateway({
+      route: () => [provider(async () => rawResult)],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+        },
+        {
+          ...paidModelContext,
+          paidCost: {
+            ...paidModelContext.paidCost,
+            durableReplayResult: () => {
+              throw projectionError;
+            },
+          },
+        },
+      ),
+    ).rejects.toBe(projectionError);
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        result: undefined,
+        errorCode: 'DURABLE_REPLAY_REJECTED',
+      }),
+    );
+    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
+      'jane@example.com',
+    );
+  });
+
   it('replays a cached provider result without calling or settling the provider again', async () => {
     const model = provider(async () => {
       throw new Error('must not execute');
