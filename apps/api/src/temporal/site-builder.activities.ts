@@ -268,6 +268,27 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const ensureRunBudget = (runId: string): void =>
     budgetLedger.open(runId, siteBuildBudgetCents());
 
+  const terminalCostSummary = async (
+    workspaceId: string,
+    siteId: string,
+    buildRunId: string,
+    reason: 'run_succeeded' | 'run_failed' | 'run_cancelled',
+  ) => {
+    if (!costLedger) return undefined;
+    await costLedger.ensureBudget({
+      workspaceId,
+      siteId,
+      buildRunId,
+      capMicrousd: siteBuildBudgetCents() * 10_000,
+    });
+    return costLedger.closeAndSummarize({
+      workspaceId,
+      siteId,
+      buildRunId,
+      reason,
+    });
+  };
+
   async function polishCopy(
     workspaceId: string,
     intake: IntakeInput,
@@ -1428,6 +1449,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         failed: 0,
         variants: 0,
       };
+      const costSummary = await terminalCostSummary(
+        workspaceId,
+        siteId,
+        buildRunId,
+        'run_succeeded',
+      );
       let promotion: PreviewPromotion | undefined;
       let publicationBaseVersionId: string | null | undefined;
       try {
@@ -1491,6 +1518,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               phase: 'P5_publish',
               progress: 1,
               finishedAt: new Date(),
+              ...(costSummary
+                ? {
+                    costSummary:
+                      costSummary as unknown as Prisma.InputJsonObject,
+                  }
+                : {}),
               ...(!hasStoredPublicationBase &&
               publicationBaseVersionId !== undefined
                 ? {
@@ -1711,6 +1744,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       const terminalStatus = input.terminalStatus ?? 'failed';
       try {
+        const costSummary = await terminalCostSummary(
+          workspaceId,
+          siteId,
+          buildRunId,
+          terminalStatus === 'cancelled' ? 'run_cancelled' : 'run_failed',
+        );
         await prisma.withWorkspace(workspaceId, async (tx) => {
           // Must be acquired before the terminal CAS to avoid a lock-order inversion with
           // recordBuildProgress (advisory lock → SiteBuildRun update).
@@ -1747,6 +1786,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     ? (run.error ?? 'refurbish failed (compensated)')
                     : null,
                 finishedAt: run.finishedAt ?? new Date(),
+                ...(costSummary
+                  ? {
+                      costSummary:
+                        costSummary as unknown as Prisma.InputJsonObject,
+                    }
+                  : {}),
                 ...(legacySteps ? { steps: legacySteps } : {}),
               },
             });
