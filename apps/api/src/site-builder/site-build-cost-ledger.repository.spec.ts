@@ -283,3 +283,80 @@ describe('SiteBuildCostLedger BrandProfile task attempt fencing', () => {
     });
   });
 });
+
+describe('SiteBuildCostLedger terminal cost summary', () => {
+  it('reconciles ambiguous reservations, closes paid calls and returns the stable v1 summary', async () => {
+    const reconcile = vi.fn(async () => [{ reconciled: 1 }]);
+    const disable = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      $queryRaw: reconcile,
+      siteBuildBudget: {
+        updateMany: disable,
+        findUnique: vi.fn(async () => ({
+          capMicrousd: 5_000_000n,
+          reservedMicrousd: 0n,
+          chargedMicrousd: 820_000n,
+          paidCallsEnabled: false,
+          disabledReason: 'run_succeeded',
+          exhaustedAt: null,
+        })),
+      },
+      siteBuildSpend: {
+        findMany: vi.fn(async () => [
+          {
+            kind: 'model',
+            status: 'SUCCEEDED',
+            costBasis: 'token_pricing',
+            budgetChargeMicrousd: 20_000n,
+            reportedCostMicrousd: null,
+            calculatedCostMicrousd: 20_000n,
+            estimatedCostMicrousd: null,
+            inputTokens: 10,
+            outputTokens: 5,
+            callCount: 1,
+          },
+          {
+            kind: 'tool',
+            status: 'UNKNOWN',
+            costBasis: 'unknown',
+            budgetChargeMicrousd: 800_000n,
+            reportedCostMicrousd: null,
+            calculatedCostMicrousd: null,
+            estimatedCostMicrousd: null,
+            inputTokens: null,
+            outputTokens: null,
+            callCount: null,
+          },
+        ]),
+      },
+    };
+    const ledger = new SiteBuildCostLedger(fakePrisma(tx));
+
+    await expect(
+      ledger.closeAndSummarize({
+        ...SCOPE,
+        reason: 'run_succeeded',
+      }),
+    ).resolves.toMatchObject({
+      schemaVersion: 'site-builder-cost-summary/v1',
+      budget: {
+        chargedMicrousd: 820_000,
+        paidCallsEnabled: false,
+        disabledReason: 'run_succeeded',
+      },
+      totals: {
+        calculatedCostMicrousd: 20_000,
+        unknownOperations: 1,
+      },
+      usage: { modelCalls: 1, toolCalls: 0 },
+    });
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(disable).toHaveBeenCalledWith({
+      where: { buildRunId: SCOPE.buildRunId, paidCallsEnabled: true },
+      data: {
+        paidCallsEnabled: false,
+        disabledReason: 'run_succeeded',
+      },
+    });
+  });
+});
