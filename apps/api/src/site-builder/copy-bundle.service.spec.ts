@@ -101,4 +101,56 @@ describe("CopyBundleService", () => {
       code: "COPY_DEFAULT_LOCALE_FAILED",
     });
   });
+
+  it("replaces model embellishment with the exact cited Claim statement", async () => {
+    const claimId = "66666666-6666-4666-8666-666666666666";
+    const factualSnapshot = {
+      ...snapshot,
+      items: [
+        {
+          claimId,
+          claimVersion: 1,
+          factKey: "rated_pressure",
+          claimType: "capability",
+          statement: "Industrial pumps up to 400 bar",
+          validUntil: null,
+          approvedBy: "reviewer-1",
+          approvedAt: NOW.toISOString(),
+          bridgeId: "bridge-1",
+          brandProfileId: "profile-1",
+          evidenceRefId: "ref-1",
+          evidenceId: "evidence-1",
+          sourceSnapshotId: "source-1",
+          sourceContentHash: "a".repeat(64),
+          quote: "Industrial pumps up to 400 bar",
+          selector: { start: 0, end: 30 },
+        },
+      ],
+    };
+    const model: CopySlotGenerator = {
+      generateSlot: vi.fn(async () => ({
+        content: "Industrial pumps up to 400 bar with market-leading reliability",
+        claimRefs: [claimId],
+      })),
+    };
+    const result = await new CopyBundleService(model, () => NOW).generate({
+      locales: ["en"],
+      sourceLocale: "en",
+      snapshotId: "55555555-5555-4555-8555-555555555555",
+      snapshot: factualSnapshot,
+      slots: [
+        {
+          key: "home.hero.headline",
+          type: "plain_text",
+          maxGraphemes: 50,
+          factual: true,
+        },
+      ],
+      approvedOutboundDomains: [],
+    });
+
+    expect(result.set.bundles.en.slots["home.hero.headline"].content).toBe(
+      "Industrial pumps up to 400 bar",
+    );
+  });
 });
