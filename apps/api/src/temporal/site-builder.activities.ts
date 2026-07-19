@@ -81,6 +81,7 @@ import {
 } from '../site-builder/site-build-cost-ledger';
 import {
   CopyBundleService,
+  neutralCopySlotContent,
   type CopySlotDefinition,
   type CopySlotGenerator,
 } from '../site-builder/copy-bundle.service';
@@ -294,7 +295,6 @@ function copySlotBudget(key: string, type: CopySlotType): number {
 
 function copySlotCatalog(
   site: { name: string; intake: Prisma.JsonValue; stylePreset: string | null },
-  hasClaims: boolean,
 ): CopySlotDefinition[] {
   const template = buildDemoSpec({
     siteName: site.name,
@@ -305,51 +305,13 @@ function copySlotCatalog(
     .sort()
     .map((key) => {
       const type = copySlotType(key);
-      const structural =
-        /^(?:nav\.|inquiry\.|footer\.)|(?:\.cta|\.submit)$/.test(key);
       return {
         key,
         type,
         maxGraphemes: copySlotBudget(key, type),
-        factual: hasClaims && !structural,
+        factual: false,
       };
     });
-}
-
-function neutralCopySlot(key: string, locale: string): string {
-  const german = locale === 'de-DE';
-  if (/^nav\.home$/.test(key)) return german ? 'Startseite' : 'Home';
-  if (/^nav\.products$/.test(key)) return german ? 'Lösungen' : 'Solutions';
-  if (/^nav\.contact$/.test(key)) return german ? 'Kontakt' : 'Contact';
-  if (/\.cta$|\.submit$/.test(key))
-    return german ? 'Kontakt aufnehmen' : 'Get in touch';
-  if (/^inquiry\.field\.name$/.test(key)) return 'Name';
-  if (/^inquiry\.field\.email$/.test(key))
-    return german ? 'Geschäftliche E-Mail' : 'Work email';
-  if (/^inquiry\.field\.message$/.test(key))
-    return german ? 'Ihre Anfrage' : 'Your inquiry';
-  if (/^inquiry\.m0\.note$/.test(key)) {
-    return german
-      ? 'Das Anfrageformular wird mit der Veröffentlichung aktiviert.'
-      : 'The inquiry form is enabled when the site is published.';
-  }
-  if (/^seo\..*\.title$/.test(key))
-    return german ? 'Unternehmenswebsite' : 'Company website';
-  if (/^seo\./.test(key)) {
-    return german
-      ? 'Informieren Sie sich über verfügbare Lösungen und Kontaktmöglichkeiten.'
-      : 'Explore available solutions and ways to get in touch.';
-  }
-  if (/\.title$|\.headline$/.test(key))
-    return german ? 'Praktische Lösungen' : 'Practical solutions';
-  if (/^faq\.q/.test(key))
-    return german
-      ? 'Wie erhalte ich weitere Informationen?'
-      : 'How can I learn more?';
-  if (/^products\.p\d+\.name$/.test(key)) return german ? 'Lösung' : 'Solution';
-  return german
-    ? 'Weitere Informationen sind auf Anfrage verfügbar.'
-    : 'Further information is available on request.';
 }
 
 export function neutralCopyOutput(
@@ -360,7 +322,7 @@ export function neutralCopyOutput(
     slots: Object.fromEntries(
       slots.map((slot) => [
         slot.key,
-        { content: neutralCopySlot(slot.key, locale), claimRefs: [] },
+        { content: neutralCopySlotContent(slot.key, locale), claimRefs: [] },
       ]),
     ),
   };
@@ -1491,9 +1453,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         },
       );
       const locales = input.scope?.options?.locales ?? ['en'];
-      const slots = copySlotCatalog(site, snapshot.items.length > 0);
+      const slots = copySlotCatalog(site);
       const taskAttemptIds: Record<string, string> = {};
       const localeOutputs = new Map<string, Promise<CopyTaskOutput>>();
+      const pendingLocaleTasks = new Map<
+        string,
+        {
+          attemptId: string;
+          fence: {
+            workspaceId: string;
+            attemptId: string;
+            fenceToken: string;
+          };
+        }
+      >();
 
       const executeLocale = (locale: string): Promise<CopyTaskOutput> => {
         const existing = localeOutputs.get(locale);
@@ -1525,7 +1498,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             attemptId: attempt.id,
             fenceToken: attempt.fenceToken,
           };
-          let completed = false;
           try {
             const candidate: CopyTaskInput = {
               locale,
@@ -1562,18 +1534,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                       },
                     )
                   ).data;
-            await costLedger.storeTaskOutput(
+            pendingLocaleTasks.set(locale, {
+              attemptId: attempt.id,
               fence,
-              taskOutput as unknown as Record<string, unknown>,
-            );
-            await costLedger.completeTask(fence, {
-              taskAttemptId: attempt.id,
-              slots: taskOutput.slots,
             });
-            completed = true;
             return taskOutput;
-          } finally {
-            if (!completed) await costLedger.releaseTask(fence);
+          } catch (error) {
+            await costLedger.releaseTask(fence);
+            throw error;
           }
         })();
         localeOutputs.set(locale, execution);
@@ -1589,14 +1557,58 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           return generated;
         },
       };
-      const generated = await new CopyBundleService(generator).generate({
-        locales,
-        sourceLocale: 'en',
-        snapshotId,
-        snapshot,
-        slots,
-        approvedOutboundDomains: [],
-      });
+      let generated;
+      try {
+        generated = await new CopyBundleService(generator).generate({
+          locales,
+          sourceLocale: 'en',
+          snapshotId,
+          snapshot,
+          slots,
+          approvedOutboundDomains: [],
+        });
+      } catch (error) {
+        await Promise.all(
+          [...pendingLocaleTasks.values()].map(({ fence }) =>
+            costLedger.releaseTask(fence),
+          ),
+        );
+        throw error;
+      }
+      const settledLocales = new Set<string>();
+      try {
+        for (const [locale, pending] of pendingLocaleTasks) {
+          const bundle = generated.set.bundles[locale];
+          if (!bundle) {
+            await costLedger.releaseTask(pending.fence);
+            settledLocales.add(locale);
+            continue;
+          }
+          const canonicalOutput: CopyTaskOutput = {
+            slots: Object.fromEntries(
+              Object.entries(bundle.slots).map(([key, slot]) => [
+                key,
+                { content: slot.content, claimRefs: slot.claimRefs },
+              ]),
+            ),
+          };
+          await costLedger.storeTaskOutput(
+            pending.fence,
+            canonicalOutput as unknown as Record<string, unknown>,
+          );
+          await costLedger.completeTask(pending.fence, {
+            taskAttemptId: pending.attemptId,
+            slots: canonicalOutput.slots,
+          });
+          settledLocales.add(locale);
+        }
+      } finally {
+        await Promise.all(
+          [...pendingLocaleTasks.entries()]
+            .filter(([locale]) => !settledLocales.has(locale))
+            .map(([, { fence }]) => costLedger.releaseTask(fence)),
+        );
+      }
       return {
         snapshotId,
         set: generated.set,
