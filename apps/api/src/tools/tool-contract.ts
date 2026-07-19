@@ -120,6 +120,12 @@ export interface Tool<I = unknown, O = unknown> {
   };
   /** 纯函数：由归一化 input 派生稳定幂等键（与 raw_source_record 去重统一）。 */
   idempotencyKey(input: I): string;
+  /**
+   * Optional fail-closed durable replay projection. Paid ToolBroker calls only
+   * persist this bounded/scrubbed shape; raw provider payloads are never copied
+   * into the spend ledger. Missing/null means the operation cannot replay data.
+   */
+  durableReplayResult?(result: ToolResult<O>): ToolResult<O> | null;
   /** 探测后端可用性/延迟（Registry 健康路由与熔断依据）。 */
   healthCheck(): Promise<{ healthy: boolean; detail?: string }>;
   /** 唯一执行实现。权限/预算/合规不在此判断——Broker 已在调用前强制。 */

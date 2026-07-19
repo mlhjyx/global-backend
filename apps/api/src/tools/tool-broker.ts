@@ -233,7 +233,14 @@ export class ToolBroker implements ExecutionBroker {
           paidDecision.result &&
           Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
         ) {
-          return paidDecision.result as unknown as ToolResult<O>;
+          const replay = tool.durableReplayResult?.(
+            paidDecision.result as unknown as ToolResult<O>,
+          );
+          if (replay) return replay;
+          throw new PaidOperationUnknownError(
+            paidScope.operationKey,
+            'REPLAY_PAYLOAD_UNAVAILABLE',
+          );
         }
         throw new Error(
           `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? 'recorded_failure'}`,
@@ -309,6 +316,7 @@ export class ToolBroker implements ExecutionBroker {
       // A settlement failure is intentionally outside the execute() catch: the
       // external call has succeeded and must not be relabelled or repeated.
       if (paidScope) {
+        const durableReplay = tool.durableReplayResult?.(result) ?? null;
         await this.settlePersistentOperation({
           scope: paidScope,
           status: 'SUCCEEDED',
@@ -316,11 +324,16 @@ export class ToolBroker implements ExecutionBroker {
             result.costCents,
             paidScope.reservationMicrousd,
           ),
-          result: result as unknown as Record<string, unknown>,
+          ...(durableReplay
+            ? {
+                result: durableReplay as unknown as Record<string, unknown>,
+              }
+            : {}),
           meta: {
             toolId: tool.id,
             toolVersion: tool.version,
             degraded: result.degraded ?? false,
+            replayPayload: durableReplay ? 'scrubbed' : 'omitted',
           },
         });
       } else if (reservation) {

@@ -8,9 +8,24 @@ import { discoverCompaniesByIndustry, WikidataCompany } from '../adapters/wikida
 import { discoverByArea, OsmPlace } from '../adapters/openstreetmap';
 import { resolvePublicIp } from '../adapters/net-guard';
 import { smtpRcptProbe, SENDER_DOMAIN } from '../adapters/smtp-probe';
+import {
+  normalizeEvidenceText,
+  sanitizeEvidenceUrl,
+} from '../site-builder/agents/evidence-ref';
 
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex').slice(0, 24);
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
+
+function publicOrigin(rawUrl: string | undefined): string | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}/`;
+  } catch {
+    return null;
+  }
+}
 
 /** searxng.search —— 元搜索发现候选域名（自托管，无需 source_policy）。 */
 export const searxngSearchTool: Tool<
@@ -28,6 +43,16 @@ export const searxngSearchTool: Tool<
   compliance: { sourcePolicy: 'none', respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'site_builder'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['domain'], accepts: ['keywords'] },
   idempotencyKey: (i) => `searxng.search:${stableKey(i)}`,
+  durableReplayResult: (result) => ({
+    data: {
+      results: result.data.results.flatMap((item) => {
+        const url = publicOrigin(item.url);
+        return url ? [{ url } as SearxResult] : [];
+      }),
+    },
+    costCents: result.costCents,
+    ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+  }),
   healthCheck: async () => {
     try {
       const r = await searxSearchPaged({ q: 'test', language: 'en' }, 1, 8000);
@@ -59,6 +84,26 @@ export const crawl4aiFetchTool: Tool<{ url: string; maxChars?: number }, { url: 
   compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment', 'site_builder'], reversible: true, authRequired: false, risk: 'low' },
   capabilities: { produces: ['company', 'domain', 'contact'], accepts: ['domain'] },
   idempotencyKey: (i) => `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}`,
+  durableReplayResult: (result) => {
+    const text = normalizeEvidenceText(result.data.text);
+    const url = sanitizeEvidenceUrl(result.data.url);
+    if (!url) return null;
+    const contentHash = hash(text);
+    return {
+      data: { url, text, contentHash },
+      costCents: result.costCents,
+      ...(result.provenance
+        ? {
+            provenance: {
+              ...result.provenance,
+              sourceUrl: sanitizeEvidenceUrl(result.provenance.sourceUrl),
+              contentHash,
+            },
+          }
+        : {}),
+      ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+    };
+  },
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
   execute: async (input) => {
     if (!(await isAllowedByRobots(input.url))) {
