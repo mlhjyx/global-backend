@@ -8,6 +8,7 @@ import { buildGatewayProvider } from '../src/model-gateway/model-providers.confi
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
+import { BuildsService } from '../src/site-builder/builds.service';
 import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
@@ -308,10 +309,31 @@ async function main(): Promise<void> {
         capMicrousd: 1_000_000n,
       },
     });
-    await ledgerA.disablePaidCalls(
-      workspaceId,
-      cancelledBuildRunId,
-      'cancellation_requested',
+    assert.deepEqual(
+      await ledgerA.reserveOperation({
+        workspaceId,
+        siteId,
+        buildRunId: cancelledBuildRunId,
+        operationKey: paidOperationKey([
+          cancelledBuildRunId,
+          'pending-at-cancellation',
+        ]),
+        kind: 'model',
+        taskId: 'site_builder.brand_profile',
+        subject: 'gpt-5.6-terra',
+        reservationMicrousd: 100_000,
+      }),
+      { kind: 'execute' },
+    );
+    const cancellationService = new BuildsService(appA, {
+      cancelRefurbish: async () => ({ terminalStatus: 'cancelled' }),
+    } as never);
+    assert.deepEqual(
+      await cancellationService.cancel(
+        { workspaceId, userId: 'r4-b-verifier', roles: [] },
+        cancelledBuildRunId,
+      ),
+      { buildId: cancelledBuildRunId, status: 'cancelled' },
     );
     const cancelledDenial = await ledgerA
       .reserveOperation({
@@ -329,16 +351,36 @@ async function main(): Promise<void> {
       })
       .catch((error: unknown) => error);
     assert(cancelledDenial instanceof PaidCallDeniedError);
-    const cancelledBudget = await appA.withWorkspace(workspaceId, (tx) =>
-      tx.siteBuildBudget.findUniqueOrThrow({
-        where: { buildRunId: cancelledBuildRunId },
-      }),
+    const [cancelledBudget, cancelledRun, cancelledSpend] =
+      await appA.withWorkspace(workspaceId, (tx) =>
+        Promise.all([
+          tx.siteBuildBudget.findUniqueOrThrow({
+            where: { buildRunId: cancelledBuildRunId },
+          }),
+          tx.siteBuildRun.findUniqueOrThrow({
+            where: { id: cancelledBuildRunId },
+          }),
+          tx.siteBuildSpend.findFirstOrThrow({
+            where: { buildRunId: cancelledBuildRunId },
+          }),
+        ]),
+      );
+    const cancelledSummary = cancelledRun.costSummary as Record<
+      string,
+      unknown
+    >;
+    assert.equal(cancelledRun.status, 'cancelled');
+    assert.equal(
+      cancelledSummary.schemaVersion,
+      'site-builder-cost-summary/v1',
     );
     assert.equal(cancelledBudget.paidCallsEnabled, false);
     assert.equal(cancelledBudget.disabledReason, 'cancellation_requested');
+    assert.equal(cancelledBudget.reservedMicrousd, 0n);
+    assert.equal(cancelledSpend.status, 'UNKNOWN');
 
     console.log(
-      '[r4-b-min] real PostgreSQL verifier passed: RLS, concurrent reserve, ACK-unknown, replay, settle, budget/cancellation kill switches, v1 summary',
+      '[r4-b-min] real PostgreSQL verifier passed: RLS, concurrent reserve, ACK-unknown, replay, settle, budget/cancellation kill switches, terminal cancellation repair, v1 summary',
     );
   } finally {
     await owner.site
