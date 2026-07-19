@@ -543,7 +543,14 @@ export class SiteBuildCostLedger {
       await tx.siteBuildBudget.updateMany({
         where: {
           buildRunId: input.buildRunId,
-          paidCallsEnabled: true,
+          OR: [
+            { paidCallsEnabled: true },
+            {
+              disabledReason: {
+                in: ['run_succeeded', 'run_failed', 'run_cancelled'],
+              },
+            },
+          ],
         },
         data: {
           paidCallsEnabled: false,

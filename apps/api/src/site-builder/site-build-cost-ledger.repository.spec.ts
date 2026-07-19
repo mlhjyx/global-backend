@@ -352,7 +352,17 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
     });
     expect(reconcile).toHaveBeenCalledOnce();
     expect(disable).toHaveBeenCalledWith({
-      where: { buildRunId: SCOPE.buildRunId, paidCallsEnabled: true },
+      where: {
+        buildRunId: SCOPE.buildRunId,
+        OR: [
+          { paidCallsEnabled: true },
+          {
+            disabledReason: {
+              in: ['run_succeeded', 'run_failed', 'run_cancelled'],
+            },
+          },
+        ],
+      },
       data: {
         paidCallsEnabled: false,
         disabledReason: 'run_succeeded',
