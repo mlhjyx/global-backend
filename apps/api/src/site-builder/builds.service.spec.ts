@@ -56,8 +56,11 @@ function makeService(
         workspaceId: CTX.workspaceId,
         siteId: run.siteId,
         capMicrousd: 5_000_000n,
+        reservedMicrousd: 0n,
+        chargedMicrousd: 0n,
         paidCallsEnabled: true,
         disabledReason: null,
+        exhaustedAt: null,
       })),
     steps: [],
     idempotencies: [...(opts.existingIdempotencies ?? [])],
@@ -65,6 +68,7 @@ function makeService(
   let seq = db.runs.length;
   const tx = {
     $executeRaw: async () => 0,
+    $queryRaw: async () => [{ reconciled: 0 }],
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         db.sites.find((site) => site.id === where.id) ?? null,
@@ -136,14 +140,32 @@ function makeService(
     },
     siteBuildBudget: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        db.budgets.push({ ...data });
+        db.budgets.push({
+          reservedMicrousd: 0n,
+          chargedMicrousd: 0n,
+          paidCallsEnabled: true,
+          disabledReason: null,
+          exhaustedAt: null,
+          ...data,
+        });
         return data;
       },
+      findUnique: async ({ where }: { where: { buildRunId: string } }) =>
+        db.budgets.find(
+          (budget) => budget.buildRunId === where.buildRunId,
+        ) ?? null,
       updateMany: async ({
         where,
         data,
       }: {
-        where: { buildRunId: string; paidCallsEnabled?: boolean };
+        where: {
+          buildRunId: string;
+          paidCallsEnabled?: boolean;
+          OR?: Array<{
+            paidCallsEnabled?: boolean;
+            disabledReason?: { in: string[] };
+          }>;
+        };
         data: Record<string, unknown>;
       }) => {
         const row = db.budgets.find(
@@ -152,13 +174,26 @@ function makeService(
         if (
           !row ||
           (where.paidCallsEnabled !== undefined &&
-            row.paidCallsEnabled !== where.paidCallsEnabled)
+            row.paidCallsEnabled !== where.paidCallsEnabled) ||
+          (where.OR &&
+            !where.OR.some(
+              (clause) =>
+                (clause.paidCallsEnabled === undefined ||
+                  row.paidCallsEnabled === clause.paidCallsEnabled) &&
+                (!clause.disabledReason ||
+                  clause.disabledReason.in.includes(
+                    row.disabledReason as string,
+                  )),
+            ))
         ) {
           return { count: 0 };
         }
         Object.assign(row, data);
         return { count: 1 };
       },
+    },
+    siteBuildSpend: {
+      findMany: async () => [],
     },
     siteBuildRun: {
       findUnique: async ({ where }: { where: { id: string } }) =>

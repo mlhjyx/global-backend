@@ -30,6 +30,7 @@ import {
 import type { SiteSpec } from '@global/contracts';
 import { terminalizeBuildProgress } from './build-progress';
 import { siteBuildBudgetCents } from '../tools/budget';
+import { SiteBuildCostLedger } from './site-build-cost-ledger';
 
 /** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。配错值 fail-closed 回默认。 */
 const parsedDailyLimit = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
@@ -116,11 +117,14 @@ function storedBaseVersionId(value: Prisma.JsonValue | null): string | undefined
 @Injectable()
 export class BuildsService {
   private readonly log = new Logger(BuildsService.name);
+  private readonly costLedger: SiteBuildCostLedger;
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(REFURBISH_LAUNCHER) private readonly launcher: RefurbishLauncher,
-  ) {}
+  ) {
+    this.costLedger = new SiteBuildCostLedger(prisma);
+  }
 
   async create(
     ctx: RequestContext,
@@ -564,6 +568,15 @@ export class BuildsService {
         cancellation.terminalStatus === 'cancelled' ? 'cancelled' : 'failed';
       let repaired: SiteBuildRun | null;
       try {
+        const costSummary = await this.costLedger.closeAndSummarize({
+          workspaceId: ctx.workspaceId,
+          siteId: cancellable.siteId,
+          buildRunId: buildId,
+          reason:
+            repairedStatus === 'cancelled'
+              ? 'run_cancelled'
+              : 'run_failed',
+        });
         repaired = await this.prisma.withWorkspace(
           ctx.workspaceId,
           async (tx) => {
@@ -585,6 +598,8 @@ export class BuildsService {
                     ? 'workflow failed after compensation retries were exhausted'
                     : null,
                 finishedAt: new Date(),
+                costSummary:
+                  costSummary as unknown as Prisma.InputJsonObject,
               },
             });
             if (transitioned.count === 1) {
