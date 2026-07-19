@@ -18,8 +18,10 @@ interface Props {
   block: { type: string; props: Record<string, unknown> };
   t: (key: string) => string;
   index: number;
+  locale: string;
+  defaultLocale: string;
 }
-const { block, t, index } = Astro.props;
+const { block, t, index, locale, defaultLocale } = Astro.props;
 const registry: Record<string, unknown> = {
   HeroBanner,
   StatsBand,
@@ -36,4 +38,12 @@ const Component = registry[block.type] as ((props: unknown) => unknown) | undefi
 const alt = index % 2 === 1;
 ---
 
-{Component ? <Component {...block.props} t={t} alt={alt} /> : null}
+{Component ? (
+  <Component
+    {...block.props}
+    t={t}
+    alt={alt}
+    locale={locale}
+    defaultLocale={defaultLocale}
+  />
+) : null}

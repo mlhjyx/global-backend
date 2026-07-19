@@ -1,11 +1,19 @@
 ---
+import { localePageHref } from '../lib/spec';
+
 interface Props {
   headlineKey: string;
   cta: { labelKey: string; pageId?: string; url?: string };
   t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
 }
-const { headlineKey, cta, t } = Astro.props;
-const href = cta?.url ?? '#inquiry';
+const { headlineKey, cta, t, locale, defaultLocale } = Astro.props;
+const href =
+  cta?.url ??
+  (cta?.pageId
+    ? localePageHref(cta.pageId, locale, defaultLocale)
+    : '#inquiry');
 ---
 
 <section class="block cta">

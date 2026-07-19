@@ -1,4 +1,11 @@
-import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -71,7 +78,9 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
       observedPath = input.specPath;
       expect(path.basename(input.specPath)).toBe('site-spec.json');
       expect(await readFile(input.specPath, 'utf8')).toBe('{"safe":true}');
-      expect((await stat(path.dirname(input.specPath))).mode & 0o777).toBe(0o700);
+      expect((await stat(path.dirname(input.specPath))).mode & 0o777).toBe(
+        0o700,
+      );
       expect((await stat(input.specPath)).mode & 0o777).toBe(0o600);
     });
 
@@ -90,7 +99,9 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
     let observedPath = '';
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
-      expect(await readFile(input.specPath, 'utf8')).toBe('{"tenant":"content"}');
+      expect(await readFile(input.specPath, 'utf8')).toBe(
+        '{"tenant":"content"}',
+      );
       throw new Error('astro failed');
     });
 

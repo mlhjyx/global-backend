@@ -1,5 +1,5 @@
 ---
-import { pageHref } from '../lib/links';
+import { localePageHref } from '../lib/spec';
 
 interface Props {
   headlineKey: string;
@@ -7,9 +7,15 @@ interface Props {
   cta?: { labelKey: string; pageId?: string; url?: string };
   variant?: string;
   t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
 }
-const { headlineKey, subheadKey, cta, t } = Astro.props;
-const ctaHref = cta?.url ?? (cta?.pageId ? pageHref(cta.pageId) : '#inquiry');
+const { headlineKey, subheadKey, cta, t, locale, defaultLocale } = Astro.props;
+const ctaHref =
+  cta?.url ??
+  (cta?.pageId
+    ? localePageHref(cta.pageId, locale, defaultLocale)
+    : '#inquiry');
 ---
 
 <section class="block hero">

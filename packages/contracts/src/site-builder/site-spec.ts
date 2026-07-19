@@ -69,6 +69,8 @@ export interface SiteSpec {
     theme: { preset: string; tokenOverrides?: Record<string, string> };
     nav: { labelKey: string; pageId: string }[];
     seoGlobal: { siteName: string };
+    /** Exact HTTPS host allowlist enforced against rendered HTML/CSS/JS. */
+    outboundDomains?: string[];
   };
   pages: SitePage[];
   /** assetId → 引用；生产端可为空对象（尚无资产），消费端按需读取。 */

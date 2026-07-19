@@ -1,6 +1,11 @@
 ---
 import { themeToCssVars } from '../lib/themes';
-import { pageHref, withBase } from '../lib/links';
+import { localePageHref, siteLocaleDirection } from '../lib/spec';
+import '@fontsource/noto-sans/latin-400.css';
+import '@fontsource/noto-sans/latin-600.css';
+import '@fontsource/noto-sans/latin-700.css';
+import '@fontsource/noto-sans-arabic/arabic-400.css';
+import '@fontsource/noto-sans-arabic/arabic-600.css';
 import type { MaterializedSpec } from '../lib/spec';
 
 interface Props {
@@ -12,15 +17,23 @@ interface Props {
 }
 const { spec, locale, title, description, t } = Astro.props;
 const vars = themeToCssVars(spec.site.theme.preset, spec.site.theme.tokenOverrides ?? {});
-const styleVars = Object.entries(vars)
+const fontFamily = locale === 'ar' ? 'Noto Sans Arabic' : 'Noto Sans';
+const styleVars = [
+  ...Object.entries(vars),
+  ['--font-locale', `'${fontFamily}'`] as const,
+]
   .map(([k, v]) => `${k}:${v}`)
   .join(';');
-const nav = spec.site.nav.map((n) => ({ label: t(n.labelKey), href: pageHref(n.pageId) }));
-const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
+const nav = spec.site.nav.map((n) => ({
+  label: t(n.labelKey),
+  href: localePageHref(n.pageId, locale, spec.site.defaultLocale),
+}));
+const direction = siteLocaleDirection(locale);
+const homeHref = localePageHref('home', locale, spec.site.defaultLocale);
 ---
 
 <!doctype html>
-<html lang={locale} dir={rtl ? 'rtl' : 'ltr'}>
+<html lang={locale} dir={direction}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -31,7 +44,7 @@ const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
   </head>
   <body style={styleVars}>
     <header class="site-header">
-      <a class="brand" href={withBase('/')}>{spec.site.seoGlobal.siteName}</a>
+      <a class="brand" href={homeHref}>{spec.site.seoGlobal.siteName}</a>
       <nav>
         {nav.map((n) => <a href={n.href}>{n.label}</a>)}
       </nav>
@@ -50,7 +63,7 @@ const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
     margin: 0;
   }
   body {
-    font-family: var(--font-body);
+    font-family: var(--font-locale), var(--font-body), sans-serif;
     color: var(--c-on-surface);
     background: var(--c-surface);
     line-height: 1.6;
@@ -58,7 +71,7 @@ const rtl = ['ar', 'he', 'fa', 'ur'].includes(locale);
   h1,
   h2,
   h3 {
-    font-family: var(--font-heading);
+    font-family: var(--font-locale), var(--font-heading), sans-serif;
     line-height: 1.2;
   }
   a {

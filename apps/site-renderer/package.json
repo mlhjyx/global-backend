@@ -9,6 +9,8 @@
     "dev": "astro dev"
   },
   "dependencies": {
+    "@fontsource/noto-sans": "5.2.6",
+    "@fontsource/noto-sans-arabic": "5.2.7",
     "@global/contracts": "workspace:*",
     "astro": "^5.7.0"
   }

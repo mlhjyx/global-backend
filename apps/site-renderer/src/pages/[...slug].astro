@@ -1,20 +1,18 @@
 ---
 import Base from '../layouts/Base.astro';
 import Section from '../components/Section.astro';
-import { loadSpec, makeT, pagePathToSlug } from '../lib/spec';
+import { buildStaticLocalePaths, loadSpec, makeT } from '../lib/spec';
 
 export function getStaticPaths() {
   const spec = loadSpec();
-  // M0：只渲染默认 locale；多语种路径（/{locale}/…）随 M1 copy agent 落
-  return spec.pages.map((page) => ({
-    params: { slug: pagePathToSlug(page.path) },
-    props: { pageId: page.id },
+  return buildStaticLocalePaths(spec).map(({ slug, pageId, locale }) => ({
+    params: { slug },
+    props: { pageId, locale },
   }));
 }
 
-const { pageId } = Astro.props;
+const { pageId, locale } = Astro.props;
 const spec = loadSpec();
-const locale = spec.site.defaultLocale;
 const t = makeT(spec, locale);
 const page = spec.pages.find((p) => p.id === pageId)!;
 ---
@@ -26,5 +24,13 @@ const page = spec.pages.find((p) => p.id === pageId)!;
   title={t(page.seo.titleKey)}
   description={t(page.seo.descriptionKey)}
 >
-  {page.puck.content.map((block, i) => <Section block={block} t={t} index={i} />)}
+  {page.puck.content.map((block, i) => (
+    <Section
+      block={block}
+      t={t}
+      index={i}
+      locale={locale}
+      defaultLocale={spec.site.defaultLocale}
+    />
+  ))}
 </Base>
