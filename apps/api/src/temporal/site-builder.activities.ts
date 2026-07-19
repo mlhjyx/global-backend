@@ -272,6 +272,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     workspaceId: string,
     intake: IntakeInput,
     runId?: string,
+    siteId?: string,
+    paidScopeKey?: string,
   ): Promise<DemoCopyPolish | undefined> {
     if (!gateway) return undefined;
     try {
@@ -304,7 +306,18 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         // FIX A（Codex P2）：带 runId 归账——refurbish 路径 assembleAndBuild→polishCopy 的
         // demo_copy 调用必须计入 buildRunId 上限（gateway 按 ctx.runId ?? ctx.workspaceId 归账）；
         // demo_v0 路径未开账户，gateway 命中未开账户=不限额，行为不变。
-        { workspaceId, runId },
+        {
+          workspaceId,
+          runId,
+          ...(costLedger && runId && siteId && paidScopeKey
+            ? {
+                paidCost: {
+                  siteId,
+                  scopeKey: paidScopeKey,
+                },
+              }
+            : {}),
+        },
       );
       // 确定性防造假闸（Codex P2）：模型若无视提示编造年限/认证，弃字段回退模板
       return sanitizePolish(result.data ?? undefined);
@@ -1307,7 +1320,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
-      const polish = await polishCopy(workspaceId, intake, buildRunId);
+      const polish = await polishCopy(
+        workspaceId,
+        intake,
+        buildRunId,
+        siteId,
+        'assemble-demo-copy',
+      );
       const candidate = buildDemoSpec({
         siteName: site.name,
         intake,

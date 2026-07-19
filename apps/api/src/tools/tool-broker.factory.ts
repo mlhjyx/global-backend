@@ -3,6 +3,7 @@ import { ToolRegistry } from './tool-registry';
 import { registerBuiltinTools } from './builtin-tools';
 import { registerSourceTools } from './source-tools';
 import { ToolBroker, ToolTrace } from './tool-broker';
+import type { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
 
 /** source_policy 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type SourcePolicyDb = { sourcePolicy: PrismaClient['sourcePolicy'] };
@@ -37,6 +38,7 @@ export function sourcePolicyReaderFrom(db: SourcePolicyDb): SourcePolicyReader {
 export function buildToolBroker(deps?: {
   sourcePolicyReader?: SourcePolicyReader;
   traceRecorder?: (t: ToolTrace) => void;
+  paidLedger?: SiteBuildCostLedger;
 }): ToolBroker {
   const registry = registerSourceTools(registerBuiltinTools(new ToolRegistry()));
   const traceRecorder =
@@ -44,5 +46,10 @@ export function buildToolBroker(deps?: {
     ((t: ToolTrace) => {
       if (t.status !== 'OK') console.warn(`[tool-broker] ${t.status} ${t.toolId} ${t.reason ?? ''}`.trim());
     });
-  return new ToolBroker({ registry, sourcePolicyReader: deps?.sourcePolicyReader, traceRecorder });
+  return new ToolBroker({
+    registry,
+    sourcePolicyReader: deps?.sourcePolicyReader,
+    traceRecorder,
+    paidLedger: deps?.paidLedger,
+  });
 }
