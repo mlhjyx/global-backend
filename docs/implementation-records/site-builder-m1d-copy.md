@@ -20,14 +20,14 @@ M1-d 已把 R4-A2 的内部 Claim/Evidence bridge 变成正式文案消费门，
 
 权威合同为 `site-builder-copy-bundle/v1` + `site-builder-copy-slots/v1`：每个 `SiteVersion + locale` 唯一，绑定 snapshot、BuildRun、locale task attempt、input hash 与 bundle digest。
 
-槽位类型包含 plain/rich/SEO/CTA/form/alt/legal；预算按 Unicode grapheme 硬判，超限拒绝而非截断。restricted rich text 只允许 doc/paragraph/text/strong/em/list/link，禁 raw HTML；外链须命中精确 HTTPS host allowlist。factual slot 必须引用 snapshot Claim，未知/重复 ref 拒绝；任何带 Claim ref 的文本由代码重建为引用 Claim statement 的逐字确定性表示（多条固定以 ` · ` 连接），模型不能追加、翻译或润色断言。数值、单位与认证 token 另作不变保护。
+槽位类型包含 plain/rich/SEO/CTA/form/alt/legal；预算按 Unicode grapheme 硬判，超限拒绝而非截断。restricted rich text 只允许 doc/paragraph/text/strong/em/list/link，禁 raw HTML；外链须命中精确 HTTPS host allowlist。模型只建议逐 slot Claim refs；代码去掉未知/重复/超预算引用。留下 ref 时文本重建为 Claim statement 的逐字确定性表示（多条固定以 ` · ` 连接），无可用 ref 时忽略模型自由文案并使用版本化中性文本。因此单个非空 snapshot 不会把同一 Claim 强塞进全部槽位，模型也不能追加、翻译或润色断言。数值、单位与认证 token 另作不变保护。
 
 SiteSpec 保留一个迁移周期的 `copyBundles` 字符串投影，并新增权威 `copyBundleSet`。新集合存在时 reader 绝不回退 legacy；缺 locale/key 直接构建失败。历史 1.0 行无新集合时继续可读，不伪造 provenance、不批量回填。
 
 ## 4. Temporal 与模型
 
 - 新 workflow 历史在 assembly 前 capture snapshot，再逐 locale 建 `site_builder.copy:<locale>` logical task attempt；物理模型调用仍使用既有 `site_builder.copy` route，未改 currentRoute、promotion evidence 或 MODEL-1 transport。
-- 同一 locale 的全部 slot 合并为一次 structured task，冻结 input/output/result；provider ACK unknown、预算/状态/取消门继续沿用 R4-B fail-closed 语义。
+- 同一 locale 的全部 slot 合并为一次 structured task，冻结 input；只有完整 CopyBundle 通过预算/Claim/确定性事实校验后才持久化 canonical output/result 并把 task attempt 置 `SUCCEEDED`。无效输出释放 lease，不会成为永久成功重放；provider ACK unknown、预算/状态/取消门继续沿用 R4-B fail-closed 语义。
 - default/source locale 失败阻断；可选 locale 失败从本 SiteVersion 省略并记录 degraded，renderer 不生成该路径。
 - authoritative SiteSpec 的 page/section/pages 局部构建必须显式请求完整 active locale 集，且候选 locale/bundle/source-default 集合须再次完全一致；否则 API 提前 422，assembly 仍二次 fail-closed，不能把既有非默认语种静默删掉。
 - 空 snapshot 不把 intake/factSheet 送模型，而由版本化 task attempt 持久化中性 en/de-DE 文案；避免“无事实时让模型自由发挥”。
