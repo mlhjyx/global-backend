@@ -7,7 +7,10 @@ import { ToolBroker } from '../tools/tool-broker';
 import { ToolRegistry } from '../tools/tool-registry';
 import { RateLimiter } from '../tools/rate-limiter';
 import type { Tool } from '../tools/tool-contract';
-import { PaidCallDeniedError } from './site-build-cost-ledger';
+import {
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+} from './site-build-cost-ledger';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
@@ -178,6 +181,39 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     ).rejects.toBeInstanceOf(PaidCallDeniedError);
     expect(model.generateStructured).not.toHaveBeenCalled();
   });
+
+  it('turns a success-settlement ACK loss into a non-fallback paid-operation error', async () => {
+    const execute = vi.fn(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }));
+    const model = provider(execute);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation: vi.fn(async () => {
+        throw new Error('database response lost');
+      }),
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+        },
+        paidModelContext,
+      ),
+    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+    expect(execute).toHaveBeenCalledOnce();
+  });
 });
 
 function paidTool(execute: () => Promise<unknown>): Tool {
@@ -287,5 +323,30 @@ describe('ToolBroker persistent paid-call gate', () => {
     ).resolves.toEqual({ data: { text: 'cached' }, costCents: 2 });
     expect(execute).not.toHaveBeenCalled();
     expect(paidLedger.settleOperation).not.toHaveBeenCalled();
+  });
+
+  it('turns a success-settlement ACK loss into a paid-operation unknown error', async () => {
+    const execute = vi.fn(async () => ({ text: 'executed-once' }));
+    const registry = new ToolRegistry();
+    registry.register(paidTool(execute));
+    const broker = new ToolBroker({
+      registry,
+      limiter: new RateLimiter(),
+      paidLedger: {
+        reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+        settleOperation: vi.fn(async () => {
+          throw new Error('database response lost');
+        }),
+      } as never,
+    });
+
+    await expect(
+      broker.invoke(
+        'crawl4ai.fetch',
+        { url: 'https://example.com' },
+        paidToolContext,
+      ),
+    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+    expect(execute).toHaveBeenCalledOnce();
   });
 });
