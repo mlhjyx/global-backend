@@ -127,7 +127,7 @@ describe('R4-B persistent paid-call ledger database invariants', () => {
       );
       expect(migration).toMatch(
         new RegExp(
-          `CREATE POLICY "${table}_tenant_isolation"[\\s\\S]+USING \\(\"workspace_id\" = current_workspace_id\\(\\)\\)[\\s\\S]+WITH CHECK \\(\"workspace_id\" = current_workspace_id\\(\\)\\)`,
+          `CREATE POLICY "${table}_tenant_isolation"[\\s\\S]+USING \\("workspace_id" = current_workspace_id\\(\\)\\)[\\s\\S]+WITH CHECK \\("workspace_id" = current_workspace_id\\(\\)\\)`,
         ),
       );
       expect(migration).toContain(
