@@ -8,7 +8,6 @@ interface SchemaNode {
   additionalProperties?: boolean;
   required?: string[];
   enum?: string[];
-  allOf?: SchemaNode[];
   properties?: Record<string, SchemaNode>;
 }
 
@@ -30,9 +29,8 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
         .costSummary;
     expect(summaryProperty.type).toBe('object');
     expect(summaryProperty.nullable).toBe(true);
-    const summary = summaryProperty.allOf?.[0] ?? summaryProperty;
 
-    expect(summary).toMatchObject({
+    expect(summaryProperty).toMatchObject({
       type: 'object',
       additionalProperties: false,
       required: [
@@ -45,12 +43,12 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
         'operations',
       ],
     });
-    expect(summary.properties?.schemaVersion.enum).toEqual([
+    expect(summaryProperty.properties?.schemaVersion.enum).toEqual([
       'site-builder-cost-summary/v1',
     ]);
-    expect(summary.properties?.currency.enum).toEqual(['USD']);
-    expect(summary.properties?.unit.enum).toEqual(['microusd']);
-    expect(summary.properties?.budget).toMatchObject({
+    expect(summaryProperty.properties?.currency.enum).toEqual(['USD']);
+    expect(summaryProperty.properties?.unit.enum).toEqual(['microusd']);
+    expect(summaryProperty.properties?.budget).toMatchObject({
       type: 'object',
       additionalProperties: false,
       required: [
@@ -63,19 +61,19 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
         'exhaustedAt',
       ],
     });
-    expect(summary.properties?.totals?.required).toEqual([
+    expect(summaryProperty.properties?.totals?.required).toEqual([
       'reportedCostMicrousd',
       'calculatedCostMicrousd',
       'estimatedCostMicrousd',
       'unknownOperations',
     ]);
-    expect(summary.properties?.usage?.required).toEqual([
+    expect(summaryProperty.properties?.usage?.required).toEqual([
       'inputTokens',
       'outputTokens',
       'modelCalls',
       'toolCalls',
     ]);
-    expect(summary.properties?.operations?.required).toEqual([
+    expect(summaryProperty.properties?.operations?.required).toEqual([
       'succeeded',
       'failed',
       'unknown',

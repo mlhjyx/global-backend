@@ -26,7 +26,17 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('System')
     .addBearerAuth()
     .build();
-  return SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, config);
+  const buildStatus = document.components?.schemas?.BuildStatusResponseDto;
+  if (buildStatus && !('$ref' in buildStatus)) {
+    // ApiProperty uses `required` both for the parent property flag and the
+    // nested object's required field list. Keep the closed nested schema and
+    // restore the pre-existing required+nullable response key explicitly.
+    buildStatus.required = Array.from(
+      new Set([...(buildStatus.required ?? []), 'costSummary']),
+    );
+  }
+  return document;
 }
 
 async function bootstrap(): Promise<void> {

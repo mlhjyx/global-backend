@@ -162,9 +162,8 @@ class BuildStatusResponseDto {
   steps!: Array<Record<string, unknown>> | null;
 
   @ApiProperty({
+    ...COST_SUMMARY_SCHEMA,
     nullable: true,
-    required: true,
-    allOf: [COST_SUMMARY_SCHEMA],
   } as unknown as Parameters<typeof ApiProperty>[0])
   costSummary!: Record<string, unknown> | null;
 
