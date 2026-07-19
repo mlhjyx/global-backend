@@ -26,6 +26,7 @@ const siteId = randomUUID();
 const buildRunId = randomUUID();
 const newApiBuildRunId = randomUUID();
 const cancelledBuildRunId = randomUUID();
+const overReservationBuildRunId = randomUUID();
 
 const scope = {
   workspaceId,
@@ -207,6 +208,100 @@ async function main(): Promise<void> {
       data: { status: 'failed', finishedAt: new Date() },
     });
 
+    await owner.siteBuildRun.create({
+      data: {
+        id: overReservationBuildRunId,
+        workspaceId,
+        siteId,
+        kind: 'refurbish',
+        status: 'running',
+      },
+    });
+    await owner.siteBuildBudget.create({
+      data: {
+        workspaceId,
+        siteId,
+        buildRunId: overReservationBuildRunId,
+        capMicrousd: 150_000n,
+      },
+    });
+    const overReservationOperation = {
+      workspaceId,
+      siteId,
+      buildRunId: overReservationBuildRunId,
+      operationKey: paidOperationKey([
+        overReservationBuildRunId,
+        'reported-over-reservation',
+      ]),
+      kind: 'model' as const,
+      taskId: 'site_builder.brand_profile',
+      subject: 'gpt-5.6-terra',
+      reservationMicrousd: 100_000,
+    };
+    assert.deepEqual(
+      await ledgerA.reserveOperation(overReservationOperation),
+      { kind: 'execute' },
+    );
+    assert.equal(
+      await ledgerA.settleOperation({
+        scope: overReservationOperation,
+        status: 'SUCCEEDED',
+        measurement: {
+          basis: 'provider_reported',
+          budgetChargeMicrousd: 120_000,
+          reportedCostMicrousd: 120_000,
+          calculatedCostMicrousd: null,
+          estimatedCostMicrousd: null,
+          inputTokens: 1_000,
+          outputTokens: 100,
+          callCount: 1,
+          meta: { verifier: 'over-reservation' },
+        },
+        result: { data: { forbiddenReplay: true } },
+      }),
+      'OVER_RESERVATION',
+    );
+    const [overReservationBudget, overReservationSpend] =
+      await appA.withWorkspace(workspaceId, (tx) =>
+        Promise.all([
+          tx.siteBuildBudget.findUniqueOrThrow({
+            where: { buildRunId: overReservationBuildRunId },
+          }),
+          tx.siteBuildSpend.findUniqueOrThrow({
+            where: {
+              buildRunId_operationKey: {
+                buildRunId: overReservationBuildRunId,
+                operationKey: overReservationOperation.operationKey,
+              },
+            },
+          }),
+        ]),
+      );
+    assert.equal(overReservationBudget.capMicrousd, 150_000n);
+    assert.equal(overReservationBudget.chargedMicrousd, 100_000n);
+    assert.equal(overReservationBudget.reservedMicrousd, 0n);
+    assert.equal(overReservationBudget.paidCallsEnabled, false);
+    assert.equal(
+      overReservationBudget.disabledReason,
+      'settlement_exceeded_reservation',
+    );
+    assert.equal(overReservationSpend.status, 'UNKNOWN');
+    assert.equal(overReservationSpend.budgetChargeMicrousd, 100_000n);
+    assert.equal(overReservationSpend.reportedCostMicrousd, 120_000n);
+    assert.equal(overReservationSpend.resultJson, null);
+    const overReservationReplay = await ledgerB
+      .reserveOperation(overReservationOperation)
+      .catch((error: unknown) => error);
+    assert(overReservationReplay instanceof PaidOperationUnknownError);
+    assert.equal(
+      overReservationReplay.errorCode,
+      'ACTUAL_EXCEEDED_RESERVATION',
+    );
+    await owner.siteBuildRun.update({
+      where: { id: overReservationBuildRunId },
+      data: { status: 'failed', finishedAt: new Date() },
+    });
+
     if (process.argv.includes('--new-api-smoke')) {
       await owner.siteBuildRun.create({
         data: {
@@ -380,7 +475,7 @@ async function main(): Promise<void> {
     assert.equal(cancelledSpend.status, 'UNKNOWN');
 
     console.log(
-      '[r4-b-min] real PostgreSQL verifier passed: RLS, concurrent reserve, ACK-unknown, replay, settle, budget/cancellation kill switches, terminal cancellation repair, v1 summary',
+      '[r4-b-min] real PostgreSQL verifier passed: RLS, concurrent reserve, ACK-unknown, replay, settle ceiling, budget/cancellation kill switches, terminal cancellation repair, v1 summary',
     );
   } finally {
     await owner.site
