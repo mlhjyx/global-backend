@@ -19,3 +19,12 @@ export * from "./site-builder/evidence";
 export * from "./site-builder/model-policy";
 export * from "./site-builder/copy-bundle";
 export * from "./site-builder/locales";
+export * from "./site-builder/inquiry";
+
+// Astro/Vite consumes this CommonJS package at build time and cannot reliably
+// statically discover names hidden behind TypeScript's __exportStar helper.
+export {
+  resolveSiteCopyBundle,
+  copyBundleToLegacyStrings,
+} from "./site-builder/copy-bundle";
+export { resolveSiteLocale } from "./site-builder/locales";
