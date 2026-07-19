@@ -6,6 +6,7 @@ import {
   copyBundleInputHash,
   copyBundleToLegacyStrings,
   finalizeCopyBundle,
+  resolveSiteCopyBundle,
   validateCopyBundle,
   type CopyBundleDraftV1,
 } from "@global/contracts";
@@ -183,5 +184,29 @@ describe("CopyBundle v1 contract", () => {
         "COPY_LOCALE_UNSUPPORTED",
       );
     }
+  });
+
+  it("dual-reads authoritative v1 bundles before the legacy string projection", () => {
+    const bundle = finalizeCopyBundle(draft(), context);
+    const spec = {
+      copyBundles: { "de-DE": { "home.hero.headline": "legacy" } },
+      copyBundleSet: {
+        schemaVersion: "site-builder-copy-bundle-set/v1" as const,
+        sourceLocale: "en",
+        bundles: { "de-DE": bundle },
+      },
+    };
+    expect(resolveSiteCopyBundle(spec, "de-DE")).toEqual({
+      "home.hero.headline": "ACME Pumpen mit 15 bar",
+    });
+    expect(
+      resolveSiteCopyBundle(
+        { copyBundles: { en: { headline: "legacy only" } } },
+        "en",
+      ),
+    ).toEqual({ headline: "legacy only" });
+    expect(() => resolveSiteCopyBundle(spec, "en")).toThrowError(
+      /COPY_LOCALE_MISSING/,
+    );
   });
 });
