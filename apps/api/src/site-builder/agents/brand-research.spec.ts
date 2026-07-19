@@ -140,6 +140,45 @@ describe('researchBrand — 正常链路', () => {
     expect(out.sources.every((s) => s.sourceType === 'web_research')).toBe(true);
   });
 
+  it('R4-B: durable attempt identity and fence reach every ToolBroker call', async () => {
+    const { broker, invocations } = brokerWith(async (toolId) =>
+      toolId === 'searxng.search'
+        ? { data: SEARCH_RESULTS }
+        : {
+            data: {
+              url: 'https://acme.example',
+              text: 'pumps',
+              contentHash: 'h',
+            },
+          },
+    );
+
+    await researchBrand(
+      { broker },
+      {
+        ...ARGS,
+        siteId: 'site-1',
+        paidCost: {
+          taskAttemptId: 'attempt-1',
+          fenceToken: 'fence-1',
+          scopeKey: 'brand-profile-attempt-1:research',
+        },
+      },
+    );
+
+    expect(invocations).not.toHaveLength(0);
+    for (const invocation of invocations) {
+      expect(invocation.ctx).toMatchObject({
+        siteId: 'site-1',
+        paidCost: {
+          taskAttemptId: 'attempt-1',
+          fenceToken: 'fence-1',
+          scopeKey: 'brand-profile-attempt-1:research',
+        },
+      });
+    }
+  });
+
   it('🔴 C4：第三方搜索 title/snippet/路径中的具名个人不进入冻结候选', async () => {
     const { broker } = brokerWith(async (toolId) =>
       toolId === 'searxng.search'

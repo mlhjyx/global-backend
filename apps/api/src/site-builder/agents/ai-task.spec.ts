@@ -360,4 +360,40 @@ describe('runAiTask — 回退链与显式失败', () => {
     await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE });
     expect(seen[0]).toMatchObject({ workspaceId: 'ws-1', runId: 'run-1' });
   });
+
+  it('R4-B: each task fallback gets a distinct durable paid-operation scope', async () => {
+    const { gateway, contexts } = gatewayReturning(async (input) => {
+      if (input.model === 'model-a') throw new Error('primary down');
+      return okResult(input.model ?? '?');
+    });
+
+    await runAiTask(DEF, { name: 'Acme' }, {
+      gateway,
+      route: ROUTE,
+      ctx: {
+        ...CTX,
+        paidCost: {
+          siteId: 'site-1',
+          taskAttemptId: 'attempt-1',
+          fenceToken: 'fence-1',
+          scopeKey: 'brand-profile-attempt-1',
+        },
+      },
+    });
+
+    expect(contexts.map((ctx) => ctx.paidCost)).toEqual([
+      {
+        siteId: 'site-1',
+        taskAttemptId: 'attempt-1',
+        fenceToken: 'fence-1',
+        scopeKey: 'brand-profile-attempt-1:model:0:model-a',
+      },
+      {
+        siteId: 'site-1',
+        taskAttemptId: 'attempt-1',
+        fenceToken: 'fence-1',
+        scopeKey: 'brand-profile-attempt-1:model:1:model-b',
+      },
+    ]);
+  });
 });
