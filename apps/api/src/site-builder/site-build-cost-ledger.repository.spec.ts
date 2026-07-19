@@ -359,4 +359,41 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
       },
     });
   });
+
+  it('corrects a provisional success reason when publication falls into failed compensation', async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ reconciled: 0 }]),
+      siteBuildBudget: {
+        updateMany,
+        findUnique: vi.fn(async () => ({
+          capMicrousd: 5_000_000n,
+          reservedMicrousd: 0n,
+          chargedMicrousd: 0n,
+          paidCallsEnabled: false,
+          disabledReason: 'run_failed',
+          exhaustedAt: null,
+        })),
+      },
+      siteBuildSpend: { findMany: vi.fn(async () => []) },
+    };
+    const ledger = new SiteBuildCostLedger(fakePrisma(tx));
+
+    await ledger.closeAndSummarize({ ...SCOPE, reason: 'run_failed' });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        buildRunId: SCOPE.buildRunId,
+        OR: [
+          { paidCallsEnabled: true },
+          {
+            disabledReason: {
+              in: ['run_succeeded', 'run_failed', 'run_cancelled'],
+            },
+          },
+        ],
+      },
+      data: { paidCallsEnabled: false, disabledReason: 'run_failed' },
+    });
+  });
 });
