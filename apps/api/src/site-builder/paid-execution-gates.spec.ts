@@ -174,6 +174,76 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     );
   });
 
+  it('omits model replay payloads when the caller did not install a persistence gate', async () => {
+    const rawResult = {
+      data: { secret: 'raw-provider-output' },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const gateway = new RouterModelGateway({
+      route: () => [provider(async () => rawResult)],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+        },
+        paidModelContext,
+      ),
+    ).resolves.toEqual(rawResult);
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ result: undefined }),
+    );
+    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
+      'raw-provider-output',
+    );
+  });
+
+  it('fails closed when a settled paid model has no approved replay payload', async () => {
+    const execute = vi.fn(async () => {
+      throw new Error('must not execute');
+    });
+    const gateway = new RouterModelGateway({
+      route: () => [provider(execute)],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({
+        kind: 'replay' as const,
+        status: 'SUCCEEDED',
+        result: null,
+        meta: null,
+        errorCode: null,
+      })),
+      settleOperation: vi.fn(),
+    } as never;
+
+    const error = await gateway
+      .generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+        },
+        paidModelContext,
+      )
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PaidOperationUnknownError);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('replays a cached provider result without calling or settling the provider again', async () => {
     const model = provider(async () => {
       throw new Error('must not execute');
