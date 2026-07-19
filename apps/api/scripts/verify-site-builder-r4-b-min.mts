@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
+import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
+import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
+import { ModelRouter } from '../src/model-gateway/model-router';
+import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
@@ -18,6 +23,7 @@ const workspaceId = randomUUID();
 const otherWorkspaceId = randomUUID();
 const siteId = randomUUID();
 const buildRunId = randomUUID();
+const newApiBuildRunId = randomUUID();
 const cancelledBuildRunId = randomUUID();
 
 const scope = {
@@ -199,6 +205,92 @@ async function main(): Promise<void> {
       where: { id: buildRunId },
       data: { status: 'failed', finishedAt: new Date() },
     });
+
+    if (process.argv.includes('--new-api-smoke')) {
+      await owner.siteBuildRun.create({
+        data: {
+          id: newApiBuildRunId,
+          workspaceId,
+          siteId,
+          kind: 'refurbish',
+          status: 'running',
+        },
+      });
+      await owner.siteBuildBudget.create({
+        data: {
+          workspaceId,
+          siteId,
+          buildRunId: newApiBuildRunId,
+          capMicrousd: 1_000_000n,
+        },
+      });
+
+      const provider = buildGatewayProvider();
+      assert(
+        provider,
+        'MODEL_GATEWAY_URL/KEY are required for --new-api-smoke',
+      );
+      const registry = new ModelProviderRegistry();
+      registry.register(provider);
+      const gateway = new RouterModelGateway(
+        new ModelRouter(registry),
+        new AiTraceSink(appA),
+      );
+      gateway.paidLedger = ledgerA;
+      const result = await gateway.generateStructured<{ ok: boolean }>(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'Return exactly {"ok":true}.',
+          schema: {
+            type: 'object',
+            required: ['ok'],
+            properties: { ok: { type: 'boolean' } },
+          },
+          model: 'gpt-5.6-terra',
+          maxTokens: 1_000,
+          maxCostCents: 25,
+        },
+        {
+          workspaceId,
+          runId: newApiBuildRunId,
+          paidCost: {
+            siteId,
+            scopeKey: 'r4-b-new-api-smoke',
+          },
+        },
+      );
+      assert.equal(result.data.ok, true);
+      assert.equal(result.provider, 'gateway');
+
+      const spend = await appA.withWorkspace(workspaceId, (tx) =>
+        tx.siteBuildSpend.findFirstOrThrow({
+          where: { buildRunId: newApiBuildRunId, kind: 'model' },
+        }),
+      );
+      assert.equal(spend.status, 'SUCCEEDED');
+      assert(
+        spend.costBasis === 'provider_reported' ||
+          spend.costBasis === 'token_pricing',
+        `real new-api usage must settle as reported or token-priced, got ${spend.costBasis}`,
+      );
+      assert((spend.inputTokens ?? 0) > 0);
+      assert((spend.outputTokens ?? 0) > 0);
+
+      await ledgerA.closeAndSummarize({
+        workspaceId,
+        siteId,
+        buildRunId: newApiBuildRunId,
+        reason: 'run_succeeded',
+      });
+      await owner.siteBuildRun.update({
+        where: { id: newApiBuildRunId },
+        data: { status: 'succeeded', finishedAt: new Date() },
+      });
+      console.log(
+        `[r4-b-min] real new-api paid gateway smoke passed: ${spend.costBasis}, usage persisted`,
+      );
+    }
+
     await owner.siteBuildRun.create({
       data: {
         id: cancelledBuildRunId,
@@ -249,11 +341,17 @@ async function main(): Promise<void> {
       '[r4-b-min] real PostgreSQL verifier passed: RLS, concurrent reserve, ACK-unknown, replay, settle, budget/cancellation kill switches, v1 summary',
     );
   } finally {
-    await owner.site.deleteMany({ where: { id: siteId } }).catch(() => undefined);
+    await owner.site
+      .deleteMany({ where: { id: siteId } })
+      .catch(() => undefined);
     await owner.workspace
       .deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } })
       .catch(() => undefined);
-    await Promise.all([owner.$disconnect(), appA.$disconnect(), appB.$disconnect()]);
+    await Promise.all([
+      owner.$disconnect(),
+      appA.$disconnect(),
+      appB.$disconnect(),
+    ]);
   }
 }
 
