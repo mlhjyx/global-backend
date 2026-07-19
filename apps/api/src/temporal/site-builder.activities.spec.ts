@@ -312,6 +312,58 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
 });
 
 describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
+  it('R4-B: persists the stable terminal cost summary on the succeeded BuildRun', async () => {
+    spyBudget();
+    const costSummary = {
+      schemaVersion: 'site-builder-cost-summary/v1',
+      currency: 'USD',
+      unit: 'microusd',
+    };
+    const closeAndSummarize = vi.fn(async () => costSummary);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        update: vi.fn(async () => ({})),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+        })),
+      },
+    };
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: {
+        ensureBudget: vi.fn(async () => undefined),
+        closeAndSummarize,
+      } as never,
+    });
+
+    await acts.finalizeRefurbish({
+      ...INPUT,
+      kb: { processed: 1, failed: 0, degraded: false },
+      profile: { status: 'done', gaps: 0 },
+      build: { previewSlug: 'acme', versionId: 'v-1' },
+    });
+
+    expect(closeAndSummarize).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      reason: 'run_succeeded',
+    });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ costSummary }),
+      }),
+    );
+  });
+
   it('发布成功 → close(buildRunId, {force:true})', async () => {
     const { close } = spyBudget();
     const tx = {
@@ -1165,6 +1217,38 @@ describe('compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
     await acts.compensateRefurbish(INPUT);
     expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
+  it('R4-B: failed compensation closes paid calls and persists the same versioned summary', async () => {
+    spyBudget();
+    const { tx, runUpdate } = compensateTx({});
+    const costSummary = {
+      schemaVersion: 'site-builder-cost-summary/v1',
+      currency: 'USD',
+      unit: 'microusd',
+    };
+    const closeAndSummarize = vi.fn(async () => costSummary);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: {
+        ensureBudget: vi.fn(async () => undefined),
+        closeAndSummarize,
+      } as never,
+    });
+
+    await acts.compensateRefurbish(INPUT);
+
+    expect(closeAndSummarize).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      reason: 'run_failed',
+    });
+    expect(runUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ costSummary }),
+      }),
+    );
   });
 
   it('DB 补偿失败会传播，交给 Temporal 重试且绝不伪装成功', async () => {
