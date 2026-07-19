@@ -35,6 +35,92 @@ class BuildActionResponseDto {
   status!: string;
 }
 
+const COST_SUMMARY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion',
+    'currency',
+    'unit',
+    'budget',
+    'totals',
+    'usage',
+    'operations',
+  ],
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['site-builder-cost-summary/v1'],
+    },
+    currency: { type: 'string', enum: ['USD'] },
+    unit: { type: 'string', enum: ['microusd'] },
+    budget: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'capMicrousd',
+        'reservedMicrousd',
+        'chargedMicrousd',
+        'remainingMicrousd',
+        'paidCallsEnabled',
+        'disabledReason',
+        'exhaustedAt',
+      ],
+      properties: {
+        capMicrousd: { type: 'integer', minimum: 0 },
+        reservedMicrousd: { type: 'integer', minimum: 0 },
+        chargedMicrousd: { type: 'integer', minimum: 0 },
+        remainingMicrousd: { type: 'integer', minimum: 0 },
+        paidCallsEnabled: { type: 'boolean' },
+        disabledReason: { type: 'string', nullable: true },
+        exhaustedAt: {
+          type: 'string',
+          format: 'date-time',
+          nullable: true,
+        },
+      },
+    },
+    totals: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'reportedCostMicrousd',
+        'calculatedCostMicrousd',
+        'estimatedCostMicrousd',
+        'unknownOperations',
+      ],
+      properties: {
+        reportedCostMicrousd: { type: 'integer', minimum: 0 },
+        calculatedCostMicrousd: { type: 'integer', minimum: 0 },
+        estimatedCostMicrousd: { type: 'integer', minimum: 0 },
+        unknownOperations: { type: 'integer', minimum: 0 },
+      },
+    },
+    usage: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['inputTokens', 'outputTokens', 'modelCalls', 'toolCalls'],
+      properties: {
+        inputTokens: { type: 'integer', minimum: 0 },
+        outputTokens: { type: 'integer', minimum: 0 },
+        modelCalls: { type: 'integer', minimum: 0 },
+        toolCalls: { type: 'integer', minimum: 0 },
+      },
+    },
+    operations: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['succeeded', 'failed', 'unknown', 'released'],
+      properties: {
+        succeeded: { type: 'integer', minimum: 0 },
+        failed: { type: 'integer', minimum: 0 },
+        unknown: { type: 'integer', minimum: 0 },
+        released: { type: 'integer', minimum: 0 },
+      },
+    },
+  },
+} as const;
+
 class BuildStatusResponseDto {
   @ApiProperty({ format: 'uuid' })
   buildId!: string;
@@ -75,7 +161,10 @@ class BuildStatusResponseDto {
   })
   steps!: Array<Record<string, unknown>> | null;
 
-  @ApiProperty({ type: 'object', nullable: true, additionalProperties: true })
+  @ApiProperty({
+    ...COST_SUMMARY_SCHEMA,
+    nullable: true,
+  } as unknown as Parameters<typeof ApiProperty>[0])
   costSummary!: Record<string, unknown> | null;
 
   @ApiProperty({
