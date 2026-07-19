@@ -8,6 +8,7 @@ interface SchemaNode {
   additionalProperties?: boolean;
   required?: string[];
   enum?: string[];
+  allOf?: SchemaNode[];
   properties?: Record<string, SchemaNode>;
 }
 
@@ -24,13 +25,14 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
     expect(
       document.components.schemas.BuildStatusResponseDto.required,
     ).toContain('costSummary');
-    const summary =
+    const summaryProperty =
       document.components.schemas.BuildStatusResponseDto.properties!
         .costSummary;
+    expect(summaryProperty.nullable).toBe(true);
+    const summary = summaryProperty.allOf?.[0] ?? summaryProperty;
 
     expect(summary).toMatchObject({
       type: 'object',
-      nullable: true,
       additionalProperties: false,
       required: [
         'schemaVersion',
