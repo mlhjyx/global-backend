@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-CONTROL-000`
 > 层级：`L2 / Map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-TEAM-001`、`CAP-INTEG-001`、`CAP-SET-001`、`CAP-ADMIN-001`
 > 事实 Owner：`OWN-SAAS-PLATFORM`
 
@@ -73,5 +73,4 @@ Incident Open → Triaged → Mitigating → Monitoring → Resolved → Reviewe
 
 ## 8. Handoff
 
-本 Pack 达到 `MAP_COMPLETE / TARGET_EXTERNAL / NOT_DEV_READY`。进入任何实现前需关闭 `BLK-FE-001/003/005/006` 的适用部分，裁决身份/控制面正式仓库与 SoR、商业套餐、运营权限、集成/secret 模型和审计/隐私政策；具体 OSS/供应商选择进入 Phase 7。
-
+本 Pack 达到 `MAP_COMPLETE / TARGET_EXTERNAL / NOT_DEV_READY`。进入任何实现前需关闭 `BLK-FE-001/003/005/006` 的适用部分，裁决身份/控制面正式仓库与 SoR、商业套餐、运营权限、集成/secret 模型和审计/隐私政策；外部候选只按 [Phase 7 Registry](../../../backend/oss-registry.md) 的触发器重新评审，不由本 Pack 自动采用。

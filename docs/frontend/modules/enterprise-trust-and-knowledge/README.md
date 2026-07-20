@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-TRUTH-000`
 > 层级：`L2 / Map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-TRUTH-001`、`CAP-KNOW-001`、`CAP-SITE-PROFILE-001`、`CAP-SITE-ASSET-001`、`CAP-SITE-KB-001`、`CAP-SITE-CLAIM-001`
 > 事实 Owner：`OWN-PRODUCT`；对象 Owner：`OWN-TRUTH-BE` / `OWN-SITE-BE`
 

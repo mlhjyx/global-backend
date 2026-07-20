@@ -22,6 +22,7 @@
 | 当前主线与完成度 | [status/current.md](../status/current.md) | 只写本能力局部状态和核验点 |
 | 施工顺序 | [release-plan.md](../roadmap/release-plan.md) | 用 milestone ID 引用 |
 | 文档、能力、对象、场景、冲突和追踪 ID | [governance/](README.md) 对应登记表 | 形成读者视图，不再建平行清单 |
+| OSS/外部能力 Card、采用决定与状态 | [OSS / 外部能力注册表](../backend/oss-registry.md) | 分组 Card 解释边界；PRD/代码不得形成影子采用清单 |
 | API | `packages/contracts/openapi/openapi.json` | 使用 operationId/路径引用，不手抄总数作长期真值 |
 | Schema、RLS 和迁移 | Prisma schema 与已合并 migration | 文档解释业务含义，不复制可漂移结构 |
 | 测试、真机和发布证明 | 对应测试、evidence bundle、Release Bundle | 摘要结论并指向精确证据 |
@@ -118,6 +119,23 @@
 
 这些限定词只有同时列出具体多轴状态和 Blocker/Gap ID 才可使用。`DEC-FE-P5-010` 已在 Gate 5 获批；Site 继续使用 `SPEC_READY_WITH_BLOCKERS`。Phase 6 非 Site Pack 使用 `MAP_COMPLETE / NOT_DEV_READY` 时仍须保留各轴的 `NONE/PROTOTYPE/EXTERNAL_OWNED/UNKNOWN`，不能由地图完整推出可施工。
 
+### 6.2 外部能力采用状态
+
+采用决定不是产品/实现/质量状态的替代轴；它只说明平台当前如何处理一个外部候选：
+
+| 状态 | 精确定义 |
+|---|---|
+| `LEARN` | 吸收方法/交互/评测，不引入运行时、代码、数据库或素材 |
+| `BUILD` | 自建我方 Contract、Adapter、Policy、状态机或差异化实现 |
+| `ADAPT` | 经隔离 Spike/Fork/包装使用，必须可替换且有维护 Owner |
+| `INTEGRATE` | 通过我方 Adapter 使用外部运行时；不取得业务对象/身份/权限 SoR |
+| `BUY` | 经采购/隐私/安全/SLA/退出评审购买服务或授权 |
+| `AVOID` | 当前证据下禁止特定用途；证据或书面授权变化后才可重开 |
+| `DEFER` | 当前不安装；只有 Card 触发器出现后才重新研究 |
+| `*_HARDEN` | 已有代码或开发运行事实，但固定版本、生产安全/恢复/Owner/退出证据未完成 |
+
+精确准入门和组合在 [adoption policy](../platform/oss-adoption/adoption-policy.md)；`INTEGRATE`、宽松许可证或开发容器运行均不等于 `DEPLOYED/GA/APPROVED_FOR_PRODUCTION`。
+
 ## 7. 能力入口可见性
 
 | 状态 | 使用条件 | 用户表达 |
@@ -161,6 +179,17 @@ Fixture 必须使用合成企业、合成联系人和有明确使用权的资产
 | `OWN-QA-EVIDENCE` | QA/证据 Owner | `UNASSIGNED` | 场景、回归、E2E、真机和 Release evidence | 自行改写承诺 |
 | `OWN-OPS` | 运营/客服 Owner | `UNASSIGNED` | 人工兜底、诊断、SLA、指南和反馈闭环 | 越权读取数据 |
 | `OWN-SEC-COMMERCIAL` | 安全/合规/商业 Owner | `UNASSIGNED` | License、Secret、安全门、套餐、预算和高风险授权 | 替代产品/技术 Owner |
+| `OWN-PLATFORM` | 通用平台运行时 Owner | `UNASSIGNED` | 通用工作流、外部运行时、版本、SLO、升级和退出 | 产品范围与法务签字 |
+| `OWN-DATA-BE` | 数据平台/数据库 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | PostgreSQL、RLS、备份恢复、检索基础设施 | 业务对象产品定义 |
+| `OWN-AI-PLATFORM` | 模型与 AI 平台 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | ModelGateway、task routes、模型/embedding 运行边界 | 模型输出业务批准 |
+| `OWN-KB-BE` | 知识与检索后端 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | 文档解析、KB、RetrievalGateway 和评测 | 企业事实审批 |
+| `OWN-ACQUISITION-BE` | 采集平台 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | Crawl/robots/egress/采集 Provider | 目标站权利和业务用途批准 |
+| `OWN-DISCOVERY-BE` | 发现平台 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | 搜索/发现 Provider、限流和候选输出 | Company 事实最终认定 |
+| `OWN-SECURITY` | 工程安全 Owner | `UNASSIGNED` | threat model、供应链、网络/Secret/隔离验证 | 商业/产品批准 |
+| `OWN-GROWTH-PRODUCT` | 增长执行产品 Owner | `UNASSIGNED` | Campaign/Publish 用户结果与范围 | 渠道技术/条款验收 |
+| `OWN-CONVERSATION-PRODUCT` | 会话与商机产品 Owner | `UNASSIGNED` | Conversation/Opportunity 用户结果与对象边界 | 本仓 Buyer backend |
+| `OWN-CONTENT-PRODUCT` | 内容/媒体产品 Owner | `UNASSIGNED` | Content/Media 用户结果、资产用途和批准流 | 模型/渲染平台运行 |
+| `OWN-MEDIA-PLATFORM` | 媒体生成平台 Owner | `UNASSIGNED` | 媒体 Worker/Provider、GPU、渲染与退出 | 素材权利和内容批准 |
 
 未指派责任帽子不阻止 Registry 建立，但会阻止相应能力进入 Dev-Ready、发布或实际前端施工。
 

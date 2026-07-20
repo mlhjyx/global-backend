@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-SHELL-000`
 > 层级：`L2 / Map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-SHELL-001`、`CAP-ID-001`、`CAP-ONB-001`、`CAP-TODAY-001`
 > 事实 Owner：`OWN-SAAS-PLATFORM`
 
@@ -96,4 +96,3 @@
 ## 9. Handoff
 
 本 Pack 达到 `MAP_COMPLETE / NOT_DEV_READY`。进入实施前至少需要：正式前端 repo/Owner/CI/deploy、身份与 Workspace capability manifest、跨域 Task/Approval/Incident/Notification 读模型、对象深链合同、数据/隐私和 QA/Ops 实际责任人。
-

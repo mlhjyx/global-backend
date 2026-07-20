@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-BUYER-000`
 > 层级：`L2 / Frozen map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001`
 > 事实 Owner：`OWN-BUYER-BE`
 
@@ -89,4 +89,3 @@
 ## 9. Handoff
 
 本 Pack 达到 `FROZEN_MAP_ONLY / BACKEND_VERIFIED / FRONTEND_NONE`。恢复施工必须由产品负责人明确解除冻结，并重新核验当时 main、正式 SaaS repo/Owner、权限、数据权利、标准 Fixture、真实企业 UAT 和下游消费证据；Phase 6 不触发上述动作。
-

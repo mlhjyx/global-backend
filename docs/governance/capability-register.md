@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-PRODUCT`
-> 产品批准来源：Gate 2 推荐组合；全局前端来源：Gate 4；Site UX 来源：Gate 5；Phase 6 非 Site 产品域待 Gate 6（2026-07-20）
+> 产品批准来源：Gate 2 推荐组合；全局前端来源：Gate 4；Site UX 来源：Gate 5；非 Site 产品域来源：Gate 6（2026-07-20）；外部采用组合待 Gate 7
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
 本表是 Capability ID、用户结果和多轴状态的唯一登记。Phase 1 [能力状态矩阵](../roadmap/saas-frontend-phase-1/capability-status-matrix.md)保留审计时点，Phase 2 [页面与能力目录](../roadmap/saas-frontend-phase-2/page-and-capability-catalog.md)保留批准论证；后续前端规范和 Capability Pack 只能引用本表 ID。
@@ -41,7 +41,7 @@
 | `CAP-SITE-005` | 接收询盘并理解站点转化 / 独立站管理→互动 | `DEFERRED/PROPOSED` | `TARGET_SPECIFIED_NOT_RUNNABLE`；正式 FE `NONE` | receiver `NONE`；Inquiry 边界禁用 | `CONTRACT` 禁用边界 / `DISABLED` | `OWN-PRODUCT` | [Phase 5 target lane](../frontend/modules/independent-site-management/public-site-output-spec.md) |
 | `CAP-KNOW-001` | 跨 Site/Content/Campaign 治理企业知识与资料 | `APPROVED` 共享底座原则；全平台能力未建 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | Site KB 子集 `VERIFIED`；平台合同 `NONE` | Site 子集 `REAL_SERVICE / INTERNAL_ONLY` | `OWN-PRODUCT` | [Phase 6 企业事实](../frontend/modules/enterprise-trust-and-knowledge/README.md) |
 | `CAP-COMP-001` | 维护可解释的市场/竞品观察 | `PROPOSED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `NONE` | `UNTESTED / UNKNOWN` | `OWN-PRODUCT` | [Phase 6 客户开发](../frontend/modules/buyer-development/README.md) |
-| `CAP-INTEG-001` | 授权、诊断和退出外部连接 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 vault/OAuth/scope `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) + Phase 7 adoption |
+| `CAP-INTEG-001` | 授权、诊断和退出外部连接 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 vault/OAuth/scope `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) + [外部能力 Registry](../backend/oss-registry.md) |
 | `CAP-TEAM-001` | 管理成员、角色、审批和数据范围 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 Workspace policy `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |
 | `CAP-SET-001` | 管理个人、Workspace、安全、套餐和偏好 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / 旧 API 局部接入`；Phase 6 `MAP_COMPLETE` | 旧 Spring 与目标边界冲突 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |
 | `CAP-ADMIN-001` | 平台运营以最小权限管理租户和事故 | `UNKNOWN/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 旧 Spring 局部实现不构成目标 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |

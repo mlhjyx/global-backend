@@ -45,4 +45,4 @@
 
 Gate 3 已通过并授权 Phase 4。当前 Registry 固化的产品决定包括：B2B 制造/工贸/传统出口为首批客户，海外增长/外贸运营为默认操作者，六项一级 IA，共享 Company/Offering/Claim/Evidence/Asset 事实底座，以及止于可信开发预览的首个纵切。
 
-[全局前端规范](../frontend/README.md)和[设计资产治理](../design/README.md)已在 Gate 4 获批；[独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)已在 Gate 5 获批；[全 SaaS 产品域 Capability Pack](../frontend/modules/README.md)已形成 Gate 6 候选。正式 SaaS 前端仓库、设计事实源和相应 Owner 仍未指派，Workspace/allowed actions、Claim review、指标/隐私等合同继续阻塞实施。Phase 7–8 尚未授权。当前审查入口见 [Gate 6 评审包](../roadmap/saas-frontend-phase-6/gate-6-review.md)。
+[全局前端规范](../frontend/README.md)和[设计资产治理](../design/README.md)已在 Gate 4 获批；[独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)已在 Gate 5 获批；[全 SaaS 产品域 Capability Pack](../frontend/modules/README.md)已在 Gate 6 获批。Phase 7 已建立 [OSS / 外部能力注册表](../backend/oss-registry.md)与 31 项采用 Card，当前等待 Gate 7；它没有选择正式 SaaS 前端栈或授权依赖/部署。正式前端仓库、设计事实源和相应 Owner 仍未指派，Workspace/allowed actions、Claim review、指标/隐私等合同继续阻塞实施。Phase 8 尚未授权。当前审查入口见 [Gate 7 评审包](../roadmap/saas-frontend-phase-7/gate-7-review.md)。

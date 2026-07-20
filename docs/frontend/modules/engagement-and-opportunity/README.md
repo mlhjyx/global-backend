@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-ENGAGE-000`
 > 层级：`L2 / Map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-ENGAGE-001`、`CAP-OPP-001`
 > 事实 Owner：`OWN-SAAS-PLATFORM`
 
@@ -82,4 +82,3 @@ LeadQualifiedPackage / Reply / Site Inquiry
 ## 8. Handoff
 
 本 Pack 达到 `MAP_COMPLETE / TARGET_EXTERNAL / NOT_DEV_READY`。未来最小纵切应只选择一个真实入站来源，完成“接收→去重/关联→分派→Opportunity candidate→人工资格→Outcome”闭环；在正式合同和隐私门出现前不制作可执行页面或引入第三方消息系统。
-

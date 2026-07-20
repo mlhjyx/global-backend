@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-MODULES-000`
 > 层级：`L2 / Product capability index`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > 事实 Owner：`OWN-PRODUCT`
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
@@ -61,4 +61,3 @@ Phase 6 的“完整”只指：六项一级 IA、企业事实横切域和管理
 - 冻结的客户开发恢复施工；
 - Phase 7 的 OSS 候选已经采用；
 - 任一模块已有真实用户、E2E、部署或 Release Bundle。
-

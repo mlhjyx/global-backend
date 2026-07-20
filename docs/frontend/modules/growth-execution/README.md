@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-GROWTH-000`
 > 层级：`L2 / Map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001`
 > 事实 Owner：`OWN-SAAS-PLATFORM`
 
@@ -89,9 +89,8 @@ Goal
 
 方向指标：从批准 Goal 到首个可核验回执时间、授权前差异发现率、有效回执率、局部失败恢复率、内容 Claim 覆盖、每 Outcome 成本。反指标：发布次数、内容数量、自动化率、无回复触达量、重复发送、投诉/退订、未授权动作、Mock impressions。
 
-已知限制：正式 SoR/repo/Owner、商业套餐、渠道政策、credential vault、suppression 执行接缝、Approval/Authorization、事件/指标/隐私均未关闭。任何具体渠道或 OSS 采用属于 Phase 7，不由本 Pack 决定。
+已知限制：正式 SoR/repo/Owner、商业套餐、渠道政策、credential vault、suppression 执行接缝、Approval/Authorization、事件/指标/隐私均未关闭。任何具体渠道或 OSS 只按 [Phase 7 Registry](../../../backend/oss-registry.md) 保持 `LEARN/DEFER` 并在产品纵切获批后重开，不由本 Pack 自动采用。
 
 ## 8. Handoff
 
 本 Pack 达到 `MAP_COMPLETE / TARGET_EXTERNAL / NOT_DEV_READY`。若未来进入路线图，应先批准最小闭环和渠道（建议单一可控渠道），完成对象/状态/授权/回执合同，再形成独立 Dev-Ready Capability Pack；不得从 Mock 页面直接拆开发任务。
-

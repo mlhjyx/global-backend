@@ -1,7 +1,7 @@
 # 跨域接缝、下一动作与缺口登记
 
 > 文档 ID：`BASE-FE-P6-002`
-> 状态：`READY_FOR_GATE_6_REVIEW`
+> 状态：`FROZEN_EVIDENCE / APPROVED_AT_GATE_6`
 > Owner：`OWN-PRODUCT`；机器合同分别由对象/平台 Owner 负责
 
 ## 1. 接缝原则
@@ -65,4 +65,3 @@ Metric rendered != metric trustworthy
 - `GAP-FE-P6-005` 属冻结 Buyer 的外部消费闭环；保持地图和现有交付稳定，不恢复新增开发。
 - `GAP-FE-P6-006..009` 不进入 Site 当前纵切；未来必须各自选择最小端到端结果。
 - `GAP-FE-P6-011/012` 分别留给 Phase 7/8，不在 Phase 6 偷跑。
-

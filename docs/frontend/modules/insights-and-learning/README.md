@@ -2,8 +2,8 @@
 
 > 文档 ID：`FE-P6-INSIGHT-000`
 > 层级：`L2 / Map-complete capability pack`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_6_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_6`
 > Capability：`CAP-INSIGHT-001`
 > 事实 Owner：`OWN-SAAS-PLATFORM`
 
@@ -61,4 +61,3 @@
 ## 7. Handoff
 
 本 Pack 达到 `MAP_COMPLETE / TARGET_EXTERNAL / NOT_DEV_READY`。后续先建 metric registry、事件/读模型 ownership、隐私与数据质量门，再从一个可下钻的真实结果漏斗起步；不得以现有 Mock 图表反向定义数据模型。
-

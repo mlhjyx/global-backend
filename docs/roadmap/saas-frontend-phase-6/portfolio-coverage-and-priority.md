@@ -1,7 +1,7 @@
 # 全 SaaS 产品组合覆盖与优先级
 
 > 文档 ID：`BASE-FE-P6-001`
-> 状态：`READY_FOR_GATE_6_REVIEW`
+> 状态：`FROZEN_EVIDENCE / APPROVED_AT_GATE_6`
 > Owner：`OWN-PRODUCT`
 > 目的：证明完整产品没有失踪能力，同时不让地图自动变成当前 roadmap
 

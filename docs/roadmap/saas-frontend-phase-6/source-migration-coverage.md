@@ -1,7 +1,7 @@
 # 历史 Word、原型、竞品与代码来源迁移覆盖
 
 > 文档 ID：`BASE-FE-P6-003`
-> 状态：`READY_FOR_GATE_6_REVIEW`
+> 状态：`FROZEN_EVIDENCE / APPROVED_AT_GATE_6`
 > Owner：`OWN-DOC-GOV`
 > 原则：迁移表示“内容有正式去向”，不表示原文件被采用、替代、移动或删除
 
@@ -61,4 +61,3 @@
 - 正式用户/管理员/运营 Tutorial/How-to：等待真实 UI、Owner 和可执行场景，不在地图阶段伪写操作步骤。
 - 历史文件 banner/archive、自动链接/状态/证据检查、Release Bundle 模板和阅读路线测试：Phase 8。
 - 实际前端、设计系统、Fixture、E2E、部署和发布：需单独实现授权，不属于 Phase 6–8 文档授权的自动结果。
-
