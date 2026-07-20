@@ -13,6 +13,7 @@
 | 文件 | 作用 | 当前状态 |
 |---|---|---|
 | [source-register.md](source-register.md) | 全量来源、版本、权威性、读取状态和去向 | `COMPLETE_FOR_GATE_1` |
+| [source-detail-register.md](source-detail-register.md) | 67 份基线 Markdown 的逐文件稳定 ID、范围、冲突与迁移去向 | `COMPLETE_FOR_GATE_1` |
 | [implementation-evidence-matrix.md](implementation-evidence-matrix.md) | 代码、契约、数据、工作流、测试和运行证据 | `COMPLETE_FOR_GATE_1` |
 | [capability-status-matrix.md](capability-status-matrix.md) | 产品、UX、前端、API、运行和发布的多轴状态 | `COMPLETE_FOR_GATE_1` |
 | [conflict-register.md](conflict-register.md) | 事实冲突、影响、证据和待裁决事项 | `COMPLETE_FOR_GATE_1` |
@@ -20,6 +21,7 @@
 | [worktree-provenance.md](worktree-provenance.md) | main、分支、legacy/dirty worktree 的事实隔离 | `COMPLETE_FOR_GATE_1` |
 | [external-benchmark-and-oss-audit.md](external-benchmark-and-oss-audit.md) | GoodJob、工作方法、官方 OSS 证据与采用前硬门 | `COMPLETE_FOR_GATE_1` |
 | [open-decisions-and-risks.md](open-decisions-and-risks.md) | 缺失输入、风险、选项和拍板人 | `COMPLETE_FOR_GATE_1` |
+| [audit-coverage-and-limitations.md](audit-coverage-and-limitations.md) | 读取/运行覆盖率、未执行项、审计边界与 Gate 条款追踪 | `COMPLETE_FOR_GATE_1` |
 | [gate-1-review.md](gate-1-review.md) | Gate 1 退出条件、结论、证据和后续授权请求 | `READY_FOR_REVIEW` |
 
 ## 状态语言

@@ -2,6 +2,7 @@
 
 > 文档 ID：AUD-FE-P1-008
 > 状态：`COMPLETE_FOR_GATE_1`
+> 事实基线：`main@c3f0cca80e228f08f35c89776f759748dac78ce2`；#157 后续合并只改变 R1-min 技术 delta，不替产品负责人决定发布范围、SaaS UX 或商业承诺
 > 原则：Phase 1 提供证据、选项和建议，不替产品负责人静默决定导航、商业规则、数据权利、OSS、设计工具或跨仓 ownership
 
 ## 1. 需要产品负责人拍板的承重决策

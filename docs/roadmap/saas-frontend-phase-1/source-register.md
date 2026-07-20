@@ -14,16 +14,16 @@
 
 | 来源面 | 当前发现 | 权威性 | 读取状态 | 备注 |
 |---|---:|---|---|---|
-| Git 基线 Markdown | 66 份 / 13,758 行 | 混合 | `FULL_READ` | 逐文件 manifest 见 §4；不含本阶段新增的计划和 Gate 1 产物 |
+| Git 基线 Markdown | 67 份 / 13,810 行 | 混合 | `FULL_READ` | 逐来源字段见 [source-detail-register.md](source-detail-register.md)；不含本阶段新增产物 |
 | 仓内 Word | 5 份 | 历史/待批准输入 | `FULL_READ` | 已完成正文、表格、SHA-256、附注、链接和媒体清点 |
-| 主工作区 HTML | 1 份 / 412 行 | 用户本地输入 | `FULL_READ` | `/global/backend/docs/agile-iteration-flowchart.html`，未跟踪；只读，不修改 |
+| 主工作区 HTML | 1 份 / 412 行 | 用户本地输入 | `FULL_READ` | `/global/backend/docs/agile-iteration-flowchart.html`；SHA-256 `690db875…`；未跟踪，只读不修改 |
 | 模型路由 JSON 证据 | 92 份 | 机器证据/历史诊断混合 | `MACHINE_INVENTORIED` | 必须按 evidence bundle 的 active/historical 语义读取，不能把全部 JSON 都当当前成功证据 |
 | 基线 main 代码、契约、迁移、测试、verify 脚本 | 逐链路登记 | 实现事实 | `CODE_VERIFIED` | 见 `implementation-evidence-matrix.md`；只认基线 main，不以历史 worktree 代替 |
 | SaaS 前端目录 `/global/frontend` | 149 个文件 | 无版本 provenance 的本地实现/原型 | `FULL_READ+CODE_VERIFIED` | 排除 `node_modules` 和 Maven `target`；目录自身及三个子项目均无 Git 元数据 |
 | 主工作区 `template/` | 10 个 Vite 项目目录 | 用户本地设计/代码输入 | `MACHINE_INVENTORIED+SAMPLED_FULL_READ` | 未跟踪用户资产，只读；不得整理、移动或删除 |
 | Git worktree/分支/任务记忆 | 41 个 Git worktree 登记项 | provenance | `CODE_VERIFIED` | 见 `worktree-provenance.md`；含项目内、legacy、工具托管和 4 个已失联 Mac 路径 |
 | GoodJob | Gitee 精确快照 | 外部竞品/工作方式输入 | `FULL_READ+RUNTIME_VERIFIED` | 快照 `5732e209…`；Gitee 刷新受认证阻挡，不能断言远端最新 |
-| 其他竞品/OSS/官方资料 | 按候选组登记 | 外部输入 | `REGISTERED_AND_SCOPED` | 已核验项与待深审项见 `external-benchmark-and-oss-audit.md`；待深审项不得视为选型 |
+| 其他竞品/OSS/官方资料 | 20 个 OSS + 方法/产品官方页 | 外部输入 | `OFFICIAL_SNAPSHOT_REVIEWED` / `rolling-doc@2026-07-20` | 精确 commit、根 License、本地关系与仍需深审项见 `external-benchmark-and-oss-audit.md`；不得视为选型 |
 
 ## 3. Word 结构与完整性登记
 
@@ -41,7 +41,7 @@ OOXML 全程在本机只读解析；没有上传到外部服务。`Pages/Words` 
 
 ## 4. Git 基线 Markdown manifest
 
-以下 66 份文件均已全文读取。它们按“权威/活文档/研究/历史/证据/模板”分别解释，不因为 `FULL_READ` 自动成为同级真值。
+以下 67 份文件均已全文读取。它们按“权威/活文档/研究/历史/证据/模板”分别解释，不因为 `FULL_READ` 自动成为同级真值。稳定 ID、权威层、范围、冲突和迁移去向逐项见 [逐来源明细登记](source-detail-register.md)。
 
 ```text
 .codex/README.md
@@ -122,7 +122,7 @@ packages/contracts/events/WEBHOOK.md
 
 ## 8. 外部来源登记
 
-GoodJob 的精确快照、测试结果、可吸收方法，以及 Diátaxis、Backstage TechDocs、Storybook、Playwright、Astro、Puck、Readdy、Temporal、OPA、Langfuse、Activepieces、Chatwoot、Docling、Crawl4AI、Remotion 的官方资料，均登记在 `external-benchmark-and-oss-audit.md`。Word 中其余 OSS 名称已进入待官方深审队列，未冒充已选型。
+GoodJob 的精确快照、测试结果、可吸收方法，以及 Diátaxis、Backstage TechDocs、Storybook、Playwright、Astro、Puck、Readdy、Temporal、OPA、Langfuse、Activepieces、Chatwoot、Docling、Crawl4AI、Remotion 的官方资料，均登记在 `external-benchmark-and-oss-audit.md`。Word/研究中的其余十项 OSS 也已完成“上游 HEAD + 根许可证 + 本地关系”初审；这仍不是采用批准或法律意见。
 
 ## 9. 不能据当前登记推出的结论
 

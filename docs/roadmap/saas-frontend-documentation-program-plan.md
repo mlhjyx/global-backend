@@ -3,6 +3,7 @@
 > 文档 ID：PLAN-FE-DOC-001
 > 版本：v0.4-gate-1
 > 状态：`PHASE_1_READY_FOR_GATE_1_REVIEW`
+> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.4 仅吸收用户随后明确同意的工作方式并回写 Phase 1 审计事实，不扩张第 2–8 阶段授权
 > 计划批准：2026-07-20（含产品工作方式、Capability Pack、设计资产、场景库和发布学习闭环增补）
 > 执行授权：`PHASE_1_GRANTED`——仅“来源与实现审计”获准执行；第 2–8 阶段、正式前端文档施工和产品代码实现仍未获授权
 > 基线提交：`c3f0cca80e228f08f35c89776f759748dac78ce2`

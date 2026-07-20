@@ -2,6 +2,7 @@
 
 > 文档 ID：AUD-FE-P1-004
 > 状态：`COMPLETE_FOR_GATE_1`
+> 审计基线：`main@c3f0cca80e228f08f35c89776f759748dac78ce2`；后续远端变化单独登记，不回写为同一时点事实
 > 原则：这里只登记冲突与影响，不在 Phase 1 静默拍板产品、导航、技术栈或 ownership
 
 | 冲突 ID | 主题 | 证据 A | 证据 B | 当前裁决/影响 | 后续动作 |
@@ -29,6 +30,7 @@
 | `CON-FE-021` | 活文档的混合时间 | `status/current`、主线摘要已更新到 M1-d/R4-A2/R4-B | 05/07/08/13/14 及 v3.2 部分段落仍保留“待实现/未落地/目标”旧状态 | 新人逐篇阅读会得到互相矛盾的当前状态 | Phase 3 建 doc register/last_verified_commit；truth-sync 只改事实 owner，不复制状态 |
 | `CON-FE-022` | 模板来源与使用权 | 本地 `template/` 和 SaaS 原型含大量 Readdy 生成痕迹，页面可运行 | 没有逐资产来源、账号条款版本、License、Owner 和允许用途记录；官方条款限制某些反向工程/竞争性 AI 用途 | 不能直接做训练集、RAG、组件蒸馏或商用模板库 | 全部标 `VISUAL_REFERENCE_ONLY`；法务/权利评审后按资产逐项放行 |
 | `CON-FE-023` | 历史分支是否等于当前实现 | R1-min-release、template-distillation、R4-A2 等 worktree 含独有提交/改动 | main 只包含已经合入的精确提交；部分 legacy worktree 还很脏 | 分支存在不能升级能力状态，也不能仅靠 ancestor 关系判断遗漏 | 以 `worktree-provenance.md` 为审计入口；合并/清理由各自任务与授权处理 |
+| `CON-FE-024` | 冻结审计基线与实时 main | 本矩阵、测试和前 23 条冲突固定在 `c3f0cca` | 审计期间 #157 于 2026-07-20 合并，`origin/main` 变为 `676c6cd`，包含 R1-min | 不能把 #157 元数据直接混成已在本 worktree 重跑的 as-built 证据；也不能继续把它描述为开放 PR | 保留冻结矩阵，新增 post-baseline delta；Phase 2 从最新 main 建基线并专项 truth-sync |
 
 ## 已知开放项而非事实冲突
 
