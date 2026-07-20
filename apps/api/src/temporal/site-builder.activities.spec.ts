@@ -375,6 +375,62 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
 });
 
 describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
+  it('R1 promotes a READY Release with the DB pointer only and never calls the local symlink seam', async () => {
+    const { close } = spyBudget();
+    const releaseUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        updateMany: siteUpdateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: 'release:release-1',
+        })),
+      },
+      siteRelease: { updateMany: releaseUpdateMany },
+    };
+    const promotePreview = vi.fn();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      promotePreview,
+    });
+
+    await expect(
+      acts.finalizeRefurbish({
+        ...INPUT,
+        progressV1: true,
+        kb: { processed: 0, failed: 0, degraded: false },
+        profile: { status: 'done', gaps: 0 },
+        build: { previewSlug: 'acme', versionId: 'version-1' },
+      }),
+    ).resolves.toEqual({ previewSlug: 'acme' });
+
+    expect(siteUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'site-1',
+        OR: [{ activeVersionId: null }, { activeVersionId: 'version-1' }],
+      },
+      data: { activeVersionId: 'version-1', status: 'ready' },
+    });
+    expect(releaseUpdateMany).toHaveBeenCalledWith({
+      where: {
+        siteVersionId: 'version-1',
+        siteId: 'site-1',
+        status: 'ready',
+      },
+      data: { lastActivatedAt: expect.any(Date) },
+    });
+    expect(promotePreview).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
   it('R4-B: persists the stable terminal cost summary on the succeeded BuildRun', async () => {
     spyBudget();
     const costSummary = {
@@ -1017,6 +1073,78 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
       await expect(
         readFile(path.join(root, '.staging', 'run-1', 'index.html')),
       ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('R1 assembles into a durable Release instead of succeeding a local artifact', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-release-assemble-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          name: 'Acme',
+          slug: 'acme',
+          intake: INTAKE,
+          stylePreset: 'modern-industrial',
+          activeVersionId: null,
+        })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => null),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        aggregate: vi.fn(async () => ({ _max: { version: null } })),
+        create: vi.fn(async () => ({ id: 'version-1' })),
+        updateMany: versionUpdateMany,
+      },
+    };
+    const renderSiteSpec = vi.fn(
+      async (_spec: unknown, output: { outDir: string }) => {
+        await writeFile(path.join(output.outDir, 'index.html'), 'candidate');
+      },
+    );
+    const materialize = vi.fn(async () => ({
+      releaseId: 'release-1',
+      artifactKey: 'release:release-1',
+      artifactPrefix: 'sites/site-1/releases/release-1',
+      artifactDigest: 'a'.repeat(64),
+      manifestDigest: 'b'.repeat(64),
+      producerToken: 'producer-1',
+    }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      renderSiteSpec,
+      releaseService: { materialize } as never,
+    });
+    try {
+      await expect(
+        acts.assembleAndBuild({ ...INPUT, progressV1: true }),
+      ).resolves.toEqual({ previewSlug: 'acme', versionId: 'version-1' });
+      expect(materialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: 'ws-1',
+          siteId: 'site-1',
+          siteVersionId: 'version-1',
+          buildRunId: 'run-1',
+          storedSpecVersion: '1.0.0',
+          root: path.join(root, '.staging', 'run-1'),
+        }),
+      );
+      expect(versionUpdateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            artifactKey: expect.stringMatching(/^local:/),
+          }),
+        }),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
