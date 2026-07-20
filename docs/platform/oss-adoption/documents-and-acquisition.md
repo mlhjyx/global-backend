@@ -1,7 +1,7 @@
 # 文档与采集候选 Capability Cards
 
 > 文档 ID：`OSS-FE-006`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > 边界：技术可抓取/解析不等于数据有权使用；Source Policy、robots/ToS、个人数据和保留规则继续独立生效
 
 ## `ADP-FE-018` Docling

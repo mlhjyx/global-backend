@@ -1,7 +1,7 @@
 # 文档与质量方法 Capability Cards
 
 > 文档 ID：`OSS-FE-008`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > 边界：方法采用不等于部署平台；工具存在不等于质量证据通过
 
 ## `ADP-FE-027` Diátaxis

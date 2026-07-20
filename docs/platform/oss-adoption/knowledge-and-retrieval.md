@@ -1,7 +1,7 @@
 # 知识与检索候选 Capability Cards
 
 > 文档 ID：`OSS-FE-005`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > 当前基线：PostgreSQL + pgvector + Docling + BGE-M3；共享企业事实不迁入候选图数据库
 
 ## `ADP-FE-015` Cognee

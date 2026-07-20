@@ -1,7 +1,7 @@
 # 官方来源与本地运行快照
 
 > 文档 ID：`OSS-FE-009`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_7`
 > 核验日期：2026-07-20
 > Owner：`OWN-SEC-COMMERCIAL`、`OWN-PLATFORM`
 

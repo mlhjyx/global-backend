@@ -21,6 +21,7 @@
 7. [统一 SaaS 前端规范](frontend/README.md)：Gate 4 已批准的 IA、Shell、权限、状态、AI、设计和交付目标规则。
 8. [全 SaaS Capability Pack](frontend/modules/README.md)：Gate 6 已批准的完整产品域入口；独立站管理保持 Gate 5 深度，其他域保持地图级诚实状态。
 9. [OSS / 外部能力注册表](backend/oss-registry.md)：31 项候选的采用决定、许可边界、Adapter/SoR、Owner 与退出路径。
+10. [防漂移与 Release 治理](governance/docs-verification.md)：机器门、历史例外、真实发布包和学习回写。
 
 任何“已完成”声明都必须回到上述主题 Owner、机器契约和证据核验。不要从旧 Word、研究稿、本地原型或历史 worktree 推导当前实现。
 
@@ -33,7 +34,7 @@
 - [核心对象登记](governance/core-object-register.md)
 - [冲突登记](governance/conflict-register.md)
 - [统一 SaaS 文档治理计划](roadmap/saas-frontend-documentation-program-plan.md)
-- 当前 Gate：[Phase 7 评审](roadmap/saas-frontend-phase-7/gate-7-review.md)
+- 当前 Gate：[Phase 8 评审](roadmap/saas-frontend-phase-8/gate-8-review.md)
 
 ### 产品设计与前端
 
@@ -72,6 +73,8 @@
 - [Temporal 测试记录](implementation-records/temporal-workflow-testing.md)
 - [独立站管理运营与验收](frontend/modules/independent-site-management/operations-and-acceptance.md)
 - [模型路由 active evidence](evidence/model-routing/model1-brand-profile-20260719-v20/README.md)
+- [角色阅读任务与独立验收状态](roadmap/saas-frontend-phase-8/reading-route-acceptance.md)
+- [Release Bundle 与学习治理](governance/release-and-learning-governance.md)
 
 ### 运营、客服与管理员
 
@@ -82,6 +85,7 @@
 - [场景中的失败恢复与人工兜底](governance/scenario-catalog.md)
 - [Compose 项目迁移 runbook](backend/compose-project-migration.md)
 - [Worktree 管理 runbook](backend/worktree-management.md)
+- [Release Bundle 索引](releases/README.md)
 
 面向终端用户、管理员和运营的正式 Guide 将在相应 Capability 达到后续 Gate 时建设；当前工程文档不能替代用户指南。
 
@@ -127,7 +131,7 @@
 |---|---|---|
 | Normative/权威 | 当前生效的边界、架构、决策、状态和规范 | 本页 §1 |
 | Registry/Contract | ID、状态、Owner、关系和机器合同 | [governance/](governance/README.md)、`packages/contracts/` |
-| Evidence | 审计、实现、测试、真机和发布证明 | `docs/evidence/`、`implementation-records/`、Phase 1 |
+| Evidence | 审计、实现、测试、真机和发布证明 | `docs/evidence/`、`implementation-records/`、`docs/releases/`、冻结 Phase 包 |
 | Guide | 面向某类用户完成任务 | `docs/backend/`、后续 Capability Guide |
 | History/Input | Word、研究、dated proposal、原型和冻结 Gate 包 | [文档登记](governance/document-register.md) |
 
@@ -152,7 +156,7 @@ Phase 1/2 的 roadmap 包是冻结审计与决策 provenance，不是第二套 c
 - Gate 4：通过，`DEC-FE-P4-001..011` 已批准，`BLK-FE-001..007` 保留。
 - Phase 5：已通过 Gate 5；当前纵切仍 `SPEC_READY_WITH_BLOCKERS`，后置链仍 `TARGET_NOT_RUNNABLE`。
 - Phase 6：已通过 Gate 6；非 Site 域仍 `MAP_COMPLETE / NOT_DEV_READY`，客户开发仍 `FROZEN_MAP_ONLY`。
-- Phase 7：已获授权并完成 31 项采用 Card、全量 Registry、触发器和退出基线，当前准备 Gate 7 评审。
-- Phase 8：未授权；任何 OSS/外部能力实现也未因 Phase 7 文档获授权。
+- Phase 7：已通过 Gate 7；31 项 Card 当前决定获批，八项现用能力仍仅为 `INTEGRATE / *_HARDEN`，全部逐项准入门保留。
+- Phase 8：已获授权并形成机器校验、历史处置、角色任务、Release Bundle/学习治理与 Gate 8 评审包；产品/OSS 实现仍未授权。
 
-进入下一阶段前请从 [Gate 7 评审包](roadmap/saas-frontend-phase-7/gate-7-review.md)检查 12 项推荐决定、31 项 Card、8 项现用硬化范围、重开触发器和未关闭许可/安全/Owner/退出门。
+当前从 [Gate 8 评审包](roadmap/saas-frontend-phase-8/gate-8-review.md)检查 12 项推荐治理决定、机器结果、独立人工未运行、零真实 Release Bundle 和所有保留 blocker/gap。Gate 8 不授权产品实现、历史移动、push、PR 或合并。

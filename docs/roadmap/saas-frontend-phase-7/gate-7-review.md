@@ -1,10 +1,10 @@
 # Gate 7 评审包
 
 > 文档 ID：`GATE-FE-P7-001`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_7`
 > 授权：Gate 6 于 2026-07-20 通过，`DEC-FE-P6-001..012` 已批准，`BLK-FE-001..007` 与 `GAP-FE-P6-001..012` 保留
 > 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
-> 当前授权终点：Gate 7；未获批准不得进入 Phase 8 或任何采用实现
+> 批准结果：产品负责人于 2026-07-20 采用 §7 推荐语句通过 Gate 7，只授权 Phase 8 文档治理
 
 ## 1. 评审结论
 
@@ -89,4 +89,4 @@ Phase 7 已把 Word、GoodJob、Phase 1 外部研究、本地代码/依赖和 Ub
 
 `Gate 7 通过，按 DEC-FE-P7-001..012 批准 OSS/外部能力采用组合、准入门、Adapter/SoR 边界与退出计划；接受 ADP-FE-001..031 的当前决定，接受 8 项现用能力仅为 INTEGRATE / *_HARDEN、其余候选按触发条件保持 ADAPT/LEARN/DEFER/AVOID，并在保留 BLK-FE-001..007、GAP-FE-P6-001..012 与全部未关闭许可、安全、Owner、生产和退出门的前提下授权 Phase 8。`
 
-收到明确批准前，当前任务停止在 Gate 7，不进入 Phase 8。
+批准原文与 §7 推荐语句一致。该包自此冻结为 Gate provenance；Phase 8 见[防漂移与收口](../saas-frontend-phase-8/README.md)，任何采用实现仍需另行授权。

@@ -3,10 +3,10 @@
 > 文档 ID：`FE-GLOBAL-014`
 > 层级：`L2 / Decision record`
 > 生命周期：`CURRENT`
-> 评审状态：`CURRENT / GATE_4_TO_6_APPROVED / GATE_7_REVIEW`
+> 评审状态：`CURRENT` / `APPROVED_AT_GATE_7` / `READY_FOR_GATE_8_REVIEW`
 > Decision Owner：`OWN-PRODUCT`
 
-本文件记录 Gate 4 已批准的全局模式、Gate 5 已批准的 Site 两 lane、Gate 6 已批准的完整产品域地图、仍需外部输入的 blocker，以及后续技术/工具开放项。产品负责人于 2026-07-20 先后批准 `DEC-FE-P4-001..011`、`DEC-FE-P5-001..010` 与 `DEC-FE-P6-001..012`；这些批准不关闭 `BLK-FE-001..007`，也不构成实现或工具选择。
+本文件记录 Gate 4 已批准的全局模式、Gate 5 已批准的 Site 两 lane、Gate 6 已批准的完整产品域地图、Gate 7 已批准的采用组合、仍需外部输入的 blocker，以及后续技术/工具开放项。产品负责人于 2026-07-20 先后批准 `DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012` 与 `DEC-FE-P7-001..012`；这些批准不关闭 `BLK-FE-001..007`，也不构成实现、工具选择或生产准入。
 
 ## 1. Gate 4 已批准的全局决定
 
@@ -38,13 +38,14 @@
 
 Gate 4 已在公开披露这些 blocker 的情况下批准全局规则；Phase 5 和 Phase 6 继续保留全部 blocker。进入实际前端施工、视觉定稿或用户可用声明前，相关 blocker 必须关闭。
 
-## 3. Gate 5–6 已批准与 Phase 7 当前候选
+## 3. Gate 5–7 已批准与 Phase 8 治理状态
 
 - Gate 5 已批准 `DEC-FE-P5-001..010`；精确状态、两 lane 与非含义见[批准证据](../roadmap/saas-frontend-phase-5/gate-5-review.md)。
 - Phase 6 已补齐[全 SaaS 产品域 Pack](modules/README.md)，但非 Site 域保持 `MAP_COMPLETE / NOT_DEV_READY`，客户开发保持 `FROZEN_MAP_ONLY`。
 - Phase 6 暴露的十二项跨域输入见 [`GAP-FE-P6-001..012`](../roadmap/saas-frontend-phase-6/cross-domain-handoffs-and-gaps.md)；它们不替代或关闭 `BLK-FE-001..007`。
 - Gate 6 已按 `DEC-FE-P6-001..012` 批准上述 Pack、接缝和优先级，并授权 Phase 7；批准记录见 [Gate 6](../roadmap/saas-frontend-phase-6/gate-6-review.md)。
-- Phase 7 已形成 `ADP-FE-001..031` 采用 Card 和 `DEC-FE-P7-001..012` 推荐组合，当前只进入 [Gate 7 评审](../roadmap/saas-frontend-phase-7/gate-7-review.md)，不构成工具或运行时采用。
+- Gate 7 已批准 `ADP-FE-001..031` 当前决定和 `DEC-FE-P7-001..012` 组合；八项现用能力仍仅为 `INTEGRATE / *_HARDEN`，其余按触发器保持 `ADAPT/LEARN/DEFER/AVOID`，不构成实现或生产准入。
+- Phase 8 已建立文档校验、历史处置建议、角色任务和 Release/学习治理；独立人工验收仍未运行，当前没有真实 Release Bundle。
 
 ## 4. 后续技术/工具决策，不因 Gate 4–7 自动拍板
 
@@ -61,16 +62,16 @@ Gate 4 已在公开披露这些 blocker 的情况下批准全局规则；Phase 5
 | `OPEN-FE-SUPPORT-001` | support impersonation/managed service policy | security/privacy/audit/SLA | Operations 实施前 |
 | `OPEN-FE-SITE-001` | Publish/Domain/Inquiry 等后置对象/合同 | Product PDR/ADR、infra、privacy、SoR | 各能力 Gate |
 
-## 5. Gate 4–6 已执行与 Phase 7 候选状态
+## 5. Gate 4–7 已执行与 Phase 8 状态
 
 - `docs/frontend/` 与 Gate 4 书面设计规范已升级为当前目标规范；
 - Phase 3 Registry 把上述 Decision 标为 `APPROVED_AT_GATE_4`，并保留 blocker；
 - Phase 5 已建立[独立站管理 Capability Pack](modules/independent-site-management/README.md)，但没有修改产品代码或开始前端施工；
 - Gate 6 产品域 Pack 已升级为当前地图规范；非 Site 域仍 `MAP_COMPLETE / NOT_DEV_READY`，客户开发仍 `FROZEN_MAP_ONLY`；
-- Phase 7 只形成采用 Registry/Card/触发器，没有选择工具、关闭 Owner/合同缺口、安装依赖或扩大 Site 用户承诺；Phase 8 尚未授权。
+- Gate 7 只批准采用 Registry/Card/触发器，没有选择工具、关闭 Owner/合同缺口、安装依赖或扩大 Site 用户承诺；Phase 8 只获授权完成文档治理。
 
 ## 6. 批准记录与当前 Gate
 
 `Gate 4 通过，按 DEC-FE-P4-001..011 批准全局前端规范，并在保留 BLK-FE-001..007 的前提下授权 Phase 5。`
 
-该语句已由产品负责人确认；Gate 5 与 Gate 6 也已按各自推荐语句通过。当前 Gate 请求见 [Gate 7 评审包](../roadmap/saas-frontend-phase-7/gate-7-review.md)。
+该语句已由产品负责人确认；Gate 5、Gate 6 与 Gate 7 也已按各自推荐语句通过。当前 Gate 请求见 [Gate 8 评审包](../roadmap/saas-frontend-phase-8/gate-8-review.md)。

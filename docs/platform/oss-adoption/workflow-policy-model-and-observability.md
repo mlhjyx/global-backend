@@ -1,7 +1,7 @@
 # 工作流、策略、模型与观测候选 Capability Cards
 
 > 文档 ID：`OSS-FE-007`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > 边界：业务状态在我方 Postgres；策略、工作流、网关和观测后端都不得成为产品主真值
 
 ## `ADP-FE-022` Temporal

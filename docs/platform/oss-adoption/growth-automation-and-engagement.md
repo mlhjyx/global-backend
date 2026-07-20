@@ -1,7 +1,7 @@
 # 增长、自动化与互动候选 Capability Cards
 
 > 文档 ID：`OSS-FE-003`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > 产品状态前提：Growth/Engagement 均为 `TARGET_EXTERNAL / NOT_DEV_READY`
 
 ## `ADP-FE-009` AiToEarn

@@ -1,7 +1,7 @@
 # 基础、建站与设计候选 Capability Cards
 
 > 文档 ID：`OSS-FE-002`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > Owner：`OWN-SITE-BE`、`OWN-SAAS-FE`、`OWN-DESIGN`；许可总责 `OWN-SEC-COMMERCIAL`
 
 ## `ADP-FE-001` PostgreSQL + pgvector

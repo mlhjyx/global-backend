@@ -2,10 +2,11 @@
 
 > 文档 ID：`OSS-FE-000`
 > 层级：`L2 / Adoption index`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_7_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_7`
 > 组合 Owner：`OWN-SEC-COMMERCIAL`；Capability Owner 见各 Card
 > 核验日期：2026-07-20
+> 批准边界：Gate 7 批准采用组合与准入治理；没有批准安装、采购、实现、部署或生产流量
 
 本目录回答“哪些外部项目只值得学习、哪些已在开发环境使用、哪些可以进入受控 Spike、哪些必须延后或避免，以及如何替换退出”。它不把官方许可证初审冒充法律意见，也不因项目已出现在代码、Compose、Word 或原型中就宣称生产准入。
 
@@ -15,7 +16,7 @@
 - [采用政策](adoption-policy.md)定义 `Learn / Build / Adapt / Integrate / Buy / Avoid / Defer`、准入门和证据要求。
 - [官方来源与本地运行快照](official-source-snapshots.md)记录外部版本/许可与本机版本，二者不得互相替代。
 - 本目录的分组 Card 解释具体边界；产品范围、架构和 as-built 仍分别服从 `product-scope`、ADR、`architecture/current` 与代码。
-- [Phase 7 评审包](../../roadmap/saas-frontend-phase-7/gate-7-review.md)只请求批准采用组合，不授权安装、采购、账号、依赖、部署或生产流量。
+- [Phase 7 评审包](../../roadmap/saas-frontend-phase-7/gate-7-review.md)记录已批准组合的 provenance；该批准不授权安装、采购、账号、依赖、部署或生产流量。
 
 ## 2. Card 分组
 

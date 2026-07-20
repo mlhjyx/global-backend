@@ -1,15 +1,15 @@
 # 统一 SaaS 前端文档治理与实施规划
 
 > 文档 ID：PLAN-FE-DOC-001
-> 版本：v0.10-gate-7-review
-> 状态：`PHASE_7_READY_FOR_GATE_7_REVIEW`
-> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.9 回写 Phase 1–6；v0.10 只回写用户明确授权的 Phase 7 OSS/外部能力采用文档与 Gate 状态，不扩张 Phase 8 或采用实现授权
+> 版本：v0.11-gate-8-review
+> 状态：`PHASE_8_READY_FOR_GATE_8_REVIEW`
+> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.10 回写 Phase 1–7；v0.11 只回写用户明确授权的 Phase 8 防漂移、Release Bundle 与最终治理收口，不扩张产品/采用实现授权
 > 计划批准：2026-07-20（含产品工作方式、Capability Pack、设计资产、场景库和发布学习闭环增补）
-> 执行授权：`PHASE_7_GRANTED`——Gate 6 已批准 `DEC-FE-P6-001..012`、非 Site `MAP_COMPLETE / NOT_DEV_READY`、客户开发 `FROZEN_MAP_ONLY`，保留 `BLK-FE-001..007` 与 `GAP-FE-P6-001..012` 并授权采用文档；Phase 8 和任何采用实现仍未获授权
+> 执行授权：`PHASE_8_GRANTED`——Gate 7 已批准 `DEC-FE-P7-001..012` 与 `ADP-FE-001..031` 当前采用决定，只授权文档 lint、历史处置提案、阅读验收、Release Bundle 和学习治理；产品/OSS 实现、历史文件移动与生产动作仍未授权
 > 基线提交：`676c6cdc175326927ec341a2d585168aa0a1a374`
 > 适用范围：完整 SaaS 产品前端，其中“独立站管理”是当前优先模块
 > 拍板人：产品负责人
-> 执行主体：Codex（Phase 1–7 均于 2026-07-20 分别获明确授权；Gate 7 后须再次取得明确批准）
+> 执行主体：Codex（Phase 1–8 均于 2026-07-20 分别获明确授权；Gate 8 决定前不扩张后续实施）
 
 ## 0. 本文件解决什么问题
 
@@ -38,22 +38,24 @@
 - Gate 4 通过后执行第 5 阶段“独立站管理 Capability Pack”：建立模块旅程/Page、对象/权限/状态、公开输出、书面低保真、微文案、stack-neutral 实施蓝图、Scenario/Fixture、运营与验收；当前纵切和后置发布链必须分层。
 - Gate 5 通过后执行第 6 阶段“其他产品域文档”：补齐七个非 Site Pack、跨域接缝、产品优先级和来源迁移覆盖，不恢复冻结开发。
 - Gate 6 通过后执行第 7 阶段“OSS/外部能力实施方案”：建立 31 项 Card、采用 Registry、官方/本地证据、组合触发器、现用硬化和退出基线；不安装、不采购、不部署。
-- 对 Phase 1–7 文档运行非破坏性校验，并在内容稳定后创建本地 docs-only checkpoint commit；不推送、不建 PR、不合并。
+- Gate 7 通过后执行第 8 阶段“防漂移与收口”：建立 docs lint/CI、历史处置提案、角色阅读任务、Release Bundle/学习治理与 Gate 8 包；不实施采用决定或移动历史文件。
+- 对 Phase 1–8 文档运行非破坏性校验，并在内容稳定后创建本地 docs-governance checkpoint commit；不推送、不建 PR、不合并。
 
 ### 1.2 当前未授权
 
-- 不进入第 8 阶段；Gate 6 只授权采用文档，不把候选升级为安装、采购、生产或产品施工。
-- 不创建真实用户/管理员发布指南、可执行 Release Bundle、归档动作或自动治理流水线。
-- 不修改产品边界、as-built 架构、ADR、当前状态、Word、Site Builder 00–14 或历史稿；只同步本计划、治理 Registry、文档门户和已批准 Pack 状态。
+- Gate 7 只授权 Phase 8 文档治理；不把候选升级为安装、采购、生产或产品施工。
+- 不创建虚假的用户发布、可执行真实 Release Bundle、用户研究或学习结论；只建立 schema、模板、空索引和前置门。
+- 不修改产品边界、as-built 架构、ADR、当前状态、Word、Site Builder 00–14 或历史正文；只同步本计划、治理 Registry、文档门户和已批准 Pack/Gate 状态。
 - 不移动、归档、删除或重命名任何现有材料。
+- 不 push、不建 PR、不合并；Git 外部动作需另获用户授权。
 - 不处理主工作区的 `.playwright-cli/`、`template/`、流程图或其他未跟踪文件。
 - 不修改产品代码、数据库、OpenAPI、测试、基础设施或依赖。
 - 不推送、创建 PR 或合并；当前仅允许在独立 worktree 创建本地 docs-only checkpoint commit。
-- 不自行改变 Gate 2 已批准导航，也不替产品负责人批准新的商业承诺、数据权利、OSS 采用、设计工具或跨仓 ownership；Phase 7 只提交推荐组合到 Gate 7。
+- 不自行改变已批准导航，也不替产品负责人批准新的商业承诺、数据权利、OSS 采用实现、设计工具或跨仓 ownership；Gate 7 已批准采用组合，Phase 8 只做防漂移与收口。
 
 ### 1.3 后续启动条件
 
-第 1–6 阶段已完成并分别通过 Gate 1–6；第 7 阶段随后获明确授权。完成 Phase 7 后必须停在 Gate 7，提交完整评审包并等待下一次明确批准；在此之前不得进入第 8 阶段或实施任何采用决定。对权限、商业承诺、数据权利、OSS 采用、设计工具、正式前端仓库和跨仓 ownership 的新裁决，执行过程中仍须单独暴露，不得由执行者静默决定。
+第 1–7 阶段已完成并分别通过 Gate 1–7；第 8 阶段随后获明确授权。完成 Phase 8 后必须停在 Gate 8，提交完整评审包并等待明确决定；任何产品/采用实现仍须另行授权。对权限、商业承诺、数据权利、OSS 实施、设计工具、正式前端仓库和跨仓 ownership 的新裁决，执行过程中仍须单独暴露，不得由执行者静默决定。
 
 ## 2. 已固定的产品事实
 
@@ -704,7 +706,7 @@ Word 中的项目名称只作为候选输入。正式方案采用 `Learn / Build
 
 交付物：本文件。
 
-当前状态：计划内容已批准；Phase 1–6 已完成并通过 Gate 1–6；Phase 7 已获授权并形成 Gate 7 评审包；Phase 8 与采用实现仍未授权。
+当前状态：计划内容已批准；Phase 1–7 已完成并通过 Gate 1–7；Phase 8 已获授权并形成 Gate 8 评审包；产品/采用实现仍未授权。
 
 退出条件：已满足。
 
@@ -778,11 +780,15 @@ Gate 7：每项候选有 `Learn / Build / Adapt / Integrate / Buy / Avoid / Defe
 
 当前状态：Phase 7 已建立 [全量采用 Registry](../backend/oss-registry.md)、`ADP-FE-001..031` 分组 Card、[官方/本地证据分层](../platform/oss-adoption/official-source-snapshots.md)、[组合与重开触发器](saas-frontend-phase-7/portfolio-decisions-and-triggers.md)、[现用硬化/退出基线](saas-frontend-phase-7/runtime-hardening-and-exit.md)和 [Gate 7 评审包](saas-frontend-phase-7/gate-7-review.md)。八项已有 as-built 只标 `*_HARDEN`；本阶段没有安装、采购、依赖、部署或生产流量变更。
 
+批准状态：产品负责人于 2026-07-20 按推荐语句批准 `DEC-FE-P7-001..012`，接受 31 项 Card 当前决定、八项现用能力仅为 `INTEGRATE / *_HARDEN`，保留全部 blocker/gap 与未关闭准入门，并只授权 Phase 8。Phase 7 评审包冻结，OSS Registry/Card 作为 current governance 继续维护。
+
 ### 阶段 8：防漂移与收口
 
 交付物：docs lint、链接检查、状态检查、证据检查、历史 banner/归档提案、阅读路线验收、Release Bundle 模板、文档可用性测试和发布后学习回写规则。
 
 Gate 8：机器和人工检查通过；新人、产品、设计、前端、后端、测试和运营均能沿各自路线完成一项真实任务并找到事实源；任一发布可通过 Release Bundle 反查规范、实现、证据、指南和复盘责任。
+
+当前状态：Phase 8 已建立 [`pnpm docs:verify`](../governance/docs-verification.md)及 CI 门、[历史处置建议](saas-frontend-phase-8/history-disposition-proposal.md)、[九条角色阅读任务](saas-frontend-phase-8/reading-route-acceptance.md)、[Release/学习治理](../governance/release-and-learning-governance.md)、受控模板、空 Release 索引、[验证报告](saas-frontend-phase-8/verification-report.md)和 [Gate 8 评审包](saas-frontend-phase-8/gate-8-review.md)。机器检查与作者路径 dry-run 可在本阶段完成；独立人工执行仍是 `NOT_RUN / BLK-FE-006`，当前无真实用户发布，Release 追踪为 `NOT_APPLICABLE_NO_USER_RELEASE`，不得冒充人工或发布 PASS。
 
 ## 13. 产品工作方式、责任与发布闭环
 
@@ -945,14 +951,14 @@ related_releases: []
 
 ## 19. 下一步 Handoff
 
-当前 handoff 状态：`PHASE_7_READY_FOR_GATE_7_REVIEW`。
+当前 handoff 状态：`PHASE_8_READY_FOR_GATE_8_REVIEW`。
 
-产品负责人已通过 Gate 6 并授权 Phase 7；31 项采用 Card、官方/本地证据、组合触发器和现用硬化/退出基线已经形成 [Gate 7 评审包](saas-frontend-phase-7/gate-7-review.md)。后续可选择：
+产品负责人已通过 Gate 7 并授权 Phase 8；自动防漂移、历史处置、角色阅读任务、Release Bundle 和学习回写治理已经形成 [Gate 8 评审包](saas-frontend-phase-8/gate-8-review.md)。后续可选择：
 
-- 按 Gate 7 推荐语句批准 `DEC-FE-P7-001..012` 并只授权 Phase 8 文档治理与最终收口；
-- Gate 7 有条件通过：先补指定 Card、许可/安全边界、Adapter/SoR、Owner 或 Exit finding，再请求复核；
-- Gate 7 不通过：修改指定候选的采用决定、触发器或组合边界。
+- 按 Gate 8 推荐语句批准 `DEC-FE-P8-001..012`，接受治理基线完成，同时保留独立人工、真实 Release 和现有 blocker/gap；
+- Gate 8 有条件通过：先补指定机器规则、阅读任务、历史处置或模板 finding，再请求复核；
+- Gate 8 不通过：修改指定治理决定，不倒退或重写 Phase 1–7 provenance。
 
-Gate 7 通过也不自动授权正式前端实现、产品代码、Schema、OpenAPI、基础设施、依赖/镜像变更、采购、生产流量、历史文件移动、push、PR 或合并；`BLK-FE-001..007`、`GAP-FE-P6-001..012` 和未关闭许可/安全/Owner/退出门不会被自动关闭。
+Gate 8 通过也不自动授权正式前端实现、产品代码、Schema、OpenAPI、基础设施、依赖/镜像变更、采购、生产流量、历史文件移动、push、PR 或合并；`BLK-FE-001..007`、`GAP-FE-P6-001..012` 和未关闭许可/安全/Owner/退出门不会被自动关闭。
 
-在收到明确 Gate 7 决策前，继续停止第 8 阶段和任何采用/产品实现。
+在收到明确 Gate 8 决策前，停止文档项目收口状态升级和任何采用/产品实现；机器校验可继续修复本阶段自身 finding。

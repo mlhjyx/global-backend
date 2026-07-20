@@ -1,7 +1,7 @@
 # 媒体生成候选 Capability Cards
 
 > 文档 ID：`OSS-FE-004`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_7`
 > 当前事实：M1-c 只有确定性 Sharp 图片管线；没有生成式图片/视频生产消费者
 
 ## `ADP-FE-012` MoneyPrinterTurbo

@@ -158,6 +158,11 @@
 | `BLOCKED` | 关键 Owner、合同、权限或数据权利缺失 |
 | `FROZEN_MAP_ONLY` | 仅用于保持完整产品地图，不启动新实现 |
 | `EXTERNAL_OWNED` | 必须由 SaaS/外部系统提供执行与证据 |
+| `MACHINE_PASS` | 指定提交上的自动规则运行通过；不等于内容、可用性或发布获批 |
+| `AUTHOR_ROUTE_DRY_RUN` | 文档作者验证阅读路径可走通；不等于独立角色验收 |
+| `INDEPENDENT_HUMAN_ACCEPTANCE` | 非作者的真实责任角色按任务执行并记录 finding/签发 |
+| `NOT_APPLICABLE_NO_USER_RELEASE` | 当前没有真实用户发布，因此 Release 追踪门不适用；不能写成 PASS |
+| `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS` | 文档治理基线收口，但产品实现、Owner、合同和 Release blocker 保留 |
 
 Fixture 必须使用合成企业、合成联系人和有明确使用权的资产；不得把生产 PII、客户文件、Readdy 输出或竞品内容直接纳入 Git。
 

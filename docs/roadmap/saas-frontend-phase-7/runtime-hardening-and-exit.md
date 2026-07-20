@@ -1,7 +1,7 @@
 # 现用能力硬化与退出基线
 
 > 文档 ID：`BASE-FE-P7-002`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_7`
 > 适用：`ADP-FE-001/002/005/018/019/021/022/024`
 
 八项能力已经存在于仓内代码、lockfile 或 Ubuntu 开发运行环境，所以 Phase 7 不把它们退回“候选”。诚实状态是 `INTEGRATE / *_HARDEN`：承认 as-built，同时列清距离可复现部署、生产安全和可退出还有什么。本文件是后续风险队列输入，不是施工授权。

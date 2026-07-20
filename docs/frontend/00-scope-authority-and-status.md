@@ -30,7 +30,7 @@ flowchart LR
 | 能力/对象/场景/冲突关系 | [governance](../governance/README.md) | 使用稳定 ID，不建第二登记表 |
 | API | `packages/contracts/openapi/openapi.json` | 按 operationId/生成类型接入，不手抄长期总数 |
 | 视觉与组件 | 未来受控设计源 + 资产登记 | 当前仅定义交付合同，实际源仍缺 |
-| 发布事实 | 未来 Release Bundle | 本包只定义门，不声称已经发布 |
+| 发布事实 | [真实 Release Bundle 索引](../releases/README.md)；当前为 0 | 本包只定义门，不声称已经发布 |
 
 冲突时先登记到 [冲突台账](../governance/conflict-register.md)，再由相应 Owner 裁决；页面文案、设计稿和前端代码不得静默重定义产品或后端状态。
 

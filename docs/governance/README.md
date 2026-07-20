@@ -19,6 +19,8 @@
 | [场景目录](scenario-catalog.md) | 用什么可复现场景评审和验收 | Scenario/Fixture ID、前置、失败恢复、证据状态 |
 | [冲突登记](conflict-register.md) | 哪些矛盾已裁决，哪些仍阻塞 | Conflict ID、状态、唯一 Owner、裁决/目标 Gate |
 | [追踪矩阵](traceability-matrix.md) | 用户价值如何追到页面、合同和证据 | Capability→Journey→Page→Object→Contract→Code→Scenario |
+| [文档自动校验](docs-verification.md) | 哪些漂移会让 CI 失败，历史例外如何治理 | 受控范围、链接/状态/Registry/Bundle 检查与例外 |
+| [Release 与学习治理](release-and-learning-governance.md) | 真实发布如何追到实现、证据、运营和复盘 | Bundle schema、证据强度、责任签发和回写 |
 
 ## 2. 唯一事实规则
 
@@ -45,4 +47,4 @@
 
 Gate 3 已通过并授权 Phase 4。当前 Registry 固化的产品决定包括：B2B 制造/工贸/传统出口为首批客户，海外增长/外贸运营为默认操作者，六项一级 IA，共享 Company/Offering/Claim/Evidence/Asset 事实底座，以及止于可信开发预览的首个纵切。
 
-[全局前端规范](../frontend/README.md)和[设计资产治理](../design/README.md)已在 Gate 4 获批；[独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)已在 Gate 5 获批；[全 SaaS 产品域 Capability Pack](../frontend/modules/README.md)已在 Gate 6 获批。Phase 7 已建立 [OSS / 外部能力注册表](../backend/oss-registry.md)与 31 项采用 Card，当前等待 Gate 7；它没有选择正式 SaaS 前端栈或授权依赖/部署。正式前端仓库、设计事实源和相应 Owner 仍未指派，Workspace/allowed actions、Claim review、指标/隐私等合同继续阻塞实施。Phase 8 尚未授权。当前审查入口见 [Gate 7 评审包](../roadmap/saas-frontend-phase-7/gate-7-review.md)。
+[全局前端规范](../frontend/README.md)和[设计资产治理](../design/README.md)已在 Gate 4 获批；[独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)已在 Gate 5 获批；[全 SaaS 产品域 Capability Pack](../frontend/modules/README.md)已在 Gate 6 获批。[OSS / 外部能力注册表](../backend/oss-registry.md)与 31 项 Card 当前决定已在 Gate 7 获批，但没有选择正式 SaaS 前端栈或授权依赖/部署。Phase 8 已建立机器防漂移、历史处置、角色任务、Release Bundle 与学习回写治理，当前审查入口见 [Gate 8 评审包](../roadmap/saas-frontend-phase-8/gate-8-review.md)。正式前端仓库、设计事实源和实际责任人仍未指派，Workspace/allowed actions、Claim review、指标/隐私等合同继续阻塞实施。

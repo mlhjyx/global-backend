@@ -1,7 +1,7 @@
 # 采用组合决定与重开触发器
 
 > 文档 ID：`BASE-FE-P7-001`
-> 状态：`READY_FOR_GATE_7_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_7`
 > Owner：`OWN-SEC-COMMERCIAL` + 各 Capability Owner
 
 ## 1. 目标组合

@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 当前清单基线：本分支 `origin/main@676c6cd` + Phase 1–7 docs-only 产物
+> 当前清单基线：本分支 `origin/main@676c6cd` + Phase 1–8 docs-governance 产物
 > 最后核验：2026-07-20
 
 本表是“读哪份、信哪份、旧内容迁到哪里”的当前入口。Phase 1 的 [逐来源明细](../roadmap/saas-frontend-phase-1/source-detail-register.md)保留 `c3f0cca` 时点的 67 份 Markdown 和非 Markdown 审计证据；本表承接其结果并管理之后新增的文档，不重写冻结审计。
@@ -41,6 +41,10 @@
 | `GOV-FE-005` | `docs/governance/scenario-catalog.md` | L1/L3 / Registry | `CURRENT` | `OWN-QA-EVIDENCE` | Scenario/Fixture ID 与证据状态 | `KEEP_CURRENT` |
 | `GOV-FE-006` | `docs/governance/conflict-register.md` | L1 / Registry | `CURRENT` | `OWN-DOC-GOV` | 跨来源冲突状态与 Owner | `KEEP_CURRENT` |
 | `GOV-FE-007` | `docs/governance/traceability-matrix.md` | L1 / Registry | `CURRENT` | `OWN-DOC-GOV` | 能力到实现/证据关系 | `KEEP_CURRENT` |
+| `GOV-FE-008` | `docs/governance/docs-verification.md` | L1 / Normative governance | `CURRENT` | `OWN-DOC-GOV` | 文档 lint、链接、状态、Registry 引用与例外规则 | `KEEP_CURRENT` |
+| `GOV-FE-008-MACHINE` | `docs/governance/docs-verification-policy.json` | L1 / Machine policy | `CURRENT` | `OWN-DOC-GOV` | 受控范围、词汇、Registry source、历史 banner 与 Bundle schema | `KEEP_CURRENT`；与 verifier 同步变更 |
+| `GOV-FE-009` | `docs/governance/release-and-learning-governance.md` | L1 / Normative governance | `CURRENT` | `OWN-QA-EVIDENCE` | Release Bundle、证据、审批和学习回写 | `KEEP_CURRENT` |
+| `REL-FE-000` | `docs/releases/README.md` | L4 / Release index | `CURRENT` | `OWN-QA-EVIDENCE` | 真实用户发布 Bundle 索引；当前数量为 0 | `KEEP_CURRENT` |
 
 Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PRODUCT`，API 实现证据属于 `OWN-SITE-BE`；`OWN-DOC-GOV` 只维护关系和完整性。
 
@@ -105,29 +109,41 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `GATE-FE-P6-000` | `docs/roadmap/saas-frontend-phase-6/README.md` | L3 / Phase evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 6 交付入口 | `REFERENCE_ONLY` |
 | `GATE-FE-P6-001` | `docs/roadmap/saas-frontend-phase-6/gate-6-review.md` | L4 / Gate review | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate 6 决策与验收 | `REFERENCE_ONLY` |
 
-### 2.4 Phase 7 OSS / 外部能力采用决策包
+### 2.4 Gate 7 已批准的 OSS / 外部能力采用治理
 
-以下文件是 Gate 7 的采用评审输入；它们不授权依赖、采购、账号、部署或生产流量。
+以下 current Registry/Card 已由 Gate 7 批准采用决定；Phase 7 来源与评审包冻结。批准仍不授权依赖、采购、账号、部署或生产流量。
 
 | Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
 |---|---|---|---|---|---|---|
 | `GOV-OSS-001` | `docs/backend/oss-registry.md` | L1 / Adoption registry | `CURRENT` | `OWN-SEC-COMMERCIAL` | Card、主决定、状态与责任帽总账 | `KEEP_CURRENT` |
-| `OSS-FE-000` | `docs/platform/oss-adoption/README.md` | L2 / Adoption index | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | 采用阅读入口和组合摘要 | Gate 7 review |
-| `OSS-FE-001` | `docs/platform/oss-adoption/adoption-policy.md` | L2 / Adoption policy | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | 七类决定、准入与状态变更规则 | Gate 7 review |
-| `OSS-FE-002` | `docs/platform/oss-adoption/foundation-site-and-design.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-001..008` | Gate 7 review |
-| `OSS-FE-003` | `docs/platform/oss-adoption/growth-automation-and-engagement.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-009..011` | Gate 7 review |
-| `OSS-FE-004` | `docs/platform/oss-adoption/media-generation.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-012..014` | Gate 7 review |
-| `OSS-FE-005` | `docs/platform/oss-adoption/knowledge-and-retrieval.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-015..017` | Gate 7 review |
-| `OSS-FE-006` | `docs/platform/oss-adoption/documents-and-acquisition.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-018..021` | Gate 7 review |
-| `OSS-FE-007` | `docs/platform/oss-adoption/workflow-policy-model-and-observability.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-022..026` | Gate 7 review |
-| `OSS-FE-008` | `docs/platform/oss-adoption/documentation-and-quality-methods.md` | L2 / Capability Cards | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-027..031` | Gate 7 review |
-| `OSS-FE-009` | `docs/platform/oss-adoption/official-source-snapshots.md` | L3 / Source/runtime evidence | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | 官方来源、lockfile 与 runtime 分层 | Gate 7 review |
-| `BASE-FE-P7-001` | `docs/roadmap/saas-frontend-phase-7/portfolio-decisions-and-triggers.md` | L3 / Portfolio baseline | `ACTIVE_INPUT` | `OWN-SEC-COMMERCIAL` | 采用组合与重开触发器 | Gate 7 review |
-| `BASE-FE-P7-002` | `docs/roadmap/saas-frontend-phase-7/runtime-hardening-and-exit.md` | L3 / Hardening baseline | `ACTIVE_INPUT` | `OWN-PLATFORM` | 现用八项硬化和退出门 | Gate 7 review |
-| `GATE-FE-P7-000` | `docs/roadmap/saas-frontend-phase-7/README.md` | L3 / Phase evidence | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 7 交付入口 | Gate 7 后冻结 |
-| `GATE-FE-P7-001` | `docs/roadmap/saas-frontend-phase-7/gate-7-review.md` | L4 / Gate review | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Gate 7 决策与验收 | Gate 7 后冻结 |
+| `OSS-FE-000` | `docs/platform/oss-adoption/README.md` | L2 / Adoption index | `CURRENT` | `OWN-SEC-COMMERCIAL` | 采用阅读入口和组合摘要 | `APPROVED_AT_GATE_7`；持续维护 |
+| `OSS-FE-001` | `docs/platform/oss-adoption/adoption-policy.md` | L2 / Adoption policy | `CURRENT` | `OWN-SEC-COMMERCIAL` | 七类决定、准入与状态变更规则 | `APPROVED_AT_GATE_7`；持续维护 |
+| `OSS-FE-002` | `docs/platform/oss-adoption/foundation-site-and-design.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-001..008` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-003` | `docs/platform/oss-adoption/growth-automation-and-engagement.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-009..011` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-004` | `docs/platform/oss-adoption/media-generation.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-012..014` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-005` | `docs/platform/oss-adoption/knowledge-and-retrieval.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-015..017` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-006` | `docs/platform/oss-adoption/documents-and-acquisition.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-018..021` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-007` | `docs/platform/oss-adoption/workflow-policy-model-and-observability.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-022..026` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-008` | `docs/platform/oss-adoption/documentation-and-quality-methods.md` | L2 / Capability Cards | `CURRENT` | `OWN-SEC-COMMERCIAL` | `ADP-FE-027..031` | `APPROVED_AT_GATE_7` |
+| `OSS-FE-009` | `docs/platform/oss-adoption/official-source-snapshots.md` | L3 / Source/runtime evidence | `FROZEN_EVIDENCE` | `OWN-SEC-COMMERCIAL` | Gate 7 官方来源、lockfile 与 runtime 分层 | 新证据建新快照，不重写 |
+| `BASE-FE-P7-001` | `docs/roadmap/saas-frontend-phase-7/portfolio-decisions-and-triggers.md` | L3 / Portfolio baseline | `FROZEN_EVIDENCE` | `OWN-SEC-COMMERCIAL` | Gate 7 采用组合与重开触发器 | `REFERENCE_ONLY` |
+| `BASE-FE-P7-002` | `docs/roadmap/saas-frontend-phase-7/runtime-hardening-and-exit.md` | L3 / Hardening baseline | `FROZEN_EVIDENCE` | `OWN-PLATFORM` | Gate 7 现用八项硬化和退出门 | `REFERENCE_ONLY` |
+| `GATE-FE-P7-000` | `docs/roadmap/saas-frontend-phase-7/README.md` | L3 / Phase evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 7 交付入口 | `REFERENCE_ONLY` |
+| `GATE-FE-P7-001` | `docs/roadmap/saas-frontend-phase-7/gate-7-review.md` | L4 / Gate review | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate 7 决策与批准 provenance | `REFERENCE_ONLY` |
 
-### 2.5 最近 Gate 证据精确入口
+### 2.5 Phase 8 防漂移与收口包
+
+| Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
+|---|---|---|---|---|---|---|
+| `GATE-FE-P8-000` | `docs/roadmap/saas-frontend-phase-8/README.md` | L3 / Phase evidence | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 8 交付与授权边界 | Gate 8 后冻结 |
+| `BASE-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/history-disposition-proposal.md` | L3 / Governance proposal | `ACTIVE_INPUT` | `OWN-DOC-GOV` | 历史 banner、原位保留与未来 archive 门 | Gate 8 决定 |
+| `BASE-FE-P8-002` | `docs/roadmap/saas-frontend-phase-8/reading-route-acceptance.md` | L3 / Usability evidence | `ACTIVE_INPUT` | `OWN-QA-EVIDENCE` | 九条角色任务、作者 dry-run 和独立人工状态 | 独立运行后增量记录 |
+| `EVID-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/verification-report.md` | L4 / Machine evidence | `ACTIVE_INPUT` | `OWN-QA-EVIDENCE` | Phase 8 命令、结果、warning 与边界 | Gate 8 后冻结 |
+| `GATE-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/gate-8-review.md` | L4 / Gate review | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Gate 8 决定、验收和保留项 | Gate 8 后冻结 |
+| `TPL-FE-REL-001` | `docs/templates/release-bundle-template.md` | L5 / Template | `GUIDE` | `OWN-QA-EVIDENCE` | 真实 Release Bundle 可复制结构 | 复制后必须换 ID/元数据 |
+| `TPL-FE-LRN-001` | `docs/templates/release-learning-template.md` | L5 / Template | `GUIDE` | `OWN-PRODUCT` | 发布学习记录结构 | 由真实 Bundle 索引 |
+
+### 2.6 最近 Gate 证据精确入口
 
 | Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
 |---|---|---|---|---|---|---|
@@ -152,11 +168,14 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `DOCSET-PHASE-4` | `docs/roadmap/saas-frontend-phase-4/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 4 交付与 Gate 4 批准 provenance | `REFERENCE_ONLY`；全局规范继续维护 |
 | `DOCSET-PHASE-5` | `docs/roadmap/saas-frontend-phase-5/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 5 交付与 Gate 5 批准 | `REFERENCE_ONLY` |
 | `DOCSET-PHASE-6` | `docs/roadmap/saas-frontend-phase-6/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 6 交付与 Gate 6 批准 provenance | `REFERENCE_ONLY` |
-| `DOCSET-PHASE-7` | `docs/roadmap/saas-frontend-phase-7/*.md`、`docs/platform/oss-adoption/*.md` | L2–L4 / `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 7 采用 Card、组合、来源和 Gate 7 审查 | Gate 7 后冻结；Registry 继续维护 |
+| `DOCSET-PHASE-7` | `docs/roadmap/saas-frontend-phase-7/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 7 组合、来源和批准 provenance | `REFERENCE_ONLY`；OSS Registry/Card 继续维护 |
+| `DOCSET-OSS-ADOPTION` | `docs/platform/oss-adoption/*.md` | L2 / `CURRENT`，来源快照除外 | `OWN-SEC-COMMERCIAL` | Gate 7 已批的 Card 与准入治理 | Registry/Card 持续维护；来源快照不可变 |
+| `DOCSET-PHASE-8` | `docs/roadmap/saas-frontend-phase-8/*.md` | L3/L4 / `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 8 lint、处置、可用性、证据和 Gate 8 | Gate 8 决定后冻结 |
+| `DOCSET-RELEASES` | `docs/releases/*.md` | L4 / Release evidence | `OWN-QA-EVIDENCE` | 真实用户发布 Bundle；当前 0 项 | Bundle 不改写；后续 learning/rollback 建关系 |
 | `DOCSET-SITE-ACTIVE` | `docs/site-builder/00`–`09`、`13`、`14` | L1/L2/L3 / `ACTIVE_INPUT` | `OWN-SITE-BE` | Site 产品、架构、合同、施工和评测专题 | 原位保留；状态只由 current/release-plan 承重 |
 | `DOCSET-SITE-DECISION-EVIDENCE` | `docs/site-builder/DQ-1-shared-sitespec-contract.md`、`docs/site-builder/handoffs/*.md` | L2/L3 / `FROZEN_EVIDENCE` | `OWN-SITE-BE` | 某决策/施工 handoff 的精确时点 | `REFERENCE_ONLY`；完成后不作为 current status |
 | `DOCSET-STATUS-EVIDENCE` | `docs/status/pilot-readiness-gap-report.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-PRODUCT` | dated gap report | 原位保留，当前结论回到 `status/current.md` |
-| `DOCSET-TEMPLATES` | `docs/templates/*.md` | L5 / `GUIDE` | `OWN-DOC-GOV` | 写作结构；不证明产品/实现 | 主工作区用户删除现场不恢复；未来替代方案另行批准 |
+| `DOCSET-TEMPLATES` | `docs/templates/*.md` | L5 / `GUIDE` | `OWN-DOC-GOV` | 写作结构；不证明产品/实现 | 旧模板 reference-only；Release/Learning 使用受控模板 |
 | `DOCSET-INFRA-GUIDES` | `infra/**/README.md` | L5 / `GUIDE` | `OWN-SITE-BE` | 运行服务任务说明 | 原位保留 |
 | `DOCSET-CONTRACT-GUIDES` | `packages/contracts/**/*.md` | L2/L5 / `ACTIVE_INPUT` 或 `GUIDE` | `OWN-SITE-BE` | 契约消费与事件说明 | 机器合同优先；Phase 4/5 建前端映射时只引用 operationId |
 
@@ -169,10 +188,10 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `DOC-HIST-001` | `CLAUDE.md` | `SUPERSEDED` 兼容入口 | `OWN-SITE-BE` | 旧模型/环境/阶段叙述可能过期 | `AGENTS.md` + current authority chain | 保留兼容；不移动 |
 | `DOC-HIST-SB-010` | `docs/site-builder/10-model-selection-study.md` | `FROZEN_EVIDENCE` | `OWN-SITE-BE` | dated 模型研究 | `task-routes.ts` + active evidence bundle | 保留证据 |
 | `DOC-HIST-SB-011` | `docs/site-builder/11-readdy-component-source-study.md` | `DATED_PROPOSAL` | `OWN-DESIGN` | 组件来源/权利研究 | `ADP-FE-004`；仅多来源净室视觉研究 | 不移动 |
-| `DOC-HIST-SB-012A` | `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.1.md` | `SUPERSEDED` | `OWN-DOC-GOV` | 巨型历史提案 | Site 00–14、ADR、status、未来 Site Capability Pack | 引用映射完成；Phase 8 再决定 banner/archive |
-| `DOC-HIST-SB-012B` | `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md` | `DATED_PROPOSAL` | `OWN-DOC-GOV` | 巨型 dated 输入，不是施工真值 | Site 00–14、ADR、status、未来 Site Capability Pack | 引用映射完成；Phase 8 再决定 banner/archive |
+| `DOC-HIST-SB-012A` | `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.1.md` | `SUPERSEDED` | `OWN-DOC-GOV` | 巨型历史提案 | Site 00–14、ADR、status、Phase 5 Site Pack | 已有强 banner；建议原位保留，移动另授权 |
+| `DOC-HIST-SB-012B` | `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md` | `DATED_PROPOSAL` | `OWN-DOC-GOV` | 巨型 dated 输入，不是施工真值 | Site 00–14、ADR、status/release-plan、Phase 5 Pack | 已有强 banner；建议原位保留，移动另授权 |
 | `DOC-HIST-SB-DQ1` | `docs/site-builder/DQ-1-shared-sitespec-contract.md` | `FROZEN_EVIDENCE` | `OWN-SITE-BE` | 已实施决策记录 | `packages/contracts` + SiteSpec current docs | 保留 provenance |
-| `DOC-HIST-TEMPLATE-001` | `docs/templates/前端技术方案模板.md` | `GUIDE`，主工作区存在用户删除 | `OWN-DOC-GOV` | 分支基线文件不代表用户要恢复 | Phase 8 再决定模板替代 | 不触碰主工作区 |
+| `DOC-HIST-TEMPLATE-001` | `docs/templates/前端技术方案模板.md` | `REFERENCE_ONLY`，主工作区存在用户删除 | `OWN-DOC-GOV` | 过薄旧模板，分支基线不代表用户要恢复 | 当前规范 + 受控 Release/Learning 模板 | 不触碰主工作区；删除/移动另授权 |
 
 ## 5. Word 与平台文档
 
@@ -180,10 +199,10 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 
 | Source ID | 路径 | 生命周期 | Owner | 已吸收内容 | 剩余迁移去向 | 文件动作 |
 |---|---|---|---|---|---|---|
-| `SRC-WORD-001` | `docs/出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx` | `DATED_PROPOSAL` | `OWN-PRODUCT` | 用户/JTBD、状态、权限、恢复和运营已进入 Phase 2、4、5、6；OSS/技术候选进入 `ADP-FE-001..031` | 历史范围不复活；采用仍待 Gate 7 | 保留，不移动 |
+| `SRC-WORD-001` | `docs/出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx` | `DATED_PROPOSAL` | `OWN-PRODUCT` | 用户/JTBD、状态、权限、恢复和运营已进入 Phase 2、4、5、6；OSS/技术候选进入 `ADP-FE-001..031` | 历史范围不复活；采用决定已在 Gate 7 批准，实施仍另过门 | 保留，不移动 |
 | `SRC-WORD-002` | `docs/出海企业AI全球客户开发与增长执行平台_产品总纲与产品手册_v3.0_完整评审稿.docx` | `DATED_PROPOSAL` | `OWN-PRODUCT` | 产品叙事、角色和工作方式进入 Phase 2/计划 | 未来产品能力说明和用户/管理员/运营 Guide | 保留，不移动 |
 | `SRC-WORD-003` | `docs/出海企业AI增长平台_总产品手册与PRD_v2.0_完整产品母本.docx` | `SUPERSEDED` | `OWN-PRODUCT` | 仅保留对象/历史场景 provenance | `HISTORY_ONLY`；不得复活旧 SAO/导航/Agent 边界 | 保留，不移动 |
-| `SRC-WORD-004` | `docs/platform/全球客户开发与增长执行平台_顶层产品与系统架构设计_v1.0.docx` | `DATED_PROPOSAL` | `OWN-SAAS-PLATFORM` | 系统分层已进入 Phase 4 集成约束和 Phase 6 跨域接缝；外部候选进入 Phase 7 Registry | 具体技术不覆盖 current architecture；采用仍待 Gate 7 | 保留，不移动 |
+| `SRC-WORD-004` | `docs/platform/全球客户开发与增长执行平台_顶层产品与系统架构设计_v1.0.docx` | `DATED_PROPOSAL` | `OWN-SAAS-PLATFORM` | 系统分层已进入 Phase 4 集成约束和 Phase 6 跨域接缝；外部候选进入 Phase 7 Registry | 具体技术不覆盖 current architecture；Gate 7 组合不授权实现 | 保留，不移动 |
 | `SRC-WORD-005` | `docs/platform/全球客户开发与增长执行平台_v3.0文档体系重构与实施治理方案_v1.0.docx` | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate、RACI、traceability 和来源治理已吸收进计划/Registry | `REFERENCE_ONLY` | 保留，不移动 |
 
 ## 6. 本地无版本输入、竞品与外部来源
@@ -197,7 +216,7 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `SRC-DES-011` | 主工作区 `docs/agile-iteration-flowchart.html` | `LOCAL_UNCONTROLLED` / process proposal | `OWN-QA-EVIDENCE` | 工作方式输入 | Phase 4 质量责任规范；不取消独立证据责任 |
 | `SRC-DES-012` | 主工作区 `.playwright-cli/` | `LOCAL_UNCONTROLLED` / runtime artifact | `OWN-QA-EVIDENCE` | 只登记存在 | 不作为受控视觉基线，不修改 |
 | `SRC-EXT-GOODJOB-001` | GoodJob `5732e209…` 快照 | `EXTERNAL_REFERENCE` | `OWN-PRODUCT` | 功能设计表达、权限社会属性、指南和工作方式方法 | `ADP-FE-031`；代码/营销/“测试全绿”不成为内部事实 |
-| `SRC-OSS-001..020` | Phase 1 OSS 索引 | `EXTERNAL_REFERENCE` | `OWN-SEC-COMMERCIAL` | 官方版本、根许可证与本地关系初审 | 已映射 `ADP-FE-002/003/009..026`；采用仍待 Gate 7 |
+| `SRC-OSS-001..020` | Phase 1 OSS 索引 | `EXTERNAL_REFERENCE` | `OWN-SEC-COMMERCIAL` | 官方版本、根许可证与本地关系初审 | 已映射 `ADP-FE-002/003/009..026`；Gate 7 已批决定，逐项准入未关闭 |
 
 外部资料的精确 URL、提交和许可见 [Phase 1 外部审计](../roadmap/saas-frontend-phase-1/external-benchmark-and-oss-audit.md)。
 
@@ -213,8 +232,8 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | Campaign/Conversation/Opportunity/Outcome | product scope + [核心对象登记](core-object-register.md) | [Phase 6 产品域 Pack](../frontend/modules/README.md)已承接地图；未来独立 Dev-Ready Pack/合同 | 正式 SaaS SoR/repo/Owner 未定 |
 | 角色、权限和对象社会属性 | [核心对象登记](core-object-register.md) | [权限与数据可见性](../frontend/06-permissions-and-data-visibility.md) | SaaS/安全/隐私 Owner 和机器合同未定 |
 | 失败、恢复、人工兜底 | [场景目录](scenario-catalog.md) | [全局状态](../frontend/07-state-error-degradation-and-recovery.md) + [Site 运营验收](../frontend/modules/independent-site-management/operations-and-acceptance.md) | QA/运营实际 Owner 未指派 |
-| OSS、Readdy、外部服务 | Phase 1 外部审计 + [全量 Registry](../backend/oss-registry.md) | `ADP-FE-001..031` 分组 Card | Gate 7 未批准；实际法务/安全/Owner/退出/生产门未关闭 |
-| 发布证据与学习 | 计划 + [场景目录](scenario-catalog.md) | Phase 8 Release Bundle/Learning Register | Release Owner/指标合同未定 |
+| OSS、Readdy、外部服务 | Phase 1 外部审计 + [全量 Registry](../backend/oss-registry.md) | `ADP-FE-001..031` 分组 Card 已获 Gate 7 批准 | 实际法务/安全/Owner/退出/生产门未关闭；无实施授权 |
+| 发布证据与学习 | [Release/学习治理](release-and-learning-governance.md) + [场景目录](scenario-catalog.md) | `docs/releases/` + 学习记录 | 当前 0 Bundle；Release Owner/指标合同未定 |
 
 ## 8. 迁移和归档门
 
@@ -226,4 +245,4 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 4. 历史 provenance、Decision/ADR 和证据仍可追溯；
 5. 产品/文档 Owner 明确批准文件动作。
 
-Phase 3 只完成迁移去向和引用关系，不授权任何移动、删除、归档或批量 banner 修改。
+Phase 8 已形成[原位保留建议](../roadmap/saas-frontend-phase-8/history-disposition-proposal.md)：现有强 banner 保留、自动检查，不移动/删除历史文件。未来任何 archive 动作仍需满足本节全部条件并另获授权。

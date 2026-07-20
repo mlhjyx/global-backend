@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 关系 Owner：`OWN-DOC-GOV`
-> 产品批准基线：Gate 2 + Gate 4 + Gate 5 + Gate 6，2026-07-20；Phase 7 采用组合待 Gate 7
+> 产品批准基线：Gate 2 + Gate 4 + Gate 5 + Gate 6 + Gate 7，2026-07-20；Phase 8 治理待 Gate 8
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
 本表回答“一个用户结果如何追到页面、对象、机器合同、main 代码、测试和场景”。它不复制规范或测试内容；链接只证明关系存在，是否通过/部署仍看精确 Evidence/Release Bundle。
@@ -30,7 +30,7 @@ Segment/Actor/Problem/Job
 - Phase 2 的用户、旅程和 Page ID 是 Gate 2 决策 provenance；Gate 4 全局规则、Gate 5 Site 规格和 Gate 6 非 Site 产品域地图已批准。
 - “测试文件存在”只记 `TEST_ANCHOR`；除非有精确运行日期/提交/结果，不标 `TEST_PASSED_NOW`。
 - hidden preview controller 是内部输出边界，不进入 public OpenAPI operation 列。
-- Release Bundle 当前不存在；任何行都不得由此推出“用户可用”或“已发布”。
+- 当前真实 Release Bundle 数为 0；[空索引](../releases/README.md)与模板不能推出“用户可用”或“已发布”。
 
 ## 2. 全 SaaS 产品地图追踪
 
@@ -109,10 +109,10 @@ Segment/Actor/Problem/Job
 
 | Source family | 已迁入的稳定关系 | 仍需迁入 | 不得做什么 |
 |---|---|---|---|
-| Phase 1 audit | source/evidence/conflict IDs、implementation truth caveats | Phase 8 自动覆盖和 banner/归档提案 | 用当前 main 重写冻结审计 |
+| Phase 1 audit | source/evidence/conflict IDs、implementation truth caveats | Phase 8 已加自动覆盖和原位保留/banner 建议 | 用当前 main 重写冻结审计 |
 | Phase 2 product baseline | Segment/Actor/Problem/Job/Journey/Page/Decision IDs | Gate 4 current 规范、Gate 5 Site 和 Phase 6 非 Site Pack 已承接；后续用户研究/实现仍待 | 把评审包或规格当已实现页面 |
-| 五份 Word | 用户/对象/场景/治理方法输入已进入 Phase 2/4/5/6；OSS/技术候选已进入 `ADP-FE-001..031` | 自动治理留 Phase 8 | 整份复制为 current PRD，或把候选写成已采用 |
-| Site v3.1/v3.2 | 已映射到 Site 00–14、Capability/Object/Scenario/Traceability 和 Phase 5 Pack | Phase 8 文件动作 | 因篇幅或位置认定为现行施工真值 |
+| 五份 Word | 用户/对象/场景/治理方法输入已进入 Phase 2/4/5/6；OSS/技术候选已进入 `ADP-FE-001..031` | Gate 7 已批采用决定；Phase 8 建自动治理；实现门保留 | 整份复制为 current PRD，或把候选写成已实现 |
+| Site v3.1/v3.2 | 已映射到 Site 00–14、Capability/Object/Scenario/Traceability 和 Phase 5 Pack | Phase 8 建议原位保留强 banner；移动另授权 | 因篇幅或位置认定为现行施工真值 |
 | 本地 React/Readdy/HTML | 原型、视觉和流程冲突已登记 | Phase 4/7 逐资产/页面采用决定 | 当作正式 repo、设计系统、License 或部署证明 |
 | GoodJob/竞品/OSS | 功能生命周期表达、权限社会属性、Guide/FAQ、采用方法已映入 `ADP-FE-031` 与采用政策 | 后续真实 Guide/用户验证 | 从竞品功能反推我们的范围或“测试全绿” |
 
@@ -132,7 +132,7 @@ Segment/Actor/Problem/Job
 
 - `OWN-SAAS-FE`、`OWN-DESIGN`、`OWN-SAAS-PLATFORM` 等实际人员/团队未指派；角色责任唯一但 operational assignee 缺失。
 - Claim public review、Workspace/Entitlement、Publish/Domain/Inquiry、指标事件等机器合同未建。
-- Fixture 仍为 `CATALOG_ONLY`；正式 frontend、E2E、设计资产、Guide、Release Bundle 和发布学习不存在。
+- Fixture 仍为 `CATALOG_ONLY`；正式 frontend、E2E、受控视觉设计资产、面向真实用户的 Guide、真实 Release Bundle 和发布学习记录不存在；Phase 8 只建立治理与模板。
 - `architecture/current.md` 的手写 OpenAPI 数字和 `INTEGRATION.md` 的 R3-B1 文案仍有漂移，已登记冲突但未在 Phase 3 修改权威/接入文档。
 
 因此 Gate 3 可以审“事实归属和迁移覆盖”，不能被解释为 Gate 4/5、Dev-Ready 或用户可用完成。
@@ -141,4 +141,4 @@ Segment/Actor/Problem/Job
 
 Gate 4 已把全产品 Capability/Page family 连接到当前 IA/Shell、权限、状态、AI/Evidence/Approval、设计系统/内容、a11y/性能/i18n、合同接入和发布证据规范。Gate 5 又把 Site 当前纵切连到 Page manifest、四层状态、29 条 Site Copy、`DSA-FE-SITE-WF-001`、13 个 operation、Scenario/Fixture、指标和实施蓝图。Phase 6 为其余 Page family 建立七个地图级 Pack，新增 `CAP-TRUTH-001` 把当前顶层 Capability 补至 24 个，并补十条跨域 Handoff、十二项 Gap、六组 target Fixture 和 16 条地图级 Scenario。
 
-全局规则为 `APPROVED_AT_GATE_4`；Site 文档轴为 `APPROVED_AT_GATE_5`；非 Site Pack 为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`。Phase 7 又把 31 项外部候选追到稳定 Card、官方/本地证据、Adapter/SoR、安全/测试、Owner 和 Exit；其决定仍 `READY_FOR_GATE_7_REVIEW`，八项现用能力也只标 `*_HARDEN`。正式 repo、受控视觉设计、权限/Claim/跨域业务/指标合同、可执行 Fixture、前端实现和 Release Bundle 仍为 `NONE/BLOCKED`；Site 发布链继续 `TARGET_NOT_RUNNABLE`。
+全局规则为 `APPROVED_AT_GATE_4`；Site 文档轴为 `APPROVED_AT_GATE_5`；非 Site Pack 为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`。Gate 7 已把 31 项外部候选追到稳定 Card、官方/本地证据、Adapter/SoR、安全/测试、Owner 和 Exit 并批准当前决定；八项现用能力仍只标 `*_HARDEN`。Phase 8 又把文档链连接到自动校验、角色任务、Release Bundle 与 learning；独立人工仍 `NOT_RUN`，真实 Release Bundle 数仍为 0。正式 repo、受控视觉设计、权限/Claim/跨域业务/指标合同、可执行 Fixture、前端实现和用户发布仍为 `NONE/BLOCKED`；Site 发布链继续 `TARGET_NOT_RUNNABLE`。

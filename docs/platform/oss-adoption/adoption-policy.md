@@ -2,9 +2,10 @@
 
 > 文档 ID：`OSS-FE-001`
 > 层级：`L2 / Normative adoption policy`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_7_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_7`
 > Owner：`OWN-SEC-COMMERCIAL`
+> 批准来源：`DEC-FE-P7-001..012`；逐项许可、安全、Owner、生产和退出门继续 fail-closed
 
 ## 1. 决策字典
 

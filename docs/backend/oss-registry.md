@@ -3,9 +3,10 @@
 > 文档 ID：`GOV-OSS-001`
 > 层级：`L1 / Platform adoption registry`
 > 生命周期：`CURRENT`
-> 评审状态：`READY_FOR_GATE_7_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_7`
 > Registry Owner：`OWN-SEC-COMMERCIAL`
 > 最后核验：2026-07-20
+> 批准来源：产品负责人于 2026-07-20 批准 `DEC-FE-P7-001..012`；实现、生产和逐项准入门未因此关闭
 
 本表是外部项目、商业服务和可复用方法的 Card ID、主决定、当前状态、边界和责任帽子的唯一总账。详细证据和退出计划见 [OSS 与外部能力采用入口](../platform/oss-adoption/README.md)。登记不等于生产许可；`INTEGRATE` 只表示已有代码或开发运行事实需要继续硬化。
 

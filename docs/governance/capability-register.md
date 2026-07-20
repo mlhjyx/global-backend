@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-PRODUCT`
-> 产品批准来源：Gate 2 推荐组合；全局前端来源：Gate 4；Site UX 来源：Gate 5；非 Site 产品域来源：Gate 6（2026-07-20）；外部采用组合待 Gate 7
+> 产品批准来源：Gate 2 推荐组合；全局前端来源：Gate 4；Site UX 来源：Gate 5；非 Site 产品域来源：Gate 6；外部采用组合来源：Gate 7（2026-07-20）
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
 本表是 Capability ID、用户结果和多轴状态的唯一登记。Phase 1 [能力状态矩阵](../roadmap/saas-frontend-phase-1/capability-status-matrix.md)保留审计时点，Phase 2 [页面与能力目录](../roadmap/saas-frontend-phase-2/page-and-capability-catalog.md)保留批准论证；后续前端规范和 Capability Pack 只能引用本表 ID。
