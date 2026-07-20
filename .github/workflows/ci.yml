@@ -34,6 +34,9 @@ jobs:
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
+      - name: Docs governance（structure · links · status · evidence）
+        run: pnpm docs:verify
+
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
@@ -126,4 +129,4 @@ jobs:
           revision: packages/contracts/openapi/openapi.json
           fail-on: ERR
           # 私有契约不外发：v0.1.6 默认 review:true 会把 spec 上传 oasdiff.com 并发 PR 评论
-          review: 'false'
+          review: "false"

@@ -13,6 +13,7 @@
     "infra:up:legacy": "docker compose -p global-backend up -d",
     "infra:down:legacy": "docker compose -p global-backend down",
     "worktree:new": "node scripts/create-codex-worktree.mjs",
+    "docs:verify": "node scripts/verify-docs.mjs",
     "contracts:lint": "pnpm --filter @global/contracts lint",
     "contracts:docs": "pnpm --filter @global/contracts docs",
     "contracts:mock": "pnpm --filter @global/contracts mock",

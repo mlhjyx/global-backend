@@ -1,0 +1,141 @@
+{
+  "schemaVersion": "docs-verification-policy/v1",
+  "controlledMarkdown": {
+    "exact": [
+      "docs/README.md",
+      "docs/backend/oss-registry.md",
+      "docs/roadmap/saas-frontend-documentation-program-plan.md"
+    ],
+    "prefixes": [
+      "docs/design/",
+      "docs/frontend/",
+      "docs/governance/",
+      "docs/platform/oss-adoption/",
+      "docs/releases/",
+      "docs/roadmap/saas-frontend-phase-",
+      "docs/templates/"
+    ],
+    "documentIdExceptions": ["docs/templates/前端技术方案模板.md"]
+  },
+  "allowedStatusTokens": [
+    "ACTIVE_INPUT",
+    "APPROVED",
+    "APPROVED_AT_GATE_4",
+    "APPROVED_AT_GATE_5",
+    "APPROVED_AT_GATE_6",
+    "APPROVED_AT_GATE_7",
+    "APPROVED_AT_GATE_8",
+    "APPROVED_FOR_RELEASE",
+    "CLOSED",
+    "COMPLETE_FOR_GATE_1",
+    "CURRENT",
+    "DEPLOYED",
+    "DRAFT",
+    "FROZEN_EVIDENCE",
+    "FROZEN_GATE_EVIDENCE",
+    "FROZEN_PHASE_EVIDENCE",
+    "GATE_4_AND_5_APPROVED",
+    "GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS",
+    "GUIDE",
+    "PHASE_8_READY_FOR_GATE_8_REVIEW",
+    "OBSERVING",
+    "READY_FOR_GATE_1_REVIEW",
+    "READY_FOR_GATE_2_REVIEW",
+    "READY_FOR_GATE_3_REVIEW",
+    "READY_FOR_GATE_7_REVIEW",
+    "READY_FOR_GATE_8_REVIEW",
+    "READY_FOR_RELEASE_REVIEW",
+    "READY_FOR_REVIEW_WITH_POST_BASELINE_DELTA",
+    "REFERENCE_ONLY",
+    "ROLLED_BACK",
+    "SUPERSEDED",
+    "TEMPLATE"
+  ],
+  "idRegistries": [
+    {
+      "name": "Capability",
+      "pattern": "CAP-[A-Z0-9]+(?:-[A-Z0-9]+)*",
+      "source": "docs/governance/capability-register.md",
+      "definitionColumns": ["Capability ID"]
+    },
+    {
+      "name": "Object",
+      "pattern": "OBJ-FE-[0-9]{3}",
+      "source": "docs/governance/core-object-register.md",
+      "definitionColumns": ["Object ID"]
+    },
+    {
+      "name": "Page",
+      "pattern": "PAGE-FE-[0-9]{3}",
+      "source": "docs/frontend/04-page-and-capability-catalog.md",
+      "definitionColumns": ["Page ID"]
+    },
+    {
+      "name": "Scenario",
+      "pattern": "SCN-FE-[A-Z0-9]+(?:-[A-Z0-9]+)*",
+      "source": "docs/governance/scenario-catalog.md",
+      "definitionColumns": ["Scenario ID"]
+    },
+    {
+      "name": "Fixture",
+      "pattern": "FX-FE-[A-Z0-9]+(?:-[A-Z0-9]+)*",
+      "source": "docs/governance/scenario-catalog.md",
+      "definitionColumns": ["Fixture ID"]
+    },
+    {
+      "name": "Adoption",
+      "pattern": "ADP-FE-[0-9]{3}",
+      "source": "docs/backend/oss-registry.md",
+      "definitionColumns": ["Card"]
+    },
+    {
+      "name": "Owner",
+      "pattern": "OWN-[A-Z0-9]+(?:-[A-Z0-9]+)*",
+      "source": "docs/governance/terminology-and-status.md",
+      "definitionColumns": ["Owner ID"]
+    }
+  ],
+  "historicalBannerChecks": [
+    {
+      "path": "docs/site-builder/10-model-selection-study.md",
+      "requiredAny": ["FROZEN", "历史", "证据"]
+    },
+    {
+      "path": "docs/site-builder/11-readdy-component-source-study.md",
+      "requiredAny": ["DATED", "历史", "ADR-019"]
+    },
+    {
+      "path": "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.1.md",
+      "requiredAny": ["SUPERSEDED", "历史"]
+    },
+    {
+      "path": "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md",
+      "requiredAny": ["DATED_PROPOSAL", "历史", "proposal"]
+    }
+  ],
+  "releaseBundles": {
+    "directory": "docs/releases",
+    "index": "docs/releases/README.md",
+    "requiredMetadata": [
+      "Release ID",
+      "状态",
+      "环境",
+      "Release Owner",
+      "实现提交",
+      "发布时间"
+    ],
+    "requiredHeadings": [
+      "Identity",
+      "Scope",
+      "Promise",
+      "Source",
+      "Evidence",
+      "Operations",
+      "Data",
+      "Rollback and exit",
+      "Guides",
+      "Approval",
+      "Learning"
+    ]
+  }
+}
