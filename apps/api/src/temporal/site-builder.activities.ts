@@ -92,6 +92,8 @@ import {
 } from '../site-builder/agents/copy';
 import { PublishableClaimSnapshotService } from '../site-builder/publishable-claim-snapshot.service';
 import { PrismaPublishableClaimSnapshotRepository } from '../site-builder/publishable-claim-snapshot.prisma';
+import { assertReleaseContract } from '../site-builder/release-artifact';
+import type { SiteReleaseService } from '../site-builder/site-release.service';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -185,6 +187,8 @@ export interface SiteBuilderActivityDeps {
   renderSiteSpec?: typeof buildSiteSpecWithTemporaryFile;
   /** Preview pointer seam for deterministic post-commit reconciliation tests. */
   promotePreview?: typeof preparePreviewPromotion;
+  /** R1 durable object Release commit protocol; required by every new progressV1 build. */
+  releaseService?: Pick<SiteReleaseService, 'materialize'>;
 }
 
 export interface RefurbishActivityInput {
@@ -337,6 +341,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     broker,
     ownerDb,
     imagePipeline,
+    releaseService,
     renderSiteSpec = buildSiteSpecWithTemporaryFile,
     promotePreview = preparePreviewPromotion,
   } = deps;
@@ -1769,6 +1774,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         await rm(outDir, { recursive: true, force: true });
       }
       await mkdir(outDir, { recursive: true });
+      // Fail before renderer I/O or object upload. Section.astro still skips unknown types for
+      // legacy compatibility, so R1 publication must enforce the exact supported contract here.
+      assertReleaseContract(doc, DEMO_SPEC_VERSION);
       await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(site.slug),
@@ -1790,15 +1798,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           });
           return false;
         }
-        const completed = await tx.siteVersion.updateMany({
-          where: {
-            id: version.id,
-            buildRunId,
-            buildStatus: 'building',
-          },
-          data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
-        });
-        return completed.count === 1;
+        return true;
       });
       if (!accepted) {
         if (input.progressV1) {
@@ -1807,6 +1807,42 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         throw new Error(
           `run ${buildRunId} no longer running — rendered candidate discarded`,
         );
+      }
+      if (input.progressV1) {
+        if (!releaseService) {
+          throw new Error('SITE_RELEASE_SERVICE_UNAVAILABLE');
+        }
+        await releaseService.materialize({
+          workspaceId,
+          siteId,
+          siteVersionId: version.id,
+          buildRunId,
+          root: outDir,
+          spec: doc,
+          storedSpecVersion: DEMO_SPEC_VERSION,
+          createdBy: 'system',
+        });
+      } else {
+        // Temporal replay compatibility only. Every newly scheduled workflow has progressV1 and
+        // therefore cannot enter this node-local branch.
+        const completed = await prisma.withWorkspace(
+          workspaceId,
+          async (tx) =>
+            tx.siteVersion.updateMany({
+              where: {
+                id: version.id,
+                buildRunId,
+                buildStatus: 'building',
+              },
+              data: {
+                buildStatus: 'succeeded',
+                artifactKey: `local:${outDir}`,
+              },
+            }),
+        );
+        if (completed.count !== 1) {
+          throw new Error(`run ${buildRunId} local replay finalize was fenced`);
+        }
       }
       return { previewSlug: site.slug, versionId: version.id };
     },
@@ -2031,7 +2067,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               data: { activeVersionId: build.versionId, status: 'ready' },
             });
           }
-          if (input.progressV1) {
+          if (targetVersion.artifactKey?.startsWith('release:')) {
+            const activatedRelease = await tx.siteRelease.updateMany({
+              where: {
+                siteVersionId: build.versionId,
+                siteId,
+                status: 'ready',
+              },
+              data: { lastActivatedAt: new Date() },
+            });
+            if (activatedRelease.count !== 1) {
+              throw new Error(
+                `site version ${build.versionId} has no READY Release`,
+              );
+            }
+          } else if (input.progressV1) {
             const stagingArtifact = `local:${previewStagingDir(buildRunId)}`;
             const versionArtifact = `local:${previewVersionDir(buildRunId)}`;
             const liveArtifact = `local:${previewLiveDir(build.previewSlug)}`;
