@@ -17,6 +17,8 @@ import {
   PATENTS_CACHE_REFRESH_WORKFLOW,
   SANCTIONS_REFRESH_SCHEDULE_ID,
   SANCTIONS_REFRESH_WORKFLOW,
+  SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID,
+  SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
 } from './understanding.constants';
 
@@ -40,6 +42,8 @@ const SPECS = [
   { id: SANCTIONS_REFRESH_SCHEDULE_ID, workflowType: SANCTIONS_REFRESH_WORKFLOW, everyEnv: 'SANCTIONS_REFRESH_EVERY', everyDefault: '24h' },
   // KB 启动丢失 / due retry / 过期 processing lease 的兜底；每轮活动内部有界处理。
   { id: KB_RECOVERY_SWEEP_SCHEDULE_ID, workflowType: KB_RECOVERY_SWEEP_WORKFLOW, everyEnv: 'KB_RECOVERY_SWEEP_EVERY', everyDefault: '5m' },
+  // R1 Release 对账与回收；workflow 始终可调度，但 activity 默认 no-op，须 ops 显式开启删除。
+  { id: SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID, workflowType: SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW, everyEnv: 'SITE_RELEASE_MAINTENANCE_SWEEP_EVERY', everyDefault: '24h' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {

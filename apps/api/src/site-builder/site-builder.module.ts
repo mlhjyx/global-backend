@@ -21,6 +21,8 @@ import { StorageService } from './storage.service';
 import { SiteSpecAssetReferenceScanner } from './site-spec-asset-reference-scanner';
 import { IMAGE_PIPELINE_RUNNER, ImagePipelineService } from './image-pipeline.service';
 import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
+import { SitePreviewController } from './site-preview.controller';
+import { SitePreviewArtifactService } from './site-preview-artifact.service';
 
 /**
  * 独立站建设（docs/site-builder/02 §1）。M0：intake + 站点档案 + 素材/KB 地基。
@@ -28,7 +30,14 @@ import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
  */
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [IntakeController, SitesController, AssetsController, KbController, BuildsController],
+  controllers: [
+    IntakeController,
+    SitesController,
+    AssetsController,
+    KbController,
+    BuildsController,
+    SitePreviewController,
+  ],
   providers: [
     IntakeService,
     SitesService,
@@ -36,6 +45,7 @@ import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
     BuildsService,
     KbService,
     StorageService,
+    SitePreviewArtifactService,
     ImagePipelineService,
     { provide: IMAGE_PIPELINE_RUNNER, useFactory: () => new IsolatedImagePipelineRunner() },
     SiteSpecAssetReferenceScanner,

@@ -3,9 +3,11 @@ import {
   CopyObjectCommand,
   CreateBucketCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetBucketLifecycleConfigurationCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   PutBucketLifecycleConfigurationCommand,
   S3Client,
@@ -240,6 +242,48 @@ export class StorageService implements OnModuleInit {
     );
   }
 
+  /**
+   * Create one producer-isolated Release object exactly once. A 412 means a prior
+   * attempt may have committed despite a lost acknowledgement; callers must hash
+   * the existing object before accepting it.
+   */
+  async putBufferImmutable(
+    key: string,
+    data: Buffer,
+    contentType: string,
+    sha256: string,
+    signal?: AbortSignal,
+  ): Promise<'created' | 'exists'> {
+    const actual = createHash('sha256').update(data).digest('hex');
+    if (!/^[0-9a-f]{64}$/.test(sha256) || actual !== sha256) {
+      throw new Error(`immutable object sha256 mismatch: ${key}`);
+    }
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: data,
+          ContentType: contentType,
+          IfNoneMatch: '*',
+          ChecksumSHA256: Buffer.from(sha256, 'hex').toString('base64'),
+          Metadata: { sha256 },
+        }),
+        signal ? { abortSignal: signal } : undefined,
+      );
+      return 'created';
+    } catch (error) {
+      const status =
+        typeof error === 'object' && error !== null && '$metadata' in error
+          ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+              ?.httpStatusCode
+          : undefined;
+      const name = error instanceof Error ? error.name : '';
+      if (status === 412 || name === 'PreconditionFailed') return 'exists';
+      throw error;
+    }
+  }
+
   async copy(fromKey: string, toKey: string, signal?: AbortSignal): Promise<void> {
     await this.client.send(
       new CopyObjectCommand({
@@ -259,5 +303,43 @@ export class StorageService implements OnModuleInit {
       new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       signal ? { abortSignal: signal } : undefined,
     );
+  }
+
+  async deletePrefix(prefix: string, signal?: AbortSignal): Promise<number> {
+    if (!prefix.endsWith('/') || prefix.includes('..')) {
+      throw new Error('invalid object deletion prefix');
+    }
+    let deleted = 0;
+    for (let page = 0; page < 10_000; page += 1) {
+      const listed = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          MaxKeys: 1000,
+        }),
+        signal ? { abortSignal: signal } : undefined,
+      );
+      const objects = (listed.Contents ?? [])
+        .map(({ Key }) => Key)
+        .filter((key): key is string => Boolean(key));
+      if (objects.length === 0) return deleted;
+      if (objects.length > 0) {
+        const result = await this.client.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: {
+              Objects: objects.map((Key) => ({ Key })),
+              Quiet: true,
+            },
+          }),
+          signal ? { abortSignal: signal } : undefined,
+        );
+        if ((result.Errors?.length ?? 0) > 0) {
+          throw new Error('Release prefix deletion returned object errors');
+        }
+        deleted += objects.length;
+      }
+    }
+    throw new Error('Release prefix deletion exceeded page safety bound');
   }
 }

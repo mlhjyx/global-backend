@@ -30,3 +30,21 @@ describe('R4-B production worker paid-ledger wiring', () => {
     );
   });
 });
+
+describe('R1 production worker Release wiring', () => {
+  it('initializes one storage client and injects one build-fenced Release service', () => {
+    expect(worker).toContain(
+      "import { SiteReleaseService, resolveSiteRendererBuildIdentity } from '../site-builder/site-release.service';",
+    );
+    expect(worker).toContain('await siteBuilderStorage.onModuleInit()');
+    expect(worker).toMatch(
+      /const releaseService = new SiteReleaseService\([\s\S]*?prisma,[\s\S]*?siteBuilderStorage,[\s\S]*?buildIdentity: resolveSiteRendererBuildIdentity\(\)/,
+    );
+    expect(worker).toMatch(
+      /createSiteBuilderActivities\(\{[\s\S]*?releaseService,[\s\S]*?\}\)/,
+    );
+    expect(worker).toMatch(
+      /new KbService\([\s\S]*?siteBuilderStorage[\s\S]*?\)/,
+    );
+  });
+});

@@ -92,6 +92,8 @@ import {
 } from '../site-builder/agents/copy';
 import { PublishableClaimSnapshotService } from '../site-builder/publishable-claim-snapshot.service';
 import { PrismaPublishableClaimSnapshotRepository } from '../site-builder/publishable-claim-snapshot.prisma';
+import { assertReleaseContract } from '../site-builder/release-artifact';
+import type { SiteReleaseService } from '../site-builder/site-release.service';
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -185,6 +187,8 @@ export interface SiteBuilderActivityDeps {
   renderSiteSpec?: typeof buildSiteSpecWithTemporaryFile;
   /** Preview pointer seam for deterministic post-commit reconciliation tests. */
   promotePreview?: typeof preparePreviewPromotion;
+  /** R1 durable object Release commit protocol; required by every new progressV1 build. */
+  releaseService?: Pick<SiteReleaseService, 'materialize'>;
 }
 
 export interface RefurbishActivityInput {
@@ -337,6 +341,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     broker,
     ownerDb,
     imagePipeline,
+    releaseService,
     renderSiteSpec = buildSiteSpecWithTemporaryFile,
     promotePreview = preparePreviewPromotion,
   } = deps;
@@ -481,112 +486,263 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: DemoV0ActivityInput,
     ): Promise<{ previewSlug: string }> {
       const { workspaceId, siteId, buildRunId } = input;
-
-      const site = await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.siteBuildRun.update({
-          where: { id: buildRunId },
+      const claimed = await prisma.withWorkspace(workspaceId, async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+        const [run, site, existing] = await Promise.all([
+          tx.siteBuildRun.findUnique({ where: { id: buildRunId } }),
+          tx.site.findUnique({ where: { id: siteId } }),
+          tx.siteVersion.findFirst({ where: { buildRunId } }),
+        ]);
+        if (
+          !run ||
+          !site ||
+          (run.siteId !== undefined && run.siteId !== siteId)
+        ) {
+          throw new Error(`demo run ${buildRunId} state is missing`);
+        }
+        if (
+          existing &&
+          (existing.workspaceId !== workspaceId ||
+            existing.siteId !== siteId ||
+            existing.source !== 'demo_v0')
+        ) {
+          throw new Error('SITE_RELEASE_VERSION_SCOPE_MISMATCH');
+        }
+        if (run.status === 'succeeded') {
+          if (
+            existing?.buildStatus === 'succeeded' &&
+            existing.artifactKey?.startsWith('release:') &&
+            site.activeVersionId === existing.id
+          ) {
+            return {
+              completed: true as const,
+              site,
+              existing,
+              publicationBaseVersionId: site.activeVersionId,
+            };
+          }
+          throw new Error('SITE_RELEASE_DEMO_TERMINAL_STATE_MISMATCH');
+        }
+        if (!['queued', 'running'].includes(run.status)) {
+          throw new Error(`demo run ${buildRunId} is not claimable`);
+        }
+        const storedScope =
+          run.scope &&
+          typeof run.scope === 'object' &&
+          !Array.isArray(run.scope)
+            ? run.scope
+            : {};
+        const hasPublicationBase = Object.prototype.hasOwnProperty.call(
+          storedScope,
+          'publicationBaseVersionId',
+        );
+        const storedBase = (
+          storedScope as Record<string, Prisma.JsonValue>
+        ).publicationBaseVersionId;
+        if (
+          hasPublicationBase &&
+          storedBase !== null &&
+          typeof storedBase !== 'string'
+        ) {
+          throw new Error(`demo run ${buildRunId} has corrupt publication base`);
+        }
+        const publicationBaseVersionId = hasPublicationBase
+          ? (storedBase as string | null)
+          : site.activeVersionId;
+        const claimedRun = await tx.siteBuildRun.updateMany({
+          where: { id: buildRunId, status: run.status },
           data: {
-            status: 'running',
+            ...(run.status === 'queued'
+              ? { status: 'running', startedAt: new Date() }
+              : {}),
             phase: 'demo_v0',
-            startedAt: new Date(),
             progress: 0.1,
+            ...(!hasPublicationBase
+              ? {
+                  scope: {
+                    ...storedScope,
+                    publicationBaseVersionId,
+                  } as Prisma.InputJsonValue,
+                }
+              : {}),
           },
         });
-        return tx.site.findUnique({ where: { id: siteId } });
+        if (claimedRun.count !== 1) {
+          throw new Error(`demo run ${buildRunId} claim was fenced`);
+        }
+        return {
+          completed: false as const,
+          site,
+          existing,
+          publicationBaseVersionId,
+        };
       });
-      if (!site) throw new Error(`site ${siteId} not found`);
+      if (claimed.completed) return { previewSlug: claimed.site.slug };
 
-      try {
-        const intake = site.intake as unknown as IntakeInput;
+      const intake = claimed.site.intake as unknown as IntakeInput;
+      let version = claimed.existing;
+      let doc: SiteSpec;
+      if (version) {
+        doc = version.spec as unknown as SiteSpec;
+      } else {
         const polish = await polishCopy(workspaceId, intake, buildRunId);
-        const doc = buildDemoSpec({
-          siteName: site.name,
+        const candidate = buildDemoSpec({
+          siteName: claimed.site.name,
           intake,
-          stylePreset: site.stylePreset,
+          stylePreset: claimed.site.stylePreset,
           polish,
         });
-
-        const version = await prisma.withWorkspace(workspaceId, async (tx) => {
-          // Temporal 重试的上一次尝试可能残留 building 版本行（复审 LOW）——按 runId 清理
-          await tx.siteVersion.deleteMany({
-            where: { buildRunId, buildStatus: 'building' },
-          });
-          const nextVersion = await allocateNextSiteVersion(tx, siteId);
-          return tx.siteVersion.create({
-            data: {
-              workspaceId,
-              siteId,
-              version: nextVersion,
-              source: 'demo_v0',
-              spec: doc as unknown as Prisma.InputJsonValue,
-              specVersion: DEMO_SPEC_VERSION,
-              buildStatus: 'building',
-              buildRunId,
-            },
-          });
-        });
-
-        const outDir = path.join(previewRoot(), site.slug);
-        await mkdir(outDir, { recursive: true });
-        await buildSiteSpecWithTemporaryFile(doc, {
-          outDir,
-          basePath: previewBasePath(site.slug),
-        });
-
-        await prisma.withWorkspace(workspaceId, async (tx) => {
-          await lockSiteSpecAssetsForActivation(tx, {
-            workspaceId,
-            siteId,
-            spec: doc,
-          });
-          await tx.siteVersion.update({
-            where: { id: version.id },
-            data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
-          });
-          await tx.site.update({
-            where: { id: siteId },
-            data: { activeVersionId: version.id, status: 'ready' },
-          });
-          await tx.siteBuildRun.update({
-            where: { id: buildRunId },
-            data: { status: 'succeeded', progress: 1, finishedAt: new Date() },
-          });
-        });
-
-        // 注册资料入知识库（01 §2）：best-effort，失败不影响 demo 就绪
-        if (kb) {
-          try {
-            await kb.ingestText(
-              { userId: 'system', workspaceId, roles: [] },
-              {
+        const persisted = await prisma.withWorkspace(
+          workspaceId,
+          async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+            const run = await tx.siteBuildRun.findUnique({
+              where: { id: buildRunId },
+              select: { status: true },
+            });
+            if (run?.status !== 'running') {
+              throw new Error(`demo run ${buildRunId} no longer running`);
+            }
+            const raced = await tx.siteVersion.findFirst({
+              where: { buildRunId },
+            });
+            if (raced) return raced;
+            const nextVersion = await allocateNextSiteVersion(tx, siteId);
+            return tx.siteVersion.create({
+              data: {
+                workspaceId,
                 siteId,
-                source: 'intake',
-                title: `注册引导资料 — ${site.name}`,
-                text: intakeToMarkdown(intake),
+                version: nextVersion,
+                source: 'demo_v0',
+                spec: candidate as unknown as Prisma.InputJsonValue,
+                specVersion: DEMO_SPEC_VERSION,
+                buildStatus: 'building',
+                buildRunId,
               },
-            );
-          } catch (err) {
-            log.warn(
-              `intake kb ingest failed for site ${siteId}: ${String(err)}`,
-            );
-          }
-        }
-
-        return { previewSlug: site.slug };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        await prisma.withWorkspace(workspaceId, async (tx) => {
-          await tx.siteBuildRun.update({
-            where: { id: buildRunId },
-            data: { status: 'failed', error: message, finishedAt: new Date() },
-          });
-          await tx.site.update({
-            where: { id: siteId },
-            data: { status: 'draft' },
-          });
-        });
-        throw err;
+            });
+          },
+        );
+        version = persisted;
+        doc = persisted.spec as unknown as SiteSpec;
       }
+      if (
+        !version ||
+        version.workspaceId !== workspaceId ||
+        version.siteId !== siteId ||
+        version.source !== 'demo_v0' ||
+        !['building', 'succeeded'].includes(version.buildStatus)
+      ) {
+        throw new Error('SITE_RELEASE_VERSION_NOT_BUILDABLE');
+      }
+      assertReleaseContract(doc, version.specVersion);
+
+      const outDir = previewStagingDir(buildRunId);
+      await rm(outDir, { recursive: true, force: true });
+      await mkdir(outDir, { recursive: true });
+      await renderSiteSpec(doc, {
+        outDir,
+        basePath: previewBasePath(claimed.site.slug),
+      });
+
+      const accepted = await prisma.withWorkspace(workspaceId, async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+        const run = await tx.siteBuildRun.findUnique({
+          where: { id: buildRunId },
+          select: { status: true },
+        });
+        if (run?.status === 'running') return true;
+        await tx.siteVersion.updateMany({
+          where: { id: version.id, buildStatus: 'building' },
+          data: { buildStatus: 'failed' },
+        });
+        return false;
+      });
+      if (!accepted) {
+        await rm(outDir, { recursive: true, force: true });
+        throw new Error(
+          `run ${buildRunId} no longer running — rendered candidate discarded`,
+        );
+      }
+      if (!releaseService) throw new Error('SITE_RELEASE_SERVICE_UNAVAILABLE');
+      const release = await releaseService.materialize({
+        workspaceId,
+        siteId,
+        siteVersionId: version.id,
+        buildRunId,
+        root: outDir,
+        spec: doc,
+        storedSpecVersion: version.specVersion,
+        createdBy: 'system',
+      });
+
+      await prisma.withWorkspace(workspaceId, async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-release-pointer-${siteId}`}))`;
+        const run = await tx.siteBuildRun.findUnique({
+          where: { id: buildRunId },
+          select: { status: true },
+        });
+        if (run?.status !== 'running') {
+          throw new Error(`demo run ${buildRunId} publication was fenced`);
+        }
+        await lockSiteSpecAssetsForActivation(tx, {
+          workspaceId,
+          siteId,
+          spec: doc,
+        });
+        const activatedRelease = await tx.siteRelease.updateMany({
+          where: { id: release.releaseId, status: 'ready' },
+          data: { lastActivatedAt: new Date() },
+        });
+        if (activatedRelease.count !== 1) {
+          throw new Error('SITE_RELEASE_NOT_READY');
+        }
+        const activatedSite = await tx.site.updateMany({
+          where: {
+            id: siteId,
+            OR: [
+              { activeVersionId: claimed.publicationBaseVersionId },
+              { activeVersionId: version.id },
+            ],
+          },
+          data: { activeVersionId: version.id, status: 'ready' },
+        });
+        if (activatedSite.count !== 1) {
+          throw new Error('SITE_RELEASE_POINTER_CAS_FAILED');
+        }
+        const completed = await tx.siteBuildRun.updateMany({
+          where: { id: buildRunId, status: 'running' },
+          data: {
+            status: 'succeeded',
+            progress: 1,
+            finishedAt: new Date(),
+          },
+        });
+        if (completed.count !== 1) {
+          throw new Error(`demo run ${buildRunId} completion was fenced`);
+        }
+      });
+
+      // 注册资料入知识库（01 §2）：best-effort，失败不影响 demo 就绪
+      if (kb) {
+        try {
+          await kb.ingestText(
+            { userId: 'system', workspaceId, roles: [] },
+            {
+              siteId,
+              source: 'intake',
+              title: `注册引导资料 — ${claimed.site.name}`,
+              text: intakeToMarkdown(intake),
+            },
+          );
+        } catch (err) {
+          log.warn(
+            `intake kb ingest failed for site ${siteId}: ${String(err)}`,
+          );
+        }
+      }
+
+      return { previewSlug: claimed.site.slug };
     },
 
     /**
@@ -613,6 +769,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             await tx.siteVersion.updateMany({
               where: { buildRunId: input.buildRunId, buildStatus: 'building' },
               data: { buildStatus: 'failed' },
+            });
+            await tx.siteBuildRun.updateMany({
+              where: { id: input.buildRunId, status: 'running' },
+              data: {
+                status: 'failed',
+                error: 'demo v0 workflow failed after retries',
+                finishedAt: new Date(),
+              },
             });
             await tx.site.update({
               where: { id: input.siteId },
@@ -1666,15 +1830,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   })
                 )?.spec ?? null)
               : null,
-            // Temporal 结果丢失重试的幂等位（Codex P2）：本 run 已有成功版本→复用，不再建第二个
+            // Release candidate may survive an upload/DB ACK-loss. Reuse its exact version/spec.
             existing: await tx.siteVersion.findFirst({
-              where: { buildRunId, buildStatus: 'succeeded' },
+              where: { buildRunId },
             }),
           };
         },
       );
       if (!site) throw new Error(`site ${siteId} not found`);
-      if (existing) return { previewSlug: site.slug, versionId: existing.id };
+      if (existing?.buildStatus === 'succeeded') {
+        return { previewSlug: site.slug, versionId: existing.id };
+      }
+      if (existing && existing.buildStatus !== 'building') {
+        throw new Error(`run ${buildRunId} has a non-retryable SiteVersion`);
+      }
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
@@ -1705,16 +1874,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           ]),
         );
       }
-      const doc = applyBuildScope(
+      const generatedDoc = applyBuildScope(
         activeSpec as unknown as SiteSpec | null,
         candidate,
         (input.scope ?? { scope: 'site' }) as NormalizedBuildRequest,
       );
+      const doc = existing
+        ? (existing.spec as unknown as SiteSpec)
+        : generatedDoc;
 
       const version = await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.siteVersion.deleteMany({
-          where: { buildRunId, buildStatus: 'building' },
-        });
+        if (existing) return existing;
         const nextVersion = await allocateNextSiteVersion(tx, siteId);
         const created = await tx.siteVersion.create({
           data: {
@@ -1769,6 +1939,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         await rm(outDir, { recursive: true, force: true });
       }
       await mkdir(outDir, { recursive: true });
+      // Fail before renderer I/O or object upload. Section.astro still skips unknown types for
+      // legacy compatibility, so R1 publication must enforce the exact supported contract here.
+      assertReleaseContract(doc, DEMO_SPEC_VERSION);
       await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(site.slug),
@@ -1790,15 +1963,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           });
           return false;
         }
-        const completed = await tx.siteVersion.updateMany({
-          where: {
-            id: version.id,
-            buildRunId,
-            buildStatus: 'building',
-          },
-          data: { buildStatus: 'succeeded', artifactKey: `local:${outDir}` },
-        });
-        return completed.count === 1;
+        return true;
       });
       if (!accepted) {
         if (input.progressV1) {
@@ -1807,6 +1972,42 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         throw new Error(
           `run ${buildRunId} no longer running — rendered candidate discarded`,
         );
+      }
+      if (input.progressV1) {
+        if (!releaseService) {
+          throw new Error('SITE_RELEASE_SERVICE_UNAVAILABLE');
+        }
+        await releaseService.materialize({
+          workspaceId,
+          siteId,
+          siteVersionId: version.id,
+          buildRunId,
+          root: outDir,
+          spec: doc,
+          storedSpecVersion: DEMO_SPEC_VERSION,
+          createdBy: 'system',
+        });
+      } else {
+        // Temporal replay compatibility only. Every newly scheduled workflow has progressV1 and
+        // therefore cannot enter this node-local branch.
+        const completed = await prisma.withWorkspace(
+          workspaceId,
+          async (tx) =>
+            tx.siteVersion.updateMany({
+              where: {
+                id: version.id,
+                buildRunId,
+                buildStatus: 'building',
+              },
+              data: {
+                buildStatus: 'succeeded',
+                artifactKey: `local:${outDir}`,
+              },
+            }),
+        );
+        if (completed.count !== 1) {
+          throw new Error(`run ${buildRunId} local replay finalize was fenced`);
+        }
       }
       return { previewSlug: site.slug, versionId: version.id };
     },
@@ -2031,7 +2232,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               data: { activeVersionId: build.versionId, status: 'ready' },
             });
           }
-          if (input.progressV1) {
+          if (targetVersion.artifactKey?.startsWith('release:')) {
+            const activatedRelease = await tx.siteRelease.updateMany({
+              where: {
+                siteVersionId: build.versionId,
+                siteId,
+                status: 'ready',
+              },
+              data: { lastActivatedAt: new Date() },
+            });
+            if (activatedRelease.count !== 1) {
+              throw new Error(
+                `site version ${build.versionId} has no READY Release`,
+              );
+            }
+          } else if (input.progressV1) {
             const stagingArtifact = `local:${previewStagingDir(buildRunId)}`;
             const versionArtifact = `local:${previewVersionDir(buildRunId)}`;
             const liveArtifact = `local:${previewLiveDir(build.previewSlug)}`;

@@ -18,6 +18,7 @@ import type { CopySlotDefinition } from '@global/contracts';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { PaidOperationUnknownError } from '../site-builder/site-build-cost-ledger';
+import { buildDemoSpec, DEMO_SPEC_VERSION } from '../site-builder/demo-spec';
 
 /**
  * M1-b fast-follow 改动 1（预算门接线）+ 改动 3（补偿路径 steps 回填）。
@@ -375,6 +376,62 @@ describe('beginRefurbishRun — 预算门接线（改动 1）', () => {
 });
 
 describe('finalizeRefurbish — 末尾 force close（改动 1）', () => {
+  it('R1 promotes a READY Release with the DB pointer only and never calls the local symlink seam', async () => {
+    const { close } = spyBudget();
+    const releaseUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: 'running', scope: {} })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({ activeVersionId: null })),
+        updateMany: siteUpdateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: { specVersion: '1.0.0', assets: {}, pages: [] },
+          artifactKey: 'release:release-1',
+        })),
+      },
+      siteRelease: { updateMany: releaseUpdateMany },
+    };
+    const promotePreview = vi.fn();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      promotePreview,
+    });
+
+    await expect(
+      acts.finalizeRefurbish({
+        ...INPUT,
+        progressV1: true,
+        kb: { processed: 0, failed: 0, degraded: false },
+        profile: { status: 'done', gaps: 0 },
+        build: { previewSlug: 'acme', versionId: 'version-1' },
+      }),
+    ).resolves.toEqual({ previewSlug: 'acme' });
+
+    expect(siteUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'site-1',
+        OR: [{ activeVersionId: null }, { activeVersionId: 'version-1' }],
+      },
+      data: { activeVersionId: 'version-1', status: 'ready' },
+    });
+    expect(releaseUpdateMany).toHaveBeenCalledWith({
+      where: {
+        siteVersionId: 'version-1',
+        siteId: 'site-1',
+        status: 'ready',
+      },
+      data: { lastActivatedAt: expect.any(Date) },
+    });
+    expect(promotePreview).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith('run-1', { force: true });
+  });
+
   it('R4-B: persists the stable terminal cost summary on the succeeded BuildRun', async () => {
     spyBudget();
     const costSummary = {
@@ -1022,6 +1079,92 @@ describe('入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     }
   });
 
+  it('R1 assembles into a durable Release instead of succeeding a local artifact', async () => {
+    spyBudget();
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-release-assemble-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      siteBuildRun: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(async () => ({ status: 'running' })),
+      },
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          name: 'Acme',
+          slug: 'acme',
+          intake: INTAKE,
+          stylePreset: 'modern-industrial',
+          activeVersionId: null,
+        })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => null),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        aggregate: vi.fn(async () => ({ _max: { version: null } })),
+        create: vi.fn(async () => ({ id: 'version-1' })),
+        updateMany: versionUpdateMany,
+      },
+    };
+    const renderSiteSpec = vi.fn(
+      async (_spec: unknown, output: { outDir: string }) => {
+        await writeFile(path.join(output.outDir, 'index.html'), 'candidate');
+      },
+    );
+    const materialize = vi.fn(async () => ({
+      releaseId: 'release-1',
+      artifactKey: 'release:release-1',
+      artifactPrefix: 'sites/site-1/releases/release-1',
+      artifactDigest: 'a'.repeat(64),
+      manifestDigest: 'b'.repeat(64),
+      producerToken: 'producer-1',
+    }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      renderSiteSpec,
+      releaseService: { materialize } as never,
+    });
+    try {
+      await expect(
+        acts.assembleAndBuild({ ...INPUT, progressV1: true }),
+      ).resolves.toEqual({ previewSlug: 'acme', versionId: 'version-1' });
+      expect(materialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: 'ws-1',
+          siteId: 'site-1',
+          siteVersionId: 'version-1',
+          buildRunId: 'run-1',
+          storedSpecVersion: '1.0.0',
+          root: path.join(root, '.staging', 'run-1'),
+        }),
+      );
+      expect(versionUpdateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            artifactKey: expect.stringMatching(/^local:/),
+          }),
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('R1 retry reuses the run-scoped building SiteVersion instead of invalidating its candidate Release', async () => {
+    const source = await readFile(
+      new URL('./site-builder.activities.ts', import.meta.url),
+      'utf8',
+    );
+    const start = source.indexOf('async assembleAndBuild(');
+    const end = source.indexOf('async finalizeRefurbish(', start);
+    const assemble = source.slice(start, end);
+    expect(assemble).not.toMatch(/siteVersion\.deleteMany\(/);
+    expect(assemble).toMatch(
+      /siteVersion\.findFirst\(\{\s*where: \{ buildRunId \}/,
+    );
+  });
+
   it('buildBrandProfile 账户未预开 → 入口立账（即便随后 gateway 缺席抛错）', async () => {
     expect(budgetLedger.remainingCents('run-1')).toBe(Infinity);
     const acts = createSiteBuilderActivities({ prisma: {} as PrismaService }); // 无 gateway
@@ -1627,13 +1770,204 @@ describe('R0-5 polishCopy — 传真 AbortSignal（超时即 abort 底层 fetch�
   });
 });
 
+describe('generateDemoV0 — R1 immutable Release publication', () => {
+  function retryingDemoTx(options?: {
+    cancelDuringRender?: boolean;
+    renderError?: Error;
+  }) {
+    let runStatus = 'running';
+    const spec = buildDemoSpec({
+      siteName: 'Acme',
+      intake: INTAKE,
+      stylePreset: 'clean',
+    });
+    const version = {
+      id: 'version-1',
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      source: 'demo_v0',
+      spec,
+      specVersion: DEMO_SPEC_VERSION,
+      buildStatus: 'building',
+      artifactKey: null as string | null,
+    };
+    const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const releaseUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const runUpdateMany = vi.fn(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        if (typeof data.status === 'string') runStatus = data.status;
+        return { count: 1 };
+      },
+    );
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: runStatus })),
+        update: vi.fn(async () => ({})),
+        updateMany: runUpdateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          name: 'Acme',
+          slug: 'acme',
+          stylePreset: 'clean',
+          intake: INTAKE,
+          activeVersionId: 'old-version',
+        })),
+        update: vi.fn(async () => ({})),
+        updateMany: siteUpdateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => version),
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+        aggregate: vi.fn(async () => ({ _max: { version: 1 } })),
+        create: vi.fn(async () => {
+          throw new Error('demo retry must reuse its durable SiteVersion');
+        }),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      siteRelease: { updateMany: releaseUpdateMany },
+    };
+    const renderSiteSpec = vi.fn(
+      async (_doc: unknown, output: { outDir: string }) => {
+        await mkdir(output.outDir, { recursive: true });
+        await writeFile(path.join(output.outDir, 'index.html'), 'candidate');
+        if (options?.cancelDuringRender) runStatus = 'cancelled';
+        if (options?.renderError) throw options.renderError;
+      },
+    );
+    return {
+      tx,
+      version,
+      renderSiteSpec,
+      siteUpdateMany,
+      releaseUpdateMany,
+      runUpdateMany,
+    };
+  }
+
+  it('reuses the run-scoped version, materializes one Release, then atomically advances the pointer', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-demo-release-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const state = retryingDemoTx();
+    const materialize = vi.fn(async () => {
+      state.version.buildStatus = 'succeeded';
+      state.version.artifactKey = 'release:release-1';
+      return {
+        releaseId: 'release-1',
+        artifactKey: 'release:release-1',
+        artifactPrefix: 'sites/site-1/releases/release-1',
+        artifactDigest: 'a'.repeat(64),
+        manifestDigest: 'b'.repeat(64),
+        producerToken: 'producer-1',
+      };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(state.tx),
+      renderSiteSpec: state.renderSiteSpec,
+      releaseService: { materialize } as never,
+    });
+    try {
+      await expect(acts.generateDemoV0(INPUT)).resolves.toEqual({
+        previewSlug: 'acme',
+      });
+      expect(state.tx.siteVersion.deleteMany).not.toHaveBeenCalled();
+      expect(state.tx.siteVersion.create).not.toHaveBeenCalled();
+      expect(materialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          siteVersionId: 'version-1',
+          buildRunId: 'run-1',
+          storedSpecVersion: DEMO_SPEC_VERSION,
+          root: path.join(root, '.staging', 'run-1'),
+        }),
+      );
+      expect(state.siteUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'site-1',
+          OR: [
+            { activeVersionId: 'old-version' },
+            { activeVersionId: 'version-1' },
+          ],
+        },
+        data: { activeVersionId: 'version-1', status: 'ready' },
+      });
+      expect(state.releaseUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'release-1', status: 'ready' },
+          data: { lastActivatedAt: expect.any(Date) },
+        }),
+      );
+      expect(state.runUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'run-1', status: 'running' },
+          data: expect.objectContaining({ status: 'succeeded', progress: 1 }),
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('lets cancellation win after rendering and never uploads or advances the old pointer', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-demo-cancel-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const state = retryingDemoTx({ cancelDuringRender: true });
+    const materialize = vi.fn();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(state.tx),
+      renderSiteSpec: state.renderSiteSpec,
+      releaseService: { materialize } as never,
+    });
+    try {
+      await expect(acts.generateDemoV0(INPUT)).rejects.toThrow(
+        'rendered candidate discarded',
+      );
+      expect(materialize).not.toHaveBeenCalled();
+      expect(state.siteUpdateMany).not.toHaveBeenCalled();
+      expect(state.releaseUpdateMany).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves transient activity failures retryable until the workflow exhausts its attempts', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-demo-retryable-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const transient = new Error('renderer node restarted');
+    const state = retryingDemoTx({ renderError: transient });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(state.tx),
+      renderSiteSpec: state.renderSiteSpec,
+      releaseService: { materialize: vi.fn() } as never,
+    });
+    try {
+      await expect(acts.generateDemoV0(INPUT)).rejects.toBe(transient);
+      expect(state.tx.site.update).not.toHaveBeenCalled();
+      expect(state.runUpdateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'failed' }),
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('cleanupFailedDemo — R0-6 不删站、置 setup_failed（保留用户数据、可原地重试）', () => {
   it('本 run 仍最新 → 保留 site 置 setup_failed + 清本 run building 孤儿版本，绝不 site.delete', async () => {
     const del = vi.fn(async () => ({}));
     const update = vi.fn(async () => ({}));
+    const runUpdateMany = vi.fn(async () => ({ count: 1 }));
     const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
-      siteBuildRun: { findFirst: async () => ({ id: 'run-1' }) }, // 最新 demo_v0 run = 本 run
+      siteBuildRun: {
+        findFirst: async () => ({ id: 'run-1' }),
+        updateMany: runUpdateMany,
+      }, // 最新 demo_v0 run = 本 run
       siteVersion: { updateMany: versionUpdateMany },
       site: { delete: del, update },
     };
@@ -1647,6 +1981,14 @@ describe('cleanupFailedDemo — R0-6 不删站、置 setup_failed（保留用户
     expect(versionUpdateMany).toHaveBeenCalledWith({
       where: { buildRunId: 'run-1', buildStatus: 'building' },
       data: { buildStatus: 'failed' },
+    });
+    expect(runUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'run-1', status: 'running' },
+      data: {
+        status: 'failed',
+        error: 'demo v0 workflow failed after retries',
+        finishedAt: expect.any(Date),
+      },
     });
   });
 
