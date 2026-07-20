@@ -18,7 +18,8 @@
 4. [ADR 注册表](adr/registry.md)：承重决策及其理由。
 5. [发布路线](roadmap/release-plan.md)：下一施工顺序。
 6. [治理入口](governance/README.md)：能力、对象、场景、冲突和追踪关系。
-7. [统一 SaaS 前端规范](frontend/README.md)：当前 Gate 4 候选的 IA、Shell、权限、状态、AI、设计和交付规则。
+7. [统一 SaaS 前端规范](frontend/README.md)：Gate 4 已批准的 IA、Shell、权限、状态、AI、设计和交付目标规则。
+8. [独立站管理 Capability Pack](frontend/modules/independent-site-management/README.md)：当前 Gate 5 的模块旅程、页面、状态、输出、实施和验收交接。
 
 任何“已完成”声明都必须回到上述主题 Owner、机器契约和证据核验。不要从旧 Word、研究稿、本地原型或历史 worktree 推导当前实现。
 
@@ -31,7 +32,7 @@
 - [核心对象登记](governance/core-object-register.md)
 - [冲突登记](governance/conflict-register.md)
 - [统一 SaaS 文档治理计划](roadmap/saas-frontend-documentation-program-plan.md)
-- 当前 Gate：[Phase 4 评审](roadmap/saas-frontend-phase-4/gate-4-review.md)
+- 当前 Gate：[Phase 5 评审](roadmap/saas-frontend-phase-5/gate-5-review.md)
 
 ### 产品设计与前端
 
@@ -43,6 +44,9 @@
 - [场景目录](governance/scenario-catalog.md)
 - [追踪矩阵](governance/traceability-matrix.md)
 - [前端合同与接入规则](frontend/11-frontend-contracts-and-integration.md)；机器真值为 `packages/contracts/openapi/openapi.json`
+- [独立站管理旅程与页面](frontend/modules/independent-site-management/journeys-and-page-spec.md)
+- [独立站管理低保真线框](design/independent-site-management-wireframes.md)
+- [独立站管理实施蓝图](frontend/implementation/independent-site-management-blueprint.md)
 
 注意：`/global/frontend/project-12080666` 是无 Git provenance 的 React/Vite Mock 原型；正式 SaaS 前端仓库、设计 Owner、设计 Token 和部署事实源尚未确定。它不能作为 as-built 或正式视觉规范。
 
@@ -55,6 +59,7 @@
 - [API 合同说明](site-builder/07-api-contract-draft.md)
 - [M1 实施设计](site-builder/09-m1-implementation-design.md)
 - [R1-min handoff](site-builder/handoffs/r1-min-execution-brief.md)
+- [公开站输出目标规范](frontend/modules/independent-site-management/public-site-output-spec.md)
 
 ### QA 与证据
 
@@ -64,6 +69,7 @@
 - [分析、测试与发布证据](frontend/12-analytics-testing-and-release-evidence.md)
 - [Site Builder 评测与测试](site-builder/08-eval-testing.md)
 - [Temporal 测试记录](implementation-records/temporal-workflow-testing.md)
+- [独立站管理运营与验收](frontend/modules/independent-site-management/operations-and-acceptance.md)
 - [模型路由 active evidence](evidence/model-routing/model1-brand-profile-20260719-v20/README.md)
 
 ### 运营、客服与管理员
@@ -142,7 +148,8 @@ Phase 1/2 的 roadmap 包是冻结审计与决策 provenance，不是第二套 c
 - Gate 1：通过，Phase 1 冻结。
 - Gate 2：通过，推荐组合已批准。
 - Gate 3：通过，Phase 3 Registry 已建立。
-- Phase 4：全局前端规范已获授权，当前准备 Gate 4 评审。
-- Phase 5–8：未授权。
+- Gate 4：通过，`DEC-FE-P4-001..011` 已批准，`BLK-FE-001..007` 保留。
+- Phase 5：已授权并完成文档交付，当前准备 Gate 5 评审。
+- Phase 6–8：未授权。
 
-进入下一阶段前请从 [Gate 4 评审包](roadmap/saas-frontend-phase-4/gate-4-review.md)检查 11 项推荐决定、全局模式复用、设计资产追踪和未关闭 blocker。
+进入下一阶段前请从 [Gate 5 评审包](roadmap/saas-frontend-phase-5/gate-5-review.md)检查 10 项推荐决定、当前/目标分层、模块追踪和未关闭 blocker。

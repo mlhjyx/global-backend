@@ -2,17 +2,17 @@
 
 > 文档 ID：`FE-GLOBAL-000`
 > 层级：`L2 / Navigation`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 > 最后核验：2026-07-20
 
-本目录把 Gate 2 批准的统一 SaaS 产品体验和 Gate 3 的治理 Registry 转成可供所有产品域复用的前端规则。它回答“整个 SaaS 的前端如何保持一致”，不提前代替独立站管理的模块 PRD、页面级 UX 或实施方案。
+本目录把 Gate 2 批准的统一 SaaS 产品体验和 Gate 3 的治理 Registry 转成可供所有产品域复用的当前目标前端规则。它回答“整个 SaaS 的前端如何保持一致”；独立站管理的模块规格已在 Phase 5 单独建立。
 
 ## 1. 当前效力
 
-- 本包是 Gate 4 的规范候选；Gate 4 通过前仍是 `ACTIVE_INPUT`，不能称为已生效设计系统或 as-built 前端。
+- `DEC-FE-P4-001..011` 已在 Gate 4 获批，本包是 `CURRENT` 目标规范；它仍不是 as-built 前端、视觉定稿或用户可用证明。
 - 产品边界、架构、ADR、状态和机器合同仍分别以 [权威链](../README.md#1-五分钟读懂当前项目)为准；本目录只消费这些事实。
 - 正式 SaaS 前端仓库、CI、部署、设计 Owner、设计事实源、Token 数值和组件库均未定位。本包定义约束、交付合同和安全默认，不虚构现有实现。
 - `/global/frontend`、Readdy、模板、截图和竞品只可作为已登记参考，不能证明页面、组件或视觉规范已经交付。
@@ -28,6 +28,7 @@
 | 设计/内容 | [设计系统与内容](09-design-system-and-content-guidelines.md) → [设计资产登记](../design/design-asset-register.md) → [微文案目录](../design/content-and-microcopy-catalog.md) |
 | QA/发布/运营 | [响应式、a11y 与性能](10-responsive-accessibility-and-performance.md) → [分析、测试与发布证据](12-analytics-testing-and-release-evidence.md) |
 | 决策者 | [开放决策](13-open-decisions.md) → [Gate 4 评审](../roadmap/saas-frontend-phase-4/gate-4-review.md) |
+| 独立站管理团队 | [Capability Pack](modules/independent-site-management/README.md) → [实施蓝图](implementation/independent-site-management-blueprint.md) → [Gate 5](../roadmap/saas-frontend-phase-5/gate-5-review.md) |
 
 ## 3. 规范文件
 
@@ -56,9 +57,9 @@
 4. “已设计”至少需要受控设计源、资产版本、关键状态、响应式和 a11y 标注；Markdown 需求不等于视觉设计。
 5. “用户可用”至少需要正式前端入口、真实合同、相称 E2E、部署和 Release evidence；Mock 或截图不计。
 
-## 5. Phase 4 明确不做
+## 5. Gate 4 批准边界与 Phase 5 承接
 
-- 不写 `docs/frontend/modules/` 的模块 Dev-Ready 规格；独立站管理属于 Phase 5。
+- Gate 4 没有批准任何模块实现；Phase 5 已把独立站管理当前纵切写成 `SPEC_READY_WITH_BLOCKERS`，后置发布链保持 `TARGET_NOT_RUNNABLE`。
 - 不决定 React/Next/Vite、BFF、UI 库、状态库、分析 SDK、i18n 库或设计工具。
 - 不生成高保真页面、HTML 原型、Figma 文件、生产 Token 数值或可执行 Fixture。
 - 不扩展首个用户承诺到公网发布、域名、回滚、询盘、站点分析或诊断。

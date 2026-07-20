@@ -2,8 +2,8 @@
 
 > 文档 ID：`DESIGN-FE-001`
 > 层级：`L2 / Design registry`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > Registry Owner：`OWN-DESIGN`
 
 ## 1. 资产状态
@@ -23,7 +23,7 @@
 
 每项资产必须具备：`asset_id`、名称、类型、source locator、source/version、status、Owner、rights/provenance、Capability/Page/Scenario、responsive/a11y coverage、last verified、successor。不存在时写 `NONE`，不得用空白表示已知。
 
-## 3. Phase 4 规范资产
+## 3. Gate 4 已批准书面规范资产
 
 | Asset ID | 资产 | Source / version | Owner | Capability / Scenario | Rights | 状态 |
 |---|---|---|---|---|---|---|
@@ -36,7 +36,7 @@
 | `DSA-FE-A11Y-001` | 响应式/a11y/性能交付合同 | `docs/frontend/10-*` / `0.1-gate4` | `OWN-DESIGN` | 全部 Capability/Scenario | 仓内原创规范 + 官方标准引用 | `SPEC_REVIEW_CANDIDATE` |
 | `DSA-FE-COPY-001` | 跨模块微文案目录 | `docs/design/content-*` / `0.1-gate4` | `OWN-DESIGN` | Shell/状态/AI/首个 Site 纵切 | 仓内原创文案 | `SPEC_REVIEW_CANDIDATE` |
 
-## 4. Gate 5 前需要的受控视觉资产
+## 4. 模块设计与待建立视觉资产
 
 | Asset ID | 交付物 | 最低覆盖 | Owner | Capability / Scenario | Asset version | 状态 |
 |---|---|---|---|---|---|---|
@@ -44,7 +44,7 @@
 | `DSA-FE-PATTERN-STATE-001` | 状态与长任务 pattern board | `STATE-FE-001..020`、取消/ACK/旧结果 | `OWN-DESIGN` | `JRN-FE-007`；Site 002/013..017 | `NONE` | `REQUIRED_NOT_CREATED` |
 | `DSA-FE-PATTERN-PERM-001` | permission/entitlement/approval pattern board | read/action denial、request/upgrade、redaction | `OWN-DESIGN` | Shell 001..003 | `NONE` | `REQUIRED_NOT_CREATED` |
 | `DSA-FE-PATTERN-AI-001` | AI/Evidence/Approval pattern board | fact/inference/recommendation/draft、diff、bulk、fallback | `OWN-DESIGN` | Site 009/010；跨域 AI | `NONE` | `REQUIRED_NOT_CREATED` |
-| `DSA-FE-SITE-WF-001` | Site 首个纵切页面流和关键线框 | `PAGE-FE-030..043` 合同相称范围、全状态/响应式/a11y | `OWN-DESIGN` | `JRN-FE-002/006/007`；Site 001..018 | `NONE` | `REQUIRED_NOT_CREATED` |
+| `DSA-FE-SITE-WF-001` | Site 首个纵切页面流和关键线框 | `PAGE-FE-030..043` 合同相称范围、全状态/响应式/a11y | `OWN-DESIGN` | `JRN-FE-002/006/007`；Site 001..018 | `docs/design/independent-site-management-wireframes.md` / `0.1-gate5` | `SPEC_REVIEW_CANDIDATE` |
 | `DSA-FE-VISUAL-001` | 品牌/视觉方向与 semantic token values | 2–3 方向、对比、密度、图表、a11y、权利 | `OWN-DESIGN` | 全 SaaS | `NONE` | `REQUIRED_NOT_CREATED` |
 | `DSA-FE-COMPONENT-001` | 正式组件库/Storybook 映射 | component contract、versions、visual/a11y tests | `OWN-SAAS-FE` | 全 SaaS | `NONE` | `REQUIRED_NOT_CREATED` |
 

@@ -7,7 +7,7 @@
 > 产品批准范围：Gate 2 首个纵切及完整产品地图
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
-本目录为产品评审、设计、前端、后端、E2E、演示和指南提供同一组稳定场景 ID。它只登记 Fixture 语义和验收关系；Phase 3 不创建可执行测试数据、不声称浏览器 E2E 已存在，也不把后置能力冒充可运行。
+本目录为产品评审、设计、前端、后端、E2E、演示和指南提供同一组稳定场景 ID。它只登记 Fixture 语义和验收关系；Phase 5 已建立 Site 页面/运营规格，但没有创建可执行测试数据或浏览器 E2E，也不把后置能力冒充可运行。
 
 ## 1. Fixture 安全规则
 
@@ -32,7 +32,16 @@
 | `FX-FE-BUYER-001` | 冻结客户开发样例 | ICP、两个公司、一个不可达 Lead、一个 qualified package | 合成公司/联系人 | `CATALOG_ONLY` | `OWN-QA-EVIDENCE` |
 | `FX-FE-INQUIRY-001` | 未来询盘样例 | 同意/重复/垃圾/合法询盘；合成访客 | 合成个人数据；保留策略待定 | `CATALOG_ONLY_BLOCKED` | `OWN-DATA-PRIVACY` |
 
-Phase 4 已在[分析、测试与发布证据候选](../frontend/12-analytics-testing-and-release-evidence.md#4-标准场景与-fixture)定义可执行 manifest 字段；实际版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence 仍须 Phase 5 创建，因此当前继续 `CATALOG_ONLY`。
+Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-and-release-evidence.md#4-标准场景与-fixture)和 Phase 5 [Site 运营验收](../frontend/modules/independent-site-management/operations-and-acceptance.md#4-标准-fixture-manifest)已定义 manifest 字段；实际版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence 均未创建，因此继续 `CATALOG_ONLY`。
+
+### 2.1 Phase 5 Site Fixture 组合
+
+| 组合 | Fixture | 覆盖 Scenario | 规格入口 | 可执行状态 |
+|---|---|---|---|---|
+| Intake/Profile | WS + COMPANY + OFFERING | Site 001..003 | `PAGE-FE-030..034` | `SPEC_ONLY_NOT_CREATED` |
+| Asset/KB/Claim | WS + ASSET + DOC + CLAIM | Site 004..010 | `PAGE-FE-035..039` | `SPEC_ONLY_NOT_CREATED`；Claim blocked |
+| Build/Preview | WS + SITE + BUILD + CLAIM + ASSET | Site 011..018 | `PAGE-FE-040..043` | `SPEC_ONLY_NOT_CREATED` |
+| Publish/Inquiry | SITE + CLAIM + INQUIRY | Site 019..023 | `PAGE-FE-048..057` | `TARGET_NOT_RUNNABLE` |
 
 ## 3. Shell 与跨域场景
 
@@ -113,4 +122,4 @@ Phase 4 已在[分析、测试与发布证据候选](../frontend/12-analytics-te
 5. 产品、设计、前端、后端、QA、运营各自验收范围；
 6. 任何不可执行依赖和不得声称的用户承诺。
 
-AI 生成场景或自评不能成为唯一 Evidence Owner。Phase 4/5 获授权前，本目录不创建 UI 规格、测试代码或真实数据。
+AI 生成场景或自评不能成为唯一 Evidence Owner。Phase 5 只创建了 UI/运营规格；测试代码、Fixture 文件、seed/reset 和真实数据仍未创建，必须由后续明确授权和真实 QA/数据 Owner 承接。

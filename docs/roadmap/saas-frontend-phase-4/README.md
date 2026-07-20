@@ -1,12 +1,14 @@
 # Phase 4 全局前端规范
 
 > 文档 ID：`GATE-FE-P4-000`
-> 状态：`READY_FOR_GATE_4_REVIEW`
+> 状态：`APPROVED_AT_GATE_4 / FROZEN_PHASE_EVIDENCE`
 > 授权：产品负责人于 2026-07-20 明确“Gate 3 通过，授权 Phase 4”
 > 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 > 施工分支：`codex/saas-frontend-doc-plan`
 
 Phase 4 将 Gate 2 的产品/IA 决策和 Gate 3 的 Registry 转成完整 SaaS 可复用的前端规范候选。它解决跨模块 Shell、权限、状态、AI/Evidence/Approval、设计、内容、a11y、性能、接入、测试和发布门，不提前进入独立站管理页面级 Dev-Ready。
+
+产品负责人于 2026-07-20 按 `DEC-FE-P4-001..011` 批准本阶段，并在保留 `BLK-FE-001..007` 的条件下授权 Phase 5。本目录现作为冻结 Gate evidence；当前规范入口已升级为 `CURRENT`，后续模块细化见 Phase 5。
 
 ## 1. 规范产物
 
@@ -38,6 +40,6 @@ Phase 4 将 Gate 2 的产品/IA 决策和 Gate 3 的 Registry 转成完整 SaaS 
 - 未移动、删除、归档或重命名 Word、历史稿、原型、分支或 worktree。
 - 未触碰主工作区用户删除/未跟踪材料；未 push、建 PR 或合并。
 
-## 5. 下一步
+## 5. Gate 结果与承接
 
-只从 [Gate 4 评审包](gate-4-review.md)审查 `DEC-FE-P4-001..011`、全局模式复用、设计资产追踪和 blocker。收到产品负责人明确 Gate 4 决策前停止 Phase 5–8。
+Gate 4 已通过；[Phase 5](../saas-frontend-phase-5/README.md)已承接独立站管理 Capability Pack。所有 blocker 继续有效，本阶段批准不构成实现、视觉定稿或 Phase 6–8 授权。

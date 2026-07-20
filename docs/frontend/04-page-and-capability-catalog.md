@@ -1,9 +1,9 @@
 # 全产品页面与能力目录
 
 > 文档 ID：`FE-GLOBAL-005`
-> 层级：`L2 / Normative candidate`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 层级：`L2 / Normative target`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-PRODUCT`
 > 数据来源：[能力登记](../governance/capability-register.md)与 Gate 2 Page ID；不是最终路由表
 
@@ -156,9 +156,9 @@
 | 设计与内容编辑 | `045..047` | `APPROVED_NOT_BUILT`；不得从 SiteSpec 地基推导编辑器已存在 |
 | Release/Publish/Domain | `048..052` | 后置；内部 Release 不等于用户选版、公开发布、回滚或域名 |
 | Inquiry/Analytics/Diagnosis | `053..056` | deferred/blocked；不在首个纵切 |
-| Astro 公开输出 | `057` | 方向已批准，完整公开输出/生产门在 Phase 5+ |
+| Astro 公开输出 | `057` | [Phase 5 输出规范](modules/independent-site-management/public-site-output-spec.md)已形成；生产门仍未关闭 |
 
-页面级首次、空、无权、等待、失败、取消、冲突、degraded、stale 和移动状态属于 Phase 5，不在本表用一句“支持”代替。
+页面级首次、空、无权、等待、失败、取消、冲突、degraded、stale 和移动状态见 [独立站管理 Page spec](modules/independent-site-management/journeys-and-page-spec.md)，本表不重复。
 
 ## 5. Page Manifest 合同
 

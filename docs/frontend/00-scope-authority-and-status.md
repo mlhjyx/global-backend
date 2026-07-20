@@ -1,9 +1,9 @@
 # 前端范围、权威与状态
 
 > 文档 ID：`FE-GLOBAL-001`
-> 层级：`L2 / Normative candidate`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 层级：`L2 / Normative target`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-PRODUCT`
 > 关联：`CAP-SHELL-001`、`DEC-FE-P2-003..009`、`BLK-FE-001..007`
 
@@ -54,7 +54,7 @@ flowchart LR
 - 客户开发后端有真实能力但新增开发冻结；Campaign、Conversation、Opportunity、Outcome 与完整 SaaS UI 是外部 ownership。
 - `/global/frontend` 是 `LOCAL_UNCONTROLLED / MOCK_PROTOTYPE`，不是正式实现或技术选型证据。
 
-### 本包拟确立
+### 本包已确立的目标规范
 
 - 跨模块可复用的 IA、Shell、权限、状态、AI/Evidence/Approval、内容、a11y、性能、合同、测试和发布门。
 - 设计资产、微文案、场景和 Release evidence 的稳定 ID 与追踪要求。
@@ -70,7 +70,7 @@ flowchart LR
 
 本包适用于 SaaS 管理面和所有后续模块 Capability Pack。公开站输出的页面内容、SEO、组件和运行性能只在跨边界处给原则；其完整输出规范属于 Phase 5。
 
-Phase 4 不批准商业套餐、数据权利、支持 impersonation、外部发送/发布策略、具体 OSS、前端技术选型或实际设计稿。对应事项集中在 [开放决策](13-open-decisions.md)。
+Gate 4 不批准商业套餐、数据权利、支持 impersonation、外部发送/发布策略、具体 OSS、前端技术选型或实际设计稿。对应事项集中在 [开放决策](13-open-decisions.md)。独立站管理的 Phase 5 规格只在相同边界内细化页面、输出和实施交接。
 
 ## 6. 例外流程
 

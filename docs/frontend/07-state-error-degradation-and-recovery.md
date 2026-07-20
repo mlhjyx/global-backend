@@ -1,9 +1,9 @@
 # 状态、错误、降级与恢复规范
 
 > 文档 ID：`FE-GLOBAL-008`
-> 层级：`L2 / Normative candidate`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 层级：`L2 / Normative target`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 关联：`JRN-FE-007`、`SCN-FE-SHELL-004`、`SCN-FE-SITE-002..018`
 

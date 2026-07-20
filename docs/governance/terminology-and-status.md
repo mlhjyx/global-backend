@@ -103,6 +103,20 @@
 
 最高质量标签只表示找到的最高证据，不表示低层证据自动完整；`DEPLOYED` 必须指明环境，不能由“本地能运行”推出。
 
+### 6.1 Capability Pack 交接限定词
+
+以下是跨轴结论的可读限定词，不是新增单轴状态；Registry 仍必须分别填写 §6 的 UX、前端、API、数据、质量和用户可用性：
+
+| 限定词 | 精确定义 |
+|---|---|
+| `SPEC_READY_WITH_BLOCKERS` | UX 轴可为 `SPEC_READY`，但正式前端、合同、Owner、质量或部署等一个或多个轴仍为 `NONE/BLOCKED`；不可据此施工或声明用户可用 |
+| `SPECIFIED_CONTROLLED_FALLBACK` | 主路径有规格，但某个读/动作合同缺失，当前只能显式阻塞或走经批准人工兜底 |
+| `PARTIAL_AS_BUILT_TARGET_SPECIFIED` | 一部分运行地基有 main 证据，完整目标另有规格；两者不能合并为“已实现” |
+| `SPEC_ONLY_NOT_CREATED` | 场景、Fixture 或资产的 manifest 已定义，但可执行文件/受控资产尚未创建 |
+| `SCHEMA_HYPOTHESIS_ONLY` | 事件/指标逻辑已描述，正式 schema、Owner、隐私或采集实现未批准 |
+
+这些限定词只有同时列出具体多轴状态和 Blocker ID 才可使用。`DEC-FE-P5-010` 在 Gate 5 前仍是推荐决定，因此 Site Pack 使用它时必须继续标 `READY_FOR_GATE_5_REVIEW`。
+
 ## 7. 能力入口可见性
 
 | 状态 | 使用条件 | 用户表达 |

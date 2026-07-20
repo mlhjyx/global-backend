@@ -1,9 +1,9 @@
 # 设计系统与内容规范
 
 > 文档 ID：`FE-GLOBAL-010`
-> 层级：`L2 / Normative candidate`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 层级：`L2 / Normative target`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 设计资产：[design-asset-register.md](../design/design-asset-register.md)
 > 微文案：[content-and-microcopy-catalog.md](../design/content-and-microcopy-catalog.md)

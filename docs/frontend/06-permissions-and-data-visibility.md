@@ -1,9 +1,9 @@
 # 权限与数据可见性规范
 
 > 文档 ID：`FE-GLOBAL-007`
-> 层级：`L2 / Normative candidate`
-> 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_4_REVIEW`
+> 层级：`L2 / Normative target`
+> 生命周期：`CURRENT`
+> 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-SAAS-PLATFORM`
 > 关联：`CON-FE-P2-014/015/022`、`BLK-FE-003`、`SCN-FE-SHELL-001..003`
 
