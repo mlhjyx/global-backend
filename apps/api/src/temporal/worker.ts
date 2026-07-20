@@ -39,6 +39,7 @@ import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 import { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
 import { SiteReleaseService, resolveSiteRendererBuildIdentity } from '../site-builder/site-release.service';
+import { createSiteReleaseMaintenanceActivities } from './site-release-maintenance.activities';
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -169,6 +170,10 @@ async function main(): Promise<void> {
         ),
       }),
       ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
+      ...createSiteReleaseMaintenanceActivities({
+        ownerDb,
+        storage: siteBuilderStorage,
+      }),
     },
   });
 

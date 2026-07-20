@@ -3,9 +3,11 @@ import {
   CopyObjectCommand,
   CreateBucketCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetBucketLifecycleConfigurationCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   PutBucketLifecycleConfigurationCommand,
   S3Client,
@@ -301,5 +303,43 @@ export class StorageService implements OnModuleInit {
       new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       signal ? { abortSignal: signal } : undefined,
     );
+  }
+
+  async deletePrefix(prefix: string, signal?: AbortSignal): Promise<number> {
+    if (!prefix.endsWith('/') || prefix.includes('..')) {
+      throw new Error('invalid object deletion prefix');
+    }
+    let deleted = 0;
+    for (let page = 0; page < 10_000; page += 1) {
+      const listed = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          MaxKeys: 1000,
+        }),
+        signal ? { abortSignal: signal } : undefined,
+      );
+      const objects = (listed.Contents ?? [])
+        .map(({ Key }) => Key)
+        .filter((key): key is string => Boolean(key));
+      if (objects.length === 0) return deleted;
+      if (objects.length > 0) {
+        const result = await this.client.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: {
+              Objects: objects.map((Key) => ({ Key })),
+              Quiet: true,
+            },
+          }),
+          signal ? { abortSignal: signal } : undefined,
+        );
+        if ((result.Errors?.length ?? 0) > 0) {
+          throw new Error('Release prefix deletion returned object errors');
+        }
+        deleted += objects.length;
+      }
+    }
+    throw new Error('Release prefix deletion exceeded page safety bound');
   }
 }
