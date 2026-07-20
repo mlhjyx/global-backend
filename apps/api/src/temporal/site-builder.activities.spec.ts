@@ -1947,9 +1947,13 @@ describe('cleanupFailedDemo — R0-6 不删站、置 setup_failed（保留用户
   it('本 run 仍最新 → 保留 site 置 setup_failed + 清本 run building 孤儿版本，绝不 site.delete', async () => {
     const del = vi.fn(async () => ({}));
     const update = vi.fn(async () => ({}));
+    const runUpdateMany = vi.fn(async () => ({ count: 1 }));
     const versionUpdateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
-      siteBuildRun: { findFirst: async () => ({ id: 'run-1' }) }, // 最新 demo_v0 run = 本 run
+      siteBuildRun: {
+        findFirst: async () => ({ id: 'run-1' }),
+        updateMany: runUpdateMany,
+      }, // 最新 demo_v0 run = 本 run
       siteVersion: { updateMany: versionUpdateMany },
       site: { delete: del, update },
     };
@@ -1963,6 +1967,14 @@ describe('cleanupFailedDemo — R0-6 不删站、置 setup_failed（保留用户
     expect(versionUpdateMany).toHaveBeenCalledWith({
       where: { buildRunId: 'run-1', buildStatus: 'building' },
       data: { buildStatus: 'failed' },
+    });
+    expect(runUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'run-1', status: 'running' },
+      data: {
+        status: 'failed',
+        error: 'demo v0 workflow failed after retries',
+        finishedAt: expect.any(Date),
+      },
     });
   });
 
