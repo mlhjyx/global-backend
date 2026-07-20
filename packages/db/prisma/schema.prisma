@@ -1278,7 +1278,9 @@ model Site {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  versions                  SiteVersion[]
+  versions                  SiteVersion[]                  @relation("SiteVersions")
+  activeVersion             SiteVersion?                   @relation("SiteActiveVersion", fields: [activeVersionId, workspaceId, id], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_active_version_scope_fkey")
+  releases                  SiteRelease[]
   buildRuns                 SiteBuildRun[]
   assets                    Asset[]
   documents                 KbDocument[]
@@ -1310,13 +1312,55 @@ model SiteVersion {
   buildRunId  String?  @map("build_run_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")
 
-  site        Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  copyBundles SiteCopyBundle[]
+  site           Site             @relation("SiteVersions", fields: [siteId], references: [id], onDelete: Cascade)
+  activeForSites Site[]           @relation("SiteActiveVersion")
+  release        SiteRelease?
+  copyBundles    SiteCopyBundle[]
 
   @@unique([siteId, version])
   @@unique([id, workspaceId, siteId], map: "site_version_id_workspace_site_key")
   @@index([workspaceId])
   @@map("site_version")
+}
+
+/// Immutable preview artifact and recovery/retention unit. SiteVersion remains
+/// the content/build version; Site.activeVersionId remains the sole preview pointer.
+model SiteRelease {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  siteVersionId   String    @unique(map: "site_release_site_version_key") @map("site_version_id") @db.Uuid
+  buildRunId      String    @unique(map: "site_release_build_run_key") @map("build_run_id") @db.Uuid
+  releaseNumber   Int       @map("release_number")
+  status          String    @default("candidate") // candidate | ready | failed | deleting | deleted
+  artifactPrefix  String    @unique(map: "site_release_artifact_prefix_key") @map("artifact_prefix")
+  artifactDigest  String?   @map("artifact_digest") @db.VarChar(64)
+  manifest        Json?
+  manifestDigest  String?   @map("manifest_digest") @db.VarChar(64)
+  producerToken   String    @map("producer_token") @db.Uuid
+  leaseUntil      DateTime  @map("lease_until")
+  gcToken         String?   @map("gc_token") @db.Uuid
+  gcLeaseUntil    DateTime? @map("gc_lease_until")
+  createdBy       String?   @map("created_by")
+  readyAt         DateTime? @map("ready_at")
+  lastActivatedAt DateTime? @map("last_activated_at")
+  deletedAt       DateTime? @map("deleted_at")
+  error           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  site        Site         @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction, map: "site_release_site_scope_fkey")
+  siteVersion SiteVersion  @relation(fields: [siteVersionId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_release_version_scope_fkey")
+  buildRun    SiteBuildRun @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_release_run_scope_fkey")
+
+  @@unique([siteId, releaseNumber], map: "site_release_site_number_key")
+  @@unique([id, workspaceId, siteId], map: "site_release_id_workspace_site_key")
+  @@unique([siteVersionId, workspaceId, siteId], map: "site_release_version_scope_key")
+  @@unique([buildRunId, workspaceId, siteId], map: "site_release_run_scope_key")
+  @@index([workspaceId, siteId, status, createdAt], map: "site_release_workspace_site_status_created_idx")
+  @@index([status, leaseUntil], map: "site_release_status_lease_idx")
+  @@index([status, gcLeaseUntil], map: "site_release_status_gc_lease_idx")
+  @@map("site_release")
 }
 
 /// 一次生成管线运行（demo v0 或精装修），进度/成本/错误供前端轮询与 SSE。
@@ -1345,6 +1389,7 @@ model SiteBuildRun {
   taskAttempts             SiteBuildTaskAttempt[]
   publishableClaimSnapshot SitePublishableClaimSnapshot?
   copyBundles              SiteCopyBundle[]
+  release                  SiteRelease?
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, siteId], map: "site_build_run_id_workspace_site_key")
