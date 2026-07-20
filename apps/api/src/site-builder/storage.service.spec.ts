@@ -21,7 +21,7 @@ describe('StorageService variant-attempt lifecycle', () => {
         'sites/s/releases/r/attempts/t/files/index.html',
         Buffer.from('immutable'),
         'text/html; charset=utf-8',
-        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+        '3e58bada6a180c0d7f817bdae51fba96a461575b309bfbc17a6918d20c6617c7',
       ),
     ).resolves.toBe('created');
     await expect(
@@ -29,7 +29,7 @@ describe('StorageService variant-attempt lifecycle', () => {
         'sites/s/releases/r/attempts/t/files/index.html',
         Buffer.from('immutable'),
         'text/html; charset=utf-8',
-        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+        '3e58bada6a180c0d7f817bdae51fba96a461575b309bfbc17a6918d20c6617c7',
       ),
     ).resolves.toBe('exists');
 
@@ -43,14 +43,24 @@ describe('StorageService variant-attempt lifecycle', () => {
     expect(command.input.IfNoneMatch).toBe('*');
     expect(command.input.ChecksumSHA256).toBe(
       Buffer.from(
-        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+        '3e58bada6a180c0d7f817bdae51fba96a461575b309bfbc17a6918d20c6617c7',
         'hex',
       ).toString('base64'),
     );
     expect(command.input.Metadata).toEqual({
       sha256:
-        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+        '3e58bada6a180c0d7f817bdae51fba96a461575b309bfbc17a6918d20c6617c7',
     });
+
+    await expect(
+      service.putBufferImmutable(
+        'sites/s/releases/r/attempts/t/files/bad.html',
+        Buffer.from('immutable'),
+        'text/html; charset=utf-8',
+        '0000000000000000000000000000000000000000000000000000000000000000',
+      ),
+    ).rejects.toThrow('immutable object sha256 mismatch');
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it('tags only producer-isolated attempt writes for automatic expiry', async () => {
