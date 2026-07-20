@@ -5,7 +5,10 @@ import path from 'node:path';
 import type { SiteSpec } from '@global/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SiteReleaseService } from './site-release.service';
+import {
+  resolveSiteRendererBuildIdentity,
+  SiteReleaseService,
+} from './site-release.service';
 
 interface ReleaseRow {
   id: string;
@@ -320,5 +323,25 @@ describe('SiteReleaseService cross-system commit protocol', () => {
     expect(prisma.state.release?.producerToken).toBe(producer);
     expect(randomUuid).toHaveBeenCalledTimes(2);
     expect(storage.objects.size).toBe(2);
+  });
+});
+
+describe('Site renderer build fencing', () => {
+  it('requires an explicit immutable build identity in production', () => {
+    expect(() =>
+      resolveSiteRendererBuildIdentity({ NODE_ENV: 'production' }),
+    ).toThrow('SITE_RENDERER_BUILD_ID is required in production');
+    expect(
+      resolveSiteRendererBuildIdentity({
+        NODE_ENV: 'production',
+        SITE_RENDERER_BUILD_ID: 'site-renderer@1.0.0+sha.abc123',
+      }),
+    ).toBe('site-renderer@1.0.0+sha.abc123');
+  });
+
+  it('marks an unpinned development build honestly instead of calling it production', () => {
+    expect(resolveSiteRendererBuildIdentity({ NODE_ENV: 'development' })).toBe(
+      'site-renderer@dev-unpinned',
+    );
   });
 });
