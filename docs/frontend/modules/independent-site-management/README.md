@@ -3,7 +3,7 @@
 > 文档 ID：`FE-SITE-000`
 > 层级：`L2 / Capability Pack index`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > Capability Owner：`OWN-PRODUCT`
 > 设计 Owner：`OWN-DESIGN`（责任帽子；实际人员未指派）
 > 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
@@ -44,7 +44,7 @@
 | [运营与验收](operations-and-acceptance.md) | 运行手册、人工兜底、Scenario/Fixture、指标、证据和 Release readiness |
 | [低保真线框](../../../design/independent-site-management-wireframes.md) | 页面流、宽/窄/移动布局和关键状态；不是视觉定稿 |
 | [前端实施蓝图](../../implementation/independent-site-management-blueprint.md) | 技术栈中立的前端架构、接入顺序、测试与依赖门 |
-| [Gate 5 评审包](../../../roadmap/saas-frontend-phase-5/gate-5-review.md) | Phase 5 决定、验收、blocker 和下一 Gate 请求 |
+| [Gate 5 批准证据](../../../roadmap/saas-frontend-phase-5/gate-5-review.md) | Phase 5 决定、验收、blocker 和批准记录 |
 
 全局 Shell、权限、状态、AI 控制、设计系统、a11y、合同和 Release evidence 不在本包复制，仍以 [统一前端规范](../../README.md)为准。本包只补 Site 特有差异。
 
@@ -96,4 +96,4 @@
 | `BLK-FE-006` | QA/Ops/Security/Commercial 只保留责任帽子 | 独立签发、运营兜底、Release Gate |
 | `BLK-FE-007` | 后置页面保留目标规格且不可操作 | Publish/Domain/Rollback/Inquiry/Analytics Dev-Ready |
 
-Phase 5 的建议 Gate 结论是：批准本 Capability Pack 的产品/UX/接入规格；当前开发预览纵切标为 `SPEC_READY_WITH_BLOCKERS`，后置链保持 `TARGET_NOT_RUNNABLE`；不得由此启动实现或关闭任何 blocker。
+Gate 5 已批准本 Capability Pack 的产品/UX/接入规格：当前开发预览纵切为 `SPEC_READY_WITH_BLOCKERS`，后置链保持 `TARGET_NOT_RUNNABLE`；该批准没有启动实现或关闭任何 blocker。

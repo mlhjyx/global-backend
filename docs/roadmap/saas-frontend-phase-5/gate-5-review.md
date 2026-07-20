@@ -1,10 +1,10 @@
 # Gate 5 评审包
 
 > 文档 ID：`GATE-FE-P5-001`
-> 状态：`READY_FOR_GATE_5_REVIEW`
+> 状态：`APPROVED_AT_GATE_5`
 > 授权：Gate 4 于 2026-07-20 通过，`DEC-FE-P4-001..011` 已批准，`BLK-FE-001..007` 保留
 > 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
-> 当前授权终点：Gate 5；未获批准不得进入 Phase 6–8
+> 批准记录：产品负责人于 2026-07-20 按推荐语句批准 `DEC-FE-P5-001..010`，接受两 lane 状态并在保留 `BLK-FE-001..007` 的前提下授权 Phase 6
 
 ## 1. 评审结论
 
@@ -20,10 +20,10 @@ Phase 5 已形成整个独立站管理模块的产品与前端文档，而不是
 | 当前 Page manifest | `PAGE-FE-030..043` 共 14 个 | 当前纵切 `SPEC_READY_WITH_BLOCKERS` |
 | 后置 Page | `PAGE-FE-044..057` 共 14 个 | 摘要/目标；不进入可运行承诺 |
 | 机器合同 | 13 个 `SiteBuilder` operation + hidden preview boundary | 只按 operationId/代码证据消费 |
-| Site 低保真 | 10 个 `WF-SITE-*` | `DSA-FE-SITE-WF-001` 为 `SPEC_REVIEW_CANDIDATE` |
+| Site 低保真 | 10 个 `WF-SITE-*` | `DSA-FE-SITE-WF-001` 为 `SPEC_APPROVED`；不等于 `DESIGNED` |
 | Site 微文案 | `COPY-FE-SITE-001..029` 共 29 条 | 全部 `DRAFT_SOURCE_COPY`，未本地化/验证 |
 | Scenario | Site 001..018 当前/合同；019..023 target | Fixture 均 `CATALOG_ONLY`/blocked |
-| Gate 5 决策 | `DEC-FE-P5-001..010` 共 10 项 | 等待产品负责人批准 |
+| Gate 5 决策 | `DEC-FE-P5-001..010` 共 10 项 | `APPROVED_AT_GATE_5` |
 | Blocker | `BLK-FE-001..007` 共 7 项 | 全部保留 |
 
 ## 3. 推荐决定
@@ -97,17 +97,10 @@ Phase 5 已形成整个独立站管理模块的产品与前端文档，而不是
 
 上述检查只证明文档登记、链接、结构、合同映射和边界一致，不证明正式设计、前端、E2E、部署或生产。本包以本地 docs-only checkpoint 冻结；精确 commit hash 由 Git 和最终 handoff 记录，文档不自引用不稳定 hash。
 
-## 8. 请求 Gate 5 决定
+## 8. Gate 5 批准记录
 
-请确认：
-
-1. 是否按 `DEC-FE-P5-001..010` 批准独立站管理 Capability Pack；
-2. 是否接受当前开发预览纵切为 `SPEC_READY_WITH_BLOCKERS`，而不是完整 Dev-Ready；
-3. 是否接受发布/域名/回滚/询盘/分析继续 `TARGET_NOT_RUNNABLE`；
-4. 是否在保留 `BLK-FE-001..007` 的前提下，只授权 Phase 6 文档工作，不自动授权任何实现。
-
-建议批准语句：
+产品负责人采用的批准语句：
 
 `Gate 5 通过，按 DEC-FE-P5-001..010 批准独立站管理 Capability Pack；接受当前开发预览纵切为 SPEC_READY_WITH_BLOCKERS、后置发布链为 TARGET_NOT_RUNNABLE，并在保留 BLK-FE-001..007 的前提下授权 Phase 6。`
 
-收到明确批准前，当前任务停止在 Gate 5，不进入 Phase 6–8。
+该批准不关闭任何 blocker，也不授权实现、Phase 7–8、push、PR 或合并。Phase 6 入口见[全 SaaS 产品域文档包](../saas-frontend-phase-6/README.md)。

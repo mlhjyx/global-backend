@@ -3,7 +3,7 @@
 > 文档 ID：`FE-SITE-003`
 > 层级：`L2 / Public output target specification`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > 内容 Owner：`OWN-PRODUCT`
 > Runtime Owner：`OWN-SITE-BE`
 > 关联：`CAP-SITE-PUBLIC-OUTPUT-001`、`PAGE-FE-057`、`SCN-FE-SITE-016..023`、`BLK-FE-007`

@@ -3,10 +3,10 @@
 > 文档 ID：`FE-GLOBAL-014`
 > 层级：`L2 / Decision record`
 > 生命周期：`CURRENT`
-> 评审状态：`APPROVED_AT_GATE_4`
+> 评审状态：`CURRENT / GATE_4_AND_5_APPROVED`
 > Decision Owner：`OWN-PRODUCT`
 
-本文件记录 Gate 4 已批准的全局模式、仍需外部输入的 blocker，以及后续技术/工具开放项。产品负责人于 2026-07-20 按推荐组合批准 `DEC-FE-P4-001..011`；该批准不关闭 `BLK-FE-001..007`，也不构成实现或工具选择。
+本文件记录 Gate 4 已批准的全局模式、Gate 5 已批准的 Site 两 lane 状态、仍需外部输入的 blocker，以及后续技术/工具开放项。产品负责人于 2026-07-20 先后批准 `DEC-FE-P4-001..011` 与 `DEC-FE-P5-001..010`；这些批准不关闭 `BLK-FE-001..007`，也不构成实现或工具选择。
 
 ## 1. Gate 4 已批准的全局决定
 
@@ -36,9 +36,16 @@
 | `BLK-FE-006` | QA/运营/安全商业实际 assignee | AI 不代签；帽子保持 `UNASSIGNED` | 独立证据、兜底、License/套餐/Release Gate |
 | `BLK-FE-007` | Publish/Domain/Rollback/Inquiry/Analytics 合同/infra/privacy | 不纳入首个承诺 | 这些后置能力的 Dev-Ready/发布 |
 
-Gate 4 已在公开披露这些 blocker 的情况下批准全局规则；Phase 5 继续保留全部 blocker。进入实际前端施工、视觉定稿或用户可用声明前，相关 blocker 必须关闭。
+Gate 4 已在公开披露这些 blocker 的情况下批准全局规则；Phase 5 和 Phase 6 继续保留全部 blocker。进入实际前端施工、视觉定稿或用户可用声明前，相关 blocker 必须关闭。
 
-## 3. 后续技术/工具决策，不在 Gate 4 拍板
+## 3. Gate 5 已批准与 Phase 6 当前候选
+
+- Gate 5 已批准 `DEC-FE-P5-001..010`；精确状态、两 lane 与非含义见[批准证据](../roadmap/saas-frontend-phase-5/gate-5-review.md)。
+- Phase 6 已补齐[全 SaaS 产品域 Pack](modules/README.md)，但非 Site 域保持 `MAP_COMPLETE / NOT_DEV_READY`，客户开发保持 `FROZEN_MAP_ONLY`。
+- Phase 6 暴露的十二项跨域输入见 [`GAP-FE-P6-001..012`](../roadmap/saas-frontend-phase-6/cross-domain-handoffs-and-gaps.md)；它们不替代或关闭 `BLK-FE-001..007`。
+- `DEC-FE-P6-001..012` 当前仍是 Gate 6 推荐决定，产品负责人批准前不得改成 current 决策或据此进入 Phase 7。
+
+## 4. 后续技术/工具决策，不在 Gate 4/5/6 拍板
 
 | Open ID | 决策 | 需要的输入 | 最迟 Gate |
 |---|---|---|---|
@@ -53,15 +60,15 @@ Gate 4 已在公开披露这些 blocker 的情况下批准全局规则；Phase 5
 | `OPEN-FE-SUPPORT-001` | support impersonation/managed service policy | security/privacy/audit/SLA | Operations 实施前 |
 | `OPEN-FE-SITE-001` | Publish/Domain/Inquiry 等后置对象/合同 | Product PDR/ADR、infra、privacy、SoR | 各能力 Gate |
 
-## 4. Gate 4 已执行的状态变化
+## 5. Gate 4/5 已执行与 Phase 6 候选状态
 
 - `docs/frontend/` 与 Gate 4 书面设计规范已升级为当前目标规范；
 - Phase 3 Registry 把上述 Decision 标为 `APPROVED_AT_GATE_4`，并保留 blocker；
 - Phase 5 已建立[独立站管理 Capability Pack](modules/independent-site-management/README.md)，但没有修改产品代码或开始前端施工；
-- 未选择工具、关闭 Owner/合同缺口、扩大 Site 用户承诺或授权 Phase 6–8。
+- 未选择工具、关闭 Owner/合同缺口或扩大 Site 用户承诺；Phase 6 已获授权且只补产品域文档，Phase 7–8 仍未授权。
 
-## 5. Gate 4 批准记录
+## 6. 批准记录与当前 Gate
 
 `Gate 4 通过，按 DEC-FE-P4-001..011 批准全局前端规范，并在保留 BLK-FE-001..007 的前提下授权 Phase 5。`
 
-该语句已由产品负责人确认。当前 Gate 请求见 [Gate 5 评审包](../roadmap/saas-frontend-phase-5/gate-5-review.md)。
+该语句已由产品负责人确认；Gate 5 也已按推荐语句通过。当前 Gate 请求见 [Gate 6 评审包](../roadmap/saas-frontend-phase-6/gate-6-review.md)。

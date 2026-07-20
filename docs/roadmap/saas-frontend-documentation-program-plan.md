@@ -1,15 +1,15 @@
 # 统一 SaaS 前端文档治理与实施规划
 
 > 文档 ID：PLAN-FE-DOC-001
-> 版本：v0.8-gate-5
-> 状态：`PHASE_5_READY_FOR_GATE_5_REVIEW`
-> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.7 回写 Phase 1–4；v0.8 只回写用户明确授权的 Phase 5 Site Capability Pack 与 Gate 状态，不扩张 Phase 6–8 授权
+> 版本：v0.9-gate-6-review
+> 状态：`PHASE_6_READY_FOR_GATE_6_REVIEW`
+> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.8 回写 Phase 1–5；v0.9 只回写用户明确授权的 Phase 6 全 SaaS 产品域文档与 Gate 状态，不扩张 Phase 7–8 授权
 > 计划批准：2026-07-20（含产品工作方式、Capability Pack、设计资产、场景库和发布学习闭环增补）
-> 执行授权：`PHASE_5_GRANTED`——Gate 4 已批准 `DEC-FE-P4-001..011`，保留 `BLK-FE-001..007` 并授权独立站管理文档包；Phase 6–8 和产品代码实现仍未获授权
+> 执行授权：`PHASE_6_GRANTED`——Gate 5 已批准 `DEC-FE-P5-001..010` 与两 lane 状态，保留 `BLK-FE-001..007` 并授权其他产品域文档包；Phase 7–8 和产品代码实现仍未获授权
 > 基线提交：`676c6cdc175326927ec341a2d585168aa0a1a374`
 > 适用范围：完整 SaaS 产品前端，其中“独立站管理”是当前优先模块
 > 拍板人：产品负责人
-> 执行主体：Codex（Phase 1–5 均于 2026-07-20 分别获明确授权；Gate 5 后须再次取得明确批准）
+> 执行主体：Codex（Phase 1–6 均于 2026-07-20 分别获明确授权；Gate 6 后须再次取得明确批准）
 
 ## 0. 本文件解决什么问题
 
@@ -51,7 +51,7 @@
 
 ### 1.3 后续启动条件
 
-第 1–4 阶段已完成并分别通过 Gate 1–4；第 5 阶段随后获明确授权。完成 Phase 5 后必须停在 Gate 5，提交完整评审包并等待下一次明确批准；在此之前不得进入第 6–8 阶段。对权限、商业承诺、数据权利、OSS 采用、设计工具、正式前端仓库和跨仓 ownership 的新裁决，执行过程中仍须单独暴露，不得由执行者静默决定。
+第 1–5 阶段已完成并分别通过 Gate 1–5；第 6 阶段随后获明确授权。完成 Phase 6 后必须停在 Gate 6，提交完整评审包并等待下一次明确批准；在此之前不得进入第 7–8 阶段。对权限、商业承诺、数据权利、OSS 采用、设计工具、正式前端仓库和跨仓 ownership 的新裁决，执行过程中仍须单独暴露，不得由执行者静默决定。
 
 ## 2. 已固定的产品事实
 
@@ -702,7 +702,7 @@ Word 中的项目名称只作为候选输入。正式方案采用 `Learn / Build
 
 交付物：本文件。
 
-当前状态：计划内容已批准；Phase 1–4 已完成并通过 Gate 1–4；Phase 5 已获授权并形成 Gate 5 评审包；Phase 6–8 仍未授权。
+当前状态：计划内容已批准；Phase 1–5 已完成并通过 Gate 1–5；Phase 6 已获授权并形成 Gate 6 评审包；Phase 7–8 仍未授权。
 
 退出条件：已满足。
 
@@ -760,13 +760,15 @@ Gate 4：所有模块可以复用统一模式，不需要各自发明 loading、
 
 Gate 5：从注册到发布/失败恢复的端到端路径完整；当前、目标和依赖无混写；所有关键状态有原型或明确规格；页面、对象、契约、场景、埋点和验收可追踪；能够进入设计定稿和工程拆分。
 
-当前状态：Phase 5 已形成 [独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)、[书面低保真](../design/independent-site-management-wireframes.md)、[stack-neutral 实施蓝图](../frontend/implementation/independent-site-management-blueprint.md)和 [Gate 5 评审包](saas-frontend-phase-5/gate-5-review.md)。端到端目标已记录，但当前可合同支撑纵切为 `SPEC_READY_WITH_BLOCKERS`，发布/域名/回滚/询盘/分析保持 `TARGET_NOT_RUNNABLE`；因此“能够进入工程拆分”仍以相关 blocker 关闭为条件，不等于已授权施工。
+当前状态：Phase 5 已形成 [独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)、[书面低保真](../design/independent-site-management-wireframes.md)、[stack-neutral 实施蓝图](../frontend/implementation/independent-site-management-blueprint.md)和 [Gate 5 评审包](saas-frontend-phase-5/gate-5-review.md)，并由产品负责人批准 `DEC-FE-P5-001..010`。当前可合同支撑纵切继续为 `SPEC_READY_WITH_BLOCKERS`，发布/域名/回滚/询盘/分析继续 `TARGET_NOT_RUNNABLE`；批准不等于授权施工。
 
 ### 阶段 6：其他产品域文档
 
 冻结能力先达到产品地图和边界完整，不伪造 Dev-Ready 细节；进入路线图的模块再补足页面、合同和验收。
 
 Gate 6：完整产品没有失踪能力，当前优先级没有被历史“大而全”路线稀释。
+
+当前状态：Phase 6 已形成[全 SaaS Capability Pack 入口](../frontend/modules/README.md)、七个非 Site 产品域工作簿、[产品组合覆盖与优先级](saas-frontend-phase-6/portfolio-coverage-and-priority.md)、[跨域接缝/缺口](saas-frontend-phase-6/cross-domain-handoffs-and-gaps.md)、[来源迁移覆盖](saas-frontend-phase-6/source-migration-coverage.md)和 [Gate 6 评审包](saas-frontend-phase-6/gate-6-review.md)。非 Site 域只达到地图完整；正式 SoR、前端、设计、合同、测试和部署状态未升级。
 
 ### 阶段 7：OSS/外部能力实施方案
 
@@ -939,14 +941,14 @@ related_releases: []
 
 ## 19. 下一步 Handoff
 
-当前 handoff 状态：`PHASE_5_READY_FOR_GATE_5_REVIEW`。
+当前 handoff 状态：`PHASE_6_READY_FOR_GATE_6_REVIEW`。
 
-产品负责人已通过 Gate 4 并授权 Phase 5；独立站管理的模块范围、旅程/Page、对象/权限/状态、公开输出、低保真、微文案、实施蓝图、场景/Fixture、运营和验收已经形成 [Gate 5 评审包](saas-frontend-phase-5/gate-5-review.md)。后续可选择：
+产品负责人已通过 Gate 5 并授权 Phase 6；完整产品组合、非 Site 产品域工作簿、跨域接缝、优先级和历史来源迁移已经形成 [Gate 6 评审包](saas-frontend-phase-6/gate-6-review.md)。后续可选择：
 
-- 按 Gate 5 推荐语句批准 `DEC-FE-P5-001..010` 并只授权 Phase 6 文档工作；
-- Gate 5 有条件通过：先补指定模块规格、Owner 或追踪 finding，再请求复核；
-- Gate 5 不通过：修改指定旅程、页面、状态、输出、实施或运营规则。
+- 按 Gate 6 推荐语句批准 `DEC-FE-P6-001..012` 并只授权 Phase 7 OSS/外部能力采用文档；
+- Gate 6 有条件通过：先补指定域、接缝、来源覆盖或优先级 finding，再请求复核；
+- Gate 6 不通过：修改指定产品域边界、Capability/Page/Object 关系或优先级。
 
-Gate 5 通过也不自动授权正式前端实现、产品代码、Schema、OpenAPI、基础设施、依赖、历史文件移动、push、PR 或合并；`BLK-FE-001..007` 不会被自动关闭。
+Gate 6 通过也不自动授权正式前端实现、产品代码、Schema、OpenAPI、基础设施、依赖采用、历史文件移动、push、PR 或合并；`BLK-FE-001..007` 与 `GAP-FE-P6-001..012` 不会被自动关闭。
 
-在收到明确 Gate 5 决策前，继续停止第 6–8 阶段和任何产品实现。
+在收到明确 Gate 6 决策前，继续停止第 7–8 阶段和任何产品实现。

@@ -3,7 +3,7 @@
 > 文档 ID：`FE-SITE-002`
 > 层级：`L2 / Module state and authorization specification`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > 内容 Owner：`OWN-PRODUCT`
 > 合同 Owner：`OWN-SITE-BE`、`OWN-TRUTH-BE`、`OWN-SAAS-PLATFORM`
 > 关联：`OBJ-FE-003..008/012..017/027`、`STATE-FE-001..020`、`BLK-FE-003/004/007`

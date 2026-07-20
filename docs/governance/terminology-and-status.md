@@ -114,8 +114,9 @@
 | `PARTIAL_AS_BUILT_TARGET_SPECIFIED` | 一部分运行地基有 main 证据，完整目标另有规格；两者不能合并为“已实现” |
 | `SPEC_ONLY_NOT_CREATED` | 场景、Fixture 或资产的 manifest 已定义，但可执行文件/受控资产尚未创建 |
 | `SCHEMA_HYPOTHESIS_ONLY` | 事件/指标逻辑已描述，正式 schema、Owner、隐私或采集实现未批准 |
+| `MAP_COMPLETE / NOT_DEV_READY` | 产品域的用户结果、Page family、对象、接缝、边界、失败和开放输入已完整登记，但页面级 UX、机器合同、实现或证据尚不满足 Dev-Ready |
 
-这些限定词只有同时列出具体多轴状态和 Blocker ID 才可使用。`DEC-FE-P5-010` 在 Gate 5 前仍是推荐决定，因此 Site Pack 使用它时必须继续标 `READY_FOR_GATE_5_REVIEW`。
+这些限定词只有同时列出具体多轴状态和 Blocker/Gap ID 才可使用。`DEC-FE-P5-010` 已在 Gate 5 获批；Site 继续使用 `SPEC_READY_WITH_BLOCKERS`。Phase 6 非 Site Pack 使用 `MAP_COMPLETE / NOT_DEV_READY` 时仍须保留各轴的 `NONE/PROTOTYPE/EXTERNAL_OWNED/UNKNOWN`，不能由地图完整推出可施工。
 
 ## 7. 能力入口可见性
 

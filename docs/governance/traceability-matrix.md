@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 关系 Owner：`OWN-DOC-GOV`
-> 产品批准基线：Gate 2 + Gate 4，2026-07-20；Phase 5 关系待 Gate 5
+> 产品批准基线：Gate 2 + Gate 4 + Gate 5，2026-07-20；Phase 6 非 Site 关系待 Gate 6
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
 本表回答“一个用户结果如何追到页面、对象、机器合同、main 代码、测试和场景”。它不复制规范或测试内容；链接只证明关系存在，是否通过/部署仍看精确 Evidence/Release Bundle。
@@ -27,7 +27,7 @@ Segment/Actor/Problem/Job
 ```
 
 - 未存在的环节明确写 `NONE / FUTURE / BLOCKED`，不能留空让读者猜测。
-- Phase 2 的用户、旅程和 Page ID 是 Gate 2 决策 provenance；Gate 4 全局规则现为 current target，Phase 5 Site 规格等待 Gate 5。
+- Phase 2 的用户、旅程和 Page ID 是 Gate 2 决策 provenance；Gate 4 全局规则和 Gate 5 Site 规格已批准，Phase 6 非 Site Pack 等待 Gate 6。
 - “测试文件存在”只记 `TEST_ANCHOR`；除非有精确运行日期/提交/结果，不标 `TEST_PASSED_NOW`。
 - hidden preview controller 是内部输出边界，不进入 public OpenAPI operation 列。
 - Release Bundle 当前不存在；任何行都不得由此推出“用户可用”或“已发布”。
@@ -36,14 +36,14 @@ Segment/Actor/Problem/Job
 
 | 产品区域 | Capability IDs | 主要 Journey / Jobs | Page IDs | 核心对象 | SoR Owner | 当前深度 | 后续规范归属 |
 |---|---|---|---|---|---|---|---|
-| 公共 Shell / 今日 | `CAP-SHELL-001`、`CAP-ID-001`、`CAP-ONB-001`、`CAP-TODAY-001` | `JRN-FE-001/007/008`；`JOB-FE-001/005` | `PAGE-FE-001..010` | `OBJ-FE-001/002/025/026` | `OWN-SAAS-PLATFORM` | 产品 IA 已批；本地 Mock；正式合同/部署未知 | [当前 IA/Shell/权限/状态规范](../frontend/README.md) |
-| 客户开发 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | `JRN-FE-004/005`；`JOB-FE-006/007` | `PAGE-FE-060..066` | `OBJ-FE-009..011` | `OWN-BUYER-BE` 到 package；SaaS thereafter | 后端真实服务、前端 Mock、新增开发冻结 | `FUTURE_PHASE_6_MAP_ONLY` |
+| 公共 Shell / 今日 | `CAP-SHELL-001`、`CAP-ID-001`、`CAP-ONB-001`、`CAP-TODAY-001` | `JRN-FE-001/007/008`；`JOB-FE-001/005` | `PAGE-FE-001..010` | `OBJ-FE-001/002/025/026` | `OWN-SAAS-PLATFORM` | 产品 IA 已批；Phase 6 map complete；本地 Mock；正式合同/部署未知 | [Phase 6 Shell/Today](../frontend/modules/workspace-shell-and-today/README.md) |
+| 客户开发 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | `JRN-FE-004/005`；`JOB-FE-006/007` | `PAGE-FE-060..066` | `OBJ-FE-009..011` | `OWN-BUYER-BE` 到 package；SaaS thereafter | 后端真实服务、前端 Mock、新增开发冻结；Phase 6 map complete | [Phase 6 客户开发](../frontend/modules/buyer-development/README.md) |
 | 独立站管理 | `CAP-SITE-001..005` + Site child IDs | `JRN-FE-001..003/006/007`；`JOB-FE-003..005` | `PAGE-FE-030..057` | `OBJ-FE-003..008/012..017/027` | 企业事实、Site、SaaS 接缝分层 | 当前纵切 UX `SPEC_READY_WITH_BLOCKERS`；正式 FE `NONE`；承诺止于开发预览 | [全局规则](../frontend/README.md) + [Phase 5 Site Pack](../frontend/modules/independent-site-management/README.md) |
-| 增长执行 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | `JRN-FE-006/008`；`JOB-FE-008/009` | `PAGE-FE-070..079` | `OBJ-FE-018/019/024/025` | `OWN-SAAS-PLATFORM` | 产品地图/原型；正式 SoR 未定位 | `FUTURE_PHASE_6` |
-| 互动与商机 | `CAP-ENGAGE-001`、`CAP-OPP-001` | `JRN-FE-005/008`；`JOB-FE-010/011` | `PAGE-FE-080..083` | `OBJ-FE-020..022/027` | `OWN-SAAS-PLATFORM` | 外部 ownership；本仓不实现 Opportunity 主状态 | `FUTURE_PHASE_6` |
-| 洞察 | `CAP-INSIGHT-001` | `JRN-FE-008`；`JOB-FE-012` | `PAGE-FE-084..086` | `OBJ-FE-023` + read models | `OWN-SAAS-PLATFORM` | 平台目标态；Site 有局部 cost ledger | [当前分析/证据规范](../frontend/12-analytics-testing-and-release-evidence.md) + `FUTURE_PHASE_6` |
-| 团队/集成/设置/运营 | `CAP-INTEG-001`、`CAP-TEAM-001`、`CAP-SET-001`、`CAP-ADMIN-001` | 多旅程横切 | `PAGE-FE-090..096` | `OBJ-FE-001/002/024..026` | `OWN-SAAS-PLATFORM` | 本地原型/旧 Spring；正式 ownership 未定 | [当前 Shell/权限/合同规范](../frontend/README.md) + `FUTURE_PHASE_6/7` |
-| 企业事实横切 | `CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | `JRN-FE-002/006`；`JOB-FE-001/002/004/009` | `PAGE-FE-020..026/034..039` | `OBJ-FE-003..008/017` | `OWN-TRUTH-BE` + `OWN-SITE-BE` | 后端地基存在；Site UX 已规格化但审核合同未完成 | [当前权限与 AI/Evidence](../frontend/README.md) + [Site 生命周期](../frontend/modules/independent-site-management/lifecycle-permissions-and-state.md) |
+| 增长执行 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | `JRN-FE-006/008`；`JOB-FE-008/009` | `PAGE-FE-070..079` | `OBJ-FE-018/019/024/025` | `OWN-SAAS-PLATFORM` | Phase 6 map complete；原型 Mock；正式 SoR 未定位 | [Phase 6 增长执行](../frontend/modules/growth-execution/README.md) |
+| 互动与商机 | `CAP-ENGAGE-001`、`CAP-OPP-001` | `JRN-FE-005/008`；`JOB-FE-010/011` | `PAGE-FE-080..083` | `OBJ-FE-020..022/027` | `OWN-SAAS-PLATFORM` | Phase 6 map complete；外部 ownership；本仓不实现 Opportunity 主状态 | [Phase 6 互动与商机](../frontend/modules/engagement-and-opportunity/README.md) |
+| 洞察 | `CAP-INSIGHT-001` | `JRN-FE-008`；`JOB-FE-012` | `PAGE-FE-084..086` | `OBJ-FE-023` + read models | `OWN-SAAS-PLATFORM` | Phase 6 map complete；平台目标态；Site 有局部 cost ledger | [Phase 6 洞察与学习](../frontend/modules/insights-and-learning/README.md) |
+| 团队/集成/设置/运营 | `CAP-INTEG-001`、`CAP-TEAM-001`、`CAP-SET-001`、`CAP-ADMIN-001` | 多旅程横切 | `PAGE-FE-090..096` | `OBJ-FE-001/002/024..026` | `OWN-SAAS-PLATFORM` | Phase 6 map complete；本地原型/旧 Spring；正式 ownership 未定 | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |
+| 企业事实横切 | `CAP-TRUTH-001`、`CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | `JRN-FE-002/006`；`JOB-FE-001/002/004/009` | `PAGE-FE-020..026/034..039` | `OBJ-FE-003..008/017` | `OWN-TRUTH-BE` + `OWN-SITE-BE` | Phase 6 map complete；后端地基存在；审核合同未完成 | [Phase 6 企业事实](../frontend/modules/enterprise-trust-and-knowledge/README.md) + [Site 生命周期](../frontend/modules/independent-site-management/lifecycle-permissions-and-state.md) |
 
 完整 Page 名称和 Gate 2 论证见 [页面与能力目录](../roadmap/saas-frontend-phase-2/page-and-capability-catalog.md)。该目录不证明页面已接入。
 
@@ -110,8 +110,8 @@ Segment/Actor/Problem/Job
 | Source family | 已迁入的稳定关系 | 仍需迁入 | 不得做什么 |
 |---|---|---|---|
 | Phase 1 audit | source/evidence/conflict IDs、implementation truth caveats | Phase 8 自动覆盖和 banner/归档提案 | 用当前 main 重写冻结审计 |
-| Phase 2 product baseline | Segment/Actor/Problem/Job/Journey/Page/Decision IDs | Gate 4 current 规范和 Phase 5 Site Pack 已承接；后续用户研究/实现仍待 | 把评审包或规格当已实现页面 |
-| 五份 Word | 用户/对象/场景/治理方法输入 | Phase 4–7 按主题迁移 | 整份复制为 current PRD |
+| Phase 2 product baseline | Segment/Actor/Problem/Job/Journey/Page/Decision IDs | Gate 4 current 规范、Gate 5 Site 和 Phase 6 非 Site Pack 已承接；后续用户研究/实现仍待 | 把评审包或规格当已实现页面 |
+| 五份 Word | 用户/对象/场景/治理方法输入已进入 Phase 2/4/5/6 | OSS/技术候选留 Phase 7；自动治理留 Phase 8 | 整份复制为 current PRD |
 | Site v3.1/v3.2 | 已映射到 Site 00–14、Capability/Object/Scenario/Traceability 和 Phase 5 Pack | Phase 8 文件动作 | 因篇幅或位置认定为现行施工真值 |
 | 本地 React/Readdy/HTML | 原型、视觉和流程冲突已登记 | Phase 4/7 逐资产/页面采用决定 | 当作正式 repo、设计系统、License 或部署证明 |
 | GoodJob/竞品/OSS | 功能生命周期表达、权限社会属性、Guide/FAQ、采用方法 | Phase 7 adoption cards、后续 Guide 模板 | 从竞品功能反推我们的范围或“测试全绿” |
@@ -122,7 +122,7 @@ Segment/Actor/Problem/Job
 
 ### 已闭合的关系
 
-- 23 个全 SaaS顶层 Capability 已映射到产品区域、Page family、核心对象、Owner 和未来规范层。
+- Gate 3 时点的 23 个顶层 Capability 已映射到产品区域、Page family、核心对象和 Owner；当时企业事实横切域只有 Domain/Object 与 `CAP-KNOW-001`/Site 子能力，尚无独立顶层 Capability。
 - 16 个 Site child Capability 已建立稳定 ID；首个纵切 9 个关键子能力已追到 public operation/internal resolver、main 代码、TEST_ANCHOR 和 Scenario。
 - 27 个核心对象均有 SoR、唯一 Object Owner、事实状态和社会属性/生命周期边界。
 - 8 条 Journey 和完整 Page ID 集未丢失；冻结/外部/后置能力在地图中保留但没有被点亮为可用。
@@ -137,8 +137,8 @@ Segment/Actor/Problem/Job
 
 因此 Gate 3 可以审“事实归属和迁移覆盖”，不能被解释为 Gate 4/5、Dev-Ready 或用户可用完成。
 
-## 9. Phase 4/5 规范追踪结论
+## 9. Phase 4–6 规范追踪结论
 
-Gate 4 已把全产品 Capability/Page family 连接到当前 IA/Shell、权限、状态、AI/Evidence/Approval、设计系统/内容、a11y/性能/i18n、合同接入和发布证据规范。Phase 5 又把 Site 当前纵切连到 Page manifest、四层状态、29 条 Site Copy、`DSA-FE-SITE-WF-001`、13 个 operation、Scenario/Fixture、指标和实施蓝图。
+Gate 4 已把全产品 Capability/Page family 连接到当前 IA/Shell、权限、状态、AI/Evidence/Approval、设计系统/内容、a11y/性能/i18n、合同接入和发布证据规范。Gate 5 又把 Site 当前纵切连到 Page manifest、四层状态、29 条 Site Copy、`DSA-FE-SITE-WF-001`、13 个 operation、Scenario/Fixture、指标和实施蓝图。Phase 6 为其余 Page family 建立七个地图级 Pack，新增 `CAP-TRUTH-001` 把当前顶层 Capability 补至 24 个，并补十条跨域 Handoff、十二项 Gap、六组 target Fixture 和 16 条地图级 Scenario。
 
-全局规则为 `APPROVED_AT_GATE_4`；Site 文档轴为 `READY_FOR_GATE_5_REVIEW`。正式 repo、受控视觉设计、权限/Claim/指标合同、可执行 Fixture、前端实现和 Release Bundle 仍为 `NONE/BLOCKED`，因此只有当前 Site 纵切的 UX 规格轴可评审，前端、质量和用户可用性轴没有自动升级；发布链保持 `TARGET_NOT_RUNNABLE`。
+全局规则为 `APPROVED_AT_GATE_4`；Site 文档轴为 `APPROVED_AT_GATE_5`；非 Site Pack 为 `READY_FOR_GATE_6_REVIEW / MAP_COMPLETE`。正式 repo、受控视觉设计、权限/Claim/跨域业务/指标合同、可执行 Fixture、前端实现和 Release Bundle 仍为 `NONE/BLOCKED`，因此 Phase 6 只关闭“产品地图失踪”风险，没有升级前端、质量和用户可用性轴；Site 发布链继续 `TARGET_NOT_RUNNABLE`。

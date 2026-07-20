@@ -19,7 +19,7 @@
 5. [发布路线](roadmap/release-plan.md)：下一施工顺序。
 6. [治理入口](governance/README.md)：能力、对象、场景、冲突和追踪关系。
 7. [统一 SaaS 前端规范](frontend/README.md)：Gate 4 已批准的 IA、Shell、权限、状态、AI、设计和交付目标规则。
-8. [独立站管理 Capability Pack](frontend/modules/independent-site-management/README.md)：当前 Gate 5 的模块旅程、页面、状态、输出、实施和验收交接。
+8. [全 SaaS Capability Pack](frontend/modules/README.md)：完整产品域的人类入口；独立站管理保持 Gate 5 深度，其他域保持地图级诚实状态。
 
 任何“已完成”声明都必须回到上述主题 Owner、机器契约和证据核验。不要从旧 Word、研究稿、本地原型或历史 worktree 推导当前实现。
 
@@ -32,7 +32,7 @@
 - [核心对象登记](governance/core-object-register.md)
 - [冲突登记](governance/conflict-register.md)
 - [统一 SaaS 文档治理计划](roadmap/saas-frontend-documentation-program-plan.md)
-- 当前 Gate：[Phase 5 评审](roadmap/saas-frontend-phase-5/gate-5-review.md)
+- 当前 Gate：[Phase 6 评审](roadmap/saas-frontend-phase-6/gate-6-review.md)
 
 ### 产品设计与前端
 
@@ -149,7 +149,8 @@ Phase 1/2 的 roadmap 包是冻结审计与决策 provenance，不是第二套 c
 - Gate 2：通过，推荐组合已批准。
 - Gate 3：通过，Phase 3 Registry 已建立。
 - Gate 4：通过，`DEC-FE-P4-001..011` 已批准，`BLK-FE-001..007` 保留。
-- Phase 5：已授权并完成文档交付，当前准备 Gate 5 评审。
-- Phase 6–8：未授权。
+- Phase 5：已通过 Gate 5；当前纵切仍 `SPEC_READY_WITH_BLOCKERS`，后置链仍 `TARGET_NOT_RUNNABLE`。
+- Phase 6：已授权并完成全 SaaS 产品域文档交付，当前准备 Gate 6 评审。
+- Phase 7–8：未授权。
 
-进入下一阶段前请从 [Gate 5 评审包](roadmap/saas-frontend-phase-5/gate-5-review.md)检查 10 项推荐决定、当前/目标分层、模块追踪和未关闭 blocker。
+进入下一阶段前请从 [Gate 6 评审包](roadmap/saas-frontend-phase-6/gate-6-review.md)检查 12 项推荐决定、完整产品覆盖、优先级、跨域缺口和未关闭 blocker。

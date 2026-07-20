@@ -3,7 +3,7 @@
 > 文档 ID：`FE-SITE-004`
 > 层级：`L2 / Operations and acceptance specification`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > 内容 Owner：`OWN-PRODUCT`
 > 验收责任帽子：`OWN-QA-EVIDENCE`、`OWN-OPS`、`OWN-SECURITY`（实际人员未指派）
 > 关联：`SCN-FE-SITE-001..023`、`FX-FE-*`、`MET-SITE-001..034`、`ANTI-FE-001..010`
@@ -150,7 +150,7 @@ Fixture 必须带 `fixture_version`、source/rights、PII classification、seed/
 
 | 检查 | Phase 5 结果 | 后续关闭条件 |
 |---|---|---|
-| 模块范围/旅程/Page 完整 | `PASS_FOR_SPEC_REVIEW` | Product Gate 5 批准 |
+| 模块范围/旅程/Page 完整 | `APPROVED_AT_GATE_5` | 变更须重新走模块 Gate |
 | 当前/目标/as-built/Mock 分开 | `PASS` | 持续 drift check |
 | 合同、状态、错误和恢复可追踪 | `PASS_FOR_SPEC_REVIEW` | 正式 client + contract CI |
 | 权限可实现 | `BLOCKED` | `BLK-FE-003` |

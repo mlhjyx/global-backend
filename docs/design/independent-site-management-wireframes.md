@@ -4,12 +4,12 @@
 > 设计资产：`DSA-FE-SITE-WF-001`
 > 层级：`L2 / Written low-fidelity wireframe`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > Asset version：`0.1-gate5`
 > 设计 Owner：`OWN-DESIGN`（责任帽子；实际人员/受控设计源未指派）
 > 覆盖：`PAGE-FE-030..043`、`SCN-FE-SITE-001..018`
 
-本资产固定页面流、内容优先级、关键状态、响应式和无障碍意图。它不是 Figma/高保真视觉稿、生产 Token、组件库或用户验证证据，状态只能是 `SPEC_REVIEW_CANDIDATE`。
+本资产固定页面流、内容优先级、关键状态、响应式和无障碍意图。Gate 5 已批准这份书面规格，因此状态为 `SPEC_APPROVED`；它仍不是 Figma/高保真视觉稿、生产 Token、组件库或用户验证证据。
 
 ## 1. 整体页面流
 
@@ -247,7 +247,7 @@ Tab 在移动端改步骤选择器，但不隐藏未完成/错误。冲突 dialo
 
 ## 14. 资产状态与下一步
 
-本资产覆盖页面流、10 个关键线框、状态、响应式和 a11y，故 `DSA-FE-SITE-WF-001` 可从 `REQUIRED_NOT_CREATED` 升为 `SPEC_REVIEW_CANDIDATE`。它不能升级为 `DESIGNED`，因为仍缺：
+本资产覆盖页面流、10 个关键线框、状态、响应式和 a11y；Gate 5 已批准其书面规格，故 `DSA-FE-SITE-WF-001` 为 `SPEC_APPROVED`。它不能升级为 `DESIGNED`，因为仍缺：
 
 1. 受控设计工具/file/node/version 与实际 Design reviewer；
 2. 品牌视觉方向、semantic token values、组件源和权利；

@@ -31,6 +31,12 @@
 | `FX-FE-BUILD-001` | Build/Step/Cost 图 | queued/running/degraded/failed/cancelled；reported/estimated/unknown | 合成时间与金额 | `CATALOG_ONLY` | `OWN-QA-EVIDENCE` |
 | `FX-FE-BUYER-001` | 冻结客户开发样例 | ICP、两个公司、一个不可达 Lead、一个 qualified package | 合成公司/联系人 | `CATALOG_ONLY` | `OWN-QA-EVIDENCE` |
 | `FX-FE-INQUIRY-001` | 未来询盘样例 | 同意/重复/垃圾/合法询盘；合成访客 | 合成个人数据；保留策略待定 | `CATALOG_ONLY_BLOCKED` | `OWN-DATA-PRIVACY` |
+| `FX-FE-CAMPAIGN-001` | 目标增长计划 | Goal、Audience snapshot、Draft/Approved Content、渠道与预算 | 合成业务数据 | `CATALOG_ONLY_TARGET` | `OWN-QA-EVIDENCE` |
+| `FX-FE-CONTENT-001` | 内容与事实引用 | 两语言三版本；approved/unsupported/revoked Claim refs | 合成文本；资产权利另证 | `CATALOG_ONLY_TARGET` | `OWN-QA-EVIDENCE` |
+| `FX-FE-CONVERSATION-001` | 入站会话 | reply/duplicate/spam/opt-out/identity ambiguity/ACK unknown | 合成个人数据；用途/保留待定 | `CATALOG_ONLY_BLOCKED` | `OWN-DATA-PRIVACY` |
+| `FX-FE-OPPORTUNITY-001` | 商机生命周期 | candidate/QGO/SAO/rejected/closed + verified/unverified outcome | 合成商业数据 | `CATALOG_ONLY_TARGET` | `OWN-QA-EVIDENCE` |
+| `FX-FE-INSIGHT-001` | 指标与成本读模型 | current/stale/partial/no-data；reported/estimated/unknown cost | 合成指标；口径待定 | `CATALOG_ONLY_BLOCKED` | `OWN-DATA-PRIVACY` |
+| `FX-FE-CONTROL-001` | 团队/集成/套餐/事故 | pending invite、last admin、expiring OAuth、quota、break-glass request | 合成控制面数据 | `CATALOG_ONLY_BLOCKED` | `OWN-QA-EVIDENCE` |
 
 Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-and-release-evidence.md#4-标准场景与-fixture)和 Phase 5 [Site 运营验收](../frontend/modules/independent-site-management/operations-and-acceptance.md#4-标准-fixture-manifest)已定义 manifest 字段；实际版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence 均未创建，因此继续 `CATALOG_ONLY`。
 
@@ -95,7 +101,30 @@ Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-a
 | `SCN-FE-HANDOFF-001` | ACT-004 接收 qualified package | immutable package + Outbox/ACK | SaaS 创建 Opportunity candidate；本仓不创建 QGO/SAO | `EXTERNAL_OWNED`；本仓 side code-backed | `OWN-SAAS-PLATFORM` |
 | `SCN-FE-HANDOFF-002` | ACT-004 回写 Outcome | SaaS Opportunity closed | 只回传结构化学习标签，不覆盖 Lead/Company 主状态 | `EXTERNAL_OWNED` | `OWN-SAAS-PLATFORM` |
 
-## 7. 失败类别覆盖
+## 7. Phase 6 地图级跨域场景
+
+这些场景保证非 Site 域没有丢失关键成功、失败和下一动作，但均未创建 Fixture 文件、正式合同、前端或测试。`MAP_ONLY/TARGET_NOT_RUNNABLE` 不能用于 Release 验收。
+
+| Scenario ID | Capability / actor result | Preconditions + Fixture | 关键验收与恢复 | 当前状态 / Owner |
+|---|---|---|---|---|
+| `SCN-FE-TRUTH-001` | 企业事实审查 | `FX-FE-COMPANY-001/DOC/CLAIM`；operator+approver | 提案→Evidence→冲突/审核→限范围批准；无 allowed action 时只读阻塞 | `MAP_ONLY/PARTIAL_BACKEND` / `OWN-TRUTH-BE` |
+| `SCN-FE-TRUTH-002` | Claim 撤销影响消费者 | approved Claim 已被 Site/Content 引用 | 撤销阻止新消费并产生影响任务；不静默改历史快照 | `MAP_ONLY/BLOCKED` / `OWN-TRUTH-BE` |
+| `SCN-FE-TRUTH-003` | 知识/素材部分成功与删除 | `FX-FE-DOC/ASSET`；一 ready、一 failed、一 referenced | 保留 ready、解释 failed；referenced 删除失败并给解除路径 | `MAP_ONLY/PARTIAL_BACKEND` / `OWN-TRUTH-BE` |
+| `SCN-FE-BUYER-002` | ICP 到可解释推荐 | `FX-FE-BUYER-001` | 规则/回测→发现/部分失败→四队列；不可达高 Fit 不推荐 | `FROZEN_MAP_ONLY/BACKEND_CODE_BACKED` / `OWN-BUYER-BE` |
+| `SCN-FE-GROWTH-001` | Campaign 从目标到 Dry Run | `FX-FE-CAMPAIGN-001` + `FX-FE-CONTENT-001` | 固化 Audience/Claim/content/channel/cost 风险；差异后重新批准 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-GROWTH-002` | 未批准事实阻止执行 | `FX-FE-CONTENT-001` 引用 revoked/unsupported Claim | 深链 Evidence/审核；不允许生成内容绕过事实门 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-GROWTH-003` | 渠道部分成功与 ACK unknown | `FX-FE-CAMPAIGN-001`；两渠道/三目标，一成功/失败/未知 | 逐目标回执；只重试可重试失败，未知先对账 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-GROWTH-004` | Suppression/授权/预算 fail-closed | `FX-FE-CAMPAIGN-001`；受众含禁联、授权过期、额度变化 | Dry Run 阻止越权目标，要求新授权；不扩大名单 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-ENGAGE-001` | 入站回复到会话分派 | `FX-FE-CONVERSATION-001` | 去重/身份关联/opt-out→分派；不确定身份进入待确认 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-ENGAGE-002` | Lead package 到 Opportunity candidate/QGO | `FX-FE-BUYER-001` + `FX-FE-OPPORTUNITY-001` | ACK 后建 candidate；Evidence 完整才人工 QGO；本仓不建主状态 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-ENGAGE-003` | QGO→SAO→Outcome | `FX-FE-OPPORTUNITY-001` | 销售接受带 Owner/next step；Outcome provisional→verified；追加审计 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-INSIGHT-001` | 指标下钻和数据缺口 | `FX-FE-INSIGHT-001` | 显示口径/时区/权限/新鲜度；partial 不补 0；下钻 canonical object | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-INSIGHT-002` | 成本和归因不确定性 | reported/estimated/unknown；样本不足 | 保持来源和未知；归因不充分显示 inconclusive | `TARGET_NOT_RUNNABLE` / `OWN-DATA-PRIVACY` |
+| `SCN-FE-CONTROL-001` | 成员邀请/移交/停用 | `FX-FE-CONTROL-001` | last-admin 保护、任务/审批移交、有效权限预览和审计 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-CONTROL-002` | 集成授权、过期和退出 | expiring OAuth、partial scope、provider outage | secret 不回显；受控重授权/移除/导出；业务对象不丢 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
+| `SCN-FE-CONTROL-003` | 套餐降级和运营事故 | quota exceed + break-glass request | 展示影响/生效时间；运营最小权限、审批、限时、全审计 | `TARGET_NOT_RUNNABLE` / `OWN-SEC-COMMERCIAL` |
+
+## 8. 失败类别覆盖
 
 | 失败/边界类别 | 必须覆盖的 Scenario |
 |---|---|
@@ -110,8 +139,12 @@ Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-a
 | 产物完整性和 fail-closed | `SCN-FE-SITE-016/017` |
 | 外部依赖、域名和投递 | `SCN-FE-SITE-021/022/023` |
 | 冻结能力与跨仓 ownership | `SCN-FE-BUYER-001`、`SCN-FE-HANDOFF-001/002` |
+| 外部执行、回执和未知 ACK | `SCN-FE-GROWTH-001..004` |
+| 会话、商机与 Outcome | `SCN-FE-ENGAGE-001..003` |
+| 指标缺口、成本与归因不确定性 | `SCN-FE-INSIGHT-001/002` |
+| 成员、集成、套餐和平台运营 | `SCN-FE-CONTROL-001..003` |
 
-## 8. 场景升级门
+## 9. 场景升级门
 
 场景从 `CATALOGED` 升级时必须同时记录：
 
@@ -122,4 +155,4 @@ Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-a
 5. 产品、设计、前端、后端、QA、运营各自验收范围；
 6. 任何不可执行依赖和不得声称的用户承诺。
 
-AI 生成场景或自评不能成为唯一 Evidence Owner。Phase 5 只创建了 UI/运营规格；测试代码、Fixture 文件、seed/reset 和真实数据仍未创建，必须由后续明确授权和真实 QA/数据 Owner 承接。
+AI 生成场景或自评不能成为唯一 Evidence Owner。Phase 5 只创建了 Site UI/运营规格，Phase 6 只补了非 Site 地图级 Scenario/Fixture 目录；测试代码、Fixture 文件、seed/reset 和真实数据仍未创建，必须由后续明确授权和真实 QA/数据 Owner 承接。

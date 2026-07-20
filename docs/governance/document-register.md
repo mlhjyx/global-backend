@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 当前清单基线：本分支 `origin/main@676c6cd` + Phase 1–5 docs-only 产物
+> 当前清单基线：本分支 `origin/main@676c6cd` + Phase 1–6 docs-only 产物
 > 最后核验：2026-07-20
 
 本表是“读哪份、信哪份、旧内容迁到哪里”的当前入口。Phase 1 的 [逐来源明细](../roadmap/saas-frontend-phase-1/source-detail-register.md)保留 `c3f0cca` 时点的 67 份 Markdown 和非 Markdown 审计证据；本表承接其结果并管理之后新增的文档，不重写冻结审计。
@@ -69,23 +69,43 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `DESIGN-FE-001` | `docs/design/design-asset-register.md` | L2 / Design registry | `CURRENT` | `OWN-DESIGN` | 设计资产 ID、版本、Owner 与追踪 | 持续维护 |
 | `DESIGN-FE-002` | `docs/design/content-and-microcopy-catalog.md` | L2 / Content registry | `CURRENT` | `OWN-DESIGN` | 跨模块/站点微文案 ID 与本地化状态 | 持续维护 |
 
-### 2.2 Phase 5 独立站管理规格
+### 2.2 Gate 5 已批准的独立站管理规格
 
-以下文件等待 Gate 5 批准；它们细化当前/目标体验，不拥有后端 as-built 或公开发布事实。
+以下文件已在 Gate 5 获批；它们细化当前/目标体验，不拥有后端 as-built 或公开发布事实。
 
 | Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
 |---|---|---|---|---|---|---|
-| `FE-SITE-000` | `docs/frontend/modules/independent-site-management/README.md` | L2 / Capability Pack | `ACTIVE_INPUT` | `OWN-PRODUCT` | Site 模块承诺、manifest 和状态分层 | Gate 5 review |
-| `FE-SITE-001` | `docs/frontend/modules/independent-site-management/journeys-and-page-spec.md` | L2 / Module UX | `ACTIVE_INPUT` | `OWN-PRODUCT` | Site 旅程与 Page manifest | Gate 5 review |
-| `FE-SITE-002` | `docs/frontend/modules/independent-site-management/lifecycle-permissions-and-state.md` | L2 / State/auth | `ACTIVE_INPUT` | `OWN-PRODUCT` | Site 对象、权限、状态和恢复 | Gate 5 review |
-| `FE-SITE-003` | `docs/frontend/modules/independent-site-management/public-site-output-spec.md` | L2 / Output target | `ACTIVE_INPUT` | `OWN-PRODUCT` | Astro 公开输出与生产门 | Gate 5 review |
-| `FE-SITE-004` | `docs/frontend/modules/independent-site-management/operations-and-acceptance.md` | L2 / Ops/acceptance | `ACTIVE_INPUT` | `OWN-PRODUCT` | Site runbook、场景、指标和验收 | Gate 5 review |
-| `FE-IMPL-SITE-001` | `docs/frontend/implementation/independent-site-management-blueprint.md` | L3 / Implementation blueprint | `ACTIVE_INPUT` | `OWN-SAAS-FE` | stack-neutral 前端实施交接 | `BLK-FE-001` 关闭后实施输入 |
-| `DESIGN-FE-003` | `docs/design/independent-site-management-wireframes.md` | L2 / Written wireframe | `ACTIVE_INPUT` | `OWN-DESIGN` | Site 页面流、低保真、responsive/a11y | 受控设计源后续实现 |
-| `GATE-FE-P5-000` | `docs/roadmap/saas-frontend-phase-5/README.md` | L3 / Phase evidence | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 5 交付入口 | Gate 5 后冻结 |
-| `GATE-FE-P5-001` | `docs/roadmap/saas-frontend-phase-5/gate-5-review.md` | L4 / Gate review | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Gate 5 决策与验收 | Gate 5 后冻结 |
+| `FE-SITE-000` | `docs/frontend/modules/independent-site-management/README.md` | L2 / Capability Pack | `CURRENT` | `OWN-PRODUCT` | Site 模块承诺、manifest 和状态分层 | `APPROVED_AT_GATE_5` |
+| `FE-SITE-001` | `docs/frontend/modules/independent-site-management/journeys-and-page-spec.md` | L2 / Module UX | `CURRENT` | `OWN-PRODUCT` | Site 旅程与 Page manifest | `APPROVED_AT_GATE_5` |
+| `FE-SITE-002` | `docs/frontend/modules/independent-site-management/lifecycle-permissions-and-state.md` | L2 / State/auth | `CURRENT` | `OWN-PRODUCT` | Site 对象、权限、状态和恢复 | `APPROVED_AT_GATE_5` |
+| `FE-SITE-003` | `docs/frontend/modules/independent-site-management/public-site-output-spec.md` | L2 / Output target | `CURRENT` | `OWN-PRODUCT` | Astro 公开输出与生产门 | `APPROVED_AT_GATE_5` |
+| `FE-SITE-004` | `docs/frontend/modules/independent-site-management/operations-and-acceptance.md` | L2 / Ops/acceptance | `CURRENT` | `OWN-PRODUCT` | Site runbook、场景、指标和验收 | `APPROVED_AT_GATE_5` |
+| `FE-IMPL-SITE-001` | `docs/frontend/implementation/independent-site-management-blueprint.md` | L3 / Implementation blueprint | `CURRENT` | `OWN-SAAS-FE` | stack-neutral 前端实施交接 | `APPROVED_AT_GATE_5`；`BLK-FE-001` 关闭后实施输入 |
+| `DESIGN-FE-003` | `docs/design/independent-site-management-wireframes.md` | L2 / Written wireframe | `CURRENT` | `OWN-DESIGN` | Site 页面流、低保真、responsive/a11y | `APPROVED_AT_GATE_5`；不等于视觉定稿 |
+| `GATE-FE-P5-000` | `docs/roadmap/saas-frontend-phase-5/README.md` | L3 / Phase evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 5 交付入口 | `REFERENCE_ONLY` |
+| `GATE-FE-P5-001` | `docs/roadmap/saas-frontend-phase-5/gate-5-review.md` | L4 / Gate review | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate 5 决策与验收 | `REFERENCE_ONLY` |
 
-### 2.3 最近 Gate 证据精确入口
+### 2.3 Phase 6 全 SaaS 产品域文档
+
+以下文件等待 Gate 6 批准。它们保证产品地图和边界完整，不把非 Site 域升级为 Dev-Ready。
+
+| Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
+|---|---|---|---|---|---|---|
+| `FE-MODULES-000` | `docs/frontend/modules/README.md` | L2 / Capability index | `ACTIVE_INPUT` | `OWN-PRODUCT` | 全 SaaS 产品域入口与深度 | Gate 6 review |
+| `FE-P6-SHELL-000` | `docs/frontend/modules/workspace-shell-and-today/README.md` | L2 / Capability Pack | `ACTIVE_INPUT` | `OWN-SAAS-PLATFORM` | Shell/Today 用户闭环与基础合同缺口 | Gate 6 review |
+| `FE-P6-TRUTH-000` | `docs/frontend/modules/enterprise-trust-and-knowledge/README.md` | L2 / Capability Pack | `ACTIVE_INPUT` | `OWN-PRODUCT` | 企业事实、知识、Claim/Evidence/Asset 横切 | Gate 6 review |
+| `FE-P6-BUYER-000` | `docs/frontend/modules/buyer-development/README.md` | L2 / Frozen Capability Pack | `ACTIVE_INPUT` | `OWN-BUYER-BE` | 冻结客户开发完整地图与后端边界 | Gate 6 review |
+| `FE-P6-GROWTH-000` | `docs/frontend/modules/growth-execution/README.md` | L2 / Target Capability Pack | `ACTIVE_INPUT` | `OWN-SAAS-PLATFORM` | Goal/Campaign/Content/Publish 目标闭环 | Gate 6 review |
+| `FE-P6-ENGAGE-000` | `docs/frontend/modules/engagement-and-opportunity/README.md` | L2 / Target Capability Pack | `ACTIVE_INPUT` | `OWN-SAAS-PLATFORM` | Conversation/Opportunity/Outcome 边界 | Gate 6 review |
+| `FE-P6-INSIGHT-000` | `docs/frontend/modules/insights-and-learning/README.md` | L2 / Target Capability Pack | `ACTIVE_INPUT` | `OWN-SAAS-PLATFORM` | 读模型、成本、归因与学习原则 | Gate 6 review |
+| `FE-P6-CONTROL-000` | `docs/frontend/modules/team-integrations-settings-and-operations/README.md` | L2 / Target Capability Pack | `ACTIVE_INPUT` | `OWN-SAAS-PLATFORM` | 控制面、集成、商业与运营边界 | Gate 6 review |
+| `BASE-FE-P6-001` | `docs/roadmap/saas-frontend-phase-6/portfolio-coverage-and-priority.md` | L3 / Product baseline | `ACTIVE_INPUT` | `OWN-PRODUCT` | 能力覆盖、成熟度与优先级 | Gate 6 review |
+| `BASE-FE-P6-002` | `docs/roadmap/saas-frontend-phase-6/cross-domain-handoffs-and-gaps.md` | L3 / Handoff register | `ACTIVE_INPUT` | `OWN-PRODUCT` | 跨域交付、责任断点与 Gap | Gate 6 review |
+| `BASE-FE-P6-003` | `docs/roadmap/saas-frontend-phase-6/source-migration-coverage.md` | L3 / Migration coverage | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Word/原型/GoodJob/代码内容去向 | Gate 6 review |
+| `GATE-FE-P6-000` | `docs/roadmap/saas-frontend-phase-6/README.md` | L3 / Phase evidence | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 6 交付入口 | Gate 6 后冻结 |
+| `GATE-FE-P6-001` | `docs/roadmap/saas-frontend-phase-6/gate-6-review.md` | L4 / Gate review | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Gate 6 决策与验收 | Gate 6 后冻结 |
+
+### 2.4 最近 Gate 证据精确入口
 
 | Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
 |---|---|---|---|---|---|---|
@@ -108,7 +128,8 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `DOCSET-PHASE-2` | `docs/roadmap/saas-frontend-phase-2/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-PRODUCT` | Gate 2 论证、选项和批准 provenance | `REFERENCE_ONLY`；批准结果迁入能力/对象/冲突 Registry |
 | `DOCSET-PHASE-3` | `docs/roadmap/saas-frontend-phase-3/*.md` | L3 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 3 交付与 Gate 3 审查 | Gate 3 后冻结；Registry 继续维护 |
 | `DOCSET-PHASE-4` | `docs/roadmap/saas-frontend-phase-4/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 4 交付与 Gate 4 批准 provenance | `REFERENCE_ONLY`；全局规范继续维护 |
-| `DOCSET-PHASE-5` | `docs/roadmap/saas-frontend-phase-5/*.md` | L3/L4 / `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 5 交付与 Gate 5 审查 | Gate 5 后冻结 |
+| `DOCSET-PHASE-5` | `docs/roadmap/saas-frontend-phase-5/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 5 交付与 Gate 5 批准 | `REFERENCE_ONLY` |
+| `DOCSET-PHASE-6` | `docs/roadmap/saas-frontend-phase-6/*.md` | L3/L4 / `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 6 交付与 Gate 6 审查 | Gate 6 后冻结 |
 | `DOCSET-SITE-ACTIVE` | `docs/site-builder/00`–`09`、`13`、`14` | L1/L2/L3 / `ACTIVE_INPUT` | `OWN-SITE-BE` | Site 产品、架构、合同、施工和评测专题 | 原位保留；状态只由 current/release-plan 承重 |
 | `DOCSET-SITE-DECISION-EVIDENCE` | `docs/site-builder/DQ-1-shared-sitespec-contract.md`、`docs/site-builder/handoffs/*.md` | L2/L3 / `FROZEN_EVIDENCE` | `OWN-SITE-BE` | 某决策/施工 handoff 的精确时点 | `REFERENCE_ONLY`；完成后不作为 current status |
 | `DOCSET-STATUS-EVIDENCE` | `docs/status/pilot-readiness-gap-report.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-PRODUCT` | dated gap report | 原位保留，当前结论回到 `status/current.md` |
@@ -136,10 +157,10 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 
 | Source ID | 路径 | 生命周期 | Owner | 已吸收内容 | 剩余迁移去向 | 文件动作 |
 |---|---|---|---|---|---|---|
-| `SRC-WORD-001` | `docs/出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx` | `DATED_PROPOSAL` | `OWN-PRODUCT` | 用户/JTBD、状态、权限、恢复、运营输入进入 Phase 2 | Phase 4 全局 UX、Phase 5 Site Capability Pack、Phase 6 其他域 | 保留，不移动 |
+| `SRC-WORD-001` | `docs/出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx` | `DATED_PROPOSAL` | `OWN-PRODUCT` | 用户/JTBD、状态、权限、恢复和运营已进入 Phase 2、4、5、6 | OSS/技术候选进 Phase 7；历史范围不复活 | 保留，不移动 |
 | `SRC-WORD-002` | `docs/出海企业AI全球客户开发与增长执行平台_产品总纲与产品手册_v3.0_完整评审稿.docx` | `DATED_PROPOSAL` | `OWN-PRODUCT` | 产品叙事、角色和工作方式进入 Phase 2/计划 | 未来产品能力说明和用户/管理员/运营 Guide | 保留，不移动 |
 | `SRC-WORD-003` | `docs/出海企业AI增长平台_总产品手册与PRD_v2.0_完整产品母本.docx` | `SUPERSEDED` | `OWN-PRODUCT` | 仅保留对象/历史场景 provenance | `HISTORY_ONLY`；不得复活旧 SAO/导航/Agent 边界 | 保留，不移动 |
-| `SRC-WORD-004` | `docs/platform/全球客户开发与增长执行平台_顶层产品与系统架构设计_v1.0.docx` | `DATED_PROPOSAL` | `OWN-SAAS-PLATFORM` | 系统分层作为方案输入 | Phase 4 集成约束、Phase 6 跨域、Phase 7 OSS；不覆盖 current architecture | 保留，不移动 |
+| `SRC-WORD-004` | `docs/platform/全球客户开发与增长执行平台_顶层产品与系统架构设计_v1.0.docx` | `DATED_PROPOSAL` | `OWN-SAAS-PLATFORM` | 系统分层已进入 Phase 4 集成约束和 Phase 6 跨域接缝 | Phase 7 OSS/外部能力；具体技术不覆盖 current architecture | 保留，不移动 |
 | `SRC-WORD-005` | `docs/platform/全球客户开发与增长执行平台_v3.0文档体系重构与实施治理方案_v1.0.docx` | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate、RACI、traceability 和来源治理已吸收进计划/Registry | `REFERENCE_ONLY` | 保留，不移动 |
 
 ## 6. 本地无版本输入、竞品与外部来源
@@ -166,7 +187,7 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | Company/Offering/Claim/Evidence/Asset | [核心对象登记](core-object-register.md) | [AI/权限规范](../frontend/08-ai-approval-evidence-and-human-control.md) + [Site 生命周期](../frontend/modules/independent-site-management/lifecycle-permissions-and-state.md) | public Claim 审核/影响合同未完整 |
 | Site Build/Release/Preview | current architecture、OpenAPI、[追踪矩阵](traceability-matrix.md) | [Site Capability Pack](../frontend/modules/independent-site-management/README.md) | 正式 SaaS 前端 repo/Owner 未定 |
 | Publish/Domain/Rollback/Inquiry/Analytics | [能力登记](capability-register.md)中的 `APPROVED_NOT_BUILT/DEFERRED` | 各自后续 Capability Pack + ADR/契约 | 不得并入当前 preview 承诺 |
-| Campaign/Conversation/Opportunity/Outcome | product scope + [核心对象登记](core-object-register.md) | Phase 6 外部 SaaS 能力包/合同 | 正式 SaaS SoR/repo/Owner 未定 |
+| Campaign/Conversation/Opportunity/Outcome | product scope + [核心对象登记](core-object-register.md) | [Phase 6 产品域 Pack](../frontend/modules/README.md)已承接地图；未来独立 Dev-Ready Pack/合同 | 正式 SaaS SoR/repo/Owner 未定 |
 | 角色、权限和对象社会属性 | [核心对象登记](core-object-register.md) | [权限与数据可见性](../frontend/06-permissions-and-data-visibility.md) | SaaS/安全/隐私 Owner 和机器合同未定 |
 | 失败、恢复、人工兜底 | [场景目录](scenario-catalog.md) | [全局状态](../frontend/07-state-error-degradation-and-recovery.md) + [Site 运营验收](../frontend/modules/independent-site-management/operations-and-acceptance.md) | QA/运营实际 Owner 未指派 |
 | OSS、Readdy、外部服务 | Phase 1 外部审计 | Phase 7 adoption cards | 权利、安全、退出和预算评审未做 |

@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 决策基线：Gate 2 推荐组合与 `DEC-FE-P4-001..011` 于 2026-07-20 获产品负责人批准；`DEC-FE-P5-*` 待 Gate 5
+> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011` 与 `DEC-FE-P5-001..010` 于 2026-07-20 获产品负责人批准；`DEC-FE-P6-*` 待 Gate 6
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
 本表只保存 Conflict ID、当前状态、唯一 Owner、裁决位置和下一 Gate。完整证据与方案比较仍留在 Phase 1 [冲突证据](../roadmap/saas-frontend-phase-1/conflict-register.md)、[风险/开放决策](../roadmap/saas-frontend-phase-1/open-decisions-and-risks.md)和 Phase 2 [IA 决策包](../roadmap/saas-frontend-phase-2/ia-conflict-and-decision-register.md)，不在这里复制。
@@ -123,22 +123,39 @@
 
 详细取舍、非含义和批准记录见 [Gate 4 决策记录](../frontend/13-open-decisions.md)。
 
-## 7. Gate 5 推荐决策
+## 7. Gate 5 已批准决策
 
 | Decision ID | 推荐决定 | 状态 | Owner |
 |---|---|---|---|
-| `DEC-FE-P5-001` | 当前开发预览纵切与目标发布链分开治理 | `RECOMMENDED` | `OWN-PRODUCT` |
-| `DEC-FE-P5-002` | 批准 `PAGE-FE-030..043` manifest 与语义路由边界 | `RECOMMENDED` | `OWN-PRODUCT` |
-| `DEC-FE-P5-003` | `PAGE-FE-044..057` 只保留摘要/目标，不进入可运行承诺 | `RECOMMENDED` | `OWN-PRODUCT` |
-| `DEC-FE-P5-004` | 权限只消费服务端 allowed actions；未知 fail-closed | `RECOMMENDED` | `OWN-SAAS-PLATFORM` |
-| `DEC-FE-P5-005` | 批准四层状态、幂等/ETag/ACK/cancel/旧结果恢复语义 | `RECOMMENDED` | `OWN-PRODUCT` |
-| `DEC-FE-P5-006` | 批准公开输出目标规范，但不升级 Publish/Domain/Inquiry 状态 | `RECOMMENDED` | `OWN-PRODUCT` |
-| `DEC-FE-P5-007` | 书面 Site 低保真资产可评审，但不标 `DESIGNED` | `RECOMMENDED` | `OWN-DESIGN` |
-| `DEC-FE-P5-008` | `COPY-FE-SITE-001..029` 作为未验证 source copy 目录 | `RECOMMENDED` | `OWN-DESIGN` |
-| `DEC-FE-P5-009` | 指标/事件只作逻辑 hypothesis；无隐私合同不引 SDK | `RECOMMENDED` | `OWN-DATA-PRIVACY` |
-| `DEC-FE-P5-010` | 当前纵切为 `SPEC_READY_WITH_BLOCKERS`，不授权实现 | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P5-001` | 当前开发预览纵切与目标发布链分开治理 | `APPROVED_AT_GATE_5` | `OWN-PRODUCT` |
+| `DEC-FE-P5-002` | 批准 `PAGE-FE-030..043` manifest 与语义路由边界 | `APPROVED_AT_GATE_5` | `OWN-PRODUCT` |
+| `DEC-FE-P5-003` | `PAGE-FE-044..057` 只保留摘要/目标，不进入可运行承诺 | `APPROVED_AT_GATE_5` | `OWN-PRODUCT` |
+| `DEC-FE-P5-004` | 权限只消费服务端 allowed actions；未知 fail-closed | `APPROVED_AT_GATE_5` | `OWN-SAAS-PLATFORM` |
+| `DEC-FE-P5-005` | 批准四层状态、幂等/ETag/ACK/cancel/旧结果恢复语义 | `APPROVED_AT_GATE_5` | `OWN-PRODUCT` |
+| `DEC-FE-P5-006` | 批准公开输出目标规范，但不升级 Publish/Domain/Inquiry 状态 | `APPROVED_AT_GATE_5` | `OWN-PRODUCT` |
+| `DEC-FE-P5-007` | 书面 Site 低保真资产可评审，但不标 `DESIGNED` | `APPROVED_AT_GATE_5` | `OWN-DESIGN` |
+| `DEC-FE-P5-008` | `COPY-FE-SITE-001..029` 作为未验证 source copy 目录 | `APPROVED_AT_GATE_5` | `OWN-DESIGN` |
+| `DEC-FE-P5-009` | 指标/事件只作逻辑 hypothesis；无隐私合同不引 SDK | `APPROVED_AT_GATE_5` | `OWN-DATA-PRIVACY` |
+| `DEC-FE-P5-010` | 当前纵切为 `SPEC_READY_WITH_BLOCKERS`，不授权实现 | `APPROVED_AT_GATE_5` | `OWN-PRODUCT` |
 
-## 8. 关闭冲突的证据要求
+## 8. Gate 6 推荐决策
+
+| Decision ID | 推荐决定 | 状态 | Owner |
+|---|---|---|---|
+| `DEC-FE-P6-001` | 批准七个非 Site Capability Pack 和 Site Pack 组成完整 SaaS 产品域入口 | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-002` | 全部 24 项顶层 Capability 与 76 个 Page ID 已有正式归属；`CAP-TRUTH-001` 补齐企业事实域；`MAP_COMPLETE` 不代表 Dev-Ready | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-003` | 当前优先级继续是 Site 可信开发预览纵切及其安全地基，不被完整产品地图稀释 | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-004` | Shell/Today 是跨域读模型与深链，不取得业务对象 ownership | `RECOMMENDED` | `OWN-SAAS-PLATFORM` |
+| `DEC-FE-P6-005` | Company/Offering/Claim/Evidence/Asset/Knowledge 是跨 Site/Growth 的共享事实底座 | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-006` | Buyer Intelligence 保持 `FROZEN_MAP_ONLY`；Phase 6 不恢复新增开发 | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-007` | Growth、Engagement/Opportunity、Insights、Control 保持 `TARGET_EXTERNAL / NOT_DEV_READY` | `RECOMMENDED` | `OWN-SAAS-PLATFORM` |
+| `DEC-FE-P6-008` | 维持本仓止于 LeadQualifiedPackage，Conversation/Opportunity/Outcome/Attribution 归 SaaS | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-009` | 批准 `HOF-FE-001..010` 的责任断点；跨域不复制主状态或把 ACK/批准/结果合并 | `RECOMMENDED` | `OWN-PRODUCT` |
+| `DEC-FE-P6-010` | 批准 `GAP-FE-P6-001..012` 为后续输入账，不补猜 SoR/API/Owner | `RECOMMENDED` | `OWN-DOC-GOV` |
+| `DEC-FE-P6-011` | Word/GoodJob/本地原型的产品内容迁移已覆盖；技术/OSS 采用只进 Phase 7 | `RECOMMENDED` | `OWN-DOC-GOV` |
+| `DEC-FE-P6-012` | 非 Site 域未来先选最小端到端结果再升级 Dev-Ready Pack，不从 Mock 页面直接拆任务 | `RECOMMENDED` | `OWN-PRODUCT` |
+
+## 9. 关闭冲突的证据要求
 
 1. 产品冲突：Decision/PDR、真实批准人、范围和被放弃方案。
 2. 技术冲突：ADR 或机器合同、main 实现和相称测试。
@@ -146,4 +163,4 @@
 4. 权利/安全冲突：真实责任 Owner、适用条款/License、威胁/隐私评审和退出方案。
 5. 可用性冲突：正式前端入口、部署环境、标准场景与 Release evidence。
 
-执行者不能因为“推荐合理”自行把 `OPEN_DECISION` 改成 `RESOLVED`。Gate 4 已通过；`DEC-FE-P5-*` 仍需产品负责人明确批准，Phase 6–8 仍需逐 Gate 授权。
+执行者不能因为“推荐合理”自行把 `OPEN_DECISION` 改成 `RESOLVED`。Gate 4/5 已通过；`DEC-FE-P6-*` 仍需产品负责人明确批准，Phase 7–8 仍需逐 Gate 授权。

@@ -3,13 +3,15 @@
 > 文档 ID：`DESIGN-FE-002`
 > 层级：`L2 / Content registry`
 > 生命周期：`CURRENT`
-> 评审状态：`APPROVED_AT_GATE_4`
+> 评审状态：`CURRENT / GATE_4_AND_5_APPROVED`
 > 内容 Owner：`OWN-DESIGN`
 > Source locale：`zh-CN`；其他翻译尚未创建
 
 ## 1. 使用方式
 
 本目录固定跨模块和首个独立站纵切关键文案的意图与变量，不替代页面内容设计。以下中文均为 `DRAFT_SOURCE_COPY`，仍需在真实界面、目标用户、长度、读屏和翻译环境验证。
+
+Gate 4 已批准跨模块内容合同，Gate 5 已批准独立站文案的意图、场景覆盖与边界；两次批准都没有把 `DRAFT_SOURCE_COPY` 升级为可直接发布的最终文案。
 
 变量使用 `{object}`、`{time}`、`{count}` 等命名；值必须转义、本地化并按权限脱敏。禁止将原始错误、Prompt、用户上传文本直接插入 `aria-live`、Toast 或通知。
 

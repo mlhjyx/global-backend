@@ -28,7 +28,8 @@
 | 设计/内容 | [设计系统与内容](09-design-system-and-content-guidelines.md) → [设计资产登记](../design/design-asset-register.md) → [微文案目录](../design/content-and-microcopy-catalog.md) |
 | QA/发布/运营 | [响应式、a11y 与性能](10-responsive-accessibility-and-performance.md) → [分析、测试与发布证据](12-analytics-testing-and-release-evidence.md) |
 | 决策者 | [开放决策](13-open-decisions.md) → [Gate 4 评审](../roadmap/saas-frontend-phase-4/gate-4-review.md) |
-| 独立站管理团队 | [Capability Pack](modules/independent-site-management/README.md) → [实施蓝图](implementation/independent-site-management-blueprint.md) → [Gate 5](../roadmap/saas-frontend-phase-5/gate-5-review.md) |
+| 产品/模块团队 | [全 SaaS Capability Pack](modules/README.md) → 对应产品域工作簿 → 当前 Gate |
+| 独立站管理团队 | [Capability Pack](modules/independent-site-management/README.md) → [实施蓝图](implementation/independent-site-management-blueprint.md) → [Gate 5 证据](../roadmap/saas-frontend-phase-5/gate-5-review.md) |
 
 ## 3. 规范文件
 
@@ -60,6 +61,7 @@
 ## 5. Gate 4 批准边界与 Phase 5 承接
 
 - Gate 4 没有批准任何模块实现；Phase 5 已把独立站管理当前纵切写成 `SPEC_READY_WITH_BLOCKERS`，后置发布链保持 `TARGET_NOT_RUNNABLE`。
+- Gate 5 已批准上述两 lane 状态；Phase 6 又补齐其他产品域的地图级 Capability Pack，但没有把任何非 Site 域升级为 Dev-Ready。
 - 不决定 React/Next/Vite、BFF、UI 库、状态库、分析 SDK、i18n 库或设计工具。
 - 不生成高保真页面、HTML 原型、Figma 文件、生产 Token 数值或可执行 Fixture。
 - 不扩展首个用户承诺到公网发布、域名、回滚、询盘、站点分析或诊断。

@@ -3,7 +3,7 @@
 > 文档 ID：`FE-SITE-001`
 > 层级：`L2 / Module UX specification`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > 内容 Owner：`OWN-PRODUCT`；设计责任帽子：`OWN-DESIGN`
 > 关联：`JRN-FE-001..003/006/007`、`PAGE-FE-030..057`、`DSA-FE-SITE-WF-001`
 

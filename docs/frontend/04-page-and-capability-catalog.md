@@ -26,13 +26,17 @@
 | 区域 | Page family | 关键页面/面板 | Capability | 当前深度 |
 |---|---|---|---|---|
 | Shell/今日 | `PAGE-FE-001..010` | 登录/会话、Workspace、今日、Search、通知、任务、审批、异常、长任务、帮助 | `CAP-ID-001`、`CAP-SHELL-001`、`CAP-ONB-001`、`CAP-TODAY-001` | IA 批准；正式 repo/合同/部署未知；本地多为 Mock |
-| 企业资料与信任 | `PAGE-FE-020..026` | 企业资料、Offering、事实审查、Evidence drawer、知识、信任评估、Asset 详情 | `CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | 后端对象局部已建；统一 CRUD/审核/UX 不完整 |
+| 企业资料与信任 | `PAGE-FE-020..026` | 企业资料、Offering、事实审查、Evidence drawer、知识、信任评估、Asset 详情 | `CAP-TRUTH-001`、`CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | 后端对象局部已建；统一 CRUD/审核/UX 不完整 |
 | 独立站管理 | `PAGE-FE-030..057` | 站点、Intake、资料、素材、KB、Claim、Build、Preview、编辑、版本、发布、域名、询盘、分析、诊断、公开输出 | `CAP-SITE-001..005` + 16 个 Site child | 当前主线；首个承诺仅 `PAGE-FE-030..043` 中合同相称子集 |
 | 客户开发 | `PAGE-FE-060..066` | 市场/ICP、客户池、公司/联系人、发现任务、资格包、数据权利 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | 后端真实能力；前端 Mock；新增开发冻结 |
 | 增长执行 | `PAGE-FE-070..079` | Goal/Initiative、Campaign、Audience、内容、素材、发布任务、渠道账号、日历、实验 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | 产品地图/原型；正式 SoR 与前端未知 |
 | 互动与商机 | `PAGE-FE-080..083` | Inbox、Conversation、Opportunity、Outcome | `CAP-ENGAGE-001`、`CAP-OPP-001` | SaaS external-owned；本仓不建主状态 |
 | 洞察 | `PAGE-FE-084..086` | 经营/漏斗、归因、质量/成本/实验 | `CAP-INSIGHT-001` | 目标读模型；Site 仅有局部成本事实 |
 | 管理与运营 | `PAGE-FE-090..096` | Team/Role、Integration、Billing/Usage、Settings/Security、数据权利、Operations、审计 | `CAP-TEAM-001`、`CAP-INTEG-001`、`CAP-SET-001`、`CAP-ADMIN-001` | 正式 ownership/合同未知；旧原型不作真值 |
+
+### 2.1 正式产品域工作簿
+
+Phase 6 已为上述非 Site 区域建立地图级 Capability Pack，统一入口见[全 SaaS 产品域目录](modules/README.md)。它们补充用户闭环、对象、状态、失败恢复和开放输入，但继续使用 `MAP_COMPLETE / NOT_DEV_READY`、`FROZEN_MAP_ONLY` 或 `TARGET_EXTERNAL`，没有把目录行升级为已设计/已实现页面。Site 保持 Gate 5 已批准的独立模块规格。
 
 ## 3. 完整 Page ID 索引
 

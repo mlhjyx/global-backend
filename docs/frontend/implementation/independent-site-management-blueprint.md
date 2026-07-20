@@ -3,7 +3,7 @@
 > 文档 ID：`FE-IMPL-SITE-001`
 > 层级：`L3 / Stack-neutral implementation blueprint`
 > 生命周期：`ACTIVE_INPUT`
-> 评审状态：`READY_FOR_GATE_5_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_5`
 > 工程 Owner：`OWN-SAAS-FE`（责任帽子；正式 repo/人员未指派）
 > 合同 Owner：`OWN-SITE-BE`、`OWN-SAAS-PLATFORM`、`OWN-TRUTH-BE`
 > 关联：`FE-SITE-000..004`、`BLK-FE-001..007`
