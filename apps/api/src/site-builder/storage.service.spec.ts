@@ -3,6 +3,56 @@ import { describe, expect, it, vi } from 'vitest';
 import { StorageService } from './storage.service';
 
 describe('StorageService variant-attempt lifecycle', () => {
+  it('uses a conditional create for immutable Release objects and reconciles 412 as existing', async () => {
+    const service = new StorageService();
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(
+        Object.assign(new Error('precondition failed'), {
+          name: 'PreconditionFailed',
+          $metadata: { httpStatusCode: 412 },
+        }),
+      );
+    (service as unknown as { client: { send: typeof send } }).client.send = send;
+
+    await expect(
+      service.putBufferImmutable(
+        'sites/s/releases/r/attempts/t/files/index.html',
+        Buffer.from('immutable'),
+        'text/html; charset=utf-8',
+        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+      ),
+    ).resolves.toBe('created');
+    await expect(
+      service.putBufferImmutable(
+        'sites/s/releases/r/attempts/t/files/index.html',
+        Buffer.from('immutable'),
+        'text/html; charset=utf-8',
+        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+      ),
+    ).resolves.toBe('exists');
+
+    const command = send.mock.calls[0]?.[0] as {
+      input: {
+        IfNoneMatch?: string;
+        ChecksumSHA256?: string;
+        Metadata?: Record<string, string>;
+      };
+    };
+    expect(command.input.IfNoneMatch).toBe('*');
+    expect(command.input.ChecksumSHA256).toBe(
+      Buffer.from(
+        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+        'hex',
+      ).toString('base64'),
+    );
+    expect(command.input.Metadata).toEqual({
+      sha256:
+        'b8f0a003d09ed6f0319c2b0cf8b3c3b41bdf421f28405c1c15f4e6d6f6f6bf11',
+    });
+  });
+
   it('tags only producer-isolated attempt writes for automatic expiry', async () => {
     const service = new StorageService();
     const send = vi.fn(async () => ({}));
