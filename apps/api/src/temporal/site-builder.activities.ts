@@ -1830,15 +1830,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   })
                 )?.spec ?? null)
               : null,
-            // Temporal 结果丢失重试的幂等位（Codex P2）：本 run 已有成功版本→复用，不再建第二个
+            // Release candidate may survive an upload/DB ACK-loss. Reuse its exact version/spec.
             existing: await tx.siteVersion.findFirst({
-              where: { buildRunId, buildStatus: 'succeeded' },
+              where: { buildRunId },
             }),
           };
         },
       );
       if (!site) throw new Error(`site ${siteId} not found`);
-      if (existing) return { previewSlug: site.slug, versionId: existing.id };
+      if (existing?.buildStatus === 'succeeded') {
+        return { previewSlug: site.slug, versionId: existing.id };
+      }
+      if (existing && existing.buildStatus !== 'building') {
+        throw new Error(`run ${buildRunId} has a non-retryable SiteVersion`);
+      }
 
       const intake = site.intake as unknown as IntakeInput;
       const stylePreset = input.scope?.options?.stylePreset ?? site.stylePreset;
@@ -1869,16 +1874,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           ]),
         );
       }
-      const doc = applyBuildScope(
+      const generatedDoc = applyBuildScope(
         activeSpec as unknown as SiteSpec | null,
         candidate,
         (input.scope ?? { scope: 'site' }) as NormalizedBuildRequest,
       );
+      const doc = existing
+        ? (existing.spec as unknown as SiteSpec)
+        : generatedDoc;
 
       const version = await prisma.withWorkspace(workspaceId, async (tx) => {
-        await tx.siteVersion.deleteMany({
-          where: { buildRunId, buildStatus: 'building' },
-        });
+        if (existing) return existing;
         const nextVersion = await allocateNextSiteVersion(tx, siteId);
         const created = await tx.siteVersion.create({
           data: {
