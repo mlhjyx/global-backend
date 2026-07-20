@@ -38,6 +38,7 @@ import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.fa
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { UNDERSTANDING_TASK_QUEUE } from './understanding.constants';
 import { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
+import { SiteReleaseService, resolveSiteRendererBuildIdentity } from '../site-builder/site-release.service';
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -48,6 +49,12 @@ async function main(): Promise<void> {
   await prisma.$connect();
   const costLedger = new SiteBuildCostLedger(prisma);
   const siteBuilderStorage = new StorageService();
+  await siteBuilderStorage.onModuleInit();
+  const releaseService = new SiteReleaseService(
+    prisma,
+    siteBuilderStorage,
+    { buildIdentity: resolveSiteRendererBuildIdentity() },
+  );
   const imagePipeline = new ImagePipelineService(
     prisma,
     siteBuilderStorage,
@@ -153,7 +160,13 @@ async function main(): Promise<void> {
         gateway,
         broker,
         imagePipeline,
-        kb: new KbService(prisma, new EmbeddingsClient(), new DoclingClient(), new StorageService()),
+        releaseService,
+        kb: new KbService(
+          prisma,
+          new EmbeddingsClient(),
+          new DoclingClient(),
+          siteBuilderStorage,
+        ),
       }),
       ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
     },
