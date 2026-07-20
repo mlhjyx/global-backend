@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { Injectable, NotFoundException } from '@nestjs/common';
 
-import type { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   RELEASE_MANIFEST_SCHEMA_VERSION,
   releaseManifestDigest,
   type ReleaseManifestFile,
   type ReleaseManifestV1,
 } from './release-artifact';
-import type { StorageService } from './storage.service';
+import { StorageService } from './storage.service';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -80,7 +80,7 @@ function manifestFile(value: unknown, requestedPath: string): ReleaseManifestFil
 export class SitePreviewArtifactService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly storage: Pick<StorageService, 'getBufferBounded'>,
+    private readonly storage: StorageService,
   ) {}
 
   async get(slug: string, assetPath: string): Promise<SitePreviewArtifact> {
