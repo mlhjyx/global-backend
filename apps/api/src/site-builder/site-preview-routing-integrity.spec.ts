@@ -29,4 +29,14 @@ describe('R1 object-backed preview routing', () => {
     expect(migration).toMatch(/REVOKE ALL ON FUNCTION resolve_site_preview_release\(TEXT\) FROM PUBLIC/);
     expect(migration).toMatch(/GRANT EXECUTE ON FUNCTION resolve_site_preview_release\(TEXT\) TO app_user/);
   });
+
+  it('keeps Nest constructor dependencies as runtime values instead of erased type-only imports', async () => {
+    const service = await readFile(
+      new URL('./site-preview-artifact.service.ts', import.meta.url),
+      'utf8',
+    );
+    expect(service).toContain("import { PrismaService } from '../prisma/prisma.service'");
+    expect(service).toContain("import { StorageService } from './storage.service'");
+    expect(service).toMatch(/private readonly storage: StorageService/);
+  });
 });
