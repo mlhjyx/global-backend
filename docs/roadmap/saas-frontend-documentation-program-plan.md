@@ -1,15 +1,15 @@
 # 统一 SaaS 前端文档治理与实施规划
 
 > 文档 ID：PLAN-FE-DOC-001
-> 版本：v0.11-gate-8-review
-> 状态：`PHASE_8_READY_FOR_GATE_8_REVIEW`
-> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.10 回写 Phase 1–7；v0.11 只回写用户明确授权的 Phase 8 防漂移、Release Bundle 与最终治理收口，不扩张产品/采用实现授权
+> 版本：v0.12-gate-8-conditionally-approved
+> 状态：`GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`
+> 批准基线：`v0.2-approved / APPROVED_PLAN`；v0.3–v0.10 回写 Phase 1–7；v0.11 建立 Phase 8；v0.12 只记录 Gate 8 条件批准与文档计划收口，不扩张产品/采用实现授权
 > 计划批准：2026-07-20（含产品工作方式、Capability Pack、设计资产、场景库和发布学习闭环增补）
-> 执行授权：`PHASE_8_GRANTED`——Gate 7 已批准 `DEC-FE-P7-001..012` 与 `ADP-FE-001..031` 当前采用决定，只授权文档 lint、历史处置提案、阅读验收、Release Bundle 和学习治理；产品/OSS 实现、历史文件移动与生产动作仍未授权
+> 执行授权：`DOCUMENTATION_PROGRAM_CLOSED`——Gate 8 已条件批准 `DEC-FE-P8-001..012`；独立人工与首个真实 Release 门保留，产品/OSS 实现、历史文件移动、Git 外部动作与生产动作仍未授权
 > 基线提交：`676c6cdc175326927ec341a2d585168aa0a1a374`
 > 适用范围：完整 SaaS 产品前端，其中“独立站管理”是当前优先模块
 > 拍板人：产品负责人
-> 执行主体：Codex（Phase 1–8 均于 2026-07-20 分别获明确授权；Gate 8 决定前不扩张后续实施）
+> 执行主体：Codex（Phase 1–8 均于 2026-07-20 分别获明确授权并完成；后续实施必须建立新范围并重新授权）
 
 ## 0. 本文件解决什么问题
 
@@ -55,7 +55,7 @@
 
 ### 1.3 后续启动条件
 
-第 1–7 阶段已完成并分别通过 Gate 1–7；第 8 阶段随后获明确授权。完成 Phase 8 后必须停在 Gate 8，提交完整评审包并等待明确决定；任何产品/采用实现仍须另行授权。对权限、商业承诺、数据权利、OSS 实施、设计工具、正式前端仓库和跨仓 ownership 的新裁决，执行过程中仍须单独暴露，不得由执行者静默决定。
+第 1–8 阶段已完成；Gate 8 已有条件通过，文档计划收口为 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`。这不是产品施工授权；任何产品/采用实现、权限、商业承诺、数据权利、设计工具、正式前端仓库或跨仓 ownership 新裁决，仍须建立新范围、暴露阻塞并取得明确批准。
 
 ## 2. 已固定的产品事实
 
@@ -706,7 +706,7 @@ Word 中的项目名称只作为候选输入。正式方案采用 `Learn / Build
 
 交付物：本文件。
 
-当前状态：计划内容已批准；Phase 1–7 已完成并通过 Gate 1–7；Phase 8 已获授权并形成 Gate 8 评审包；产品/采用实现仍未授权。
+当前状态：计划内容和 Phase 1–8 均已完成相应 Gate；Gate 8 以保留独立人工、真实 Release 和全部 blocker 的条件通过，文档治理基线已收口，产品/采用实现仍未授权。
 
 退出条件：已满足。
 
@@ -789,6 +789,8 @@ Gate 7：每项候选有 `Learn / Build / Adapt / Integrate / Buy / Avoid / Defe
 Gate 8：机器和人工检查通过；新人、产品、设计、前端、后端、测试和运营均能沿各自路线完成一项真实任务并找到事实源；任一发布可通过 Release Bundle 反查规范、实现、证据、指南和复盘责任。
 
 当前状态：Phase 8 已建立 [`pnpm docs:verify`](../governance/docs-verification.md)及 CI 门、[历史处置建议](saas-frontend-phase-8/history-disposition-proposal.md)、[九条角色阅读任务](saas-frontend-phase-8/reading-route-acceptance.md)、[Release/学习治理](../governance/release-and-learning-governance.md)、受控模板、空 Release 索引、[验证报告](saas-frontend-phase-8/verification-report.md)和 [Gate 8 评审包](saas-frontend-phase-8/gate-8-review.md)。机器检查与作者路径 dry-run 可在本阶段完成；独立人工执行仍是 `NOT_RUN / BLK-FE-006`，当前无真实用户发布，Release 追踪为 `NOT_APPLICABLE_NO_USER_RELEASE`，不得冒充人工或发布 PASS。
+
+批准状态：产品负责人于 2026-07-20 按推荐语句有条件批准 `DEC-FE-P8-001..012`，接受 `MACHINE_PASS`、`AUTHOR_ROUTE_DRY_RUN`、独立人工 `NOT_RUN / BLK-FE-006`、真实 Release Bundle 数为 0 和 `NOT_APPLICABLE_NO_USER_RELEASE`。文档计划收口为 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`；所有 blocker/gap/OSS 准入门及独立人工/首个真实 Release 前置门继续保留。
 
 ## 13. 产品工作方式、责任与发布闭环
 
@@ -951,14 +953,15 @@ related_releases: []
 
 ## 19. 下一步 Handoff
 
-当前 handoff 状态：`PHASE_8_READY_FOR_GATE_8_REVIEW`。
+当前 handoff 状态：`GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`。
 
-产品负责人已通过 Gate 7 并授权 Phase 8；自动防漂移、历史处置、角色阅读任务、Release Bundle 和学习回写治理已经形成 [Gate 8 评审包](saas-frontend-phase-8/gate-8-review.md)。后续可选择：
+产品负责人已按 [Gate 8 推荐语句](saas-frontend-phase-8/gate-8-review.md)有条件批准 `DEC-FE-P8-001..012`。当前文档计划没有自动开启的“下一阶段”；后续只允许在新的明确范围与授权下选择：
 
-- 按 Gate 8 推荐语句批准 `DEC-FE-P8-001..012`，接受治理基线完成，同时保留独立人工、真实 Release 和现有 blocker/gap；
-- Gate 8 有条件通过：先补指定机器规则、阅读任务、历史处置或模板 finding，再请求复核；
-- Gate 8 不通过：修改指定治理决定，不倒退或重写 Phase 1–7 provenance。
+- 指派真实角色执行 `ROUTE-FE-001..009` 的适用子集，关闭或更新 `BLK-FE-006`；
+- 关闭某一具体 Capability 的前置 blocker 后，另做设计/实现方案与授权；
+- 首次真实用户发布时创建 Release Bundle、执行适用人工路线并进入学习窗口；
+- 持续维护 current Registry/规范，冻结 Gate provenance 不重写。
 
 Gate 8 通过也不自动授权正式前端实现、产品代码、Schema、OpenAPI、基础设施、依赖/镜像变更、采购、生产流量、历史文件移动、push、PR 或合并；`BLK-FE-001..007`、`GAP-FE-P6-001..012` 和未关闭许可/安全/Owner/退出门不会被自动关闭。
 
-在收到明确 Gate 8 决策前，停止文档项目收口状态升级和任何采用/产品实现；机器校验可继续修复本阶段自身 finding。
+当前停止在文档治理基线收口。除日常 current 文档维护和机器门执行外，不进入任何采用/产品实现，不执行历史文件动作或 Git 外部动作，直至取得新的明确授权。

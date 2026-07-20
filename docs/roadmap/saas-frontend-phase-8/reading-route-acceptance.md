@@ -2,11 +2,12 @@
 
 > 文档 ID：`BASE-FE-P8-002`
 > 层级：`L3 / Usability test plan and author dry-run evidence`
-> 状态：`READY_FOR_GATE_8_REVIEW`
+> 状态：`CURRENT` / `APPROVED_AT_GATE_8`
 > 测试 Owner：`OWN-QA-EVIDENCE`
 > 作者走查：`AUTHOR_ROUTE_DRY_RUN`
 > 独立人工状态：`NOT_RUN / BLK-FE-006`
 > 核验日期：2026-07-20
+> Gate 8 结论：任务与分层获批；独立人工继续 `NOT_RUN / BLK-FE-006`，首个真实设计/实现/Release 前补做适用路线
 
 ## 1. 测试原则
 

@@ -31,7 +31,7 @@
 | `DOC-ADR-001` | `docs/adr/registry.md` | L1 / Registry | `CURRENT` | `OWN-SITE-BE` | 承重技术/产品决策 | `KEEP_CURRENT` |
 | `DOC-STATUS-001` | `docs/status/current.md` | L1 / Normative | `CURRENT` | `OWN-SITE-BE` | 当前主线和完成度 | `KEEP_CURRENT` |
 | `DOC-ROADMAP-001` | `docs/roadmap/release-plan.md` | L1/L2 / Normative | `CURRENT` | `OWN-PRODUCT` | Site Builder 施工顺序 | `KEEP_CURRENT` |
-| `PLAN-FE-DOC-001` | `docs/roadmap/saas-frontend-documentation-program-plan.md` | L2 / Program plan | `ACTIVE_INPUT` | `OWN-PRODUCT` | 前端文档项目阶段、Gate 和授权 | `KEEP_CURRENT` 至 Gate 8 |
+| `PLAN-FE-DOC-001` | `docs/roadmap/saas-frontend-documentation-program-plan.md` | L2 / Program plan | `FROZEN_EVIDENCE` | `OWN-PRODUCT` | 前端文档项目阶段、Gate 和条件收口 | `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS` |
 | `PORTAL-FE-001` | `docs/README.md` | L1 / Navigation | `CURRENT` | `OWN-DOC-GOV` | 按角色的文档入口 | `KEEP_CURRENT` |
 | `GOV-FE-000` | `docs/governance/README.md` | L1 / Registry index | `CURRENT` | `OWN-DOC-GOV` | Registry 导航 | `KEEP_CURRENT` |
 | `GOV-FE-001` | `docs/governance/document-register.md` | L1 / Registry | `CURRENT` | `OWN-DOC-GOV` | 文档生命周期与迁移 | `KEEP_CURRENT` |
@@ -131,15 +131,15 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `GATE-FE-P7-000` | `docs/roadmap/saas-frontend-phase-7/README.md` | L3 / Phase evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 7 交付入口 | `REFERENCE_ONLY` |
 | `GATE-FE-P7-001` | `docs/roadmap/saas-frontend-phase-7/gate-7-review.md` | L4 / Gate review | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate 7 决策与批准 provenance | `REFERENCE_ONLY` |
 
-### 2.5 Phase 8 防漂移与收口包
+### 2.5 Gate 8 已条件批准的防漂移与收口包
 
 | Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
 |---|---|---|---|---|---|---|
-| `GATE-FE-P8-000` | `docs/roadmap/saas-frontend-phase-8/README.md` | L3 / Phase evidence | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 8 交付与授权边界 | Gate 8 后冻结 |
-| `BASE-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/history-disposition-proposal.md` | L3 / Governance proposal | `ACTIVE_INPUT` | `OWN-DOC-GOV` | 历史 banner、原位保留与未来 archive 门 | Gate 8 决定 |
-| `BASE-FE-P8-002` | `docs/roadmap/saas-frontend-phase-8/reading-route-acceptance.md` | L3 / Usability evidence | `ACTIVE_INPUT` | `OWN-QA-EVIDENCE` | 九条角色任务、作者 dry-run 和独立人工状态 | 独立运行后增量记录 |
-| `EVID-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/verification-report.md` | L4 / Machine evidence | `ACTIVE_INPUT` | `OWN-QA-EVIDENCE` | Phase 8 命令、结果、warning 与边界 | Gate 8 后冻结 |
-| `GATE-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/gate-8-review.md` | L4 / Gate review | `ACTIVE_INPUT` | `OWN-DOC-GOV` | Gate 8 决定、验收和保留项 | Gate 8 后冻结 |
+| `GATE-FE-P8-000` | `docs/roadmap/saas-frontend-phase-8/README.md` | L3 / Phase evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 8 交付与授权边界 | `APPROVED_AT_GATE_8 / REFERENCE_ONLY` |
+| `BASE-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/history-disposition-proposal.md` | L3 / Governance decision evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | 已批准历史 banner、原位保留与未来 archive 门 | `APPROVED_AT_GATE_8 / REFERENCE_ONLY` |
+| `BASE-FE-P8-002` | `docs/roadmap/saas-frontend-phase-8/reading-route-acceptance.md` | L3 / Usability task and evidence | `CURRENT` | `OWN-QA-EVIDENCE` | 九条角色任务、作者 dry-run 和独立人工状态 | 独立运行后增量记录；不得改写 Gate 8 结论 |
+| `EVID-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/verification-report.md` | L4 / Machine evidence | `FROZEN_EVIDENCE` | `OWN-QA-EVIDENCE` | Phase 8 命令、结果、warning 与边界 | `APPROVED_AT_GATE_8 / REFERENCE_ONLY` |
+| `GATE-FE-P8-001` | `docs/roadmap/saas-frontend-phase-8/gate-8-review.md` | L4 / Gate review | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate 8 条件批准、验收和保留项 | `APPROVED_AT_GATE_8 / REFERENCE_ONLY` |
 | `TPL-FE-REL-001` | `docs/templates/release-bundle-template.md` | L5 / Template | `GUIDE` | `OWN-QA-EVIDENCE` | 真实 Release Bundle 可复制结构 | 复制后必须换 ID/元数据 |
 | `TPL-FE-LRN-001` | `docs/templates/release-learning-template.md` | L5 / Template | `GUIDE` | `OWN-PRODUCT` | 发布学习记录结构 | 由真实 Bundle 索引 |
 
@@ -170,7 +170,7 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `DOCSET-PHASE-6` | `docs/roadmap/saas-frontend-phase-6/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 6 交付与 Gate 6 批准 provenance | `REFERENCE_ONLY` |
 | `DOCSET-PHASE-7` | `docs/roadmap/saas-frontend-phase-7/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 7 组合、来源和批准 provenance | `REFERENCE_ONLY`；OSS Registry/Card 继续维护 |
 | `DOCSET-OSS-ADOPTION` | `docs/platform/oss-adoption/*.md` | L2 / `CURRENT`，来源快照除外 | `OWN-SEC-COMMERCIAL` | Gate 7 已批的 Card 与准入治理 | Registry/Card 持续维护；来源快照不可变 |
-| `DOCSET-PHASE-8` | `docs/roadmap/saas-frontend-phase-8/*.md` | L3/L4 / `ACTIVE_INPUT` | `OWN-DOC-GOV` | Phase 8 lint、处置、可用性、证据和 Gate 8 | Gate 8 决定后冻结 |
+| `DOCSET-PHASE-8` | `docs/roadmap/saas-frontend-phase-8/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 8 lint、处置、可用性、证据和条件批准 | `REFERENCE_ONLY`；阅读任务按精确行继续 current |
 | `DOCSET-RELEASES` | `docs/releases/*.md` | L4 / Release evidence | `OWN-QA-EVIDENCE` | 真实用户发布 Bundle；当前 0 项 | Bundle 不改写；后续 learning/rollback 建关系 |
 | `DOCSET-SITE-ACTIVE` | `docs/site-builder/00`–`09`、`13`、`14` | L1/L2/L3 / `ACTIVE_INPUT` | `OWN-SITE-BE` | Site 产品、架构、合同、施工和评测专题 | 原位保留；状态只由 current/release-plan 承重 |
 | `DOCSET-SITE-DECISION-EVIDENCE` | `docs/site-builder/DQ-1-shared-sitespec-contract.md`、`docs/site-builder/handoffs/*.md` | L2/L3 / `FROZEN_EVIDENCE` | `OWN-SITE-BE` | 某决策/施工 handoff 的精确时点 | `REFERENCE_ONLY`；完成后不作为 current status |

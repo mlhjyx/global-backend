@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 关系 Owner：`OWN-DOC-GOV`
-> 产品批准基线：Gate 2 + Gate 4 + Gate 5 + Gate 6 + Gate 7，2026-07-20；Phase 8 治理待 Gate 8
+> 产品批准基线：Gate 2 + Gate 4 + Gate 5 + Gate 6 + Gate 7 + Gate 8，2026-07-20；Gate 8 为保留独立人工、真实 Release 和全部 blocker 的条件通过
 > 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 
 本表回答“一个用户结果如何追到页面、对象、机器合同、main 代码、测试和场景”。它不复制规范或测试内容；链接只证明关系存在，是否通过/部署仍看精确 Evidence/Release Bundle。
@@ -137,8 +137,8 @@ Segment/Actor/Problem/Job
 
 因此 Gate 3 可以审“事实归属和迁移覆盖”，不能被解释为 Gate 4/5、Dev-Ready 或用户可用完成。
 
-## 9. Phase 4–7 规范追踪结论
+## 9. Phase 4–8 规范追踪结论
 
 Gate 4 已把全产品 Capability/Page family 连接到当前 IA/Shell、权限、状态、AI/Evidence/Approval、设计系统/内容、a11y/性能/i18n、合同接入和发布证据规范。Gate 5 又把 Site 当前纵切连到 Page manifest、四层状态、29 条 Site Copy、`DSA-FE-SITE-WF-001`、13 个 operation、Scenario/Fixture、指标和实施蓝图。Phase 6 为其余 Page family 建立七个地图级 Pack，新增 `CAP-TRUTH-001` 把当前顶层 Capability 补至 24 个，并补十条跨域 Handoff、十二项 Gap、六组 target Fixture 和 16 条地图级 Scenario。
 
-全局规则为 `APPROVED_AT_GATE_4`；Site 文档轴为 `APPROVED_AT_GATE_5`；非 Site Pack 为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`。Gate 7 已把 31 项外部候选追到稳定 Card、官方/本地证据、Adapter/SoR、安全/测试、Owner 和 Exit 并批准当前决定；八项现用能力仍只标 `*_HARDEN`。Phase 8 又把文档链连接到自动校验、角色任务、Release Bundle 与 learning；独立人工仍 `NOT_RUN`，真实 Release Bundle 数仍为 0。正式 repo、受控视觉设计、权限/Claim/跨域业务/指标合同、可执行 Fixture、前端实现和用户发布仍为 `NONE/BLOCKED`；Site 发布链继续 `TARGET_NOT_RUNNABLE`。
+全局规则为 `APPROVED_AT_GATE_4`；Site 文档轴为 `APPROVED_AT_GATE_5`；非 Site Pack 为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`。Gate 7 已把 31 项外部候选追到稳定 Card、官方/本地证据、Adapter/SoR、安全/测试、Owner 和 Exit 并批准当前决定；八项现用能力仍只标 `*_HARDEN`。Gate 8 已有条件批准自动校验、历史原位保留、角色任务、Release Bundle 与 learning 治理，并将文档计划收口为 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`；独立人工仍 `NOT_RUN / BLK-FE-006`，真实 Release Bundle 数仍为 0。正式 repo、受控视觉设计、权限/Claim/跨域业务/指标合同、可执行 Fixture、前端实现和用户发布仍为 `NONE/BLOCKED`；Site 发布链继续 `TARGET_NOT_RUNNABLE`。

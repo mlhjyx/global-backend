@@ -2,9 +2,9 @@
 
 > 文档 ID：`EVID-FE-P8-001`
 > 层级：`L4 / Machine evidence`
-> 状态：`READY_FOR_GATE_8_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_8`
 > Evidence Owner：`OWN-QA-EVIDENCE`
-> 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374` + 当前 Phase 1–8 docs-only 候选差异
+> 工程基线：Phase 8 checkpoint `d3472c8`，基于 `origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
 > 运行日期：2026-07-20
 
 ## 1. 验证结论

@@ -73,7 +73,7 @@
 | `LOCAL_UNCONTROLLED` | 无 Git/Owner/版本 provenance 的本地输入 | 只读；不得视为发布或设计真值 |
 | `RETIRED` | 已不再支持且引用已清零 | 只有引用映射和授权完成后使用 |
 
-`SUPERSEDED` 不等于“可以删除”。在 Phase 8 之前，本项目只登记迁移去向，不移动历史文件。
+`SUPERSEDED` 不等于“可以删除”。Gate 8 已批准“原位保留 + 强 banner + Registry successor”；任何未来移动、删除或归档仍需满足独立文件动作门并另获授权。
 
 ## 5. 决策与 Gate 状态
 

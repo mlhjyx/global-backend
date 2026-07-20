@@ -2,9 +2,9 @@
 
 > 文档 ID：`GATE-FE-P8-000`
 > 层级：`L3 / Phase evidence`
-> 状态：`READY_FOR_GATE_8_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_8`
 > 授权：产品负责人于 2026-07-20 通过 Gate 7，批准 `DEC-FE-P7-001..012` 与 `ADP-FE-001..031` 当前采用决定，只授权 Phase 8 文档治理与最终收口
-> 当前授权终点：Gate 8；不包含产品/OSS 实现、历史文件移动、push、PR 或合并
+> 批准结果：Gate 8 已按推荐语句有条件通过；文档计划收口为 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`，不包含产品/OSS 实现、历史文件移动、push、PR 或合并
 > 事实 Owner：`OWN-DOC-GOV`
 
 ## 1. Phase 8 解决的问题
@@ -47,3 +47,5 @@ Gate 8 分开记录：
 4. `RELEASE_TRACEABILITY`：只有真实发布出现后才用真实 Bundle 验证，当前无发布则为 `NOT_APPLICABLE_NO_USER_RELEASE`，不能写 PASS。
 
 机器通过不自动满足人工门。由于 `BLK-FE-006` 的实际 QA/运营/安全责任人未指派，Gate 8 评审必须明确接受或要求补做独立人工验收，不能隐去该缺口。
+
+产品负责人已于 2026-07-20 明确接受该分层：作者 dry-run 保留，独立人工继续 `NOT_RUN / BLK-FE-006`，并成为首个真实设计/实现/Release 的前置门。本 Phase 包自此冻结；后续执行记录只增量写入 current 阅读任务，不重写本包。

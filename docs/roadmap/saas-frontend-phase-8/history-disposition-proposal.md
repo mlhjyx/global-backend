@@ -2,16 +2,16 @@
 
 > 文档 ID：`BASE-FE-P8-001`
 > 层级：`L3 / Governance proposal`
-> 状态：`READY_FOR_GATE_8_REVIEW`
+> 状态：`FROZEN_EVIDENCE` / `APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-DOC-GOV`
-> 文件动作：`PROPOSAL_ONLY / NO_MOVE_NO_DELETE`
+> 文件动作：`APPROVED_POLICY / NO_MOVE_NO_DELETE`
 > 核验日期：2026-07-20
 
 ## 1. 建议结论
 
 Phase 8 建议采用“**原位保留 + 强 banner + Registry successor + 自动检查**”，暂不把 Site 10–12、Word、Phase 1–7 评审证据或旧模板迁入 `archive/`。理由不是历史文件继续有效，而是当前仍有仓内深链、Git provenance 和主工作区用户删除现场；移动的收益低于断链与误恢复风险。
 
-该建议若在 Gate 8 获批，只批准文件生命周期和后续动作规则；本阶段仍不移动或删除任何历史文件。
+该建议已在 Gate 8 获批，只批准文件生命周期和后续动作规则；本阶段仍不移动或删除任何历史文件。
 
 ## 2. Site 10–12 逐项处置
 

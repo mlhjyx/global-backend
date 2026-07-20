@@ -3,10 +3,11 @@
 > 文档 ID：`GOV-FE-009`
 > 层级：`L1 / Normative governance`
 > 状态：`CURRENT`
-> 评审状态：`READY_FOR_GATE_8_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-QA-EVIDENCE`
 > 学习责任帽：`OWN-PRODUCT`
 > 最后核验：2026-07-20
+> 批准边界：schema、责任与回写规则已批准；当前真实 Release Bundle 仍为 0
 
 本文把 [Release Bundle 语义](../frontend/12-analytics-testing-and-release-evidence.md#7-release-bundle-schema)落成可复制、可校验、可回写的交付合同。它不创建真实发布，也不替代部署系统、artifact store、监控或真实责任人的签字。
 

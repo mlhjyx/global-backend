@@ -3,10 +3,11 @@
 > 文档 ID：`GOV-FE-008`
 > 层级：`L1 / Normative governance`
 > 状态：`CURRENT`
-> 评审状态：`READY_FOR_GATE_8_REVIEW`
+> 评审状态：`APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-DOC-GOV`
 > 机器政策：[`docs-verification-policy/v1`](docs-verification-policy.json)
 > 最后核验：2026-07-20
+> 批准边界：产品负责人条件批准机器门与例外治理；独立人工、真实 Release 和全部 blocker 仍保留
 
 本文定义文档如何进入持续集成、什么必须失败、什么只能告警，以及历史证据为什么不能为了“全绿”被无声重写。机器规则由 JSON 政策和 `scripts/verify-docs.mjs` 承重；本文解释其人类语义。
 

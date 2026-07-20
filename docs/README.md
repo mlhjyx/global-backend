@@ -34,7 +34,7 @@
 - [核心对象登记](governance/core-object-register.md)
 - [冲突登记](governance/conflict-register.md)
 - [统一 SaaS 文档治理计划](roadmap/saas-frontend-documentation-program-plan.md)
-- 当前 Gate：[Phase 8 评审](roadmap/saas-frontend-phase-8/gate-8-review.md)
+- 文档计划状态：Gate 8 已有条件通过，当前为 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`；批准证据见 [Gate 8](roadmap/saas-frontend-phase-8/gate-8-review.md)
 
 ### 产品设计与前端
 
@@ -157,6 +157,6 @@ Phase 1/2 的 roadmap 包是冻结审计与决策 provenance，不是第二套 c
 - Phase 5：已通过 Gate 5；当前纵切仍 `SPEC_READY_WITH_BLOCKERS`，后置链仍 `TARGET_NOT_RUNNABLE`。
 - Phase 6：已通过 Gate 6；非 Site 域仍 `MAP_COMPLETE / NOT_DEV_READY`，客户开发仍 `FROZEN_MAP_ONLY`。
 - Phase 7：已通过 Gate 7；31 项 Card 当前决定获批，八项现用能力仍仅为 `INTEGRATE / *_HARDEN`，全部逐项准入门保留。
-- Phase 8：已获授权并形成机器校验、历史处置、角色任务、Release Bundle/学习治理与 Gate 8 评审包；产品/OSS 实现仍未授权。
+- Phase 8：已按 `DEC-FE-P8-001..012` 有条件通过；机器门与作者 dry-run 获接受，独立人工仍 `NOT_RUN / BLK-FE-006`，真实 Release Bundle 仍为 0。
 
-当前从 [Gate 8 评审包](roadmap/saas-frontend-phase-8/gate-8-review.md)检查 12 项推荐治理决定、机器结果、独立人工未运行、零真实 Release Bundle 和所有保留 blocker/gap。Gate 8 不授权产品实现、历史移动、push、PR 或合并。
+文档计划已经条件收口，没有自动开启的下一实施阶段。[Gate 8 评审包](roadmap/saas-frontend-phase-8/gate-8-review.md)保留 12 项批准决定、机器结果、独立人工未运行、零真实 Release Bundle 和全部 blocker/gap。Gate 8 不授权产品实现、历史移动、push、PR 或合并。
