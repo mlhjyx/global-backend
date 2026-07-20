@@ -161,6 +161,10 @@ function canonicalJson(value: unknown): string {
   throw new Error('SITE_RELEASE_NON_JSON_VALUE');
 }
 
+export function releaseManifestDigest(manifest: ReleaseManifestV1): string {
+  return sha256(canonicalJson(manifest));
+}
+
 function contentTypeFor(relativePath: string): string {
   const extension = path.posix.extname(relativePath).toLowerCase();
   return (
@@ -324,7 +328,7 @@ export async function buildReleaseArtifact(
     files,
     manifest,
     manifestBytes,
-    manifestDigest: sha256(manifestBytes),
+    manifestDigest: releaseManifestDigest(manifest),
     manifestObjectKey: `${objectRoot}/release-manifest.json`,
     artifactDigest,
   };
