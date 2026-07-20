@@ -25,9 +25,9 @@ pnpm docs:verify
 |---|---|---|
 | 结构 | 受控文档不是一个 H1、围栏不成对、缺结尾换行、受控表格列漂移 | 内容正确或用户可理解 |
 | Document ID | 受控文档缺 ID、任意文档 ID 重复 | Registry 已登记或 Owner 已接受 |
-| 状态 | 受控文档缺状态/生命周期、状态 token 不在政策词汇 | 产品或实现状态获得批准 |
-| 链接 | 仓内目标或 Markdown heading anchor 不存在 | 外部网页当前可用、链接内容可信 |
-| Registry 引用 | Capability/Object/Page/Scenario/Fixture/Adoption/Owner ID 不在各自真值登记 | 引用关系本身业务正确 |
+| 状态 | 受控文档缺状态/生命周期、元数据未使用受控反引号格式、状态 token 不在政策词汇 | 产品或实现状态获得批准 |
+| 链接 | 仓内目标或 Markdown heading anchor 不存在，或使用会跳到 GitHub host root 的 `/docs/...` 根相对路径 | 外部网页当前可用、链接内容可信 |
+| Registry 引用 | Capability/Object/Page/Scenario/Fixture/Adoption/Owner ID 不在各自 Registry 的声明列 | 引用关系本身业务正确 |
 | 历史 banner | 已登记的 Site 历史稿缺少冻结、dated 或 superseded 前言 | 可以删除、移动或覆盖历史证据 |
 | Release Bundle | `docs/releases/` 中真实 bundle 缺必需元数据或章节 | 各证据真实通过或发布成功 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
@@ -51,14 +51,14 @@ pnpm docs:verify
 
 ## 5. Registry 引用规则
 
-机器校验只验证稳定 ID 是否存在于唯一 Registry：
+机器校验只把唯一 Registry 表格的声明列视为定义，再验证所有受控文档中的稳定 ID 引用。Registry 其他列中的 Parent、Pages、Owner 或正文引用不会反向创造定义：
 
 | ID 族 | 唯一机器查找源 |
 |---|---|
 | `CAP-*` | [Capability Registry](capability-register.md) |
 | `OBJ-FE-*` | [Object Registry](core-object-register.md) |
 | `PAGE-FE-*` | [页面与能力目录](../frontend/04-page-and-capability-catalog.md) |
-| `SCN-FE-*`、`FIX-FE-*` | [Scenario Catalog](scenario-catalog.md) |
+| `SCN-FE-*`、`FX-FE-*` | [Scenario Catalog](scenario-catalog.md) |
 | `ADP-FE-*` | [OSS Registry](../backend/oss-registry.md) |
 | `OWN-*` | [责任词典](terminology-and-status.md#9-责任角色) |
 

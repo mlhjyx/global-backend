@@ -6,7 +6,8 @@
 > 模板 Owner：`OWN-QA-EVIDENCE`
 > 使用规则：复制到 `docs/releases/<release-id>.md` 后，先替换 Document ID 和以下全部占位符
 > Release ID：`<REL-YYYYMMDD-NNN>`
-> 状态：`<DRAFT | READY_FOR_RELEASE_REVIEW | APPROVED_FOR_RELEASE | DEPLOYED | OBSERVING | CLOSED | ROLLED_BACK | SUPERSEDED>`
+> 状态：`DRAFT`
+> 允许状态：`DRAFT | READY_FOR_RELEASE_REVIEW | APPROVED_FOR_RELEASE | DEPLOYED | OBSERVING | CLOSED | ROLLED_BACK | SUPERSEDED`
 > 环境：`<environment and region>`
 > Release Owner：`<real assignee and responsibility hat>`
 > 实现提交：`<immutable commit or multi-repo commit set>`

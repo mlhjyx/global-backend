@@ -55,37 +55,44 @@
     {
       "name": "Capability",
       "pattern": "CAP-[A-Z0-9]+(?:-[A-Z0-9]+)*",
-      "source": "docs/governance/capability-register.md"
+      "source": "docs/governance/capability-register.md",
+      "definitionColumns": ["Capability ID"]
     },
     {
       "name": "Object",
       "pattern": "OBJ-FE-[0-9]{3}",
-      "source": "docs/governance/core-object-register.md"
+      "source": "docs/governance/core-object-register.md",
+      "definitionColumns": ["Object ID"]
     },
     {
       "name": "Page",
       "pattern": "PAGE-FE-[0-9]{3}",
-      "source": "docs/frontend/04-page-and-capability-catalog.md"
+      "source": "docs/frontend/04-page-and-capability-catalog.md",
+      "definitionColumns": ["Page ID"]
     },
     {
       "name": "Scenario",
       "pattern": "SCN-FE-[A-Z0-9]+(?:-[A-Z0-9]+)*",
-      "source": "docs/governance/scenario-catalog.md"
+      "source": "docs/governance/scenario-catalog.md",
+      "definitionColumns": ["Scenario ID"]
     },
     {
       "name": "Fixture",
-      "pattern": "FIX-FE-[A-Z0-9]+(?:-[A-Z0-9]+)*",
-      "source": "docs/governance/scenario-catalog.md"
+      "pattern": "FX-FE-[A-Z0-9]+(?:-[A-Z0-9]+)*",
+      "source": "docs/governance/scenario-catalog.md",
+      "definitionColumns": ["Fixture ID"]
     },
     {
       "name": "Adoption",
       "pattern": "ADP-FE-[0-9]{3}",
-      "source": "docs/backend/oss-registry.md"
+      "source": "docs/backend/oss-registry.md",
+      "definitionColumns": ["Card"]
     },
     {
       "name": "Owner",
       "pattern": "OWN-[A-Z0-9]+(?:-[A-Z0-9]+)*",
-      "source": "docs/governance/terminology-and-status.md"
+      "source": "docs/governance/terminology-and-status.md",
+      "definitionColumns": ["Owner ID"]
     }
   ],
   "historicalBannerChecks": [

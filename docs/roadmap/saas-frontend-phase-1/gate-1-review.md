@@ -1,7 +1,8 @@
 # Gate 1 评审包：SaaS 前端来源与实现审计
 
 > 文档 ID：AUD-FE-P1-009
-> 状态：`READY_FOR_REVIEW_WITH_POST_BASELINE_DELTA`，不是 `APPROVED`
+> 状态：`READY_FOR_REVIEW_WITH_POST_BASELINE_DELTA`
+> 批准边界：不是 `APPROVED`
 > 审计基线：`main@c3f0cca80e228f08f35c89776f759748dac78ce2`
 > 评审日期：2026-07-20
 > 决策请求：产品负责人确认 Gate 1 是否通过；未明确批准前，Codex 停止在 Phase 1

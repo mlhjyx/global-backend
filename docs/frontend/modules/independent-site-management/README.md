@@ -59,7 +59,7 @@
 | Objects | `OBJ-FE-003..008`、`OBJ-FE-012..017`、目标 `OBJ-FE-027` |
 | Machine contract | `packages/contracts/openapi/openapi.json` 中 13 个 `SiteBuilder` operation；hidden preview resolver 另按代码证据 |
 | Scenarios | `SCN-FE-SITE-001..018` 当前/合同场景；`019..023` 目标不可运行 |
-| Fixtures | `FX-FE-WS/COMPANY/OFFERING/ASSET/DOC/CLAIM/SITE/BUILD-001`，当前均 `CATALOG_ONLY` |
+| Fixtures | `FX-FE-WS-001`、`FX-FE-COMPANY-001`、`FX-FE-OFFERING-001`、`FX-FE-ASSET-001`、`FX-FE-DOC-001`、`FX-FE-CLAIM-001`、`FX-FE-SITE-001`、`FX-FE-BUILD-001`，当前均 `CATALOG_ONLY` |
 | Metrics | 当前方向 `MET-SITE-001..014`；发布/询盘 `020..034` 未激活；`ANTI-FE-001..010` |
 | Design | `DSA-FE-SITE-WF-001` 书面低保真；视觉/组件源仍受 `BLK-FE-002` 阻塞 |
 | Copy | `COPY-FE-SITE-001..029`，均为未验证的 `DRAFT_SOURCE_COPY` |

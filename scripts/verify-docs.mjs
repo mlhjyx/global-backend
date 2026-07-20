@@ -84,6 +84,56 @@ function tableCellCount(line) {
   return body.split(/(?<!\\)\|/).length;
 }
 
+function markdownTableCells(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split(/(?<!\\)\|/)
+    .map((cell) => cell.trim());
+}
+
+function registryDefinitions(content, registry, pattern) {
+  const definitions = new Set();
+  const definitionColumns = new Set(registry.definitionColumns ?? []);
+  const lines = withoutFencedCode(content).split("\n");
+
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const header = lines[index].trim();
+    const separator = lines[index + 1].trim();
+    if (!header.startsWith("|") || !separator.startsWith("|")) continue;
+    const headers = markdownTableCells(header);
+    const separatorCells = markdownTableCells(separator);
+    if (
+      headers.length !== separatorCells.length ||
+      !separatorCells.every((cell) => /^:?-{3,}:?$/.test(cell))
+    ) {
+      continue;
+    }
+
+    const declarationIndexes = headers
+      .map((cell, columnIndex) =>
+        definitionColumns.has(cell) ? columnIndex : -1,
+      )
+      .filter((columnIndex) => columnIndex >= 0);
+    if (declarationIndexes.length === 0) continue;
+
+    let row = index + 2;
+    while (row < lines.length && lines[row].trim().startsWith("|")) {
+      const cells = markdownTableCells(lines[row]);
+      for (const columnIndex of declarationIndexes) {
+        for (const match of cells[columnIndex]?.matchAll(pattern) ?? []) {
+          definitions.add(match[0]);
+        }
+      }
+      row += 1;
+    }
+    index = row - 1;
+  }
+
+  return definitions;
+}
+
 function checkTables(path, content, controlled) {
   const lines = withoutFencedCode(content).split("\n");
   for (let index = 0; index < lines.length - 1; index += 1) {
@@ -183,9 +233,25 @@ for (const [path, content] of markdownByPath) {
     for (const match of metadata.matchAll(
       /^> (?:状态|生命周期|评审状态)：(.+)$/gm,
     )) {
-      const tokens = [...match[1].matchAll(/`([^`]+)`/g)].flatMap((item) => {
+      const rawStatus = match[1].trim();
+      if (!/^`[^`\n]+`(?:\s*\/\s*`[^`\n]+`)*$/.test(rawStatus)) {
+        report(
+          "error",
+          "STATUS_UNKNOWN",
+          path,
+          `malformed metadata status value ${rawStatus}`,
+        );
+        continue;
+      }
+      const tokens = [...rawStatus.matchAll(/`([^`]+)`/g)].flatMap((item) => {
         const value = item[1].trim();
         if (!/^[A-Z][A-Z0-9_]*(?:\s*\/\s*[A-Z][A-Z0-9_]*)*$/.test(value)) {
+          report(
+            "error",
+            "STATUS_UNKNOWN",
+            path,
+            `malformed metadata status token ${value}`,
+          );
           return [];
         }
         return value.split(/\s*\/\s*/);
@@ -223,7 +289,15 @@ for (const [path, content] of markdownByPath) {
       report("error", "LINK_ENCODING", path, `cannot decode ${target}`);
       continue;
     }
-    if (decodedFile.startsWith("/")) continue;
+    if (decodedFile.startsWith("/")) {
+      report(
+        "error",
+        "LINK_ROOT_RELATIVE",
+        path,
+        `repository links must be relative: ${target}`,
+      );
+      continue;
+    }
     const resolvedPath = decodedFile
       ? resolve(dirname(path), decodedFile)
       : path;
@@ -283,9 +357,19 @@ for (const [id, paths] of documentIds) {
 for (const registry of policy.idRegistries) {
   const sourcePath = join(root, registry.source);
   const pattern = new RegExp(`\\b${registry.pattern}\\b`, "g");
-  const definitions = new Set(
-    readFileSync(sourcePath, "utf8").match(pattern) ?? [],
+  const definitions = registryDefinitions(
+    readFileSync(sourcePath, "utf8"),
+    registry,
+    pattern,
   );
+  if (definitions.size === 0) {
+    report(
+      "error",
+      "REGISTRY_DEFINITIONS",
+      sourcePath,
+      `${registry.name} registry has no IDs in declaration columns: ${(registry.definitionColumns ?? []).join(", ")}`,
+    );
+  }
   for (const [path, content] of markdownByPath) {
     if (!isControlled(path)) continue;
     for (const id of new Set(content.match(pattern) ?? [])) {

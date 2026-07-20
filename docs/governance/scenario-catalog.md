@@ -107,9 +107,9 @@ Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-a
 
 | Scenario ID | Capability / actor result | Preconditions + Fixture | 关键验收与恢复 | 当前状态 / Owner |
 |---|---|---|---|---|
-| `SCN-FE-TRUTH-001` | 企业事实审查 | `FX-FE-COMPANY-001/DOC/CLAIM`；operator+approver | 提案→Evidence→冲突/审核→限范围批准；无 allowed action 时只读阻塞 | `MAP_ONLY/PARTIAL_BACKEND` / `OWN-TRUTH-BE` |
+| `SCN-FE-TRUTH-001` | 企业事实审查 | `FX-FE-COMPANY-001`、`FX-FE-DOC-001`、`FX-FE-CLAIM-001`；operator+approver | 提案→Evidence→冲突/审核→限范围批准；无 allowed action 时只读阻塞 | `MAP_ONLY/PARTIAL_BACKEND` / `OWN-TRUTH-BE` |
 | `SCN-FE-TRUTH-002` | Claim 撤销影响消费者 | approved Claim 已被 Site/Content 引用 | 撤销阻止新消费并产生影响任务；不静默改历史快照 | `MAP_ONLY/BLOCKED` / `OWN-TRUTH-BE` |
-| `SCN-FE-TRUTH-003` | 知识/素材部分成功与删除 | `FX-FE-DOC/ASSET`；一 ready、一 failed、一 referenced | 保留 ready、解释 failed；referenced 删除失败并给解除路径 | `MAP_ONLY/PARTIAL_BACKEND` / `OWN-TRUTH-BE` |
+| `SCN-FE-TRUTH-003` | 知识/素材部分成功与删除 | `FX-FE-DOC-001`、`FX-FE-ASSET-001`；一 ready、一 failed、一 referenced | 保留 ready、解释 failed；referenced 删除失败并给解除路径 | `MAP_ONLY/PARTIAL_BACKEND` / `OWN-TRUTH-BE` |
 | `SCN-FE-BUYER-002` | ICP 到可解释推荐 | `FX-FE-BUYER-001` | 规则/回测→发现/部分失败→四队列；不可达高 Fit 不推荐 | `FROZEN_MAP_ONLY/BACKEND_CODE_BACKED` / `OWN-BUYER-BE` |
 | `SCN-FE-GROWTH-001` | Campaign 从目标到 Dry Run | `FX-FE-CAMPAIGN-001` + `FX-FE-CONTENT-001` | 固化 Audience/Claim/content/channel/cost 风险；差异后重新批准 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
 | `SCN-FE-GROWTH-002` | 未批准事实阻止执行 | `FX-FE-CONTENT-001` 引用 revoked/unsupported Claim | 深链 Evidence/审核；不允许生成内容绕过事实门 | `TARGET_NOT_RUNNABLE` / `OWN-SAAS-PLATFORM` |
