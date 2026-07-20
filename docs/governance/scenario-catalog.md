@@ -32,7 +32,7 @@
 | `FX-FE-BUYER-001` | 冻结客户开发样例 | ICP、两个公司、一个不可达 Lead、一个 qualified package | 合成公司/联系人 | `CATALOG_ONLY` | `OWN-QA-EVIDENCE` |
 | `FX-FE-INQUIRY-001` | 未来询盘样例 | 同意/重复/垃圾/合法询盘；合成访客 | 合成个人数据；保留策略待定 | `CATALOG_ONLY_BLOCKED` | `OWN-DATA-PRIVACY` |
 
-正式可执行 manifest 在 Phase 4/5 需要补：版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence。
+Phase 4 已在[分析、测试与发布证据候选](../frontend/12-analytics-testing-and-release-evidence.md#4-标准场景与-fixture)定义可执行 manifest 字段；实际版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence 仍须 Phase 5 创建，因此当前继续 `CATALOG_ONLY`。
 
 ## 3. Shell 与跨域场景
 

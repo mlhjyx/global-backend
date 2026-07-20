@@ -165,6 +165,12 @@ Fixture 必须使用合成企业、合成联系人和有明确使用权的资产
 | `Claim` | 可审核、带适用范围和生命周期的事实声明 | 不等于 AI 生成文案 |
 | `Evidence` | 支撑 Claim 的来源、引用、时间、hash 和资产关联 | 不等于“模型说过”或不可审计链接 |
 | `Asset` | 有权利、用途和生命周期的逻辑素材对象 | 不等于 presigned URL 或派生 variant |
+| Allowed action | 服务端针对 actor + Workspace + object + version + policy 判定的当前可执行动作 | 不等于前端根据角色名显示按钮 |
+| Approval | 对候选事实、内容或业务决定的可审计批准/退回/限制范围 | 不等于已经发布、发送或执行外部副作用 |
+| Execution authorization | 绑定具体对象、版本、目标、范围和时间的执行许可 | 不等于长期角色权限或可复用 Approval |
+| Design Asset | 有稳定 ID、受控 source/version、Owner、权利和 Capability/Scenario 关系的设计交付物 | 不等于无版本截图、竞品页面或导出代码 |
+| Microcopy | 带意图、变量、locale、状态、Owner 和场景关系的用户界面文案 | 不等于散落在代码中的临时字符串 |
+| Release Bundle | 一次用户可见发布的范围、规范、设计、实现、证据、运营、指南和学习索引 | 不等于构建产物、CI 日志或 release note 单页 |
 | `LeadQualifiedPackage` | 本仓交给 SaaS 的不可变合格线索包 | 不等于 SaaS Opportunity/QGO/SAO |
 | Capability Pack | 围绕一个用户结果的规范、设计、契约、场景、证据、指南和发布引用集合 | 不是复制所有事实的新巨型文档 |
 

@@ -45,8 +45,8 @@
 | `OBJ-FE-022` | CommercialOutcome / 商业结果 | SaaS 商机域 | `OWN-SAAS-PLATFORM` | `EXTERNAL_OWNED` | 商机/洞察 / 商业敏感 | 本仓只接收学习标签，不接管主状态 |
 | `OBJ-FE-023` | Touchpoint、Attribution、Recommendation / 触点、归因、建议 | SaaS 分析读模型 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED` | 洞察 / 聚合读模型 | 不成为业务对象写入 SoR |
 | `OBJ-FE-024` | Integration、CredentialRef / 集成、凭据引用 | SaaS 控制面 + Secret store | `OWN-SAAS-PLATFORM` | `EXTERNAL_OWNED` | Shell/运营 / 高敏感 | UI 永不持有明文 Secret 真值 |
-| `OBJ-FE-025` | Approval、Authorization / 审批、执行授权 | SaaS Policy/Control Plane；域内决定写回对象 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED`；Claim 有局部事实 | Shell/跨域 / 审计决定 | 统一审计信封原则待 Phase 4，不建万能聚合根 |
-| `OBJ-FE-026` | Notification、Task、Incident / 通知、任务、异常 | SaaS 聚合读模型 + 域事件 | `OWN-SAAS-PLATFORM` | `PROPOSED` | Shell/运营 / 个人或团队范围待定 | 聚合项深链回 canonical object |
+| `OBJ-FE-025` | Approval、Authorization / 审批、执行授权 | SaaS Policy/Control Plane；域内决定写回对象 | `OWN-SAAS-PLATFORM` | `PROPOSED/EXTERNAL_OWNED`；Claim 有局部事实 | Shell/跨域 / 审计决定 | Phase 4 候选已分 Approval/execution auth；机器合同仍缺，不建万能聚合根 |
+| `OBJ-FE-026` | Notification、Task、Incident / 通知、任务、异常 | SaaS 聚合读模型 + 域事件 | `OWN-SAAS-PLATFORM` | `PROPOSED` | Shell/运营 / 个人或团队范围待定 | Phase 4 候选要求数据社会属性和深链；读模型合同仍缺 |
 | `OBJ-FE-027` | Inquiry / 站点询盘 | 原始接收边界 + SaaS 投影待 ADR | `OWN-PRODUCT` | `DEFERRED/OPEN_DECISION` | Site→互动 / 个人数据 | `LC-INQUIRY-001` 目标边界，M2 前必须裁决 |
 
 ## 3. 对象社会属性
@@ -60,7 +60,7 @@
 | `SOC-FE-005` | 系统控制与诊断 | BuildRun、TaskAttempt、Spend、ProviderHealth、Incident | 普通用户看业务摘要；运营看受控诊断 | `OWN-OPS` + 技术 Owner |
 | `SOC-FE-006` | 外部执行副本 | CRM、Chatwoot、渠道发布记录 | 平台业务对象仍为 SoR；外部只保留副本/回执 | `OWN-SAAS-PLATFORM` |
 
-前端隐藏字段或按钮不构成授权。任何对象动作至少需要服务端返回有效权限/allowed actions 和安全拒绝语义。
+前端隐藏字段或按钮不构成授权。任何对象动作至少需要服务端返回有效权限/allowed actions 和安全拒绝语义。Phase 4 的目标矩阵见 [权限与数据可见性候选](../frontend/06-permissions-and-data-visibility.md)；Gate 4 批准也不会补出尚不存在的服务端合同。
 
 ## 4. 当前已建生命周期
 

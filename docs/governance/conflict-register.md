@@ -80,30 +80,50 @@
 | `CON-FE-P2-010` | 首批目标用户过宽 | `RESOLVED` | `OWN-PRODUCT` | `DEC-FE-P2-001` |
 | `CON-FE-P2-011` | 日常操作者不明确 | `RESOLVED` | `OWN-PRODUCT` | `DEC-FE-P2-002` |
 | `CON-FE-P2-012` | Today 是否拥有对象 | `RESOLVED` IA 原则 | `OWN-PRODUCT` | 只做读模型/深链，不拥有业务对象 |
-| `CON-FE-P2-013` | 常驻 AI 是否能绕过结构化对象/权限 | `OPEN_DECISION` | `OWN-PRODUCT` | Phase 4 定 AI 交互；当前只保留“结构化对象才是结果”推荐 |
-| `CON-FE-P2-014` | Workspace 权限与数据范围合同缺失 | `CONTRACT_BLOCKED` | `OWN-SAAS-PLATFORM` | Phase 4 角色×对象×动作×社会属性矩阵；服务端 fail-closed |
-| `CON-FE-P2-015` | 管理员是否默认读取个人工作数据 | `OPEN_DECISION` | `OWN-DATA-PRIVACY` | 默认建议“不自动可读”，需政策/审计在 Phase 4 批准 |
+| `CON-FE-P2-013` | 常驻 AI 是否能绕过结构化对象/权限 | `OPEN_DECISION` | `OWN-PRODUCT` | `DEC-FE-P4-006` 推荐 Global AI 只表达/解释并落结构化对象；等待 Gate 4 |
+| `CON-FE-P2-014` | Workspace 权限与数据范围合同缺失 | `CONTRACT_BLOCKED` | `OWN-SAAS-PLATFORM` | [权限候选](../frontend/06-permissions-and-data-visibility.md)已定义角色×对象×动作×社会属性；服务端合同仍缺 |
+| `CON-FE-P2-015` | 管理员是否默认读取个人工作数据 | `OPEN_DECISION` | `OWN-DATA-PRIVACY` | `DEC-FE-P4-004` 推荐“不自动可读”，需 Gate 4 和后续政策/审计合同 |
 | `CON-FE-P2-016` | Buyer Intelligence 冻结但产品地图需保留 | `RESOLVED` | `OWN-PRODUCT` | IA 保留；日常可见性由 capability/entitlement 决定，不恢复施工 |
 | `CON-FE-P2-017` | Campaign/Conversation/Opportunity SoR 与旧原型冲突 | `RESOLVED` 边界 / `INPUT_BLOCKED` 实现 | `OWN-SAAS-PLATFORM` | 归 SaaS；正式 repo/Owner 仍缺 |
 | `CON-FE-P2-018` | Inquiry 原始接收与 SaaS 投影 ownership | `OPEN_DECISION` | `OWN-PRODUCT` | M2 前 ADR/PDR + privacy/retention contract |
 | `CON-FE-P2-019` | 成功定义被 Build success/Mock 数字替代 | `RESOLVED` 方向 / `INPUT_BLOCKED` 数据 | `OWN-PRODUCT` | 指标+反指标获批；baseline/event/privacy Owner 未定 |
 | `CON-FE-P2-020` | 正式前端仓库未知 | `INPUT_BLOCKED` | `OWN-SAAS-FE` | Gate 4/实际施工前必须指定 repo/remote/CI/deploy |
 | `CON-FE-P2-021` | 设计事实源未知 | `INPUT_BLOCKED` | `OWN-DESIGN` | Gate 4/实际设计前指定设计 Owner、工具、资产版本和权利 |
-| `CON-FE-P2-022` | frozen/deferred/unavailable 的 UI 表达 | `OPEN_DECISION` | `OWN-SAAS-PLATFORM` | Phase 4 审批 `AVAILABLE/UNAVAILABLE_WITH_REASON/NOT_OFFERED` 服务端 manifest |
+| `CON-FE-P2-022` | frozen/deferred/unavailable 的 UI 表达 | `OPEN_DECISION` | `OWN-SAAS-PLATFORM` | Gate 4 候选继续采用三态并要求服务端 manifest；等待 `DEC-FE-P4-002/003` |
 
 ## 5. 当前硬 blocker
 
 | Blocker ID | 缺失输入/决定 | Accountable Owner | 最迟 Gate | 阻止范围 | 安全默认 |
 |---|---|---|---|---|---|
-| `BLK-FE-001` | 正式 SaaS 前端 repo、remote、CI、deploy 与实际 Owner | `OWN-SAAS-FE` | Gate 4 结束前；前端施工前 | 正式客户端架构、实现和发布 | `/global/frontend` 只读 Mock 原型 |
-| `BLK-FE-002` | 设计 Owner、设计事实源、Token/组件/资产版本与权利 | `OWN-DESIGN` | Gate 4 | 设计定稿、视觉回归、组件复用 | 不把代码截图/Readdy 当规范 |
-| `BLK-FE-003` | SaaS Workspace/Membership/Role/Entitlement/allowed actions 合同 | `OWN-SAAS-PLATFORM` | Gate 4/5 | Shell、权限、入口可见性和发布授权 | 服务端 fail-closed，前端不自建角色表 |
+| `BLK-FE-001` | 正式 SaaS 前端 repo、remote、CI、deploy 与实际 Owner | `OWN-SAAS-FE` | Phase 5 技术方案/任何前端施工前 | 正式客户端架构、实现和发布 | `/global/frontend` 只读 Mock 原型 |
+| `BLK-FE-002` | 设计 Owner、设计事实源、Token/组件/资产版本与权利 | `OWN-DESIGN` | Phase 5 视觉施工/设计定稿前 | 设计定稿、视觉回归、组件复用 | 不把代码截图/Readdy 当规范 |
+| `BLK-FE-003` | SaaS Workspace/Membership/Role/Entitlement/allowed actions 合同 | `OWN-SAAS-PLATFORM` | Gate 5 | Shell、权限、入口可见性和发布授权 | 服务端 fail-closed，前端不自建角色表 |
 | `BLK-FE-004` | Claim public review/impact contract 或正式运营兜底 SOP | `OWN-TRUTH-BE` | Gate 5 | 首个纵切事实 Gate | 自动批准禁止；显式阻塞 |
-| `BLK-FE-005` | 指标事件、基线、隐私/保留和实际 Data Owner | `OWN-DATA-PRIVACY` | Gate 4/5 | KPI 验收、tracking 和发布学习 | 不引入 tracking SDK，不用 Mock 数字 |
-| `BLK-FE-006` | QA、运营、安全/商业实际责任人 | `OWN-PRODUCT` | Gate 4/5 | 独立证据、人工恢复、License/套餐和 Release Gate | 责任帽子保持 `UNASSIGNED`，AI 不代签 |
+| `BLK-FE-005` | 指标事件、基线、隐私/保留和实际 Data Owner | `OWN-DATA-PRIVACY` | Gate 5/实际 tracking 前 | KPI 验收、tracking 和发布学习 | 不引入 tracking SDK，不用 Mock 数字 |
+| `BLK-FE-006` | QA、运营、安全/商业实际责任人 | `OWN-PRODUCT` | Gate 5/相应 Release Gate | 独立证据、人工恢复、License/套餐和 Release Gate | 责任帽子保持 `UNASSIGNED`，AI 不代签 |
 | `BLK-FE-007` | Publish/Domain/Rollback/Inquiry 的对象、合同、infra 和合规 | `OWN-PRODUCT` | 各后续 Capability Gate | 公网发布与访客转化 | 不纳入首个用户承诺 |
 
-## 6. 关闭冲突的证据要求
+## 6. Gate 4 推荐决策
+
+Phase 4 已形成以下全局规范候选；状态为 `RECOMMENDED`，收到产品负责人明确 Gate 4 批准前不改为已决：
+
+| Decision ID | 主题 | 当前状态 | 唯一 Owner | 候选规范 |
+|---|---|---|---|---|
+| `DEC-FE-P4-001` | 统一体验原则 | `RECOMMENDED` | `OWN-PRODUCT` | [体验原则](../frontend/01-product-experience-principles.md) |
+| `DEC-FE-P4-002` | 六项 IA 正式迁入全局规范、事实对象为横切上下文 | `RECOMMENDED` | `OWN-PRODUCT` | [IA](../frontend/02-information-architecture.md) + [Shell](../frontend/05-navigation-and-workspace-shell.md) |
+| `DEC-FE-P4-003` | capability/entitlement/authorization/data scope/Approval/execution auth 分层 | `RECOMMENDED` | `OWN-SAAS-PLATFORM` | [权限](../frontend/06-permissions-and-data-visibility.md) |
+| `DEC-FE-P4-004` | 数据社会属性；管理员不默认读取个人工作数据 | `RECOMMENDED` | `OWN-DATA-PRIVACY` | [权限 §2–3](../frontend/06-permissions-and-data-visibility.md#2-数据社会属性) |
+| `DEC-FE-P4-005` | 全局状态/错误/长任务/恢复模式 | `RECOMMENDED` | `OWN-DESIGN` | [状态与恢复](../frontend/07-state-error-degradation-and-recovery.md) |
+| `DEC-FE-P4-006` | AI/Evidence/Approval/执行授权控制链 | `RECOMMENDED` | `OWN-PRODUCT` | [AI 与人工控制](../frontend/08-ai-approval-evidence-and-human-control.md) |
+| `DEC-FE-P4-007` | Semantic Token、组件合同、设计资产/Copy ID 治理 | `RECOMMENDED` | `OWN-DESIGN` | [设计系统](../frontend/09-design-system-and-content-guidelines.md) + [设计登记](../design/README.md) |
+| `DEC-FE-P4-008` | WCAG 2.2 AA、响应式/i18n/性能进入发布门 | `RECOMMENDED` | `OWN-DESIGN` | [a11y/性能/i18n](../frontend/10-responsive-accessibility-and-performance.md) |
+| `DEC-FE-P4-009` | analytics 分层、隐私门和反指标 | `RECOMMENDED` | `OWN-DATA-PRIVACY` | [分析/测试](../frontend/12-analytics-testing-and-release-evidence.md) |
+| `DEC-FE-P4-010` | Release Bundle 与发布后学习 | `RECOMMENDED` | `OWN-QA-EVIDENCE` | [发布证据](../frontend/12-analytics-testing-and-release-evidence.md#7-release-bundle-schema) |
+| `DEC-FE-P4-011` | 模块复用全局模式，例外需登记 | `RECOMMENDED` | `OWN-DOC-GOV` | [范围与例外](../frontend/00-scope-authority-and-status.md#6-例外流程) |
+
+详细取舍、非含义和批准语句见 [Gate 4 决策包](../frontend/13-open-decisions.md)。
+
+## 7. 关闭冲突的证据要求
 
 1. 产品冲突：Decision/PDR、真实批准人、范围和被放弃方案。
 2. 技术冲突：ADR 或机器合同、main 实现和相称测试。
@@ -111,4 +131,4 @@
 4. 权利/安全冲突：真实责任 Owner、适用条款/License、威胁/隐私评审和退出方案。
 5. 可用性冲突：正式前端入口、部署环境、标准场景与 Release evidence。
 
-执行者不能因为“推荐合理”自行把 `OPEN_DECISION` 改成 `RESOLVED`。Gate 3 只审文档归属；Phase 4–8 仍需产品负责人逐 Gate 授权。
+执行者不能因为“推荐合理”自行把 `OPEN_DECISION` 改成 `RESOLVED`。Gate 3 已通过；Phase 4 的 `DEC-FE-P4-*` 仍需产品负责人明确批准，Phase 5–8 仍需逐 Gate 授权。

@@ -18,6 +18,7 @@
 4. [ADR 注册表](adr/registry.md)：承重决策及其理由。
 5. [发布路线](roadmap/release-plan.md)：下一施工顺序。
 6. [治理入口](governance/README.md)：能力、对象、场景、冲突和追踪关系。
+7. [统一 SaaS 前端规范](frontend/README.md)：当前 Gate 4 候选的 IA、Shell、权限、状态、AI、设计和交付规则。
 
 任何“已完成”声明都必须回到上述主题 Owner、机器契约和证据核验。不要从旧 Word、研究稿、本地原型或历史 worktree 推导当前实现。
 
@@ -30,16 +31,18 @@
 - [核心对象登记](governance/core-object-register.md)
 - [冲突登记](governance/conflict-register.md)
 - [统一 SaaS 文档治理计划](roadmap/saas-frontend-documentation-program-plan.md)
-- 当前 Gate：[Phase 3 评审](roadmap/saas-frontend-phase-3/gate-3-review.md)
+- 当前 Gate：[Phase 4 评审](roadmap/saas-frontend-phase-4/gate-4-review.md)
 
 ### 产品设计与前端
 
-- [用户、问题与旅程的批准来源](roadmap/saas-frontend-phase-2/user-problem-and-journey-baseline.md)
-- [页面与能力地图的批准来源](roadmap/saas-frontend-phase-2/page-and-capability-catalog.md)
+- [统一 SaaS 前端规范入口](frontend/README.md)
+- [页面与能力人类目录](frontend/04-page-and-capability-catalog.md)
+- [设计系统与内容规范](frontend/09-design-system-and-content-guidelines.md)
+- [设计资产与微文案治理](design/README.md)
 - [术语与状态](governance/terminology-and-status.md)
 - [场景目录](governance/scenario-catalog.md)
 - [追踪矩阵](governance/traceability-matrix.md)
-- [OpenAPI 接入说明](../packages/contracts/INTEGRATION.md)；机器真值为 `packages/contracts/openapi/openapi.json`
+- [前端合同与接入规则](frontend/11-frontend-contracts-and-integration.md)；机器真值为 `packages/contracts/openapi/openapi.json`
 
 注意：`/global/frontend/project-12080666` 是无 Git provenance 的 React/Vite Mock 原型；正式 SaaS 前端仓库、设计 Owner、设计 Token 和部署事实源尚未确定。它不能作为 as-built 或正式视觉规范。
 
@@ -57,6 +60,8 @@
 
 - [场景目录](governance/scenario-catalog.md)
 - [追踪矩阵](governance/traceability-matrix.md)
+- [响应式、a11y 与性能](frontend/10-responsive-accessibility-and-performance.md)
+- [分析、测试与发布证据](frontend/12-analytics-testing-and-release-evidence.md)
 - [Site Builder 评测与测试](site-builder/08-eval-testing.md)
 - [Temporal 测试记录](implementation-records/temporal-workflow-testing.md)
 - [模型路由 active evidence](evidence/model-routing/model1-brand-profile-20260719-v20/README.md)
@@ -65,6 +70,8 @@
 
 - [当前状态](status/current.md)
 - [核心对象与社会属性](governance/core-object-register.md)
+- [权限与数据可见性](frontend/06-permissions-and-data-visibility.md)
+- [状态、错误、降级与恢复](frontend/07-state-error-degradation-and-recovery.md)
 - [场景中的失败恢复与人工兜底](governance/scenario-catalog.md)
 - [Compose 项目迁移 runbook](backend/compose-project-migration.md)
 - [Worktree 管理 runbook](backend/worktree-management.md)
@@ -134,7 +141,8 @@ Phase 1/2 的 roadmap 包是冻结审计与决策 provenance，不是第二套 c
 
 - Gate 1：通过，Phase 1 冻结。
 - Gate 2：通过，推荐组合已批准。
-- Phase 3：文档治理底座已获授权，当前准备 Gate 3 评审。
-- Phase 4–8：未授权。
+- Gate 3：通过，Phase 3 Registry 已建立。
+- Phase 4：全局前端规范已获授权，当前准备 Gate 4 评审。
+- Phase 5–8：未授权。
 
-进入下一阶段前请从 [Gate 3 评审包](roadmap/saas-frontend-phase-3/gate-3-review.md)检查唯一 Owner、旧文档迁移去向、未指派责任和引用覆盖。
+进入下一阶段前请从 [Gate 4 评审包](roadmap/saas-frontend-phase-4/gate-4-review.md)检查 11 项推荐决定、全局模式复用、设计资产追踪和未关闭 blocker。

@@ -24,7 +24,7 @@
 
 - Phase 1 是冻结审计证据，Phase 2 是产品/IA 决策 provenance，Phase 3 Registry 承接已批准的稳定 ID 与归属。
 - Registry 只存“索引和关系”；完整产品论证、实现细节和测试内容仍留在各自事实源。
-- 未来 `docs/frontend/` 只消费这些 ID；不能另建一套能力、对象或状态清单。
+- `docs/frontend/` 只消费这些 ID；不能另建一套能力、对象或状态清单。Gate 4 通过前它仍是 `ACTIVE_INPUT / Normative candidate`。
 - 当前未指派的 SaaS、前端、设计、数据、QA、运营和安全责任必须继续显示为 `UNASSIGNED`，不得以 Codex 或模糊“团队”代填。
 - 历史文件在引用映射、Owner 和用户授权完成前不移动、不归档、不删除。
 
@@ -43,6 +43,6 @@
 
 ## 4. 当前 Gate
 
-Gate 2 已通过并授权 Phase 3。当前 Registry 固化的产品决定包括：B2B 制造/工贸/传统出口为首批客户，海外增长/外贸运营为默认操作者，六项一级 IA，共享 Company/Offering/Claim/Evidence/Asset 事实底座，以及止于可信开发预览的首个纵切。
+Gate 3 已通过并授权 Phase 4。当前 Registry 固化的产品决定包括：B2B 制造/工贸/传统出口为首批客户，海外增长/外贸运营为默认操作者，六项一级 IA，共享 Company/Offering/Claim/Evidence/Asset 事实底座，以及止于可信开发预览的首个纵切。
 
-正式 SaaS 前端仓库、设计事实源和相应 Owner 仍未指派；Phase 4–8 尚未授权。当前审查入口见 [Gate 3 评审包](../roadmap/saas-frontend-phase-3/gate-3-review.md)。
+[全局前端规范](../frontend/README.md)和[设计资产治理](../design/README.md)已形成 Gate 4 候选；正式 SaaS 前端仓库、设计事实源和相应 Owner 仍未指派，Workspace/allowed actions、Claim review、指标/隐私等合同继续阻塞实施。Phase 5–8 尚未授权。当前审查入口见 [Gate 4 评审包](../roadmap/saas-frontend-phase-4/gate-4-review.md)。
