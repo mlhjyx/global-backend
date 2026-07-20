@@ -18,6 +18,7 @@ import type { CopySlotDefinition } from '@global/contracts';
 import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { PaidOperationUnknownError } from '../site-builder/site-build-cost-ledger';
+import { buildDemoSpec, DEMO_SPEC_VERSION } from '../site-builder/demo-spec';
 
 /**
  * M1-b fast-follow 改动 1（预算门接线）+ 改动 3（补偿路径 steps 回填）。
@@ -1752,6 +1753,166 @@ describe('R0-5 polishCopy — 传真 AbortSignal（超时即 abort 底层 fetch�
       signal?: unknown;
     };
     expect(inputArg.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe('generateDemoV0 — R1 immutable Release publication', () => {
+  function retryingDemoTx(options?: { cancelDuringRender?: boolean }) {
+    let runStatus = 'running';
+    const spec = buildDemoSpec({
+      siteName: 'Acme',
+      intake: INTAKE,
+      stylePreset: 'clean',
+    });
+    const version = {
+      id: 'version-1',
+      workspaceId: 'ws-1',
+      siteId: 'site-1',
+      buildRunId: 'run-1',
+      source: 'demo_v0',
+      spec,
+      specVersion: DEMO_SPEC_VERSION,
+      buildStatus: 'building',
+      artifactKey: null as string | null,
+    };
+    const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const releaseUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const runUpdateMany = vi.fn(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        if (typeof data.status === 'string') runStatus = data.status;
+        return { count: 1 };
+      },
+    );
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: runStatus })),
+        update: vi.fn(async () => ({})),
+        updateMany: runUpdateMany,
+      },
+      site: {
+        findUnique: vi.fn(async () => ({
+          id: 'site-1',
+          name: 'Acme',
+          slug: 'acme',
+          stylePreset: 'clean',
+          intake: INTAKE,
+          activeVersionId: 'old-version',
+        })),
+        update: vi.fn(async () => ({})),
+        updateMany: siteUpdateMany,
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => version),
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+        aggregate: vi.fn(async () => ({ _max: { version: 1 } })),
+        create: vi.fn(async () => {
+          throw new Error('demo retry must reuse its durable SiteVersion');
+        }),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      siteRelease: { updateMany: releaseUpdateMany },
+    };
+    const renderSiteSpec = vi.fn(
+      async (_doc: unknown, output: { outDir: string }) => {
+        await mkdir(output.outDir, { recursive: true });
+        await writeFile(path.join(output.outDir, 'index.html'), 'candidate');
+        if (options?.cancelDuringRender) runStatus = 'cancelled';
+      },
+    );
+    return {
+      tx,
+      version,
+      renderSiteSpec,
+      siteUpdateMany,
+      releaseUpdateMany,
+      runUpdateMany,
+    };
+  }
+
+  it('reuses the run-scoped version, materializes one Release, then atomically advances the pointer', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-demo-release-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const state = retryingDemoTx();
+    const materialize = vi.fn(async () => {
+      state.version.buildStatus = 'succeeded';
+      state.version.artifactKey = 'release:release-1';
+      return {
+        releaseId: 'release-1',
+        artifactKey: 'release:release-1',
+        artifactPrefix: 'sites/site-1/releases/release-1',
+        artifactDigest: 'a'.repeat(64),
+        manifestDigest: 'b'.repeat(64),
+        producerToken: 'producer-1',
+      };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(state.tx),
+      renderSiteSpec: state.renderSiteSpec,
+      releaseService: { materialize } as never,
+    });
+    try {
+      await expect(acts.generateDemoV0(INPUT)).resolves.toEqual({
+        previewSlug: 'acme',
+      });
+      expect(state.tx.siteVersion.deleteMany).not.toHaveBeenCalled();
+      expect(state.tx.siteVersion.create).not.toHaveBeenCalled();
+      expect(materialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          siteVersionId: 'version-1',
+          buildRunId: 'run-1',
+          storedSpecVersion: DEMO_SPEC_VERSION,
+          root: path.join(root, '.staging', 'run-1'),
+        }),
+      );
+      expect(state.siteUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'site-1',
+          OR: [
+            { activeVersionId: 'old-version' },
+            { activeVersionId: 'version-1' },
+          ],
+        },
+        data: { activeVersionId: 'version-1', status: 'ready' },
+      });
+      expect(state.releaseUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'release-1', status: 'ready' },
+          data: { lastActivatedAt: expect.any(Date) },
+        }),
+      );
+      expect(state.runUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'run-1', status: 'running' },
+          data: expect.objectContaining({ status: 'succeeded', progress: 1 }),
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('lets cancellation win after rendering and never uploads or advances the old pointer', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-demo-cancel-'));
+    vi.stubEnv('PREVIEW_DIR', root);
+    const state = retryingDemoTx({ cancelDuringRender: true });
+    const materialize = vi.fn();
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(state.tx),
+      renderSiteSpec: state.renderSiteSpec,
+      releaseService: { materialize } as never,
+    });
+    try {
+      await expect(acts.generateDemoV0(INPUT)).rejects.toThrow(
+        'rendered candidate discarded',
+      );
+      expect(materialize).not.toHaveBeenCalled();
+      expect(state.siteUpdateMany).not.toHaveBeenCalled();
+      expect(state.releaseUpdateMany).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
