@@ -87,6 +87,17 @@ describe('R1 immutable SiteRelease database invariants', () => {
     );
   });
 
+  it('serializes pointer changes with GC and refuses to claim the active release', () => {
+    const siteLockUses = migration.match(
+      /pg_advisory_xact_lock\(hashtext\('site-release-pointer-' \|\|/g,
+    );
+    expect(siteLockUses).toHaveLength(2);
+    expect(migration).toContain('active SiteRelease cannot enter deleting');
+    expect(migration).toMatch(
+      /NEW\."status" = 'deleting'[\s\S]+active_version_id[\s\S]+OLD\."site_version_id"/is,
+    );
+  });
+
   it('forces tenant RLS and denies arbitrary application deletes', () => {
     expect(migration).toContain(
       'ALTER TABLE "site_release" FORCE ROW LEVEL SECURITY',
