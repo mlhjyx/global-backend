@@ -240,6 +240,48 @@ export class StorageService implements OnModuleInit {
     );
   }
 
+  /**
+   * Create one producer-isolated Release object exactly once. A 412 means a prior
+   * attempt may have committed despite a lost acknowledgement; callers must hash
+   * the existing object before accepting it.
+   */
+  async putBufferImmutable(
+    key: string,
+    data: Buffer,
+    contentType: string,
+    sha256: string,
+    signal?: AbortSignal,
+  ): Promise<'created' | 'exists'> {
+    const actual = createHash('sha256').update(data).digest('hex');
+    if (!/^[0-9a-f]{64}$/.test(sha256) || actual !== sha256) {
+      throw new Error(`immutable object sha256 mismatch: ${key}`);
+    }
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: data,
+          ContentType: contentType,
+          IfNoneMatch: '*',
+          ChecksumSHA256: Buffer.from(sha256, 'hex').toString('base64'),
+          Metadata: { sha256 },
+        }),
+        signal ? { abortSignal: signal } : undefined,
+      );
+      return 'created';
+    } catch (error) {
+      const status =
+        typeof error === 'object' && error !== null && '$metadata' in error
+          ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+              ?.httpStatusCode
+          : undefined;
+      const name = error instanceof Error ? error.name : '';
+      if (status === 412 || name === 'PreconditionFailed') return 'exists';
+      throw error;
+    }
+  }
+
   async copy(fromKey: string, toKey: string, signal?: AbortSignal): Promise<void> {
     await this.client.send(
       new CopyObjectCommand({
