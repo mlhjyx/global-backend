@@ -10,8 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fontsource/noto-sans": "5.2.6",
-    "@fontsource/noto-sans-arabic": "5.2.7",
+    "@fontsource/noto-sans": "5.3.0",
+    "@fontsource/noto-sans-arabic": "5.3.0",
     "@global/contracts": "workspace:*",
     "astro": "^5.7.0"
   },
