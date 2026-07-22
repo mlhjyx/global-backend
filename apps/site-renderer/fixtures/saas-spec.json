@@ -59,7 +59,7 @@
         { "type": "PricingTiers", "props": { "id": "PricingTiers-1", "alt": true,
           "eyebrowKey": "price.eyebrow", "titleKey": "price.title", "titleLine2Key": "price.title2", "subKey": "price.sub",
           "monthlyKey": "price.monthly", "yearlyKey": "price.yearly", "saveKey": "price.save", "featuredKey": "price.featured",
-          "ctaPrefixKey": "price.ctaPrefix", "perMoKey": "price.perMo",
+          "perMoKey": "price.perMo",
           "plans": [
             { "nameKey": "price.p1.n", "taglineKey": "price.p1.t", "monthly": 9, "yearly": 7, "features": ["1 published project", "Pebble subdomain", "Community templates", "Basic analytics"] },
             { "nameKey": "price.p2.n", "taglineKey": "price.p2.t", "monthly": 29, "yearly": 22, "featured": true, "features": ["10 published projects", "Custom domains + SSL", "Live collaboration (5 seats)", "Branch previews", "AI copy assistant"] },

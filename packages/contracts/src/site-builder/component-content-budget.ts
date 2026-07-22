@@ -38,6 +38,11 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   ProcessSteps: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minItems: 2, maxItems: 6, number: 12, itemTitle: 60, itemBody: 200, meta: 48 }),
   ArticleGrid: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, titleLine2: 60, titleLine2Words: 8, intro: 240, minItems: 1, maxItems: 8, category: 48, itemTitle: 80, itemDescription: 240, readTime: 32 }),
   StatementBlock: Object.freeze({ label: 48, statement: 240 }),
+  PricingTable: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, column: 48, cta: 24, footnote: 160, minRows: 1, maxRows: 8, service: 60, note: 160, from: 48 }),
+  StatsCountup: Object.freeze({ heading: 48, minItems: 2, maxItems: 4, value: 16, label: 48 }),
+  LedgerStats: Object.freeze({ chapter: 40, title: 60, titleWords: 8, body: 240, minStats: 2, maxStats: 4, value: 16, label: 48, minClients: 1, maxClients: 8, client: 80, clientsLabel: 48 }),
+  PricingTiers: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, titleLine2: 60, titleLine2Words: 8, sub: 240, billingLabel: 32, save: 48, featured: 32, perMo: 24, minPlans: 1, maxPlans: 4, name: 48, tagline: 160, price: 16, minFeatures: 1, maxFeatures: 8, feature: 80 }),
+  ValueStrip: Object.freeze({ heading: 48, minItems: 2, maxItems: 6, icon: 80, label: 80 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -155,6 +160,11 @@ const contentSchemas = {
   ProcessSteps: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), accent: boundedCopy(40), intro: boundedCopy(240), items: z.array(z.object({ number: boundedCopy(12), title: boundedCopy(60), body: boundedCopy(200), meta: boundedCopy(48).optional(), icon: boundedCopy(80) }).strict()).min(2).max(6) }).strict(),
   ArticleGrid: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), titleLine2: boundedCopy(60, 8), intro: boundedCopy(240), articles: z.array(z.object({ category: boundedCopy(48), title: boundedCopy(80), description: boundedCopy(240), readTime: boundedCopy(32) }).strict()).min(1).max(8) }).strict(),
   StatementBlock: z.object({ label: boundedCopy(48), statement: boundedCopy(240) }).strict(),
+  PricingTable: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60,8), accent: boundedCopy(40), intro: boundedCopy(240), serviceColumn: boundedCopy(48), fromColumn: boundedCopy(48), primaryCta: boundedCopy(24,4), secondaryCta: boundedCopy(24,4).optional(), footnote: boundedCopy(160), rows: z.array(z.object({icon:boundedCopy(80),service:boundedCopy(60),note:boundedCopy(160),from:boundedCopy(48)}).strict()).min(1).max(8) }).strict(),
+  StatsCountup: z.object({ heading: boundedCopy(48), stats: z.array(z.object({value:boundedCopy(16),label:boundedCopy(48)}).strict()).min(2).max(4) }).strict(),
+  LedgerStats: z.object({chapter:boundedCopy(40),title:boundedCopy(60,8),body:boundedCopy(240),stats:z.array(z.object({value:boundedCopy(16),label:boundedCopy(48)}).strict()).min(2).max(4),clients:z.array(boundedCopy(80)).min(1).max(8),clientsLabel:boundedCopy(48)}).strict(),
+  PricingTiers: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),titleLine2:boundedCopy(60,8),sub:boundedCopy(240),monthlyLabel:boundedCopy(32),yearlyLabel:boundedCopy(32),save:boundedCopy(48),featured:boundedCopy(32),perMo:boundedCopy(24),plans:z.array(z.object({name:boundedCopy(48),tagline:boundedCopy(160),monthly:boundedCopy(16),yearly:boundedCopy(16),featured:z.boolean(),features:z.array(boundedCopy(80)).min(1).max(8)}).strict()).min(1).max(4)}).strict(),
+  ValueStrip: z.object({heading:boundedCopy(48),items:z.array(z.object({icon:boundedCopy(80),label:boundedCopy(80)}).strict()).min(2).max(6)}).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

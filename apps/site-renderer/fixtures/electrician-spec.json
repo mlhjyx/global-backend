@@ -70,6 +70,7 @@
         } },
         { "type": "PricingTable", "props": { "id": "PricingTable-1", "alt": true,
           "eyebrowKey": "pricing.eyebrow", "titleKey": "pricing.title", "titleAccentKey": "pricing.titleAccent", "introKey": "pricing.intro",
+          "serviceColumnKey": "pricing.colService", "fromColumnKey": "pricing.colFrom",
           "primaryCta": { "labelKey": "pricing.ctaCheck", "pageId": "book" },
           "secondaryCta": { "labelKey": "pricing.ctaFull", "pageId": "pricing" },
           "footnoteKey": "pricing.footnote",

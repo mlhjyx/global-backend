@@ -68,6 +68,7 @@ export type SiteSpecComponentType = (typeof SITE_SPEC_COMPONENT_TYPES)[number];
 export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "AboutBlock",
   "ArticleGrid",
+  "LedgerStats",
   "CertWall",
   "CtaBanner",
   "FeatureCards",
@@ -77,14 +78,18 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "MapLocation",
   "LogoMarquee",
   "ProcessTimeline",
+  "PricingTable",
+  "PricingTiers",
   "ProcessSteps",
   "ProductGrid",
   "ServicesGrid",
   "StatsBand",
+  "StatsCountup",
   "StatementBlock",
   "TechSystems",
   "Testimonials",
   "TrustSplit",
+  "ValueStrip",
 ] as const satisfies readonly SiteSpecComponentType[];
 export type SiteSpecReleaseComponentType =
   (typeof SITE_SPEC_RELEASE_COMPONENT_TYPES)[number];

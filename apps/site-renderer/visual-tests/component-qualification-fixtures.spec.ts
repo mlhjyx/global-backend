@@ -13,13 +13,18 @@ const QUALIFIED_COMPONENTS = {
   MapLocation: "section.map-location",
   ProcessTimeline: "section.process-timeline",
   ProcessSteps: "section.process-steps",
+  PricingTable: "section.pricing-table",
+  PricingTiers: "section.pricing-tiers",
   ProductGrid: "section.product-grid",
+  StatsCountup: "section.stats-countup",
   StatsBand: "section.stats",
   StatementBlock: "section.statement-block",
   ServicesGrid: "section.services-grid",
   TechSystems: "section.tech-systems",
   Testimonials: "section.testimonials",
   TrustSplit: "section.trust-split",
+  LedgerStats: "section.ledger-stats",
+  ValueStrip: "section.value-strip",
 } as const;
 
 const componentType = process.env.COMPONENT_QUALIFICATION_COMPONENT;
@@ -65,6 +70,24 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
   }
   if (componentType === "StatementBlock") {
     await expect(section.locator("p")).toHaveCount(1);
+  }
+  if (componentType === "PricingTable") {
+    await expect(section.locator("table tbody tr")).toHaveCount(2);
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
+  }
+  if (componentType === "PricingTiers") {
+    await expect(section.locator("article")).toHaveCount(2);
+    await expect(section.locator("button")).toHaveCount(0);
+  }
+  if (componentType === "StatsCountup") {
+    await expect(section.locator("ul > li")).toHaveCount(3);
+    await expect(section.locator("script")).toHaveCount(0);
+  }
+  if (componentType === "LedgerStats") {
+    await expect(section.locator(".stats > li")).toHaveCount(2);
+  }
+  if (componentType === "ValueStrip") {
+    await expect(section.locator("ul > li")).toHaveCount(2);
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",

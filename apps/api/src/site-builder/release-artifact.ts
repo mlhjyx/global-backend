@@ -110,10 +110,27 @@ export function assertReleaseContract(
       `SITE_RELEASE_UNSUPPORTED_SPEC_VERSION: stored=${storedSpecVersion} embedded=${spec.specVersion} supported=${SITE_SPEC_VERSION}`,
     );
   }
+  const pageIds = new Set(spec.pages.map((page) => page.id));
   for (const page of spec.pages) {
     for (const block of page.puck.content) {
       validateBlock(block);
       assertReleaseComponentEligible(block.type);
+      if (block.type === 'PricingTable') {
+        const props = block.props as {
+          primaryCta: { pageId: string };
+          secondaryCta?: { pageId: string };
+        };
+        for (const [name, cta] of [
+          ['primaryCta', props.primaryCta],
+          ['secondaryCta', props.secondaryCta],
+        ] as const) {
+          if (cta && !pageIds.has(cta.pageId)) {
+            throw new Error(
+              `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: PricingTable.${name}.pageId=${cta.pageId}`,
+            );
+          }
+        }
+      }
     }
   }
 }

@@ -33,6 +33,7 @@
           ]
         } },
         { "type": "StatsCountup", "props": { "id": "StatsCountup-1", "alt": true,
+          "headingKey": "stat.heading",
           "stats": [
             { "value": 312, "suffix": "%", "labelKey": "stat.s1" },
             { "value": 47, "suffix": "%", "labelKey": "stat.s2" },
@@ -60,7 +61,7 @@
         { "type": "PricingTiers", "props": { "id": "PricingTiers-1",
           "eyebrowKey": "price.eyebrow", "titleKey": "price.title", "titleLine2Key": "price.title2", "subKey": "price.sub",
           "monthlyKey": "price.monthly", "yearlyKey": "price.yearly", "saveKey": "price.save", "featuredKey": "price.featured",
-          "ctaPrefixKey": "price.ctaPrefix", "perMoKey": "price.perMo",
+          "perMoKey": "price.perMo",
           "plans": [
             { "nameKey": "price.p1.n", "taglineKey": "price.p1.t", "monthly": 1900, "yearly": 1500, "features": ["Brand audit", "Channel strategy", "Monthly reporting", "Email support"] },
             { "nameKey": "price.p2.n", "taglineKey": "price.p2.t", "monthly": 4900, "yearly": 3900, "featured": true, "features": ["Everything in Starter", "Creative production", "Media buying + MMM", "Bi-weekly strategy", "Dedicated lead"] },
@@ -104,7 +105,7 @@
       "feat.f3.t": "Creative analytics", "feat.f3.d": "Score every ad by hook rate, hold rate and incremental ROAS - and ship the winners next week.",
       "feat.f4.t": "Predictive lift", "feat.f4.d": "Forecast the incremental revenue of a campaign before you spend a dollar on it.",
 
-      "stat.s1": "Average ROAS lift", "stat.s2": "Lower CAC", "stat.s3": "Revenue measured", "stat.s4": "Avg. client rating",
+      "stat.heading": "Key figures", "stat.s1": "Average ROAS lift", "stat.s2": "Lower CAC", "stat.s3": "Revenue measured", "stat.s4": "Avg. client rating",
 
       "testi.eyebrow": "What founders say", "testi.platform": "Verified client",
       "testi.t1.q": "Bullseye rebuilt our attribution from scratch in six weeks. For the first time, finance and marketing agree on what 'worked' means.", "testi.t1.n": "Elena Vasquez", "testi.t1.r": "CEO, Northwind",

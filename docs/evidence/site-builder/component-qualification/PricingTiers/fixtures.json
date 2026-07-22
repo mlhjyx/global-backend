@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"PricingTiers","status":"pass","part":"fixtures","assertions":["The fixture contains one page and one qualified component."],"sources":["apps/site-renderer/fixtures/component-qualification/pricing-tiers-spec.json"],"verification":["pnpm --filter @global/site-renderer test -- fixture-build.spec.ts"]}
