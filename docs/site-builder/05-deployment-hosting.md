@@ -66,7 +66,7 @@
 1. 用户在工作台填域名 → 后端生成**随机 ownership token**，返回 CNAME 记录指引（指向 `edge.<平台域>`）+ 待验证的 **TXT/CNAME ownership** 记录（v3.2 §7.3 回写：防任意域名蹭绑）。
 2. 后端轮询 DNS 验证 ownership token 生效 → 域名写入**已授权列表**（active）。**绑定、续期、所有权迁移时均复验 ownership**，不只验一次。
 3. Caddy `ask` 端点校验"该域名 ∈ 授权列表且 verified+active"才允许签证书——**防任意域名指过来蹭证书/钓鱼挂靠**；证书签发有**速率限制、重试、告警与失败状态**（不静默重试打爆 ACME 配额）。
-4. 首次访问自动签发（一次性 3~5 秒）→ 绑定完成事件 → **Google Maps 前端 key 的 referrer 白名单自动追加该域**（衔接 04 §10 D16）。
+4. 首次访问自动签发（一次性 3~5 秒）→ 绑定完成事件；MapLocation 为无外呼地址文本卡，不配置第三方地图 key 或域名白名单（04 §10 D16）。
 5. **删除/解绑防护**（v3.2 §7.3 回写）：删除域名后打 **tombstone + cooldown**，防 dangling CNAME takeover（他人抢注已解绑域名指回本平台蹭证书/内容）；**站点删除先撤路由、再清产物**，不留悬挂路由。
 
 ## 3. 预览链路（M1 起步本地路径，平台域后升子域）
@@ -129,7 +129,7 @@ previewRoot/{slug}/current.json
 ## 7. 安全基线
 
 - 对象存储私有桶，只经网关签名回源；网关限速防刷。
-- 发布站默认安全头：CSP（自站+Maps Embed 白名单）、HSTS、X-Content-Type-Options、Referrer-Policy；**外呼域与第三方资源以 Release 扫描结果为准**（v3.2 §7.3 回写），不硬编码。
+- 发布站默认安全头：CSP（自站资源）、HSTS、X-Content-Type-Options、Referrer-Policy；**外呼域与第三方资源以 Release 扫描结果为准**（v3.2 §7.3 回写），不硬编码。MapLocation 不增加第三方地图白名单。
 - Caddy `ask` 端点 + 授权列表（§2.3）杜绝非客户域名蹭挂；tombstone/cooldown 防解绑后 takeover（§2.5）。
 - Preview/Publish 同一 artifact，杜绝二次构建漂移（§3）。
 - AI 媒体真实性与披露按 `syntheticClass` / `disclosureMode` 分类处理（v3.2 §29.4，详见 06）——发布扫描据此决定机器标记/可见披露/阻断，不一刀切。
