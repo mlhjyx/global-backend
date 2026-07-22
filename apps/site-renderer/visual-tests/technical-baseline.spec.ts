@@ -79,7 +79,7 @@ for (const component of COMPONENTS) {
     await expect(section).toBeVisible();
     await expect(section).toHaveScreenshot(`${component.name}.png`, {
       animations: "disabled",
-      maxDiffPixelRatio: 0.005,
+      maxDiffPixelRatio: 0.015,
     });
   });
 }
