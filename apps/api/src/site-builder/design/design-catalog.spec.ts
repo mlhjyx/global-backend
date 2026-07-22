@@ -14,7 +14,7 @@ import {
   validateDesignObservation,
   validateDesignRule,
 } from "@global/contracts";
-import { resolveDesignBriefFromCatalog } from "./catalog";
+import { STATIC_DESIGN_CATALOG, resolveDesignBriefFromCatalog } from "./catalog";
 
 function observation(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -153,6 +153,12 @@ function brief(value: ReturnType<typeof catalog>, overrides: Record<string, unkn
 }
 
 describe("DI-0 clean-room contracts and static catalog", () => {
+  it("exposes an immutable empty catalog foundation rather than an unreviewed family", () => {
+    expect(STATIC_DESIGN_CATALOG.families).toEqual([]);
+    expect(Object.isFrozen(STATIC_DESIGN_CATALOG)).toBe(true);
+    expect(Object.isFrozen(STATIC_DESIGN_CATALOG.families)).toBe(true);
+  });
+
   it("accepts abstract observations but rejects source-reconstructable fields", () => {
     expect(validateDesignObservation(observation())).toMatchObject({
       heroComposition: "split",
