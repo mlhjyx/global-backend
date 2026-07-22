@@ -1,6 +1,7 @@
 ---
 import { createRequire } from 'node:module';
 import { localePagePathHref } from '../lib/spec';
+import { resolveServiceRowsCta } from '../lib/component-compat';
 
 interface Service { icon: string; titleKey: string; descKey: string; fromKey: string; unitKey: string }
 interface Cta { labelKey: string; pageId: string }
@@ -24,9 +25,7 @@ interface Props {
 }
 const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
 const { eyebrowKey, titleKey, titleAccentKey, introKey, fromLabelKey, cta, bookLabelKey, bookPageId, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
-const resolvedCta = cta ?? (bookLabelKey && bookPageId
-  ? { labelKey: bookLabelKey, pageId: bookPageId }
-  : { labelKey: 'cta.learnMore', pageId: 'services' });
+const resolvedCta = resolveServiceRowsCta(cta, bookLabelKey, bookPageId);
 if (!resolvedCta) throw new Error('SERVICE_ROWS_CTA_REQUIRED');
 const content = {
   eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey), intro: t(introKey), fromLabel: fromLabelKey ? t(fromLabelKey) : 'From', cta: t(resolvedCta.labelKey),
