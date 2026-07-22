@@ -38,34 +38,75 @@ describe("M1-e-A technical baseline component contract", () => {
         variant: "technical-grid",
       },
     },
+    {
+      type: "ProductGrid",
+      props: {
+        titleKey: "products.title",
+        products: [{ nameKey: "products.p1" }],
+        variant: "technical-grid",
+      },
+    },
+    {
+      type: "AboutBlock",
+      props: {
+        titleKey: "about.title",
+        bodyKey: "about.body",
+        variant: "technical-grid",
+      },
+    },
+    {
+      type: "InquiryForm",
+      props: {
+        titleKey: "inquiry.title",
+        variant: "technical-grid",
+      },
+    },
   ])("$type accepts the technical-grid variant", ({ type, props }) => {
     expect(() => validateBlock({ type, props } as never)).not.toThrow();
   });
 
-  it.each(["HeroBanner", "StatsBand", "CtaBanner"])(
-    "%s rejects an unregistered decorative variant",
-    (type) => {
-      const props =
-        type === "HeroBanner"
-          ? { headlineKey: "hero.headline", variant: "glass-orbit" }
-          : type === "StatsBand"
+  it.each([
+    "HeroBanner",
+    "StatsBand",
+    "CtaBanner",
+    "ProductGrid",
+    "AboutBlock",
+    "InquiryForm",
+  ])("%s rejects an unregistered decorative variant", (type) => {
+    const props =
+      type === "HeroBanner"
+        ? { headlineKey: "hero.headline", variant: "glass-orbit" }
+        : type === "StatsBand"
+          ? {
+              stats: [
+                { value: "20+", labelKey: "stats.years" },
+                { value: "40+", labelKey: "stats.markets" },
+              ],
+              variant: "glass-orbit",
+            }
+          : type === "ProductGrid"
             ? {
-                stats: [
-                  { value: "20+", labelKey: "stats.years" },
-                  { value: "40+", labelKey: "stats.markets" },
-                ],
+                titleKey: "products.title",
+                products: [{ nameKey: "products.p1" }],
                 variant: "glass-orbit",
               }
-            : {
-                headlineKey: "cta.headline",
-                cta: { labelKey: "cta.label" },
-                variant: "glass-orbit",
-              };
-      expect(() => validateBlock({ type, props } as never)).toThrow(
-        `INVALID_BLOCK_PROPS: ${type}`,
-      );
-    },
-  );
+            : type === "AboutBlock"
+              ? {
+                  titleKey: "about.title",
+                  bodyKey: "about.body",
+                  variant: "glass-orbit",
+                }
+              : type === "InquiryForm"
+                ? { titleKey: "inquiry.title", variant: "glass-orbit" }
+                : {
+                    headlineKey: "cta.headline",
+                    cta: { labelKey: "cta.label" },
+                    variant: "glass-orbit",
+                  };
+    expect(() => validateBlock({ type, props } as never)).toThrow(
+      `INVALID_BLOCK_PROPS: ${type}`,
+    );
+  });
 
   it("accepts content exactly at each component budget", () => {
     expect(() =>
@@ -87,6 +128,24 @@ describe("M1-e-A technical baseline component contract", () => {
       assertQualifiedComponentContentBudget("CtaBanner", {
         headline: "H".repeat(60),
         cta: "C".repeat(24),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget("ProductGrid", {
+        title: "T".repeat(60),
+        products: [{ name: "N".repeat(48), blurb: "B".repeat(240) }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget("AboutBlock", {
+        title: "T".repeat(60),
+        body: "B".repeat(400),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget("InquiryForm", {
+        title: "T".repeat(60),
+        subhead: "S".repeat(140),
       }),
     ).not.toThrow();
   });
@@ -123,6 +182,12 @@ describe("M1-e-A technical baseline component contract", () => {
         cta: Array.from({ length: 5 }, () => "go").join(" "),
       },
     ],
+    [
+      "ProductGrid",
+      { title: "Products", products: [{ name: "N".repeat(49) }] },
+    ],
+    ["AboutBlock", { title: "About", body: "B".repeat(401) }],
+    ["InquiryForm", { title: "T".repeat(61) }],
   ])("%s rejects copy beyond its content budget", (type, content) => {
     expect(() => assertQualifiedComponentContentBudget(type, content)).toThrow(
       `COMPONENT_CONTENT_BUDGET_EXCEEDED: ${type}`,

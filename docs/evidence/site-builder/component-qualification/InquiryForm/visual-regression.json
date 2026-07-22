@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "InquiryForm",
+  "part": "visualRegression",
+  "status": "pass",
+  "breakpoints": [375, 768, 1440],
+  "outputs": [
+    {
+      "breakpoint": 375,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/mobile-375/InquiryForm.png",
+      "sha256": "e4c92fcc24942a8f0caa3382337fd4073549514069a67ebe8b330e08e3034220"
+    },
+    {
+      "breakpoint": 768,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/tablet-768/InquiryForm.png",
+      "sha256": "2fedd26d4ab91ebd639c0485155a7ad6b64fd3c110c2cd42f6c9ed4daa5ec69b"
+    },
+    {
+      "breakpoint": 1440,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/InquiryForm.png",
+      "sha256": "d2ef6eced4d008ec83f9a864f60fb87985841d2e21076d441dd09bf21543d69e"
+    }
+  ],
+  "assertions": [
+    "The named component output matches all three checked-in reduced-motion references."
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

@@ -3,6 +3,9 @@ import { expect, test } from "@playwright/test";
 const COMPONENTS = [
   { name: "HeroBanner", selector: "section.hero" },
   { name: "StatsBand", selector: "section.stats" },
+  { name: "ProductGrid", selector: "section.product-grid" },
+  { name: "AboutBlock", selector: "section.about-block" },
+  { name: "InquiryForm", selector: "section.inquiry-block" },
   { name: "CtaBanner", selector: "section.cta" },
 ] as const;
 
@@ -44,6 +47,32 @@ test("StatsBand exposes list semantics for each metric", async ({ page }) => {
   const list = page.locator('section.stats [role="list"]').first();
   await expect(list).toBeVisible();
   await expect(list.getByRole("listitem")).toHaveCount(3);
+});
+
+test("ProductGrid gives each offering a named article", async ({ page }) => {
+  const section = page.locator("section.product-grid").first();
+  const cards = section.locator("article");
+  await expect(cards).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    const card = cards.nth(index);
+    const labelId = await card.getAttribute("aria-labelledby");
+    expect(labelId).toBeTruthy();
+    await expect(card.locator(`#${labelId}`)).toBeVisible();
+  }
+});
+
+test("InquiryForm labels every disabled preview field and explains its state", async ({
+  page,
+}) => {
+  const form = page.locator("section.inquiry-block form").first();
+  await expect(form.locator("label")).toHaveCount(3);
+  for (const name of ["name", "email", "message"]) {
+    const field = form.locator(`[name=\"${name}\"]`);
+    await expect(field).toBeDisabled();
+    const id = await field.getAttribute("id");
+    await expect(form.locator(`label[for=\"${id}\"]`)).toBeVisible();
+  }
+  await expect(form.locator("[role=status]")).toBeVisible();
 });
 
 test("component landmarks keep local label ids unique", async ({ page }) => {

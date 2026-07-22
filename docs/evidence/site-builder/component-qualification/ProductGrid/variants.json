@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "ProductGrid",
+  "part": "variants",
+  "status": "pass",
+  "variantValues": ["technical-grid", "quiet"],
+  "assertions": [
+    "technical-grid is the deterministic default.",
+    "quiet removes the technical background while retaining card semantics."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-schema.ts",
+    "apps/site-renderer/src/components/ProductGrid.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

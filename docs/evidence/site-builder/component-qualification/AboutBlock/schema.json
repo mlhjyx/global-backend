@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "AboutBlock",
+  "part": "schema",
+  "status": "pass",
+  "assertions": [
+    "Props and the closed variant enum are parsed before rendering.",
+    "Unknown props and variants fail validation."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-schema.ts",
+    "apps/site-renderer/src/components/AboutBlock.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

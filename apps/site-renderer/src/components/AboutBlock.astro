@@ -1,52 +1,62 @@
 ---
+import { createRequire } from 'node:module';
+
 interface Props {
+  id?: string;
+  instanceId: string;
   titleKey: string;
   bodyKey: string;
   foundedYear?: number | null;
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   alt?: boolean;
 }
-const { titleKey, bodyKey, foundedYear, t, alt } = Astro.props;
+const { id, instanceId, titleKey, bodyKey, foundedYear, variant = 'technical-grid', t, alt } = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const title = t(titleKey);
+const body = t(bodyKey);
+assertQualifiedComponentContentBudget('AboutBlock', { title, body });
+const baseId = `${id ?? 'about'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
+const foundedLabelId = `${baseId}-founded-label`;
 ---
 
-<section class:list={['block', { alt }]} id="about">
-  <div class="cols">
-    <div>
-      <h2>{t(titleKey)}</h2>
-      <p>{t(bodyKey)}</p>
+<section
+  class:list={['block', 'about-block', `about-block--${variant}`, { alt }]}
+  data-component="AboutBlock"
+  data-variant={variant}
+  aria-labelledby={headingId}
+>
+  <div class="container cols">
+    <div class="copy">
+      <span class="eyebrow" aria-hidden="true">02 / COMPANY</span>
+      <h2 id={headingId}>{title}</h2>
+      <p>{body}</p>
     </div>
     {
       foundedYear && (
-        <aside class="since">
-          <span class="muted">Since</span>
-          <strong>{foundedYear}</strong>
-        </aside>
+        <dl class="since">
+          <dt id={foundedLabelId}>Established</dt>
+          <dd aria-labelledby={foundedLabelId}>{foundedYear}</dd>
+        </dl>
       )
     }
   </div>
 </section>
 
 <style>
-  .cols {
-    display: flex;
-    gap: 2.5rem;
-    align-items: start;
-    flex-wrap: wrap;
-  }
-  .cols > div {
-    flex: 1 1 420px;
-    display: grid;
-    gap: 1rem;
-  }
-  .since {
-    display: grid;
-    justify-items: center;
-    padding: 1.5rem 2rem;
-    border: 1px solid var(--c-surface-alt);
-    border-radius: var(--radius);
-  }
-  .since strong {
-    font-size: 2rem;
-    color: var(--c-primary);
-  }
+  .about-block { background: var(--c-surface-alt); }
+  .about-block--technical-grid { background-image: linear-gradient(90deg, color-mix(in srgb, var(--c-border) 42%, transparent) 1px, transparent 1px); background-size: 3rem 3rem; }
+  .about-block--quiet { background: var(--c-surface); }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(11rem, .36fr); gap: clamp(2rem, 7vw, 7rem); align-items: end; }
+  .copy { display: grid; gap: 1rem; max-width: 48rem; }
+  .eyebrow, dt { color: var(--c-primary); font-family: var(--font-heading); font-size: .75rem; font-weight: 700; letter-spacing: .12em; }
+  h2 { max-width: 18ch; font-size: clamp(1.75rem, 4vw, 3rem); text-wrap: balance; }
+  p { color: var(--c-on-surface-muted); font-size: clamp(1rem, 1.35vw, 1.15rem); line-height: 1.7; overflow-wrap: anywhere; }
+  .since { display: grid; gap: .4rem; margin: 0; padding: 1.4rem; border: 1px solid var(--c-border); background: var(--c-surface); }
+  .about-block--quiet .since { background: var(--c-surface-alt); }
+  dd { margin: 0; color: var(--c-primary); font-family: var(--font-heading); font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 700; line-height: .9; }
+  @media (max-width: 639px) { .cols { grid-template-columns: 1fr; } .since { max-width: 15rem; } }
 </style>

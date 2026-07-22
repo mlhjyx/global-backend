@@ -1,71 +1,99 @@
 ---
+import { createRequire } from 'node:module';
+
 interface ProductCard {
   nameKey: string;
   blurbKey?: string;
   image?: { assetId: string } | null;
 }
 interface Props {
+  id?: string;
+  instanceId: string;
   titleKey: string;
   products: ProductCard[];
   columns?: number;
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   alt?: boolean;
 }
-const { titleKey, products = [], t, alt } = Astro.props;
+const {
+  id,
+  instanceId,
+  titleKey,
+  products = [],
+  columns,
+  variant = 'technical-grid',
+  t,
+  alt,
+} = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const title = t(titleKey);
+const resolvedProducts = products.map((product) => ({
+  name: t(product.nameKey),
+  ...(product.blurbKey ? { blurb: t(product.blurbKey) } : {}),
+}));
+assertQualifiedComponentContentBudget('ProductGrid', {
+  title,
+  products: resolvedProducts,
+});
+const baseId = `${id ?? 'product-grid'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
+const columnsStyle = columns ? `--product-columns: ${columns}` : undefined;
 const initials = (name: string) =>
   name
     .split(/\s+/)
     .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
+    .map((word) => word[0]?.toUpperCase() ?? '')
     .join('');
 ---
 
-<section class:list={['block', { alt }]} id="products">
-  <h2>{t(titleKey)}</h2>
-  <div class="grid cards">
-    {
-      products.map((p) => {
-        const name = t(p.nameKey);
-        return (
-          <article class="card">
-            <div class="thumb" aria-hidden="true">
-              {initials(name)}
-            </div>
-            <h3>{name}</h3>
-            {p.blurbKey && <p class="muted">{t(p.blurbKey)}</p>}
-          </article>
-        );
-      })
-    }
+<section
+  class:list={['block', 'product-grid', `product-grid--${variant}`, { alt }]}
+  data-component="ProductGrid"
+  data-variant={variant}
+  aria-labelledby={headingId}
+>
+  <div class="container">
+    <div class="section-heading">
+      <span class="eyebrow" aria-hidden="true">01 / OFFERINGS</span>
+      <h2 id={headingId}>{title}</h2>
+    </div>
+    <div class="cards" style={columnsStyle}>
+      {
+        resolvedProducts.map((product, index) => {
+          const cardHeadingId = `${baseId}-product-${index}`;
+          return (
+            <article class="card" aria-labelledby={cardHeadingId}>
+              <div class="thumb" aria-hidden="true"><span>{initials(product.name)}</span></div>
+              <div class="card-body">
+                <span class="card-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+                <h3 id={cardHeadingId}>{product.name}</h3>
+                {product.blurb && <p class="muted">{product.blurb}</p>}
+              </div>
+            </article>
+          );
+        })
+      }
+    </div>
   </div>
 </section>
 
 <style>
-  h2 {
-    font-size: clamp(1.5rem, 3vw, 2.2rem);
-    margin-bottom: 2rem;
-  }
-  .cards {
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  }
-  .card {
-    border: 1px solid var(--c-surface-alt);
-    border-radius: var(--radius);
-    padding: 1.25rem;
-    display: grid;
-    gap: 0.6rem;
-    background: var(--c-surface);
-  }
-  /* 用户产品图未上传时的占位（M1 图片管线接手真实图）*/
-  .thumb {
-    height: 120px;
-    border-radius: var(--radius);
-    background: linear-gradient(135deg, var(--c-surface-alt), var(--c-surface));
-    color: var(--c-primary);
-    display: grid;
-    place-items: center;
-    font-size: 1.8rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-  }
+  .product-grid { background: var(--c-surface); }
+  .product-grid--technical-grid { background-image: linear-gradient(color-mix(in srgb, var(--c-border) 45%, transparent) 1px, transparent 1px); background-size: 3rem 3rem; }
+  .product-grid--quiet { background: var(--c-surface-alt); }
+  .section-heading { display: grid; gap: .65rem; margin-bottom: clamp(1.5rem, 3vw, 2.5rem); }
+  .eyebrow, .card-index { color: var(--c-primary); font-family: var(--font-heading); font-size: .75rem; font-weight: 700; letter-spacing: .12em; }
+  h2 { max-width: 22ch; font-size: clamp(1.75rem, 4vw, 3rem); text-wrap: balance; }
+  .cards { display: grid; grid-template-columns: repeat(var(--product-columns, auto-fit), minmax(min(100%, 15rem), 1fr)); gap: 1px; border: 1px solid var(--c-border); background: var(--c-border); }
+  .card { min-width: 0; background: var(--c-surface); }
+  .product-grid--quiet .card { background: var(--c-surface-alt); }
+  .thumb { display: grid; min-height: 9rem; place-items: center; border-bottom: 1px solid var(--c-border); background: linear-gradient(135deg, color-mix(in srgb, var(--c-primary) 11%, transparent), transparent 68%); color: var(--c-primary); font-family: var(--font-heading); font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 700; letter-spacing: .08em; }
+  .thumb span { border: 1px solid color-mix(in srgb, var(--c-primary) 35%, transparent); padding: .3em .45em; }
+  .card-body { display: grid; gap: .75rem; padding: clamp(1.1rem, 2.5vw, 1.6rem); }
+  h3 { font-size: 1.2rem; overflow-wrap: anywhere; }
+  .muted { color: var(--c-on-surface-muted); overflow-wrap: anywhere; }
+  @media (max-width: 639px) { .cards { grid-template-columns: 1fr; } }
 </style>

@@ -168,7 +168,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/fixtures.json",
-    sha256: "350c0adfc573d22b7e521656d82e1181ede4615362be754377ebca106f39ca8d",
+    sha256: "5bd63cfb9e00373ac44fa6eabf12c788c6a4a98ded1eaff75e0a08a5d1cc6be5",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -176,7 +176,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e",
+          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
       },
     ],
   },
@@ -186,7 +186,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "visualRegression",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/visual-regression.json",
-    sha256: "64bfcbd4170ab7f2c157349e8c3f85cb9c4da0cd8ccad45bf5b0c118abca4d37",
+    sha256: "f7528641d1f9b8b92d69d9c6501503c3a4e2d272a431cbe31024fb058b17d61f",
     breakpoints: [375, 768, 1440],
     outputs: [
       {
@@ -208,7 +208,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/CtaBanner.png",
         sha256:
-          "3a8d87b310d13ecc1d5df654b276d9e1f29f99c418488f0d8be57c627a2edd7c",
+          "e071c58abe968dece3be1c2ccef080538f57576680b896180c9339a8c81ffd86",
       },
     ],
   },
@@ -259,7 +259,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/HeroBanner/fixtures.json",
-    sha256: "4760e80c5809bffa130f57d8ebd1dddf1caa2ee4376a3ea567cf75d6769d95e4",
+    sha256: "f0e721a6600376e96821803015b92e66981c1e9e1887cd1c6294c8057c667e39",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -267,7 +267,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e",
+          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
       },
     ],
   },
@@ -350,7 +350,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/StatsBand/fixtures.json",
-    sha256: "1e0d6c454d87439bf073598049092dda86d4de6299eb80c6f5874d17d00dd9a0",
+    sha256: "9f2e37ba2209681370f1fd822e08dae17a3f1010ff39e0d5f61a9b75ce44b014",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -358,7 +358,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e",
+          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
       },
     ],
   },
@@ -391,6 +391,279 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
           "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/StatsBand.png",
         sha256:
           "a2fc278d98f0d2897c495c9b5a50a074c4b37eba0aa814366171352213101bb5",
+      },
+    ],
+  },
+  "m1-e-a-product-grid-schema": {
+    artifactId: "m1-e-a-product-grid-schema",
+    componentType: "ProductGrid",
+    part: "schema",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/schema.json",
+    sha256: "cf5adcb39edbd10b97330c41539db32c8b25e3a49211a747c61c9a71af1f702f",
+  },
+  "m1-e-a-product-grid-variants": {
+    artifactId: "m1-e-a-product-grid-variants",
+    componentType: "ProductGrid",
+    part: "variants",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/variants.json",
+    sha256: "7ce4a9e00f16570728c0ab6f20ed2be1e0508d2872d4c2c00f5e3f5c49609005",
+    variantValues: ["technical-grid", "quiet"],
+  },
+  "m1-e-a-product-grid-content-budget": {
+    artifactId: "m1-e-a-product-grid-content-budget",
+    componentType: "ProductGrid",
+    part: "contentBudget",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/content-budget.json",
+    sha256: "5946afa4bc957dfde67735f1e9e710cf61c505fb95bc7e4e511148558dad509a",
+  },
+  "m1-e-a-product-grid-accessibility": {
+    artifactId: "m1-e-a-product-grid-accessibility",
+    componentType: "ProductGrid",
+    part: "accessibility",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/accessibility.json",
+    sha256: "b835c8836cf222d0dc3ea4a114b8eec95ff6af15b25e8bddf02a555d0c4a386e",
+  },
+  "m1-e-a-product-grid-reduced-motion": {
+    artifactId: "m1-e-a-product-grid-reduced-motion",
+    componentType: "ProductGrid",
+    part: "reducedMotion",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/reduced-motion.json",
+    sha256: "c72bd6ea3ae5523becb995c42f0e58d50675a9ab2679ebbdcc04b69d63b2160e",
+  },
+  "m1-e-a-product-grid-fixtures": {
+    artifactId: "m1-e-a-product-grid-fixtures",
+    componentType: "ProductGrid",
+    part: "fixtures",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/fixtures.json",
+    sha256: "1943b0c7aa93a3aa1861dfa760e1c59a44af17b679e8389d6800ebc70d155d31",
+    fixtureIds: ["technical-baseline"],
+    fixtureFiles: [
+      {
+        fixtureId: "technical-baseline",
+        repositoryPath:
+          "apps/site-renderer/fixtures/technical-baseline-spec.json",
+        sha256:
+          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+      },
+    ],
+  },
+  "m1-e-a-product-grid-visual-regression": {
+    artifactId: "m1-e-a-product-grid-visual-regression",
+    componentType: "ProductGrid",
+    part: "visualRegression",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/ProductGrid/visual-regression.json",
+    sha256: "2c6534a0ca1a45c961cff42238f423313c721920ac41a822c2979345de5c3b7f",
+    breakpoints: [375, 768, 1440],
+    outputs: [
+      {
+        breakpoint: 375,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/mobile-375/ProductGrid.png",
+        sha256:
+          "fff59ca199df1ea91ea40cc9110c3c90f0565ae800e199a9b91e60b51829b486",
+      },
+      {
+        breakpoint: 768,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/tablet-768/ProductGrid.png",
+        sha256:
+          "3279d0ccb8cad0ff6c6b97d42a1a197e324b5c237b2631f58a6ced5f9b07f745",
+      },
+      {
+        breakpoint: 1440,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/ProductGrid.png",
+        sha256:
+          "8483c6355f2fe0921afebf42d083ea1db238016c9a3356e995a3a5ae52cc314f",
+      },
+    ],
+  },
+  "m1-e-a-about-block-schema": {
+    artifactId: "m1-e-a-about-block-schema",
+    componentType: "AboutBlock",
+    part: "schema",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/schema.json",
+    sha256: "a6c949da3597abb60c81d2ba552c9da94fc031bc4da27daf88f346a42fadc95e",
+  },
+  "m1-e-a-about-block-variants": {
+    artifactId: "m1-e-a-about-block-variants",
+    componentType: "AboutBlock",
+    part: "variants",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/variants.json",
+    sha256: "538ace7bb4adf58348dd5fc8b52fdee722f1d928128c693a7dffa9bd023e55c1",
+    variantValues: ["technical-grid", "quiet"],
+  },
+  "m1-e-a-about-block-content-budget": {
+    artifactId: "m1-e-a-about-block-content-budget",
+    componentType: "AboutBlock",
+    part: "contentBudget",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/content-budget.json",
+    sha256: "8760fabf8a469c9ea580d7512ad65d5f1841b783c08978b5277b2f59f01e3ae6",
+  },
+  "m1-e-a-about-block-accessibility": {
+    artifactId: "m1-e-a-about-block-accessibility",
+    componentType: "AboutBlock",
+    part: "accessibility",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/accessibility.json",
+    sha256: "c6af6db34cbdc3600a740cc7c64f7afd89c8f5350d30c97ef09eb14c8cc6e1ac",
+  },
+  "m1-e-a-about-block-reduced-motion": {
+    artifactId: "m1-e-a-about-block-reduced-motion",
+    componentType: "AboutBlock",
+    part: "reducedMotion",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/reduced-motion.json",
+    sha256: "77bc5823c1263beba8e2d900590306e403b0bb36bc2f00c24ffaae6fb7ff8cf2",
+  },
+  "m1-e-a-about-block-fixtures": {
+    artifactId: "m1-e-a-about-block-fixtures",
+    componentType: "AboutBlock",
+    part: "fixtures",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/fixtures.json",
+    sha256: "a4ef2a5e20d219dee88c5d20cc75705b5a1a13cbde04343f34b82fc60b5e06fa",
+    fixtureIds: ["technical-baseline"],
+    fixtureFiles: [
+      {
+        fixtureId: "technical-baseline",
+        repositoryPath:
+          "apps/site-renderer/fixtures/technical-baseline-spec.json",
+        sha256:
+          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+      },
+    ],
+  },
+  "m1-e-a-about-block-visual-regression": {
+    artifactId: "m1-e-a-about-block-visual-regression",
+    componentType: "AboutBlock",
+    part: "visualRegression",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/AboutBlock/visual-regression.json",
+    sha256: "60c8bd510cbbe90598b07d714985bb4b6db6fe0f97312f1017db9681367d80ae",
+    breakpoints: [375, 768, 1440],
+    outputs: [
+      {
+        breakpoint: 375,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/mobile-375/AboutBlock.png",
+        sha256:
+          "25f7782b780c2078080e136c27e26197ada4b107b8f806ff888efabe31d255ce",
+      },
+      {
+        breakpoint: 768,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/tablet-768/AboutBlock.png",
+        sha256:
+          "4d58ca7c1d950cc2b1ef9d0780373c6f57af1502ff18703e1a30922f19273ab2",
+      },
+      {
+        breakpoint: 1440,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/AboutBlock.png",
+        sha256:
+          "1712725276c40d882065892f15cd7d19aa1bb32a657c26818ce39d669bbbf57f",
+      },
+    ],
+  },
+  "m1-e-a-inquiry-form-schema": {
+    artifactId: "m1-e-a-inquiry-form-schema",
+    componentType: "InquiryForm",
+    part: "schema",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/schema.json",
+    sha256: "257fcf15bf04ef5a0bbe4a3ffd3143d80a63a13d72050936e043164f1d37daf7",
+  },
+  "m1-e-a-inquiry-form-variants": {
+    artifactId: "m1-e-a-inquiry-form-variants",
+    componentType: "InquiryForm",
+    part: "variants",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/variants.json",
+    sha256: "644c9f350ee7b3544da1f02b2866497a3377b65cb801ed595c19378589571eec",
+    variantValues: ["technical-grid", "quiet"],
+  },
+  "m1-e-a-inquiry-form-content-budget": {
+    artifactId: "m1-e-a-inquiry-form-content-budget",
+    componentType: "InquiryForm",
+    part: "contentBudget",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/content-budget.json",
+    sha256: "eda0a4b6efebb7d125343e3acf9ccf5ff5efa0a6f82ffa40cc1bc4634dd09722",
+  },
+  "m1-e-a-inquiry-form-accessibility": {
+    artifactId: "m1-e-a-inquiry-form-accessibility",
+    componentType: "InquiryForm",
+    part: "accessibility",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/accessibility.json",
+    sha256: "25c06eed227bfec41fb72088d9d4b9568df8e6d97093229dcc7737480028fa92",
+  },
+  "m1-e-a-inquiry-form-reduced-motion": {
+    artifactId: "m1-e-a-inquiry-form-reduced-motion",
+    componentType: "InquiryForm",
+    part: "reducedMotion",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/reduced-motion.json",
+    sha256: "2a95a71286296f134ed12e573ed47b72c297de2fc4ba06991b8458adbb8c2954",
+  },
+  "m1-e-a-inquiry-form-fixtures": {
+    artifactId: "m1-e-a-inquiry-form-fixtures",
+    componentType: "InquiryForm",
+    part: "fixtures",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/fixtures.json",
+    sha256: "62a69bc03197d929855d1db9851e8fa11d96337ecc3a19cdfd81bf83f0ba8e3e",
+    fixtureIds: ["technical-baseline"],
+    fixtureFiles: [
+      {
+        fixtureId: "technical-baseline",
+        repositoryPath:
+          "apps/site-renderer/fixtures/technical-baseline-spec.json",
+        sha256:
+          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+      },
+    ],
+  },
+  "m1-e-a-inquiry-form-visual-regression": {
+    artifactId: "m1-e-a-inquiry-form-visual-regression",
+    componentType: "InquiryForm",
+    part: "visualRegression",
+    repositoryPath:
+      "docs/evidence/site-builder/component-qualification/InquiryForm/visual-regression.json",
+    sha256: "ac2818c98a4b693f5be7d9ac26ce465efc2db62088c91e3a63ad6f38a0ec6f05",
+    breakpoints: [375, 768, 1440],
+    outputs: [
+      {
+        breakpoint: 375,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/mobile-375/InquiryForm.png",
+        sha256:
+          "e4c92fcc24942a8f0caa3382337fd4073549514069a67ebe8b330e08e3034220",
+      },
+      {
+        breakpoint: 768,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/tablet-768/InquiryForm.png",
+        sha256:
+          "2fedd26d4ab91ebd639c0485155a7ad6b64fd3c110c2cd42f6c9ed4daa5ec69b",
+      },
+      {
+        breakpoint: 1440,
+        repositoryPath:
+          "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/InquiryForm.png",
+        sha256:
+          "d2ef6eced4d008ec83f9a864f60fb87985841d2e21076d441dd09bf21543d69e",
       },
     ],
   },
@@ -436,6 +709,33 @@ export const M1_E_A_COMPONENT_QUALIFICATIONS: Readonly<
     visualRegression: {
       artifactId: "m1-e-a-stats-band-visual-regression",
     },
+  },
+  ProductGrid: {
+    schema: { artifactId: "m1-e-a-product-grid-schema" },
+    variants: { artifactId: "m1-e-a-product-grid-variants" },
+    contentBudget: { artifactId: "m1-e-a-product-grid-content-budget" },
+    accessibility: { artifactId: "m1-e-a-product-grid-accessibility" },
+    reducedMotion: { artifactId: "m1-e-a-product-grid-reduced-motion" },
+    fixtures: { artifactId: "m1-e-a-product-grid-fixtures" },
+    visualRegression: { artifactId: "m1-e-a-product-grid-visual-regression" },
+  },
+  AboutBlock: {
+    schema: { artifactId: "m1-e-a-about-block-schema" },
+    variants: { artifactId: "m1-e-a-about-block-variants" },
+    contentBudget: { artifactId: "m1-e-a-about-block-content-budget" },
+    accessibility: { artifactId: "m1-e-a-about-block-accessibility" },
+    reducedMotion: { artifactId: "m1-e-a-about-block-reduced-motion" },
+    fixtures: { artifactId: "m1-e-a-about-block-fixtures" },
+    visualRegression: { artifactId: "m1-e-a-about-block-visual-regression" },
+  },
+  InquiryForm: {
+    schema: { artifactId: "m1-e-a-inquiry-form-schema" },
+    variants: { artifactId: "m1-e-a-inquiry-form-variants" },
+    contentBudget: { artifactId: "m1-e-a-inquiry-form-content-budget" },
+    accessibility: { artifactId: "m1-e-a-inquiry-form-accessibility" },
+    reducedMotion: { artifactId: "m1-e-a-inquiry-form-reduced-motion" },
+    fixtures: { artifactId: "m1-e-a-inquiry-form-fixtures" },
+    visualRegression: { artifactId: "m1-e-a-inquiry-form-visual-regression" },
   },
 });
 

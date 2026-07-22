@@ -7,7 +7,7 @@
     {
       "fixtureId": "technical-baseline",
       "repositoryPath": "apps/site-renderer/fixtures/technical-baseline-spec.json",
-      "sha256": "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e"
+      "sha256": "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab"
     }
   ],
   "assertions": [

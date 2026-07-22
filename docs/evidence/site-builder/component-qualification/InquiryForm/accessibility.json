@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "InquiryForm",
+  "part": "accessibility",
+  "status": "pass",
+  "assertions": [
+    "The section has a stable accessible name.",
+    "Every field has a connected visible label.",
+    "The disabled preview state is linked to a status explanation."
+  ],
+  "sources": [
+    "apps/site-renderer/src/components/InquiryForm.astro",
+    "apps/site-renderer/visual-tests/technical-baseline.spec.ts"
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

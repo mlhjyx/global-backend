@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "InquiryForm",
+  "part": "contentBudget",
+  "status": "pass",
+  "limits": {
+    "titleMaxCharacters": 60,
+    "titleMaxWords": 8,
+    "subheadMaxCharacters": 140
+  },
+  "assertions": [
+    "Runtime rendering rejects resolved title and subhead copy beyond registered limits."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-content-budget.ts",
+    "apps/site-renderer/src/components/InquiryForm.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

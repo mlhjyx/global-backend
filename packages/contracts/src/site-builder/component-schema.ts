@@ -61,12 +61,14 @@ export const COMPONENT_SCHEMAS = {
         image: strictObj({ assetId: str }).nullable().optional(),
       }),
     ),
-    columns: z.number().optional(),
+    columns: z.number().int().min(2).max(4).optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   AboutBlock: obj({
     titleKey: str,
     bodyKey: str,
     foundedYear: z.number().nullable().optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   CertWall: obj({
     titleKey: str,
@@ -85,7 +87,11 @@ export const COMPONENT_SCHEMAS = {
     cta: ctaSchema,
     variant: technicalBaselineVariant.optional(),
   }),
-  InquiryForm: obj({ titleKey: str, subKey: str.optional() }),
+  InquiryForm: obj({
+    titleKey: str,
+    subKey: str.optional(),
+    variant: technicalBaselineVariant.optional(),
+  }),
   MapLocation: obj({
     titleKey: str,
     addressKey: str,
