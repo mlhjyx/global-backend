@@ -90,7 +90,7 @@ describe('R1 release contract gate', () => {
   it('fails closed on an unknown component before renderer publication', () => {
     expect(() =>
       assertReleaseContract(spec(['HeroBanner', 'InventedWidget']), '1.0.0'),
-    ).toThrow('SITE_RELEASE_UNKNOWN_COMPONENT: InventedWidget');
+    ).toThrow('UNKNOWN_COMPONENT_TYPE: InventedWidget');
   });
 
   it('fails closed when either stored or embedded specVersion is unsupported', () => {
