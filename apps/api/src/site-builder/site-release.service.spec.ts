@@ -59,7 +59,7 @@ function siteSpec(): SiteSpec {
         path: '/',
         puck: {
           root: {},
-          content: [{ type: 'HeroBanner', props: { id: 'hero' } }],
+          content: [{ type: 'HeroBanner', props: { id: 'hero', headlineKey: 'hero.headline' } }],
         },
         seo: { titleKey: 'title', descriptionKey: 'description' },
       },
