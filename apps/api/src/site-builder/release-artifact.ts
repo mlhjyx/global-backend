@@ -3,7 +3,6 @@ import { open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
   SITE_SPEC_VERSION,
-  SITE_SPEC_COMPONENT_TYPES,
   SITE_SPEC_RELEASE_COMPONENT_TYPES,
   validateBlock,
   type SiteSpec,
@@ -16,7 +15,6 @@ export const RELEASE_MANIFEST_SCHEMA_VERSION =
 export const R1_RENDERER_COMPONENT_TYPES =
   SITE_SPEC_RELEASE_COMPONENT_TYPES;
 
-const componentTypes = new Set<string>(SITE_SPEC_COMPONENT_TYPES);
 const releaseComponentTypes = new Set<string>(
   SITE_SPEC_RELEASE_COMPONENT_TYPES,
 );
