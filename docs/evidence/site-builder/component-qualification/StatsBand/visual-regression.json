@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "StatsBand",
+  "part": "visualRegression",
+  "status": "pass",
+  "breakpoints": [375, 768, 1440],
+  "outputs": [
+    {
+      "breakpoint": 375,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/mobile-375/StatsBand.png",
+      "sha256": "58b9461e3be020aa47abfb10945c607afacf9d1c84e58354501dae1fceefa954"
+    },
+    {
+      "breakpoint": 768,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/tablet-768/StatsBand.png",
+      "sha256": "6ceb7a169a4bdbddc3e7da07272419a9faad04321a83ba377f90e092bb2f5950"
+    },
+    {
+      "breakpoint": 1440,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/StatsBand.png",
+      "sha256": "a2fc278d98f0d2897c495c9b5a50a074c4b37eba0aa814366171352213101bb5"
+    }
+  ],
+  "assertions": [
+    "The named component output matches all three checked-in reduced-motion references."
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

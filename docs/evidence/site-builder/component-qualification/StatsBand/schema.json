@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "StatsBand",
+  "part": "schema",
+  "status": "pass",
+  "assertions": [
+    "Props are parsed by the closed SiteSpec component schema.",
+    "The component requires between two and four stat items."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-schema.ts",
+    "apps/site-renderer/src/components/StatsBand.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

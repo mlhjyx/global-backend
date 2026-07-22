@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "CtaBanner",
+  "part": "visualRegression",
+  "status": "pass",
+  "breakpoints": [375, 768, 1440],
+  "outputs": [
+    {
+      "breakpoint": 375,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/mobile-375/CtaBanner.png",
+      "sha256": "1ca9336e59ef34480f4a4e4fd86f1760e3b8f29959f4ef826e0666e2954e56c4"
+    },
+    {
+      "breakpoint": 768,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/tablet-768/CtaBanner.png",
+      "sha256": "c3ce68543dedce07f48eaf94723ed6325978f6dae72974884ad6af945d4cd408"
+    },
+    {
+      "breakpoint": 1440,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/CtaBanner.png",
+      "sha256": "3a8d87b310d13ecc1d5df654b276d9e1f29f99c418488f0d8be57c627a2edd7c"
+    }
+  ],
+  "assertions": [
+    "The named component output matches all three checked-in reduced-motion references."
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

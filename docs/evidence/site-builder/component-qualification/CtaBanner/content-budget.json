@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "CtaBanner",
+  "part": "contentBudget",
+  "status": "pass",
+  "limits": {
+    "headlineMaxCharacters": 100,
+    "ctaMaxCharacters": 32
+  },
+  "assertions": [
+    "Runtime rendering rejects resolved copy beyond the registered limits."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-content-budget.ts",
+    "apps/site-renderer/src/components/CtaBanner.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

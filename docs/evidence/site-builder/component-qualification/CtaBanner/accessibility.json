@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "CtaBanner",
+  "part": "accessibility",
+  "status": "pass",
+  "assertions": [
+    "The section has a stable accessible name through aria-labelledby.",
+    "The CTA meets the 44px target and visible keyboard-focus contracts.",
+    "Decorative grid content is hidden from assistive technology."
+  ],
+  "sources": [
+    "apps/site-renderer/src/components/CtaBanner.astro",
+    "apps/site-renderer/src/styles/global.css",
+    "apps/site-renderer/visual-tests/technical-baseline.spec.ts"
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

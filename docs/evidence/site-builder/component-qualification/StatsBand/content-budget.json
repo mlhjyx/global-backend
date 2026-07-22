@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "StatsBand",
+  "part": "contentBudget",
+  "status": "pass",
+  "limits": {
+    "itemsMin": 2,
+    "itemsMax": 4,
+    "valueMaxCharacters": 16,
+    "labelMaxCharacters": 48
+  },
+  "assertions": [
+    "Runtime rendering rejects resolved content beyond the registered limits."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-content-budget.ts",
+    "apps/site-renderer/src/components/StatsBand.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

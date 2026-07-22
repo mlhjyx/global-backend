@@ -221,9 +221,9 @@ describe("M1-e-A component qualification gate", () => {
       );
 
       if (registered.part === "fixtures") {
-        expect(registered.fixtureFiles.map(({ fixtureId }) => fixtureId)).toEqual(
-          registered.fixtureIds,
-        );
+        expect(
+          registered.fixtureFiles.map(({ fixtureId }) => fixtureId),
+        ).toEqual(registered.fixtureIds);
         for (const fixture of registered.fixtureFiles) {
           const fixtureBytes = readFileSync(
             resolve(repositoryRoot, fixture.repositoryPath),
