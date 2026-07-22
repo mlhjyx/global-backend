@@ -9,9 +9,8 @@
  *   - `assets` 值形状：生产端 `Record<string, never>`（永远空）、消费端 `{ kind, hash }`。
  * 本文件按 04 契约**调和为唯一真值**（取兼容超集），两端 `import type` 之，漂移在编译期即报错。
  *
- * 后续（DQ-1 follow-up，不在本次）：运行时校验（04 §7 三重门）以 Zod schema 叠加于此，
- * 渲染器 `loadSpec` 处 `parse` 把生产端违约变成响亮构建错误。`DesignBrief`（设计智能层）
- * 代码尚无消费者，随该层落地时再补，此处不预造（YAGNI）。
+ * #165 已叠加组件 props 的运行时 Zod 子门；完整 SiteSpec 信封、引用、语义与兼容门
+ * 仍由 M1-e 增量完成。`DesignBrief`（设计智能层）代码尚无消费者，随该层落地时再补。
  */
 
 import type { CopyBundleSetV1 } from "./copy-bundle";
@@ -58,6 +57,28 @@ export const SITE_SPEC_COMPONENT_TYPES = [
   "IndustrialHero", "ProductShowcaseAlt", "TechSystems", "MinimalHero", "StatementBlock",
 ] as const;
 export type SiteSpecComponentType = (typeof SITE_SPEC_COMPONENT_TYPES)[number];
+
+/**
+ * Components that may enter an immutable R1 Release before M1-e-A finishes.
+ * The full 55-type registry is available to the development gallery, but new
+ * distilled components are promoted here only after their seven-part contract
+ * (schema, variants, budgets, a11y, reduced motion, fixtures, visual regression)
+ * is complete.
+ */
+export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
+  "AboutBlock",
+  "CertWall",
+  "CtaBanner",
+  "FaqAccordion",
+  "HeroBanner",
+  "InquiryForm",
+  "MapLocation",
+  "ProcessTimeline",
+  "ProductGrid",
+  "StatsBand",
+] as const satisfies readonly SiteSpecComponentType[];
+export type SiteSpecReleaseComponentType =
+  (typeof SITE_SPEC_RELEASE_COMPONENT_TYPES)[number];
 
 /** Puck 兼容组件块：`{ type, props: { id?, ... } }`（04 §2）。type 封闭为 SiteSpecComponentType。 */
 export interface PuckBlock {
