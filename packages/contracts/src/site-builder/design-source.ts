@@ -25,24 +25,13 @@ export const DESIGN_USES = [
 export type DesignUse = (typeof DESIGN_USES)[number];
 
 export type DesignSourceRetentionPolicy =
-  | "manifest_only"
-  | "ephemeral_source"
-  | "licensed_archive";
+  "manifest_only" | "ephemeral_source" | "licensed_archive";
 export type DesignSourceTrainingPolicy =
-  | "platform_corpus"
-  | "license_permits"
-  | "prohibited";
+  "platform_corpus" | "license_permits" | "prohibited";
 export type ExternalDesignAssetKind =
-  | "image"
-  | "font"
-  | "icon"
-  | "script"
-  | "copy";
+  "image" | "font" | "icon" | "script" | "copy";
 export type ExternalDesignAssetDisposition =
-  | "remove"
-  | "replace"
-  | "self_host"
-  | "retain";
+  "remove" | "replace" | "self_host" | "retain";
 
 export interface OwnerAuthorization {
   evidencePath: string;
@@ -112,6 +101,7 @@ export type DesignSourceManifest =
 
 export type DesignSourceManifestContractErrorCode =
   | "DESIGN_SOURCE_INVALID"
+  | "DESIGN_SOURCE_POLICY_CONFLICT"
   | "DESIGN_SOURCE_LICENSE_REQUIRED"
   | "DESIGN_SOURCE_AUTHORIZATION_INVALID"
   | "DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED"
@@ -127,7 +117,10 @@ export class DesignSourceManifestContractError extends Error {
   }
 }
 
-function fail(code: DesignSourceManifestContractErrorCode, message: string): never {
+function fail(
+  code: DesignSourceManifestContractErrorCode,
+  message: string,
+): never {
   throw new DesignSourceManifestContractError(code, message);
 }
 
@@ -154,7 +147,9 @@ function stringSet(value: unknown): Set<string> | null {
   return new Set(value);
 }
 
-function assertExternalAssets(value: unknown): asserts value is DesignExternalAsset[] {
+function assertExternalAssets(
+  value: unknown,
+): asserts value is DesignExternalAsset[] {
   if (!Array.isArray(value)) {
     fail("DESIGN_SOURCE_INVALID", "externalAssets must be an array");
   }
@@ -162,7 +157,9 @@ function assertExternalAssets(value: unknown): asserts value is DesignExternalAs
     const asset = record(item);
     if (
       !asset ||
-      !["image", "font", "icon", "script", "copy"].includes(String(asset.kind)) ||
+      !["image", "font", "icon", "script", "copy"].includes(
+        String(asset.kind),
+      ) ||
       !nonBlank(asset.source) ||
       !["remove", "replace", "self_host", "retain"].includes(
         String(asset.disposition),
@@ -192,16 +189,26 @@ function assertOwnedAuthorization(
     !nonBlank(authorization.revocationTerms) ||
     !validTimestamp(authorization.recordedAt)
   ) {
-    fail("DESIGN_SOURCE_AUTHORIZATION_INVALID", "authorization coverage is incomplete");
+    fail(
+      "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+      "authorization coverage is incomplete",
+    );
   }
 
   const validity = record(authorization.validity);
-  if (!validity || (validity.kind !== "perpetual" && validity.kind !== "expires")) {
-    fail("DESIGN_SOURCE_AUTHORIZATION_INVALID", "authorization validity is invalid");
+  if (
+    !validity ||
+    (validity.kind !== "perpetual" && validity.kind !== "expires")
+  ) {
+    fail(
+      "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+      "authorization validity is invalid",
+    );
   }
   if (
     validity.kind === "expires" &&
-    (!validTimestamp(validity.expiresAt) || Date.parse(validity.expiresAt) <= now.getTime())
+    (!validTimestamp(validity.expiresAt) ||
+      Date.parse(validity.expiresAt) <= now.getTime())
   ) {
     fail("DESIGN_SOURCE_AUTHORIZATION_INVALID", "authorization has expired");
   }
@@ -209,10 +216,16 @@ function assertOwnedAuthorization(
   const redistribution = record(authorization.redistribution);
   if (
     !redistribution ||
-    !["allowed", "prohibited", "conditional"].includes(String(redistribution.kind)) ||
-    (redistribution.kind === "conditional" && !nonBlank(redistribution.conditions))
+    !["allowed", "prohibited", "conditional"].includes(
+      String(redistribution.kind),
+    ) ||
+    (redistribution.kind === "conditional" &&
+      !nonBlank(redistribution.conditions))
   ) {
-    fail("DESIGN_SOURCE_AUTHORIZATION_INVALID", "redistribution terms are incomplete");
+    fail(
+      "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+      "redistribution terms are incomplete",
+    );
   }
   if (trainingRequired && covers.training !== true) {
     fail(
@@ -246,7 +259,9 @@ export function validateDesignSourceManifest(
   ) {
     fail("DESIGN_SOURCE_INVALID", "manifest identity is invalid");
   }
-  if (!DESIGN_SOURCE_CLASSES.includes(manifest.sourceClass as DesignSourceClass)) {
+  if (
+    !DESIGN_SOURCE_CLASSES.includes(manifest.sourceClass as DesignSourceClass)
+  ) {
     fail("DESIGN_SOURCE_INVALID", "sourceClass is unsupported");
   }
   const allowedUsesRaw = manifest.allowedUses;
@@ -267,11 +282,13 @@ export function validateDesignSourceManifest(
   ) {
     fail("DESIGN_SOURCE_INVALID", "manifest policy is invalid");
   }
+  const prohibitedUses = new Set(manifest.prohibitedUses);
   assertExternalAssets(manifest.externalAssets);
 
   if (manifest.sourceClass === "visual_research_only") {
     const researchOnlyAssets = manifest.externalAssets.every(
-      (asset) => asset.disposition === "remove" || asset.disposition === "replace",
+      (asset) =>
+        asset.disposition === "remove" || asset.disposition === "replace",
     );
     if (
       allowedUses.has("code_transformation") ||
@@ -286,12 +303,25 @@ export function validateDesignSourceManifest(
         "visual research cannot be transformed, archived, or used for training",
       );
     }
+    if ([...allowedUses].some((use) => prohibitedUses.has(use))) {
+      fail(
+        "DESIGN_SOURCE_POLICY_CONFLICT",
+        "a use cannot be both allowed and prohibited",
+      );
+    }
     return manifest as unknown as DesignSourceManifest;
+  }
+
+  if ([...allowedUses].some((use) => prohibitedUses.has(use))) {
+    fail(
+      "DESIGN_SOURCE_POLICY_CONFLICT",
+      "a use cannot be both allowed and prohibited",
+    );
   }
 
   const needsClearLicense =
     allowedUses.has("code_transformation") ||
-    manifest.trainingPolicy === "license_permits";
+    manifest.trainingPolicy !== "prohibited";
   if (
     needsClearLicense &&
     (!nonBlank(manifest.licenseSpdx) || !nonBlank(manifest.licenseEvidencePath))
@@ -302,9 +332,22 @@ export function validateDesignSourceManifest(
     );
   }
 
+  if (
+    manifest.trainingPolicy === "platform_corpus" &&
+    manifest.sourceClass !== "platform_original"
+  ) {
+    fail(
+      "DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED",
+      "platform corpus training is limited to platform-original sources",
+    );
+  }
+
   if (manifest.sourceClass === "owned_export_authorized") {
     if (!validTimestamp(manifest.approvedAt)) {
-      fail("DESIGN_SOURCE_AUTHORIZATION_INVALID", "authorized export needs approvedAt");
+      fail(
+        "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+        "authorized export needs approvedAt",
+      );
     }
     assertOwnedAuthorization(
       manifest.ownerAuthorization,
@@ -320,7 +363,10 @@ export function validateDesignSourceManifest(
       "owner authorization is only valid for authorized exports",
     );
   }
-  if (manifest.approvedAt !== undefined && !validTimestamp(manifest.approvedAt)) {
+  if (
+    manifest.approvedAt !== undefined &&
+    !validTimestamp(manifest.approvedAt)
+  ) {
     fail("DESIGN_SOURCE_INVALID", "approvedAt is invalid");
   }
   return manifest as unknown as DesignSourceManifest;
