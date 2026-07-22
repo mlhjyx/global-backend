@@ -108,4 +108,35 @@ describe('未知 type/preset 真实 build fail-closed 负例', () => {
     );
     expect(out).toContain('UNKNOWN_STYLE_PRESET');
   }, 90000);
+
+  it('缺必填 props -> astro build fail-closed (COPY_SLOT_MISSING)', () => {
+    const spec = {
+      ...baseSpec,
+      pages: [
+        {
+          ...baseSpec.pages[0],
+          puck: { content: [{ type: 'HeroBanner', props: {} }], root: {} },
+        },
+      ],
+    };
+    const tmp = join(fixturesDir, '__tmp-missing-prop.json');
+    writeFileSync(tmp, JSON.stringify(spec));
+    let err: unknown;
+    try {
+      runBuild('fixtures/__tmp-missing-prop.json', 'dist-test-missing-prop');
+    } catch (e) {
+      err = e;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* noop */ }
+    }
+    expect(err).toBeDefined();
+    const out = String(
+      (err as { stderr?: Buffer; stdout?: Buffer; message?: string })
+        ?.stderr ||
+        (err as { stdout?: Buffer })?.stdout ||
+        (err as { message?: string })?.message ||
+        '',
+    );
+    expect(out).toContain('COPY_SLOT_MISSING');
+  }, 90000);
 });

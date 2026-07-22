@@ -4,6 +4,7 @@ import {
   buildStaticLocalePaths,
   localePageHref,
   makeT,
+  safeOptionalSlot,
   siteLocaleDirection,
 } from "./spec";
 
@@ -69,5 +70,21 @@ describe("M1-d renderer locale contract", () => {
       "/de-DE/products",
     );
     expect(localePageHref("home", "en", "en")).toBe("/");
+  });
+});
+
+describe("safeOptionalSlot (Base 可选 slot 精确探测，不吞异常)", () => {
+  const t = makeT(spec, "en");
+  it("缺 key (COPY_SLOT_MISSING) 返回空串", () => {
+    expect(safeOptionalSlot(t, "missing.key")).toBe("");
+  });
+  it("有 key 返回值", () => {
+    expect(safeOptionalSlot(t, "title")).toBe("English");
+  });
+  it("非 COPY_SLOT_MISSING 异常 rethrow（不静默吞）", () => {
+    const badT = () => {
+      throw new Error("SOME_OTHER_ERROR: x");
+    };
+    expect(() => safeOptionalSlot(badT, "k")).toThrow("SOME_OTHER_ERROR");
   });
 });

@@ -1,6 +1,6 @@
 ---
 import { themeToCssVars } from '../lib/themes';
-import { localePageHref, siteLocaleDirection } from '../lib/spec';
+import { localePageHref, siteLocaleDirection, safeOptionalSlot } from '../lib/spec';
 import '@fontsource/noto-sans/latin-400.css';
 import '@fontsource/noto-sans/latin-600.css';
 import '@fontsource/noto-sans/latin-700.css';
@@ -56,9 +56,7 @@ const homeHref = localePageHref('home', locale, spec.site.defaultLocale);
 const isHome = pageId === 'home';
 const brandName = spec.site.seoGlobal.siteName;
 // 联系方式/导航 slot 可选：缺 key 安全探测返回空（不 throw COPY_SLOT_MISSING），UI 按空值隐藏
-const safe = (k: string) => {
-  try { return t(k); } catch { return ''; }
-};
+const safe = (k: string) => safeOptionalSlot(t, k);
 const phone = safe('contact.phone');
 const whatsapp = safe('contact.whatsapp');
 const email = safe('contact.email');
