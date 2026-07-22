@@ -144,7 +144,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "contentBudget",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/content-budget.json",
-    sha256: "8518ed15f12122e7d12ef74e0cf5f36f3828e7a82cb303240561733562120b0a",
+    sha256: "b622ed183738fe4746c8ca37786f88b7906c670dfccb8c11552e6332b212c885",
   },
   "m1-e-a-cta-banner-accessibility": {
     artifactId: "m1-e-a-cta-banner-accessibility",
@@ -235,7 +235,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "contentBudget",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/HeroBanner/content-budget.json",
-    sha256: "633ace9c5e5cfb417c1331d8b717759c8d45c86cfb2f9bf6ab0b1fa2838da232",
+    sha256: "0ef054b7aa89109d7ffbc6361e8ec8f72cd04e7d5dc6c61ec3163ffc79a38fe8",
   },
   "m1-e-a-hero-banner-accessibility": {
     artifactId: "m1-e-a-hero-banner-accessibility",

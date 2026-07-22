@@ -1,27 +1,47 @@
 import { z } from "zod";
 
 export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
-  HeroBanner: Object.freeze({ headline: 60, subhead: 140, cta: 24 }),
+  HeroBanner: Object.freeze({
+    headline: 60,
+    headlineWords: 8,
+    subhead: 140,
+    cta: 24,
+    ctaWords: 4,
+  }),
   StatsBand: Object.freeze({ minItems: 2, maxItems: 4, value: 8, label: 24 }),
-  CtaBanner: Object.freeze({ headline: 60, cta: 24 }),
+  CtaBanner: Object.freeze({
+    headline: 60,
+    headlineWords: 8,
+    cta: 24,
+    ctaWords: 4,
+  }),
 });
 
 export type QualifiedContentBudgetComponent =
   keyof typeof QUALIFIED_COMPONENT_CONTENT_BUDGETS;
 
-const nonempty = (max: number) => z.string().trim().min(1).max(max);
+const boundedCopy = (maxCharacters: number, maxWords?: number) => {
+  const schema = z.string().trim().min(1).max(maxCharacters);
+  if (maxWords === undefined) return schema;
+  return schema.refine(
+    (value) => value.split(/\s+/u).length <= maxWords,
+    `Must contain at most ${maxWords} words`,
+  );
+};
 
 const contentSchemas = {
   HeroBanner: z
     .object({
-      headline: nonempty(
+      headline: boundedCopy(
         QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.headline,
+        QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.headlineWords,
       ),
-      subhead: nonempty(
+      subhead: boundedCopy(
         QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.subhead,
       ).optional(),
-      cta: nonempty(
+      cta: boundedCopy(
         QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.cta,
+        QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.ctaWords,
       ).optional(),
     })
     .strict(),
@@ -31,10 +51,10 @@ const contentSchemas = {
         .array(
           z
             .object({
-              value: nonempty(
+              value: boundedCopy(
                 QUALIFIED_COMPONENT_CONTENT_BUDGETS.StatsBand.value,
               ),
-              label: nonempty(
+              label: boundedCopy(
                 QUALIFIED_COMPONENT_CONTENT_BUDGETS.StatsBand.label,
               ),
             })
@@ -46,10 +66,14 @@ const contentSchemas = {
     .strict(),
   CtaBanner: z
     .object({
-      headline: nonempty(
+      headline: boundedCopy(
         QUALIFIED_COMPONENT_CONTENT_BUDGETS.CtaBanner.headline,
+        QUALIFIED_COMPONENT_CONTENT_BUDGETS.CtaBanner.headlineWords,
       ),
-      cta: nonempty(QUALIFIED_COMPONENT_CONTENT_BUDGETS.CtaBanner.cta),
+      cta: boundedCopy(
+        QUALIFIED_COMPONENT_CONTENT_BUDGETS.CtaBanner.cta,
+        QUALIFIED_COMPONENT_CONTENT_BUDGETS.CtaBanner.ctaWords,
+      ),
     })
     .strict(),
 } as const;

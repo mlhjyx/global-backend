@@ -1,4 +1,10 @@
-import type { SiteSpec, SiteSpecStylePreset, SiteSpecComponentType } from '@global/contracts';
+import {
+  QUALIFIED_COMPONENT_CONTENT_BUDGETS,
+  assertQualifiedComponentContentBudget,
+  type SiteSpec,
+  type SiteSpecComponentType,
+  type SiteSpecStylePreset,
+} from '@global/contracts';
 import type { IntakeInput } from './intake.service';
 
 /**
@@ -35,17 +41,53 @@ const FABRICATION_PATTERNS: RegExp[] = [
   /quality control/i, // 质检（R0-3）
   /export packaging/i, // 出口包装（R0-3）
 ];
-const POLISH_MAX_CHARS = 500;
+const POLISH_LIMITS = {
+  headline: {
+    characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.headline,
+    words: QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.headlineWords,
+  },
+  subhead: {
+    characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.subhead,
+  },
+  aboutBody: { characters: 500 },
+} as const;
+
+function fitsCopyLimit(
+  value: string,
+  limit: { characters: number; words?: number },
+): boolean {
+  return (
+    value.length <= limit.characters &&
+    (limit.words === undefined || value.split(/\s+/u).length <= limit.words)
+  );
+}
+
+function constrainCopy(
+  value: string,
+  limit: { characters: number; words?: number },
+): string {
+  const trimmed = value.trim();
+  const wordBounded =
+    limit.words === undefined
+      ? trimmed
+      : trimmed.split(/\s+/u).slice(0, limit.words).join(' ');
+  if (wordBounded.length <= limit.characters) return wordBounded;
+  return `${wordBounded.slice(0, limit.characters - 1).trimEnd()}…`;
+}
 
 /** 只放行"无法虚构事实"的润色文案；不合格字段静默回退确定性模板。 */
-export function sanitizePolish(polish: DemoCopyPolish | undefined): DemoCopyPolish {
+export function sanitizePolish(
+  polish: DemoCopyPolish | undefined,
+): DemoCopyPolish {
   if (!polish) return {};
   const out: DemoCopyPolish = {};
   for (const field of ['headline', 'subhead', 'aboutBody'] as const) {
     const value = polish[field];
     if (typeof value !== 'string') continue;
     const trimmed = value.trim();
-    if (trimmed === '' || trimmed.length > POLISH_MAX_CHARS) continue;
+    if (trimmed === '' || !fitsCopyLimit(trimmed, POLISH_LIMITS[field])) {
+      continue;
+    }
     if (FABRICATION_PATTERNS.some((re) => re.test(trimmed))) continue;
     out[field] = trimmed;
   }
@@ -76,7 +118,9 @@ const PRECISION_KEYWORDS =
 
 export function pickPreset(intake: IntakeInput): string {
   const haystack = [intake.industry, ...intake.products].join(' ');
-  return PRECISION_KEYWORDS.test(haystack) ? 'precision-light' : 'modern-industrial';
+  return PRECISION_KEYWORDS.test(haystack)
+    ? 'precision-light'
+    : 'modern-industrial';
 }
 
 function titleCase(words: string): string {
@@ -90,7 +134,9 @@ function listJoin(items: string[]): string {
 
 function regionName(alpha2: string): string {
   try {
-    return new Intl.DisplayNames(['en'], { type: 'region' }).of(alpha2) ?? alpha2;
+    return (
+      new Intl.DisplayNames(['en'], { type: 'region' }).of(alpha2) ?? alpha2
+    );
   } catch {
     return alpha2;
   }
@@ -98,10 +144,24 @@ function regionName(alpha2: string): string {
 
 export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
   const { siteName, intake, polish } = input;
-  const preset = (input.stylePreset ?? pickPreset(intake)) as SiteSpecStylePreset;
+  const safePolish = sanitizePolish(polish);
+  const preset = (input.stylePreset ??
+    pickPreset(intake)) as SiteSpecStylePreset;
   const products = intake.products;
   const marketNames = intake.targetMarkets.map(regionName);
   const primaryProduct = titleCase(products[0] ?? 'products');
+  const heroHeadline =
+    safePolish.headline ??
+    constrainCopy(
+      `${siteName} — ${primaryProduct} Supplier`,
+      POLISH_LIMITS.headline,
+    );
+  const heroSubhead =
+    safePolish.subhead ??
+    constrainCopy(
+      `We supply ${listJoin(products)} to customers in ${listJoin(marketNames)}.`,
+      POLISH_LIMITS.subhead,
+    );
 
   const en: Record<string, string> = {
     'nav.home': 'Home',
@@ -114,28 +174,30 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     'seo.products.desc': `Explore ${listJoin(products)} from ${siteName}.`,
     'seo.contact.title': `Contact — ${siteName}`,
     'seo.contact.desc': `Send an inquiry to ${siteName}.`,
-    'home.hero.headline': polish?.headline ?? `${siteName} — ${primaryProduct} Supplier`,
-    'home.hero.subhead':
-      polish?.subhead ??
-      `We supply ${listJoin(products)} to customers in ${listJoin(marketNames)}.`,
+    'home.hero.headline': heroHeadline,
+    'home.hero.subhead': heroSubhead,
     'home.hero.cta': 'Request a Quote',
     'products.title': 'Our Products',
     'about.title': `About ${siteName}`,
     'about.body':
-      polish?.aboutBody ??
+      safePolish.aboutBody ??
       `${siteName} supplies ${listJoin(products)} to customers in ${listJoin(marketNames)}. Tell us about your requirements and our team will get back to you with details and a tailored quotation.`,
     'process.title': 'How We Work',
     'process.s1.title': 'Requirement Review',
-    'process.s1.body': 'Share your requirements and our team confirms the details with you.',
+    'process.s1.body':
+      'Share your requirements and our team confirms the details with you.',
     'process.s2.title': 'Proposal & Quotation',
-    'process.s2.body': 'We prepare a tailored proposal and quotation based on your requirements.',
+    'process.s2.body':
+      'We prepare a tailored proposal and quotation based on your requirements.',
     'process.s3.title': 'Delivery & Support',
-    'process.s3.body': 'Order fulfilment, documentation and responsive after-sales support.',
+    'process.s3.body':
+      'Order fulfilment, documentation and responsive after-sales support.',
     'faq.title': 'Frequently Asked Questions',
     'faq.q1': 'Which markets do you serve?',
     'faq.a1': `We currently focus on customers in ${listJoin(marketNames)}.`,
     'faq.q2': 'How can I get a quotation?',
-    'faq.a2': 'Send your requirements via the inquiry form and we will reply with details.',
+    'faq.a2':
+      'Send your requirements via the inquiry form and we will reply with details.',
     'cta.headline': 'Tell us about your project',
     'cta.label': 'Get in touch',
     'inquiry.title': 'Send an Inquiry',
@@ -144,7 +206,8 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     'inquiry.field.email': 'Work email',
     'inquiry.field.message': 'Tell us about your requirements',
     'inquiry.submit': 'Send inquiry',
-    'inquiry.m0.note': 'The inquiry form goes live when your site is published.',
+    'inquiry.m0.note':
+      'The inquiry form goes live when your site is published.',
   };
 
   for (let i = 0; i < products.length; i += 1) {
@@ -160,7 +223,21 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
 
   const productGrid = (n: number): Block => ({
     type: 'ProductGrid',
-    props: { id: `ProductGrid-demo-${n}`, titleKey: 'products.title', products: productCards },
+    props: {
+      id: `ProductGrid-demo-${n}`,
+      titleKey: 'products.title',
+      products: productCards,
+    },
+  });
+
+  assertQualifiedComponentContentBudget('HeroBanner', {
+    headline: en['home.hero.headline'],
+    subhead: en['home.hero.subhead'],
+    cta: en['home.hero.cta'],
+  });
+  assertQualifiedComponentContentBudget('CtaBanner', {
+    headline: en['cta.headline'],
+    cta: en['cta.label'],
   });
 
   return {
@@ -196,7 +273,11 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
             productGrid(1),
             {
               type: 'AboutBlock',
-              props: { id: 'AboutBlock-demo-1', titleKey: 'about.title', bodyKey: 'about.body' },
+              props: {
+                id: 'AboutBlock-demo-1',
+                titleKey: 'about.title',
+                bodyKey: 'about.body',
+              },
             },
             {
               type: 'ProcessTimeline',
@@ -224,7 +305,10 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
       {
         id: 'products',
         path: '/products',
-        seo: { titleKey: 'seo.products.title', descriptionKey: 'seo.products.desc' },
+        seo: {
+          titleKey: 'seo.products.title',
+          descriptionKey: 'seo.products.desc',
+        },
         puck: {
           root: { props: {} },
           content: [
@@ -246,13 +330,20 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
       {
         id: 'contact',
         path: '/contact',
-        seo: { titleKey: 'seo.contact.title', descriptionKey: 'seo.contact.desc' },
+        seo: {
+          titleKey: 'seo.contact.title',
+          descriptionKey: 'seo.contact.desc',
+        },
         puck: {
           root: { props: {} },
           content: [
             {
               type: 'InquiryForm',
-              props: { id: 'InquiryForm-demo-1', titleKey: 'inquiry.title', subKey: 'inquiry.sub' },
+              props: {
+                id: 'InquiryForm-demo-1',
+                titleKey: 'inquiry.title',
+                subKey: 'inquiry.sub',
+              },
             },
           ],
         },

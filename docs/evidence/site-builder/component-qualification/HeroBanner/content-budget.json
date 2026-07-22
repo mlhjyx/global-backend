@@ -5,8 +5,10 @@
   "status": "pass",
   "limits": {
     "headlineMaxCharacters": 60,
+    "headlineMaxWords": 8,
     "subheadMaxCharacters": 140,
-    "ctaMaxCharacters": 24
+    "ctaMaxCharacters": 24,
+    "ctaMaxWords": 4
   },
   "assertions": [
     "Runtime rendering rejects resolved copy beyond the registered limits."
