@@ -252,6 +252,14 @@ describe("DesignSourceManifest contract", () => {
     ).toThrowError(/DESIGN_SOURCE_RESEARCH_ONLY/);
   });
 
+  it("requires external identity when a non-platform source contributes rule evidence", () => {
+    expect(() =>
+      validateDesignSourceManifest(
+        visualResearchSource({ sourceContributionGroup: "research-a" }),
+      ),
+    ).toThrowError(/DESIGN_SOURCE_INVALID/);
+  });
+
   it("exposes a stable machine-readable error code", () => {
     try {
       validateDesignSourceManifest(
