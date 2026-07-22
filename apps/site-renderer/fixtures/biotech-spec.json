@@ -36,6 +36,7 @@
           ]
         } },
         { "type": "StatsCountup", "props": { "id": "StatsCountup-1",
+          "headingKey": "stat.heading",
           "stats": [
             { "value": 24, "suffix": "/7", "labelKey": "stat.s1" },
             { "value": 180, "suffix": "k", "labelKey": "stat.s2" },
@@ -106,7 +107,7 @@
       "cap.c2.t": "Designed therapies, validated in days", "cap.c2.d": "A closed-loop pipeline turns hypothesis into wet-lab evidence inside a single working week - collapsing months of conventional screening.",
       "cap.c3.t": "Foundation models for living systems", "cap.c3.d": "Trained on petabytes of proprietary perturbation data, our models propose, prioritize, and re-design experiments without a human in the loop.",
 
-      "stat.s1": "Continuous experiment uptime", "stat.s2": "Cell-line assays per quarter", "stat.s3": "Therapeutic programs underway", "stat.s4": "Peer-reviewed publications",
+      "stat.heading": "Key figures", "stat.s1": "Continuous experiment uptime", "stat.s2": "Cell-line assays per quarter", "stat.s3": "Therapeutic programs underway", "stat.s4": "Peer-reviewed publications",
 
       "testi.eyebrow": "What partners say", "testi.platform": "Research partner",
       "testi.t1.q": "Neura/Bio collapsed a six-month screening campaign into a single week. The platform's reproducibility is genuinely unmatched.", "testi.t1.n": "Dr. Lena Fischer", "testi.t1.r": "Principal Investigator, Sanger",

@@ -20,6 +20,7 @@ const ctaSchema = strictObj({
   pageId: str.optional(),
   url: str.optional(),
 });
+const internalCtaSchema = strictObj({ labelKey: str, pageId: str });
 const statSchema = strictObj({ value: str, labelKey: str });
 const statCountupSchema = strictObj({
   value: z.number(),
@@ -174,12 +175,15 @@ export const COMPONENT_SCHEMAS = {
     titleKey: str,
     titleAccentKey: str,
     introKey: str,
-    primaryCta: ctaSchema,
+    serviceColumnKey: str,
+    fromColumnKey: str,
+    primaryCta: internalCtaSchema,
     rows: z.array(
       strictObj({ icon: str, serviceKey: str, noteKey: str, fromKey: str }),
-    ),
+    ).min(1).max(8),
     footnoteKey: str,
-    secondaryCta: ctaSchema.optional(),
+    secondaryCta: internalCtaSchema.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   Testimonials: obj({
     eyebrowKey: str,
@@ -246,7 +250,7 @@ export const COMPONENT_SCHEMAS = {
     allLabelKey: str.optional(),
     allPageId: str.optional(),
   }),
-  StatsCountup: obj({ stats: z.array(statCountupSchema) }),
+  StatsCountup: obj({ headingKey: str, stats: z.array(statCountupSchema).min(2).max(4), variant: technicalBaselineVariant.optional() }),
   MaterialsLibrary: obj({
     eyebrowKey: str,
     titleKey: str,
@@ -344,7 +348,7 @@ export const COMPONENT_SCHEMAS = {
     scrollKey: str,
     secondaryCta: ctaSchema.optional(),
   }),
-  ValueStrip: obj({ items: z.array(strictObj({ icon: str, labelKey: str })) }),
+  ValueStrip: obj({ headingKey: str, items: z.array(strictObj({ icon: str, labelKey: str })).min(2).max(6), variant: technicalBaselineVariant.optional() }),
   FeaturedSpotlight: obj({
     eyebrowKey: str,
     titleKey: str,
@@ -394,9 +398,10 @@ export const COMPONENT_SCHEMAS = {
     chapterKey: str,
     titleKey: str,
     bodyKey: str,
-    stats: z.array(statSchema),
-    clients: strArr,
+    stats: z.array(statSchema).min(2).max(4),
+    clients: strArr.min(1).max(8),
     clientsLabelKey: str,
+    variant: technicalBaselineVariant.optional(),
   }),
   ServicesEditorial: obj({
     chapterKey: str,
@@ -520,7 +525,8 @@ export const COMPONENT_SCHEMAS = {
     yearlyKey: str,
     saveKey: str,
     featuredKey: str,
-    ctaPrefixKey: str,
+    // Legacy SiteSpec input is accepted but has no renderer behavior after A.7.
+    ctaPrefixKey: str.optional(),
     perMoKey: str,
     plans: z.array(
       strictObj({
@@ -529,9 +535,15 @@ export const COMPONENT_SCHEMAS = {
         monthly: z.number(),
         yearly: z.number(),
         featured: z.boolean().optional(),
-        features: strArr,
-      }),
-    ),
+        featureKeys: strArr.min(1).max(8).optional(),
+        // Preserve existing 1.0.0 documents while assemblers emit featureKeys.
+        features: strArr.min(1).max(8).optional(),
+      }).refine(
+        (plan) => plan.featureKeys !== undefined || plan.features !== undefined,
+        "Must provide featureKeys or legacy features",
+      ),
+    ).min(1).max(4),
+    variant: technicalBaselineVariant.optional(),
   }),
   ArticleGrid: obj({
     eyebrowKey: str,

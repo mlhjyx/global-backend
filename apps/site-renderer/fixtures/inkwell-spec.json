@@ -56,6 +56,7 @@
           ]
         } },
         { "type": "StatsCountup", "props": { "id": "StatsCountup-1",
+          "headingKey": "stats.heading",
           "stats": [
             { "value": 12, "suffix": "+", "labelKey": "stats.years" },
             { "value": 850, "suffix": "+", "labelKey": "stats.projects" },
@@ -176,7 +177,7 @@
       "process.s3.title": "Print & Finish", "process.s3.body": "Offset or HP Indigo, then hand-finishing - foil, deboss, perfect bind or saddle stitch in-house.", "process.s3.meta": "Day 5-9",
       "process.s4.title": "Mail & Deliver", "process.s4.body": "Packed, addressed and dropped at USPS or freighted globally with end-to-end tracking.", "process.s4.meta": "Day 10+",
 
-      "stats.years": "Years pressing", "stats.projects": "Projects shipped", "stats.stocks": "Paper stocks", "stats.repeat": "Repeat clients",
+      "stats.heading": "Key figures", "stats.years": "Years pressing", "stats.projects": "Projects shipped", "stats.stocks": "Paper stocks", "stats.repeat": "Repeat clients",
 
       "materials.eyebrow": "PAPER LIBRARY · 42 STOCKS", "materials.title": "One quiet", "materials.titleAccent": "obsession.",
       "materials.intro": "A working library of cottons, recycleds and specialty papers we keep on the studio floor. Request a free swatch pack with your quote.",

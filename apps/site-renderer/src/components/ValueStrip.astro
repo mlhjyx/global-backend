@@ -1,32 +1,5 @@
 ---
-interface Item { icon: string; labelKey: string }
-interface Props {
-  items: Item[];
-  t: (key: string) => string;
-  alt?: boolean;
-}
-const { items = [], t, alt } = Astro.props;
+import { createRequire } from 'node:module'; interface Item {icon:string;labelKey:string} interface Props {headingKey:string;items:Item[];variant?:'technical-grid'|'quiet';t:(key:string)=>string;alt?:boolean;instanceId:string} const {assertQualifiedComponentContentBudget}=createRequire(import.meta.url)('@global/contracts');const {headingKey,items,variant='technical-grid',t,alt,instanceId}=Astro.props;const heading=t(headingKey);const values=items.map((item)=>({icon:item.icon,label:t(item.labelKey)}));assertQualifiedComponentContentBudget('ValueStrip',{heading,items:values});const headingId=`${instanceId}-value-strip-heading`;
 ---
-
-<section class:list={['block', 'value-strip', { alt }]}>
-  <div class="container">
-    <ul class="grid">
-      {items.map((v) => (
-        <li class="item">
-          <span class="icon"><i class={v.icon}></i></span>
-          <span class="label">{t(v.labelKey)}</span>
-        </li>
-      ))}
-    </ul>
-  </div>
-</section>
-
-<style>
-  .value-strip { padding: clamp(2rem, 4vw, 3rem) 0; border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); }
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; list-style: none; padding: 0; margin: 0; }
-  @media (min-width: 768px) { .grid { grid-template-columns: repeat(4, 1fr); gap: 2.5rem; } }
-  .item { display: flex; align-items: center; gap: 0.85rem; }
-  .icon { width: 3rem; height: 3rem; flex: none; display: grid; place-items: center; border-radius: 9999px; background: var(--c-surface-alt); color: var(--c-on-surface); transition: background .4s ease, color .4s ease, transform .4s ease; }
-  .item:hover .icon { background: var(--c-on-surface); color: var(--c-on-dark); transform: rotate(8deg); }
-  .label { font-family: var(--font-heading); font-weight: 600; font-size: 1.05rem; color: var(--c-on-surface); white-space: nowrap; }
-</style>
+<section class:list={['block','value-strip',`value-strip--${variant}`,{alt}]} data-component="ValueStrip" data-variant={variant} aria-labelledby={headingId}><div class="container"><h2 id={headingId} class="sr-only">{heading}</h2><ul>{values.map((value)=><li><span class="icon" aria-hidden="true"><i class={value.icon}></i></span><span>{value.label}</span></li>)}</ul></div></section>
+<style>.value-strip{padding:clamp(2rem,4vw,3rem) 0;border-block:1px solid var(--c-border)}ul{display:grid;grid-template-columns:repeat(2,1fr);gap:1.5rem;list-style:none;padding:0;margin:0}@media(min-width:768px){ul{grid-template-columns:repeat(4,1fr);gap:2.5rem}}li{display:flex;align-items:center;gap:.85rem;font-weight:600}.icon{width:3rem;height:3rem;display:grid;place-items:center;border-radius:9999px;background:var(--c-surface-alt)}.value-strip--technical-grid .icon{border:1px solid var(--c-border)}</style>

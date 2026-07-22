@@ -26,6 +26,7 @@
           "scrollKey": "hero.scroll"
         } },
         { "type": "ValueStrip", "props": { "id": "ValueStrip-1",
+          "headingKey": "val.heading",
           "items": [
             { "icon": "ri-hand-heart-line", "labelKey": "val.v1" },
             { "icon": "ri-plant-line", "labelKey": "val.v2" },
@@ -107,7 +108,7 @@
       "hero.eyebrow": "Est. in the Midwest", "hero.h1l1": "Made slow.", "hero.h1l2": "Kept long.",
       "hero.ctaShop": "Shop the collection", "hero.ctaMakers": "The makers", "hero.scroll": "Scroll",
 
-      "val.v1": "Hand-finished", "val.v2": "Natural fibers", "val.v3": "Free over $95", "val.v4": "Recycled muslin",
+      "val.heading": "Values", "val.v1": "Hand-finished", "val.v2": "Natural fibers", "val.v3": "Free over $95", "val.v4": "Recycled muslin",
 
       "feat.eyebrow": "This season", "feat.title": "Featured pieces", "feat.all": "Browse the full shop",
       "feat.p1.name": "Heritage Patchwork Quilt", "feat.p1.cat": "Textiles", "feat.p1.price": "$218",

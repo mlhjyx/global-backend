@@ -24,8 +24,35 @@ describe("M1-e-A technical baseline component contract", () => {
     ["ProcessSteps", { eyebrowKey: "process.eyebrow", titleKey: "process.title", titleAccentKey: "process.accent", introKey: "process.intro", steps: [{ num: "01", icon: "ri-search-line", titleKey: "process.one.title", bodyKey: "process.one.body" }, { num: "02", icon: "ri-file-list-line", titleKey: "process.two.title", bodyKey: "process.two.body" }], variant: "technical-grid" }],
     ["ArticleGrid", { eyebrowKey: "articles.eyebrow", titleKey: "articles.title", titleLine2Key: "articles.line2", introKey: "articles.intro", items: [{ cat: "Guide", titleKey: "articles.one.title", descKey: "articles.one.description", readTime: "4 min" }], variant: "technical-grid" }],
     ["StatementBlock", { labelKey: "statement.label", statementKey: "statement.body", variant: "technical-grid" }],
+    ["PricingTable", { eyebrowKey: "pricing.eyebrow", titleKey: "pricing.title", titleAccentKey: "pricing.accent", introKey: "pricing.intro", serviceColumnKey: "pricing.serviceColumn", fromColumnKey: "pricing.fromColumn", primaryCta: { labelKey: "pricing.contact", pageId: "contact" }, rows: [{ icon: "ri-settings-line", serviceKey: "pricing.service", noteKey: "pricing.note", fromKey: "pricing.from" }], footnoteKey: "pricing.footnote", variant: "technical-grid" }],
+    ["StatsCountup", { headingKey: "stats.heading", stats: [{ value: 24, labelKey: "stats.hours" }, { value: 99, suffix: "%", labelKey: "stats.uptime" }], variant: "technical-grid" }],
+    ["LedgerStats", { chapterKey: "ledger.chapter", titleKey: "ledger.title", bodyKey: "ledger.body", stats: [{ value: "24", labelKey: "ledger.hours" }, { value: "6", labelKey: "ledger.regions" }], clients: ["ISO 9001"], clientsLabelKey: "ledger.clients", variant: "technical-grid" }],
+    ["PricingTiers", { eyebrowKey: "tiers.eyebrow", titleKey: "tiers.title", titleLine2Key: "tiers.line2", subKey: "tiers.sub", monthlyKey: "tiers.monthly", yearlyKey: "tiers.yearly", saveKey: "tiers.save", featuredKey: "tiers.featured", perMoKey: "tiers.perMonth", plans: [{ nameKey: "tiers.one.name", taglineKey: "tiers.one.tagline", monthly: 29, yearly: 290, featureKeys: ["tiers.one.feature"] }], variant: "technical-grid" }],
+    ["ValueStrip", { headingKey: "value.heading", items: [{ icon: "ri-shield-check-line", labelKey: "value.quality" }, { icon: "ri-time-line", labelKey: "value.response" }], variant: "technical-grid" }],
   ])("%s accepts the technical-grid variant", (type, props) => {
     expect(() => validateBlock({ type, props } as never)).not.toThrow();
+  });
+
+  it("keeps the legacy PricingTiers CTA label input parseable without rendering a false action", () => {
+    expect(() =>
+      validateBlock({
+        type: "PricingTiers",
+        props: {
+          eyebrowKey: "tiers.eyebrow",
+          titleKey: "tiers.title",
+          titleLine2Key: "tiers.line2",
+          subKey: "tiers.sub",
+          monthlyKey: "tiers.monthly",
+          yearlyKey: "tiers.yearly",
+          saveKey: "tiers.save",
+          featuredKey: "tiers.featured",
+          ctaPrefixKey: "tiers.legacyCta",
+          perMoKey: "tiers.perMonth",
+          plans: [{ nameKey: "tiers.one.name", taglineKey: "tiers.one.tagline", monthly: 29, yearly: 290, features: ["Legacy feature"] }],
+          variant: "technical-grid",
+        },
+      } as never),
+    ).not.toThrow();
   });
 
   it.each([
@@ -43,6 +70,11 @@ describe("M1-e-A technical baseline component contract", () => {
     ["ServicesGrid", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", introKey: "services.intro", services: [{ icon: "ri-settings-line", titleKey: "services.one.title", descKey: "services.one.description" }], bookLabelKey: "cta.book", bookPageId: "book" }],
     ["TrustSplit", { eyebrowKey: "trust.eyebrow", titleKey: "trust.title", titleAccentKey: "trust.accent", introKey: "trust.intro", stats: [{ value: "24h", labelKey: "trust.one" }, { value: "ISO", labelKey: "trust.two" }], badges: [], portraitNameKey: "trust.name", portraitRoleKey: "trust.role", portraitPageId: "about" }],
     ["ArticleGrid", { eyebrowKey: "articles.eyebrow", titleKey: "articles.title", titleLine2Key: "articles.line2", introKey: "articles.intro", items: [{ cat: "Guide", titleKey: "articles.one.title", descKey: "articles.one.description", readTime: "4 min" }], readKey: "cta.read" }],
+    ["PricingTable", { eyebrowKey: "pricing.eyebrow", titleKey: "pricing.title", titleAccentKey: "pricing.accent", introKey: "pricing.intro", serviceColumnKey: "pricing.serviceColumn", fromColumnKey: "pricing.fromColumn", primaryCta: { labelKey: "pricing.contact" }, rows: [{ icon: "ri-settings-line", serviceKey: "pricing.service", noteKey: "pricing.note", fromKey: "pricing.from" }], footnoteKey: "pricing.footnote" }],
+    ["StatsCountup", { stats: [{ value: "24", labelKey: "stats.hours" }] }],
+    ["LedgerStats", { chapterKey: "ledger.chapter", titleKey: "ledger.title", bodyKey: "ledger.body", stats: [{ value: "24", labelKey: "ledger.hours" }, { value: "6", labelKey: "ledger.regions" }], clients: [] }],
+    ["PricingTiers", { eyebrowKey: "tiers.eyebrow", titleKey: "tiers.title", titleLine2Key: "tiers.line2", subKey: "tiers.sub", monthlyKey: "tiers.monthly", yearlyKey: "tiers.yearly", saveKey: "tiers.save", featuredKey: "tiers.featured", perMoKey: "tiers.perMonth", plans: [{ nameKey: "tiers.one.name", taglineKey: "tiers.one.tagline", monthly: 29, yearly: 290, features: [] }], ctaPrefixKey: "tiers.cta" }],
+    ["ValueStrip", { headingKey: "value.heading", items: [{ icon: "ri-shield-check-line", labelKey: "value.quality" }], variant: "glass-orbit" }],
   ])("%s rejects props outside its qualified item cardinality", (type, props) => {
     expect(() => validateBlock({ type, props } as never)).toThrow(
       `INVALID_BLOCK_PROPS: ${type}`,
@@ -60,6 +92,11 @@ describe("M1-e-A technical baseline component contract", () => {
     ["FeatureCards", { eyebrow: "What the team receives", title: "Clear technical decisions", intro: "Focused information supports comparison.", items: [{ title: "Duty-point review", description: "Operating conditions are documented." }, { title: "Traceable documents", description: "Records are agreed against scope." }] }],
     ["TechSystems", { chapter: "Technical systems", title: "Built around operating duty", intro: "Relevant limits remain visible.", systems: [{ label: "Hydraulic", title: "Pressure-aware selection", description: "Duty data is reviewed.", metric: "16", suffix: "bar", metricLabel: "Reference pressure" }, { label: "Materials", title: "Material compatibility", description: "Choices reflect process media.", metric: "320", suffix: "°C", metricLabel: "Reference temperature" }] }],
     ["MapLocation", { title: "Engineering office", address: "Industrial Estate, Sheffield, United Kingdom" }],
+    ["PricingTable", { eyebrow: "Pricing", title: "Commercial scope", accent: "made legible", intro: "Compare documented service options.", serviceColumn: "Service", fromColumn: "From", primaryCta: "Contact", footnote: "Scope is confirmed before release.", rows: [{ icon: "ri-settings-line", service: "Duty review", note: "Operating conditions are recorded.", from: "From €480" }] }],
+    ["StatsCountup", { heading: "Key figures", stats: [{ value: "24", label: "Hour response" }, { value: "99%", label: "Documented scope" }] }],
+    ["LedgerStats", { chapter: "Delivery ledger", title: "Traceable commercial work", body: "Each request has an accountable record.", stats: [{ value: "24", label: "Hour response" }, { value: "6", label: "Operating regions" }], clients: ["ISO 9001"], clientsLabel: "Working standards" }],
+    ["PricingTiers", { eyebrow: "Pricing", title: "Choose a", titleLine2: "documented scope", sub: "Static pricing keeps comparison readable.", monthlyLabel: "Monthly", yearlyLabel: "Annual", save: "Save 15%", featured: "Most selected", perMo: "per month", plans: [{ name: "Review", tagline: "For an initial technical assessment.", monthly: "29", yearly: "290", featured: false, features: ["Duty-point review"] }] }],
+    ["ValueStrip", { heading: "Values", items: [{ icon: "ri-shield-check-line", label: "Traceable scope" }, { icon: "ri-time-line", label: "Clear response target" }] }],
   ])("%s accepts bounded qualified content", (type, content) => {
     expect(() => assertQualifiedComponentContentBudget(type, content)).not.toThrow();
   });
@@ -373,6 +410,11 @@ describe("M1-e-A technical baseline component contract", () => {
       "FaqAccordion",
       { title: "FAQ", items: [{ question: "Q", answer: "A".repeat(401) }] },
     ],
+    ["PricingTable", { eyebrow: "Pricing", title: "Commercial scope", accent: "made legible", intro: "Compare documented service options.", serviceColumn: "Service", fromColumn: "From", primaryCta: "Contact", footnote: "F".repeat(161), rows: [{ icon: "ri-settings-line", service: "Duty review", note: "Operating conditions are recorded.", from: "From €480" }] }],
+    ["StatsCountup", { heading: "Key figures", stats: [{ value: "24", label: "Hour response" }, { value: "99%", label: "L".repeat(49) }] }],
+    ["LedgerStats", { chapter: "Delivery ledger", title: "Traceable commercial work", body: "Each request has an accountable record.", stats: [{ value: "24", label: "Hour response" }, { value: "6", label: "Operating regions" }], clients: [], clientsLabel: "Working standards" }],
+    ["PricingTiers", { eyebrow: "Pricing", title: "Choose a", titleLine2: "documented scope", sub: "Static pricing keeps comparison readable.", monthlyLabel: "Monthly", yearlyLabel: "Annual", save: "Save 15%", featured: "Most selected", perMo: "per month", plans: [{ name: "Review", tagline: "For an initial technical assessment.", monthly: "29", yearly: "290", featured: false, features: [] }] }],
+    ["ValueStrip", { heading: "Values", items: [{ icon: "ri-shield-check-line", label: "Traceable scope" }, { icon: "ri-time-line", label: "Clear response target" }, { icon: "ri-file-list-line", label: "L".repeat(81) }] }],
   ])("%s rejects copy beyond its content budget", (type, content) => {
     expect(() => assertQualifiedComponentContentBudget(type, content)).toThrow(
       `COMPONENT_CONTENT_BUDGET_EXCEEDED: ${type}`,

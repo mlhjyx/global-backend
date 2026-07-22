@@ -76,6 +76,7 @@ describe('R1 release contract gate', () => {
     expect(R1_RENDERER_COMPONENT_TYPES).toEqual([
       'AboutBlock',
       'ArticleGrid',
+      'LedgerStats',
       'CertWall',
       'CtaBanner',
       'FeatureCards',
@@ -85,14 +86,18 @@ describe('R1 release contract gate', () => {
       'MapLocation',
       'LogoMarquee',
       'ProcessTimeline',
+      'PricingTable',
+      'PricingTiers',
       'ProcessSteps',
       'ProductGrid',
       'ServicesGrid',
       'StatsBand',
+      'StatsCountup',
       'StatementBlock',
       'TechSystems',
       'Testimonials',
       'TrustSplit',
+      'ValueStrip',
     ]);
     expect(() =>
       assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
@@ -102,18 +107,41 @@ describe('R1 release contract gate', () => {
   it('blocks a registered gallery component until M1-e-A promotes it', () => {
     expect(() =>
       assertReleaseContract(
-        spec(['PricingTable'], {
-          eyebrowKey: 'pricing.eyebrow',
-          titleKey: 'pricing.title',
-          titleAccentKey: 'pricing.accent',
-          introKey: 'pricing.intro',
-          primaryCta: { labelKey: 'pricing.contact' },
-          rows: [],
-          footnoteKey: 'pricing.footnote',
+        spec(['AreaGallery'], {
+          eyebrowKey: 'areas.eyebrow',
+          titleKey: 'areas.title',
+          titleAccentKey: 'areas.accent',
+          areas: [{ name: 'North', noteKey: 'areas.north' }],
         }),
         '1.0.0',
       ),
-    ).toThrow('SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: PricingTable');
+    ).toThrow('SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: AreaGallery');
+  });
+
+  it('rejects a PricingTable CTA whose internal target page does not exist', () => {
+    const pricing = spec(['PricingTable'], {
+      eyebrowKey: 'pricing.eyebrow',
+      titleKey: 'pricing.title',
+      titleAccentKey: 'pricing.accent',
+      introKey: 'pricing.intro',
+      serviceColumnKey: 'pricing.serviceColumn',
+      fromColumnKey: 'pricing.fromColumn',
+      primaryCta: { labelKey: 'pricing.contact', pageId: 'missing' },
+      rows: [
+        {
+          icon: 'ri-settings-line',
+          serviceKey: 'pricing.service',
+          noteKey: 'pricing.note',
+          fromKey: 'pricing.from',
+        },
+      ],
+      footnoteKey: 'pricing.footnote',
+      variant: 'technical-grid',
+    });
+
+    expect(() => assertReleaseContract(pricing, '1.0.0')).toThrow(
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: PricingTable.primaryCta.pageId=missing',
+    );
   });
 
   it('rejects a free-form HeroBanner variant before release publication', () => {

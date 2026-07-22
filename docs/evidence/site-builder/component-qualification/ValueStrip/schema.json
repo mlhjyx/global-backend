@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"ValueStrip","status":"pass","part":"schema","assertions":["非交互的语义价值列表。 Props、数量和 variant 均为封闭合同。"],"sources":["packages/contracts/src/site-builder/component-schema.ts","apps/site-renderer/src/components/ValueStrip.astro"],"verification":["pnpm --filter @global/site-renderer test -- fixture-build.spec.ts"]}
