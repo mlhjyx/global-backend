@@ -5,7 +5,9 @@ import {
   validateDesignSourceManifest,
 } from "@global/contracts";
 
-function authorizedSource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function authorizedSource(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
     id: "owned-precision-system",
@@ -48,14 +50,20 @@ function authorizedSource(overrides: Record<string, unknown> = {}): Record<strin
   };
 }
 
-function visualResearchSource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function visualResearchSource(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
     id: "research-layout-study",
     title: "Visual layout study",
     sourceClass: "visual_research_only",
     capturedAt: "2026-07-22T00:00:00.000Z",
-    allowedUses: ["visual_analysis", "token_abstraction", "structure_abstraction"],
+    allowedUses: [
+      "visual_analysis",
+      "token_abstraction",
+      "structure_abstraction",
+    ],
     prohibitedUses: ["training", "code_transformation"],
     retentionPolicy: "ephemeral_source",
     trainingPolicy: "prohibited",
@@ -102,10 +110,48 @@ describe("DesignSourceManifest contract", () => {
     ).toThrowError(/DESIGN_SOURCE_POLICY_CONFLICT/);
   });
 
+  it("rejects unknown fields at every source-manifest record boundary", () => {
+    expect(() =>
+      validateDesignSourceManifest(
+        visualResearchSource({ rawHtml: "<main>source page</main>" }),
+      ),
+    ).toThrowError(/DESIGN_SOURCE_INVALID/);
+    expect(() =>
+      validateDesignSourceManifest(
+        visualResearchSource({
+          externalAssets: [
+            {
+              kind: "image",
+              source: "research-page",
+              disposition: "remove",
+              screenshotData: "base64-source-content",
+            },
+          ],
+        }),
+      ),
+    ).toThrowError(/DESIGN_SOURCE_INVALID/);
+    expect(() =>
+      validateDesignSourceManifest(
+        authorizedSource({
+          ownerAuthorization: {
+            ...((authorizedSource().ownerAuthorization as Record<
+              string,
+              unknown
+            >) ?? {}),
+            rawCopy: "source content",
+          },
+        }),
+      ),
+    ).toThrowError(/DESIGN_SOURCE_AUTHORIZATION_INVALID/);
+  });
+
   it("rejects expired authorizations and training without explicit training coverage", () => {
     const expired = authorizedSource({
       ownerAuthorization: {
-        ...((authorizedSource().ownerAuthorization as Record<string, unknown>) ?? {}),
+        ...((authorizedSource().ownerAuthorization as Record<
+          string,
+          unknown
+        >) ?? {}),
         validity: { kind: "expires", expiresAt: "2026-07-21T23:59:59.000Z" },
       },
     });
@@ -115,7 +161,10 @@ describe("DesignSourceManifest contract", () => {
 
     const trainingNotCovered = authorizedSource({
       ownerAuthorization: {
-        ...((authorizedSource().ownerAuthorization as Record<string, unknown>) ?? {}),
+        ...((authorizedSource().ownerAuthorization as Record<
+          string,
+          unknown
+        >) ?? {}),
         covers: {
           aiSiteBuilder: true,
           derivativeComponents: true,
@@ -181,7 +230,9 @@ describe("DesignSourceManifest contract", () => {
 
   it("exposes a stable machine-readable error code", () => {
     try {
-      validateDesignSourceManifest(visualResearchSource({ trainingPolicy: "platform_corpus" }));
+      validateDesignSourceManifest(
+        visualResearchSource({ trainingPolicy: "platform_corpus" }),
+      );
     } catch (error) {
       expect(error).toBeInstanceOf(DesignSourceManifestContractError);
       expect((error as DesignSourceManifestContractError).code).toBe(

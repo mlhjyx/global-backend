@@ -257,6 +257,15 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_RULE_PROVENANCE_UNVERIFIED/);
   });
 
+  it("rejects source-derived content in a DesignRule summary", () => {
+    expect(() =>
+      validateDesignRule(
+        rule({ summary: "<h1>Copied source headline</h1>" }),
+        ruleValidationContext(),
+      ),
+    ).toThrowError(/DESIGN_RULE_FORBIDDEN_CONTENT/);
+  });
+
   it("freezes validated rule provenance into the catalog digest", () => {
     const value = catalog();
     const sourceManifests = ruleValidationContext().sourceManifests;
@@ -309,6 +318,43 @@ describe("DI-0 clean-room contracts and static catalog", () => {
         }),
       ),
     ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_BUDGET/);
+  });
+
+  it("rejects a demo visual pack that the approved family does not list", () => {
+    const value = catalog();
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          assetStrategy: {
+            availableRoles: ["hero"],
+            demoVisualPackId: "unapproved-pack",
+            allowGeneratedImages: false,
+            allowVideo: false,
+          },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_DEMO_VISUAL_PACK/);
+  });
+
+  it("returns contract errors instead of prototype lookups for brief selections", () => {
+    const value = catalog();
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          blueprintIds: { toString: "unexpected" },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_BLUEPRINT/);
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          componentVariantOverrides: { toString: "unexpected" },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_VARIANT/);
   });
 
   it("keeps draft families unavailable even when their immutable digest matches", () => {
