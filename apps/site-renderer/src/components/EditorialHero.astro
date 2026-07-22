@@ -1,133 +1,31 @@
 ---
-import { localePageHref } from '../lib/spec';
+import { createRequire } from 'node:module';
+import { localeQualifiedPageHref } from '../lib/page-reference';
 
 interface Props {
-  eyebrowKey: string;
-  headlineKey: string;
-  ctaLabelKey: string;
-  ctaPageId?: string;
-  statusKey: string;
-  scrollKey: string;
-  t: (key: string) => string;
-  locale: string;
-  defaultLocale: string;
+  eyebrowKey: string; headlineKey: string; ctaLabelKey: string; ctaPageId?: string;
+  statusKey: string; scrollKey: string; variant?: 'technical-grid' | 'quiet';
+  t: (key: string) => string; locale: string; defaultLocale: string;
+  instanceId: string; pagePathById?: Record<string, string>;
 }
-const { eyebrowKey, headlineKey, ctaLabelKey, ctaPageId = 'services', statusKey, scrollKey, t, locale, defaultLocale } = Astro.props;
-const ctaHref = localePageHref(ctaPageId, locale, defaultLocale);
-const text = t(headlineKey);
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { eyebrowKey, headlineKey, ctaLabelKey, ctaPageId = 'services', statusKey, scrollKey, variant = 'technical-grid', t, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
+const content = { eyebrow: t(eyebrowKey), headline: t(headlineKey), cta: t(ctaLabelKey), status: t(statusKey), scroll: t(scrollKey) };
+assertQualifiedComponentContentBudget('EditorialHero', content);
+const headingId = `${instanceId}-editorial-hero-heading`;
+const ctaHref = localeQualifiedPageHref(ctaPageId, pagePathById, locale, defaultLocale);
 ---
 
-<section class="editorial-hero">
-  <div class="band">
-    <div class="band-bg" aria-hidden="true"></div>
-    <div class="band-overlay"></div>
-    <div class="status">
-      <span class="pulse"></span>
-      <span>{t(statusKey)}</span>
-    </div>
-    <div class="scroll-cue">
-      <span>{t(scrollKey)}</span>
-      <span class="scroll-line"></span>
-    </div>
-  </div>
-
-  <div class="paper-band">
-    <div class="paper-inner">
-      <div class="left">
-        <p class="eyebrow-flat">{t(eyebrowKey)}</p>
-        <h1 class="display" data-scramble aria-label={text}>
-          <span class="scramble-host" data-text={text}></span>
-        </h1>
-      </div>
-      <a class="pill" href={ctaHref}>
-        {t(ctaLabelKey)}<i class="ri-arrow-right-up-line"></i>
-      </a>
-    </div>
+<section class:list={['editorial-hero', `editorial-hero--${variant}`]} data-component="EditorialHero" data-variant={variant} aria-labelledby={headingId}>
+  <div class="texture" aria-hidden="true"></div>
+  <div class="container content">
+    <p class="eyebrow">{content.eyebrow}</p>
+    <p class="status">{content.status}</p>
+    <h1 id={headingId}>{content.headline}</h1>
+    <div class="footer"><a href={ctaHref}>{content.cta}<span aria-hidden="true">→</span></a><p>{content.scroll}</p></div>
   </div>
 </section>
 
-<script>
-  const host = document.querySelector<HTMLElement>('[data-scramble] .scramble-host');
-  const text = host?.getAttribute('data-text') ?? '';
-  if (host && text) {
-    const POOL = '!<>-_\\/[]{}-=+*^?#01ABCXYZ';
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const render = (chars: string[]) => { host.textContent = chars.join(''); };
-    if (reduced) { render(Array.from(text)); }
-    else {
-      const final = Array.from(text);
-      const cur = final.map((c) => (c === ' ' ? ' ' : POOL[Math.floor(Math.random() * POOL.length)]));
-      render(cur);
-      final.forEach((_, i) => {
-        const startAt = 200 + i * 18;
-        for (let cyc = 0; cyc < 4; cyc++) {
-          setTimeout(() => {
-            if (cur[i] !== final[i] && final[i] !== ' ') cur[i] = POOL[Math.floor(Math.random() * POOL.length)];
-            render(cur);
-          }, startAt + cyc * 45);
-        }
-        setTimeout(() => { cur[i] = final[i]; render(cur); }, startAt + 4 * 45);
-      });
-    }
-  }
-</script>
-
 <style>
-  .editorial-hero { background: var(--c-surface); }
-  .band { position: relative; height: 68vh; min-height: 520px; overflow: hidden; background: var(--c-primary); }
-  .band-bg {
-    position: absolute; inset: 0;
-    background:
-      radial-gradient(60% 50% at 30% 30%, color-mix(in srgb, var(--c-accent) 18%, transparent), transparent 60%),
-      linear-gradient(120deg, #1a1a1a, #000 60%, #111);
-    animation: ken-burns 18s ease-in-out infinite alternate;
-  }
-  @keyframes ken-burns { 0% { transform: scale(1.08); } 100% { transform: scale(1.18) translate(-1.5%, -1.5%); } }
-  @media (prefers-reduced-motion: reduce) { .band-bg { animation: none; } }
-  .band-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.2), transparent 40%, rgba(0,0,0,0.2)); }
-  .status {
-    position: absolute; left: clamp(1.5rem, 5vw, 3rem); bottom: 2rem;
-    display: flex; align-items: center; gap: 0.75rem;
-    color: var(--c-on-dark); font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase;
-    animation: floatY 5s ease-in-out infinite;
-  }
-  @keyframes floatY { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-  .pulse { width: 10px; height: 10px; border-radius: 9999px; background: var(--c-accent); animation: pulse-ring 2.4s ease-out infinite; }
-  @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-accent) 45%, transparent); } 70% { box-shadow: 0 0 0 14px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-  .scroll-cue {
-    position: absolute; right: clamp(1.5rem, 5vw, 3rem); bottom: 2rem;
-    display: flex; align-items: center; gap: 0.5rem;
-    color: rgba(255,255,255,0.7); font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase;
-  }
-  .scroll-line { display: block; width: 1px; height: 2.5rem; background: rgba(255,255,255,0.6); transform-origin: top; animation: draw-y 1.2s ease-out both; }
-  @keyframes draw-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-
-  .paper-band { background: var(--c-surface); padding: clamp(2rem, 5vw, 3rem) clamp(1.5rem, 5vw, 3rem) clamp(4rem, 8vw, 6rem); }
-  .paper-inner { display: flex; flex-direction: column; gap: 2.5rem; }
-  @media (min-width: 1024px) { .paper-inner { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
-  .eyebrow-flat { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.18em; color: var(--c-on-surface); margin-bottom: 1.5rem; }
-  .display {
-    font-family: var(--font-heading);
-    font-weight: 500;
-    font-size: clamp(3.5rem, 12vw, 9rem);
-    line-height: 0.95;
-    letter-spacing: -0.03em;
-    color: var(--c-on-surface);
-    max-width: 1100px;
-  }
-  .scramble-host { white-space: pre; }
-  .pill {
-    align-self: flex-start;
-    display: inline-flex; align-items: center; gap: 0.5rem;
-    border: 1px solid var(--c-on-surface);
-    color: var(--c-on-surface);
-    padding: 0.75rem 1.5rem;
-    border-radius: 9999px;
-    font-size: 0.875rem;
-    transition: background .3s ease, color .3s ease;
-    white-space: nowrap;
-  }
-  .pill:hover { background: var(--c-on-surface); color: var(--c-surface); }
-  .pill i { transition: transform .4s cubic-bezier(.22,1,.36,1); }
-  .pill:hover i { transform: translate(2px, -2px); }
+  .editorial-hero{position:relative;overflow:hidden;background:var(--c-primary);color:var(--c-on-primary);min-height:min(42rem,78vh);display:grid;align-items:end}.texture{position:absolute;inset:0;background:radial-gradient(55% 58% at 74% 24%,color-mix(in srgb,var(--c-accent) 20%,transparent),transparent 70%),linear-gradient(115deg,transparent 0 48%,color-mix(in srgb,var(--c-on-primary) 6%,transparent) 48% 49%,transparent 49%);background-size:auto,2.2rem 2.2rem}.content{position:relative;padding-top:8rem;padding-bottom:3rem}.eyebrow,.status{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase}.status{margin-top:3rem;color:color-mix(in srgb,var(--c-on-primary) 74%,transparent)}h1{margin-top:.8rem;max-width:13ch;font-size:clamp(3rem,9vw,7.5rem);line-height:.94;letter-spacing:-.04em}.footer{margin-top:3rem;display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap}.footer a{min-height:2.75rem;display:inline-flex;align-items:center;gap:.55rem;padding:.55rem 1rem;border:1px solid currentColor;color:inherit}.footer a:hover,.footer a:focus-visible{background:var(--c-on-primary);color:var(--c-primary)}.footer p{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--c-on-primary) 72%,transparent)}.editorial-hero--quiet{background:var(--c-surface);color:var(--c-on-surface)}.editorial-hero--quiet .texture{background:linear-gradient(90deg,color-mix(in srgb,var(--c-border) 35%,transparent) 1px,transparent 1px);background-size:2rem 2rem}.editorial-hero--quiet .footer a:hover,.editorial-hero--quiet .footer a:focus-visible{background:var(--c-on-surface);color:var(--c-surface)}
 </style>

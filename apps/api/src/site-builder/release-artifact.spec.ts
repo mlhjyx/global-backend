@@ -78,6 +78,8 @@ describe('R1 release contract gate', () => {
       'ArticleGrid',
       'AreaMarquee',
       'AreaGallery',
+      'DishesShowcase',
+      'EditorialHero',
       'CollectionCards',
       'LedgerStats',
       'CertWall',
@@ -98,9 +100,11 @@ describe('R1 release contract gate', () => {
       'ProductGrid',
       'ProductShowcaseAlt',
       'ProjectsGrid',
+      'PhotoGallery',
       'ServicesGrid',
       'ServicesDark',
       'ServiceRows',
+      'SplitAbout',
       'StatsBand',
       'StatsCountup',
       'StatementBlock',
@@ -108,6 +112,7 @@ describe('R1 release contract gate', () => {
       'Testimonials',
       'TrustSplit',
       'ValueStrip',
+      'WarmHero',
     ]);
     expect(() =>
       assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
@@ -177,6 +182,15 @@ describe('R1 release contract gate', () => {
         items: [], ctaPrimaryLabelKey: 'materials.cta', ctaSecondaryLabelKey: 'materials.more',
       },
       'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: MaterialsLibrary.ctaPrimaryPageId.pageId=contact',
+    ],
+    [
+      'DishesShowcase.defaultPageId',
+      'DishesShowcase',
+      {
+        eyebrowKey: 'dishes.eyebrow', titleKey: 'dishes.title', titleAccentKey: 'dishes.accent',
+        dishes: [], variant: 'technical-grid',
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: DishesShowcase.addPageId.pageId=services',
     ],
     [
       'MaterialsLibrary.ctaPrimaryPageId',

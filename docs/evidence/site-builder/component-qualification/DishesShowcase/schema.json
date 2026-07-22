@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"DishesShowcase","status":"pass","part":"schema","assertions":["Closed props bound semantic dish cards, optional CTA and controlled variants."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

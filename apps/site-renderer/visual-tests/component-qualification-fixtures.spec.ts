@@ -8,6 +8,8 @@ const QUALIFIED_COMPONENTS = {
   CertWall: "section.cert-wall",
   CtaBanner: "section.cta",
   CtaCenter: "section.cta-center",
+  DishesShowcase: "section.dishes-showcase",
+  EditorialHero: "section.editorial-hero",
   FaqSplit: "section.faq-split",
   FaqAccordion: "section.faq-accordion",
   FeatureCards: "section.feature-cards",
@@ -21,6 +23,7 @@ const QUALIFIED_COMPONENTS = {
   PricingTiers: "section.pricing-tiers",
   ProductGrid: "section.product-grid",
   ProductShowcaseAlt: "section.product-showcase-alt",
+  PhotoGallery: "section.photo-gallery",
   ProjectsGrid: "section.projects-grid",
   MaterialsLibrary: "section.materials-library",
   CollectionCards: "section.collection-cards",
@@ -30,11 +33,13 @@ const QUALIFIED_COMPONENTS = {
   ServicesGrid: "section.services-grid",
   ServicesDark: "section.services-dark",
   ServiceRows: "section.service-rows",
+  SplitAbout: "section.split-about",
   TechSystems: "section.tech-systems",
   Testimonials: "section.testimonials",
   TrustSplit: "section.trust-split",
   LedgerStats: "section.ledger-stats",
   ValueStrip: "section.value-strip",
+  WarmHero: "section.warm-hero",
 } as const;
 
 const componentType = process.env.COMPONENT_QUALIFICATION_COMPONENT;
@@ -144,6 +149,27 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
     await expect(section.locator("article.showcase")).toHaveCount(1);
     await expect(section.locator("button")).toHaveCount(0);
     await expect(section.locator("a")).toHaveAttribute("href", "/contact");
+  }
+  if (componentType === "EditorialHero") {
+    await expect(section.locator("h1")).toHaveCount(1);
+    await expect(section.locator("a")).toHaveAttribute("href", "/services");
+  }
+  if (componentType === "SplitAbout") {
+    await expect(section.locator("h2")).toHaveCount(1);
+    await expect(section.locator("a")).toHaveAttribute("href", "/contact");
+  }
+  if (componentType === "WarmHero") {
+    await expect(section.locator("ul > li")).toHaveCount(2);
+    await expect(section.locator("a")).toHaveCount(2);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/booking");
+  }
+  if (componentType === "DishesShowcase") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/menu");
+  }
+  if (componentType === "PhotoGallery") {
+    await expect(section.locator("ul > li figure")).toHaveCount(3);
+    await expect(section.locator("a")).toHaveAttribute("href", "/archive");
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",
