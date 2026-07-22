@@ -20,7 +20,10 @@ afterEach(async () => {
   );
 });
 
-function spec(types: readonly string[] = ['StatementBlock'], blockProps: Record<string, unknown> = { labelKey: 'l', statementKey: 's' }): SiteSpec {
+function spec(
+  types: readonly string[] = ['HeroBanner'],
+  blockProps: Record<string, unknown> = { headlineKey: 'hero.headline' },
+): SiteSpec {
   return {
     specVersion: '1.0.0',
     site: {
@@ -69,7 +72,7 @@ const identity = {
 };
 
 describe('R1 release contract gate', () => {
-  it('accepts only the exact SiteSpec contract and current closed renderer registry', () => {
+  it('accepts only the current release-eligible component registry', () => {
     expect(R1_RENDERER_COMPONENT_TYPES).toEqual([
       'AboutBlock',
       'CertWall',
@@ -82,19 +85,54 @@ describe('R1 release contract gate', () => {
       'ProductGrid',
       'StatsBand',
     ]);
-    // { id } 缺必填 props -> validateBlock zod parse fail-closed（INVALID_BLOCK_PROPS）
     expect(() =>
-      assertReleaseContract(spec(R1_RENDERER_COMPONENT_TYPES), '1.0.0'),
-    ).toThrow('INVALID_BLOCK_PROPS');
-    // 合法 props（StatementBlock 必填 labelKey/statementKey）-> 通过
-    expect(() =>
-      assertReleaseContract(spec(['StatementBlock'], { labelKey: 'k', statementKey: 's' }), '1.0.0'),
+      assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
     ).not.toThrow();
+  });
+
+  it('blocks a registered gallery component until M1-e-A promotes it', () => {
+    expect(() =>
+      assertReleaseContract(
+        spec(['StatementBlock'], {
+          labelKey: 'statement.label',
+          statementKey: 'statement.body',
+        }),
+        '1.0.0',
+      ),
+    ).toThrow('SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: StatementBlock');
+  });
+
+  it('rejects a free-form HeroBanner variant before release publication', () => {
+    expect(() =>
+      assertReleaseContract(
+        spec(['HeroBanner'], {
+          headlineKey: 'hero.headline',
+          variant: 'invented-layout',
+        }),
+        '1.0.0',
+      ),
+    ).toThrow('INVALID_BLOCK_PROPS');
+  });
+
+  it('rejects unknown fields nested inside component props', () => {
+    expect(() =>
+      assertReleaseContract(
+        spec(['HeroBanner'], {
+          headlineKey: 'hero.headline',
+          cta: {
+            labelKey: 'hero.cta',
+            pageId: 'inquiry',
+            injected: 'must-not-pass',
+          },
+        }),
+        '1.0.0',
+      ),
+    ).toThrow('INVALID_BLOCK_PROPS');
   });
 
   it('fails closed on an unknown component before renderer publication', () => {
     expect(() =>
-      assertReleaseContract(spec(['StatementBlock', 'InventedWidget']), '1.0.0'),
+      assertReleaseContract(spec(['InventedWidget']), '1.0.0'),
     ).toThrow('UNKNOWN_COMPONENT_TYPE: InventedWidget');
   });
 
