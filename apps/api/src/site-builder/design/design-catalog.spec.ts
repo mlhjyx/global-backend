@@ -6,6 +6,7 @@ import {
   DESIGN_EVALUATION_SCHEMA_VERSION,
   DESIGN_OBSERVATION_SCHEMA_VERSION,
   DESIGN_RULE_SCHEMA_VERSION,
+  DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
   DESIGN_TEMPLATE_FAMILY_SCHEMA_VERSION,
   designTemplateFamilyDigest,
   finalizeDesignCatalog,
@@ -51,6 +52,27 @@ function rule(overrides: Record<string, unknown> = {}): Record<string, unknown> 
       nonNeighboring: true,
     },
     ...overrides,
+  };
+}
+
+function ruleValidationContext(groups = ["a", "b", "c", "d", "e"]) {
+  return {
+    sourceManifests: groups.map((sourceContributionGroup) => ({
+      schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
+      id: `platform-study-${sourceContributionGroup}`,
+      title: `Platform study ${sourceContributionGroup}`,
+      sourceClass: "platform_original",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+      licenseSpdx: "LicenseRef-Platform-Original",
+      licenseEvidencePath: `licenses/${sourceContributionGroup}.txt`,
+      allowedUses: ["visual_analysis"],
+      prohibitedUses: ["training"],
+      retentionPolicy: "manifest_only",
+      trainingPolicy: "prohibited",
+      sourceContributionGroup,
+      externalAssets: [],
+      reviewer: "design-governance",
+    })),
   };
 }
 
@@ -122,7 +144,7 @@ function catalog(status: "approved" | "draft" = "approved") {
       },
     ],
     families: [family(status)],
-  });
+  }, ruleValidationContext());
 }
 
 function brief(value: ReturnType<typeof catalog>, overrides: Record<string, unknown> = {}) {
@@ -166,10 +188,21 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     expect(() =>
       validateDesignObservation(observation({ rawDom: "<main>source page</main>" })),
     ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
+    expect(() =>
+      validateDesignObservation(
+        observation({
+          imageStrategy: {
+            ratioBands: ["3:2"],
+            focalPattern: "<h1>Source-specific headline</h1>",
+            treatment: "high-contrast",
+          },
+        }),
+      ),
+    ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
   });
 
   it("requires a DesignRule to be supported by five independent contribution groups", () => {
-    expect(validateDesignRule(rule())).toMatchObject({
+    expect(validateDesignRule(rule(), ruleValidationContext())).toMatchObject({
       id: "proof-near-primary-action",
     });
     expect(() =>
@@ -183,8 +216,12 @@ describe("DI-0 clean-room contracts and static catalog", () => {
             nonNeighboring: true,
           },
         }),
+        ruleValidationContext(),
       ),
     ).toThrowError(/DESIGN_RULE_INSUFFICIENT_EVIDENCE/);
+    expect(() =>
+      validateDesignRule(rule(), ruleValidationContext(["a", "b", "c", "d"])),
+    ).toThrowError(/DESIGN_RULE_PROVENANCE_UNVERIFIED/);
   });
 
   it("resolves only an approved family when the frozen brief pins catalog and family digests", () => {
@@ -203,6 +240,12 @@ describe("DI-0 clean-room contracts and static catalog", () => {
         componentVariantOverrides: { HeroBanner: "cinematic" },
       })),
     ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_VARIANT/);
+
+    expect(() =>
+      resolveDesignBriefFromCatalog(value, brief(value, {
+        contentBudgets: { "home.hero": { minimum: 20, maximum: 999 } },
+      })),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_BUDGET/);
   });
 
   it("keeps draft families unavailable even when their immutable digest matches", () => {

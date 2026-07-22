@@ -94,6 +94,14 @@ describe("DesignSourceManifest contract", () => {
     ).toThrowError(/DESIGN_SOURCE_LICENSE_REQUIRED/);
   });
 
+  it("rejects a use that is simultaneously allowed and prohibited", () => {
+    expect(() =>
+      validateDesignSourceManifest(
+        visualResearchSource({ prohibitedUses: ["visual_analysis"] }),
+      ),
+    ).toThrowError(/DESIGN_SOURCE_POLICY_CONFLICT/);
+  });
+
   it("rejects expired authorizations and training without explicit training coverage", () => {
     const expired = authorizedSource({
       ownerAuthorization: {
@@ -119,6 +127,29 @@ describe("DesignSourceManifest contract", () => {
     expect(() => validateDesignSourceManifest(trainingNotCovered)).toThrowError(
       /DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED/,
     );
+  });
+
+  it("requires clear evidence for every non-prohibited training policy", () => {
+    const thirdPartyTraining = authorizedSource({
+      sourceClass: "permissive_licensed",
+      ownerAuthorization: undefined,
+      approvedAt: undefined,
+      allowedUses: ["visual_analysis"],
+      trainingPolicy: "platform_corpus",
+      licenseSpdx: undefined,
+      licenseEvidencePath: undefined,
+    });
+    expect(() => validateDesignSourceManifest(thirdPartyTraining)).toThrowError(
+      /DESIGN_SOURCE_LICENSE_REQUIRED/,
+    );
+
+    expect(() =>
+      validateDesignSourceManifest({
+        ...thirdPartyTraining,
+        licenseSpdx: "MIT",
+        licenseEvidencePath: "licenses/template.txt",
+      }),
+    ).toThrowError(/DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED/);
   });
 
   it("keeps visual-research sources out of transformation, archives, and training", () => {
