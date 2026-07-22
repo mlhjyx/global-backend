@@ -25,6 +25,9 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   }),
   AboutBlock: Object.freeze({ title: 60, titleWords: 8, body: 400 }),
   InquiryForm: Object.freeze({ title: 60, titleWords: 8, subhead: 140 }),
+  CertWall: Object.freeze({ title: 60, titleWords: 8, minItems: 1, maxItems: 8, label: 48 }),
+  ProcessTimeline: Object.freeze({ title: 60, titleWords: 8, minItems: 2, maxItems: 6, stepTitle: 40, stepBody: 160 }),
+  FaqAccordion: Object.freeze({ title: 60, titleWords: 8, minItems: 1, maxItems: 8, question: 120, answer: 400 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -129,6 +132,9 @@ const contentSchemas = {
       ).optional(),
     })
     .strict(),
+  CertWall: z.object({ title: boundedCopy(60, 8), certs: z.array(z.object({ label: boundedCopy(48) }).strict()).min(1).max(8) }).strict(),
+  ProcessTimeline: z.object({ title: boundedCopy(60, 8), steps: z.array(z.object({ title: boundedCopy(40), body: boundedCopy(160) }).strict()).min(2).max(6) }).strict(),
+  FaqAccordion: z.object({ title: boundedCopy(60, 8), items: z.array(z.object({ question: boundedCopy(120), answer: boundedCopy(400) }).strict()).min(1).max(8) }).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

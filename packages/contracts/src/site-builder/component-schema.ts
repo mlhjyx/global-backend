@@ -72,15 +72,21 @@ export const COMPONENT_SCHEMAS = {
   }),
   CertWall: obj({
     titleKey: str,
-    certs: z.array(strictObj({ labelKey: str, assetId: str.optional() })),
+    certs: z
+      .array(strictObj({ labelKey: str, assetId: str.optional() }))
+      .min(1)
+      .max(8),
+    variant: technicalBaselineVariant.optional(),
   }),
   ProcessTimeline: obj({
     titleKey: str,
-    steps: z.array(strictObj({ titleKey: str, bodyKey: str })),
+    steps: z.array(strictObj({ titleKey: str, bodyKey: str })).min(2).max(6),
+    variant: technicalBaselineVariant.optional(),
   }),
   FaqAccordion: obj({
     titleKey: str,
-    items: z.array(strictObj({ qKey: str, aKey: str })),
+    items: z.array(strictObj({ qKey: str, aKey: str })).min(1).max(8),
+    variant: technicalBaselineVariant.optional(),
   }),
   CtaBanner: obj({
     headlineKey: str,

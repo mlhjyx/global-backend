@@ -103,6 +103,67 @@
               "cta": { "labelKey": "cta.label" },
               "variant": "technical-grid"
             }
+          },
+          {
+            "type": "CertWall",
+            "props": {
+              "id": "CertWall-technical",
+              "titleKey": "certs.title",
+              "certs": [
+                { "labelKey": "certs.quality" },
+                { "labelKey": "certs.material" },
+                { "labelKey": "certs.inspection" }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProcessTimeline",
+            "props": {
+              "id": "ProcessTimeline-technical",
+              "titleKey": "process.title",
+              "steps": [
+                { "titleKey": "process.step1.title", "bodyKey": "process.step1.body" },
+                { "titleKey": "process.step2.title", "bodyKey": "process.step2.body" },
+                { "titleKey": "process.step3.title", "bodyKey": "process.step3.body" }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "FaqAccordion",
+            "props": {
+              "id": "FaqAccordion-technical",
+              "titleKey": "faq.title",
+              "items": [
+                { "qKey": "q1", "aKey": "a1" },
+                { "qKey": "q2", "aKey": "a2" }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProcessTimeline",
+            "props": {
+              "id": "ProcessTimeline-technical",
+              "titleKey": "process.title",
+              "steps": [
+                { "titleKey": "process.step1.title", "bodyKey": "process.step1.body" },
+                { "titleKey": "process.step2.title", "bodyKey": "process.step2.body" }
+              ],
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "FaqAccordion",
+            "props": {
+              "id": "FaqAccordion-technical",
+              "titleKey": "faq.title",
+              "items": [
+                { "qKey": "q1", "aKey": "a1" }
+              ],
+              "variant": "quiet"
+            }
           }
         ]
       }
@@ -136,6 +197,22 @@
       "inquiry.field.message": "Project requirements",
       "inquiry.submit": "Submit enquiry",
       "inquiry.m0.note": "Enquiry submission is not available in this preview.",
+      "certs.title": "Documentation for a traceable project record",
+      "certs.quality": "Quality-system documentation",
+      "certs.material": "Material traceability record",
+      "certs.inspection": "Inspection documentation",
+      "process.title": "A clear path from duty point to delivery",
+      "process.step1.title": "Confirm the operating duty",
+      "process.step1.body": "Review flow, pressure, fluid, temperature and installation constraints.",
+      "process.step2.title": "Align the technical specification",
+      "process.step2.body": "Set materials, sealing, testing and documentation requirements.",
+      "process.step3.title": "Plan delivery and support",
+      "process.step3.body": "Coordinate build slots, inspection points and handover information.",
+      "faq.title": "Technical questions, answered clearly",
+      "q1": "Can you review an existing pump specification?",
+      "a1": "Yes. Share the operating conditions and available drawings so requirements can be checked before selection.",
+      "q2": "Which documents can be supplied with an order?",
+      "a2": "Documentation depends on the agreed scope and may include inspection records, material traceability and operating information.",
       "cta.headline": "Tell us about your project",
       "cta.label": "Get in touch"
     }

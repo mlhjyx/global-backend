@@ -1,35 +1,15 @@
 ---
-interface Props {
-  titleKey: string;
-  certs: { labelKey: string; assetId?: string }[];
-  t: (key: string) => string;
-  alt?: boolean;
-}
-const { titleKey, certs = [], t, alt } = Astro.props;
+import { createRequire } from 'node:module';
+interface Props { id?: string; instanceId: string; titleKey: string; certs: { labelKey: string; assetId?: string }[]; variant?: 'technical-grid' | 'quiet'; t: (key: string) => string; alt?: boolean; }
+const { id, instanceId, titleKey, certs = [], variant = 'technical-grid', t, alt } = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts') as typeof import('@global/contracts');
+const title = t(titleKey); const resolvedCerts = certs.map((cert) => t(cert.labelKey));
+assertQualifiedComponentContentBudget('CertWall', { title, certs: resolvedCerts.map((label) => ({ label })) });
+const baseId = `${id ?? 'cert-wall'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-'); const headingId = `${baseId}-heading`;
 ---
-
-<section class:list={['block', { alt }]} id="certifications">
-  <h2>{t(titleKey)}</h2>
-  <div class="wall">
-    {certs.map((c) => <span class="badge">{t(c.labelKey)}</span>)}
-  </div>
+<section class:list={['block', 'cert-wall', `cert-wall--${variant}`, { alt }]} data-component="CertWall" data-variant={variant} aria-labelledby={headingId}>
+  <div class="container"><span class="eyebrow" aria-hidden="true">04</span><h2 id={headingId}>{title}</h2><ul role="list">{resolvedCerts.map((label, index) => <li><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>{label}</li>)}</ul></div>
 </section>
-
 <style>
-  h2 {
-    margin-bottom: 1.5rem;
-  }
-  .wall {
-    display: flex;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .badge {
-    border: 1.5px solid var(--c-primary);
-    color: var(--c-primary);
-    border-radius: 999px;
-    padding: 0.4rem 1.1rem;
-    font-weight: 600;
-    font-size: 0.95rem;
-  }
+  .cert-wall { background: var(--c-surface-alt); } .cert-wall--technical-grid { background-image: linear-gradient(90deg, color-mix(in srgb, var(--c-border) 42%, transparent) 1px, transparent 1px); background-size: 3rem 3rem; } .cert-wall--quiet { background: var(--c-surface); } .eyebrow { color: var(--c-primary); font-family: var(--font-heading); font-size: .75rem; font-weight: 700; letter-spacing: .12em; } h2 { margin-top: .65rem; max-width: 20ch; font-size: clamp(1.75rem, 4vw, 3rem); text-wrap: balance; } ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1px; margin: 2rem 0 0; padding: 1px; background: var(--c-border); } li { display: flex; gap: .75rem; align-items: center; min-width: 0; padding: 1rem; background: var(--c-surface); color: var(--c-on-surface); font-weight: 700; overflow-wrap: anywhere; } .cert-wall--quiet li { background: var(--c-surface-alt); } li span { color: var(--c-primary); font-family: var(--font-heading); font-size: .75rem; }
 </style>

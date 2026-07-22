@@ -1,47 +1,72 @@
 ---
-interface Props {
+import { createRequire } from 'node:module';
+
+import type { Translate } from '../i18n';
+
+const require = createRequire(import.meta.url);
+const { assertQualifiedComponentContentBudget } = require('@global/contracts') as typeof import('@global/contracts');
+
+type Props = {
+  id?: string;
+  instanceId: string;
   titleKey: string;
-  items: { qKey: string; aKey: string }[];
-  t: (key: string) => string;
+  items: Array<{ qKey: string; aKey: string }>;
+  variant?: 'technical-grid' | 'quiet';
+  t: Translate;
   alt?: boolean;
-}
-const { titleKey, items = [], t, alt } = Astro.props;
+};
+
+const { id, instanceId, titleKey, items, variant = 'technical-grid', t, alt } = Astro.props;
+const title = t(titleKey);
+const resolvedItems = items.map((item) => ({ question: t(item.qKey), answer: t(item.aKey) }));
+assertQualifiedComponentContentBudget('FaqAccordion', { title, items: resolvedItems });
+
+const baseId = `faq-accordion-${id ?? 'section'}-${instanceId}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
 ---
 
-<section class:list={['block', { alt }]} id="faq">
-  <h2>{t(titleKey)}</h2>
-  <div class="faq">
-    {
-      items.map((item) => (
-        <details>
-          <summary>{t(item.qKey)}</summary>
-          <p class="muted">{t(item.aKey)}</p>
-        </details>
-      ))
-    }
+<section class:list={['block', 'faq-accordion', `faq-accordion--${variant}`, { alt }]} data-component="FaqAccordion" data-variant={variant} aria-labelledby={headingId}>
+  <div class="container faq-accordion__inner">
+    <div class="faq-accordion__intro">
+      <p class="eyebrow" aria-hidden="true">02</p>
+      <h2 id={headingId}>{title}</h2>
+    </div>
+
+    <div class="faq-accordion__items">
+      {resolvedItems.map((item, index) => {
+        const itemId = `${baseId}-item-${index + 1}`;
+        return (
+          <details class="faq-accordion__item" id={itemId}>
+            <summary>
+              <span>{item.question}</span>
+              <span class="faq-accordion__marker" aria-hidden="true">+</span>
+            </summary>
+            <p>{item.answer}</p>
+          </details>
+        );
+      })}
+    </div>
   </div>
 </section>
 
 <style>
-  h2 {
-    margin-bottom: 1.5rem;
-  }
-  .faq {
-    display: grid;
-    gap: 0.5rem;
-    max-width: 760px;
-  }
-  details {
-    border: 1px solid var(--c-surface-alt);
-    border-radius: var(--radius);
-    padding: 0.9rem 1.1rem;
-    background: var(--c-surface);
-  }
-  summary {
-    cursor: pointer;
-    font-weight: 600;
-  }
-  details p {
-    padding-top: 0.6rem;
-  }
+  .faq-accordion { border-block: 1px solid var(--c-border); background: var(--c-surface); }
+  .faq-accordion.alt { background: var(--c-surface-alt); }
+  .faq-accordion__inner { display: grid; gap: 2rem; }
+  .faq-accordion__intro { max-width: 38rem; }
+  .eyebrow { margin: 0 0 .65rem; color: var(--c-primary); font: 700 .75rem/1.2 var(--font-sans, sans-serif); letter-spacing: .12em; text-transform: uppercase; }
+  h2, p { margin: 0; }
+  h2 { color: var(--c-on-surface); font: 700 clamp(1.75rem, 3vw, 2.75rem)/1.08 var(--font-display, var(--font-sans, sans-serif)); letter-spacing: -.025em; }
+  .faq-accordion__items { border-top: 1px solid var(--c-border); }
+  .faq-accordion__item { border-bottom: 1px solid var(--c-border); }
+  summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.15rem 0; cursor: pointer; color: var(--c-on-surface); font: 700 clamp(1rem, 1.5vw, 1.15rem)/1.35 var(--font-sans, sans-serif); list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 4px; }
+  .faq-accordion__marker { flex: 0 0 auto; color: var(--c-primary); font: 400 1.75rem/1 var(--font-sans, sans-serif); }
+  details[open] .faq-accordion__marker { transform: rotate(45deg); }
+  .faq-accordion__item > p { max-width: 46rem; padding: 0 3rem 1.25rem 0; color: var(--c-on-surface-muted); font: 400 1rem/1.6 var(--font-sans, sans-serif); }
+  .faq-accordion--technical-grid { background-image: linear-gradient(to right, color-mix(in srgb, var(--c-border) 45%, transparent) 1px, transparent 1px); background-size: 4rem 100%; }
+  .faq-accordion--quiet { background-image: none; }
+  @media (min-width: 48rem) { .faq-accordion__inner { grid-template-columns: minmax(15rem, .8fr) minmax(0, 1.2fr); align-items: start; gap: clamp(3rem, 8vw, 8rem); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
 </style>
