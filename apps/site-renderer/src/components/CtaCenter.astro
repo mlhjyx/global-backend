@@ -1,8 +1,8 @@
 ---
 import { createRequire } from 'node:module';
-import { localePageHref } from '../lib/spec';
+import { localePagePathHref } from '../lib/spec';
 
-interface Cta { labelKey: string; pageId: string }
+interface Cta { labelKey: string; pageId?: string; url?: string }
 interface Props {
   eyebrowKey: string;
   titleKey: string;
@@ -16,11 +16,12 @@ interface Props {
   locale: string;
   defaultLocale: string;
   instanceId: string;
+  pagePathById?: Record<string, string>;
 }
 const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
 const {
   eyebrowKey, titleKey, titleAccentKey, subtitleKey, primaryCta, secondaryCta,
-  variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId,
+  variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {},
 } = Astro.props;
 const content = {
   eyebrow: t(eyebrowKey),
@@ -32,7 +33,12 @@ const content = {
 };
 assertQualifiedComponentContentBudget('CtaCenter', content);
 const headingId = `${instanceId}-cta-center-heading`;
-const href = (cta: Cta) => localePageHref(cta.pageId, locale, defaultLocale);
+const href = (cta: Cta) => {
+  if (cta.url) return cta.url;
+  const pagePath = cta.pageId ? pagePathById[cta.pageId] : undefined;
+  if (!pagePath) throw new Error('PAGE_REFERENCE_UNKNOWN: CtaCenter.' + (cta.pageId ?? '(empty)'));
+  return localePagePathHref(pagePath, locale, defaultLocale);
+};
 ---
 
 <section class:list={['block', 'cta-center', `cta-center--${variant}`, { alt }]} data-component="CtaCenter" data-variant={variant} aria-labelledby={headingId}>

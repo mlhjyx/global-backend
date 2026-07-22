@@ -203,6 +203,20 @@ describe('R1 release contract gate', () => {
     expect(() => assertReleaseContract(spec([type], props), '1.0.0')).toThrow(expected);
   });
 
+  it('rejects blank internal CTA page IDs before publication', () => {
+    expect(() => assertReleaseContract(spec(['CtaCenter'], {
+      eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', subtitleKey: 'cta.subtitle',
+      primaryCta: { labelKey: 'cta.primary', pageId: '' },
+    }), '1.0.0')).toThrow('INVALID_BLOCK_PROPS: CtaCenter');
+  });
+
+  it('keeps an explicit legacy external CTA URL releaseable', () => {
+    expect(() => assertReleaseContract(spec(['CtaCenter'], {
+      eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', subtitleKey: 'cta.subtitle',
+      primaryCta: { labelKey: 'cta.primary', url: 'https://example.test/contact' },
+    }), '1.0.0')).not.toThrow();
+  });
+
   it('rejects a free-form HeroBanner variant before release publication', () => {
     expect(() =>
       assertReleaseContract(

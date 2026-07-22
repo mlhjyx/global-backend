@@ -15,6 +15,7 @@ const { pageId, locale } = Astro.props;
 const spec = loadSpec();
 const t = makeT(spec, locale);
 const page = spec.pages.find((p) => p.id === pageId)!;
+const pagePathById = Object.fromEntries(spec.pages.map((candidate) => [candidate.id, candidate.path]));
 ---
 
 <Base
@@ -33,6 +34,7 @@ const page = spec.pages.find((p) => p.id === pageId)!;
       scope={page.id}
       locale={locale}
       defaultLocale={spec.site.defaultLocale}
+      pagePathById={pagePathById}
     />
   ))}
 </Base>

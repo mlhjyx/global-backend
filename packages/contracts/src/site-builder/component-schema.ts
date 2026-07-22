@@ -20,7 +20,12 @@ const ctaSchema = strictObj({
   pageId: str.optional(),
   url: str.optional(),
 });
-const internalCtaSchema = strictObj({ labelKey: str, pageId: str });
+const releaseCtaSchema = strictObj({
+  labelKey: str,
+  pageId: str.min(1).optional(),
+  url: str.min(1).optional(),
+}).refine((cta) => Boolean(cta.pageId || cta.url));
+const internalCtaSchema = strictObj({ labelKey: str, pageId: str.min(1) });
 const statSchema = strictObj({ value: str, labelKey: str });
 const statCountupSchema = strictObj({
   value: z.number(),
@@ -126,8 +131,8 @@ export const COMPONENT_SCHEMAS = {
     image: strictObj({ assetId: str }).nullable().optional(),
   }),
   AreaMarquee: obj({
-    headingKey: str,
-    items: strArr.min(2).max(12),
+    headingKey: str.optional(),
+    items: z.array(z.union([str, strictObj({ labelKey: str })])).min(2).max(12),
     variant: technicalBaselineVariant.optional(),
   }),
   ServicesGrid: obj({
@@ -229,9 +234,9 @@ export const COMPONENT_SCHEMAS = {
     eyebrowKey: str,
     titleKey: str,
     subtitleKey: str,
-    primaryCta: internalCtaSchema,
+    primaryCta: releaseCtaSchema,
     titleAccentKey: str.optional(),
-    secondaryCta: internalCtaSchema.optional(),
+    secondaryCta: releaseCtaSchema.optional(),
     variant: technicalBaselineVariant.optional(),
   }),
   EditorialHero: obj({
@@ -254,6 +259,8 @@ export const COMPONENT_SCHEMAS = {
     titleAccentKey: str,
     services: z.array(strictObj({ icon: str, titleKey: str, descKey: str })).min(1).max(8),
     allCta: internalCtaSchema.optional(),
+    allLabelKey: str.optional(),
+    allPageId: str.optional(),
     variant: technicalBaselineVariant.optional(),
   }),
   StatsCountup: obj({ headingKey: str, stats: z.array(statCountupSchema).min(2).max(4), variant: technicalBaselineVariant.optional() }),
@@ -316,8 +323,10 @@ export const COMPONENT_SCHEMAS = {
         unitKey: str,
       }),
     ).min(1).max(8),
-    fromLabelKey: str,
-    cta: internalCtaSchema,
+    fromLabelKey: str.optional(),
+    cta: internalCtaSchema.optional(),
+    bookLabelKey: str.optional(),
+    bookPageId: str.optional(),
     variant: technicalBaselineVariant.optional(),
   }),
   DishesShowcase: obj({

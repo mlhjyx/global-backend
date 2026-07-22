@@ -1,6 +1,6 @@
 ---
 import { createRequire } from 'node:module';
-import { localePageHref } from '../lib/spec';
+import { localePagePathHref } from '../lib/spec';
 
 interface Service { icon: string; titleKey: string; descKey: string; fromKey: string; unitKey: string }
 interface Cta { labelKey: string; pageId: string }
@@ -9,8 +9,10 @@ interface Props {
   titleKey: string;
   titleAccentKey: string;
   introKey: string;
-  fromLabelKey: string;
-  cta: Cta;
+  fromLabelKey?: string;
+  cta?: Cta;
+  bookLabelKey?: string;
+  bookPageId?: string;
   services: Service[];
   variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
@@ -18,16 +20,23 @@ interface Props {
   locale: string;
   defaultLocale: string;
   instanceId: string;
+  pagePathById?: Record<string, string>;
 }
 const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
-const { eyebrowKey, titleKey, titleAccentKey, introKey, fromLabelKey, cta, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId } = Astro.props;
+const { eyebrowKey, titleKey, titleAccentKey, introKey, fromLabelKey, cta, bookLabelKey, bookPageId, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
+const resolvedCta = cta ?? (bookLabelKey && bookPageId
+  ? { labelKey: bookLabelKey, pageId: bookPageId }
+  : { labelKey: 'cta.learnMore', pageId: 'services' });
+if (!resolvedCta) throw new Error('SERVICE_ROWS_CTA_REQUIRED');
 const content = {
-  eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey), intro: t(introKey), fromLabel: t(fromLabelKey), cta: t(cta.labelKey),
+  eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey), intro: t(introKey), fromLabel: fromLabelKey ? t(fromLabelKey) : 'From', cta: t(resolvedCta.labelKey),
   services: services.map((service) => ({ icon: service.icon, title: t(service.titleKey), description: t(service.descKey), from: t(service.fromKey), unit: t(service.unitKey) })),
 };
 assertQualifiedComponentContentBudget('ServiceRows', content);
 const headingId = `${instanceId}-service-rows-heading`;
-const ctaHref = localePageHref(cta.pageId, locale, defaultLocale);
+const ctaPath = pagePathById[resolvedCta.pageId];
+if (!ctaPath) throw new Error('PAGE_REFERENCE_UNKNOWN: ServiceRows.' + resolvedCta.pageId);
+const ctaHref = localePagePathHref(ctaPath, locale, defaultLocale);
 ---
 
 <section class:list={['block', 'service-rows', `service-rows--${variant}`, { alt }]} data-component="ServiceRows" data-variant={variant} aria-labelledby={headingId}>

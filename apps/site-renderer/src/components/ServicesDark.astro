@@ -1,6 +1,6 @@
 ---
 import { createRequire } from 'node:module';
-import { localePageHref } from '../lib/spec';
+import { localePagePathHref } from '../lib/spec';
 
 interface Service { icon: string; titleKey: string; descKey: string }
 interface Cta { labelKey: string; pageId: string }
@@ -16,16 +16,27 @@ interface Props {
   locale: string;
   defaultLocale: string;
   instanceId: string;
+  pagePathById?: Record<string, string>;
+  allLabelKey?: string;
+  allPageId?: string;
 }
 const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
-const { eyebrowKey, titleKey, titleAccentKey, allCta, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId } = Astro.props;
+const { eyebrowKey, titleKey, titleAccentKey, allCta, allLabelKey, allPageId, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
+const resolvedAllCta = allCta ?? (allLabelKey ? { labelKey: allLabelKey, pageId: allPageId ?? 'services' } : undefined);
 const content = {
   eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey),
   services: services.map((service) => ({ icon: service.icon, title: t(service.titleKey), description: t(service.descKey) })),
-  allCta: allCta ? t(allCta.labelKey) : undefined,
+  allCta: resolvedAllCta ? t(resolvedAllCta.labelKey) : undefined,
 };
 assertQualifiedComponentContentBudget('ServicesDark', content);
 const headingId = `${instanceId}-services-dark-heading`;
+const allCtaHref = resolvedAllCta
+  ? (() => {
+      const pagePath = pagePathById[resolvedAllCta.pageId];
+      if (!pagePath) throw new Error('PAGE_REFERENCE_UNKNOWN: ServicesDark.' + resolvedAllCta.pageId);
+      return localePagePathHref(pagePath, locale, defaultLocale);
+    })()
+  : undefined;
 ---
 
 <section class:list={['block', 'services-dark', `services-dark--${variant}`, { alt }]} data-component="ServicesDark" data-variant={variant} aria-labelledby={headingId}>
@@ -35,8 +46,8 @@ const headingId = `${instanceId}-services-dark-heading`;
         <p class="eyebrow-flat">{content.eyebrow}</p>
         <h2 id={headingId} class="display">{content.title} <em>{content.accent}</em></h2>
       </div>
-      {allCta && content.allCta && (
-        <a class="pill-outline" href={localePageHref(allCta.pageId, locale, defaultLocale)}>
+      {resolvedAllCta && content.allCta && allCtaHref && (
+        <a class="pill-outline" href={allCtaHref}>
           {content.allCta}<i class="ri-arrow-right-line" aria-hidden="true"></i>
         </a>
       )}

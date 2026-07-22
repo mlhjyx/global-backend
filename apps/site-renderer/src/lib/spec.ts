@@ -67,6 +67,21 @@ export function localePageHref(
   return withBase(`${prefix}${page}` || '/');
 }
 
+/**
+ * Links in qualified blocks are resolved from the declared page path rather
+ * than assuming a page id is also its URL slug.  Keep `localePageHref` above
+ * for legacy blocks that still use the id-based compatibility contract.
+ */
+export function localePagePathHref(
+  pagePath: string,
+  locale: string,
+  defaultLocale: string,
+): string {
+  const slug = pagePathToSlug(pagePath);
+  const prefix = locale === defaultLocale ? '' : `/${locale}`;
+  return withBase([prefix, slug].filter(Boolean).join('/') || '/');
+}
+
 export function buildStaticLocalePaths(spec: MaterializedSpec): Array<{
   slug: string | undefined;
   pageId: string;

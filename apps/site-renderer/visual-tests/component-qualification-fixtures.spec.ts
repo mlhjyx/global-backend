@@ -105,15 +105,18 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
   if (componentType === "CtaCenter") {
     await expect(section.locator("a")).toHaveCount(2);
     await expect(section.locator('a[href="#"]')).toHaveCount(0);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/contact");
   }
   if (componentType === "ServicesDark") {
     await expect(section.locator("ul > li > article")).toHaveCount(2);
     await expect(section.locator('a[href="#"]')).toHaveCount(0);
+    await expect(section.locator("a")).toHaveAttribute("href", "/contact");
   }
   if (componentType === "ServiceRows") {
     await expect(section.locator("ul > li > article")).toHaveCount(2);
     await expect(section.locator("a")).toHaveCount(2);
     await expect(section.locator('a[href="#"]')).toHaveCount(0);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/contact");
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",
