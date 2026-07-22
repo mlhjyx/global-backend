@@ -101,10 +101,10 @@ export const COMPONENT_SCHEMAS = {
   MapLocation: obj({
     titleKey: str,
     addressKey: str,
-    variant: z.enum(["static", "interactive"]).optional(),
-    coords: strictObj({ lat: z.number(), lng: z.number() })
-      .nullable()
-      .optional(),
+    // `static` is retained only for existing SiteSpec compatibility and is
+    // normalized by the renderer to the technical-grid presentation. Maps,
+    // embeds, geolocation and coordinates are deliberately outside Release.
+    variant: z.enum(["technical-grid", "quiet", "static"]).optional(),
   }),
   HeroFull: obj({
     eyebrowKey: str,

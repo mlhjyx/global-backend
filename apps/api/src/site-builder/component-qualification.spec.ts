@@ -101,12 +101,12 @@ describe("M1-e-A component qualification gate", () => {
     expect(SITE_SPEC_RELEASE_COMPONENT_TYPES).toEqual(
       expect.arrayContaining(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES),
     );
-    expect(getComponentReleaseReadiness("MapLocation")).toEqual({
-      status: "transitional_release",
+    expect(getComponentReleaseReadiness("MapLocation")).toMatchObject({
+      status: "m1_e_a_qualified",
     });
   });
 
-  it("registers thirteen qualified components and keeps unqualified types gallery-only", () => {
+  it("registers fourteen qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("StatementBlock")).toEqual({
       status: "gallery_only",
@@ -120,6 +120,7 @@ describe("M1-e-A component qualification gate", () => {
       "HeroBanner",
       "InquiryForm",
       "LogoMarquee",
+      "MapLocation",
       "ProcessTimeline",
       "ProductGrid",
       "StatsBand",
@@ -127,7 +128,7 @@ describe("M1-e-A component qualification gate", () => {
       "Testimonials",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      91,
+      98,
     );
     for (const componentType of [
       "CtaBanner",
@@ -141,6 +142,7 @@ describe("M1-e-A component qualification gate", () => {
       "AboutBlock",
       "FeatureCards",
       "LogoMarquee",
+      "MapLocation",
       "TechSystems",
       "Testimonials",
     ] as const) {
