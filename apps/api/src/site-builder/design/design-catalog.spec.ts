@@ -1,0 +1,526 @@
+import { describe, expect, it } from "vitest";
+import {
+  DESIGN_BRIEF_SCHEMA_VERSION,
+  DESIGN_CATALOG_SCHEMA_VERSION,
+  DESIGN_DNA_SCHEMA_VERSION,
+  DESIGN_EVALUATION_SCHEMA_VERSION,
+  DESIGN_OBSERVATION_SCHEMA_VERSION,
+  DESIGN_RULE_SCHEMA_VERSION,
+  DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
+  DESIGN_TEMPLATE_FAMILY_SCHEMA_VERSION,
+  type DesignCatalogDraft,
+  type DesignSourceManifest,
+  designTemplateFamilyDigest,
+  finalizeDesignCatalog,
+  hasDesignEvaluationHardFailures,
+  validateDesignDna,
+  validateDesignEvaluation,
+  validateDesignObservation,
+  validateDesignRule,
+} from "@global/contracts";
+import {
+  STATIC_DESIGN_CATALOG,
+  resolveDesignBriefFromCatalog,
+} from "./catalog";
+
+function observation(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    schemaVersion: DESIGN_OBSERVATION_SCHEMA_VERSION,
+    sourceManifestId: "platform-study-1",
+    observedAt: "2026-07-22T00:00:00.000Z",
+    heroComposition: "split",
+    hierarchyScale: { headlineBand: "display", bodyMeasureBand: "reading" },
+    sectionRhythm: ["airy", "proof"],
+    imageStrategy: {
+      ratioBands: ["3:2"],
+      focalPattern: "product-and-proof",
+      treatment: "high-contrast",
+    },
+    ctaStrategy: { primaryCount: 1, placementPattern: "hero-and-terminal" },
+    motionIntensity: "subtle",
+    mobileReflow: ["stack_proof_below_primary_action"],
+    reusablePrinciples: ["pair_product_claim_with_visible_proof"],
+    prohibitedSourceSpecificTraits: ["no_branded_illustration_treatment"],
+    ...overrides,
+  };
+}
+
+function rule(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    schemaVersion: DESIGN_RULE_SCHEMA_VERSION,
+    id: "proof-near-primary-action",
+    summary: "primary_action_adjacent_proof",
+    sourceContributionGroups: ["a", "b", "c", "d", "e"],
+    evidence: {
+      independentSourceCount: 5,
+      generalized: true,
+      selfReimplementable: true,
+      nonNeighboring: true,
+    },
+    ...overrides,
+  };
+}
+
+function ruleValidationContext(groups = ["a", "b", "c", "d", "e"]): {
+  sourceManifests: DesignSourceManifest[];
+} {
+  return {
+    sourceManifests: groups.map((sourceContributionGroup) => ({
+      schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
+      id: `platform-study-${sourceContributionGroup}`,
+      title: `Platform study ${sourceContributionGroup}`,
+      sourceClass: "platform_original",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+      licenseSpdx: "LicenseRef-Platform-Original",
+      licenseEvidencePath: `licenses/${sourceContributionGroup}.txt`,
+      allowedUses: ["visual_analysis"],
+      prohibitedUses: ["training"],
+      retentionPolicy: "manifest_only",
+      trainingPolicy: "prohibited",
+      sourceContributionGroup,
+      externalAssets: [],
+      reviewer: "design-governance",
+    })),
+  };
+}
+
+function family(
+  status: "approved" | "draft" = "approved",
+): Record<string, unknown> {
+  return {
+    schemaVersion: DESIGN_TEMPLATE_FAMILY_SCHEMA_VERSION,
+    id: "foundation-preview",
+    version: "1.0.0",
+    status,
+    designDnaId: "foundation-dna",
+    compatibleArchetypes: ["industrial-b2b"],
+    compatibleIndustries: ["industrial"],
+    stylePresetIds: ["foundation-light"],
+    blueprints: {
+      home: [
+        {
+          id: "home-default",
+          sectionRoles: ["hero", "proof", "cta"],
+          allowedComponents: ["HeroBanner", "StatsBand", "CtaBanner"],
+        },
+      ],
+    },
+    componentVariants: { HeroBanner: ["split"] },
+    adjacencyRules: ["hero-followed-by-proof-or-product"],
+    contentBudgets: { "home.hero": { minimum: 20, maximum: 80 } },
+    assetRequirements: [],
+    demoVisualPackIds: [],
+    motionPolicy: {
+      intensity: "low",
+      allowed: ["fade"],
+      forbidden: ["parallax"],
+    },
+    qualityBaselineId: "foundation-quality-v1",
+    sourceManifestIds: ["platform-study-a"],
+  };
+}
+
+function catalog(status: "approved" | "draft" = "approved") {
+  return finalizeDesignCatalog({
+    schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+    catalogVersion: "2026.07.0",
+    sourceManifests: ruleValidationContext().sourceManifests,
+    designRules: [rule()],
+    designDnas: [
+      {
+        schemaVersion: DESIGN_DNA_SCHEMA_VERSION,
+        id: "foundation-dna",
+        name: "foundation",
+        ruleIds: ["proof-near-primary-action"],
+        hierarchy: {
+          displayScale: "balanced",
+          headingContrast: "medium",
+          maxReadingWidthRem: 44,
+        },
+        spatialRhythm: {
+          sectionGapPx: [48, 96],
+          contentGapPx: [16, 32],
+          density: "balanced",
+        },
+        composition: {
+          heroModes: ["split"],
+          imageTextRatios: ["3:2"],
+          alignmentBias: "left",
+        },
+        surfaces: {
+          cardStyle: "bordered",
+          borderWeight: "hairline",
+          radius: "subtle",
+        },
+        imagery: {
+          preferredSubjects: ["product"],
+          cropModes: ["cover"],
+          backgroundPolicy: "light",
+          maxGeneratedMediaRatio: 0,
+        },
+        motion: {
+          intensity: "low",
+          allowed: ["fade"],
+          forbidden: ["parallax"],
+        },
+        antiPatterns: ["decorative_dashboard_chrome"],
+      },
+    ],
+    families: [family(status)],
+  });
+}
+
+function brief(
+  value: ReturnType<typeof catalog>,
+  overrides: Record<string, unknown> = {},
+) {
+  const selected = value.families[0];
+  return {
+    schemaVersion: DESIGN_BRIEF_SCHEMA_VERSION,
+    catalogVersion: value.catalogVersion,
+    catalogDigest: value.digest,
+    familyId: selected.id,
+    familyVersion: selected.version,
+    familyDigest: designTemplateFamilyDigest(selected),
+    stylePresetId: "foundation-light",
+    blueprintIds: { home: "home-default" },
+    componentVariantOverrides: { HeroBanner: "split" },
+    assetStrategy: {
+      availableRoles: ["hero"],
+      allowGeneratedImages: false,
+      allowVideo: false,
+    },
+    contentBudgets: { "home.hero": { minimum: 20, maximum: 80 } },
+    localePolicy: ["en"],
+    motionIntensity: "low",
+    variationSeed: "build-immutable-seed",
+    reasons: ["compatible with industrial-b2b"],
+    warnings: [],
+    ...overrides,
+  };
+}
+
+describe("DI-0 clean-room contracts and static catalog", () => {
+  it("exposes an immutable empty catalog foundation rather than an unreviewed family", () => {
+    expect(STATIC_DESIGN_CATALOG.families).toEqual([]);
+    expect(Object.isFrozen(STATIC_DESIGN_CATALOG)).toBe(true);
+    expect(Object.isFrozen(STATIC_DESIGN_CATALOG.families)).toBe(true);
+  });
+
+  it("accepts abstract observations but rejects source-reconstructable fields", () => {
+    expect(validateDesignObservation(observation())).toMatchObject({
+      heroComposition: "split",
+    });
+    expect(() =>
+      validateDesignObservation(
+        observation({ rawDom: "<main>source page</main>" }),
+      ),
+    ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
+    expect(() =>
+      validateDesignObservation(
+        observation({
+          imageStrategy: {
+            ratioBands: ["3:2"],
+            focalPattern: "<h1>Source-specific headline</h1>",
+            treatment: "high-contrast",
+          },
+        }),
+      ),
+    ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
+  });
+
+  it("rejects plain source copy rather than relying on markup delimiters", () => {
+    expect(() =>
+      validateDesignObservation(
+        observation({ reusablePrinciples: ["Copied source headline"] }),
+      ),
+    ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
+    expect(() =>
+      validateDesignRule(
+        rule({ summary: "Copied source headline" }),
+        ruleValidationContext(),
+      ),
+    ).toThrowError(/DESIGN_RULE_FORBIDDEN_CONTENT/);
+  });
+
+  it("requires a DesignRule to be supported by five independent contribution groups", () => {
+    expect(validateDesignRule(rule(), ruleValidationContext())).toMatchObject({
+      id: "proof-near-primary-action",
+    });
+    expect(() =>
+      validateDesignRule(
+        rule({
+          sourceContributionGroups: ["a", "b", "c", "d"],
+          evidence: {
+            independentSourceCount: 4,
+            generalized: true,
+            selfReimplementable: true,
+            nonNeighboring: true,
+          },
+        }),
+        ruleValidationContext(),
+      ),
+    ).toThrowError(/DESIGN_RULE_INSUFFICIENT_EVIDENCE/);
+    expect(() =>
+      validateDesignRule(rule(), ruleValidationContext(["a", "b", "c", "d"])),
+    ).toThrowError(/DESIGN_RULE_PROVENANCE_UNVERIFIED/);
+  });
+
+  it("allows unrelated ungrouped manifests beside rule evidence", () => {
+    const value = catalog();
+    const {
+      sourceContributionGroup: _sourceContributionGroup,
+      ...ungroupedTemplate
+    } = value.sourceManifests[0];
+    const sourceManifests = [
+      ...value.sourceManifests,
+      {
+        ...ungroupedTemplate,
+        id: "supporting-family-source",
+      },
+    ];
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: value.families,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects source-derived content in a DesignRule summary", () => {
+    expect(() =>
+      validateDesignRule(
+        rule({ summary: "<h1>Copied source headline</h1>" }),
+        ruleValidationContext(),
+      ),
+    ).toThrowError(/DESIGN_RULE_FORBIDDEN_CONTENT/);
+  });
+
+  it("rejects source-derived text in DesignDNA fields", () => {
+    const dna = catalog().designDnas[0];
+    expect(() =>
+      validateDesignDna({
+        ...dna,
+        antiPatterns: ["Copied source headline"],
+      }),
+    ).toThrowError(/DESIGN_DNA_INVALID/);
+  });
+
+  it("rejects undeclared fields inside DesignDNA records", () => {
+    const dna = catalog().designDnas[0];
+    expect(() =>
+      validateDesignDna({
+        ...dna,
+        hierarchy: {
+          ...dna.hierarchy,
+          rawHtml: "<h1>Copied source headline</h1>",
+        },
+      }),
+    ).toThrowError(/DESIGN_DNA_INVALID/);
+  });
+
+  it("rejects source-derived text in family adjacency rules", () => {
+    const value = catalog();
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests: value.sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: [
+          {
+            ...value.families[0],
+            adjacencyRules: ["Copied source headline"],
+          },
+        ],
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
+  it("freezes validated rule provenance into the catalog digest", () => {
+    const value = catalog();
+    const sourceManifests = ruleValidationContext().sourceManifests;
+    const provenanceBoundDraft: DesignCatalogDraft = {
+      schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+      catalogVersion: value.catalogVersion,
+      designRules: value.designRules,
+      designDnas: value.designDnas,
+      families: value.families,
+      sourceManifests,
+    };
+    const provenanceBoundCatalog = finalizeDesignCatalog(provenanceBoundDraft);
+    expect(provenanceBoundCatalog.sourceManifests).toHaveLength(5);
+    expect(() =>
+      finalizeDesignCatalog({
+        ...provenanceBoundDraft,
+        sourceManifests: sourceManifests.slice(0, 4),
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
+  it("rejects multiple contribution groups backed by the same canonical source", () => {
+    const value = catalog();
+    const sourceManifests = ruleValidationContext().sourceManifests.map(
+      (manifest, index) =>
+        index < 2
+          ? { ...manifest, sourceUrl: "https://platform.example/study" }
+          : manifest,
+    );
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: value.families,
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
+  it("rejects duplicate blueprint IDs within one page type", () => {
+    const value = catalog();
+    const selected = value.families[0];
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests: value.sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: [
+          {
+            ...selected,
+            blueprints: {
+              home: [selected.blueprints.home[0], selected.blueprints.home[0]],
+            },
+          },
+        ],
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
+  it("resolves only an approved family when the frozen brief pins catalog and family digests", () => {
+    const value = catalog();
+    expect(resolveDesignBriefFromCatalog(value, brief(value))).toMatchObject({
+      id: "foundation-preview",
+      status: "approved",
+    });
+
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, { catalogDigest: "0".repeat(64) }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_CATALOG_MISMATCH/);
+
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          componentVariantOverrides: { HeroBanner: "cinematic" },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_VARIANT/);
+
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          contentBudgets: { "home.hero": { minimum: 20, maximum: 999 } },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_BUDGET/);
+  });
+
+  it("rejects a demo visual pack that the approved family does not list", () => {
+    const value = catalog();
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          assetStrategy: {
+            availableRoles: ["hero"],
+            demoVisualPackId: "unapproved-pack",
+            allowGeneratedImages: false,
+            allowVideo: false,
+          },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_DEMO_VISUAL_PACK/);
+  });
+
+  it("rejects motion outside the approved family's policy", () => {
+    const value = catalog();
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, { motionIntensity: "medium" }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_MOTION/);
+  });
+
+  it("returns contract errors instead of prototype lookups for brief selections", () => {
+    const value = catalog();
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          blueprintIds: { toString: "unexpected" },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_BLUEPRINT/);
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          componentVariantOverrides: { toString: "unexpected" },
+        }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_VARIANT/);
+  });
+
+  it("keeps draft families unavailable even when their immutable digest matches", () => {
+    const draftCatalog = catalog("draft");
+    expect(() =>
+      resolveDesignBriefFromCatalog(draftCatalog, brief(draftCatalog)),
+    ).toThrowError(/DESIGN_BRIEF_FAMILY_UNAVAILABLE/);
+  });
+
+  it("preserves evaluation as a contract while exposing hard failures to a later release gate", () => {
+    const evaluation = validateDesignEvaluation({
+      schemaVersion: DESIGN_EVALUATION_SCHEMA_VERSION,
+      overallScore: 91,
+      dimensions: {
+        hierarchy: 90,
+        consistency: 92,
+        spacing: 90,
+        contrast: 96,
+        imagery: 88,
+        mobileComposition: 91,
+        ctaClarity: 89,
+        credibility: 92,
+        originality: 90,
+      },
+      hardFailures: [
+        {
+          code: "CONTRAST_FAILURE",
+          page: "home",
+          breakpoint: 375,
+          evidencePath: "evaluations/home-375.png",
+        },
+      ],
+      findings: [],
+    });
+    expect(hasDesignEvaluationHardFailures(evaluation)).toBe(true);
+  });
+});
