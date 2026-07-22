@@ -20,7 +20,7 @@ afterEach(async () => {
   );
 });
 
-function spec(types: readonly string[] = ['HeroBanner']): SiteSpec {
+function spec(types: readonly string[] = ['StatementBlock'], blockProps: Record<string, unknown> = { labelKey: 'l', statementKey: 's' }): SiteSpec {
   return {
     specVersion: '1.0.0',
     site: {
@@ -38,7 +38,7 @@ function spec(types: readonly string[] = ['HeroBanner']): SiteSpec {
           root: {},
           content: types.map((type, index) => ({
             type,
-            props: { id: `block-${index}` },
+            props: { id: `block-${index}`, ...blockProps },
           })),
         },
         seo: { titleKey: 'seo.title', descriptionKey: 'seo.description' },
@@ -82,14 +82,19 @@ describe('R1 release contract gate', () => {
       'ProductGrid',
       'StatsBand',
     ]);
+    // { id } 缺必填 props -> validateBlock zod parse fail-closed（INVALID_BLOCK_PROPS）
     expect(() =>
       assertReleaseContract(spec(R1_RENDERER_COMPONENT_TYPES), '1.0.0'),
+    ).toThrow('INVALID_BLOCK_PROPS');
+    // 合法 props（StatementBlock 必填 labelKey/statementKey）-> 通过
+    expect(() =>
+      assertReleaseContract(spec(['StatementBlock'], { labelKey: 'k', statementKey: 's' }), '1.0.0'),
     ).not.toThrow();
   });
 
   it('fails closed on an unknown component before renderer publication', () => {
     expect(() =>
-      assertReleaseContract(spec(['HeroBanner', 'InventedWidget']), '1.0.0'),
+      assertReleaseContract(spec(['StatementBlock', 'InventedWidget']), '1.0.0'),
     ).toThrow('UNKNOWN_COMPONENT_TYPE: InventedWidget');
   });
 

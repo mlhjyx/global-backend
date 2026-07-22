@@ -35,4 +35,4 @@ export {
   copyBundleToLegacyStrings,
 } from "./site-builder/copy-bundle";
 export { resolveSiteLocale } from "./site-builder/locales";
-export { validateBlock, COMPONENT_REQUIRED_KEYS } from "./site-builder/component-schema";
+export { validateBlock, COMPONENT_SCHEMAS } from "./site-builder/component-schema";

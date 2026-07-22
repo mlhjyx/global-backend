@@ -137,6 +137,99 @@ describe('未知 type/preset 真实 build fail-closed 负例', () => {
         (err as { message?: string })?.message ||
         '',
     );
-    expect(out).toContain('COPY_SLOT_MISSING');
+    expect(out).toContain('INVALID_BLOCK_PROPS');
+  }, 90000);
+
+  it('错误 props 类型 -> astro build fail-closed (INVALID_BLOCK_PROPS)', () => {
+    const spec = {
+      ...baseSpec,
+      pages: [
+        {
+          ...baseSpec.pages[0],
+          puck: { content: [{ type: 'HeroBanner', props: { headlineKey: 123 } }], root: {} },
+        },
+      ],
+    };
+    const tmp = join(fixturesDir, '__tmp-wrong-type.json');
+    writeFileSync(tmp, JSON.stringify(spec));
+    let err: unknown;
+    try {
+      runBuild('fixtures/__tmp-wrong-type.json', 'dist-test-wrong-type');
+    } catch (e) {
+      err = e;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* noop */ }
+    }
+    expect(err).toBeDefined();
+    const out = String(
+      (err as { stderr?: Buffer; stdout?: Buffer; message?: string })
+        ?.stderr ||
+        (err as { stdout?: Buffer })?.stdout ||
+        (err as { message?: string })?.message ||
+        '',
+    );
+    expect(out).toContain('INVALID_BLOCK_PROPS');
+  }, 90000);
+
+  it('未知字段 -> astro build fail-closed (.strict INVALID_BLOCK_PROPS)', () => {
+    const spec = {
+      ...baseSpec,
+      pages: [
+        {
+          ...baseSpec.pages[0],
+          puck: { content: [{ type: 'HeroBanner', props: { headlineKey: 'h', unknownField: 'x' } }], root: {} },
+        },
+      ],
+    };
+    const tmp = join(fixturesDir, '__tmp-unknown-field.json');
+    writeFileSync(tmp, JSON.stringify(spec));
+    let err: unknown;
+    try {
+      runBuild('fixtures/__tmp-unknown-field.json', 'dist-test-unknown-field');
+    } catch (e) {
+      err = e;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* noop */ }
+    }
+    expect(err).toBeDefined();
+    const out = String(
+      (err as { stderr?: Buffer; stdout?: Buffer; message?: string })
+        ?.stderr ||
+        (err as { stdout?: Buffer })?.stdout ||
+        (err as { message?: string })?.message ||
+        '',
+    );
+    expect(out).toContain('INVALID_BLOCK_PROPS');
+  }, 90000);
+
+  it('未知 variant -> astro build fail-closed (z.enum INVALID_BLOCK_PROPS)', () => {
+    const spec = {
+      ...baseSpec,
+      pages: [
+        {
+          ...baseSpec.pages[0],
+          puck: { content: [{ type: 'MapLocation', props: { titleKey: 't', addressKey: 'a', variant: 'unknown' } }], root: {} },
+        },
+      ],
+    };
+    const tmp = join(fixturesDir, '__tmp-unknown-variant.json');
+    writeFileSync(tmp, JSON.stringify(spec));
+    let err: unknown;
+    try {
+      runBuild('fixtures/__tmp-unknown-variant.json', 'dist-test-unknown-variant');
+    } catch (e) {
+      err = e;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* noop */ }
+    }
+    expect(err).toBeDefined();
+    const out = String(
+      (err as { stderr?: Buffer; stdout?: Buffer; message?: string })
+        ?.stderr ||
+        (err as { stdout?: Buffer })?.stdout ||
+        (err as { message?: string })?.message ||
+        '',
+    );
+    expect(out).toContain('INVALID_BLOCK_PROPS');
   }, 90000);
 });
