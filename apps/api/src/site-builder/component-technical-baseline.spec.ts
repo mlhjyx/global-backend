@@ -70,29 +70,29 @@ describe("M1-e-A technical baseline component contract", () => {
   it("accepts content exactly at each component budget", () => {
     expect(() =>
       assertQualifiedComponentContentBudget("HeroBanner", {
-        headline: "H".repeat(72),
-        subhead: "S".repeat(180),
-        cta: "C".repeat(32),
+        headline: "H".repeat(60),
+        subhead: "S".repeat(140),
+        cta: "C".repeat(24),
       }),
     ).not.toThrow();
     expect(() =>
       assertQualifiedComponentContentBudget("StatsBand", {
         stats: Array.from({ length: 4 }, () => ({
-          value: "V".repeat(16),
-          label: "L".repeat(48),
+          value: "V".repeat(8),
+          label: "L".repeat(24),
         })),
       }),
     ).not.toThrow();
     expect(() =>
       assertQualifiedComponentContentBudget("CtaBanner", {
-        headline: "H".repeat(100),
-        cta: "C".repeat(32),
+        headline: "H".repeat(60),
+        cta: "C".repeat(24),
       }),
     ).not.toThrow();
   });
 
   it.each([
-    ["HeroBanner", { headline: "H".repeat(73) }],
+    ["HeroBanner", { headline: "H".repeat(61) }],
     [
       "StatsBand",
       {
@@ -102,7 +102,16 @@ describe("M1-e-A technical baseline component contract", () => {
         })),
       },
     ],
-    ["CtaBanner", { headline: "H".repeat(101), cta: "Contact" }],
+    [
+      "StatsBand",
+      {
+        stats: [
+          { value: "V".repeat(9), label: "Metric" },
+          { value: "2", label: "Metric" },
+        ],
+      },
+    ],
+    ["CtaBanner", { headline: "H".repeat(61), cta: "Contact" }],
   ])("%s rejects copy beyond its content budget", (type, content) => {
     expect(() => assertQualifiedComponentContentBudget(type, content)).toThrow(
       `COMPONENT_CONTENT_BUDGET_EXCEEDED: ${type}`,

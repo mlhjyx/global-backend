@@ -46,6 +46,37 @@ test("StatsBand exposes list semantics for each metric", async ({ page }) => {
   await expect(list.getByRole("listitem")).toHaveCount(3);
 });
 
+test("component landmarks keep local label ids unique", async ({ page }) => {
+  const sections = page.locator("section[data-component][aria-labelledby]");
+  const labelIds = await sections.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("aria-labelledby")),
+  );
+  expect(labelIds.every(Boolean)).toBe(true);
+  expect(new Set(labelIds).size).toBe(labelIds.length);
+  for (let index = 0; index < labelIds.length; index += 1) {
+    await expect(
+      sections.nth(index).locator(`#${labelIds[index]}`),
+    ).toHaveCount(1);
+  }
+});
+
+test("four-item StatsBand uses the supported responsive layout", async ({
+  page,
+}) => {
+  const items = page
+    .locator('section.stats[data-variant="quiet"]')
+    .getByRole("listitem");
+  await expect(items).toHaveCount(4);
+  const rows = await items.evaluateAll((elements) =>
+    elements.map((element) => Math.round(element.getBoundingClientRect().y)),
+  );
+  if (page.viewportSize()!.width < 640) {
+    expect(new Set(rows).size).toBe(4);
+  } else {
+    expect(new Set(rows).size).toBe(1);
+  }
+});
+
 test("qualified CTA links have touch, focus, and reduced-motion contracts", async ({
   page,
 }) => {

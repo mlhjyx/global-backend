@@ -41,6 +41,19 @@
             }
           },
           {
+            "type": "StatsBand",
+            "props": {
+              "id": "StatsBand-technical",
+              "stats": [
+                { "value": "20+", "labelKey": "stats.years" },
+                { "value": "40+", "labelKey": "stats.markets" },
+                { "value": "ISO 9001", "labelKey": "stats.quality" },
+                { "value": "24/7", "labelKey": "stats.support" }
+              ],
+              "variant": "quiet"
+            }
+          },
+          {
             "type": "CtaBanner",
             "props": {
               "id": "CtaBanner-technical",
@@ -64,6 +77,7 @@
       "stats.years": "Years of manufacturing",
       "stats.markets": "Export markets",
       "stats.quality": "Certified quality system",
+      "stats.support": "Engineering support",
       "cta.headline": "Tell us about your project",
       "cta.label": "Get in touch"
     }
