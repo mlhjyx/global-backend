@@ -58,6 +58,8 @@ import ProductShowcaseAlt from './ProductShowcaseAlt.astro';
 import TechSystems from './TechSystems.astro';
 import MinimalHero from './MinimalHero.astro';
 import StatementBlock from './StatementBlock.astro';
+import { createRequire } from 'node:module';
+const { SITE_SPEC_COMPONENT_TYPES } = createRequire(import.meta.url)('@global/contracts');
 
 interface Props {
   block: { type: string; props: Record<string, unknown> };
@@ -124,6 +126,16 @@ const registry: Record<string, unknown> = {
   MinimalHero,
   StatementBlock,
 };
+// 一致性校验：registry keys 必须等于封闭真值 SITE_SPEC_COMPONENT_TYPES（防手工漂移）
+const _registryKeys = Object.keys(registry);
+if (
+  _registryKeys.length !== SITE_SPEC_COMPONENT_TYPES.length ||
+  _registryKeys.some((k) => !SITE_SPEC_COMPONENT_TYPES.includes(k as never))
+) {
+  throw new Error(
+    'REGISTRY_DRIFT: Section registry keys 与 SITE_SPEC_COMPONENT_TYPES 不一致',
+  );
+}
 const Component = registry[block.type] as ((props: unknown) => unknown) | undefined;
 if (!Component) throw new Error(
   `UNKNOWN_COMPONENT_TYPE: ${block.type} -- 不在封闭 55 型注册表（SITE_SPEC_COMPONENT_TYPES）`,

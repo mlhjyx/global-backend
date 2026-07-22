@@ -55,15 +55,15 @@ const direction = siteLocaleDirection(locale);
 const homeHref = localePageHref('home', locale, spec.site.defaultLocale);
 const isHome = pageId === 'home';
 const brandName = spec.site.seoGlobal.siteName;
-// 联系方式从 copyBundle 取（缺则空字符串，不渲染对应项）
-const phone = t('contact.phone');
-const whatsapp = t('contact.whatsapp');
-const email = t('contact.email');
-const brandTagline = t('brand.tagline');
-const bookLabel = t('nav.book');
+// 联系方式/导航 slot 可选：缺 key 安全探测返回空（不 throw COPY_SLOT_MISSING），UI 按空值隐藏
 const safe = (k: string) => {
   try { return t(k); } catch { return ''; }
 };
+const phone = safe('contact.phone');
+const whatsapp = safe('contact.whatsapp');
+const email = safe('contact.email');
+const brandTagline = safe('brand.tagline');
+const bookLabel = safe('nav.book');
 ---
 
 <!doctype html>
