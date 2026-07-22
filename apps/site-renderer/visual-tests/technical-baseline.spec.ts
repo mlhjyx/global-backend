@@ -10,6 +10,10 @@ const COMPONENTS = [
   { name: "ProcessTimeline", selector: "section.process-timeline" },
   { name: "FaqAccordion", selector: "section.faq-accordion" },
   { name: "CtaBanner", selector: "section.cta" },
+  { name: "LogoMarquee", selector: "section.logo-marquee" },
+  { name: "Testimonials", selector: "section.testimonials" },
+  { name: "FeatureCards", selector: "section.feature-cards" },
+  { name: "TechSystems", selector: "section.tech-systems" },
 ] as const;
 
 test.beforeEach(async ({ page }) => {
@@ -105,6 +109,15 @@ test("FaqAccordion keeps native keyboard disclosure and visible focus", async ({
   expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
   await summary.press("Enter");
   await expect(item).toHaveAttribute("open", "");
+});
+
+test("proof and system components expose semantic lists instead of inert controls", async ({ page }) => {
+  await expect(page.locator("section.logo-marquee ul").first().getByRole("listitem")).toHaveCount(4);
+  await expect(page.locator("section.testimonials h2")).toHaveText("Project feedback");
+  await expect(page.locator("section.testimonials").getByRole("article")).toHaveCount(2);
+  await expect(page.locator("section.feature-cards").getByRole("article")).toHaveCount(3);
+  await expect(page.locator("section.tech-systems ol").getByRole("listitem")).toHaveCount(2);
+  await expect(page.locator("section.tech-systems button")).toHaveCount(0);
 });
 
 test("component landmarks keep local label ids unique", async ({ page }) => {

@@ -28,6 +28,10 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   CertWall: Object.freeze({ title: 60, titleWords: 8, minItems: 1, maxItems: 8, label: 48 }),
   ProcessTimeline: Object.freeze({ title: 60, titleWords: 8, minItems: 2, maxItems: 6, stepTitle: 40, stepBody: 160 }),
   FaqAccordion: Object.freeze({ title: 60, titleWords: 8, minItems: 1, maxItems: 8, question: 120, answer: 400 }),
+  LogoMarquee: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, minItems: 2, maxItems: 12, item: 48 }),
+  Testimonials: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, minItems: 1, maxItems: 6, quote: 400, name: 80, location: 80, platform: 60 }),
+  FeatureCards: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, intro: 240, minItems: 2, maxItems: 6, itemTitle: 60, itemDescription: 200, learn: 24 }),
+  TechSystems: Object.freeze({ chapter: 40, title: 60, titleWords: 8, intro: 240, minItems: 2, maxItems: 6, label: 48, systemTitle: 60, description: 200, metric: 24, suffix: 12, metricLabel: 48, live: 40 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -135,6 +139,10 @@ const contentSchemas = {
   CertWall: z.object({ title: boundedCopy(60, 8), certs: z.array(z.object({ label: boundedCopy(48) }).strict()).min(1).max(8) }).strict(),
   ProcessTimeline: z.object({ title: boundedCopy(60, 8), steps: z.array(z.object({ title: boundedCopy(40), body: boundedCopy(160) }).strict()).min(2).max(6) }).strict(),
   FaqAccordion: z.object({ title: boundedCopy(60, 8), items: z.array(z.object({ question: boundedCopy(120), answer: boundedCopy(400) }).strict()).min(1).max(8) }).strict(),
+  LogoMarquee: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), items: z.array(boundedCopy(48)).min(2).max(12) }).strict(),
+  Testimonials: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), items: z.array(z.object({ quote: boundedCopy(400), name: boundedCopy(80), location: boundedCopy(80), platform: boundedCopy(60), rating: z.number().min(0).max(5) }).strict()).min(1).max(6) }).strict(),
+  FeatureCards: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), intro: boundedCopy(240), items: z.array(z.object({ title: boundedCopy(60), description: boundedCopy(200) }).strict()).min(2).max(6), learn: boundedCopy(24).optional() }).strict(),
+  TechSystems: z.object({ chapter: boundedCopy(40), title: boundedCopy(60, 8), intro: boundedCopy(240), systems: z.array(z.object({ label: boundedCopy(48), title: boundedCopy(60), description: boundedCopy(200), metric: boundedCopy(24), suffix: boundedCopy(12), metricLabel: boundedCopy(48) }).strict()).min(2).max(6), live: boundedCopy(40).optional() }).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

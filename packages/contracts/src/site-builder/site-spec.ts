@@ -69,13 +69,17 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "AboutBlock",
   "CertWall",
   "CtaBanner",
+  "FeatureCards",
   "FaqAccordion",
   "HeroBanner",
   "InquiryForm",
   "MapLocation",
+  "LogoMarquee",
   "ProcessTimeline",
   "ProductGrid",
   "StatsBand",
+  "TechSystems",
+  "Testimonials",
 ] as const satisfies readonly SiteSpecComponentType[];
 export type SiteSpecReleaseComponentType =
   (typeof SITE_SPEC_RELEASE_COMPONENT_TYPES)[number];

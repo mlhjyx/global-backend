@@ -1,65 +1,56 @@
 ---
-interface Props {
+import { createRequire } from 'node:module';
+
+import type { Translate } from '../i18n';
+
+const require = createRequire(import.meta.url);
+const { assertQualifiedComponentContentBudget } = require('@global/contracts') as typeof import('@global/contracts');
+
+type Props = {
+  id?: string;
+  instanceId: string;
   eyebrowKey: string;
   titleKey: string;
   titleLine2Key?: string;
   items: string[];
-  t: (key: string) => string;
+  variant?: 'technical-grid' | 'quiet';
+  t: Translate;
   alt?: boolean;
-}
-const { eyebrowKey, titleKey, titleLine2Key, items = [], t, alt } = Astro.props;
-const doubled = [...items, ...items];
+};
+
+const { id, instanceId, eyebrowKey, titleKey, titleLine2Key, items, variant = 'technical-grid', t, alt } = Astro.props;
+const eyebrow = t(eyebrowKey);
+const title = [t(titleKey), titleLine2Key ? t(titleLine2Key) : undefined].filter(Boolean).join(' ');
+assertQualifiedComponentContentBudget('LogoMarquee', { eyebrow, title, items });
+const baseId = `logo-marquee-${id ?? 'section'}-${instanceId}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
 ---
 
-<section class:list={['block', 'logo-marquee', { alt }]}>
-  <div class="container head reveal">
-    <p class="eyebrow-flat">{t(eyebrowKey)}</p>
-    <h2 class="display">{t(titleKey)}{titleLine2Key && <><br />{t(titleLine2Key)}</>}</h2>
+<section class:list={['block', 'logo-marquee', `logo-marquee--${variant}`, { alt }]} data-component="LogoMarquee" data-variant={variant} aria-labelledby={headingId}>
+  <div class="container logo-marquee__intro">
+    <p class="logo-marquee__eyebrow">{eyebrow}</p>
+    <h2 id={headingId}>{t(titleKey)}{titleLine2Key && <><br />{t(titleLine2Key)}</>}</h2>
   </div>
-
-  <div class="rows">
-    <div class="row-wrap">
-      <div class="fade left"></div>
-      <div class="fade right"></div>
-      <div class="track track-slow">
-        {doubled.map((name, i) => (
-          <span class="item"><span class="name">{name}</span></span>
-        ))}
-      </div>
-    </div>
-    <div class="row-wrap">
-      <div class="fade left"></div>
-      <div class="fade right"></div>
-      <div class="track track-fast reverse">
-        {doubled.map((name, i) => (
-          <span class="item"><span class="name dim">- {name}</span></span>
-        ))}
-      </div>
+  <div class="logo-marquee__viewport">
+    <div class="logo-marquee__track">
+      <ul role="list">{items.map((item) => <li>{item}</li>)}</ul>
+      <ul aria-hidden="true">{items.map((item) => <li>{item}</li>)}</ul>
     </div>
   </div>
 </section>
 
 <style>
-  .logo-marquee { overflow: hidden; }
-  .head { text-align: center; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
-  .eyebrow-flat { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.18em; color: var(--c-on-surface); margin-bottom: 1.25rem; }
-  .display { font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 1.02; letter-spacing: -0.02em; }
-  .rows { display: flex; flex-direction: column; gap: 2.5rem; }
-  .row-wrap { position: relative; overflow: hidden; }
-  .fade { position: absolute; top: 0; bottom: 0; width: 6rem; z-index: 2; pointer-events: none; }
-  .fade.left { left: 0; background: linear-gradient(to right, var(--c-surface-alt), transparent); }
-  .fade.right { right: 0; background: linear-gradient(to left, var(--c-surface-alt), transparent); }
-  :not(.alt) .fade.left { background: linear-gradient(to right, var(--c-surface), transparent); }
-  :not(.alt) .fade.right { background: linear-gradient(to left, var(--c-surface), transparent); }
-  .track { display: flex; width: max-content; }
-  .track-slow { animation: marq 80s linear infinite; }
-  .track-fast { animation: marq 40s linear infinite; }
-  .track.reverse { animation-direction: reverse; }
-  @keyframes marq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-  @media (prefers-reduced-motion: reduce) { .track { animation: none; flex-wrap: wrap; } }
-  .item { display: flex; align-items: center; justify-content: center; padding: 1.25rem 3rem; flex: none; }
-  .name { font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.25rem, 2.5vw, 1.875rem); letter-spacing: -0.01em; color: var(--c-on-surface); transition: color .3s ease; }
-  .item:hover .name { color: var(--c-on-surface); }
-  .name.dim { font-weight: 500; opacity: 0.3; }
-  .item:hover .name.dim { color: var(--c-accent); opacity: 1; }
+  .logo-marquee { overflow: hidden; background: var(--c-surface); border-block: 1px solid var(--c-border); }
+  .logo-marquee.alt { background: var(--c-surface-alt); }
+  .logo-marquee__intro { max-width: 42rem; }
+  .logo-marquee__eyebrow { margin: 0 0 .65rem; color: var(--c-primary); font: 700 .75rem/1.2 var(--font-sans, sans-serif); letter-spacing: .12em; text-transform: uppercase; }
+  h2 { margin: 0; color: var(--c-on-surface); font: 700 clamp(1.75rem, 4vw, 3.25rem)/1.06 var(--font-display, var(--font-sans, sans-serif)); letter-spacing: -.025em; text-wrap: balance; }
+  .logo-marquee__viewport { margin-top: clamp(1.75rem, 4vw, 3rem); overflow: hidden; border-block: 1px solid var(--c-border); }
+  .logo-marquee__track { display: flex; width: max-content; animation: logo-marquee-scroll 42s linear infinite; }
+  ul { display: flex; align-items: stretch; margin: 0; padding: 0; list-style: none; }
+  li { display: grid; min-width: min(15rem, 72vw); place-items: center; padding: 1.25rem 2.25rem; border-right: 1px solid var(--c-border); color: var(--c-on-surface); font: 700 clamp(1rem, 2vw, 1.4rem)/1.2 var(--font-display, var(--font-sans, sans-serif)); text-align: center; overflow-wrap: anywhere; }
+  .logo-marquee--technical-grid { background-image: linear-gradient(to right, color-mix(in srgb, var(--c-border) 42%, transparent) 1px, transparent 1px); background-size: 4rem 100%; }
+  .logo-marquee--quiet { background-image: none; }
+  @keyframes logo-marquee-scroll { to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .logo-marquee__viewport { overflow: visible; } .logo-marquee__track { width: auto; animation: none; } .logo-marquee__track > ul[aria-hidden='true'] { display: none; } ul { width: 100%; flex-wrap: wrap; } li { flex: 1 1 12rem; } }
 </style>

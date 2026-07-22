@@ -183,6 +183,7 @@ export const COMPONENT_SCHEMAS = {
   }),
   Testimonials: obj({
     eyebrowKey: str,
+    titleKey: str.optional(),
     items: z.array(
       strictObj({
         quoteKey: str,
@@ -191,7 +192,8 @@ export const COMPONENT_SCHEMAS = {
         rating: z.number(),
         platformKey: str,
       }),
-    ),
+    ).min(1).max(6),
+    variant: technicalBaselineVariant.optional(),
   }),
   AreaGallery: obj({
     eyebrowKey: str,
@@ -266,8 +268,9 @@ export const COMPONENT_SCHEMAS = {
   LogoMarquee: obj({
     eyebrowKey: str,
     titleKey: str,
-    items: strArr,
+    items: strArr.min(2).max(12),
     titleLine2Key: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   SplitAbout: obj({
     eyebrowKey: str,
@@ -504,8 +507,9 @@ export const COMPONENT_SCHEMAS = {
     titleKey: str,
     titleLine2Key: str,
     introKey: str,
-    items: z.array(strictObj({ icon: str, titleKey: str, descKey: str })),
+    items: z.array(strictObj({ icon: str, titleKey: str, descKey: str })).min(2).max(6),
     learnKey: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   PricingTiers: obj({
     eyebrowKey: str,
@@ -589,8 +593,9 @@ export const COMPONENT_SCHEMAS = {
         suffix: str,
         metricLabelKey: str,
       }),
-    ),
+    ).min(2).max(6),
     liveKey: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   MinimalHero: obj({
     eyebrowKey: str,
