@@ -88,6 +88,11 @@ export function validateDesignDna(value: unknown): DesignDna {
     isDesignAbstractionCodeArray(dna.ruleIds) &&
     dna.ruleIds.length > 0 &&
     hierarchy &&
+    hasOnlyKeys(hierarchy, [
+      "displayScale",
+      "headingContrast",
+      "maxReadingWidthRem",
+    ]) &&
     ["compact", "balanced", "editorial"].includes(
       String(hierarchy.displayScale),
     ) &&
@@ -95,10 +100,16 @@ export function validateDesignDna(value: unknown): DesignDna {
     isFiniteNumber(hierarchy.maxReadingWidthRem) &&
     hierarchy.maxReadingWidthRem > 0 &&
     rhythm &&
+    hasOnlyKeys(rhythm, ["sectionGapPx", "contentGapPx", "density"]) &&
     pair(rhythm.sectionGapPx) &&
     pair(rhythm.contentGapPx) &&
     ["airy", "balanced", "dense"].includes(String(rhythm.density)) &&
     composition &&
+    hasOnlyKeys(composition, [
+      "heroModes",
+      "imageTextRatios",
+      "alignmentBias",
+    ]) &&
     Array.isArray(composition.heroModes) &&
     composition.heroModes.length > 0 &&
     composition.heroModes.every((mode) =>
@@ -113,12 +124,19 @@ export function validateDesignDna(value: unknown): DesignDna {
     isDesignRatioBandArray(composition.imageTextRatios) &&
     ["left", "center", "mixed"].includes(String(composition.alignmentBias)) &&
     surfaces &&
+    hasOnlyKeys(surfaces, ["cardStyle", "borderWeight", "radius"]) &&
     ["flat", "bordered", "elevated", "tinted"].includes(
       String(surfaces.cardStyle),
     ) &&
     ["none", "hairline", "strong"].includes(String(surfaces.borderWeight)) &&
     ["none", "subtle", "soft"].includes(String(surfaces.radius)) &&
     imagery &&
+    hasOnlyKeys(imagery, [
+      "preferredSubjects",
+      "cropModes",
+      "backgroundPolicy",
+      "maxGeneratedMediaRatio",
+    ]) &&
     isDesignAbstractionCodeArray(imagery.preferredSubjects) &&
     Array.isArray(imagery.cropModes) &&
     imagery.cropModes.every((mode) =>
@@ -129,6 +147,7 @@ export function validateDesignDna(value: unknown): DesignDna {
     imagery.maxGeneratedMediaRatio >= 0 &&
     imagery.maxGeneratedMediaRatio <= 1 &&
     motion &&
+    hasOnlyKeys(motion, ["intensity", "allowed", "forbidden"]) &&
     ["none", "low", "medium"].includes(String(motion.intensity)) &&
     isDesignAbstractionCodeArray(motion.allowed) &&
     isDesignAbstractionCodeArray(motion.forbidden) &&
