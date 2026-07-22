@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import ControlledAssetPicture from './ControlledAssetPicture.astro';
 import { localeQualifiedPageHref } from '../lib/page-reference';
 
-interface Area { name: string; postcodes?: string | string[]; noteKey: string; asset?: { assetId: string; altKey?: string } }
+interface Area { name: string; postcodes?: string | string[]; noteKey: string; asset?: { assetId: string; altKey?: string; variantUrl?: string } }
 interface Props {
   eyebrowKey: string; titleKey: string; titleAccentKey: string; areas: Area[];
   allLabelKey?: string; allPageId?: string; variant?: 'technical-grid' | 'quiet';
@@ -19,7 +19,7 @@ const content = {
 };
 assertQualifiedComponentContentBudget('AreaGallery', content);
 const headingId = `${instanceId}-area-gallery-heading`;
-const allHref = allLabelKey && allPageId ? localeQualifiedPageHref(allPageId, pagePathById, locale, defaultLocale) : undefined;
+const allHref = allLabelKey ? localeQualifiedPageHref(allPageId ?? 'area', pagePathById, locale, defaultLocale) : undefined;
 ---
 
 <section class:list={['block', 'area-gallery', `area-gallery--${variant}`, { alt }]} data-component="AreaGallery" data-variant={variant} aria-labelledby={headingId}>

@@ -125,13 +125,23 @@ export function assertReleaseContract(
               ? ['allCta']
               : block.type === 'ServiceRows'
                 ? ['cta']
+                : block.type === 'AreaGallery'
+                  ? ['allPageId']
+                  : block.type === 'ProjectsGrid'
+                    ? ['allPageId']
+                    : block.type === 'CollectionCards'
+                      ? ['allPageId']
                 : block.type === 'MaterialsLibrary'
                   ? ['ctaPrimaryPageId', 'ctaSecondaryPageId']
                   : block.type === 'ProductShowcaseAlt'
-                    ? ['configureCta']
+                    ? ['configureCta', 'configurePageId']
                 : [];
       for (const field of ctaFields) {
-        const value = props[field];
+        const value = props[field]
+          ?? (block.type === 'MaterialsLibrary' ? 'contact' : undefined)
+          ?? (block.type === 'AreaGallery' && props.allLabelKey ? 'area' : undefined)
+          ?? (block.type === 'ProjectsGrid' && props.allLabelKey ? 'projects' : undefined)
+          ?? (block.type === 'CollectionCards' ? 'home' : undefined);
         const cta = typeof value === 'string'
           ? { pageId: value }
           : value as { pageId?: string; url?: string } | undefined;

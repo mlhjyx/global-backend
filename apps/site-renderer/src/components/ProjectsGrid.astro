@@ -3,14 +3,14 @@ import { createRequire } from 'node:module';
 import ControlledAssetPicture from './ControlledAssetPicture.astro';
 import { localeQualifiedPageHref } from '../lib/page-reference';
 
-interface Item { titleKey: string; descKey: string; asset?: { assetId: string; altKey?: string } }
+interface Item { titleKey: string; descKey: string; asset?: { assetId: string; altKey?: string; variantUrl?: string } }
 interface Props { titleKey: string; items: Item[]; allLabelKey?: string; allPageId?: string; variant?: 'technical-grid' | 'quiet'; t: (key: string) => string; alt?: boolean; locale: string; defaultLocale: string; instanceId: string; pagePathById?: Record<string, string> }
 const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
 const { titleKey, items, allLabelKey, allPageId, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
 const content = { title: t(titleKey), items: items.map((item) => ({ title: t(item.titleKey), description: t(item.descKey), alt: item.asset?.altKey ? t(item.asset.altKey) : t(item.titleKey) })), allCta: allLabelKey ? t(allLabelKey) : undefined };
 assertQualifiedComponentContentBudget('ProjectsGrid', content);
 const headingId = `${instanceId}-projects-grid-heading`;
-const allHref = allLabelKey && allPageId ? localeQualifiedPageHref(allPageId, pagePathById, locale, defaultLocale) : undefined;
+const allHref = allLabelKey ? localeQualifiedPageHref(allPageId ?? 'projects', pagePathById, locale, defaultLocale) : undefined;
 ---
 
 <section class:list={['block', 'projects-grid', `projects-grid--${variant}`, { alt }]} data-component="ProjectsGrid" data-variant={variant} aria-labelledby={headingId}><div class="container"><header class="head"><h2 id={headingId}>{content.title}</h2>{allHref && content.allCta && <a class="all" href={allHref}>{content.allCta}<i class="ri-arrow-right-line" aria-hidden="true"></i></a>}</header><ul class="grid">{items.map((item,index)=><li><article class="card"><div class="media">{item.asset?<ControlledAssetPicture assetId={item.asset.assetId} alt={content.items[index]!.alt} width={960} height={720}/>:<span class="fallback" aria-hidden="true">{String(index+1).padStart(2,'0')}</span>}</div><div class="body"><h3>{content.items[index]!.title}</h3><p>{content.items[index]!.description}</p></div></article></li>)}</ul></div></section>

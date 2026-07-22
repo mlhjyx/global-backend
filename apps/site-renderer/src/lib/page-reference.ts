@@ -2,8 +2,9 @@ import { localePageHref, localePagePathHref } from './spec';
 
 /**
  * Qualified components resolve a page id through the SiteSpec path map.  The
- * id fallback preserves preview compatibility for legacy component callers;
- * release validation rejects unknown targets before publication.
+ * Legacy standalone previews may omit the map entirely. Once a renderer has
+ * supplied it, an unknown page id is an authoring error rather than a route
+ * that may accidentally look valid.
  */
 export function localeQualifiedPageHref(
   pageId: string,
@@ -11,8 +12,10 @@ export function localeQualifiedPageHref(
   locale: string,
   defaultLocale: string,
 ): string {
+  if (Object.keys(pagePathById).length === 0) {
+    return localePageHref(pageId, locale, defaultLocale);
+  }
   const path = pagePathById[pageId];
-  return path
-    ? localePagePathHref(path, locale, defaultLocale)
-    : localePageHref(pageId, locale, defaultLocale);
+  if (!path) throw new Error(`PAGE_REFERENCE_UNKNOWN: ${pageId}`);
+  return localePagePathHref(path, locale, defaultLocale);
 }

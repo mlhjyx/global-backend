@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"CollectionCards","status":"pass","part":"contentBudget","assertions":["Collection headings and labels are bounded."],"sources":["packages/contracts/src/site-builder/component-content-budget.ts"],"verification":["pnpm --filter @global/api test -- component-technical-baseline.spec.ts"]}

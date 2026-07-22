@@ -1,20 +1,23 @@
 ---
 interface Props {
   assetId?: string;
+  variantUrl?: string;
   alt: string;
   width: number;
   height: number;
   class?: string;
 }
 
-const { assetId, alt, width, height, class: className } = Astro.props;
+const { assetId, variantUrl, alt, width, height, class: className } = Astro.props;
 ---
 
 {
-  assetId ? (
+  assetId && variantUrl && /^\/(?!\/)/.test(variantUrl) ? (
     <picture class={className} data-asset-variant="gallery-card/v1">
-      <source media="(min-width: 768px)" srcset={`#asset:${assetId}`} />
-      <img src={`#asset:${assetId}`} alt={alt} width={width} height={height} loading="lazy" decoding="async" />
+      <source media="(min-width: 768px)" srcset={variantUrl} />
+      <img src={variantUrl} alt={alt} width={width} height={height} loading="lazy" decoding="async" />
     </picture>
-  ) : null
+  ) : (
+    <span data-asset-fallback aria-hidden="true">{assetId ?? ""}</span>
+  )
 }

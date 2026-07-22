@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MaterialsLibrary","status":"pass","part":"contentBudget","assertions":["Material metadata, notes and CTAs are bounded."],"sources":["packages/contracts/src/site-builder/component-content-budget.ts"],"verification":["pnpm --filter @global/api test -- component-technical-baseline.spec.ts"]}

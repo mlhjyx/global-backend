@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MaterialsLibrary","status":"pass","part":"reducedMotion","assertions":["The component is fully readable without motion."],"sources":["apps/site-renderer/src/components/MaterialsLibrary.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}
