@@ -314,6 +314,19 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_DNA_INVALID/);
   });
 
+  it("rejects undeclared fields inside DesignDNA records", () => {
+    const dna = catalog().designDnas[0];
+    expect(() =>
+      validateDesignDna({
+        ...dna,
+        hierarchy: {
+          ...dna.hierarchy,
+          rawHtml: "<h1>Copied source headline</h1>",
+        },
+      }),
+    ).toThrowError(/DESIGN_DNA_INVALID/);
+  });
+
   it("rejects source-derived text in family adjacency rules", () => {
     const value = catalog();
     expect(() =>
