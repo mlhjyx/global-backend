@@ -6,8 +6,8 @@
   "limits": {
     "itemsMin": 2,
     "itemsMax": 4,
-    "valueMaxCharacters": 16,
-    "labelMaxCharacters": 48
+    "valueMaxCharacters": 8,
+    "labelMaxCharacters": 24
   },
   "assertions": [
     "Runtime rendering rejects resolved content beyond the registered limits."

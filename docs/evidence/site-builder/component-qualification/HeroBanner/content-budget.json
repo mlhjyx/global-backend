@@ -4,9 +4,9 @@
   "part": "contentBudget",
   "status": "pass",
   "limits": {
-    "headlineMaxCharacters": 72,
-    "subheadMaxCharacters": 180,
-    "ctaMaxCharacters": 32
+    "headlineMaxCharacters": 60,
+    "subheadMaxCharacters": 140,
+    "ctaMaxCharacters": 24
   },
   "assertions": [
     "Runtime rendering rejects resolved copy beyond the registered limits."

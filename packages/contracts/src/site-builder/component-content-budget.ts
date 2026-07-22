@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
-  HeroBanner: Object.freeze({ headline: 72, subhead: 180, cta: 32 }),
-  StatsBand: Object.freeze({ minItems: 2, maxItems: 4, value: 16, label: 48 }),
-  CtaBanner: Object.freeze({ headline: 100, cta: 32 }),
+  HeroBanner: Object.freeze({ headline: 60, subhead: 140, cta: 24 }),
+  StatsBand: Object.freeze({ minItems: 2, maxItems: 4, value: 8, label: 24 }),
+  CtaBanner: Object.freeze({ headline: 60, cta: 24 }),
 });
 
 export type QualifiedContentBudgetComponent =

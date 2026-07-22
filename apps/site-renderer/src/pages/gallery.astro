@@ -144,7 +144,7 @@ function blockCount(spec: any): number {
                     {page.puck.content.map((block: any, i: number) => (
                       <div class="gf-block">
                         <div class="gf-block-tag">{block.type} · {f.key}.{page.id}</div>
-                        <Section block={block} t={t} index={i} locale="en" defaultLocale="en" />
+                        <Section block={block} t={t} index={i} scope={`${f.key}-${page.id}`} locale="en" defaultLocale="en" />
                       </div>
                     ))}
                   </div>

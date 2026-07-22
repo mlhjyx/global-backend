@@ -4,6 +4,7 @@ import { localePageHref } from '../lib/spec';
 
 interface Props {
   id?: string;
+  instanceId: string;
   headlineKey: string;
   subheadKey?: string;
   cta?: { labelKey: string; pageId?: string; url?: string };
@@ -14,6 +15,7 @@ interface Props {
 }
 const {
   id,
+  instanceId,
   headlineKey,
   subheadKey,
   cta,
@@ -38,7 +40,7 @@ const ctaHref =
   (cta?.pageId
     ? localePageHref(cta.pageId, locale, defaultLocale)
     : '#inquiry');
-const baseId = (id ?? `hero-${headlineKey}`).replace(/[^A-Za-z0-9_-]/g, '-');
+const baseId = `${id ?? 'hero'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
 const headingId = `${baseId}-heading`;
 ---
 

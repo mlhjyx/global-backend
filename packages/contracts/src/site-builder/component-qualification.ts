@@ -144,7 +144,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "contentBudget",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/content-budget.json",
-    sha256: "7c7e5a23f555feeeba369fbb34b5afb8f61816dcfc4b08c6ccc9153f9158b826",
+    sha256: "8518ed15f12122e7d12ef74e0cf5f36f3828e7a82cb303240561733562120b0a",
   },
   "m1-e-a-cta-banner-accessibility": {
     artifactId: "m1-e-a-cta-banner-accessibility",
@@ -168,7 +168,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/fixtures.json",
-    sha256: "58077784a67b9ad289a77fe854a0d671a7491a710ee53c5bcf0a2219e2160f7a",
+    sha256: "350c0adfc573d22b7e521656d82e1181ede4615362be754377ebca106f39ca8d",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -176,7 +176,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "1ee61f548eda921e02b1c89e9caf593729efbda84232bc3797bcf5e2c21fbb93",
+          "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e",
       },
     ],
   },
@@ -186,7 +186,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "visualRegression",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/visual-regression.json",
-    sha256: "7bb7f3b6ad99418cfa568d49847172df6206d47a78fc2807039e2f68400dc151",
+    sha256: "64bfcbd4170ab7f2c157349e8c3f85cb9c4da0cd8ccad45bf5b0c118abca4d37",
     breakpoints: [375, 768, 1440],
     outputs: [
       {
@@ -194,7 +194,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/visual-tests/__screenshots__/mobile-375/CtaBanner.png",
         sha256:
-          "1ca9336e59ef34480f4a4e4fd86f1760e3b8f29959f4ef826e0666e2954e56c4",
+          "80fccdfe5c23b8bc120691fed069c2cd02bdf2690754fc5cb895b1cb2c535102",
       },
       {
         breakpoint: 768,
@@ -235,7 +235,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "contentBudget",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/HeroBanner/content-budget.json",
-    sha256: "5cbfcfcd450ad47ed86569b16f62142c239657f259baa712fcc76619b60f7dd8",
+    sha256: "633ace9c5e5cfb417c1331d8b717759c8d45c86cfb2f9bf6ab0b1fa2838da232",
   },
   "m1-e-a-hero-banner-accessibility": {
     artifactId: "m1-e-a-hero-banner-accessibility",
@@ -259,7 +259,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/HeroBanner/fixtures.json",
-    sha256: "e90940577d8a6ca967c838fd7b008fcf8b78daebbc32d2a29480a918d6ea6ac9",
+    sha256: "4760e80c5809bffa130f57d8ebd1dddf1caa2ee4376a3ea567cf75d6769d95e4",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -267,7 +267,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "1ee61f548eda921e02b1c89e9caf593729efbda84232bc3797bcf5e2c21fbb93",
+          "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e",
       },
     ],
   },
@@ -326,7 +326,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "contentBudget",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/StatsBand/content-budget.json",
-    sha256: "48291c7911dee085ac43e7e91def7808c65171caff1840bc0ceb79e9c89593b4",
+    sha256: "f5720a09d4b055daf02dca306df3600ed90adc9be36b8947f5c577bd101dfc3b",
   },
   "m1-e-a-stats-band-accessibility": {
     artifactId: "m1-e-a-stats-band-accessibility",
@@ -350,7 +350,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/StatsBand/fixtures.json",
-    sha256: "24576a3512e5fc19cbcedb5bf0e9ec5a7eacece4ce2ff41e39b3bba0dbce10b0",
+    sha256: "1e0d6c454d87439bf073598049092dda86d4de6299eb80c6f5874d17d00dd9a0",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -358,7 +358,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "1ee61f548eda921e02b1c89e9caf593729efbda84232bc3797bcf5e2c21fbb93",
+          "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e",
       },
     ],
   },

@@ -30,6 +30,7 @@ const page = spec.pages.find((p) => p.id === pageId)!;
       block={block}
       t={t}
       index={i}
+      scope={page.id}
       locale={locale}
       defaultLocale={spec.site.defaultLocale}
     />
