@@ -94,6 +94,10 @@ describe("M1-e-A technical baseline component contract", () => {
   it.each([
     ["HeroBanner", { headline: "H".repeat(61) }],
     [
+      "HeroBanner",
+      { headline: Array.from({ length: 9 }, () => "word").join(" ") },
+    ],
+    [
       "StatsBand",
       {
         stats: Array.from({ length: 5 }, () => ({
@@ -112,6 +116,13 @@ describe("M1-e-A technical baseline component contract", () => {
       },
     ],
     ["CtaBanner", { headline: "H".repeat(61), cta: "Contact" }],
+    [
+      "CtaBanner",
+      {
+        headline: "Ready to discuss your project",
+        cta: Array.from({ length: 5 }, () => "go").join(" "),
+      },
+    ],
   ])("%s rejects copy beyond its content budget", (type, content) => {
     expect(() => assertQualifiedComponentContentBudget(type, content)).toThrow(
       `COMPONENT_CONTENT_BUDGET_EXCEEDED: ${type}`,
