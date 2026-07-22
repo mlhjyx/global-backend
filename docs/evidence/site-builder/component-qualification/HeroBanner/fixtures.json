@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "HeroBanner",
+  "part": "fixtures",
+  "status": "pass",
+  "fixtureFiles": [
+    {
+      "fixtureId": "technical-baseline",
+      "repositoryPath": "apps/site-renderer/fixtures/technical-baseline-spec.json",
+      "sha256": "f2b4eac427aacb447f138161964374585158bdbc0a6e82249916f3cc5ef4873e"
+    }
+  ],
+  "assertions": [
+    "The fixture uses bounded copy and the explicit technical-grid variant."
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

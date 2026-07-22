@@ -110,6 +110,15 @@ section.block.flush { padding-top: 0; padding-bottom: 0; }
 .btn-ghost:hover { color: var(--c-primary); }
 .btn-on-dark-outline { background: rgba(255,255,255,0.08); color: var(--c-on-dark); border-color: rgba(255,255,255,0.22); }
 .btn-on-dark-outline:hover { background: rgba(255,255,255,0.16); }
+.btn:focus {
+  outline: 3px solid var(--c-accent);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .btn.btn { transition: none !important; }
+  .btn.btn:hover { transform: none !important; }
+}
 
 /* header */
 .site-header {

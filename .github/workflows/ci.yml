@@ -55,6 +55,9 @@ jobs:
       - name: Renderer locale contract test
         run: pnpm --filter @global/site-renderer test
 
+      - name: Renderer qualified component visual regression（375 · 768 · 1440）
+        run: pnpm --filter @global/site-renderer test:visual
+
       - name: Renderer multilingual smoke build
         run: pnpm --filter @global/site-renderer build
         env:

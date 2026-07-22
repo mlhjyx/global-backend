@@ -28,6 +28,7 @@ export * from "./site-builder/design-brief";
 export * from "./site-builder/design-evaluation";
 export * from "./site-builder/design-catalog";
 export * from "./site-builder/component-qualification";
+export * from "./site-builder/component-content-budget";
 
 // Astro/Vite consumes this CommonJS package at build time and cannot reliably
 // statically discover names hidden behind TypeScript's __exportStar helper.
@@ -49,3 +50,7 @@ export {
   getComponentReleaseReadiness,
   validateComponentQualification,
 } from "./site-builder/component-qualification";
+export {
+  QUALIFIED_COMPONENT_CONTENT_BUDGETS,
+  assertQualifiedComponentContentBudget,
+} from "./site-builder/component-content-budget";

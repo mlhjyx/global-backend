@@ -1,54 +1,118 @@
 ---
+import { createRequire } from 'node:module';
 import { localePageHref } from '../lib/spec';
 
 interface Props {
+  id?: string;
+  instanceId: string;
   headlineKey: string;
   subheadKey?: string;
   cta?: { labelKey: string; pageId?: string; url?: string };
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   locale: string;
   defaultLocale: string;
 }
-const { headlineKey, subheadKey, cta, t, locale, defaultLocale } = Astro.props;
+const {
+  id,
+  instanceId,
+  headlineKey,
+  subheadKey,
+  cta,
+  variant = 'technical-grid',
+  t,
+  locale,
+  defaultLocale,
+} = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const headline = t(headlineKey);
+const subhead = subheadKey ? t(subheadKey) : undefined;
+const ctaLabel = cta ? t(cta.labelKey) : undefined;
+assertQualifiedComponentContentBudget('HeroBanner', {
+  headline,
+  ...(subhead ? { subhead } : {}),
+  ...(ctaLabel ? { cta: ctaLabel } : {}),
+});
 const ctaHref =
   cta?.url ??
   (cta?.pageId
     ? localePageHref(cta.pageId, locale, defaultLocale)
     : '#inquiry');
+const baseId = `${id ?? 'hero'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
 ---
 
-<section class="block hero">
-  <div class="inner">
-    <h1>{t(headlineKey)}</h1>
-    {subheadKey && <p class="sub">{t(subheadKey)}</p>}
-    {cta && <a class="btn" href={ctaHref}>{t(cta.labelKey)}</a>}
+<section
+  class:list={['block', 'hero', `hero--${variant}`]}
+  data-component="HeroBanner"
+  data-variant={variant}
+  aria-labelledby={headingId}
+>
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="inner container">
+    <h1 id={headingId}>{headline}</h1>
+    {subhead && <p class="sub">{subhead}</p>}
+    {cta && ctaLabel && (
+      <a class="btn btn-md btn-accent" href={ctaHref}>
+        {ctaLabel}<span aria-hidden="true">↗</span>
+      </a>
+    )}
   </div>
 </section>
 
 <style>
   .hero {
-    background: linear-gradient(135deg, var(--c-secondary), var(--c-primary));
-    color: var(--c-on-primary);
-    text-align: center;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    color: var(--c-on-dark);
+    background: var(--c-primary-dark);
+    text-align: left;
   }
+  :global(body.is-home) .hero {
+    padding-top: calc(var(--header-h) + clamp(2.75rem, 7vw, 5.5rem));
+  }
+  .hero-grid {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+  .hero--technical-grid .hero-grid {
+    opacity: 0.42;
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--c-on-dark) 12%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--c-on-dark) 12%, transparent) 1px, transparent 1px),
+      linear-gradient(120deg, transparent 54%, color-mix(in srgb, var(--c-accent) 24%, transparent) 54.2%, transparent 54.5%);
+    background-size: 3rem 3rem, 3rem 3rem, 100% 100%;
+    mask-image: linear-gradient(90deg, black, transparent 88%);
+  }
+  .hero--quiet {
+    color: var(--c-on-surface);
+    background: var(--c-surface-alt);
+  }
+  .hero--quiet .hero-grid { display: none; }
   .inner {
-    max-width: 820px;
-    margin: 0 auto;
     display: grid;
     gap: 1.25rem;
-    justify-items: center;
-    padding: clamp(1rem, 4vw, 3rem) 0;
+    justify-items: start;
+    min-height: clamp(20rem, 46vw, 31rem);
+    align-content: center;
   }
   h1 {
-    font-size: clamp(1.9rem, 4.5vw, 3.2rem);
+    max-width: 18ch;
+    font-size: clamp(2.25rem, 5.8vw, 5rem);
+    text-wrap: balance;
   }
   .sub {
-    font-size: 1.15rem;
-    opacity: 0.9;
-    max-width: 640px;
+    max-width: 60ch;
+    color: var(--c-on-dark-muted);
+    font-size: clamp(1rem, 1.6vw, 1.2rem);
   }
-  .hero .btn {
-    background: var(--c-surface);
-    color: var(--c-secondary);
+  .hero--quiet .sub { color: var(--c-on-surface-muted); }
+  @media (max-width: 767px) {
+    .inner { min-height: 22rem; }
   }
 </style>

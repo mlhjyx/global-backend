@@ -1,32 +1,89 @@
 ---
+import { createRequire } from 'node:module';
+
 interface Props {
+  id?: string;
+  instanceId: string;
   stats: { value: string; labelKey: string }[];
   t: (key: string) => string;
   alt?: boolean;
+  variant?: 'technical-grid' | 'quiet';
 }
-const { stats = [], t, alt } = Astro.props;
+const {
+  id,
+  instanceId,
+  stats = [],
+  t,
+  alt,
+  variant = 'technical-grid',
+} = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const resolvedStats = stats.map((stat) => ({
+  value: stat.value,
+  label: t(stat.labelKey),
+}));
+assertQualifiedComponentContentBudget('StatsBand', { stats: resolvedStats });
+const baseId = `${id ?? 'stats-band'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
+const labelId = `${baseId}-label-0`;
 ---
 
-<section class:list={['block', 'stats', { alt }]}>
-  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
-    {
-      stats.map((s) => (
-        <div class="stat">
-          <div class="value">{s.value}</div>
-          <div class="muted">{t(s.labelKey)}</div>
-        </div>
-      ))
-    }
-  </div>
+<section
+  class:list={['block', 'stats', `stats--${variant}`, { alt }]}
+  data-component="StatsBand"
+  data-variant={variant}
+  aria-labelledby={labelId}
+>
+  <ul class="grid container" role="list">
+    {resolvedStats.map((stat, index) => (
+      <li class="stat" role="listitem">
+        <span class="value">{stat.value}</span>
+        <span class="label" id={index === 0 ? labelId : undefined}>{stat.label}</span>
+      </li>
+    ))}
+  </ul>
 </section>
 
 <style>
-  .stat {
-    text-align: center;
+  .stats {
+    position: relative;
+    background-color: var(--c-surface-alt);
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--c-border) 50%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--c-border) 50%, transparent) 1px, transparent 1px);
+    background-size: 3rem 3rem;
   }
+  .stats--quiet { background-image: none; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    padding: 0 clamp(1rem, 5vw, 4rem);
+  }
+  .stat {
+    min-width: 0;
+    padding: clamp(1.25rem, 3vw, 2rem);
+    border-left: 1px solid var(--c-border);
+  }
+  .stat:last-child { border-right: 1px solid var(--c-border); }
+  .value,
+  .label { display: block; }
   .value {
-    font-size: 2rem;
-    font-weight: 700;
     color: var(--c-primary);
+    font-family: var(--font-heading);
+    font-size: clamp(1.75rem, 4vw, 3.25rem);
+    font-weight: 700;
+    line-height: 1;
+    overflow-wrap: anywhere;
+  }
+  .label {
+    margin-top: 0.75rem;
+    color: var(--c-on-surface-muted);
+    font-size: 0.875rem;
+  }
+  @media (max-width: 639px) {
+    .grid { grid-template-columns: 1fr; }
+    .stat { border-right: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); }
+    .stat:last-child { border-bottom: 0; }
   }
 </style>

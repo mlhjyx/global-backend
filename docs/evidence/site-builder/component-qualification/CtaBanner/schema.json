@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "CtaBanner",
+  "part": "schema",
+  "status": "pass",
+  "assertions": [
+    "Props are parsed by the closed SiteSpec component schema.",
+    "The headline and CTA are required and unknown variants fail validation."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-schema.ts",
+    "apps/site-renderer/src/components/CtaBanner.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

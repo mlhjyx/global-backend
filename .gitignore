@@ -47,3 +47,5 @@ __pycache__/
 /.codex/audits/
 .astro/
 dist-test-*/
+playwright-report/
+test-results/

@@ -1,33 +1,95 @@
 ---
+import { createRequire } from 'node:module';
 import { localePageHref } from '../lib/spec';
 
 interface Props {
+  id?: string;
+  instanceId: string;
   headlineKey: string;
   cta: { labelKey: string; pageId?: string; url?: string };
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   locale: string;
   defaultLocale: string;
 }
-const { headlineKey, cta, t, locale, defaultLocale } = Astro.props;
+const {
+  id,
+  instanceId,
+  headlineKey,
+  cta,
+  variant = 'technical-grid',
+  t,
+  locale,
+  defaultLocale,
+} = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const headline = t(headlineKey);
+const ctaLabel = t(cta.labelKey);
+assertQualifiedComponentContentBudget('CtaBanner', {
+  headline,
+  cta: ctaLabel,
+});
 const href =
   cta?.url ??
   (cta?.pageId
     ? localePageHref(cta.pageId, locale, defaultLocale)
     : '#inquiry');
+const baseId = `${id ?? 'cta'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
 ---
 
-<section class="block cta">
-  <h2>{t(headlineKey)}</h2>
-  <a class="btn" href={href}>{t(cta.labelKey)}</a>
+<section
+  class:list={['block', 'cta', `cta--${variant}`]}
+  data-component="CtaBanner"
+  data-variant={variant}
+  aria-labelledby={headingId}
+>
+  <div class="cta-grid" aria-hidden="true"></div>
+  <div class="inner container">
+    <h2 id={headingId}>{headline}</h2>
+    <a class="btn btn-md btn-accent" href={href}>
+      {ctaLabel}<span aria-hidden="true">↗</span>
+    </a>
+  </div>
 </section>
 
 <style>
   .cta {
-    background: var(--c-secondary);
-    color: var(--c-on-primary);
-    text-align: center;
-    display: grid;
-    gap: 1.25rem;
-    justify-items: center;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    color: var(--c-on-dark);
+    background: var(--c-primary-dark);
+  }
+  .cta-grid {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--c-on-dark) 10%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--c-on-dark) 10%, transparent) 1px, transparent 1px);
+    background-size: 3rem 3rem;
+    mask-image: linear-gradient(90deg, transparent, black 50%, transparent);
+  }
+  .cta--quiet {
+    color: var(--c-on-surface);
+    background: var(--c-surface-alt);
+  }
+  .cta--quiet .cta-grid { display: none; }
+  .inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+  h2 {
+    max-width: 24ch;
+    font-size: clamp(1.75rem, 4vw, 3rem);
+    text-wrap: balance;
+  }
+  @media (max-width: 639px) {
+    .inner { align-items: flex-start; flex-direction: column; }
   }
 </style>

@@ -65,10 +65,11 @@ interface Props {
   block: { type: string; props: Record<string, unknown> };
   t: (key: string) => string;
   index: number;
+  scope: string;
   locale: string;
   defaultLocale: string;
 }
-const { block, t, index, locale, defaultLocale } = Astro.props;
+const { block, t, index, scope, locale, defaultLocale } = Astro.props;
 const registry: Record<string, unknown> = {
   HeroBanner,
   StatsBand,
@@ -142,6 +143,7 @@ if (!Component) throw new Error(
   `UNKNOWN_COMPONENT_TYPE: ${block.type} -- 不在封闭 55 型注册表（SITE_SPEC_COMPONENT_TYPES）`,
 );
 const alt = index % 2 === 1;
+const instanceId = `${scope}-${index}`.replace(/[^A-Za-z0-9_-]/g, '-');
 ---
 
 {Component ? (
@@ -149,6 +151,7 @@ const alt = index % 2 === 1;
     {...block.props}
     t={t}
     alt={alt}
+    instanceId={instanceId}
     locale={locale}
     defaultLocale={defaultLocale}
   />

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "StatsBand",
+  "part": "reducedMotion",
+  "status": "pass",
+  "assertions": [
+    "The component introduces no required motion to communicate its values.",
+    "The three-breakpoint reference output is captured with animations disabled."
+  ],
+  "sources": [
+    "apps/site-renderer/src/components/StatsBand.astro",
+    "apps/site-renderer/visual-tests/technical-baseline.spec.ts"
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

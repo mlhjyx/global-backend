@@ -26,6 +26,31 @@ const completeEvidence: ComponentQualificationEvidence = {
 };
 
 const sha256 = "a".repeat(64);
+const fixtureFile = {
+  fixtureId: "technical-baseline",
+  repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json",
+  sha256,
+};
+const visualOutputs = [
+  {
+    breakpoint: 375 as const,
+    repositoryPath:
+      "apps/site-renderer/visual-tests/__screenshots__/mobile-375/HeroBanner.png",
+    sha256,
+  },
+  {
+    breakpoint: 768 as const,
+    repositoryPath:
+      "apps/site-renderer/visual-tests/__screenshots__/tablet-768/HeroBanner.png",
+    sha256,
+  },
+  {
+    breakpoint: 1440 as const,
+    repositoryPath:
+      "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/HeroBanner.png",
+    sha256,
+  },
+] as const;
 const artifact = (
   artifactId: string,
   part: ComponentQualificationArtifact["part"],
@@ -51,12 +76,13 @@ const completeArtifacts: Readonly<
   "hero-accessibility": artifact("hero-accessibility", "accessibility"),
   "hero-reduced-motion": artifact("hero-reduced-motion", "reducedMotion"),
   "hero-fixtures": artifact("hero-fixtures", "fixtures", {
-    fixtureIds: ["hero-default", "hero-technical-grid"],
+    fixtureIds: ["technical-baseline"],
+    fixtureFiles: [fixtureFile],
   }),
   "hero-visual-regression": artifact(
     "hero-visual-regression",
     "visualRegression",
-    { breakpoints: [375, 768, 1440] },
+    { breakpoints: [375, 768, 1440], outputs: visualOutputs },
   ),
 };
 
@@ -69,17 +95,33 @@ describe("M1-e-A component qualification gate", () => {
     expect(new Set(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES)).toEqual(
       new Set(SITE_SPEC_RELEASE_COMPONENT_TYPES),
     );
-    expect(getComponentReleaseReadiness("HeroBanner")).toEqual({
+    expect(getComponentReleaseReadiness("AboutBlock")).toEqual({
       status: "transitional_release",
     });
   });
 
-  it("keeps every newly distilled component gallery-only until qualification", () => {
+  it("registers the three technical-baseline components and keeps the rest gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("StatementBlock")).toEqual({
       status: "gallery_only",
     });
-    expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS)).toHaveLength(0);
+    expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS).sort()).toEqual([
+      "CtaBanner",
+      "HeroBanner",
+      "StatsBand",
+    ]);
+    expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
+      21,
+    );
+    for (const componentType of [
+      "CtaBanner",
+      "HeroBanner",
+      "StatsBand",
+    ] as const) {
+      expect(getComponentReleaseReadiness(componentType)).toMatchObject({
+        status: "m1_e_a_qualified",
+      });
+    }
   });
 
   it("accepts evidence only when all seven contract parts are present", () => {
@@ -137,7 +179,10 @@ describe("M1-e-A component qualification gate", () => {
         "hero-visual-regression": artifact(
           "hero-visual-regression",
           "visualRegression",
-          { breakpoints: [390, 768, 1440] as unknown as [375, 768, 1440] },
+          {
+            breakpoints: [390, 768, 1440] as unknown as [375, 768, 1440],
+            outputs: visualOutputs,
+          },
         ),
       }),
     ).toThrow("COMPONENT_QUALIFICATION_INVALID: HeroBanner");
@@ -174,6 +219,34 @@ describe("M1-e-A component qualification gate", () => {
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(
         registered.sha256,
       );
+
+      if (registered.part === "fixtures") {
+        expect(
+          registered.fixtureFiles.map(({ fixtureId }) => fixtureId),
+        ).toEqual(registered.fixtureIds);
+        for (const fixture of registered.fixtureFiles) {
+          const fixtureBytes = readFileSync(
+            resolve(repositoryRoot, fixture.repositoryPath),
+          );
+          expect(createHash("sha256").update(fixtureBytes).digest("hex")).toBe(
+            fixture.sha256,
+          );
+        }
+      }
+
+      if (registered.part === "visualRegression") {
+        expect(registered.outputs.map(({ breakpoint }) => breakpoint)).toEqual(
+          registered.breakpoints,
+        );
+        for (const output of registered.outputs) {
+          const outputBytes = readFileSync(
+            resolve(repositoryRoot, output.repositoryPath),
+          );
+          expect(createHash("sha256").update(outputBytes).digest("hex")).toBe(
+            output.sha256,
+          );
+        }
+      }
     }
   });
 });

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "CtaBanner",
+  "part": "variants",
+  "status": "pass",
+  "variantValues": ["technical-grid", "quiet"],
+  "assertions": [
+    "technical-grid is the deterministic default variant.",
+    "quiet removes the decorative grid while preserving the CTA hierarchy."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-schema.ts",
+    "apps/site-renderer/src/components/CtaBanner.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

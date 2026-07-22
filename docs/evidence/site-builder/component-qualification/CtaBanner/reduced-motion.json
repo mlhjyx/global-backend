@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "CtaBanner",
+  "part": "reducedMotion",
+  "status": "pass",
+  "assertions": [
+    "Interactive transitions resolve to zero duration under prefers-reduced-motion.",
+    "The three-breakpoint reference output is captured with animations disabled."
+  ],
+  "sources": [
+    "apps/site-renderer/src/styles/global.css",
+    "apps/site-renderer/visual-tests/technical-baseline.spec.ts"
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

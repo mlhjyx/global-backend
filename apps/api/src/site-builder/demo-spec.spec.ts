@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { SITE_SPEC_VERSION, type SiteSpec } from '@global/contracts';
+import {
+  QUALIFIED_COMPONENT_CONTENT_BUDGETS,
+  SITE_SPEC_VERSION,
+  assertQualifiedComponentContentBudget,
+  type SiteSpec,
+} from '@global/contracts';
 import {
   buildDemoSpec,
   collectTextKeys,
@@ -26,7 +31,10 @@ describe('DQ-1 契约守卫：demo 生产端符合 @global/contracts 的 SiteSpe
 
   it('信封形状：产出可赋给 SiteSpec，顶层字段齐备（编译期赋值 + 运行期断言双守）', () => {
     // 编译期：若生产端漂移出契约，此赋值即类型报错——这正是 DQ-1 单一真值的意义。
-    const doc: SiteSpec = buildDemoSpec({ siteName: 'Acme Pump Co., Ltd.', intake: INTAKE });
+    const doc: SiteSpec = buildDemoSpec({
+      siteName: 'Acme Pump Co., Ltd.',
+      intake: INTAKE,
+    });
     expect(typeof doc.specVersion).toBe('string');
     expect(typeof doc.site.defaultLocale).toBe('string');
     expect(Array.isArray(doc.site.locales)).toBe(true);
@@ -41,17 +49,25 @@ describe('DQ-1 契约守卫：demo 生产端符合 @global/contracts 的 SiteSpe
 
 describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 快速通道）', () => {
   it('结构：home/products/contact 三页，home 首块 HeroBanner，contact 含 InquiryForm，nav 指向存在页面', () => {
-    const doc = buildDemoSpec({ siteName: 'Acme Pump Co., Ltd.', intake: INTAKE });
+    const doc = buildDemoSpec({
+      siteName: 'Acme Pump Co., Ltd.',
+      intake: INTAKE,
+    });
     expect(doc.pages.map((p) => p.id)).toEqual(['home', 'products', 'contact']);
     expect(doc.pages[0].puck.content[0].type).toBe('HeroBanner');
     const contact = doc.pages.find((p) => p.id === 'contact')!;
-    expect(contact.puck.content.some((b) => b.type === 'InquiryForm')).toBe(true);
+    expect(contact.puck.content.some((b) => b.type === 'InquiryForm')).toBe(
+      true,
+    );
     const pageIds = new Set(doc.pages.map((p) => p.id));
     for (const n of doc.site.nav) expect(pageIds.has(n.pageId)).toBe(true);
   });
 
   it('文案只用注册事实：公司名/产品/目标市场入 bundle，不虚构年限或认证', () => {
-    const doc = buildDemoSpec({ siteName: 'Acme Pump Co., Ltd.', intake: INTAKE });
+    const doc = buildDemoSpec({
+      siteName: 'Acme Pump Co., Ltd.',
+      intake: INTAKE,
+    });
     const en = doc.copyBundles.en;
     const all = Object.values(en).join(' ');
     expect(all).toContain('Acme Pump Co., Ltd.');
@@ -64,7 +80,10 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
   });
 
   it('textKey 完整性：spec 引用的所有 key（含组件内建 key）在 bundle 中存在', () => {
-    const doc = buildDemoSpec({ siteName: 'Acme Pump Co., Ltd.', intake: INTAKE });
+    const doc = buildDemoSpec({
+      siteName: 'Acme Pump Co., Ltd.',
+      intake: INTAKE,
+    });
     const keys = collectTextKeys(doc);
     expect(keys.length).toBeGreaterThan(10);
     for (const key of keys) {
@@ -75,7 +94,10 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
   it('preset 选择：泵类默认 modern-industrial；医疗/电子类词 → precision-light；显式 stylePreset 优先', () => {
     expect(pickPreset(INTAKE)).toBe('modern-industrial');
     expect(
-      pickPreset({ ...INTAKE, products: ['ultrasound probe', 'medical device housing'] }),
+      pickPreset({
+        ...INTAKE,
+        products: ['ultrasound probe', 'medical device housing'],
+      }),
     ).toBe('precision-light');
     const doc = buildDemoSpec({
       siteName: 'X',
@@ -94,17 +116,27 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
       }),
     ).toEqual({ headline: 'Reliable Pumps for Global Buyers' });
     expect(sanitizePolish(undefined)).toEqual({});
-    expect(sanitizePolish({ headline: '   ', subhead: 'x'.repeat(501) })).toEqual({});
+    expect(
+      sanitizePolish({ headline: '   ', subhead: 'x'.repeat(501) }),
+    ).toEqual({});
   });
 
   it('R0-3（ADR-017）sanitizePolish：角色虚构（manufacturer/engineering team/quality control/export packaging）也剔除——堵住润色回灌身份', () => {
-    expect(sanitizePolish({ headline: 'Your Trusted Pump Manufacturer' })).toEqual({});
     expect(
-      sanitizePolish({ subhead: 'Backed by our engineering team and quality control.' }),
+      sanitizePolish({ headline: 'Your Trusted Pump Manufacturer' }),
     ).toEqual({});
-    expect(sanitizePolish({ aboutBody: 'Export packaging handled in-house.' })).toEqual({});
+    expect(
+      sanitizePolish({
+        subhead: 'Backed by our engineering team and quality control.',
+      }),
+    ).toEqual({});
+    expect(
+      sanitizePolish({ aboutBody: 'Export packaging handled in-house.' }),
+    ).toEqual({});
     // 中性文案照常放行
-    expect(sanitizePolish({ headline: 'Reliable Pumps for Global Buyers' })).toEqual({
+    expect(
+      sanitizePolish({ headline: 'Reliable Pumps for Global Buyers' }),
+    ).toEqual({
       headline: 'Reliable Pumps for Global Buyers',
     });
   });
@@ -120,7 +152,10 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
       websiteUrl: null,
       businessEmail: 'hello@example.com',
     };
-    const doc = buildDemoSpec({ siteName: 'Example Trading Co.', intake: nonManufacturer });
+    const doc = buildDemoSpec({
+      siteName: 'Example Trading Co.',
+      intake: nonManufacturer,
+    });
     const all = Object.values(doc.copyBundles.en).join(' ');
     // 守卫独立声明红线词表（不镜像实现，防实现被悄悄放宽 → 永久 CI 门）
     for (const forbidden of [
@@ -129,7 +164,9 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
       /quality control/i,
       /export packaging/i,
     ]) {
-      expect(all, `demo 文案不得含虚构身份 ${forbidden}`).not.toMatch(forbidden);
+      expect(all, `demo 文案不得含虚构身份 ${forbidden}`).not.toMatch(
+        forbidden,
+      );
     }
     // 仍必须用上真实 intake 事实（去虚构 ≠ 去内容）
     expect(all).toContain('Example Trading Co.');
@@ -144,8 +181,51 @@ describe('buildDemoSpec（demo v0：行业模板 + 注册信息填充，02 §4 �
       intake: INTAKE,
       polish: { headline: 'Reliable Pumps, Proven Worldwide' },
     });
-    expect(polished.copyBundles.en['home.hero.headline']).toBe('Reliable Pumps, Proven Worldwide');
+    expect(polished.copyBundles.en['home.hero.headline']).toBe(
+      'Reliable Pumps, Proven Worldwide',
+    );
     expect(plain.copyBundles.en['home.hero.headline']).toContain('Acme');
-    expect(polished.copyBundles.en['about.body']).toBe(plain.copyBundles.en['about.body']);
+    expect(polished.copyBundles.en['about.body']).toBe(
+      plain.copyBundles.en['about.body'],
+    );
+  });
+
+  it('最长合法 intake 与过长 polish 仍产出符合已晋级组件预算的 demo', () => {
+    const doc = buildDemoSpec({
+      siteName: 'A'.repeat(200),
+      intake: {
+        ...INTAKE,
+        company: { nameZh: '长名称', nameEn: 'A'.repeat(200) },
+        products: ['B'.repeat(120)],
+      },
+      polish: {
+        headline: 'polished '.repeat(20).trim(),
+        subhead: 'subhead '.repeat(30).trim(),
+      },
+    });
+    const en = doc.copyBundles.en;
+    const headline = en['home.hero.headline'];
+    const subhead = en['home.hero.subhead'];
+    expect(headline.length).toBeLessThanOrEqual(
+      QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.headline,
+    );
+    expect(subhead.length).toBeLessThanOrEqual(
+      QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.subhead,
+    );
+    expect(headline).not.toContain('polished');
+    expect(subhead).not.toContain('subhead');
+    expect(() =>
+      assertQualifiedComponentContentBudget('HeroBanner', {
+        headline,
+        subhead,
+        cta: en['home.hero.cta'],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget('CtaBanner', {
+        headline: en['cta.headline'],
+        cta: en['cta.label'],
+      }),
+    ).not.toThrow();
   });
 });
