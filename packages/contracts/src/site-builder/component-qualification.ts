@@ -168,7 +168,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/fixtures.json",
-    sha256: "3bd098357b6db68ccac30a3274da4c47bc8f4b7a8140b4d6c6c0fae2f225f76e",
+    sha256: "7b252ea433845e4767c9ae5902049ea3ee78c76f8aa86ece312ea6cbec060889",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -176,7 +176,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
+          "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a",
       },
     ],
   },
@@ -259,7 +259,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/HeroBanner/fixtures.json",
-    sha256: "da40655eed9b54e1689093568f8cc1567e820e221ef7b5f617657a9720cfe6d4",
+    sha256: "12cb5dad61ae06488da82b18daa5be78b4a362179af17389c81d1bd6d8b56c6d",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -267,7 +267,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
+          "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a",
       },
     ],
   },
@@ -350,7 +350,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/StatsBand/fixtures.json",
-    sha256: "a95fa026734d17064bf793866a6840273cc2ee1d13a6eeb234693fce14e6908d",
+    sha256: "5e2d920c7383a982509cbe5719cba2b5c500528cdbdbe6c33a6928d24b2a4a71",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -358,7 +358,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
+          "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a",
       },
     ],
   },
@@ -441,7 +441,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/ProductGrid/fixtures.json",
-    sha256: "adb9e74f4ead8b83b8795c65de0216d05c2b45e12961a4747847347f0f658dcb",
+    sha256: "ed27cf52f016d9176272f5be51e0a517c1ef206456d51bb9fd0ac9a41dd4e565",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -449,7 +449,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
+          "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a",
       },
     ],
   },
@@ -532,7 +532,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/AboutBlock/fixtures.json",
-    sha256: "308c3cdf31ad5aaaa71694593d45a579fe60acca45f240e6f051a96375a3b543",
+    sha256: "8d4d4b04e12a55b3ad9baa2067016e442dda4bff8d3bf0af718685d465b91ef7",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -540,7 +540,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
+          "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a",
       },
     ],
   },
@@ -623,7 +623,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/InquiryForm/fixtures.json",
-    sha256: "6b71744a2db58b3a45de38b681415c1836dab8b2af49bd5225ec0f14b1391537",
+    sha256: "534e0e1bb404c50ce065fe7c92722ff4bd33a2d3fd2847faf59434166d56b7f2",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -631,7 +631,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
+          "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a",
       },
     ],
   },
@@ -672,22 +672,50 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
   "m1-e-a-cert-wall-content-budget": { artifactId: "m1-e-a-cert-wall-content-budget", componentType: "CertWall", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/content-budget.json", sha256: "14deaed85ff805fa479e600435e8f979300e0c29279f6aec5ce5617de001fad0" },
   "m1-e-a-cert-wall-accessibility": { artifactId: "m1-e-a-cert-wall-accessibility", componentType: "CertWall", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/accessibility.json", sha256: "0924c8433483d6b7bb16d0f8750e12d58447f973e55fd3f558e2f78f0071845a" },
   "m1-e-a-cert-wall-reduced-motion": { artifactId: "m1-e-a-cert-wall-reduced-motion", componentType: "CertWall", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/reduced-motion.json", sha256: "c774550b663c7424e49210caee6987c4ee714127f71164eea847f031fc1eb5a7" },
-  "m1-e-a-cert-wall-fixtures": { artifactId: "m1-e-a-cert-wall-fixtures", componentType: "CertWall", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/fixtures.json", sha256: "506565ba0ba07c26b3bfaf2ac53746059fb7a3286a421a043f180b3b9b4c5c76", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed" }] },
+  "m1-e-a-cert-wall-fixtures": { artifactId: "m1-e-a-cert-wall-fixtures", componentType: "CertWall", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/fixtures.json", sha256: "a2b1d47140dffb1ee410990a86ab898ab997e16982dad1055c620de66f324b68", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
   "m1-e-a-cert-wall-visual-regression": { artifactId: "m1-e-a-cert-wall-visual-regression", componentType: "CertWall", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/visual-regression.json", sha256: "1e8619303422b5cc5508dae95ac332f1a0a96213e92651eeee55f2a4fa59457c", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/CertWall.png", sha256: "b5809a57c744f452ae581136dcba7cd810fd7c9e5421539b3a118d9ab338b865" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/CertWall.png", sha256: "04a8be938fe3d435c9376889515495035c09f77823ce87e6dc6414148b316d26" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/CertWall.png", sha256: "9928faff68bbc6a6e6a87044789005716677e7e32fc94bc0dc2d36ae179b03b5" }] },
   "m1-e-a-process-timeline-schema": { artifactId: "m1-e-a-process-timeline-schema", componentType: "ProcessTimeline", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/schema.json", sha256: "9e4ac3e3cccd56e7667108dfd45b338a7e62cbd7f6ffc51ecedd88e169420bf4" },
   "m1-e-a-process-timeline-variants": { artifactId: "m1-e-a-process-timeline-variants", componentType: "ProcessTimeline", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/variants.json", sha256: "d31f04ac02ca9e012a0ad116126e92cb8fb7252b137d5f4b4f4b9a2ae1beda61", variantValues: ["technical-grid", "quiet"] },
   "m1-e-a-process-timeline-content-budget": { artifactId: "m1-e-a-process-timeline-content-budget", componentType: "ProcessTimeline", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/content-budget.json", sha256: "c0f2df8fc46de0c690729dd947fa1e03849e95d111ee60320f215230c75d2e11" },
   "m1-e-a-process-timeline-accessibility": { artifactId: "m1-e-a-process-timeline-accessibility", componentType: "ProcessTimeline", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/accessibility.json", sha256: "d41dc582b5910b2e062d908587a392b9a4ee20dc692c91858b5c259b3975e1ae" },
   "m1-e-a-process-timeline-reduced-motion": { artifactId: "m1-e-a-process-timeline-reduced-motion", componentType: "ProcessTimeline", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/reduced-motion.json", sha256: "c7e20675b75fe371021a27d7da670ddca7d037c7c94f064b3a79f12a0d099c80" },
-  "m1-e-a-process-timeline-fixtures": { artifactId: "m1-e-a-process-timeline-fixtures", componentType: "ProcessTimeline", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/fixtures.json", sha256: "aa58adb4c77b0d8f73f43f569b0c76e4a39366692caa44aea83896f759d08686", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed" }] },
+  "m1-e-a-process-timeline-fixtures": { artifactId: "m1-e-a-process-timeline-fixtures", componentType: "ProcessTimeline", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/fixtures.json", sha256: "292415f8b532efc8a4bd31c3efe18d957dd70a56b355e0d9003e38487dd6c8be", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
   "m1-e-a-process-timeline-visual-regression": { artifactId: "m1-e-a-process-timeline-visual-regression", componentType: "ProcessTimeline", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/visual-regression.json", sha256: "9b36f10265bb6a3fcbe177154b76c6f5371fe49c84cf45d27b4d9a24d8856fa5", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/ProcessTimeline.png", sha256: "5728cdcf52ff4b58e8d2626caa41425b663ba01c176c525327f5e446e0edf8ed" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/ProcessTimeline.png", sha256: "45c0c01440443cac576576ec00638561e50ea00420c3db65d97dbb3b74f34cb4" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/ProcessTimeline.png", sha256: "b9a0f76bd5eb728f9e8e889a032258c075973f5869f5963990083994faf99bfb" }] },
   "m1-e-a-faq-accordion-schema": { artifactId: "m1-e-a-faq-accordion-schema", componentType: "FaqAccordion", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/schema.json", sha256: "700f4f0f6859d8a61470a780114500fc1a4ee2a0e4cf05472922b326836b2d65" },
   "m1-e-a-faq-accordion-variants": { artifactId: "m1-e-a-faq-accordion-variants", componentType: "FaqAccordion", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/variants.json", sha256: "8768f280f66e86564aab4976d1073120601873c2ede924123a75f95b66e4caeb", variantValues: ["technical-grid", "quiet"] },
   "m1-e-a-faq-accordion-content-budget": { artifactId: "m1-e-a-faq-accordion-content-budget", componentType: "FaqAccordion", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/content-budget.json", sha256: "69b568f65c01388cff491949c3b5be24a7350018ff834b32f993d0dd5cb1e50e" },
   "m1-e-a-faq-accordion-accessibility": { artifactId: "m1-e-a-faq-accordion-accessibility", componentType: "FaqAccordion", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/accessibility.json", sha256: "e26ef6bc3495320ea979e99120cbb2c67a193801a76b8fc6f6b6ce8a52464999" },
   "m1-e-a-faq-accordion-reduced-motion": { artifactId: "m1-e-a-faq-accordion-reduced-motion", componentType: "FaqAccordion", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/reduced-motion.json", sha256: "3c03341f4530613e41ad224cdfa1cda9e8cfed9a2dff8e3647d7368ce59472f1" },
-  "m1-e-a-faq-accordion-fixtures": { artifactId: "m1-e-a-faq-accordion-fixtures", componentType: "FaqAccordion", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/fixtures.json", sha256: "09658b08a5b5b74569f3cf92ed8058b13a6221cadf6b194406b247b0dd335b21", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed" }] },
+  "m1-e-a-faq-accordion-fixtures": { artifactId: "m1-e-a-faq-accordion-fixtures", componentType: "FaqAccordion", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/fixtures.json", sha256: "eccb6944d5b115410a35ffddb3eecf85a2efb01e3bcfcd20cfe5a8ef0604f865", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
   "m1-e-a-faq-accordion-visual-regression": { artifactId: "m1-e-a-faq-accordion-visual-regression", componentType: "FaqAccordion", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/visual-regression.json", sha256: "a692698664599c90cbb50ed53d924fcbf433d213878a2c8eded60ac97196977b", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/FaqAccordion.png", sha256: "dbd624ce16b9c64dc81c60d59e5400ff413abb3aa24dd9a9c522b017c16f3096" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/FaqAccordion.png", sha256: "4e29e40ab1dbc6009100293d5bc276c98c80d61c90e54f6845b985241ce1f793" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/FaqAccordion.png", sha256: "f4e156791e8fd4fed55f8081fe23100b126b3e5f993bf0bf2bccea4719637dce" }] },
+  "m1-e-a-logo-marquee-schema": { artifactId: "m1-e-a-logo-marquee-schema", componentType: "LogoMarquee", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/schema.json", sha256: "906ff3fd388d7f2292da0cef131ed3f911d748f4038378dcec15dd0e66f4ea16" },
+  "m1-e-a-logo-marquee-variants": { artifactId: "m1-e-a-logo-marquee-variants", componentType: "LogoMarquee", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/variants.json", sha256: "8ae2e75241a58d8085123313d7269a0d987c62eb02af99b6aef2e97098a10b1e", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-logo-marquee-content-budget": { artifactId: "m1-e-a-logo-marquee-content-budget", componentType: "LogoMarquee", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/content-budget.json", sha256: "9f1c474cff58d06b0f31982a8caec3f2dc521d11a227415d95cd7032a04c8cc2" },
+  "m1-e-a-logo-marquee-accessibility": { artifactId: "m1-e-a-logo-marquee-accessibility", componentType: "LogoMarquee", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/accessibility.json", sha256: "169f999f722905f34a421f1d6aa47a17cd7bd9c00ac15e2574348667e9c6b160" },
+  "m1-e-a-logo-marquee-reduced-motion": { artifactId: "m1-e-a-logo-marquee-reduced-motion", componentType: "LogoMarquee", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/reduced-motion.json", sha256: "75349066e00ebba8778e66171d3fb8eaf427d9bd71a519637fddb719f3f54f58" },
+  "m1-e-a-logo-marquee-fixtures": { artifactId: "m1-e-a-logo-marquee-fixtures", componentType: "LogoMarquee", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/fixtures.json", sha256: "ab611eb37c0348dfbc791f73f21af99cb16d0251729e4a5c590f2beb98c66574", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
+  "m1-e-a-logo-marquee-visual-regression": { artifactId: "m1-e-a-logo-marquee-visual-regression", componentType: "LogoMarquee", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/LogoMarquee/visual-regression.json", sha256: "d6c4b257683f6315bc359ea81d3296cd972831636faa87433e283a3ac45423b9", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/LogoMarquee.png", sha256: "e0d32805860661ef5690ae0096f9e8384561d02fd8d2e62065ec5bdcf755cebe" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/LogoMarquee.png", sha256: "04cac69f5a96621705b7e5287d25d18e5f0a9a43168311d6ac9db37e9aa7fa6a" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/LogoMarquee.png", sha256: "302d9c654e14f7078357ea1317ad286e1cb7d34be2be58d7aaa9284aac096b27" }] },
+  "m1-e-a-testimonials-schema": { artifactId: "m1-e-a-testimonials-schema", componentType: "Testimonials", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/schema.json", sha256: "7c5965dca5b1ef6c046cd738beef747f7ed2779e078dfadf159476195bfabc7a" },
+  "m1-e-a-testimonials-variants": { artifactId: "m1-e-a-testimonials-variants", componentType: "Testimonials", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/variants.json", sha256: "efe38e12d363723a3768bedc26fcf836460ca83f51995a65f9138de24ec02334", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-testimonials-content-budget": { artifactId: "m1-e-a-testimonials-content-budget", componentType: "Testimonials", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/content-budget.json", sha256: "fa958f190444c05d7f0419f838f07f929a0132ba7dbe1af370bca30da8122946" },
+  "m1-e-a-testimonials-accessibility": { artifactId: "m1-e-a-testimonials-accessibility", componentType: "Testimonials", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/accessibility.json", sha256: "88269869af60e7c4e20cba9ff14f299a47b273ebbcee4e1f1b2e06e3866805e7" },
+  "m1-e-a-testimonials-reduced-motion": { artifactId: "m1-e-a-testimonials-reduced-motion", componentType: "Testimonials", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/reduced-motion.json", sha256: "86655c0e5e6f1f4ec856af87f758a34ff668674d71614f2da641ad5af49a72ba" },
+  "m1-e-a-testimonials-fixtures": { artifactId: "m1-e-a-testimonials-fixtures", componentType: "Testimonials", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/fixtures.json", sha256: "c860817832d3e66a5c55d7b0c919d6b5334f7ea56665e638d14f570bfc1ec545", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
+  "m1-e-a-testimonials-visual-regression": { artifactId: "m1-e-a-testimonials-visual-regression", componentType: "Testimonials", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/Testimonials/visual-regression.json", sha256: "797933713cc2774d44eb6e05bcc8569baf7c0104230e94489e90d878a0b20080", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/Testimonials.png", sha256: "760e39c9b2c737e483c15746e0c53b4d774abbdf79d48e0c2ffc3e3467f944c3" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/Testimonials.png", sha256: "a7defbd2ad1285bcd82dbf94eba25f6ce4473d0c71d8bf5789f7315ec2c56bbc" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/Testimonials.png", sha256: "92bdd3a5a090dc2274a3518634a7134bd8a2ab79a4e924ae1f8b0bd077e7c979" }] },
+  "m1-e-a-feature-cards-schema": { artifactId: "m1-e-a-feature-cards-schema", componentType: "FeatureCards", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/schema.json", sha256: "f0005c0b9534e223428ee9e15206e0df84bb257fa70679b4f826a71c98b7212d" },
+  "m1-e-a-feature-cards-variants": { artifactId: "m1-e-a-feature-cards-variants", componentType: "FeatureCards", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/variants.json", sha256: "70356b849b81169e0a7233472631c8436e66730138e823a27175658858071970", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-feature-cards-content-budget": { artifactId: "m1-e-a-feature-cards-content-budget", componentType: "FeatureCards", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/content-budget.json", sha256: "c0f6ddc81f4564c449b8606baf8b048a659ee5b78f882b909736b8366226c0bb" },
+  "m1-e-a-feature-cards-accessibility": { artifactId: "m1-e-a-feature-cards-accessibility", componentType: "FeatureCards", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/accessibility.json", sha256: "7e7ee6a5b0adb87e2a42b99a9d09858000349c55ee38a530a8b97cc24666fca3" },
+  "m1-e-a-feature-cards-reduced-motion": { artifactId: "m1-e-a-feature-cards-reduced-motion", componentType: "FeatureCards", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/reduced-motion.json", sha256: "b81560a4e5e7d54f09aa74c849af6e3a450fbc5dec7840d2a801e48646e19d8b" },
+  "m1-e-a-feature-cards-fixtures": { artifactId: "m1-e-a-feature-cards-fixtures", componentType: "FeatureCards", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/fixtures.json", sha256: "049d237419ffd6d1693aef258e95a96a3ab0a95282ffdac37b5d059cb6904003", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
+  "m1-e-a-feature-cards-visual-regression": { artifactId: "m1-e-a-feature-cards-visual-regression", componentType: "FeatureCards", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/FeatureCards/visual-regression.json", sha256: "e5ddf8f6561ed14ca6b3b21c30c65039919c66eabd5f8487904164ac2916160d", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/FeatureCards.png", sha256: "71fe45571c6dc1297665e90103ae4da7d16967423b1fcba9de25214d45bad910" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/FeatureCards.png", sha256: "fa0b747f1b4c60f919e176a365ad98000027303019329dbe1b98d48296f0cca7" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/FeatureCards.png", sha256: "714e0b6cd6363d1e1ad61597ac0ba27f775fa763cbcb03efe5c0a3c910cce7b1" }] },
+  "m1-e-a-tech-systems-schema": { artifactId: "m1-e-a-tech-systems-schema", componentType: "TechSystems", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/schema.json", sha256: "af56e3720c232311573403243ee26a56702d060f9e19b4a609084f177e2f6a95" },
+  "m1-e-a-tech-systems-variants": { artifactId: "m1-e-a-tech-systems-variants", componentType: "TechSystems", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/variants.json", sha256: "05cbacec98163757ce85ae3ed0bae13d14d6342a044ad079fa6f2a54cbffbc55", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-tech-systems-content-budget": { artifactId: "m1-e-a-tech-systems-content-budget", componentType: "TechSystems", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/content-budget.json", sha256: "a2b35abb090df3442e447101cd6f09b9483a1d4561ffe250e5ade4c00e8baa0e" },
+  "m1-e-a-tech-systems-accessibility": { artifactId: "m1-e-a-tech-systems-accessibility", componentType: "TechSystems", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/accessibility.json", sha256: "9e3ec6dbbd8413841045682976334dad1236e1f7185aabb109d80ca82e5373ee" },
+  "m1-e-a-tech-systems-reduced-motion": { artifactId: "m1-e-a-tech-systems-reduced-motion", componentType: "TechSystems", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/reduced-motion.json", sha256: "a98e84fca450c50ddc8bb486705818473032ee62b4ac6a081fecb76b514a3ad3" },
+  "m1-e-a-tech-systems-fixtures": { artifactId: "m1-e-a-tech-systems-fixtures", componentType: "TechSystems", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/fixtures.json", sha256: "d406053310c7d179ec587186ff143fca40bbb2f5622b4eed5e05e5b91997b17d", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "2e005c3251a94c17412a6a75a65c2e8ec5a6419bf328a44869b402b93b56d59a" }] },
+  "m1-e-a-tech-systems-visual-regression": { artifactId: "m1-e-a-tech-systems-visual-regression", componentType: "TechSystems", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/TechSystems/visual-regression.json", sha256: "b26694e18fcde5ee57a8c33b365982e42f6f496220b05929334a17de79f98567", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/TechSystems.png", sha256: "fc4131ca06bb7658d8256039eb2f903f73a6e8236cd2ebe5d576d1e4821f2cdb" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/TechSystems.png", sha256: "d48622c7ac6a84529a5d2e9b1740b9cd39836f78dc93ab5e95c10b80e76e33c0" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/TechSystems.png", sha256: "eedc5175dbd6e84310399b2b38790582d3c9c8ff0e41f60bc4d1dbfbd579e563" }] },
 } satisfies Record<string, ComponentQualificationArtifact>);
 
 /**
@@ -784,6 +812,18 @@ export const M1_E_A_COMPONENT_QUALIFICATIONS: Readonly<
     reducedMotion: { artifactId: "m1-e-a-faq-accordion-reduced-motion" },
     fixtures: { artifactId: "m1-e-a-faq-accordion-fixtures" },
     visualRegression: { artifactId: "m1-e-a-faq-accordion-visual-regression" },
+  },
+  LogoMarquee: {
+    schema: { artifactId: "m1-e-a-logo-marquee-schema" }, variants: { artifactId: "m1-e-a-logo-marquee-variants" }, contentBudget: { artifactId: "m1-e-a-logo-marquee-content-budget" }, accessibility: { artifactId: "m1-e-a-logo-marquee-accessibility" }, reducedMotion: { artifactId: "m1-e-a-logo-marquee-reduced-motion" }, fixtures: { artifactId: "m1-e-a-logo-marquee-fixtures" }, visualRegression: { artifactId: "m1-e-a-logo-marquee-visual-regression" },
+  },
+  Testimonials: {
+    schema: { artifactId: "m1-e-a-testimonials-schema" }, variants: { artifactId: "m1-e-a-testimonials-variants" }, contentBudget: { artifactId: "m1-e-a-testimonials-content-budget" }, accessibility: { artifactId: "m1-e-a-testimonials-accessibility" }, reducedMotion: { artifactId: "m1-e-a-testimonials-reduced-motion" }, fixtures: { artifactId: "m1-e-a-testimonials-fixtures" }, visualRegression: { artifactId: "m1-e-a-testimonials-visual-regression" },
+  },
+  FeatureCards: {
+    schema: { artifactId: "m1-e-a-feature-cards-schema" }, variants: { artifactId: "m1-e-a-feature-cards-variants" }, contentBudget: { artifactId: "m1-e-a-feature-cards-content-budget" }, accessibility: { artifactId: "m1-e-a-feature-cards-accessibility" }, reducedMotion: { artifactId: "m1-e-a-feature-cards-reduced-motion" }, fixtures: { artifactId: "m1-e-a-feature-cards-fixtures" }, visualRegression: { artifactId: "m1-e-a-feature-cards-visual-regression" },
+  },
+  TechSystems: {
+    schema: { artifactId: "m1-e-a-tech-systems-schema" }, variants: { artifactId: "m1-e-a-tech-systems-variants" }, contentBudget: { artifactId: "m1-e-a-tech-systems-content-budget" }, accessibility: { artifactId: "m1-e-a-tech-systems-accessibility" }, reducedMotion: { artifactId: "m1-e-a-tech-systems-reduced-motion" }, fixtures: { artifactId: "m1-e-a-tech-systems-fixtures" }, visualRegression: { artifactId: "m1-e-a-tech-systems-visual-regression" },
   },
 });
 

@@ -87,20 +87,26 @@ const completeArtifacts: Readonly<
 };
 
 describe("M1-e-A component qualification gate", () => {
-  it("keeps the frozen original release list as provenance while qualifications take precedence", () => {
+  it("keeps the frozen transitional list as provenance while qualifications extend release eligibility", () => {
     expect(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES).toHaveLength(10);
     expect(
       Object.isFrozen(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES),
     ).toBe(true);
     expect(new Set(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES)).toEqual(
-      new Set(SITE_SPEC_RELEASE_COMPONENT_TYPES),
+      new Set([
+        "AboutBlock", "CertWall", "CtaBanner", "FaqAccordion", "HeroBanner",
+        "InquiryForm", "MapLocation", "ProcessTimeline", "ProductGrid", "StatsBand",
+      ]),
+    );
+    expect(SITE_SPEC_RELEASE_COMPONENT_TYPES).toEqual(
+      expect.arrayContaining(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES),
     );
     expect(getComponentReleaseReadiness("MapLocation")).toEqual({
       status: "transitional_release",
     });
   });
 
-  it("registers nine qualified components and keeps unqualified types gallery-only", () => {
+  it("registers thirteen qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("StatementBlock")).toEqual({
       status: "gallery_only",
@@ -110,14 +116,18 @@ describe("M1-e-A component qualification gate", () => {
       "CertWall",
       "CtaBanner",
       "FaqAccordion",
+      "FeatureCards",
       "HeroBanner",
       "InquiryForm",
+      "LogoMarquee",
       "ProcessTimeline",
       "ProductGrid",
       "StatsBand",
+      "TechSystems",
+      "Testimonials",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      63,
+      91,
     );
     for (const componentType of [
       "CtaBanner",
@@ -129,6 +139,10 @@ describe("M1-e-A component qualification gate", () => {
       "ProductGrid",
       "StatsBand",
       "AboutBlock",
+      "FeatureCards",
+      "LogoMarquee",
+      "TechSystems",
+      "Testimonials",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",
@@ -203,7 +217,10 @@ describe("M1-e-A component qualification gate", () => {
   it("rejects manually extending the release list without qualification", () => {
     expect(() =>
       assertReleaseQualificationRegistryIntegrity({
-        releaseTypes: [...SITE_SPEC_RELEASE_COMPONENT_TYPES, "StatementBlock"],
+        releaseTypes: [
+          ...SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES,
+          "StatementBlock",
+        ],
         qualifications: M1_E_A_COMPONENT_QUALIFICATIONS,
         artifacts: M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
       }),
@@ -213,7 +230,10 @@ describe("M1-e-A component qualification gate", () => {
   it("rejects placeholder qualification ids without resolved artifacts", () => {
     expect(() =>
       assertReleaseQualificationRegistryIntegrity({
-        releaseTypes: [...SITE_SPEC_RELEASE_COMPONENT_TYPES, "StatementBlock"],
+        releaseTypes: [
+          ...SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES,
+          "StatementBlock",
+        ],
         qualifications: { StatementBlock: completeEvidence },
         artifacts: {},
       }),

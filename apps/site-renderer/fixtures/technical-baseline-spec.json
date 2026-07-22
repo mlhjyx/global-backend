@@ -164,6 +164,59 @@
               ],
               "variant": "quiet"
             }
+          },
+          {
+            "type": "LogoMarquee",
+            "props": {
+              "id": "LogoMarquee-technical",
+              "eyebrowKey": "logos.eyebrow",
+              "titleKey": "logos.title",
+              "items": ["ISO 9001", "EN 10204", "CE", "ATEX"],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "Testimonials",
+            "props": {
+              "id": "Testimonials-technical",
+              "eyebrowKey": "testimonials.eyebrow",
+              "items": [
+                { "quoteKey": "testimonials.one.quote", "nameKey": "testimonials.one.name", "postcodeKey": "testimonials.one.location", "rating": 4.8, "platformKey": "testimonials.one.platform" },
+                { "quoteKey": "testimonials.two.quote", "nameKey": "testimonials.two.name", "postcodeKey": "testimonials.two.location", "rating": 4.9, "platformKey": "testimonials.two.platform" }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "FeatureCards",
+            "props": {
+              "id": "FeatureCards-technical",
+              "eyebrowKey": "features.eyebrow",
+              "titleKey": "features.title",
+              "titleLine2Key": "features.titleLine2",
+              "introKey": "features.intro",
+              "items": [
+                { "icon": "ri-settings-3-line", "titleKey": "features.one.title", "descKey": "features.one.desc" },
+                { "icon": "ri-file-list-3-line", "titleKey": "features.two.title", "descKey": "features.two.desc" },
+                { "icon": "ri-customer-service-2-line", "titleKey": "features.three.title", "descKey": "features.three.desc" }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "TechSystems",
+            "props": {
+              "id": "TechSystems-technical",
+              "chapterKey": "systems.chapter",
+              "titleKey": "systems.title",
+              "titleAccentKey": "systems.titleAccent",
+              "introKey": "systems.intro",
+              "systems": [
+                { "label": "Hydraulic", "titleKey": "systems.one.title", "descKey": "systems.one.desc", "metric": "16", "suffix": "bar", "metricLabelKey": "systems.one.metricLabel" },
+                { "label": "Materials", "titleKey": "systems.two.title", "descKey": "systems.two.desc", "metric": "320", "suffix": "°C", "metricLabelKey": "systems.two.metricLabel" }
+              ],
+              "variant": "technical-grid"
+            }
           }
         ]
       }
@@ -214,7 +267,38 @@
       "q2": "Which documents can be supplied with an order?",
       "a2": "Documentation depends on the agreed scope and may include inspection records, material traceability and operating information.",
       "cta.headline": "Tell us about your project",
-      "cta.label": "Get in touch"
+      "cta.label": "Get in touch",
+      "logos.eyebrow": "Verified capability",
+      "logos.title": "Documentation that travels with the equipment",
+      "testimonials.eyebrow": "Project feedback",
+      "testimonials.one.quote": "The selection discussion was focused, documented and useful to our maintenance team.",
+      "testimonials.one.name": "Operations manager",
+      "testimonials.one.location": "Northern Europe",
+      "testimonials.one.platform": "Project review",
+      "testimonials.two.quote": "Specifications were easy to compare before we committed to the final duty point.",
+      "testimonials.two.name": "Engineering buyer",
+      "testimonials.two.location": "Middle East",
+      "testimonials.two.platform": "Technical review",
+      "features.eyebrow": "What the team receives",
+      "features.title": "Clear inputs for",
+      "features.titleLine2": "technical decisions",
+      "features.intro": "Focused information helps project teams compare requirements without decorative noise.",
+      "features.one.title": "Duty-point review",
+      "features.one.desc": "Operating conditions are gathered before a suitable configuration is discussed.",
+      "features.two.title": "Traceable documents",
+      "features.two.desc": "Records are defined against the agreed inspection and documentation scope.",
+      "features.three.title": "Practical handover",
+      "features.three.desc": "Project details remain readable for installation and maintenance teams.",
+      "systems.chapter": "Technical systems",
+      "systems.title": "Built around the",
+      "systems.titleAccent": "operating duty",
+      "systems.intro": "Each system description keeps the relevant operating limit and context visible.",
+      "systems.one.title": "Pressure-aware selection",
+      "systems.one.desc": "Duty data is reviewed alongside pressure, fluid and installation requirements.",
+      "systems.one.metricLabel": "Reference pressure",
+      "systems.two.title": "Material compatibility",
+      "systems.two.desc": "Material choices are aligned with temperature, process media and documentation needs.",
+      "systems.two.metricLabel": "Reference temperature"
     }
   }
 }

@@ -13,6 +13,35 @@ const { assertQualifiedComponentContentBudget } = createRequire(
 
 describe("M1-e-A technical baseline component contract", () => {
   it.each([
+    ["LogoMarquee", { eyebrowKey: "logos.eyebrow", titleKey: "logos.title", items: ["ISO", "CE"], variant: "technical-grid" }],
+    ["Testimonials", { eyebrowKey: "testimonials.eyebrow", items: [{ quoteKey: "quote", nameKey: "name", postcodeKey: "location", rating: 4.8, platformKey: "platform" }], variant: "technical-grid" }],
+    ["FeatureCards", { eyebrowKey: "features.eyebrow", titleKey: "features.title", titleLine2Key: "features.titleLine2", introKey: "features.intro", items: [{ icon: "ri-settings-3-line", titleKey: "features.one.title", descKey: "features.one.desc" }, { icon: "ri-file-list-3-line", titleKey: "features.two.title", descKey: "features.two.desc" }], variant: "technical-grid" }],
+    ["TechSystems", { chapterKey: "systems.chapter", titleKey: "systems.title", titleAccentKey: "systems.titleAccent", introKey: "systems.intro", systems: [{ label: "Hydraulic", titleKey: "systems.one.title", descKey: "systems.one.desc", metric: "16", suffix: "bar", metricLabelKey: "systems.one.metric" }, { label: "Materials", titleKey: "systems.two.title", descKey: "systems.two.desc", metric: "320", suffix: "°C", metricLabelKey: "systems.two.metric" }], variant: "technical-grid" }],
+  ])("%s accepts the technical-grid variant", (type, props) => {
+    expect(() => validateBlock({ type, props } as never)).not.toThrow();
+  });
+
+  it.each([
+    ["LogoMarquee", { eyebrowKey: "logos.eyebrow", titleKey: "logos.title", items: ["ISO"], variant: "technical-grid" }],
+    ["Testimonials", { eyebrowKey: "testimonials.eyebrow", items: [], variant: "technical-grid" }],
+    ["FeatureCards", { eyebrowKey: "features.eyebrow", titleKey: "features.title", titleLine2Key: "features.titleLine2", introKey: "features.intro", items: [{ icon: "ri-settings-3-line", titleKey: "features.one.title", descKey: "features.one.desc" }], variant: "technical-grid" }],
+    ["TechSystems", { chapterKey: "systems.chapter", titleKey: "systems.title", titleAccentKey: "systems.titleAccent", introKey: "systems.intro", systems: [{ label: "Hydraulic", titleKey: "systems.one.title", descKey: "systems.one.desc", metric: "16", suffix: "bar", metricLabelKey: "systems.one.metric" }], variant: "technical-grid" }],
+  ])("%s rejects props outside its qualified item cardinality", (type, props) => {
+    expect(() => validateBlock({ type, props } as never)).toThrow(
+      `INVALID_BLOCK_PROPS: ${type}`,
+    );
+  });
+
+  it.each([
+    ["LogoMarquee", { eyebrow: "Verified capability", title: "Documentation that travels", items: ["ISO", "CE"] }],
+    ["Testimonials", { eyebrow: "Project feedback", title: "Project feedback", items: [{ quote: "Documented and useful.", name: "Operations manager", location: "Northern Europe", platform: "Project review", rating: 4.8 }] }],
+    ["FeatureCards", { eyebrow: "What the team receives", title: "Clear technical decisions", intro: "Focused information supports comparison.", items: [{ title: "Duty-point review", description: "Operating conditions are documented." }, { title: "Traceable documents", description: "Records are agreed against scope." }] }],
+    ["TechSystems", { chapter: "Technical systems", title: "Built around operating duty", intro: "Relevant limits remain visible.", systems: [{ label: "Hydraulic", title: "Pressure-aware selection", description: "Duty data is reviewed.", metric: "16", suffix: "bar", metricLabel: "Reference pressure" }, { label: "Materials", title: "Material compatibility", description: "Choices reflect process media.", metric: "320", suffix: "°C", metricLabel: "Reference temperature" }] }],
+  ])("%s accepts bounded qualified content", (type, content) => {
+    expect(() => assertQualifiedComponentContentBudget(type, content)).not.toThrow();
+  });
+
+  it.each([
     {
       type: "HeroBanner",
       props: {

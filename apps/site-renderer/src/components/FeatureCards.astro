@@ -1,62 +1,43 @@
 ---
-interface Item { icon: string; titleKey: string; descKey: string }
-interface Props {
-  eyebrowKey: string;
-  titleKey: string;
-  titleLine2Key: string;
-  introKey: string;
-  items: Item[];
-  learnKey?: string;
-  t: (key: string) => string;
-  alt?: boolean;
-}
-const { eyebrowKey, titleKey, titleLine2Key, introKey, items = [], learnKey = 'cta.learnMore', t, alt } = Astro.props;
-const accents = ['accent', 'secondary', 'accent', 'secondary', 'accent', 'secondary'];
+import { createRequire } from 'node:module';
+
+import type { Translate } from '../i18n';
+
+const require = createRequire(import.meta.url);
+const { assertQualifiedComponentContentBudget } = require('@global/contracts') as typeof import('@global/contracts');
+
+type Feature = { icon: string; titleKey: string; descKey: string };
+type Props = { id?: string; instanceId: string; eyebrowKey: string; titleKey: string; titleLine2Key: string; introKey: string; items: Feature[]; learnKey?: string; variant?: 'technical-grid' | 'quiet'; t: Translate; alt?: boolean };
+const { id, instanceId, eyebrowKey, titleKey, titleLine2Key, introKey, items, learnKey, variant = 'technical-grid', t, alt } = Astro.props;
+const eyebrow = t(eyebrowKey);
+const title = `${t(titleKey)} ${t(titleLine2Key)}`;
+const intro = t(introKey);
+const resolvedItems = items.map((item) => ({ title: t(item.titleKey), description: t(item.descKey) }));
+assertQualifiedComponentContentBudget('FeatureCards', { eyebrow, title, intro, items: resolvedItems, learn: learnKey ? t(learnKey) : undefined });
+const baseId = `feature-cards-${id ?? 'section'}-${instanceId}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
 ---
 
-<section class:list={['block', { alt }]} id="features">
+<section class:list={['block', 'feature-cards', `feature-cards--${variant}`, { alt }]} data-component="FeatureCards" data-variant={variant} aria-labelledby={headingId}>
   <div class="container">
-    <div class="head reveal">
-      <div class="col-2">
-        <div class="eyebrow"><span class="dot"></span>{t(eyebrowKey)}</div>
-        <h2>{t(titleKey)}<br />{t(titleLine2Key)}</h2>
-      </div>
-      <p class="intro">{t(introKey)}</p>
+    <div class="feature-cards__intro">
+      <div><p class="feature-cards__eyebrow">{eyebrow}</p><h2 id={headingId}>{t(titleKey)}<br />{t(titleLine2Key)}</h2></div>
+      <p>{intro}</p>
     </div>
-    <div class="grid">
-      {items.map((f, i) => (
-        <article class:list={['card', 'reveal', `accent-${accents[i % accents.length]}`]}>
-          <span class="icon"><i class={f.icon}></i></span>
-          <h3>{t(f.titleKey)}</h3>
-          <p>{t(f.descKey)}</p>
-          <span class="learn">{t(learnKey)}<i class="ri-arrow-right-line"></i></span>
-        </article>
-      ))}
-    </div>
+    <ul class="feature-cards__list" role="list">
+      {resolvedItems.map((item, index) => { const itemId = `${baseId}-item-${index + 1}`; return <li><article aria-labelledby={itemId}><span class="feature-cards__number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><h3 id={itemId}>{item.title}</h3><p>{item.description}</p></article></li>; })}
+    </ul>
   </div>
 </section>
 
 <style>
-  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
-  @media (min-width: 1024px) { .head { grid-template-columns: 2fr 1fr; align-items: end; } }
-  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.2em; color: var(--c-on-surface-muted); margin-bottom: 1.25rem; }
-  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-secondary); }
-  h2 { font-weight: 700; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.05; letter-spacing: -0.02em; }
-  .intro { font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); }
-  .grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
-  @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; } }
-  .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius-lg); padding: clamp(1.5rem, 3vw, 2rem); transition: transform .3s ease; }
-  .card:hover { transform: translateY(-4px); }
-  .icon { display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: var(--radius); margin-bottom: 1.5rem; }
-  .accent-accent .icon { background: var(--c-accent); }
-  .accent-secondary .icon { background: var(--c-secondary); }
-  .icon i { font-size: 1.25rem; color: var(--c-on-surface); }
-  .card h3 { font-weight: 700; font-size: 1.25rem; margin-bottom: 0.75rem; }
-  .card p { font-size: 0.9rem; line-height: 1.65; color: var(--c-on-surface-muted); }
-  .learn { display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 1.5rem; font-size: 0.85rem; font-weight: 500; }
-  .learn i { transition: transform .3s ease; }
-  .card:hover .learn i { transform: translateX(3px); }
-  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .8s ease, transform .8s cubic-bezier(0.22,1,0.36,1); }
-  .reveal { opacity: 1; transform: translateY(0); }
+  .feature-cards { background: var(--c-surface); border-block: 1px solid var(--c-border); }
+  .feature-cards.alt { background: var(--c-surface-alt); }
+  .feature-cards__intro { display: grid; gap: 1.5rem; align-items: end; max-width: 68rem; } @media (min-width: 48rem) { .feature-cards__intro { grid-template-columns: 1.15fr .85fr; } }
+  .feature-cards__eyebrow { margin: 0 0 .65rem; color: var(--c-primary); font: 700 .75rem/1.2 var(--font-sans, sans-serif); letter-spacing: .12em; text-transform: uppercase; }
+  h2, h3, p { margin: 0; } h2 { color: var(--c-on-surface); font: 700 clamp(1.75rem, 4vw, 3.25rem)/1.06 var(--font-display, var(--font-sans, sans-serif)); letter-spacing: -.025em; } .feature-cards__intro > p { max-width: 32rem; color: var(--c-on-surface-muted); font: 400 1rem/1.6 var(--font-sans, sans-serif); }
+  .feature-cards__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 1px; margin: 2rem 0 0; padding: 1px; list-style: none; background: var(--c-border); }
+  li { min-width: 0; background: var(--c-surface); } .feature-cards.alt li { background: var(--c-surface-alt); } article { min-height: 100%; padding: clamp(1.25rem, 3vw, 2rem); } .feature-cards__number { display: block; margin-bottom: 2rem; color: var(--c-primary); font: 700 .75rem/1 var(--font-mono, monospace); letter-spacing: .1em; } h3 { color: var(--c-on-surface); font: 700 clamp(1.05rem, 1.7vw, 1.35rem)/1.3 var(--font-sans, sans-serif); } article p { margin-top: .75rem; color: var(--c-on-surface-muted); font: 400 .95rem/1.6 var(--font-sans, sans-serif); }
+  .feature-cards--technical-grid { background-image: linear-gradient(to right, color-mix(in srgb, var(--c-border) 42%, transparent) 1px, transparent 1px); background-size: 4rem 100%; } .feature-cards--quiet { background-image: none; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
 </style>

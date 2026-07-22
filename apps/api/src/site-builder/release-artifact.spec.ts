@@ -77,13 +77,17 @@ describe('R1 release contract gate', () => {
       'AboutBlock',
       'CertWall',
       'CtaBanner',
+      'FeatureCards',
       'FaqAccordion',
       'HeroBanner',
       'InquiryForm',
       'MapLocation',
+      'LogoMarquee',
       'ProcessTimeline',
       'ProductGrid',
       'StatsBand',
+      'TechSystems',
+      'Testimonials',
     ]);
     expect(() =>
       assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
