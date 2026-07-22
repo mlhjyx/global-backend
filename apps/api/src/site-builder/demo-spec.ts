@@ -1,4 +1,4 @@
-import type { SiteSpec, SiteSpecStylePreset } from '@global/contracts';
+import type { SiteSpec, SiteSpecStylePreset, SiteSpecComponentType } from '@global/contracts';
 import type { IntakeInput } from './intake.service';
 
 /**
@@ -60,7 +60,7 @@ export interface DemoSpecInput {
 }
 
 interface Block {
-  type: string;
+  type: SiteSpecComponentType;
   props: Record<string, unknown>;
 }
 

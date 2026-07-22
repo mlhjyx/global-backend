@@ -1,34 +1,111 @@
 import { describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 // CI 构建门：每个 fixture 物化为 SITESPEC_PATH 后真实跑 astro build，
-// 实例化 Section/Base/全 55 组件（不只是查 JSON）。Base 的可选 slot（contact.*/nav.book）
-// 用 safe 探测，缺 key 不崩；未知 type/preset fail-closed throw 会让 build 失败。
+// 实例化 Section/Base/全 55 组件（不只是查 JSON）。
 const fixturesDir = join(process.cwd(), 'fixtures');
 const fixtures = readdirSync(fixturesDir).filter((f) => f.endsWith('-spec.json'));
-
 const astroBin =
   process.platform === 'win32'
     ? 'node_modules\\.bin\\astro.CMD'
     : 'node_modules/.bin/astro';
 
+function runBuild(specPath: string, outDir: string): void {
+  execSync(`${astroBin} build`, {
+    env: { ...process.env, SITESPEC_PATH: specPath, OUT_DIR: outDir },
+    stdio: 'pipe',
+    timeout: 60000,
+  });
+}
+
 describe('每 fixture 真实 Astro 构建（CI 构建门）', () => {
   for (const f of fixtures) {
-    it(`${f}: astro build 成功（SITESPEC_PATH 物化，实例化全组件）`, () => {
-      const env = {
-        ...process.env,
-        SITESPEC_PATH: join('fixtures', f),
-        OUT_DIR: 'dist-test-' + f.replace('.json', ''),
-      };
+    it(`${f}: astro build 成功（实例化全 55 组件）`, () => {
       expect(() =>
-        execSync(`${astroBin} build`, {
-          env,
-          stdio: 'pipe',
-          timeout: 60000,
-        }),
+        runBuild(join('fixtures', f), 'dist-test-' + f.replace('.json', '')),
       ).not.toThrow();
     }, 90000);
   }
+});
+
+describe('未知 type/preset 真实 build fail-closed 负例', () => {
+  const baseSpec = {
+    specVersion: '1.0.0',
+    site: {
+      defaultLocale: 'en',
+      locales: ['en'],
+      theme: { preset: 'modern-industrial' },
+      nav: [],
+      seoGlobal: { siteName: 'T' },
+    },
+    pages: [
+      {
+        id: 'home',
+        path: '/',
+        puck: { content: [], root: {} },
+        seo: { titleKey: 't', descriptionKey: 'd' },
+      },
+    ],
+    assets: {},
+    copyBundles: { en: { t: 'T', d: 'D' } },
+  };
+
+  it('未知 block.type -> astro build throw UNKNOWN_COMPONENT_TYPE', () => {
+    const spec = {
+      ...baseSpec,
+      pages: [
+        {
+          ...baseSpec.pages[0],
+          puck: { content: [{ type: 'UnknownType', props: {} }], root: {} },
+        },
+      ],
+    };
+    const tmp = join(fixturesDir, '__tmp-unknown-type.json');
+    writeFileSync(tmp, JSON.stringify(spec));
+    let err: unknown;
+    try {
+      runBuild('fixtures/__tmp-unknown-type.json', 'dist-test-unknown-type');
+    } catch (e) {
+      err = e;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* noop */ }
+    }
+    expect(err).toBeDefined();
+    const out = String(
+      (err as { stderr?: Buffer; stdout?: Buffer; message?: string })
+        ?.stderr ||
+        (err as { stdout?: Buffer })?.stdout ||
+        (err as { message?: string })?.message ||
+        '',
+    );
+    expect(out).toContain('UNKNOWN_COMPONENT_TYPE');
+  }, 90000);
+
+  it('未知 theme.preset -> astro build throw UNKNOWN_STYLE_PRESET', () => {
+    const spec = {
+      ...baseSpec,
+      site: { ...baseSpec.site, theme: { preset: 'unknown-preset' } },
+    };
+    const tmp = join(fixturesDir, '__tmp-unknown-preset.json');
+    writeFileSync(tmp, JSON.stringify(spec));
+    let err: unknown;
+    try {
+      runBuild('fixtures/__tmp-unknown-preset.json', 'dist-test-unknown-preset');
+    } catch (e) {
+      err = e;
+    } finally {
+      try { unlinkSync(tmp); } catch { /* noop */ }
+    }
+    expect(err).toBeDefined();
+    const out = String(
+      (err as { stderr?: Buffer; stdout?: Buffer; message?: string })
+        ?.stderr ||
+        (err as { stdout?: Buffer })?.stdout ||
+        (err as { message?: string })?.message ||
+        '',
+    );
+    expect(out).toContain('UNKNOWN_STYLE_PRESET');
+  }, 90000);
 });

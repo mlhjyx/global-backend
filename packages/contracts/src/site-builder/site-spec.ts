@@ -59,9 +59,9 @@ export const SITE_SPEC_COMPONENT_TYPES = [
 ] as const;
 export type SiteSpecComponentType = (typeof SITE_SPEC_COMPONENT_TYPES)[number];
 
-/** Puck 兼容组件块：`{ type, props: { id?, ... } }`（04 §2）。 */
+/** Puck 兼容组件块：`{ type, props: { id?, ... } }`（04 §2）。type 封闭为 SiteSpecComponentType。 */
 export interface PuckBlock {
-  type: string;
+  type: SiteSpecComponentType;
   props: Record<string, unknown>;
 }
 
