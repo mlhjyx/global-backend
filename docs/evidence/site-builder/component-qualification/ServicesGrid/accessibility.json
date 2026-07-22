@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"ServicesGrid","part":"accessibility","status":"pass","assertions":["Services use a semantic list of articles and optional links require a real page target."],"sources":["apps/site-renderer/src/components/ServicesGrid.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

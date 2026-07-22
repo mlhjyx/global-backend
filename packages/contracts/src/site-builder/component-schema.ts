@@ -137,22 +137,21 @@ export const COMPONENT_SCHEMAS = {
         descKey: str,
         fromKey: str.optional(),
       }),
-    ),
+    ).min(1).max(8),
     allLabelKey: str.optional(),
     allPageId: str.optional(),
-    bookLabelKey: str.optional(),
-    bookPageId: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   TrustSplit: obj({
     eyebrowKey: str,
     titleKey: str,
     titleAccentKey: str,
     introKey: str,
-    stats: z.array(statSchema),
+    stats: z.array(statSchema).min(2).max(4),
     badges: strArr,
     portraitNameKey: str,
     portraitRoleKey: str,
-    portraitPageId: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   ProcessSteps: obj({
     eyebrowKey: str,
@@ -167,7 +166,8 @@ export const COMPONENT_SCHEMAS = {
         bodyKey: str,
         metaKey: str.optional(),
       }),
-    ),
+    ).min(2).max(6),
+    variant: technicalBaselineVariant.optional(),
   }),
   PricingTable: obj({
     eyebrowKey: str,
@@ -540,8 +540,8 @@ export const COMPONENT_SCHEMAS = {
     introKey: str,
     items: z.array(
       strictObj({ cat: str, titleKey: str, descKey: str, readTime: str }),
-    ),
-    readKey: str.optional(),
+    ).min(1).max(8),
+    variant: technicalBaselineVariant.optional(),
   }),
   IndustrialHero: obj({
     badgeKey: str,
@@ -606,7 +606,7 @@ export const COMPONENT_SCHEMAS = {
     cta2Key: str,
     scrollKey: str,
   }),
-  StatementBlock: obj({ labelKey: str, statementKey: str }),
+  StatementBlock: obj({ labelKey: str, statementKey: str, variant: technicalBaselineVariant.optional() }),
 } as const satisfies Record<SiteSpecComponentType, z.ZodObject<z.ZodRawShape>>;
 
 // 一致性：COMPONENT_SCHEMAS keys 必须等于 SITE_SPEC_COMPONENT_TYPES（防漂移）

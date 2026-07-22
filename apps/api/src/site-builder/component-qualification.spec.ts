@@ -106,13 +106,14 @@ describe("M1-e-A component qualification gate", () => {
     });
   });
 
-  it("registers fourteen qualified components and keeps unqualified types gallery-only", () => {
+  it("registers nineteen qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
-    expect(getComponentReleaseReadiness("StatementBlock")).toEqual({
+    expect(getComponentReleaseReadiness("PricingTable")).toEqual({
       status: "gallery_only",
     });
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS).sort()).toEqual([
       "AboutBlock",
+      "ArticleGrid",
       "CertWall",
       "CtaBanner",
       "FaqAccordion",
@@ -121,14 +122,18 @@ describe("M1-e-A component qualification gate", () => {
       "InquiryForm",
       "LogoMarquee",
       "MapLocation",
+      "ProcessSteps",
       "ProcessTimeline",
       "ProductGrid",
+      "ServicesGrid",
+      "StatementBlock",
       "StatsBand",
       "TechSystems",
       "Testimonials",
+      "TrustSplit",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      98,
+      133,
     );
     for (const componentType of [
       "CtaBanner",
@@ -145,6 +150,11 @@ describe("M1-e-A component qualification gate", () => {
       "MapLocation",
       "TechSystems",
       "Testimonials",
+      "ServicesGrid",
+      "TrustSplit",
+      "ProcessSteps",
+      "ArticleGrid",
+      "StatementBlock",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",
@@ -220,13 +230,13 @@ describe("M1-e-A component qualification gate", () => {
     expect(() =>
       assertReleaseQualificationRegistryIntegrity({
         releaseTypes: [
-          ...SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES,
-          "StatementBlock",
+          ...SITE_SPEC_RELEASE_COMPONENT_TYPES,
+          "PricingTable",
         ],
         qualifications: M1_E_A_COMPONENT_QUALIFICATIONS,
         artifacts: M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
       }),
-    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: StatementBlock");
+    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: PricingTable");
   });
 
   it("rejects placeholder qualification ids without resolved artifacts", () => {

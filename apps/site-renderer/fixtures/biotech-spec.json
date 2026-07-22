@@ -28,7 +28,7 @@
         } },
         { "type": "ServicesGrid", "props": { "id": "ServicesGrid-1", "alt": true,
           "eyebrowKey": "cap.eyebrow", "titleKey": "cap.title", "titleAccentKey": "cap.titleAccent", "introKey": "cap.intro",
-          "allLabelKey": "cap.all", "allPageId": "home", "bookLabelKey": "cap.discover", "bookPageId": "home",
+          "allLabelKey": "cap.all", "allPageId": "home",
           "services": [
             { "icon": "ri-robot-line", "titleKey": "cap.c1.t", "descKey": "cap.c1.d" },
             { "icon": "ri-test-tube-line", "titleKey": "cap.c2.t", "descKey": "cap.c2.d" },

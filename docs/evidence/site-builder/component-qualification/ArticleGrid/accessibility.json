@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"ArticleGrid","part":"accessibility","status":"pass","assertions":["Items are semantic articles, not fake links or visual buttons."],"sources":["apps/site-renderer/src/components/ArticleGrid.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

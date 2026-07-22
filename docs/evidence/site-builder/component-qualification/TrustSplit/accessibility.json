@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"TrustSplit","part":"accessibility","status":"pass","assertions":["Metrics and badges are semantic lists; the profile is non-interactive content."],"sources":["apps/site-renderer/src/components/TrustSplit.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}
