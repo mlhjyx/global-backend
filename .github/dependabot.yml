@@ -4,7 +4,7 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     groups:
       # 次要/补丁版聚合成一个 PR，减少噪声；主要版单独 PR 便于评审破坏性变更
@@ -24,6 +24,6 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
     commit-message:
       prefix: "chore(ci)"
