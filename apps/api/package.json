@@ -13,8 +13,8 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1091.0",
-    "@aws-sdk/s3-request-presigner": "^3.1091.0",
+    "@aws-sdk/client-s3": "^3.1092.0",
+    "@aws-sdk/s3-request-presigner": "^3.1092.0",
     "@global/contracts": "workspace:*",
     "@google-cloud/bigquery": "^8.3.1",
     "@nestjs/common": "^10.4.15",
@@ -37,7 +37,7 @@
     "fast-xml-parser": "^4.5.0",
     "helmet": "^8.3.0",
     "ipaddr.js": "2.4.0",
-    "jose": "^6.2.3",
+    "jose": "^6.2.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "0.35.3",
