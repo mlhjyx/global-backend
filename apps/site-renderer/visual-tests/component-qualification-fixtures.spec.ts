@@ -9,6 +9,7 @@ const QUALIFIED_COMPONENTS = {
   HeroBanner: "section.hero",
   InquiryForm: "section.inquiry-block",
   LogoMarquee: "section.logo-marquee",
+  MapLocation: "section.map-location",
   ProcessTimeline: "section.process-timeline",
   ProductGrid: "section.product-grid",
   StatsBand: "section.stats",
