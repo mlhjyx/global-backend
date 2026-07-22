@@ -102,6 +102,15 @@ describe("M1-e-A technical baseline component contract", () => {
   });
 
   it.each([
+    ["AreaMarquee", { items: ["North Dock", "Rail Quarter"] }],
+    ["CtaCenter", { eyebrowKey: "cta.eyebrow", titleKey: "cta.title", subtitleKey: "cta.subtitle", primaryCta: { labelKey: "cta.primary", url: "https://example.test/contact" } }],
+    ["ServicesDark", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", allLabelKey: "services.all", allPageId: "home", services: [{ icon: "ri-settings-line", titleKey: "services.one", descKey: "services.description" }] }],
+    ["ServiceRows", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", introKey: "services.intro", bookLabelKey: "services.book", bookPageId: "home", services: [{ icon: "ri-settings-line", titleKey: "services.one", descKey: "services.description", fromKey: "services.from", unitKey: "services.unit" }] }],
+  ])("%s keeps legacy 1.0 props parseable", (type, props) => {
+    expect(() => validateBlock({ type, props } as never)).not.toThrow();
+  });
+
+  it.each([
     {
       type: "HeroBanner",
       props: {

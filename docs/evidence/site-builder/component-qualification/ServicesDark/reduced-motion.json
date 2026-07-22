@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"ServicesDark","status":"pass","part":"reducedMotion","assertions":["Presentation is static; reduced motion does not remove information."],"sources":["apps/site-renderer/src/components/ServicesDark.astro"],"verification":["prefers-reduced-motion fixture rendering"]}

@@ -76,11 +76,14 @@ describe('R1 release contract gate', () => {
     expect(R1_RENDERER_COMPONENT_TYPES).toEqual([
       'AboutBlock',
       'ArticleGrid',
+      'AreaMarquee',
       'LedgerStats',
       'CertWall',
       'CtaBanner',
+      'CtaCenter',
       'FeatureCards',
       'FaqAccordion',
+      'FaqSplit',
       'HeroBanner',
       'InquiryForm',
       'MapLocation',
@@ -91,6 +94,8 @@ describe('R1 release contract gate', () => {
       'ProcessSteps',
       'ProductGrid',
       'ServicesGrid',
+      'ServicesDark',
+      'ServiceRows',
       'StatsBand',
       'StatsCountup',
       'StatementBlock',
@@ -142,6 +147,74 @@ describe('R1 release contract gate', () => {
     expect(() => assertReleaseContract(pricing, '1.0.0')).toThrow(
       'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: PricingTable.primaryCta.pageId=missing',
     );
+  });
+
+  it.each([
+    [
+      'CtaCenter.primaryCta',
+      'CtaCenter',
+      {
+        eyebrowKey: 'cta.eyebrow',
+        titleKey: 'cta.title',
+        subtitleKey: 'cta.subtitle',
+        primaryCta: { labelKey: 'cta.primary', pageId: 'missing' },
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: CtaCenter.primaryCta.pageId=missing',
+    ],
+    [
+      'CtaCenter.secondaryCta',
+      'CtaCenter',
+      {
+        eyebrowKey: 'cta.eyebrow',
+        titleKey: 'cta.title',
+        subtitleKey: 'cta.subtitle',
+        primaryCta: { labelKey: 'cta.primary', pageId: 'home' },
+        secondaryCta: { labelKey: 'cta.secondary', pageId: 'missing' },
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: CtaCenter.secondaryCta.pageId=missing',
+    ],
+    [
+      'ServicesDark.allCta',
+      'ServicesDark',
+      {
+        eyebrowKey: 'services.eyebrow',
+        titleKey: 'services.title',
+        titleAccentKey: 'services.accent',
+        allCta: { labelKey: 'services.cta', pageId: 'missing' },
+        services: [{ icon: 'ri-settings-line', titleKey: 'services.one', descKey: 'services.description' }],
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ServicesDark.allCta.pageId=missing',
+    ],
+    [
+      'ServiceRows.cta',
+      'ServiceRows',
+      {
+        eyebrowKey: 'services.eyebrow',
+        titleKey: 'services.title',
+        titleAccentKey: 'services.accent',
+        introKey: 'services.intro',
+        fromLabelKey: 'services.from',
+        cta: { labelKey: 'services.cta', pageId: 'missing' },
+        services: [{ icon: 'ri-settings-line', titleKey: 'services.one', descKey: 'services.description', fromKey: 'services.price', unitKey: 'services.unit' }],
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ServiceRows.cta.pageId=missing',
+    ],
+  ])('rejects unknown internal page target for %s', (_label, type, props, expected) => {
+    expect(() => assertReleaseContract(spec([type], props), '1.0.0')).toThrow(expected);
+  });
+
+  it('rejects blank internal CTA page IDs before publication', () => {
+    expect(() => assertReleaseContract(spec(['CtaCenter'], {
+      eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', subtitleKey: 'cta.subtitle',
+      primaryCta: { labelKey: 'cta.primary', pageId: '' },
+    }), '1.0.0')).toThrow('INVALID_BLOCK_PROPS: CtaCenter');
+  });
+
+  it('keeps an explicit legacy external CTA URL releaseable', () => {
+    expect(() => assertReleaseContract(spec(['CtaCenter'], {
+      eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', subtitleKey: 'cta.subtitle',
+      primaryCta: { labelKey: 'cta.primary', url: 'https://example.test/contact' },
+    }), '1.0.0')).not.toThrow();
   });
 
   it('rejects a free-form HeroBanner variant before release publication', () => {

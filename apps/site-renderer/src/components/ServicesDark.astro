@@ -1,78 +1,93 @@
 ---
-import { localePageHref } from '../lib/spec';
+import { createRequire } from 'node:module';
+import { localePagePathHref } from '../lib/spec';
 
 interface Service { icon: string; titleKey: string; descKey: string }
+interface Cta { labelKey: string; pageId: string }
 interface Props {
   eyebrowKey: string;
   titleKey: string;
   titleAccentKey: string;
-  allLabelKey?: string;
-  allPageId?: string;
+  allCta?: Cta;
   services: Service[];
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   alt?: boolean;
   locale: string;
   defaultLocale: string;
+  instanceId: string;
+  pagePathById?: Record<string, string>;
+  allLabelKey?: string;
+  allPageId?: string;
 }
-const { eyebrowKey, titleKey, titleAccentKey, allLabelKey, allPageId = 'services', services = [], t, alt, locale, defaultLocale } = Astro.props;
-const allHref = localePageHref(allPageId, locale, defaultLocale);
-const isDark = !alt;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { eyebrowKey, titleKey, titleAccentKey, allCta, allLabelKey, allPageId, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
+const resolvedAllCta = allCta ?? (allLabelKey ? { labelKey: allLabelKey, pageId: allPageId ?? 'services' } : undefined);
+const content = {
+  eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey),
+  services: services.map((service) => ({ icon: service.icon, title: t(service.titleKey), description: t(service.descKey) })),
+  allCta: resolvedAllCta ? t(resolvedAllCta.labelKey) : undefined,
+};
+assertQualifiedComponentContentBudget('ServicesDark', content);
+const headingId = `${instanceId}-services-dark-heading`;
+const allCtaHref = resolvedAllCta
+  ? (() => {
+      const pagePath = pagePathById[resolvedAllCta.pageId];
+      if (!pagePath) throw new Error('PAGE_REFERENCE_UNKNOWN: ServicesDark.' + resolvedAllCta.pageId);
+      return localePagePathHref(pagePath, locale, defaultLocale);
+    })()
+  : undefined;
 ---
 
-<section class:list={['block', 'svc-dark', { alt }]}>
+<section class:list={['block', 'services-dark', `services-dark--${variant}`, { alt }]} data-component="ServicesDark" data-variant={variant} aria-labelledby={headingId}>
   <div class="container">
     <div class="head">
-      <div class="reveal">
-        <p class="eyebrow-flat">{t(eyebrowKey)}</p>
-        <h2 class="display">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
+      <div>
+        <p class="eyebrow-flat">{content.eyebrow}</p>
+        <h2 id={headingId} class="display">{content.title} <em>{content.accent}</em></h2>
       </div>
-      {allLabelKey && (
-        <a class="pill-outline reveal" href={allHref}>
-          {t(allLabelKey)}<i class="ri-arrow-right-line"></i>
+      {resolvedAllCta && content.allCta && allCtaHref && (
+        <a class="pill-outline" href={allCtaHref}>
+          {content.allCta}<i class="ri-arrow-right-line" aria-hidden="true"></i>
         </a>
       )}
     </div>
 
-    <div class="grid">
-      {services.map((s, idx) => (
-        <div class="card reveal">
-          <div class="top">
-            <span class="icon"><i class={s.icon}></i></span>
-            <span class="num">0{idx + 1}</span>
-          </div>
-          <h3>{t(s.titleKey)}</h3>
-          <p class="desc">{t(s.descKey)}</p>
-          <span class="more">Learn more <i class="ri-arrow-right-line"></i></span>
-        </div>
+    <ul class="grid">
+      {content.services.map((service, index) => (
+        <li>
+          <article class="card">
+            <div class="top">
+              <span class="icon"><i class={service.icon} aria-hidden="true"></i></span>
+              <span class="num">{String(index + 1).padStart(2, '0')}</span>
+            </div>
+            <h3>{service.title}</h3>
+            <p class="desc">{service.description}</p>
+          </article>
+        </li>
       ))}
-    </div>
+    </ul>
   </div>
 </section>
 
 <style>
-  .svc-dark { background: var(--c-primary); color: var(--c-on-dark); }
-  .svc-dark.alt { background: var(--c-surface-alt); color: var(--c-on-surface); }
+  .services-dark { background: var(--c-primary); color: var(--c-on-dark); }
+  .services-dark.alt { background: var(--c-surface-alt); color: var(--c-on-surface); }
+  .services-dark--technical-grid { background-image: linear-gradient(color-mix(in srgb, currentColor 10%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, currentColor 10%, transparent) 1px, transparent 1px); background-size: 2rem 2rem; }
   .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
   @media (min-width: 1024px) { .head { grid-template-columns: 7fr 5fr; align-items: end; } .head .pill-outline { justify-self: end; } }
   .eyebrow-flat { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.18em; opacity: 0.7; margin-bottom: 1.5rem; }
   .display { font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.5rem, 6vw, 5rem); line-height: 1; letter-spacing: -0.025em; }
   .display em { font-style: italic; font-weight: 400; color: var(--c-accent); }
-  .pill-outline { display: inline-flex; align-items: center; gap: 0.5rem; border: 1px solid currentColor; opacity: 0.7; padding: 0.75rem 1.5rem; border-radius: 9999px; font-size: 0.875rem; transition: opacity .3s ease; white-space: nowrap; }
-  .pill-outline:hover { opacity: 1; }
-
-  .grid { display: grid; grid-template-columns: 1fr; gap: 1px; background: color-mix(in srgb, currentColor 12%, transparent); border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: var(--radius); overflow: hidden; }
+  .pill-outline { display: inline-flex; align-items: center; gap: 0.5rem; border: 1px solid currentColor; padding: 0.75rem 1.5rem; border-radius: 9999px; font-size: 0.875rem; white-space: nowrap; }
+  .grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr; gap: 1px; background: color-mix(in srgb, currentColor 12%, transparent); border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: var(--radius); overflow: hidden; }
   @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } }
   @media (min-width: 1024px) { .grid { grid-template-columns: repeat(4, 1fr); } }
-  .card { background: var(--c-primary); padding: clamp(1.5rem, 3vw, 2.5rem); display: flex; flex-direction: column; gap: 1.25rem; transition: background .3s ease; }
-  .svc-dark.alt .card { background: var(--c-surface); }
-  .card:hover { background: color-mix(in srgb, currentColor 6%, var(--c-primary)); }
-  .svc-dark.alt .card:hover { background: var(--c-surface-alt); }
+  .card { height: 100%; background: var(--c-primary); padding: clamp(1.5rem, 3vw, 2.5rem); display: flex; flex-direction: column; gap: 1.25rem; }
+  .services-dark.alt .card { background: var(--c-surface); }
   .top { display: flex; align-items: center; justify-content: space-between; }
-  .icon { width: 3.5rem; height: 3.5rem; display: grid; place-items: center; border-radius: 9999px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); color: var(--c-accent); font-size: 1.5rem; transition: transform .5s ease, border-color .5s ease; }
-  .card:hover .icon { transform: rotate(18deg); border-color: var(--c-accent); }
+  .icon { width: 3.5rem; height: 3.5rem; display: grid; place-items: center; border-radius: 9999px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); color: var(--c-accent); font-size: 1.5rem; }
   .num { font-size: 0.75rem; letter-spacing: 0.15em; opacity: 0.4; }
   .card h3 { font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.25rem, 2vw, 1.5rem); letter-spacing: -0.01em; margin-top: 0.5rem; }
-  .desc { font-size: 0.875rem; opacity: 0.65; line-height: 1.6; }
-  .more { margin-top: auto; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.15em; opacity: 0.8; transition: color .3s ease; }
-  .card:hover .more { color: var(--c-accent); }
+  .desc { font-size: 0.875rem; opacity: 0.72; line-height: 1.6; }
 </style>

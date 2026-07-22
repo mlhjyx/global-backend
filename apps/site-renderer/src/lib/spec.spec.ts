@@ -3,6 +3,7 @@ import type { SiteSpec } from "@global/contracts";
 import {
   buildStaticLocalePaths,
   localePageHref,
+  localePagePathHref,
   makeT,
   safeOptionalSlot,
   siteLocaleDirection,
@@ -70,6 +71,10 @@ describe("M1-d renderer locale contract", () => {
       "/de-DE/products",
     );
     expect(localePageHref("home", "en", "en")).toBe("/");
+    expect(localePagePathHref("/catalogue", "de-DE", "en")).toBe(
+      "/de-DE/catalogue",
+    );
+    expect(localePagePathHref("/", "en", "en")).toBe("/");
   });
 });
 

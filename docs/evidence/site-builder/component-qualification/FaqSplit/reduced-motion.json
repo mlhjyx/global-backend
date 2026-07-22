@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"FaqSplit","status":"pass","part":"reducedMotion","assertions":["Native disclosure has no motion-dependent state."],"sources":["apps/site-renderer/src/components/FaqSplit.astro"],"verification":["prefers-reduced-motion fixture rendering"]}

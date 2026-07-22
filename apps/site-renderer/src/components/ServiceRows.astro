@@ -1,73 +1,93 @@
 ---
-import { localePageHref } from '../lib/spec';
+import { createRequire } from 'node:module';
+import { localePagePathHref } from '../lib/spec';
+import { resolveServiceRowsCta } from '../lib/component-compat';
 
 interface Service { icon: string; titleKey: string; descKey: string; fromKey: string; unitKey: string }
+interface Cta { labelKey: string; pageId: string }
 interface Props {
   eyebrowKey: string;
   titleKey: string;
   titleAccentKey: string;
   introKey: string;
-  services: Service[];
+  fromLabelKey?: string;
+  cta?: Cta;
   bookLabelKey?: string;
   bookPageId?: string;
+  services: Service[];
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   alt?: boolean;
   locale: string;
   defaultLocale: string;
+  instanceId: string;
+  pagePathById?: Record<string, string>;
 }
-const { eyebrowKey, titleKey, titleAccentKey, introKey, services = [], bookLabelKey = 'cta.learnMore', bookPageId = 'services', t, alt, locale, defaultLocale } = Astro.props;
-const bookHref = localePageHref(bookPageId, locale, defaultLocale);
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { eyebrowKey, titleKey, titleAccentKey, introKey, fromLabelKey, cta, bookLabelKey, bookPageId, services, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
+const resolvedCta = resolveServiceRowsCta(cta, bookLabelKey, bookPageId);
+if (!resolvedCta) throw new Error('SERVICE_ROWS_CTA_REQUIRED');
+const content = {
+  eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey), intro: t(introKey), fromLabel: fromLabelKey ? t(fromLabelKey) : 'From', cta: t(resolvedCta.labelKey),
+  services: services.map((service) => ({ icon: service.icon, title: t(service.titleKey), description: t(service.descKey), from: t(service.fromKey), unit: t(service.unitKey) })),
+};
+assertQualifiedComponentContentBudget('ServiceRows', content);
+const headingId = `${instanceId}-service-rows-heading`;
+const ctaPath = pagePathById[resolvedCta.pageId];
+if (!ctaPath) throw new Error('PAGE_REFERENCE_UNKNOWN: ServiceRows.' + resolvedCta.pageId);
+const ctaHref = localePagePathHref(ctaPath, locale, defaultLocale);
 ---
 
-<section class:list={['block', { alt }]}>
+<section class:list={['block', 'service-rows', `service-rows--${variant}`, { alt }]} data-component="ServiceRows" data-variant={variant} aria-labelledby={headingId}>
   <div class="container">
-    <div class="head reveal">
+    <div class="head">
       <div>
-        <span class="eyebrow-accent">{t(eyebrowKey)}</span>
-        <h2 class="serif-title">{t(titleKey)}<em>{t(titleAccentKey)}</em></h2>
+        <span class="eyebrow-accent">{content.eyebrow}</span>
+        <h2 id={headingId} class="serif-title">{content.title}<em>{content.accent}</em></h2>
       </div>
-      <p class="intro">{t(introKey)}</p>
+      <p class="intro">{content.intro}</p>
     </div>
 
-    <div class="grid">
-      {services.map((s, i) => (
-        <article class:list={['card', 'reveal', { dark: i % 3 === 0 }]}>
-          <div class="ph"><i class={s.icon}></i></div>
-          <div class="body">
-            <span class="icon-circle"><i class={s.icon}></i></span>
-            <h3>{t(s.titleKey)}</h3>
-            <p class="desc">{t(s.descKey)}</p>
-            <div class="foot">
-              <div>
-                <span class="from-label">From</span>
-                <span class="price">{t(s.fromKey)}<span class="unit">{t(s.unitKey)}</span></span>
+    <ul class="grid">
+      {content.services.map((service, index) => (
+        <li>
+          <article class:list={['card', { dark: index % 3 === 0 }]}>
+            <div class="ph"><i class={service.icon} aria-hidden="true"></i></div>
+            <div class="body">
+              <span class="icon-circle"><i class={service.icon} aria-hidden="true"></i></span>
+              <h3>{service.title}</h3>
+              <p class="desc">{service.description}</p>
+              <div class="foot">
+                <div>
+                  <span class="from-label">{content.fromLabel}</span>
+                  <span class="price">{service.from}<span class="unit">{service.unit}</span></span>
+                </div>
+                <a class:list={['learn', { dark: index % 3 === 0 }]} href={ctaHref}>
+                  {content.cta}<i class="ri-arrow-right-up-line" aria-hidden="true"></i>
+                </a>
               </div>
-              <a class:list={['learn', { dark: i % 3 === 0 }]} href={bookHref}>
-                {t(bookLabelKey)}<i class="ri-arrow-right-up-line"></i>
-              </a>
             </div>
-          </div>
-        </article>
+          </article>
+        </li>
       ))}
-    </div>
+    </ul>
   </div>
 </section>
 
 <style>
+  .service-rows--technical-grid { background-image: linear-gradient(color-mix(in srgb, var(--c-border) 40%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--c-border) 40%, transparent) 1px, transparent 1px); background-size: 2rem 2rem; }
   .head { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
   @media (min-width: 768px) { .head { grid-template-columns: 1.4fr 1fr; align-items: end; } }
   .eyebrow-accent { font-size: 0.7rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--c-primary); }
   .serif-title { margin-top: 1rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.1; max-width: 22ch; }
   .serif-title em { font-style: italic; font-weight: 400; }
   .intro { font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); max-width: 28rem; }
-  .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  .grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
   @media (min-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-  .card { display: grid; grid-template-columns: 1fr; overflow: hidden; border-radius: var(--radius-lg); border: 1px solid var(--c-border); background: var(--c-surface); }
+  .card { height: 100%; display: grid; grid-template-columns: 1fr; overflow: hidden; border-radius: var(--radius-lg); border: 1px solid var(--c-border); background: var(--c-surface); }
   @media (min-width: 640px) { .card { grid-template-columns: 2fr 3fr; } }
   .card.dark { background: var(--c-on-surface); color: var(--c-on-dark); border-color: var(--c-on-surface); }
-  .ph { aspect-ratio: 1 / 1; display: grid; place-items: center; background:
-      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 18%, transparent), transparent 60%),
-      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); }
+  .ph { aspect-ratio: 1 / 1; display: grid; place-items: center; background: radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 18%, transparent), transparent 60%), linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); }
   @media (min-width: 640px) { .ph { aspect-ratio: auto; height: 100%; min-height: 16rem; } }
   .ph i { font-size: 3rem; color: rgba(0,0,0,0.15); }
   .card.dark .ph { background: linear-gradient(140deg, #3a2a1c, #5c3a24); }
@@ -81,8 +101,6 @@ const bookHref = localePageHref(bookPageId, locale, defaultLocale);
   .from-label { font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.7; display: block; }
   .price { font-family: var(--font-heading); font-weight: 500; font-size: 1.5rem; }
   .unit { margin-left: 0.25rem; font-size: 0.75rem; font-family: var(--font-body); font-weight: 400; opacity: 0.7; }
-  .learn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.75rem; background: var(--c-on-surface); color: var(--c-on-dark); white-space: nowrap; transition: background .3s ease; }
-  .learn:hover { background: var(--c-on-surface-muted); }
+  .learn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.75rem; background: var(--c-on-surface); color: var(--c-on-dark); white-space: nowrap; }
   .learn.dark { background: var(--c-secondary); color: var(--c-on-surface); }
-  .learn.dark:hover { filter: brightness(1.08); }
 </style>

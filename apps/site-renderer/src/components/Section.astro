@@ -68,8 +68,9 @@ interface Props {
   scope: string;
   locale: string;
   defaultLocale: string;
+  pagePathById?: Record<string, string>;
 }
-const { block, t, index, scope, locale, defaultLocale } = Astro.props;
+const { block, t, index, scope, locale, defaultLocale, pagePathById = {} } = Astro.props;
 const registry: Record<string, unknown> = {
   HeroBanner,
   StatsBand,
@@ -154,5 +155,6 @@ const instanceId = `${scope}-${index}`.replace(/[^A-Za-z0-9_-]/g, '-');
     instanceId={instanceId}
     locale={locale}
     defaultLocale={defaultLocale}
+    pagePathById={pagePathById}
   />
 ) : null}

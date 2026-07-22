@@ -1,5 +1,6 @@
 ---
-import { localePageHref } from '../lib/spec';
+import { createRequire } from 'node:module';
+import { localePagePathHref } from '../lib/spec';
 
 interface Cta { labelKey: string; pageId?: string; url?: string }
 interface Props {
@@ -9,32 +10,51 @@ interface Props {
   subtitleKey: string;
   primaryCta: Cta;
   secondaryCta?: Cta;
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   alt?: boolean;
   locale: string;
   defaultLocale: string;
+  instanceId: string;
+  pagePathById?: Record<string, string>;
 }
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
 const {
-  eyebrowKey, titleKey, titleAccentKey, subtitleKey,
-  primaryCta, secondaryCta, t, alt, locale, defaultLocale,
+  eyebrowKey, titleKey, titleAccentKey, subtitleKey, primaryCta, secondaryCta,
+  variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {},
 } = Astro.props;
-const href = (c?: Cta) => c?.url ?? (c?.pageId ? localePageHref(c.pageId, locale, defaultLocale) : '#book');
+const content = {
+  eyebrow: t(eyebrowKey),
+  title: t(titleKey),
+  accent: titleAccentKey ? t(titleAccentKey) : undefined,
+  subtitle: t(subtitleKey),
+  primaryCta: t(primaryCta.labelKey),
+  secondaryCta: secondaryCta ? t(secondaryCta.labelKey) : undefined,
+};
+assertQualifiedComponentContentBudget('CtaCenter', content);
+const headingId = `${instanceId}-cta-center-heading`;
+const href = (cta: Cta) => {
+  if (cta.url) return cta.url;
+  const pagePath = cta.pageId ? pagePathById[cta.pageId] : undefined;
+  if (!pagePath) throw new Error('PAGE_REFERENCE_UNKNOWN: CtaCenter.' + (cta.pageId ?? '(empty)'));
+  return localePagePathHref(pagePath, locale, defaultLocale);
+};
 ---
 
-<section class:list={['block', { alt }]}>
-  <div class="container cta-center reveal">
-    <span class="eyebrow">{t(eyebrowKey)}</span>
-    <h2 class="cta-title">
-      {t(titleKey)}{titleAccentKey && <em> {t(titleAccentKey)}</em>}
+<section class:list={['block', 'cta-center', `cta-center--${variant}`, { alt }]} data-component="CtaCenter" data-variant={variant} aria-labelledby={headingId}>
+  <div class="container cta-center__content">
+    <span class="eyebrow">{content.eyebrow}</span>
+    <h2 id={headingId} class="cta-title">
+      {content.title}{content.accent && <em> {content.accent}</em>}
     </h2>
-    <p class="muted cta-sub">{t(subtitleKey)}</p>
+    <p class="muted cta-sub">{content.subtitle}</p>
     <div class="ctas">
       <a class="btn btn-dark btn-lg btn-pill" href={href(primaryCta)}>
-        {t(primaryCta.labelKey)}<i class="ri-arrow-right-up-line"></i>
+        {content.primaryCta}<i class="ri-arrow-right-up-line" aria-hidden="true"></i>
       </a>
-      {secondaryCta && (
+      {secondaryCta && content.secondaryCta && (
         <a class="btn btn-ghost btn-lg" href={href(secondaryCta)}>
-          {t(secondaryCta.labelKey)}<i class="ri-arrow-right-line"></i>
+          {content.secondaryCta}<i class="ri-arrow-right-line" aria-hidden="true"></i>
         </a>
       )}
     </div>
@@ -42,7 +62,9 @@ const href = (c?: Cta) => c?.url ?? (c?.pageId ? localePageHref(c.pageId, locale
 </section>
 
 <style>
-  .cta-center { max-width: 56rem; margin: 0 auto; text-align: center; display: flex; flex-direction: column; align-items: center; }
+  .cta-center { background-image: linear-gradient(color-mix(in srgb, var(--c-border) 45%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--c-border) 45%, transparent) 1px, transparent 1px); background-size: 2rem 2rem; }
+  .cta-center--quiet { background-image: none; }
+  .cta-center__content { max-width: 56rem; margin: 0 auto; text-align: center; display: flex; flex-direction: column; align-items: center; }
   .cta-title { font-size: clamp(2rem, 5.5vw, 4rem); font-weight: 600; max-width: 20ch; margin-top: 1.25rem; }
   .cta-title em { font-style: normal; color: var(--c-accent); }
   .cta-sub { margin-top: 1.25rem; max-width: 36rem; font-size: 1.05rem; }

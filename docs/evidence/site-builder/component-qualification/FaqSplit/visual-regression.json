@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"FaqSplit","status":"pass","part":"visualRegression","assertions":["375, 768, and 1440 pixel screenshot evidence is byte-pinned."],"sources":["apps/site-renderer/visual-tests/__screenshots__/qualification"],"verification":["dedicated Playwright fixture visual regression"]}
