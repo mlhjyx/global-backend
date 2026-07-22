@@ -314,6 +314,25 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_DNA_INVALID/);
   });
 
+  it("rejects source-derived text in family adjacency rules", () => {
+    const value = catalog();
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests: value.sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: [
+          {
+            ...value.families[0],
+            adjacencyRules: ["Copied source headline"],
+          },
+        ],
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
   it("freezes validated rule provenance into the catalog digest", () => {
     const value = catalog();
     const sourceManifests = ruleValidationContext().sourceManifests;
