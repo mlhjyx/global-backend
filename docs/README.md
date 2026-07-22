@@ -4,7 +4,7 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-07-20，`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
+> 最后核验：2026-07-22，`origin/main@8dcbbcb8254a561f33abc59c49da4cb6a3de30b1` + Phase 9 `DRAFT`
 
 这是 `/global/backend` 文档的人类入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；本仓当前主线是 Site Builder 后端能力。“独立站管理”属于统一 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是平行的第二套 SaaS 前端。
 
@@ -22,6 +22,7 @@
 8. [全 SaaS Capability Pack](frontend/modules/README.md)：Gate 6 已批准的完整产品域入口；独立站管理保持 Gate 5 深度，其他域保持地图级诚实状态。
 9. [OSS / 外部能力注册表](backend/oss-registry.md)：31 项候选的采用决定、许可边界、Adapter/SoR、Owner 与退出路径。
 10. [防漂移与 Release 治理](governance/docs-verification.md)：机器门、历史例外、真实发布包和学习回写。
+11. [Phase 9 全产品体验设计工作包](roadmap/saas-frontend-phase-9/README.md)：跨源事实、功能/对象/页面完整性、Provider 架构、交互语言、旅程和 Figma 交付；当前仍是 `DRAFT`，不覆盖 current Registry 或实现状态。
 
 任何“已完成”声明都必须回到上述主题 Owner、机器契约和证据核验。不要从旧 Word、研究稿、本地原型或历史 worktree 推导当前实现。
 
@@ -49,6 +50,11 @@
 - [独立站管理旅程与页面](frontend/modules/independent-site-management/journeys-and-page-spec.md)
 - [独立站管理低保真线框](design/independent-site-management-wireframes.md)
 - [独立站管理实施蓝图](frontend/implementation/independent-site-management-blueprint.md)
+- [Phase 9 全产品功能覆盖、对象与页面族](roadmap/saas-frontend-phase-9/README.md)
+- [Phase 9 Figma 交付登记](roadmap/saas-frontend-phase-9/figma-delivery-register.md)
+- [Phase 9 视觉方向受控内容 Fixture](roadmap/saas-frontend-phase-9/visual-direction-content-fixture.md)
+- [Phase 9 设计系统 v1 范围与差距分析](roadmap/saas-frontend-phase-9/design-system-v1-scope.md)
+- [Phase 9 Canva 评审交付登记](roadmap/saas-frontend-phase-9/canva-review-delivery.md)
 
 注意：`/global/frontend/project-12080666` 是无 Git provenance 的 React/Vite Mock 原型；正式 SaaS 前端仓库、设计 Owner、设计 Token 和部署事实源尚未确定。它不能作为 as-built 或正式视觉规范。
 
@@ -158,5 +164,6 @@ Phase 1/2 的 roadmap 包是冻结审计与决策 provenance，不是第二套 c
 - Phase 6：已通过 Gate 6；非 Site 域仍 `MAP_COMPLETE / NOT_DEV_READY`，客户开发仍 `FROZEN_MAP_ONLY`。
 - Phase 7：已通过 Gate 7；31 项 Card 当前决定获批，八项现用能力仍仅为 `INTEGRATE / *_HARDEN`，全部逐项准入门保留。
 - Phase 8：已按 `DEC-FE-P8-001..012` 有条件通过；机器门与作者 dry-run 获接受，独立人工仍 `NOT_RUN / BLK-FE-006`，真实 Release Bundle 仍为 0。
+- Phase 9：已启动 `DRAFT` 体验设计工作包；当前已形成跨源/覆盖/对象/Provider 总账和两张 Figma 结构板。用户已确认 Today、Site Editor、Buyer Development、Unified Inbox、AI Task Strategy 五张视觉基线；它们只批准布局与视觉语言。正式对象/Page ID、组件库、页面原型和产品实现仍未获准，进入 Figma 前先完成 docs 全量阅读与 current 合同校正。
 
-文档计划已经条件收口，没有自动开启的下一实施阶段。[Gate 8 评审包](roadmap/saas-frontend-phase-8/gate-8-review.md)保留 12 项批准决定、机器结果、独立人工未运行、零真实 Release Bundle 和全部 blocker/gap。Gate 8 不授权产品实现、历史移动、push、PR 或合并。
+Phase 1–8 文档计划已经条件收口。[Gate 8 评审包](roadmap/saas-frontend-phase-8/gate-8-review.md)保留 12 项批准决定、机器结果、独立人工未运行、零真实 Release Bundle 和全部 blocker/gap。Phase 9 是用户授权的新设计阶段，但仍不授权产品实现、历史移动或把提案写成 current truth。

@@ -4,8 +4,8 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 当前清单基线：本分支 `origin/main@676c6cd` + Phase 1–8 docs-governance 产物
-> 最后核验：2026-07-20
+> 当前清单基线：`origin/main@8dcbbcb` + Phase 1–8 冻结治理产物 + Phase 9 `DRAFT`
+> 最后核验：2026-07-22
 
 本表是“读哪份、信哪份、旧内容迁到哪里”的当前入口。Phase 1 的 [逐来源明细](../roadmap/saas-frontend-phase-1/source-detail-register.md)保留 `c3f0cca` 时点的 67 份 Markdown 和非 Markdown 审计证据；本表承接其结果并管理之后新增的文档，不重写冻结审计。
 
@@ -150,6 +150,28 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `GATE-FE-P4-000` | `docs/roadmap/saas-frontend-phase-4/README.md` | L3 / Phase evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 4 交付与批准记录 | `REFERENCE_ONLY` |
 | `GATE-FE-P4-001` | `docs/roadmap/saas-frontend-phase-4/gate-4-review.md` | L4 / Gate evidence | `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Gate 4 决定与验收 | `REFERENCE_ONLY` |
 
+### 2.7 Phase 9 全产品体验设计工作包
+
+以下文件是用户授权的新设计阶段，当前均为 `DRAFT`。它们不修改 Phase 1–8 冻结证据，不自动更新 current Capability/Object/Page Registry，也不授权前端或后端实现。
+
+| Registry ID | 路径 | 层级 / 类型 | 生命周期 | 唯一 Owner | 唯一事实主题 | 去向 |
+|---|---|---|---|---|---|---|
+| `GATE-FE-P9-000` | `docs/roadmap/saas-frontend-phase-9/README.md` | L3 / Working package | `DRAFT` | `OWN-PRODUCT` | Phase 9 范围、Gate、交付和红线 | 选择门与后续评审入口 |
+| `AUD-FE-P9-001` | `docs/roadmap/saas-frontend-phase-9/source-and-truth-ledger.md` | L3 / Audit evidence | `DRAFT` | `OWN-DOC-GOV` | 跨源读取、权威、版本、冲突和去向 | 后续 truth refresh 增量维护 |
+| `AUD-FE-P9-002` | `docs/roadmap/saas-frontend-phase-9/conflict-and-decision-ledger.md` | L3 / Audit and decision evidence | `DRAFT` | `OWN-DOC-GOV` | Phase 9 冲突、决定和 blocker | 关闭后迁入 current Registry |
+| `BASE-FE-P9-002` | `docs/roadmap/saas-frontend-phase-9/feature-coverage-ledger.md` | L3 / Coverage baseline | `DRAFT` | `OWN-PRODUCT` | 功能候选、76 页基线和 64 个 OpenAPI operation 归属 | 批准后申请正式 Capability/Page 变更 |
+| `BASE-FE-P9-003` | `docs/roadmap/saas-frontend-phase-9/object-page-family-review.md` | L3 / Object and page review | `DRAFT` | `OWN-PRODUCT` | 对象分类、生命周期和 24 个候选页面族 | 批准后进入对象/Page Registry |
+| `BASE-FE-P9-004` | `docs/roadmap/saas-frontend-phase-9/provider-and-sor-architecture.md` | L4 / Architecture proposal | `DRAFT` | `OWN-SAAS-PLATFORM` | Provider、SoR、回执、恢复和退出合同 | 独立准入与接口评审 |
+| `DESIGN-FE-P9-001` | `docs/roadmap/saas-frontend-phase-9/interaction-language-and-visual-semantics.md` | L2 / Design proposal | `DRAFT` | `OWN-DESIGN` | 全产品交互语言和视觉语义 | 视觉方向选择后形成 successor |
+| `DESIGN-FE-P9-002` | `docs/roadmap/saas-frontend-phase-9/journey-and-prototype-catalog.md` | L2 / Journey proposal | `DRAFT` | `OWN-PRODUCT` | 12 条端到端旅程和原型要求 | 逐 Journey 设计与验证 |
+| `DESIGN-FE-P9-003` | `docs/roadmap/saas-frontend-phase-9/figma-delivery-register.md` | L2 / Design delivery registry | `DRAFT` | `OWN-DESIGN` | Figma 文件、Node、状态和 QA 证据 | 持续更新；链接不等于验证完成 |
+| `DESIGN-FE-P9-004` | `docs/roadmap/saas-frontend-phase-9/visual-direction-content-fixture.md` | L2 / Controlled interaction fixture | `DRAFT` | `OWN-PRODUCT` | 动态资料/知识引导、current 合同、状态 Fixture、禁止固定行业字段和旧图边界 | 每轮资料、Onboarding、Site Editor 或 Inbox 设计前核对 |
+| `DESIGN-FE-P9-005` | `docs/roadmap/saas-frontend-phase-9/design-system-v1-scope.md` | L2 / Design system scope proposal | `DRAFT` | `OWN-DESIGN` | Phase 0 设计来源、差距、Token/组件范围、外部库采用和 Phase 1 门 | 用户批准后写入 Figma Variables/Components |
+| `DESIGN-FE-P9-006` | `docs/roadmap/saas-frontend-phase-9/canva-review-delivery.md` | L2 / Review communication registry | `DRAFT` | `OWN-DESIGN` | Canva 汇报、旅程报告和管理层路线图的输入与安全门 | Figma 页面冻结后按需创建；不拥有设计真值 |
+| `AUD-FE-P9-003` | `docs/roadmap/saas-frontend-phase-9/docs-reading-ledger.md` | L3 / Complete source audit ledger | `DRAFT` | `OWN-DOC-GOV` | 171 份 Markdown/DOCX 的路径、指纹、层级、读取状态和采用规则 | docs 快照或权威层级变化时重算；不得由低层来源覆盖 current truth |
+| `EVID-FE-P9-001` | `docs/roadmap/saas-frontend-phase-9/phase-1-design-evidence.md` | L4 / Design QA evidence | `DRAFT` | `OWN-DESIGN` | Phase 1 Figma Node、同视口 QA、组件限制和生成素材 provenance | 后续状态、响应式、a11y 和用户验证增量记录 |
+| `DESIGN-FE-P9-007` | `docs/roadmap/saas-frontend-phase-9/page-manifest-v2.md` | L2 / Page design registry | `DRAFT` | `OWN-PRODUCT` | 76 个稳定 Page ID 的任务、对象/SoR、状态、Scenario、动作、异常和 Figma 去向 | 逐页设计和验证后申请正式 Page Registry delta |
+
 ## 3. 现有 Markdown 文档族
 
 以下规则覆盖 Phase 1 清点的 67 份 Markdown、Phase 1/2 冻结包和当前 Phase 3 评审包。精确入口见 §2，例外见 §4。
@@ -171,6 +193,7 @@ Registry 的内容 Owner 仍按主题分开。例如能力批准属于 `OWN-PROD
 | `DOCSET-PHASE-7` | `docs/roadmap/saas-frontend-phase-7/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 7 组合、来源和批准 provenance | `REFERENCE_ONLY`；OSS Registry/Card 继续维护 |
 | `DOCSET-OSS-ADOPTION` | `docs/platform/oss-adoption/*.md` | L2 / `CURRENT`，来源快照除外 | `OWN-SEC-COMMERCIAL` | Gate 7 已批的 Card 与准入治理 | Registry/Card 持续维护；来源快照不可变 |
 | `DOCSET-PHASE-8` | `docs/roadmap/saas-frontend-phase-8/*.md` | L3/L4 / `FROZEN_EVIDENCE` | `OWN-DOC-GOV` | Phase 8 lint、处置、可用性、证据和条件批准 | `REFERENCE_ONLY`；阅读任务按精确行继续 current |
+| `DOCSET-PHASE-9` | `docs/roadmap/saas-frontend-phase-9/*.md` | L2–L4 / `DRAFT` | 按精确文档 Owner | 新阶段的事实、覆盖、对象、Provider、交互、旅程和 Figma 工作资产；不拥有 current truth | 选择门与后续 Gate；批准前不得迁入正式 Registry |
 | `DOCSET-RELEASES` | `docs/releases/*.md` | L4 / Release evidence | `OWN-QA-EVIDENCE` | 真实用户发布 Bundle；当前 0 项 | Bundle 不改写；后续 learning/rollback 建关系 |
 | `DOCSET-SITE-ACTIVE` | `docs/site-builder/00`–`09`、`13`、`14` | L1/L2/L3 / `ACTIVE_INPUT` | `OWN-SITE-BE` | Site 产品、架构、合同、施工和评测专题 | 原位保留；状态只由 current/release-plan 承重 |
 | `DOCSET-SITE-DECISION-EVIDENCE` | `docs/site-builder/DQ-1-shared-sitespec-contract.md`、`docs/site-builder/handoffs/*.md` | L2/L3 / `FROZEN_EVIDENCE` | `OWN-SITE-BE` | 某决策/施工 handoff 的精确时点 | `REFERENCE_ONLY`；完成后不作为 current status |
