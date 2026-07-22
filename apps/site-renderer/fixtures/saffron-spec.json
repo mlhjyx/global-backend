@@ -35,7 +35,7 @@
         } },
         { "type": "ServiceRows", "props": { "id": "ServiceRows-1", "alt": true,
           "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent", "introKey": "services.intro",
-          "bookLabelKey": "cta.learnMore", "bookPageId": "services",
+          "fromLabelKey": "services.from", "cta": { "labelKey": "cta.learnMore", "pageId": "services" },
           "services": [
             { "icon": "ri-restaurant-2-line", "titleKey": "services.s1.title", "descKey": "services.s1.desc", "fromKey": "services.s1.from", "unitKey": "services.s1.unit" },
             { "icon": "ri-cake-3-line", "titleKey": "services.s2.title", "descKey": "services.s2.desc", "fromKey": "services.s2.from", "unitKey": "services.s2.unit" },
@@ -145,7 +145,7 @@
       "hero.scroll": "Scroll",
 
       "services.eyebrow": "What we cook for you", "services.title": "Four ways to bring a", "services.titleAccent": "private chef home.",
-      "services.intro": "Each service is shaped around your space, your guests, and your story - from a quiet Sunday supper to an eighty-guest celebration.",
+      "services.intro": "Each service is shaped around your space, your guests, and your story - from a quiet Sunday supper to an eighty-guest celebration.", "services.from": "From",
       "services.s1.title": "Private Dining", "services.s1.desc": "Multi-course tasting menus served in your home, plated and styled to feel like a restaurant.", "services.s1.from": "$95", "services.s1.unit": "per guest",
       "services.s2.title": "Event Catering", "services.s2.desc": "Showers, birthdays, anniversaries - bespoke menus catered for groups of 12 to 80 guests.", "services.s2.from": "$1,800", "services.s2.unit": "starting",
       "services.s3.title": "Weekly Meal Prep", "services.s3.desc": "Five chef-cooked dinners delivered weekly, tailored to your household's tastes and goals.", "services.s3.from": "$280", "services.s3.unit": "per week",

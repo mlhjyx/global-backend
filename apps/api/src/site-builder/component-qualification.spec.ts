@@ -106,17 +106,20 @@ describe("M1-e-A component qualification gate", () => {
     });
   });
 
-  it("registers twenty-four qualified components and keeps unqualified types gallery-only", () => {
+  it("registers twenty-nine qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("AreaGallery")).toEqual({
       status: "gallery_only",
     });
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS).sort()).toEqual([
       "AboutBlock",
+      "AreaMarquee",
       "ArticleGrid",
       "CertWall",
       "CtaBanner",
+      "CtaCenter",
       "FaqAccordion",
+      "FaqSplit",
       "FeatureCards",
       "HeroBanner",
       "InquiryForm",
@@ -128,6 +131,8 @@ describe("M1-e-A component qualification gate", () => {
       "ProcessSteps",
       "ProcessTimeline",
       "ProductGrid",
+      "ServiceRows",
+      "ServicesDark",
       "ServicesGrid",
       "StatementBlock",
       "StatsBand",
@@ -138,7 +143,7 @@ describe("M1-e-A component qualification gate", () => {
       "ValueStrip",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      168,
+      203,
     );
     for (const componentType of [
       "CtaBanner",
@@ -320,8 +325,11 @@ describe("M1-e-A component qualification gate", () => {
       const spec = JSON.parse(
         readFileSync(resolve(repositoryRoot, fixture.repositoryPath), "utf8"),
       ) as { pages?: Array<{ puck?: { content?: Array<{ type?: string }> } }> };
-      const content = spec.pages?.[0]?.puck?.content;
-      expect(spec.pages).toHaveLength(1);
+      const page = spec.pages?.find((candidate) =>
+        candidate.puck?.content?.some((block) => block.type === registered.componentType),
+      );
+      const content = page?.puck?.content;
+      expect(spec.pages?.length).toBeGreaterThanOrEqual(1);
       expect(content).toHaveLength(1);
       expect(content?.[0]?.type).toBe(registered.componentType);
     }

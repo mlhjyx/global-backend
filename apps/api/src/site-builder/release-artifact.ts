@@ -115,20 +115,23 @@ export function assertReleaseContract(
     for (const block of page.puck.content) {
       validateBlock(block);
       assertReleaseComponentEligible(block.type);
-      if (block.type === 'PricingTable') {
-        const props = block.props as {
-          primaryCta: { pageId: string };
-          secondaryCta?: { pageId: string };
-        };
-        for (const [name, cta] of [
-          ['primaryCta', props.primaryCta],
-          ['secondaryCta', props.secondaryCta],
-        ] as const) {
-          if (cta && !pageIds.has(cta.pageId)) {
-            throw new Error(
-              `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: PricingTable.${name}.pageId=${cta.pageId}`,
-            );
-          }
+      const props = block.props as Record<string, unknown>;
+      const ctaFields =
+        block.type === 'PricingTable'
+          ? ['primaryCta', 'secondaryCta']
+          : block.type === 'CtaCenter'
+            ? ['primaryCta', 'secondaryCta']
+            : block.type === 'ServicesDark'
+              ? ['allCta']
+              : block.type === 'ServiceRows'
+                ? ['cta']
+                : [];
+      for (const field of ctaFields) {
+        const cta = props[field] as { pageId?: string } | undefined;
+        if (cta?.pageId && !pageIds.has(cta.pageId)) {
+          throw new Error(
+            `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ${block.type}.${field}.pageId=${cta.pageId}`,
+          );
         }
       }
     }

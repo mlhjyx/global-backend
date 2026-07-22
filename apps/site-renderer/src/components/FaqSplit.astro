@@ -1,80 +1,11 @@
 ---
-interface Item { qKey: string; aKey: string }
-interface Props {
-  eyebrowKey: string;
-  titleKey: string;
-  titleAccentKey: string;
-  introKey: string;
-  items: Item[];
-  t: (key: string) => string;
-  alt?: boolean;
-}
-const { eyebrowKey, titleKey, titleAccentKey, introKey, items = [], t, alt } = Astro.props;
+import { createRequire } from 'node:module';
+interface Item { qKey:string; aKey:string }
+interface Props { eyebrowKey:string; titleKey:string; titleAccentKey:string; introKey:string; items:Item[]; variant?:'technical-grid'|'quiet'; t:(key:string)=>string; alt?:boolean; instanceId:string }
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { eyebrowKey,titleKey,titleAccentKey,introKey,items,variant='technical-grid',t,alt,instanceId } = Astro.props;
+const content={eyebrow:t(eyebrowKey),title:t(titleKey),accent:t(titleAccentKey),intro:t(introKey),items:items.map((item)=>({question:t(item.qKey),answer:t(item.aKey)}))};
+assertQualifiedComponentContentBudget('FaqSplit',content); const headingId=`${instanceId}-faq-heading`;
 ---
-
-<section class:list={['block', { alt }]}>
-  <div class="container grid-12 faq">
-    <div class="left reveal">
-      <span class="eyebrow">{t(eyebrowKey)}</span>
-      <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
-      <p class="muted intro">{t(introKey)}</p>
-    </div>
-
-    <div class="right reveal">
-      <div class="list">
-        {items.map((it, i) => (
-          <div class:list={['faq-item', { open: i === 0 }]}>
-            <button type="button" class="faq-q" aria-expanded={i === 0 ? 'true' : 'false'}>
-              <span>{t(it.qKey)}</span>
-              <span class="icon"><i class="ri-add-line"></i></span>
-            </button>
-            <div class="faq-a">
-              <p class="muted">{t(it.aKey)}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  </div>
-</section>
-
-<style>
-  .left { grid-column: span 4; }
-  .right { grid-column: span 8; }
-  @media (max-width: 1023px) { .left, .right { grid-column: span 1; } }
-  .intro { margin-top: 1rem; max-width: 24rem; }
-  .list {
-    border-radius: var(--radius-lg);
-    background: var(--c-surface-alt);
-    border: 1px solid var(--c-border);
-    overflow: hidden;
-  }
-  .faq-item { border-bottom: 1px solid var(--c-border); }
-  .faq-item:last-child { border-bottom: none; }
-  .faq-q {
-    width: 100%;
-    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-    padding: 1.25rem 1.5rem;
-    background: transparent; border: none; cursor: pointer;
-    text-align: left;
-    transition: background .2s ease;
-  }
-  .faq-q:hover { background: var(--c-surface); }
-  .faq-q span:first-child { font-family: var(--font-heading); font-weight: 600; font-size: 1.05rem; color: var(--c-on-surface); }
-  .faq-q .icon {
-    width: 2.25rem; height: 2.25rem; flex: none;
-    display: grid; place-items: center;
-    border-radius: 9999px;
-    background: var(--c-surface);
-    color: var(--c-on-surface-muted);
-    transition: transform .3s ease, background .2s ease, color .2s ease;
-  }
-  .faq-item.open .faq-q .icon { transform: rotate(45deg); background: var(--c-accent); color: var(--c-on-accent); }
-  .faq-a {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height .3s ease;
-  }
-  .faq-item.open .faq-a { max-height: 10rem; }
-  .faq-a p { padding: 0 1.5rem 1.5rem; font-size: 0.95rem; max-width: 48rem; }
-</style>
+<section class:list={['block','faq-split',`faq-split--${variant}`,{alt}]} data-component="FaqSplit" data-variant={variant} aria-labelledby={headingId}><div class="container layout"><header><p>{content.eyebrow}</p><h2 id={headingId}>{content.title} <em>{content.accent}</em></h2><p>{content.intro}</p></header><div class="list">{content.items.map((item,index)=><details open={index===0}><summary>{item.question}<i class="ri-add-line" aria-hidden="true"></i></summary><p>{item.answer}</p></details>)}</div></div></section>
+<style>.layout{display:grid;gap:2rem}@media(min-width:1024px){.layout{grid-template-columns:4fr 8fr}}header>p:first-child{font-size:.75rem;letter-spacing:.15em;text-transform:uppercase}h2{margin-top:1rem;font-size:clamp(2rem,5vw,3.5rem)}header>p:last-child{margin-top:1rem;max-width:26rem}.list{border:1px solid var(--c-border)}details+details{border-top:1px solid var(--c-border)}summary{display:flex;justify-content:space-between;gap:1rem;padding:1.25rem 1.5rem;cursor:pointer;font-family:var(--font-heading);font-weight:600;list-style:none}summary::-webkit-details-marker{display:none}summary i{transition:transform .2s ease}details[open] summary i{transform:rotate(45deg)}details p{padding:0 1.5rem 1.5rem;max-width:48rem}.faq-split--technical-grid .list{background:linear-gradient(var(--c-surface-alt) 1px,transparent 1px),linear-gradient(90deg,var(--c-surface-alt) 1px,transparent 1px);background-size:1rem 1rem}@media(prefers-reduced-motion:reduce){summary i{transition:none}}</style>

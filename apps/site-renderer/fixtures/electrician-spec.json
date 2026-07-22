@@ -36,7 +36,7 @@
           "revealCta": { "labelKey": "hero.revealCta", "pageId": "book" }
         } },
         { "type": "AreaMarquee", "props": { "id": "AreaMarquee-1", "alt": true,
-          "items": ["Upper Street", "Essex Road", "Liverpool Road", "Caledonian Road", "Holloway Road", "St Paul's Road", "Highbury Grove", "Canonbury Road", "City Road", "Camden Passage"]
+          "headingKey": "areas.heading", "items": ["Upper Street", "Essex Road", "Liverpool Road", "Caledonian Road", "Holloway Road", "St Paul's Road", "Highbury Grove", "Canonbury Road", "City Road", "Camden Passage"]
         } },
         { "type": "ServicesGrid", "props": { "id": "ServicesGrid-1",
           "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent", "introKey": "services.intro",
@@ -227,7 +227,7 @@
       "testi.t2.quote": "Sorted the lighting in our small café before opening. Friendly, calm, quick - exactly the kind of local trade you want.", "testi.t2.name": "Daniel P.", "testi.t2.postcode": "N5, Highbury", "testi.t2.platform": "Checkatrade",
       "testi.t3.quote": "Landlord EICR done the next day. Report was clear, easy to read, and he walked me through everything patiently.", "testi.t3.name": "Priya S.", "testi.t3.postcode": "N7, Holloway", "testi.t3.platform": "Google Reviews",
 
-      "area.eyebrow": "Where I work", "area.title": "Serving Islington and nearby", "area.titleAccent": "North London homes & shops.", "area.all": "See service area",
+      "areas.heading": "Service areas", "area.eyebrow": "Where I work", "area.title": "Serving Islington and nearby", "area.titleAccent": "North London homes & shops.", "area.all": "See service area",
       "area.a1": "Home base - same-week slots most weeks.", "area.a2": "Flats, terraces and small offices.", "area.a3": "Independent shops, cafés and studios.", "area.a4": "Family homes and residential lofts.",
 
       "faq.eyebrow": "FAQ", "faq.title": "Quick answers,", "faq.titleAccent": "no jargon.", "faq.intro": "Something not listed here? Send a message and I'll get back to you as soon as I can.",

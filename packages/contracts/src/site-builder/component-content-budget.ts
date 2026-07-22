@@ -43,6 +43,11 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   LedgerStats: Object.freeze({ chapter: 40, title: 60, titleWords: 8, body: 240, minStats: 2, maxStats: 4, value: 16, label: 48, minClients: 1, maxClients: 8, client: 80, clientsLabel: 48 }),
   PricingTiers: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, titleLine2: 60, titleLine2Words: 8, sub: 240, billingLabel: 32, save: 48, featured: 32, perMo: 24, minPlans: 1, maxPlans: 4, name: 48, tagline: 160, price: 16, minFeatures: 1, maxFeatures: 8, feature: 80 }),
   ValueStrip: Object.freeze({ heading: 48, minItems: 2, maxItems: 6, icon: 80, label: 80 }),
+  AreaMarquee: Object.freeze({ heading: 48, minItems: 2, maxItems: 12, item: 48 }),
+  FaqSplit: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minItems: 1, maxItems: 8, question: 120, answer: 400 }),
+  CtaCenter: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, subtitle: 140, cta: 24 }),
+  ServicesDark: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, minItems: 1, maxItems: 8, serviceTitle: 60, serviceDescription: 200, cta: 24 }),
+  ServiceRows: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, fromLabel: 48, minItems: 1, maxItems: 8, serviceTitle: 60, serviceDescription: 200, from: 48, unit: 24, cta: 24 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -165,6 +170,11 @@ const contentSchemas = {
   LedgerStats: z.object({chapter:boundedCopy(40),title:boundedCopy(60,8),body:boundedCopy(240),stats:z.array(z.object({value:boundedCopy(16),label:boundedCopy(48)}).strict()).min(2).max(4),clients:z.array(boundedCopy(80)).min(1).max(8),clientsLabel:boundedCopy(48)}).strict(),
   PricingTiers: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),titleLine2:boundedCopy(60,8),sub:boundedCopy(240),monthlyLabel:boundedCopy(32),yearlyLabel:boundedCopy(32),save:boundedCopy(48),featured:boundedCopy(32),perMo:boundedCopy(24),plans:z.array(z.object({name:boundedCopy(48),tagline:boundedCopy(160),monthly:boundedCopy(16),yearly:boundedCopy(16),featured:z.boolean(),features:z.array(boundedCopy(80)).min(1).max(8)}).strict()).min(1).max(4)}).strict(),
   ValueStrip: z.object({heading:boundedCopy(48),items:z.array(z.object({icon:boundedCopy(80),label:boundedCopy(80)}).strict()).min(2).max(6)}).strict(),
+  AreaMarquee: z.object({heading:boundedCopy(48),items:z.array(boundedCopy(48)).min(2).max(12)}).strict(),
+  FaqSplit: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),items:z.array(z.object({question:boundedCopy(120),answer:boundedCopy(400)}).strict()).min(1).max(8)}).strict(),
+  CtaCenter: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40).optional(),subtitle:boundedCopy(140),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional()}).strict(),
+  ServicesDark: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),services:z.array(z.object({icon:boundedCopy(80),title:boundedCopy(60),description:boundedCopy(200)}).strict()).min(1).max(8),allCta:boundedCopy(24,4).optional()}).strict(),
+  ServiceRows: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),fromLabel:boundedCopy(48),cta:boundedCopy(24,4),services:z.array(z.object({icon:boundedCopy(80),title:boundedCopy(60),description:boundedCopy(200),from:boundedCopy(48),unit:boundedCopy(24)}).strict()).min(1).max(8)}).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

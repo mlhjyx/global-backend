@@ -38,7 +38,7 @@
         } },
         { "type": "ServicesDark", "props": { "id": "ServicesDark-1",
           "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent",
-          "allLabelKey": "services.all", "allPageId": "services",
+          "allCta": { "labelKey": "services.all", "pageId": "services" },
           "services": [
             { "icon": "ri-book-2-line", "titleKey": "services.s1.title", "descKey": "services.s1.desc" },
             { "icon": "ri-bank-card-line", "titleKey": "services.s2.title", "descKey": "services.s2.desc" },

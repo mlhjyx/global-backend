@@ -1,0 +1,7 @@
+{
+  "specVersion": "1.0.0",
+  "site": { "defaultLocale": "en", "locales": ["en"], "theme": { "preset": "modern-industrial" }, "nav": [], "seoGlobal": { "siteName": "Qualification Area" } },
+  "pages": [{ "id": "home", "path": "/", "seo": { "titleKey": "seo.title", "descriptionKey": "seo.description" }, "puck": { "root": { "props": {} }, "content": [{ "type": "AreaMarquee", "props": { "id": "area-marquee-qualification", "headingKey": "area.heading", "items": ["North Dock", "Rail Quarter", "Foundry District"], "variant": "technical-grid" } }] } }],
+  "assets": {},
+  "copyBundles": { "en": { "seo.title": "Area coverage", "seo.description": "Qualification fixture", "area.heading": "Coverage areas" } }
+}

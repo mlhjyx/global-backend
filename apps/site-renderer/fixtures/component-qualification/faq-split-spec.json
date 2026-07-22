@@ -1,0 +1,7 @@
+{
+  "specVersion": "1.0.0",
+  "site": { "defaultLocale": "en", "locales": ["en"], "theme": { "preset": "modern-industrial" }, "nav": [], "seoGlobal": { "siteName": "Qualification FAQ" } },
+  "pages": [{ "id": "home", "path": "/", "seo": { "titleKey": "seo.title", "descriptionKey": "seo.description" }, "puck": { "root": { "props": {} }, "content": [{ "type": "FaqSplit", "props": { "id": "faq-split-qualification", "eyebrowKey": "faq.eyebrow", "titleKey": "faq.title", "titleAccentKey": "faq.accent", "introKey": "faq.intro", "items": [{ "qKey": "faq.q1", "aKey": "faq.a1" }, { "qKey": "faq.q2", "aKey": "faq.a2" }], "variant": "technical-grid" } }] } }],
+  "assets": {},
+  "copyBundles": { "en": { "seo.title": "FAQ", "seo.description": "Qualification fixture", "faq.eyebrow": "Support", "faq.title": "Answers for", "faq.accent": "operators", "faq.intro": "Short answers to the questions teams ask before engaging.", "faq.q1": "How is work scoped?", "faq.a1": "Each engagement starts with a documented scope and a named owner.", "faq.q2": "Can priorities change?", "faq.a2": "Yes. We record changes before work proceeds." } }
+}

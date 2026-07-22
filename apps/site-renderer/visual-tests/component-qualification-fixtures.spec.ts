@@ -3,8 +3,11 @@ import { expect, test } from "@playwright/test";
 const QUALIFIED_COMPONENTS = {
   AboutBlock: "section.about-block",
   ArticleGrid: "section.article-grid",
+  AreaMarquee: "section.area-marquee",
   CertWall: "section.cert-wall",
   CtaBanner: "section.cta",
+  CtaCenter: "section.cta-center",
+  FaqSplit: "section.faq-split",
   FaqAccordion: "section.faq-accordion",
   FeatureCards: "section.feature-cards",
   HeroBanner: "section.hero",
@@ -20,6 +23,8 @@ const QUALIFIED_COMPONENTS = {
   StatsBand: "section.stats",
   StatementBlock: "section.statement-block",
   ServicesGrid: "section.services-grid",
+  ServicesDark: "section.services-dark",
+  ServiceRows: "section.service-rows",
   TechSystems: "section.tech-systems",
   Testimonials: "section.testimonials",
   TrustSplit: "section.trust-split",
@@ -88,6 +93,27 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
   }
   if (componentType === "ValueStrip") {
     await expect(section.locator("ul > li")).toHaveCount(2);
+  }
+  if (componentType === "AreaMarquee") {
+    await expect(section.locator("ul > li")).toHaveCount(3);
+    await expect(section.locator("[aria-hidden='true']")).toHaveCount(3);
+  }
+  if (componentType === "FaqSplit") {
+    await expect(section.locator("details")).toHaveCount(2);
+    await expect(section.locator("summary")).toHaveCount(2);
+  }
+  if (componentType === "CtaCenter") {
+    await expect(section.locator("a")).toHaveCount(2);
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
+  }
+  if (componentType === "ServicesDark") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
+  }
+  if (componentType === "ServiceRows") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a")).toHaveCount(2);
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",
