@@ -134,7 +134,7 @@ function catalog(status: "approved" | "draft" = "approved") {
       {
         schemaVersion: DESIGN_DNA_SCHEMA_VERSION,
         id: "foundation-dna",
-        name: "Foundation",
+        name: "foundation",
         ruleIds: ["proof-near-primary-action"],
         hierarchy: {
           displayScale: "balanced",
@@ -167,7 +167,7 @@ function catalog(status: "approved" | "draft" = "approved") {
           allowed: ["fade"],
           forbidden: ["parallax"],
         },
-        antiPatterns: ["decorative dashboard chrome"],
+        antiPatterns: ["decorative_dashboard_chrome"],
       },
     ],
     families: [family(status)],
@@ -272,12 +272,15 @@ describe("DI-0 clean-room contracts and static catalog", () => {
 
   it("allows unrelated ungrouped manifests beside rule evidence", () => {
     const value = catalog();
+    const {
+      sourceContributionGroup: _sourceContributionGroup,
+      ...ungroupedTemplate
+    } = value.sourceManifests[0];
     const sourceManifests = [
       ...value.sourceManifests,
       {
-        ...value.sourceManifests[0],
+        ...ungroupedTemplate,
         id: "supporting-family-source",
-        sourceContributionGroup: undefined,
       },
     ];
     expect(() =>

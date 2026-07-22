@@ -1,4 +1,11 @@
-import { designSha256, hasOnlyKeys, isFiniteNumber, isNonBlankString, isRecord, isStringArray } from "./design-integrity";
+import {
+  designSha256,
+  hasOnlyKeys,
+  isFiniteNumber,
+  isNonBlankString,
+  isRecord,
+  isStringArray,
+} from "./design-integrity";
 
 export const DESIGN_TEMPLATE_FAMILY_SCHEMA_VERSION =
   "site-builder-template-family/v1" as const;
@@ -29,7 +36,11 @@ export interface TemplateFamily {
   contentBudgets: Record<string, ContentBudget>;
   assetRequirements: string[];
   demoVisualPackIds: string[];
-  motionPolicy: { intensity: "none" | "low" | "medium"; allowed: string[]; forbidden: string[] };
+  motionPolicy: {
+    intensity: "none" | "low" | "medium";
+    allowed: string[];
+    forbidden: string[];
+  };
   qualityBaselineId: string;
   sourceManifestIds: string[];
 }
@@ -57,6 +68,10 @@ function validBlueprint(value: unknown): value is PageBlueprint {
     isStringArray(blueprint.allowedComponents) &&
     blueprint.allowedComponents.length > 0
   );
+}
+
+function hasUniqueBlueprintIds(items: readonly PageBlueprint[]): boolean {
+  return new Set(items.map((item) => item.id)).size === items.length;
 }
 
 export function validateTemplateFamily(value: unknown): TemplateFamily {
@@ -96,7 +111,11 @@ export function validateTemplateFamily(value: unknown): TemplateFamily {
     isRecord(family.blueprints) &&
     Object.keys(family.blueprints).length > 0 &&
     Object.values(family.blueprints).every(
-      (items) => Array.isArray(items) && items.length > 0 && items.every(validBlueprint),
+      (items) =>
+        Array.isArray(items) &&
+        items.length > 0 &&
+        items.every(validBlueprint) &&
+        hasUniqueBlueprintIds(items),
     ) &&
     isRecord(family.componentVariants) &&
     Object.values(family.componentVariants).every(

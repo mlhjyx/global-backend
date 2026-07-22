@@ -1,4 +1,7 @@
 import {
+  isDesignAbstractionCode,
+  isDesignAbstractionCodeArray,
+  isDesignRatioBandArray,
   hasOnlyKeys,
   isFiniteNumber,
   isNonBlankString,
@@ -114,25 +117,6 @@ function containsForbiddenSourceField(value: unknown): boolean {
   );
 }
 
-function abstractCode(value: unknown): value is string {
-  return (
-    isNonBlankString(value) &&
-    value.length <= 80 &&
-    /^[a-z](?:[a-z0-9]*(?:[-_][a-z0-9]+)*)$/.test(value)
-  );
-}
-
-function abstractCodeArray(value: unknown): value is string[] {
-  return isStringArray(value) && value.every(abstractCode);
-}
-
-function ratioBandArray(value: unknown): value is string[] {
-  return (
-    isStringArray(value) &&
-    value.every((item) => /^\d{1,2}:\d{1,2}$/.test(item))
-  );
-}
-
 /** Rejects raw source material before it can enter a reusable design corpus. */
 export function validateDesignObservation(value: unknown): DesignObservation {
   if (containsForbiddenSourceField(value)) {
@@ -189,7 +173,7 @@ export function validateDesignObservation(value: unknown): DesignObservation {
     !isNonBlankString(hierarchy.bodyMeasureBand) ||
     !image ||
     !hasOnlyKeys(image, ["ratioBands", "focalPattern", "treatment"]) ||
-    !ratioBandArray(image.ratioBands) ||
+    !isDesignRatioBandArray(image.ratioBands) ||
     !isNonBlankString(image.focalPattern) ||
     !isNonBlankString(image.treatment) ||
     !cta ||
@@ -211,14 +195,14 @@ export function validateDesignObservation(value: unknown): DesignObservation {
     fail("DESIGN_OBSERVATION_INVALID", "observation structure is invalid");
   }
   if (
-    !abstractCode(hierarchy.headlineBand) ||
-    !abstractCode(hierarchy.bodyMeasureBand) ||
-    !abstractCode(image.focalPattern) ||
-    !abstractCode(image.treatment) ||
-    !abstractCode(cta.placementPattern) ||
-    !abstractCodeArray(observation.mobileReflow) ||
-    !abstractCodeArray(observation.reusablePrinciples) ||
-    !abstractCodeArray(observation.prohibitedSourceSpecificTraits)
+    !isDesignAbstractionCode(hierarchy.headlineBand) ||
+    !isDesignAbstractionCode(hierarchy.bodyMeasureBand) ||
+    !isDesignAbstractionCode(image.focalPattern) ||
+    !isDesignAbstractionCode(image.treatment) ||
+    !isDesignAbstractionCode(cta.placementPattern) ||
+    !isDesignAbstractionCodeArray(observation.mobileReflow) ||
+    !isDesignAbstractionCodeArray(observation.reusablePrinciples) ||
+    !isDesignAbstractionCodeArray(observation.prohibitedSourceSpecificTraits)
   ) {
     fail(
       "DESIGN_OBSERVATION_FORBIDDEN_CONTENT",
@@ -250,7 +234,7 @@ export function validateDesignRule(
   ) {
     fail("DESIGN_RULE_INVALID", "rule metadata is invalid");
   }
-  if (!abstractCode(rule.summary)) {
+  if (!isDesignAbstractionCode(rule.summary)) {
     fail(
       "DESIGN_RULE_FORBIDDEN_CONTENT",
       "rule summary must be abstract rather than source-derived content",
@@ -298,12 +282,13 @@ export function validateDesignRule(
       );
     }
     const verifiedGroups = new Set(
-      sourceManifests.map((manifest) => manifest.sourceContributionGroup),
+      sourceManifests.flatMap((manifest) =>
+        manifest.sourceContributionGroup === undefined
+          ? []
+          : [manifest.sourceContributionGroup],
+      ),
     );
-    if (
-      verifiedGroups.has(undefined) ||
-      [...groups].some((group) => !verifiedGroups.has(group))
-    ) {
+    if ([...groups].some((group) => !verifiedGroups.has(group))) {
       fail(
         "DESIGN_RULE_PROVENANCE_UNVERIFIED",
         "each contribution group must map to a validated source manifest",

@@ -1,4 +1,11 @@
-import { hasOnlyKeys, isFiniteNumber, isNonBlankString, isRecord, isStringArray } from "./design-integrity";
+import {
+  hasOnlyKeys,
+  isDesignAbstractionCode,
+  isDesignAbstractionCodeArray,
+  isDesignRatioBandArray,
+  isFiniteNumber,
+  isRecord,
+} from "./design-integrity";
 
 export const DESIGN_DNA_SCHEMA_VERSION = "site-builder-design-dna/v1" as const;
 
@@ -18,7 +25,9 @@ export interface DesignDna {
     density: "airy" | "balanced" | "dense";
   };
   composition: {
-    heroModes: Array<"split" | "full_bleed" | "editorial" | "product_stage" | "technical">;
+    heroModes: Array<
+      "split" | "full_bleed" | "editorial" | "product_stage" | "technical"
+    >;
     imageTextRatios: string[];
     alignmentBias: "left" | "center" | "mixed";
   };
@@ -33,7 +42,11 @@ export interface DesignDna {
     backgroundPolicy: "light" | "dark" | "mixed";
     maxGeneratedMediaRatio: number;
   };
-  motion: { intensity: "none" | "low" | "medium"; allowed: string[]; forbidden: string[] };
+  motion: {
+    intensity: "none" | "low" | "medium";
+    allowed: string[];
+    forbidden: string[];
+  };
   antiPatterns: string[];
 }
 
@@ -56,14 +69,28 @@ export function validateDesignDna(value: unknown): DesignDna {
   const motion = dna && isRecord(dna.motion) ? dna.motion : null;
   const valid =
     dna &&
-    hasOnlyKeys(dna, ["schemaVersion", "id", "name", "ruleIds", "hierarchy", "spatialRhythm", "composition", "surfaces", "imagery", "motion", "antiPatterns"]) &&
+    hasOnlyKeys(dna, [
+      "schemaVersion",
+      "id",
+      "name",
+      "ruleIds",
+      "hierarchy",
+      "spatialRhythm",
+      "composition",
+      "surfaces",
+      "imagery",
+      "motion",
+      "antiPatterns",
+    ]) &&
     dna.schemaVersion === DESIGN_DNA_SCHEMA_VERSION &&
-    isNonBlankString(dna.id) &&
-    isNonBlankString(dna.name) &&
-    isStringArray(dna.ruleIds) &&
+    isDesignAbstractionCode(dna.id) &&
+    isDesignAbstractionCode(dna.name) &&
+    isDesignAbstractionCodeArray(dna.ruleIds) &&
     dna.ruleIds.length > 0 &&
     hierarchy &&
-    ["compact", "balanced", "editorial"].includes(String(hierarchy.displayScale)) &&
+    ["compact", "balanced", "editorial"].includes(
+      String(hierarchy.displayScale),
+    ) &&
     ["low", "medium", "high"].includes(String(hierarchy.headingContrast)) &&
     isFiniteNumber(hierarchy.maxReadingWidthRem) &&
     hierarchy.maxReadingWidthRem > 0 &&
@@ -74,26 +101,38 @@ export function validateDesignDna(value: unknown): DesignDna {
     composition &&
     Array.isArray(composition.heroModes) &&
     composition.heroModes.length > 0 &&
-    composition.heroModes.every((mode) => ["split", "full_bleed", "editorial", "product_stage", "technical"].includes(String(mode))) &&
-    isStringArray(composition.imageTextRatios) &&
+    composition.heroModes.every((mode) =>
+      [
+        "split",
+        "full_bleed",
+        "editorial",
+        "product_stage",
+        "technical",
+      ].includes(String(mode)),
+    ) &&
+    isDesignRatioBandArray(composition.imageTextRatios) &&
     ["left", "center", "mixed"].includes(String(composition.alignmentBias)) &&
     surfaces &&
-    ["flat", "bordered", "elevated", "tinted"].includes(String(surfaces.cardStyle)) &&
+    ["flat", "bordered", "elevated", "tinted"].includes(
+      String(surfaces.cardStyle),
+    ) &&
     ["none", "hairline", "strong"].includes(String(surfaces.borderWeight)) &&
     ["none", "subtle", "soft"].includes(String(surfaces.radius)) &&
     imagery &&
-    isStringArray(imagery.preferredSubjects) &&
+    isDesignAbstractionCodeArray(imagery.preferredSubjects) &&
     Array.isArray(imagery.cropModes) &&
-    imagery.cropModes.every((mode) => ["contain", "cover", "editorial_crop"].includes(String(mode))) &&
+    imagery.cropModes.every((mode) =>
+      ["contain", "cover", "editorial_crop"].includes(String(mode)),
+    ) &&
     ["light", "dark", "mixed"].includes(String(imagery.backgroundPolicy)) &&
     isFiniteNumber(imagery.maxGeneratedMediaRatio) &&
     imagery.maxGeneratedMediaRatio >= 0 &&
     imagery.maxGeneratedMediaRatio <= 1 &&
     motion &&
     ["none", "low", "medium"].includes(String(motion.intensity)) &&
-    isStringArray(motion.allowed) &&
-    isStringArray(motion.forbidden) &&
-    isStringArray(dna.antiPatterns);
+    isDesignAbstractionCodeArray(motion.allowed) &&
+    isDesignAbstractionCodeArray(motion.forbidden) &&
+    isDesignAbstractionCodeArray(dna.antiPatterns);
   if (!valid) throw new Error("DESIGN_DNA_INVALID");
   return dna as unknown as DesignDna;
 }

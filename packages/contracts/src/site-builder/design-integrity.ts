@@ -7,7 +7,8 @@ export function canonicalDesignJson(value: unknown): string {
     return JSON.stringify(value);
   }
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("DESIGN_CONTRACT_NON_JSON_VALUE");
+    if (!Number.isFinite(value))
+      throw new Error("DESIGN_CONTRACT_NON_JSON_VALUE");
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
@@ -18,7 +19,8 @@ export function canonicalDesignJson(value: unknown): string {
     return `{${Object.keys(record)
       .sort()
       .map((key) => {
-        if (record[key] === undefined) throw new Error("DESIGN_CONTRACT_NON_JSON_VALUE");
+        if (record[key] === undefined)
+          throw new Error("DESIGN_CONTRACT_NON_JSON_VALUE");
         return `${JSON.stringify(key)}:${canonicalDesignJson(record[key])}`;
       })
       .join(",")}}`;
@@ -27,7 +29,9 @@ export function canonicalDesignJson(value: unknown): string {
 }
 
 export function designSha256(value: unknown): string {
-  return createHash("sha256").update(canonicalDesignJson(value), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(canonicalDesignJson(value), "utf8")
+    .digest("hex");
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,6 +44,29 @@ export function isNonBlankString(value: unknown): value is string {
 
 export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isNonBlankString);
+}
+
+/** Machine-readable clean-room descriptor, never retained source prose. */
+export function isDesignAbstractionCode(value: unknown): value is string {
+  return (
+    isNonBlankString(value) &&
+    value.length <= 80 &&
+    /^[a-z](?:[a-z0-9]*(?:[-_][a-z0-9]+)*)$/.test(value)
+  );
+}
+
+export function isDesignAbstractionCodeArray(
+  value: unknown,
+): value is string[] {
+  return Array.isArray(value) && value.every(isDesignAbstractionCode);
+}
+
+export function isDesignRatioBand(value: unknown): value is string {
+  return typeof value === "string" && /^\d{1,2}:\d{1,2}$/.test(value);
+}
+
+export function isDesignRatioBandArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isDesignRatioBand);
 }
 
 export function isFiniteNumber(value: unknown): value is number {
