@@ -1,81 +1,34 @@
 ---
-import { localePageHref } from '../lib/spec';
+import { createRequire } from 'node:module';
+import ControlledAssetPicture from './ControlledAssetPicture.astro';
+import { localeQualifiedPageHref } from '../lib/page-reference';
 
-interface Area { name: string; postcodes: string; noteKey: string }
+interface Area { name: string; postcodes?: string | string[]; noteKey: string; asset?: { assetId: string; altKey?: string } }
 interface Props {
-  eyebrowKey: string;
-  titleKey: string;
-  titleAccentKey: string;
-  allLabelKey?: string;
-  allPageId?: string;
-  areas: Area[];
-  t: (key: string) => string;
-  alt?: boolean;
-  locale: string;
-  defaultLocale: string;
+  eyebrowKey: string; titleKey: string; titleAccentKey: string; areas: Area[];
+  allLabelKey?: string; allPageId?: string; variant?: 'technical-grid' | 'quiet';
+  t: (key: string) => string; alt?: boolean; locale: string; defaultLocale: string;
+  instanceId: string; pagePathById?: Record<string, string>;
 }
-const {
-  eyebrowKey, titleKey, titleAccentKey, allLabelKey, allPageId = 'area',
-  areas = [], t, alt, locale, defaultLocale,
-} = Astro.props;
-const allHref = localePageHref(allPageId, locale, defaultLocale);
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { eyebrowKey, titleKey, titleAccentKey, areas, allLabelKey, allPageId, variant = 'technical-grid', t, alt, locale, defaultLocale, instanceId, pagePathById = {} } = Astro.props;
+const content = {
+  eyebrow: t(eyebrowKey), title: t(titleKey), accent: t(titleAccentKey),
+  areas: areas.map((area) => ({ name: area.name, postcodes: Array.isArray(area.postcodes) ? area.postcodes.join(', ') : area.postcodes, note: t(area.noteKey), alt: area.asset?.altKey ? t(area.asset.altKey) : area.name })),
+  allCta: allLabelKey ? t(allLabelKey) : undefined,
+};
+assertQualifiedComponentContentBudget('AreaGallery', content);
+const headingId = `${instanceId}-area-gallery-heading`;
+const allHref = allLabelKey && allPageId ? localeQualifiedPageHref(allPageId, pagePathById, locale, defaultLocale) : undefined;
 ---
 
-<section class:list={['block', { alt }]}>
+<section class:list={['block', 'area-gallery', `area-gallery--${variant}`, { alt }]} data-component="AreaGallery" data-variant={variant} aria-labelledby={headingId}>
   <div class="container">
-    <div class="head">
-      <div class="reveal">
-        <span class="eyebrow">{t(eyebrowKey)}</span>
-        <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
-      </div>
-      {allLabelKey && (
-        <a class="btn btn-outline btn-sm reveal" href={allHref}>
-          {t(allLabelKey)}<i class="ri-arrow-right-line"></i>
-        </a>
-      )}
-    </div>
-
-    <div class="grid">
-      {areas.map((a) => (
-        <div class="card reveal">
-          <div class="ph"><i class="ri-map-pin-2-line"></i></div>
-          <div class="body">
-            <div class="row">
-              <p class="name">{a.name}</p>
-              <span class="postcodes">{a.postcodes}</span>
-            </div>
-            <p class="muted note">{t(a.noteKey)}</p>
-          </div>
-        </div>
-      ))}
-    </div>
+    <header class="head"><div><span class="eyebrow">{content.eyebrow}</span><h2 id={headingId}>{content.title} <em>{content.accent}</em></h2></div>{allHref && content.allCta && <a class="all" href={allHref}>{content.allCta}<i class="ri-arrow-right-line" aria-hidden="true"></i></a>}</header>
+    <ul class="grid">{areas.map((area, index) => <li><article class="card"><div class="media">{area.asset ? <ControlledAssetPicture assetId={area.asset.assetId} alt={content.areas[index]!.alt} width={720} height={900} /> : <span class="fallback" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>}</div><div class="body"><h3>{content.areas[index]!.name}</h3>{content.areas[index]!.postcodes && <p class="postcodes">{content.areas[index]!.postcodes}</p>}<p class="note">{content.areas[index]!.note}</p></div></article></li>)}</ul>
   </div>
 </section>
 
 <style>
-  .head { display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: clamp(2rem, 4vw, 3rem); }
-  @media (min-width: 768px) { .head { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(4, 1fr); } }
-  .card {
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    background: var(--c-surface);
-    border: 1px solid var(--c-border);
-    transition: transform .3s ease, border-color .3s ease;
-  }
-  .card:hover { transform: translateY(-4px); border-color: var(--c-on-surface-subtle); }
-  .ph {
-    aspect-ratio: 3 / 4;
-    display: grid; place-items: center;
-    background:
-      radial-gradient(60% 45% at 50% 30%, color-mix(in srgb, var(--c-primary) 16%, transparent), transparent 70%),
-      linear-gradient(160deg, var(--c-surface-alt2), var(--c-surface-alt));
-  }
-  .ph i { font-size: 2.5rem; color: var(--c-on-surface-subtle); }
-  .body { padding: 1rem 1.1rem; background: var(--c-surface); }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .name { font-family: var(--font-heading); font-weight: 600; font-size: 1.05rem; }
-  .postcodes { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--c-on-surface-muted); }
-  .note { margin-top: 0.25rem; font-size: 0.8rem; }
+  .area-gallery--technical-grid{background-image:linear-gradient(color-mix(in srgb,var(--c-border) 38%,transparent) 1px,transparent 1px);background-size:2rem 2rem}.head{display:flex;justify-content:space-between;align-items:end;gap:1rem;flex-wrap:wrap;margin-bottom:2rem}.eyebrow,.postcodes{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--c-on-surface-muted)}h2{margin-top:.6rem;font-size:clamp(2rem,4vw,3.25rem)}h2 em{font-style:normal;color:var(--c-accent)}.all{display:inline-flex;align-items:center;gap:.4rem;min-height:2.75rem;padding:.5rem .9rem;border:1px solid var(--c-border)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr));gap:1rem;list-style:none;padding:0;margin:0}.card{height:100%;border:1px solid var(--c-border);background:var(--c-surface)}.media{aspect-ratio:4/5;overflow:hidden;background:var(--c-surface-alt);display:grid;place-items:center}.media picture,.media img{display:block;width:100%;height:100%;object-fit:cover}.fallback{font-family:var(--font-heading);font-size:2rem;color:var(--c-primary)}.body{padding:1rem}.body h3{font-size:1.15rem}.note{margin-top:.45rem;color:var(--c-on-surface-muted);font-size:.9rem}.area-gallery--quiet{background:var(--c-surface-alt)}
 </style>

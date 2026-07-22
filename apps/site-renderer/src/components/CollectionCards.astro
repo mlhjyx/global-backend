@@ -1,59 +1,13 @@
 ---
-import { localePageHref } from '../lib/spec';
-
-interface Item { nameKey: string }
-interface Props {
-  eyebrowKey: string;
-  titleKey: string;
-  items: Item[];
-  allPageId?: string;
-  t: (key: string) => string;
-  alt?: boolean;
-  locale: string;
-  defaultLocale: string;
-}
-const { eyebrowKey, titleKey, items = [], allPageId = 'home', t, alt, locale, defaultLocale } = Astro.props;
-const allHref = localePageHref(allPageId, locale, defaultLocale);
+import { createRequire } from 'node:module';
+import ControlledAssetPicture from './ControlledAssetPicture.astro';
+interface Item { nameKey: string; asset?: { assetId: string; altKey?: string } }
+interface Props { eyebrowKey:string; titleKey:string; items:Item[]; allPageId?:string; variant?:'technical-grid'|'quiet'; t:(key:string)=>string; alt?:boolean; instanceId:string }
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { eyebrowKey,titleKey,items,variant='technical-grid',t,alt,instanceId }=Astro.props;
+const content={eyebrow:t(eyebrowKey),title:t(titleKey),items:items.map((item)=>({name:t(item.nameKey),alt:item.asset?.altKey?t(item.asset.altKey):t(item.nameKey)}))};
+assertQualifiedComponentContentBudget('CollectionCards',content);
+const headingId=`${instanceId}-collection-cards-heading`;
 ---
-
-<section class:list={['block', { alt }]} id="collections">
-  <div class="container">
-    <div class="head reveal">
-      <span class="eyebrow-flat">{t(eyebrowKey)}</span>
-      <h2 class="serif-title">{t(titleKey)}</h2>
-    </div>
-    <ul class="grid">
-      {items.map((it) => (
-        <li class="reveal">
-          <a class="card" href={allHref}>
-            <div class="ph"><i class="ri-home-heart-line"></i></div>
-            <div class="overlay"></div>
-            <div class="cap">
-              <h3>{t(it.nameKey)}</h3>
-              <span class="arrow"><i class="ri-arrow-right-up-line"></i></span>
-            </div>
-          </a>
-        </li>
-      ))}
-    </ul>
-  </div>
-</section>
-
-<style>
-  .head { margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
-  .eyebrow-flat { font-size: 0.7rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--c-on-surface-muted); }
-  .serif-title { margin-top: 0.75rem; font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.875rem, 4vw, 3rem); line-height: 1.1; }
-  .grid { display: grid; grid-template-columns: 1fr; gap: 1rem; list-style: none; padding: 0; margin: 0; }
-  @media (min-width: 768px) { .grid { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; } }
-  .card { position: relative; display: block; overflow: hidden; border-radius: var(--radius-lg); }
-  .ph { aspect-ratio: 4 / 5; display: grid; place-items: center; background:
-      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 16%, transparent), transparent 60%),
-      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); transition: transform 1.2s ease; }
-  .card:hover .ph { transform: scale(1.06); }
-  .ph i { font-size: 3rem; color: rgba(0,0,0,0.12); }
-  .overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0.1) 40%, transparent); }
-  .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: clamp(1rem, 2.5vw, 1.5rem); display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; color: var(--c-on-dark); }
-  .cap h3 { font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.1rem, 2vw, 1.5rem); }
-  .arrow { width: 2.5rem; height: 2.5rem; flex: none; display: grid; place-items: center; border-radius: 9999px; background: color-mix(in srgb, var(--c-surface) 90%, transparent); color: var(--c-on-surface); transition: background .3s ease; }
-  .card:hover .arrow { background: var(--c-surface); }
-</style>
+<section class:list={['block','collection-cards',`collection-cards--${variant}`,{alt}]} data-component="CollectionCards" data-variant={variant} aria-labelledby={headingId}><div class="container"><header><span class="eyebrow">{content.eyebrow}</span><h2 id={headingId}>{content.title}</h2></header><ul class="grid">{items.map((item,index)=><li><article class="card"><div class="media">{item.asset?<ControlledAssetPicture assetId={item.asset.assetId} alt={content.items[index]!.alt} width={720} height={900}/>:<span class="fallback" aria-hidden="true">{String(index+1).padStart(2,'0')}</span>}</div><h3>{content.items[index]!.name}</h3></article></li>)}</ul></div></section>
+<style>.collection-cards--technical-grid{background-image:linear-gradient(90deg,color-mix(in srgb,var(--c-border) 30%,transparent) 1px,transparent 1px);background-size:2rem 2rem}header{margin-bottom:2rem}.eyebrow{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--c-on-surface-muted)}h2{margin-top:.6rem;font-size:clamp(2rem,4vw,3.25rem)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:1rem;list-style:none;margin:0;padding:0}.card{height:100%;border:1px solid var(--c-border);background:var(--c-surface)}.media{aspect-ratio:4/5;display:grid;place-items:center;overflow:hidden;background:var(--c-surface-alt)}.media picture,.media img{display:block;width:100%;height:100%;object-fit:cover}.fallback{font-family:var(--font-heading);font-size:1.5rem;color:var(--c-primary)}h3{padding:1rem;font-size:1.15rem}.collection-cards--quiet{background:var(--c-surface-alt)}</style>

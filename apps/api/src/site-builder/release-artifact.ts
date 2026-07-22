@@ -125,9 +125,16 @@ export function assertReleaseContract(
               ? ['allCta']
               : block.type === 'ServiceRows'
                 ? ['cta']
+                : block.type === 'MaterialsLibrary'
+                  ? ['ctaPrimaryPageId', 'ctaSecondaryPageId']
+                  : block.type === 'ProductShowcaseAlt'
+                    ? ['configureCta']
                 : [];
       for (const field of ctaFields) {
-        const cta = props[field] as { pageId?: string; url?: string } | undefined;
+        const value = props[field];
+        const cta = typeof value === 'string'
+          ? { pageId: value }
+          : value as { pageId?: string; url?: string } | undefined;
         if (cta && !cta.url && !pageIds.has(cta.pageId ?? '')) {
           throw new Error(
             `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ${block.type}.${field}.pageId=${cta.pageId ?? ''}`,
