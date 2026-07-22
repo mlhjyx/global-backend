@@ -35,19 +35,19 @@ const visualOutputs = [
   {
     breakpoint: 375 as const,
     repositoryPath:
-      "apps/site-renderer/visual-tests/__screenshots__/mobile-375/HeroBanner.png",
+      "apps/site-renderer/visual-tests/__screenshots__/qualification/mobile-375/HeroBanner.png",
     sha256,
   },
   {
     breakpoint: 768 as const,
     repositoryPath:
-      "apps/site-renderer/visual-tests/__screenshots__/tablet-768/HeroBanner.png",
+      "apps/site-renderer/visual-tests/__screenshots__/qualification/tablet-768/HeroBanner.png",
     sha256,
   },
   {
     breakpoint: 1440 as const,
     repositoryPath:
-      "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/HeroBanner.png",
+      "apps/site-renderer/visual-tests/__screenshots__/qualification/desktop-1440/HeroBanner.png",
     sha256,
   },
 ] as const;
@@ -279,6 +279,29 @@ describe("M1-e-A component qualification gate", () => {
           );
         }
       }
+    }
+  });
+
+  it("requires every qualified component to own a minimal SiteSpec fixture", () => {
+    const repositoryRoot = resolve(process.cwd(), "../..");
+    for (const registered of Object.values(
+      M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
+    )) {
+      if (registered.part !== "fixtures") continue;
+
+      expect(registered.fixtureFiles).toHaveLength(1);
+      const [fixture] = registered.fixtureFiles;
+      expect(fixture.repositoryPath).toMatch(
+        /^apps\/site-renderer\/fixtures\/component-qualification\/.+-spec\.json$/,
+      );
+
+      const spec = JSON.parse(
+        readFileSync(resolve(repositoryRoot, fixture.repositoryPath), "utf8"),
+      ) as { pages?: Array<{ puck?: { content?: Array<{ type?: string }> } }> };
+      const content = spec.pages?.[0]?.puck?.content;
+      expect(spec.pages).toHaveLength(1);
+      expect(content).toHaveLength(1);
+      expect(content?.[0]?.type).toBe(registered.componentType);
     }
   });
 });

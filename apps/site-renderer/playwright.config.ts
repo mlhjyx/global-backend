@@ -6,6 +6,12 @@ const BREAKPOINTS = [
   { name: "desktop-1440", width: 1440, height: 1000 },
 ] as const;
 
+const siteSpecPath =
+  process.env.SITESPEC_PATH ?? "fixtures/technical-baseline-spec.json";
+const snapshotPathTemplate = process.env.COMPONENT_QUALIFICATION_COMPONENT
+  ? "{testDir}/__screenshots__/qualification/{projectName}/{arg}{ext}"
+  : "{testDir}/__screenshots__/{projectName}/{arg}{ext}";
+
 export default defineConfig({
   testDir: "./visual-tests",
   fullyParallel: false,
@@ -13,7 +19,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: process.env.CI ? "line" : "list",
-  snapshotPathTemplate: "{testDir}/__screenshots__/{projectName}/{arg}{ext}",
+  snapshotPathTemplate,
   use: {
     baseURL: "http://127.0.0.1:4325",
     channel: "chrome",
@@ -28,9 +34,10 @@ export default defineConfig({
   })),
   webServer: {
     command:
-      "SITESPEC_PATH=fixtures/technical-baseline-spec.json pnpm dev --host 127.0.0.1 --port 4325",
+      `SITESPEC_PATH=${siteSpecPath} pnpm dev --host 127.0.0.1 --port 4325`,
     url: "http://127.0.0.1:4325",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer:
+      !process.env.CI && !process.env.COMPONENT_QUALIFICATION_COMPONENT,
     timeout: 60_000,
   },
 });
