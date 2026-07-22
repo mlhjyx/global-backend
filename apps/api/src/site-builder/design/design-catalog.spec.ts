@@ -13,6 +13,7 @@ import {
   designTemplateFamilyDigest,
   finalizeDesignCatalog,
   hasDesignEvaluationHardFailures,
+  validateDesignDna,
   validateDesignEvaluation,
   validateDesignObservation,
   validateDesignRule,
@@ -269,6 +270,28 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_RULE_PROVENANCE_UNVERIFIED/);
   });
 
+  it("allows unrelated ungrouped manifests beside rule evidence", () => {
+    const value = catalog();
+    const sourceManifests = [
+      ...value.sourceManifests,
+      {
+        ...value.sourceManifests[0],
+        id: "supporting-family-source",
+        sourceContributionGroup: undefined,
+      },
+    ];
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: value.families,
+      }),
+    ).not.toThrow();
+  });
+
   it("rejects source-derived content in a DesignRule summary", () => {
     expect(() =>
       validateDesignRule(
@@ -276,6 +299,16 @@ describe("DI-0 clean-room contracts and static catalog", () => {
         ruleValidationContext(),
       ),
     ).toThrowError(/DESIGN_RULE_FORBIDDEN_CONTENT/);
+  });
+
+  it("rejects source-derived text in DesignDNA fields", () => {
+    const dna = catalog().designDnas[0];
+    expect(() =>
+      validateDesignDna({
+        ...dna,
+        antiPatterns: ["Copied source headline"],
+      }),
+    ).toThrowError(/DESIGN_DNA_INVALID/);
   });
 
   it("freezes validated rule provenance into the catalog digest", () => {
@@ -315,6 +348,28 @@ describe("DI-0 clean-room contracts and static catalog", () => {
         designRules: value.designRules,
         designDnas: value.designDnas,
         families: value.families,
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
+  it("rejects duplicate blueprint IDs within one page type", () => {
+    const value = catalog();
+    const selected = value.families[0];
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests: value.sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: [
+          {
+            ...selected,
+            blueprints: {
+              home: [selected.blueprints.home[0], selected.blueprints.home[0]],
+            },
+          },
+        ],
       }),
     ).toThrowError(/DESIGN_CATALOG_INVALID/);
   });
