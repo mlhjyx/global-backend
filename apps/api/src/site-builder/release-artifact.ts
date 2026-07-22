@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   SITE_SPEC_VERSION,
   SITE_SPEC_RELEASE_COMPONENT_TYPES,
+  assertReleaseComponentEligible,
   validateBlock,
   type SiteSpec,
 } from '@global/contracts';
@@ -15,9 +16,6 @@ export const RELEASE_MANIFEST_SCHEMA_VERSION =
 export const R1_RENDERER_COMPONENT_TYPES =
   SITE_SPEC_RELEASE_COMPONENT_TYPES;
 
-const releaseComponentTypes = new Set<string>(
-  SITE_SPEC_RELEASE_COMPONENT_TYPES,
-);
 const MAX_RELEASE_FILES = 4096;
 const MAX_RELEASE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_RELEASE_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -115,11 +113,7 @@ export function assertReleaseContract(
   for (const page of spec.pages) {
     for (const block of page.puck.content) {
       validateBlock(block);
-      if (!releaseComponentTypes.has(block.type)) {
-        throw new Error(
-          `SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: ${block.type}`,
-        );
-      }
+      assertReleaseComponentEligible(block.type);
     }
   }
 }

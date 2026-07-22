@@ -27,6 +27,7 @@ export * from "./site-builder/template-family";
 export * from "./site-builder/design-brief";
 export * from "./site-builder/design-evaluation";
 export * from "./site-builder/design-catalog";
+export * from "./site-builder/component-qualification";
 
 // Astro/Vite consumes this CommonJS package at build time and cannot reliably
 // statically discover names hidden behind TypeScript's __exportStar helper.
@@ -35,4 +36,16 @@ export {
   copyBundleToLegacyStrings,
 } from "./site-builder/copy-bundle";
 export { resolveSiteLocale } from "./site-builder/locales";
-export { validateBlock, COMPONENT_SCHEMAS } from "./site-builder/component-schema";
+export {
+  validateBlock,
+  COMPONENT_SCHEMAS,
+} from "./site-builder/component-schema";
+export {
+  M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
+  M1_E_A_COMPONENT_QUALIFICATIONS,
+  SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES,
+  assertReleaseComponentEligible,
+  assertReleaseQualificationRegistryIntegrity,
+  getComponentReleaseReadiness,
+  validateComponentQualification,
+} from "./site-builder/component-qualification";
