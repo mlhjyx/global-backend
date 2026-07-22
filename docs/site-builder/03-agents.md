@@ -216,5 +216,5 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 | Visual Evaluator | 三断点截图 + rubric | DesignEvaluation、结构化 Findings | 只给"好看/不好看"的自由文本 |
 | Originality Reviewer | 来源截图 + 生成截图 | 相似性风险、差异说明 | 把像素差当作唯一版权结论 |
 
-> 组件库口径：Component Mapper 映射进的**封闭组件库 v1 目标 26 型**（ADR-015/D12）；main 现注册 10 型（见 §0.4、02/04），扩库=显式加注册 + 版本 minor。
+> 组件库口径：Component Mapper 映射进的**封闭组件库 v1 目标 55 型**（ADR-015/D12）；main 现注册 55 型（见 §0.4、02/04），扩库=显式加注册 + 版本 minor。
 > 干净室边界（引 ADR-019）：Pattern Aggregator 至少综合 5 个独立来源/原创实验才形成 DesignRule；Blueprint Synthesizer 只读聚合规则、不读来源页面；运行时不读原始 Readdy 页面（详见 11-Readdy 边界文档、02 开发/生产两平面）。

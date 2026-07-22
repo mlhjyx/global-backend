@@ -16,6 +16,8 @@ paths = [
   '''apps/api/src/adapters/trade-fair-algolia\.ts''',
   '''apps/api/scripts/acq-multi-country\.mts''',
   '''apps/api/scripts/discover-fair-algolia\.mjs''',
+  # site-renderer fixtures 是测试 SiteSpec（i18n key 如 crew.m1.truck，非真实凭证，已核验）
+  '''apps/site-renderer/fixtures/.*\.json''',
 ]
 # 兜底：这些公开串出现在任何文件都放行（RX 共用 public key + 展会 slug + EU FSF 公开 token）
 regexes = [

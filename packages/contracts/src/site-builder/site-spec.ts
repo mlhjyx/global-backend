@@ -39,6 +39,26 @@ export const SITE_SPEC_STYLE_PRESETS = [
 ] as const;
 export type SiteSpecStylePreset = (typeof SITE_SPEC_STYLE_PRESETS)[number];
 
+/**
+ * 封闭组件库 v1 = 55 型（与 `apps/site-renderer/src/components/Section.astro` 的 registry
+ * keys 同一份真值）。运行时 fail-closed：未知 type 由 Section 抛错，不静默返回 null。
+ * `Section.spec.ts` 断言 registry keys 与本数组完全相等。
+ */
+export const SITE_SPEC_COMPONENT_TYPES = [
+  "HeroBanner", "StatsBand", "ProductGrid", "AboutBlock", "CertWall",
+  "ProcessTimeline", "FaqAccordion", "CtaBanner", "InquiryForm", "MapLocation",
+  "HeroFull", "AreaMarquee", "ServicesGrid", "TrustSplit", "ProcessSteps",
+  "PricingTable", "Testimonials", "AreaGallery", "FaqSplit", "CtaCenter",
+  "EditorialHero", "ProjectsGrid", "ServicesDark", "StatsCountup", "MaterialsLibrary",
+  "LogoMarquee", "SplitAbout", "WarmHero", "ServiceRows", "DishesShowcase",
+  "PhotoGallery", "MediaCta", "FarmhouseHero", "ValueStrip", "FeaturedSpotlight",
+  "StoryChapters", "CollectionCards", "DispatchHero", "LedgerStats", "ServicesEditorial",
+  "DispatchTimeline", "CrewGrid", "CoverageMap", "AxiomHero", "ChapterShowcase",
+  "ColorwayPicker", "SaaSHero", "FeatureCards", "PricingTiers", "ArticleGrid",
+  "IndustrialHero", "ProductShowcaseAlt", "TechSystems", "MinimalHero", "StatementBlock",
+] as const;
+export type SiteSpecComponentType = (typeof SITE_SPEC_COMPONENT_TYPES)[number];
+
 /** Puck 兼容组件块：`{ type, props: { id?, ... } }`（04 §2）。 */
 export interface PuckBlock {
   type: string;
@@ -75,7 +95,7 @@ export interface SiteSpec {
     defaultLocale: string;
     locales: string[];
     /** `tokenOverrides` 可选：生产端可不发，消费端主题覆写时读取（04 §6）。 */
-    theme: { preset: string; tokenOverrides?: Record<string, string> };
+    theme: { preset: SiteSpecStylePreset; tokenOverrides?: Record<string, string> };
     nav: { labelKey: string; pageId: string }[];
     seoGlobal: { siteName: string };
     /** Exact HTTPS host allowlist enforced against rendered HTML/CSS/JS. */

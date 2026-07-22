@@ -150,18 +150,42 @@ importers:
 
   apps/site-renderer:
     dependencies:
+      '@fontsource-variable/archivo':
+        specifier: ^5.2.0
+        version: 5.3.0
+      '@fontsource-variable/inter':
+        specifier: ^5.2.0
+        version: 5.3.0
+      '@fontsource/bricolage-grotesque':
+        specifier: ^5.2.0
+        version: 5.3.0
+      '@fontsource/fraunces':
+        specifier: ^5.2.0
+        version: 5.3.0
+      '@fontsource/instrument-serif':
+        specifier: ^5.2.0
+        version: 5.3.0
+      '@fontsource/jetbrains-mono':
+        specifier: ^5.2.0
+        version: 5.3.0
       '@fontsource/noto-sans':
         specifier: 5.2.6
         version: 5.2.6
       '@fontsource/noto-sans-arabic':
         specifier: 5.2.7
         version: 5.2.7
+      '@fontsource/urbanist':
+        specifier: ^5.2.0
+        version: 5.3.0
       '@global/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       astro:
         specifier: ^5.7.0
         version: 5.18.2(@types/node@26.1.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.2)(terser@5.49.0)(tsx@4.23.1)(typescript@5.9.3)(yaml@2.9.0)
+      remixicon:
+        specifier: ^4.6.0
+        version: 4.9.1
     devDependencies:
       vitest:
         specifier: ^4.1.10
@@ -906,11 +930,32 @@ packages:
     resolution: {integrity: sha512-XK6BTq1NDMo9Xqw/YkYyGjSsg44fbNwYRx7QK2CuoQgyy+f1rrTDHoExVM5PsyXCtfl2vs2vVJ0MN0yN6LppRw==}
     engines: {node: '>=14.0.0', npm: '>=6.0.0'}
 
+  '@fontsource-variable/archivo@5.3.0':
+    resolution: {integrity: sha512-HogK8FJelrD1o7TlZlkIVtHgc20bO5PZRWE7mUeUTdMN055alznQV6/00J00IBeu8FQAH4s3zW9UJNvKExXf+g==}
+
+  '@fontsource-variable/inter@5.3.0':
+    resolution: {integrity: sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA==}
+
+  '@fontsource/bricolage-grotesque@5.3.0':
+    resolution: {integrity: sha512-MdOVb/5in11IfN/IQJOExMuu6AroCIQbirl0yX7NUvKk+h0HYIKfGaVAXRS/gCPil4aFxWhjZnOw28tUwv7tFw==}
+
+  '@fontsource/fraunces@5.3.0':
+    resolution: {integrity: sha512-LEHTOBiZufQzAvnAe2rZ8ZknbDS28Q9kzwb0L+gZJEmjLGr8hhZ/5NuHXwDuHBWhVXYoiGGXmrb0H6Ko/RrHTg==}
+
+  '@fontsource/instrument-serif@5.3.0':
+    resolution: {integrity: sha512-mDiaIg0u67sYV59fie92Wz4sM8UiVlbL7fLxnFPCKkX15DMASEnQTREbaP5S5/3DCcsoAOcQ0sV9E4AeY4QqYQ==}
+
+  '@fontsource/jetbrains-mono@5.3.0':
+    resolution: {integrity: sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A==}
+
   '@fontsource/noto-sans-arabic@5.2.7':
     resolution: {integrity: sha512-n+Dalv/kdIkPxFSnmiF/ajsU1izy+1uD4D2eEQ1FmGU3oD4sDTHs9+jxQrX6zPP43gBtxO4ZW6dBOQujZH49mw==}
 
   '@fontsource/noto-sans@5.2.6':
     resolution: {integrity: sha512-46D39T1/QJ16LSbCTaNjjrGS6Y69FMLS9FeHKsrXSQg15Z2MFqmlnNMpURx2l6Sr3x9t9EVdr3CAkHnZyvea+w==}
+
+  '@fontsource/urbanist@5.3.0':
+    resolution: {integrity: sha512-588s006ey+ygDqZtnJ1qehGNzIfNDl49ibAKifeYmU3juExX39LfMuCSkvT4nMktbvc07hg/8zc3qABh8zoxeA==}
 
   '@google-cloud/bigquery@8.3.1':
     resolution: {integrity: sha512-F4g9oMgI3EB5Uo+6npRHDSWn1HkVko8GebG1tJtzasn/gknAEFeobQzuLeGYC6SJ92RVdaBpGVisw86P70RrHQ==}
@@ -5709,6 +5754,9 @@ packages:
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
 
+  remixicon@4.9.1:
+    resolution: {integrity: sha512-36gLSoujkabnCFZFDyP17VNh9piuBA/rsXUb4auSJWLGsHVXtmxLj/EM5FjaEAGnk8oIAj1Azob/DZ2N+90lAQ==}
+
   repeat-string@1.6.1:
     resolution: {integrity: sha512-PV0dzCYDNfRi1jCDbJzpW7jNNDRuCOG/jI5ctQcGKt/clZD+YcPS3yIlWuTJMmESC8aevCFmWJy5wjAFgNqN6w==}
     engines: {node: '>=0.10'}
@@ -7595,9 +7643,23 @@ snapshots:
 
   '@faker-js/faker@7.6.0': {}
 
+  '@fontsource-variable/archivo@5.3.0': {}
+
+  '@fontsource-variable/inter@5.3.0': {}
+
+  '@fontsource/bricolage-grotesque@5.3.0': {}
+
+  '@fontsource/fraunces@5.3.0': {}
+
+  '@fontsource/instrument-serif@5.3.0': {}
+
+  '@fontsource/jetbrains-mono@5.3.0': {}
+
   '@fontsource/noto-sans-arabic@5.2.7': {}
 
   '@fontsource/noto-sans@5.2.6': {}
+
+  '@fontsource/urbanist@5.3.0': {}
 
   '@google-cloud/bigquery@8.3.1':
     dependencies:
@@ -13319,6 +13381,8 @@ snapshots:
       '@types/mdast': 4.0.4
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
+
+  remixicon@4.9.1: {}
 
   repeat-string@1.6.1: {}
 

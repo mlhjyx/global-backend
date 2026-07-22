@@ -362,9 +362,12 @@ export function themeToCssVars(
   preset: string,
   overrides: Record<string, string> = {},
 ): Record<string, string> {
-  const selected = Object.prototype.hasOwnProperty.call(THEME_PRESETS, preset)
-    ? (preset as SiteSpecStylePreset)
-    : 'modern-industrial';
+  if (!Object.prototype.hasOwnProperty.call(THEME_PRESETS, preset)) {
+    throw new Error(
+      `UNKNOWN_STYLE_PRESET: ${preset} -- 不在封闭 11 个 theme preset（SITE_SPEC_STYLE_PRESETS）`,
+    );
+  }
+  const selected = preset as SiteSpecStylePreset;
   const tokens = THEME_PRESETS[selected];
   const c = tokens.colors;
   const vars: Record<string, string> = {

@@ -126,7 +126,7 @@ Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
 | M1-b | 企业理解 | BrandProjection、联网研究、evidence gate、预算、currentRoute |
 | M1-c | 图片管线 | 原图保留、确定性优化、AssetVariant、active SiteSpec 引用删除保护、图片 QA；生成式默认关闭；MediaJob/AssetUsage 待真实消费者出现再补（ADR-018 MF-0 薄版） |
 | M1-d | 内容与多语言 | PublishableClaimSnapshot、CopyBundle、受限富文本、en/de、RTL 合同、字体自托管 |
-| M1-e | 设计与组装 | 封闭组件库（v1 目标 **26 型**，见 ADR-015；渲染器 as-built 已注册 10 型）、DesignCatalog、DesignBrief、SiteSpec、可复现构建 |
+| M1-e | 设计与组装 | 封闭组件库（v1 目标 **55 型**，见 ADR-015；渲染器 as-built 已注册 55 型）、DesignCatalog、DesignBrief、SiteSpec、可复现构建 |
 | M1-f | 质量闭环 | QA、SEO、审美复核（capability-gated 弃权）、有限 Patch 修复、PublishReview 前置数据 |
 | M1-g | 评测收口 | 6 样本启动集 → 12 视觉子集、用户偏好比较、模型候选报告、成本/延迟基线、文档同步；30+ 成熟系统集分期建设 |
 | M2 | 工作台与公开发布 | Puck 编辑、最小询盘持久化 + Outbox、域名、发布审核（PublishReview）、**不可变 Release / 原子发布 / 回滚**（ADR-013）、媒体披露、分析、实验、持续维护 |

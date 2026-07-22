@@ -2,7 +2,7 @@
 
 > 状态：**已认可（2026-07-14 用户拍板；2026-07-17 ADR-020 模型组合补充）**。设计真值 = 本目录活文档；决策真值 = `docs/adr/registry.md`（ADR-013~020）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
 >
-> **2026-07-16 回写（v3.2 §24/§26 分发入本文，Reviewed against 12 v3.2）**：新增 §10 生产化审计（R0–R4 定点修复 + 各阶段前置门）、§11 施工 PR 图（粒度/顺序/风险分级）、§12 目标态消费契约与 schema；并就地校正过时表述（组件库 17→26 型/ADR-015；rembg 移出 M1-c/ADR-018；「终选」改四态路由 currentRoute/targetCandidate/ADR-016；R0-3 禁虚构身份引 ADR-017）。**严格区分 as-built（§2 触点 + `@global/contracts` SiteSpec 1.0.0 type-only）与目标态（§12，SiteSpec 1.1 / 内容生命周期，未落地）**。
+> **2026-07-16 回写（v3.2 §24/§26 分发入本文，Reviewed against 12 v3.2）**：新增 §10 生产化审计（R0–R4 定点修复 + 各阶段前置门）、§11 施工 PR 图（粒度/顺序/风险分级）、§12 目标态消费契约与 schema；并就地校正过时表述（组件库 17→55 型/ADR-015；rembg 移出 M1-c/ADR-018；「终选」改四态路由 currentRoute/targetCandidate/ADR-016；R0-3 禁虚构身份引 ADR-017）。**严格区分 as-built（§2 触点 + `@global/contracts` SiteSpec 1.0.0 type-only）与目标态（§12，SiteSpec 1.1 / 内容生命周期，未落地）**。
 >
 > **2026-07-19 as-built**：R1-safety ①+②、**R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2/B-min 与 M1-d 均已落地**。M1-d 激活 `en/de-DE` 生成并冻结 snapshot/CopyBundle/renderer 合同；下一门是 R1-min，DI-0 可并行，M1-e 不提前。
 
@@ -65,7 +65,7 @@
 - `imagePipeline`（✅ **M1-c as-built = 纯 Sharp 确定性算法**，ADR-018/D-M1c-1 已把 rembg 与生成式重绘移出）：固定序为严格 MIME/20 MiB/40 MP/4 channels/单页解码 → 自动方向/sRGB → 重编码/去 EXIF·GPS·XMP → 版本化质量 warning → 显式 focal 的受控 cover、其他路径不放大 → 源图可承受的 320/640/960/1440/1920 AVIF/WebP/fallback。inspection 与编码均在可超时终止、全 worker 默认并发 1、有协议/路径/输出硬上限的子进程；Ubuntu 编译子进程另有 `prlimit`，仍不能表述为生产容器/cgroup/独立 UID/禁网隔离。writer 在首次对象写前持久预占完整 recipe set；过期 producer 只能写带一日 lifecycle tag 的 token 隔离 attempt key，当前 token 重新取得 Asset/key fence 才能在 15 秒有界窗口内 promote canonical 并转 ready，copy 去除 TTL tag；ready 账本缺对象 fail-closed，attempt 在重试前以 8 路有界 IO 对账压缩，settled cleanup 重放只重删冻结 attempt，cleanup IO 接 cancellation+110 秒 deadline。新 cleanup 原件+Variant+attempt 总对象≤128，历史无 attempt 合同保留 129 对象上界。生产 lifecycle 默认 validate-only/缺失阻启，仅单一部署 owner 可管理。refurbish 首个 Activity 物化≤512 个排序 Asset ID 的不可变 workset，再按两张/Activity 有界执行；旧 cursor 仅保留 replay。坏图逐项降级；`hasPerson` 只沿用已有真值，`aiEdited=false`；cert 图片只走确定性处理，PDF 跳过。生成式重绘/rembg/视觉质检/pHash+embedding = M1-c2/M3；公开 process/select API 与 Renderer 固定 Variant 消费不在 M1-c。
 
 ### 2.5 渲染器（apps/site-renderer）
-- 组件库补齐 04 §5 v1 封闭 **26 型**（D12/ADR-015，17→26；现渲染器已注册 **10** 个：AboutBlock/CertWall/CtaBanner/FaqAccordion/HeroBanner/InquiryForm/MapLocation/ProcessTimeline/ProductGrid/StatsBand）：+TrustBar/ProductDetail/FactoryShowcase/CaseStudies/WhatsAppFloat/VideoBlock 等 + 既有组件补变体位；封闭枚举 `type`/`variant`，Section.astro 注册表扩展（🔴 **R1-4 修**：未知 type 从静默 null 改 **fail-closed**——契约漂移不再被掩盖）。26 型清单是 04 契约真值，本文只引不复述。
+- 组件库补齐 04 §5 v1 封闭 **26 型**（D12/ADR-015，17→55；现渲染器已注册 **10** 个：AboutBlock/CertWall/CtaBanner/FaqAccordion/HeroBanner/InquiryForm/MapLocation/ProcessTimeline/ProductGrid/StatsBand）：+TrustBar/ProductDetail/FactoryShowcase/CaseStudies/WhatsAppFloat/VideoBlock 等 + 既有组件补变体位；封闭枚举 `type`/`variant`，Section.astro 注册表扩展（🔴 **R1-4 修**：未知 type 从静默 null 改 **fail-closed**——契约漂移不再被掩盖）。26 型清单是 04 契约真值，本文只引不复述。
 - 多语种：`getStaticPaths` 扩 locale 维（`/{locale}/...`，默认 locale 免前缀），CopyBundle per-locale，`ar` 触发 `dir="rtl"`；hreflang 互指由 seo 检查兜底。
 - **自托管字体对**（F1 🔴）：fontsource 包内嵌构建，`typography.fontPair` 枚举；构建产物禁 `fonts.googleapis.com` 等外呼域（qa 静态检查）。
 - 图片（v3.2 §20.5）：`props.image={assetId,usage,focalPoint?}` + 顶层 assets manifest 对账；M1-e 图片组件**统一输出 `<picture>`**（AVIF/WebP/fallback + `width/height` 避免 CLS + `loading/fetchpriority/sizes` 按角色）；**build 时固定 `variantId`**——禁组件自拼对象存储 URL、禁 Renderer 自选最新 Variant、**禁外链 URL 直嵌**（🔴 ADR-014，校验器已管）。
@@ -109,7 +109,7 @@
 | D-M1-1 | M1 是否含 P4 质量环（01/02 口径张力） | **含，确定性优先**：qa/seo 主体是 Playwright/Lighthouse/检查表；审美维 capability-gated 自动弃权。Gemini 3.5 Flash 虽已在网关可见，仍须视觉输入探针和评测后激活，不能“见到型号即零门槛切换” |
 | D-M1-2 | 文本模型逐 task 从 currentRoute 晋级 | **是**：BrandProfile 已用同形 6×2 基线证明 Terra/Sonnet 通过而 DeepSeek Pro 有 2 次硬失败，故只翻该 task；其他任务继续保持 DeepSeek/方舟 currentRoute，必须各自补消费者、评测、失败门和 rollback 后再切 |
 | D-M1-3 | gpt-image-2 生成步现在写吗 | **不写调用代码，也不在 M1-c 预建其 rembg/mask 步骤位**：`/images/generations` 单次真探已通过，但仍无真实消费者、MediaGateway、edit/mask 合同与主体保护评测；M1-c 只落 Sharp 的重编码/方向/sRGB/EXIF-GPS/质量门/裁切/多尺寸。生成式编辑进入 M1-c2/M3 时再随真实合同加 feature flag |
-| D-M1-4 | 组件库扩展幅度 | **补齐 04 §5 封闭 26 型**（D12/ADR-015，17→26）：契约是封闭枚举，P3 组装 prompt 需要完整菜单；现渲染器已注册 10 个，增量 16 个（M1-e-A）。ScrollVideoHero/Interactive3DHero 不进封闭库 |
+| D-M1-4 | 组件库扩展幅度 | **04 §5 封闭 55 型**（D12/ADR-015，17→55）：契约是封闭枚举，P3 组装 prompt 需要完整菜单；渲染器已注册 55 个。ScrollVideoHero/Interactive3DHero 不进封闭库 |
 | D-M1-5 | M1 语种范围 | **en + de 真跑**（golden=德国市场先例），`ar`(RTL) 进渲染器单测但不进 M1 golden；语种是 options 参数非硬编码 |
 | D-M1-6 | 进度推送 | **轮询 `GET /builds/{id}` 先行**，SSE 端点 M1 末段可选（07 允许轮询替代；SaaS 前端未接，YAGNI） |
 | D-M1-7 | KB 摄入 Temporal 化形态 | **独立小 workflow**（`kbIngestWorkflow`，commit 触发）而非并进 refurbish：上传时刻≠构建时刻，摄入失败重触发语义独立 |

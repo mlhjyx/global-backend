@@ -2,13 +2,13 @@
 
 > 三方核心契约：**组装 agent**（产出）↔ **渲染器**（Astro 构建消费）↔ **SaaS 前端**（展示；将来嵌 Puck 编辑器手动微调）。
 > 依据 [02-architecture.md](02-architecture.md) D11：页面数据形状与 Puck 兼容（[Puck Data 官方模型](https://puckeditor.com/docs/api-reference/data-model/data)）。
-> 决策依据：**ADR-014**（SiteSpec 三方契约，类型级单一真值 = `@global/contracts`）、**ADR-015**（26 型封闭组件库，D12）、**ADR-013**（建站边界与不可变 Release）——见 [docs/adr/registry.md](../adr/registry.md)，本文不复述整条决策。
+> 决策依据：**ADR-014**（SiteSpec 三方契约，类型级单一真值 = `@global/contracts`）、**ADR-015**（55 型封闭组件库，D12）、**ADR-013**（建站边界与不可变 Release）——见 [docs/adr/registry.md](../adr/registry.md)，本文不复述整条决策。
 
 > 🔴 **as-built 与目标态严格分栏（阅读前必读）**：
 > - **as-built 1.0.0（已落地，#117 DQ-1）**：`packages/contracts/src/site-builder/site-spec.ts`，`SITE_SPEC_VERSION='1.0.0'`——**type-only 共享信封**，`copyBundles` 为 `Record<string, Record<string,string>>`（**纯字符串**），基础 `AssetRef{kind,hash}`。这是**代码事实源**（§8.1 逐字段审计）。
 > - **目标态 1.1.0（DI-0 / M1-d/e 通过 semver minor 演进，SiteSpec 现无）**：`componentLibraryVersion`/`rendererVersion`/`archetype`/`familyId`/`claimRefs`/`offeringRefs`/`locks`、`RichTextDoc`、媒体/视频/产品引用契约、DesignBrief/DesignDNA 等**均为目标字段，尚无代码**（§8.2）。凡本文标 **[1.1.0 目标]** 处，`SiteSpec` 当前接口里**不存在该字段**，不得写码时当已存在。
 >
-> `Reviewed against 12 v3.2` · as-built SHA = #117 合并态 · 组件库 v1 = **26 型**（D12，17→26；ADR-015）。
+> `Reviewed against 12 v3.2` · as-built SHA = #117 合并态 · 组件库 v1 = **55 型**（D12，17→55；ADR-015）。
 
 ## 1. 顶层信封
 
@@ -89,9 +89,9 @@ DI-0/M1-d/e 拟通过 **semver minor** 在 1.0.0 之上**兼容增量**演进到
 - **产品/服务**：ProductGrid / ProductDetail 用 `{ offeringRef, snapshotRef, textKey }`——`offeringRef` 指向唯一产品真相源，`snapshotRef` 冻结发布期快照，**不在 SiteSpec 里复制第二套产品数据**。
 - **人工编辑 provenance**：所有人工编辑保存 `{ source, editor, locked, claimRefs, prompt/model provenance }`；物化 SiteSpec 可以简洁，但 **ReleaseManifest 必须可追溯**（见 [05](05-deployment-hosting.md)/[09](09-m1-implementation-design.md)）。
 
-## 5. v1 组件清单（section 级 26 个，ADR-015 / D12 封闭库）
+## 5. v1 组件清单（section 级 55 个，ADR-015 / D12 封闭库）
 
-> 🔴 **26 型封闭库是 v1 目标（ADR-015 / D12，17→26；00 已拍板）**，非全部已落地：渲染器 `apps/site-renderer/src/components/Section.astro` 当前**实注册约 10 个**（AboutBlock, CertWall, CtaBanner, FaqAccordion, HeroBanner, InquiryForm, MapLocation, ProcessTimeline, ProductGrid, StatsBand），**未知组件当前静默返回 `null`**（掩盖契约漂移、页面悄悄缺块）。补齐 26 型 + fail-closed 由 **PR M1-e-A** 落地（v3.2 §26），从测试分支 `feat/site-builder-industrial-template`（IT-0）**选择性提取实现**，🔴 **不允许测试 PR 整体覆盖共享合同**。本表是**契约唯一真值**，测试分支结果不能代替契约更新。
+> 🔴 **55 型封闭库是 v1 目标（ADR-015 / D12，17→55；00 已拍板）**，非全部已落地：渲染器 `apps/site-renderer/src/components/Section.astro` 当前**实注册 55 个**（AboutBlock, CertWall, CtaBanner, FaqAccordion, HeroBanner, InquiryForm, MapLocation, ProcessTimeline, ProductGrid, StatsBand），**未知组件 fail-closed 抛错 `null`**（掩盖契约漂移、页面悄悄缺块）。已扩到 55 型 + fail-closed 由 **PR M1-e-A** 落地（v3.2 §26），从测试分支 `feat/site-builder-industrial-template`（IT-0）**选择性提取实现**，🔴 **不允许测试 PR 整体覆盖共享合同**。本表是**契约唯一真值**，测试分支结果不能代替契约更新。
 
 | type | 用途 | 关键 props | 变体 |
 |---|---|---|---|
