@@ -1,0 +1,71 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "modern-industrial" },
+    "nav": [],
+    "seoGlobal": { "siteName": "Acme Pump Co., Ltd." }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": {},
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-technical",
+              "headlineKey": "hero.headline",
+              "subheadKey": "hero.subhead",
+              "cta": { "labelKey": "hero.cta" },
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "StatsBand",
+            "props": {
+              "id": "StatsBand-technical",
+              "stats": [
+                { "value": "20+", "labelKey": "stats.years" },
+                { "value": "40+", "labelKey": "stats.markets" },
+                { "value": "ISO 9001", "labelKey": "stats.quality" }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CtaBanner",
+            "props": {
+              "id": "CtaBanner-technical",
+              "headlineKey": "cta.headline",
+              "cta": { "labelKey": "cta.label" },
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "seo.home.title": "Industrial Pump Systems",
+      "seo.home.description": "Qualified technical component baseline.",
+      "hero.headline": "Industrial Pumps Engineered for Reliability",
+      "hero.subhead": "20 years of manufacturing centrifugal and screw pumps for chemical, marine and water treatment industries.",
+      "hero.cta": "Request a Quote",
+      "stats.years": "Years of manufacturing",
+      "stats.markets": "Export markets",
+      "stats.quality": "Certified quality system",
+      "cta.headline": "Tell us about your project",
+      "cta.label": "Get in touch"
+    }
+  }
+}
