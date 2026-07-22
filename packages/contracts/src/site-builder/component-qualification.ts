@@ -168,7 +168,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/fixtures.json",
-    sha256: "5bd63cfb9e00373ac44fa6eabf12c788c6a4a98ded1eaff75e0a08a5d1cc6be5",
+    sha256: "3bd098357b6db68ccac30a3274da4c47bc8f4b7a8140b4d6c6c0fae2f225f76e",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -176,7 +176,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
       },
     ],
   },
@@ -186,7 +186,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "visualRegression",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/CtaBanner/visual-regression.json",
-    sha256: "f7528641d1f9b8b92d69d9c6501503c3a4e2d272a431cbe31024fb058b17d61f",
+    sha256: "91df21c30a99eac99f085983ba0424e0d2eab802a12ceff3c07a6ef01859d722",
     breakpoints: [375, 768, 1440],
     outputs: [
       {
@@ -194,7 +194,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/visual-tests/__screenshots__/mobile-375/CtaBanner.png",
         sha256:
-          "80fccdfe5c23b8bc120691fed069c2cd02bdf2690754fc5cb895b1cb2c535102",
+          "7fff8c6776d91c301572bfbb988a9801744941556be95dc7c2551d26e2e43808",
       },
       {
         breakpoint: 768,
@@ -259,7 +259,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/HeroBanner/fixtures.json",
-    sha256: "f0e721a6600376e96821803015b92e66981c1e9e1887cd1c6294c8057c667e39",
+    sha256: "da40655eed9b54e1689093568f8cc1567e820e221ef7b5f617657a9720cfe6d4",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -267,7 +267,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
       },
     ],
   },
@@ -350,7 +350,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/StatsBand/fixtures.json",
-    sha256: "9f2e37ba2209681370f1fd822e08dae17a3f1010ff39e0d5f61a9b75ce44b014",
+    sha256: "a95fa026734d17064bf793866a6840273cc2ee1d13a6eeb234693fce14e6908d",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -358,7 +358,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
       },
     ],
   },
@@ -441,7 +441,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/ProductGrid/fixtures.json",
-    sha256: "1943b0c7aa93a3aa1861dfa760e1c59a44af17b679e8389d6800ebc70d155d31",
+    sha256: "adb9e74f4ead8b83b8795c65de0216d05c2b45e12961a4747847347f0f658dcb",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -449,7 +449,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
       },
     ],
   },
@@ -532,7 +532,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/AboutBlock/fixtures.json",
-    sha256: "a4ef2a5e20d219dee88c5d20cc75705b5a1a13cbde04343f34b82fc60b5e06fa",
+    sha256: "308c3cdf31ad5aaaa71694593d45a579fe60acca45f240e6f051a96375a3b543",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -540,7 +540,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
       },
     ],
   },
@@ -623,7 +623,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
     part: "fixtures",
     repositoryPath:
       "docs/evidence/site-builder/component-qualification/InquiryForm/fixtures.json",
-    sha256: "62a69bc03197d929855d1db9851e8fa11d96337ecc3a19cdfd81bf83f0ba8e3e",
+    sha256: "6b71744a2db58b3a45de38b681415c1836dab8b2af49bd5225ec0f14b1391537",
     fixtureIds: ["technical-baseline"],
     fixtureFiles: [
       {
@@ -631,7 +631,7 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
         repositoryPath:
           "apps/site-renderer/fixtures/technical-baseline-spec.json",
         sha256:
-          "e3831bd6bb2d673de4e88b1aafeb928d316249c4a42685df2c065f985d9d0aab",
+          "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed",
       },
     ],
   },
@@ -667,6 +667,27 @@ export const M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS = Object.freeze({
       },
     ],
   },
+  "m1-e-a-cert-wall-schema": { artifactId: "m1-e-a-cert-wall-schema", componentType: "CertWall", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/schema.json", sha256: "2d222ece313dd34170691738009801de3534003b76b64d6be3bba95723e52a4e" },
+  "m1-e-a-cert-wall-variants": { artifactId: "m1-e-a-cert-wall-variants", componentType: "CertWall", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/variants.json", sha256: "74ee31c22a399bd37e04160976abdcc494c60e9bb40368768db22cb1a1b78883", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-cert-wall-content-budget": { artifactId: "m1-e-a-cert-wall-content-budget", componentType: "CertWall", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/content-budget.json", sha256: "14deaed85ff805fa479e600435e8f979300e0c29279f6aec5ce5617de001fad0" },
+  "m1-e-a-cert-wall-accessibility": { artifactId: "m1-e-a-cert-wall-accessibility", componentType: "CertWall", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/accessibility.json", sha256: "0924c8433483d6b7bb16d0f8750e12d58447f973e55fd3f558e2f78f0071845a" },
+  "m1-e-a-cert-wall-reduced-motion": { artifactId: "m1-e-a-cert-wall-reduced-motion", componentType: "CertWall", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/reduced-motion.json", sha256: "c774550b663c7424e49210caee6987c4ee714127f71164eea847f031fc1eb5a7" },
+  "m1-e-a-cert-wall-fixtures": { artifactId: "m1-e-a-cert-wall-fixtures", componentType: "CertWall", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/fixtures.json", sha256: "506565ba0ba07c26b3bfaf2ac53746059fb7a3286a421a043f180b3b9b4c5c76", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed" }] },
+  "m1-e-a-cert-wall-visual-regression": { artifactId: "m1-e-a-cert-wall-visual-regression", componentType: "CertWall", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/CertWall/visual-regression.json", sha256: "1e8619303422b5cc5508dae95ac332f1a0a96213e92651eeee55f2a4fa59457c", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/CertWall.png", sha256: "b5809a57c744f452ae581136dcba7cd810fd7c9e5421539b3a118d9ab338b865" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/CertWall.png", sha256: "04a8be938fe3d435c9376889515495035c09f77823ce87e6dc6414148b316d26" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/CertWall.png", sha256: "9928faff68bbc6a6e6a87044789005716677e7e32fc94bc0dc2d36ae179b03b5" }] },
+  "m1-e-a-process-timeline-schema": { artifactId: "m1-e-a-process-timeline-schema", componentType: "ProcessTimeline", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/schema.json", sha256: "9e4ac3e3cccd56e7667108dfd45b338a7e62cbd7f6ffc51ecedd88e169420bf4" },
+  "m1-e-a-process-timeline-variants": { artifactId: "m1-e-a-process-timeline-variants", componentType: "ProcessTimeline", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/variants.json", sha256: "d31f04ac02ca9e012a0ad116126e92cb8fb7252b137d5f4b4f4b9a2ae1beda61", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-process-timeline-content-budget": { artifactId: "m1-e-a-process-timeline-content-budget", componentType: "ProcessTimeline", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/content-budget.json", sha256: "c0f2df8fc46de0c690729dd947fa1e03849e95d111ee60320f215230c75d2e11" },
+  "m1-e-a-process-timeline-accessibility": { artifactId: "m1-e-a-process-timeline-accessibility", componentType: "ProcessTimeline", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/accessibility.json", sha256: "d41dc582b5910b2e062d908587a392b9a4ee20dc692c91858b5c259b3975e1ae" },
+  "m1-e-a-process-timeline-reduced-motion": { artifactId: "m1-e-a-process-timeline-reduced-motion", componentType: "ProcessTimeline", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/reduced-motion.json", sha256: "c7e20675b75fe371021a27d7da670ddca7d037c7c94f064b3a79f12a0d099c80" },
+  "m1-e-a-process-timeline-fixtures": { artifactId: "m1-e-a-process-timeline-fixtures", componentType: "ProcessTimeline", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/fixtures.json", sha256: "aa58adb4c77b0d8f73f43f569b0c76e4a39366692caa44aea83896f759d08686", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed" }] },
+  "m1-e-a-process-timeline-visual-regression": { artifactId: "m1-e-a-process-timeline-visual-regression", componentType: "ProcessTimeline", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/ProcessTimeline/visual-regression.json", sha256: "9b36f10265bb6a3fcbe177154b76c6f5371fe49c84cf45d27b4d9a24d8856fa5", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/ProcessTimeline.png", sha256: "5728cdcf52ff4b58e8d2626caa41425b663ba01c176c525327f5e446e0edf8ed" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/ProcessTimeline.png", sha256: "45c0c01440443cac576576ec00638561e50ea00420c3db65d97dbb3b74f34cb4" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/ProcessTimeline.png", sha256: "b9a0f76bd5eb728f9e8e889a032258c075973f5869f5963990083994faf99bfb" }] },
+  "m1-e-a-faq-accordion-schema": { artifactId: "m1-e-a-faq-accordion-schema", componentType: "FaqAccordion", part: "schema", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/schema.json", sha256: "700f4f0f6859d8a61470a780114500fc1a4ee2a0e4cf05472922b326836b2d65" },
+  "m1-e-a-faq-accordion-variants": { artifactId: "m1-e-a-faq-accordion-variants", componentType: "FaqAccordion", part: "variants", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/variants.json", sha256: "8768f280f66e86564aab4976d1073120601873c2ede924123a75f95b66e4caeb", variantValues: ["technical-grid", "quiet"] },
+  "m1-e-a-faq-accordion-content-budget": { artifactId: "m1-e-a-faq-accordion-content-budget", componentType: "FaqAccordion", part: "contentBudget", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/content-budget.json", sha256: "69b568f65c01388cff491949c3b5be24a7350018ff834b32f993d0dd5cb1e50e" },
+  "m1-e-a-faq-accordion-accessibility": { artifactId: "m1-e-a-faq-accordion-accessibility", componentType: "FaqAccordion", part: "accessibility", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/accessibility.json", sha256: "e26ef6bc3495320ea979e99120cbb2c67a193801a76b8fc6f6b6ce8a52464999" },
+  "m1-e-a-faq-accordion-reduced-motion": { artifactId: "m1-e-a-faq-accordion-reduced-motion", componentType: "FaqAccordion", part: "reducedMotion", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/reduced-motion.json", sha256: "3c03341f4530613e41ad224cdfa1cda9e8cfed9a2dff8e3647d7368ce59472f1" },
+  "m1-e-a-faq-accordion-fixtures": { artifactId: "m1-e-a-faq-accordion-fixtures", componentType: "FaqAccordion", part: "fixtures", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/fixtures.json", sha256: "09658b08a5b5b74569f3cf92ed8058b13a6221cadf6b194406b247b0dd335b21", fixtureIds: ["technical-baseline"], fixtureFiles: [{ fixtureId: "technical-baseline", repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json", sha256: "a9982b759be6f6672576a6974c01377fe722a6ce50817cdd177d782b8dee12ed" }] },
+  "m1-e-a-faq-accordion-visual-regression": { artifactId: "m1-e-a-faq-accordion-visual-regression", componentType: "FaqAccordion", part: "visualRegression", repositoryPath: "docs/evidence/site-builder/component-qualification/FaqAccordion/visual-regression.json", sha256: "a692698664599c90cbb50ed53d924fcbf433d213878a2c8eded60ac97196977b", breakpoints: [375, 768, 1440], outputs: [{ breakpoint: 375, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/mobile-375/FaqAccordion.png", sha256: "dbd624ce16b9c64dc81c60d59e5400ff413abb3aa24dd9a9c522b017c16f3096" }, { breakpoint: 768, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/tablet-768/FaqAccordion.png", sha256: "4e29e40ab1dbc6009100293d5bc276c98c80d61c90e54f6845b985241ce1f793" }, { breakpoint: 1440, repositoryPath: "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/FaqAccordion.png", sha256: "f4e156791e8fd4fed55f8081fe23100b126b3e5f993bf0bf2bccea4719637dce" }] },
 } satisfies Record<string, ComponentQualificationArtifact>);
 
 /**
@@ -736,6 +757,33 @@ export const M1_E_A_COMPONENT_QUALIFICATIONS: Readonly<
     reducedMotion: { artifactId: "m1-e-a-inquiry-form-reduced-motion" },
     fixtures: { artifactId: "m1-e-a-inquiry-form-fixtures" },
     visualRegression: { artifactId: "m1-e-a-inquiry-form-visual-regression" },
+  },
+  CertWall: {
+    schema: { artifactId: "m1-e-a-cert-wall-schema" },
+    variants: { artifactId: "m1-e-a-cert-wall-variants" },
+    contentBudget: { artifactId: "m1-e-a-cert-wall-content-budget" },
+    accessibility: { artifactId: "m1-e-a-cert-wall-accessibility" },
+    reducedMotion: { artifactId: "m1-e-a-cert-wall-reduced-motion" },
+    fixtures: { artifactId: "m1-e-a-cert-wall-fixtures" },
+    visualRegression: { artifactId: "m1-e-a-cert-wall-visual-regression" },
+  },
+  ProcessTimeline: {
+    schema: { artifactId: "m1-e-a-process-timeline-schema" },
+    variants: { artifactId: "m1-e-a-process-timeline-variants" },
+    contentBudget: { artifactId: "m1-e-a-process-timeline-content-budget" },
+    accessibility: { artifactId: "m1-e-a-process-timeline-accessibility" },
+    reducedMotion: { artifactId: "m1-e-a-process-timeline-reduced-motion" },
+    fixtures: { artifactId: "m1-e-a-process-timeline-fixtures" },
+    visualRegression: { artifactId: "m1-e-a-process-timeline-visual-regression" },
+  },
+  FaqAccordion: {
+    schema: { artifactId: "m1-e-a-faq-accordion-schema" },
+    variants: { artifactId: "m1-e-a-faq-accordion-variants" },
+    contentBudget: { artifactId: "m1-e-a-faq-accordion-content-budget" },
+    accessibility: { artifactId: "m1-e-a-faq-accordion-accessibility" },
+    reducedMotion: { artifactId: "m1-e-a-faq-accordion-reduced-motion" },
+    fixtures: { artifactId: "m1-e-a-faq-accordion-fixtures" },
+    visualRegression: { artifactId: "m1-e-a-faq-accordion-visual-regression" },
   },
 });
 

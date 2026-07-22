@@ -95,31 +95,37 @@ describe("M1-e-A component qualification gate", () => {
     expect(new Set(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES)).toEqual(
       new Set(SITE_SPEC_RELEASE_COMPONENT_TYPES),
     );
-    expect(getComponentReleaseReadiness("CertWall")).toEqual({
+    expect(getComponentReleaseReadiness("MapLocation")).toEqual({
       status: "transitional_release",
     });
   });
 
-  it("registers six qualified components and keeps unqualified types gallery-only", () => {
+  it("registers nine qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("StatementBlock")).toEqual({
       status: "gallery_only",
     });
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS).sort()).toEqual([
       "AboutBlock",
+      "CertWall",
       "CtaBanner",
+      "FaqAccordion",
       "HeroBanner",
       "InquiryForm",
+      "ProcessTimeline",
       "ProductGrid",
       "StatsBand",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      42,
+      63,
     );
     for (const componentType of [
       "CtaBanner",
+      "CertWall",
+      "FaqAccordion",
       "HeroBanner",
       "InquiryForm",
+      "ProcessTimeline",
       "ProductGrid",
       "StatsBand",
       "AboutBlock",

@@ -1,59 +1,71 @@
 ---
-interface Props {
+import { createRequire } from 'node:module';
+
+import type { Translate } from '../i18n';
+
+const require = createRequire(import.meta.url);
+const { assertQualifiedComponentContentBudget } = require('@global/contracts') as typeof import('@global/contracts');
+
+type Props = {
+  id?: string;
+  instanceId: string;
   titleKey: string;
-  steps: { titleKey: string; bodyKey: string }[];
-  t: (key: string) => string;
+  steps: Array<{ titleKey: string; bodyKey: string }>;
+  variant?: 'technical-grid' | 'quiet';
+  t: Translate;
   alt?: boolean;
-}
-const { titleKey, steps = [], t, alt } = Astro.props;
+};
+
+const { id, instanceId, titleKey, steps, variant = 'technical-grid', t, alt } = Astro.props;
+const title = t(titleKey);
+const resolvedSteps = steps.map((step) => ({ title: t(step.titleKey), body: t(step.bodyKey) }));
+assertQualifiedComponentContentBudget('ProcessTimeline', { title, steps: resolvedSteps });
+
+const baseId = `process-timeline-${id ?? 'section'}-${instanceId}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
 ---
 
-<section class:list={['block', { alt }]} id="process">
-  <h2>{t(titleKey)}</h2>
-  <ol class="steps">
-    {
-      steps.map((s, i) => (
-        <li>
-          <span class="num">{i + 1}</span>
-          <div>
-            <h3>{t(s.titleKey)}</h3>
-            <p class="muted">{t(s.bodyKey)}</p>
-          </div>
-        </li>
-      ))
-    }
-  </ol>
+<section class:list={['block', 'process-timeline', `process-timeline--${variant}`, { alt }]} data-component="ProcessTimeline" data-variant={variant} aria-labelledby={headingId}>
+  <div class="container process-timeline__inner">
+    <div class="process-timeline__intro">
+      <p class="eyebrow" aria-hidden="true">01</p>
+      <h2 id={headingId}>{title}</h2>
+    </div>
+
+    <ol class="process-timeline__steps">
+      {resolvedSteps.map((step, index) => {
+        const stepId = `${baseId}-step-${index + 1}`;
+        return (
+          <li class="process-timeline__step">
+            <span class="process-timeline__number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+            <div class="process-timeline__copy">
+              <h3 id={stepId}>{step.title}</h3>
+              <p>{step.body}</p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  </div>
 </section>
 
 <style>
-  h2 {
-    margin-bottom: 2rem;
-  }
-  .steps {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    gap: 1.5rem;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  }
-  .steps li {
-    display: flex;
-    gap: 0.9rem;
-    align-items: start;
-  }
-  .num {
-    flex: none;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
-    background: var(--c-primary);
-    color: var(--c-on-primary);
-    display: grid;
-    place-items: center;
-    font-weight: 700;
-  }
-  h3 {
-    font-size: 1.05rem;
-    margin-bottom: 0.3rem;
-  }
+  .process-timeline { border-block: 1px solid var(--c-border); background: var(--c-surface); }
+  .process-timeline.alt { background: var(--c-surface-alt); }
+  .process-timeline__inner { display: grid; gap: 2rem; }
+  .process-timeline__intro { max-width: 38rem; }
+  .eyebrow { margin: 0 0 .65rem; color: var(--c-primary); font: 700 .75rem/1.2 var(--font-sans, sans-serif); letter-spacing: .12em; text-transform: uppercase; }
+  h2, h3, p { margin: 0; }
+  h2 { color: var(--c-on-surface); font: 700 clamp(1.75rem, 3vw, 2.75rem)/1.08 var(--font-display, var(--font-sans, sans-serif)); letter-spacing: -.025em; }
+  .process-timeline__steps { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; counter-reset: process; }
+  .process-timeline__step { display: grid; grid-template-columns: minmax(3.5rem, 5.5rem) minmax(0, 1fr); gap: 1rem; padding: 1.25rem 0; border-top: 1px solid var(--c-border); }
+  .process-timeline__step:last-child { border-bottom: 1px solid var(--c-border); }
+  .process-timeline__number { color: var(--c-primary); font: 700 .75rem/1.3 var(--font-mono, monospace); letter-spacing: .08em; }
+  .process-timeline__copy { display: grid; gap: .5rem; }
+  h3 { color: var(--c-on-surface); font: 700 clamp(1.05rem, 1.5vw, 1.25rem)/1.25 var(--font-sans, sans-serif); }
+  .process-timeline__copy p { max-width: 46rem; color: var(--c-on-surface-muted); font: 400 1rem/1.6 var(--font-sans, sans-serif); }
+  .process-timeline--technical-grid { background-image: linear-gradient(to right, color-mix(in srgb, var(--c-border) 45%, transparent) 1px, transparent 1px); background-size: 4rem 100%; }
+  .process-timeline--quiet { background-image: none; }
+  @media (min-width: 48rem) { .process-timeline__inner { grid-template-columns: minmax(15rem, .8fr) minmax(0, 1.2fr); align-items: start; gap: clamp(3rem, 8vw, 8rem); } .process-timeline__step { padding: 1.5rem 0; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
 </style>

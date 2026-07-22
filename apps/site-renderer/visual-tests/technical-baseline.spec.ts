@@ -6,6 +6,9 @@ const COMPONENTS = [
   { name: "ProductGrid", selector: "section.product-grid" },
   { name: "AboutBlock", selector: "section.about-block" },
   { name: "InquiryForm", selector: "section.inquiry-block" },
+  { name: "CertWall", selector: "section.cert-wall" },
+  { name: "ProcessTimeline", selector: "section.process-timeline" },
+  { name: "FaqAccordion", selector: "section.faq-accordion" },
   { name: "CtaBanner", selector: "section.cta" },
 ] as const;
 
@@ -75,6 +78,35 @@ test("InquiryForm labels every disabled preview field and explains its state", a
   await expect(form.locator("[role=status]")).toBeVisible();
 });
 
+test("CertWall exposes a short semantic evidence list", async ({ page }) => {
+  const list = page.locator("section.cert-wall ul").first();
+  await expect(list).toBeVisible();
+  await expect(list.getByRole("listitem")).toHaveCount(3);
+});
+
+test("ProcessTimeline exposes its ordered technical steps", async ({ page }) => {
+  const steps = page.locator("section.process-timeline ol").first();
+  await expect(steps).toBeVisible();
+  await expect(steps.getByRole("listitem")).toHaveCount(3);
+});
+
+test("FaqAccordion keeps native keyboard disclosure and visible focus", async ({
+  page,
+}) => {
+  const item = page.locator("section.faq-accordion details").first();
+  const summary = item.locator("summary");
+  await summary.focus();
+  await expect(summary).toBeFocused();
+  const focus = await summary.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: Number.parseFloat(style.outlineWidth) };
+  });
+  expect(focus.outlineStyle).not.toBe("none");
+  expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
+  await summary.press("Enter");
+  await expect(item).toHaveAttribute("open", "");
+});
+
 test("component landmarks keep local label ids unique", async ({ page }) => {
   const sections = page.locator("section[data-component][aria-labelledby]");
   const labelIds = await sections.evaluateAll((elements) =>
@@ -86,6 +118,19 @@ test("component landmarks keep local label ids unique", async ({ page }) => {
     await expect(
       sections.nth(index).locator(`#${labelIds[index]}`),
     ).toHaveCount(1);
+  }
+});
+
+test("repeated explicit component ids retain unique landmark labels", async ({
+  page,
+}) => {
+  for (const component of ["ProcessTimeline", "FaqAccordion"]) {
+    const sections = page.locator(`section[data-component="${component}"]`);
+    await expect(sections).toHaveCount(2);
+    const labels = await sections.evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute("aria-labelledby")),
+    );
+    expect(new Set(labels).size).toBe(labels.length);
   }
 });
 

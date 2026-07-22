@@ -61,8 +61,75 @@ describe("M1-e-A technical baseline component contract", () => {
         variant: "technical-grid",
       },
     },
+    {
+      type: "CertWall",
+      props: {
+        titleKey: "certs.title",
+        certs: [{ labelKey: "certs.quality" }],
+        variant: "technical-grid",
+      },
+    },
+    {
+      type: "ProcessTimeline",
+      props: {
+        titleKey: "process.title",
+        steps: [
+          { titleKey: "process.one", bodyKey: "process.one.body" },
+          { titleKey: "process.two", bodyKey: "process.two.body" },
+        ],
+        variant: "technical-grid",
+      },
+    },
+    {
+      type: "FaqAccordion",
+      props: {
+        titleKey: "faq.title",
+        items: [{ qKey: "faq.question", aKey: "faq.answer" }],
+        variant: "technical-grid",
+      },
+    },
   ])("$type accepts the technical-grid variant", ({ type, props }) => {
     expect(() => validateBlock({ type, props } as never)).not.toThrow();
+  });
+
+  it.each([
+    ["CertWall", { titleKey: "certs.title", certs: [] }],
+    [
+      "CertWall",
+      {
+        titleKey: "certs.title",
+        certs: Array.from({ length: 9 }, () => ({ labelKey: "certs.quality" })),
+      },
+    ],
+    [
+      "ProcessTimeline",
+      { titleKey: "process.title", steps: [{ titleKey: "one", bodyKey: "one.body" }] },
+    ],
+    [
+      "ProcessTimeline",
+      {
+        titleKey: "process.title",
+        steps: Array.from({ length: 7 }, (_, index) => ({
+          titleKey: `step.${index}.title`,
+          bodyKey: `step.${index}.body`,
+        })),
+      },
+    ],
+    ["FaqAccordion", { titleKey: "faq.title", items: [] }],
+    [
+      "FaqAccordion",
+      {
+        titleKey: "faq.title",
+        items: Array.from({ length: 9 }, (_, index) => ({
+          qKey: `faq.${index}.question`,
+          aKey: `faq.${index}.answer`,
+        })),
+      },
+    ],
+  ])("%s rejects props outside its qualified item cardinality", (type, props) => {
+    expect(() => validateBlock({ type, props } as never)).toThrow(
+      `INVALID_BLOCK_PROPS: ${type}`,
+    );
   });
 
   it.each([
@@ -72,6 +139,9 @@ describe("M1-e-A technical baseline component contract", () => {
     "ProductGrid",
     "AboutBlock",
     "InquiryForm",
+    "CertWall",
+    "ProcessTimeline",
+    "FaqAccordion",
   ])("%s rejects an unregistered decorative variant", (type) => {
     const props =
       type === "HeroBanner"
@@ -98,6 +168,27 @@ describe("M1-e-A technical baseline component contract", () => {
                 }
               : type === "InquiryForm"
                 ? { titleKey: "inquiry.title", variant: "glass-orbit" }
+                : type === "CertWall"
+                  ? {
+                      titleKey: "certs.title",
+                      certs: [{ labelKey: "certs.quality" }],
+                      variant: "glass-orbit",
+                    }
+                  : type === "ProcessTimeline"
+                    ? {
+                        titleKey: "process.title",
+                        steps: [
+                          { titleKey: "process.one", bodyKey: "process.one.body" },
+                          { titleKey: "process.two", bodyKey: "process.two.body" },
+                        ],
+                        variant: "glass-orbit",
+                      }
+                    : type === "FaqAccordion"
+                      ? {
+                          titleKey: "faq.title",
+                          items: [{ qKey: "faq.question", aKey: "faq.answer" }],
+                          variant: "glass-orbit",
+                        }
                 : {
                     headlineKey: "cta.headline",
                     cta: { labelKey: "cta.label" },
@@ -148,6 +239,30 @@ describe("M1-e-A technical baseline component contract", () => {
         subhead: "S".repeat(140),
       }),
     ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget("CertWall", {
+        title: "T".repeat(60),
+        certs: Array.from({ length: 8 }, () => ({ label: "L".repeat(48) })),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget("ProcessTimeline", {
+        title: "T".repeat(60),
+        steps: Array.from({ length: 6 }, () => ({
+          title: "S".repeat(40),
+          body: "B".repeat(160),
+        })),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertQualifiedComponentContentBudget("FaqAccordion", {
+        title: "T".repeat(60),
+        items: Array.from({ length: 8 }, () => ({
+          question: "Q".repeat(120),
+          answer: "A".repeat(400),
+        })),
+      }),
+    ).not.toThrow();
   });
 
   it.each([
@@ -188,6 +303,18 @@ describe("M1-e-A technical baseline component contract", () => {
     ],
     ["AboutBlock", { title: "About", body: "B".repeat(401) }],
     ["InquiryForm", { title: "T".repeat(61) }],
+    [
+      "CertWall",
+      { title: "Certifications", certs: Array.from({ length: 9 }, () => ({ label: "Record" })) },
+    ],
+    [
+      "ProcessTimeline",
+      { title: "Process", steps: [{ title: "One", body: "Body" }] },
+    ],
+    [
+      "FaqAccordion",
+      { title: "FAQ", items: [{ question: "Q", answer: "A".repeat(401) }] },
+    ],
   ])("%s rejects copy beyond its content budget", (type, content) => {
     expect(() => assertQualifiedComponentContentBudget(type, content)).toThrow(
       `COMPONENT_CONTENT_BUDGET_EXCEEDED: ${type}`,

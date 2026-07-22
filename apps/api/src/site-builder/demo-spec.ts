@@ -49,7 +49,9 @@ const POLISH_LIMITS = {
   subhead: {
     characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.HeroBanner.subhead,
   },
-  aboutBody: { characters: 500 },
+  aboutBody: {
+    characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.AboutBlock.body,
+  },
 } as const;
 
 function fitsCopyLimit(
@@ -148,7 +150,8 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
   const preset = (input.stylePreset ??
     pickPreset(intake)) as SiteSpecStylePreset;
   const products = intake.products;
-  const marketNames = intake.targetMarkets.map(regionName);
+  const marketNames = [...new Set(intake.targetMarkets.map(regionName))];
+  const marketList = listJoin(marketNames);
   const primaryProduct = titleCase(products[0] ?? 'products');
   const heroHeadline =
     safePolish.headline ??
@@ -159,7 +162,7 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
   const heroSubhead =
     safePolish.subhead ??
     constrainCopy(
-      `We supply ${listJoin(products)} to customers in ${listJoin(marketNames)}.`,
+      `We supply ${listJoin(products)} to customers in ${marketList}.`,
       POLISH_LIMITS.subhead,
     );
 
@@ -167,9 +170,9 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     'nav.home': 'Home',
     'nav.products': 'Products',
     'nav.contact': 'Contact',
-    'footer.tagline': `${primaryProduct} supplier serving ${listJoin(marketNames)}.`,
+    'footer.tagline': `${primaryProduct} supplier serving ${marketList}.`,
     'seo.home.title': `${siteName} — ${primaryProduct} Supplier`,
-    'seo.home.desc': `${siteName} supplies ${listJoin(products)} for customers in ${listJoin(marketNames)}.`,
+    'seo.home.desc': `${siteName} supplies ${listJoin(products)} for customers in ${marketList}.`,
     'seo.products.title': `Products — ${siteName}`,
     'seo.products.desc': `Explore ${listJoin(products)} from ${siteName}.`,
     'seo.contact.title': `Contact — ${siteName}`,
@@ -178,10 +181,16 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     'home.hero.subhead': heroSubhead,
     'home.hero.cta': 'Request a Quote',
     'products.title': 'Our Products',
-    'about.title': `About ${siteName}`,
+    'about.title': constrainCopy(`About ${siteName}`, {
+      characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.AboutBlock.title,
+      words: QUALIFIED_COMPONENT_CONTENT_BUDGETS.AboutBlock.titleWords,
+    }),
     'about.body':
       safePolish.aboutBody ??
-      `${siteName} supplies ${listJoin(products)} to customers in ${listJoin(marketNames)}. Tell us about your requirements and our team will get back to you with details and a tailored quotation.`,
+      constrainCopy(
+        `${siteName} supplies ${listJoin(products)} to customers in ${marketList}. Tell us about your requirements and our team will get back to you with details and a tailored quotation.`,
+        { characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.AboutBlock.body },
+      ),
     'process.title': 'How We Work',
     'process.s1.title': 'Requirement Review',
     'process.s1.body':
@@ -194,7 +203,10 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
       'Order fulfilment, documentation and responsive after-sales support.',
     'faq.title': 'Frequently Asked Questions',
     'faq.q1': 'Which markets do you serve?',
-    'faq.a1': `We currently focus on customers in ${listJoin(marketNames)}.`,
+    'faq.a1': constrainCopy(
+      `We currently focus on customers in ${marketList}.`,
+      { characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.FaqAccordion.answer },
+    ),
     'faq.q2': 'How can I get a quotation?',
     'faq.a2':
       'Send your requirements via the inquiry form and we will reply with details.',
@@ -211,9 +223,13 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
   };
 
   for (let i = 0; i < products.length; i += 1) {
-    en[`products.p${i + 1}.name`] = titleCase(products[i]);
-    en[`products.p${i + 1}.blurb`] =
-      `Learn more about our ${products[i]} range — full specifications available on request.`;
+    en[`products.p${i + 1}.name`] = constrainCopy(titleCase(products[i]), {
+      characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.ProductGrid.productName,
+    });
+    en[`products.p${i + 1}.blurb`] = constrainCopy(
+      `Learn more about our ${products[i]} range — full specifications available on request.`,
+      { characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.ProductGrid.productBlurb },
+    );
   }
 
   const productCards = products.map((_, i) => ({
