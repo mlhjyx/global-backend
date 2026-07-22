@@ -339,6 +339,16 @@ export function validateDesignSourceManifest(
   ) {
     fail("DESIGN_SOURCE_INVALID", "sourceClass is unsupported");
   }
+  if (
+    manifest.sourceContributionGroup !== undefined &&
+    manifest.sourceClass !== "platform_original" &&
+    !nonBlank(manifest.sourceUrl)
+  ) {
+    fail(
+      "DESIGN_SOURCE_INVALID",
+      "external contribution evidence requires a stable source URL",
+    );
+  }
   const allowedUsesRaw = manifest.allowedUses;
   const allowedUses = stringSet(allowedUsesRaw);
   if (
