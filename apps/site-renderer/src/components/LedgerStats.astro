@@ -1,0 +1,67 @@
+---
+interface Stat { value: string; labelKey: string }
+interface Props {
+  chapterKey: string;
+  titleKey: string;
+  bodyKey: string;
+  stats: Stat[];
+  clients: string[];
+  clientsLabelKey: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { chapterKey, titleKey, bodyKey, stats = [], clients = [], clientsLabelKey, t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'ledger', { alt }]}>
+  <div class="container wide">
+    <div class="head">
+      <div class="col-3">
+        <div class="mono-tag">{t(chapterKey)}</div>
+      </div>
+      <div class="col-9">
+        <h2 class="display">{t(titleKey)}</h2>
+        <p class="body">{t(bodyKey)}</p>
+      </div>
+    </div>
+
+    <div class="stats">
+      {stats.map((s) => (
+        <div class="stat">
+          <div class="value">{s.value}</div>
+          <div class="label">{t(s.labelKey)}</div>
+        </div>
+      ))}
+    </div>
+
+    <div class="clients">
+      <div class="mono-tag dim">{t(clientsLabelKey)}</div>
+      <div class="client-grid">
+        {clients.map((c) => (<div class="client">{c}</div>))}
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .ledger { background: var(--c-primary); color: var(--c-on-dark); }
+  .wide { max-width: 88rem; }
+  .head { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: 3.5rem; }
+  @media (min-width: 768px) { .head { grid-template-columns: 3fr 9fr; gap: 2rem; } }
+  .mono-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(244,241,234,0.5); }
+  .display { font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 0.95; letter-spacing: -0.02em; }
+  .body { margin-top: 1.5rem; max-width: 34rem; line-height: 1.7; color: rgba(244,241,234,0.7); }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); border-top: 1px solid rgba(244,241,234,0.15); }
+  @media (min-width: 1024px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+  .stat { padding: 2.5rem 1.5rem; }
+  @media (min-width: 1024px) { .stat { padding: 3rem 2.5rem; } .stat:not(:first-child) { border-left: 1px solid rgba(244,241,234,0.15); } }
+  @media (max-width: 1023px) { .stat:nth-child(odd) { border-right: 1px solid rgba(244,241,234,0.15); } .stat:nth-child(-n+2) { border-bottom: 1px solid rgba(244,241,234,0.15); } }
+  .value { font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1; }
+  .label { margin-top: 1rem; font-size: 0.875rem; line-height: 1.5; color: rgba(244,241,234,0.6); max-width: 13rem; }
+  .clients { margin-top: 4rem; padding-top: 2.5rem; border-top: 1px solid rgba(244,241,234,0.15); }
+  .client-grid { margin-top: 1.5rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem 1.5rem; }
+  @media (min-width: 640px) { .client-grid { grid-template-columns: repeat(4, 1fr); } }
+  @media (min-width: 1024px) { .client-grid { grid-template-columns: repeat(8, 1fr); } }
+  .client { font-family: var(--font-heading); font-weight: 700; font-size: 0.9rem; letter-spacing: -0.01em; color: rgba(244,241,234,0.7); line-height: 1.3; }
+  .dim { color: rgba(244,241,234,0.5); }
+</style>

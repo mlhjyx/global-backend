@@ -1,0 +1,62 @@
+---
+interface Item { icon: string; titleKey: string; descKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleLine2Key: string;
+  introKey: string;
+  items: Item[];
+  learnKey?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { eyebrowKey, titleKey, titleLine2Key, introKey, items = [], learnKey = 'cta.learnMore', t, alt } = Astro.props;
+const accents = ['accent', 'secondary', 'accent', 'secondary', 'accent', 'secondary'];
+---
+
+<section class:list={['block', { alt }]} id="features">
+  <div class="container">
+    <div class="head reveal">
+      <div class="col-2">
+        <div class="eyebrow"><span class="dot"></span>{t(eyebrowKey)}</div>
+        <h2>{t(titleKey)}<br />{t(titleLine2Key)}</h2>
+      </div>
+      <p class="intro">{t(introKey)}</p>
+    </div>
+    <div class="grid">
+      {items.map((f, i) => (
+        <article class:list={['card', 'reveal', `accent-${accents[i % accents.length]}`]}>
+          <span class="icon"><i class={f.icon}></i></span>
+          <h3>{t(f.titleKey)}</h3>
+          <p>{t(f.descKey)}</p>
+          <span class="learn">{t(learnKey)}<i class="ri-arrow-right-line"></i></span>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
+  @media (min-width: 1024px) { .head { grid-template-columns: 2fr 1fr; align-items: end; } }
+  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.2em; color: var(--c-on-surface-muted); margin-bottom: 1.25rem; }
+  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-secondary); }
+  h2 { font-weight: 700; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.05; letter-spacing: -0.02em; }
+  .intro { font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; } }
+  .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius-lg); padding: clamp(1.5rem, 3vw, 2rem); transition: transform .3s ease; }
+  .card:hover { transform: translateY(-4px); }
+  .icon { display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: var(--radius); margin-bottom: 1.5rem; }
+  .accent-accent .icon { background: var(--c-accent); }
+  .accent-secondary .icon { background: var(--c-secondary); }
+  .icon i { font-size: 1.25rem; color: var(--c-on-surface); }
+  .card h3 { font-weight: 700; font-size: 1.25rem; margin-bottom: 0.75rem; }
+  .card p { font-size: 0.9rem; line-height: 1.65; color: var(--c-on-surface-muted); }
+  .learn { display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 1.5rem; font-size: 0.85rem; font-weight: 500; }
+  .learn i { transition: transform .3s ease; }
+  .card:hover .learn i { transform: translateX(3px); }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .8s ease, transform .8s cubic-bezier(0.22,1,0.36,1); }
+  .reveal { opacity: 1; transform: translateY(0); }
+</style>

@@ -1,0 +1,65 @@
+---
+interface Stat { value: number; suffix?: string; labelKey: string }
+interface Props {
+  stats: Stat[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { stats = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', 'stats-dark', { alt }]}>
+  <div class="container">
+    <div class="grid" data-stats>
+      {stats.map((s, i) => (
+        <div class="stat reveal" style={`transition-delay:${i * 120}ms`}>
+          <p class="value">
+            <span class="num" data-end={s.value} data-suffix={s.suffix ?? ''}>0</span>
+            <span class="suffix">{s.suffix ?? ''}</span>
+          </p>
+          <p class="label">{t(s.labelKey)}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script>
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.querySelectorAll<HTMLElement>('[data-stats]').forEach((root) => {
+    const nums = Array.from(root.querySelectorAll<HTMLElement>('.num'));
+    const run = () => nums.forEach((el) => {
+      const end = parseFloat(el.dataset.end ?? '0');
+      const dur = 1800;
+      if (reduced) { el.textContent = String(end); return; }
+      const start = performance.now();
+      const step = (now: number) => {
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = String(Math.round(end * eased));
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => { if (e.isIntersecting) { run(); io.disconnect(); } });
+      }, { threshold: 0.3 });
+      io.observe(root);
+    } else { run(); }
+  });
+</script>
+
+<style>
+  .stats-dark { background: var(--c-primary); color: var(--c-on-dark); }
+  .stats-dark.alt { background: var(--c-surface); color: var(--c-on-surface); }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem 1.5rem; }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(4, 1fr); gap: 3rem; } }
+  .stat { display: flex; flex-direction: column; transition: opacity .7s ease, transform .7s ease; }
+  @media (min-width: 1024px) {
+    .stat:not(:first-child) { border-left: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding-left: 3rem; }
+  }
+  .value { font-family: var(--font-heading); font-weight: 500; font-size: clamp(3rem, 7vw, 5.5rem); line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .suffix { color: var(--c-accent); }
+  .label { margin-top: 1rem; font-size: 0.8rem; letter-spacing: 0.15em; text-transform: uppercase; opacity: 0.7; }
+</style>

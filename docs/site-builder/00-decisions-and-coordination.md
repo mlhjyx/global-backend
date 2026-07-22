@@ -7,7 +7,7 @@
 
 | 决策 | 内容 | 出处/日期 |
 |---|---|---|
-| **组件库 v1 = 26 型** | 17 → 26（+Testimonials/PricingTable/TeamGrid/GalleryGrid/MarqueeStrip/IconFeatureGrid/HistoryTimeline/PageHeader/BackToTop）；v1.5 候选=NewsList 筛选/BeforeAfter/RegionsGrid；ScrollVideoHero/Interactive3DHero 不进封闭库 | **ADR-015 / D12**；11 号仅保留历史研究证据 |
+| **组件库 v1 = 55 型** | 17 → 55（+Testimonials/PricingTable/TeamGrid/GalleryGrid/MarqueeStrip/IconFeatureGrid/HistoryTimeline/PageHeader/BackToTop）；v1.5 候选=NewsList 筛选/BeforeAfter/RegionsGrid；ScrollVideoHero/Interactive3DHero 不进封闭库 | **ADR-015 / D12**；11 号仅保留历史研究证据 |
 | **🔴 R0-3 虚构身份红线** | demo-spec/文案**只用 intake 事实**；对未知企业类型**禁止**默认写 manufacturer/engineering team/QC/export packaging/认证/产能/年限/客户。缺=**中性措辞**（supplier/supply），绝不虚构 | 01 事实红线 + **[ADR-017](../adr/registry.md)**；✅ #123 已合并：确定性模板、`sanitizePolish`、提示词与强制守卫四处收口。后续任何 demo-spec 改动都必须保持该守卫绿 |
 | **R0 intake 行为与契约** | 有/无旧站都无条件在同一 Site 发起 Demo；`hasWebsite/websiteUrl` 仅作背景。正式客户端使用 `Idempotency-Key`，响应固定为 `{siteId,buildId,status:"generating_demo"}` | ✅ #121 已去掉行为分叉；✅ #126 已补齐持久幂等、Temporal 启动证据、稳定错误码及 Swagger/OpenAPI，并移除响应 `mode` |
 | **R0-4/5/6 生产化加固** | 联系邮箱不进通用 KB/品牌 Prompt；copy polish 真取消；201 后异步失败保留 Site/intake 并可原地重试 | ✅ #124 已合并（含存量脱敏脚本、`setup_failed` 契约与迟到 cleanup 守卫） |

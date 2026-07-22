@@ -1,0 +1,66 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Dish { nameKey: string; seasonKey: string; noteKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  dishes: Dish[];
+  addLabelKey?: string;
+  addPageId?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, titleKey, titleAccentKey, dishes = [], addLabelKey = 'cta.addToMenu', addPageId = 'services', t, alt, locale, defaultLocale } = Astro.props;
+const addHref = localePageHref(addPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head reveal">
+      <span class="eyebrow-accent">{t(eyebrowKey)}</span>
+      <h2 class="serif-title">{t(titleKey)}<em>{t(titleAccentKey)}</em></h2>
+    </div>
+    <div class="grid">
+      {dishes.map((d) => (
+        <article class="card reveal">
+          <div class="ph">
+            <i class="ri-restaurant-2-line"></i>
+            <span class="season"><i class="ri-sparkling-2-line"></i>{t(d.seasonKey)}</span>
+          </div>
+          <div class="body">
+            <h3>{t(d.nameKey)}</h3>
+            <p class="note">{t(d.noteKey)}</p>
+            <a class="add" href={addHref}>{t(addLabelKey)}<i class="ri-arrow-right-up-line"></i></a>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { max-width: 36rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
+  .eyebrow-accent { font-size: 0.7rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--c-accent-strong); }
+  .serif-title { margin-top: 1rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.1; }
+  .serif-title em { font-style: italic; font-weight: 400; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(3, 1fr); gap: 2rem; } }
+  .card { display: flex; flex-direction: column; border-radius: var(--radius-lg); overflow: hidden; background: var(--c-surface-alt); border: 1px solid var(--c-border); transition: border-color .3s ease; }
+  .card:hover { border-color: var(--c-accent); }
+  .ph { position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; background:
+      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 16%, transparent), transparent 60%),
+      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); }
+  .ph i { font-size: 3rem; color: rgba(0,0,0,0.15); }
+  .season { position: absolute; top: 1rem; left: 1rem; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.75rem; border-radius: 9999px; background: color-mix(in srgb, var(--c-surface) 85%, transparent); backdrop-filter: blur(4px); font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--c-on-surface); }
+  .season i { font-size: 0.85rem; color: var(--c-accent-strong); }
+  .body { padding: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .body h3 { font-family: var(--font-heading); font-weight: 500; font-size: clamp(1.25rem, 2vw, 1.5rem); line-height: 1.25; }
+  .note { font-size: 0.875rem; color: var(--c-on-surface-muted); }
+  .add { margin-top: 0.75rem; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--c-primary); }
+  .add i { transition: transform .3s ease; }
+  .add:hover i { transform: translate(2px, -2px); }
+</style>

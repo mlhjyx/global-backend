@@ -1,0 +1,132 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "biotech-minimal" },
+    "nav": [
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "Neura/Bio" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "MinimalHero", "props": { "id": "MinimalHero-1",
+          "eyebrowKey": "hero.eyebrow", "h1Key": "hero.h1", "h1AccentKey": "hero.h1a", "subKey": "hero.sub",
+          "cta1Key": "hero.cta1", "cta2Key": "hero.cta2", "scrollKey": "hero.scroll"
+        } },
+        { "type": "StatementBlock", "props": { "id": "StatementBlock-1", "alt": true,
+          "labelKey": "stmt.label", "statementKey": "stmt.text"
+        } },
+        { "type": "LogoMarquee", "props": { "id": "LogoMarquee-1",
+          "eyebrowKey": "partners.eyebrow", "titleKey": "partners.title",
+          "items": ["Broad Institute", "Sanger", "Genentech", "Vertex", "Moderna", "BioNTech", "Ginkgo", "Recursion"]
+        } },
+        { "type": "ServicesGrid", "props": { "id": "ServicesGrid-1", "alt": true,
+          "eyebrowKey": "cap.eyebrow", "titleKey": "cap.title", "titleAccentKey": "cap.titleAccent", "introKey": "cap.intro",
+          "allLabelKey": "cap.all", "allPageId": "home", "bookLabelKey": "cap.discover", "bookPageId": "home",
+          "services": [
+            { "icon": "ri-robot-line", "titleKey": "cap.c1.t", "descKey": "cap.c1.d" },
+            { "icon": "ri-test-tube-line", "titleKey": "cap.c2.t", "descKey": "cap.c2.d" },
+            { "icon": "ri-brain-line", "titleKey": "cap.c3.t", "descKey": "cap.c3.d" }
+          ]
+        } },
+        { "type": "StatsCountup", "props": { "id": "StatsCountup-1",
+          "stats": [
+            { "value": 24, "suffix": "/7", "labelKey": "stat.s1" },
+            { "value": 180, "suffix": "k", "labelKey": "stat.s2" },
+            { "value": 12, "suffix": "", "labelKey": "stat.s3" },
+            { "value": 37, "suffix": "", "labelKey": "stat.s4" }
+          ]
+        } },
+        { "type": "Testimonials", "props": { "id": "Testimonials-1", "alt": true,
+          "eyebrowKey": "testi.eyebrow",
+          "items": [
+            { "quoteKey": "testi.t1.q", "nameKey": "testi.t1.n", "postcodeKey": "testi.t1.r", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t2.q", "nameKey": "testi.t2.n", "postcodeKey": "testi.t2.r", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t3.q", "nameKey": "testi.t3.n", "postcodeKey": "testi.t3.r", "rating": 5, "platformKey": "testi.platform" }
+          ]
+        } },
+        { "type": "FaqSplit", "props": { "id": "FaqSplit-1",
+          "eyebrowKey": "faq.eyebrow", "titleKey": "faq.title", "titleAccentKey": "faq.titleAccent", "introKey": "faq.intro",
+          "items": [
+            { "qKey": "faq.q1", "aKey": "faq.a1" },
+            { "qKey": "faq.q2", "aKey": "faq.a2" },
+            { "qKey": "faq.q3", "aKey": "faq.a3" },
+            { "qKey": "faq.q4", "aKey": "faq.a4" }
+          ]
+        } },
+        { "type": "MediaCta", "props": { "id": "MediaCta-1",
+          "eyebrowKey": "closing.eyebrow", "titleKey": "closing.title", "titleAccentKey": "closing.titleAccent", "subKey": "closing.sub",
+          "primaryCta": { "labelKey": "closing.cta1", "pageId": "book" },
+          "secondaryCta": { "labelKey": "closing.cta2", "pageId": "home" },
+          "primaryIcon": "ri-play-fill"
+        } }
+      ] }
+    },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "book.title", "subKey": "book.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.book": "Request a demo",
+      "brand.tagline": "Robotic cell engineering",
+      "contact.phone": "", "contact.whatsapp": "", "contact.email": "hello@neura.bio",
+      "footer.intro": "Neura/Bio designs machines that design medicine - robotic islands that culture, perturb, and read living cells.",
+      "footer.available": "Cambridge · Live", "footer.exploreTitle": "Platform", "footer.contactTitle": "Get in touch",
+      "footer.bookTitle": "Request a demo", "footer.bookNote": "See the platform run a real experiment.",
+      "footer.badgeQualified": "24/7 uptime", "footer.badgeInsured": "ISO 9001",
+      "footer.area": "Cambridge, UK", "footer.privacy": "Privacy", "footer.terms": "Research", "footer.insurance": "Contact",
+
+      "seo.home.title": "Neura/Bio - Robotic Cell Engineering",
+      "seo.home.desc": "We design machines that design medicine - robotic islands that culture, perturb, and read living cells.",
+      "seo.book.title": "Request a Demo - Neura/Bio", "seo.book.desc": "See the platform run a real experiment.",
+
+      "hero.eyebrow": "A robotic cell engineering company",
+      "hero.h1": "We design machines that", "hero.h1a": "design medicine.",
+      "hero.sub": "Robotic islands that culture, perturb, and read living cells with the patience of an artisan and the cadence of a metronome.",
+      "hero.cta1": "Request a live demo", "hero.cta2": "Watch the 2-minute film", "hero.scroll": "Scroll",
+
+      "stmt.label": "A robotic cell engineering company",
+      "stmt.text": "We design machines that design medicine - robotic islands that culture, perturb, and read living cells with the patience of an artisan and the cadence of a metronome.",
+
+      "partners.eyebrow": "Trusted by leading labs", "partners.title": "Built with the best.",
+
+      "cap.eyebrow": "Capabilities", "cap.title": "Three disciplines,", "cap.titleAccent": "one continuous loop.",
+      "cap.intro": "Modular robotic islands run 24/7 across cell culture, assay, and analytics - orchestrated by a single scheduler.",
+      "cap.all": "Read the research", "cap.discover": "Discover",
+      "cap.c1.t": "Autonomous wet labs that never sleep", "cap.c1.d": "Modular robotic islands run 24/7 across cell culture, assay, and analytics - orchestrated by a single scheduler designed in-house in Cambridge.",
+      "cap.c2.t": "Designed therapies, validated in days", "cap.c2.d": "A closed-loop pipeline turns hypothesis into wet-lab evidence inside a single working week - collapsing months of conventional screening.",
+      "cap.c3.t": "Foundation models for living systems", "cap.c3.d": "Trained on petabytes of proprietary perturbation data, our models propose, prioritize, and re-design experiments without a human in the loop.",
+
+      "stat.s1": "Continuous experiment uptime", "stat.s2": "Cell-line assays per quarter", "stat.s3": "Therapeutic programs underway", "stat.s4": "Peer-reviewed publications",
+
+      "testi.eyebrow": "What partners say", "testi.platform": "Research partner",
+      "testi.t1.q": "Neura/Bio collapsed a six-month screening campaign into a single week. The platform's reproducibility is genuinely unmatched.", "testi.t1.n": "Dr. Lena Fischer", "testi.t1.r": "Principal Investigator, Sanger",
+      "testi.t2.q": "Their robotic islands run with a cadence our manual labs could never match. We scaled three programs in parallel without hiring.", "testi.t2.n": "Prof. Arjun Mehta", "testi.t2.r": "Head of Translational, Vertex",
+      "testi.t3.q": "The closed-loop pipeline is the first time a platform has proposed an experiment we hadn't already thought of - and been right.", "testi.t3.n": "Dr. Yuki Tanaka", "testi.t3.r": "Director, Broad Institute",
+
+      "faq.eyebrow": "FAQ", "faq.title": "Questions", "faq.titleAccent": "answered.", "faq.intro": "Everything we get asked before a demo.",
+      "faq.q1": "Do you work with academic labs?", "faq.a1": "Yes. We partner with institutes on shared-risk programs and offer subsidized access for peer-reviewed, pre-competitive research.",
+      "faq.q2": "What cell types do you support?", "faq.a2": "Adherent and suspension mammalian lines, organoids, and primary patient-derived cultures. iPSC workflows are in late beta.",
+      "faq.q3": "How long is a typical experiment?", "faq.a3": "Most perturbation screens complete within five working days end-to-end, including analytics. Larger panels scale linearly.",
+      "faq.q4": "Who owns the data?", "faq.a4": "You do. All raw and processed data is delivered in open formats and deleted from our systems 90 days after handoff, unless you opt in to retention.",
+
+      "closing.eyebrow": "Live demo", "closing.title": "Want to see the platform", "closing.titleAccent": "run a real experiment?",
+      "closing.sub": "Book a live demo and watch a perturbation screen run end-to-end on the floor.",
+      "closing.cta1": "Request a live demo", "closing.cta2": "Watch the 2-minute film",
+
+      "book.title": "Request a live demo.", "book.sub": "See the platform run a real experiment, end-to-end.",
+      "inquiry.title": "Request a live demo.", "inquiry.sub": "We'll set up a live run on the floor.",
+      "inquiry.field.name": "Your name", "inquiry.field.email": "Work email", "inquiry.field.message": "Tell us about your research",
+      "inquiry.submit": "Request demo", "inquiry.m0.note": "We'll set up a live run on the floor."
+    }
+  }
+}

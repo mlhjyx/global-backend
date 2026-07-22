@@ -2,7 +2,7 @@
 
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
-> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；BrandProfile 有 MODEL-1 task-shaped 评测。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**，不能宣称 copy MODEL-1 晋级。design/assemble/QA/审美等其余目标仍未覆盖；26 型封闭组件库仍是 M1-e 目标，当前 10 型 as-built。
+> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；BrandProfile 有 MODEL-1 task-shaped 评测。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**，不能宣称 copy MODEL-1 晋级。design/assemble/QA/审美等其余目标仍未覆盖；55 型封闭组件库已落地（蒸馏），当前 55 型 as-built。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 

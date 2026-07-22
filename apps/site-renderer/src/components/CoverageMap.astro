@@ -1,0 +1,98 @@
+---
+interface Area { name: string }
+interface Pin { labelKey: string; subKey: string; top: string; left: string; pulse?: boolean }
+interface Props {
+  chapterKey: string;
+  titleKey: string;
+  titleLine2Key: string;
+  bodyKey: string;
+  indexLabelKey: string;
+  areas: Area[];
+  footnoteKey: string;
+  pins: Pin[];
+  plateLabelKey: string;
+  updatedKey: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { chapterKey, titleKey, titleLine2Key, bodyKey, indexLabelKey, areas = [], footnoteKey, pins = [], plateLabelKey, updatedKey, t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="coverage">
+  <div class="container wide">
+    <div class="head">
+      <div class="col-3"><div class="mono-tag">{t(chapterKey)}</div></div>
+      <div class="col-9">
+        <h2 class="display">{t(titleKey)}<br />{t(titleLine2Key)}</h2>
+        <p class="body">{t(bodyKey)}</p>
+      </div>
+    </div>
+
+    <div class="grid-12">
+      <div class="index">
+        <div class="index-head">
+          <span>{t(indexLabelKey)}</span>
+          <span>{String(areas.length).padStart(2, '0')} / {String(areas.length).padStart(2, '0')}</span>
+        </div>
+        <ul>
+          {areas.map((a, i) => (
+            <li>
+              <span class="idx-name"><span class="idx-num">{String(i + 1).padStart(2, '0')}</span>{a.name}</span>
+              <span class="idx-cta">24/7 -&gt;</span>
+            </li>
+          ))}
+        </ul>
+        <div class="index-foot">{t(footnoteKey)}</div>
+      </div>
+
+      <div class="map">
+        <div class="map-bg"></div>
+        <div class="map-overlay"></div>
+        {pins.map((p) => (
+          <div class="pin" style={`top:${p.top};left:${p.left}`}>
+            <div class="pin-dot">{p.pulse && <div class="pin-flicker"></div>}</div>
+            <div class="pin-label">{t(p.subKey)} · {t(p.labelKey)}</div>
+          </div>
+        ))}
+        <div class="map-foot">
+          <div><div class="dim">PLATE 02</div><div class="map-value">{t(plateLabelKey)}</div></div>
+          <div class="dim right-align">{t(updatedKey)}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .wide { max-width: 88rem; }
+  .head { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: 3rem; }
+  @media (min-width: 768px) { .head { grid-template-columns: 3fr 9fr; } }
+  .mono-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .display { margin-top: 1rem; font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 0.95; letter-spacing: -0.02em; }
+  .body { margin-top: 1.5rem; max-width: 34rem; line-height: 1.7; color: color-mix(in srgb, var(--c-on-surface) 75%, transparent); }
+  .grid-12 { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+  @media (min-width: 1024px) { .grid-12 { grid-template-columns: 5fr 7fr; } }
+  .index { background: color-mix(in srgb, var(--c-surface-alt) 50%, transparent); border: 1px solid rgba(31,31,31,0.1); }
+  .index-head { padding: 1rem 1.5rem; border-bottom: 1px solid rgba(31,31,31,0.1); display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .index ul { list-style: none; margin: 0; padding: 0; }
+  .index li { padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(31,31,31,0.08); transition: background .2s ease; }
+  .index li:hover { background: color-mix(in srgb, var(--c-surface) 60%, transparent); }
+  .index li:last-child { border-bottom: none; }
+  .idx-name { display: flex; align-items: center; gap: 1rem; font-family: var(--font-heading); font-weight: 700; font-size: 1.1rem; }
+  .idx-num { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: var(--c-on-surface-muted); }
+  .idx-cta { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); transition: color .2s ease; }
+  .index li:hover .idx-cta { color: var(--c-accent); }
+  .index-foot { padding: 1.25rem 1.5rem; border-top: 1px solid rgba(31,31,31,0.1); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .map { position: relative; min-height: 26rem; overflow: hidden; background: var(--c-secondary); }
+  .map-bg { position: absolute; inset: 0; background: radial-gradient(50% 40% at 50% 50%, color-mix(in srgb, var(--c-accent) 10%, transparent), transparent 60%), linear-gradient(140deg, #2a2a2a, #0e0e0e); }
+  .map-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.3), transparent 40%, rgba(0,0,0,0.1)); }
+  .pin { position: absolute; transform: translate(-50%, -50%); }
+  .pin-dot { position: relative; width: 0.75rem; height: 0.75rem; background: var(--c-accent); }
+  .pin-flicker { position: absolute; inset: -8px; border: 1px solid color-mix(in srgb, var(--c-accent) 70%, transparent); animation: flicker 1.8s ease-in-out infinite; }
+  @keyframes flicker { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .pin-label { margin-top: 0.5rem; padding: 0.25rem 0.5rem; background: var(--c-primary); color: var(--c-on-dark); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; white-space: nowrap; }
+  .map-foot { position: absolute; bottom: 1.5rem; left: 1.5rem; right: 1.5rem; display: flex; justify-content: space-between; align-items: flex-end; color: var(--c-on-dark); }
+  .dim { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(244,241,234,0.7); }
+  .map-value { margin-top: 0.25rem; font-family: var(--font-heading); font-weight: 700; font-size: 1.25rem; }
+  .right-align { text-align: right; }
+</style>

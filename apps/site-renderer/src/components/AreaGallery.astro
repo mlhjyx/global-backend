@@ -1,0 +1,81 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Area { name: string; postcodes: string; noteKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  allLabelKey?: string;
+  allPageId?: string;
+  areas: Area[];
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const {
+  eyebrowKey, titleKey, titleAccentKey, allLabelKey, allPageId = 'area',
+  areas = [], t, alt, locale, defaultLocale,
+} = Astro.props;
+const allHref = localePageHref(allPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head">
+      <div class="reveal">
+        <span class="eyebrow">{t(eyebrowKey)}</span>
+        <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
+      </div>
+      {allLabelKey && (
+        <a class="btn btn-outline btn-sm reveal" href={allHref}>
+          {t(allLabelKey)}<i class="ri-arrow-right-line"></i>
+        </a>
+      )}
+    </div>
+
+    <div class="grid">
+      {areas.map((a) => (
+        <div class="card reveal">
+          <div class="ph"><i class="ri-map-pin-2-line"></i></div>
+          <div class="body">
+            <div class="row">
+              <p class="name">{a.name}</p>
+              <span class="postcodes">{a.postcodes}</span>
+            </div>
+            <p class="muted note">{t(a.noteKey)}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: clamp(2rem, 4vw, 3rem); }
+  @media (min-width: 768px) { .head { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+  .card {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    transition: transform .3s ease, border-color .3s ease;
+  }
+  .card:hover { transform: translateY(-4px); border-color: var(--c-on-surface-subtle); }
+  .ph {
+    aspect-ratio: 3 / 4;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(60% 45% at 50% 30%, color-mix(in srgb, var(--c-primary) 16%, transparent), transparent 70%),
+      linear-gradient(160deg, var(--c-surface-alt2), var(--c-surface-alt));
+  }
+  .ph i { font-size: 2.5rem; color: var(--c-on-surface-subtle); }
+  .body { padding: 1rem 1.1rem; background: var(--c-surface); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .name { font-family: var(--font-heading); font-weight: 600; font-size: 1.05rem; }
+  .postcodes { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--c-on-surface-muted); }
+  .note { margin-top: 0.25rem; font-size: 0.8rem; }
+</style>

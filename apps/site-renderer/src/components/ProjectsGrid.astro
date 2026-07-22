@@ -1,0 +1,66 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Item { titleKey: string; descKey: string }
+interface Props {
+  titleKey: string;
+  allLabelKey?: string;
+  allPageId?: string;
+  items: Item[];
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const { titleKey, allLabelKey, allPageId = 'projects', items = [], t, alt, locale, defaultLocale } = Astro.props;
+const allHref = localePageHref(allPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head">
+      <h2 class="display">{t(titleKey)}</h2>
+      {allLabelKey && (
+        <a class="pill" href={allHref}>
+          {t(allLabelKey)}<i class="ri-arrow-right-line"></i>
+        </a>
+      )}
+    </div>
+    <div class="grid">
+      {items.map((it) => (
+        <a class="card reveal" href={allHref}>
+          <div class="ph">
+            <i class="ri-book-2-line"></i>
+            <div class="overlay"></div>
+          </div>
+          <div class="cap">
+            <h3>{t(it.titleKey)}</h3>
+            <p>{t(it.descKey)}</p>
+          </div>
+        </a>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); flex-wrap: wrap; }
+  .display { font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.25rem, 5vw, 3.75rem); letter-spacing: -0.02em; }
+  .pill { display: inline-flex; align-items: center; gap: 0.5rem; border: 1px solid var(--c-on-surface); color: var(--c-on-surface); padding: 0.6rem 1.25rem; border-radius: 9999px; font-size: 0.875rem; transition: background .3s ease, color .3s ease; white-space: nowrap; }
+  .pill:hover { background: var(--c-on-surface); color: var(--c-surface); }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); gap: 2rem; } }
+  .card { position: relative; display: block; overflow: hidden; border-radius: var(--radius); }
+  .ph { position: relative; aspect-ratio: 1 / 1; overflow: hidden; background: var(--c-surface-alt2); display: grid; place-items: center; }
+  .ph i { font-size: 3.5rem; color: rgba(255,255,255,0.35); z-index: 1; }
+  .ph::before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(60% 50% at 30% 30%, color-mix(in srgb, var(--c-accent) 14%, transparent), transparent 60%),
+      linear-gradient(135deg, #2a2a2a, #0e0e0e);
+  }
+  .overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.55), transparent 50%); }
+  .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: clamp(1.25rem, 3vw, 2rem); color: var(--c-on-dark); }
+  .cap h3 { font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.25rem, 2.5vw, 1.875rem); letter-spacing: -0.01em; }
+  .cap p { margin-top: 0.5rem; font-size: 0.85rem; color: rgba(255,255,255,0.8); max-width: 28rem; }
+</style>

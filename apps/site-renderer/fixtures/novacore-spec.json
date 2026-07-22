@@ -1,0 +1,122 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "industrial-power" },
+    "nav": [
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "NOVACORE" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "IndustrialHero", "props": { "id": "IndustrialHero-1",
+          "badgeKey": "hero.badge", "badgeSubKey": "hero.badgeSub",
+          "leftH1Key": "hero.lh1", "leftH1AccentKey": "hero.lh1a", "leftSubKey": "hero.lsub",
+          "leftStats": [ { "value": "98.6", "suffix": "%", "labelKey": "hero.stat1" }, { "value": "2.4M", "suffix": "+", "labelKey": "hero.stat2" } ],
+          "rightH1Key": "hero.rh1", "rightH2aKey": "hero.rh2a", "rightH2bAccentKey": "hero.rh2a2",
+          "rightSubKey": "hero.rsub", "cta1Key": "hero.cta1", "cta2Key": "hero.cta2"
+        } },
+        { "type": "ProductShowcaseAlt", "props": { "id": "ProductShowcaseAlt-1", "alt": true,
+          "chapterKey": "prod.chapter", "titleKey": "prod.title", "titleAccentKey": "prod.titleAccent", "introKey": "prod.intro",
+          "configureKey": "cta.configure", "f1Key": "prod.f1", "f2Key": "prod.f2", "f3Key": "prod.f3",
+          "products": [
+            { "code": "NC-01", "nameKey": "prod.p1.n", "taglineKey": "prod.p1.t", "capacityKey": "prod.p1.cap", "weightKey": "prod.p1.w", "cyclesKey": "prod.p1.cy", "priceKey": "prod.p1.pr" },
+            { "code": "NC-02", "nameKey": "prod.p2.n", "taglineKey": "prod.p2.t", "capacityKey": "prod.p2.cap", "weightKey": "prod.p2.w", "cyclesKey": "prod.p2.cy", "priceKey": "prod.p2.pr" },
+            { "code": "NC-03", "nameKey": "prod.p3.n", "taglineKey": "prod.p3.t", "capacityKey": "prod.p3.cap", "weightKey": "prod.p3.w", "cyclesKey": "prod.p3.cy", "priceKey": "prod.p3.pr" },
+            { "code": "NC-04", "nameKey": "prod.p4.n", "taglineKey": "prod.p4.t", "capacityKey": "prod.p4.cap", "weightKey": "prod.p4.w", "cyclesKey": "prod.p4.cy", "priceKey": "prod.p4.pr" }
+          ]
+        } },
+        { "type": "TechSystems", "props": { "id": "TechSystems-1",
+          "chapterKey": "tech.chapter", "titleKey": "tech.title", "titleAccentKey": "tech.titleAccent", "introKey": "tech.intro", "liveKey": "tech.live",
+          "systems": [
+            { "label": "Cell Array", "titleKey": "tech.s1.t", "descKey": "tech.s1.d", "metric": "± 0.02", "suffix": "V", "metricLabelKey": "tech.s1.m" },
+            { "label": "Smart BMS", "titleKey": "tech.s2.t", "descKey": "tech.s2.d", "metric": "400", "suffix": "Hz", "metricLabelKey": "tech.s2.m" },
+            { "label": "Thermal Skin", "titleKey": "tech.s3.t", "descKey": "tech.s3.d", "metric": "31", "suffix": "%", "metricLabelKey": "tech.s3.m" },
+            { "label": "Forged Shell", "titleKey": "tech.s4.t", "descKey": "tech.s4.d", "metric": "2.4", "suffix": "m", "metricLabelKey": "tech.s4.m" }
+          ]
+        } },
+        { "type": "ArticleGrid", "props": { "id": "ArticleGrid-1", "alt": true,
+          "eyebrowKey": "res.eyebrow", "titleKey": "res.title", "titleLine2Key": "res.title2", "introKey": "res.intro",
+          "items": [
+            { "cat": "Field Reports", "titleKey": "res.a1.t", "descKey": "res.a1.d", "readTime": "8 min" },
+            { "cat": "Engineering", "titleKey": "res.a2.t", "descKey": "res.a2.d", "readTime": "6 min" },
+            { "cat": "Press", "titleKey": "res.a3.t", "descKey": "res.a3.d", "readTime": "3 min" },
+            { "cat": "Engineering", "titleKey": "res.a4.t", "descKey": "res.a4.d", "readTime": "5 min" },
+            { "cat": "Field Reports", "titleKey": "res.a5.t", "descKey": "res.a5.d", "readTime": "7 min" },
+            { "cat": "Press", "titleKey": "res.a6.t", "descKey": "res.a6.d", "readTime": "2 min" }
+          ]
+        } },
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-1",
+          "titleKey": "contact.title", "subKey": "contact.sub"
+        } }
+      ] }
+    },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "contact.title", "subKey": "contact.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.book": "Contact engineering",
+      "brand.tagline": "Industrial Power",
+      "contact.phone": "+49 711 4801 2200", "contact.whatsapp": "", "contact.email": "engineering@novacore.energy",
+      "footer.intro": "NOVACORE builds robotically-calibrated power cells engineered for the workshop, the warehouse, and everything in between.",
+      "footer.available": "Stuttgart HQ · Live", "footer.exploreTitle": "Product", "footer.contactTitle": "Engineering",
+      "footer.bookTitle": "Spec a pack", "footer.bookNote": "An engineer replies within one working day - not a brochure.",
+      "footer.badgeQualified": "IP67 sealed", "footer.badgeInsured": "2.4m drop tested",
+      "footer.area": "Werkstraße 14, Stuttgart", "footer.privacy": "Privacy", "footer.terms": "Spec sheet", "footer.insurance": "Warranty",
+
+      "seo.home.title": "NOVACORE - Precision Industrial Power Cells",
+      "seo.home.desc": "Robotically calibrated cells engineered for the workshop, the warehouse, and everything in between.",
+      "seo.book.title": "Contact Engineering - NOVACORE", "seo.book.desc": "Tell us what you're powering.",
+
+      "hero.badge": "Gen 04", "hero.badgeSub": "/ Industrial Power",
+      "hero.lh1": "Precision", "hero.lh1a": "Power.",
+      "hero.lsub": "Robotically calibrated cells engineered for the workshop, the warehouse, and everything in between.",
+      "hero.stat1": "Yield Rate", "hero.stat2": "Units Shipped",
+      "hero.rh1": "Built to", "hero.rh2a": "Out", "hero.rh2a2": "last.",
+      "hero.rsub": "Every cell is hand-selected, robot-tested and serialized - so your tools never miss a beat on site.",
+      "hero.cta1": "Explore lineup", "hero.cta2": "Spec sheet",
+
+      "prod.chapter": "01 / The Lineup", "prod.title": "Four cells.", "prod.titleAccent": "One obsession.",
+      "prod.intro": "Each NOVACORE cell is built to survive a worst-day-on-site test before it ever earns a serial number. Pick the size - we already handled the punishment.",
+      "prod.f1": "IP67 sealed - dust + jet-water proof", "prod.f2": "Operates -20°C to 60°C without throttle", "prod.f3": "30-min fast charge with NovaDock station",
+      "prod.p1.n": "Apex 18V", "prod.p1.t": "Universal Job-Site Pack", "prod.p1.cap": "9.0 Ah", "prod.p1.w": "684 g", "prod.p1.cy": "2,400+ cycles", "prod.p1.pr": "$129",
+      "prod.p2.n": "Forge 36V", "prod.p2.t": "High-Draw Workshop Cell", "prod.p2.cap": "12.0 Ah", "prod.p2.w": "1.12 kg", "prod.p2.cy": "2,100+ cycles", "prod.p2.pr": "$249",
+      "prod.p3.n": "Pulse Mini", "prod.p3.t": "Compact Field Module", "prod.p3.cap": "5.5 Ah", "prod.p3.w": "412 g", "prod.p3.cy": "1,800+ cycles", "prod.p3.pr": "$89",
+      "prod.p4.n": "Titan XL", "prod.p4.t": "Heavy Equipment Reserve", "prod.p4.cap": "24.0 Ah", "prod.p4.w": "2.86 kg", "prod.p4.cy": "3,000+ cycles", "prod.p4.pr": "$489",
+
+      "products.capacity": "Capacity", "products.weight": "Weight", "products.cycles": "Cycles", "products.from": "From",
+
+      "tech.chapter": "02 / Inside the Pack", "tech.title": "The four systems that", "tech.titleAccent": "never compromise.", "tech.live": "Live System",
+      "tech.intro": "Tools fail when their power source flinches. We built four independent systems whose only job is to make sure your pack never flinches - not on day one, and not on day three thousand.",
+      "tech.s1.t": "Hand-tiered cells, robot-matched.", "tech.s1.d": "Every individual lithium cell is graded across 14 voltage curves, then matched into packs by an autonomous robotic line - so the weakest cell in any pack still outperforms the industry average.", "tech.s1.m": "Cell-to-cell tolerance",
+      "tech.s2.t": "A brain in every battery.", "tech.s2.d": "NovaSync BMS samples each cell 400 times per second, balancing current to keep the entire pack inside a perfect thermal corridor - even on a 60°C asphalt roof.", "tech.s2.m": "Sample rate per cell",
+      "tech.s3.t": "Heat goes out. Cold stays out.", "tech.s3.d": "A phase-change polymer skin absorbs heat spikes during peak draw and re-radiates it during idle. Same cells, 30% longer service life on heavy-duty tools.", "tech.s3.m": "Internal heat-soak",
+      "tech.s4.t": "Built like the tools it powers.", "tech.s4.d": "A glass-filled nylon mono-shell tested at 2.4m drops onto raw concrete, then back into service - no recalibration, no re-pairing. Just keep working.", "tech.s4.m": "Concrete-drop verified",
+
+      "res.eyebrow": "04 / Field Notes", "res.title": "We document everything", "res.title2": "we put through hell.",
+      "res.intro": "Engineering write-ups, field journals, and the occasional bit of press. No fluff - just what the team learned this week.",
+      "res.a1.t": "What 14 months on a North-Sea rig taught us about IP-ratings.", "res.a1.d": "Sixty packs went out. Sixty came back. Here's everything our crew measured between sunrise pours and 4am gale tests.",
+      "res.a2.t": "Why we sample every cell 400 times a second (and why slower hurts).", "res.a2.d": "A look inside the firmware loop that lets NovaSync BMS detect a failing cell three weeks before its voltage ever wobbles.",
+      "res.a3.t": "NOVACORE selected as battery partner for the 2027 Solar Challenge.", "res.a3.d": "Twenty student teams will run our Forge 36V packs in 48°C desert heat - and yes, we're sending engineers along for the ride.",
+      "res.a4.t": "Concrete drop tests, on purpose - the case for redundant shells.", "res.a4.d": "We dropped 240 packs onto raw concrete from 2.4 metres. Here's what survived, what didn't, and what we changed.",
+      "res.a5.t": "Three winters in Yukon: lithium chemistry meets -42°C reality.", "res.a5.d": "A heavy-equipment fleet ran our Titan XL through three full Canadian winters. The data turned out almost too clean to believe.",
+      "res.a6.t": "Forge 36V wins iF Industrial Design Award 2026.", "res.a6.d": "Recognized for engineering integrity and field-first ergonomics. The jury cited 'unmistakable purpose in every surface'.",
+
+      "cta.configure": "Configure", "cta.read": "Read",
+      "contact.title": "Tell us what you're powering.", "contact.sub": "An engineer (not a sales rep) replies within one working day, with a real recommendation - not a brochure.",
+      "inquiry.title": "Tell us what you're powering.", "inquiry.sub": "An engineer replies within one working day.",
+      "inquiry.field.name": "Full name", "inquiry.field.email": "Work email", "inquiry.field.message": "Crew size, tool brands, environment, anything quirky about your workflow",
+      "inquiry.submit": "Send to engineering", "inquiry.m0.note": "An engineer replies within one working day."
+    }
+  }
+}

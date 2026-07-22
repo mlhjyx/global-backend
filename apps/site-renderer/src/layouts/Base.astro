@@ -1,12 +1,33 @@
 ---
 import { themeToCssVars } from '../lib/themes';
-import { localePageHref, siteLocaleDirection } from '../lib/spec';
+import { localePageHref, siteLocaleDirection, safeOptionalSlot } from '../lib/spec';
 import '@fontsource/noto-sans/latin-400.css';
 import '@fontsource/noto-sans/latin-600.css';
 import '@fontsource/noto-sans/latin-700.css';
 import '@fontsource/noto-sans-arabic/arabic-400.css';
 import '@fontsource/noto-sans-arabic/arabic-600.css';
+import '@fontsource/bricolage-grotesque/500.css';
+import '@fontsource/bricolage-grotesque/600.css';
+import '@fontsource/bricolage-grotesque/700.css';
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/archivo/wght.css';
+import '@fontsource/fraunces/400.css';
+import '@fontsource/fraunces/500.css';
+import '@fontsource/fraunces/600.css';
+import '@fontsource/fraunces/400-italic.css';
+import '@fontsource/fraunces/500-italic.css';
+import '@fontsource/urbanist/400.css';
+import '@fontsource/urbanist/500.css';
+import '@fontsource/urbanist/600.css';
+import '@fontsource/urbanist/700.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/700.css';
+import '@fontsource/instrument-serif/400.css';
+import '@fontsource/instrument-serif/400-italic.css';
+import 'remixicon/fonts/remixicon.css';
 import type { MaterializedSpec } from '../lib/spec';
+import '../styles/global.css';
 
 interface Props {
   spec: MaterializedSpec;
@@ -14,10 +35,11 @@ interface Props {
   title: string;
   description: string;
   t: (key: string) => string;
+  pageId?: string;
 }
-const { spec, locale, title, description, t } = Astro.props;
+const { spec, locale, title, description, t, pageId } = Astro.props;
 const vars = themeToCssVars(spec.site.theme.preset, spec.site.theme.tokenOverrides ?? {});
-const fontFamily = locale === 'ar' ? 'Noto Sans Arabic' : 'Noto Sans';
+const fontFamily = locale === 'ar' ? 'Noto Sans Arabic' : 'Inter Variable';
 const styleVars = [
   ...Object.entries(vars),
   ['--font-locale', `'${fontFamily}'`] as const,
@@ -27,9 +49,19 @@ const styleVars = [
 const nav = spec.site.nav.map((n) => ({
   label: t(n.labelKey),
   href: localePageHref(n.pageId, locale, spec.site.defaultLocale),
+  pageId: n.pageId,
 }));
 const direction = siteLocaleDirection(locale);
 const homeHref = localePageHref('home', locale, spec.site.defaultLocale);
+const isHome = pageId === 'home';
+const brandName = spec.site.seoGlobal.siteName;
+// 联系方式/导航 slot 可选：缺 key 安全探测返回空（不 throw COPY_SLOT_MISSING），UI 按空值隐藏
+const safe = (k: string) => safeOptionalSlot(t, k);
+const phone = safe('contact.phone');
+const whatsapp = safe('contact.whatsapp');
+const email = safe('contact.email');
+const brandTagline = safe('brand.tagline');
+const bookLabel = safe('nav.book');
 ---
 
 <!doctype html>
@@ -42,100 +74,270 @@ const homeHref = localePageHref('home', locale, spec.site.defaultLocale);
     <title>{title}</title>
     <meta name="description" content={description} />
   </head>
-  <body style={styleVars}>
-    <header class="site-header">
-      <a class="brand" href={homeHref}>{spec.site.seoGlobal.siteName}</a>
-      <nav>
-        {nav.map((n) => <a href={n.href}>{n.label}</a>)}
-      </nav>
+  <body style={styleVars} data-page={pageId} class:list={[{ 'is-home': isHome }]}>
+    <header class="site-header" data-transparent-over-hero={isHome ? 'true' : 'false'}>
+      <div class="header-inner">
+        <a class="brand" href={homeHref}>
+          <span class="brand-mark"><i class="ri-flashlight-fill"></i></span>
+          <span class="brand-text">
+            <span class="brand-name">{brandName}</span>
+            {brandTagline && <span class="brand-sub">{brandTagline}</span>}
+          </span>
+        </a>
+
+        <nav class="nav-desktop">
+          {nav.map((n) => (
+            <a href={n.href} class:list={['nav-link', { active: n.pageId === pageId }]}>
+              {n.label}
+            </a>
+          ))}
+        </nav>
+
+        <div class="nav-actions">
+          {phone && (
+            <a class="nav-phone" href={`tel:${phone.replace(/\s+/g, '')}`}>
+              <i class="ri-phone-fill"></i><span>{phone}</span>
+            </a>
+          )}
+          {bookLabel && (
+            <a class="btn btn-accent btn-sm" href={localePageHref('book', locale, spec.site.defaultLocale)}>
+              {bookLabel}<i class="ri-arrow-right-up-line"></i>
+            </a>
+          )}
+          <button class="nav-toggle" type="button" aria-label="Toggle menu" aria-expanded="false">
+            <i class="ri-menu-3-line"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="nav-mobile">
+        <div class="nav-mobile-inner">
+          {nav.map((n) => (
+            <a href={n.href} class:list={['nav-mobile-link', { active: n.pageId === pageId }]}>
+              {n.label}
+            </a>
+          ))}
+          <div class="nav-mobile-cta">
+            {phone && (
+              <a class="btn btn-outline btn-sm" href={`tel:${phone.replace(/\s+/g, '')}`}>
+                <i class="ri-phone-fill"></i> Call
+              </a>
+            )}
+            {bookLabel && (
+              <a class="btn btn-accent btn-sm" href={localePageHref('book', locale, spec.site.defaultLocale)}>
+                {bookLabel} <i class="ri-arrow-right-up-line"></i>
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
     </header>
+
     <main><slot /></main>
+
     <footer class="site-footer">
-      <p>© {new Date().getFullYear()} {spec.site.seoGlobal.siteName}</p>
-      <p class="muted">{t('footer.tagline')}</p>
+      <div class="footer-card">
+        <div class="footer-grid">
+          <div class="footer-col footer-brand">
+            <div class="footer-brand-row">
+              <span class="brand-mark"><i class="ri-flashlight-fill"></i></span>
+              <span class="footer-brand-text">
+                <span class="brand-name">{brandName}</span>
+                {brandTagline && <span class="brand-sub">{brandTagline}</span>}
+              </span>
+            </div>
+            <p class="footer-intro">{safe('footer.intro')}</p>
+            <div class="footer-available">
+              <span class="pulse-dot"></span><span>{safe('footer.available')}</span>
+            </div>
+          </div>
+
+          <div class="footer-col">
+            <h4>{safe('footer.exploreTitle')}</h4>
+            <ul>
+              {nav.map((n) => <li><a href={n.href}>{n.label}</a></li>)}
+            </ul>
+          </div>
+
+          <div class="footer-col">
+            <h4>{safe('footer.contactTitle')}</h4>
+            <ul>
+              {phone && <li><a href={`tel:${phone.replace(/\s+/g, '')}`}><i class="ri-phone-fill"></i> {phone}</a></li>}
+              {whatsapp && <li><a href={`https://wa.me/${whatsapp}`}><i class="ri-whatsapp-line"></i> WhatsApp</a></li>}
+              {email && <li><a href={`mailto:${email}`}><i class="ri-mail-line"></i> {email}</a></li>}
+              {safe('footer.area') && <li class="muted-row"><i class="ri-map-pin-line"></i> {safe('footer.area')}</li>}
+            </ul>
+          </div>
+
+          <div class="footer-col">
+            <h4>{safe('footer.bookTitle')}</h4>
+            <p class="footer-book-note">{safe('footer.bookNote')}</p>
+            {bookLabel && (
+              <a class="btn btn-accent btn-sm" href={localePageHref('book', locale, spec.site.defaultLocale)}>
+                {bookLabel}<i class="ri-arrow-right-up-line"></i>
+              </a>
+            )}
+            <div class="footer-badges">
+              <span><i class="ri-shield-check-line"></i> {safe('footer.badgeQualified')}</span>
+              <span><i class="ri-check-double-line"></i> {safe('footer.badgeInsured')}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-watermark" aria-hidden="true">{brandName}</div>
+
+        <div class="footer-bottom">
+          <p>© {new Date().getFullYear()} {brandName}</p>
+          <div class="footer-legal">
+            <a href="#">{safe('footer.privacy')}</a>
+            <a href="#">{safe('footer.terms')}</a>
+            <a href="#">{safe('footer.insurance')}</a>
+          </div>
+        </div>
+      </div>
     </footer>
+
+    {bookLabel && pageId !== 'book' && (
+      <div class="mobile-cta">
+        {phone && (
+          <a class="mobile-cta-icon" href={`tel:${phone.replace(/\s+/g, '')}`} aria-label="Call"><i class="ri-phone-fill"></i></a>
+        )}
+        {whatsapp && (
+          <a class="mobile-cta-icon" href={`https://wa.me/${whatsapp}`} aria-label="WhatsApp"><i class="ri-whatsapp-line"></i></a>
+        )}
+        <a class="btn btn-accent mobile-cta-book" href={localePageHref('book', locale, spec.site.defaultLocale)}>
+          {bookLabel}<i class="ri-arrow-right-up-line"></i>
+        </a>
+      </div>
+    )}
   </body>
 </html>
 
-<style is:global>
-  * {
-    box-sizing: border-box;
-    margin: 0;
+<script>
+  // ---- Navbar: transparent over home hero, solid on scroll / non-home ----
+  const header = document.querySelector('.site-header') as HTMLElement | null;
+  if (header) {
+    const overHero = header.getAttribute('data-transparent-over-hero') === 'true';
+    const apply = () => {
+      const threshold = overHero ? Math.max(300, window.innerHeight * 0.7) : 20;
+      header.classList.toggle('scrolled', window.scrollY > threshold);
+    };
+    apply();
+    window.addEventListener('scroll', apply, { passive: true });
+    window.addEventListener('resize', apply);
   }
-  body {
-    font-family: var(--font-locale), var(--font-body), sans-serif;
-    color: var(--c-on-surface);
-    background: var(--c-surface);
-    line-height: 1.6;
+
+  // ---- Mobile menu ----
+  const toggle = document.querySelector('.nav-toggle') as HTMLButtonElement | null;
+  const mobile = document.querySelector('.nav-mobile') as HTMLElement | null;
+  if (toggle && mobile) {
+    toggle.addEventListener('click', () => {
+      const open = mobile.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.querySelector('i')!.className = open ? 'ri-close-line' : 'ri-menu-3-line';
+    });
+    mobile.querySelectorAll('a').forEach((a) =>
+      a.addEventListener('click', () => {
+        mobile.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.querySelector('i')!.className = 'ri-menu-3-line';
+      }),
+    );
   }
-  h1,
-  h2,
-  h3 {
-    font-family: var(--font-locale), var(--font-heading), sans-serif;
-    line-height: 1.2;
+
+  // ---- Tilt cards (pointer-follow 3D + glow) ----
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isFine = window.matchMedia('(pointer: fine)').matches;
+  if (isFine && !prefersReduced) {
+    document.querySelectorAll<HTMLElement>('.tilt-card').forEach((el) => {
+      const rot = parseFloat(el.dataset.tiltRotation ?? '8');
+      const scale = parseFloat(el.dataset.tiltScale ?? '1.02');
+      el.addEventListener('mousemove', (e) => {
+        const r = el.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width;
+        const y = (e.clientY - r.top) / r.height;
+        const ry = (x - 0.5) * rot * 2;
+        const rx = -(y - 0.5) * rot * 2;
+        el.style.transform = `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${scale})`;
+        el.style.setProperty('--tilt-x', `${x * 100}%`);
+        el.style.setProperty('--tilt-y', `${y * 100}%`);
+      });
+      el.addEventListener('mouseleave', () => {
+        el.style.transform = 'perspective(900px) rotateX(0deg) rotateY(0deg) scale(1)';
+      });
+    });
   }
-  a {
-    color: inherit;
-    text-decoration: none;
+
+  // ---- FAQ accordion ----
+  document.querySelectorAll<HTMLElement>('.faq-item').forEach((item) => {
+    const btn = item.querySelector<HTMLButtonElement>('.faq-q');
+    const panel = item.querySelector<HTMLElement>('.faq-a');
+    if (!btn || !panel) return;
+    btn.addEventListener('click', () => {
+      const isOpen = item.classList.toggle('open');
+      btn.setAttribute('aria-expanded', String(isOpen));
+      panel.style.maxHeight = isOpen ? panel.scrollHeight + 'px' : '0px';
+    });
+  });
+
+  // ---- Hero service selector ----
+  document.querySelectorAll<HTMLElement>('[data-hero-selector]').forEach((root) => {
+    const cards = root.querySelectorAll<HTMLElement>('[data-hero-card]');
+    const reveal = root.querySelector<HTMLElement>('[data-hero-reveal]');
+    cards.forEach((card) => {
+      card.addEventListener('click', () => {
+        const isActive = card.classList.contains('active');
+        cards.forEach((c) => c.classList.remove('active'));
+        if (reveal) reveal.classList.toggle('show', !isActive);
+        if (!isActive) {
+          card.classList.add('active');
+          if (reveal) {
+            reveal.querySelector('[data-reveal-title]')!.textContent =
+              card.dataset.title ?? '';
+            reveal.querySelector('[data-reveal-sub]')!.textContent =
+              card.dataset.subtitle ?? '';
+          }
+        }
+      });
+    });
+  });
+
+  // ---- Testimonial carousel ----
+  document.querySelectorAll<HTMLElement>('[data-testimonials]').forEach((root) => {
+    const slides = Array.from(root.querySelectorAll<HTMLElement>('[data-slide]'));
+    const dots = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-dot]'));
+    if (slides.length <= 1) return;
+    const go = (i: number) => {
+      slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
+      dots.forEach((d, idx) => {
+        d.classList.toggle('active', idx === i);
+        d.setAttribute('aria-current', String(idx === i));
+      });
+    };
+    dots.forEach((d, i) => d.addEventListener('click', () => go(i)));
+    let cur = 0;
+    if (!prefersReduced) {
+      setInterval(() => { cur = (cur + 1) % slides.length; go(cur); }, 6000);
+    }
+  });
+
+  // ---- Reveal on scroll ----
+  if (!prefersReduced && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            (e.target as HTMLElement).classList.add('in');
+            io.unobserve(e.target);
+          }
+        });
+      },
+      { threshold: 0.12 },
+    );
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+  } else {
+    document.querySelectorAll('.reveal').forEach((el) => el.classList.add('in'));
   }
-  .muted {
-    color: var(--c-on-surface-muted);
-  }
-  .site-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem clamp(1rem, 5vw, 4rem);
-    border-bottom: 1px solid var(--c-surface-alt);
-    position: sticky;
-    top: 0;
-    background: var(--c-surface);
-    z-index: 10;
-  }
-  .brand {
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--c-secondary);
-  }
-  .site-header nav {
-    display: flex;
-    gap: 1.25rem;
-    flex-wrap: wrap;
-  }
-  .site-header nav a:hover {
-    color: var(--c-primary);
-  }
-  .site-footer {
-    padding: 2rem clamp(1rem, 5vw, 4rem);
-    border-top: 1px solid var(--c-surface-alt);
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-    font-size: 0.9rem;
-  }
-  section.block {
-    padding: clamp(2.5rem, 7vw, 5rem) clamp(1rem, 5vw, 4rem);
-  }
-  section.block.alt {
-    background: var(--c-surface-alt);
-  }
-  .btn {
-    display: inline-block;
-    background: var(--c-primary);
-    color: var(--c-on-primary);
-    padding: 0.75rem 1.5rem;
-    border-radius: var(--radius);
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-  }
-  .btn:hover {
-    filter: brightness(1.08);
-  }
-  .grid {
-    display: grid;
-    gap: 1.5rem;
-  }
-</style>
+</script>
+
+<!-- 全局站点样式已抽到 src/styles/global.css，由 frontmatter import 引入 -->

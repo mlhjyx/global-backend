@@ -1,0 +1,80 @@
+---
+interface Stat { value: string; suffix?: string; labelKey: string }
+interface Props {
+  badgeKey: string;
+  badgeSubKey: string;
+  leftH1Key: string;
+  leftH1AccentKey: string;
+  leftSubKey: string;
+  leftStats: Stat[];
+  rightH1Key: string;
+  rightH2aKey: string;
+  rightH2bKey: string;
+  rightH2bAccentKey: string;
+  rightSubKey: string;
+  cta1Key: string;
+  cta2Key: string;
+  t: (key: string) => string;
+}
+const { badgeKey, badgeSubKey, leftH1Key, leftH1AccentKey, leftSubKey, leftStats = [], rightH1Key, rightH2aKey, rightH2bKey, rightH2bAccentKey, rightSubKey, cta1Key, cta2Key, t } = Astro.props;
+---
+
+<section class="industrial-hero">
+  <div class="grid-bg" aria-hidden="true"></div>
+  <div class="inner">
+    <div class="block left">
+      <div class="badges">
+        <span class="badge-ink"><i class="ri-shield-flash-line"></i>{t(badgeKey)}</span>
+        <span class="badge-mono">{t(badgeSubKey)}</span>
+      </div>
+      <h1>{t(leftH1Key)}<span class="accent">{t(leftH1AccentKey)}</span></h1>
+      <p class="sub">{t(leftSubKey)}</p>
+      <div class="stats">
+        {leftStats.map((s) => (
+          <div class="stat">
+            <div class="value">{s.value}<span class="accent">{s.suffix ?? ''}</span></div>
+            <div class="label">{t(s.labelKey)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div class="block right">
+      <h1>{t(rightH1Key)}<span class="line2">{t(rightH2aKey)}<span class="accent">{t(rightH2bAccentKey)}</span></span></h1>
+      <p class="sub">{t(rightSubKey)}</p>
+      <div class="ctas">
+        <a class="cta-ink" href="#products">{t(cta1Key)}<i class="ri-arrow-right-line"></i></a>
+        <a class="cta-outline" href="#contact"><i class="ri-file-list-3-line"></i>{t(cta2Key)}</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .industrial-hero { position: relative; min-height: 100svh; background: var(--c-surface-alt2); overflow: hidden; display: flex; align-items: center; }
+  .grid-bg { position: absolute; inset: 0; opacity: 0.18; background-image: linear-gradient(to right, rgba(0,0,0,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.06) 1px, transparent 1px); background-size: 72px 72px; }
+  .inner { position: relative; z-index: 1; width: 100%; max-width: 84rem; margin: 0 auto; padding: clamp(6rem, 12vw, 9rem) clamp(1.5rem, 5vw, 2.5rem); display: grid; grid-template-columns: 1fr; gap: 3rem; }
+  @media (min-width: 1024px) { .inner { grid-template-columns: 1fr 1fr; gap: 4rem; } }
+  .block { max-width: 26rem; }
+  .right { margin-left: auto; text-align: right; }
+  @media (max-width: 1023px) { .right { margin-left: 0; text-align: left; } }
+  .badges { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem; }
+  .right .badges { justify-content: flex-end; }
+  .badge-ink { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem; border-radius: 9999px; background: var(--c-primary); color: var(--c-on-primary); font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.15em; }
+  .badge-mono { font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--c-on-surface-subtle); }
+  h1 { font-weight: 700; font-size: clamp(2.5rem, 6vw, 4.5rem); line-height: 0.95; letter-spacing: -0.02em; }
+  .accent { color: var(--c-accent); }
+  .line2 { display: block; }
+  .sub { margin-top: 1.5rem; font-size: 0.95rem; line-height: 1.65; color: var(--c-on-surface-muted); max-width: 22rem; }
+  .right .sub { margin-left: auto; }
+  .stats { margin-top: 2rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; max-width: 22rem; }
+  .stat { border-top: 1px solid var(--c-primary); padding-top: 0.75rem; }
+  .value { font-weight: 700; font-size: 1.875rem; }
+  .label { margin-top: 0.25rem; font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--c-on-surface-subtle); }
+  .ctas { margin-top: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .right .ctas { align-items: flex-end; }
+  @media (min-width: 640px) { .ctas { flex-direction: row; } .right .ctas { justify-content: flex-end; } }
+  .cta-ink { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--c-primary); color: var(--c-on-primary); padding: 0.85rem 1.5rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; transition: background .2s ease; }
+  .cta-ink:hover { background: #000; }
+  .cta-outline { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.85rem 1.5rem; border-radius: 9999px; border: 1px solid var(--c-border); background: color-mix(in srgb, var(--c-surface) 80%, transparent); font-size: 0.875rem; font-weight: 600; transition: background .2s ease; }
+  .cta-outline:hover { background: var(--c-surface); }
+</style>

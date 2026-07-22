@@ -1,4 +1,4 @@
-import type { SiteSpec } from '@global/contracts';
+import type { SiteSpec, SiteSpecStylePreset, SiteSpecComponentType } from '@global/contracts';
 import type { IntakeInput } from './intake.service';
 
 /**
@@ -60,7 +60,7 @@ export interface DemoSpecInput {
 }
 
 interface Block {
-  type: string;
+  type: SiteSpecComponentType;
   props: Record<string, unknown>;
 }
 
@@ -98,7 +98,7 @@ function regionName(alpha2: string): string {
 
 export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
   const { siteName, intake, polish } = input;
-  const preset = input.stylePreset ?? pickPreset(intake);
+  const preset = (input.stylePreset ?? pickPreset(intake)) as SiteSpecStylePreset;
   const products = intake.products;
   const marketNames = intake.targetMarkets.map(regionName);
   const primaryProduct = titleCase(products[0] ?? 'products');

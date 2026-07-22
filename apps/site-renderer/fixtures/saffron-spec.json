@@ -1,0 +1,191 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "warm-kitchen" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.about", "pageId": "about" },
+      { "labelKey": "nav.services", "pageId": "services" },
+      { "labelKey": "nav.gallery", "pageId": "gallery" },
+      { "labelKey": "nav.testimonials", "pageId": "testimonials" },
+      { "labelKey": "nav.contact", "pageId": "contact" },
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "Saffron & Sage" },
+    "outboundDomains": ["wa.me"]
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "WarmHero", "props": { "id": "WarmHero-1",
+          "eyebrowKey": "hero.eyebrow", "h1Key": "hero.h1", "h1AccentKey": "hero.h1Accent", "subKey": "hero.sub",
+          "primaryCta": { "labelKey": "hero.ctaPrimary", "pageId": "book" },
+          "secondaryCta": { "labelKey": "hero.ctaSecondary", "pageId": "services" },
+          "primaryIcon": "ri-calendar-event-line",
+          "stats": [
+            { "value": "12+", "labelKey": "hero.stat1" },
+            { "value": "400+", "labelKey": "hero.stat2" },
+            { "value": "4.98", "labelKey": "hero.stat3" }
+          ],
+          "scrollKey": "hero.scroll"
+        } },
+        { "type": "ServiceRows", "props": { "id": "ServiceRows-1", "alt": true,
+          "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent", "introKey": "services.intro",
+          "bookLabelKey": "cta.learnMore", "bookPageId": "services",
+          "services": [
+            { "icon": "ri-restaurant-2-line", "titleKey": "services.s1.title", "descKey": "services.s1.desc", "fromKey": "services.s1.from", "unitKey": "services.s1.unit" },
+            { "icon": "ri-cake-3-line", "titleKey": "services.s2.title", "descKey": "services.s2.desc", "fromKey": "services.s2.from", "unitKey": "services.s2.unit" },
+            { "icon": "ri-leaf-line", "titleKey": "services.s3.title", "descKey": "services.s3.desc", "fromKey": "services.s3.from", "unitKey": "services.s3.unit" },
+            { "icon": "ri-quill-pen-line", "titleKey": "services.s4.title", "descKey": "services.s4.desc", "fromKey": "services.s4.from", "unitKey": "services.s4.unit" }
+          ]
+        } },
+        { "type": "DishesShowcase", "props": { "id": "DishesShowcase-1",
+          "eyebrowKey": "dishes.eyebrow", "titleKey": "dishes.title", "titleAccentKey": "dishes.titleAccent",
+          "dishes": [
+            { "nameKey": "dishes.d1.name", "seasonKey": "dishes.d1.season", "noteKey": "dishes.d1.note" },
+            { "nameKey": "dishes.d2.name", "seasonKey": "dishes.d2.season", "noteKey": "dishes.d2.note" },
+            { "nameKey": "dishes.d3.name", "seasonKey": "dishes.d3.season", "noteKey": "dishes.d3.note" }
+          ],
+          "addLabelKey": "cta.addToMenu", "addPageId": "services"
+        } },
+        { "type": "SplitAbout", "props": { "id": "SplitAbout-1", "alt": true,
+          "eyebrowKey": "about.eyebrow", "titleKey": "about.title", "bodyKey": "about.body",
+          "ctaLabelKey": "about.cta", "ctaPageId": "about",
+          "chipIcon": "ri-medal-line", "chipKey": "about.chip"
+        } },
+        { "type": "ProcessSteps", "props": { "id": "ProcessSteps-1",
+          "eyebrowKey": "process.eyebrow", "titleKey": "process.title", "titleAccentKey": "process.titleAccent", "introKey": "process.intro",
+          "steps": [
+            { "num": "01", "icon": "ri-mail-send-line", "titleKey": "process.s1.title", "bodyKey": "process.s1.body" },
+            { "num": "02", "icon": "ri-chat-quote-line", "titleKey": "process.s2.title", "bodyKey": "process.s2.body" },
+            { "num": "03", "icon": "ri-calendar-check-line", "titleKey": "process.s3.title", "bodyKey": "process.s3.body" },
+            { "num": "04", "icon": "ri-restaurant-line", "titleKey": "process.s4.title", "bodyKey": "process.s4.body" }
+          ]
+        } },
+        { "type": "PhotoGallery", "props": { "id": "PhotoGallery-1", "alt": true,
+          "eyebrowKey": "gallery.eyebrow", "titleKey": "gallery.title", "titleAccentKey": "gallery.titleAccent",
+          "allLabelKey": "gallery.all", "allPageId": "gallery", "itemCount": 4
+        } },
+        { "type": "Testimonials", "props": { "id": "Testimonials-1",
+          "eyebrowKey": "testi.eyebrow",
+          "items": [
+            { "quoteKey": "testi.t1.quote", "nameKey": "testi.t1.name", "postcodeKey": "testi.t1.role", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t2.quote", "nameKey": "testi.t2.name", "postcodeKey": "testi.t2.role", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t3.quote", "nameKey": "testi.t3.name", "postcodeKey": "testi.t3.role", "rating": 5, "platformKey": "testi.platform" }
+          ]
+        } },
+        { "type": "MediaCta", "props": { "id": "MediaCta-1",
+          "eyebrowKey": "cta.eyebrow", "titleKey": "cta.title", "titleAccentKey": "cta.titleAccent", "subKey": "cta.sub",
+          "primaryCta": { "labelKey": "cta.ctaPrimary", "pageId": "book" },
+          "whatsappLabelKey": "cta.whatsapp", "whatsappUrl": "https://wa.me/15551234567",
+          "primaryIcon": "ri-shopping-bag-3-line"
+        } }
+      ] }
+    },
+    { "id": "about", "path": "/about", "seo": { "titleKey": "seo.about.title", "descriptionKey": "seo.about.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-a", "headlineKey": "page.about.h", "subheadKey": "page.about.sub", "cta": { "labelKey": "hero.ctaPrimary", "pageId": "book" } } }
+      ] } },
+    { "id": "services", "path": "/services", "seo": { "titleKey": "seo.services.title", "descriptionKey": "seo.services.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-s", "headlineKey": "page.services.h", "subheadKey": "page.services.sub", "cta": { "labelKey": "hero.ctaPrimary", "pageId": "book" } } }
+      ] } },
+    { "id": "gallery", "path": "/gallery", "seo": { "titleKey": "seo.gallery.title", "descriptionKey": "seo.gallery.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "PhotoGallery", "props": { "id": "PhotoGallery-g", "alt": true, "eyebrowKey": "gallery.eyebrow", "titleKey": "gallery.title", "titleAccentKey": "gallery.titleAccent", "itemCount": 6 } }
+      ] } },
+    { "id": "testimonials", "path": "/testimonials", "seo": { "titleKey": "seo.testimonials.title", "descriptionKey": "seo.testimonials.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "Testimonials", "props": { "id": "Testimonials-t", "eyebrowKey": "testi.eyebrow",
+          "items": [
+            { "quoteKey": "testi.t1.quote", "nameKey": "testi.t1.name", "postcodeKey": "testi.t1.role", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t2.quote", "nameKey": "testi.t2.name", "postcodeKey": "testi.t2.role", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t3.quote", "nameKey": "testi.t3.name", "postcodeKey": "testi.t3.role", "rating": 5, "platformKey": "testi.platform" }
+          ] } }
+      ] } },
+    { "id": "contact", "path": "/contact", "seo": { "titleKey": "seo.contact.title", "descriptionKey": "seo.contact.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-c", "titleKey": "inquiry.title", "subKey": "inquiry.sub" } }
+      ] } },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "inquiry.title", "subKey": "inquiry.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.home": "Home", "nav.about": "About", "nav.services": "Services", "nav.gallery": "Gallery", "nav.testimonials": "Reviews", "nav.contact": "Contact", "nav.book": "Book a Consultation",
+      "brand.tagline": "Private Chef · Brooklyn",
+      "contact.phone": "+1 (555) 123-4567", "contact.whatsapp": "15551234567", "contact.email": "hello@saffronandsage.co",
+      "footer.intro": "A private chef studio crafting intimate dinners and boutique catering for hosts who care about every detail.",
+      "footer.available": "Booking dates 4-6 weeks out", "footer.exploreTitle": "Explore", "footer.contactTitle": "Get in touch",
+      "footer.bookTitle": "Reserve a date", "footer.bookNote": "Tell us about your evening - we reply within one business day.",
+      "footer.badgeQualified": "Fully insured", "footer.badgeInsured": "ServSafe certified",
+      "footer.area": "Brooklyn, NY · Hudson Valley", "footer.privacy": "Policies", "footer.terms": "Seasonal letters", "footer.insurance": "Chef's portal",
+
+      "seo.home.title": "Saffron & Sage - Private Chef & Catering, Brooklyn",
+      "seo.home.desc": "Intimate dinners, event catering and weekly meal prep in your home. Seasonal menus, gentle hands, a quiet kind of luxury.",
+      "seo.about.title": "About - Saffron & Sage", "seo.about.desc": "Meet Chef Mira - twelve years in restaurant kitchens, brought home to yours.",
+      "seo.services.title": "Services - Saffron & Sage", "seo.services.desc": "Private dining, event catering, weekly meal prep and custom menus.",
+      "seo.gallery.title": "Gallery - Saffron & Sage", "seo.gallery.desc": "Plated courses, grazing tables and candlelit dinners.",
+      "seo.testimonials.title": "Reviews - Saffron & Sage", "seo.testimonials.desc": "What guests say at the door.",
+      "seo.contact.title": "Contact - Saffron & Sage", "seo.contact.desc": "Start a conversation with the chef.",
+      "seo.book.title": "Book a Consultation - Saffron & Sage", "seo.book.desc": "Tell us about your evening.",
+
+      "hero.eyebrow": "Private Chef · Catering · Custom Menus",
+      "hero.h1": "A private table,", "hero.h1Accent": "warmly set",
+      "hero.sub": "Saffron & Sage crafts intimate dinners, event catering, and weekly meal experiences in your home - seasonal menus, gentle hands, and a quiet kind of luxury.",
+      "hero.ctaPrimary": "Book a Catering Call", "hero.ctaSecondary": "Explore the Menu",
+      "hero.stat1": "Years cooking", "hero.stat2": "Events catered", "hero.stat3": "Client rating",
+      "hero.scroll": "Scroll",
+
+      "services.eyebrow": "What we cook for you", "services.title": "Four ways to bring a", "services.titleAccent": "private chef home.",
+      "services.intro": "Each service is shaped around your space, your guests, and your story - from a quiet Sunday supper to an eighty-guest celebration.",
+      "services.s1.title": "Private Dining", "services.s1.desc": "Multi-course tasting menus served in your home, plated and styled to feel like a restaurant.", "services.s1.from": "$95", "services.s1.unit": "per guest",
+      "services.s2.title": "Event Catering", "services.s2.desc": "Showers, birthdays, anniversaries - bespoke menus catered for groups of 12 to 80 guests.", "services.s2.from": "$1,800", "services.s2.unit": "starting",
+      "services.s3.title": "Weekly Meal Prep", "services.s3.desc": "Five chef-cooked dinners delivered weekly, tailored to your household's tastes and goals.", "services.s3.from": "$280", "services.s3.unit": "per week",
+      "services.s4.title": "Custom Menus", "services.s4.desc": "Themed dinners, dietary-specific menus, and special occasion creations built around your story.", "services.s4.from": "$120", "services.s4.unit": "consultation",
+
+      "dishes.eyebrow": "Signature dishes", "dishes.title": "Seasonal favourites,", "dishes.titleAccent": "remembered long after the last bite.",
+      "dishes.d1.name": "Heirloom Tomato & Burrata", "dishes.d1.season": "Summer Tasting", "dishes.d1.note": "Basil oil, sourdough crumble, aged balsamic",
+      "dishes.d2.name": "Slow Braised Lamb Shoulder", "dishes.d2.season": "Autumn Feast", "dishes.d2.note": "Saffron jus, charred root vegetables",
+      "dishes.d3.name": "Salted Honey & Fig Tart", "dishes.d3.season": "Signature Dessert", "dishes.d3.note": "Brown butter pastry, whipped mascarpone",
+
+      "about.eyebrow": "About the Chef", "about.title": "Twelve years in restaurant kitchens, brought home to yours.",
+      "about.body": "I'm Mira - a chef who fell in love with quieter dinners. After a decade in Michelin-starred kitchens across Paris and Copenhagen, I built Saffron & Sage to bring that same level of care to private tables. Every menu starts with a conversation - I cook around what's in season, what you remember loving, and what your guests will quietly thank you for.",
+      "about.cta": "Read the full story", "about.chip": "Trained at Le Cordon Bleu, Paris",
+
+      "process.eyebrow": "How it works", "process.title": "Four quiet steps from", "process.titleAccent": "hello to dinner.",
+      "process.intro": "From the first message to the last bite, here's how a Saffron & Sage evening comes together.",
+      "process.s1.title": "Send a note", "process.s1.body": "Tell us about the occasion, your guests, and the kind of evening you imagine.",
+      "process.s2.title": "Tasting consultation", "process.s2.body": "We meet on a quick call, shape a draft menu, and confirm pacing and pairings.",
+      "process.s3.title": "Reserve your date", "process.s3.body": "A small deposit holds the date. Final menu is locked one week before your event.",
+      "process.s4.title": "We cook in your home", "process.s4.body": "Shopping, prep, plating, and clean-up. You host. We handle the rest.",
+
+      "gallery.eyebrow": "From the table", "gallery.title": "Moments that", "gallery.titleAccent": "linger long after dessert.", "gallery.all": "View full gallery",
+
+      "testi.eyebrow": "Kind words", "testi.platform": "Private client",
+      "testi.t1.quote": "Chef Mira transformed our living room into the warmest restaurant in the city. Every course was beautifully presented, every flavour layered with intention. Our guests are still texting me about that fig tart.", "testi.t1.name": "Eleanor Whitfield", "testi.t1.role": "Anniversary Dinner · Brooklyn",
+      "testi.t2.quote": "We finally stopped takeout Tuesdays. Mira knows our kids' picky list, our marathon training, and somehow still surprises us with something new every week.", "testi.t2.name": "Marcus & Hana Tan", "testi.t2.role": "Weekly Meal Prep · Park Slope",
+      "testi.t3.quote": "From the canapés to the styled grazing table, every detail felt curated. Mira handled the menu, the timing, and even pairings with the florals. I genuinely got to enjoy my own party.", "testi.t3.name": "Priya Anand", "testi.t3.role": "Bridal Shower · 38 guests",
+
+      "cta.eyebrow": "Booking dates 4-6 weeks out", "cta.title": "Ready to set", "cta.titleAccent": "the table?",
+      "cta.sub": "Tell us a little about your evening. We'll come back within one business day with a draft menu and an honest quote - no pressure, no obligation.",
+      "cta.ctaPrimary": "Reserve your date", "cta.whatsapp": "WhatsApp us instead",
+
+      "cta.learnMore": "Learn more", "cta.addToMenu": "Add to menu",
+
+      "inquiry.title": "Book a Consultation", "inquiry.sub": "We reply within one business day with a draft menu.",
+      "inquiry.field.name": "Your name", "inquiry.field.email": "Work email", "inquiry.field.message": "Tell us about your evening",
+      "inquiry.submit": "Send inquiry", "inquiry.m0.note": "Inquiry form goes live at publish.",
+
+      "page.about.h": "About the Chef", "page.about.sub": "Twelve years in restaurant kitchens, brought home to yours.",
+      "page.services.h": "Services", "page.services.sub": "Private dining, event catering, meal prep and custom menus."
+    }
+  }
+}

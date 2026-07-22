@@ -3,6 +3,8 @@ import { open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
   SITE_SPEC_VERSION,
+  SITE_SPEC_COMPONENT_TYPES,
+  validateBlock,
   type SiteSpec,
 } from '@global/contracts';
 
@@ -22,7 +24,7 @@ export const R1_RENDERER_COMPONENT_TYPES = [
   'StatsBand',
 ] as const;
 
-const componentTypes = new Set<string>(R1_RENDERER_COMPONENT_TYPES);
+const componentTypes = new Set<string>(SITE_SPEC_COMPONENT_TYPES);
 const MAX_RELEASE_FILES = 4096;
 const MAX_RELEASE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_RELEASE_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -117,17 +119,10 @@ export function assertReleaseContract(
       `SITE_RELEASE_UNSUPPORTED_SPEC_VERSION: stored=${storedSpecVersion} embedded=${spec.specVersion} supported=${SITE_SPEC_VERSION}`,
     );
   }
-  const unknown = [
-    ...new Set(
-      spec.pages.flatMap((page) =>
-        page.puck.content
-          .map((block) => block.type)
-          .filter((type) => !componentTypes.has(type)),
-      ),
-    ),
-  ].sort();
-  if (unknown.length > 0) {
-    throw new Error(`SITE_RELEASE_UNKNOWN_COMPONENT: ${unknown.join(', ')}`);
+  for (const page of spec.pages) {
+    for (const block of page.puck.content) {
+      validateBlock(block); // type 封闭 + 必填 props，fail-closed（UNKNOWN_COMPONENT_TYPE / MISSING_REQUIRED_PROP）
+    }
   }
 }
 

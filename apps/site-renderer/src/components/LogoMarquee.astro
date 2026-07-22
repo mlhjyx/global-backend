@@ -1,0 +1,65 @@
+---
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleLine2Key?: string;
+  items: string[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { eyebrowKey, titleKey, titleLine2Key, items = [], t, alt } = Astro.props;
+const doubled = [...items, ...items];
+---
+
+<section class:list={['block', 'logo-marquee', { alt }]}>
+  <div class="container head reveal">
+    <p class="eyebrow-flat">{t(eyebrowKey)}</p>
+    <h2 class="display">{t(titleKey)}{titleLine2Key && <><br />{t(titleLine2Key)}</>}</h2>
+  </div>
+
+  <div class="rows">
+    <div class="row-wrap">
+      <div class="fade left"></div>
+      <div class="fade right"></div>
+      <div class="track track-slow">
+        {doubled.map((name, i) => (
+          <span class="item"><span class="name">{name}</span></span>
+        ))}
+      </div>
+    </div>
+    <div class="row-wrap">
+      <div class="fade left"></div>
+      <div class="fade right"></div>
+      <div class="track track-fast reverse">
+        {doubled.map((name, i) => (
+          <span class="item"><span class="name dim">- {name}</span></span>
+        ))}
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .logo-marquee { overflow: hidden; }
+  .head { text-align: center; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
+  .eyebrow-flat { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.18em; color: var(--c-on-surface); margin-bottom: 1.25rem; }
+  .display { font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 1.02; letter-spacing: -0.02em; }
+  .rows { display: flex; flex-direction: column; gap: 2.5rem; }
+  .row-wrap { position: relative; overflow: hidden; }
+  .fade { position: absolute; top: 0; bottom: 0; width: 6rem; z-index: 2; pointer-events: none; }
+  .fade.left { left: 0; background: linear-gradient(to right, var(--c-surface-alt), transparent); }
+  .fade.right { right: 0; background: linear-gradient(to left, var(--c-surface-alt), transparent); }
+  :not(.alt) .fade.left { background: linear-gradient(to right, var(--c-surface), transparent); }
+  :not(.alt) .fade.right { background: linear-gradient(to left, var(--c-surface), transparent); }
+  .track { display: flex; width: max-content; }
+  .track-slow { animation: marq 80s linear infinite; }
+  .track-fast { animation: marq 40s linear infinite; }
+  .track.reverse { animation-direction: reverse; }
+  @keyframes marq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .track { animation: none; flex-wrap: wrap; } }
+  .item { display: flex; align-items: center; justify-content: center; padding: 1.25rem 3rem; flex: none; }
+  .name { font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.25rem, 2.5vw, 1.875rem); letter-spacing: -0.01em; color: var(--c-on-surface); transition: color .3s ease; }
+  .item:hover .name { color: var(--c-on-surface); }
+  .name.dim { font-weight: 500; opacity: 0.3; }
+  .item:hover .name.dim { color: var(--c-accent); opacity: 1; }
+</style>

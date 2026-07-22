@@ -1,0 +1,129 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Service {
+  icon: string;
+  titleKey: string;
+  descKey: string;
+  fromKey?: string;
+}
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  allLabelKey?: string;
+  allPageId?: string;
+  bookLabelKey?: string;
+  bookPageId?: string;
+  services: Service[];
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const {
+  eyebrowKey, titleKey, titleAccentKey, introKey,
+  allLabelKey, allPageId, bookLabelKey = 'cta.bookService', bookPageId = 'book',
+  services = [], t, alt, locale, defaultLocale,
+} = Astro.props;
+const allHref = allPageId ? localePageHref(allPageId, locale, defaultLocale) : undefined;
+const bookHref = localePageHref(bookPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head">
+      <div class="reveal">
+        <span class="eyebrow">{t(eyebrowKey)}</span>
+        <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
+        <p class="muted intro">{t(introKey)}</p>
+      </div>
+      {allLabelKey && allHref && (
+        <a class="btn btn-outline btn-sm reveal" href={allHref}>
+          {t(allLabelKey)}<i class="ri-arrow-right-line"></i>
+        </a>
+      )}
+    </div>
+
+    <div class="grid">
+      {services.map((s) => (
+        <div class="tilt-card reveal" data-tilt-rotation="6" data-tilt-scale="1.015">
+          <span class="tilt-glow"></span>
+          <article class="card">
+            <div class="ph">
+              <i class={s.icon}></i>
+              {s.fromKey && <span class="from">{t(s.fromKey)}</span>}
+            </div>
+            <div class="body">
+              <h3>{t(s.titleKey)}</h3>
+              <p class="muted">{t(s.descKey)}</p>
+              <div class="foot">
+                <a class="link" href={bookHref}>
+                  {t(bookLabelKey)}<i class="ri-arrow-right-line"></i>
+                </a>
+                {allHref && (
+                  <a class="arrow" href={allHref} aria-label={t(s.titleKey)}>
+                    <i class="ri-arrow-right-up-line"></i>
+                  </a>
+                )}
+              </div>
+            </div>
+          </article>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: clamp(2rem, 4vw, 3.5rem); }
+  @media (min-width: 768px) { .head { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
+  .head .intro { margin-top: 0.85rem; max-width: 40rem; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  .card {
+    display: flex; flex-direction: column;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    height: 100%;
+    transition: border-color .3s ease;
+  }
+  .card:hover { border-color: var(--c-on-surface-subtle); }
+  .ph {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(80% 60% at 30% 20%, color-mix(in srgb, var(--c-accent) 14%, transparent), transparent 70%),
+      linear-gradient(135deg, var(--c-surface-alt2), var(--c-surface-alt));
+  }
+  .ph i { font-size: 2.75rem; color: var(--c-on-surface-subtle); }
+  .from {
+    position: absolute; top: 0.75rem; right: 0.75rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 9999px;
+    background: var(--c-primary-dark);
+    color: var(--c-on-dark);
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .body { padding: 1.25rem; display: flex; flex-direction: column; flex: 1; }
+  .body h3 { font-size: 1.1rem; font-weight: 600; }
+  .body .muted { margin-top: 0.5rem; font-size: 0.9rem; }
+  .foot { margin-top: auto; padding-top: 1.25rem; display: flex; align-items: center; justify-content: space-between; }
+  .link { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.875rem; font-weight: 600; color: var(--c-primary); }
+  .link i { transition: transform .2s ease; }
+  .link:hover i { transform: translateX(2px); }
+  .arrow {
+    width: 2rem; height: 2rem;
+    display: grid; place-items: center;
+    border-radius: 9999px;
+    background: var(--c-surface-alt2);
+    color: var(--c-on-surface-muted);
+    transition: background .2s ease, color .2s ease;
+  }
+  .arrow:hover { background: var(--c-accent); color: var(--c-on-accent); }
+</style>

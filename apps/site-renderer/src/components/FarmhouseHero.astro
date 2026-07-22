@@ -1,0 +1,54 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Cta { labelKey: string; pageId?: string; url?: string }
+interface Props {
+  eyebrowKey: string;
+  h1Line1Key: string;
+  h1Line2Key: string;
+  primaryCta: Cta;
+  secondaryCta?: Cta;
+  scrollKey: string;
+  t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, h1Line1Key, h1Line2Key, primaryCta, secondaryCta, scrollKey, t, locale, defaultLocale } = Astro.props;
+const href = (c?: Cta) => c?.url ?? (c?.pageId ? localePageHref(c.pageId, locale, defaultLocale) : '#collections');
+---
+
+<section class="farmhouse-hero">
+  <div class="bg" aria-hidden="true"></div>
+  <div class="overlay"></div>
+  <div class="content">
+    <p class="eyebrow">{t(eyebrowKey)}</p>
+    <h1>{t(h1Line1Key)}<br />{t(h1Line2Key)}</h1>
+    <div class="ctas">
+      <a class="cta-primary" href={href(primaryCta)}>{t(primaryCta.labelKey)}<i class="ri-arrow-right-line"></i></a>
+      {secondaryCta && <a class="cta-outline" href={href(secondaryCta)}>{t(secondaryCta.labelKey)}</a>}
+    </div>
+  </div>
+  <div class="scroll-cue"><span>{t(scrollKey)}</span><span class="line"></span></div>
+</section>
+
+<style>
+  .farmhouse-hero { position: relative; min-height: 640px; height: 88vh; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  .bg { position: absolute; inset: 0; animation: kb 2s ease-out both;
+    background:
+      radial-gradient(80% 60% at 30% 40%, color-mix(in srgb, var(--c-secondary) 20%, transparent), transparent 60%),
+      linear-gradient(135deg, #4a3528, #6b4a32 50%, #2e2117); }
+  @keyframes kb { from { transform: scale(1.1); } to { transform: scale(1); } }
+  .overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0.25), rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.55)); }
+  .content { position: relative; z-index: 2; width: 100%; max-width: 72rem; margin: 0 auto; padding: 0 clamp(1rem, 5vw, 3.5rem) clamp(4rem, 8vw, 5rem); color: var(--c-on-dark); }
+  .eyebrow { font-size: 0.75rem; letter-spacing: 0.3em; text-transform: uppercase; color: rgba(255,255,255,0.85); margin-bottom: 1.25rem; }
+  h1 { font-family: var(--font-heading); font-weight: 600; font-size: clamp(2.75rem, 8vw, 5.5rem); line-height: 0.95; letter-spacing: -0.01em; }
+  .ctas { margin-top: 2.5rem; display: flex; flex-wrap: wrap; gap: 1rem; }
+  .cta-primary { display: inline-flex; align-items: center; gap: 0.5rem; height: 2.75rem; padding: 0 1.5rem; border-radius: 9999px; background: var(--c-surface); color: var(--c-on-surface); font-size: 0.875rem; font-weight: 500; transition: background .3s ease; }
+  .cta-primary:hover { background: var(--c-surface-alt); }
+  .cta-outline { display: inline-flex; align-items: center; gap: 0.5rem; height: 2.75rem; padding: 0 1.5rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.5); color: var(--c-on-dark); font-size: 0.875rem; transition: background .3s ease; }
+  .cta-outline:hover { background: rgba(255,255,255,0.1); }
+  .scroll-cue { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); z-index: 2; display: none; flex-direction: column; align-items: center; gap: 0.5rem; color: rgba(255,255,255,0.8); font-size: 0.6rem; letter-spacing: 0.4em; text-transform: uppercase; }
+  @media (min-width: 768px) { .scroll-cue { display: flex; } }
+  .scroll-cue .line { width: 1px; height: 2rem; background: rgba(255,255,255,0.6); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+</style>

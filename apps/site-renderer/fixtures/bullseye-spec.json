@@ -1,0 +1,135 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "industrial-power" },
+    "nav": [
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "Bullseye" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "MinimalHero", "props": { "id": "MinimalHero-1",
+          "eyebrowKey": "hero.eyebrow", "h1Key": "hero.h1", "h1AccentKey": "hero.h1a", "subKey": "hero.sub",
+          "cta1Key": "hero.cta1", "cta2Key": "hero.cta2", "scrollKey": "hero.scroll"
+        } },
+        { "type": "LogoMarquee", "props": { "id": "LogoMarquee-1", "alt": true,
+          "eyebrowKey": "logos.eyebrow", "titleKey": "logos.title",
+          "items": ["Northwind", "Halcyon", "Arclight", "Vela", "Monolith", "Brightline"]
+        } },
+        { "type": "FeatureCards", "props": { "id": "FeatureCards-1",
+          "eyebrowKey": "feat.eyebrow", "titleKey": "feat.title", "titleLine2Key": "feat.title2", "introKey": "feat.intro",
+          "items": [
+            { "icon": "ri-focus-3-line", "titleKey": "feat.f1.t", "descKey": "feat.f1.d" },
+            { "icon": "ri-stack-line", "titleKey": "feat.f2.t", "descKey": "feat.f2.d" },
+            { "icon": "ri-movie-2-line", "titleKey": "feat.f3.t", "descKey": "feat.f3.d" },
+            { "icon": "ri-line-chart-line", "titleKey": "feat.f4.t", "descKey": "feat.f4.d" }
+          ]
+        } },
+        { "type": "StatsCountup", "props": { "id": "StatsCountup-1", "alt": true,
+          "stats": [
+            { "value": 312, "suffix": "%", "labelKey": "stat.s1" },
+            { "value": 47, "suffix": "%", "labelKey": "stat.s2" },
+            { "value": 420, "suffix": "M", "labelKey": "stat.s3" },
+            { "value": 49, "suffix": "", "labelKey": "stat.s4" }
+          ]
+        } },
+        { "type": "Testimonials", "props": { "id": "Testimonials-1",
+          "eyebrowKey": "testi.eyebrow",
+          "items": [
+            { "quoteKey": "testi.t1.q", "nameKey": "testi.t1.n", "postcodeKey": "testi.t1.r", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t2.q", "nameKey": "testi.t2.n", "postcodeKey": "testi.t2.r", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t3.q", "nameKey": "testi.t3.n", "postcodeKey": "testi.t3.r", "rating": 5, "platformKey": "testi.platform" }
+          ]
+        } },
+        { "type": "FaqSplit", "props": { "id": "FaqSplit-1", "alt": true,
+          "eyebrowKey": "faq.eyebrow", "titleKey": "faq.title", "titleAccentKey": "faq.titleAccent", "introKey": "faq.intro",
+          "items": [
+            { "qKey": "faq.q1", "aKey": "faq.a1" },
+            { "qKey": "faq.q2", "aKey": "faq.a2" },
+            { "qKey": "faq.q3", "aKey": "faq.a3" },
+            { "qKey": "faq.q4", "aKey": "faq.a4" }
+          ]
+        } },
+        { "type": "PricingTiers", "props": { "id": "PricingTiers-1",
+          "eyebrowKey": "price.eyebrow", "titleKey": "price.title", "titleLine2Key": "price.title2", "subKey": "price.sub",
+          "monthlyKey": "price.monthly", "yearlyKey": "price.yearly", "saveKey": "price.save", "featuredKey": "price.featured",
+          "ctaPrefixKey": "price.ctaPrefix", "perMoKey": "price.perMo",
+          "plans": [
+            { "nameKey": "price.p1.n", "taglineKey": "price.p1.t", "monthly": 1900, "yearly": 1500, "features": ["Brand audit", "Channel strategy", "Monthly reporting", "Email support"] },
+            { "nameKey": "price.p2.n", "taglineKey": "price.p2.t", "monthly": 4900, "yearly": 3900, "featured": true, "features": ["Everything in Starter", "Creative production", "Media buying + MMM", "Bi-weekly strategy", "Dedicated lead"] },
+            { "nameKey": "price.p3.n", "taglineKey": "price.p3.t", "monthly": 12000, "yearly": 9800, "features": ["Everything in Growth", "Full-funnel attribution", "In-house embedding", "Quarterly board review", "Priority access"] }
+          ]
+        } }
+      ] }
+    },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "book.title", "subKey": "book.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.book": "Start a project",
+      "brand.tagline": "Brand · Media · Measurement",
+      "contact.phone": "", "contact.whatsapp": "", "contact.email": "studio@bullseye.co",
+      "footer.intro": "Bullseye is an independent studio building brand, media and measurement for brands operating at boardroom altitude.",
+      "footer.available": "Est. 2017", "footer.exploreTitle": "Studio", "footer.contactTitle": "Get in touch",
+      "footer.bookTitle": "Start a project", "footer.bookNote": "Tell us about your brand and the altitude you're operating at.",
+      "footer.badgeQualified": "Independent", "footer.badgeInsured": "Boardroom-grade",
+      "footer.area": "Remote-first", "footer.privacy": "Privacy", "footer.terms": "Capabilities", "footer.insurance": "Contact",
+
+      "seo.home.title": "Bullseye - Precision Is a Craft",
+      "seo.home.desc": "An independent studio building brand, media and measurement for brands operating at boardroom altitude.",
+      "seo.book.title": "Start a Project - Bullseye", "seo.book.desc": "Tell us about your brand.",
+
+      "hero.eyebrow": "Bullseye - Est. 2017",
+      "hero.h1": "Precision is", "hero.h1a": "a craft.",
+      "hero.sub": "An independent studio building brand, media and measurement for brands operating at boardroom altitude.",
+      "hero.cta1": "See the work", "hero.cta2": "Capabilities", "hero.scroll": "Scroll",
+
+      "logos.eyebrow": "Trusted by", "logos.title": "Brands at boardroom altitude.",
+
+      "feat.eyebrow": "Capabilities", "feat.title": "Three disciplines,", "feat.title2": "one studio.",
+      "feat.intro": "Brand, media and measurement under one roof - so the story you tell and the numbers you report always agree.",
+      "feat.f1.t": "Unified attribution", "feat.f1.d": "Stitch first-party events, ad platforms, and revenue into one model - no more debating which dashboard is right.",
+      "feat.f2.t": "Audience builder", "feat.f2.d": "Build cohorts from any signal in seconds and push them straight into Meta, Google, Klaviyo and CRM.",
+      "feat.f3.t": "Creative analytics", "feat.f3.d": "Score every ad by hook rate, hold rate and incremental ROAS - and ship the winners next week.",
+      "feat.f4.t": "Predictive lift", "feat.f4.d": "Forecast the incremental revenue of a campaign before you spend a dollar on it.",
+
+      "stat.s1": "Average ROAS lift", "stat.s2": "Lower CAC", "stat.s3": "Revenue measured", "stat.s4": "Avg. client rating",
+
+      "testi.eyebrow": "What founders say", "testi.platform": "Verified client",
+      "testi.t1.q": "Bullseye rebuilt our attribution from scratch in six weeks. For the first time, finance and marketing agree on what 'worked' means.", "testi.t1.n": "Elena Vasquez", "testi.t1.r": "CEO, Northwind",
+      "testi.t2.q": "They treat brand and performance as the same problem. Our creative win rate tripled in a quarter.", "testi.t2.n": "Marcus Holt", "testi.t2.r": "CMO, Halcyon",
+      "testi.t3.q": "The most senior team we've worked with. Boardroom-grade reporting without the agency overhead.", "testi.t3.n": "Priya Nair", "testi.t3.r": "Founder, Arclight",
+
+      "faq.eyebrow": "FAQ", "faq.title": "Questions", "faq.titleAccent": "answered.", "faq.intro": "What we get asked before a first call.",
+      "faq.q1": "Do you work with early-stage brands?", "faq.a1": "Yes. Our Starter retainer is built for pre-Series A brands that need senior strategy without the agency overhead.",
+      "faq.q2": "How is your attribution different?", "faq.a2": "We run a multi-touch + MMM hybrid stitched to first-party revenue, so finance and marketing see the same number - not two competing dashboards.",
+      "faq.q3": "Do you produce creative in-house?", "faq.a3": "Yes. Creative production, media buying and measurement all sit under one roof, which is why the work and the report always agree.",
+      "faq.q4": "What's the minimum engagement?", "faq.a4": "A three-month retainer on any plan. Most clients stay well beyond a year - we earn the renewal every quarter.",
+
+      "price.eyebrow": "Engagements", "price.title": "Senior strategy,", "price.title2": "without the overhead.",
+      "price.sub": "Flat monthly retainers. Cancel any time after the first quarter - no painful offboarding.",
+      "price.monthly": "Monthly", "price.yearly": "Quarterly", "price.save": "-21%", "price.featured": "Most chosen",
+      "price.ctaPrefix": "Start with", "price.perMo": "/mo",
+      "price.p1.n": "Starter", "price.p1.t": "For pre-Series A brands finding their footing.",
+      "price.p2.n": "Growth", "price.p2.t": "For brands scaling media and creative in parallel.",
+      "price.p3.n": "Scale", "price.p3.t": "For brands operating at boardroom altitude.",
+
+      "cta.learnMore": "Learn more", "cta.read": "Read",
+      "book.title": "Start a project.", "book.sub": "Tell us about your brand and the altitude you're operating at.",
+      "inquiry.title": "Start a project.", "inquiry.sub": "Tell us about your brand.",
+      "inquiry.field.name": "Your name", "inquiry.field.email": "Work email", "inquiry.field.message": "Tell us about your brand and goals",
+      "inquiry.submit": "Start a project", "inquiry.m0.note": "We reply within one working day."
+    }
+  }
+}

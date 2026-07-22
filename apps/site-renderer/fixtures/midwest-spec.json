@@ -1,0 +1,139 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "farmhouse" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.artisans", "pageId": "artisans" },
+      { "labelKey": "nav.journal", "pageId": "journal" },
+      { "labelKey": "nav.about", "pageId": "about" },
+      { "labelKey": "nav.book", "pageId": "shop" }
+    ],
+    "seoGlobal": { "siteName": "Hearth & Heirloom" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "FarmhouseHero", "props": { "id": "FarmhouseHero-1",
+          "eyebrowKey": "hero.eyebrow", "h1Line1Key": "hero.h1l1", "h1Line2Key": "hero.h1l2",
+          "primaryCta": { "labelKey": "hero.ctaShop", "pageId": "shop" },
+          "secondaryCta": { "labelKey": "hero.ctaMakers", "pageId": "artisans" },
+          "scrollKey": "hero.scroll"
+        } },
+        { "type": "ValueStrip", "props": { "id": "ValueStrip-1",
+          "items": [
+            { "icon": "ri-hand-heart-line", "labelKey": "val.v1" },
+            { "icon": "ri-plant-line", "labelKey": "val.v2" },
+            { "icon": "ri-truck-line", "labelKey": "val.v3" },
+            { "icon": "ri-recycle-line", "labelKey": "val.v4" }
+          ]
+        } },
+        { "type": "FeaturedSpotlight", "props": { "id": "FeaturedSpotlight-1",
+          "eyebrowKey": "feat.eyebrow", "titleKey": "feat.title", "allLabelKey": "feat.all", "allPageId": "shop",
+          "items": [
+            { "nameKey": "feat.p1.name", "categoryKey": "feat.p1.cat", "priceKey": "feat.p1.price" },
+            { "nameKey": "feat.p2.name", "categoryKey": "feat.p2.cat", "priceKey": "feat.p2.price" },
+            { "nameKey": "feat.p3.name", "categoryKey": "feat.p3.cat", "priceKey": "feat.p3.price" },
+            { "nameKey": "feat.p4.name", "categoryKey": "feat.p4.cat", "priceKey": "feat.p4.price" },
+            { "nameKey": "feat.p5.name", "categoryKey": "feat.p5.cat", "priceKey": "feat.p5.price" },
+            { "nameKey": "feat.p6.name", "categoryKey": "feat.p6.cat", "priceKey": "feat.p6.price" }
+          ]
+        } },
+        { "type": "StoryChapters", "props": { "id": "StoryChapters-1", "alt": true,
+          "introEyebrowKey": "story.eyebrow", "introTitleKey": "story.title",
+          "chapters": [
+            { "eyebrowKey": "story.c1.eyebrow", "titleKey": "story.c1.title", "bodyKey": "story.c1.body", "align": "right" },
+            { "eyebrowKey": "story.c2.eyebrow", "titleKey": "story.c2.title", "bodyKey": "story.c2.body", "align": "left" },
+            { "eyebrowKey": "story.c3.eyebrow", "titleKey": "story.c3.title", "bodyKey": "story.c3.body", "align": "right" }
+          ]
+        } },
+        { "type": "CollectionCards", "props": { "id": "CollectionCards-1",
+          "eyebrowKey": "coll.eyebrow", "titleKey": "coll.title", "allPageId": "shop",
+          "items": [
+            { "nameKey": "coll.c1" },
+            { "nameKey": "coll.c2" },
+            { "nameKey": "coll.c3" }
+          ]
+        } },
+        { "type": "MediaCta", "props": { "id": "MediaCta-1",
+          "eyebrowKey": "closing.eyebrow", "titleKey": "closing.title", "titleAccentKey": "closing.titleAccent", "subKey": "closing.sub",
+          "primaryCta": { "labelKey": "closing.ctaShop", "pageId": "shop" },
+          "secondaryCta": { "labelKey": "closing.ctaMakers", "pageId": "artisans" },
+          "primaryIcon": "ri-shopping-bag-3-line"
+        } }
+      ] }
+    },
+    { "id": "shop", "path": "/shop", "seo": { "titleKey": "seo.shop.title", "descriptionKey": "seo.shop.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "CollectionCards", "props": { "id": "CollectionCards-s", "alt": true, "eyebrowKey": "coll.eyebrow", "titleKey": "coll.title", "items": [ { "nameKey": "coll.c1" }, { "nameKey": "coll.c2" }, { "nameKey": "coll.c3" } ] } }
+      ] } },
+    { "id": "artisans", "path": "/artisans", "seo": { "titleKey": "seo.artisans.title", "descriptionKey": "seo.artisans.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-ar", "headlineKey": "page.artisans.h", "subheadKey": "page.artisans.sub", "cta": { "labelKey": "hero.ctaShop", "pageId": "shop" } } }
+      ] } },
+    { "id": "journal", "path": "/journal", "seo": { "titleKey": "seo.journal.title", "descriptionKey": "seo.journal.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-j", "headlineKey": "page.journal.h", "subheadKey": "page.journal.sub", "cta": { "labelKey": "hero.ctaShop", "pageId": "shop" } } }
+      ] } },
+    { "id": "about", "path": "/about", "seo": { "titleKey": "seo.about.title", "descriptionKey": "seo.about.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-a", "headlineKey": "page.about.h", "subheadKey": "page.about.sub", "cta": { "labelKey": "hero.ctaShop", "pageId": "shop" } } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.home": "Home", "nav.artisans": "Our Artisans", "nav.journal": "Journal", "nav.about": "About", "nav.book": "Shop the collection",
+      "brand.tagline": "Handmade Midwest home goods",
+      "contact.phone": "", "contact.whatsapp": "", "contact.email": "hello@hearthandheirloom.com",
+      "footer.intro": "Slow-made home goods from mom-led workshops across Iowa, Illinois and Minnesota. Stitched, thrown and lettered by hand - kept for a lifetime.",
+      "footer.available": "Made slow. Loved long.", "footer.exploreTitle": "Shop", "footer.contactTitle": "Studio",
+      "footer.bookTitle": "Visit the shop", "footer.bookNote": "Browse the full collection of handmade heirloom goods.",
+      "footer.badgeQualified": "Small-batch", "footer.badgeInsured": "Recycled muslin",
+      "footer.area": "Heartland, USA", "footer.privacy": "Privacy", "footer.terms": "Shipping", "footer.insurance": "Returns",
+
+      "seo.home.title": "Hearth & Heirloom - Handmade Midwest Home Goods",
+      "seo.home.desc": "Slow-made quilts, stoneware, signs and textiles from mom-led workshops across the Midwest.",
+      "seo.shop.title": "Shop - Hearth & Heirloom", "seo.shop.desc": "Browse the collections of handmade heirloom home goods.",
+      "seo.artisans.title": "Our Artisans - Hearth & Heirloom", "seo.artisans.desc": "Meet the moms behind every piece.",
+      "seo.journal.title": "Journal - Hearth & Heirloom", "seo.journal.desc": "Stories from the heartland workshop.",
+      "seo.about.title": "About - Hearth & Heirloom", "seo.about.desc": "Three makers, one quiet table.",
+
+      "hero.eyebrow": "Est. in the Midwest", "hero.h1l1": "Made slow.", "hero.h1l2": "Kept long.",
+      "hero.ctaShop": "Shop the collection", "hero.ctaMakers": "The makers", "hero.scroll": "Scroll",
+
+      "val.v1": "Hand-finished", "val.v2": "Natural fibers", "val.v3": "Free over $95", "val.v4": "Recycled muslin",
+
+      "feat.eyebrow": "This season", "feat.title": "Featured pieces", "feat.all": "Browse the full shop",
+      "feat.p1.name": "Heritage Patchwork Quilt", "feat.p1.cat": "Textiles", "feat.p1.price": "$218",
+      "feat.p2.name": "Stoneware Morning Mug", "feat.p2.cat": "Kitchenware", "feat.p2.price": "$36",
+      "feat.p3.name": "Hand-Lettered Hearth Sign", "feat.p3.cat": "Wall Art", "feat.p3.price": "$64",
+      "feat.p4.name": "Linen Embroidered Tea Towels", "feat.p4.cat": "Textiles", "feat.p4.price": "$42",
+      "feat.p5.name": "Walnut Pie Crust Board", "feat.p5.cat": "Kitchenware", "feat.p5.price": "$88",
+      "feat.p6.name": "Pressed Wildflower Frame", "feat.p6.cat": "Wall Art", "feat.p6.price": "$78",
+
+      "story.eyebrow": "Our story", "story.title": "Three makers. One quiet table.",
+      "story.c1.eyebrow": "01 - The hands", "story.c1.title": "Stitched, not shipped.", "story.c1.body": "Every quilt, sign, and stoneware mug is finished by one of three makers - never a line, never a machine.",
+      "story.c2.eyebrow": "02 - The material", "story.c2.title": "Linen. Oak. Beeswax.", "story.c2.body": "Sourced within a day's drive. Honest fibers and woods that soften and patina the longer you live with them.",
+      "story.c3.eyebrow": "03 - The hearth", "story.c3.title": "Goods that gather.", "story.c3.body": "Pieces meant to outlast trends - passed from a bedside to a daughter's, from a Sunday table to the next.",
+
+      "coll.eyebrow": "Browse", "coll.title": "The collections",
+      "coll.c1": "Wall Art", "coll.c2": "Textiles & Linens", "coll.c3": "Kitchenware",
+
+      "closing.eyebrow": "Welcome home", "closing.title": "Bring something", "closing.titleAccent": "worth keeping.",
+      "closing.sub": "Slow-made home goods, wrapped in recycled muslin and shipped from the heartland.",
+      "closing.ctaShop": "Shop the collection", "closing.ctaMakers": "Meet the makers",
+
+      "cta.viewPiece": "View piece",
+
+      "page.artisans.h": "The makers", "page.artisans.sub": "Three moms, three home studios, one quiet table.",
+      "page.journal.h": "Journal", "page.journal.sub": "Stories from the heartland workshop.",
+      "page.about.h": "About Hearth & Heirloom", "page.about.sub": "Three makers. One quiet table."
+    }
+  }
+}

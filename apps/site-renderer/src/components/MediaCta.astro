@@ -1,0 +1,71 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Cta { labelKey: string; pageId?: string; url?: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  subKey: string;
+  primaryCta: Cta;
+  secondaryCta?: Cta;
+  whatsappLabelKey?: string;
+  whatsappUrl?: string;
+  primaryIcon?: string;
+  t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, titleKey, titleAccentKey, subKey, primaryCta, secondaryCta, whatsappLabelKey, whatsappUrl, primaryIcon = 'ri-shopping-bag-3-line', t, locale, defaultLocale } = Astro.props;
+const primaryHref = primaryCta.url ?? (primaryCta.pageId ? localePageHref(primaryCta.pageId, locale, defaultLocale) : '#book');
+const secondaryHref = secondaryCta?.url ?? (secondaryCta?.pageId ? localePageHref(secondaryCta.pageId, locale, defaultLocale) : '#');
+---
+
+<section class="media-cta">
+  <div class="bg" aria-hidden="true"></div>
+  <div class="overlay"></div>
+  <div class="content">
+    <span class="eyebrow-pill"><i class="ri-sparkling-line"></i>{t(eyebrowKey)}</span>
+    <h2>{t(titleKey)}<em>{t(titleAccentKey)}</em></h2>
+    <p class="sub">{t(subKey)}</p>
+    <div class="ctas">
+      <a class="cta-primary" href={primaryHref}>
+        <span class="cta-badge"><i class={primaryIcon}></i></span>
+        {t(primaryCta.labelKey)}<i class="ri-arrow-right-up-line"></i>
+      </a>
+      {whatsappLabelKey && whatsappUrl && (
+        <a class="cta-outline" href={whatsappUrl}>
+          <i class="ri-whatsapp-line"></i>{t(whatsappLabelKey)}
+        </a>
+      )}
+      {secondaryCta && (
+        <a class="cta-outline" href={secondaryHref}>{t(secondaryCta.labelKey)}</a>
+      )}
+    </div>
+  </div>
+</section>
+
+<style>
+  .media-cta { position: relative; min-height: 520px; display: flex; align-items: center; overflow: hidden; }
+  .bg { position: absolute; inset: 0; animation: kb 18s ease-out both;
+    background:
+      radial-gradient(70% 60% at 30% 50%, color-mix(in srgb, var(--c-primary) 28%, transparent), transparent 65%),
+      linear-gradient(120deg, #2a1a10, #4a2c18 60%, #1f120a); }
+  @keyframes kb { 0% { transform: scale(1.05); } 100% { transform: scale(1.18) translate(-1%, -1.5%); } }
+  @media (prefers-reduced-motion: reduce) { .bg { animation: none; } }
+  .overlay { position: absolute; inset: 0; background: linear-gradient(to right, rgba(20,12,6,0.82), rgba(20,12,6,0.55) 50%, rgba(20,12,6,0.3)); }
+  .content { position: relative; z-index: 2; width: 100%; max-width: 80rem; margin: 0 auto; padding: 5rem clamp(1.5rem, 5vw, 2.5rem); max-width: 48rem; }
+  .eyebrow-pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); backdrop-filter: blur(6px); font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--c-on-dark); }
+  .eyebrow-pill i { color: var(--c-secondary); }
+  h2 { margin-top: 1.5rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.25rem, 5.5vw, 4rem); line-height: 1.05; color: var(--c-on-dark); max-width: 20ch; }
+  h2 em { font-style: italic; font-weight: 400; }
+  .sub { margin-top: 1.25rem; max-width: 36rem; font-size: clamp(0.95rem, 1.5vw, 1.125rem); color: rgba(255,255,255,0.9); line-height: 1.7; }
+  .ctas { margin-top: 2.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  @media (min-width: 640px) { .ctas { flex-direction: row; } }
+  .cta-primary { display: inline-flex; align-items: center; gap: 0.75rem; padding: 0.5rem 1.5rem 0.5rem 0.5rem; border-radius: 9999px; background: var(--c-secondary); color: var(--c-on-surface); font-size: 0.9rem; font-weight: 500; transition: background .3s ease; }
+  .cta-primary:hover { filter: brightness(1.08); }
+  .cta-badge { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border-radius: 9999px; background: var(--c-on-surface); color: var(--c-secondary); transition: transform .3s ease; }
+  .cta-primary:hover .cta-badge { transform: rotate(12deg); }
+  .cta-outline { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.4); color: var(--c-on-dark); font-size: 0.9rem; transition: background .3s ease; }
+  .cta-outline:hover { background: rgba(255,255,255,0.1); }
+</style>

@@ -1,0 +1,99 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Cta { labelKey: string; pageId?: string; url?: string }
+interface Row { icon: string; serviceKey: string; noteKey: string; fromKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  primaryCta: Cta;
+  secondaryCta?: Cta;
+  rows: Row[];
+  footnoteKey: string;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const {
+  eyebrowKey, titleKey, titleAccentKey, introKey,
+  primaryCta, secondaryCta, rows = [], footnoteKey,
+  t, alt, locale, defaultLocale,
+} = Astro.props;
+const href = (c?: Cta) => c?.url ?? (c?.pageId ? localePageHref(c.pageId, locale, defaultLocale) : '#book');
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container grid-12 pricing">
+    <div class="left reveal">
+      <span class="eyebrow">{t(eyebrowKey)}</span>
+      <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
+      <p class="muted intro">{t(introKey)}</p>
+      <div class="ctas">
+        <a class="btn btn-dark btn-pill" href={href(primaryCta)}>
+          {t(primaryCta.labelKey)}<i class="ri-arrow-right-up-line"></i>
+        </a>
+        {secondaryCta && (
+          <a class="btn btn-outline btn-pill" href={href(secondaryCta)}>
+            {t(secondaryCta.labelKey)}<i class="ri-arrow-right-line"></i>
+          </a>
+        )}
+      </div>
+    </div>
+
+    <div class="right reveal">
+      <div class="table">
+        <div class="thead">
+          <span class="th-service">{t('pricing.colService')}</span>
+          <span class="th-from">{t('pricing.colFrom')}</span>
+        </div>
+        {rows.map((r) => (
+          <div class="row">
+            <span class="row-icon"><i class={r.icon}></i></span>
+            <div class="row-text">
+              <p class="row-service">{t(r.serviceKey)}</p>
+              <p class="muted row-note">{t(r.noteKey)}</p>
+            </div>
+            <span class="row-from">{t(r.fromKey)}</span>
+          </div>
+        ))}
+      </div>
+      <p class="footnote subtle">{t(footnoteKey)}</p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .left { grid-column: span 5; }
+  .right { grid-column: span 7; }
+  @media (max-width: 1023px) { .left, .right { grid-column: span 1; } }
+  .intro { margin-top: 1rem; max-width: 28rem; }
+  .ctas { margin-top: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  @media (min-width: 640px) { .ctas { flex-direction: row; } }
+  .table {
+    border-radius: var(--radius-lg);
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    overflow: hidden;
+  }
+  .thead { display: none; padding: 1rem 1.25rem; font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--c-on-surface-subtle); border-bottom: 1px solid var(--c-border); }
+  @media (min-width: 640px) { .thead { display: flex; align-items: center; justify-content: space-between; } }
+  .th-from { width: 6rem; text-align: right; }
+  .row { display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--c-border); transition: background .2s ease; }
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: var(--c-surface-alt); }
+  .row-icon {
+    width: 2.25rem; height: 2.25rem; flex: none;
+    display: grid; place-items: center;
+    border-radius: 9999px;
+    background: var(--c-surface-alt);
+    color: var(--c-accent-strong);
+  }
+  .row-text { flex: 1; min-width: 0; }
+  .row-service { font-size: 0.95rem; font-weight: 600; }
+  .row-note { font-size: 0.8rem; margin-top: 0.1rem; }
+  .row-from { flex: none; font-family: var(--font-heading); font-weight: 600; font-size: clamp(1rem, 2vw, 1.5rem); color: var(--c-accent-strong); white-space: nowrap; }
+  .footnote { margin-top: 1rem; font-size: 0.75rem; line-height: 1.5; }
+</style>

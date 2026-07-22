@@ -1,0 +1,26 @@
+---
+interface Props {
+  labelKey: string;
+  statementKey: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { labelKey, statementKey, t, alt } = Astro.props;
+const SERIF = "'Instrument Serif', ui-serif, Georgia, serif";
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container statement">
+    <div class="eyebrow reveal"><span class="dot"></span>{t(labelKey)}</div>
+    <h2 class="reveal" style={`font-family:${SERIF}`}>{t(statementKey)}</h2>
+  </div>
+</section>
+
+<style>
+  .statement { max-width: 48rem; }
+  .eyebrow { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.5rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3em; color: var(--c-on-surface-muted); }
+  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-on-surface); }
+  h2 { font-weight: 400; font-size: clamp(1.875rem, 4vw, 3.5rem); line-height: 1.1; letter-spacing: -0.015em; color: var(--c-on-surface); }
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .9s ease, transform .9s cubic-bezier(0.22,1,0.36,1); }
+  .reveal { opacity: 1; transform: translateY(0); }
+</style>

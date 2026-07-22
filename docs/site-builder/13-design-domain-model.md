@@ -1,7 +1,7 @@
 # 13 · 设计智能层领域模型契约（design intelligence domain model）
 
 > 本文 = 独立站建设**设计智能层的领域契约**。DI-0/#164 已落地 `DesignSourceManifest / DesignObservation / DesignRule / DesignDNA / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation / DesignCatalog` 的共享类型、运行时 validator 与 digest；M1-e/f 继续落真实目录条目和生产/消费链。媒体域 `Asset / AssetVariant / MediaJob / AssetUsage / DemoVisualPack` 仍按各自阶段推进。
-> ⚠️ **合同存在不等于运行时能力存在**：当前静态 Catalog 故意为空，没有真实 TemplateFamily/Blueprint/StylePreset/DemoVisualPack；SiteSpec 仍是 `@global/contracts` 的 **1.0.0**，不含 `componentLibraryVersion / rendererVersion / familyId` 等 1.1.0 字段；Renderer 仍注册 **10** 型 section 组件。26 型封闭库、SiteSpec 1.1、designSpec/assembly 消费属于 M1-e，DesignEvaluation 运行时生产属于 M1-f（见 [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014/015**）。
+> ⚠️ **合同存在不等于运行时能力存在**：当前静态 Catalog 故意为空，没有真实 TemplateFamily/Blueprint/StylePreset/DemoVisualPack；SiteSpec 仍是 `@global/contracts` 的 **1.0.0**，不含 `componentLibraryVersion / rendererVersion / familyId` 等 1.1.0 字段；Renderer 注册 **55** 型 section 组件。SiteSpec 1.1、designSpec/assembly 消费属于 M1-e，DesignEvaluation 运行时生产属于 M1-f（见 [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014/015**）。
 > **非自封权威**：施工真值仍是当前代码、活文档 00-10/[14](14-media-foundation-mf0.md) 与 [ADR registry](../adr/registry.md)；11 是受 ADR-019 取代的历史研究，12 v3.2 是归档 proposal。本文是设计智能层的**目标设计基线**，实际落地时须回写 [03-agents.md](03-agents.md) / [04-sitespec-contract.md](04-sitespec-contract.md) 并把消费者需要的字段合入 `@global/contracts`。
 > 实质内容由外部草稿 v3.2 §13–§20 分发而来（逐节标注「v3.2 §X 回写」），v3.2 本身非权威。承重决策**按 ID 引用** ADR-013~020，不复述整条。
 
@@ -12,8 +12,8 @@
 - **本文管什么**：设计智能层"从设计参考 → 平台自有设计知识 → 每次生成的冻结决策 → 质量评测"这条链上的领域模型。它是 [09-m1-implementation-design.md](09-m1-implementation-design.md) 精装修管线（P1→P4）在 M1-d/e/f 阶段的**数据契约层**。
 - **本文不管什么**：编排 DAG、Agent 卡执行流（→ [03-agents.md](03-agents.md)）、SiteSpec 页面数据形状（→ [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014**）、模型路由四态（→ [10-model-selection-study.md](10-model-selection-study.md)、**ADR-016**）。
 - **as-built ↔ target 分界（务必区分）**：
-  - **as-built（2026-07-22）**：SiteSpec 1.0.0 共享契约（#117）；DI-0 设计合同与冻结空 Catalog（#164）；`design_spec` AI Task 路由；10 型渲染组件；`AssetVariant`/MF-0 与 M1-c 纯 Sharp 图片管线。
-  - **target（尚未落地）**：真实 DesignDNA/TemplateFamily/Blueprint/StylePreset/DemoVisualPack 目录条目与运行时消费者、26 型组件库、SiteSpec 1.1.0、DesignBrief 生产和 DesignEvaluation 运行时实例。**ADR 本身只是路线，代码、消费者与验证才是实现证明**。
+  - **as-built（2026-07-22）**：SiteSpec 1.0.0 共享契约（#117）；DI-0 设计合同与冻结空 Catalog（#164）；`design_spec` AI Task 路由；55 型渲染组件；`AssetVariant`/MF-0 与 M1-c 纯 Sharp 图片管线。
+  - **target（尚未落地）**：真实 DesignDNA/TemplateFamily/Blueprint/StylePreset/DemoVisualPack 目录条目与运行时消费者、SiteSpec 1.1.0、DesignBrief 生产和 DesignEvaluation 运行时实例。**ADR 本身只是路线，代码、消费者与验证才是实现证明**。
 - **红线继承**：设计智能层不改变 **ADR-013**（固定 DAG + 有界 AI Task，无自由 Agent/Planner）、**ADR-017**（禁虚构身份）、**ADR-019**（Readdy = 净室视觉参考、运行时零依赖）。本文所有实体在这三条约束下成立。
 
 ---
@@ -59,7 +59,7 @@
 
 1. **多源成立**：至少在 **5 个独立来源或平台原创实验**中成立；单一来源不能独占规则依据。
 2. **去具体化仍通用**：去掉品牌、文案、素材和具体数值后，仍可描述为**通用构图/节奏原则**。
-3. **可自有重实现**：可由平台自有组件与 token 重新实现，**不需运行时读取来源**（组件目标态 = 26 型封闭库 **ADR-015**；当前 as-built 10 型）。
+3. **可自有重实现**：可由平台自有组件与 token 重新实现，**不需运行时读取来源**（组件目标态 = 55 型封闭库 **ADR-015**；当前 as-built 55 型）。
 4. **非近邻复刻**：生成站与任一单一来源通过**截图 / 结构 / 代码相似度门**，不是近邻复刻。
 
 `DesignRule` = 满足上述条件的跨来源通用原则（携带证据来源数）。**生产方**：Pattern Aggregator。**消费方**：DesignDNA 合成、Blueprint Synthesizer。

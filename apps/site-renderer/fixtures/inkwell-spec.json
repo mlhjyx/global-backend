@@ -1,0 +1,215 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "editorial-press" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.projects", "pageId": "projects" },
+      { "labelKey": "nav.services", "pageId": "services" },
+      { "labelKey": "nav.contact", "pageId": "contact" },
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "More Than B&W" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "EditorialHero", "props": { "id": "EditorialHero-1",
+          "eyebrowKey": "hero.eyebrow", "headlineKey": "hero.headline",
+          "ctaLabelKey": "hero.cta", "ctaPageId": "services",
+          "statusKey": "hero.status", "scrollKey": "hero.scroll"
+        } },
+        { "type": "SplitAbout", "props": { "id": "SplitAbout-1", "alt": true,
+          "eyebrowKey": "about.eyebrow", "titleKey": "about.title", "bodyKey": "about.body",
+          "ctaLabelKey": "about.cta", "ctaPageId": "contact",
+          "chipIcon": "ri-leaf-line", "chipKey": "about.chip"
+        } },
+        { "type": "ProjectsGrid", "props": { "id": "ProjectsGrid-1",
+          "titleKey": "projects.title", "allLabelKey": "projects.all", "allPageId": "projects",
+          "items": [
+            { "titleKey": "projects.p1.title", "descKey": "projects.p1.desc" },
+            { "titleKey": "projects.p2.title", "descKey": "projects.p2.desc" }
+          ]
+        } },
+        { "type": "ServicesDark", "props": { "id": "ServicesDark-1",
+          "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent",
+          "allLabelKey": "services.all", "allPageId": "services",
+          "services": [
+            { "icon": "ri-book-2-line", "titleKey": "services.s1.title", "descKey": "services.s1.desc" },
+            { "icon": "ri-bank-card-line", "titleKey": "services.s2.title", "descKey": "services.s2.desc" },
+            { "icon": "ri-archive-2-line", "titleKey": "services.s3.title", "descKey": "services.s3.desc" },
+            { "icon": "ri-file-paper-2-line", "titleKey": "services.s4.title", "descKey": "services.s4.desc" }
+          ]
+        } },
+        { "type": "ProcessSteps", "props": { "id": "ProcessSteps-1",
+          "eyebrowKey": "process.eyebrow", "titleKey": "process.title", "titleAccentKey": "process.titleAccent", "introKey": "process.intro",
+          "steps": [
+            { "num": "01", "icon": "ri-chat-quote-line", "titleKey": "process.s1.title", "bodyKey": "process.s1.body", "metaKey": "process.s1.meta" },
+            { "num": "02", "icon": "ri-file-search-line", "titleKey": "process.s2.title", "bodyKey": "process.s2.body", "metaKey": "process.s2.meta" },
+            { "num": "03", "icon": "ri-printer-line", "titleKey": "process.s3.title", "bodyKey": "process.s3.body", "metaKey": "process.s3.meta" },
+            { "num": "04", "icon": "ri-truck-line", "titleKey": "process.s4.title", "bodyKey": "process.s4.body", "metaKey": "process.s4.meta" }
+          ]
+        } },
+        { "type": "StatsCountup", "props": { "id": "StatsCountup-1",
+          "stats": [
+            { "value": 12, "suffix": "+", "labelKey": "stats.years" },
+            { "value": 850, "suffix": "+", "labelKey": "stats.projects" },
+            { "value": 42, "suffix": "", "labelKey": "stats.stocks" },
+            { "value": 98, "suffix": "%", "labelKey": "stats.repeat" }
+          ]
+        } },
+        { "type": "MaterialsLibrary", "props": { "id": "MaterialsLibrary-1", "alt": true,
+          "eyebrowKey": "materials.eyebrow", "titleKey": "materials.title", "titleAccentKey": "materials.titleAccent", "introKey": "materials.intro",
+          "ctaPrimaryLabelKey": "materials.ctaPrimary", "ctaPrimaryPageId": "contact",
+          "ctaSecondaryLabelKey": "materials.ctaSecondary", "ctaSecondaryPageId": "contact",
+          "items": [
+            { "no": "01", "nameKey": "mat.p1.name", "weightKey": "mat.p1.weight", "noteKey": "mat.p1.note" },
+            { "no": "02", "nameKey": "mat.p2.name", "weightKey": "mat.p2.weight", "noteKey": "mat.p2.note" },
+            { "no": "03", "nameKey": "mat.p3.name", "weightKey": "mat.p3.weight", "noteKey": "mat.p3.note" },
+            { "no": "04", "nameKey": "mat.p4.name", "weightKey": "mat.p4.weight", "noteKey": "mat.p4.note" },
+            { "no": "05", "nameKey": "mat.p5.name", "weightKey": "mat.p5.weight", "noteKey": "mat.p5.note" },
+            { "no": "06", "nameKey": "mat.p6.name", "weightKey": "mat.p6.weight", "noteKey": "mat.p6.note" }
+          ]
+        } },
+        { "type": "Testimonials", "props": { "id": "Testimonials-1",
+          "eyebrowKey": "testi.eyebrow",
+          "items": [
+            { "quoteKey": "testi.t1.quote", "nameKey": "testi.t1.name", "postcodeKey": "testi.t1.role", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t2.quote", "nameKey": "testi.t2.name", "postcodeKey": "testi.t2.role", "rating": 5, "platformKey": "testi.platform" },
+            { "quoteKey": "testi.t3.quote", "nameKey": "testi.t3.name", "postcodeKey": "testi.t3.role", "rating": 4.9, "platformKey": "testi.platform" }
+          ]
+        } },
+        { "type": "LogoMarquee", "props": { "id": "LogoMarquee-1", "alt": true,
+          "eyebrowKey": "clients.eyebrow", "titleKey": "clients.title", "titleLine2Key": "clients.title2",
+          "items": ["POLYESTER", "MAISON VERTE", "STUDIO FIELD", "NORTHERN FOLIO", "ATELIER 9", "VERSO PRESS", "KINDLING CO.", "PAPER & PINE"]
+        } },
+        { "type": "FaqSplit", "props": { "id": "FaqSplit-1",
+          "eyebrowKey": "faq.eyebrow", "titleKey": "faq.title", "titleAccentKey": "faq.titleAccent", "introKey": "faq.intro",
+          "items": [
+            { "qKey": "faq.q1", "aKey": "faq.a1" },
+            { "qKey": "faq.q2", "aKey": "faq.a2" },
+            { "qKey": "faq.q3", "aKey": "faq.a3" },
+            { "qKey": "faq.q4", "aKey": "faq.a4" },
+            { "qKey": "faq.q5", "aKey": "faq.a5" }
+          ]
+        } },
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-1", "alt": true,
+          "titleKey": "cta.title", "subKey": "cta.sub"
+        } }
+      ] }
+    },
+    {
+      "id": "projects", "path": "/projects",
+      "seo": { "titleKey": "seo.projects.title", "descriptionKey": "seo.projects.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-p", "headlineKey": "page.projects.h", "subheadKey": "page.projects.sub", "cta": { "labelKey": "about.cta", "pageId": "contact" } } }
+      ] }
+    },
+    {
+      "id": "services", "path": "/services",
+      "seo": { "titleKey": "seo.services.title", "descriptionKey": "seo.services.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-s", "headlineKey": "page.services.h", "subheadKey": "page.services.sub", "cta": { "labelKey": "about.cta", "pageId": "contact" } } }
+      ] }
+    },
+    {
+      "id": "contact", "path": "/contact",
+      "seo": { "titleKey": "seo.contact.title", "descriptionKey": "seo.contact.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-c", "titleKey": "cta.title", "subKey": "cta.sub" } }
+      ] }
+    },
+    {
+      "id": "book", "path": "/book",
+      "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "cta.title", "subKey": "cta.sub" } }
+      ] }
+    }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.home": "Home", "nav.projects": "Projects", "nav.services": "Services", "nav.contact": "Contact", "nav.book": "Get a Quote",
+      "brand.tagline": "San Francisco · Print Studio",
+      "contact.phone": "+1 (415) 555-0199", "contact.whatsapp": "", "contact.email": "hello@morethanbw.co",
+      "footer.intro": "A digital printing studio crafting tactile objects since 2012. Booklets, cards, packaging and mailers - set, proofed and finished in-house.",
+      "footer.available": "Studio is open · taking briefs", "footer.exploreTitle": "Studio", "footer.contactTitle": "Head Office",
+      "footer.bookTitle": "Inquiries", "footer.bookNote": "Looking to get a quote? Tell us about your project.",
+      "footer.badgeQualified": "FSC certified", "footer.badgeInsured": "In-house bindery",
+      "footer.area": "500 Terry Francine St, San Francisco, CA", "footer.privacy": "Privacy Policy", "footer.terms": "Accessibility", "footer.insurance": "Terms",
+
+      "seo.home.title": "More Than B&W - Premium Printing & Mailing Studio",
+      "seo.home.desc": "Booklets, cards, packaging and direct mail printed and finished in-house. From brief to mailbox in ten days.",
+      "seo.projects.title": "Projects - More Than B&W", "seo.projects.desc": "Selected printing and mailing projects.",
+      "seo.services.title": "Services - More Than B&W", "seo.services.desc": "Booklets, cards, packaging and brochures.",
+      "seo.contact.title": "Contact - More Than B&W", "seo.contact.desc": "Request a print quote.",
+      "seo.book.title": "Get a Quote - More Than B&W", "seo.book.desc": "Tell us about your print project.",
+
+      "hero.eyebrow": "PREMIUM PRINTING SOLUTIONS",
+      "hero.headline": "Print Your  Life",
+      "hero.cta": "Read More", "hero.status": "Studio is open · taking briefs", "hero.scroll": "Scroll",
+
+      "about.eyebrow": "ABOUT US", "about.title": "The go-to experts for all your printing needs",
+      "about.body": "More Than B&W is a digital printing studio crafting tactile objects since 2012. We partner with publishers, designers and brands to produce booklets, cards, packaging and mailers - set, proofed and finished in-house by a tight five-person team.",
+      "about.cta": "Get a Quote", "about.chip": "FSC paper · in-house bindery",
+
+      "projects.title": "Our Projects", "projects.all": "All Projects",
+      "projects.p1.title": "Booklets & Mailers", "projects.p1.desc": "Saddle-stitched mailer booklets printed for a quarterly subscription program, addressed and shipped from our floor in cream kraft envelopes.",
+      "projects.p2.title": "Cards & Direct Mail", "projects.p2.desc": "Letterpress postcards and business card sets, addressed in-house and mailed worldwide for a brand launch campaign.",
+
+      "services.eyebrow": "OUR PRINTING SERVICES", "services.title": "Quality prints,", "services.titleAccent": "Beautiful", "services.all": "All Services",
+      "services.s1.title": "BOOKLETS", "services.s1.desc": "Saddle-stitched and perfect-bound booklets printed on archival paper for magazines, lookbooks and reports.",
+      "services.s2.title": "CARDS", "services.s2.desc": "Letterpress, foil and embossed business cards, postcards and invitations finished to a premium standard.",
+      "services.s3.title": "PACKAGING", "services.s3.desc": "Custom-printed boxes, sleeves and tags. Sustainable stocks, tactile finishes, made-to-measure dies.",
+      "services.s4.title": "BROCHURES", "services.s4.desc": "Tri-fold, gate-fold and bespoke brochures with crisp registration and rich, accurate color reproduction.",
+
+      "process.eyebrow": "HOW WE WORK", "process.title": "From brief to mailbox, in ten days.", "process.titleAccent": "mailbox",
+      "process.intro": "A straightforward four-step process. No middlemen, no surprises - every project is managed by the same printer who runs your press.",
+      "process.s1.title": "Brief & Estimate", "process.s1.body": "Share artwork, paper preference and deadline. We quote within 24 hours and ship samples on request.", "process.s1.meta": "Day 1",
+      "process.s2.title": "Proof & Approval", "process.s2.body": "Digital proofs are signed off, then a press-side wet proof confirms color before we run a single sheet.", "process.s2.meta": "Day 2-4",
+      "process.s3.title": "Print & Finish", "process.s3.body": "Offset or HP Indigo, then hand-finishing - foil, deboss, perfect bind or saddle stitch in-house.", "process.s3.meta": "Day 5-9",
+      "process.s4.title": "Mail & Deliver", "process.s4.body": "Packed, addressed and dropped at USPS or freighted globally with end-to-end tracking.", "process.s4.meta": "Day 10+",
+
+      "stats.years": "Years pressing", "stats.projects": "Projects shipped", "stats.stocks": "Paper stocks", "stats.repeat": "Repeat clients",
+
+      "materials.eyebrow": "PAPER LIBRARY · 42 STOCKS", "materials.title": "One quiet", "materials.titleAccent": "obsession.",
+      "materials.intro": "A working library of cottons, recycleds and specialty papers we keep on the studio floor. Request a free swatch pack with your quote.",
+      "materials.ctaPrimary": "Order a swatch pack", "materials.ctaSecondary": "Browse the full library",
+      "mat.p1.name": "Mohawk Superfine", "mat.p1.weight": "118 gsm · Eggshell", "mat.p1.note": "House favorite for editorial",
+      "mat.p2.name": "Colorplan Pristine", "mat.p2.weight": "270 gsm · Smooth", "mat.p2.note": "Letterpress & deboss",
+      "mat.p3.name": "GF Smith Plike", "mat.p3.weight": "330 gsm · Rubberized", "mat.p3.note": "Soft-touch covers",
+      "mat.p4.name": "Crush Citrus", "mat.p4.weight": "120 gsm · Recycled", "mat.p4.note": "Made from juice pulp",
+      "mat.p5.name": "Curious Metallics", "mat.p5.weight": "250 gsm · Pearl", "mat.p5.note": "Cards & invitations",
+      "mat.p6.name": "Munken Pure Rough", "mat.p6.weight": "100 gsm · Uncoated", "mat.p6.note": "Books & catalogs",
+
+      "testi.eyebrow": "KIND WORDS", "testi.platform": "Verified client",
+      "testi.t1.quote": "The team treated our quarterly magazine like their own. The paper, the binding, the timing - every detail landed where it should.", "testi.t1.name": "Eliza Hartman", "testi.t1.role": "Editor in Chief, Polyester",
+      "testi.t2.quote": "Their direct mail run lifted our seasonal campaign response rate by 38%. Print, done this well, still wins.", "testi.t2.name": "Marco Bellini", "testi.t2.role": "Head of Brand, Maison Verte",
+      "testi.t3.quote": "From letterpress cards to a 240-page catalog, every piece arrived perfect. The only press we recommend to clients.", "testi.t3.name": "Sara Okonkwo", "testi.t3.role": "Creative Director, Studio Field",
+
+      "clients.eyebrow": "OUR CLIENTS", "clients.title": "We're proud to work with", "clients.title2": "these companies",
+
+      "faq.eyebrow": "FREQUENT QUESTIONS", "faq.title": "Things people", "faq.titleAccent": "often", "faq.intro": "Can't find what you're after? Drop us a note - we read every email personally.",
+      "faq.q1": "What's your minimum order quantity?", "faq.a1": "There is no hard minimum on digital runs - we'll happily print a single test booklet. For offset jobs, 250 copies is the sweet spot for cost per unit.",
+      "faq.q2": "How fast can you turn around a project?", "faq.a2": "Most cards and brochures ship within 5-7 business days from approval. Bound magazines typically take 10-14 days depending on finishing.",
+      "faq.q3": "Do you handle the mailing too?", "faq.a3": "Yes - every project can be addressed, sorted and dropped at USPS in-house. We can also handle freight for international runs.",
+      "faq.q4": "Can I bring my own paper?", "faq.a4": "Absolutely. Send a sample and we'll test it on press before quoting. We're happy to spec from your local mill of choice.",
+      "faq.q5": "Do you offer sustainable options?", "faq.a5": "Roughly 70% of our paper library is FSC-certified or post-consumer recycled. Vegetable-based inks and water-based coatings are standard.",
+
+      "cta.title": "Let's print something good.", "cta.sub": "Tell us a little about your project. We'll come back within 24 hours with a quote and paper samples on request.",
+
+      "inquiry.title": "Request a Quote", "inquiry.sub": "We reply within one business day.",
+      "inquiry.field.name": "Your name", "inquiry.field.email": "Work email", "inquiry.field.message": "Tell us about your requirements",
+      "inquiry.submit": "Request a Quote", "inquiry.m0.note": "Inquiry form goes live at publish.",
+
+      "page.projects.h": "Selected projects", "page.projects.sub": "Booklets, cards, packaging and mailers we've printed and shipped.",
+      "page.services.h": "Printing services", "page.services.sub": "Booklets, cards, packaging and brochures - finished in-house."
+    }
+  }
+}

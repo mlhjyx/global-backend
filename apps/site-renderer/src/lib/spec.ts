@@ -33,6 +33,19 @@ export function makeT(spec: MaterializedSpec, locale: string): (key: string) => 
   };
 }
 
+/**
+ * 可选 slot 安全探测：缺 key（COPY_SLOT_MISSING）返回空串（UI 按空值隐藏）；
+ * 其他异常一律 rethrow -- 不吞 CopyBundle/完整性错误，避免破坏 fail-closed。
+ */
+export function safeOptionalSlot(t: (key: string) => string, key: string): string {
+  try {
+    return t(key);
+  } catch (e) {
+    if (e instanceof Error && /^COPY_SLOT_MISSING/.test(e.message)) return '';
+    throw e;
+  }
+}
+
 export function pagePathToSlug(path: string): string | undefined {
   const cleaned = path.replace(/^\/+|\/+$/g, '');
   return cleaned === '' ? undefined : cleaned;
