@@ -106,6 +106,11 @@ describe("M1-e-A technical baseline component contract", () => {
     ["CtaCenter", { eyebrowKey: "cta.eyebrow", titleKey: "cta.title", subtitleKey: "cta.subtitle", primaryCta: { labelKey: "cta.primary", url: "https://example.test/contact" } }],
     ["ServicesDark", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", allLabelKey: "services.all", allPageId: "home", services: [{ icon: "ri-settings-line", titleKey: "services.one", descKey: "services.description" }] }],
     ["ServiceRows", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", introKey: "services.intro", bookLabelKey: "services.book", bookPageId: "home", services: [{ icon: "ri-settings-line", titleKey: "services.one", descKey: "services.description", fromKey: "services.from", unitKey: "services.unit" }] }],
+    ["AreaGallery", { eyebrowKey: "areas.eyebrow", titleKey: "areas.title", titleAccentKey: "areas.accent", areas: [], allLabelKey: "areas.all" }],
+    ["ProjectsGrid", { titleKey: "projects.title", items: [], allLabelKey: "projects.all" }],
+    ["MaterialsLibrary", { eyebrowKey: "materials.eyebrow", titleKey: "materials.title", titleAccentKey: "materials.accent", introKey: "materials.intro", items: [], ctaPrimaryLabelKey: "materials.primary", ctaSecondaryLabelKey: "materials.secondary" }],
+    ["CollectionCards", { eyebrowKey: "collections.eyebrow", titleKey: "collections.title", items: [], allPageId: "collections" }],
+    ["ProductShowcaseAlt", { chapterKey: "product.chapter", titleKey: "product.title", titleAccentKey: "product.accent", introKey: "product.intro", products: [] }],
   ])("%s keeps legacy 1.0 props parseable", (type, props) => {
     expect(() => validateBlock({ type, props } as never)).not.toThrow();
   });

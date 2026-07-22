@@ -48,6 +48,11 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   CtaCenter: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, subtitle: 140, cta: 24 }),
   ServicesDark: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, minItems: 1, maxItems: 8, serviceTitle: 60, serviceDescription: 200, cta: 24 }),
   ServiceRows: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, fromLabel: 48, minItems: 1, maxItems: 8, serviceTitle: 60, serviceDescription: 200, from: 48, unit: 24, cta: 24 }),
+  AreaGallery: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, minItems: 1, maxItems: 8, name: 60, postcodes: 80, note: 160, cta: 24 }),
+  ProjectsGrid: Object.freeze({ title: 60, titleWords: 8, minItems: 1, maxItems: 8, itemTitle: 80, itemDescription: 240, cta: 24 }),
+  MaterialsLibrary: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minItems: 1, maxItems: 8, number: 24, name: 80, weight: 48, note: 160, cta: 24 }),
+  CollectionCards: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, minItems: 1, maxItems: 8, name: 80 }),
+  ProductShowcaseAlt: Object.freeze({ chapter: 40, title: 60, titleWords: 8, accent: 40, intro: 240, code: 24, name: 80, tagline: 80, spec: 48, price: 24, label: 48, minFeatures: 0, maxFeatures: 3, feature: 80, cta: 24 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -175,6 +180,11 @@ const contentSchemas = {
   CtaCenter: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40).optional(),subtitle:boundedCopy(140),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional()}).strict(),
   ServicesDark: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),services:z.array(z.object({icon:boundedCopy(80),title:boundedCopy(60),description:boundedCopy(200)}).strict()).min(1).max(8),allCta:boundedCopy(24,4).optional()}).strict(),
   ServiceRows: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),fromLabel:boundedCopy(48).optional(),cta:boundedCopy(24,4),services:z.array(z.object({icon:boundedCopy(80),title:boundedCopy(60),description:boundedCopy(200),from:boundedCopy(48),unit:boundedCopy(24)}).strict()).min(1).max(8)}).strict(),
+  AreaGallery: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),areas:z.array(z.object({name:boundedCopy(60),postcodes:boundedCopy(80).optional(),note:boundedCopy(160),alt:boundedCopy(160)}).strict()).max(8),allCta:boundedCopy(24,4).optional()}).strict(),
+  ProjectsGrid: z.object({title:boundedCopy(60,8),items:z.array(z.object({title:boundedCopy(80),description:boundedCopy(240),alt:boundedCopy(160)}).strict()).max(8),allCta:boundedCopy(24,4).optional()}).strict(),
+  MaterialsLibrary: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),items:z.array(z.object({no:boundedCopy(24),name:boundedCopy(80),weight:boundedCopy(48),note:boundedCopy(160),alt:boundedCopy(160)}).strict()).max(8),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4)}).strict(),
+  CollectionCards: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),items:z.array(z.object({name:boundedCopy(80),alt:boundedCopy(160)}).strict()).max(8)}).strict(),
+  ProductShowcaseAlt: z.object({chapter:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),product:z.object({code:boundedCopy(24),name:boundedCopy(80),tagline:boundedCopy(80),capacity:boundedCopy(48),weight:boundedCopy(48),cycles:boundedCopy(48),price:boundedCopy(24),alt:boundedCopy(160)}).strict(),capacityLabel:boundedCopy(48),weightLabel:boundedCopy(48),cyclesLabel:boundedCopy(48),fromLabel:boundedCopy(48),features:z.array(boundedCopy(80)).max(3),cta:boundedCopy(24,4).optional()}).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

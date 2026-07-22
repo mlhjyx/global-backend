@@ -106,16 +106,18 @@ describe("M1-e-A component qualification gate", () => {
     });
   });
 
-  it("registers twenty-nine qualified components and keeps unqualified types gallery-only", () => {
+  it("registers thirty-four qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
-    expect(getComponentReleaseReadiness("AreaGallery")).toEqual({
-      status: "gallery_only",
+    expect(getComponentReleaseReadiness("AreaGallery")).toMatchObject({
+      status: "m1_e_a_qualified",
     });
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS).sort()).toEqual([
       "AboutBlock",
+      "AreaGallery",
       "AreaMarquee",
       "ArticleGrid",
       "CertWall",
+      "CollectionCards",
       "CtaBanner",
       "CtaCenter",
       "FaqAccordion",
@@ -126,11 +128,14 @@ describe("M1-e-A component qualification gate", () => {
       "LedgerStats",
       "LogoMarquee",
       "MapLocation",
+      "MaterialsLibrary",
       "PricingTable",
       "PricingTiers",
       "ProcessSteps",
       "ProcessTimeline",
       "ProductGrid",
+      "ProductShowcaseAlt",
+      "ProjectsGrid",
       "ServiceRows",
       "ServicesDark",
       "ServicesGrid",
@@ -143,7 +148,7 @@ describe("M1-e-A component qualification gate", () => {
       "ValueStrip",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      203,
+      238,
     );
     for (const componentType of [
       "CtaBanner",
@@ -170,6 +175,11 @@ describe("M1-e-A component qualification gate", () => {
       "LedgerStats",
       "PricingTiers",
       "ValueStrip",
+      "AreaGallery",
+      "ProjectsGrid",
+      "MaterialsLibrary",
+      "CollectionCards",
+      "ProductShowcaseAlt",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",
@@ -246,12 +256,12 @@ describe("M1-e-A component qualification gate", () => {
       assertReleaseQualificationRegistryIntegrity({
         releaseTypes: [
           ...SITE_SPEC_RELEASE_COMPONENT_TYPES,
-          "AreaGallery",
+          "EditorialHero",
         ],
         qualifications: M1_E_A_COMPONENT_QUALIFICATIONS,
         artifacts: M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
       }),
-    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: AreaGallery");
+    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: EditorialHero");
   });
 
   it("rejects placeholder qualification ids without resolved artifacts", () => {

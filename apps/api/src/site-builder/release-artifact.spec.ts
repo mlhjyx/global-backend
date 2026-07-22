@@ -77,6 +77,8 @@ describe('R1 release contract gate', () => {
       'AboutBlock',
       'ArticleGrid',
       'AreaMarquee',
+      'AreaGallery',
+      'CollectionCards',
       'LedgerStats',
       'CertWall',
       'CtaBanner',
@@ -87,12 +89,15 @@ describe('R1 release contract gate', () => {
       'HeroBanner',
       'InquiryForm',
       'MapLocation',
+      'MaterialsLibrary',
       'LogoMarquee',
       'ProcessTimeline',
       'PricingTable',
       'PricingTiers',
       'ProcessSteps',
       'ProductGrid',
+      'ProductShowcaseAlt',
+      'ProjectsGrid',
       'ServicesGrid',
       'ServicesDark',
       'ServiceRows',
@@ -109,18 +114,11 @@ describe('R1 release contract gate', () => {
     ).not.toThrow();
   });
 
-  it('blocks a registered gallery component until M1-e-A promotes it', () => {
-    expect(() =>
-      assertReleaseContract(
-        spec(['AreaGallery'], {
-          eyebrowKey: 'areas.eyebrow',
-          titleKey: 'areas.title',
-          titleAccentKey: 'areas.accent',
-          areas: [{ name: 'North', noteKey: 'areas.north' }],
-        }),
-        '1.0.0',
-      ),
-    ).toThrow('SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: AreaGallery');
+  it('accepts a qualified gallery component', () => {
+    expect(() => assertReleaseContract(spec(['AreaGallery'], {
+      eyebrowKey: 'areas.eyebrow', titleKey: 'areas.title', titleAccentKey: 'areas.accent',
+      areas: [{ name: 'North', noteKey: 'areas.north' }], variant: 'technical-grid',
+    }), '1.0.0')).not.toThrow();
   });
 
   it('rejects a PricingTable CTA whose internal target page does not exist', () => {
@@ -150,6 +148,56 @@ describe('R1 release contract gate', () => {
   });
 
   it.each([
+    [
+      'AreaGallery.allPageId',
+      'AreaGallery',
+      {
+        eyebrowKey: 'areas.eyebrow', titleKey: 'areas.title', titleAccentKey: 'areas.accent',
+        areas: [], allLabelKey: 'areas.all', allPageId: 'missing', variant: 'technical-grid',
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: AreaGallery.allPageId.pageId=missing',
+    ],
+    [
+      'ProjectsGrid.allPageId',
+      'ProjectsGrid',
+      { titleKey: 'projects.title', items: [], allLabelKey: 'projects.all', allPageId: 'missing', variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ProjectsGrid.allPageId.pageId=missing',
+    ],
+    [
+      'CollectionCards.allPageId',
+      'CollectionCards',
+      { eyebrowKey: 'collections.eyebrow', titleKey: 'collections.title', items: [], allPageId: 'missing', variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: CollectionCards.allPageId.pageId=missing',
+    ],
+    [
+      'MaterialsLibrary.defaultPageId',
+      'MaterialsLibrary',
+      {
+        eyebrowKey: 'materials.eyebrow', titleKey: 'materials.title', titleAccentKey: 'materials.accent', introKey: 'materials.intro',
+        items: [], ctaPrimaryLabelKey: 'materials.cta', ctaSecondaryLabelKey: 'materials.more',
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: MaterialsLibrary.ctaPrimaryPageId.pageId=contact',
+    ],
+    [
+      'MaterialsLibrary.ctaPrimaryPageId',
+      'MaterialsLibrary',
+      {
+        eyebrowKey: 'materials.eyebrow', titleKey: 'materials.title', titleAccentKey: 'materials.accent', introKey: 'materials.intro',
+        items: [{ no: '01', nameKey: 'materials.one', weightKey: 'materials.weight', noteKey: 'materials.note' }],
+        ctaPrimaryLabelKey: 'materials.cta', ctaSecondaryLabelKey: 'materials.more', ctaPrimaryPageId: 'missing',
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: MaterialsLibrary.ctaPrimaryPageId.pageId=missing',
+    ],
+    [
+      'ProductShowcaseAlt.configureCta',
+      'ProductShowcaseAlt',
+      {
+        chapterKey: 'product.chapter', titleKey: 'product.title', titleAccentKey: 'product.accent', introKey: 'product.intro',
+        products: [{ code: 'PX', nameKey: 'product.name', taglineKey: 'product.tagline', capacityKey: 'product.capacity', weightKey: 'product.weight', cyclesKey: 'product.cycles', priceKey: 'product.price' }],
+        configureCta: { labelKey: 'product.cta', pageId: 'missing' }, variant: 'technical-grid',
+      },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ProductShowcaseAlt.configureCta.pageId=missing',
+    ],
     [
       'CtaCenter.primaryCta',
       'CtaCenter',
@@ -201,6 +249,12 @@ describe('R1 release contract gate', () => {
     ],
   ])('rejects unknown internal page target for %s', (_label, type, props, expected) => {
     expect(() => assertReleaseContract(spec([type], props), '1.0.0')).toThrow(expected);
+  });
+
+  it('keeps the legacy CollectionCards home target releaseable', () => {
+    expect(() => assertReleaseContract(spec(['CollectionCards'], {
+      eyebrowKey: 'collections.eyebrow', titleKey: 'collections.title', items: [], variant: 'technical-grid',
+    }), '1.0.0')).not.toThrow();
   });
 
   it('rejects blank internal CTA page IDs before publication', () => {

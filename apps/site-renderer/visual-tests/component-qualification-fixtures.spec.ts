@@ -4,6 +4,7 @@ const QUALIFIED_COMPONENTS = {
   AboutBlock: "section.about-block",
   ArticleGrid: "section.article-grid",
   AreaMarquee: "section.area-marquee",
+  AreaGallery: "section.area-gallery",
   CertWall: "section.cert-wall",
   CtaBanner: "section.cta",
   CtaCenter: "section.cta-center",
@@ -19,6 +20,10 @@ const QUALIFIED_COMPONENTS = {
   PricingTable: "section.pricing-table",
   PricingTiers: "section.pricing-tiers",
   ProductGrid: "section.product-grid",
+  ProductShowcaseAlt: "section.product-showcase-alt",
+  ProjectsGrid: "section.projects-grid",
+  MaterialsLibrary: "section.materials-library",
+  CollectionCards: "section.collection-cards",
   StatsCountup: "section.stats-countup",
   StatsBand: "section.stats",
   StatementBlock: "section.statement-block",
@@ -117,6 +122,28 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
     await expect(section.locator("a")).toHaveCount(2);
     await expect(section.locator('a[href="#"]')).toHaveCount(0);
     await expect(section.locator("a").first()).toHaveAttribute("href", "/contact");
+  }
+  if (componentType === "AreaGallery") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a")).toHaveAttribute("href", "/coverage");
+  }
+  if (componentType === "ProjectsGrid") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a")).toHaveAttribute("href", "/case-studies");
+  }
+  if (componentType === "MaterialsLibrary") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/contact");
+  }
+  if (componentType === "CollectionCards") {
+    await expect(section.locator("ul > li > article")).toHaveCount(3);
+    await expect(section.locator("a")).toHaveCount(3);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/");
+  }
+  if (componentType === "ProductShowcaseAlt") {
+    await expect(section.locator("article.showcase")).toHaveCount(1);
+    await expect(section.locator("button")).toHaveCount(0);
+    await expect(section.locator("a")).toHaveAttribute("href", "/contact");
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",

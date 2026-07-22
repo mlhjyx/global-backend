@@ -1,131 +1,16 @@
 ---
-interface Product { code: string; nameKey: string; taglineKey: string; capacityKey: string; weightKey: string; cyclesKey: string; priceKey: string }
-interface Props {
-  chapterKey: string;
-  titleKey: string;
-  titleAccentKey: string;
-  introKey: string;
-  products: Product[];
-  configureKey?: string;
-  f1Key?: string; f2Key?: string; f3Key?: string;
-  t: (key: string) => string;
-  alt?: boolean;
-}
-const { chapterKey, titleKey, titleAccentKey, introKey, products = [], configureKey = 'cta.configure', f1Key, f2Key, f3Key, t, alt } = Astro.props;
+import { createRequire } from 'node:module';
+import ControlledAssetPicture from './ControlledAssetPicture.astro';
+import { localeQualifiedPageHref } from '../lib/page-reference';
+interface Product { code:string; nameKey:string; taglineKey:string; capacityKey:string; weightKey:string; cyclesKey:string; priceKey:string; asset?:{assetId:string;altKey?:string;variantUrl?:string} }
+interface Props { chapterKey:string; titleKey:string; titleAccentKey:string; introKey:string; products:Product[]; configureKey?:string; configurePageId?:string; configureCta?:{labelKey:string;pageId:string};capacityLabelKey?:string;weightLabelKey?:string;cyclesLabelKey?:string;fromLabelKey?:string;f1Key?:string;f2Key?:string;f3Key?:string;variant?:'technical-grid'|'quiet';t:(key:string)=>string;alt?:boolean;locale:string;defaultLocale:string;instanceId:string;pagePathById?:Record<string,string> }
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { chapterKey,titleKey,titleAccentKey,introKey,products,configureKey,configurePageId,configureCta,capacityLabelKey='products.capacity',weightLabelKey='products.weight',cyclesLabelKey='products.cycles',fromLabelKey='products.from',f1Key,f2Key,f3Key,variant='technical-grid',t,alt,locale,defaultLocale,instanceId,pagePathById={} }=Astro.props;
+const fallback={code:'',nameKey:titleKey,taglineKey:introKey,capacityKey:introKey,weightKey:introKey,cyclesKey:introKey,priceKey:introKey};
+const records=products.length?products:[fallback]; const first=records[0]!;
+const cta=configureCta ?? (configureKey&&configurePageId?{labelKey:configureKey,pageId:configurePageId}:undefined);
+const content={chapter:t(chapterKey),title:t(titleKey),accent:t(titleAccentKey),intro:t(introKey),product:{code:first.code,name:t(first.nameKey),tagline:t(first.taglineKey),capacity:t(first.capacityKey),weight:t(first.weightKey),cycles:t(first.cyclesKey),price:t(first.priceKey),alt:first.asset?.altKey?t(first.asset.altKey):t(first.nameKey)},capacityLabel:t(capacityLabelKey),weightLabel:t(weightLabelKey),cyclesLabel:t(cyclesLabelKey),fromLabel:t(fromLabelKey),features:[f1Key,f2Key,f3Key].filter((key):key is string=>Boolean(key)).map(t),cta:cta?t(cta.labelKey):undefined};
+for (const product of records) assertQualifiedComponentContentBudget('ProductShowcaseAlt',{...content,product:{code:product.code,name:t(product.nameKey),tagline:t(product.taglineKey),capacity:t(product.capacityKey),weight:t(product.weightKey),cycles:t(product.cyclesKey),price:t(product.priceKey),alt:product.asset?.altKey?t(product.asset.altKey):t(product.nameKey)}}); const href=cta?localeQualifiedPageHref(cta.pageId,pagePathById,locale,defaultLocale):undefined; const headingId=`${instanceId}-product-showcase-alt-heading`;
 ---
-
-<section class:list={['block', { alt }]} id="products" data-products>
-  <div class="container">
-    <div class="head">
-      <div>
-        <div class="chapter"><span class="ic"><i class="ri-archive-2-line"></i></span>{t(chapterKey)}</div>
-        <h2>{t(titleKey)}<span class="accent">{t(titleAccentKey)}</span></h2>
-      </div>
-      <p class="intro">{t(introKey)}</p>
-    </div>
-
-    <div class="tabs">
-      {products.map((p, i) => (
-        <button type="button" class:list={['tab', { active: i === 0 }]} data-tab data-index={i}>
-          <span class="dot"></span>{p.code} · {t(p.nameKey)}
-        </button>
-      ))}
-    </div>
-
-    <div class="showcase">
-      <div class="stage">
-        <div class="grid-tex"></div>
-        <div class="corners"><span></span><span></span><span></span><span></span></div>
-        <span class="code-badge"><i class="ri-barcode-line"></i><span data-code>{products[0]?.code ?? ''}</span></span>
-        <div class="ph"><i class="ri-battery-2-charge-line"></i></div>
-        <div class="ticker">
-          <span data-cap>{t(products[0]?.capacityKey ?? '')}</span><span class="sep"></span>
-          <span data-weight>{t(products[0]?.weightKey ?? '')}</span><span class="sep"></span>
-          <span data-cycles>{t(products[0]?.cyclesKey ?? '')}</span>
-        </div>
-      </div>
-
-      <div class="detail">
-        <span class="tagline" data-tagline>{t(products[0]?.taglineKey ?? '')}</span>
-        <h3 data-name>{t(products[0]?.nameKey ?? '')}</h3>
-        <div class="specs">
-          <div><div class="spec-label">{t('products.capacity')}</div><div class="spec-val" data-cap2>{t(products[0]?.capacityKey ?? '')}</div></div>
-          <div><div class="spec-label">{t('products.weight')}</div><div class="spec-val" data-weight2>{t(products[0]?.weightKey ?? '')}</div></div>
-          <div><div class="spec-label">{t('products.cycles')}</div><div class="spec-val" data-cycles2>{t(products[0]?.cyclesKey ?? '')}</div></div>
-        </div>
-        <ul class="feats">
-          <li><i class="ri-shield-check-line"></i>{f1Key && t(f1Key)}</li>
-          <li><i class="ri-temp-cold-line"></i>{f2Key && t(f2Key)}</li>
-          <li><i class="ri-flashlight-line"></i>{f3Key && t(f3Key)}</li>
-        </ul>
-        <div class="foot">
-          <div><div class="from-label">{t('products.from')}</div><div class="price" data-price>{t(products[0]?.priceKey ?? '')}</div></div>
-          <a class="cta-accent" href="#contact">{t(configureKey)}<i class="ri-arrow-right-up-line"></i></a>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<script>
-  document.querySelectorAll<HTMLElement>('[data-products]').forEach((root) => {
-    const tabs = Array.from(root.querySelectorAll<HTMLElement>('[data-tab]'));
-    const el = (sel: string) => root.querySelector<HTMLElement>(sel);
-    tabs.forEach((tab) => tab.addEventListener('click', () => {
-      const i = Number(tab.dataset.index);
-      tabs.forEach((b) => b.classList.remove('active'));
-      tab.classList.add('active');
-      const p = tabs.map((b) => ({
-        code: b.textContent?.split('·')[0].trim() ?? '',
-        name: b.textContent?.split('·')[1]?.trim() ?? '',
-      }))[i];
-      if (el('[data-code]')) el('[data-code]')!.textContent = p.code;
-      if (el('[data-name]')) el('[data-name]')!.textContent = p.name;
-      if (el('[data-tagline]')) el('[data-tagline]')!.textContent = p.code + ' · ' + p.name;
-    }));
-  });
-</script>
-
-<style>
-  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
-  @media (min-width: 768px) { .head { grid-template-columns: 1.5fr 1fr; align-items: end; } }
-  .chapter { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.2em; color: var(--c-on-surface-subtle); }
-  .ic { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; background: var(--c-primary); color: var(--c-on-primary); }
-  h2 { font-weight: 700; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.02; letter-spacing: -0.02em; }
-  .accent { display: block; color: var(--c-accent); }
-  .intro { font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); max-width: 28rem; }
-  .tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2.5rem; }
-  .tab { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; border-radius: 9999px; border: 1px solid var(--c-border); background: var(--c-surface); font-family: ui-monospace, monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--c-on-surface-muted); cursor: pointer; transition: all .2s ease; }
-  .tab:hover { border-color: var(--c-primary); }
-  .tab.active { background: var(--c-primary); color: var(--c-on-primary); border-color: var(--c-primary); }
-  .dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--c-on-surface-subtle); }
-  .tab.active .dot { background: var(--c-accent); }
-  .showcase { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
-  @media (min-width: 1024px) { .showcase { grid-template-columns: 7fr 5fr; gap: 2rem; } }
-  .stage { position: relative; background: var(--c-surface-alt2); border: 1px solid var(--c-border); border-radius: var(--radius-lg); overflow: hidden; min-height: 28rem; }
-  .grid-tex { position: absolute; inset: 0; opacity: 0.06; background-image: linear-gradient(to right, #0a0a0a 1px, transparent 1px), linear-gradient(to bottom, #0a0a0a 1px, transparent 1px); background-size: 32px 32px; }
-  .corners span { position: absolute; width: 1.25rem; height: 1.25rem; border-color: var(--c-primary); }
-  .corners span:nth-child(1) { top: 1rem; left: 1rem; border-left: 2px solid; border-top: 2px solid; }
-  .corners span:nth-child(2) { top: 1rem; right: 1rem; border-right: 2px solid; border-top: 2px solid; }
-  .corners span:nth-child(3) { bottom: 1rem; left: 1rem; border-left: 2px solid; border-bottom: 2px solid; }
-  .corners span:nth-child(4) { bottom: 1rem; right: 1rem; border-right: 2px solid; border-bottom: 2px solid; }
-  .code-badge { position: absolute; top: 1.25rem; left: 3rem; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem; border-radius: 9999px; background: var(--c-primary); color: var(--c-on-primary); font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.15em; }
-  .ph { position: absolute; inset: 0; display: grid; place-items: center; }
-  .ph i { font-size: 7rem; color: color-mix(in srgb, var(--c-primary) 12%, transparent); }
-  .ticker { position: absolute; bottom: 1.25rem; left: 3rem; right: 3rem; display: flex; align-items: center; justify-content: space-between; font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-subtle); }
-  .sep { width: 1px; height: 0.75rem; background: var(--c-border); }
-  .detail { background: var(--c-primary); color: var(--c-on-primary); border-radius: var(--radius-lg); padding: clamp(1.75rem, 4vw, 2.5rem); display: flex; flex-direction: column; }
-  .tagline { font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.2em; color: color-mix(in srgb, var(--c-on-primary) 50%, transparent); }
-  .detail h3 { margin-top: 0.75rem; font-weight: 700; font-size: clamp(2rem, 4vw, 3rem); line-height: 1; }
-  .specs { margin-top: 2rem; padding-top: 1.75rem; border-top: 1px solid color-mix(in srgb, var(--c-on-primary) 15%, transparent); display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-  .spec-label { font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em; color: color-mix(in srgb, var(--c-on-primary) 50%, transparent); margin-bottom: 0.25rem; }
-  .spec-val { font-weight: 700; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-  .feats { margin-top: 1.75rem; padding-top: 1.75rem; border-top: 1px solid color-mix(in srgb, var(--c-on-primary) 15%, transparent); display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.85rem; color: color-mix(in srgb, var(--c-on-primary) 80%, transparent); }
-  .feats li { display: flex; align-items: center; gap: 0.75rem; list-style: none; }
-  .feats i { color: var(--c-accent); }
-  .foot { margin-top: 1.75rem; padding-top: 1.75rem; border-top: 1px solid color-mix(in srgb, var(--c-on-primary) 15%, transparent); display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
-  .from-label { font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em; color: color-mix(in srgb, var(--c-on-primary) 50%, transparent); margin-bottom: 0.25rem; }
-  .price { font-weight: 700; font-size: 1.875rem; font-variant-numeric: tabular-nums; }
-  .cta-accent { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--c-accent); color: var(--c-on-accent); padding: 0.75rem 1.25rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; transition: background .2s ease; }
-  .cta-accent:hover { background: var(--c-accent-strong); }
-</style>
+<section class:list={['block','product-showcase-alt',`product-showcase-alt--${variant}`,{alt}]} data-component="ProductShowcaseAlt" data-variant={variant} aria-labelledby={headingId}><div class="container"><header><span>{content.chapter}</span><h2 id={headingId}>{content.title} <em>{content.accent}</em></h2><p>{content.intro}</p></header><div class="records">{records.map((product,index)=><article class="showcase"><div class="media">{product.asset?<ControlledAssetPicture assetId={product.asset.assetId} variantUrl={product.asset.variantUrl} alt={product.asset.altKey?t(product.asset.altKey):t(product.nameKey)} width={1200} height={900}/>:<span class="fallback" aria-hidden="true">{product.code}</span>}</div><div class="detail"><span>{t(product.taglineKey)}</span><h3>{t(product.nameKey)}</h3><dl><div><dt>{content.capacityLabel}</dt><dd>{t(product.capacityKey)}</dd></div><div><dt>{content.weightLabel}</dt><dd>{t(product.weightKey)}</dd></div><div><dt>{content.cyclesLabel}</dt><dd>{t(product.cyclesKey)}</dd></div></dl>{index===0&&content.features.length>0&&<ul>{content.features.map((feature)=><li>{feature}</li>)}</ul>}<footer><strong>{content.fromLabel} {t(product.priceKey)}</strong>{index===0&&href&&content.cta&&<a href={href}>{content.cta}</a>}</footer></div></article>)}</div></div></section>
+<style>.product-showcase-alt--technical-grid{background-image:linear-gradient(90deg,color-mix(in srgb,var(--c-border) 35%,transparent) 1px,transparent 1px);background-size:2rem 2rem}header{margin-bottom:2rem}header span,.detail>span,dt{font:700 .72rem ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--c-on-surface-muted)}h2{font-size:clamp(2.2rem,5vw,3.8rem)}h2 em{color:var(--c-accent);font-style:normal}.records{display:grid;gap:1rem}.showcase{display:grid;border:1px solid var(--c-border);background:var(--c-surface)}.media{aspect-ratio:4/3;display:grid;place-items:center;background:var(--c-surface-alt);overflow:hidden}.media picture,.media img{display:block;width:100%;height:100%;object-fit:cover}.detail{padding:1.5rem}.detail h3{font-size:2rem}dl{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-top:1rem;border-top:1px solid var(--c-border);padding-top:1rem}dd{margin:.3rem 0 0;font-weight:700}ul{padding:0;list-style:none}footer{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid var(--c-border);padding-top:1rem}a{min-height:2.75rem;padding:.55rem .9rem;background:var(--c-primary);color:var(--c-on-primary)}@media(min-width:900px){.showcase{grid-template-columns:7fr 5fr}.media{aspect-ratio:auto;min-height:24rem}}</style>
