@@ -69,6 +69,6 @@ packages/contracts/
 ## Site Builder / DQ-1
 
 - **共享类型**：`SiteSpec`、`SitePage`、`PuckData`、`PuckBlock`、`AssetRef` 与 `SITE_SPEC_VERSION='1.0.0'` 由 `@global/contracts` 导出。API 生产端和 `apps/site-renderer` 必须 `import type` 此处，不得各自重建第二份接口。
-- **当前能力边界**：DQ-1/#117 解决的是**编译期类型双真值**。运行时 Zod 校验、SiteSpec 1.1.0、DesignBrief/DesignDNA、丰富资产 provenance 都是后续消费者驱动的增量能力，不能写成已落地。
+- **当前能力边界**：DQ-1/#117 解决的是 SiteSpec **编译期类型双真值**；DI-0/#164 另行落地了带运行时 fail-closed validator 的 `DesignSourceManifest`、`DesignObservation`、`DesignRule`、`DesignDNA`、`TemplateFamily`、`DesignBrief`、`DesignEvaluation` 与静态 `DesignCatalog` 合同。API 当前只提供冻结的空 Catalog；真实 Family、SiteSpec 1.1.0、Renderer/assembly 消费、丰富资产 provenance 与 DesignEvaluation 运行时生产仍是后续消费者能力，不能写成已落地。
 - **REST 接入**：当前 OpenAPI 已包含 `/api/v1/site-builder/intake`、sites/profile、assets、KB status、builds/cancel 等端点。逐端点请求/响应以 `openapi.json` 为准，前端调用顺序与 as-built/target 差异见 [INTEGRATION.md](INTEGRATION.md)。
 - **R0 contract closeout（#126）**：intake OpenAPI 已声明 `idempotency-key`，成功响应为 `{siteId,buildId,status:"generating_demo"}` 且无 `mode`；400/409/502 稳定错误码、Temporal execution-chain ACK 与消费者迁移说明已同步。当前接入以本包生成的 OpenAPI/类型为准。

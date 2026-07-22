@@ -1,7 +1,7 @@
 # 13 · 设计智能层领域模型契约（design intelligence domain model）
 
-> 本文 = 独立站建设**设计智能层的目标态领域契约**（随 **M1-d/e/f** 落地）。系统化承载设计工厂的实体：`DesignSourceManifest / DesignObservation / DesignRule / DesignDNA / StylePreset / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation` + 媒体域 `Asset / AssetVariant / MediaJob / AssetUsage / DemoVisualPack`——每个实体的**定义 / 字段 / 关系 / 状态 / 生产方·消费方**。
-> ⚠️ **这些实体当前尚未落地**：as-built 的 SiteSpec 共享契约是 `@global/contracts` 的 **1.0.0**（`SITE_SPEC_VERSION='1.0.0'`，type-only：顶层信封 + string-only CopyBundle + 基础 `AssetRef`），**不含** `DesignBrief / DesignDNA / componentLibraryVersion / rendererVersion / claimRefs / RichText——这些属 1.1.0 目标态**（见 [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014**）。渲染器 as-built 注册 **10** 型 section 组件（`apps/site-renderer/.../Section.astro`），**55 型封闭库是 v1 目标**（**ADR-015 / D12**）。
+> 本文 = 独立站建设**设计智能层的领域契约**。DI-0/#164 已落地 `DesignSourceManifest / DesignObservation / DesignRule / DesignDNA / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation / DesignCatalog` 的共享类型、运行时 validator 与 digest；M1-e/f 继续落真实目录条目和生产/消费链。媒体域 `Asset / AssetVariant / MediaJob / AssetUsage / DemoVisualPack` 仍按各自阶段推进。
+> ⚠️ **合同存在不等于运行时能力存在**：当前静态 Catalog 故意为空，没有真实 TemplateFamily/Blueprint/StylePreset/DemoVisualPack；SiteSpec 仍是 `@global/contracts` 的 **1.0.0**，不含 `componentLibraryVersion / rendererVersion / familyId` 等 1.1.0 字段；Renderer 注册 **55** 型 section 组件。SiteSpec 1.1、designSpec/assembly 消费属于 M1-e，DesignEvaluation 运行时生产属于 M1-f（见 [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014/015**）。
 > **非自封权威**：施工真值仍是当前代码、活文档 00-10/[14](14-media-foundation-mf0.md) 与 [ADR registry](../adr/registry.md)；11 是受 ADR-019 取代的历史研究，12 v3.2 是归档 proposal。本文是设计智能层的**目标设计基线**，实际落地时须回写 [03-agents.md](03-agents.md) / [04-sitespec-contract.md](04-sitespec-contract.md) 并把消费者需要的字段合入 `@global/contracts`。
 > 实质内容由外部草稿 v3.2 §13–§20 分发而来（逐节标注「v3.2 §X 回写」），v3.2 本身非权威。承重决策**按 ID 引用** ADR-013~020，不复述整条。
 
@@ -12,8 +12,8 @@
 - **本文管什么**：设计智能层"从设计参考 → 平台自有设计知识 → 每次生成的冻结决策 → 质量评测"这条链上的领域模型。它是 [09-m1-implementation-design.md](09-m1-implementation-design.md) 精装修管线（P1→P4）在 M1-d/e/f 阶段的**数据契约层**。
 - **本文不管什么**：编排 DAG、Agent 卡执行流（→ [03-agents.md](03-agents.md)）、SiteSpec 页面数据形状（→ [04-sitespec-contract.md](04-sitespec-contract.md)、**ADR-014**）、模型路由四态（→ [10-model-selection-study.md](10-model-selection-study.md)、**ADR-016**）。
 - **as-built ↔ target 分界（务必区分）**：
-  - **as-built（2026-07-16，含 #125 truth-sync / #126 R0 contract）**：SiteSpec 1.0.0 type-only 共享契约（#117）、`design_spec` AI Task 路由（7 个 task 之一）、55 型渲染组件、基础 `Asset`/上传能力。
-  - **target（尚未落地）**：DesignDNA / TemplateFamily / Blueprint / DesignBrief / DesignEvaluation、55 型组件库与 SiteSpec 1.1.0 演进。`AssetVariant`/MF-0 与 M1-c 纯 Sharp 图片管线已在 2026-07-17 当前交付分支实现并完成开发验证；是否进入 `main` 以 PR/CI/合并证据为准。**ADR-018 本身只是路线，代码与验证才是实现证明**。
+  - **as-built（2026-07-22）**：SiteSpec 1.0.0 共享契约（#117）；DI-0 设计合同与冻结空 Catalog（#164）；`design_spec` AI Task 路由；55 型渲染组件；`AssetVariant`/MF-0 与 M1-c 纯 Sharp 图片管线。
+  - **target（尚未落地）**：真实 DesignDNA/TemplateFamily/Blueprint/StylePreset/DemoVisualPack 目录条目与运行时消费者、SiteSpec 1.1.0、DesignBrief 生产和 DesignEvaluation 运行时实例。**ADR 本身只是路线，代码、消费者与验证才是实现证明**。
 - **红线继承**：设计智能层不改变 **ADR-013**（固定 DAG + 有界 AI Task，无自由 Agent/Planner）、**ADR-017**（禁虚构身份）、**ADR-019**（Readdy = 净室视觉参考、运行时零依赖）。本文所有实体在这三条约束下成立。
 
 ---
@@ -115,7 +115,7 @@
 > 承接 [04-sitespec-contract.md §6](04-sitespec-contract.md) as-built 概念，纳入领域模型。**定义**：某 DesignDNA 语言下的一组**具体 token + 各组件默认变体映射**——工作台"风格类型"切换 = 换 preset 秒级重渲染。
 
 **字段（对齐 04 §6 主题 token 字典）**：`colors`(primary/secondary/surface/onSurface…) · `typography`(fontPair 枚举 = 自托管字体对 + 比例尺) · `spacing`/`radius`/`shadow` 比例尺 · `motionIntensity`(none/subtle/normal) · `density` + **各组件默认 variant 映射**。
-- **硬约束（target）**：文本/背景对比度须由确定性校验器按 WCAG 2.2 AA 验证，不合格的 `tokenOverrides` 拒绝。04 §6 规定了目标合同，**当前不能写成校验器已落地**；实现与测试证据随 DI-0/M1-e 提交。
+- **硬约束（target）**：文本/背景对比度须由确定性校验器按 WCAG 2.2 AA 验证，不合格的 `tokenOverrides` 拒绝。DI-0 只落设计合同，不含该 Renderer/assembly 消费门；实现与测试证据归 M1-e。
 - **关系**：`TemplateFamily.stylePresetIds[]` 引用。**生产方**：设计目录（开发期）。**消费方**：designSpec、渲染器、SaaS 工作台切换。
 
 ### 4.3 `TemplateFamily`（可部署设计产品，≠ 单页模板）
@@ -235,16 +235,16 @@
 
 | 实体 | 生产方 | 消费方 | 落地阶段 | as-built 现状 |
 |---|---|---|---|---|
-| `DesignSourceManifest` | Reference Curator（开发角色） | Design Decomposer、工序 §8 | M1-d | 无 |
-| `DesignObservation` | Design Decomposer | Pattern Aggregator（**非** Synthesizer） | M1-d | 无 |
-| `DesignRule` | Pattern Aggregator | DNA 合成、Synthesizer | M1-d | 无 |
-| `DesignDNA` | Pattern Aggregator + Synthesizer | Component Mapper、Synthesizer、RAG | M1-e | 无 |
-| `StylePreset` | 设计目录（开发期） | designSpec、渲染器、工作台 | M1-e | 部分（04 §6 token 字典概念） |
-| `TemplateFamily` | Blueprint Synthesizer | designSpec、装配、目录 | M1-e | 无 |
-| `Blueprint` | Blueprint Synthesizer | designSpec、装配 | M1-e | 无 |
-| `DemoVisualPack` | 设计目录 | demo 快路径、装配 | M1-e | 无 |
-| `DesignBrief` | `designSpec` Agent(P3) | copy / assembly / renderer / quality | M1-e | 路由 `design_spec` 存在，产出未达全 schema |
-| `DesignEvaluation` | Visual Evaluator / quality(P4) | assemblyFix、发布门 | M1-f | 路由 `qa_summarize` 存在；`aesthetic_review` 为目标 |
+| `DesignSourceManifest` | Reference Curator（开发角色） | Design Decomposer、工序 §8 | DI-0 / M1-e | 合同+validator 已落；无真实 Manifest 目录 |
+| `DesignObservation` | Design Decomposer | Pattern Aggregator（**非** Synthesizer） | DI-0 / M1-e | 合同+validator 已落；无生产管线实例 |
+| `DesignRule` | Pattern Aggregator | DNA 合成、Synthesizer | DI-0 / M1-e | 五独立贡献组合同已落；无真实 Rule 目录 |
+| `DesignDNA` | Pattern Aggregator + Synthesizer | Component Mapper、Synthesizer、RAG | DI-0 / M1-e | 合同+validator 已落；空 Catalog 无条目 |
+| `StylePreset` | 设计目录（开发期） | designSpec、渲染器、工作台 | M1-e | Family 只持有 ID 合同；真实 preset/消费者未落 |
+| `TemplateFamily` | Blueprint Synthesizer | designSpec、装配、目录 | DI-0 / M1-e | 合同+digest 已落；无真实 Family |
+| `Blueprint` | Blueprint Synthesizer | designSpec、装配 | DI-0 / M1-e | Family 内嵌合同已落；无真实 Blueprint |
+| `DemoVisualPack` | 设计目录 | demo 快路径、装配 | DV-0 / M1-e | 仅 ID 引用合同；真实 pack 未落 |
+| `DesignBrief` | `designSpec` Agent(P3) | copy / assembly / renderer / quality | DI-0 / M1-e | 合同+Catalog 校验已落；运行时生产未落 |
+| `DesignEvaluation` | Visual Evaluator / quality(P4) | assemblyFix、发布门 | DI-0 / M1-f | 合同+validator 已落；运行时生产未落 |
 | `Asset` | imagePipeline(P2)/上传 | Variant 派生、装配、删除守卫 | MF-1（薄面 MF-0） | 部分 |
 | `AssetVariant` | M1-c Sharp 管线 | 渲染器、SiteSpec AssetRef | **MF-0-thin（M1-c 门）** | 表/RLS/删除与当前分支 writer 已落；Renderer 消费待 M1-e |
 | `MediaJob` | 媒体工作流 | 成本/审计/对账 | MF-1（有真实消费者才建） | 无 |

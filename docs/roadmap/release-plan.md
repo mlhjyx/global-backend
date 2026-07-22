@@ -1,6 +1,6 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
-> 2026-07-10 v2（获客合流定稿）；**2026-07-18 MF0-A/B + M1-c + R3-A + R3-B1/B2 + R4-A1/A2 + MODEL-1 BrandProfile 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-22 DI-0 净室设计合同与静态 Catalog 基础更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -27,9 +27,10 @@
 8. **R4-A2 ✅ 2026-07-19 当前交付分支**：公共企业事实/PII/value-quote 门与 `research_hint` fail-closed 后，BrandProfile fact 只接受严格 lower_snake_case；非 canonical key 在 schema、gate、投影与数据库层直接拒绝。新 Site 原子关联 CompanyProfile，旧未关联 Site 不猜身份。稳定分域 key 复用共享 Claim/Evidence，不可变 FORCE RLS bridge 与 exact trigger 锁定同公司 EvidenceRef；认证须 live ready cert Asset。origin Claim 审批由 Claim 行锁、exact precheck 与 security-definer trigger bridge 行锁共同守护，孤立 Claim 与直写都不能批准，manual/legacy null identity 保持兼容。Workspace 尚有 Site 时禁止物理删除，避免对象清理/outbox 被级联绕过；cert Asset 删除扫描已有 partial ordered covering index。真 PostgreSQL 已覆盖 strict factKey、Workspace guard、并发审批单赢家、孤立审批、EXPLAIN、RLS/immutability/FK，夹具清零。A2 无新增 endpoint、SiteSpec/CopyBundle/正式 `PublishableClaimSnapshot` 或生产发布；19 个 forward migration 的开发验证不等于生产部署，恢复快照仍须逐步通过 5 秒 lock gate。
 9. **R4-B-min ✅ 2026-07-19 当前交付分支**：BuildRun 具备数据库硬预算、logical task attempt lease/fence 与 physical spend operation 幂等账本；BrandProfile 在外部 IO 前 claim，重放复用已保存模型输出和最终 profile。模型与 ToolBroker 共用 reserve/settle，结算 ACK 不明不会继续 fallback；真实 reported/token-calculated/tool-reported 与 estimate/unknown 分层。预算、状态和取消 kill switch 全部 fail-closed，终态 reconciliation 写稳定 `site-builder-cost-summary/v1`。真 PostgreSQL 已验证 RLS、双连接并发、ACK-unknown、replay、settle、预算/取消门与 summary；不代表生产部署。M1-d 已复用该合同承载逐 locale task attempt，R1-min 仍须在 M1-e 可见预览前完成。
 10. **M1-d ✅ 2026-07-19 当前交付分支**：不可变 PublishableClaimSnapshot 只消费 exact Site bridge 的 approved/current/audited Claim/Evidence，CopyBundle 按 SiteVersion/locale/version/hash/task attempt 持久化；`en/de-DE` 逐 locale/slot 生成，default 失败阻断、optional 省略+degraded，空 snapshot 使用中性无模型路径。SiteSpec 权威 `copyBundleSet` + legacy dual-read、renderer locale/RTL/自托管字体/outbound scan 与 inquiry/consent future contract已落。
-11. **R1-min ✅ 2026-07-20 当前交付分支**：对象存储不可变 Release、manifest/digest、原子预览指针、跨节点 retry/ACK-loss、取消/并发 fencing、unknown contract fail-closed 与默认关闭的 retention/GC 对账已落。历史 `local:` 不回填；生产 bucket/凭证/IaC 仍由部署方配置。本项不实现或裁决 DI-0，M1-e 前仍须单独收口 DI-0。
+11. **R1-min ✅ 2026-07-20 当前交付分支**：对象存储不可变 Release、manifest/digest、原子预览指针、跨节点 retry/ACK-loss、取消/并发 fencing、unknown contract fail-closed 与默认关闭的 retention/GC 对账已落。历史 `local:` 不回填；生产 bucket/凭证/IaC 仍由部署方配置。本项未实现或裁决 DI-0；其独立前置门现已由 #164 收口。
+12. **DI-0 ✅ 2026-07-22（#164）**：净室来源 Manifest/Observation/Rule、DesignDNA、TemplateFamily、DesignBrief、DesignEvaluation 与静态 DesignCatalog 合同已落；来源授权/训练/保留边界、五独立贡献组、确定性 digest、approved-family-only resolver 与递归冻结均 fail-closed。当前静态 Catalog 故意为空，不含真实 Family/Blueprint/StylePreset/DemoVisualPack；SiteSpec 1.1、Renderer/assembly 消费与 DesignEvaluation 运行时生产仍归 M1-e/M1-f。
 
-并行泳道遵循 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md)：IT-0 效果验证、R3/R4/DI-0、MODEL-0/EVAL-bootstrap 可在依赖允许时推进；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
+下一主线按 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md) 进入 M1-e-A；DV-0 可在 DI-0 后独立推进。IT-0/`template-distillation` 只提供选择性提取候选，不自动取得组件合同或主线合并资格；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 
 **MODEL 路由泳道（2026-07-19，不改变 R4 顺序）**：ADR-020 已批准质量优先 target portfolio；BGE-M3 应用经 new-api 已完成。MODEL-0 registry 与 BrandProfile 评测基座已落；MODEL-1 fast-follow 以同一 final-code/source bundle 的 6×2 报告证明 Terra/Responses、Sonnet/Messages 均 12/12，完整 legacy DeepSeek Pro→GLM 路由也为 12/12。旧 23/24 candidate、失败/诊断/preflight 报告保留且不冒充成功；v20 精确记录 requested/reported/resolved model 与 transport。三路硬门全过后按 accepted-artifact 成本、失败门与 rollback 只把 `brand_profile` 保持为 Terra→Sonnet，配任务硬门、原生协议、一键回 DeepSeek→GLM 与紧急 override。其他 6 个文本 task 继续按各自消费者补 capability/task-shaped 评测后独立晋级；图片/视频仍只登记 target，不因 GPT Image 2 单次探针或配置字符串可见而上线。禁止 mega switch；真实外部流量/高风险部署前走 MODEL-2。R4-B-min 只承接现役路由 provenance/usage 做持久记账，未重跑或改写 MODEL-1；M1-d 也未晋级或改写 `copy` route。
 
