@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-07-22 · Site Builder DI-0 净室设计合同与静态 Catalog 基础（#164）
+
+- `@global/contracts` 新增并导出 DesignSourceManifest、DesignObservation、DesignRule、DesignDNA、TemplateFamily/Blueprint、DesignBrief、DesignEvaluation 与 DesignCatalog；每个非可信对象都有运行时 fail-closed validator，目录与 Family 使用确定性 digest。
+- 来源合同区分平台原创、许可归档、仅视觉研究与书面授权路径；授权、训练、保留、未来生效时间、外部贡献稳定身份和至少五个独立贡献组均在合同层拒绝违规输入。Tier B 视觉研究不得保存原始文案、素材、DOM、代码、精确坐标或进入训练/运行时 RAG。
+- API 只提供递归冻结的空静态 Catalog 和 approved-family-only resolver；当前没有真实 Family、Blueprint、StylePreset、DemoVisualPack、SiteSpec 1.1 或 Renderer/assembly 消费。DesignEvaluation 只落合同，运行时生产仍归 M1-f。本交付不代表 M1-e、设计系统或生产部署完成。
+- CI build/test、contracts drift/lint/breaking 与 gitleaks 全绿后合并；下一主线为 M1-e-A 26 型封闭组件与变体，实验模板只能按批准合同选择性提取。
+
 ## 2026-07-18 · MODEL-1 BrandProfile 首个逐任务晋级
 
 - 真实 new-api 同形 6×2 评测固定 prompt/schema/evaluator 与协议：Terra/Responses、Sonnet/Messages 均 12/12 accepted、0 hard failure；当时 DeepSeek Pro/Chat 为 10/12。候选/基线报告与价格快照写入 evidence id `model1-brand-profile-20260718-v1`，故 owner 批准 Terra 主、Sonnet 回退。**2026-07-19 fast-follow 已 supersede 此 active evidence**：v20 final-code candidate 24/24、完整 legacy route baseline 12/12；旧 v1 只保留为历史裁决输入，不再作为当前 baseline 真值。

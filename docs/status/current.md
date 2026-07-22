@@ -1,6 +1,6 @@
 # status/current —— 当前真值与待拍板（活文档）
 
-> 2026-07-10 立；**2026-07-18 R1-safety、R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2 与 MODEL-1 BrandProfile 更新**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
+> 2026-07-10 立；**2026-07-22 DI-0 净室设计合同与静态 Catalog 基础更新**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
 > 下方「真实具备/缺口/偏差/待拍板」四节是**获客侧快照，冻结于 2026-07-13 获客暂停时点**。测试数量随提交变化，不在活状态文档固化；是否通过以当前分支实际命令和 CI 结果为准。
 
 ## 🟢 当前主线：独立站建设（Site Builder）
@@ -25,7 +25,8 @@
 - **已知独立漂移（不并入 R4-A1）**：空库 schema diff 仍显示 R3-B2 的 `site_build_step.id` / `updated_at` 数据库默认表达式与 Prisma client-side 默认声明不同；R4-A1 新表自身无 drift。该项须独立判定和修复，不能借 Evidence 迁移顺手改变 R3 行为。
 - **DOC-12 状态**：#119/#120 已把主要内容分发进 00–14 并登记 ADR-013~019；2026-07-17 新增 ADR-020 记录后续模型组合决策。v3.1/v3.2 已降为 dated proposal。此前把“内容分发”写成“全项目真值已收口”过早；2026-07-16 truth-sync 已纠正权威层与接入文档，未把旧 Word/研究稿升级为权威。
 - **R1-min 已完成（2026-07-20 当前交付分支）**：新增 RLS `SiteRelease` 不可变账本与 manifest/digest、producer/build/GC fencing；Demo/refurbish 均先写 producer-isolated S3/MinIO Release，再以 `Site.activeVersionId` 单一指针事务晋级。跨节点 activity retry/ACK-loss 复用同一 run/version/release，取消与并发 active CAS 保留旧 Release；公开 `/preview/{slug}` 只经窄 SECURITY DEFINER resolver 读取 active READY Release 并逐对象验 digest。unknown component/unsupported SiteSpec 在 renderer 与上传前 fail-closed。定时遗留 candidate/retention 对账已接线，GC 默认关闭，显式开启后仍保留 active、30 天内 READY 与每站最新两个回滚点；这不代表生产部署。
-- **当前关键路径**：R1-min 已解除 M1-e 的 Release 前置门；DI-0 仍是后续独立主线，不因本任务或 `template-distillation` 实验分支而取消、转交或视为完成。进入 M1-e 前仍须按当时 main 重新核验 DI-0 与合并顺序。
+- **DI-0 已完成（#164，2026-07-22）**：`@global/contracts` 已新增并运行时 fail-closed 校验 `DesignSourceManifest`、`DesignObservation`、`DesignRule`、`DesignDNA`、`TemplateFamily`、`DesignBrief`、`DesignEvaluation` 与静态 `DesignCatalog`；来源授权/训练/保留策略、至少五个独立贡献组、目录/Family digest、approved-family-only resolver 和递归冻结均有自动化负例。API 当前只导出冻结的**空 Catalog**，不含任何真实 Family、Blueprint、StylePreset 或 DemoVisualPack；SiteSpec 仍是 1.0.0，Renderer/assembly 尚未消费这些合同，`DesignEvaluation` 的运行时生产仍属 M1-f。该合同基础不等于设计系统、M1-e 或生产部署完成。
+- **当前关键路径**：R1-min 与 DI-0 已解除 M1-e 的两个前置门；下一主线是 **M1-e-A 26 型封闭组件与变体**，再进入 M1-e-B 的六个 Family、DesignBrief 与受控组装。`template-distillation` 结果仍只可选择性提取，不因实验代码或分支存在而改变 26 型合同、M1-e 验收或主线所有权。
 - **抓取出口 as-built**：Ubuntu mihomo fake-IP 兼容不再使用 broad allow-internal。只有系统解析结果全部落入 `198.18.0.0/15` 时才走固定 Cloudflare DoH；API 连接钉扎并逐跳重验 redirect，Crawl4AI 保留 global-unicast seed guard 与浏览器 pinning proxy。公网 `/md`/`/crawl` 正例和 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 负例均已通过；`:11235` 仍只绑 loopback。
 - **已拍板、尚按消费者推进**：26 型封闭组件库（ADR-015）· 模型档四态路由（ADR-016）· MF-0 薄媒体地基（ADR-018）· Readdy 净室参考（ADR-019）· 不可变 Release（ADR-013）· 质量优先目标模型组合（ADR-020）。ADR-020 是 approved target portfolio，不是整组已实现；目前只有 BrandProfile 经独立证据成为代码级 `promotedRoute`，其余仍逐 task 服从 capability probe、Golden Set、成本/质量、失败门与回滚门，真实外部流量/高风险部署前再走 MODEL-2。ACCEPTED 不等于已实现或已部署。
 - **协同事实源**：[00-decisions-and-coordination.md](../site-builder/00-decisions-and-coordination.md)。承重决策只认 [ADR 注册表](../adr/registry.md)，施工序看 [09](../site-builder/09-m1-implementation-design.md)。

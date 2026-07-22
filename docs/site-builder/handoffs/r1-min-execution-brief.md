@@ -1,6 +1,6 @@
 # R1-min 执行交接：当前 Codex 任务仅完成 R1-min
 
-> 状态：Site Builder 当前多任务并行施工的有效交接文档。
+> 状态：**历史执行交接（已 superseded）**。R1-min（#157）与 DI-0（#164）均已进入 `main`；当前施工序以 `status/current`、`release-plan`、00 与 09 为准。下文保留当时任务隔离、冲突停止门与 provenance，不再表示 DI-0 待安排或 R1-min 在途。
 > 原始创建基线：2026-07-19 已核验的 `origin/main` `874213f206060126f1efd0675418f292f5b111a3`。
 > 2026-07-19 边界修订基线：`origin/main` `06c924f5a1c396cdb34186c80955f81bba144f75`；R4-B-min（#153）与 M1-d（#154）已经合并。当前 Codex 任务只负责 R1-min，不在本任务实现 DI-0 或 template-distillation；这不表示 DI-0 被取消、转交或由测试分支替代。
 > 本文只约束本次执行边界，不替代架构、ADR、当前状态或发布计划等权威真值。开工前必须重新 fetch 并记录实际 `origin/main`。

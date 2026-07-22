@@ -44,7 +44,7 @@
 
 ## 5. 谁在做什么（滚动状态只查 Git，不固化临时分支）
 
-当前 Codex R1-min 任务只负责 R1-min；这是本次任务隔离，不表示取消、延期裁决或转交 DI-0。DI-0 仍是 M1-e 前待安排的独立主线门。`template-distillation` 只是独立测试分支，不属于 Site Builder 主线，不承担 DI-0／M1-e 所有权，也不构成其开工或完成证据；是否吸收其结果须另行评估。R1-min 的任务边界、冲突停止门与实现开工门见 [R1-min 执行交接](handoffs/r1-min-execution-brief.md)。该 handoff 是任务执行约束，不替代本页、09、ADR、status 或现场 Git 状态。
+R1-min（#157）与 DI-0（#164）均已进入 `main`。DI-0 只交付净室来源/规则/DNA/Family/Brief/Evaluation 合同与冻结的空静态 Catalog；真实 Family、受控组装和 DesignEvaluation 运行时生产仍分别属于 M1-e/M1-f。下一主线门是 M1-e-A 的 26 型封闭组件与变体，再进入 M1-e-B。`template-distillation` 仍只是独立测试输入，不属于 Site Builder 主线，不承担 M1-e 所有权，也不构成组件合同或能力完成证据；任何结果必须按 26 型权威合同选择性提取。历史 [R1-min 执行交接](handoffs/r1-min-execution-brief.md) 只保留当时任务边界与 provenance，不再表示当前施工状态。
 
 分支/worktree 是易变运行态，提交进文档会在合并后立即失真。开工前必须现场执行 `git worktree list`、`git branch -vv` 与各 worktree 的 `git status --short`，再把**本次认领**写进 PR 描述或协同评论；分支存在、旧锁记录或计划草案都不等于能力已开工/已落地。
 
