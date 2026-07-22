@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"StatementBlock","part":"accessibility","status":"pass","assertions":["The section has a unique heading-based accessible name."],"sources":["apps/site-renderer/src/components/StatementBlock.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

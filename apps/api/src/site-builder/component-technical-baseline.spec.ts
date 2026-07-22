@@ -19,6 +19,11 @@ describe("M1-e-A technical baseline component contract", () => {
     ["TechSystems", { chapterKey: "systems.chapter", titleKey: "systems.title", titleAccentKey: "systems.titleAccent", introKey: "systems.intro", systems: [{ label: "Hydraulic", titleKey: "systems.one.title", descKey: "systems.one.desc", metric: "16", suffix: "bar", metricLabelKey: "systems.one.metric" }, { label: "Materials", titleKey: "systems.two.title", descKey: "systems.two.desc", metric: "320", suffix: "°C", metricLabelKey: "systems.two.metric" }], variant: "technical-grid" }],
     ["MapLocation", { titleKey: "location.title", addressKey: "location.address", variant: "quiet" }],
     ["MapLocation", { titleKey: "location.title", addressKey: "location.address", variant: "static" }],
+    ["ServicesGrid", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", introKey: "services.intro", services: [{ icon: "ri-settings-line", titleKey: "services.one.title", descKey: "services.one.description" }], variant: "technical-grid" }],
+    ["TrustSplit", { eyebrowKey: "trust.eyebrow", titleKey: "trust.title", titleAccentKey: "trust.accent", introKey: "trust.intro", stats: [{ value: "24h", labelKey: "trust.one" }, { value: "ISO", labelKey: "trust.two" }], badges: [], portraitNameKey: "trust.name", portraitRoleKey: "trust.role", variant: "technical-grid" }],
+    ["ProcessSteps", { eyebrowKey: "process.eyebrow", titleKey: "process.title", titleAccentKey: "process.accent", introKey: "process.intro", steps: [{ num: "01", icon: "ri-search-line", titleKey: "process.one.title", bodyKey: "process.one.body" }, { num: "02", icon: "ri-file-list-line", titleKey: "process.two.title", bodyKey: "process.two.body" }], variant: "technical-grid" }],
+    ["ArticleGrid", { eyebrowKey: "articles.eyebrow", titleKey: "articles.title", titleLine2Key: "articles.line2", introKey: "articles.intro", items: [{ cat: "Guide", titleKey: "articles.one.title", descKey: "articles.one.description", readTime: "4 min" }], variant: "technical-grid" }],
+    ["StatementBlock", { labelKey: "statement.label", statementKey: "statement.body", variant: "technical-grid" }],
   ])("%s accepts the technical-grid variant", (type, props) => {
     expect(() => validateBlock({ type, props } as never)).not.toThrow();
   });
@@ -30,6 +35,14 @@ describe("M1-e-A technical baseline component contract", () => {
     ["TechSystems", { chapterKey: "systems.chapter", titleKey: "systems.title", titleAccentKey: "systems.titleAccent", introKey: "systems.intro", systems: [{ label: "Hydraulic", titleKey: "systems.one.title", descKey: "systems.one.desc", metric: "16", suffix: "bar", metricLabelKey: "systems.one.metric" }], variant: "technical-grid" }],
     ["MapLocation", { titleKey: "location.title", addressKey: "location.address", variant: "interactive" }],
     ["MapLocation", { titleKey: "location.title", addressKey: "location.address", coords: { lat: 51.5, lng: -0.1 } }],
+    ["ServicesGrid", { titleKey: "services.title", services: [] }],
+    ["TrustSplit", { titleKey: "trust.title", stats: [{ value: "1", labelKey: "trust.one" }] }],
+    ["ProcessSteps", { titleKey: "process.title", steps: [{ number: "01", titleKey: "process.one", bodyKey: "process.one.body" }] }],
+    ["ArticleGrid", { titleKey: "articles.title", items: [] }],
+    ["StatementBlock", { labelKey: "statement.label", statementKey: "statement.body", variant: "interactive" }],
+    ["ServicesGrid", { eyebrowKey: "services.eyebrow", titleKey: "services.title", titleAccentKey: "services.accent", introKey: "services.intro", services: [{ icon: "ri-settings-line", titleKey: "services.one.title", descKey: "services.one.description" }], bookLabelKey: "cta.book", bookPageId: "book" }],
+    ["TrustSplit", { eyebrowKey: "trust.eyebrow", titleKey: "trust.title", titleAccentKey: "trust.accent", introKey: "trust.intro", stats: [{ value: "24h", labelKey: "trust.one" }, { value: "ISO", labelKey: "trust.two" }], badges: [], portraitNameKey: "trust.name", portraitRoleKey: "trust.role", portraitPageId: "about" }],
+    ["ArticleGrid", { eyebrowKey: "articles.eyebrow", titleKey: "articles.title", titleLine2Key: "articles.line2", introKey: "articles.intro", items: [{ cat: "Guide", titleKey: "articles.one.title", descKey: "articles.one.description", readTime: "4 min" }], readKey: "cta.read" }],
   ])("%s rejects props outside its qualified item cardinality", (type, props) => {
     expect(() => validateBlock({ type, props } as never)).toThrow(
       `INVALID_BLOCK_PROPS: ${type}`,
@@ -37,6 +50,11 @@ describe("M1-e-A technical baseline component contract", () => {
   });
 
   it.each([
+    ["ServicesGrid", { eyebrow: "Services", title: "Engineering support", accent: "that remains traceable", intro: "Scope, delivery and records stay clear.", cards: [{ title: "Duty review", description: "Operating conditions are documented.", icon: "ri-settings-line" }] }],
+    ["TrustSplit", { eyebrow: "Trust", title: "Evidence", accent: "before claims", intro: "The working basis is visible.", metrics: [{ value: "24h", label: "Reply target" }, { value: "ISO", label: "Quality system" }], badges: ["CE"], name: "Technical team", role: "Project support" }],
+    ["ProcessSteps", { eyebrow: "Process", title: "A clear", accent: "delivery sequence", intro: "Each stage remains reviewable.", items: [{ number: "01", icon: "ri-search-line", title: "Review", body: "Confirm the operating need." }, { number: "02", icon: "ri-file-list-line", title: "Document", body: "Record the agreed scope." }] }],
+    ["ArticleGrid", { eyebrow: "Resources", title: "Useful", titleLine2: "technical notes", intro: "Material for practical decisions.", articles: [{ category: "Guide", title: "Selecting a duty point", description: "A short guide to operating data.", readTime: "4 min" }] }],
+    ["StatementBlock", { label: "Our approach", statement: "Traceable information helps teams make the next decision." }],
     ["LogoMarquee", { eyebrow: "Verified capability", title: "Documentation that travels", items: ["ISO", "CE"] }],
     ["Testimonials", { eyebrow: "Project feedback", title: "Project feedback", items: [{ quote: "Documented and useful.", name: "Operations manager", location: "Northern Europe", platform: "Project review", rating: 4.8 }] }],
     ["FeatureCards", { eyebrow: "What the team receives", title: "Clear technical decisions", intro: "Focused information supports comparison.", items: [{ title: "Duty-point review", description: "Operating conditions are documented." }, { title: "Traceable documents", description: "Records are agreed against scope." }] }],
@@ -300,6 +318,11 @@ describe("M1-e-A technical baseline component contract", () => {
   });
 
   it.each([
+    ["ServicesGrid", { eyebrow: "Services", title: "T".repeat(61), accent: "a", intro: "i", cards: [{ title: "t", description: "d" }] }],
+    ["TrustSplit", { eyebrow: "Trust", title: "T", accent: "a", intro: "i", metrics: [{ value: "1", label: "one" }], badges: [], name: "Team", role: "Support" }],
+    ["ProcessSteps", { eyebrow: "Process", title: "T", accent: "a", intro: "i", items: [{ number: "01", title: "One", body: "Body" }] }],
+    ["ArticleGrid", { eyebrow: "Resources", title: "T", titleLine2: "L", intro: "i", articles: [{ category: "Guide", title: "T".repeat(81), description: "d", readTime: "4 min" }] }],
+    ["StatementBlock", { label: "Label", statement: "S".repeat(241) }],
     ["HeroBanner", { headline: "H".repeat(61) }],
     [
       "HeroBanner",

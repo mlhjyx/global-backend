@@ -75,6 +75,7 @@ describe('R1 release contract gate', () => {
   it('accepts only the current release-eligible component registry', () => {
     expect(R1_RENDERER_COMPONENT_TYPES).toEqual([
       'AboutBlock',
+      'ArticleGrid',
       'CertWall',
       'CtaBanner',
       'FeatureCards',
@@ -84,10 +85,14 @@ describe('R1 release contract gate', () => {
       'MapLocation',
       'LogoMarquee',
       'ProcessTimeline',
+      'ProcessSteps',
       'ProductGrid',
+      'ServicesGrid',
       'StatsBand',
+      'StatementBlock',
       'TechSystems',
       'Testimonials',
+      'TrustSplit',
     ]);
     expect(() =>
       assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
@@ -97,13 +102,18 @@ describe('R1 release contract gate', () => {
   it('blocks a registered gallery component until M1-e-A promotes it', () => {
     expect(() =>
       assertReleaseContract(
-        spec(['StatementBlock'], {
-          labelKey: 'statement.label',
-          statementKey: 'statement.body',
+        spec(['PricingTable'], {
+          eyebrowKey: 'pricing.eyebrow',
+          titleKey: 'pricing.title',
+          titleAccentKey: 'pricing.accent',
+          introKey: 'pricing.intro',
+          primaryCta: { labelKey: 'pricing.contact' },
+          rows: [],
+          footnoteKey: 'pricing.footnote',
         }),
         '1.0.0',
       ),
-    ).toThrow('SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: StatementBlock');
+    ).toThrow('SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: PricingTable');
   });
 
   it('rejects a free-form HeroBanner variant before release publication', () => {

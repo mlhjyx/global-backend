@@ -40,7 +40,7 @@
         } },
         { "type": "ServicesGrid", "props": { "id": "ServicesGrid-1",
           "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent", "introKey": "services.intro",
-          "allLabelKey": "services.all", "allPageId": "services", "bookLabelKey": "cta.bookService", "bookPageId": "book",
+          "allLabelKey": "services.all", "allPageId": "services",
           "services": [
             { "icon": "ri-search-eye-line", "titleKey": "services.s1.title", "descKey": "services.s1.desc", "fromKey": "services.s1.from" },
             { "icon": "ri-plug-line", "titleKey": "services.s2.title", "descKey": "services.s2.desc", "fromKey": "services.s2.from" },
@@ -58,7 +58,7 @@
             { "value": "4.9", "labelKey": "trust.stat3" }
           ],
           "badges": ["Fully qualified", "Public liability insured", "Part P registered", "Clear pricing", "Tidy workmanship"],
-          "portraitNameKey": "trust.portraitName", "portraitRoleKey": "trust.portraitRole", "portraitPageId": "about"
+          "portraitNameKey": "trust.portraitName", "portraitRoleKey": "trust.portraitRole"
         } },
         { "type": "ProcessSteps", "props": { "id": "ProcessSteps-1",
           "eyebrowKey": "process.eyebrow", "titleKey": "process.title", "titleAccentKey": "process.titleAccent", "introKey": "process.intro",

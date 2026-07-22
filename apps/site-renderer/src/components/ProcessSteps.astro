@@ -1,74 +1,11 @@
 ---
-interface Step { num: string; icon: string; titleKey: string; bodyKey: string; metaKey?: string }
-interface Props {
-  eyebrowKey: string;
-  titleKey: string;
-  titleAccentKey: string;
-  introKey: string;
-  steps: Step[];
-  t: (key: string) => string;
-  alt?: boolean;
-}
-const { eyebrowKey, titleKey, titleAccentKey, introKey, steps = [], t, alt } = Astro.props;
+import { createRequire } from 'node:module';
+interface Step { num: string | number; icon: string; titleKey: string; bodyKey: string; metaKey?: string }
+interface Props { eyebrowKey:string; titleKey:string; titleAccentKey:string; introKey:string; steps:Step[]; variant?:'technical-grid'|'quiet'; t:(key:string)=>string; alt?:boolean; instanceId:string }
+const { assertQualifiedComponentContentBudget }=createRequire(import.meta.url)('@global/contracts');
+const {eyebrowKey,titleKey,titleAccentKey,introKey,steps,variant='technical-grid',t,alt,instanceId}=Astro.props;
+const eyebrow=t(eyebrowKey),title=t(titleKey),accent=t(titleAccentKey),intro=t(introKey); const items=steps.map((step)=>({number:String(step.num),title:t(step.titleKey),body:t(step.bodyKey),meta:step.metaKey?t(step.metaKey):undefined,icon:step.icon}));
+assertQualifiedComponentContentBudget('ProcessSteps',{eyebrow,title,accent,intro,items}); const headingId=`${instanceId}-process-steps-heading`;
 ---
-
-<section class:list={['block', { alt }]}>
-  <div class="container grid-12 steps-section">
-    <div class="left reveal">
-      <span class="eyebrow">{t(eyebrowKey)}</span>
-      <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
-      <p class="muted intro">{t(introKey)}</p>
-    </div>
-
-    <div class="right">
-      {steps.map((s) => (
-        <div class="tilt-card reveal" data-tilt-rotation="8" data-tilt-scale="1.02">
-          <span class="tilt-glow"></span>
-          <div class="step">
-            <div class="step-top">
-              <span class="num">{s.num}</span>
-              <span class="icon"><i class={s.icon}></i></span>
-            </div>
-            <h3>{t(s.titleKey)}</h3>
-            <p class="muted">{t(s.bodyKey)}</p>
-            {s.metaKey && (
-              <span class="meta"><i class="ri-time-line"></i> {t(s.metaKey)}</span>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-</section>
-
-<style>
-  .left { grid-column: span 4; }
-  .right { grid-column: span 8; display: grid; grid-template-columns: 1fr; gap: 1rem; }
-  @media (min-width: 768px) { .right { grid-template-columns: repeat(3, 1fr); } }
-  @media (max-width: 1023px) { .left, .right { grid-column: span 1; } }
-  .intro { margin-top: 1rem; max-width: 28rem; }
-  .step {
-    position: relative;
-    display: flex; flex-direction: column;
-    padding: 1.5rem;
-    border-radius: var(--radius-lg);
-    background: var(--c-surface-alt);
-    border: 1px solid var(--c-border);
-    height: 100%;
-    transition: border-color .3s ease;
-  }
-  .step:hover { border-color: var(--c-accent); }
-  .step-top { display: flex; align-items: center; justify-content: space-between; }
-  .num { font-family: var(--font-heading); font-weight: 600; font-size: clamp(2rem, 4vw, 3rem); color: var(--c-accent); letter-spacing: -0.02em; }
-  .icon {
-    width: 2.75rem; height: 2.75rem;
-    display: grid; place-items: center;
-    border-radius: 9999px;
-    background: var(--c-primary-dark); color: var(--c-on-dark);
-    transition: background .3s ease, color .3s ease;
-  }
-  .step:hover .icon { background: var(--c-accent); color: var(--c-on-accent); }
-  .step h3 { margin-top: 2rem; font-size: 1.2rem; font-weight: 600; }
-  .step .muted { margin-top: 0.5rem; font-size: 0.9rem; }
-  .step .meta { margin-top: auto; padding-top: 1.25rem; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--c-on-surface-subtle); }
-</style>
+<section class:list={['block','process-steps',`process-steps--${variant}`,{alt}]} data-component="ProcessSteps" data-variant={variant} aria-labelledby={headingId}><div class="container grid-12 layout"><div><span class="eyebrow">{eyebrow}</span><h2 id={headingId} class="section-title">{title} <em>{accent}</em></h2><p class="muted intro">{intro}</p></div><ol>{items.map((item)=><li><article><div class="top"><span class="number">{item.number}</span><span aria-hidden="true" class="icon"><i class={item.icon}></i></span></div><h3>{item.title}</h3><p class="muted">{item.body}</p>{item.meta&&<p class="meta">{item.meta}</p>}</article></li>)}</ol></div></section>
+<style>.layout>div{grid-column:span 4}.layout>ol{grid-column:span 8;display:grid;grid-template-columns:1fr;gap:1rem;list-style:none;padding:0;margin:0}@media(min-width:768px){.layout>ol{grid-template-columns:repeat(3,1fr)}}@media(max-width:1023px){.layout>div,.layout>ol{grid-column:span 1}}.intro{margin-top:1rem}.layout article{height:100%;padding:1.5rem;border:1px solid var(--c-border);border-radius:var(--radius-lg);background:var(--c-surface)}.process-steps--technical-grid article{background:linear-gradient(var(--c-surface-alt) 1px,transparent 1px),linear-gradient(90deg,var(--c-surface-alt) 1px,transparent 1px),var(--c-surface);background-size:1rem 1rem}.top{display:flex;justify-content:space-between}.number{font-size:2rem;font-weight:700;color:var(--c-accent)}.icon{display:grid;place-items:center;width:2.5rem;height:2.5rem;border-radius:99px;background:var(--c-primary-dark);color:var(--c-on-dark)}h3{margin-top:1.5rem;font-size:1.1rem}.muted{margin-top:.5rem}.meta{margin-top:1rem;font-size:.75rem;color:var(--c-on-surface-muted)}</style>

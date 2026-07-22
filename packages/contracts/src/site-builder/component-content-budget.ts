@@ -33,6 +33,11 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   FeatureCards: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, intro: 240, minItems: 2, maxItems: 6, itemTitle: 60, itemDescription: 200, learn: 24 }),
   TechSystems: Object.freeze({ chapter: 40, title: 60, titleWords: 8, intro: 240, minItems: 2, maxItems: 6, label: 48, systemTitle: 60, description: 200, metric: 24, suffix: 12, metricLabel: 48, live: 40 }),
   MapLocation: Object.freeze({ title: 60, titleWords: 8, address: 160, addressWords: 24 }),
+  ServicesGrid: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minItems: 1, maxItems: 8, itemTitle: 60, itemDescription: 200, from: 48 }),
+  TrustSplit: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minStats: 2, maxStats: 4, value: 16, label: 48, maxBadges: 8, badge: 48, name: 80, role: 80 }),
+  ProcessSteps: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minItems: 2, maxItems: 6, number: 12, itemTitle: 60, itemBody: 200, meta: 48 }),
+  ArticleGrid: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, titleLine2: 60, titleLine2Words: 8, intro: 240, minItems: 1, maxItems: 8, category: 48, itemTitle: 80, itemDescription: 240, readTime: 32 }),
+  StatementBlock: Object.freeze({ label: 48, statement: 240 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -145,6 +150,11 @@ const contentSchemas = {
   FeatureCards: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), intro: boundedCopy(240), items: z.array(z.object({ title: boundedCopy(60), description: boundedCopy(200) }).strict()).min(2).max(6), learn: boundedCopy(24).optional() }).strict(),
   TechSystems: z.object({ chapter: boundedCopy(40), title: boundedCopy(60, 8), intro: boundedCopy(240), systems: z.array(z.object({ label: boundedCopy(48), title: boundedCopy(60), description: boundedCopy(200), metric: boundedCopy(24), suffix: boundedCopy(12), metricLabel: boundedCopy(48) }).strict()).min(2).max(6), live: boundedCopy(40).optional() }).strict(),
   MapLocation: z.object({ title: boundedCopy(60, 8), address: boundedCopy(160, 24) }).strict(),
+  ServicesGrid: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), accent: boundedCopy(40), intro: boundedCopy(240), cards: z.array(z.object({ title: boundedCopy(60), description: boundedCopy(200), from: boundedCopy(48).optional(), icon: boundedCopy(80) }).strict()).min(1).max(8) }).strict(),
+  TrustSplit: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), accent: boundedCopy(40), intro: boundedCopy(240), metrics: z.array(z.object({ value: boundedCopy(16), label: boundedCopy(48) }).strict()).min(2).max(4), badges: z.array(boundedCopy(48)).max(8), name: boundedCopy(80), role: boundedCopy(80) }).strict(),
+  ProcessSteps: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), accent: boundedCopy(40), intro: boundedCopy(240), items: z.array(z.object({ number: boundedCopy(12), title: boundedCopy(60), body: boundedCopy(200), meta: boundedCopy(48).optional(), icon: boundedCopy(80) }).strict()).min(2).max(6) }).strict(),
+  ArticleGrid: z.object({ eyebrow: boundedCopy(40), title: boundedCopy(60, 8), titleLine2: boundedCopy(60, 8), intro: boundedCopy(240), articles: z.array(z.object({ category: boundedCopy(48), title: boundedCopy(80), description: boundedCopy(240), readTime: boundedCopy(32) }).strict()).min(1).max(8) }).strict(),
+  StatementBlock: z.object({ label: boundedCopy(48), statement: boundedCopy(240) }).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

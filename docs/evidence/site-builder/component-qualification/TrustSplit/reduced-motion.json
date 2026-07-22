@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"TrustSplit","part":"reducedMotion","status":"pass","assertions":["The release component has no motion-dependent state."],"sources":["apps/site-renderer/src/components/TrustSplit.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}
