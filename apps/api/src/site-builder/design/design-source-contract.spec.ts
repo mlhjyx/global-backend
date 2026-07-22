@@ -201,6 +201,30 @@ describe("DesignSourceManifest contract", () => {
     ).toThrowError(/DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED/);
   });
 
+  it("rejects approvals and authorization records that are not yet effective", () => {
+    const now = new Date("2026-07-22T00:00:00.000Z");
+    expect(() =>
+      validateDesignSourceManifest(
+        authorizedSource({ approvedAt: "2026-07-22T00:00:01.000Z" }),
+        { now },
+      ),
+    ).toThrowError(/DESIGN_SOURCE_AUTHORIZATION_INVALID/);
+    expect(() =>
+      validateDesignSourceManifest(
+        authorizedSource({
+          ownerAuthorization: {
+            ...((authorizedSource().ownerAuthorization as Record<
+              string,
+              unknown
+            >) ?? {}),
+            recordedAt: "2026-07-22T00:00:01.000Z",
+          },
+        }),
+        { now },
+      ),
+    ).toThrowError(/DESIGN_SOURCE_AUTHORIZATION_INVALID/);
+  });
+
   it("keeps visual-research sources out of transformation, archives, and training", () => {
     expect(validateDesignSourceManifest(visualResearchSource())).toMatchObject({
       sourceClass: "visual_research_only",

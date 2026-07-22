@@ -234,6 +234,20 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
   });
 
+  it("rejects plain source copy rather than relying on markup delimiters", () => {
+    expect(() =>
+      validateDesignObservation(
+        observation({ reusablePrinciples: ["Copied source headline"] }),
+      ),
+    ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
+    expect(() =>
+      validateDesignRule(
+        rule({ summary: "Copied source headline" }),
+        ruleValidationContext(),
+      ),
+    ).toThrowError(/DESIGN_RULE_FORBIDDEN_CONTENT/);
+  });
+
   it("requires a DesignRule to be supported by five independent contribution groups", () => {
     expect(validateDesignRule(rule(), ruleValidationContext())).toMatchObject({
       id: "proof-near-primary-action",
@@ -287,6 +301,26 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_CATALOG_INVALID/);
   });
 
+  it("rejects multiple contribution groups backed by the same canonical source", () => {
+    const value = catalog();
+    const sourceManifests = ruleValidationContext().sourceManifests.map(
+      (manifest, index) =>
+        index < 2
+          ? { ...manifest, sourceUrl: "https://platform.example/study" }
+          : manifest,
+    );
+    expect(() =>
+      finalizeDesignCatalog({
+        schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+        catalogVersion: value.catalogVersion,
+        sourceManifests,
+        designRules: value.designRules,
+        designDnas: value.designDnas,
+        families: value.families,
+      }),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
   it("resolves only an approved family when the frozen brief pins catalog and family digests", () => {
     const value = catalog();
     expect(resolveDesignBriefFromCatalog(value, brief(value))).toMatchObject({
@@ -335,6 +369,16 @@ describe("DI-0 clean-room contracts and static catalog", () => {
         }),
       ),
     ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_DEMO_VISUAL_PACK/);
+  });
+
+  it("rejects motion outside the approved family's policy", () => {
+    const value = catalog();
+    expect(() =>
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, { motionIntensity: "medium" }),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_MOTION/);
   });
 
   it("returns contract errors instead of prototype lookups for brief selections", () => {
