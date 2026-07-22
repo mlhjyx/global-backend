@@ -22,13 +22,16 @@ function deepFreeze<T>(value: T): T {
  * approved families are an M1-e deliverable; an empty catalog is safer than
  * smuggling an unreviewed demonstration family into the runtime.
  */
-export const STATIC_DESIGN_CATALOG: DesignCatalog = deepFreeze(finalizeDesignCatalog({
-  schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
-  catalogVersion: "di-0-foundation/1",
-  designRules: [],
-  designDnas: [],
-  families: [],
-}));
+export const STATIC_DESIGN_CATALOG: DesignCatalog = deepFreeze(
+  finalizeDesignCatalog({
+    schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+    catalogVersion: "di-0-foundation/1",
+    sourceManifests: [],
+    designRules: [],
+    designDnas: [],
+    families: [],
+  }),
+);
 
 export function resolveDesignBriefFromCatalog(
   catalog: DesignCatalog,

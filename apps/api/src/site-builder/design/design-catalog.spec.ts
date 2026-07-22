@@ -8,6 +8,8 @@ import {
   DESIGN_RULE_SCHEMA_VERSION,
   DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
   DESIGN_TEMPLATE_FAMILY_SCHEMA_VERSION,
+  type DesignCatalogDraft,
+  type DesignSourceManifest,
   designTemplateFamilyDigest,
   finalizeDesignCatalog,
   hasDesignEvaluationHardFailures,
@@ -64,7 +66,9 @@ function rule(
   };
 }
 
-function ruleValidationContext(groups = ["a", "b", "c", "d", "e"]) {
+function ruleValidationContext(groups = ["a", "b", "c", "d", "e"]): {
+  sourceManifests: DesignSourceManifest[];
+} {
   return {
     sourceManifests: groups.map((sourceContributionGroup) => ({
       schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -122,55 +126,53 @@ function family(
 }
 
 function catalog(status: "approved" | "draft" = "approved") {
-  return finalizeDesignCatalog(
-    {
-      schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
-      catalogVersion: "2026.07.0",
-      designRules: [rule()],
-      designDnas: [
-        {
-          schemaVersion: DESIGN_DNA_SCHEMA_VERSION,
-          id: "foundation-dna",
-          name: "Foundation",
-          ruleIds: ["proof-near-primary-action"],
-          hierarchy: {
-            displayScale: "balanced",
-            headingContrast: "medium",
-            maxReadingWidthRem: 44,
-          },
-          spatialRhythm: {
-            sectionGapPx: [48, 96],
-            contentGapPx: [16, 32],
-            density: "balanced",
-          },
-          composition: {
-            heroModes: ["split"],
-            imageTextRatios: ["3:2"],
-            alignmentBias: "left",
-          },
-          surfaces: {
-            cardStyle: "bordered",
-            borderWeight: "hairline",
-            radius: "subtle",
-          },
-          imagery: {
-            preferredSubjects: ["product"],
-            cropModes: ["cover"],
-            backgroundPolicy: "light",
-            maxGeneratedMediaRatio: 0,
-          },
-          motion: {
-            intensity: "low",
-            allowed: ["fade"],
-            forbidden: ["parallax"],
-          },
-          antiPatterns: ["decorative dashboard chrome"],
+  return finalizeDesignCatalog({
+    schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+    catalogVersion: "2026.07.0",
+    sourceManifests: ruleValidationContext().sourceManifests,
+    designRules: [rule()],
+    designDnas: [
+      {
+        schemaVersion: DESIGN_DNA_SCHEMA_VERSION,
+        id: "foundation-dna",
+        name: "Foundation",
+        ruleIds: ["proof-near-primary-action"],
+        hierarchy: {
+          displayScale: "balanced",
+          headingContrast: "medium",
+          maxReadingWidthRem: 44,
         },
-      ],
-      families: [family(status)],
-    },
-    ruleValidationContext(),
-  );
+        spatialRhythm: {
+          sectionGapPx: [48, 96],
+          contentGapPx: [16, 32],
+          density: "balanced",
+        },
+        composition: {
+          heroModes: ["split"],
+          imageTextRatios: ["3:2"],
+          alignmentBias: "left",
+        },
+        surfaces: {
+          cardStyle: "bordered",
+          borderWeight: "hairline",
+          radius: "subtle",
+        },
+        imagery: {
+          preferredSubjects: ["product"],
+          cropModes: ["cover"],
+          backgroundPolicy: "light",
+          maxGeneratedMediaRatio: 0,
+        },
+        motion: {
+          intensity: "low",
+          allowed: ["fade"],
+          forbidden: ["parallax"],
+        },
+        antiPatterns: ["decorative dashboard chrome"],
+      },
+    ],
+    families: [family(status)],
+  });
 }
 
 function brief(
@@ -258,7 +260,7 @@ describe("DI-0 clean-room contracts and static catalog", () => {
   it("freezes validated rule provenance into the catalog digest", () => {
     const value = catalog();
     const sourceManifests = ruleValidationContext().sourceManifests;
-    const provenanceBoundDraft = {
+    const provenanceBoundDraft: DesignCatalogDraft = {
       schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
       catalogVersion: value.catalogVersion,
       designRules: value.designRules,
@@ -266,18 +268,13 @@ describe("DI-0 clean-room contracts and static catalog", () => {
       families: value.families,
       sourceManifests,
     };
-    const provenanceBoundCatalog = finalizeDesignCatalog(
-      provenanceBoundDraft as never,
-    );
-    expect(
-      (provenanceBoundCatalog as { sourceManifests?: unknown[] })
-        .sourceManifests,
-    ).toHaveLength(5);
+    const provenanceBoundCatalog = finalizeDesignCatalog(provenanceBoundDraft);
+    expect(provenanceBoundCatalog.sourceManifests).toHaveLength(5);
     expect(() =>
       finalizeDesignCatalog({
         ...provenanceBoundDraft,
         sourceManifests: sourceManifests.slice(0, 4),
-      } as never),
+      }),
     ).toThrowError(/DESIGN_CATALOG_INVALID/);
   });
 

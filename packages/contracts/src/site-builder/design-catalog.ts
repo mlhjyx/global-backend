@@ -6,16 +6,16 @@ import {
 } from "./design-integrity";
 import { validateDesignBrief, type DesignBrief } from "./design-brief";
 import { validateDesignDna, type DesignDna } from "./design-dna";
-import {
-  validateDesignRule,
-  type DesignRule,
-  type DesignRuleValidationContext,
-} from "./design-observation";
+import { validateDesignRule, type DesignRule } from "./design-observation";
 import {
   designTemplateFamilyDigest,
   validateTemplateFamily,
   type TemplateFamily,
 } from "./template-family";
+import {
+  validateDesignSourceManifest,
+  type DesignSourceManifest,
+} from "./design-source";
 
 export const DESIGN_CATALOG_SCHEMA_VERSION =
   "site-builder-design-catalog/v1" as const;
@@ -23,6 +23,7 @@ export const DESIGN_CATALOG_SCHEMA_VERSION =
 export interface DesignCatalogDraft {
   schemaVersion: typeof DESIGN_CATALOG_SCHEMA_VERSION;
   catalogVersion: string;
+  sourceManifests: DesignSourceManifest[];
   designRules: DesignRule[];
   designDnas: DesignDna[];
   families: TemplateFamily[];
@@ -61,23 +62,21 @@ function uniqueIds(values: readonly { id: string }[]): boolean {
   return new Set(values.map((item) => item.id)).size === values.length;
 }
 
-function validateCatalogDraft(
-  value: unknown,
-  context?: DesignRuleValidationContext,
-  requireRuleProvenance = false,
-): DesignCatalogDraft {
+function validateCatalogDraft(value: unknown): DesignCatalogDraft {
   const catalog = isRecord(value) ? value : null;
   if (
     !catalog ||
     !hasOnlyKeys(catalog, [
       "schemaVersion",
       "catalogVersion",
+      "sourceManifests",
       "designRules",
       "designDnas",
       "families",
     ]) ||
     catalog.schemaVersion !== DESIGN_CATALOG_SCHEMA_VERSION ||
     !isNonBlankString(catalog.catalogVersion) ||
+    !Array.isArray(catalog.sourceManifests) ||
     !Array.isArray(catalog.designRules) ||
     !Array.isArray(catalog.designDnas) ||
     !Array.isArray(catalog.families)
@@ -87,29 +86,41 @@ function validateCatalogDraft(
   let rules: DesignRule[];
   let dnas: DesignDna[];
   let families: TemplateFamily[];
+  let sourceManifests: DesignSourceManifest[];
   try {
-    if (requireRuleProvenance && catalog.designRules.length > 0 && !context) {
-      fail(
-        "DESIGN_CATALOG_INVALID",
-        "catalog publication needs validated rule provenance",
-      );
-    }
+    sourceManifests = catalog.sourceManifests.map((sourceManifest) =>
+      validateDesignSourceManifest(sourceManifest),
+    );
     rules = catalog.designRules.map((rule) =>
-      validateDesignRule(rule, context),
+      validateDesignRule(rule, { sourceManifests }),
     );
     dnas = catalog.designDnas.map(validateDesignDna);
     families = catalog.families.map(validateTemplateFamily);
   } catch {
     fail("DESIGN_CATALOG_INVALID", "catalog contains an invalid entry");
   }
-  if (!uniqueIds(rules) || !uniqueIds(dnas) || !uniqueIds(families)) {
+  if (
+    !uniqueIds(sourceManifests) ||
+    !uniqueIds(rules) ||
+    !uniqueIds(dnas) ||
+    !uniqueIds(families)
+  ) {
     fail("DESIGN_CATALOG_INVALID", "catalog identifiers must be unique");
   }
   const ruleIds = new Set(rules.map((rule) => rule.id));
   const dnaIds = new Set(dnas.map((dna) => dna.id));
+  const sourceManifestIds = new Set(
+    sourceManifests.map((sourceManifest) => sourceManifest.id),
+  );
   if (
     dnas.some((dna) => dna.ruleIds.some((ruleId) => !ruleIds.has(ruleId))) ||
-    families.some((family) => !dnaIds.has(family.designDnaId))
+    families.some(
+      (family) =>
+        !dnaIds.has(family.designDnaId) ||
+        family.sourceManifestIds.some(
+          (sourceManifestId) => !sourceManifestIds.has(sourceManifestId),
+        ),
+    )
   ) {
     fail(
       "DESIGN_CATALOG_INVALID",
@@ -119,6 +130,7 @@ function validateCatalogDraft(
   return {
     schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
     catalogVersion: catalog.catalogVersion,
+    sourceManifests,
     designRules: rules,
     designDnas: dnas,
     families,
@@ -127,9 +139,8 @@ function validateCatalogDraft(
 
 export function finalizeDesignCatalog(
   value: DesignCatalogDraft,
-  context?: DesignRuleValidationContext,
 ): DesignCatalog {
-  const draft = validateCatalogDraft(value, context, true);
+  const draft = validateCatalogDraft(value);
   return { ...draft, digest: designSha256(draft) };
 }
 
@@ -140,6 +151,7 @@ export function validateDesignCatalog(value: unknown): DesignCatalog {
     !hasOnlyKeys(catalog, [
       "schemaVersion",
       "catalogVersion",
+      "sourceManifests",
       "designRules",
       "designDnas",
       "families",
@@ -157,6 +169,7 @@ export function validateDesignCatalog(value: unknown): DesignCatalog {
   const draft = validateCatalogDraft({
     schemaVersion: catalog.schemaVersion,
     catalogVersion: catalog.catalogVersion,
+    sourceManifests: catalog.sourceManifests,
     designRules: catalog.designRules,
     designDnas: catalog.designDnas,
     families: catalog.families,
