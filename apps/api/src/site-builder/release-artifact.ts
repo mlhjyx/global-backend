@@ -3,7 +3,7 @@ import { open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
   SITE_SPEC_VERSION,
-  SITE_SPEC_COMPONENT_TYPES,
+  SITE_SPEC_RELEASE_COMPONENT_TYPES,
   validateBlock,
   type SiteSpec,
 } from '@global/contracts';
@@ -11,20 +11,13 @@ import {
 export const RELEASE_MANIFEST_SCHEMA_VERSION =
   'site-builder-release-manifest/v1' as const;
 
-export const R1_RENDERER_COMPONENT_TYPES = [
-  'AboutBlock',
-  'CertWall',
-  'CtaBanner',
-  'FaqAccordion',
-  'HeroBanner',
-  'InquiryForm',
-  'MapLocation',
-  'ProcessTimeline',
-  'ProductGrid',
-  'StatsBand',
-] as const;
+/** @deprecated Use the shared release-eligible registry from @global/contracts. */
+export const R1_RENDERER_COMPONENT_TYPES =
+  SITE_SPEC_RELEASE_COMPONENT_TYPES;
 
-const componentTypes = new Set<string>(SITE_SPEC_COMPONENT_TYPES);
+const releaseComponentTypes = new Set<string>(
+  SITE_SPEC_RELEASE_COMPONENT_TYPES,
+);
 const MAX_RELEASE_FILES = 4096;
 const MAX_RELEASE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_RELEASE_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -121,7 +114,12 @@ export function assertReleaseContract(
   }
   for (const page of spec.pages) {
     for (const block of page.puck.content) {
-      validateBlock(block); // type 封闭 + 必填 props，fail-closed（UNKNOWN_COMPONENT_TYPE / MISSING_REQUIRED_PROP）
+      validateBlock(block);
+      if (!releaseComponentTypes.has(block.type)) {
+        throw new Error(
+          `SITE_RELEASE_COMPONENT_NOT_ELIGIBLE: ${block.type}`,
+        );
+      }
     }
   }
 }
