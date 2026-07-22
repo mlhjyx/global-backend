@@ -39,11 +39,9 @@ function observation(
     },
     ctaStrategy: { primaryCount: 1, placementPattern: "hero-and-terminal" },
     motionIntensity: "subtle",
-    mobileReflow: ["stack proof below primary action"],
-    reusablePrinciples: ["pair a product claim with one visible proof element"],
-    prohibitedSourceSpecificTraits: [
-      "do not reproduce branded illustration treatment",
-    ],
+    mobileReflow: ["stack_proof_below_primary_action"],
+    reusablePrinciples: ["pair_product_claim_with_visible_proof"],
+    prohibitedSourceSpecificTraits: ["no_branded_illustration_treatment"],
     ...overrides,
   };
 }
@@ -54,7 +52,7 @@ function rule(
   return {
     schemaVersion: DESIGN_RULE_SCHEMA_VERSION,
     id: "proof-near-primary-action",
-    summary: "Place one abstract proof element near the primary action.",
+    summary: "primary_action_adjacent_proof",
     sourceContributionGroups: ["a", "b", "c", "d", "e"],
     evidence: {
       independentSourceCount: 5,

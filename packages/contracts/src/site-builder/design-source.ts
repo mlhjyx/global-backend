@@ -218,6 +218,12 @@ function assertOwnedAuthorization(
       "authorization coverage is incomplete",
     );
   }
+  if (Date.parse(authorization.recordedAt) > now.getTime()) {
+    fail(
+      "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+      "authorization record is not yet effective",
+    );
+  }
 
   const validity = record(authorization.validity);
   if (
@@ -412,16 +418,20 @@ export function validateDesignSourceManifest(
   }
 
   if (manifest.sourceClass === "owned_export_authorized") {
-    if (!validTimestamp(manifest.approvedAt)) {
+    const now = options.now ?? new Date();
+    if (
+      !validTimestamp(manifest.approvedAt) ||
+      Date.parse(manifest.approvedAt) > now.getTime()
+    ) {
       fail(
         "DESIGN_SOURCE_AUTHORIZATION_INVALID",
-        "authorized export needs approvedAt",
+        "authorized export needs an effective approvedAt",
       );
     }
     assertOwnedAuthorization(
       manifest.ownerAuthorization,
       manifest.trainingPolicy === "license_permits",
-      options.now ?? new Date(),
+      now,
     );
     return manifest as unknown as DesignSourceManifest;
   }

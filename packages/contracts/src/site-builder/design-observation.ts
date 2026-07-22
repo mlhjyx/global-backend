@@ -114,17 +114,23 @@ function containsForbiddenSourceField(value: unknown): boolean {
   );
 }
 
-function abstractText(value: unknown): value is string {
+function abstractCode(value: unknown): value is string {
   return (
     isNonBlankString(value) &&
-    value.length <= 280 &&
-    !/[<>]/.test(value) &&
-    !/https?:\/\//i.test(value)
+    value.length <= 80 &&
+    /^[a-z](?:[a-z0-9]*(?:[-_][a-z0-9]+)*)$/.test(value)
   );
 }
 
-function abstractTextArray(value: unknown): value is string[] {
-  return isStringArray(value) && value.every(abstractText);
+function abstractCodeArray(value: unknown): value is string[] {
+  return isStringArray(value) && value.every(abstractCode);
+}
+
+function ratioBandArray(value: unknown): value is string[] {
+  return (
+    isStringArray(value) &&
+    value.every((item) => /^\d{1,2}:\d{1,2}$/.test(item))
+  );
 }
 
 /** Rejects raw source material before it can enter a reusable design corpus. */
@@ -161,9 +167,9 @@ export function validateDesignObservation(value: unknown): DesignObservation {
     !["none", "subtle", "normal"].includes(
       String(observation.motionIntensity),
     ) ||
-    !abstractTextArray(observation.mobileReflow) ||
-    !abstractTextArray(observation.reusablePrinciples) ||
-    !abstractTextArray(observation.prohibitedSourceSpecificTraits)
+    !isStringArray(observation.mobileReflow) ||
+    !isStringArray(observation.reusablePrinciples) ||
+    !isStringArray(observation.prohibitedSourceSpecificTraits)
   ) {
     fail("DESIGN_OBSERVATION_INVALID", "observation metadata is invalid");
   }
@@ -183,7 +189,7 @@ export function validateDesignObservation(value: unknown): DesignObservation {
     !isNonBlankString(hierarchy.bodyMeasureBand) ||
     !image ||
     !hasOnlyKeys(image, ["ratioBands", "focalPattern", "treatment"]) ||
-    !abstractTextArray(image.ratioBands) ||
+    !ratioBandArray(image.ratioBands) ||
     !isNonBlankString(image.focalPattern) ||
     !isNonBlankString(image.treatment) ||
     !cta ||
@@ -205,11 +211,14 @@ export function validateDesignObservation(value: unknown): DesignObservation {
     fail("DESIGN_OBSERVATION_INVALID", "observation structure is invalid");
   }
   if (
-    !abstractText(hierarchy.headlineBand) ||
-    !abstractText(hierarchy.bodyMeasureBand) ||
-    !abstractText(image.focalPattern) ||
-    !abstractText(image.treatment) ||
-    !abstractText(cta.placementPattern)
+    !abstractCode(hierarchy.headlineBand) ||
+    !abstractCode(hierarchy.bodyMeasureBand) ||
+    !abstractCode(image.focalPattern) ||
+    !abstractCode(image.treatment) ||
+    !abstractCode(cta.placementPattern) ||
+    !abstractCodeArray(observation.mobileReflow) ||
+    !abstractCodeArray(observation.reusablePrinciples) ||
+    !abstractCodeArray(observation.prohibitedSourceSpecificTraits)
   ) {
     fail(
       "DESIGN_OBSERVATION_FORBIDDEN_CONTENT",
@@ -241,7 +250,7 @@ export function validateDesignRule(
   ) {
     fail("DESIGN_RULE_INVALID", "rule metadata is invalid");
   }
-  if (!abstractText(rule.summary)) {
+  if (!abstractCode(rule.summary)) {
     fail(
       "DESIGN_RULE_FORBIDDEN_CONTENT",
       "rule summary must be abstract rather than source-derived content",

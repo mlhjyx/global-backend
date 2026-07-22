@@ -43,6 +43,7 @@ export type DesignCatalogContractErrorCode =
   | "DESIGN_BRIEF_UNSUPPORTED_BLUEPRINT"
   | "DESIGN_BRIEF_UNSUPPORTED_VARIANT"
   | "DESIGN_BRIEF_UNSUPPORTED_DEMO_VISUAL_PACK"
+  | "DESIGN_BRIEF_UNSUPPORTED_MOTION"
   | "DESIGN_BRIEF_UNSUPPORTED_BUDGET";
 
 export class DesignCatalogContractError extends Error {
@@ -68,6 +69,19 @@ function hasOwnRecordKey(
   key: string,
 ): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function canonicalSourceIdentity(manifest: DesignSourceManifest): string {
+  if (!manifest.sourceUrl) return `manifest:${manifest.id}`;
+  try {
+    const url = new URL(manifest.sourceUrl);
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return `source-url:${manifest.sourceUrl.trim().toLowerCase()}`;
+  }
 }
 
 function validateCatalogDraft(value: unknown): DesignCatalogDraft {
@@ -120,6 +134,15 @@ function validateCatalogDraft(value: unknown): DesignCatalogDraft {
   const sourceManifestIds = new Set(
     sourceManifests.map((sourceManifest) => sourceManifest.id),
   );
+  const sourceIdentities = new Set(
+    sourceManifests.map(canonicalSourceIdentity),
+  );
+  if (sourceIdentities.size !== sourceManifests.length) {
+    fail(
+      "DESIGN_CATALOG_INVALID",
+      "catalog source manifests must identify independent sources",
+    );
+  }
   if (
     dnas.some((dna) => dna.ruleIds.some((ruleId) => !ruleIds.has(ruleId))) ||
     families.some(
@@ -225,6 +248,12 @@ export function validateDesignBriefAgainstCatalog(
     fail(
       "DESIGN_BRIEF_FAMILY_MISMATCH",
       "brief does not pin this family revision",
+    );
+  }
+  if (brief.motionIntensity !== family.motionPolicy.intensity) {
+    fail(
+      "DESIGN_BRIEF_UNSUPPORTED_MOTION",
+      "brief motion intensity differs from the approved family policy",
     );
   }
   if (
