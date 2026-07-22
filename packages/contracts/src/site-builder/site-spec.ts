@@ -27,6 +27,15 @@ export const SITE_SPEC_IDENTIFIER_PATTERN_SOURCE =
 export const SITE_SPEC_STYLE_PRESETS = [
   "modern-industrial",
   "precision-light",
+  "local-trust",
+  "editorial-press",
+  "warm-kitchen",
+  "farmhouse",
+  "dispatch",
+  "precision-instrument",
+  "saas-cream",
+  "industrial-power",
+  "biotech-minimal",
 ] as const;
 export type SiteSpecStylePreset = (typeof SITE_SPEC_STYLE_PRESETS)[number];
 

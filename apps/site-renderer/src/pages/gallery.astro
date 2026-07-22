@@ -1,0 +1,229 @@
+---
+/**
+ * dev-only 组件画廊。遍历 fixtures/*.json 的 SiteSpec，用 Section 调度器渲染全部 block，
+ * 每段套各自 theme preset 的 CSS 变量。纯 live 渲染，不截图、不喂大模型。
+ * 访问：pnpm dev -> http://localhost:4321/__gallery
+ */
+import Section from '../components/Section.astro';
+import { makeT } from '../lib/spec';
+import { themeToCssVars } from '../lib/themes';
+import '../styles/global.css';
+
+// 字体（与 Base.astro 一致，否则画廊无字体）
+import '@fontsource/noto-sans/latin-400.css';
+import '@fontsource/noto-sans/latin-600.css';
+import '@fontsource/noto-sans/latin-700.css';
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/archivo/wght.css';
+import '@fontsource/bricolage-grotesque/500.css';
+import '@fontsource/bricolage-grotesque/600.css';
+import '@fontsource/bricolage-grotesque/700.css';
+import '@fontsource/fraunces/400.css';
+import '@fontsource/fraunces/500.css';
+import '@fontsource/fraunces/600.css';
+import '@fontsource/fraunces/400-italic.css';
+import '@fontsource/urbanist/400.css';
+import '@fontsource/urbanist/500.css';
+import '@fontsource/urbanist/600.css';
+import '@fontsource/urbanist/700.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/700.css';
+import '@fontsource/instrument-serif/400.css';
+import '@fontsource/instrument-serif/400-italic.css';
+import 'remixicon/fonts/remixicon.css';
+
+import electrician from '../../fixtures/electrician-spec.json';
+import dispatch from '../../fixtures/dispatch-spec.json';
+import inkwell from '../../fixtures/inkwell-spec.json';
+import saffron from '../../fixtures/saffron-spec.json';
+import novacore from '../../fixtures/novacore-spec.json';
+import saas from '../../fixtures/saas-spec.json';
+import bullseye from '../../fixtures/bullseye-spec.json';
+import biotech from '../../fixtures/biotech-spec.json';
+import midwest from '../../fixtures/midwest-spec.json';
+import axiom from '../../fixtures/axiom-spec.json';
+import demo from '../../fixtures/demo-spec.json';
+
+interface FixtureEntry { key: string; name: string; spec: any }
+const fixtures: FixtureEntry[] = [
+  { key: 'electrician', name: 'Electrician', spec: electrician },
+  { key: 'dispatch', name: 'Dispatch', spec: dispatch },
+  { key: 'inkwell', name: 'Inkwell', spec: inkwell },
+  { key: 'saffron', name: 'Saffron', spec: saffron },
+  { key: 'novacore', name: 'Novacore', spec: novacore },
+  { key: 'saas', name: 'SaaS', spec: saas },
+  { key: 'bullseye', name: 'Bullseye', spec: bullseye },
+  { key: 'biotech', name: 'Biotech', spec: biotech },
+  { key: 'midwest', name: 'Midwest', spec: midwest },
+  { key: 'axiom', name: 'Axiom', spec: axiom },
+  { key: 'demo', name: 'Demo', spec: demo },
+];
+
+// dev 模式，或本机 GALLERY_FORCE=1 build 时，渲染真画廊；否则（CI/prod build）渲染占位
+const isDev = import.meta.env.DEV || process.env.GALLERY_FORCE === '1';
+
+// 统计：覆盖的 block type 种类 + 总实例数
+const allBlockTypes = new Set<string>();
+let totalInstances = 0;
+for (const f of fixtures) {
+  for (const page of f.spec.pages) {
+    for (const block of page.puck.content) {
+      allBlockTypes.add(block.type);
+      totalInstances++;
+    }
+  }
+}
+
+// preset + tokenOverrides -> 内联 style 字符串（CSS 变量级联到子组件）
+function varsFor(spec: any): string {
+  const preset = spec.site.theme.preset;
+  const overrides = spec.site.theme.tokenOverrides ?? {};
+  const vars = themeToCssVars(preset, overrides);
+  return [...Object.entries(vars), ['--font-locale', "'Inter Variable'"]]
+    .map(([k, v]) => `${k}:${v}`)
+    .join(';');
+}
+
+// 缺 key 不崩：返回 key 本身作为可见标记（画廊是预览，缺文案一眼可见）
+function safeT(spec: any): (key: string) => string {
+  const raw = makeT(spec, 'en');
+  return (k: string) => {
+    try { return raw(k); } catch { return k; }
+  };
+}
+
+function blockCount(spec: any): number {
+  return spec.pages.reduce((n: number, p: any) => n + p.puck.content.length, 0);
+}
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>组件画廊 · site-renderer</title>
+  </head>
+  <body data-gallery>
+    {isDev ? (
+      <>
+        <nav class="gallery-bar">
+          <div class="gb-title">组件画廊 · site-renderer</div>
+          <div class="gb-stats">
+            {fixtures.length} 站 · {totalInstances} 组件实例 · {allBlockTypes.size} 种 block type
+          </div>
+          <div class="gb-links">
+            {fixtures.map((f) => (
+              <a href={`#fx-${f.key}`}>{f.key}</a>
+            ))}
+          </div>
+        </nav>
+
+        <main class="gallery-main">
+          {fixtures.map((f) => {
+            const t = safeT(f.spec);
+            const preset = f.spec.site.theme.preset;
+            return (
+              <section
+                id={`fx-${f.key}`}
+                class="gallery-fixture"
+                style={varsFor(f.spec)}
+                data-preset={preset}
+              >
+                <header class="gf-head">
+                  <h2>{f.name}</h2>
+                  <span class="gf-preset">{preset}</span>
+                  <span class="gf-count">{blockCount(f.spec)} blocks · {f.spec.pages.length} pages</span>
+                </header>
+
+                {f.spec.pages.map((page: any) => (
+                  <div class="gf-page">
+                    <div class="gf-page-head">page: {page.id} <span class="muted">({page.puck.content.length} blocks)</span></div>
+                    {page.puck.content.map((block: any, i: number) => (
+                      <div class="gf-block">
+                        <div class="gf-block-tag">{block.type} · {f.key}.{page.id}</div>
+                        <Section block={block} t={t} index={i} locale="en" defaultLocale="en" />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </section>
+            );
+          })}
+        </main>
+      </>
+    ) : (
+      <div class="gallery-devonly">
+        <h1>组件画廊仅 dev 可用</h1>
+        <p>请用 <code>pnpm dev</code> 启动后访问 <code>/__gallery</code>。</p>
+      </div>
+    )}
+
+    <script>
+      // 画廊里让 scroll-reveal 元素立即可见（否则 opacity:0 看不见）
+      document.querySelectorAll('.reveal').forEach((el) => el.classList.add('in'));
+    </script>
+
+    <style>
+      body[data-gallery] { background: #0b0b0b; }
+      .gallery-bar {
+        position: sticky; top: 0; z-index: 100;
+        display: flex; align-items: center; gap: 1rem;
+        padding: 0.6rem 1rem; flex-wrap: wrap;
+        background: #111; color: #eee; border-bottom: 1px solid #333;
+        font-family: ui-monospace, monospace;
+      }
+      .gb-title { font-weight: 700; }
+      .gb-stats { font-size: 0.78rem; color: #999; }
+      .gb-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }
+      .gb-links a {
+        color: #8ab4f8; font-size: 0.78rem;
+        padding: 0.2rem 0.5rem; border-radius: 4px; background: #1f1f1f;
+      }
+      .gb-links a:hover { background: #2c2c2c; }
+
+      .gallery-main { display: flex; flex-direction: column; gap: 1px; background: #000; }
+      .gallery-fixture { background: var(--c-surface); color: var(--c-on-surface); }
+      .gf-head {
+        display: flex; align-items: center; gap: 0.75rem;
+        padding: 0.9rem 1.5rem;
+        border-bottom: 1px solid var(--c-border);
+        position: sticky; top: 2.6rem; z-index: 10;
+        background: color-mix(in srgb, var(--c-surface) 92%, transparent);
+        backdrop-filter: blur(8px);
+      }
+      .gf-head h2 { font-size: 1rem; font-family: var(--font-heading); }
+      .gf-preset {
+        font-family: ui-monospace, monospace; font-size: 0.7rem;
+        padding: 0.15rem 0.5rem; border-radius: 4px;
+        background: var(--c-surface-alt2); color: var(--c-on-surface-muted);
+      }
+      .gf-count { font-size: 0.75rem; color: var(--c-on-surface-subtle); margin-left: auto; }
+      .gf-page { border-top: 1px dashed var(--c-border); }
+      .gf-page-head {
+        font-family: ui-monospace, monospace; font-size: 0.7rem;
+        color: var(--c-on-surface-subtle);
+        padding: 0.5rem 1.5rem; background: var(--c-surface-alt);
+      }
+      .gf-page-head .muted { opacity: 0.6; }
+      .gf-block {
+        position: relative;
+        border-top: 1px solid color-mix(in srgb, var(--c-border) 50%, transparent);
+      }
+      .gf-block-tag {
+        position: absolute; top: 0; left: 0; z-index: 30;
+        font-family: ui-monospace, monospace; font-size: 0.65rem;
+        padding: 0.15rem 0.45rem;
+        background: rgba(0,0,0,0.7); color: #fff;
+        border-radius: 0 0 4px 0;
+        pointer-events: none; opacity: 0; transition: opacity .15s ease;
+      }
+      .gf-block:hover .gf-block-tag { opacity: 1; }
+
+      .gallery-devonly { padding: 4rem 2rem; color: #eee; text-align: center; }
+      .gallery-devonly code { background: #222; padding: 0.1rem 0.4rem; border-radius: 4px; }
+    </style>
+  </body>
+</html>

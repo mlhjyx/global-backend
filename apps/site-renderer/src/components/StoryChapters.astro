@@ -1,0 +1,56 @@
+---
+interface Chapter { eyebrowKey: string; titleKey: string; bodyKey: string; align?: 'left' | 'right' }
+interface Props {
+  introEyebrowKey: string;
+  introTitleKey: string;
+  chapters: Chapter[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { introEyebrowKey, introTitleKey, chapters = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="intro reveal">
+      <span class="eyebrow-flat">{t(introEyebrowKey)}</span>
+      <h2 class="serif-title">{t(introTitleKey)}</h2>
+    </div>
+    <div class="chapters">
+      {chapters.map((c, i) => (
+        <div class:list={['chapter', 'reveal', { reverse: c.align === 'left' }]}>
+          <div class="media">
+            <div class="ph"><i class="ri-seedling-line"></i></div>
+            <span class="chapter-badge">Chapter {String(i + 1).padStart(2, '0')}</span>
+          </div>
+          <div class="text">
+            <p class="eyebrow-flat">{t(c.eyebrowKey)}</p>
+            <h3 class="serif-title">{t(c.titleKey)}</h3>
+            <p class="body">{t(c.bodyKey)}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .intro { max-width: 36rem; margin-bottom: clamp(3rem, 6vw, 4rem); }
+  .eyebrow-flat { font-size: 0.7rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--c-on-surface-muted); }
+  .serif-title { margin-top: 0.75rem; font-family: var(--font-heading); font-weight: 600; line-height: 1.1; }
+  .intro .serif-title { font-size: clamp(1.875rem, 4vw, 3rem); }
+  .chapters { display: flex; flex-direction: column; gap: clamp(3rem, 6vw, 5rem); }
+  .chapter { display: grid; grid-template-columns: 1fr; gap: 1.5rem; align-items: center; }
+  @media (min-width: 1024px) { .chapter { grid-template-columns: 7fr 5fr; gap: 2.5rem; } .chapter.reverse { grid-template-columns: 5fr 7fr; } .chapter.reverse .media { order: 2; } }
+  .media { position: relative; aspect-ratio: 4 / 5; border-radius: var(--radius-lg); overflow: hidden; }
+  @media (min-width: 768px) { .media { aspect-ratio: 5 / 4; } }
+  .ph { position: absolute; inset: 0; display: grid; place-items: center; background:
+      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 16%, transparent), transparent 60%),
+      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); }
+  .ph i { font-size: 3.5rem; color: rgba(0,0,0,0.12); }
+  .chapter-badge { position: absolute; top: 1rem; left: 1rem; padding: 0.3rem 0.75rem; border-radius: 9999px; background: color-mix(in srgb, var(--c-surface) 85%, transparent); font-size: 0.6rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--c-on-surface); }
+  .text { padding: 0 0.25rem; }
+  .chapter.reverse .text { order: 1; }
+  .text .serif-title { font-size: clamp(1.75rem, 3.5vw, 2.75rem); }
+  .body { margin-top: 1.25rem; font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); max-width: 28rem; }
+</style>

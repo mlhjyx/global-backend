@@ -1,0 +1,87 @@
+---
+interface Item { quoteKey: string; nameKey: string; postcodeKey: string; rating: number; platformKey: string }
+interface Props {
+  eyebrowKey: string;
+  items: Item[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { eyebrowKey, items = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} data-testimonials>
+  <div class="container grid-12 tmonial">
+    <div class="left reveal">
+      <div class="eb"><span class="dot"></span><span class="eb-text">{t(eyebrowKey)}</span></div>
+      <div class="slides">
+        {items.map((it, i) => (
+          <blockquote class:list={['slide', { active: i === 0 }]} data-slide>
+            <span class="quote-mark">&ldquo;</span>
+            <p class="quote">{t(it.quoteKey)}</p>
+            <div class="meta">
+              <div>
+                <p class="name">{t(it.nameKey)}</p>
+                <p class="muted post">{t(it.postcodeKey)}</p>
+              </div>
+              <span class="divider"></span>
+              <span class="rating">
+                <i class="ri-star-fill"></i> {it.rating.toFixed(1)} · {t(it.platformKey)}
+              </span>
+            </div>
+          </blockquote>
+        ))}
+      </div>
+      <div class="dots">
+        {items.map((_, i) => (
+          <button type="button" class:list={['dot-btn', { active: i === 0 }]} data-dot aria-label={`Show testimonial ${i + 1}`} aria-current={i === 0 ? 'true' : 'false'}></button>
+        ))}
+      </div>
+    </div>
+
+    <div class="right reveal">
+      <div class="portrait-ph"><i class="ri-user-smile-line"></i></div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .left { grid-column: span 7; order: 1; }
+  .right { grid-column: span 5; order: 2; }
+  @media (max-width: 1023px) { .left, .right { grid-column: span 1; } }
+  .eb { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .eb .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-on-surface); }
+  .eb-text { font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .slides { position: relative; }
+  .slide { display: none; position: relative; }
+  .slide.active { display: block; }
+  .quote-mark {
+    position: absolute; top: -1.5rem; left: -0.25rem;
+    font-family: var(--font-heading); font-size: clamp(3rem, 6vw, 5rem);
+    color: var(--c-accent); line-height: 1; user-select: none;
+  }
+  .quote { font-family: var(--font-heading); font-weight: 500; font-size: clamp(1.4rem, 2.8vw, 2.6rem); line-height: 1.18; letter-spacing: -0.02em; color: var(--c-on-surface); }
+  .meta { margin-top: 2rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+  .name { font-size: 1rem; font-weight: 600; }
+  .post { font-size: 0.8rem; }
+  .divider { width: 1px; height: 2rem; background: var(--c-border); }
+  .rating {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.8rem; border-radius: 9999px;
+    background: var(--c-surface-alt); border: 1px solid var(--c-border);
+    font-size: 0.75rem;
+  }
+  .rating i { color: #34d399; }
+  .dots { margin-top: 2rem; display: flex; align-items: center; gap: 0.5rem; }
+  .dot-btn { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-border); border: none; cursor: pointer; padding: 0; transition: all .3s ease; }
+  .dot-btn.active { width: 2rem; background: var(--c-primary-dark); }
+  .portrait-ph {
+    aspect-ratio: 4 / 5;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(60% 45% at 50% 35%, color-mix(in srgb, var(--c-accent) 16%, transparent), transparent 70%),
+      linear-gradient(160deg, var(--c-surface-alt2), var(--c-surface-alt));
+  }
+  .portrait-ph i { font-size: 4.5rem; color: var(--c-on-surface-subtle); }
+</style>

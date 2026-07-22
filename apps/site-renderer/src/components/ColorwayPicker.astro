@@ -1,0 +1,161 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Colorway { code: string; nameKey: string; subtitleKey: string; finishKey: string; hex: string; editionKey: string }
+interface Props {
+  chapterKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  items: Colorway[];
+  reserveLabelKey?: string;
+  reservePageId?: string;
+  t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
+}
+const { chapterKey, titleKey, titleAccentKey, introKey, items = [], reserveLabelKey = 'cta.reserve', reservePageId = 'book', t, locale, defaultLocale } = Astro.props;
+const reserveHref = localePageHref(reservePageId, locale, defaultLocale);
+---
+
+<section class="colorway-picker" id="colorways" data-colorway>
+  <div class="glow" data-glow></div>
+  <div class="hairline"></div>
+  <div class="inner">
+    <div class="head">
+      <div class="col-8">
+        <div class="chapter-tag reveal">{t(chapterKey)}</div>
+        <h2 class="serif-title reveal" style="transition-delay:200ms">{t(titleKey)}<br /><em>{t(titleAccentKey)}</em></h2>
+      </div>
+      <p class="intro reveal" style="transition-delay:320ms">{t(introKey)}</p>
+    </div>
+
+    <div class="split reveal" style="transition-delay:400ms">
+      <div class="image-wrap" data-image>
+        <div class="ph"><i class="ri-radio-line"></i></div>
+        <div class="scrim"></div>
+        <span class="index" data-index>{items[0]?.code ?? ''}</span>
+        <div class="caption">
+          <span class="cap-code">AX-07</span>
+          <span class="cap-name" data-cap-name>{t(items[0]?.nameKey ?? '')}</span>
+        </div>
+      </div>
+
+      <div class="meta">
+        <div class="meta-label">SELECTED</div>
+        <h3 data-name>{t(items[0]?.nameKey ?? '')}</h3>
+        <p class="sub" data-subtitle>{t(items[0]?.subtitleKey ?? '')}</p>
+        <div class="rows" data-rows>
+          {[
+            { label: 'FINISH', key: 'finishKey' },
+            { label: 'HEX', key: 'hex' },
+            { label: 'EDITION', key: 'editionKey' },
+            { label: 'SHIPS', key: 'ships' },
+          ].map((row) => (
+            <div class="row">
+              <span class="row-label">{row.label}</span>
+              <span class="row-value" data-row={row.key}>{row.key === 'hex' ? (items[0]?.hex ?? '').toUpperCase() : row.key === 'ships' ? 'Q3 · 2026' : t(items[0]?.[row.key as keyof Colorway] ?? '' as any) || ''}</span>
+            </div>
+          ))}
+        </div>
+        <a class="reserve" href={reserveHref}>{t(reserveLabelKey)}<i class="ri-arrow-right-line"></i></a>
+      </div>
+    </div>
+
+    <div class="swatches">
+      {items.map((c, idx) => (
+        <button type="button" class:list={['swatch', { active: idx === 0 }]} data-swatch
+          data-name={t(c.nameKey)} data-subtitle={t(c.subtitleKey)} data-finish={t(c.finishKey)}
+          data-hex={c.hex.toUpperCase()} data-edition={t(c.editionKey)} data-code={c.code}
+          aria-label={t(c.nameKey)}>
+          <span class="swatch-top" data-swatch-top></span>
+          <div class="swatch-body">
+            <span class="dot" style={`background:${c.hex}`}></span>
+            <div>
+              <div class="sw-code">{c.code}</div>
+              <div class="sw-name">{t(c.nameKey)}</div>
+              <div class="sw-finish">{t(c.finishKey)}</div>
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-colorway]').forEach((root) => {
+    const swatches = Array.from(root.querySelectorAll<HTMLElement>('[data-swatch]'));
+    const nameEl = root.querySelector<HTMLElement>('[data-name]');
+    const subEl = root.querySelector<HTMLElement>('[data-subtitle]');
+    const capName = root.querySelector<HTMLElement>('[data-cap-name]');
+    const indexEl = root.querySelector<HTMLElement>('[data-index]');
+    const glow = root.querySelector<HTMLElement>('[data-glow]');
+    const finishRow = root.querySelector<HTMLElement>('[data-row="finishKey"]');
+    const hexRow = root.querySelector<HTMLElement>('[data-row="hex"]');
+    const editionRow = root.querySelector<HTMLElement>('[data-row="editionKey"]');
+    const select = (btn: HTMLElement) => {
+      swatches.forEach((s) => s.classList.remove('active'));
+      btn.classList.add('active');
+      const n = btn.dataset.name ?? ''; const s = btn.dataset.subtitle ?? '';
+      if (nameEl) nameEl.textContent = n;
+      if (subEl) subEl.textContent = s;
+      if (capName) capName.textContent = n;
+      if (indexEl) indexEl.textContent = btn.dataset.code ?? '';
+      if (finishRow) finishRow.textContent = btn.dataset.finish ?? '';
+      if (hexRow) hexRow.textContent = btn.dataset.hex ?? '';
+      if (editionRow) editionRow.textContent = btn.dataset.edition ?? '';
+      if (glow) glow.style.background = `radial-gradient(circle at 50% 50%, ${btn.dataset.hex}40 0%, transparent 60%)`;
+    };
+    swatches.forEach((btn) => { btn.addEventListener('click', () => select(btn)); btn.addEventListener('mouseenter', () => select(btn)); });
+  });
+</script>
+
+<style>
+  .colorway-picker { position: relative; background: var(--c-surface); color: var(--c-on-surface); font-family: var(--font-body); padding: clamp(4rem, 9vw, 7rem) 0; overflow: hidden; }
+  .glow { position: absolute; top: 10%; right: -15%; width: 60vw; height: 60vw; background: radial-gradient(circle, rgba(122,168,238,0.18) 0%, transparent 60%); filter: blur(20px); transition: background 900ms ease; }
+  .hairline { position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(to right, transparent, rgba(255,255,255,0.14) 20%, rgba(255,255,255,0.14) 80%, transparent); }
+  .inner { position: relative; max-width: 80rem; margin: 0 auto; padding: 0 clamp(1.5rem, 4vw, 3.5rem); }
+  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
+  @media (min-width: 1024px) { .head { grid-template-columns: 8fr 4fr; align-items: end; } }
+  .chapter-tag { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.32em; color: var(--c-primary); font-weight: 500; margin-bottom: 1.25rem; }
+  .serif-title { font-size: clamp(2.5rem, 6vw, 4.75rem); font-weight: 700; line-height: 0.98; letter-spacing: -0.03em; }
+  .serif-title em { font-style: italic; font-weight: 500; color: rgba(255,255,255,0.72); }
+  .intro { font-size: 0.95rem; line-height: 1.8; color: var(--c-on-surface-muted); }
+  .split { display: grid; grid-template-columns: 1fr; gap: 2.5rem; align-items: start; }
+  @media (min-width: 1024px) { .split { grid-template-columns: 7fr 5fr; gap: 2.5rem; } }
+  .image-wrap { position: relative; aspect-ratio: 16 / 11; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.15)); }
+  @media (min-width: 768px) { .image-wrap { aspect-ratio: 5 / 4; } }
+  .ph { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-primary) 12%, transparent), transparent 60%), linear-gradient(140deg, #1B2435, #0F1420); }
+  .ph i { font-size: 4rem; color: rgba(255,255,255,0.12); }
+  .scrim { position: absolute; inset-x: 0; bottom: 0; height: 46%; background: linear-gradient(180deg, transparent, rgba(20,27,42,0.75)); }
+  .index { position: absolute; top: 1.25rem; left: 1.5rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255,255,255,0.72); font-weight: 500; }
+  .caption { position: absolute; left: 1.75rem; bottom: 1.75rem; }
+  .cap-code { display: block; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255,255,255,0.55); margin-bottom: 0.5rem; }
+  .cap-name { font-size: 1.875rem; font-weight: 700; letter-spacing: -0.015em; }
+  .meta { padding-top: 0.5rem; }
+  .meta-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255,255,255,0.42); margin-bottom: 0.75rem; }
+  .meta h3 { font-size: clamp(2rem, 4vw, 2.75rem); font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; }
+  .meta .sub { margin-top: 0.625rem; margin-bottom: 2.5rem; font-size: 1.05rem; line-height: 1.6; color: var(--c-on-surface-muted); }
+  .rows { border-top: 1px solid rgba(255,255,255,0.14); }
+  .row { display: grid; grid-template-columns: 8rem 1fr; gap: 1rem; align-items: baseline; padding: 1.125rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .row-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.28em; color: rgba(255,255,255,0.5); }
+  .row-value { font-size: 0.95rem; font-weight: 500; }
+  .reserve { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 2.5rem; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.28em; text-transform: uppercase; color: var(--c-primary); border-bottom: 1px solid rgba(122,168,238,0.5); padding-bottom: 0.25rem; }
+  .reserve i { transition: transform .3s ease; }
+  .reserve:hover i { transform: translateX(4px); }
+  .swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 4rem; border-top: 1px solid rgba(255,255,255,0.14); }
+  .swatch { position: relative; text-align: left; background: transparent; border: none; border-right: 1px solid rgba(255,255,255,0.08); padding: 2rem 0.25rem 1.75rem; cursor: pointer; color: var(--c-on-surface); }
+  .swatch:last-child { border-right: none; }
+  .swatch-top { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--c-primary); transform: scaleX(0); transform-origin: left; transition: transform 480ms cubic-bezier(0.22,1,0.36,1); }
+  .swatch.active .swatch-top { transform: scaleX(1); }
+  .swatch-body { display: flex; align-items: center; gap: 1.25rem; }
+  .dot { width: 3.25rem; height: 3.25rem; border-radius: 9999px; flex: none; border: 1px solid rgba(255,255,255,0.14); transition: transform .4s ease; }
+  .swatch.active .dot { transform: scale(1.02); border-color: rgba(122,168,238,0.5); }
+  .sw-code { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255,255,255,0.42); margin-bottom: 0.25rem; }
+  .sw-name { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.005em; color: rgba(255,255,255,0.72); transition: color .2s ease; }
+  .swatch.active .sw-name { color: #fff; }
+  .sw-finish { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-top: 0.25rem; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity 900ms ease, transform 900ms cubic-bezier(0.22,1,0.36,1); }
+  .reveal { opacity: 1; transform: translateY(0); }
+</style>

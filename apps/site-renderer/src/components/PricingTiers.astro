@@ -1,0 +1,98 @@
+---
+interface Plan { nameKey: string; taglineKey: string; monthly: number; yearly: number; featured?: boolean; features: string[] }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleLine2Key: string;
+  subKey: string;
+  monthlyKey: string;
+  yearlyKey: string;
+  saveKey: string;
+  featuredKey: string;
+  ctaPrefixKey: string;
+  perMoKey: string;
+  plans: Plan[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { eyebrowKey, titleKey, titleLine2Key, subKey, monthlyKey, yearlyKey, saveKey, featuredKey, ctaPrefixKey, perMoKey, plans = [], t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="pricing" data-pricing>
+  <div class="container">
+    <div class="head reveal">
+      <div class="eyebrow"><span class="dot"></span>{t(eyebrowKey)}</div>
+      <h2>{t(titleKey)}<br />{t(titleLine2Key)}</h2>
+      <p class="sub">{t(subKey)}</p>
+      <div class="toggle">
+        <button type="button" class="tog" data-cycle="monthly">{t(monthlyKey)}</button>
+        <button type="button" class="tog active" data-cycle="yearly">{t(yearlyKey)}<span class="save">{t(saveKey)}</span></button>
+      </div>
+    </div>
+
+    <div class="grid">
+      {plans.map((p) => (
+        <article class:list={['plan', 'reveal', { featured: p.featured }]}>
+          {p.featured && <span class="badge">{t(featuredKey)}</span>}
+          <div class="plan-head"><span class="plan-icon"><i class="ri-leaf-line"></i></span><h3>{t(p.nameKey)}</h3></div>
+          <p class="tagline">{t(p.taglineKey)}</p>
+          <div class="price"><span class="amount" data-monthly={p.monthly} data-yearly={p.yearly}>${p.yearly}</span><span class="per">{t(perMoKey)}</span></div>
+          <a class:list={['cta', { featured: p.featured }]} href="#start">{t(ctaPrefixKey)} {t(p.nameKey)}<i class="ri-arrow-right-line"></i></a>
+          <ul>
+            {p.features.map((f) => (<li><span class="check"><i class="ri-check-line"></i></span>{f}</li>))}
+          </ul>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-pricing]').forEach((root) => {
+    const toggs = Array.from(root.querySelectorAll<HTMLElement>('[data-cycle]'));
+    const amounts = Array.from(root.querySelectorAll<HTMLElement>('.amount'));
+    const apply = (cycle: string) => {
+      toggs.forEach((b) => b.classList.toggle('active', b.dataset.cycle === cycle));
+      amounts.forEach((a) => { a.textContent = '$' + (cycle === 'monthly' ? a.dataset.monthly : a.dataset.yearly); });
+    };
+    toggs.forEach((b) => b.addEventListener('click', () => apply(b.dataset.cycle ?? 'yearly')));
+  });
+</script>
+
+<style>
+  .head { text-align: center; max-width: 40rem; margin: 0 auto clamp(2.5rem, 5vw, 3.5rem); }
+  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.2em; color: var(--c-on-surface-muted); margin-bottom: 1.25rem; }
+  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-accent); }
+  h2 { font-weight: 700; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.05; letter-spacing: -0.02em; }
+  .sub { margin-top: 1.25rem; font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); }
+  .toggle { margin-top: 2.25rem; display: inline-flex; background: var(--c-surface-alt); border: 1px solid var(--c-border); border-radius: 9999px; padding: 0.25rem; }
+  .tog { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.25rem; border-radius: 9999px; border: none; background: transparent; font-size: 0.85rem; font-weight: 500; color: var(--c-on-surface-muted); cursor: pointer; transition: background .2s ease, color .2s ease; }
+  .tog.active { background: var(--c-primary); color: var(--c-on-primary); }
+  .save { font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 9999px; background: var(--c-surface); color: var(--c-on-surface); }
+  .tog.active .save { background: var(--c-surface); color: var(--c-on-surface); }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  .plan { position: relative; border-radius: var(--radius-lg); padding: clamp(1.5rem, 3vw, 2rem); border: 1px solid var(--c-border); background: var(--c-surface-alt); transition: transform .3s ease; }
+  .plan:hover { transform: translateY(-4px); }
+  .plan.featured { background: var(--c-primary); color: var(--c-on-primary); border-color: var(--c-primary); }
+  .badge { position: absolute; top: -0.75rem; left: 50%; transform: translateX(-50%); padding: 0.25rem 0.75rem; border-radius: 9999px; background: var(--c-accent); color: var(--c-on-surface); font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.18em; }
+  .plan-head { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+  .plan-icon { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border-radius: 9999px; background: var(--c-accent); color: var(--c-on-surface); }
+  .plan.featured .plan-icon { background: var(--c-accent); }
+  .plan-head h3 { font-weight: 700; font-size: 1.5rem; }
+  .tagline { font-size: 0.875rem; line-height: 1.5; margin-bottom: 1.5rem; opacity: 0.8; }
+  .price { display: flex; align-items: baseline; gap: 0.25rem; margin-bottom: 1.5rem; }
+  .amount { font-weight: 700; font-size: 3rem; letter-spacing: -0.02em; }
+  .per { font-size: 0.85rem; opacity: 0.7; }
+  .cta { display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%; padding: 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 500; background: var(--c-primary); color: var(--c-on-primary); transition: background .2s ease; }
+  .cta:hover { background: #000; }
+  .cta.featured { background: var(--c-surface); color: var(--c-on-surface); }
+  .cta.featured:hover { background: var(--c-surface-alt); }
+  ul { margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+  li { display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.875rem; }
+  .check { flex: none; width: 1.25rem; height: 1.25rem; display: grid; place-items: center; border-radius: 9999px; background: var(--c-surface); color: var(--c-on-surface); margin-top: 0.1rem; }
+  .plan.featured .check { background: var(--c-surface); color: var(--c-on-surface); }
+  .check i { font-size: 0.7rem; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .8s ease, transform .8s cubic-bezier(0.22,1,0.36,1); }
+  .reveal { opacity: 1; transform: translateY(0); }
+</style>

@@ -1,0 +1,136 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "saas-cream" },
+    "nav": [
+      { "labelKey": "nav.features", "pageId": "home" },
+      { "labelKey": "nav.customers", "pageId": "home" },
+      { "labelKey": "nav.pricing", "pageId": "home" },
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "Pebble" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "SaaSHero", "props": { "id": "SaaSHero-1",
+          "eyebrowKey": "hero.eyebrow", "h1aKey": "hero.h1a", "h1bKey": "hero.h1b", "subKey": "hero.sub",
+          "cta1Key": "hero.cta1", "cta2Key": "hero.cta2", "scrollKey": "hero.scroll"
+        } },
+        { "type": "FeatureCards", "props": { "id": "FeatureCards-1", "alt": true,
+          "eyebrowKey": "feat.eyebrow", "titleKey": "feat.title", "titleLine2Key": "feat.title2", "introKey": "feat.intro",
+          "items": [
+            { "icon": "ri-stack-line", "titleKey": "feat.f1.t", "descKey": "feat.f1.d" },
+            { "icon": "ri-device-line", "titleKey": "feat.f2.t", "descKey": "feat.f2.d" },
+            { "icon": "ri-article-line", "titleKey": "feat.f3.t", "descKey": "feat.f3.d" },
+            { "icon": "ri-flashlight-line", "titleKey": "feat.f4.t", "descKey": "feat.f4.d" },
+            { "icon": "ri-sparkling-line", "titleKey": "feat.f5.t", "descKey": "feat.f5.d" },
+            { "icon": "ri-line-chart-line", "titleKey": "feat.f6.t", "descKey": "feat.f6.d" }
+          ]
+        } },
+        { "type": "Testimonials", "props": { "id": "Testimonials-1",
+          "eyebrowKey": "cust.eyebrow",
+          "items": [
+            { "quoteKey": "cust.t1.q", "nameKey": "cust.t1.n", "postcodeKey": "cust.t1.r", "rating": 5, "platformKey": "cust.platform" },
+            { "quoteKey": "cust.t2.q", "nameKey": "cust.t2.n", "postcodeKey": "cust.t2.r", "rating": 5, "platformKey": "cust.platform" },
+            { "quoteKey": "cust.t3.q", "nameKey": "cust.t3.n", "postcodeKey": "cust.t3.r", "rating": 5, "platformKey": "cust.platform" }
+          ]
+        } },
+        { "type": "LogoMarquee", "props": { "id": "LogoMarquee-1", "alt": true,
+          "eyebrowKey": "logos.eyebrow", "titleKey": "logos.title",
+          "items": ["Notably", "Lumen", "Northwind", "Atlas", "Quartz", "Folio", "Halo", "Mosaic"]
+        } },
+        { "type": "ArticleGrid", "props": { "id": "ArticleGrid-1",
+          "eyebrowKey": "res.eyebrow", "titleKey": "res.title", "titleLine2Key": "res.title2", "introKey": "res.intro",
+          "items": [
+            { "cat": "Guides", "titleKey": "res.a1.t", "descKey": "res.a1.d", "readTime": "8 min read" },
+            { "cat": "Templates", "titleKey": "res.a2.t", "descKey": "res.a2.d", "readTime": "Free template" },
+            { "cat": "Stories", "titleKey": "res.a3.t", "descKey": "res.a3.d", "readTime": "12 min read" },
+            { "cat": "Guides", "titleKey": "res.a4.t", "descKey": "res.a4.d", "readTime": "6 min read" },
+            { "cat": "Templates", "titleKey": "res.a5.t", "descKey": "res.a5.d", "readTime": "Free template" },
+            { "cat": "Changelog", "titleKey": "res.a6.t", "descKey": "res.a6.d", "readTime": "Released today" }
+          ]
+        } },
+        { "type": "PricingTiers", "props": { "id": "PricingTiers-1", "alt": true,
+          "eyebrowKey": "price.eyebrow", "titleKey": "price.title", "titleLine2Key": "price.title2", "subKey": "price.sub",
+          "monthlyKey": "price.monthly", "yearlyKey": "price.yearly", "saveKey": "price.save", "featuredKey": "price.featured",
+          "ctaPrefixKey": "price.ctaPrefix", "perMoKey": "price.perMo",
+          "plans": [
+            { "nameKey": "price.p1.n", "taglineKey": "price.p1.t", "monthly": 9, "yearly": 7, "features": ["1 published project", "Pebble subdomain", "Community templates", "Basic analytics"] },
+            { "nameKey": "price.p2.n", "taglineKey": "price.p2.t", "monthly": 29, "yearly": 22, "featured": true, "features": ["10 published projects", "Custom domains + SSL", "Live collaboration (5 seats)", "Branch previews", "AI copy assistant"] },
+            { "nameKey": "price.p3.n", "taglineKey": "price.p3.t", "monthly": 79, "yearly": 62, "features": ["Unlimited projects", "Unlimited seats", "SSO + audit log", "Priority edge regions", "Dedicated success manager"] }
+          ]
+        } }
+      ] }
+    },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "book.title", "subKey": "book.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.features": "Features", "nav.customers": "Customers", "nav.pricing": "Pricing", "nav.book": "Start free",
+      "brand.tagline": "Website builder for startups",
+      "contact.phone": "", "contact.whatsapp": "", "contact.email": "hello@pebble.studio",
+      "footer.intro": "Pebble bundles the visual builder, hosting, CMS and analytics into a single quiet workspace for early-stage startups.",
+      "footer.available": "Start building free", "footer.exploreTitle": "Product", "footer.contactTitle": "Get in touch",
+      "footer.bookTitle": "Start free", "footer.bookNote": "Launch a stunning site without hiring designers or developers.",
+      "footer.badgeQualified": "Lighthouse 95+", "footer.badgeInsured": "Cookie-free analytics",
+      "footer.area": "Remote-first", "footer.privacy": "Privacy", "footer.terms": "Terms", "footer.insurance": "Changelog",
+
+      "seo.home.title": "Pebble - Design That Speaks Startup",
+      "seo.home.desc": "Launch stunning, responsive sites without hiring designers or developers. Perfect for early-stage startups and growing SaaS companies.",
+      "seo.book.title": "Start Building Free - Pebble", "seo.book.desc": "Start building your site free.",
+
+      "hero.eyebrow": "For early-stage startups", "hero.h1a": "Design that", "hero.h1b": "speaks startup",
+      "hero.sub": "Launch stunning, responsive sites without hiring designers or developers - perfect for early-stage startups and growing SaaS companies.",
+      "hero.cta1": "Start building free", "hero.cta2": "Watch the 90s demo", "hero.scroll": "Scroll to explore",
+
+      "feat.eyebrow": "Features", "feat.title": "Calm tools that", "feat.title2": "do the heavy lifting.",
+      "feat.intro": "Every feature in Pebble is shaped to feel quiet, fast and intentional.",
+      "feat.f1.t": "Smart components", "feat.f1.d": "Build once, reuse forever. Edit a component and updates ripple across every page automatically.",
+      "feat.f2.t": "Adaptive layouts", "feat.f2.d": "Every breakpoint handled by a single composition. No more pixel pushing for tablet and phone.",
+      "feat.f3.t": "Built-in CMS", "feat.f3.d": "Structured content with a delightful editor. Marketers ship copy without pinging engineers.",
+      "feat.f4.t": "Performance baked in", "feat.f4.d": "Critical CSS, edge caching and image optimisation by default. Lighthouse 95+ out of the box.",
+      "feat.f5.t": "AI copy assistant", "feat.f5.d": "Brief, expand or tone-shift any block. Trained on your brand voice without the awkward energy.",
+      "feat.f6.t": "Privacy first analytics", "feat.f6.d": "Real-time, cookie-free traffic insights you can actually act on. No bloated dashboards.",
+
+      "cust.eyebrow": "Customers", "cust.platform": "Verified customer",
+      "cust.t1.q": "Pebble felt like the missing co-founder. We replaced three separate tools and shipped our seed-round site in a single weekend.", "cust.t1.n": "Ava Reyes", "cust.t1.r": "Founder, Notably",
+      "cust.t2.q": "Our design and engineering teams finally share one source of truth. The collaboration model is the most polished I have ever seen in a builder.", "cust.t2.n": "Jules Carter", "cust.t2.r": "Head of Design, Lumen",
+      "cust.t3.q": "We migrated five brand sites onto Pebble in under a month and the CMS is so quiet our writers actually enjoy using it.", "cust.t3.n": "Sora Lindqvist", "cust.t3.r": "Director of Brand, Northwind",
+
+      "logos.eyebrow": "Trusted by 4,200+ founders", "logos.title": "Quietly shipping for great teams.",
+
+      "res.eyebrow": "Resources", "res.title": "Field notes from", "res.title2": "calmer launches.",
+      "res.intro": "Guides, templates and behind-the-scenes stories from teams using Pebble to ship serious products without the noise.",
+      "res.a1.t": "The quiet launch playbook", "res.a1.d": "A 14-step ritual we use to ship serious products without burning out the team.",
+      "res.a2.t": "Founder one-pager - Wisp", "res.a2.d": "An elegant single-page narrative perfect for pre-seed and seed-stage startups.",
+      "res.a3.t": "How Notably hit product-market fit", "res.a3.d": "From an internal Notion doc to a $400k MRR business - without a single hire on the marketing team.",
+      "res.a4.t": "Designing calmer marketing sites", "res.a4.d": "A field guide to whitespace, contrast and the art of saying less on a landing page.",
+      "res.a5.t": "Studio portfolio - Atlas", "res.a5.d": "A grid-led portfolio template designed for boutique creative studios with deep case studies.",
+      "res.a6.t": "v3.4 - Branch previews are live", "res.a6.d": "Spin up a fresh preview URL for every change. Share it with stakeholders without merging to main.",
+
+      "price.eyebrow": "Pricing", "price.title": "Soft on the wallet,", "price.title2": "serious about the work.",
+      "price.sub": "Pick a plan that scales with you. Cancel any time - no painful offboarding, just a clean export of everything you built.",
+      "price.monthly": "Monthly", "price.yearly": "Yearly", "price.save": "-22%", "price.featured": "Most loved",
+      "price.ctaPrefix": "Start with", "price.perMo": "/mo",
+      "price.p1.n": "Solo", "price.p1.t": "For individual makers shipping personal sites.",
+      "price.p2.n": "Studio", "price.p2.t": "For growing startups that need to move fast.",
+      "price.p3.n": "Scale", "price.p3.t": "For teams running multiple brands and surfaces.",
+
+      "cta.learnMore": "Learn more", "cta.read": "Read",
+      "book.title": "Start building free.", "book.sub": "Launch a stunning site in minutes. No credit card required.",
+      "inquiry.title": "Start building free.", "inquiry.sub": "No credit card required.",
+      "inquiry.field.name": "Your name", "inquiry.field.email": "Work email", "inquiry.field.message": "Tell us about your project",
+      "inquiry.submit": "Start free", "inquiry.m0.note": "Start building in minutes."
+    }
+  }
+}

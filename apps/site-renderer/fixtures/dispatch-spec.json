@@ -1,0 +1,187 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "dispatch" },
+    "nav": [
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "Conduitora" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "DispatchHero", "props": { "id": "DispatchHero-1",
+          "fileKey": "hero.file", "chapterKey": "hero.chapter", "eyebrowKey": "hero.eyebrow",
+          "h1aKey": "hero.h1a", "h1bKey": "hero.h1b", "bodyKey": "hero.body",
+          "cta1Key": "hero.cta1", "cta2Key": "hero.cta2", "cta2PhoneKey": "hero.phone",
+          "trustOpenKey": "hero.trustOpen", "trustLicKey": "hero.trustLic",
+          "coverageLabelKey": "hero.coverageLabel", "coverageValueKey": "hero.coverageValue",
+          "etaLabelKey": "hero.etaLabel", "etaValueKey": "hero.etaValue",
+          "marqueeItems": ["Las Vegas", "Henderson", "Reno", "Sparks", "Carson City", "North Las Vegas", "Boulder City", "Mesquite", "Pahrump", "Elko"]
+        } },
+        { "type": "LedgerStats", "props": { "id": "LedgerStats-1",
+          "chapterKey": "metrics.chapter", "titleKey": "metrics.title", "bodyKey": "metrics.body",
+          "clientsLabelKey": "metrics.clientsLabel",
+          "stats": [
+            { "value": "24/7", "labelKey": "metrics.s1" },
+            { "value": "≤1.5 hr", "labelKey": "metrics.s2" },
+            { "value": "11k+", "labelKey": "metrics.s3" },
+            { "value": "$0", "labelKey": "metrics.s4" }
+          ],
+          "clients": ["Sierra Foods Co.", "Pioneer Hospitality", "Mojave Logistics", "Reno Public Schools", "Boulder Casino Grp.", "Silver State Clinics", "Carson Civic Trust", "Nevada Rail Works"]
+        } },
+        { "type": "ServicesEditorial", "props": { "id": "ServicesEditorial-1", "alt": true,
+          "chapterKey": "services.chapter", "bookLabelKey": "cta.bookThis",
+          "notListKey": "services.notList", "notListBodyKey": "services.notListBody", "notListCtaKey": "services.notListCta",
+          "services": [
+            { "code": "01", "titleKey": "svc.s1.title", "bodyKey": "svc.s1.body", "specKey": "svc.s1.spec" },
+            { "code": "02", "titleKey": "svc.s2.title", "bodyKey": "svc.s2.body", "specKey": "svc.s2.spec" },
+            { "code": "03", "titleKey": "svc.s3.title", "bodyKey": "svc.s3.body", "specKey": "svc.s3.spec" },
+            { "code": "04", "titleKey": "svc.s4.title", "bodyKey": "svc.s4.body", "specKey": "svc.s4.spec" },
+            { "code": "05", "titleKey": "svc.s5.title", "bodyKey": "svc.s5.body", "specKey": "svc.s5.spec" },
+            { "code": "06", "titleKey": "svc.s6.title", "bodyKey": "svc.s6.body", "specKey": "svc.s6.spec" }
+          ]
+        } },
+        { "type": "DispatchTimeline", "props": { "id": "DispatchTimeline-1",
+          "chapterKey": "dispatch.chapter", "titleKey": "dispatch.title", "titleAccentKey": "dispatch.titleAccent", "bodyKey": "dispatch.body",
+          "ctaKey": "dispatch.cta", "callKey": "dispatch.call", "callPhoneKey": "hero.phone",
+          "steps": [
+            { "t": "00:00", "titleKey": "dispatch.s1.title", "bodyKey": "dispatch.s1.body" },
+            { "t": "00:04", "titleKey": "dispatch.s2.title", "bodyKey": "dispatch.s2.body" },
+            { "t": "00:38", "titleKey": "dispatch.s3.title", "bodyKey": "dispatch.s3.body" },
+            { "t": "01:30", "titleKey": "dispatch.s4.title", "bodyKey": "dispatch.s4.body" }
+          ]
+        } },
+        { "type": "CrewGrid", "props": { "id": "CrewGrid-1", "alt": true,
+          "chapterKey": "crew.chapter", "h1aKey": "crew.h1a", "h1bKey": "crew.h1b", "bodyKey": "crew.body",
+          "footnoteKey": "crew.footnote", "requestKey": "crew.request",
+          "stats": [
+            { "labelKey": "crew.st1", "value": "11", "subKey": "crew.su1" },
+            { "labelKey": "crew.st2", "value": "81", "subKey": "crew.su2" },
+            { "labelKey": "crew.st3", "value": "2,667+", "subKey": "crew.su3" },
+            { "labelKey": "crew.st4", "value": "0", "subKey": "crew.su4" }
+          ],
+          "members": [
+            { "nameKey": "crew.m1.name", "roleKey": "crew.m1.role", "years": "22", "regionsKey": "crew.m1.regions", "quoteKey": "crew.m1.quote", "truckKey": "crew.m1.truck" },
+            { "nameKey": "crew.m2.name", "roleKey": "crew.m2.role", "years": "14", "regionsKey": "crew.m2.regions", "quoteKey": "crew.m2.quote", "truckKey": "crew.m2.truck" },
+            { "nameKey": "crew.m3.name", "roleKey": "crew.m3.role", "years": "9", "regionsKey": "crew.m3.regions", "quoteKey": "crew.m3.quote", "truckKey": "crew.m3.truck" },
+            { "nameKey": "crew.m4.name", "roleKey": "crew.m4.role", "years": "18", "regionsKey": "crew.m4.regions", "quoteKey": "crew.m4.quote", "truckKey": "crew.m4.truck" },
+            { "nameKey": "crew.m5.name", "roleKey": "crew.m5.role", "years": "11", "regionsKey": "crew.m5.regions", "quoteKey": "crew.m5.quote", "truckKey": "crew.m5.truck" },
+            { "nameKey": "crew.m6.name", "roleKey": "crew.m6.role", "years": "7", "regionsKey": "crew.m6.regions", "quoteKey": "crew.m6.quote", "truckKey": "crew.m6.truck" }
+          ]
+        } },
+        { "type": "CoverageMap", "props": { "id": "CoverageMap-1",
+          "chapterKey": "coverage.chapter", "titleKey": "coverage.title", "titleLine2Key": "coverage.title2", "bodyKey": "coverage.body",
+          "indexLabelKey": "coverage.indexLabel", "footnoteKey": "coverage.footnote",
+          "plateLabelKey": "coverage.plate", "updatedKey": "coverage.updated",
+          "areas": [ { "name": "Las Vegas" }, { "name": "Henderson" }, { "name": "Reno" }, { "name": "Sparks" }, { "name": "North Las Vegas" }, { "name": "Carson City" }, { "name": "Boulder City" }, { "name": "Mesquite" }, { "name": "Pahrump" }, { "name": "Elko" } ],
+          "pins": [
+            { "labelKey": "coverage.pin1.label", "subKey": "coverage.pin1.sub", "top": "14%", "left": "18%", "pulse": true },
+            { "labelKey": "coverage.pin2.label", "subKey": "coverage.pin2.sub", "top": "76%", "left": "72%", "pulse": true },
+            { "labelKey": "coverage.pin3.label", "subKey": "coverage.pin3.sub", "top": "22%", "left": "64%" }
+          ]
+        } },
+        { "type": "FaqSplit", "props": { "id": "FaqSplit-1", "alt": true,
+          "eyebrowKey": "faq.eyebrow", "titleKey": "faq.title", "titleAccentKey": "faq.titleAccent", "introKey": "faq.intro",
+          "items": [
+            { "qKey": "faq.q1", "aKey": "faq.a1" },
+            { "qKey": "faq.q2", "aKey": "faq.a2" },
+            { "qKey": "faq.q3", "aKey": "faq.a3" },
+            { "qKey": "faq.q4", "aKey": "faq.a4" }
+          ]
+        } },
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-1",
+          "titleKey": "book.title", "subKey": "book.sub"
+        } }
+      ] }
+    },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "book.title", "subKey": "book.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.book": "Book a truck",
+      "brand.tagline": "NV · LIC 0089421",
+      "contact.phone": "(702) 555-0144", "contact.whatsapp": "", "contact.email": "",
+      "footer.intro": "Nevada plumbing dispatch. Real trucks, real hours, a flat number before any wrench turns.",
+      "footer.available": "Dispatch open · now", "footer.exploreTitle": "Services", "footer.contactTitle": "Dispatch",
+      "footer.bookTitle": "Page a truck", "footer.bookNote": "Dispatch confirms by phone in under five minutes.",
+      "footer.badgeQualified": "NSCB licensed", "footer.badgeInsured": "Bonded · $2M GL",
+      "footer.area": "Reno · Las Vegas · Elko hubs", "footer.privacy": "Privacy", "footer.terms": "License", "footer.insurance": "Bond",
+
+      "seo.home.title": "Conduitora - Nevada On-Call Plumbers, 24/7 Dispatch",
+      "seo.home.desc": "Residential and commercial plumbing across Nevada. Real trucks, real hours, a flat number before any wrench turns.",
+      "seo.book.title": "Book a Truck - Conduitora", "seo.book.desc": "Tell us what's leaking. Dispatch confirms in under five minutes.",
+
+      "hero.file": "FILE / 2026.NV.PLB.0144", "hero.chapter": "CHAPTER ONE · ON-CALL",
+      "hero.eyebrow": "Nevada · On-call plumbers · Est. 2014",
+      "hero.h1a": "Pipe leaking", "hero.h1b": "Call us.",
+      "hero.body": "Residential and commercial plumbing across Nevada. Real trucks, real hours, a flat number before any wrench turns.",
+      "hero.cta1": "Start a job", "hero.cta2": "Call dispatch", "hero.phone": "(702) 555-0144",
+      "hero.trustOpen": "Dispatch open · now", "hero.trustLic": "NSCB #0089421",
+      "hero.coverageLabel": "Coverage", "hero.coverageValue": "Statewide",
+      "hero.etaLabel": "Median ETA", "hero.etaValue": "90 min",
+
+      "metrics.chapter": "02 / Ledger", "metrics.title": "Numbers we don't pad.",
+      "metrics.body": "No marketing math, no 'up to' caveats. Just what 4,182 service calls measured last year - pulled straight from dispatch, audited by our shop foreman.",
+      "metrics.clientsLabel": "Recurring contracts · partial",
+      "metrics.s1": "Dispatch line, year-round", "metrics.s2": "Median arrival, Clark County", "metrics.s3": "Calls cleared since 2014", "metrics.s4": "Estimate, no surprise add-ons",
+
+      "services.chapter": "03 / Services", "services.titleLine": "Six trades.",
+      "services.notList": "Not on this list?", "services.notListBody": "If your job isn't one of these six, we'll tell you who does it better.", "services.notListCta": "Ask anyway",
+      "svc.s1.title": "Drain & Sewer Clearing", "svc.s1.body": "Hydro-jet and cable work for kitchen, lateral, and mainline blockages. Camera inspection on every mainline.", "svc.s1.spec": "1.5\" – 8\" lines",
+      "svc.s2.title": "Leak Detection & Repair", "svc.s2.body": "Acoustic and thermal locating, slab and wall. We open the smallest possible cut, document with photos, and patch.", "svc.s2.spec": "Slab · Wall · Roof",
+      "svc.s3.title": "Water Heater Service", "svc.s3.body": "Tank, tankless, and hybrid. Replacement crews stocked from Reno to Henderson. Same-day install on most residential units.", "svc.s3.spec": "40 – 100 gal",
+      "svc.s4.title": "Commercial Backflow", "svc.s4.body": "Certified testing, repair, and annual reports to the Southern Nevada Water Authority. Restaurants, clinics, warehouses.", "svc.s4.spec": "AWWA · USC FCCCHR",
+      "svc.s5.title": "Repipe & Rough-In", "svc.s5.body": "Whole-home and new-construction rough-ins. PEX-A, Type-L copper. Permitted, inspected, photographed at every stage.", "svc.s5.spec": "PEX-A · Copper L",
+      "svc.s6.title": "Trenchless Sewer", "svc.s6.body": "Pipe bursting and CIPP lining when excavation isn't an option. Driveways, slabs, and HOA easements stay intact.", "svc.s6.spec": "4\" – 12\" mainline",
+
+      "dispatch.chapter": "04 / Deep dive", "dispatch.title": "Ninety minutes,", "dispatch.titleAccent": "on average.",
+      "dispatch.body": "A call into Conduitora doesn't go to a voicemail tree. It rings a desk in midtown Reno, where a licensed journeyman pages the nearest stocked truck. Here is the timeline, measured against 4,182 calls last year.",
+      "dispatch.cta": "Start a job", "dispatch.call": "Or call",
+      "dispatch.s1.title": "You call. A human picks up.", "dispatch.s1.body": "Dispatch is in Reno, staffed by licensed journeymen - never an answering service.",
+      "dispatch.s2.title": "Job is logged, truck is paged.", "dispatch.s2.body": "Nearest crew to your ZIP gets a pre-stocked truck with the parts for your symptom.",
+      "dispatch.s3.title": "We text a photo of your tech.", "dispatch.s3.body": "Name, badge, license number, ETA window. No unmarked vans.",
+      "dispatch.s4.title": "Diagnosis, then a flat number.", "dispatch.s4.body": "Written estimate before any wrench turns. You sign, or we leave - no charge.",
+
+      "crew.chapter": "05 / Crew", "crew.h1a": "The people", "crew.h1b": "behind the wrench.",
+      "crew.body": "Every truck has one licensed journeyman or master plumber - not 'a guy with the tools.' Below is the actual rotation, with badge numbers you can verify against the Nevada State Contractors Board.",
+      "crew.st1": "On payroll", "crew.su1": "Full-time W-2", "crew.st2": "Combined years", "crew.su2": "On the wrench", "crew.st3": "Calls in 2025", "crew.su3": "From this crew alone", "crew.st4": "Subcontractors", "crew.su4": "Day-of, ever",
+      "crew.footnote": "Verify any license at nscb.nv.gov · We'll tell you who's coming before they arrive.", "crew.request": "Request a specific tech",
+      "crew.m1.name": "Daryl Halverson", "crew.m1.role": "Lead journeyman", "crew.m1.regions": "Las Vegas · Henderson · Boulder City", "crew.m1.quote": "If it's behind a wall, I've already met it twice.", "crew.m1.truck": "Truck 14",
+      "crew.m2.name": "Marisol Vega", "crew.m2.role": "Service plumber", "crew.m2.regions": "Reno · Sparks · Carson City", "crew.m2.quote": "Tankless isn't magic. It's just measured math and a clean install.", "crew.m2.truck": "Truck 07",
+      "crew.m3.name": "Anthony Brooks", "crew.m3.role": "Drain & sewer tech", "crew.m3.regions": "North Las Vegas · Mesquite · Pahrump", "crew.m3.quote": "Every clog tells you what the last plumber missed.", "crew.m3.truck": "Truck 21",
+      "crew.m4.name": "Sarah Engle", "crew.m4.role": "Master plumber · Dispatch lead", "crew.m4.regions": "Statewide oversight", "crew.m4.quote": "I don't turn wrenches anymore. I send the right person to your door.", "crew.m4.truck": "Desk 01",
+      "crew.m5.name": "Wesley Okafor", "crew.m5.role": "Rural journeyman", "crew.m5.regions": "Elko · Winnemucca · Pahrump", "crew.m5.quote": "Out here, the nearest backup is two hours away. So the truck carries it.", "crew.m5.truck": "Truck 33",
+      "crew.m6.name": "Carla Reyes", "crew.m6.role": "Residential service", "crew.m6.regions": "Henderson · Boulder City · Las Vegas", "crew.m6.quote": "I leave the kitchen cleaner than I found it. Every time.", "crew.m6.truck": "Truck 09",
+
+      "coverage.chapter": "06 / Coverage", "coverage.title": "From the Strip", "coverage.title2": "to the Sierra.",
+      "coverage.body": "Crews are stationed in three hubs - Las Vegas, Reno, and Elko - so the truck coming to you isn't an hour of freeway away from your kitchen flood.",
+      "coverage.indexLabel": "Service index · A-Z", "coverage.footnote": "Outside Nevada? We refer. No charge.",
+      "coverage.plate": "NV - Coverage", "coverage.updated": "Updated 05.2026",
+      "coverage.pin1.label": "Reno", "coverage.pin1.sub": "Hub 01",
+      "coverage.pin2.label": "Las Vegas", "coverage.pin2.sub": "Hub 02",
+      "coverage.pin3.label": "Elko", "coverage.pin3.sub": "Hub 03",
+
+      "faq.eyebrow": "08 / FAQ", "faq.title": "Things people", "faq.titleAccent": "often ask.", "faq.intro": "Can't find what you're after? Call dispatch - a human picks up.",
+      "faq.q1": "Are you licensed and bonded in Nevada?", "faq.a1": "Yes. NSCB License #0089421, Bond NV-BO-44218, $2M general liability. Verification page on request.",
+      "faq.q2": "What's your call-out fee?", "faq.a2": "Standard hours: $0. After-hours (10 PM – 6 AM, holidays): $89, credited against the job if you book us.",
+      "faq.q3": "Do you work with property managers?", "faq.a3": "Yes. Net-30 billing, single invoice per portfolio, dedicated dispatcher for properties of 40+ doors.",
+      "faq.q4": "Will you tear up my yard for a sewer line?", "faq.a4": "Only if we have to. We default to trenchless on lines 20+ years old; full excavation is quoted separately.",
+
+      "cta.bookThis": "Book this",
+      "book.title": "Tell us what's leaking.", "book.sub": "Send the form. Dispatch confirms by phone in under five minutes, with a named tech and a window.",
+      "inquiry.title": "Tell us what's leaking.", "inquiry.sub": "Dispatch confirms by phone in under five minutes.",
+      "inquiry.field.name": "Full name", "inquiry.field.email": "Phone or email", "inquiry.field.message": "What's happening - when it started, any noises or smells.",
+      "inquiry.submit": "Page a truck", "inquiry.m0.note": "Dispatch confirms by phone in under 5 minutes."
+    }
+  }
+}

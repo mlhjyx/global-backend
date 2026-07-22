@@ -1,0 +1,250 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "local-trust" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.services", "pageId": "services" },
+      { "labelKey": "nav.pricing", "pageId": "pricing" },
+      { "labelKey": "nav.about", "pageId": "about" },
+      { "labelKey": "nav.area", "pageId": "area" },
+      { "labelKey": "nav.contact", "pageId": "contact" },
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "Watts & Wire" },
+    "outboundDomains": ["wa.me"]
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroFull", "props": { "id": "HeroFull-1",
+          "eyebrowKey": "hero.eyebrow", "ratingKey": "hero.rating",
+          "h1aKey": "hero.h1a", "h1bKey": "hero.h1b", "h1cKey": "hero.h1c", "subKey": "hero.sub",
+          "primaryCta": { "labelKey": "hero.ctaBook", "pageId": "book" },
+          "secondaryCta": { "labelKey": "hero.ctaPricing", "pageId": "pricing" },
+          "selectors": [
+            { "icon": "ri-tools-fill", "titleKey": "hero.s1.title", "subtitleKey": "hero.s1.sub", "tagKey": "hero.s1.tag" },
+            { "icon": "ri-lightbulb-flash-fill", "titleKey": "hero.s2.title", "subtitleKey": "hero.s2.sub", "tagKey": "hero.s2.tag" },
+            { "icon": "ri-shield-check-fill", "titleKey": "hero.s3.title", "subtitleKey": "hero.s3.sub", "tagKey": "hero.s3.tag" }
+          ],
+          "revealSuffixKey": "hero.revealSuffix",
+          "revealCta": { "labelKey": "hero.revealCta", "pageId": "book" }
+        } },
+        { "type": "AreaMarquee", "props": { "id": "AreaMarquee-1", "alt": true,
+          "items": ["Upper Street", "Essex Road", "Liverpool Road", "Caledonian Road", "Holloway Road", "St Paul's Road", "Highbury Grove", "Canonbury Road", "City Road", "Camden Passage"]
+        } },
+        { "type": "ServicesGrid", "props": { "id": "ServicesGrid-1",
+          "eyebrowKey": "services.eyebrow", "titleKey": "services.title", "titleAccentKey": "services.titleAccent", "introKey": "services.intro",
+          "allLabelKey": "services.all", "allPageId": "services", "bookLabelKey": "cta.bookService", "bookPageId": "book",
+          "services": [
+            { "icon": "ri-search-eye-line", "titleKey": "services.s1.title", "descKey": "services.s1.desc", "fromKey": "services.s1.from" },
+            { "icon": "ri-plug-line", "titleKey": "services.s2.title", "descKey": "services.s2.desc", "fromKey": "services.s2.from" },
+            { "icon": "ri-lightbulb-line", "titleKey": "services.s3.title", "descKey": "services.s3.desc", "fromKey": "services.s3.from" },
+            { "icon": "ri-dashboard-3-line", "titleKey": "services.s4.title", "descKey": "services.s4.desc", "fromKey": "services.s4.from" },
+            { "icon": "ri-shield-check-line", "titleKey": "services.s5.title", "descKey": "services.s5.desc", "fromKey": "services.s5.from" },
+            { "icon": "ri-file-text-line", "titleKey": "services.s6.title", "descKey": "services.s6.desc", "fromKey": "services.s6.from" }
+          ]
+        } },
+        { "type": "TrustSplit", "props": { "id": "TrustSplit-1", "alt": true,
+          "eyebrowKey": "trust.eyebrow", "titleKey": "trust.title", "titleAccentKey": "trust.titleAccent", "introKey": "trust.intro",
+          "stats": [
+            { "value": "12+", "labelKey": "trust.stat1" },
+            { "value": "1,400+", "labelKey": "trust.stat2" },
+            { "value": "4.9", "labelKey": "trust.stat3" }
+          ],
+          "badges": ["Fully qualified", "Public liability insured", "Part P registered", "Clear pricing", "Tidy workmanship"],
+          "portraitNameKey": "trust.portraitName", "portraitRoleKey": "trust.portraitRole", "portraitPageId": "about"
+        } },
+        { "type": "ProcessSteps", "props": { "id": "ProcessSteps-1",
+          "eyebrowKey": "process.eyebrow", "titleKey": "process.title", "titleAccentKey": "process.titleAccent", "introKey": "process.intro",
+          "steps": [
+            { "num": "01", "icon": "ri-message-3-line", "titleKey": "process.s1.title", "bodyKey": "process.s1.body" },
+            { "num": "02", "icon": "ri-calendar-check-line", "titleKey": "process.s2.title", "bodyKey": "process.s2.body" },
+            { "num": "03", "icon": "ri-shield-check-line", "titleKey": "process.s3.title", "bodyKey": "process.s3.body" }
+          ]
+        } },
+        { "type": "PricingTable", "props": { "id": "PricingTable-1", "alt": true,
+          "eyebrowKey": "pricing.eyebrow", "titleKey": "pricing.title", "titleAccentKey": "pricing.titleAccent", "introKey": "pricing.intro",
+          "primaryCta": { "labelKey": "pricing.ctaCheck", "pageId": "book" },
+          "secondaryCta": { "labelKey": "pricing.ctaFull", "pageId": "pricing" },
+          "footnoteKey": "pricing.footnote",
+          "rows": [
+            { "icon": "ri-map-pin-2-line", "serviceKey": "pricing.r1.service", "noteKey": "pricing.r1.note", "fromKey": "pricing.r1.from" },
+            { "icon": "ri-search-eye-line", "serviceKey": "pricing.r2.service", "noteKey": "pricing.r2.note", "fromKey": "pricing.r2.from" },
+            { "icon": "ri-plug-line", "serviceKey": "pricing.r3.service", "noteKey": "pricing.r3.note", "fromKey": "pricing.r3.from" },
+            { "icon": "ri-lightbulb-line", "serviceKey": "pricing.r4.service", "noteKey": "pricing.r4.note", "fromKey": "pricing.r4.from" },
+            { "icon": "ri-dashboard-3-line", "serviceKey": "pricing.r5.service", "noteKey": "pricing.r5.note", "fromKey": "pricing.r5.from" }
+          ]
+        } },
+        { "type": "Testimonials", "props": { "id": "Testimonials-1",
+          "eyebrowKey": "testi.eyebrow",
+          "items": [
+            { "quoteKey": "testi.t1.quote", "nameKey": "testi.t1.name", "postcodeKey": "testi.t1.postcode", "rating": 5, "platformKey": "testi.t1.platform" },
+            { "quoteKey": "testi.t2.quote", "nameKey": "testi.t2.name", "postcodeKey": "testi.t2.postcode", "rating": 5, "platformKey": "testi.t2.platform" },
+            { "quoteKey": "testi.t3.quote", "nameKey": "testi.t3.name", "postcodeKey": "testi.t3.postcode", "rating": 5, "platformKey": "testi.t3.platform" }
+          ]
+        } },
+        { "type": "AreaGallery", "props": { "id": "AreaGallery-1", "alt": true,
+          "eyebrowKey": "area.eyebrow", "titleKey": "area.title", "titleAccentKey": "area.titleAccent", "allLabelKey": "area.all", "allPageId": "area",
+          "areas": [
+            { "name": "Islington", "postcodes": "N1 · N7", "noteKey": "area.a1" },
+            { "name": "Highbury", "postcodes": "N5", "noteKey": "area.a2" },
+            { "name": "Angel", "postcodes": "N1", "noteKey": "area.a3" },
+            { "name": "Canonbury", "postcodes": "N1", "noteKey": "area.a4" }
+          ]
+        } },
+        { "type": "FaqSplit", "props": { "id": "FaqSplit-1",
+          "eyebrowKey": "faq.eyebrow", "titleKey": "faq.title", "titleAccentKey": "faq.titleAccent", "introKey": "faq.intro",
+          "items": [
+            { "qKey": "faq.q1", "aKey": "faq.a1" },
+            { "qKey": "faq.q2", "aKey": "faq.a2" },
+            { "qKey": "faq.q3", "aKey": "faq.a3" },
+            { "qKey": "faq.q4", "aKey": "faq.a4" },
+            { "qKey": "faq.q5", "aKey": "faq.a5" }
+          ]
+        } },
+        { "type": "CtaCenter", "props": { "id": "CtaCenter-1", "alt": true,
+          "eyebrowKey": "cta.eyebrow", "titleKey": "cta.title", "titleAccentKey": "cta.titleAccent", "subtitleKey": "cta.subtitle",
+          "primaryCta": { "labelKey": "cta.ctaPrimary", "pageId": "book" },
+          "secondaryCta": { "labelKey": "cta.ctaSecondary", "pageId": "pricing" }
+        } }
+      ] }
+    },
+    {
+      "id": "services", "path": "/services",
+      "seo": { "titleKey": "seo.services.title", "descriptionKey": "seo.services.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-s", "headlineKey": "page.services.h", "subheadKey": "page.services.sub", "cta": { "labelKey": "hero.ctaBook", "pageId": "book" } } },
+        { "type": "CtaCenter", "props": { "id": "CtaCenter-s", "alt": true, "eyebrowKey": "cta.eyebrow", "titleKey": "cta.title", "titleAccentKey": "cta.titleAccent", "subtitleKey": "cta.subtitle", "primaryCta": { "labelKey": "cta.ctaPrimary", "pageId": "book" }, "secondaryCta": { "labelKey": "cta.ctaSecondary", "pageId": "pricing" } } }
+      ] }
+    },
+    {
+      "id": "pricing", "path": "/pricing",
+      "seo": { "titleKey": "seo.pricing.title", "descriptionKey": "seo.pricing.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-p", "headlineKey": "page.pricing.h", "subheadKey": "page.pricing.sub", "cta": { "labelKey": "hero.ctaBook", "pageId": "book" } } },
+        { "type": "CtaCenter", "props": { "id": "CtaCenter-p", "alt": true, "eyebrowKey": "cta.eyebrow", "titleKey": "cta.title", "titleAccentKey": "cta.titleAccent", "subtitleKey": "cta.subtitle", "primaryCta": { "labelKey": "cta.ctaPrimary", "pageId": "book" } } }
+      ] }
+    },
+    {
+      "id": "about", "path": "/about",
+      "seo": { "titleKey": "seo.about.title", "descriptionKey": "seo.about.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-a", "headlineKey": "page.about.h", "subheadKey": "page.about.sub", "cta": { "labelKey": "hero.ctaBook", "pageId": "book" } } },
+        { "type": "CtaCenter", "props": { "id": "CtaCenter-a", "alt": true, "eyebrowKey": "cta.eyebrow", "titleKey": "cta.title", "titleAccentKey": "cta.titleAccent", "subtitleKey": "cta.subtitle", "primaryCta": { "labelKey": "cta.ctaPrimary", "pageId": "book" } } }
+      ] }
+    },
+    {
+      "id": "area", "path": "/area",
+      "seo": { "titleKey": "seo.area.title", "descriptionKey": "seo.area.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-ar", "headlineKey": "page.area.h", "subheadKey": "page.area.sub", "cta": { "labelKey": "hero.ctaBook", "pageId": "book" } } },
+        { "type": "CtaCenter", "props": { "id": "CtaCenter-ar", "alt": true, "eyebrowKey": "cta.eyebrow", "titleKey": "cta.title", "titleAccentKey": "cta.titleAccent", "subtitleKey": "cta.subtitle", "primaryCta": { "labelKey": "cta.ctaPrimary", "pageId": "book" } } }
+      ] }
+    },
+    {
+      "id": "contact", "path": "/contact",
+      "seo": { "titleKey": "seo.contact.title", "descriptionKey": "seo.contact.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-c", "headlineKey": "page.contact.h", "subheadKey": "page.contact.sub", "cta": { "labelKey": "hero.ctaBook", "pageId": "book" } } }
+      ] }
+    },
+    {
+      "id": "book", "path": "/book",
+      "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "HeroBanner", "props": { "id": "HeroBanner-b", "headlineKey": "page.book.h", "subheadKey": "page.book.sub", "cta": { "labelKey": "hero.ctaBook", "pageId": "contact" } } }
+      ] }
+    }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.home": "Home", "nav.services": "Services", "nav.pricing": "Pricing", "nav.about": "About", "nav.area": "Area", "nav.contact": "Contact", "nav.book": "Book Appointment",
+      "brand.tagline": "Islington · N. London",
+      "contact.phone": "07700 900123", "contact.whatsapp": "447700900123", "contact.email": "hello@wattsandwire.co.uk",
+      "footer.intro": "Independent local electrician for homes, flats, landlords and small businesses across Islington and nearby North London.",
+      "footer.available": "Available this week", "footer.exploreTitle": "Explore", "footer.contactTitle": "Get in touch",
+      "footer.bookTitle": "Book a visit", "footer.bookNote": "Prefer to choose a time online? It takes about a minute.",
+      "footer.badgeQualified": "Fully qualified", "footer.badgeInsured": "Insured",
+      "footer.area": "Upper Street, Islington N1", "footer.privacy": "Privacy", "footer.terms": "Terms", "footer.insurance": "Insurance",
+
+      "seo.home.title": "Watts & Wire - Local Electrician in Islington, North London",
+      "seo.home.desc": "Straightforward electrical repairs, installations and safety checks from an independent UK electrician serving Islington and nearby North London.",
+      "seo.services.title": "Services - Watts & Wire", "seo.services.desc": "Residential and small commercial electrical work across Islington.",
+      "seo.pricing.title": "Pricing - Watts & Wire", "seo.pricing.desc": "Honest guide prices for local electrical work.",
+      "seo.about.title": "About - Watts & Wire", "seo.about.desc": "Meet your local Islington electrician.",
+      "seo.area.title": "Service Area - Watts & Wire", "seo.area.desc": "Islington and nearby North London neighbourhoods covered.",
+      "seo.contact.title": "Contact - Watts & Wire", "seo.contact.desc": "Phone, WhatsApp and email your local electrician.",
+      "seo.book.title": "Book an Appointment - Watts & Wire", "seo.book.desc": "Book a visit from your local Islington electrician.",
+
+      "hero.eyebrow": "Available this week · Islington & nearby",
+      "hero.rating": "4.9 · 200+ local reviews",
+      "hero.h1a": "Local Electrician",
+      "hero.h1b": "Homes & Small",
+      "hero.h1c": "Businesses in North London.",
+      "hero.sub": "Straightforward electrical repairs, installations and safety checks from an independent UK electrician serving the local area.",
+      "hero.ctaBook": "Book an Appointment", "hero.ctaPricing": "View Quick Pricing",
+      "hero.s1.title": "I need a repair", "hero.s1.sub": "No power, faulty socket or tripping fuse box? Choose a time and I'll take a look.", "hero.s1.tag": "Same-week slots",
+      "hero.s2.title": "I need an installation", "hero.s2.sub": "Pendants, sockets, spots or EV chargers - clean, tidy fitting with clear pricing.", "hero.s2.tag": "Guide from £75",
+      "hero.s3.title": "I need a safety check", "hero.s3.sub": "EICR reports, landlord certificates and full periodic inspections.", "hero.s3.tag": "EICR ready",
+      "hero.revealSuffix": "- you're covered.", "hero.revealCta": "Book this now",
+
+      "services.eyebrow": "What I do", "services.title": "Everyday electrical work,", "services.titleAccent": "done tidy and safe.", "services.intro": "Homes, flats and small businesses across Islington. No confusing jargon, no surprise pricing.", "services.all": "See all services",
+      "services.s1.title": "Fault finding", "services.s1.desc": "Tracking down trips, no-power rooms and mystery faults - quickly and neatly.", "services.s1.from": "From £85",
+      "services.s2.title": "Socket & switch repairs", "services.s2.desc": "Replacements, upgrades and dead sockets sorted with tidy finishing.", "services.s2.from": "From £55",
+      "services.s3.title": "Lighting installation", "services.s3.desc": "Pendants, spotlights, wall lights and dimmers fitted in living rooms and kitchens.", "services.s3.from": "From £75",
+      "services.s4.title": "Consumer unit checks", "services.s4.desc": "Fuse box inspections, RCD testing and clear advice on upgrades.", "services.s4.from": "From £95",
+      "services.s5.title": "Electrical safety checks", "services.s5.desc": "Periodic inspections for homeowners who want peace of mind.", "services.s5.from": "From £120",
+      "services.s6.title": "Landlord EICR certificates", "services.s6.desc": "Full EICR reports for rental properties, delivered promptly.", "services.s6.from": "From £140",
+
+      "trust.eyebrow": "Independent · Local · Qualified", "trust.title": "One skilled electrician", "trust.titleAccent": "who actually turns up", "trust.intro": "No call centres, no big teams, no surprise fees. Just clean electrical work by someone who lives and works in the local area.",
+      "trust.stat1": "Years working across North London", "trust.stat2": "Local jobs completed", "trust.stat3": "Average local rating",
+      "trust.portraitName": "James Wallace", "trust.portraitRole": "Independent electrician · Islington N1",
+
+      "process.eyebrow": "How it works", "process.title": "Three simple steps", "process.titleAccent": "to a fixed problem.", "process.intro": "Booking a local electrician shouldn't feel like a chore. Here's what happens after you get in touch.",
+      "process.s1.title": "Tell me what's up", "process.s1.body": "A short message or booking form - a couple of photos help a lot.",
+      "process.s2.title": "Pick a time", "process.s2.body": "Choose an appointment slot that works for you, usually same-week.",
+      "process.s3.title": "Job done, tidy", "process.s3.body": "Clear pricing before I start, safe work, and everything left neat.",
+
+      "pricing.eyebrow": "Quick pricing", "pricing.title": "Guide prices,", "pricing.titleAccent": "clearly written.", "pricing.intro": "These are honest guide prices for local work. Final cost depends on the job, access, parts and urgency - but you'll always be told the likely cost before the work goes ahead.",
+      "pricing.colService": "Service", "pricing.colFrom": "From",
+      "pricing.ctaCheck": "Check Availability", "pricing.ctaFull": "Full pricing", "pricing.footnote": "Prices are guide prices for local work. You'll always be told the likely cost before the job goes ahead.",
+      "pricing.r1.service": "Local call-out", "pricing.r1.note": "Assessment and quote for local jobs.", "pricing.r1.from": "£65",
+      "pricing.r2.service": "Fault finding", "pricing.r2.note": "Tracking trips, dead sockets and faulty circuits.", "pricing.r2.from": "£85",
+      "pricing.r3.service": "Socket or switch replacement", "pricing.r3.note": "Per fitting, parts extra where needed.", "pricing.r3.from": "£55",
+      "pricing.r4.service": "Light fitting installation", "pricing.r4.note": "Standard pendants, spots and wall lights.", "pricing.r4.from": "£75",
+      "pricing.r5.service": "Consumer unit inspection", "pricing.r5.note": "Visual check and RCD testing.", "pricing.r5.from": "£95",
+
+      "testi.eyebrow": "What locals say",
+      "testi.t1.quote": "Turned up on time, fixed our tripping fuse box and left the place tidier than he found it. Clear pricing from the start.", "testi.t1.name": "Rachel M.", "testi.t1.postcode": "N1, Islington", "testi.t1.platform": "Google Reviews",
+      "testi.t2.quote": "Sorted the lighting in our small café before opening. Friendly, calm, quick - exactly the kind of local trade you want.", "testi.t2.name": "Daniel P.", "testi.t2.postcode": "N5, Highbury", "testi.t2.platform": "Checkatrade",
+      "testi.t3.quote": "Landlord EICR done the next day. Report was clear, easy to read, and he walked me through everything patiently.", "testi.t3.name": "Priya S.", "testi.t3.postcode": "N7, Holloway", "testi.t3.platform": "Google Reviews",
+
+      "area.eyebrow": "Where I work", "area.title": "Serving Islington and nearby", "area.titleAccent": "North London homes & shops.", "area.all": "See service area",
+      "area.a1": "Home base - same-week slots most weeks.", "area.a2": "Flats, terraces and small offices.", "area.a3": "Independent shops, cafés and studios.", "area.a4": "Family homes and residential lofts.",
+
+      "faq.eyebrow": "FAQ", "faq.title": "Quick answers,", "faq.titleAccent": "no jargon.", "faq.intro": "Something not listed here? Send a message and I'll get back to you as soon as I can.",
+      "faq.q1": "Do you cover emergency call-outs?", "faq.a1": "Yes, where I can. If it's an immediate safety issue (sparks, burning smell, exposed live wires), turn off the power and call emergency services first - then send me a message and I'll come as soon as I can.",
+      "faq.q2": "Are you insured and qualified?", "faq.a2": "Yes - fully qualified UK electrician, Part P registered, with public liability insurance. I'll happily share paperwork before any job.",
+      "faq.q3": "How does pricing work?", "faq.a3": "Guide prices are on the pricing page. Once I've seen the job I'll give you a clear price before starting. No sneaky add-ons.",
+      "faq.q4": "Do you work with landlords?", "faq.a4": "Absolutely. EICR safety certificates, remedial works and periodic inspections for local landlords are a big part of what I do.",
+      "faq.q5": "Can you help my small business?", "faq.a5": "Yes - I work with local shops, cafés, salons and small offices. I focus on independent businesses rather than large commercial builds.",
+
+      "cta.eyebrow": "Ready when you are", "cta.title": "Local electrician,", "cta.titleAccent": "just around the corner.", "cta.subtitle": "Book a visit in under a minute - same-week slots most weeks.", "cta.ctaPrimary": "Book Appointment", "cta.ctaSecondary": "View Quick Pricing",
+      "cta.bookService": "Book this service",
+
+      "page.services.h": "Electrical services", "page.services.sub": "Repairs, installations and safety checks for homes and small businesses across Islington.",
+      "page.pricing.h": "Clear, honest pricing", "page.pricing.sub": "Guide prices for local work - you'll always know the cost before we start.",
+      "page.about.h": "Meet your local electrician", "page.about.sub": "Independent, qualified and based right here in Islington.",
+      "page.area.h": "Where I work", "page.area.sub": "Islington and nearby North London neighbourhoods.",
+      "page.contact.h": "Get in touch", "page.contact.sub": "Phone, WhatsApp or email - whatever's easiest for you.",
+      "page.book.h": "Book an appointment", "page.book.sub": "Choose a time that works for you. It takes about a minute."
+    }
+  }
+}

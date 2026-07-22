@@ -1,0 +1,65 @@
+---
+interface Service { code: string; titleKey: string; bodyKey: string; specKey: string }
+interface Props {
+  chapterKey: string;
+  notListKey?: string;
+  notListBodyKey?: string;
+  notListCtaKey?: string;
+  services: Service[];
+  bookLabelKey?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { chapterKey, notListKey, notListBodyKey, notListCtaKey, services = [], bookLabelKey = 'cta.bookThis', t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="services">
+  <div class="container wide">
+    <div class="head">
+      <div class="col-3"><div class="mono-tag">{t(chapterKey)}</div></div>
+      <div class="col-9"><h2 class="display">{t('services.titleLine')}</h2></div>
+    </div>
+    <div class="grid">
+      {services.map((s) => (
+        <article class="card">
+          <div class="card-top"><span>SVC · {s.code}</span><span>{t(s.specKey)}</span></div>
+          <div class="card-body">
+            <h3>{t(s.titleKey)}</h3>
+            <p>{t(s.bodyKey)}</p>
+          </div>
+          <a class="book" href="#book">{t(bookLabelKey)} -&gt;</a>
+        </article>
+      ))}
+      {notListKey && (
+        <article class="card dark">
+          <div class="mono-tag dim">{t(notListKey)}</div>
+          <p class="not-body">{t(notListBodyKey)}</p>
+          <a class="ask" href="#book">{t(notListCtaKey)} <span class="line"></span> -&gt;</a>
+        </article>
+      )}
+    </div>
+  </div>
+</section>
+
+<style>
+  .wide { max-width: 88rem; }
+  .head { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: 3.5rem; }
+  @media (min-width: 768px) { .head { grid-template-columns: 3fr 9fr; } }
+  .mono-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .display { font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 0.95; letter-spacing: -0.02em; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  .card { background: color-mix(in srgb, var(--c-surface-alt) 70%, transparent); border: 1px solid rgba(31,31,31,0.1); padding: 1.75rem; display: flex; flex-direction: column; min-height: 16rem; }
+  .card.dark { background: var(--c-primary); color: var(--c-on-dark); }
+  .card-top { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .card.dark .card-top, .card.dark .mono-tag { color: rgba(244,241,234,0.5); }
+  .card-body { margin-top: auto; padding-top: 3rem; }
+  .card h3 { font-family: var(--font-heading); font-weight: 700; font-stretch: 125%; font-size: 1.5rem; line-height: 1.15; letter-spacing: -0.01em; }
+  .card-body p { margin-top: 0.75rem; font-size: 0.9rem; line-height: 1.6; color: color-mix(in srgb, var(--c-on-surface) 70%, transparent); }
+  .book { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(31,31,31,0.1); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface); transition: color .2s ease; }
+  .book:hover { color: var(--c-accent); }
+  .not-body { margin-top: 1rem; font-family: var(--font-heading); font-weight: 700; font-size: 1.5rem; line-height: 1.25; }
+  .ask { margin-top: auto; padding-top: 1.5rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-dark); transition: color .2s ease; }
+  .ask:hover { color: var(--c-accent); }
+  .ask .line { display: inline-block; width: 1.5rem; height: 1px; background: var(--c-on-dark); vertical-align: middle; margin: 0 0.4rem; }
+</style>

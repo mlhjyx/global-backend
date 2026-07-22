@@ -1,0 +1,97 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Paper { no: string; nameKey: string; weightKey: string; noteKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  items: Paper[];
+  ctaPrimaryLabelKey: string;
+  ctaPrimaryPageId?: string;
+  ctaSecondaryLabelKey: string;
+  ctaSecondaryPageId?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const {
+  eyebrowKey, titleKey, titleAccentKey, introKey, items = [],
+  ctaPrimaryLabelKey, ctaPrimaryPageId = 'contact',
+  ctaSecondaryLabelKey, ctaSecondaryPageId = 'contact',
+  t, alt, locale, defaultLocale,
+} = Astro.props;
+const pHref = localePageHref(ctaPrimaryPageId, locale, defaultLocale);
+const sHref = localePageHref(ctaSecondaryPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head">
+      <div class="reveal">
+        <p class="eyebrow-flat">{t(eyebrowKey)}</p>
+        <h2 class="display">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
+      </div>
+      <p class="intro reveal">{t(introKey)}</p>
+    </div>
+
+    <div class="grid">
+      {items.map((p) => (
+        <a class="paper reveal" href={pHref}>
+          <div class="ph shine">
+            <span class="no">{p.no}</span>
+          </div>
+          <div class="meta">
+            <div>
+              <h4>{t(p.nameKey)}</h4>
+              <p class="weight">{t(p.weightKey)}</p>
+              <p class="note">{t(p.noteKey)}</p>
+            </div>
+            <span class="arrow"><i class="ri-arrow-right-up-line"></i></span>
+          </div>
+        </a>
+      ))}
+    </div>
+
+    <div class="ctas reveal">
+      <a class="btn btn-dark btn-pill" href={pHref}>{t(ctaPrimaryLabelKey)}<i class="ri-arrow-right-line"></i></a>
+      <a class="link" href={sHref}>{t(ctaSecondaryLabelKey)}<i class="ri-arrow-right-line"></i></a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(3rem, 6vw, 4rem); }
+  @media (min-width: 1024px) { .head { grid-template-columns: 7fr 5fr; align-items: end; } }
+  .eyebrow-flat { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.18em; color: var(--c-on-surface); margin-bottom: 1.5rem; }
+  .display { font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.02; letter-spacing: -0.02em; }
+  .display em { font-style: italic; font-weight: 400; }
+  .intro { font-size: 0.95rem; opacity: 0.7; line-height: 1.7; max-width: 28rem; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 2.5rem 2rem; }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  .paper { display: block; }
+  .ph { position: relative; aspect-ratio: 5 / 4; overflow: hidden; border-radius: var(--radius); margin-bottom: 1.25rem;
+    background:
+      radial-gradient(50% 40% at 40% 30%, color-mix(in srgb, var(--c-accent) 12%, transparent), transparent 60%),
+      linear-gradient(135deg, var(--c-surface), var(--c-surface-alt2));
+    border: 1px solid var(--c-border);
+  }
+  .ph::after { content: ''; position: absolute; inset: 0; background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%); transform: translateX(-120%) skewX(-20deg); pointer-events: none; }
+  .paper:hover .ph::after { animation: shine 1.1s ease-out; }
+  @keyframes shine { 0% { transform: translateX(-120%) skewX(-20deg); } 100% { transform: translateX(220%) skewX(-20deg); } }
+  .no { position: absolute; top: 1rem; left: 1rem; font-size: 0.65rem; letter-spacing: 0.2em; color: var(--c-on-dark); background: rgba(0,0,0,0.55); backdrop-filter: blur(4px); padding: 0.25rem 0.6rem; border-radius: 9999px; }
+  .meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; border-top: 1px solid color-mix(in srgb, var(--c-on-surface) 15%, transparent); padding-top: 1rem; transition: border-color .3s ease; }
+  .paper:hover .meta { border-color: color-mix(in srgb, var(--c-on-surface) 35%, transparent); }
+  .meta h4 { font-family: var(--font-heading); font-weight: 600; font-size: 1.1rem; letter-spacing: -0.01em; }
+  .weight { margin-top: 0.4rem; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.55; }
+  .note { margin-top: 0.75rem; font-size: 0.75rem; opacity: 0.7; }
+  .arrow { margin-top: 0.25rem; opacity: 0.4; transition: opacity .3s ease; }
+  .paper:hover .arrow { opacity: 1; }
+  .ctas { margin-top: clamp(3rem, 6vw, 4rem); display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+  @media (min-width: 640px) { .ctas { flex-direction: row; justify-content: center; } }
+  .link { font-size: 0.875rem; opacity: 0.7; transition: opacity .3s ease; }
+  .link:hover { opacity: 1; }
+</style>

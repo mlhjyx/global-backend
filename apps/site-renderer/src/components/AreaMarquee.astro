@@ -1,0 +1,46 @@
+---
+interface Props {
+  items: string[];
+  alt?: boolean;
+}
+const { items = [], alt } = Astro.props;
+const doubled = [...items, ...items];
+---
+
+<section class:list={['block', 'marquee-section', { alt }]}>
+  <div class="marquee">
+    <div class="marquee-track">
+      {doubled.map((name, i) => (
+        <span class="marquee-item">
+          <i class="ri-map-pin-2-line"></i>
+          <span class="marquee-name">{name}</span>
+          <span class="marquee-dot">·</span>
+        </span>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .marquee-section { padding: 1.5rem 0; overflow: hidden; border-top: 1px solid var(--c-border); border-bottom: 1px solid var(--c-border); }
+  .marquee { overflow: hidden; }
+  .marquee-track {
+    display: flex;
+    align-items: center;
+    gap: clamp(1rem, 3vw, 2.5rem);
+    white-space: nowrap;
+    width: max-content;
+    animation: marquee-x 32s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; flex-wrap: wrap; } }
+  @keyframes marquee-x { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .marquee-item { display: inline-flex; align-items: center; gap: 0.75rem; color: var(--c-on-surface); }
+  .marquee-item i { color: var(--c-accent); font-size: 1.25rem; }
+  .marquee-name {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    font-size: clamp(1.1rem, 2.5vw, 2.25rem);
+    letter-spacing: -0.02em;
+  }
+  .marquee-dot { color: var(--c-on-surface-subtle); }
+</style>

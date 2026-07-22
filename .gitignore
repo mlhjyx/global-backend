@@ -45,3 +45,4 @@ __pycache__/
 # repo-local Codex runtime state; policy lives in .codex/README.md
 /.codex/worktrees/
 /.codex/audits/
+.astro/

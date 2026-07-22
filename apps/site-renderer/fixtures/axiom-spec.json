@@ -1,0 +1,90 @@
+{
+  "specVersion": "1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "theme": { "preset": "precision-instrument" },
+    "nav": [
+      { "labelKey": "nav.book", "pageId": "book" }
+    ],
+    "seoGlobal": { "siteName": "AXIOM" },
+    "outboundDomains": []
+  },
+  "pages": [
+    {
+      "id": "home", "path": "/",
+      "seo": { "titleKey": "seo.home.title", "descriptionKey": "seo.home.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "AxiomHero", "props": { "id": "AxiomHero-1",
+          "brandKey": "hero.brand", "brandSubKey": "hero.brandSub", "chapterKey": "hero.chapter", "liveKey": "hero.live",
+          "h1aKey": "hero.h1a", "h1bKey": "hero.h1b", "h1cKey": "hero.h1c", "serialKey": "hero.serial",
+          "subKey": "hero.sub", "scrollKey": "hero.scroll"
+        } },
+        { "type": "ChapterShowcase", "props": { "id": "ChapterShowcase-1",
+          "chapterKey": "line.chapter", "h1aKey": "line.h1a", "h1bKey": "line.h1b",
+          "pieces": [
+            { "tagKey": "line.p1.tag", "nameKey": "line.p1.name", "specKey": "line.p1.spec" },
+            { "tagKey": "line.p2.tag", "nameKey": "line.p2.name", "specKey": "line.p2.spec" },
+            { "tagKey": "line.p3.tag", "nameKey": "line.p3.name", "specKey": "line.p3.spec" },
+            { "tagKey": "line.p4.tag", "nameKey": "line.p4.name", "specKey": "line.p4.spec" }
+          ]
+        } },
+        { "type": "ColorwayPicker", "props": { "id": "ColorwayPicker-1",
+          "chapterKey": "cw.chapter", "titleKey": "cw.title", "titleAccentKey": "cw.titleAccent", "introKey": "cw.intro",
+          "reserveLabelKey": "cta.reserve", "reservePageId": "book",
+          "items": [
+            { "code": "01 / 03", "nameKey": "cw.c1.name", "subtitleKey": "cw.c1.sub", "finishKey": "cw.c1.finish", "hex": "#1A1D24", "editionKey": "cw.c1.edition" },
+            { "code": "02 / 03", "nameKey": "cw.c2.name", "subtitleKey": "cw.c2.sub", "finishKey": "cw.c2.finish", "hex": "#5A8A78", "editionKey": "cw.c2.edition" },
+            { "code": "03 / 03", "nameKey": "cw.c3.name", "subtitleKey": "cw.c3.sub", "finishKey": "cw.c3.finish", "hex": "#C3A97E", "editionKey": "cw.c3.edition" }
+          ]
+        } },
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-1",
+          "titleKey": "book.title", "subKey": "book.sub"
+        } }
+      ] }
+    },
+    { "id": "book", "path": "/book", "seo": { "titleKey": "seo.book.title", "descriptionKey": "seo.book.desc" },
+      "puck": { "root": { "props": {} }, "content": [
+        { "type": "InquiryForm", "props": { "id": "InquiryForm-b", "titleKey": "book.title", "subKey": "book.sub" } }
+      ] } }
+  ],
+  "assets": {},
+  "copyBundles": {
+    "en": {
+      "nav.book": "Reserve",
+      "brand.tagline": "Precision instrument",
+      "contact.phone": "", "contact.whatsapp": "", "contact.email": "studio@axiom.audio",
+      "footer.intro": "AXIOM is a precision audio instrument, built in Studio 07. Reference tuning, three finishes, ships Q3 2026.",
+      "footer.available": "Live · Tokyo", "footer.exploreTitle": "AXIOM", "footer.contactTitle": "Studio 07",
+      "footer.bookTitle": "Reserve", "footer.bookNote": "Refundable deposit. Finish confirmed before assembly.",
+      "footer.badgeQualified": "5-year warranty", "footer.badgeInsured": "Hand-built",
+      "footer.area": "Studio 07", "footer.privacy": "Privacy", "footer.terms": "Warranty", "footer.insurance": "Returns",
+
+      "seo.home.title": "AXIOM - Precision Audio Instrument",
+      "seo.home.desc": "Reference tuning, three finishes, hand-built in Studio 07. Ships Q3 2026.",
+      "seo.book.title": "Reserve - AXIOM", "seo.book.desc": "Reserve your AXIOM. Refundable deposit.",
+
+      "hero.brand": "AXIOM", "hero.brandSub": "/ 07", "hero.chapter": "CHAPTER 001 · PRECISION INSTRUMENT", "hero.live": "Live · Tokyo",
+      "hero.h1a": "AXIOM", "hero.h1b": "PRECISION", "hero.h1c": "SOUND", "hero.serial": "N° 001 - 2026",
+      "hero.sub": "A precision audio instrument. Reference tuning, three finishes, hand-built in Studio 07.",
+      "hero.scroll": "Scroll",
+
+      "line.chapter": "003 - THE LINE", "line.h1a": "REFERENCE", "line.h1b": "LINE",
+      "line.p1.tag": "FLAGSHIP · 2024", "line.p1.name": "REFERENCE ONE", "line.p1.spec": "Beryllium · Titanium · Class-A",
+      "line.p2.tag": "PRO · 2023", "line.p2.name": "STUDIO EDITION", "line.p2.spec": "Aluminum · Alcantara · Balanced",
+      "line.p3.tag": "RESERVE · 2022", "line.p3.name": "ARCHIVE ZERO", "line.p3.spec": "Walnut · Copper · Single-ended",
+      "line.p4.tag": "PORTABLE · 2024", "line.p4.name": "NOMAD MONO", "line.p4.spec": "Magnesium · Vegan Leather · USB-C DAC",
+
+      "cw.chapter": "004 - COLORWAYS", "cw.title": "Three finishes.", "cw.titleAccent": "One tuning.", "cw.intro": "Same curve. Different surface.",
+      "cw.c1.name": "Reference Onyx", "cw.c1.sub": "The original.", "cw.c1.finish": "Anodized titanium", "cw.c1.edition": "Open series",
+      "cw.c2.name": "Slate Green", "cw.c2.sub": "For quiet interiors.", "cw.c2.finish": "PVD slate green", "cw.c2.edition": "Limited · 400",
+      "cw.c3.name": "Warm Sand", "cw.c3.sub": "For daylight travel.", "cw.c3.finish": "Bead-blasted aluminum", "cw.c3.edition": "Limited · 200",
+
+      "cta.reserve": "Reserve",
+      "book.title": "First ships, Q3 · 2026.", "book.sub": "Refundable deposit. Finish confirmed before assembly. We reply within two days.",
+      "inquiry.title": "Reserve your AXIOM.", "inquiry.sub": "Refundable deposit. Studio 07 follows up within two days.",
+      "inquiry.field.name": "Full name", "inquiry.field.email": "Email", "inquiry.field.message": "Notes for the studio - engraving, delivery, or a hello.",
+      "inquiry.submit": "Confirm reservation", "inquiry.m0.note": "Studio 07 follows up within two days."
+    }
+  }
+}

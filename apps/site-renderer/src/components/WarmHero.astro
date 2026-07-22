@@ -1,0 +1,86 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Cta { labelKey: string; pageId?: string; url?: string }
+interface Stat { value: string; labelKey: string }
+interface Props {
+  eyebrowKey: string;
+  h1Key: string;
+  h1AccentKey: string;
+  subKey: string;
+  primaryCta: Cta;
+  secondaryCta?: Cta;
+  primaryIcon?: string;
+  stats: Stat[];
+  scrollKey: string;
+  t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, h1Key, h1AccentKey, subKey, primaryCta, secondaryCta, primaryIcon = 'ri-calendar-event-line', stats = [], scrollKey, t, locale, defaultLocale } = Astro.props;
+const href = (c?: Cta) => c?.url ?? (c?.pageId ? localePageHref(c.pageId, locale, defaultLocale) : '#book');
+---
+
+<section class="warm-hero">
+  <div class="bg" aria-hidden="true"></div>
+  <div class="overlay"></div>
+  <div class="content">
+    <span class="eyebrow-pill"><i class="ri-leaf-line"></i>{t(eyebrowKey)}</span>
+    <h1>{t(h1Key)}<em>{t(h1AccentKey)}</em></h1>
+    <p class="sub">{t(subKey)}</p>
+    <div class="ctas">
+      <a class="cta-primary" href={href(primaryCta)}>
+        <span class="cta-badge"><i class={primaryIcon}></i></span>
+        {t(primaryCta.labelKey)}<i class="ri-arrow-right-up-line"></i>
+      </a>
+      {secondaryCta && (
+        <a class="cta-outline" href={href(secondaryCta)}>
+          {t(secondaryCta.labelKey)}<i class="ri-arrow-right-line"></i>
+        </a>
+      )}
+    </div>
+    <div class="stats">
+      {stats.map((s) => (
+        <div class="stat">
+          <div class="value">{s.value}</div>
+          <div class="label">{t(s.labelKey)}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+  <div class="scroll-cue">
+    <span>{t(scrollKey)}</span><i class="ri-arrow-down-line"></i>
+  </div>
+</section>
+
+<style>
+  .warm-hero { position: relative; min-height: 760px; overflow: hidden; display: flex; align-items: center; }
+  .bg { position: absolute; inset: 0; animation: kb 18s ease-out both;
+    background:
+      radial-gradient(70% 60% at 50% 35%, color-mix(in srgb, var(--c-secondary) 22%, transparent), transparent 60%),
+      linear-gradient(135deg, #3a2a1c, #5c3a24 50%, #2a1d12); }
+  @keyframes kb { 0% { transform: scale(1.05); } 100% { transform: scale(1.18) translate(-1%, -1.5%); } }
+  @media (prefers-reduced-motion: reduce) { .bg { animation: none; } }
+  .overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(20,12,6,0.55), rgba(20,12,6,0.35) 45%, rgba(20,12,6,0.65)); }
+  .content { position: relative; z-index: 2; width: 100%; max-width: 64rem; margin: 0 auto; padding: 8rem clamp(1.5rem, 5vw, 2.5rem) 6rem; text-align: center; color: var(--c-on-dark); display: flex; flex-direction: column; align-items: center; }
+  .eyebrow-pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); backdrop-filter: blur(6px); font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; }
+  .eyebrow-pill i { color: var(--c-secondary); }
+  h1 { margin-top: 1.75rem; max-width: 36rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.5rem, 6vw, 4.5rem); line-height: 1.05; letter-spacing: -0.01em; }
+  h1 em { font-style: italic; font-weight: 400; color: var(--c-secondary); }
+  .sub { margin-top: 1.5rem; max-width: 36rem; font-size: clamp(0.95rem, 1.5vw, 1.125rem); color: rgba(255,255,255,0.9); line-height: 1.7; }
+  .ctas { margin-top: 2.25rem; display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
+  @media (min-width: 640px) { .ctas { flex-direction: row; } }
+  .cta-primary { display: inline-flex; align-items: center; gap: 0.75rem; padding: 0.5rem 1.5rem 0.5rem 0.5rem; border-radius: 9999px; background: var(--c-primary); color: var(--c-on-primary); font-size: 0.9rem; font-weight: 500; transition: background .3s ease; }
+  .cta-primary:hover { background: var(--c-primary-dark); }
+  .cta-badge { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border-radius: 9999px; background: var(--c-secondary); color: var(--c-on-surface); transition: transform .3s ease; }
+  .cta-primary:hover .cta-badge { transform: rotate(12deg); }
+  .cta-outline { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.4); color: var(--c-on-dark); font-size: 0.9rem; transition: background .3s ease; }
+  .cta-outline:hover { background: rgba(255,255,255,0.1); }
+  .stats { margin-top: 4rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; width: 100%; max-width: 30rem; }
+  .stat { text-align: center; }
+  .stat .value { font-family: var(--font-heading); font-weight: 500; font-size: clamp(1.75rem, 3vw, 2.5rem); color: var(--c-secondary); }
+  .stat .label { margin-top: 0.25rem; font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.75); }
+  .scroll-cue { position: absolute; bottom: 1.5rem; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; color: rgba(255,255,255,0.8); font-size: 0.6rem; letter-spacing: 0.3em; text-transform: uppercase; }
+  .scroll-cue i { animation: bounce 2s ease-in-out infinite; }
+  @keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+</style>

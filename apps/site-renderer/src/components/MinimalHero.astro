@@ -1,0 +1,53 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Props {
+  eyebrowKey: string;
+  h1Key: string;
+  h1AccentKey: string;
+  subKey: string;
+  cta1Key: string;
+  cta2Key: string;
+  scrollKey: string;
+  t: (key: string) => string;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, h1Key, h1AccentKey, subKey, cta1Key, cta2Key, scrollKey, t, locale, defaultLocale } = Astro.props;
+const cta1Href = localePageHref('book', locale, defaultLocale);
+const SERIF = "'Instrument Serif', ui-serif, Georgia, serif";
+---
+
+<section class="minimal-hero">
+  <div class="bg-grad" aria-hidden="true"></div>
+  <div class="inner">
+    <div class="eyebrow"><span class="dot"></span>{t(eyebrowKey)}</div>
+    <h1 style={`font-family:${SERIF}`}>{t(h1Key)}<em>{t(h1AccentKey)}</em></h1>
+    <p class="sub">{t(subKey)}</p>
+    <div class="ctas">
+      <a class="cta-ink" href={cta1Href}>{t(cta1Key)}<i class="ri-arrow-right-line"></i></a>
+      <a class="cta-ghost" href="#research"><span class="play"><i class="ri-play-fill"></i></span>{t(cta2Key)}</a>
+    </div>
+  </div>
+  <div class="scroll-cue"><span>{t(scrollKey)}</span><span class="line"></span></div>
+</section>
+
+<style>
+  .minimal-hero { position: relative; min-height: 100svh; background: var(--c-surface); display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+  .bg-grad { position: absolute; inset: 0; background: radial-gradient(60% 50% at 70% 20%, var(--c-surface-alt), transparent 60%); }
+  .inner { position: relative; max-width: 48rem; margin: 0 auto; padding: 0 clamp(1.5rem, 5vw, 2.5rem); text-align: center; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3em; color: var(--c-on-surface-muted); margin-bottom: 2rem; }
+  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-on-surface); }
+  h1 { font-weight: 400; font-size: clamp(2.75rem, 7vw, 5.5rem); line-height: 1.05; letter-spacing: -0.015em; color: var(--c-on-surface); }
+  h1 em { font-style: italic; }
+  .sub { margin: 1.75rem auto 0; max-width: 34rem; font-size: 1.05rem; line-height: 1.7; color: var(--c-on-surface-muted); }
+  .ctas { margin-top: 2.5rem; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
+  @media (min-width: 640px) { .ctas { flex-direction: row; justify-content: center; } }
+  .cta-ink { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--c-primary); color: var(--c-on-primary); padding: 0.85rem 1.5rem; border-radius: 9999px; font-size: 0.875rem; transition: background .2s ease; }
+  .cta-ink:hover { background: #000; }
+  .cta-ghost { display: inline-flex; align-items: center; gap: 0.6rem; font-size: 0.875rem; color: var(--c-on-surface); }
+  .play { width: 2.25rem; height: 2.25rem; display: grid; place-items: center; border-radius: 9999px; border: 1px solid var(--c-border); transition: background .2s ease; }
+  .cta-ghost:hover .play { background: var(--c-surface-alt); }
+  .scroll-cue { position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 0.5rem; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.4em; color: var(--c-on-surface-muted); }
+  .line { width: 1px; height: 2.5rem; background: var(--c-border); }
+</style>

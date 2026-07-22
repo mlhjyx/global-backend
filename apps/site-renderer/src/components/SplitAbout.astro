@@ -1,0 +1,60 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  bodyKey: string;
+  ctaLabelKey: string;
+  ctaPageId?: string;
+  chipIcon?: string;
+  chipKey?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, titleKey, bodyKey, ctaLabelKey, ctaPageId = 'contact', chipIcon = 'ri-leaf-line', chipKey, t, alt, locale, defaultLocale } = Astro.props;
+const ctaHref = localePageHref(ctaPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container split">
+    <div class="text reveal">
+      <p class="eyebrow-flat">{t(eyebrowKey)}</p>
+      <h2 class="display">{t(titleKey)}</h2>
+      <p class="body">{t(bodyKey)}</p>
+      <a class="pill" href={ctaHref}>{t(ctaLabelKey)}<i class="ri-arrow-right-up-line"></i></a>
+    </div>
+    <div class="media reveal">
+      <div class="ph">
+        {chipKey && (
+          <div class="chip">
+            <i class={chipIcon}></i><span>{t(chipKey)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .split { display: grid; grid-template-columns: 1fr; gap: 2.5rem; align-items: center; }
+  @media (min-width: 1024px) { .split { grid-template-columns: 1fr 1fr; gap: 3.5rem; } }
+  .eyebrow-flat { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.18em; color: var(--c-on-surface); margin-bottom: 1.5rem; }
+  .display { font-family: var(--font-heading); font-weight: 500; font-size: clamp(2.25rem, 4.5vw, 3.5rem); line-height: 1.05; letter-spacing: -0.02em; max-width: 22ch; }
+  .body { margin-top: 2rem; font-size: 0.95rem; line-height: 1.7; opacity: 0.75; max-width: 36rem; }
+  .pill { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 2.5rem; border: 1px solid var(--c-on-surface); color: var(--c-on-surface); padding: 0.75rem 1.5rem; border-radius: 9999px; font-size: 0.875rem; transition: background .3s ease, color .3s ease; }
+  .pill:hover { background: var(--c-on-surface); color: var(--c-surface); }
+  .pill i { transition: transform .4s cubic-bezier(.22,1,.36,1); }
+  .pill:hover i { transform: translate(2px, -2px); }
+  .media { order: -1; }
+  @media (min-width: 1024px) { .media { order: 0; } }
+  .ph { position: relative; aspect-ratio: 4 / 5; border-radius: var(--radius); overflow: hidden; background:
+      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-accent) 14%, transparent), transparent 60%),
+      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt));
+    border: 1px solid var(--c-border); }
+  .chip { position: absolute; left: 1.25rem; bottom: 1.25rem; display: inline-flex; align-items: center; gap: 0.5rem; background: color-mix(in srgb, var(--c-surface) 90%, transparent); backdrop-filter: blur(6px); padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.75rem; color: var(--c-on-surface); animation: floatY 5s ease-in-out infinite; }
+  .chip i { color: var(--c-accent); }
+  @keyframes floatY { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+</style>

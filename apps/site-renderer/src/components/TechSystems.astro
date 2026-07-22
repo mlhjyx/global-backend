@@ -1,0 +1,118 @@
+---
+interface System { label: string; titleKey: string; descKey: string; metric: string; suffix: string; metricLabelKey: string }
+interface Props {
+  chapterKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  systems: System[];
+  liveKey?: string;
+  t: (key: string) => string;
+}
+const { chapterKey, titleKey, titleAccentKey, introKey, systems = [], liveKey = 'tech.live', t } = Astro.props;
+---
+
+<section class="tech-systems" id="technology" data-tech>
+  <div class="grid-tex"></div>
+  <div class="container">
+    <div class="head">
+      <div>
+        <div class="chapter"><span class="ic accent"><i class="ri-cpu-line"></i></span>{t(chapterKey)}</div>
+        <h2>{t(titleKey)}<span class="accent">{t(titleAccentKey)}</span></h2>
+      </div>
+      <p class="intro">{t(introKey)}</p>
+    </div>
+
+    <div class="grid">
+      <div class="tabs">
+        {systems.map((s, i) => (
+          <button type="button" class:list={['ttab', { active: i === 0 }]} data-ttab data-index={i}>
+            <div class="ttab-top"><span class="sys-num">System 0{i + 1}</span><i class="ri-arrow-right-line"></i></div>
+            <div class="ttab-label">{s.label}</div>
+          </button>
+        ))}
+      </div>
+      <div class="display">
+        <div class="ph"><i class="ri-cpu-line"></i><span class="corners"></span><span class="corners"></span></div>
+        <span class="live"><span class="pulse"></span>{t(liveKey)} · <span data-label>{systems[0]?.label ?? ''}</span></span>
+        <div class="display-body">
+          <div class="col-2">
+            <h3 data-title>{t(systems[0]?.titleKey ?? '')}</h3>
+            <p data-desc>{t(systems[0]?.descKey ?? '')}</p>
+            <div class="dots">
+              {systems.map((s, i) => (<span class:list={['dot', { active: i === 0 }]} data-tdot></span>))}
+            </div>
+          </div>
+          <div class="col-1">
+            <div class="metric-label" data-metric-label>{t(systems[0]?.metricLabelKey ?? '')}</div>
+            <div class="metric" data-metric>{systems[0]?.metric ?? ''}<span class="suffix" data-suffix>{systems[0]?.suffix ?? ''}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-tech]').forEach((root) => {
+    const tabs = Array.from(root.querySelectorAll<HTMLElement>('[data-ttab]'));
+    const dots = Array.from(root.querySelectorAll<HTMLElement>('[data-tdot]'));
+    const sysData = tabs.map((b) => ({
+      label: b.querySelector('.ttab-label')?.textContent ?? '',
+      title: b.querySelector('.ttab-label')?.textContent ?? '',
+    }));
+    tabs.forEach((tab, i) => tab.addEventListener('click', () => {
+      tabs.forEach((b) => b.classList.remove('active'));
+      dots.forEach((d) => d.classList.remove('active'));
+      tab.classList.add('active');
+      dots[i]?.classList.add('active');
+      const label = tab.querySelector('.ttab-label')?.textContent ?? '';
+      const lbl = root.querySelector('[data-label]'); if (lbl) lbl.textContent = label;
+    }));
+  });
+</script>
+
+<style>
+  .tech-systems { position: relative; background: var(--c-primary); color: var(--c-on-primary); padding: clamp(4rem, 9vw, 7rem) 0; overflow: hidden; }
+  .grid-tex { position: absolute; inset: 0; opacity: 0.08; background-image: linear-gradient(to right, rgba(255,255,255,0.4) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.4) 1px, transparent 1px); background-size: 72px 72px; }
+  .container { position: relative; }
+  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
+  @media (min-width: 768px) { .head { grid-template-columns: 1.5fr 1fr; align-items: end; } }
+  .chapter { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.2em; color: color-mix(in srgb, var(--c-on-primary) 50%, transparent); }
+  .ic { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; background: var(--c-primary); color: var(--c-on-primary); }
+  .ic.accent { background: var(--c-accent); }
+  h2 { font-weight: 700; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.02; letter-spacing: -0.02em; }
+  .accent { display: block; color: var(--c-accent); }
+  .intro { font-size: 0.95rem; line-height: 1.7; color: color-mix(in srgb, var(--c-on-primary) 70%, transparent); max-width: 28rem; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  @media (min-width: 1024px) { .grid { grid-template-columns: 4fr 8fr; gap: 2rem; } }
+  .tabs { display: flex; flex-direction: column; gap: 0.75rem; }
+  .ttab { text-align: left; padding: 1.25rem; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--c-on-primary) 15%, transparent); background: color-mix(in srgb, var(--c-on-primary) 4%, transparent); color: var(--c-on-primary); cursor: pointer; transition: all .2s ease; }
+  .ttab:hover { background: color-mix(in srgb, var(--c-on-primary) 8%, transparent); }
+  .ttab.active { background: var(--c-surface); color: var(--c-on-surface); border-color: var(--c-surface); }
+  .ttab-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.7; }
+  .ttab-top i { transition: transform .2s ease; }
+  .ttab.active .ttab-top i { transform: translateX(4px); color: var(--c-accent); }
+  .ttab-label { font-weight: 700; font-size: 1.25rem; }
+  .display { background: var(--c-surface); color: var(--c-on-surface); border-radius: var(--radius-lg); overflow: hidden; }
+  .ph { position: relative; height: 16rem; background: linear-gradient(135deg, var(--c-surface-alt2), var(--c-surface-alt)); display: grid; place-items: center; }
+  .ph i { font-size: 4rem; color: color-mix(in srgb, var(--c-primary) 12%, transparent); }
+  .corners { position: absolute; top: 1rem; width: 1.25rem; height: 1.25rem; border-color: var(--c-primary); }
+  .corners:nth-child(2) { left: 1rem; border-left: 2px solid; border-top: 2px solid; }
+  .corners:nth-child(3) { right: 1rem; border-right: 2px solid; border-top: 2px solid; }
+  .live { position: absolute; bottom: 1rem; left: 1rem; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem; border-radius: 9999px; background: var(--c-primary); color: var(--c-on-primary); font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em; }
+  .pulse { width: 6px; height: 6px; border-radius: 9999px; background: var(--c-accent); animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .display-body { padding: clamp(1.75rem, 4vw, 2.5rem); display: grid; grid-template-columns: 1fr; gap: 2rem; }
+  @media (min-width: 768px) { .display-body { grid-template-columns: 2fr 1fr; } }
+  .display-body h3 { font-weight: 700; font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1.15; margin-bottom: 0.75rem; }
+  .display-body p { font-size: 0.95rem; line-height: 1.65; color: var(--c-on-surface-muted); }
+  .dots { margin-top: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+  .dot { height: 6px; width: 12px; border-radius: 9999px; background: var(--c-border); transition: all .2s ease; }
+  .dot.active { width: 2rem; background: var(--c-accent); }
+  .col-1 { border-left: 1px solid var(--c-border); padding-left: 0; }
+  @media (min-width: 768px) { .col-1 { padding-left: 1.75rem; } }
+  .metric-label { font-family: ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--c-on-surface-subtle); margin-bottom: 0.5rem; }
+  .metric { font-weight: 700; font-size: 2.5rem; color: var(--c-accent); line-height: 1; font-variant-numeric: tabular-nums; }
+  .suffix { font-size: 1.25rem; margin-left: 0.25rem; }
+</style>

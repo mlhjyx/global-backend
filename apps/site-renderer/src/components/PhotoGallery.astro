@@ -1,0 +1,62 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  allLabelKey?: string;
+  allPageId?: string;
+  itemCount?: number;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, titleKey, titleAccentKey, allLabelKey, allPageId = 'gallery', itemCount = 4, t, alt, locale, defaultLocale } = Astro.props;
+const allHref = localePageHref(allPageId, locale, defaultLocale);
+const icons = ['ri-restaurant-2-line', 'ri-cake-3-line', 'ri-goblet-line', 'ri-leaf-line', 'ri-fire-line', 'ri-bowl-line'];
+const items = Array.from({ length: itemCount }, (_, i) => ({ i }));
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head reveal">
+      <div>
+        <span class="eyebrow-accent">{t(eyebrowKey)}</span>
+        <h2 class="serif-title">{t(titleKey)}<em>{t(titleAccentKey)}</em></h2>
+      </div>
+      {allLabelKey && (
+        <a class="all-link" href={allHref}>{t(allLabelKey)}<i class="ri-arrow-right-up-line"></i></a>
+      )}
+    </div>
+    <div class="grid">
+      {items.map((it, idx) => (
+        <div class:list={['tile', 'reveal', { tall: idx === 1 }]} data-idx={idx}>
+          <div class="ph"><i class={icons[idx % icons.length]}></i></div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: flex; flex-direction: column; gap: 1.5rem; margin-bottom: clamp(2rem, 4vw, 3rem); }
+  @media (min-width: 768px) { .head { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
+  .eyebrow-accent { font-size: 0.7rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--c-secondary); }
+  .serif-title { margin-top: 1rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.1; max-width: 22ch; }
+  .serif-title em { font-style: italic; font-weight: 400; }
+  .all-link { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.25rem; border-radius: 9999px; border: 1px solid var(--c-border); font-size: 0.875rem; color: var(--c-on-surface); transition: background .3s ease, color .3s ease, border-color .3s ease; white-space: nowrap; }
+  .all-link:hover { background: var(--c-on-surface); color: var(--c-on-dark); border-color: var(--c-on-surface); }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(4, 1fr); gap: 1rem; } }
+  .tile { overflow: hidden; border-radius: var(--radius); }
+  .tile.tall { grid-row: span 2; }
+  .ph { height: 18rem; display: grid; place-items: center; background:
+      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 14%, transparent), transparent 60%),
+      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); transition: transform .7s ease; }
+  .tile.tall .ph { height: 100%; min-height: 37rem; }
+  @media (max-width: 1023px) { .tile.tall .ph { min-height: 18rem; } }
+  .ph i { font-size: 2.5rem; color: rgba(0,0,0,0.12); }
+  .tile:hover .ph { transform: scale(1.05); }
+</style>

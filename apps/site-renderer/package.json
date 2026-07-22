@@ -3,17 +3,25 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "SiteSpec(04 契约) → 静态站渲染器：Astro 构建，主题 token 驱动，组件封闭枚举",
+  "description": "SiteSpec(04 契约) -> 静态站渲染器：Astro 构建，主题 token 驱动，组件封闭枚举",
   "scripts": {
     "build": "astro build",
     "dev": "astro dev",
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource/bricolage-grotesque": "^5.2.0",
     "@fontsource/noto-sans": "5.2.6",
     "@fontsource/noto-sans-arabic": "5.2.7",
+    "@fontsource-variable/archivo": "^5.2.0",
+    "@fontsource-variable/inter": "^5.2.0",
+    "@fontsource/fraunces": "^5.2.0",
+    "@fontsource/urbanist": "^5.2.0",
+    "@fontsource/jetbrains-mono": "^5.2.0",
+    "@fontsource/instrument-serif": "^5.2.0",
     "@global/contracts": "workspace:*",
-    "astro": "^5.7.0"
+    "astro": "^5.7.0",
+    "remixicon": "^4.6.0"
   },
   "devDependencies": {
     "vitest": "^4.1.10"

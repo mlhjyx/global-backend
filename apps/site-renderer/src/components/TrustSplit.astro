@@ -1,0 +1,131 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Stat { value: string; labelKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  stats: Stat[];
+  badges: string[];
+  portraitNameKey: string;
+  portraitRoleKey: string;
+  portraitPageId?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const {
+  eyebrowKey, titleKey, titleAccentKey, introKey, stats = [], badges = [],
+  portraitNameKey, portraitRoleKey, portraitPageId = 'about',
+  t, alt, locale, defaultLocale,
+} = Astro.props;
+const portraitHref = localePageHref(portraitPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container grid-12 trust">
+    <div class="left reveal">
+      <span class="eyebrow">{t(eyebrowKey)}</span>
+      <h2 class="section-title">{t(titleKey)} <em>{t(titleAccentKey)}</em></h2>
+      <p class="muted intro">{t(introKey)}</p>
+
+      <div class="stats">
+        {stats.map((s, i) => (
+          <div class:list={['stat', { bordered: i < stats.length - 1 }]}>
+            <div class="value">{s.value}</div>
+            <div class="muted label">{t(s.labelKey)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div class="badges">
+        {badges.map((b) => (
+          <span class="badge"><i class="ri-check-line"></i> {b}</span>
+        ))}
+      </div>
+    </div>
+
+    <div class="right reveal">
+      <div class="portrait">
+        <div class="portrait-ph"><i class="ri-user-3-line"></i></div>
+        <div class="portrait-card">
+          <span class="portrait-icon"><i class="ri-user-3-line"></i></span>
+          <div class="portrait-text">
+            <p class="portrait-name">{t(portraitNameKey)}</p>
+            <p class="muted portrait-role">{t(portraitRoleKey)}</p>
+          </div>
+          <a class="portrait-link" href={portraitHref} aria-label={t(portraitNameKey)}>
+            <i class="ri-arrow-right-up-line"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .trust { align-items: center; }
+  .left { grid-column: span 7; }
+  .right { grid-column: span 5; }
+  @media (max-width: 1023px) { .left, .right { grid-column: span 1; } }
+  .intro { margin-top: 1.25rem; max-width: 36rem; }
+  .stats {
+    margin-top: 2.5rem;
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    border-top: 1px solid var(--c-border);
+    padding-top: 2rem;
+  }
+  .stat { padding-right: 0.75rem; }
+  .stat.bordered { border-right: 1px solid var(--c-border); }
+  .value { font-family: var(--font-heading); font-weight: 600; font-size: clamp(1.5rem, 3vw, 3rem); color: var(--c-accent); letter-spacing: -0.02em; }
+  .label { margin-top: 0.5rem; font-size: 0.85rem; }
+  .badges { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 9999px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    font-size: 0.75rem;
+    color: var(--c-on-surface);
+  }
+  .badge i { color: var(--c-accent); }
+  .portrait { position: relative; border-radius: var(--radius-lg); overflow: hidden; background: var(--c-surface-alt2); }
+  .portrait-ph {
+    aspect-ratio: 4 / 5;
+    display: grid; place-items: center;
+    background:
+      radial-gradient(70% 50% at 50% 30%, color-mix(in srgb, var(--c-primary) 18%, transparent), transparent 70%),
+      linear-gradient(160deg, var(--c-surface-alt2), var(--c-surface-alt));
+  }
+  .portrait-ph i { font-size: 4rem; color: var(--c-on-surface-subtle); }
+  .portrait-card {
+    position: absolute; left: 1rem; right: 1rem; bottom: 1rem;
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 1rem;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--c-surface) 95%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .portrait-icon {
+    width: 2.75rem; height: 2.75rem; flex: none;
+    display: grid; place-items: center;
+    border-radius: 9999px;
+    background: var(--c-accent); color: var(--c-on-accent);
+  }
+  .portrait-text { flex: 1; min-width: 0; }
+  .portrait-name { font-size: 0.9rem; font-weight: 600; }
+  .portrait-role { font-size: 0.75rem; }
+  .portrait-link {
+    width: 2.25rem; height: 2.25rem; flex: none;
+    display: grid; place-items: center;
+    border-radius: 9999px;
+    background: var(--c-primary-dark); color: var(--c-on-dark);
+    transition: background .2s ease;
+  }
+  .portrait-link:hover { background: var(--c-primary); }
+</style>

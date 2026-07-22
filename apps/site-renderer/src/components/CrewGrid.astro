@@ -1,0 +1,122 @@
+---
+interface CrewStat { labelKey: string; value: string; subKey: string }
+interface Member { nameKey: string; roleKey: string; years: string; regionsKey: string; quoteKey: string; truckKey: string }
+interface Props {
+  chapterKey: string;
+  h1aKey: string;
+  h1bKey: string;
+  bodyKey: string;
+  stats: CrewStat[];
+  members: Member[];
+  footnoteKey: string;
+  requestKey: string;
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { chapterKey, h1aKey, h1bKey, bodyKey, stats = [], members = [], footnoteKey, requestKey, t, alt } = Astro.props;
+---
+
+<section class:list={['block', { alt }]} id="crew">
+  <div class="container wide">
+    <div class="head">
+      <div class="col-3"><div class="mono-tag">{t(chapterKey)}</div></div>
+      <div class="col-9">
+        <h2 class="display">
+          <span class="scramble" data-scramble data-text={t(h1aKey)}>{t(h1aKey)}</span>
+          <span class="scramble dim" data-scramble data-text={t(h1bKey)}>{t(h1bKey)}</span>
+        </h2>
+        <p class="body">{t(bodyKey)}</p>
+      </div>
+    </div>
+
+    <div class="ledger-strip">
+      {stats.map((s, i) => (
+        <div class:list={['lstat', { last: i === stats.length - 1 }]}>
+          <div class="mono-tag">{t(s.labelKey)}</div>
+          <div class="lvalue">{s.value}</div>
+          <div class="lsub">{t(s.subKey)}</div>
+        </div>
+      ))}
+    </div>
+
+    <div class="grid">
+      {members.map((m, i) => (
+        <article class="mcard">
+          <div class="plate">
+            <div class="plate-bg"></div>
+            <div class="plate-top"><span>PLATE {String(i + 1).padStart(2, '0')}</span><span>{t(m.truckKey)}</span></div>
+            <div class="nameplate">
+              <div>
+                <div class="mname">{t(m.nameKey)}</div>
+                <div class="mrole">{t(m.roleKey)}</div>
+              </div>
+              <div class="yrs"><div class="yrs-num">{m.years}</div><div class="yrs-lbl">yrs</div></div>
+            </div>
+          </div>
+          <div class="mbody">
+            <div class="mono-tag">Coverage zone</div>
+            <div class="regions">{t(m.regionsKey)}</div>
+            <p class="quote">&ldquo;{t(m.quoteKey)}&rdquo;</p>
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <div class="foot">
+      <span>{t(footnoteKey)}</span>
+      <a href="#book">{t(requestKey)} -&gt;</a>
+    </div>
+  </div>
+</section>
+
+<script>
+  const POOL = '!<>-_\\/[]{}-=+*^?#01ABCXYZ';
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.querySelectorAll<HTMLElement>('#crew [data-scramble]').forEach((host) => {
+    const text = host.getAttribute('data-text') ?? '';
+    if (reduced) { host.textContent = text; return; }
+    const final = Array.from(text);
+    const cur = final.map((c) => (c === ' ' ? ' ' : POOL[Math.floor(Math.random() * POOL.length)]));
+    host.textContent = cur.join('');
+    final.forEach((_, i) => {
+      const startAt = 200 + i * 35;
+      for (let cyc = 0; cyc < 8; cyc++) setTimeout(() => { if (cur[i] !== final[i] && final[i] !== ' ') { cur[i] = POOL[Math.floor(Math.random() * POOL.length)]; host.textContent = cur.join(''); } }, startAt + cyc * 45);
+      setTimeout(() => { cur[i] = final[i]; host.textContent = cur.join(''); }, startAt + 8 * 45);
+    });
+  });
+</script>
+
+<style>
+  .wide { max-width: 88rem; }
+  .head { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: 3.5rem; }
+  @media (min-width: 768px) { .head { grid-template-columns: 3fr 9fr; } }
+  .mono-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  .display { margin-top: 1rem; font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 0.95; letter-spacing: -0.02em; }
+  .display .scramble { display: block; }
+  .display .dim { color: color-mix(in srgb, var(--c-on-surface) 40%, transparent); }
+  .body { margin-top: 1.5rem; max-width: 34rem; line-height: 1.7; color: color-mix(in srgb, var(--c-on-surface) 70%, transparent); }
+  .ledger-strip { display: grid; grid-template-columns: repeat(2, 1fr); border-top: 1px solid rgba(31,31,31,0.15); border-bottom: 1px solid rgba(31,31,31,0.15); margin-bottom: 3rem; }
+  @media (min-width: 768px) { .ledger-strip { grid-template-columns: repeat(4, 1fr); } }
+  .lstat { padding: 2rem 1.25rem; }
+  .lstat:not(.last) { border-right: 1px solid rgba(31,31,31,0.15); }
+  .lvalue { margin-top: 0.75rem; font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(1.875rem, 4vw, 3rem); line-height: 1; }
+  .lsub { margin-top: 0.75rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: color-mix(in srgb, var(--c-on-surface) 50%, transparent); }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 3rem; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); gap: 1.5rem 1.5rem; } }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  .plate { position: relative; aspect-ratio: 4 / 5; overflow: hidden; background: var(--c-secondary); }
+  .plate-bg { position: absolute; inset: 0; background: radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-accent) 12%, transparent), transparent 60%), linear-gradient(140deg, #2a2a2a, #0e0e0e); }
+  .plate-top { position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem; display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-dark); mix-blend-mode: difference; }
+  .nameplate { position: absolute; bottom: 0; left: 0; right: 0; padding: 1rem; background: rgba(11,11,11,0.85); backdrop-filter: blur(4px); color: var(--c-on-dark); display: flex; justify-content: space-between; align-items: flex-end; }
+  .mname { font-family: var(--font-heading); font-weight: 700; font-size: 1.15rem; }
+  .mrole { margin-top: 0.25rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(244,241,234,0.6); }
+  .yrs-num { font-family: var(--font-heading); font-weight: 900; font-size: 1.5rem; line-height: 1; text-align: right; }
+  .yrs-lbl { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(244,241,234,0.6); }
+  .mbody { margin-top: 1.25rem; }
+  .regions { margin-top: 0.5rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; }
+  .quote { margin-top: 1.25rem; font-style: italic; line-height: 1.6; color: color-mix(in srgb, var(--c-on-surface) 80%, transparent); }
+  .foot { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid rgba(31,31,31,0.15); display: flex; flex-direction: column; gap: 1rem; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
+  @media (min-width: 640px) { .foot { flex-direction: row; align-items: center; } }
+  .foot a { color: var(--c-on-surface); transition: color .2s ease; }
+  .foot a:hover { color: var(--c-accent); }
+</style>

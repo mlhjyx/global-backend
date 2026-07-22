@@ -1,0 +1,69 @@
+---
+interface Item { cat: string; titleKey: string; descKey: string; readTime: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleLine2Key: string;
+  introKey: string;
+  readKey?: string;
+  items: Item[];
+  t: (key: string) => string;
+  alt?: boolean;
+}
+const { eyebrowKey, titleKey, titleLine2Key, introKey, readKey = 'cta.read', items = [], t, alt } = Astro.props;
+const accents = ['accent', 'secondary', 'accent', 'secondary', 'accent', 'secondary'];
+---
+
+<section class:list={['block', { alt }]} id="resources">
+  <div class="container">
+    <div class="head reveal">
+      <div class="col-2">
+        <div class="eyebrow"><span class="dot"></span>{t(eyebrowKey)}</div>
+        <h2>{t(titleKey)}<br />{t(titleLine2Key)}</h2>
+      </div>
+      <p class="intro">{t(introKey)}</p>
+    </div>
+    <div class="grid">
+      {items.map((it, i) => (
+        <a class:list={['card', 'reveal', `accent-${accents[i % accents.length]}`]} href="#article">
+          <div class="ph"><i class="ri-article-line"></i></div>
+          <span class="cat">{it.cat}</span>
+          <div class="body">
+            <h3>{t(it.titleKey)}</h3>
+            <p>{t(it.descKey)}</p>
+            <div class="foot"><span class="read-time">{it.readTime}</span><span class="read">{t(readKey)}<i class="ri-arrow-right-line"></i></span></div>
+          </div>
+        </a>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: grid; grid-template-columns: 1fr; gap: 2rem; margin-bottom: clamp(2.5rem, 5vw, 3rem); }
+  @media (min-width: 1024px) { .head { grid-template-columns: 2fr 1fr; align-items: end; } }
+  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.2em; color: var(--c-on-surface-muted); margin-bottom: 1.25rem; }
+  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-accent); }
+  h2 { font-weight: 700; font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: 1.05; letter-spacing: -0.02em; }
+  .intro { font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; } }
+  .card { display: flex; flex-direction: column; border-radius: var(--radius-lg); overflow: hidden; background: var(--c-surface-alt); border: 1px solid var(--c-border); transition: transform .3s ease; }
+  .card:hover { transform: translateY(-4px); }
+  .ph { aspect-ratio: 5 / 4; position: relative; display: grid; place-items: center; }
+  .accent-accent .ph { background: linear-gradient(135deg, var(--c-accent), color-mix(in srgb, var(--c-accent) 50%, var(--c-surface))); }
+  .accent-secondary .ph { background: linear-gradient(135deg, var(--c-secondary), color-mix(in srgb, var(--c-secondary) 50%, var(--c-surface))); }
+  .ph i { font-size: 2.5rem; color: rgba(11,11,42,0.2); }
+  .cat { position: absolute; top: 1rem; left: 1rem; padding: 0.3rem 0.75rem; border-radius: 9999px; background: var(--c-surface); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.18em; font-weight: 500; }
+  .body { padding: 1.5rem; display: flex; flex-direction: column; flex: 1; }
+  .body h3 { font-weight: 700; font-size: 1.25rem; line-height: 1.3; }
+  .body p { margin-top: 0.75rem; font-size: 0.875rem; line-height: 1.6; color: var(--c-on-surface-muted); }
+  .foot { margin-top: auto; padding-top: 1.25rem; border-top: 1px solid var(--c-border); display: flex; align-items: center; justify-content: space-between; }
+  .read-time { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-subtle); }
+  .read { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; font-weight: 500; }
+  .read i { transition: transform .3s ease; }
+  .card:hover .read i { transform: translateX(3px); }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .8s ease, transform .8s cubic-bezier(0.22,1,0.36,1); }
+  .reveal { opacity: 1; transform: translateY(0); }
+</style>

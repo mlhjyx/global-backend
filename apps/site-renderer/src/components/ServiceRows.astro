@@ -1,0 +1,88 @@
+---
+import { localePageHref } from '../lib/spec';
+
+interface Service { icon: string; titleKey: string; descKey: string; fromKey: string; unitKey: string }
+interface Props {
+  eyebrowKey: string;
+  titleKey: string;
+  titleAccentKey: string;
+  introKey: string;
+  services: Service[];
+  bookLabelKey?: string;
+  bookPageId?: string;
+  t: (key: string) => string;
+  alt?: boolean;
+  locale: string;
+  defaultLocale: string;
+}
+const { eyebrowKey, titleKey, titleAccentKey, introKey, services = [], bookLabelKey = 'cta.learnMore', bookPageId = 'services', t, alt, locale, defaultLocale } = Astro.props;
+const bookHref = localePageHref(bookPageId, locale, defaultLocale);
+---
+
+<section class:list={['block', { alt }]}>
+  <div class="container">
+    <div class="head reveal">
+      <div>
+        <span class="eyebrow-accent">{t(eyebrowKey)}</span>
+        <h2 class="serif-title">{t(titleKey)}<em>{t(titleAccentKey)}</em></h2>
+      </div>
+      <p class="intro">{t(introKey)}</p>
+    </div>
+
+    <div class="grid">
+      {services.map((s, i) => (
+        <article class:list={['card', 'reveal', { dark: i % 3 === 0 }]}>
+          <div class="ph"><i class={s.icon}></i></div>
+          <div class="body">
+            <span class="icon-circle"><i class={s.icon}></i></span>
+            <h3>{t(s.titleKey)}</h3>
+            <p class="desc">{t(s.descKey)}</p>
+            <div class="foot">
+              <div>
+                <span class="from-label">From</span>
+                <span class="price">{t(s.fromKey)}<span class="unit">{t(s.unitKey)}</span></span>
+              </div>
+              <a class:list={['learn', { dark: i % 3 === 0 }]} href={bookHref}>
+                {t(bookLabelKey)}<i class="ri-arrow-right-up-line"></i>
+              </a>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .head { display: grid; grid-template-columns: 1fr; gap: 1.5rem; margin-bottom: clamp(2.5rem, 5vw, 3.5rem); }
+  @media (min-width: 768px) { .head { grid-template-columns: 1.4fr 1fr; align-items: end; } }
+  .eyebrow-accent { font-size: 0.7rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--c-primary); }
+  .serif-title { margin-top: 1rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.1; max-width: 22ch; }
+  .serif-title em { font-style: italic; font-weight: 400; }
+  .intro { font-size: 0.95rem; line-height: 1.7; color: var(--c-on-surface-muted); max-width: 28rem; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  @media (min-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  .card { display: grid; grid-template-columns: 1fr; overflow: hidden; border-radius: var(--radius-lg); border: 1px solid var(--c-border); background: var(--c-surface); }
+  @media (min-width: 640px) { .card { grid-template-columns: 2fr 3fr; } }
+  .card.dark { background: var(--c-on-surface); color: var(--c-on-dark); border-color: var(--c-on-surface); }
+  .ph { aspect-ratio: 1 / 1; display: grid; place-items: center; background:
+      radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-secondary) 18%, transparent), transparent 60%),
+      linear-gradient(140deg, var(--c-surface-alt2), var(--c-surface-alt)); }
+  @media (min-width: 640px) { .ph { aspect-ratio: auto; height: 100%; min-height: 16rem; } }
+  .ph i { font-size: 3rem; color: rgba(0,0,0,0.15); }
+  .card.dark .ph { background: linear-gradient(140deg, #3a2a1c, #5c3a24); }
+  .card.dark .ph i { color: rgba(255,255,255,0.2); }
+  .body { padding: clamp(1.5rem, 3vw, 2.25rem); display: flex; flex-direction: column; }
+  .icon-circle { width: 2.75rem; height: 2.75rem; display: grid; place-items: center; border-radius: 9999px; background: color-mix(in srgb, var(--c-primary) 14%, transparent); color: var(--c-primary); }
+  .card.dark .icon-circle { background: rgba(255,255,255,0.1); color: var(--c-secondary); }
+  .card h3 { margin-top: 1.25rem; font-family: var(--font-heading); font-weight: 500; font-size: clamp(1.5rem, 2.5vw, 1.875rem); line-height: 1.2; }
+  .desc { margin-top: 0.75rem; font-size: 0.9rem; line-height: 1.65; opacity: 0.8; }
+  .foot { margin-top: auto; padding-top: 1.75rem; display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+  .from-label { font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.7; display: block; }
+  .price { font-family: var(--font-heading); font-weight: 500; font-size: 1.5rem; }
+  .unit { margin-left: 0.25rem; font-size: 0.75rem; font-family: var(--font-body); font-weight: 400; opacity: 0.7; }
+  .learn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.75rem; background: var(--c-on-surface); color: var(--c-on-dark); white-space: nowrap; transition: background .3s ease; }
+  .learn:hover { background: var(--c-on-surface-muted); }
+  .learn.dark { background: var(--c-secondary); color: var(--c-on-surface); }
+  .learn.dark:hover { filter: brightness(1.08); }
+</style>

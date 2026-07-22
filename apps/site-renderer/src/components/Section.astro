@@ -13,6 +13,51 @@ import FaqAccordion from './FaqAccordion.astro';
 import CtaBanner from './CtaBanner.astro';
 import InquiryForm from './InquiryForm.astro';
 import MapLocation from './MapLocation.astro';
+import HeroFull from './HeroFull.astro';
+import AreaMarquee from './AreaMarquee.astro';
+import ServicesGrid from './ServicesGrid.astro';
+import TrustSplit from './TrustSplit.astro';
+import ProcessSteps from './ProcessSteps.astro';
+import PricingTable from './PricingTable.astro';
+import Testimonials from './Testimonials.astro';
+import AreaGallery from './AreaGallery.astro';
+import FaqSplit from './FaqSplit.astro';
+import CtaCenter from './CtaCenter.astro';
+import EditorialHero from './EditorialHero.astro';
+import ProjectsGrid from './ProjectsGrid.astro';
+import ServicesDark from './ServicesDark.astro';
+import StatsCountup from './StatsCountup.astro';
+import MaterialsLibrary from './MaterialsLibrary.astro';
+import LogoMarquee from './LogoMarquee.astro';
+import SplitAbout from './SplitAbout.astro';
+import WarmHero from './WarmHero.astro';
+import ServiceRows from './ServiceRows.astro';
+import DishesShowcase from './DishesShowcase.astro';
+import PhotoGallery from './PhotoGallery.astro';
+import MediaCta from './MediaCta.astro';
+import FarmhouseHero from './FarmhouseHero.astro';
+import ValueStrip from './ValueStrip.astro';
+import FeaturedSpotlight from './FeaturedSpotlight.astro';
+import StoryChapters from './StoryChapters.astro';
+import CollectionCards from './CollectionCards.astro';
+import DispatchHero from './DispatchHero.astro';
+import LedgerStats from './LedgerStats.astro';
+import ServicesEditorial from './ServicesEditorial.astro';
+import DispatchTimeline from './DispatchTimeline.astro';
+import CrewGrid from './CrewGrid.astro';
+import CoverageMap from './CoverageMap.astro';
+import AxiomHero from './AxiomHero.astro';
+import ChapterShowcase from './ChapterShowcase.astro';
+import ColorwayPicker from './ColorwayPicker.astro';
+import SaaSHero from './SaaSHero.astro';
+import FeatureCards from './FeatureCards.astro';
+import PricingTiers from './PricingTiers.astro';
+import ArticleGrid from './ArticleGrid.astro';
+import IndustrialHero from './IndustrialHero.astro';
+import ProductShowcaseAlt from './ProductShowcaseAlt.astro';
+import TechSystems from './TechSystems.astro';
+import MinimalHero from './MinimalHero.astro';
+import StatementBlock from './StatementBlock.astro';
 
 interface Props {
   block: { type: string; props: Record<string, unknown> };
@@ -33,6 +78,51 @@ const registry: Record<string, unknown> = {
   CtaBanner,
   InquiryForm,
   MapLocation,
+  HeroFull,
+  AreaMarquee,
+  ServicesGrid,
+  TrustSplit,
+  ProcessSteps,
+  PricingTable,
+  Testimonials,
+  AreaGallery,
+  FaqSplit,
+  CtaCenter,
+  EditorialHero,
+  ProjectsGrid,
+  ServicesDark,
+  StatsCountup,
+  MaterialsLibrary,
+  LogoMarquee,
+  SplitAbout,
+  WarmHero,
+  ServiceRows,
+  DishesShowcase,
+  PhotoGallery,
+  MediaCta,
+  FarmhouseHero,
+  ValueStrip,
+  FeaturedSpotlight,
+  StoryChapters,
+  CollectionCards,
+  DispatchHero,
+  LedgerStats,
+  ServicesEditorial,
+  DispatchTimeline,
+  CrewGrid,
+  CoverageMap,
+  AxiomHero,
+  ChapterShowcase,
+  ColorwayPicker,
+  SaaSHero,
+  FeatureCards,
+  PricingTiers,
+  ArticleGrid,
+  IndustrialHero,
+  ProductShowcaseAlt,
+  TechSystems,
+  MinimalHero,
+  StatementBlock,
 };
 const Component = registry[block.type] as ((props: unknown) => unknown) | undefined;
 const alt = index % 2 === 1;
