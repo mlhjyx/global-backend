@@ -1,53 +1,85 @@
 ---
 /**
- * M0 静态占位：结构/样式就绪，提交后端（询盘 API + 反垃圾，06 §6）随 M2 接线，
- * 接线前禁用提交按钮——绝不做"看起来能发实际丢失"的假表单。
+ * M1 静态合同：公开接收端、反垃圾和持久化仍属于 M2；提交控件保持禁用，
+ * 让访客和辅助技术都明确知道当前站点不会静默丢弃询盘。
  */
+import { createRequire } from 'node:module';
+
 interface Props {
+  id?: string;
+  instanceId: string;
   titleKey: string;
   subKey?: string;
+  variant?: 'technical-grid' | 'quiet';
   t: (key: string) => string;
   alt?: boolean;
 }
-const { titleKey, subKey, t, alt } = Astro.props;
+const { id, instanceId, titleKey, subKey, variant = 'technical-grid', t, alt } = Astro.props;
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const title = t(titleKey);
+const subhead = subKey ? t(subKey) : undefined;
+assertQualifiedComponentContentBudget('InquiryForm', {
+  title,
+  ...(subhead ? { subhead } : {}),
+});
+const baseId = `${id ?? 'inquiry'}-${instanceId}`.replace(/[^A-Za-z0-9_-]/g, '-');
+const headingId = `${baseId}-heading`;
+const noteId = `${baseId}-note`;
+const nameId = `${baseId}-name`;
+const emailId = `${baseId}-email`;
+const messageId = `${baseId}-message`;
 ---
 
-<section class:list={['block', { alt }]} id="inquiry">
-  <h2>{t(titleKey)}</h2>
-  {subKey && <p class="muted">{t(subKey)}</p>}
-  <form class="inquiry" action="#" method="post">
-    <input type="text" name="name" placeholder={t('inquiry.field.name')} disabled />
-    <input type="email" name="email" placeholder={t('inquiry.field.email')} disabled />
-    <textarea name="message" rows="4" placeholder={t('inquiry.field.message')} disabled></textarea>
-    <button class="btn" type="submit" disabled>{t('inquiry.submit')}</button>
-    <p class="muted note">{t('inquiry.m0.note')}</p>
-  </form>
+<section
+  class:list={['block', 'inquiry-block', `inquiry-block--${variant}`, { alt }]}
+  data-component="InquiryForm"
+  data-variant={variant}
+  aria-labelledby={headingId}
+>
+  <div class="container layout">
+    <div class="intro">
+      <span class="eyebrow" aria-hidden="true">03 / CONTACT</span>
+      <h2 id={headingId}>{title}</h2>
+      {subhead && <p class="muted">{subhead}</p>}
+    </div>
+    <form class="inquiry" action="#" method="post" aria-describedby={noteId}>
+      <div class="field">
+        <label for={nameId}>{t('inquiry.field.name')}</label>
+        <input id={nameId} type="text" name="name" autocomplete="name" disabled />
+      </div>
+      <div class="field">
+        <label for={emailId}>{t('inquiry.field.email')}</label>
+        <input id={emailId} type="email" name="email" autocomplete="email" disabled />
+      </div>
+      <div class="field">
+        <label for={messageId}>{t('inquiry.field.message')}</label>
+        <textarea id={messageId} name="message" rows="5" disabled></textarea>
+      </div>
+      <button class="btn btn-md btn-accent" type="submit" disabled>{t('inquiry.submit')}</button>
+      <p class="muted note" id={noteId} role="status">{t('inquiry.m0.note')}</p>
+    </form>
+  </div>
 </section>
 
 <style>
-  h2 {
-    margin-bottom: 0.5rem;
-  }
-  .inquiry {
-    margin-top: 1.5rem;
-    display: grid;
-    gap: 0.9rem;
-    max-width: 560px;
-  }
-  input,
-  textarea {
-    padding: 0.75rem 0.9rem;
-    border: 1px solid var(--c-surface-alt);
-    border-radius: var(--radius);
-    font: inherit;
-    background: var(--c-surface);
-    color: var(--c-on-surface);
-  }
-  .btn[disabled] {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  .note {
-    font-size: 0.85rem;
-  }
+  .inquiry-block { background: var(--c-surface); }
+  .inquiry-block--technical-grid { background-image: linear-gradient(color-mix(in srgb, var(--c-border) 42%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--c-border) 42%, transparent) 1px, transparent 1px); background-size: 3rem 3rem; }
+  .inquiry-block--quiet { background: var(--c-surface-alt); }
+  .layout { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(2rem, 7vw, 7rem); align-items: start; }
+  .intro { display: grid; gap: 1rem; }
+  .eyebrow { color: var(--c-primary); font-family: var(--font-heading); font-size: .75rem; font-weight: 700; letter-spacing: .12em; }
+  h2 { max-width: 16ch; font-size: clamp(1.75rem, 4vw, 3rem); text-wrap: balance; }
+  .muted { color: var(--c-on-surface-muted); line-height: 1.65; overflow-wrap: anywhere; }
+  .inquiry { display: grid; gap: 1rem; padding: clamp(1.1rem, 3vw, 2rem); border: 1px solid var(--c-border); background: var(--c-surface); }
+  .inquiry-block--quiet .inquiry { background: var(--c-surface-alt); }
+  .field { display: grid; gap: .45rem; }
+  label { color: var(--c-on-surface); font-size: .9rem; font-weight: 700; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: .75rem .9rem; border: 1px solid var(--c-border); border-radius: 0; font: inherit; background: var(--c-surface); color: var(--c-on-surface); }
+  .inquiry-block--quiet input, .inquiry-block--quiet textarea { background: var(--c-surface); }
+  input:disabled, textarea:disabled { cursor: not-allowed; opacity: .72; }
+  .btn[disabled] { cursor: not-allowed; opacity: .62; }
+  .note { font-size: .875rem; }
+  @media (max-width: 767px) { .layout { grid-template-columns: 1fr; } }
 </style>

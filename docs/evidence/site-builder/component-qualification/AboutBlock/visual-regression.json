@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "AboutBlock",
+  "part": "visualRegression",
+  "status": "pass",
+  "breakpoints": [375, 768, 1440],
+  "outputs": [
+    {
+      "breakpoint": 375,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/mobile-375/AboutBlock.png",
+      "sha256": "25f7782b780c2078080e136c27e26197ada4b107b8f806ff888efabe31d255ce"
+    },
+    {
+      "breakpoint": 768,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/tablet-768/AboutBlock.png",
+      "sha256": "4d58ca7c1d950cc2b1ef9d0780373c6f57af1502ff18703e1a30922f19273ab2"
+    },
+    {
+      "breakpoint": 1440,
+      "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/AboutBlock.png",
+      "sha256": "1712725276c40d882065892f15cd7d19aa1bb32a657c26818ce39d669bbbf57f"
+    }
+  ],
+  "assertions": [
+    "The named component output matches all three checked-in reduced-motion references."
+  ],
+  "verification": ["pnpm --filter @global/site-renderer test:visual"]
+}

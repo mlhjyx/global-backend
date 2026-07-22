@@ -87,7 +87,7 @@ const completeArtifacts: Readonly<
 };
 
 describe("M1-e-A component qualification gate", () => {
-  it("classifies the original ten release components as transitional debt", () => {
+  it("keeps the frozen original release list as provenance while qualifications take precedence", () => {
     expect(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES).toHaveLength(10);
     expect(
       Object.isFrozen(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES),
@@ -95,28 +95,34 @@ describe("M1-e-A component qualification gate", () => {
     expect(new Set(SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES)).toEqual(
       new Set(SITE_SPEC_RELEASE_COMPONENT_TYPES),
     );
-    expect(getComponentReleaseReadiness("AboutBlock")).toEqual({
+    expect(getComponentReleaseReadiness("CertWall")).toEqual({
       status: "transitional_release",
     });
   });
 
-  it("registers the three technical-baseline components and keeps the rest gallery-only", () => {
+  it("registers six qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("StatementBlock")).toEqual({
       status: "gallery_only",
     });
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATIONS).sort()).toEqual([
+      "AboutBlock",
       "CtaBanner",
       "HeroBanner",
+      "InquiryForm",
+      "ProductGrid",
       "StatsBand",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      21,
+      42,
     );
     for (const componentType of [
       "CtaBanner",
       "HeroBanner",
+      "InquiryForm",
+      "ProductGrid",
       "StatsBand",
+      "AboutBlock",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "AboutBlock",
+  "part": "contentBudget",
+  "status": "pass",
+  "limits": {
+    "titleMaxCharacters": 60,
+    "titleMaxWords": 8,
+    "bodyMaxCharacters": 400
+  },
+  "assertions": [
+    "Runtime rendering rejects resolved title and body copy beyond registered limits."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-content-budget.ts",
+    "apps/site-renderer/src/components/AboutBlock.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}

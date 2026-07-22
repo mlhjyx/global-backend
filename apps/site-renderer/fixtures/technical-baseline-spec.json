@@ -54,6 +54,48 @@
             }
           },
           {
+            "type": "ProductGrid",
+            "props": {
+              "id": "ProductGrid-technical",
+              "titleKey": "products.title",
+              "products": [
+                {
+                  "nameKey": "products.p1.name",
+                  "blurbKey": "products.p1.blurb"
+                },
+                {
+                  "nameKey": "products.p2.name",
+                  "blurbKey": "products.p2.blurb"
+                },
+                {
+                  "nameKey": "products.p3.name",
+                  "blurbKey": "products.p3.blurb"
+                }
+              ],
+              "columns": 3,
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "AboutBlock",
+            "props": {
+              "id": "AboutBlock-technical",
+              "titleKey": "about.title",
+              "bodyKey": "about.body",
+              "foundedYear": 2004,
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-technical",
+              "titleKey": "inquiry.title",
+              "subKey": "inquiry.subhead",
+              "variant": "technical-grid"
+            }
+          },
+          {
             "type": "CtaBanner",
             "props": {
               "id": "CtaBanner-technical",
@@ -78,6 +120,22 @@
       "stats.markets": "Export markets",
       "stats.quality": "Certified quality system",
       "stats.support": "Engineering support",
+      "products.title": "Pump systems for demanding processes",
+      "products.p1.name": "Centrifugal Pumps",
+      "products.p1.blurb": "Process pumps for continuous industrial duty.",
+      "products.p2.name": "Screw Pumps",
+      "products.p2.blurb": "Steady transfer for viscous liquids and oils.",
+      "products.p3.name": "Service Spares",
+      "products.p3.blurb": "Matched parts for planned maintenance windows.",
+      "about.title": "Built for the work behind every flow line",
+      "about.body": "We supply industrial pump systems with clear specifications and practical support for project teams.",
+      "inquiry.title": "Start with your operating requirements",
+      "inquiry.subhead": "Share the essentials and our enquiry service will be available in the next delivery phase.",
+      "inquiry.field.name": "Your name",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Project requirements",
+      "inquiry.submit": "Submit enquiry",
+      "inquiry.m0.note": "Enquiry submission is not available in this preview.",
       "cta.headline": "Tell us about your project",
       "cta.label": "Get in touch"
     }

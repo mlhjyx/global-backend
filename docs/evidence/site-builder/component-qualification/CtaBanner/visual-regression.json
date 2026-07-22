@@ -18,7 +18,7 @@
     {
       "breakpoint": 1440,
       "repositoryPath": "apps/site-renderer/visual-tests/__screenshots__/desktop-1440/CtaBanner.png",
-      "sha256": "3a8d87b310d13ecc1d5df654b276d9e1f29f99c418488f0d8be57c627a2edd7c"
+      "sha256": "e071c58abe968dece3be1c2ccef080538f57576680b896180c9339a8c81ffd86"
     }
   ],
   "assertions": [

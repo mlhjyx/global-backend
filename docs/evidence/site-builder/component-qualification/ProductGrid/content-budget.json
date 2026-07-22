@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "component-qualification-evidence/v1",
+  "componentType": "ProductGrid",
+  "part": "contentBudget",
+  "status": "pass",
+  "limits": {
+    "titleMaxCharacters": 60,
+    "titleMaxWords": 8,
+    "productNameMaxCharacters": 48,
+    "productBlurbMaxCharacters": 240,
+    "maxItems": 8
+  },
+  "assertions": [
+    "Runtime rendering rejects resolved title, product name, and blurb copy beyond registered limits."
+  ],
+  "sources": [
+    "packages/contracts/src/site-builder/component-content-budget.ts",
+    "apps/site-renderer/src/components/ProductGrid.astro"
+  ],
+  "verification": [
+    "pnpm --filter @global/api test -- component-technical-baseline.spec.ts"
+  ]
+}
