@@ -1,7 +1,7 @@
 ---
 /**
- * 组件分发（04 §5 封闭枚举的 M0 子集）。未知 type 按 §8 容忍：跳过不炸构建
- * ——老渲染器遇新 minor 组件仍可出站。
+ * 组件分发（04 §5 的 55 型封闭枚举）。未知 type 与非法 props 均 fail-closed，
+ * 防止契约漂移被静默吞掉后进入不可变 Release。
  */
 import HeroBanner from './HeroBanner.astro';
 import StatsBand from './StatsBand.astro';
