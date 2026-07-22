@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"SplitAbout","status":"pass","part":"accessibility","assertions":["The section has a labelled heading, readable body and a real CTA link."],"sources":["apps/site-renderer/src/components/SplitAbout.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"WarmHero","status":"pass","part":"reducedMotion","assertions":["Values are static and the controlled display has no continuous animation."],"sources":["apps/site-renderer/src/components/WarmHero.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

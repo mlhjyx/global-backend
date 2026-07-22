@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"SplitAbout","status":"pass","part":"schema","assertions":["Closed props accept bounded copy keys, a resolved CTA and controlled variants."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

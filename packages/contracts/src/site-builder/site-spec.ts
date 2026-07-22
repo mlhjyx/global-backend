@@ -70,6 +70,8 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "ArticleGrid",
   "AreaMarquee",
   "AreaGallery",
+  "DishesShowcase",
+  "EditorialHero",
   "CollectionCards",
   "LedgerStats",
   "CertWall",
@@ -90,9 +92,11 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "ProductGrid",
   "ProductShowcaseAlt",
   "ProjectsGrid",
+  "PhotoGallery",
   "ServicesGrid",
   "ServicesDark",
   "ServiceRows",
+  "SplitAbout",
   "StatsBand",
   "StatsCountup",
   "StatementBlock",
@@ -100,6 +104,7 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "Testimonials",
   "TrustSplit",
   "ValueStrip",
+  "WarmHero",
 ] as const satisfies readonly SiteSpecComponentType[];
 export type SiteSpecReleaseComponentType =
   (typeof SITE_SPEC_RELEASE_COMPONENT_TYPES)[number];

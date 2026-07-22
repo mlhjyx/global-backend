@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"PhotoGallery","status":"pass","part":"schema","assertions":["Closed props bound gallery items to controlled asset IDs, fixed picture URLs and controlled variants."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

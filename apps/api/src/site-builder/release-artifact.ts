@@ -133,8 +133,18 @@ export function assertReleaseContract(
                       ? ['allPageId']
                 : block.type === 'MaterialsLibrary'
                   ? ['ctaPrimaryPageId', 'ctaSecondaryPageId']
-                  : block.type === 'ProductShowcaseAlt'
+                : block.type === 'ProductShowcaseAlt'
                     ? ['configureCta', 'configurePageId']
+                : block.type === 'EditorialHero'
+                  ? ['ctaPageId']
+                : block.type === 'SplitAbout'
+                  ? ['ctaPageId']
+                : block.type === 'WarmHero'
+                  ? ['primaryCta', 'secondaryCta']
+                : block.type === 'DishesShowcase'
+                  ? ['addPageId']
+                : block.type === 'PhotoGallery'
+                  ? (props.allLabelKey ? ['allPageId'] : [])
                 : [];
       for (const field of ctaFields) {
         const value = props[field]
@@ -142,9 +152,16 @@ export function assertReleaseContract(
           ?? (block.type === 'AreaGallery' && props.allLabelKey ? 'area' : undefined)
           ?? (block.type === 'ProjectsGrid' && props.allLabelKey ? 'projects' : undefined)
           ?? (block.type === 'CollectionCards' ? 'home' : undefined);
-        const cta = typeof value === 'string'
-          ? { pageId: value }
-          : value as { pageId?: string; url?: string } | undefined;
+        const defaultPageId =
+          block.type === 'EditorialHero' ? 'services'
+          : block.type === 'SplitAbout' ? 'contact'
+          : block.type === 'DishesShowcase' ? 'services'
+          : block.type === 'PhotoGallery' ? 'gallery'
+          : undefined;
+        const resolvedValue = value ?? defaultPageId;
+        const cta = typeof resolvedValue === 'string'
+          ? { pageId: resolvedValue }
+          : resolvedValue as { pageId?: string; url?: string } | undefined;
         if (cta && !cta.url && !pageIds.has(cta.pageId ?? '')) {
           throw new Error(
             `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ${block.type}.${field}.pageId=${cta.pageId ?? ''}`,

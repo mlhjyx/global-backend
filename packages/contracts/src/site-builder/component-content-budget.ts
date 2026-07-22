@@ -53,6 +53,11 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   MaterialsLibrary: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, accent: 40, intro: 240, minItems: 1, maxItems: 8, number: 24, name: 80, weight: 48, note: 160, cta: 24 }),
   CollectionCards: Object.freeze({ eyebrow: 40, title: 60, titleWords: 8, minItems: 1, maxItems: 8, name: 80 }),
   ProductShowcaseAlt: Object.freeze({ chapter: 40, title: 60, titleWords: 8, accent: 40, intro: 240, code: 24, name: 80, tagline: 80, spec: 48, price: 24, label: 48, minFeatures: 0, maxFeatures: 3, feature: 80, cta: 24 }),
+  EditorialHero: Object.freeze({ eyebrow: 40, headline: 80, headlineWords: 12, status: 48, scroll: 48, cta: 24 }),
+  SplitAbout: Object.freeze({ eyebrow: 40, title: 80, titleWords: 12, body: 400, cta: 24, chip: 80 }),
+  WarmHero: Object.freeze({ eyebrow: 40, title: 80, titleWords: 12, accent: 40, sub: 240, cta: 24, minStats: 0, maxStats: 4, value: 16, label: 48, scroll: 48 }),
+  DishesShowcase: Object.freeze({ eyebrow: 40, title: 80, titleWords: 12, accent: 40, minItems: 0, maxItems: 8, name: 80, season: 48, note: 240, cta: 24 }),
+  PhotoGallery: Object.freeze({ eyebrow: 40, title: 80, titleWords: 12, accent: 40, minItems: 1, maxItems: 8, alt: 160, cta: 24 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -185,6 +190,11 @@ const contentSchemas = {
   MaterialsLibrary: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),items:z.array(z.object({no:boundedCopy(24),name:boundedCopy(80),weight:boundedCopy(48),note:boundedCopy(160),alt:boundedCopy(160)}).strict()).max(8),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4)}).strict(),
   CollectionCards: z.object({eyebrow:boundedCopy(40),title:boundedCopy(60,8),items:z.array(z.object({name:boundedCopy(80),alt:boundedCopy(160)}).strict()).max(8)}).strict(),
   ProductShowcaseAlt: z.object({chapter:boundedCopy(40),title:boundedCopy(60,8),accent:boundedCopy(40),intro:boundedCopy(240),product:z.object({code:boundedCopy(24),name:boundedCopy(80),tagline:boundedCopy(80),capacity:boundedCopy(48),weight:boundedCopy(48),cycles:boundedCopy(48),price:boundedCopy(24),alt:boundedCopy(160)}).strict(),capacityLabel:boundedCopy(48),weightLabel:boundedCopy(48),cyclesLabel:boundedCopy(48),fromLabel:boundedCopy(48),features:z.array(boundedCopy(80)).max(3),cta:boundedCopy(24,4).optional()}).strict(),
+  EditorialHero: z.object({eyebrow:boundedCopy(40),headline:boundedCopy(80,12),cta:boundedCopy(24,4),status:boundedCopy(48),scroll:boundedCopy(48)}).strict(),
+  SplitAbout: z.object({eyebrow:boundedCopy(40),title:boundedCopy(80,12),body:boundedCopy(400),cta:boundedCopy(24,4),chip:boundedCopy(80).optional()}).strict(),
+  WarmHero: z.object({eyebrow:boundedCopy(40),title:boundedCopy(80,12),accent:boundedCopy(40),sub:boundedCopy(240),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional(),stats:z.array(z.object({value:boundedCopy(16),label:boundedCopy(48)}).strict()).max(4),scroll:boundedCopy(48)}).strict(),
+  DishesShowcase: z.object({eyebrow:boundedCopy(40),title:boundedCopy(80,12),accent:boundedCopy(40),dishes:z.array(z.object({name:boundedCopy(80),season:boundedCopy(48),note:boundedCopy(240)}).strict()).max(8),cta:boundedCopy(24,4).optional()}).strict(),
+  PhotoGallery: z.object({eyebrow:boundedCopy(40),title:boundedCopy(80,12),accent:boundedCopy(40),cta:boundedCopy(24,4).optional(),items:z.array(z.object({alt:boundedCopy(160)}).strict()).min(1).max(8)}).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(
