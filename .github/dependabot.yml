@@ -10,6 +10,14 @@ updates:
       # 次要/补丁版聚合成一个 PR，减少噪声；主要版单独 PR 便于评审破坏性变更
       minor-and-patch:
         update-types: [minor, patch]
+    # 这些大版本必须按运行时/框架迁移项目处理，不能由单包 PR 直接推进。
+    ignore:
+      - dependency-name: "astro"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nestjs/core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(deps)"
 
