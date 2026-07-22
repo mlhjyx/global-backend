@@ -15,9 +15,14 @@ import {
   validateDesignObservation,
   validateDesignRule,
 } from "@global/contracts";
-import { STATIC_DESIGN_CATALOG, resolveDesignBriefFromCatalog } from "./catalog";
+import {
+  STATIC_DESIGN_CATALOG,
+  resolveDesignBriefFromCatalog,
+} from "./catalog";
 
-function observation(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function observation(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     schemaVersion: DESIGN_OBSERVATION_SCHEMA_VERSION,
     sourceManifestId: "platform-study-1",
@@ -34,12 +39,16 @@ function observation(overrides: Record<string, unknown> = {}): Record<string, un
     motionIntensity: "subtle",
     mobileReflow: ["stack proof below primary action"],
     reusablePrinciples: ["pair a product claim with one visible proof element"],
-    prohibitedSourceSpecificTraits: ["do not reproduce branded illustration treatment"],
+    prohibitedSourceSpecificTraits: [
+      "do not reproduce branded illustration treatment",
+    ],
     ...overrides,
   };
 }
 
-function rule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function rule(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     schemaVersion: DESIGN_RULE_SCHEMA_VERSION,
     id: "proof-near-primary-action",
@@ -76,7 +85,9 @@ function ruleValidationContext(groups = ["a", "b", "c", "d", "e"]) {
   };
 }
 
-function family(status: "approved" | "draft" = "approved"): Record<string, unknown> {
+function family(
+  status: "approved" | "draft" = "approved",
+): Record<string, unknown> {
   return {
     schemaVersion: DESIGN_TEMPLATE_FAMILY_SCHEMA_VERSION,
     id: "foundation-preview",
@@ -100,54 +111,72 @@ function family(status: "approved" | "draft" = "approved"): Record<string, unkno
     contentBudgets: { "home.hero": { minimum: 20, maximum: 80 } },
     assetRequirements: [],
     demoVisualPackIds: [],
-    motionPolicy: { intensity: "low", allowed: ["fade"], forbidden: ["parallax"] },
+    motionPolicy: {
+      intensity: "low",
+      allowed: ["fade"],
+      forbidden: ["parallax"],
+    },
     qualityBaselineId: "foundation-quality-v1",
-    sourceManifestIds: ["platform-study-1"],
+    sourceManifestIds: ["platform-study-a"],
   };
 }
 
 function catalog(status: "approved" | "draft" = "approved") {
-  return finalizeDesignCatalog({
-    schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
-    catalogVersion: "2026.07.0",
-    designRules: [rule()],
-    designDnas: [
-      {
-        schemaVersion: DESIGN_DNA_SCHEMA_VERSION,
-        id: "foundation-dna",
-        name: "Foundation",
-        ruleIds: ["proof-near-primary-action"],
-        hierarchy: {
-          displayScale: "balanced",
-          headingContrast: "medium",
-          maxReadingWidthRem: 44,
+  return finalizeDesignCatalog(
+    {
+      schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+      catalogVersion: "2026.07.0",
+      designRules: [rule()],
+      designDnas: [
+        {
+          schemaVersion: DESIGN_DNA_SCHEMA_VERSION,
+          id: "foundation-dna",
+          name: "Foundation",
+          ruleIds: ["proof-near-primary-action"],
+          hierarchy: {
+            displayScale: "balanced",
+            headingContrast: "medium",
+            maxReadingWidthRem: 44,
+          },
+          spatialRhythm: {
+            sectionGapPx: [48, 96],
+            contentGapPx: [16, 32],
+            density: "balanced",
+          },
+          composition: {
+            heroModes: ["split"],
+            imageTextRatios: ["3:2"],
+            alignmentBias: "left",
+          },
+          surfaces: {
+            cardStyle: "bordered",
+            borderWeight: "hairline",
+            radius: "subtle",
+          },
+          imagery: {
+            preferredSubjects: ["product"],
+            cropModes: ["cover"],
+            backgroundPolicy: "light",
+            maxGeneratedMediaRatio: 0,
+          },
+          motion: {
+            intensity: "low",
+            allowed: ["fade"],
+            forbidden: ["parallax"],
+          },
+          antiPatterns: ["decorative dashboard chrome"],
         },
-        spatialRhythm: {
-          sectionGapPx: [48, 96],
-          contentGapPx: [16, 32],
-          density: "balanced",
-        },
-        composition: {
-          heroModes: ["split"],
-          imageTextRatios: ["3:2"],
-          alignmentBias: "left",
-        },
-        surfaces: { cardStyle: "bordered", borderWeight: "hairline", radius: "subtle" },
-        imagery: {
-          preferredSubjects: ["product"],
-          cropModes: ["cover"],
-          backgroundPolicy: "light",
-          maxGeneratedMediaRatio: 0,
-        },
-        motion: { intensity: "low", allowed: ["fade"], forbidden: ["parallax"] },
-        antiPatterns: ["decorative dashboard chrome"],
-      },
-    ],
-    families: [family(status)],
-  }, ruleValidationContext());
+      ],
+      families: [family(status)],
+    },
+    ruleValidationContext(),
+  );
 }
 
-function brief(value: ReturnType<typeof catalog>, overrides: Record<string, unknown> = {}) {
+function brief(
+  value: ReturnType<typeof catalog>,
+  overrides: Record<string, unknown> = {},
+) {
   const selected = value.families[0];
   return {
     schemaVersion: DESIGN_BRIEF_SCHEMA_VERSION,
@@ -186,7 +215,9 @@ describe("DI-0 clean-room contracts and static catalog", () => {
       heroComposition: "split",
     });
     expect(() =>
-      validateDesignObservation(observation({ rawDom: "<main>source page</main>" })),
+      validateDesignObservation(
+        observation({ rawDom: "<main>source page</main>" }),
+      ),
     ).toThrowError(/DESIGN_OBSERVATION_FORBIDDEN_CONTENT/);
     expect(() =>
       validateDesignObservation(
@@ -224,6 +255,32 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     ).toThrowError(/DESIGN_RULE_PROVENANCE_UNVERIFIED/);
   });
 
+  it("freezes validated rule provenance into the catalog digest", () => {
+    const value = catalog();
+    const sourceManifests = ruleValidationContext().sourceManifests;
+    const provenanceBoundDraft = {
+      schemaVersion: DESIGN_CATALOG_SCHEMA_VERSION,
+      catalogVersion: value.catalogVersion,
+      designRules: value.designRules,
+      designDnas: value.designDnas,
+      families: value.families,
+      sourceManifests,
+    };
+    const provenanceBoundCatalog = finalizeDesignCatalog(
+      provenanceBoundDraft as never,
+    );
+    expect(
+      (provenanceBoundCatalog as { sourceManifests?: unknown[] })
+        .sourceManifests,
+    ).toHaveLength(5);
+    expect(() =>
+      finalizeDesignCatalog({
+        ...provenanceBoundDraft,
+        sourceManifests: sourceManifests.slice(0, 4),
+      } as never),
+    ).toThrowError(/DESIGN_CATALOG_INVALID/);
+  });
+
   it("resolves only an approved family when the frozen brief pins catalog and family digests", () => {
     const value = catalog();
     expect(resolveDesignBriefFromCatalog(value, brief(value))).toMatchObject({
@@ -232,19 +289,28 @@ describe("DI-0 clean-room contracts and static catalog", () => {
     });
 
     expect(() =>
-      resolveDesignBriefFromCatalog(value, brief(value, { catalogDigest: "0".repeat(64) })),
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, { catalogDigest: "0".repeat(64) }),
+      ),
     ).toThrowError(/DESIGN_BRIEF_CATALOG_MISMATCH/);
 
     expect(() =>
-      resolveDesignBriefFromCatalog(value, brief(value, {
-        componentVariantOverrides: { HeroBanner: "cinematic" },
-      })),
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          componentVariantOverrides: { HeroBanner: "cinematic" },
+        }),
+      ),
     ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_VARIANT/);
 
     expect(() =>
-      resolveDesignBriefFromCatalog(value, brief(value, {
-        contentBudgets: { "home.hero": { minimum: 20, maximum: 999 } },
-      })),
+      resolveDesignBriefFromCatalog(
+        value,
+        brief(value, {
+          contentBudgets: { "home.hero": { minimum: 20, maximum: 999 } },
+        }),
+      ),
     ).toThrowError(/DESIGN_BRIEF_UNSUPPORTED_BUDGET/);
   });
 
