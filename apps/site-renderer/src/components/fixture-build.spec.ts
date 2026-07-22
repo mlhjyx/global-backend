@@ -6,7 +6,9 @@ import { join } from 'node:path';
 // CI 构建门：每个 fixture 物化为 SITESPEC_PATH 后真实跑 astro build，
 // 实例化 Section/Base/全 55 组件（不只是查 JSON）。
 const fixturesDir = join(process.cwd(), 'fixtures');
-const fixtures = readdirSync(fixturesDir).filter((f) => f.endsWith('-spec.json'));
+const fixtures = readdirSync(fixturesDir, { recursive: true })
+  .filter((f): f is string => typeof f === 'string' && f.endsWith('-spec.json'))
+  .sort();
 const astroBin =
   process.platform === 'win32'
     ? 'node_modules\\.bin\\astro.CMD'
@@ -24,7 +26,10 @@ describe('每 fixture 真实 Astro 构建（CI 构建门）', () => {
   for (const f of fixtures) {
     it(`${f}: astro build 成功（实例化全 55 组件）`, () => {
       expect(() =>
-        runBuild(join('fixtures', f), 'dist-test-' + f.replace('.json', '')),
+        runBuild(
+          join('fixtures', f),
+          'dist-test-' + f.replace(/[/.]/g, '-').replace(/json$/, ''),
+        ),
       ).not.toThrow();
     }, 90000);
   }
