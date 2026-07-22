@@ -36,8 +36,12 @@ export {
   copyBundleToLegacyStrings,
 } from "./site-builder/copy-bundle";
 export { resolveSiteLocale } from "./site-builder/locales";
-export { validateBlock, COMPONENT_SCHEMAS } from "./site-builder/component-schema";
 export {
+  validateBlock,
+  COMPONENT_SCHEMAS,
+} from "./site-builder/component-schema";
+export {
+  M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
   M1_E_A_COMPONENT_QUALIFICATIONS,
   SITE_SPEC_TRANSITIONAL_RELEASE_COMPONENT_TYPES,
   assertReleaseComponentEligible,
