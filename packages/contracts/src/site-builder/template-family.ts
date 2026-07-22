@@ -1,6 +1,7 @@
 import {
   designSha256,
   hasOnlyKeys,
+  isDesignAbstractionCodeArray,
   isFiniteNumber,
   isNonBlankString,
   isRecord,
@@ -121,7 +122,7 @@ export function validateTemplateFamily(value: unknown): TemplateFamily {
     Object.values(family.componentVariants).every(
       (items) => isStringArray(items) && items.length > 0,
     ) &&
-    isStringArray(family.adjacencyRules) &&
+    isDesignAbstractionCodeArray(family.adjacencyRules) &&
     isRecord(family.contentBudgets) &&
     Object.values(family.contentBudgets).every(validBudget) &&
     isStringArray(family.assetRequirements) &&

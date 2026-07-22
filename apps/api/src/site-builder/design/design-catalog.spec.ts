@@ -110,7 +110,7 @@ function family(
       ],
     },
     componentVariants: { HeroBanner: ["split"] },
-    adjacencyRules: ["hero must be followed by proof or product"],
+    adjacencyRules: ["hero-followed-by-proof-or-product"],
     contentBudgets: { "home.hero": { minimum: 20, maximum: 80 } },
     assetRequirements: [],
     demoVisualPackIds: [],
