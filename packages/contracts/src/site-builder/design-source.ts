@@ -130,6 +130,13 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
 function nonBlank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -157,6 +164,7 @@ function assertExternalAssets(
     const asset = record(item);
     if (
       !asset ||
+      !hasOnlyKeys(asset, ["kind", "source", "disposition"]) ||
       !["image", "font", "icon", "script", "copy"].includes(
         String(asset.kind),
       ) ||
@@ -180,10 +188,26 @@ function assertOwnedAuthorization(
   if (
     !authorization ||
     !covers ||
+    !hasOnlyKeys(authorization, [
+      "evidencePath",
+      "covers",
+      "territories",
+      "validity",
+      "revocationTerms",
+      "redistribution",
+      "recordedAt",
+    ]) ||
+    !hasOnlyKeys(covers, [
+      "aiSiteBuilder",
+      "derivativeComponents",
+      "commercialDistribution",
+      "training",
+    ]) ||
     !nonBlank(authorization.evidencePath) ||
     covers.aiSiteBuilder !== true ||
     covers.derivativeComponents !== true ||
     covers.commercialDistribution !== true ||
+    (covers.training !== undefined && typeof covers.training !== "boolean") ||
     !stringList(authorization.territories) ||
     authorization.territories.length === 0 ||
     !nonBlank(authorization.revocationTerms) ||
@@ -203,6 +227,17 @@ function assertOwnedAuthorization(
     fail(
       "DESIGN_SOURCE_AUTHORIZATION_INVALID",
       "authorization validity is invalid",
+    );
+  }
+  if (
+    !hasOnlyKeys(
+      validity,
+      validity.kind === "expires" ? ["kind", "expiresAt"] : ["kind"],
+    )
+  ) {
+    fail(
+      "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+      "authorization validity has unknown fields",
     );
   }
   if (
@@ -227,6 +262,17 @@ function assertOwnedAuthorization(
       "redistribution terms are incomplete",
     );
   }
+  if (
+    !hasOnlyKeys(
+      redistribution,
+      redistribution.kind === "conditional" ? ["kind", "conditions"] : ["kind"],
+    )
+  ) {
+    fail(
+      "DESIGN_SOURCE_AUTHORIZATION_INVALID",
+      "redistribution terms have unknown fields",
+    );
+  }
   if (trainingRequired && covers.training !== true) {
     fail(
       "DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED",
@@ -245,6 +291,29 @@ export function validateDesignSourceManifest(
 ): DesignSourceManifest {
   const manifest = record(value);
   if (!manifest) fail("DESIGN_SOURCE_INVALID", "manifest must be an object");
+  if (
+    !hasOnlyKeys(manifest, [
+      "schemaVersion",
+      "id",
+      "title",
+      "sourceUrl",
+      "capturedAt",
+      "licenseSpdx",
+      "licenseEvidencePath",
+      "allowedUses",
+      "prohibitedUses",
+      "retentionPolicy",
+      "trainingPolicy",
+      "sourceContributionGroup",
+      "externalAssets",
+      "reviewer",
+      "sourceClass",
+      "ownerAuthorization",
+      "approvedAt",
+    ])
+  ) {
+    fail("DESIGN_SOURCE_INVALID", "manifest contains unknown fields");
+  }
   if (manifest.schemaVersion !== DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION) {
     fail("DESIGN_SOURCE_INVALID", "unsupported manifest schema version");
   }

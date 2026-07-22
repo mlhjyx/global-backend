@@ -67,6 +67,7 @@ export type DesignObservationContractErrorCode =
   | "DESIGN_OBSERVATION_FORBIDDEN_CONTENT"
   | "DESIGN_RULE_INVALID"
   | "DESIGN_RULE_INSUFFICIENT_EVIDENCE"
+  | "DESIGN_RULE_FORBIDDEN_CONTENT"
   | "DESIGN_RULE_PROVENANCE_UNVERIFIED"
   | "DESIGN_RULE_UNSAFE";
 
@@ -239,6 +240,12 @@ export function validateDesignRule(
     !isStringArray(rule.sourceContributionGroups)
   ) {
     fail("DESIGN_RULE_INVALID", "rule metadata is invalid");
+  }
+  if (!abstractText(rule.summary)) {
+    fail(
+      "DESIGN_RULE_FORBIDDEN_CONTENT",
+      "rule summary must be abstract rather than source-derived content",
+    );
   }
   const groups = new Set(rule.sourceContributionGroups);
   const evidence = isRecord(rule.evidence) ? rule.evidence : null;

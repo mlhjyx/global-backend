@@ -42,6 +42,7 @@ export type DesignCatalogContractErrorCode =
   | "DESIGN_BRIEF_UNSUPPORTED_PRESET"
   | "DESIGN_BRIEF_UNSUPPORTED_BLUEPRINT"
   | "DESIGN_BRIEF_UNSUPPORTED_VARIANT"
+  | "DESIGN_BRIEF_UNSUPPORTED_DEMO_VISUAL_PACK"
   | "DESIGN_BRIEF_UNSUPPORTED_BUDGET";
 
 export class DesignCatalogContractError extends Error {
@@ -60,6 +61,13 @@ function fail(code: DesignCatalogContractErrorCode, message: string): never {
 
 function uniqueIds(values: readonly { id: string }[]): boolean {
   return new Set(values.map((item) => item.id)).size === values.length;
+}
+
+function hasOwnRecordKey(
+  record: Record<string, unknown>,
+  key: string,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
 }
 
 function validateCatalogDraft(value: unknown): DesignCatalogDraft {
@@ -219,6 +227,15 @@ export function validateDesignBriefAgainstCatalog(
       "brief does not pin this family revision",
     );
   }
+  if (
+    brief.assetStrategy.demoVisualPackId !== undefined &&
+    !family.demoVisualPackIds.includes(brief.assetStrategy.demoVisualPackId)
+  ) {
+    fail(
+      "DESIGN_BRIEF_UNSUPPORTED_DEMO_VISUAL_PACK",
+      "brief selected a demo visual pack unavailable to this family",
+    );
+  }
   if (!family.stylePresetIds.includes(brief.stylePresetId)) {
     fail(
       "DESIGN_BRIEF_UNSUPPORTED_PRESET",
@@ -227,6 +244,7 @@ export function validateDesignBriefAgainstCatalog(
   }
   for (const [page, blueprintId] of Object.entries(brief.blueprintIds)) {
     if (
+      !hasOwnRecordKey(family.blueprints, page) ||
       !family.blueprints[page]?.some(
         (blueprint) => blueprint.id === blueprintId,
       )
@@ -240,7 +258,10 @@ export function validateDesignBriefAgainstCatalog(
   for (const [component, variant] of Object.entries(
     brief.componentVariantOverrides,
   )) {
-    if (!family.componentVariants[component]?.includes(variant)) {
+    if (
+      !hasOwnRecordKey(family.componentVariants, component) ||
+      !family.componentVariants[component]?.includes(variant)
+    ) {
       fail(
         "DESIGN_BRIEF_UNSUPPORTED_VARIANT",
         `brief selected ${component}:${variant}`,
