@@ -111,9 +111,39 @@ function fail(code: CopyBundleContractErrorCode, message: string): never {
   throw new CopyBundleContractError(code, message);
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null) return "null";
+  if (
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  ) {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw new Error("COPY_BUNDLE_NON_JSON_VALUE");
+    }
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => {
+        if (record[key] === undefined) {
+          throw new Error("COPY_BUNDLE_NON_JSON_VALUE");
+        }
+        return `${JSON.stringify(key)}:${canonicalJson(record[key])}`;
+      })
+      .join(",")}}`;
+  }
+  throw new Error("COPY_BUNDLE_NON_JSON_VALUE");
+}
+
 function sha256(value: unknown): string {
   return createHash("sha256")
-    .update(JSON.stringify(value), "utf8")
+    .update(canonicalJson(value), "utf8")
     .digest("hex");
 }
 

@@ -304,10 +304,10 @@ function brief(catalog = finalizeDesignCatalogV2(draft())) {
 }
 
 describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
-  it("keeps DI-0 v1 intact while exposing the immutable six-family B3 catalog", () => {
+  it("keeps DI-0 v1 intact while exposing the immutable approved M1-e-B catalog", () => {
     expect(STATIC_DESIGN_CATALOG.catalogVersion).toBe("di-0-foundation/1");
     expect(STATIC_DESIGN_CATALOG.families).toEqual([]);
-    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-b3-drafts/1");
+    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b/1.0.0");
     expect(
       STATIC_DESIGN_CATALOG_V2.families.map((family) => family.id),
     ).toEqual([
@@ -320,7 +320,17 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
     ]);
     expect(
       STATIC_DESIGN_CATALOG_V2.families.every(
-        (family) => family.status === "draft",
+        (family) => family.status === "approved" && family.version === "1.0.0",
+      ),
+    ).toBe(true);
+    expect(
+      STATIC_DESIGN_CATALOG_V2.stylePresets.every(
+        (preset) => preset.status === "approved" && preset.version === "1.0.0",
+      ),
+    ).toBe(true);
+    expect(
+      STATIC_DESIGN_CATALOG_V2.demoVisualPacks.every(
+        (pack) => pack.status === "approved" && pack.version === "1.0.0",
       ),
     ).toBe(true);
     const externalSources = STATIC_DESIGN_CATALOG_V2.sourceManifests.filter(

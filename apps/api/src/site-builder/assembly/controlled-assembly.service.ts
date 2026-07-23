@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash } from "node:crypto";
 import {
   copyBundleToLegacyStrings,
   finalizeDesignBriefV2,
@@ -9,27 +9,27 @@ import {
   type DesignBriefV2,
   type DesignCatalogV2,
   type SiteSpecV1_1,
-} from '@global/contracts';
-import type { PublishableClaimSnapshot } from '../publishable-claim-snapshot';
+} from "@global/contracts";
+import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
 import {
   COMPONENT_ASSEMBLY_ADAPTERS,
   buildControlledComponentProps,
   type BuildAdapterPropsInput,
-} from './component-assembly-adapters';
+} from "./component-assembly-adapters";
 import {
   deriveCopySlotDefinitions,
   type QualifiedComponentTemplateRepository,
-} from './copy-slot-derivation';
+} from "./copy-slot-derivation";
 import {
   validateControlledAssembly,
   type AssemblyFinding,
-} from './controlled-assembly-validator';
+} from "./controlled-assembly-validator";
 
 export const CONTROLLED_ASSEMBLY_TASK_IDS = [
-  'site_builder.assemble',
-  'site_builder.assembly_fix:1',
-  'site_builder.assembly_fix:2',
-  'site_builder.assembly_fix:3',
+  "site_builder.assemble",
+  "site_builder.assembly_fix:1",
+  "site_builder.assembly_fix:2",
+  "site_builder.assembly_fix:3",
 ] as const;
 export type ControlledAssemblyTaskId =
   (typeof CONTROLLED_ASSEMBLY_TASK_IDS)[number];
@@ -63,7 +63,7 @@ export interface ControlledAssemblyResult {
   spec: SiteSpecV1_1;
   designBrief: DesignBriefV2;
   attempts: Array<{
-    taskId: ControlledAssemblyTaskId | 'same-family-safe-fallback';
+    taskId: ControlledAssemblyTaskId | "same-family-safe-fallback";
     findings: AssemblyFinding[];
   }>;
   fallbackUsed: boolean;
@@ -71,22 +71,22 @@ export interface ControlledAssemblyResult {
 
 export class ControlledAssemblyError extends Error {
   constructor(
-    readonly code: 'CONTROLLED_ASSEMBLY_INVALID',
+    readonly code: "CONTROLLED_ASSEMBLY_INVALID",
     message: string,
-    readonly attempts: ControlledAssemblyResult['attempts'],
+    readonly attempts: ControlledAssemblyResult["attempts"],
   ) {
     super(`${code}: ${message}`);
-    this.name = 'ControlledAssemblyError';
+    this.name = "ControlledAssemblyError";
   }
 }
 
 function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function stringArray(value: unknown): value is string[] {
   return (
-    Array.isArray(value) && value.every((item) => typeof item === 'string')
+    Array.isArray(value) && value.every((item) => typeof item === "string")
   );
 }
 
@@ -105,10 +105,10 @@ function parseSelection(
 ): AssemblySelection {
   if (
     !record(value) ||
-    Object.keys(value).some((key) => key !== 'sections') ||
+    Object.keys(value).some((key) => key !== "sections") ||
     !Array.isArray(value.sections)
   ) {
-    throw new Error('CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID');
+    throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
   }
   const sections = value.sections.map((candidate) => {
     if (
@@ -116,16 +116,16 @@ function parseSelection(
       Object.keys(candidate).some(
         (key) =>
           ![
-            'pageKey',
-            'sectionId',
-            'copySlotKeys',
-            'assetReferenceIds',
-            'claimIds',
-            'itemIndexes',
+            "pageKey",
+            "sectionId",
+            "copySlotKeys",
+            "assetReferenceIds",
+            "claimIds",
+            "itemIndexes",
           ].includes(key),
       ) ||
-      typeof candidate.pageKey !== 'string' ||
-      typeof candidate.sectionId !== 'string' ||
+      typeof candidate.pageKey !== "string" ||
+      typeof candidate.sectionId !== "string" ||
       !stringArray(candidate.copySlotKeys) ||
       !stringArray(candidate.assetReferenceIds) ||
       !stringArray(candidate.claimIds) ||
@@ -157,7 +157,7 @@ function parseSelection(
       candidate.assetReferenceIds.some((id) => !bounds.assetIds.has(id)) ||
       candidate.claimIds.some((id) => !bounds.claimIds.has(id))
     ) {
-      throw new Error('CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID');
+      throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
     }
     return {
       pageKey: candidate.pageKey,
@@ -175,7 +175,7 @@ function parseSelection(
       sections.map((section) => `${section.pageKey}\0${section.sectionId}`),
     ).size !== sections.length
   ) {
-    throw new Error('CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID');
+    throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
   }
   return { sections };
 }
@@ -189,17 +189,17 @@ function selectedTemplateItems(
   const dynamic = Object.entries(clone).find(([, value]) =>
     Array.isArray(value),
   );
-  if (!dynamic) throw new Error('CONTROLLED_ASSEMBLY_ITEM_SELECTION_INVALID');
+  if (!dynamic) throw new Error("CONTROLLED_ASSEMBLY_ITEM_SELECTION_INVALID");
   const [key, values] = dynamic as [string, unknown[]];
   if (indexes.some((index) => index >= values.length)) {
-    throw new Error('CONTROLLED_ASSEMBLY_ITEM_SELECTION_INVALID');
+    throw new Error("CONTROLLED_ASSEMBLY_ITEM_SELECTION_INVALID");
   }
   clone[key] = indexes.map((index) => values[index]);
   return clone;
 }
 
 function digest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function deterministicSelection(input: {
@@ -258,19 +258,19 @@ function assetRoleMap(input: {
   return new Map(
     Object.entries(input.assets).map(([referenceId, asset]) => {
       const roles = new Set<string>();
-      if (asset.source === 'catalog') {
+      if (asset.source === "catalog") {
         const catalogAsset = pack?.assets.find(
           (candidate) => candidate.id === asset.catalogAssetId,
         );
         if (catalogAsset) roles.add(catalogAsset.role);
       } else {
-        if (asset.kind === 'logo') roles.add('logo');
-        if (asset.kind === 'product_image') roles.add('generic-product');
-        if (asset.kind === 'factory_image') {
-          roles.add('hero');
-          roles.add('generic-process');
+        if (asset.kind === "logo") roles.add("logo");
+        if (asset.kind === "product_image") roles.add("generic-product");
+        if (asset.kind === "factory_image") {
+          roles.add("hero");
+          roles.add("generic-process");
         }
-        if (asset.kind === 'cert') roles.add('evidence');
+        if (asset.kind === "cert") roles.add("evidence");
       }
       return [referenceId, roles] as const;
     }),
@@ -309,7 +309,7 @@ function buildSpec(input: {
   const rolesByAsset = assetRoleMap(input);
   const pages = Object.entries(input.brief.blueprintIds)
     .sort(([left], [right]) =>
-      left === 'home' ? -1 : right === 'home' ? 1 : left.localeCompare(right),
+      left === "home" ? -1 : right === "home" ? 1 : left.localeCompare(right),
     )
     .map(([pageKey, blueprintId]) => {
       const blueprint = family.blueprints[pageKey]!.find(
@@ -317,7 +317,7 @@ function buildSpec(input: {
       )!;
       return {
         id: pageKey,
-        path: pageKey === 'home' ? '/' : `/${pageKey}`,
+        path: pageKey === "home" ? "/" : `/${pageKey}`,
         seo: {
           titleKey: `seo.${pageKey}.title`,
           descriptionKey: `seo.${pageKey}.description`,
@@ -359,7 +359,7 @@ function buildSpec(input: {
       };
     });
   return {
-    specVersion: '1.1.0',
+    specVersion: "1.1.0",
     componentLibraryVersion: input.brief.componentLibraryVersion,
     rendererVersion: input.brief.rendererVersion,
     site: {
@@ -404,16 +404,28 @@ function safeBrief(
 }
 
 function mustNotFallback(error: unknown): boolean {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String(error.name)
+      : "";
   const code =
-    record(error) && typeof error.code === 'string' ? error.code : '';
+    record(error) && typeof error.code === "string" ? error.code : "";
   const message = error instanceof Error ? error.message : String(error);
-  return [
-    'TASK_CANCELLED',
-    'BUILD_CANCELLED',
-    'BUDGET_KILL_SWITCH',
-    'TASK_SETTLEMENT_UNKNOWN',
-    'MODEL_LEDGER_SETTLEMENT_UNKNOWN',
-  ].some((marker) => code === marker || message.includes(marker));
+  return (
+    [
+      "TASK_CANCELLED",
+      "BUILD_CANCELLED",
+      "BUDGET_KILL_SWITCH",
+      "TASK_SETTLEMENT_UNKNOWN",
+      "MODEL_LEDGER_SETTLEMENT_UNKNOWN",
+    ].some((marker) => code === marker || message.includes(marker)) ||
+    [
+      "PaidCallDeniedError",
+      "PaidOperationUnknownError",
+      "CancellationError",
+      "CancelledFailure",
+    ].includes(name)
+  );
 }
 
 export class ControlledAssemblyService {
@@ -483,7 +495,7 @@ export class ControlledAssemblyService {
       assetIds: new Set(Object.keys(input.assets)),
       claimIds: new Set(input.claimSnapshot.items.map((item) => item.claimId)),
     };
-    const attempts: ControlledAssemblyResult['attempts'] = [];
+    const attempts: ControlledAssemblyResult["attempts"] = [];
     let previousCandidateDigest: string | undefined;
     let findings: AssemblyFinding[] = [];
     for (const taskId of CONTROLLED_ASSEMBLY_TASK_IDS) {
@@ -547,15 +559,15 @@ export class ControlledAssemblyService {
       claimSnapshot: input.claimSnapshot,
       copySlots,
     });
-    attempts.push({ taskId: 'same-family-safe-fallback', findings });
+    attempts.push({ taskId: "same-family-safe-fallback", findings });
     if (findings.length > 0) {
       throw new ControlledAssemblyError(
-        'CONTROLLED_ASSEMBLY_INVALID',
+        "CONTROLLED_ASSEMBLY_INVALID",
         `three repair attempts and same-family safe fallback failed: ${findings
           .map(
             (finding) => `${finding.layer}/${finding.code}:${finding.message}`,
           )
-          .join('; ')}`,
+          .join("; ")}`,
         attempts,
       );
     }

@@ -389,6 +389,10 @@ export function themeToCssVars(
     '--c-on-dark-muted': c.onDarkMuted,
     '--font-body': tokens.typography.fontBody,
     '--font-heading': tokens.typography.fontHeading,
+    '--font-sans': tokens.typography.fontBody,
+    '--font-display': tokens.typography.fontHeading,
+    '--font-mono':
+      "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     '--radius': tokens.radius,
     '--radius-lg': tokens.radiusLg,
   };

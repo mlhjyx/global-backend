@@ -17,8 +17,9 @@ paths = [
   '''apps/api/scripts/acq-multi-country\.mts''',
   '''apps/api/scripts/discover-fair-algolia\.mjs''',
 ]
-# site-renderer fixtures 的 crew.mN.<field> 是 SiteSpec i18n key（非 token、非凭证，已核验），
-# 精确放行该 key 模式而非整目录，保留对未来真实 secret 的扫描。
+# site-renderer fixtures 的 crew.mN.<field> 与六个 M1-e-B Family 的稳定文案路径是
+# SiteSpec i18n key（非 token、非凭证，已核验）。精确放行这些 key 模式而非整目录，
+# 保留对未来真实 secret 的扫描。
 # 兜底：这些公开串出现在任何文件都放行（RX 共用 public key + 展会 slug + EU FSF 公开 token）
 regexes = [
   '''d5cd7d4ec26134ff4a34d736a7f9ad47''',
@@ -26,4 +27,6 @@ regexes = [
   '''dG9rZW4tMjAxNw''',
   # site-renderer fixture 的 crew.mN.<field> 是 SiteSpec i18n key（非 token、非凭证，已核验），精确放行该模式
   '''crew\.[a-z0-9]+\.[a-z]+''',
+  # M1-e-B Golden 只生成 home/detail.<section>.<semantic-field> 稳定 CopySlot 路径。
+  '''(?:home|detail)\.[a-z0-9-]+\.(?:[a-z0-9]+\.)*[a-z0-9]+''',
 ]

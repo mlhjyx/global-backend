@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "site-builder-m1-e-b-golden-manifest/v1",
+  "catalogVersion": "m1-e-b/1.0.0",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "fixtures": [
+    {
+      "id": "natural-origin-rich",
+      "mode": "rich",
+      "familyId": "natural-origin",
+      "designBriefDigest": "46d3e0935a4fa69b578f5b318be98a12ac2c60de7fa5079af3d09c8849b5f40d",
+      "specSha256": "b1aba2999ad20c6c8a609cf7290d8a6cba6edca6f1da7a0ade3e9e177d4d76d4"
+    },
+    {
+      "id": "natural-origin-sparse",
+      "mode": "sparse",
+      "familyId": "natural-origin",
+      "designBriefDigest": "b64a76cb426136f0aad7583e704bebfb5c73b7050bb24130fd413e31837e8950",
+      "specSha256": "46ec432348292abeef2925c88e44a6b89ee4ebc03123f68385a135df24ef1394"
+    },
+    {
+      "id": "oem-capability-rich",
+      "mode": "rich",
+      "familyId": "oem-capability",
+      "designBriefDigest": "15343ffac06a5c22404520e0570cac7d854cbf777a48e1d3f5e7842361d5cb3d",
+      "specSha256": "52b6295cab5a997a3891548f6c76826ec1ed4306a0ef63750c727367bb38d58a"
+    },
+    {
+      "id": "oem-capability-sparse",
+      "mode": "sparse",
+      "familyId": "oem-capability",
+      "designBriefDigest": "41c391ca2501a50b2948008c79d722e0872cd5e4dcd4952e271ac8d628bc9a7e",
+      "specSha256": "60e0fc38cd536f0598aff4a49a07b57f065bc69b8f7c125e2b8d21de5567b2dd"
+    },
+    {
+      "id": "precision-industrial-rich",
+      "mode": "rich",
+      "familyId": "precision-industrial",
+      "designBriefDigest": "b674c44443a9d74dedb39cf5c53eca10081f7655360e2de04fe9ff004a5d4190",
+      "specSha256": "1b7d563d7b1a50eb56a6f6d493b8b1d99d06c2119118e9bf51b61ea49f6fcb6a"
+    },
+    {
+      "id": "precision-industrial-sparse",
+      "mode": "sparse",
+      "familyId": "precision-industrial",
+      "designBriefDigest": "b9df4dfba24835d40cf9bdebba33680578e0cc4bc55e82ea58337a8669b5d7f4",
+      "specSha256": "b62c6f0f17469089a1c42ca54ca860ce9a62c98ceecbc4c857d0a4ba137cf683"
+    },
+    {
+      "id": "premium-innovation-rich",
+      "mode": "rich",
+      "familyId": "premium-innovation",
+      "designBriefDigest": "1a14f07310614e45fcefb173444758dee69b48bd7df1fd9c3e7d403fc85dad43",
+      "specSha256": "d2975171d06f4fcd205c2a30a375dad91d04ae4ec09e468dc35b09c6d464ff88"
+    },
+    {
+      "id": "premium-innovation-sparse",
+      "mode": "sparse",
+      "familyId": "premium-innovation",
+      "designBriefDigest": "f62d927e5002971cb3f7272474e481b0e5e6908b733a57a6b8e1b164bbcc75b3",
+      "specSha256": "db81903261fbe0ba5393728ca1dbe5c36cb13e80670530460f1b5ddc8ee3465c"
+    },
+    {
+      "id": "scientific-trust-rich",
+      "mode": "rich",
+      "familyId": "scientific-trust",
+      "designBriefDigest": "f4ed405b35a3b7aaa31d11f494dd4703cf037ecb8fa7be3891b6527835009977",
+      "specSha256": "f92fa7a7cc7d3d876d0c253ac9f0ff648e4fe164020ae596a2f31168b79f2258"
+    },
+    {
+      "id": "scientific-trust-sparse",
+      "mode": "sparse",
+      "familyId": "scientific-trust",
+      "designBriefDigest": "f3f842c90b98d90125154810e66ef2d87fe0615933bb89b79abc525f2d8cbf28",
+      "specSha256": "6160bbf747542956c74c29eea36d29c68f1b16eacc36bd92135ea1fede61d1a5"
+    },
+    {
+      "id": "technical-catalog-rich",
+      "mode": "rich",
+      "familyId": "technical-catalog",
+      "designBriefDigest": "11918d7c84fcb79550c7fd3f4c1c0bfef263098decdc4da527014ee4e0ecfd83",
+      "specSha256": "431e5a427b79ae4e5072df3cdecee469ef2c0f54304695a5ac4c3ed39c27e869"
+    },
+    {
+      "id": "technical-catalog-sparse",
+      "mode": "sparse",
+      "familyId": "technical-catalog",
+      "designBriefDigest": "9170fce45b43468be372610cfebe68d4fad9b70a989b5dccb4e2fb33e3a8fbd3",
+      "specSha256": "3a3996ca03008cd7d4ec558e198326519b2be17cbb9319dabc9a25f7d1d47956"
+    }
+  ]
+}

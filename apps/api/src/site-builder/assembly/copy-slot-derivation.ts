@@ -3,9 +3,9 @@ import {
   type DesignBriefV2,
   type DesignCatalogV2,
   type SiteSpecComponentType,
-} from '@global/contracts';
-import type { CopySlotDefinition } from '../copy-bundle.service';
-import { COMPONENT_ASSEMBLY_ADAPTERS } from './component-assembly-adapters';
+} from "@global/contracts";
+import type { CopySlotDefinition } from "../copy-bundle.service";
+import { COMPONENT_ASSEMBLY_ADAPTERS } from "./component-assembly-adapters";
 
 export interface QualifiedComponentTemplateRepository {
   /** Returns a trusted M1-e-A fixture template, never model output. */
@@ -13,7 +13,7 @@ export interface QualifiedComponentTemplateRepository {
 }
 
 function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function slotKey(
@@ -23,9 +23,9 @@ function slotKey(
 ): string {
   return `${pageKey}.${sectionId}.${path
     .map(String)
-    .join('.')
-    .replace(/key$/i, '')
-    .replace(/[^A-Za-z0-9._-]/g, '-')}`.toLowerCase();
+    .join(".")
+    .replace(/key$/i, "")
+    .replace(/[^A-Za-z0-9._-]/g, "-")}`.toLowerCase();
 }
 
 function semanticLimit(
@@ -33,12 +33,21 @@ function semanticLimit(
   property: string,
 ): number {
   const normalized = property
-    .replace(/key$/i, '')
-    .replace(/^q$/i, 'question')
-    .replace(/^a$/i, 'answer')
-    .replace(/^sub$/i, 'subhead')
-    .replace(/^desc$/i, 'description')
+    .replace(/key$/i, "")
+    .replace(/^q$/i, "question")
+    .replace(/^a$/i, "answer")
+    .replace(/^sub$/i, "subhead")
+    .replace(/^desc$/i, "description")
     .toLowerCase();
+  if (normalized.includes("cta") && limits.cta !== undefined) {
+    return limits.cta;
+  }
+  if (
+    /(?:^|\.)(?:h1|headline)/.test(normalized) &&
+    (limits.title !== undefined || limits.headline !== undefined)
+  ) {
+    return limits.title ?? limits.headline!;
+  }
   const exact = Object.entries(limits).find(
     ([key]) => key.toLowerCase() === normalized,
   )?.[1];
@@ -73,17 +82,39 @@ function collectTemplateSlots(input: {
     return;
   }
   if (!record(input.value)) return;
+  const compositeTitleKeys = Object.keys(input.value).filter((key) =>
+    /^(?:title(?:accent|line\d+)?|h1(?:accent|line\d+|[abc])?)key$/i.test(key),
+  );
+  const compositeTitleLimit =
+    compositeTitleKeys.length > 1
+      ? Math.max(
+          1,
+          Math.floor(
+            (Math.min(
+              input.familyMaximum,
+              semanticLimit(input.componentLimits, "title"),
+            ) -
+              (compositeTitleKeys.length - 1)) /
+              compositeTitleKeys.length,
+          ),
+        )
+      : undefined;
   for (const [key, value] of Object.entries(input.value)) {
     const childPath = [...path, key];
-    if (key.endsWith('Key') && typeof value === 'string') {
+    if (key.endsWith("Key") && typeof value === "string") {
       input.output.push({
         key: slotKey(input.pageKey, input.sectionId, childPath),
         type: /body|description|intro|statement|answer/i.test(key)
-          ? 'rich_text'
-          : 'plain_text',
+          ? "rich_text"
+          : "plain_text",
         maxGraphemes: Math.min(
           input.familyMaximum,
-          semanticLimit(input.componentLimits, key),
+          compositeTitleLimit !== undefined && compositeTitleKeys.includes(key)
+            ? compositeTitleLimit
+            : semanticLimit(
+                input.componentLimits,
+                childPath.map(String).join("."),
+              ),
         ),
         factual: input.factual,
       });
@@ -109,9 +140,39 @@ export function deriveCopySlotDefinitions(input: {
   );
   const output: CopySlotDefinition[] = [
     {
-      key: 'footer.tagline',
-      type: 'plain_text',
+      key: "footer.tagline",
+      type: "plain_text",
       maxGraphemes: 120,
+      factual: false,
+    },
+    {
+      key: "inquiry.field.name",
+      type: "form_label",
+      maxGraphemes: 48,
+      factual: false,
+    },
+    {
+      key: "inquiry.field.email",
+      type: "form_label",
+      maxGraphemes: 48,
+      factual: false,
+    },
+    {
+      key: "inquiry.field.message",
+      type: "form_label",
+      maxGraphemes: 48,
+      factual: false,
+    },
+    {
+      key: "inquiry.submit",
+      type: "cta_label",
+      maxGraphemes: 24,
+      factual: false,
+    },
+    {
+      key: "inquiry.m0.note",
+      type: "plain_text",
+      maxGraphemes: 160,
       factual: false,
     },
   ];
@@ -129,19 +190,19 @@ export function deriveCopySlotDefinitions(input: {
     output.push(
       {
         key: `nav.${pageKey}`,
-        type: 'plain_text',
+        type: "plain_text",
         maxGraphemes: 32,
         factual: false,
       },
       {
         key: `seo.${pageKey}.title`,
-        type: 'seo_title',
+        type: "seo_title",
         maxGraphemes: 60,
         factual: false,
       },
       {
         key: `seo.${pageKey}.description`,
-        type: 'seo_description',
+        type: "seo_description",
         maxGraphemes: 160,
         factual: false,
       },
@@ -184,7 +245,7 @@ export function deriveCopySlotDefinitions(input: {
   }
   const unique = new Map(output.map((slot) => [slot.key, slot]));
   if (unique.size !== output.length) {
-    throw new Error('CONTROLLED_ASSEMBLY_COPY_SLOT_DUPLICATE');
+    throw new Error("CONTROLLED_ASSEMBLY_COPY_SLOT_DUPLICATE");
   }
   return [...unique.values()].sort((left, right) =>
     left.key.localeCompare(right.key),

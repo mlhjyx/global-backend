@@ -1,0 +1,222 @@
+{
+  "schemaVersion": "site-builder-m1-e-b-visual-evidence/v1",
+  "screenshotCount": 36,
+  "screenshots": [
+    {
+      "fixtureId": "natural-origin-rich",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/natural-origin-rich.png",
+      "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d"
+    },
+    {
+      "fixtureId": "natural-origin-sparse",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/natural-origin-sparse.png",
+      "sha256": "b3b77146c459d33a44c54e8224ea9e33351cd7e6a6dff6299f01e8f2f1cb15da"
+    },
+    {
+      "fixtureId": "oem-capability-rich",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/oem-capability-rich.png",
+      "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20"
+    },
+    {
+      "fixtureId": "oem-capability-sparse",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/oem-capability-sparse.png",
+      "sha256": "a19050ae8f46d8773503bee8d54c89d0f4847696d6743949003238941dbfe9a4"
+    },
+    {
+      "fixtureId": "precision-industrial-rich",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/precision-industrial-rich.png",
+      "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d"
+    },
+    {
+      "fixtureId": "precision-industrial-sparse",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/precision-industrial-sparse.png",
+      "sha256": "3ca115eb70b3f7ab041d17e440c21d6f656257eec1c27850ee25350ece494f52"
+    },
+    {
+      "fixtureId": "premium-innovation-rich",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/premium-innovation-rich.png",
+      "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8"
+    },
+    {
+      "fixtureId": "premium-innovation-sparse",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/premium-innovation-sparse.png",
+      "sha256": "358cb3a25327c2aa9bd8a94c5b2a1aa4f81ebc502752967c3534ab42a5dc23ce"
+    },
+    {
+      "fixtureId": "scientific-trust-rich",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/scientific-trust-rich.png",
+      "sha256": "2035e5459beb3db41bded7ce79293271b232efcda7a531990e782a74137ac507"
+    },
+    {
+      "fixtureId": "scientific-trust-sparse",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/scientific-trust-sparse.png",
+      "sha256": "6693d3c9701d1828023256059cf95cca2bc7760b61ed64608c8cda2ad4ce9704"
+    },
+    {
+      "fixtureId": "technical-catalog-rich",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/technical-catalog-rich.png",
+      "sha256": "e6fe78b197ca137b0d270f91311e5182fd2903ab95a0421b854ba8ac7be8ed09"
+    },
+    {
+      "fixtureId": "technical-catalog-sparse",
+      "viewport": "desktop-1440",
+      "path": "desktop-1440/technical-catalog-sparse.png",
+      "sha256": "2a18c245c9243c8feabca056d810884cb856f2b8533bd3b19f6d7b65ba1c4ca8"
+    },
+    {
+      "fixtureId": "natural-origin-rich",
+      "viewport": "mobile-375",
+      "path": "mobile-375/natural-origin-rich.png",
+      "sha256": "53bc46f65d9ea4a0f2f7322e66474e30dc78e96be59ef1d8b69123fb3c3b3505"
+    },
+    {
+      "fixtureId": "natural-origin-sparse",
+      "viewport": "mobile-375",
+      "path": "mobile-375/natural-origin-sparse.png",
+      "sha256": "090672532aeb4d10498a78f85d05bcfdd706863a96c6d01976f32ed86385535b"
+    },
+    {
+      "fixtureId": "oem-capability-rich",
+      "viewport": "mobile-375",
+      "path": "mobile-375/oem-capability-rich.png",
+      "sha256": "35fe5e3915d319594d2a69e643878d5e006145a74ed66ec69278bf4f94e43e69"
+    },
+    {
+      "fixtureId": "oem-capability-sparse",
+      "viewport": "mobile-375",
+      "path": "mobile-375/oem-capability-sparse.png",
+      "sha256": "2a3763688144d8548f60d5f1996cb1e1f224682d37e013442aeb64bd2fdf93bb"
+    },
+    {
+      "fixtureId": "precision-industrial-rich",
+      "viewport": "mobile-375",
+      "path": "mobile-375/precision-industrial-rich.png",
+      "sha256": "860aa2b7790e4e7546e9d525f5fc001549dfb080c189227c30773518b51d8856"
+    },
+    {
+      "fixtureId": "precision-industrial-sparse",
+      "viewport": "mobile-375",
+      "path": "mobile-375/precision-industrial-sparse.png",
+      "sha256": "3d39b96dea60bf1dcec40a65f2aaff8e1e56df6bcd5d1062963b74db8fa3fc76"
+    },
+    {
+      "fixtureId": "premium-innovation-rich",
+      "viewport": "mobile-375",
+      "path": "mobile-375/premium-innovation-rich.png",
+      "sha256": "88f3b53243fb6f70559907e375e8d38cc3f312557d1d8da4411a5a7c9f5b696f"
+    },
+    {
+      "fixtureId": "premium-innovation-sparse",
+      "viewport": "mobile-375",
+      "path": "mobile-375/premium-innovation-sparse.png",
+      "sha256": "8d518c3e66f384e08e989c295a6dae7047a0c412663637bfb02c081b11cd7f65"
+    },
+    {
+      "fixtureId": "scientific-trust-rich",
+      "viewport": "mobile-375",
+      "path": "mobile-375/scientific-trust-rich.png",
+      "sha256": "a1f4dceb9673a143d0851d9c1f6971f2fe743e070425e2880795c064a461c4b2"
+    },
+    {
+      "fixtureId": "scientific-trust-sparse",
+      "viewport": "mobile-375",
+      "path": "mobile-375/scientific-trust-sparse.png",
+      "sha256": "09d4ba44112a2b0b48735e86ab2eb8a0a738e12c7c682c601297c3239ff6670f"
+    },
+    {
+      "fixtureId": "technical-catalog-rich",
+      "viewport": "mobile-375",
+      "path": "mobile-375/technical-catalog-rich.png",
+      "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff"
+    },
+    {
+      "fixtureId": "technical-catalog-sparse",
+      "viewport": "mobile-375",
+      "path": "mobile-375/technical-catalog-sparse.png",
+      "sha256": "15abc0d577087a74d8e870417336c476607c25c0934d719eb0c9f315e5e6c7ec"
+    },
+    {
+      "fixtureId": "natural-origin-rich",
+      "viewport": "tablet-768",
+      "path": "tablet-768/natural-origin-rich.png",
+      "sha256": "44050f8d4638ed3e3cf27dd0676b6e37f73ef2b9eeeda3a898d4c350197cda26"
+    },
+    {
+      "fixtureId": "natural-origin-sparse",
+      "viewport": "tablet-768",
+      "path": "tablet-768/natural-origin-sparse.png",
+      "sha256": "46242f0c1e2bf2f77cc999d9045db204ca2034bb7c13b996808cb76c82fe95ee"
+    },
+    {
+      "fixtureId": "oem-capability-rich",
+      "viewport": "tablet-768",
+      "path": "tablet-768/oem-capability-rich.png",
+      "sha256": "dcfd49e2768db5b77fc181339d6244ad5e25a0a398a95041f12941a9c2292392"
+    },
+    {
+      "fixtureId": "oem-capability-sparse",
+      "viewport": "tablet-768",
+      "path": "tablet-768/oem-capability-sparse.png",
+      "sha256": "5f0c4dd1946e930a437b2b94013c7e73ca440af5493ea6326d11fbd5260b1870"
+    },
+    {
+      "fixtureId": "precision-industrial-rich",
+      "viewport": "tablet-768",
+      "path": "tablet-768/precision-industrial-rich.png",
+      "sha256": "af04b99982fe03871afe286f43bc0b922609213926c68f2b72258b25b9f3dca9"
+    },
+    {
+      "fixtureId": "precision-industrial-sparse",
+      "viewport": "tablet-768",
+      "path": "tablet-768/precision-industrial-sparse.png",
+      "sha256": "f618bdc09a6630f080e1b0f63224145a9ebf44125037be68cfa0100106f2d79c"
+    },
+    {
+      "fixtureId": "premium-innovation-rich",
+      "viewport": "tablet-768",
+      "path": "tablet-768/premium-innovation-rich.png",
+      "sha256": "a32ec3fd0741c525fb82906ede7a128e99aaf7faba0572e69c84c84ec2d5b461"
+    },
+    {
+      "fixtureId": "premium-innovation-sparse",
+      "viewport": "tablet-768",
+      "path": "tablet-768/premium-innovation-sparse.png",
+      "sha256": "b4b3eb2f7f45831d993e5181351541f4daa39e52bd026f1e421183c02546f136"
+    },
+    {
+      "fixtureId": "scientific-trust-rich",
+      "viewport": "tablet-768",
+      "path": "tablet-768/scientific-trust-rich.png",
+      "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8"
+    },
+    {
+      "fixtureId": "scientific-trust-sparse",
+      "viewport": "tablet-768",
+      "path": "tablet-768/scientific-trust-sparse.png",
+      "sha256": "b746865c6328fb065a3386dd7e2bc93b919d46d4a75f3a62e9178c8bcfe75bc8"
+    },
+    {
+      "fixtureId": "technical-catalog-rich",
+      "viewport": "tablet-768",
+      "path": "tablet-768/technical-catalog-rich.png",
+      "sha256": "219a56e239c9a22f97dd957d96250db7e6d93e2abf1c59d98fb65c76e8d335a3"
+    },
+    {
+      "fixtureId": "technical-catalog-sparse",
+      "viewport": "tablet-768",
+      "path": "tablet-768/technical-catalog-sparse.png",
+      "sha256": "dd646a509ec3bc22ee4a42397564347c3cff05a69bfd65d9decd0bd0cd115f16"
+    }
+  ]
+}

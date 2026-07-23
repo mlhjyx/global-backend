@@ -12,6 +12,10 @@ export interface PublishableClaimSnapshotRepository {
     workspaceId: string,
     buildRunId: string,
   ): Promise<PublishableClaimSnapshot | null>;
+  findById(
+    workspaceId: string,
+    snapshotId: string,
+  ): Promise<PublishableClaimSnapshot | null>;
   getSiteCompanyProfileId(
     workspaceId: string,
     siteId: string,

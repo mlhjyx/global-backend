@@ -1,9 +1,10 @@
-import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const BUILD_TIMEOUT_MS = 180_000;
@@ -27,35 +28,36 @@ export type RendererBuildExecutor = (
  */
 export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
   return {
-    NODE_ENV: 'production',
-    LANG: 'C.UTF-8',
-    TZ: 'UTC',
+    NODE_ENV: "production",
+    LANG: "C.UTF-8",
+    TZ: "UTC",
     SITESPEC_PATH: input.specPath,
     OUT_DIR: input.outDir,
     BASE_PATH: input.basePath,
     ...(input.publicAssetDir ? { PUBLIC_ASSET_DIR: input.publicAssetDir } : {}),
-    ASTRO_TELEMETRY_DISABLED: '1',
+    ASTRO_TELEMETRY_DISABLED: "1",
   };
 }
 
-function resolveRendererEntrypoint(cwd = process.cwd()): {
+export function resolveRendererEntrypoint(cwd = process.cwd()): {
   rendererRoot: string;
   astroCli: string;
 } {
   const candidates = [
-    path.join(cwd, 'apps', 'site-renderer'),
-    path.join(cwd, '..', 'site-renderer'),
+    path.join(cwd, "apps", "site-renderer"),
+    path.join(cwd, "..", "site-renderer"),
   ];
-  const requireFromCwd = createRequire(path.join(cwd, 'package.json'));
+  const requireFromCwd = createRequire(path.join(cwd, "package.json"));
 
   for (const rendererRoot of candidates) {
+    if (!existsSync(rendererRoot)) continue;
     try {
-      const astroPackage = requireFromCwd.resolve('astro/package.json', {
+      const astroPackage = requireFromCwd.resolve("astro/package.json", {
         paths: [rendererRoot],
       });
       return {
         rendererRoot,
-        astroCli: path.join(path.dirname(astroPackage), 'astro.js'),
+        astroCli: path.join(path.dirname(astroPackage), "astro.js"),
       };
     } catch {
       // Try the next supported monorepo working directory shape.
@@ -65,10 +67,21 @@ function resolveRendererEntrypoint(cwd = process.cwd()): {
   throw new Error(`site renderer dependencies not found from ${cwd}`);
 }
 
-/** 用固定 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
+function resolveNodeExecutable(): string {
+  const candidates =
+    process.platform === "linux"
+      ? ["/proc/self/exe", process.execPath, process.argv0]
+      : [process.execPath, process.argv0];
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate) && existsSync(candidate)) return candidate;
+  }
+  throw new Error("RENDERER_NODE_EXECUTABLE_UNAVAILABLE");
+}
+
+/** 用已解析的 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
 export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   const { rendererRoot, astroCli } = resolveRendererEntrypoint();
-  await execFileAsync(process.execPath, [astroCli, 'build'], {
+  await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
     cwd: rendererRoot,
     env: buildRendererEnv(input),
     timeout: BUILD_TIMEOUT_MS,
@@ -81,17 +94,27 @@ export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
 }
 
 const SCANNED_RENDER_EXTENSIONS = new Set([
-  '.html',
-  '.css',
-  '.js',
-  '.mjs',
-  '.json',
-  '.xml',
-  '.svg',
-  '.txt',
+  ".html",
+  ".css",
+  ".js",
+  ".mjs",
+  ".json",
+  ".xml",
+  ".svg",
+  ".txt",
 ]);
-const OUTBOUND_URL = /(?:https?:)?\/\/[^\s"'<>)}\\]+/giu;
+// A bare `//` is common inside base64-encoded font data. Protocol-relative URLs
+// must therefore begin at a non-base64 boundary and contain a DNS-shaped host.
+const OUTBOUND_URL =
+  /(?<![A-Za-z0-9+/=])(?:https?:\/\/[^\s"'<>)}\\]+|\/\/(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?[^\s"'<>)}\\]*)/giu;
 const MAX_SCANNED_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+function navigableOutputText(value: string): string {
+  return value
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, "")
+    .replace(/\bxmlns(?::[A-Za-z][\w.-]*)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
+}
 
 /** Post-build gate covers HTML, CSS and bundled JS rather than trusting component props alone. */
 export async function assertRenderedOutboundDomains(
@@ -107,7 +130,7 @@ export async function assertRenderedOutboundDomains(
     for (const entry of entries) {
       const filePath = path.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
-        throw new Error('RENDERER_OUTPUT_SYMLINK_FORBIDDEN');
+        throw new Error("RENDERER_OUTPUT_SYMLINK_FORBIDDEN");
       }
       if (entry.isDirectory()) {
         await visit(filePath);
@@ -119,20 +142,20 @@ export async function assertRenderedOutboundDomains(
       ) {
         continue;
       }
-      const value = await readFile(filePath, 'utf8');
+      const value = await readFile(filePath, "utf8");
       scannedBytes += Buffer.byteLength(value);
       if (scannedBytes > MAX_SCANNED_OUTPUT_BYTES) {
-        throw new Error('RENDERER_OUTPUT_SCAN_LIMIT_EXCEEDED');
+        throw new Error("RENDERER_OUTPUT_SCAN_LIMIT_EXCEEDED");
       }
-      for (const raw of value.match(OUTBOUND_URL) ?? []) {
+      for (const raw of navigableOutputText(value).match(OUTBOUND_URL) ?? []) {
         let parsed: URL;
         try {
-          parsed = new URL(raw.startsWith('//') ? `https:${raw}` : raw);
+          parsed = new URL(raw.startsWith("//") ? `https:${raw}` : raw);
         } catch {
           throw new Error(`RENDERER_OUTBOUND_URL_INVALID: ${raw}`);
         }
         if (
-          parsed.protocol !== 'https:' ||
+          parsed.protocol !== "https:" ||
           !approved.has(parsed.hostname.toLowerCase())
         ) {
           throw new Error(
@@ -146,12 +169,12 @@ export async function assertRenderedOutboundDomains(
 }
 
 function allowedOutboundDomains(spec: unknown): string[] {
-  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return [];
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return [];
   const site = (spec as Record<string, unknown>).site;
-  if (!site || typeof site !== 'object' || Array.isArray(site)) return [];
+  if (!site || typeof site !== "object" || Array.isArray(site)) return [];
   const domains = (site as Record<string, unknown>).outboundDomains;
   return Array.isArray(domains) &&
-    domains.every((value) => typeof value === 'string')
+    domains.every((value) => typeof value === "string")
     ? domains
     : [];
 }
@@ -166,12 +189,12 @@ export async function buildSiteSpecWithTemporaryFile(
   output: { outDir: string; basePath: string; publicAssetDir?: string },
   execute: RendererBuildExecutor = runAstroBuild,
 ): Promise<void> {
-  const tempDir = await mkdtemp(path.join(tmpdir(), 'global-site-renderer-'));
-  const specPath = path.join(tempDir, 'site-spec.json');
+  const tempDir = await mkdtemp(path.join(tmpdir(), "global-site-renderer-"));
+  const specPath = path.join(tempDir, "site-spec.json");
 
   try {
     await writeFile(specPath, JSON.stringify(spec), {
-      encoding: 'utf8',
+      encoding: "utf8",
       mode: 0o600,
     });
     await execute({

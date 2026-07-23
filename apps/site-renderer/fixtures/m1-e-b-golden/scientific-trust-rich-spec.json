@@ -1,0 +1,1643 @@
+{
+  "specVersion": "1.1.0",
+  "componentLibraryVersion": "m1-e-a/55-qualified",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "archetype": "equipment-supplier",
+    "familyId": "scientific-trust",
+    "dirByLocale": { "en": "ltr" },
+    "theme": { "preset": "precision-light" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.detail", "pageId": "detail" }
+    ],
+    "seoGlobal": { "siteName": "scientific-trust rich" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "MinimalHero",
+            "props": {
+              "id": "MinimalHero-home-scientific-home-evidence-hero",
+              "eyebrowKey": "home.scientific-home-evidence-hero.eyebrow",
+              "h1Key": "home.scientific-home-evidence-hero.h1",
+              "h1AccentKey": "home.scientific-home-evidence-hero.h1accent",
+              "subKey": "home.scientific-home-evidence-hero.sub",
+              "primaryCta": {
+                "labelKey": "home.scientific-home-evidence-hero.primarycta.label",
+                "pageId": "detail"
+              },
+              "secondaryCta": {
+                "labelKey": "home.scientific-home-evidence-hero.secondarycta.label",
+                "pageId": "detail"
+              },
+              "scrollKey": "home.scientific-home-evidence-hero.scroll",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "TrustSplit",
+            "props": {
+              "id": "TrustSplit-home-scientific-home-evidence-trust",
+              "eyebrowKey": "home.scientific-home-evidence-trust.eyebrow",
+              "titleKey": "home.scientific-home-evidence-trust.title",
+              "titleAccentKey": "home.scientific-home-evidence-trust.titleaccent",
+              "introKey": "home.scientific-home-evidence-trust.intro",
+              "stats": [
+                {
+                  "value": "24",
+                  "labelKey": "home.scientific-home-evidence-trust.stats.0.label"
+                },
+                {
+                  "value": "18",
+                  "labelKey": "home.scientific-home-evidence-trust.stats.1.label"
+                }
+              ],
+              "badges": ["Documented review", "Material traceability"],
+              "portraitNameKey": "home.scientific-home-evidence-trust.portraitname",
+              "portraitRoleKey": "home.scientific-home-evidence-trust.portraitrole",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CertWall",
+            "props": {
+              "id": "CertWall-home-scientific-home-evidence-certificates",
+              "titleKey": "home.scientific-home-evidence-certificates.title",
+              "certs": [
+                {
+                  "labelKey": "home.scientific-home-evidence-certificates.certs.0.label"
+                },
+                {
+                  "labelKey": "home.scientific-home-evidence-certificates.certs.1.label"
+                },
+                {
+                  "labelKey": "home.scientific-home-evidence-certificates.certs.2.label"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProductShowcaseAlt",
+            "props": {
+              "id": "ProductShowcaseAlt-home-scientific-home-evidence-products",
+              "chapterKey": "home.scientific-home-evidence-products.chapter",
+              "titleKey": "home.scientific-home-evidence-products.title",
+              "titleAccentKey": "home.scientific-home-evidence-products.titleaccent",
+              "introKey": "home.scientific-home-evidence-products.intro",
+              "configureCta": {
+                "labelKey": "home.scientific-home-evidence-products.configurecta.label",
+                "pageId": "detail"
+              },
+              "capacityLabelKey": "home.scientific-home-evidence-products.capacitylabel",
+              "weightLabelKey": "home.scientific-home-evidence-products.weightlabel",
+              "cyclesLabelKey": "home.scientific-home-evidence-products.cycleslabel",
+              "fromLabelKey": "home.scientific-home-evidence-products.fromlabel",
+              "f1Key": "home.scientific-home-evidence-products.f1",
+              "f2Key": "home.scientific-home-evidence-products.f2",
+              "products": [
+                {
+                  "code": "PX-24",
+                  "nameKey": "home.scientific-home-evidence-products.products.0.name",
+                  "taglineKey": "home.scientific-home-evidence-products.products.0.tagline",
+                  "capacityKey": "home.scientific-home-evidence-products.products.0.capacity",
+                  "weightKey": "home.scientific-home-evidence-products.products.0.weight",
+                  "cyclesKey": "home.scientific-home-evidence-products.products.0.cycles",
+                  "priceKey": "home.scientific-home-evidence-products.products.0.price",
+                  "asset": {
+                    "assetId": "catalog-scientific-trust-product-instrument",
+                    "variantUrl": "/assets/catalog/94cb6496ee466e8bd459ead9e0cac3df0a131af96cfaf7d0de52fa1a02ab94af.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ArticleGrid",
+            "props": {
+              "id": "ArticleGrid-home-scientific-home-evidence-articles",
+              "eyebrowKey": "home.scientific-home-evidence-articles.eyebrow",
+              "titleKey": "home.scientific-home-evidence-articles.title",
+              "titleLine2Key": "home.scientific-home-evidence-articles.titleline2",
+              "introKey": "home.scientific-home-evidence-articles.intro",
+              "items": [
+                {
+                  "cat": "Guides",
+                  "titleKey": "home.scientific-home-evidence-articles.items.0.title",
+                  "descKey": "home.scientific-home-evidence-articles.items.0.desc",
+                  "readTime": "4 min read"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-home-scientific-home-evidence-inquiry",
+              "titleKey": "home.scientific-home-evidence-inquiry.title",
+              "subKey": "home.scientific-home-evidence-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "path": "/detail",
+      "seo": {
+        "titleKey": "seo.detail.title",
+        "descriptionKey": "seo.detail.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-detail-scientific-validation-hero",
+              "headlineKey": "detail.scientific-validation-hero.headline",
+              "subheadKey": "detail.scientific-validation-hero.subhead",
+              "cta": {
+                "labelKey": "detail.scientific-validation-hero.cta.label"
+              },
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "TrustSplit",
+            "props": {
+              "id": "TrustSplit-detail-scientific-validation-trust",
+              "eyebrowKey": "detail.scientific-validation-trust.eyebrow",
+              "titleKey": "detail.scientific-validation-trust.title",
+              "titleAccentKey": "detail.scientific-validation-trust.titleaccent",
+              "introKey": "detail.scientific-validation-trust.intro",
+              "stats": [
+                {
+                  "value": "24",
+                  "labelKey": "detail.scientific-validation-trust.stats.0.label"
+                },
+                {
+                  "value": "18",
+                  "labelKey": "detail.scientific-validation-trust.stats.1.label"
+                }
+              ],
+              "badges": ["Documented review", "Material traceability"],
+              "portraitNameKey": "detail.scientific-validation-trust.portraitname",
+              "portraitRoleKey": "detail.scientific-validation-trust.portraitrole",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CertWall",
+            "props": {
+              "id": "CertWall-detail-scientific-validation-certificates",
+              "titleKey": "detail.scientific-validation-certificates.title",
+              "certs": [
+                {
+                  "labelKey": "detail.scientific-validation-certificates.certs.0.label"
+                },
+                {
+                  "labelKey": "detail.scientific-validation-certificates.certs.1.label"
+                },
+                {
+                  "labelKey": "detail.scientific-validation-certificates.certs.2.label"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ArticleGrid",
+            "props": {
+              "id": "ArticleGrid-detail-scientific-validation-articles",
+              "eyebrowKey": "detail.scientific-validation-articles.eyebrow",
+              "titleKey": "detail.scientific-validation-articles.title",
+              "titleLine2Key": "detail.scientific-validation-articles.titleline2",
+              "introKey": "detail.scientific-validation-articles.intro",
+              "items": [
+                {
+                  "cat": "Guides",
+                  "titleKey": "detail.scientific-validation-articles.items.0.title",
+                  "descKey": "detail.scientific-validation-articles.items.0.desc",
+                  "readTime": "4 min read"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CtaCenter",
+            "props": {
+              "id": "CtaCenter-detail-scientific-validation-cta",
+              "eyebrowKey": "detail.scientific-validation-cta.eyebrow",
+              "titleKey": "detail.scientific-validation-cta.title",
+              "titleAccentKey": "detail.scientific-validation-cta.titleaccent",
+              "subtitleKey": "detail.scientific-validation-cta.subtitle",
+              "primaryCta": {
+                "labelKey": "detail.scientific-validation-cta.primarycta.label",
+                "pageId": "detail"
+              },
+              "secondaryCta": {
+                "labelKey": "detail.scientific-validation-cta.secondarycta.label",
+                "pageId": "detail"
+              },
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {
+    "catalog-scientific-trust-hero-field": {
+      "source": "catalog",
+      "packId": "scientific-trust-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "scientific-trust-hero-field",
+      "sha256": "974186f8c186ea0e5ec6cc0b95fa912bc552fde20b63ec30310891f6c2382464",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-scientific-trust-product-instrument": {
+      "source": "catalog",
+      "packId": "scientific-trust-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "scientific-trust-product-instrument",
+      "sha256": "94cb6496ee466e8bd459ead9e0cac3df0a131af96cfaf7d0de52fa1a02ab94af",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-scientific-trust-process-sample": {
+      "source": "catalog",
+      "packId": "scientific-trust-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "scientific-trust-process-sample",
+      "sha256": "bc076be6569d4e4698ee0bceb8415f3c876ae83c233da057738d7669c44e59d4",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-scientific-trust-process-validation": {
+      "source": "catalog",
+      "packId": "scientific-trust-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "scientific-trust-process-validation",
+      "sha256": "29fcd01d518118505896f6d8855ce5cf0b334dae30db4df193762e6c9a1a428f",
+      "mimeType": "image/svg+xml"
+    }
+  },
+  "copyBundles": {
+    "en": {
+      "detail.scientific-solution-faq.items.0.a": "Further information is available on request.",
+      "detail.scientific-solution-faq.items.0.q": "Further information is available on request.",
+      "detail.scientific-solution-faq.items.1.a": "Further information is available on request.",
+      "detail.scientific-solution-faq.items.1.q": "Further information is available on request.",
+      "detail.scientific-solution-faq.title": "Practical solutions",
+      "detail.scientific-solution-features.eyebrow": "Further information is available on req…",
+      "detail.scientific-solution-features.intro": "Further information is available on request.",
+      "detail.scientific-solution-features.items.0.desc": "Further information is…",
+      "detail.scientific-solution-features.items.0.title": "Practical solutions",
+      "detail.scientific-solution-features.items.1.desc": "Further information is…",
+      "detail.scientific-solution-features.items.1.title": "Practical solutions",
+      "detail.scientific-solution-features.items.2.desc": "Further information is…",
+      "detail.scientific-solution-features.items.2.title": "Practical solutions",
+      "detail.scientific-solution-features.title": "Practical solutions",
+      "detail.scientific-solution-features.titleline2": "Further information is avail…",
+      "detail.scientific-solution-hero.cta.label": "Get in touch",
+      "detail.scientific-solution-hero.headline": "Practical solutions",
+      "detail.scientific-solution-hero.subhead": "Further information is available on request.",
+      "detail.scientific-solution-inquiry.sub": "Further information is available on request.",
+      "detail.scientific-solution-inquiry.title": "Practical solutions",
+      "detail.scientific-solution-process.eyebrow": "Further information is available on req…",
+      "detail.scientific-solution-process.intro": "Further information is available on request.",
+      "detail.scientific-solution-process.steps.0.body": "Further information is available on req…",
+      "detail.scientific-solution-process.steps.0.title": "Practical solutions",
+      "detail.scientific-solution-process.steps.1.body": "Further information is available on req…",
+      "detail.scientific-solution-process.steps.1.title": "Practical solutions",
+      "detail.scientific-solution-process.title": "Practical solutions",
+      "detail.scientific-solution-process.titleaccent": "Further information is avail…",
+      "detail.scientific-validation-articles.eyebrow": "Further information is available on req…",
+      "detail.scientific-validation-articles.intro": "Further information is available on request.",
+      "detail.scientific-validation-articles.items.0.desc": "Further information is availabl…",
+      "detail.scientific-validation-articles.items.0.title": "Practical solutions",
+      "detail.scientific-validation-articles.title": "Practical solutions",
+      "detail.scientific-validation-articles.titleline2": "Further information is avail…",
+      "detail.scientific-validation-certificates.certs.0.label": "Further information is available on request.",
+      "detail.scientific-validation-certificates.certs.1.label": "Further information is available on request.",
+      "detail.scientific-validation-certificates.certs.2.label": "Further information is available on request.",
+      "detail.scientific-validation-certificates.title": "Practical solutions",
+      "detail.scientific-validation-cta.eyebrow": "Further information is available on req…",
+      "detail.scientific-validation-cta.primarycta.label": "Get in touch",
+      "detail.scientific-validation-cta.secondarycta.label": "Get in touch",
+      "detail.scientific-validation-cta.subtitle": "Further information is available on request.",
+      "detail.scientific-validation-cta.title": "Practical solutions",
+      "detail.scientific-validation-cta.titleaccent": "Further information…",
+      "detail.scientific-validation-hero.cta.label": "Get in touch",
+      "detail.scientific-validation-hero.headline": "Practical solutions",
+      "detail.scientific-validation-hero.subhead": "Further information is available on request.",
+      "detail.scientific-validation-trust.eyebrow": "Further information is available on req…",
+      "detail.scientific-validation-trust.intro": "Further information is available on request.",
+      "detail.scientific-validation-trust.portraitname": "Further information is available on request.",
+      "detail.scientific-validation-trust.portraitrole": "Further information is available on request.",
+      "detail.scientific-validation-trust.stats.0.label": "Further information is available on request.",
+      "detail.scientific-validation-trust.stats.1.label": "Further information is available on request.",
+      "detail.scientific-validation-trust.title": "Practical solutions",
+      "detail.scientific-validation-trust.titleaccent": "Further information is avail…",
+      "footer.tagline": "Further information is available on request.",
+      "home.scientific-home-evidence-articles.eyebrow": "Further information is available on req…",
+      "home.scientific-home-evidence-articles.intro": "Further information is available on request.",
+      "home.scientific-home-evidence-articles.items.0.desc": "Further information is availabl…",
+      "home.scientific-home-evidence-articles.items.0.title": "Practical solutions",
+      "home.scientific-home-evidence-articles.title": "Practical solutions",
+      "home.scientific-home-evidence-articles.titleline2": "Further information is avail…",
+      "home.scientific-home-evidence-certificates.certs.0.label": "Further information is available on request.",
+      "home.scientific-home-evidence-certificates.certs.1.label": "Further information is available on request.",
+      "home.scientific-home-evidence-certificates.certs.2.label": "Further information is available on request.",
+      "home.scientific-home-evidence-certificates.title": "Practical solutions",
+      "home.scientific-home-evidence-hero.eyebrow": "Further information is available on request.",
+      "home.scientific-home-evidence-hero.h1": "Further information is available…",
+      "home.scientific-home-evidence-hero.h1accent": "Further information is available…",
+      "home.scientific-home-evidence-hero.primarycta.label": "Get in touch",
+      "home.scientific-home-evidence-hero.scroll": "Further information is available on request.",
+      "home.scientific-home-evidence-hero.secondarycta.label": "Get in touch",
+      "home.scientific-home-evidence-hero.sub": "Further information is available on request.",
+      "home.scientific-home-evidence-inquiry.sub": "Further information is available on request.",
+      "home.scientific-home-evidence-inquiry.title": "Practical solutions",
+      "home.scientific-home-evidence-products.capacitylabel": "Further information is available on request.",
+      "home.scientific-home-evidence-products.chapter": "Further information is available on req…",
+      "home.scientific-home-evidence-products.configurecta.label": "Further information is…",
+      "home.scientific-home-evidence-products.cycleslabel": "Further information is available on request.",
+      "home.scientific-home-evidence-products.f1": "Further information is…",
+      "home.scientific-home-evidence-products.f2": "Further information is…",
+      "home.scientific-home-evidence-products.fromlabel": "Further information is available on request.",
+      "home.scientific-home-evidence-products.intro": "Further information is available on request.",
+      "home.scientific-home-evidence-products.products.0.capacity": "Further information is…",
+      "home.scientific-home-evidence-products.products.0.cycles": "Further information is…",
+      "home.scientific-home-evidence-products.products.0.name": "Further information is available on request.",
+      "home.scientific-home-evidence-products.products.0.price": "Further information is…",
+      "home.scientific-home-evidence-products.products.0.tagline": "Further information is available on request.",
+      "home.scientific-home-evidence-products.products.0.weight": "Further information is…",
+      "home.scientific-home-evidence-products.title": "Practical solutions",
+      "home.scientific-home-evidence-products.titleaccent": "Further information is avail…",
+      "home.scientific-home-evidence-products.weightlabel": "Further information is available on request.",
+      "home.scientific-home-evidence-trust.eyebrow": "Further information is available on req…",
+      "home.scientific-home-evidence-trust.intro": "Further information is available on request.",
+      "home.scientific-home-evidence-trust.portraitname": "Further information is available on request.",
+      "home.scientific-home-evidence-trust.portraitrole": "Further information is available on request.",
+      "home.scientific-home-evidence-trust.stats.0.label": "Further information is available on request.",
+      "home.scientific-home-evidence-trust.stats.1.label": "Further information is available on request.",
+      "home.scientific-home-evidence-trust.title": "Practical solutions",
+      "home.scientific-home-evidence-trust.titleaccent": "Further information is avail…",
+      "home.scientific-home-system-cta.cta.label": "Get in touch",
+      "home.scientific-home-system-cta.headline": "Practical solutions",
+      "home.scientific-home-system-hero.brand": "Further information is available on request.",
+      "home.scientific-home-system-hero.brandsub": "Further information is available on request.",
+      "home.scientific-home-system-hero.chapter": "Further information is available on request.",
+      "home.scientific-home-system-hero.h1a": "Further information i…",
+      "home.scientific-home-system-hero.h1b": "Further information i…",
+      "home.scientific-home-system-hero.h1c": "Further information i…",
+      "home.scientific-home-system-hero.live": "Further information is available on request.",
+      "home.scientific-home-system-hero.scroll": "Further information is available on request.",
+      "home.scientific-home-system-hero.serial": "Further information is available on request.",
+      "home.scientific-home-system-hero.sub": "Further information is available on request.",
+      "home.scientific-home-system-process.steps.0.body": "Further information is available on req…",
+      "home.scientific-home-system-process.steps.0.title": "Practical solutions",
+      "home.scientific-home-system-process.steps.1.body": "Further information is available on req…",
+      "home.scientific-home-system-process.steps.1.title": "Practical solutions",
+      "home.scientific-home-system-process.steps.2.body": "Further information is available on req…",
+      "home.scientific-home-system-process.steps.2.title": "Practical solutions",
+      "home.scientific-home-system-process.title": "Practical solutions",
+      "home.scientific-home-system-statement.label": "Further information is available on request.",
+      "home.scientific-home-system-statement.statement": "Further information is available on request.",
+      "home.scientific-home-system-technical.chapter": "Further information is available on req…",
+      "home.scientific-home-system-technical.intro": "Further information is available on request.",
+      "home.scientific-home-system-technical.systems.0.desc": "Further information is…",
+      "home.scientific-home-system-technical.systems.0.metriclabel": "Further information is…",
+      "home.scientific-home-system-technical.systems.0.title": "Practical solutions",
+      "home.scientific-home-system-technical.systems.1.desc": "Further information is…",
+      "home.scientific-home-system-technical.systems.1.metriclabel": "Further information is…",
+      "home.scientific-home-system-technical.systems.1.title": "Practical solutions",
+      "home.scientific-home-system-technical.title": "Practical solutions",
+      "home.scientific-home-system-technical.titleaccent": "Further information is avail…",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Your inquiry",
+      "inquiry.field.name": "Name",
+      "inquiry.m0.note": "The inquiry form is enabled when the site is published.",
+      "inquiry.submit": "Get in touch",
+      "nav.detail": "Further information is availabl…",
+      "nav.home": "Home",
+      "seo.detail.description": "Explore available solutions and ways to get in touch.",
+      "seo.detail.title": "Company website",
+      "seo.home.description": "Explore available solutions and ways to get in touch.",
+      "seo.home.title": "Company website"
+    }
+  },
+  "copyBundleSet": {
+    "schemaVersion": "site-builder-copy-bundle-set/v1",
+    "sourceLocale": "en",
+    "bundles": {
+      "en": {
+        "schemaVersion": "site-builder-copy-bundle/v1",
+        "slotCatalogVersion": "site-builder-copy-slots/v1",
+        "locale": "en",
+        "sourceLocale": "en",
+        "status": "complete",
+        "claimSnapshot": {
+          "id": "snapshot-39fbbb8bd1dbc2ee",
+          "digest": "0ef54e1b5c3b71af07d944d8e90f5818f0a8b314483211dfc5698b5854fbfb63"
+        },
+        "inputHash": "1737329ea4fa2a7e29fc72b2caf93204bab3c3029b6b04a63b675c49a0534acf",
+        "slots": {
+          "detail.scientific-solution-faq.items.0.a": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-faq.items.0.q": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-faq.items.1.a": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-faq.items.1.q": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-faq.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.items.2.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.items.2.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-features.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.steps.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.steps.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.steps.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.steps.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-solution-process.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-articles.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-articles.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.scientific-validation-articles.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-articles.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-articles.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-articles.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-certificates.certs.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-certificates.certs.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-certificates.certs.2.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-certificates.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-cta.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-cta.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-cta.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-cta.subtitle": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-cta.title": {
+            "type": "plain_text",
+            "maxGraphemes": 21,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-cta.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 21,
+            "factual": false,
+            "content": "Further information…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.portraitname": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.portraitrole": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.scientific-validation-trust.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "footer.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 120,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-articles.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-articles.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-articles.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-articles.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-articles.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-articles.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-certificates.certs.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-certificates.certs.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-certificates.certs.2.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-certificates.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.h1": {
+            "type": "plain_text",
+            "maxGraphemes": 33,
+            "factual": false,
+            "content": "Further information is available…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.h1accent": {
+            "type": "plain_text",
+            "maxGraphemes": 33,
+            "factual": false,
+            "content": "Further information is available…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.scroll": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-hero.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.capacitylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.configurecta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.cycleslabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.f1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.f2": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.fromlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.products.0.capacity": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.products.0.cycles": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.products.0.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.products.0.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.products.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-products.weightlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.portraitname": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.portraitrole": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-evidence-trust.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.brand": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.brandsub": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.h1a": {
+            "type": "plain_text",
+            "maxGraphemes": 22,
+            "factual": false,
+            "content": "Further information i…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.h1b": {
+            "type": "plain_text",
+            "maxGraphemes": 22,
+            "factual": false,
+            "content": "Further information i…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.h1c": {
+            "type": "plain_text",
+            "maxGraphemes": 22,
+            "factual": false,
+            "content": "Further information i…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.live": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.scroll": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.serial": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-hero.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.steps.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.steps.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.steps.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.steps.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.steps.2.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.steps.2.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-process.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-statement.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-statement.statement": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 168,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.systems.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.systems.0.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.systems.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.systems.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.systems.1.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.systems.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.scientific-home-system-technical.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "inquiry.field.email": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Work email",
+            "claimRefs": []
+          },
+          "inquiry.field.message": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Your inquiry",
+            "claimRefs": []
+          },
+          "inquiry.field.name": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Name",
+            "claimRefs": []
+          },
+          "inquiry.m0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "The inquiry form is enabled when the site is published.",
+            "claimRefs": []
+          },
+          "inquiry.submit": {
+            "type": "cta_label",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "nav.detail": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "nav.home": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Home",
+            "claimRefs": []
+          },
+          "seo.detail.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.detail.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          },
+          "seo.home.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.home.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          }
+        },
+        "digest": "b75f256f0a053acb5fa8bf8223559a8cd8e1fce82abcd0d8cf08462bc5595d46"
+      }
+    }
+  }
+}

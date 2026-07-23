@@ -80,6 +80,30 @@ describe("CopyBundle v1 contract", () => {
     });
   });
 
+  it("keeps its digest across a PostgreSQL JSON key-order round trip", () => {
+    const original = finalizeCopyBundle(draft(), context);
+    const reordered = {
+      ...original,
+      slots: Object.fromEntries(
+        Object.entries(original.slots).map(([key, slot]) => [
+          key,
+          {
+            claimRefs: slot.claimRefs,
+            content: slot.content,
+            factual: slot.factual,
+            maxGraphemes: slot.maxGraphemes,
+            type: slot.type,
+          },
+        ]),
+      ),
+    };
+    const { digest: observedDigest, ...roundTrippedDraft } = reordered;
+
+    expect(finalizeCopyBundle(roundTrippedDraft, context).digest).toBe(
+      observedDigest,
+    );
+  });
+
   it("accepts restricted rich text with internal or approved links", () => {
     const value = draft({
       slots: {

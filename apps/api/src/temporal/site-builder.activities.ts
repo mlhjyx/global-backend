@@ -1,30 +1,30 @@
-import { mkdir, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { Logger } from '@nestjs/common';
-import { Prisma, PrismaClient } from '@prisma/client';
-import { Context as ActivityContext } from '@temporalio/activity';
-import { PrismaService } from '../prisma/prisma.service';
-import { ModelGateway } from '../model-gateway/model-gateway';
+import { mkdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { Logger } from "@nestjs/common";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { Context as ActivityContext } from "@temporalio/activity";
+import { PrismaService } from "../prisma/prisma.service";
+import { ModelGateway } from "../model-gateway/model-gateway";
 import {
   buildDemoSpec,
   collectTextKeys,
   DEMO_SPEC_VERSION,
   DemoCopyPolish,
   sanitizePolish,
-} from '../site-builder/demo-spec';
-import type { IntakeInput } from '../site-builder/intake.service';
-import type { KbService } from '../site-builder/kb.service';
-import type { BuildScopeInput } from '../site-builder/refurbish-launcher';
+} from "../site-builder/demo-spec";
+import type { IntakeInput } from "../site-builder/intake.service";
+import type { KbService } from "../site-builder/kb.service";
+import type { BuildScopeInput } from "../site-builder/refurbish-launcher";
 import type {
   ImagePipelineService,
   SiteImagePipelineSummary,
-} from '../site-builder/image-pipeline.service';
-import { allocateNextSiteVersion } from '../site-builder/version-alloc';
+} from "../site-builder/image-pipeline.service";
+import { allocateNextSiteVersion } from "../site-builder/version-alloc";
 import {
   runAiTask,
   type AiTaskRunResult,
-} from '../site-builder/agents/ai-task';
+} from "../site-builder/agents/ai-task";
 import {
   BRAND_PROFILE_TASK,
   BrandProfileOutput,
@@ -33,76 +33,116 @@ import {
   PromptEvidenceSource,
   sanitizeBrandProfilePersistenceOutput,
   sanitizeProfileForPrompt,
-} from '../site-builder/agents/brand-profile';
+} from "../site-builder/agents/brand-profile";
 import {
   researchBrand,
   ResearchSource,
-} from '../site-builder/agents/brand-research';
-import { prepareBrandEvidenceSources } from '../site-builder/agents/brand-evidence';
+} from "../site-builder/agents/brand-research";
+import { prepareBrandEvidenceSources } from "../site-builder/agents/brand-evidence";
 import {
   evidenceSourceDedupeKey,
   type FrozenEvidenceSource,
-} from '../site-builder/agents/evidence-ref';
-import { buildSiteSpecWithTemporaryFile } from '../site-builder/renderer-build';
+} from "../site-builder/agents/evidence-ref";
+import { buildSiteSpecWithTemporaryFile } from "../site-builder/renderer-build";
 import {
   preparePreviewPromotion,
   type PreviewPromotion,
-} from '../site-builder/preview-promotion';
-import { lockSiteSpecAssetsForActivation } from '../site-builder/asset-reference-gate';
-import { applyBuildScope } from '../site-builder/build-scope';
+} from "../site-builder/preview-promotion";
+import { lockSiteSpecAssetsForActivation } from "../site-builder/asset-reference-gate";
+import { applyBuildScope } from "../site-builder/build-scope";
 import {
   copyBundleToLegacyStrings,
+  SITE_SPEC_STYLE_PRESETS,
+  SITE_SPEC_V1_1_VERSION,
+  validateDesignBriefV2AgainstCatalog,
+  validateSiteSpecV1_1,
   type CopyBundleSetV1,
   type CopySlotType,
+  type DesignBriefV2,
   type SiteSpec,
-} from '@global/contracts';
+  type SiteSpecStylePreset,
+  type SiteSpecV1_1,
+} from "@global/contracts";
 import {
   BuildProgressEvent,
   recordBuildProgress,
   terminalizeBuildProgress,
-} from '../site-builder/build-progress';
-import type { NormalizedBuildRequest } from '../site-builder/build-request-contract';
-import type { ExecutionBroker } from '../tools/tool-contract';
-import { budgetLedger, siteBuildBudgetCents } from '../tools/budget';
+} from "../site-builder/build-progress";
+import type { NormalizedBuildRequest } from "../site-builder/build-request-contract";
+import type { ExecutionBroker } from "../tools/tool-contract";
+import { budgetLedger, siteBuildBudgetCents } from "../tools/budget";
 import {
   claimEvidenceOriginKey,
   claimOriginIdentity,
   ClaimEvidenceBridgeService,
-} from '../site-builder/claim-evidence-bridge.service';
+} from "../site-builder/claim-evidence-bridge.service";
 import {
   claimTypeForBrandFact,
   PrismaClaimEvidenceBridgeRepository,
-} from '../site-builder/claim-evidence-bridge.prisma';
-import { compareClaimProjectionOrder } from '../site-builder/claim-projection-order';
-import { gateCertificationFactsForPersistence } from '../site-builder/claim-evidence-persistence-gate';
+} from "../site-builder/claim-evidence-bridge.prisma";
+import { compareClaimProjectionOrder } from "../site-builder/claim-projection-order";
+import { gateCertificationFactsForPersistence } from "../site-builder/claim-evidence-persistence-gate";
 import {
   PaidOperationUnknownError,
   SiteBuildCostLedger,
-} from '../site-builder/site-build-cost-ledger';
+} from "../site-builder/site-build-cost-ledger";
 import {
   CopyBundleService,
   neutralCopySlotContent,
+  protectedFactTokens,
   type CopySlotDefinition,
   type CopySlotGenerator,
-} from '../site-builder/copy-bundle.service';
+} from "../site-builder/copy-bundle.service";
 import {
   COPY_TASK,
   type CopyTaskInput,
   type CopyTaskOutput,
-} from '../site-builder/agents/copy';
-import { PublishableClaimSnapshotService } from '../site-builder/publishable-claim-snapshot.service';
-import { PrismaPublishableClaimSnapshotRepository } from '../site-builder/publishable-claim-snapshot.prisma';
-import { assertReleaseContract } from '../site-builder/release-artifact';
-import type { SiteReleaseService } from '../site-builder/site-release.service';
+} from "../site-builder/agents/copy";
+import { PublishableClaimSnapshotService } from "../site-builder/publishable-claim-snapshot.service";
+import { PrismaPublishableClaimSnapshotRepository } from "../site-builder/publishable-claim-snapshot.prisma";
+import {
+  RELEASE_MANIFEST_V2_SCHEMA_VERSION,
+  assertReleaseContract,
+  releaseSpecDigest,
+  validateReleaseManifest,
+} from "../site-builder/release-artifact";
+import type { SiteReleaseService } from "../site-builder/site-release.service";
+import type { StorageService } from "../site-builder/storage.service";
+import {
+  DESIGN_SPEC_INPUT_VERSION,
+  M1_E_A_COMPONENT_LIBRARY_VERSION,
+  DesignBriefProducer,
+} from "../site-builder/design/design-brief-producer";
+import { STATIC_DESIGN_CATALOG_V2 } from "../site-builder/design/catalog";
+import { loadQualifiedComponentTemplates } from "../site-builder/assembly/qualified-component-templates";
+import { deriveCopySlotDefinitions } from "../site-builder/assembly/copy-slot-derivation";
+import { ControlledAssemblyService } from "../site-builder/assembly/controlled-assembly.service";
+import { validateControlledAssembly } from "../site-builder/assembly/controlled-assembly-validator";
+import { createLedgerAssemblyGenerator } from "../site-builder/agents/controlled-assembly";
+import {
+  assertPartialBuildContract,
+  isPartialBuild,
+  loadPartialBuildBase,
+} from "../site-builder/partial-build-base";
+import {
+  buildControlledAssetManifest,
+  createTenantVariantReader,
+  resolveRepositoryRoot,
+} from "../site-builder/controlled-build-assets";
+import {
+  controlledAssetUrls,
+  materializeControlledAssetOverlay,
+} from "../site-builder/controlled-asset-materializer";
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
-  'kb_ingest',
-  'brand_profile',
-  'image_pipeline',
-  'copy',
-  'assemble_build',
-  'quality_loop',
+  "kb_ingest",
+  "brand_profile",
+  "image_pipeline",
+  "design_spec",
+  "copy",
+  "assemble_build",
+  "quality_loop",
 ] as const;
 
 /**
@@ -121,11 +161,11 @@ export function buildCompensatedSteps(
   assembleBuildDone: boolean,
 ): { key: string; status: string }[] {
   return REFURBISH_STEP_KEYS.map((key) => {
-    if (key === 'brand_profile')
-      return { key, status: brandProfileDone ? 'done' : 'aborted' };
-    if (key === 'assemble_build')
-      return { key, status: assembleBuildDone ? 'done' : 'aborted' };
-    return { key, status: 'aborted' };
+    if (key === "brand_profile")
+      return { key, status: brandProfileDone ? "done" : "aborted" };
+    if (key === "assemble_build")
+      return { key, status: assembleBuildDone ? "done" : "aborted" };
+    return { key, status: "aborted" };
   });
 }
 
@@ -141,7 +181,7 @@ export async function runBrandProfilePersistenceWithRetry<T>(
   maxAttempts = 5,
 ): Promise<T> {
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-    throw new Error('maxAttempts must be a positive integer');
+    throw new Error("maxAttempts must be a positive integer");
   }
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
@@ -149,11 +189,29 @@ export async function runBrandProfilePersistenceWithRetry<T>(
     } catch (error) {
       const retryable =
         error instanceof Prisma.PrismaClientKnownRequestError &&
-        (error.code === 'P2002' || error.code === 'P2034');
+        (error.code === "P2002" || error.code === "P2034");
       if (!retryable || attempt === maxAttempts - 1) throw error;
     }
   }
-  throw new Error('unreachable BrandProfile persistence retry state');
+  throw new Error("unreachable BrandProfile persistence retry state");
+}
+
+export function controlledAssemblyEffectiveBrief(
+  requested: DesignBriefV2,
+  assembled: DesignBriefV2,
+  expectedFamilyId: string,
+  partialBuild: boolean,
+): DesignBriefV2 {
+  if (
+    assembled.familyId !== expectedFamilyId ||
+    assembled.stylePresetId !== requested.stylePresetId
+  ) {
+    throw new Error("CONTROLLED_ASSEMBLY_IDENTITY_DRIFT");
+  }
+  if (partialBuild && assembled.digest !== requested.digest) {
+    throw new Error("PARTIAL_BUILD_DESIGN_BRIEF_DRIFT");
+  }
+  return assembled;
 }
 
 export interface DemoV0ActivityInput {
@@ -169,10 +227,10 @@ export interface SiteBuilderActivityDeps {
   gateway?: ModelGateway;
   /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
   kb?: {
-    ingestText: KbService['ingestText'];
-    processQueued: KbService['processQueued'];
-    processAsset: KbService['processAsset'];
-    digestSources?: KbService['digestSources'];
+    ingestText: KbService["ingestText"];
+    processQueued: KbService["processQueued"];
+    processAsset: KbService["processAsset"];
+    digestSources?: KbService["digestSources"];
   };
   /** KB recovery 只读跨租户枚举；实际读写仍由 KbService.withWorkspace 执行。 */
   ownerDb?: PrismaClient;
@@ -181,14 +239,20 @@ export interface SiteBuilderActivityDeps {
   /** M1-c deterministic Sharp writer; absent in narrow unit tests means an honest degraded step. */
   imagePipeline?: Pick<
     ImagePipelineService,
-    'listSiteImageIds' | 'processSiteImages'
+    "listSiteImageIds" | "processSiteImages"
   >;
   /** Renderer seam for deterministic cancellation-race tests; production uses the real Astro build. */
   renderSiteSpec?: typeof buildSiteSpecWithTemporaryFile;
   /** Preview pointer seam for deterministic post-commit reconciliation tests. */
   promotePreview?: typeof preparePreviewPromotion;
   /** R1 durable object Release commit protocol; required by every new progressV1 build. */
-  releaseService?: Pick<SiteReleaseService, 'materialize'>;
+  releaseService?: Pick<SiteReleaseService, "materialize">;
+  /** Trusted MinIO reader used only by the controlled asset materializer. */
+  storage?: Pick<StorageService, "getBufferBounded">;
+  /** Immutable Renderer identity frozen into DesignBrief and ReleaseManifest v2. */
+  rendererBuildIdentity?: string;
+  /** Test seam; production resolves the monorepo root from the worker cwd. */
+  repositoryRoot?: string;
 }
 
 export interface RefurbishActivityInput {
@@ -206,6 +270,14 @@ export interface RefurbishActivityInput {
   imageBatchLimit?: number;
   /** Patch-gated M1-d immutable copy result passed from generation to assembly. */
   copy?: CopyGenerationSummary;
+  /** Patch-gated M1-e-B immutable design decision. */
+  designBrief?: DesignBriefGenerationSummary;
+}
+
+export interface DesignBriefGenerationSummary {
+  source: "generated" | "base_release_v2";
+  designBrief: DesignBriefV2;
+  taskAttemptId?: string;
 }
 
 export interface CopyGenerationSummary {
@@ -215,8 +287,15 @@ export interface CopyGenerationSummary {
   taskAttemptIds: Record<string, string>;
 }
 
+export interface RefurbishBuildSummary {
+  previewSlug: string;
+  versionId: string;
+  /** Present on the M1-e-B path so finalization follows a same-family safe fallback. */
+  designBrief?: DesignBriefV2;
+}
+
 export interface RefurbishCompensationInput extends RefurbishActivityInput {
-  terminalStatus?: 'failed' | 'cancelled';
+  terminalStatus?: "failed" | "cancelled";
   progressV1?: boolean;
 }
 
@@ -241,29 +320,29 @@ export interface BrandProfileSummary {
 export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   kb: { processed: number; failed: number; degraded: boolean };
   /** P1 brandProfile 步骤汇总（failed=任务整体失败但构建继续的 fail-safe 语义）。 */
-  profile: { status: 'done' | 'degraded' | 'failed'; gaps: number };
+  profile: { status: "done" | "degraded" | "failed"; gaps: number };
   /** Optional only at the Activity wire boundary so pre-M1-c scheduled payloads remain replayable. */
   images?: Pick<
     SiteImagePipelineSummary,
-    'status' | 'processed' | 'failed' | 'variants'
+    "status" | "processed" | "failed" | "variants"
   >;
-  build: { previewSlug: string; versionId: string };
+  build: RefurbishBuildSummary;
   progressV1?: boolean;
 }
 
 /** 本地预览产物根目录（M0 雏形；M1 迁对象存储 + 边缘节点，05 §1）。 */
 export function previewRoot(): string {
   return (
-    process.env.PREVIEW_DIR ?? path.join(process.cwd(), '.preview', 'sites')
+    process.env.PREVIEW_DIR ?? path.join(process.cwd(), ".preview", "sites")
   );
 }
 
 function previewStagingDir(buildRunId: string): string {
-  return path.join(previewRoot(), '.staging', buildRunId);
+  return path.join(previewRoot(), ".staging", buildRunId);
 }
 
 function previewVersionDir(buildRunId: string): string {
-  return path.join(previewRoot(), '.versions', buildRunId);
+  return path.join(previewRoot(), ".versions", buildRunId);
 }
 
 function previewLiveDir(slug: string): string {
@@ -273,33 +352,35 @@ function previewLiveDir(slug: string): string {
 /** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
 export function previewBasePath(slug: string): string {
   const pattern =
-    process.env.PREVIEW_URL_PATTERN ?? 'http://localhost:3000/preview/{slug}/';
+    process.env.PREVIEW_URL_PATTERN ?? "http://localhost:3000/preview/{slug}/";
   try {
-    return new URL(pattern.replace('{slug}', slug)).pathname;
+    return new URL(pattern.replace("{slug}", slug)).pathname;
   } catch {
     return `/preview/${slug}/`;
   }
 }
 
 function copySlotType(key: string): CopySlotType {
-  if (/^seo\..*\.title$/.test(key)) return 'seo_title';
-  if (/^seo\./.test(key)) return 'seo_description';
-  if (/(?:\.cta|\.submit)$/.test(key)) return 'cta_label';
-  if (/^inquiry\.field\./.test(key)) return 'form_label';
-  return 'plain_text';
+  if (/^seo\..*\.title$/.test(key)) return "seo_title";
+  if (/^seo\./.test(key)) return "seo_description";
+  if (/(?:\.cta|\.submit)$/.test(key)) return "cta_label";
+  if (/^inquiry\.field\./.test(key)) return "form_label";
+  return "plain_text";
 }
 
 function copySlotBudget(key: string, type: CopySlotType): number {
-  if (type === 'seo_title') return 60;
-  if (type === 'seo_description') return 160;
-  if (type === 'cta_label' || type === 'form_label') return 32;
+  if (type === "seo_title") return 60;
+  if (type === "seo_description") return 160;
+  if (type === "cta_label" || type === "form_label") return 32;
   if (/(?:\.body|\.subhead|\.desc|\.blurb|\.a\d+)$/.test(key)) return 420;
   return 90;
 }
 
-function copySlotCatalog(
-  site: { name: string; intake: Prisma.JsonValue; stylePreset: string | null },
-): CopySlotDefinition[] {
+function copySlotCatalog(site: {
+  name: string;
+  intake: Prisma.JsonValue;
+  stylePreset: string | null;
+}): CopySlotDefinition[] {
   const template = buildDemoSpec({
     siteName: site.name,
     intake: site.intake as unknown as IntakeInput,
@@ -332,6 +413,31 @@ export function neutralCopyOutput(
   };
 }
 
+function jsonTextValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(jsonTextValues);
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).flatMap(
+      jsonTextValues,
+    );
+  }
+  return [];
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? structuredClone(value as Record<string, unknown>)
+    : {};
+}
+
+function activityCancelled(): boolean {
+  try {
+    return ActivityContext.current().cancellationSignal.aborted;
+  } catch {
+    return false;
+  }
+}
+
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const {
     prisma,
@@ -342,10 +448,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ownerDb,
     imagePipeline,
     releaseService,
+    storage,
+    rendererBuildIdentity = "site-renderer@dev-unpinned",
+    repositoryRoot = resolveRepositoryRoot(),
     renderSiteSpec = buildSiteSpecWithTemporaryFile,
     promotePreview = preparePreviewPromotion,
   } = deps;
-  const log = new Logger('SiteBuilderActivities');
+  const log = new Logger("SiteBuilderActivities");
+  const qualifiedTemplates = loadQualifiedComponentTemplates();
 
   // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
   // 重复无害）。budgetLedger 是进程内单例、无 GC——若只在 beginRefurbishRun 开账，换 worker 或
@@ -359,7 +469,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     workspaceId: string,
     siteId: string,
     buildRunId: string,
-    reason: 'run_succeeded' | 'run_failed' | 'run_cancelled',
+    reason: "run_succeeded" | "run_failed" | "run_cancelled",
   ) => {
     if (!costLedger) return undefined;
     await costLedger.ensureBudget({
@@ -389,21 +499,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       // 烧钱），signal 由网关合并进 AbortSignal.any 透传到 fetch。失败/超时/abort 一律回退确定性模板。
       const result = await gateway.generateStructured<DemoCopyPolish>(
         {
-          task: 'site_builder.demo_copy',
+          task: "site_builder.demo_copy",
           prompt: [
-            'Write concise English website copy for a B2B supplier landing page.',
+            "Write concise English website copy for a B2B supplier landing page.",
             `Company: ${intake.company.nameEn ?? intake.company.nameZh}`,
-            `Products: ${intake.products.join(', ')}`,
-            `Target markets (ISO country codes): ${intake.targetMarkets.join(', ')}`,
-            'Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).',
-            'Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.',
-          ].join('\n'),
+            `Products: ${intake.products.join(", ")}`,
+            `Target markets (ISO country codes): ${intake.targetMarkets.join(", ")}`,
+            "Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).",
+            "Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.",
+          ].join("\n"),
           schema: {
-            type: 'object',
+            type: "object",
             properties: {
-              headline: { type: 'string' },
-              subhead: { type: 'string' },
-              aboutBody: { type: 'string' },
+              headline: { type: "string" },
+              subhead: { type: "string" },
+              aboutBody: { type: "string" },
             },
             additionalProperties: false,
           },
@@ -426,7 +536,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     ...providerResult,
                     data: sanitizePolish(
                       providerResult.data &&
-                        typeof providerResult.data === 'object' &&
+                        typeof providerResult.data === "object" &&
                         !Array.isArray(providerResult.data)
                         ? (providerResult.data as DemoCopyPolish)
                         : undefined,
@@ -457,7 +567,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     } catch {
       activity = undefined;
     }
-    let stage = 'list-queued';
+    let stage = "list-queued";
     activity?.heartbeat({ siteId, stage });
     const heartbeatTimer = activity
       ? setInterval(() => activity?.heartbeat({ siteId, stage }), 5_000)
@@ -465,7 +575,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     heartbeatTimer?.unref();
     try {
       return await kb.processQueued(
-        { userId: 'system', workspaceId, roles: [] },
+        { userId: "system", workspaceId, roles: [] },
         siteId,
         {
           signal: activity?.cancellationSignal,
@@ -478,6 +588,299 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
     }
+  }
+
+  async function assembleControlledBuild(
+    input: RefurbishActivityInput,
+  ): Promise<RefurbishBuildSummary> {
+    const { workspaceId, siteId, buildRunId } = input;
+    const brief = input.designBrief?.designBrief;
+    const copy = input.copy;
+    if (!brief || !copy) {
+      throw new Error("CONTROLLED_ASSEMBLY_INPUT_MISSING");
+    }
+    if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
+    if (!releaseService) throw new Error("SITE_RELEASE_SERVICE_UNAVAILABLE");
+    assertPartialBuildContract(input.scope);
+    const family = validateDesignBriefV2AgainstCatalog(
+      STATIC_DESIGN_CATALOG_V2,
+      brief,
+    );
+    const state = await prisma.withWorkspace(workspaceId, async (tx) => {
+      const advanced = await tx.siteBuildRun.updateMany({
+        where: { id: buildRunId, status: "running" },
+        data: { phase: "P3_assembly", progress: 0.74 },
+      });
+      if (advanced.count === 0) {
+        throw new Error(
+          `run ${buildRunId} no longer running (cancelled?) — aborting controlled assembly`,
+        );
+      }
+      const [site, existing] = await Promise.all([
+        tx.site.findFirst({
+          where: { id: siteId, workspaceId },
+          select: { id: true, name: true, slug: true },
+        }),
+        tx.siteVersion.findFirst({
+          where: { buildRunId },
+          include: { release: true },
+        }),
+      ]);
+      if (!site) throw new Error(`site ${siteId} not found`);
+      const base = isPartialBuild(input.scope)
+        ? await loadPartialBuildBase(tx, {
+            siteId,
+            baseVersionId: input.scope!.baseVersionId!,
+          })
+        : undefined;
+      if (
+        base &&
+        (base.designBrief.digest !== brief.digest ||
+          base.designBrief.variationSeed !== brief.variationSeed)
+      ) {
+        throw new Error("PARTIAL_BUILD_DESIGN_BRIEF_DRIFT");
+      }
+      const repository = new PrismaPublishableClaimSnapshotRepository(tx);
+      const snapshot = await repository.findById(workspaceId, copy.snapshotId);
+      if (
+        !snapshot ||
+        snapshot.siteId !== siteId ||
+        Object.values(copy.set.bundles).some(
+          (bundle) =>
+            bundle.claimSnapshot.id !== copy.snapshotId ||
+            bundle.claimSnapshot.digest !== snapshot.digest,
+        )
+      ) {
+        throw new Error("COPY_CLAIM_SNAPSHOT_MISSING");
+      }
+      const assets = await buildControlledAssetManifest(tx, {
+        siteId,
+        brief,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+      });
+      return { site, existing, base, snapshot, assets };
+    });
+    if (state.existing?.buildStatus === "succeeded") {
+      const replaySpec = state.existing.spec as unknown;
+      if (
+        !state.existing.release ||
+        state.existing.release.status !== "ready" ||
+        !state.existing.release.manifest
+      ) {
+        throw new Error("CONTROLLED_ASSEMBLY_REPLAY_INVALID");
+      }
+      const replay = validateSiteSpecV1_1(replaySpec);
+      const manifest = validateReleaseManifest(state.existing.release.manifest);
+      if (
+        manifest.schemaVersion !== "site-builder-release-manifest/v2" ||
+        replay.specVersion !== SITE_SPEC_V1_1_VERSION
+      ) {
+        throw new Error("CONTROLLED_ASSEMBLY_REPLAY_INVALID");
+      }
+      const replayBrief = controlledAssemblyEffectiveBrief(
+        brief,
+        manifest.designBrief,
+        family.id,
+        Boolean(state.base),
+      );
+      return {
+        previewSlug: state.site.slug,
+        versionId: state.existing.id,
+        designBrief: replayBrief,
+      };
+    }
+    if (state.existing && state.existing.buildStatus !== "building") {
+      throw new Error(`run ${buildRunId} has a non-retryable SiteVersion`);
+    }
+
+    const generator = gateway
+      ? createLedgerAssemblyGenerator({
+          ledger: costLedger,
+          gateway,
+          workspaceId,
+          siteId,
+          buildRunId,
+          isCancelled: activityCancelled,
+        })
+      : {
+          generate: async () => {
+            throw new Error("controlled assembly model gateway unavailable");
+          },
+        };
+    const assetUrls = controlledAssetUrls(state.assets);
+    const assembled = await new ControlledAssemblyService(generator).assemble({
+      brief,
+      catalog: STATIC_DESIGN_CATALOG_V2,
+      copyBundleSet: copy.set,
+      templates: qualifiedTemplates,
+      assets: state.assets,
+      assetUrls,
+      claimSnapshot: state.snapshot,
+      siteName: state.site.name,
+    });
+    const effectiveBrief = controlledAssemblyEffectiveBrief(
+      brief,
+      assembled.designBrief,
+      family.id,
+      Boolean(state.base),
+    );
+    const generatedDoc = state.base
+      ? (applyBuildScope(
+          state.base.spec,
+          assembled.spec,
+          (input.scope ?? { scope: "site" }) as NormalizedBuildRequest,
+          {
+            supportedLocales: state.base.spec.site.locales,
+            claims: new Map(
+              state.snapshot.items.map((item) => [
+                item.claimId,
+                {
+                  statement: item.statement,
+                  protectedTokens: protectedFactTokens(item),
+                },
+              ]),
+            ),
+            approvedOutboundDomains: state.base.spec.site.outboundDomains ?? [],
+          },
+        ) as SiteSpecV1_1)
+      : assembled.spec;
+    const doc = state.existing
+      ? validateSiteSpecV1_1(state.existing.spec)
+      : validateSiteSpecV1_1(generatedDoc);
+    const finalFindings = validateControlledAssembly({
+      spec: doc,
+      brief: effectiveBrief,
+      catalog: STATIC_DESIGN_CATALOG_V2,
+      claimSnapshot: state.snapshot,
+      copySlots: deriveCopySlotDefinitions({
+        brief: effectiveBrief,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+        templates: qualifiedTemplates,
+      }),
+    });
+    if (finalFindings.length > 0) {
+      throw new Error(
+        `CONTROLLED_ASSEMBLY_INVALID: ${finalFindings
+          .map(
+            (finding) => `${finding.layer}/${finding.code}:${finding.message}`,
+          )
+          .join(",")}`,
+      );
+    }
+
+    const version = await prisma.withWorkspace(workspaceId, async (tx) => {
+      if (state.existing) return state.existing;
+      const nextVersion = await allocateNextSiteVersion(tx, siteId);
+      const created = await tx.siteVersion.create({
+        data: {
+          workspaceId,
+          siteId,
+          version: nextVersion,
+          source: "build",
+          spec: doc as unknown as Prisma.InputJsonValue,
+          specVersion: SITE_SPEC_V1_1_VERSION,
+          buildStatus: "building",
+          buildRunId,
+        },
+      });
+      await tx.siteCopyBundle.createMany({
+        data: Object.entries(copy.set.bundles).map(([locale, bundle]) => {
+          const taskAttemptId = copy.taskAttemptIds[locale];
+          if (!taskAttemptId) {
+            throw new Error(`copy task attempt missing for ${locale}`);
+          }
+          return {
+            workspaceId,
+            siteId,
+            siteVersionId: created.id,
+            buildRunId,
+            claimSnapshotId: copy.snapshotId,
+            taskAttemptId,
+            locale,
+            sourceLocale: bundle.sourceLocale,
+            status: bundle.status,
+            schemaVersion: bundle.schemaVersion,
+            slotCatalogVersion: bundle.slotCatalogVersion,
+            inputHash: bundle.inputHash,
+            bundleDigest: bundle.digest,
+            document: bundle as unknown as Prisma.InputJsonObject,
+          };
+        }),
+      });
+      return created;
+    });
+
+    const outDir = previewStagingDir(buildRunId);
+    await rm(outDir, { recursive: true, force: true });
+    await mkdir(outDir, { recursive: true });
+    const overlay = await materializeControlledAssetOverlay({
+      workspaceId,
+      siteId,
+      spec: doc,
+      designBrief: effectiveBrief,
+      catalog: STATIC_DESIGN_CATALOG_V2,
+      repositoryRoot,
+      tenantReader: storage
+        ? createTenantVariantReader({
+            prisma,
+            storage,
+            signal: (() => {
+              try {
+                return ActivityContext.current().cancellationSignal;
+              } catch {
+                return undefined;
+              }
+            })(),
+          })
+        : { readReadyVariant: async () => null },
+    });
+    try {
+      await renderSiteSpec(doc, {
+        outDir,
+        basePath: previewBasePath(state.site.slug),
+        publicAssetDir: overlay.publicDir,
+      });
+    } finally {
+      await overlay.cleanup();
+    }
+
+    const accepted = await prisma.withWorkspace(workspaceId, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
+      const run = await tx.siteBuildRun.findUnique({
+        where: { id: buildRunId },
+        select: { status: true },
+      });
+      if (!run || run.status !== "running") {
+        await tx.siteVersion.updateMany({
+          where: { id: version.id, buildStatus: "building" },
+          data: { buildStatus: "failed" },
+        });
+        return false;
+      }
+      return true;
+    });
+    if (!accepted) {
+      await rm(outDir, { recursive: true, force: true });
+      throw new Error(
+        `run ${buildRunId} no longer running — controlled candidate discarded`,
+      );
+    }
+    await releaseService.materialize({
+      workspaceId,
+      siteId,
+      siteVersionId: version.id,
+      buildRunId,
+      root: outDir,
+      spec: doc,
+      storedSpecVersion: SITE_SPEC_V1_1_VERSION,
+      designBrief: effectiveBrief,
+      createdBy: "system",
+    });
+    return {
+      previewSlug: state.site.slug,
+      versionId: version.id,
+      designBrief: effectiveBrief,
+    };
   }
 
   return {
@@ -504,14 +907,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           existing &&
           (existing.workspaceId !== workspaceId ||
             existing.siteId !== siteId ||
-            existing.source !== 'demo_v0')
+            existing.source !== "demo_v0")
         ) {
-          throw new Error('SITE_RELEASE_VERSION_SCOPE_MISMATCH');
+          throw new Error("SITE_RELEASE_VERSION_SCOPE_MISMATCH");
         }
-        if (run.status === 'succeeded') {
+        if (run.status === "succeeded") {
           if (
-            existing?.buildStatus === 'succeeded' &&
-            existing.artifactKey?.startsWith('release:') &&
+            existing?.buildStatus === "succeeded" &&
+            existing.artifactKey?.startsWith("release:") &&
             site.activeVersionId === existing.id
           ) {
             return {
@@ -521,30 +924,31 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               publicationBaseVersionId: site.activeVersionId,
             };
           }
-          throw new Error('SITE_RELEASE_DEMO_TERMINAL_STATE_MISMATCH');
+          throw new Error("SITE_RELEASE_DEMO_TERMINAL_STATE_MISMATCH");
         }
-        if (!['queued', 'running'].includes(run.status)) {
+        if (!["queued", "running"].includes(run.status)) {
           throw new Error(`demo run ${buildRunId} is not claimable`);
         }
         const storedScope =
           run.scope &&
-          typeof run.scope === 'object' &&
+          typeof run.scope === "object" &&
           !Array.isArray(run.scope)
             ? run.scope
             : {};
         const hasPublicationBase = Object.prototype.hasOwnProperty.call(
           storedScope,
-          'publicationBaseVersionId',
+          "publicationBaseVersionId",
         );
-        const storedBase = (
-          storedScope as Record<string, Prisma.JsonValue>
-        ).publicationBaseVersionId;
+        const storedBase = (storedScope as Record<string, Prisma.JsonValue>)
+          .publicationBaseVersionId;
         if (
           hasPublicationBase &&
           storedBase !== null &&
-          typeof storedBase !== 'string'
+          typeof storedBase !== "string"
         ) {
-          throw new Error(`demo run ${buildRunId} has corrupt publication base`);
+          throw new Error(
+            `demo run ${buildRunId} has corrupt publication base`,
+          );
         }
         const publicationBaseVersionId = hasPublicationBase
           ? (storedBase as string | null)
@@ -552,10 +956,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         const claimedRun = await tx.siteBuildRun.updateMany({
           where: { id: buildRunId, status: run.status },
           data: {
-            ...(run.status === 'queued'
-              ? { status: 'running', startedAt: new Date() }
+            ...(run.status === "queued"
+              ? { status: "running", startedAt: new Date() }
               : {}),
-            phase: 'demo_v0',
+            phase: "demo_v0",
             progress: 0.1,
             ...(!hasPublicationBase
               ? {
@@ -600,7 +1004,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               where: { id: buildRunId },
               select: { status: true },
             });
-            if (run?.status !== 'running') {
+            if (run?.status !== "running") {
               throw new Error(`demo run ${buildRunId} no longer running`);
             }
             const raced = await tx.siteVersion.findFirst({
@@ -613,10 +1017,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 workspaceId,
                 siteId,
                 version: nextVersion,
-                source: 'demo_v0',
+                source: "demo_v0",
                 spec: candidate as unknown as Prisma.InputJsonValue,
                 specVersion: DEMO_SPEC_VERSION,
-                buildStatus: 'building',
+                buildStatus: "building",
                 buildRunId,
               },
             });
@@ -629,10 +1033,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         !version ||
         version.workspaceId !== workspaceId ||
         version.siteId !== siteId ||
-        version.source !== 'demo_v0' ||
-        !['building', 'succeeded'].includes(version.buildStatus)
+        version.source !== "demo_v0" ||
+        !["building", "succeeded"].includes(version.buildStatus)
       ) {
-        throw new Error('SITE_RELEASE_VERSION_NOT_BUILDABLE');
+        throw new Error("SITE_RELEASE_VERSION_NOT_BUILDABLE");
       }
       assertReleaseContract(doc, version.specVersion);
 
@@ -650,10 +1054,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           where: { id: buildRunId },
           select: { status: true },
         });
-        if (run?.status === 'running') return true;
+        if (run?.status === "running") return true;
         await tx.siteVersion.updateMany({
-          where: { id: version.id, buildStatus: 'building' },
-          data: { buildStatus: 'failed' },
+          where: { id: version.id, buildStatus: "building" },
+          data: { buildStatus: "failed" },
         });
         return false;
       });
@@ -663,7 +1067,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           `run ${buildRunId} no longer running — rendered candidate discarded`,
         );
       }
-      if (!releaseService) throw new Error('SITE_RELEASE_SERVICE_UNAVAILABLE');
+      if (!releaseService) throw new Error("SITE_RELEASE_SERVICE_UNAVAILABLE");
       const release = await releaseService.materialize({
         workspaceId,
         siteId,
@@ -672,7 +1076,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         root: outDir,
         spec: doc,
         storedSpecVersion: version.specVersion,
-        createdBy: 'system',
+        createdBy: "system",
       });
 
       await prisma.withWorkspace(workspaceId, async (tx) => {
@@ -682,7 +1086,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           where: { id: buildRunId },
           select: { status: true },
         });
-        if (run?.status !== 'running') {
+        if (run?.status !== "running") {
           throw new Error(`demo run ${buildRunId} publication was fenced`);
         }
         await lockSiteSpecAssetsForActivation(tx, {
@@ -691,11 +1095,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           spec: doc,
         });
         const activatedRelease = await tx.siteRelease.updateMany({
-          where: { id: release.releaseId, status: 'ready' },
+          where: { id: release.releaseId, status: "ready" },
           data: { lastActivatedAt: new Date() },
         });
         if (activatedRelease.count !== 1) {
-          throw new Error('SITE_RELEASE_NOT_READY');
+          throw new Error("SITE_RELEASE_NOT_READY");
         }
         const activatedSite = await tx.site.updateMany({
           where: {
@@ -705,15 +1109,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               { activeVersionId: version.id },
             ],
           },
-          data: { activeVersionId: version.id, status: 'ready' },
+          data: { activeVersionId: version.id, status: "ready" },
         });
         if (activatedSite.count !== 1) {
-          throw new Error('SITE_RELEASE_POINTER_CAS_FAILED');
+          throw new Error("SITE_RELEASE_POINTER_CAS_FAILED");
         }
         const completed = await tx.siteBuildRun.updateMany({
-          where: { id: buildRunId, status: 'running' },
+          where: { id: buildRunId, status: "running" },
           data: {
-            status: 'succeeded',
+            status: "succeeded",
             progress: 1,
             finishedAt: new Date(),
           },
@@ -727,10 +1131,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       if (kb) {
         try {
           await kb.ingestText(
-            { userId: 'system', workspaceId, roles: [] },
+            { userId: "system", workspaceId, roles: [] },
             {
               siteId,
-              source: 'intake',
+              source: "intake",
               title: `注册引导资料 — ${claimed.site.name}`,
               text: intakeToMarkdown(intake),
             },
@@ -759,28 +1163,28 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             // 否则若 Temporal 丢失本 cleanup 的完成 ack 触发迟到重试，而用户此间已 re-intake（复用
             // setup_failed 站、新 run 已跑到 ready），无条件 update 会 clobber 掉那个成功的站。
             const latest = await tx.siteBuildRun.findFirst({
-              where: { siteId: input.siteId, kind: 'demo_v0' },
-              orderBy: { createdAt: 'desc' },
+              where: { siteId: input.siteId, kind: "demo_v0" },
+              orderBy: { createdAt: "desc" },
               select: { id: true },
             });
             if (latest?.id !== input.buildRunId) return false; // 更新的 run 已接管，本次 cleanup 作废
             // Codex P2：清本 run 残留的 building 版本（旧版靠删站 cascade 带走；保留站后须显式收尾，
             // 否则终态失败留下永久 in-progress 版本行——下次 re-intake 用新 runId 只清自己那批）。
             await tx.siteVersion.updateMany({
-              where: { buildRunId: input.buildRunId, buildStatus: 'building' },
-              data: { buildStatus: 'failed' },
+              where: { buildRunId: input.buildRunId, buildStatus: "building" },
+              data: { buildStatus: "failed" },
             });
             await tx.siteBuildRun.updateMany({
-              where: { id: input.buildRunId, status: 'running' },
+              where: { id: input.buildRunId, status: "running" },
               data: {
-                status: 'failed',
-                error: 'demo v0 workflow failed after retries',
+                status: "failed",
+                error: "demo v0 workflow failed after retries",
                 finishedAt: new Date(),
               },
             });
             await tx.site.update({
               where: { id: input.siteId },
-              data: { status: 'setup_failed' },
+              data: { status: "setup_failed" },
             });
             return true;
           },
@@ -812,25 +1216,26 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           select: { status: true },
         });
         const claimed =
-          run?.status === 'queued'
+          run?.status === "queued"
             ? await tx.siteBuildRun.updateMany({
-                where: { id: buildRunId, status: 'queued' },
+                where: { id: buildRunId, status: "queued" },
                 data: {
-                  status: 'running',
-                  phase: 'P1_understanding',
+                  status: "running",
+                  phase: "P1_understanding",
                   progress: 0.05,
                   startedAt: new Date(),
                   steps: [
-                    { key: 'kb_ingest', status: 'queued' },
-                    { key: 'brand_profile', status: 'queued' },
-                    { key: 'image_pipeline', status: 'queued' },
-                    { key: 'copy', status: 'queued' },
-                    { key: 'assemble_build', status: 'queued' },
-                    { key: 'quality_loop', status: 'queued' },
+                    { key: "kb_ingest", status: "queued" },
+                    { key: "brand_profile", status: "queued" },
+                    { key: "image_pipeline", status: "queued" },
+                    { key: "design_spec", status: "queued" },
+                    { key: "copy", status: "queued" },
+                    { key: "assemble_build", status: "queued" },
+                    { key: "quality_loop", status: "queued" },
                   ] as Prisma.InputJsonValue,
                 },
               })
-            : { count: run?.status === 'running' ? 1 : 0 };
+            : { count: run?.status === "running" ? 1 : 0 };
         if (claimed.count === 0) {
           throw new Error(
             `run ${buildRunId} not claimable (cancelled or terminal) — aborting`,
@@ -838,7 +1243,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         }
         await tx.site.update({
           where: { id: siteId },
-          data: { status: 'building' },
+          data: { status: "building" },
         });
       });
       // 预算门真接线（改动 1）：认领成功后才开账（失败 claim 上一步已抛）。close-then-open 清跨-retry
@@ -871,7 +1276,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     async listImages(
       input: RefurbishActivityInput,
     ): Promise<{ assetIds: string[]; truncated: boolean }> {
-      if (!imagePipeline) throw new Error('image pipeline unavailable');
+      if (!imagePipeline) throw new Error("image pipeline unavailable");
       return imagePipeline.listSiteImageIds({
         workspaceId: input.workspaceId,
         siteId: input.siteId,
@@ -884,7 +1289,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ): Promise<SiteImagePipelineSummary> {
       if (!imagePipeline) {
         return {
-          status: 'degraded',
+          status: "degraded",
           processed: 0,
           failed: 0,
           variants: 0,
@@ -897,13 +1302,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       } catch {
         activity = undefined;
       }
-      activity?.heartbeat({ siteId: input.siteId, stage: 'image-pipeline' });
+      activity?.heartbeat({ siteId: input.siteId, stage: "image-pipeline" });
       const heartbeatTimer = activity
         ? setInterval(
             () =>
               activity?.heartbeat({
                 siteId: input.siteId,
-                stage: 'image-pipeline',
+                stage: "image-pipeline",
               }),
             5_000,
           )
@@ -937,7 +1342,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     /** 单素材 KB 活动：workflowId/input/DB fence 三者都绑定 assetId。 */
     async processKbAsset(input: KbRecoveryCandidate) {
       if (!kb?.processAsset) {
-        return { assetId: input.assetId, outcome: 'not_due' as const };
+        return { assetId: input.assetId, outcome: "not_due" as const };
       }
       // verifier/unit tests may invoke the activity function directly, outside a Temporal
       // Activity context. Production worker calls get heartbeat+cancellation propagation.
@@ -947,7 +1352,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       } catch {
         activity = undefined;
       }
-      let stage = 'claim';
+      let stage = "claim";
       activity?.heartbeat({ assetId: input.assetId, stage });
       const heartbeatTimer = activity
         ? setInterval(
@@ -958,7 +1363,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       heartbeatTimer?.unref();
       try {
         return await kb.processAsset(
-          { userId: 'system', workspaceId: input.workspaceId, roles: [] },
+          { userId: "system", workspaceId: input.workspaceId, roles: [] },
           input.siteId,
           input.assetId,
           {
@@ -986,25 +1391,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const limit = Math.max(1, Math.min(input.limit, 500));
       const rows = await ownerDb.asset.findMany({
         where: {
-          kind: 'doc',
+          kind: "doc",
           contentHash: { not: null },
           deletedAt: null,
           OR: [
             {
-              processingStatus: 'queued',
+              processingStatus: "queued",
               OR: [{ retryAt: null }, { retryAt: { lte: now } }],
             },
-            { processingStatus: 'processing', leaseUntil: { lte: now } },
+            { processingStatus: "processing", leaseUntil: { lte: now } },
           ],
         },
         orderBy: [
           // `processing` sorts before `queued`, so an expired worker lease cannot be
           // starved forever by a sustained queued backlog before `take` is applied.
-          { processingStatus: 'asc' },
-          { leaseUntil: { sort: 'asc', nulls: 'last' } },
-          { retryAt: { sort: 'asc', nulls: 'first' } },
-          { createdAt: 'asc' },
-          { id: 'asc' },
+          { processingStatus: "asc" },
+          { leaseUntil: { sort: "asc", nulls: "last" } },
+          { retryAt: { sort: "asc", nulls: "first" } },
+          { createdAt: "asc" },
+          { id: "asc" },
         ],
         take: limit,
         select: {
@@ -1024,7 +1429,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         if (row.processingAttempt >= 5 || ageMs >= 60 * 60 * 1000) {
           log.warn(
             JSON.stringify({
-              event: 'site_builder_kb_recovery_alert',
+              event: "site_builder_kb_recovery_alert",
               assetId: row.id,
               workspaceId: row.workspaceId,
               siteId: row.siteId,
@@ -1057,8 +1462,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ): Promise<BrandProfileSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
-      if (!gateway) throw new Error('brand profile: model gateway unavailable');
-      if (!costLedger) throw new Error('PERSISTENT_LEDGER_UNAVAILABLE');
+      if (!gateway) throw new Error("brand profile: model gateway unavailable");
+      if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
 
       const taskClaim = await costLedger.claimTaskAttempt({
         workspaceId,
@@ -1066,7 +1471,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         buildRunId,
         taskId: BRAND_PROFILE_TASK.id,
       });
-      if (taskClaim.kind === 'completed') {
+      if (taskClaim.kind === "completed") {
         return taskClaim.result as unknown as BrandProfileSummary;
       }
       const attempt = taskClaim.attempt;
@@ -1091,7 +1496,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }),
         );
         if (!site) throw new Error(`site ${siteId} not found`);
-        if (!run || run.status !== 'running') {
+        if (!run || run.status !== "running") {
           throw new Error(
             `run ${buildRunId} not running (cancelled?) — skip brand profile`,
           );
@@ -1109,7 +1514,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
         const digestDocs = kb?.digestSources
           ? await kb.digestSources(
-              { userId: 'system', workspaceId, roles: [] },
+              { userId: "system", workspaceId, roles: [] },
               siteId,
             )
           : [];
@@ -1163,7 +1568,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               where: { id: buildRunId },
               select: { status: true },
             });
-            if (!live || live.status !== 'running') {
+            if (!live || live.status !== "running") {
               throw new Error(
                 `run ${buildRunId} no longer running — skip evidence snapshot write`,
               );
@@ -1218,7 +1623,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         ): PromptEvidenceSource => {
           const persisted = persistedFor(source);
           const title =
-            typeof source.provenance.title === 'string'
+            typeof source.provenance.title === "string"
               ? source.provenance.title
               : undefined;
           return {
@@ -1279,7 +1684,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             }),
         );
         if (frozenPersistedSources.length !== frozenSourceIds.length) {
-          throw new Error('frozen BrandProfile evidence source is missing');
+          throw new Error("frozen BrandProfile evidence source is missing");
         }
 
         const frozenById = new Map<string, FrozenEvidenceSource>(
@@ -1288,14 +1693,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             {
               sourceKey: source.sourceKey,
               sourceType:
-                source.sourceType as FrozenEvidenceSource['sourceType'],
+                source.sourceType as FrozenEvidenceSource["sourceType"],
               sourceRole:
-                source.sourceRole as FrozenEvidenceSource['sourceRole'],
-              hashAlgorithm: 'sha256',
+                source.sourceRole as FrozenEvidenceSource["sourceRole"],
+              hashAlgorithm: "sha256",
               contentHash: source.contentHash,
               upstreamContentHash: source.upstreamContentHash ?? undefined,
               normalizationVersion:
-                source.normalizationVersion as FrozenEvidenceSource['normalizationVersion'],
+                source.normalizationVersion as FrozenEvidenceSource["normalizationVersion"],
               snapshotText: source.snapshotText,
               displayUrl: source.displayUrl ?? undefined,
               fetchedAt: source.fetchedAt?.toISOString(),
@@ -1311,7 +1716,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             ...gated.gaps,
             ...(data.gaps ?? []).map((gap) => ({
               field: gap.field,
-              reason: 'needs_input' as const,
+              reason: "needs_input" as const,
               hint: gap.question,
             })),
           ];
@@ -1353,8 +1758,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           providerResult: Record<string, unknown>,
         ): Record<string, unknown> => {
           const data = providerResult.data;
-          if (!data || typeof data !== 'object' || Array.isArray(data)) {
-            throw new Error('BrandProfile durable replay has no object data');
+          if (!data || typeof data !== "object" || Array.isArray(data)) {
+            throw new Error("BrandProfile durable replay has no object data");
           }
           const clean = projectBrandProfileOutput(data as BrandProfileOutput);
           return {
@@ -1366,9 +1771,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         let result: AiTaskRunResult<BrandProfileOutput>;
         let generatedModelOutput = false;
         if (
-          attempt.status === 'MODEL_SUCCEEDED' &&
+          attempt.status === "MODEL_SUCCEEDED" &&
           attempt.outputJson &&
-          typeof attempt.outputJson === 'object' &&
+          typeof attempt.outputJson === "object" &&
           !Array.isArray(attempt.outputJson)
         ) {
           result =
@@ -1414,7 +1819,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               where: { id: buildRunId },
               select: { status: true },
             });
-            if (!live || live.status !== 'running') {
+            if (!live || live.status !== "running") {
               throw new Error(
                 `run ${buildRunId} no longer running — skip brand profile write`,
               );
@@ -1528,10 +1933,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               );
               for (const { factIndex } of projectionOrder) {
                 const projection = await claimBridge.projectFact(
-                  { userId: 'system', workspaceId, roles: [] },
+                  { userId: "system", workspaceId, roles: [] },
                   { siteId, brandProfileId, factIndex },
                 );
-                if (projection.kind !== 'projected') {
+                if (projection.kind !== "projected") {
                   throw new Error(
                     `claim bridge rejected persisted fact ${factIndex}: ${projection.reason}`,
                   );
@@ -1549,17 +1954,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               where: {
                 id: attempt.id,
                 fenceToken: attempt.fenceToken,
-                status: 'MODEL_SUCCEEDED',
+                status: "MODEL_SUCCEEDED",
                 leaseUntil: { gt: new Date() },
               },
               data: {
-                status: 'SUCCEEDED',
+                status: "SUCCEEDED",
                 resultJson: summary as unknown as Prisma.InputJsonObject,
                 leaseUntil: new Date(),
               },
             });
             if (completed.count !== 1) {
-              throw new Error('paid task fence is stale or expired');
+              throw new Error("paid task fence is stale or expired");
             }
             return summary;
           }),
@@ -1569,7 +1974,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         persistedGapsCount = persisted.gapsCount;
 
         log.log(
-          `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${researchDegraded ? ', research degraded' : ''}`,
+          `brand profile v${version} for site ${siteId}: ${persistedFactCount} facts, ${persistedGapsCount} gaps, model=${result.model}${researchDegraded ? ", research degraded" : ""}`,
         );
         taskCompleted = true;
         return persisted;
@@ -1578,47 +1983,217 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       }
     },
 
-    /** M1-d: freeze exact publishable Claims, then generate one fenced task per locale. */
+    /** M1-e-B: freeze the approved Catalog decision before copy or assembly. */
+    async generateDesignBrief(
+      input: RefurbishActivityInput,
+    ): Promise<DesignBriefGenerationSummary> {
+      const { workspaceId, siteId, buildRunId } = input;
+      ensureRunBudget(buildRunId);
+      assertPartialBuildContract(input.scope);
+      if (isPartialBuild(input.scope)) {
+        const base = await prisma.withWorkspace(workspaceId, (tx) =>
+          loadPartialBuildBase(tx, {
+            siteId,
+            baseVersionId: input.scope!.baseVersionId!,
+          }),
+        );
+        validateDesignBriefV2AgainstCatalog(
+          STATIC_DESIGN_CATALOG_V2,
+          base.designBrief,
+        );
+        return {
+          source: "base_release_v2",
+          designBrief: base.designBrief,
+        };
+      }
+      if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
+
+      const frozen = await prisma.withWorkspace(workspaceId, async (tx) => {
+        const site = await tx.site.findFirst({
+          where: { id: siteId, workspaceId },
+          select: {
+            id: true,
+            intake: true,
+            locales: true,
+            stylePreset: true,
+            brandProfiles: {
+              orderBy: [{ version: "desc" }, { id: "desc" }],
+              take: 1,
+              select: {
+                keywords: true,
+                valueProps: true,
+                differentiators: true,
+                factSheet: true,
+                _count: { select: { evidenceRefs: true } },
+              },
+            },
+            assets: {
+              where: { deletedAt: null },
+              orderBy: { id: "asc" },
+              select: { id: true, kind: true, processingStatus: true },
+            },
+          },
+        });
+        if (!site) throw new Error(`site ${siteId} not found`);
+        return site;
+      });
+      const profile = frozen.brandProfiles[0];
+      const profileText = profile
+        ? jsonTextValues([
+            profile.keywords,
+            profile.valueProps,
+            profile.differentiators,
+            profile.factSheet,
+          ])
+        : [];
+      const supportedKinds = new Set([
+        "logo",
+        "product_image",
+        "factory_image",
+        "cert",
+        "doc",
+        "video",
+      ]);
+      const siteLocales = Array.isArray(frozen.locales)
+        ? frozen.locales.filter(
+            (locale): locale is string => typeof locale === "string",
+          )
+        : [];
+      const locales =
+        input.scope?.options?.locales ??
+        (siteLocales.length > 0
+          ? Intl.getCanonicalLocales(siteLocales)
+          : ["en"]);
+      const configuredPreset =
+        input.scope?.options?.stylePreset ?? frozen.stylePreset ?? undefined;
+      const stylePreset =
+        configuredPreset &&
+        (SITE_SPEC_STYLE_PRESETS as readonly string[]).includes(
+          configuredPreset,
+        )
+          ? (configuredPreset as SiteSpecStylePreset)
+          : undefined;
+      const produced = await new DesignBriefProducer({
+        ledger: costLedger,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+        ...(gateway ? { gateway } : {}),
+        isCancelled: activityCancelled,
+      }).produce({
+        schemaVersion: DESIGN_SPEC_INPUT_VERSION,
+        workspaceId,
+        siteId,
+        buildRunId,
+        ...(profile
+          ? {
+              brandProfile: {
+                industryTags: [...new Set(profileText)]
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                  .slice(0, 64),
+                summary: profileText.join(" · ").slice(0, 4_000),
+                frozenFactCount: profile._count.evidenceRefs,
+              },
+            }
+          : {}),
+        frozenIntake: jsonRecord(frozen.intake),
+        assetCapabilities: {
+          assets: frozen.assets
+            .filter((asset) => supportedKinds.has(asset.kind))
+            .map((asset) => ({
+              assetId: asset.id,
+              kind: asset.kind as
+                | "logo"
+                | "product_image"
+                | "factory_image"
+                | "cert"
+                | "doc"
+                | "video",
+              status:
+                asset.processingStatus === "ready"
+                  ? ("ready" as const)
+                  : ["failed", "rejected", "deleted"].includes(
+                        asset.processingStatus,
+                      )
+                    ? ("failed" as const)
+                    : ("pending" as const),
+            })),
+        },
+        locales,
+        ...(stylePreset ? { stylePreset } : {}),
+        catalogDigest: STATIC_DESIGN_CATALOG_V2.digest,
+        componentLibraryVersion: M1_E_A_COMPONENT_LIBRARY_VERSION,
+        rendererVersion: rendererBuildIdentity,
+      });
+      return { source: "generated", ...produced };
+    },
+
+    /** M1-d/B6: freeze exact publishable Claims, then generate one fenced task per locale. */
     async generateCopyBundles(
       input: RefurbishActivityInput,
     ): Promise<CopyGenerationSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId);
-      if (!gateway) throw new Error('copy: model gateway unavailable');
-      if (!costLedger) throw new Error('PERSISTENT_LEDGER_UNAVAILABLE');
+      if (!gateway) throw new Error("copy: model gateway unavailable");
+      if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
 
-      const { site, snapshot, snapshotId } = await prisma.withWorkspace(
-        workspaceId,
-        async (tx) => {
+      assertPartialBuildContract(input.scope);
+      const { site, snapshot, snapshotId, inheritedTaskAttemptIds } =
+        await prisma.withWorkspace(workspaceId, async (tx) => {
           const repository = new PrismaPublishableClaimSnapshotRepository(tx);
+          const partial = isPartialBuild(input.scope)
+            ? await loadPartialBuildBase(tx, {
+                siteId,
+                baseVersionId: input.scope!.baseVersionId!,
+              })
+            : undefined;
           const snapshotService = new PublishableClaimSnapshotService(
             repository,
           );
-          const captured = await snapshotService.capture(
-            { userId: 'system', workspaceId, roles: [] },
-            { siteId, buildRunId },
-          );
-          const stored = await tx.sitePublishableClaimSnapshot.findUnique({
-            where: { buildRunId },
-            select: { id: true },
-          });
+          const captured = partial
+            ? await repository.findById(workspaceId, partial.claimSnapshotId)
+            : await snapshotService.capture(
+                { userId: "system", workspaceId, roles: [] },
+                { siteId, buildRunId },
+              );
+          const stored = partial
+            ? { id: partial.claimSnapshotId }
+            : await tx.sitePublishableClaimSnapshot.findUnique({
+                where: { buildRunId },
+                select: { id: true },
+              });
           const currentSite = await tx.site.findFirst({
             where: { id: siteId, workspaceId },
             select: { name: true, intake: true, stylePreset: true },
           });
-          if (!stored || !currentSite) {
-            throw new Error('copy snapshot or Site disappeared during capture');
+          if (!stored || !currentSite || !captured) {
+            throw new Error("copy snapshot or Site disappeared during capture");
           }
           return {
             site: currentSite,
             snapshot: captured,
             snapshotId: stored.id,
+            inheritedTaskAttemptIds: partial?.taskAttemptIds ?? {},
           };
-        },
-      );
-      const locales = input.scope?.options?.locales ?? ['en'];
-      const slots = copySlotCatalog(site);
-      const taskAttemptIds: Record<string, string> = {};
+        });
+      const designBrief = input.designBrief?.designBrief;
+      if (designBrief) {
+        validateDesignBriefV2AgainstCatalog(
+          STATIC_DESIGN_CATALOG_V2,
+          designBrief,
+        );
+      }
+      const locales = designBrief?.localePolicy ??
+        input.scope?.options?.locales ?? ["en"];
+      const slots = designBrief
+        ? deriveCopySlotDefinitions({
+            brief: designBrief,
+            catalog: STATIC_DESIGN_CATALOG_V2,
+            templates: qualifiedTemplates,
+          })
+        : copySlotCatalog(site);
+      const taskAttemptIds: Record<string, string> = {
+        ...inheritedTaskAttemptIds,
+      };
       const localeOutputs = new Map<string, Promise<CopyTaskOutput>>();
       const pendingLocaleTasks = new Map<
         string,
@@ -1643,10 +2218,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             buildRunId,
             taskId,
           });
-          if (taskClaim.kind === 'completed') {
+          if (taskClaim.kind === "completed") {
             const replay = taskClaim.result as unknown as {
               taskAttemptId: string;
-              slots: CopyTaskOutput['slots'];
+              slots: CopyTaskOutput["slots"];
             };
             if (!replay.taskAttemptId || !replay.slots) {
               throw new Error(`completed ${taskId} result is malformed`);
@@ -1665,7 +2240,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           try {
             const candidate: CopyTaskInput = {
               locale,
-              sourceLocale: 'en',
+              sourceLocale: "en",
               snapshotDigest: snapshot.digest,
               claims: snapshot.items,
               slots,
@@ -1725,7 +2300,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       try {
         generated = await new CopyBundleService(generator).generate({
           locales,
-          sourceLocale: 'en',
+          sourceLocale: "en",
           snapshotId,
           snapshot,
           slots,
@@ -1784,17 +2359,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
     async assembleAndBuild(
       input: RefurbishActivityInput,
-    ): Promise<{ previewSlug: string; versionId: string }> {
+    ): Promise<RefurbishBuildSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
+      if (input.designBrief) {
+        return assembleControlledBuild(input);
+      }
       const partialBuild =
-        input.scope?.scope === 'page' ||
-        input.scope?.scope === 'section' ||
+        input.scope?.scope === "page" ||
+        input.scope?.scope === "section" ||
         Boolean(input.scope?.options?.pages);
       const baseVersionId = input.scope?.baseVersionId;
       if (partialBuild && !baseVersionId) {
         throw new Error(
-          'partial build is missing its immutable base SiteVersion',
+          "partial build is missing its immutable base SiteVersion",
         );
       }
       const { site, existing, activeSpec } = await prisma.withWorkspace(
@@ -1802,9 +2380,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         async (tx) => {
           // cancelled 后不再推进（复审 C2）
           const advanced = await tx.siteBuildRun.updateMany({
-            where: { id: buildRunId, status: 'running' },
+            where: { id: buildRunId, status: "running" },
             data: {
-              phase: 'P3_assembly',
+              phase: "P3_assembly",
               progress: input.progressV1 ? 0.65 : 0.5,
             },
           });
@@ -1824,7 +2402,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     where: {
                       id: baseVersionId,
                       siteId,
-                      buildStatus: 'succeeded',
+                      buildStatus: "succeeded",
                     },
                     select: { spec: true },
                   })
@@ -1838,10 +2416,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         },
       );
       if (!site) throw new Error(`site ${siteId} not found`);
-      if (existing?.buildStatus === 'succeeded') {
+      if (existing?.buildStatus === "succeeded") {
         return { previewSlug: site.slug, versionId: existing.id };
       }
-      if (existing && existing.buildStatus !== 'building') {
+      if (existing && existing.buildStatus !== "building") {
         throw new Error(`run ${buildRunId} has a non-retryable SiteVersion`);
       }
 
@@ -1854,7 +2432,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             intake,
             buildRunId,
             siteId,
-            'assemble-demo-copy',
+            "assemble-demo-copy",
           );
       const candidate = buildDemoSpec({
         siteName: site.name,
@@ -1877,7 +2455,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const generatedDoc = applyBuildScope(
         activeSpec as unknown as SiteSpec | null,
         candidate,
-        (input.scope ?? { scope: 'site' }) as NormalizedBuildRequest,
+        (input.scope ?? { scope: "site" }) as NormalizedBuildRequest,
       );
       const doc = existing
         ? (existing.spec as unknown as SiteSpec)
@@ -1891,10 +2469,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             workspaceId,
             siteId,
             version: nextVersion,
-            source: 'build',
+            source: "build",
             spec: doc as unknown as Prisma.InputJsonValue,
             specVersion: DEMO_SPEC_VERSION,
-            buildStatus: 'building',
+            buildStatus: "building",
             buildRunId,
           },
         });
@@ -1956,10 +2534,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           where: { id: buildRunId },
           select: { status: true },
         });
-        if (!run || run.status !== 'running') {
+        if (!run || run.status !== "running") {
           await tx.siteVersion.updateMany({
-            where: { id: version.id, buildStatus: 'building' },
-            data: { buildStatus: 'failed' },
+            where: { id: version.id, buildStatus: "building" },
+            data: { buildStatus: "failed" },
           });
           return false;
         }
@@ -1975,7 +2553,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       }
       if (input.progressV1) {
         if (!releaseService) {
-          throw new Error('SITE_RELEASE_SERVICE_UNAVAILABLE');
+          throw new Error("SITE_RELEASE_SERVICE_UNAVAILABLE");
         }
         await releaseService.materialize({
           workspaceId,
@@ -1985,25 +2563,23 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           root: outDir,
           spec: doc,
           storedSpecVersion: DEMO_SPEC_VERSION,
-          createdBy: 'system',
+          createdBy: "system",
         });
       } else {
         // Temporal replay compatibility only. Every newly scheduled workflow has progressV1 and
         // therefore cannot enter this node-local branch.
-        const completed = await prisma.withWorkspace(
-          workspaceId,
-          async (tx) =>
-            tx.siteVersion.updateMany({
-              where: {
-                id: version.id,
-                buildRunId,
-                buildStatus: 'building',
-              },
-              data: {
-                buildStatus: 'succeeded',
-                artifactKey: `local:${outDir}`,
-              },
-            }),
+        const completed = await prisma.withWorkspace(workspaceId, async (tx) =>
+          tx.siteVersion.updateMany({
+            where: {
+              id: version.id,
+              buildRunId,
+              buildStatus: "building",
+            },
+            data: {
+              buildStatus: "succeeded",
+              artifactKey: `local:${outDir}`,
+            },
+          }),
         );
         if (completed.count !== 1) {
           throw new Error(`run ${buildRunId} local replay finalize was fenced`);
@@ -2025,7 +2601,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         build,
       } = input;
       const images = input.images ?? {
-        status: 'skipped_m1c' as const,
+        status: "skipped_m1c" as const,
         processed: 0,
         failed: 0,
         variants: 0,
@@ -2034,7 +2610,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         workspaceId,
         siteId,
         buildRunId,
-        'run_succeeded',
+        "run_succeeded",
       );
       let promotion: PreviewPromotion | undefined;
       let publicationBaseVersionId: string | null | undefined;
@@ -2059,13 +2635,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           }
           const storedScope =
             runBefore.scope &&
-            typeof runBefore.scope === 'object' &&
+            typeof runBefore.scope === "object" &&
             !Array.isArray(runBefore.scope)
               ? runBefore.scope
               : {};
           const hasStoredPublicationBase = Object.prototype.hasOwnProperty.call(
             storedScope,
-            'publicationBaseVersionId',
+            "publicationBaseVersionId",
           );
           const storedPublicationBase = (
             storedScope as Record<string, Prisma.JsonValue>
@@ -2073,18 +2649,18 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           if (
             hasStoredPublicationBase &&
             storedPublicationBase !== null &&
-            typeof storedPublicationBase !== 'string'
+            typeof storedPublicationBase !== "string"
           ) {
             throw new Error(`run ${buildRunId} has corrupt publication base`);
           }
           const inputHasBase = Boolean(
             input.scope &&
-            Object.prototype.hasOwnProperty.call(input.scope, 'baseVersionId'),
+            Object.prototype.hasOwnProperty.call(input.scope, "baseVersionId"),
           );
           publicationBaseVersionId = input.progressV1
             ? hasStoredPublicationBase
               ? (storedPublicationBase as string | null)
-              : runBefore.status === 'running'
+              : runBefore.status === "running"
                 ? inputHasBase
                   ? (input.scope?.baseVersionId ?? null)
                   : siteBefore.activeVersionId
@@ -2096,34 +2672,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const snapshotService = new PublishableClaimSnapshotService(
               snapshotRepository,
             );
-            const frozen = await snapshotRepository.findByBuildRun(
+            const frozen = await snapshotRepository.findById(
               workspaceId,
-              buildRunId,
+              input.copy.snapshotId,
             );
             const storedSnapshot =
               await tx.sitePublishableClaimSnapshot.findUnique({
-                where: { buildRunId },
-                select: { id: true },
+                where: { id: input.copy.snapshotId },
+                select: { id: true, siteId: true },
               });
             if (
               !frozen ||
               !storedSnapshot ||
+              storedSnapshot.siteId !== siteId ||
               storedSnapshot.id !== input.copy.snapshotId
             ) {
-              throw new Error('COPY_CLAIM_SNAPSHOT_MISSING');
+              throw new Error("COPY_CLAIM_SNAPSHOT_MISSING");
             }
             await snapshotService.assertCurrent(
-              { userId: 'system', workspaceId, roles: [] },
+              { userId: "system", workspaceId, roles: [] },
               frozen,
             );
           }
           // 🔴 发布守卫（复审 C2 / Codex P2）：run 先于指针切换按状态条件落 succeeded——
           // cancelled 的 run 绝不发布；'succeeded' 也可重入=结果丢失重试幂等。count=0 抛错→补偿。
           const published = await tx.siteBuildRun.updateMany({
-            where: { id: buildRunId, status: { in: ['running', 'succeeded'] } },
+            where: { id: buildRunId, status: { in: ["running", "succeeded"] } },
             data: {
-              status: 'succeeded',
-              phase: 'P5_publish',
+              status: "succeeded",
+              phase: "P5_publish",
               progress: 1,
               finishedAt: new Date(),
               ...(costSummary
@@ -2146,26 +2723,27 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 : {
                     steps: [
                       {
-                        key: 'kb_ingest',
-                        status: kbSummary.degraded ? 'degraded' : 'done',
+                        key: "kb_ingest",
+                        status: kbSummary.degraded ? "degraded" : "done",
                         processed: kbSummary.processed,
                         failed: kbSummary.failed,
                       },
                       {
-                        key: 'brand_profile',
+                        key: "brand_profile",
                         status: profile.status,
                         gaps: profile.gaps,
                       },
                       {
-                        key: 'image_pipeline',
+                        key: "image_pipeline",
                         status: images.status,
                         processed: images.processed,
                         failed: images.failed,
                         variants: images.variants,
                       },
-                      { key: 'copy', status: 'skipped_m1d' },
-                      { key: 'assemble_build', status: 'done' },
-                      { key: 'quality_loop', status: 'skipped_m1f' },
+                      { key: "design_spec", status: "skipped_m1eb" },
+                      { key: "copy", status: "skipped_m1d" },
+                      { key: "assemble_build", status: "done" },
+                      { key: "quality_loop", status: "skipped_m1f" },
                     ] as Prisma.InputJsonValue,
                   }),
             },
@@ -2176,13 +2754,19 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             );
           }
           const targetVersion = await tx.siteVersion.findFirst({
-            where: { id: build.versionId, siteId, buildStatus: 'succeeded' },
+            where: { id: build.versionId, siteId, buildStatus: "succeeded" },
             select: {
               spec: true,
               artifactKey: true,
+              release: {
+                select: {
+                  status: true,
+                  manifest: true,
+                },
+              },
               copyBundles: {
                 select: { locale: true, bundleDigest: true },
-                orderBy: { locale: 'asc' },
+                orderBy: { locale: "asc" },
               },
             },
           });
@@ -2190,6 +2774,24 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             throw new Error(
               `site version ${build.versionId} is not activatable`,
             );
+          if (input.designBrief) {
+            const spec = validateSiteSpecV1_1(targetVersion.spec);
+            const manifest = validateReleaseManifest(
+              targetVersion.release?.manifest,
+            );
+            if (
+              targetVersion.release?.status !== "ready" ||
+              manifest.schemaVersion !== RELEASE_MANIFEST_V2_SCHEMA_VERSION ||
+              manifest.designBriefDigest !==
+                input.designBrief.designBrief.digest ||
+              manifest.specDigest !== releaseSpecDigest(spec) ||
+              manifest.componentLibraryVersion !==
+                spec.componentLibraryVersion ||
+              manifest.rendererVersion !== spec.rendererVersion
+            ) {
+              throw new Error("SITE_RELEASE_V2_ACTIVATION_MISMATCH");
+            }
+          }
           if (input.copy) {
             const expected = Object.entries(input.copy.set.bundles)
               .map(([locale, bundle]) => ({
@@ -2201,7 +2803,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               JSON.stringify(targetVersion.copyBundles) !==
               JSON.stringify(expected)
             ) {
-              throw new Error('COPY_BUNDLE_ACTIVATION_MISMATCH');
+              throw new Error("COPY_BUNDLE_ACTIVATION_MISMATCH");
             }
           }
           await lockSiteSpecAssetsForActivation(tx, {
@@ -2219,25 +2821,25 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   { activeVersionId: build.versionId },
                 ],
               },
-              data: { activeVersionId: build.versionId, status: 'ready' },
+              data: { activeVersionId: build.versionId, status: "ready" },
             });
             if (activated.count !== 1) {
               throw new Error(
-                'active SiteVersion changed during partial build — pointer untouched',
+                "active SiteVersion changed during partial build — pointer untouched",
               );
             }
           } else {
             await tx.site.update({
               where: { id: siteId },
-              data: { activeVersionId: build.versionId, status: 'ready' },
+              data: { activeVersionId: build.versionId, status: "ready" },
             });
           }
-          if (targetVersion.artifactKey?.startsWith('release:')) {
+          if (targetVersion.artifactKey?.startsWith("release:")) {
             const activatedRelease = await tx.siteRelease.updateMany({
               where: {
                 siteVersionId: build.versionId,
                 siteId,
-                status: 'ready',
+                status: "ready",
               },
               data: { lastActivatedAt: new Date() },
             });
@@ -2316,8 +2918,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const expectedArtifact = `local:${previewVersionDir(buildRunId)}`;
             if (
               siteNow?.activeVersionId !== build.versionId ||
-              runNow?.status !== 'succeeded' ||
-              versionNow?.buildStatus !== 'succeeded' ||
+              runNow?.status !== "succeeded" ||
+              versionNow?.buildStatus !== "succeeded" ||
               versionNow.artifactKey !== expectedArtifact
             ) {
               await promotion!.abandon();
@@ -2335,14 +2937,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   where: { id: siteId, activeVersionId: build.versionId },
                   data: {
                     activeVersionId: publicationBaseVersionId,
-                    status: publicationBaseVersionId ? 'ready' : 'draft',
+                    status: publicationBaseVersionId ? "ready" : "draft",
                   },
                 });
                 const failed = await tx.siteBuildRun.updateMany({
-                  where: { id: buildRunId, status: 'succeeded' },
+                  where: { id: buildRunId, status: "succeeded" },
                   data: {
-                    status: 'failed',
-                    error: 'preview pointer promotion failed',
+                    status: "failed",
+                    error: "preview pointer promotion failed",
                     finishedAt: new Date(),
                   },
                 });
@@ -2351,9 +2953,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                     where: {
                       id: build.versionId,
                       buildRunId,
-                      buildStatus: 'succeeded',
+                      buildStatus: "succeeded",
                     },
-                    data: { buildStatus: 'failed' },
+                    data: { buildStatus: "failed" },
                   });
                 }
               });
@@ -2363,7 +2965,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               );
               throw new AggregateError(
                 [pointerError, reconcileError],
-                'preview pointer promotion and reconciliation failed',
+                "preview pointer promotion and reconciliation failed",
                 { cause: reconcileError },
               );
             }
@@ -2385,13 +2987,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishCompensationInput,
     ): Promise<void> {
       const { workspaceId, siteId, buildRunId } = input;
-      const terminalStatus = input.terminalStatus ?? 'failed';
+      const terminalStatus = input.terminalStatus ?? "failed";
       try {
         const costSummary = await terminalCostSummary(
           workspaceId,
           siteId,
           buildRunId,
-          terminalStatus === 'cancelled' ? 'run_cancelled' : 'run_failed',
+          terminalStatus === "cancelled" ? "run_cancelled" : "run_failed",
         );
         await prisma.withWorkspace(workspaceId, async (tx) => {
           // Must be acquired before the terminal CAS to avoid a lock-order inversion with
@@ -2400,7 +3002,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           const run = await tx.siteBuildRun.findUnique({
             where: { id: buildRunId },
           });
-          if (run && ['queued', 'running'].includes(run.status)) {
+          if (run && ["queued", "running"].includes(run.status)) {
             // 改动 3：转 failed 时补写 steps（观测性）——否则 API 显示「failed 但六步全 pending」。
             // brand_profile 落库无 buildRunId 列，用 createdAt>=startedAt 归属探测（单站单活跃 run，claim 守卫）；
             // startedAt 缺失（无从归属）→ 不查，保守判 aborted（不误认领旧版本）。
@@ -2412,7 +3014,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             // assemble_build 完成靠 siteVersion 行核验（FIX 2）：assembleAndBuild 真成功即留一条
             // succeeded 版本行，buildRunId 唯一定位本 run，无需 startedAt；缺则保守判 aborted。
             const assembleBuildDone = !!(await tx.siteVersion.findFirst({
-              where: { buildRunId, buildStatus: 'succeeded' },
+              where: { buildRunId, buildStatus: "succeeded" },
             }));
             const legacySteps = input.progressV1
               ? null
@@ -2421,12 +3023,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                   assembleBuildDone,
                 ) as Prisma.InputJsonValue);
             const transitioned = await tx.siteBuildRun.updateMany({
-              where: { id: buildRunId, status: { in: ['queued', 'running'] } },
+              where: { id: buildRunId, status: { in: ["queued", "running"] } },
               data: {
                 status: terminalStatus,
                 error:
-                  terminalStatus === 'failed'
-                    ? (run.error ?? 'refurbish failed (compensated)')
+                  terminalStatus === "failed"
+                    ? (run.error ?? "refurbish failed (compensated)")
                     : null,
                 finishedAt: run.finishedAt ?? new Date(),
                 ...(costSummary
@@ -2446,17 +3048,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               await tx.siteVersion.updateMany({
                 where: {
                   buildRunId,
-                  buildStatus: { in: ['building', 'succeeded'] },
+                  buildStatus: { in: ["building", "succeeded"] },
                 },
-                data: { buildStatus: 'failed' },
+                data: { buildStatus: "failed" },
               });
               if (input.progressV1) {
                 const terminalSteps = await terminalizeBuildProgress(tx, {
                   workspaceId,
                   buildRunId,
-                  phase: (run.phase ?? 'P1_understanding') as Parameters<
+                  phase: (run.phase ?? "P1_understanding") as Parameters<
                     typeof terminalizeBuildProgress
-                  >[1]['phase'],
+                  >[1]["phase"],
                   progress: run.progress,
                 });
                 await tx.siteBuildRun.update({
@@ -2468,7 +3070,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               if (site) {
                 await tx.site.update({
                   where: { id: siteId },
-                  data: { status: site.activeVersionId ? 'ready' : 'draft' },
+                  data: { status: site.activeVersionId ? "ready" : "draft" },
                 });
               }
             }
@@ -2503,16 +3105,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 /** intake JSON → KB 文档 markdown（结构化事实，供后续检索/factSheet）。 */
 export function intakeToMarkdown(intake: IntakeInput): string {
   return [
-    '# Company registration facts',
+    "# Company registration facts",
     `Company name (zh): ${intake.company.nameZh}`,
-    intake.company.nameEn ? `Company name (en): ${intake.company.nameEn}` : '',
+    intake.company.nameEn ? `Company name (en): ${intake.company.nameEn}` : "",
     `Industry: ${intake.industry}`,
-    `Main products: ${intake.products.join(', ')}`,
-    `Target markets: ${intake.targetMarkets.join(', ')}`,
+    `Main products: ${intake.products.join(", ")}`,
+    `Target markets: ${intake.targetMarkets.join(", ")}`,
     // R0-4（隐私红线，与 ADR-010 存储侧同源）：businessEmail 是联系信息，绝不进 KB embedding / 品牌 Prompt；
     // 留在受控结构化区 Site.intake（Copy 的 contact 槽按用途读取），不入通用检索语料。
-    intake.websiteUrl ? `Existing website: ${intake.websiteUrl}` : '',
+    intake.websiteUrl ? `Existing website: ${intake.websiteUrl}` : "",
   ]
     .filter(Boolean)
-    .join('\n');
+    .join("\n");
 }

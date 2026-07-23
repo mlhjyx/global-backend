@@ -1,25 +1,26 @@
-import { Prisma } from '@prisma/client';
-import type { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from "@prisma/client";
+import type { PrismaService } from "../prisma/prisma.service";
 
 export const BUILD_PHASES = [
-  'P1_understanding',
-  'P2_assets',
-  'P3_assembly',
-  'P5_publish',
+  "P1_understanding",
+  "P2_assets",
+  "P3_assembly",
+  "P5_publish",
 ] as const;
 export type BuildPhase = (typeof BUILD_PHASES)[number];
 
 export const BUILD_STEP_KEYS = [
-  'kb_ingest',
-  'brand_profile',
-  'image_pipeline',
-  'copy',
-  'assemble_build',
-  'quality_loop',
+  "kb_ingest",
+  "brand_profile",
+  "image_pipeline",
+  "design_spec",
+  "copy",
+  "assemble_build",
+  "quality_loop",
 ] as const;
 export type BuildStepKey = (typeof BUILD_STEP_KEYS)[number];
 export type BuildStepStatus =
-  'queued' | 'running' | 'done' | 'degraded' | 'failed' | 'skipped' | 'aborted';
+  "queued" | "running" | "done" | "degraded" | "failed" | "skipped" | "aborted";
 
 export interface BuildProgressInput {
   workspaceId: string;
@@ -47,22 +48,22 @@ const STATUS_RANK: Record<BuildStepStatus, number> = {
   aborted: 2,
 };
 const TERMINAL_STEP = new Set<BuildStepStatus>([
-  'done',
-  'degraded',
-  'failed',
-  'skipped',
-  'aborted',
+  "done",
+  "degraded",
+  "failed",
+  "skipped",
+  "aborted",
 ]);
 
 function publicStatus(statuses: BuildStepStatus[]): BuildStepStatus {
-  if (statuses.includes('failed')) return 'failed';
-  if (statuses.includes('running')) return 'running';
-  if (statuses.includes('queued')) return 'queued';
-  if (statuses.includes('aborted')) return 'aborted';
-  if (statuses.includes('degraded')) return 'degraded';
-  if (statuses.length > 0 && statuses.every((status) => status === 'skipped'))
-    return 'skipped';
-  return 'done';
+  if (statuses.includes("failed")) return "failed";
+  if (statuses.includes("running")) return "running";
+  if (statuses.includes("queued")) return "queued";
+  if (statuses.includes("aborted")) return "aborted";
+  if (statuses.includes("degraded")) return "degraded";
+  if (statuses.length > 0 && statuses.every((status) => status === "skipped"))
+    return "skipped";
+  return "done";
 }
 
 type StepRow = {
@@ -103,7 +104,7 @@ export function buildStepReadModel(rows: StepRow[]): Prisma.InputJsonValue {
       .sort((a, b) => b.getTime() - a.getTime())[0];
     return {
       key,
-      status: group.length === 0 ? 'queued' : publicStatus(statuses),
+      status: group.length === 0 ? "queued" : publicStatus(statuses),
       attempt: Math.max(1, ...group.map((row) => row.attempt)),
       progress: Math.max(0, ...group.map((row) => row.progress)),
       degraded: group.some((row) => row.degraded),
@@ -130,7 +131,7 @@ export async function recordBuildProgress(
   // Its own retry attempt must never become the logical step attempt: after an ACK-loss retry,
   // the following `done` call would otherwise look older than the preceding `running` call.
   const attempt = event.attempt ?? 1;
-  const itemKey = event.itemKey ?? '';
+  const itemKey = event.itemKey ?? "";
   const progress = Math.max(0, Math.min(1, event.progress));
   await prisma.withWorkspace(input.workspaceId, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${input.buildRunId}`}))`;
@@ -139,11 +140,11 @@ export async function recordBuildProgress(
       select: { status: true, phase: true, progress: true },
     });
     if (!run) throw new Error(`build run ${input.buildRunId} not found`);
-    if (!['queued', 'running'].includes(run.status)) return;
+    if (!["queued", "running"].includes(run.status)) return;
 
     const latest = await tx.siteBuildStep.findFirst({
       where: { buildRunId: input.buildRunId, key: event.key, itemKey },
-      orderBy: { attempt: 'desc' },
+      orderBy: { attempt: "desc" },
     });
     if (latest && latest.attempt > attempt) return;
     if (
@@ -175,19 +176,19 @@ export async function recordBuildProgress(
         status: event.status,
         phase: event.phase,
         progress,
-        degraded: event.status === 'degraded',
+        degraded: event.status === "degraded",
         errorCode: event.errorCode ?? null,
-        startedAt: event.status === 'queued' ? null : now,
+        startedAt: event.status === "queued" ? null : now,
         finishedAt: TERMINAL_STEP.has(event.status) ? now : null,
       },
       update: {
         status: event.status,
         phase: event.phase,
         progress: Math.max(latest?.progress ?? 0, progress),
-        degraded: latest?.degraded || event.status === 'degraded',
+        degraded: latest?.degraded || event.status === "degraded",
         errorCode: event.errorCode ?? latest?.errorCode ?? null,
         startedAt:
-          latest?.startedAt ?? (event.status === 'queued' ? null : now),
+          latest?.startedAt ?? (event.status === "queued" ? null : now),
         finishedAt: TERMINAL_STEP.has(event.status)
           ? (latest?.finishedAt ?? now)
           : null,
@@ -196,7 +197,7 @@ export async function recordBuildProgress(
 
     const rows = await tx.siteBuildStep.findMany({
       where: { buildRunId: input.buildRunId },
-      orderBy: [{ key: 'asc' }, { itemKey: 'asc' }, { attempt: 'asc' }],
+      orderBy: [{ key: "asc" }, { itemKey: "asc" }, { attempt: "asc" }],
       select: {
         key: true,
         itemKey: true,
@@ -212,7 +213,7 @@ export async function recordBuildProgress(
     const currentRank = PHASE_RANK.get(run.phase as BuildPhase) ?? -1;
     const nextRank = PHASE_RANK.get(event.phase) ?? -1;
     await tx.siteBuildRun.updateMany({
-      where: { id: input.buildRunId, status: { in: ['queued', 'running'] } },
+      where: { id: input.buildRunId, status: { in: ["queued", "running"] } },
       data: {
         phase: nextRank >= currentRank ? event.phase : run.phase,
         progress: Math.max(run.progress, progress),
@@ -233,16 +234,16 @@ export async function terminalizeBuildProgress(
 ): Promise<Prisma.InputJsonValue> {
   const rows = await tx.siteBuildStep.findMany({
     where: { buildRunId: input.buildRunId },
-    orderBy: [{ key: 'asc' }, { itemKey: 'asc' }, { attempt: 'asc' }],
+    orderBy: [{ key: "asc" }, { itemKey: "asc" }, { attempt: "asc" }],
   });
   const now = new Date();
   await tx.siteBuildStep.updateMany({
     where: {
       buildRunId: input.buildRunId,
-      status: { in: ['queued', 'running'] },
+      status: { in: ["queued", "running"] },
     },
     data: {
-      status: 'aborted',
+      status: "aborted",
       phase: input.phase,
       progress: input.progress,
       finishedAt: now,
@@ -256,9 +257,9 @@ export async function terminalizeBuildProgress(
           workspaceId: input.workspaceId,
           buildRunId: input.buildRunId,
           key,
-          itemKey: '',
+          itemKey: "",
           attempt: 1,
-          status: 'aborted',
+          status: "aborted",
           phase: input.phase,
           progress: input.progress,
           startedAt: null,
@@ -269,7 +270,7 @@ export async function terminalizeBuildProgress(
   }
   const terminalRows = await tx.siteBuildStep.findMany({
     where: { buildRunId: input.buildRunId },
-    orderBy: [{ key: 'asc' }, { itemKey: 'asc' }, { attempt: 'asc' }],
+    orderBy: [{ key: "asc" }, { itemKey: "asc" }, { attempt: "asc" }],
     select: {
       key: true,
       itemKey: true,

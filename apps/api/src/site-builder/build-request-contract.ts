@@ -119,6 +119,12 @@ export function normalizeBuildRequest(
       "stylePreset changes the whole Site and cannot be combined with a partial build",
     );
   }
+  if (options.locales && (input.scope !== "site" || options.pages)) {
+    unavailable(
+      "BUILD_OPTION_UNAVAILABLE",
+      "locales change the whole Site and cannot be combined with a partial build",
+    );
+  }
   if (
     options.locales &&
     (options.locales[0] !== "en" ||

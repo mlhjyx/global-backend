@@ -1,0 +1,1638 @@
+{
+  "specVersion": "1.1.0",
+  "componentLibraryVersion": "m1-e-a/55-qualified",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "archetype": "b2b-service",
+    "familyId": "premium-innovation",
+    "dirByLocale": { "en": "ltr" },
+    "theme": { "preset": "precision-instrument" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.detail", "pageId": "detail" }
+    ],
+    "seoGlobal": { "siteName": "premium-innovation rich" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroFull",
+            "props": {
+              "id": "HeroFull-home-premium-home-product-hero",
+              "eyebrowKey": "home.premium-home-product-hero.eyebrow",
+              "ratingKey": "home.premium-home-product-hero.rating",
+              "h1aKey": "home.premium-home-product-hero.h1a",
+              "h1bKey": "home.premium-home-product-hero.h1b",
+              "h1cKey": "home.premium-home-product-hero.h1c",
+              "subKey": "home.premium-home-product-hero.sub",
+              "primaryCta": {
+                "labelKey": "home.premium-home-product-hero.primarycta.label",
+                "pageId": "detail"
+              },
+              "secondaryCta": {
+                "labelKey": "home.premium-home-product-hero.secondarycta.label",
+                "pageId": "detail"
+              },
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "ProductShowcaseAlt",
+            "props": {
+              "id": "ProductShowcaseAlt-home-premium-home-product-showcase",
+              "chapterKey": "home.premium-home-product-showcase.chapter",
+              "titleKey": "home.premium-home-product-showcase.title",
+              "titleAccentKey": "home.premium-home-product-showcase.titleaccent",
+              "introKey": "home.premium-home-product-showcase.intro",
+              "configureCta": {
+                "labelKey": "home.premium-home-product-showcase.configurecta.label",
+                "pageId": "detail"
+              },
+              "capacityLabelKey": "home.premium-home-product-showcase.capacitylabel",
+              "weightLabelKey": "home.premium-home-product-showcase.weightlabel",
+              "cyclesLabelKey": "home.premium-home-product-showcase.cycleslabel",
+              "fromLabelKey": "home.premium-home-product-showcase.fromlabel",
+              "f1Key": "home.premium-home-product-showcase.f1",
+              "f2Key": "home.premium-home-product-showcase.f2",
+              "products": [
+                {
+                  "code": "PX-24",
+                  "nameKey": "home.premium-home-product-showcase.products.0.name",
+                  "taglineKey": "home.premium-home-product-showcase.products.0.tagline",
+                  "capacityKey": "home.premium-home-product-showcase.products.0.capacity",
+                  "weightKey": "home.premium-home-product-showcase.products.0.weight",
+                  "cyclesKey": "home.premium-home-product-showcase.products.0.cycles",
+                  "priceKey": "home.premium-home-product-showcase.products.0.price",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-product-study",
+                    "variantUrl": "/assets/catalog/0f98ca44bb78c3b1cb0c0c7be689a0ff0be88f55e5900a05e6bee6955e5d6080.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "MaterialsLibrary",
+            "props": {
+              "id": "MaterialsLibrary-home-premium-home-product-materials",
+              "eyebrowKey": "home.premium-home-product-materials.eyebrow",
+              "titleKey": "home.premium-home-product-materials.title",
+              "titleAccentKey": "home.premium-home-product-materials.titleaccent",
+              "introKey": "home.premium-home-product-materials.intro",
+              "ctaPrimaryLabelKey": "home.premium-home-product-materials.ctaprimarylabel",
+              "ctaPrimaryPageId": "detail",
+              "ctaSecondaryLabelKey": "home.premium-home-product-materials.ctasecondarylabel",
+              "ctaSecondaryPageId": "detail",
+              "items": [
+                {
+                  "no": "01",
+                  "nameKey": "home.premium-home-product-materials.items.0.name",
+                  "weightKey": "home.premium-home-product-materials.items.0.weight",
+                  "noteKey": "home.premium-home-product-materials.items.0.note",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-hero-stage",
+                    "variantUrl": "/assets/catalog/9666669e209fc98603fee177f34e8d8e412a3305b79b50902a8fc839e7ff5dc7.svg"
+                  }
+                },
+                {
+                  "no": "02",
+                  "nameKey": "home.premium-home-product-materials.items.1.name",
+                  "weightKey": "home.premium-home-product-materials.items.1.weight",
+                  "noteKey": "home.premium-home-product-materials.items.1.note",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-product-study",
+                    "variantUrl": "/assets/catalog/0f98ca44bb78c3b1cb0c0c7be689a0ff0be88f55e5900a05e6bee6955e5d6080.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProjectsGrid",
+            "props": {
+              "id": "ProjectsGrid-home-premium-home-product-projects",
+              "titleKey": "home.premium-home-product-projects.title",
+              "allLabelKey": "home.premium-home-product-projects.alllabel",
+              "allPageId": "detail",
+              "items": [
+                {
+                  "titleKey": "home.premium-home-product-projects.items.0.title",
+                  "descKey": "home.premium-home-product-projects.items.0.desc",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-hero-stage",
+                    "variantUrl": "/assets/catalog/9666669e209fc98603fee177f34e8d8e412a3305b79b50902a8fc839e7ff5dc7.svg"
+                  }
+                },
+                {
+                  "titleKey": "home.premium-home-product-projects.items.1.title",
+                  "descKey": "home.premium-home-product-projects.items.1.desc",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-product-study",
+                    "variantUrl": "/assets/catalog/0f98ca44bb78c3b1cb0c0c7be689a0ff0be88f55e5900a05e6bee6955e5d6080.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-home-premium-home-product-inquiry",
+              "titleKey": "home.premium-home-product-inquiry.title",
+              "subKey": "home.premium-home-product-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "path": "/detail",
+      "seo": {
+        "titleKey": "seo.detail.title",
+        "descriptionKey": "seo.detail.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-detail-premium-proof-hero",
+              "headlineKey": "detail.premium-proof-hero.headline",
+              "subheadKey": "detail.premium-proof-hero.subhead",
+              "cta": { "labelKey": "detail.premium-proof-hero.cta.label" },
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProjectsGrid",
+            "props": {
+              "id": "ProjectsGrid-detail-premium-proof-projects",
+              "titleKey": "detail.premium-proof-projects.title",
+              "allLabelKey": "detail.premium-proof-projects.alllabel",
+              "allPageId": "detail",
+              "items": [
+                {
+                  "titleKey": "detail.premium-proof-projects.items.0.title",
+                  "descKey": "detail.premium-proof-projects.items.0.desc",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-hero-stage",
+                    "variantUrl": "/assets/catalog/9666669e209fc98603fee177f34e8d8e412a3305b79b50902a8fc839e7ff5dc7.svg"
+                  }
+                },
+                {
+                  "titleKey": "detail.premium-proof-projects.items.1.title",
+                  "descKey": "detail.premium-proof-projects.items.1.desc",
+                  "asset": {
+                    "assetId": "catalog-premium-innovation-product-study",
+                    "variantUrl": "/assets/catalog/0f98ca44bb78c3b1cb0c0c7be689a0ff0be88f55e5900a05e6bee6955e5d6080.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "TrustSplit",
+            "props": {
+              "id": "TrustSplit-detail-premium-proof-trust",
+              "eyebrowKey": "detail.premium-proof-trust.eyebrow",
+              "titleKey": "detail.premium-proof-trust.title",
+              "titleAccentKey": "detail.premium-proof-trust.titleaccent",
+              "introKey": "detail.premium-proof-trust.intro",
+              "stats": [
+                {
+                  "value": "24",
+                  "labelKey": "detail.premium-proof-trust.stats.0.label"
+                },
+                {
+                  "value": "18",
+                  "labelKey": "detail.premium-proof-trust.stats.1.label"
+                }
+              ],
+              "badges": ["Documented review", "Material traceability"],
+              "portraitNameKey": "detail.premium-proof-trust.portraitname",
+              "portraitRoleKey": "detail.premium-proof-trust.portraitrole",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ArticleGrid",
+            "props": {
+              "id": "ArticleGrid-detail-premium-proof-articles",
+              "eyebrowKey": "detail.premium-proof-articles.eyebrow",
+              "titleKey": "detail.premium-proof-articles.title",
+              "titleLine2Key": "detail.premium-proof-articles.titleline2",
+              "introKey": "detail.premium-proof-articles.intro",
+              "items": [
+                {
+                  "cat": "Guides",
+                  "titleKey": "detail.premium-proof-articles.items.0.title",
+                  "descKey": "detail.premium-proof-articles.items.0.desc",
+                  "readTime": "4 min read"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-detail-premium-proof-inquiry",
+              "titleKey": "detail.premium-proof-inquiry.title",
+              "subKey": "detail.premium-proof-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {
+    "catalog-premium-innovation-hero-stage": {
+      "source": "catalog",
+      "packId": "premium-innovation-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "premium-innovation-hero-stage",
+      "sha256": "9666669e209fc98603fee177f34e8d8e412a3305b79b50902a8fc839e7ff5dc7",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-premium-innovation-product-study": {
+      "source": "catalog",
+      "packId": "premium-innovation-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "premium-innovation-product-study",
+      "sha256": "0f98ca44bb78c3b1cb0c0c7be689a0ff0be88f55e5900a05e6bee6955e5d6080",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-premium-innovation-process-concept": {
+      "source": "catalog",
+      "packId": "premium-innovation-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "premium-innovation-process-concept",
+      "sha256": "718d2592d584d2981bfcdcfa3041078b50d868ef432d68cc0545ea01c5f32a91",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-premium-innovation-process-proof": {
+      "source": "catalog",
+      "packId": "premium-innovation-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "premium-innovation-process-proof",
+      "sha256": "c198fa382cdd8ea0679d85c9b6cf9e12097c6aa5c2f6dd36d1b9b8de6c1cef8c",
+      "mimeType": "image/svg+xml"
+    }
+  },
+  "copyBundles": {
+    "en": {
+      "detail.premium-innovation-chapter.chapter": "Further information is available on req…",
+      "detail.premium-innovation-chapter.h1a": "Further information is available on re…",
+      "detail.premium-innovation-chapter.h1b": "Further information is available on re…",
+      "detail.premium-innovation-chapter.pieces.0.name": "Further information is available on request.",
+      "detail.premium-innovation-chapter.pieces.0.spec": "Further information is available on request.",
+      "detail.premium-innovation-chapter.pieces.0.tag": "Further information is available on request.",
+      "detail.premium-innovation-chapter.pieces.1.name": "Further information is available on request.",
+      "detail.premium-innovation-chapter.pieces.1.spec": "Further information is available on request.",
+      "detail.premium-innovation-chapter.pieces.1.tag": "Further information is available on request.",
+      "detail.premium-innovation-cta.cta.label": "Get in touch",
+      "detail.premium-innovation-cta.headline": "Practical solutions",
+      "detail.premium-innovation-faq.eyebrow": "Further information is available on req…",
+      "detail.premium-innovation-faq.intro": "Further information is available on request.",
+      "detail.premium-innovation-faq.items.0.a": "Further information is available on req…",
+      "detail.premium-innovation-faq.items.0.q": "Further information is available on req…",
+      "detail.premium-innovation-faq.items.1.a": "Further information is available on req…",
+      "detail.premium-innovation-faq.items.1.q": "Further information is available on req…",
+      "detail.premium-innovation-faq.title": "Practical solutions",
+      "detail.premium-innovation-faq.titleaccent": "Further information is avail…",
+      "detail.premium-innovation-hero.cta.label": "Get in touch",
+      "detail.premium-innovation-hero.headline": "Practical solutions",
+      "detail.premium-innovation-hero.subhead": "Further information is available on request.",
+      "detail.premium-innovation-systems.chapter": "Further information is available on req…",
+      "detail.premium-innovation-systems.intro": "Further information is available on request.",
+      "detail.premium-innovation-systems.systems.0.desc": "Further information is…",
+      "detail.premium-innovation-systems.systems.0.metriclabel": "Further information is…",
+      "detail.premium-innovation-systems.systems.0.title": "Practical solutions",
+      "detail.premium-innovation-systems.systems.1.desc": "Further information is…",
+      "detail.premium-innovation-systems.systems.1.metriclabel": "Further information is…",
+      "detail.premium-innovation-systems.systems.1.title": "Practical solutions",
+      "detail.premium-innovation-systems.title": "Practical solutions",
+      "detail.premium-innovation-systems.titleaccent": "Further information is avail…",
+      "detail.premium-proof-articles.eyebrow": "Further information is available on req…",
+      "detail.premium-proof-articles.intro": "Further information is available on request.",
+      "detail.premium-proof-articles.items.0.desc": "Further information is availabl…",
+      "detail.premium-proof-articles.items.0.title": "Practical solutions",
+      "detail.premium-proof-articles.title": "Practical solutions",
+      "detail.premium-proof-articles.titleline2": "Further information is avail…",
+      "detail.premium-proof-hero.cta.label": "Get in touch",
+      "detail.premium-proof-hero.headline": "Practical solutions",
+      "detail.premium-proof-hero.subhead": "Further information is available on request.",
+      "detail.premium-proof-inquiry.sub": "Further information is available on req…",
+      "detail.premium-proof-inquiry.title": "Practical solutions",
+      "detail.premium-proof-projects.alllabel": "Get in touch",
+      "detail.premium-proof-projects.items.0.desc": "Further information is…",
+      "detail.premium-proof-projects.items.0.title": "Practical solutions",
+      "detail.premium-proof-projects.items.1.desc": "Further information is…",
+      "detail.premium-proof-projects.items.1.title": "Practical solutions",
+      "detail.premium-proof-projects.title": "Practical solutions",
+      "detail.premium-proof-trust.eyebrow": "Further information is available on req…",
+      "detail.premium-proof-trust.intro": "Further information is available on request.",
+      "detail.premium-proof-trust.portraitname": "Further information is available on request.",
+      "detail.premium-proof-trust.portraitrole": "Further information is available on request.",
+      "detail.premium-proof-trust.stats.0.label": "Further information is available on request.",
+      "detail.premium-proof-trust.stats.1.label": "Further information is available on request.",
+      "detail.premium-proof-trust.title": "Practical solutions",
+      "detail.premium-proof-trust.titleaccent": "Further information is avail…",
+      "footer.tagline": "Further information is available on request.",
+      "home.premium-home-editorial-articles.eyebrow": "Further information is available on req…",
+      "home.premium-home-editorial-articles.intro": "Further information is available on request.",
+      "home.premium-home-editorial-articles.items.0.desc": "Further information is availabl…",
+      "home.premium-home-editorial-articles.items.0.title": "Practical solutions",
+      "home.premium-home-editorial-articles.title": "Practical solutions",
+      "home.premium-home-editorial-articles.titleline2": "Further information is avail…",
+      "home.premium-home-editorial-chapter.chapter": "Further information is available on req…",
+      "home.premium-home-editorial-chapter.h1a": "Further information is available on re…",
+      "home.premium-home-editorial-chapter.h1b": "Further information is available on re…",
+      "home.premium-home-editorial-chapter.pieces.0.name": "Further information is available on request.",
+      "home.premium-home-editorial-chapter.pieces.0.spec": "Further information is available on request.",
+      "home.premium-home-editorial-chapter.pieces.0.tag": "Further information is available on request.",
+      "home.premium-home-editorial-chapter.pieces.1.name": "Further information is available on request.",
+      "home.premium-home-editorial-chapter.pieces.1.spec": "Further information is available on request.",
+      "home.premium-home-editorial-chapter.pieces.1.tag": "Further information is available on request.",
+      "home.premium-home-editorial-cta.eyebrow": "Further information is available on req…",
+      "home.premium-home-editorial-cta.primarycta.label": "Get in touch",
+      "home.premium-home-editorial-cta.secondarycta.label": "Get in touch",
+      "home.premium-home-editorial-cta.subtitle": "Further information is available on req…",
+      "home.premium-home-editorial-cta.title": "Practical solutions",
+      "home.premium-home-editorial-cta.titleaccent": "Further informatio…",
+      "home.premium-home-editorial-featured.alllabel": "Get in touch",
+      "home.premium-home-editorial-featured.eyebrow": "Further information is available on req…",
+      "home.premium-home-editorial-featured.items.0.category": "Further information is available on request.",
+      "home.premium-home-editorial-featured.items.0.name": "Further information is available on request.",
+      "home.premium-home-editorial-featured.items.0.price": "Further information is…",
+      "home.premium-home-editorial-featured.items.1.category": "Further information is available on request.",
+      "home.premium-home-editorial-featured.items.1.name": "Further information is available on request.",
+      "home.premium-home-editorial-featured.items.1.price": "Further information is…",
+      "home.premium-home-editorial-featured.title": "Practical solutions",
+      "home.premium-home-editorial-hero.ctalabel": "Further information is…",
+      "home.premium-home-editorial-hero.eyebrow": "Further information is available on req…",
+      "home.premium-home-editorial-hero.headline": "Practical solutions",
+      "home.premium-home-editorial-hero.scroll": "Further information is available on request.",
+      "home.premium-home-editorial-hero.status": "Further information is available on request.",
+      "home.premium-home-editorial-statement.label": "Further information is available on request.",
+      "home.premium-home-editorial-statement.statement": "Further information is available on request.",
+      "home.premium-home-product-hero.eyebrow": "Further information is available on request.",
+      "home.premium-home-product-hero.h1a": "Further informatio…",
+      "home.premium-home-product-hero.h1b": "Further informatio…",
+      "home.premium-home-product-hero.h1c": "Further informatio…",
+      "home.premium-home-product-hero.primarycta.label": "Get in touch",
+      "home.premium-home-product-hero.rating": "Further information is available on request.",
+      "home.premium-home-product-hero.secondarycta.label": "Get in touch",
+      "home.premium-home-product-hero.sub": "Further information is available on request.",
+      "home.premium-home-product-inquiry.sub": "Further information is available on req…",
+      "home.premium-home-product-inquiry.title": "Practical solutions",
+      "home.premium-home-product-materials.ctaprimarylabel": "Further information is…",
+      "home.premium-home-product-materials.ctasecondarylabel": "Further information is…",
+      "home.premium-home-product-materials.eyebrow": "Further information is available on req…",
+      "home.premium-home-product-materials.intro": "Further information is available on request.",
+      "home.premium-home-product-materials.items.0.name": "Further information is available on request.",
+      "home.premium-home-product-materials.items.0.note": "Further information is available on request.",
+      "home.premium-home-product-materials.items.0.weight": "Further information is available on request.",
+      "home.premium-home-product-materials.items.1.name": "Further information is available on request.",
+      "home.premium-home-product-materials.items.1.note": "Further information is available on request.",
+      "home.premium-home-product-materials.items.1.weight": "Further information is available on request.",
+      "home.premium-home-product-materials.title": "Practical solutions",
+      "home.premium-home-product-materials.titleaccent": "Further information is avail…",
+      "home.premium-home-product-projects.alllabel": "Get in touch",
+      "home.premium-home-product-projects.items.0.desc": "Further information is…",
+      "home.premium-home-product-projects.items.0.title": "Practical solutions",
+      "home.premium-home-product-projects.items.1.desc": "Further information is…",
+      "home.premium-home-product-projects.items.1.title": "Practical solutions",
+      "home.premium-home-product-projects.title": "Practical solutions",
+      "home.premium-home-product-showcase.capacitylabel": "Further information is available on request.",
+      "home.premium-home-product-showcase.chapter": "Further information is available on req…",
+      "home.premium-home-product-showcase.configurecta.label": "Further information is…",
+      "home.premium-home-product-showcase.cycleslabel": "Further information is available on request.",
+      "home.premium-home-product-showcase.f1": "Further information is…",
+      "home.premium-home-product-showcase.f2": "Further information is…",
+      "home.premium-home-product-showcase.fromlabel": "Further information is available on request.",
+      "home.premium-home-product-showcase.intro": "Further information is available on request.",
+      "home.premium-home-product-showcase.products.0.capacity": "Further information is…",
+      "home.premium-home-product-showcase.products.0.cycles": "Further information is…",
+      "home.premium-home-product-showcase.products.0.name": "Further information is available on request.",
+      "home.premium-home-product-showcase.products.0.price": "Further information is…",
+      "home.premium-home-product-showcase.products.0.tagline": "Further information is available on request.",
+      "home.premium-home-product-showcase.products.0.weight": "Further information is…",
+      "home.premium-home-product-showcase.title": "Practical solutions",
+      "home.premium-home-product-showcase.titleaccent": "Further information is avail…",
+      "home.premium-home-product-showcase.weightlabel": "Further information is available on request.",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Your inquiry",
+      "inquiry.field.name": "Name",
+      "inquiry.m0.note": "The inquiry form is enabled when the site is published.",
+      "inquiry.submit": "Get in touch",
+      "nav.detail": "Further information is availabl…",
+      "nav.home": "Home",
+      "seo.detail.description": "Explore available solutions and ways to get in touch.",
+      "seo.detail.title": "Company website",
+      "seo.home.description": "Explore available solutions and ways to get in touch.",
+      "seo.home.title": "Company website"
+    }
+  },
+  "copyBundleSet": {
+    "schemaVersion": "site-builder-copy-bundle-set/v1",
+    "sourceLocale": "en",
+    "bundles": {
+      "en": {
+        "schemaVersion": "site-builder-copy-bundle/v1",
+        "slotCatalogVersion": "site-builder-copy-slots/v1",
+        "locale": "en",
+        "sourceLocale": "en",
+        "status": "complete",
+        "claimSnapshot": {
+          "id": "snapshot-c1f0924f8fe22560",
+          "digest": "6593f11b876615e1ed0d7449ca3411c70a7e355566e533fdd46c2a6061b5ffd7"
+        },
+        "inputHash": "a9152d43efe4e0675e8fc8b95e0bbc5a3ff042a265f73ba709552f97d69b0200",
+        "slots": {
+          "detail.premium-innovation-chapter.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.h1a": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Further information is available on re…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.h1b": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Further information is available on re…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.pieces.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.pieces.0.spec": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.pieces.0.tag": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.pieces.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.pieces.1.spec": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-chapter.pieces.1.tag": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.items.0.a": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.items.0.q": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.items.1.a": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.items.1.q": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-faq.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.systems.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.systems.0.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.systems.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.systems.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.systems.1.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.systems.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-innovation-systems.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-articles.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-articles.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.premium-proof-articles.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-articles.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-articles.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-articles.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.premium-proof-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-proof-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-projects.alllabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.premium-proof-projects.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-projects.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-projects.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-projects.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-projects.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.portraitname": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.portraitrole": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.premium-proof-trust.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "footer.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 120,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-articles.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-articles.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-articles.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-articles.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-articles.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-articles.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.h1a": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Further information is available on re…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.h1b": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Further information is available on re…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.pieces.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.pieces.0.spec": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.pieces.0.tag": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.pieces.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.pieces.1.spec": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-chapter.pieces.1.tag": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-cta.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-cta.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-cta.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-cta.subtitle": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-cta.title": {
+            "type": "plain_text",
+            "maxGraphemes": 19,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-cta.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 19,
+            "factual": false,
+            "content": "Further informatio…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.alllabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.items.0.category": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.items.0.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.items.1.category": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.items.1.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-featured.title": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-hero.ctalabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-hero.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-hero.scroll": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-hero.status": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-statement.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-editorial-statement.statement": {
+            "type": "rich_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.h1a": {
+            "type": "plain_text",
+            "maxGraphemes": 19,
+            "factual": false,
+            "content": "Further informatio…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.h1b": {
+            "type": "plain_text",
+            "maxGraphemes": 19,
+            "factual": false,
+            "content": "Further informatio…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.h1c": {
+            "type": "plain_text",
+            "maxGraphemes": 19,
+            "factual": false,
+            "content": "Further informatio…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.rating": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.premium-home-product-hero.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.ctaprimarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.ctasecondarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.items.0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.items.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.items.1.note": {
+            "type": "plain_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.items.1.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-product-materials.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-projects.alllabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.premium-home-product-projects.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-projects.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-product-projects.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-projects.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-product-projects.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.capacitylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.configurecta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.cycleslabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.f1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.f2": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.fromlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 148,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.products.0.capacity": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.products.0.cycles": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.products.0.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.products.0.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.products.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.premium-home-product-showcase.weightlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "inquiry.field.email": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Work email",
+            "claimRefs": []
+          },
+          "inquiry.field.message": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Your inquiry",
+            "claimRefs": []
+          },
+          "inquiry.field.name": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Name",
+            "claimRefs": []
+          },
+          "inquiry.m0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "The inquiry form is enabled when the site is published.",
+            "claimRefs": []
+          },
+          "inquiry.submit": {
+            "type": "cta_label",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "nav.detail": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "nav.home": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Home",
+            "claimRefs": []
+          },
+          "seo.detail.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.detail.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          },
+          "seo.home.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.home.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          }
+        },
+        "digest": "2361d607f331b45442f50b2f7b223a16cffcf3011098a195a2d121517026634c"
+      }
+    }
+  }
+}

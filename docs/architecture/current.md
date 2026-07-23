@@ -1,7 +1,7 @@
 # architecture/current —— 本仓顶层架构（as-built + 目标收敛 · L1/L4）
 
 > 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../roadmap/release-plan.md](../roadmap/release-plan.md)。
-> **2026-07-16 补，2026-07-18 R4-A2/模型决策同步**：本文 §1–§8 主体描述**获客后端**（C 核心）as-built 架构。自 2026-07-13 起主线转为**独立站建设子系统（Site Builder）**；其 as-built 快照见下方 §1A，细节与承重决策见 [../site-builder/02-architecture.md](../site-builder/02-architecture.md)、[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md) 和 [../adr/registry.md](../adr/registry.md) ADR-013~020。旧 Word、v3.1/v3.2 和研究稿不是 as-built 权威。
+> **2026-07-16 补，2026-07-24 M1-e-B 同步**：本文 §1–§8 主体描述**获客后端**（C 核心）as-built 架构。自 2026-07-13 起主线转为**独立站建设子系统（Site Builder）**；其 as-built 快照见下方 §1A，细节与承重决策见 [../site-builder/02-architecture.md](../site-builder/02-architecture.md)、[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md) 和 [../adr/registry.md](../adr/registry.md) ADR-013~020。旧 Word、v3.1/v3.2 和研究稿不是 as-built 权威。
 
 ## 1. 顶层运行架构
 
@@ -36,20 +36,22 @@ NestJS site-builder context（intake / site / profile / asset / KB / build）
 PostgreSQL + RLS             MinIO（素材/KB 对象）
         │                         ▲
         ▼                         │
-Temporal 固定 DAG → 有界 AI Task / Docling / BGE-M3 → SiteSpec 1.0.0
-                                                   │
-                                                   ▼
-                                    Astro renderer → 本地构建产物/静态预览
+Temporal 固定 DAG → Brand/Asset → DesignBrief → CopyBundle → 受控 Assembly
+                                                               │
+                                      SiteSpec 1.0(Demo) / 1.1 ─┘
+                                                               ▼
+                                    Astro renderer → SiteRelease v1/v2 → active pointer
 ```
 
-- 类型边界：`@global/contracts` 的 `SiteSpec` 1.0.0 是 API 生产端与 Astro 消费端唯一共享类型（DQ-1/#117）；运行时 Zod 门与 1.1.0 目标字段尚未落地，不得写成 as-built。
+- 类型边界：`@global/contracts` 的 `SiteSpec = SiteSpecV1 | SiteSpecV1_1` 是 API 与 Astro 的唯一共享类型。Demo v0 显式固定 1.0；M1-e-B 新历史固定 1.1 并增加组件库、Renderer、archetype、Family 与 `dirByLocale` identity。ReleaseManifest 同样为 v1/v2 closed union；旧版本不后台迁移。
 - #121/#123/#124/#126 已收口 intake 行为、事实安全、隐私、可取消超时、失败保站、幂等合同与 OpenAPI；R1-safety、R2-A1–A4、MF0-A/B、M1-c、R3-A/B1/B2 与 R1-min 均已落地。新构建以 `SiteRelease` manifest/digest 写入 S3-compatible producer-isolated 不可变对象，READY 后才允许 `Site.activeVersionId` 事务晋级；公开预览从该唯一指针解析对象并复验 digest。历史 `local:` 版本不静默回填，也不能冒充生产 Release。
 - R4-A1 已新增内部 `EvidenceRefV2` 合同、不可变 `SiteEvidenceSourceSnapshot`/`BrandProfileEvidenceRef`、FORCE RLS 与复合 provenance FK。P1 Activity 在模型前冻结经 PII 清洗和规范化的 intake/KB/storefront/research 语料，KB 精确到 chunk hash；新事实必须精确绑定 source/type/SHA-256/quote/Unicode selector。旧 v1 BrandProfile 不伪造回填；公开 OpenAPI 未变化。R4-A1 只证明引用完整性，不证明事实真值或可发布性。
 - R4-A2 在 BrandProfile 持久化边界加入公共企业事实 allowlist、PII/未消歧案例与 value/quote 关键值门，`research_hint` 永不投影；新 intake 原子建立 CompanyProfile→Site 复合租户关系，历史未关联 Site 不按名称猜身份。fact key 唯一合同为严格 lower_snake_case，schema/gate/投影与 EvidenceRef/Claim 约束均拒绝非 canonical 输入。通过项以稳定分域 key 复用共享 Claim/Evidence，不可变 FORCE RLS bridge 与 trigger 精确绑定 company/fact/snapshot/hash/quote/selector/asset；认证还须 live ready cert Asset。origin Claim 审批以 Claim 行锁+exact bridge 预检开始，固定 search_path 的 security-definer trigger 在 UPDATE 内取得 surviving bridge 行锁；API 绕过与 Site/BrandProfile 级联后的孤立审批均 fail-closed，manual/legacy null identity 仍兼容。Workspace 仍有 Site 时物理删除被 trigger 拒绝，避免 relational cascade 绕过对象清理/outbox；Asset DELETE 的 cert bridge 扫描由 partial ordered covering index 支撑。审批、撤销、到期与冲突裁决继续以 CAS/固定锁序把状态和 outbox 原子成对。A2 本身没有新增 endpoint、SiteSpec/CopyBundle 或消费者；后续 M1-d 已在其上建立正式消费链。19 个 A2 forward migration 只在 Ubuntu 开发环境通过空库/旧数据/真 PG 验证，不代表生产部署，恢复快照仍须逐 migration 通过 5 秒 lock gate。
 - R4-B-min 为每个 BuildRun 原子创建 `SiteBuildBudget`，以 `SiteBuildTaskAttempt` 的 lease/fence 管 logical task，以 `SiteBuildSpend` 的稳定 operation key 管 physical model/tool call；数据库函数串行 reserve/settle/reconcile，结算 ACK 不明保持 unknown 并阻止 fallback 重复花费。BrandProfile 在外部 IO 前 claim，冻结 input/output，重放复用成功产物并以 attempt 复合 provenance 原子完成。模型网关与 ToolBroker 共用账本；provider-reported、MODEL-1 冻结 token pricing、tool-reported、legacy estimate、unknown/not-incurred 分层，预算保守 charge 不冒充真实 cost。取消/预算/非运行态关闭付费门，终态写闭合 `site-builder-cost-summary/v1`。该合同已通过 Ubuntu 真 PostgreSQL RLS/并发/ACK-loss/replay/kill-switch verifier，不代表生产部署，也不改变 MODEL-1 路由证据。
 - 模型面须分层描述：现役只认 `task-routes.ts`；7 个文本 task 中仅 `site_builder.brand_profile` 经真实 new-api 协议探针、同形 6×2 Golden 与成本/质量门成为代码级 `promotedRoute`=`gpt-5.6-terra`（Responses）→`claude-sonnet-5`（Messages），并有任务硬门和回 DeepSeek Pro→GLM 开关；其余 6 个仍是 DeepSeek/GLM/MiniMax/Doubao `currentRoute`。2026-07-19 fast-follow active evidence id=`model1-brand-profile-20260719-v20`：final-code candidate 24/24（两模型各 12/12）且完整 legacy route baseline 12/12，同 source bundle，并精确记录 requested/reported/resolved model 与 transport；旧失败/诊断证据保留。三路全过后仍按 accepted-artifact 成本和失败门保持 Terra→Sonnet，不再用旧 baseline 失败作晋级理由。本机 new-api 已可见 GPT/Claude/Gemini 3.5/GPT Image 2。#140 合并后，Ubuntu 开发环境的应用已把 Ollama BGE-M3 以私有别名 `site-builder-bge-m3-local` + 专用模型受限令牌统一经 new-api 调用，并通过真实 `EmbeddingsClient` 两条 1024 维有限向量验证；这不代表生产部署。ADR-020 是整组质量优先目标，其他逐 task promotion 仍受 ADR-016 约束；图片/视频无生产 MediaGateway/消费者；BGE 路由迁移不换模型、维度或 `embed_version`，因此不触发重嵌。
 - M1-d 已把 R4-A2 bridge 冻结为 immutable PublishableClaimSnapshot，并以 SiteVersion/locale CopyBundle、R4-B task attempt、dual-read SiteSpec 与激活前 Claim 重验形成正式消费者。生成支持 `en/de-DE`，`ar` 只作 RTL renderer smoke；renderer 具备 locale route、自托管字体和构建产物 outbound-domain gate。公网 inquiry 仍未实现。
-- 当前关键路径：R1-min 已完成；DI-0 保留为后续独立主线，M1-e 开工前按当时 main 重新核验其合同与串行顺序。
+- M1-e-A/B 已把 55 型资格、六个 approved Family、DesignBrief producer、封闭 assembly adapter/copy slot/四层 validator、内容寻址 asset overlay 与 ReleaseManifest v2 接入真实 refurbish DAG。模型只可建议冻结 ID，服务端纯函数产生最终 props；三轮后只在同 Family 使用 safe Blueprint。局部 build 必须从 ready Release v2 读取并保持 Brief/seed/未命中 spec/copy/assets 不变，v1 base fail-closed。Catalog=`m1-e-b/1.0.0`，12 个 sparse/rich Golden 有 36 张三断点整站证据。
+- 当前关键路径：M1-e-B 已完成，下一步为 M1-f 质量循环；`quality_loop` 在本阶段明确 skipped，尚无 DesignEvaluation 运行时或审美模型晋级。
 - 🔴 **抓取 egress as-built**：Compose 已移除 broad allow-internal；Crawl4AI 固定不可变镜像 digest，保留 seed global-unicast 守卫和浏览器 pinning proxy。Ubuntu fake-IP 仅在系统答案全部位于 `198.18.0.0/15` 时经固定 Cloudflare DoH 回退；private/loopback/metadata/保留或混合答案 fail-closed。API 的 Crawl/robots/`http.get` 在每一跳解析、校验并钉扎连接，限制 redirect、超时、响应大小且跨域剥离凭证。公网与 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机矩阵已全绿；loopback 端口绑定仍保留为 defense-in-depth。
 
 ## 2. Bounded Contexts（9 个）

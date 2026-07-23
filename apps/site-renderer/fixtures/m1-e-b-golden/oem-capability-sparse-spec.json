@@ -1,0 +1,1205 @@
+{
+  "specVersion": "1.1.0",
+  "componentLibraryVersion": "m1-e-a/55-qualified",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "archetype": "custom-oem",
+    "familyId": "oem-capability",
+    "dirByLocale": { "en": "ltr" },
+    "theme": { "preset": "industrial-power" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.detail", "pageId": "detail" }
+    ],
+    "seoGlobal": { "siteName": "oem-capability sparse" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "IndustrialHero",
+            "props": {
+              "id": "IndustrialHero-home-oem-home-process-hero",
+              "badgeKey": "home.oem-home-process-hero.badge",
+              "badgeSubKey": "home.oem-home-process-hero.badgesub",
+              "leftH1Key": "home.oem-home-process-hero.lefth1",
+              "leftH1AccentKey": "home.oem-home-process-hero.lefth1accent",
+              "leftSubKey": "home.oem-home-process-hero.leftsub",
+              "leftStats": [
+                {
+                  "value": "24",
+                  "suffix": "h",
+                  "labelKey": "home.oem-home-process-hero.leftstats.0.label"
+                }
+              ],
+              "rightH1Key": "home.oem-home-process-hero.righth1",
+              "rightH2aKey": "home.oem-home-process-hero.righth2a",
+              "rightH2bAccentKey": "home.oem-home-process-hero.righth2baccent",
+              "rightSubKey": "home.oem-home-process-hero.rightsub",
+              "primaryCta": {
+                "labelKey": "home.oem-home-process-hero.primarycta.label",
+                "pageId": "home"
+              },
+              "secondaryCta": {
+                "labelKey": "home.oem-home-process-hero.secondarycta.label",
+                "pageId": "home"
+              },
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "LedgerStats",
+            "props": {
+              "id": "LedgerStats-home-oem-home-process-stats",
+              "chapterKey": "home.oem-home-process-stats.chapter",
+              "titleKey": "home.oem-home-process-stats.title",
+              "bodyKey": "home.oem-home-process-stats.body",
+              "clientsLabelKey": "home.oem-home-process-stats.clientslabel",
+              "stats": [
+                {
+                  "value": "24/7",
+                  "labelKey": "home.oem-home-process-stats.stats.0.label"
+                },
+                {
+                  "value": "≤ 1 hr",
+                  "labelKey": "home.oem-home-process-stats.stats.1.label"
+                }
+              ],
+              "clients": ["Northworks", "Delta Systems"],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "TechSystems",
+            "props": {
+              "id": "TechSystems-home-oem-home-process-systems",
+              "chapterKey": "home.oem-home-process-systems.chapter",
+              "titleKey": "home.oem-home-process-systems.title",
+              "titleAccentKey": "home.oem-home-process-systems.titleaccent",
+              "introKey": "home.oem-home-process-systems.intro",
+              "systems": [
+                {
+                  "label": "Hydraulic",
+                  "titleKey": "home.oem-home-process-systems.systems.0.title",
+                  "descKey": "home.oem-home-process-systems.systems.0.desc",
+                  "metric": "16",
+                  "suffix": "bar",
+                  "metricLabelKey": "home.oem-home-process-systems.systems.0.metriclabel"
+                },
+                {
+                  "label": "Materials",
+                  "titleKey": "home.oem-home-process-systems.systems.1.title",
+                  "descKey": "home.oem-home-process-systems.systems.1.desc",
+                  "metric": "320",
+                  "suffix": "°C",
+                  "metricLabelKey": "home.oem-home-process-systems.systems.1.metriclabel"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProcessTimeline",
+            "props": {
+              "id": "ProcessTimeline-home-oem-home-process-timeline",
+              "titleKey": "home.oem-home-process-timeline.title",
+              "steps": [
+                {
+                  "titleKey": "home.oem-home-process-timeline.steps.0.title",
+                  "bodyKey": "home.oem-home-process-timeline.steps.0.body"
+                },
+                {
+                  "titleKey": "home.oem-home-process-timeline.steps.1.title",
+                  "bodyKey": "home.oem-home-process-timeline.steps.1.body"
+                },
+                {
+                  "titleKey": "home.oem-home-process-timeline.steps.2.title",
+                  "bodyKey": "home.oem-home-process-timeline.steps.2.body"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProjectsGrid",
+            "props": {
+              "id": "ProjectsGrid-home-oem-home-process-projects",
+              "titleKey": "home.oem-home-process-projects.title",
+              "allLabelKey": "home.oem-home-process-projects.alllabel",
+              "allPageId": "home",
+              "items": [
+                {
+                  "titleKey": "home.oem-home-process-projects.items.0.title",
+                  "descKey": "home.oem-home-process-projects.items.0.desc",
+                  "asset": {
+                    "assetId": "catalog-oem-capability-hero-field",
+                    "variantUrl": "/assets/catalog/2127aec38d4a50813029eabcbf6fb6adfc6ce5e7581a7b65dbfe967785712ea0.svg"
+                  }
+                },
+                {
+                  "titleKey": "home.oem-home-process-projects.items.1.title",
+                  "descKey": "home.oem-home-process-projects.items.1.desc",
+                  "asset": {
+                    "assetId": "catalog-oem-capability-product-module",
+                    "variantUrl": "/assets/catalog/54180fb3c099d95bac3305eb8f70916f9e42c2bcbea2fa4a880e293cf00dbdaa.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CtaBanner",
+            "props": {
+              "id": "CtaBanner-home-oem-home-process-cta",
+              "headlineKey": "home.oem-home-process-cta.headline",
+              "cta": { "labelKey": "home.oem-home-process-cta.cta.label" },
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "path": "/detail",
+      "seo": {
+        "titleKey": "seo.detail.title",
+        "descriptionKey": "seo.detail.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-detail-oem-capability-hero",
+              "headlineKey": "detail.oem-capability-hero.headline",
+              "subheadKey": "detail.oem-capability-hero.subhead",
+              "cta": { "labelKey": "detail.oem-capability-hero.cta.label" },
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "FeatureCards",
+            "props": {
+              "id": "FeatureCards-detail-oem-capability-features",
+              "eyebrowKey": "detail.oem-capability-features.eyebrow",
+              "titleKey": "detail.oem-capability-features.title",
+              "titleLine2Key": "detail.oem-capability-features.titleline2",
+              "introKey": "detail.oem-capability-features.intro",
+              "items": [
+                {
+                  "icon": "ri-settings-3-line",
+                  "titleKey": "detail.oem-capability-features.items.0.title",
+                  "descKey": "detail.oem-capability-features.items.0.desc"
+                },
+                {
+                  "icon": "ri-file-list-3-line",
+                  "titleKey": "detail.oem-capability-features.items.1.title",
+                  "descKey": "detail.oem-capability-features.items.1.desc"
+                },
+                {
+                  "icon": "ri-customer-service-2-line",
+                  "titleKey": "detail.oem-capability-features.items.2.title",
+                  "descKey": "detail.oem-capability-features.items.2.desc"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "MaterialsLibrary",
+            "props": {
+              "id": "MaterialsLibrary-detail-oem-capability-materials",
+              "eyebrowKey": "detail.oem-capability-materials.eyebrow",
+              "titleKey": "detail.oem-capability-materials.title",
+              "titleAccentKey": "detail.oem-capability-materials.titleaccent",
+              "introKey": "detail.oem-capability-materials.intro",
+              "ctaPrimaryLabelKey": "detail.oem-capability-materials.ctaprimarylabel",
+              "ctaPrimaryPageId": "home",
+              "ctaSecondaryLabelKey": "detail.oem-capability-materials.ctasecondarylabel",
+              "ctaSecondaryPageId": "home",
+              "items": [
+                {
+                  "no": "01",
+                  "nameKey": "detail.oem-capability-materials.items.0.name",
+                  "weightKey": "detail.oem-capability-materials.items.0.weight",
+                  "noteKey": "detail.oem-capability-materials.items.0.note",
+                  "asset": {
+                    "assetId": "catalog-oem-capability-product-module",
+                    "variantUrl": "/assets/catalog/54180fb3c099d95bac3305eb8f70916f9e42c2bcbea2fa4a880e293cf00dbdaa.svg"
+                  }
+                },
+                {
+                  "no": "02",
+                  "nameKey": "detail.oem-capability-materials.items.1.name",
+                  "weightKey": "detail.oem-capability-materials.items.1.weight",
+                  "noteKey": "detail.oem-capability-materials.items.1.note",
+                  "asset": {
+                    "assetId": "catalog-oem-capability-product-module",
+                    "variantUrl": "/assets/catalog/54180fb3c099d95bac3305eb8f70916f9e42c2bcbea2fa4a880e293cf00dbdaa.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProcessSteps",
+            "props": {
+              "id": "ProcessSteps-detail-oem-capability-process",
+              "eyebrowKey": "detail.oem-capability-process.eyebrow",
+              "titleKey": "detail.oem-capability-process.title",
+              "titleAccentKey": "detail.oem-capability-process.titleaccent",
+              "introKey": "detail.oem-capability-process.intro",
+              "steps": [
+                {
+                  "num": "01",
+                  "icon": "ri-search-line",
+                  "titleKey": "detail.oem-capability-process.steps.0.title",
+                  "bodyKey": "detail.oem-capability-process.steps.0.body"
+                },
+                {
+                  "num": "02",
+                  "icon": "ri-file-list-3-line",
+                  "titleKey": "detail.oem-capability-process.steps.1.title",
+                  "bodyKey": "detail.oem-capability-process.steps.1.body"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-detail-oem-capability-inquiry",
+              "titleKey": "detail.oem-capability-inquiry.title",
+              "subKey": "detail.oem-capability-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {
+    "catalog-oem-capability-hero-field": {
+      "source": "catalog",
+      "packId": "oem-capability-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "oem-capability-hero-field",
+      "sha256": "2127aec38d4a50813029eabcbf6fb6adfc6ce5e7581a7b65dbfe967785712ea0",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-oem-capability-product-module": {
+      "source": "catalog",
+      "packId": "oem-capability-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "oem-capability-product-module",
+      "sha256": "54180fb3c099d95bac3305eb8f70916f9e42c2bcbea2fa4a880e293cf00dbdaa",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-oem-capability-process-line": {
+      "source": "catalog",
+      "packId": "oem-capability-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "oem-capability-process-line",
+      "sha256": "204e76ce33159fa8d1049d37bf0e70000474cdc0580228d9fb08279dd94f3d06",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-oem-capability-process-proof": {
+      "source": "catalog",
+      "packId": "oem-capability-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "oem-capability-process-proof",
+      "sha256": "63304f2f21e71958cefd56b15b2d8829109db0b817ecf538af09bb27df78e0e3",
+      "mimeType": "image/svg+xml"
+    }
+  },
+  "copyBundles": {
+    "en": {
+      "detail.oem-capability-features.eyebrow": "Further information is available on req…",
+      "detail.oem-capability-features.intro": "Further information is available on request.",
+      "detail.oem-capability-features.items.0.desc": "Further information is…",
+      "detail.oem-capability-features.items.0.title": "Practical solutions",
+      "detail.oem-capability-features.items.1.desc": "Further information is…",
+      "detail.oem-capability-features.items.1.title": "Practical solutions",
+      "detail.oem-capability-features.items.2.desc": "Further information is…",
+      "detail.oem-capability-features.items.2.title": "Practical solutions",
+      "detail.oem-capability-features.title": "Practical solutions",
+      "detail.oem-capability-features.titleline2": "Further information is avail…",
+      "detail.oem-capability-hero.cta.label": "Get in touch",
+      "detail.oem-capability-hero.headline": "Practical solutions",
+      "detail.oem-capability-hero.subhead": "Further information is available on request.",
+      "detail.oem-capability-inquiry.sub": "Further information is available on request.",
+      "detail.oem-capability-inquiry.title": "Practical solutions",
+      "detail.oem-capability-materials.ctaprimarylabel": "Further information is…",
+      "detail.oem-capability-materials.ctasecondarylabel": "Further information is…",
+      "detail.oem-capability-materials.eyebrow": "Further information is available on req…",
+      "detail.oem-capability-materials.intro": "Further information is available on request.",
+      "detail.oem-capability-materials.items.0.name": "Further information is available on request.",
+      "detail.oem-capability-materials.items.0.note": "Further information is available on request.",
+      "detail.oem-capability-materials.items.0.weight": "Further information is available on request.",
+      "detail.oem-capability-materials.items.1.name": "Further information is available on request.",
+      "detail.oem-capability-materials.items.1.note": "Further information is available on request.",
+      "detail.oem-capability-materials.items.1.weight": "Further information is available on request.",
+      "detail.oem-capability-materials.title": "Practical solutions",
+      "detail.oem-capability-materials.titleaccent": "Further information is avail…",
+      "detail.oem-capability-process.eyebrow": "Further information is available on req…",
+      "detail.oem-capability-process.intro": "Further information is available on request.",
+      "detail.oem-capability-process.steps.0.body": "Further information is available on req…",
+      "detail.oem-capability-process.steps.0.title": "Practical solutions",
+      "detail.oem-capability-process.steps.1.body": "Further information is available on req…",
+      "detail.oem-capability-process.steps.1.title": "Practical solutions",
+      "detail.oem-capability-process.title": "Practical solutions",
+      "detail.oem-capability-process.titleaccent": "Further information is avail…",
+      "footer.tagline": "Further information is available on request.",
+      "home.oem-home-process-cta.cta.label": "Get in touch",
+      "home.oem-home-process-cta.headline": "Practical solutions",
+      "home.oem-home-process-hero.badge": "Further information is available on request.",
+      "home.oem-home-process-hero.badgesub": "Further information is available on request.",
+      "home.oem-home-process-hero.lefth1": "Further information is…",
+      "home.oem-home-process-hero.lefth1accent": "Further information is…",
+      "home.oem-home-process-hero.leftstats.0.label": "Further information is available on request.",
+      "home.oem-home-process-hero.leftsub": "Further information is available on request.",
+      "home.oem-home-process-hero.primarycta.label": "Get in touch",
+      "home.oem-home-process-hero.righth1": "Further information is…",
+      "home.oem-home-process-hero.righth2a": "Further information is…",
+      "home.oem-home-process-hero.righth2baccent": "Further information is…",
+      "home.oem-home-process-hero.rightsub": "Further information is available on request.",
+      "home.oem-home-process-hero.secondarycta.label": "Get in touch",
+      "home.oem-home-process-projects.alllabel": "Get in touch",
+      "home.oem-home-process-projects.items.0.desc": "Further information is…",
+      "home.oem-home-process-projects.items.0.title": "Practical solutions",
+      "home.oem-home-process-projects.items.1.desc": "Further information is…",
+      "home.oem-home-process-projects.items.1.title": "Practical solutions",
+      "home.oem-home-process-projects.title": "Practical solutions",
+      "home.oem-home-process-stats.body": "Further information is available on request.",
+      "home.oem-home-process-stats.chapter": "Further information is available on req…",
+      "home.oem-home-process-stats.clientslabel": "Further information is available on request.",
+      "home.oem-home-process-stats.stats.0.label": "Further information is available on request.",
+      "home.oem-home-process-stats.stats.1.label": "Further information is available on request.",
+      "home.oem-home-process-stats.title": "Practical solutions",
+      "home.oem-home-process-systems.chapter": "Further information is available on req…",
+      "home.oem-home-process-systems.intro": "Further information is available on request.",
+      "home.oem-home-process-systems.systems.0.desc": "Further information is…",
+      "home.oem-home-process-systems.systems.0.metriclabel": "Further information is…",
+      "home.oem-home-process-systems.systems.0.title": "Practical solutions",
+      "home.oem-home-process-systems.systems.1.desc": "Further information is…",
+      "home.oem-home-process-systems.systems.1.metriclabel": "Further information is…",
+      "home.oem-home-process-systems.systems.1.title": "Practical solutions",
+      "home.oem-home-process-systems.title": "Practical solutions",
+      "home.oem-home-process-systems.titleaccent": "Further information is avail…",
+      "home.oem-home-process-timeline.steps.0.body": "Further information is available on req…",
+      "home.oem-home-process-timeline.steps.0.title": "Practical solutions",
+      "home.oem-home-process-timeline.steps.1.body": "Further information is available on req…",
+      "home.oem-home-process-timeline.steps.1.title": "Practical solutions",
+      "home.oem-home-process-timeline.steps.2.body": "Further information is available on req…",
+      "home.oem-home-process-timeline.steps.2.title": "Practical solutions",
+      "home.oem-home-process-timeline.title": "Practical solutions",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Your inquiry",
+      "inquiry.field.name": "Name",
+      "inquiry.m0.note": "The inquiry form is enabled when the site is published.",
+      "inquiry.submit": "Get in touch",
+      "nav.detail": "Further information is availabl…",
+      "nav.home": "Home",
+      "seo.detail.description": "Explore available solutions and ways to get in touch.",
+      "seo.detail.title": "Company website",
+      "seo.home.description": "Explore available solutions and ways to get in touch.",
+      "seo.home.title": "Company website"
+    }
+  },
+  "copyBundleSet": {
+    "schemaVersion": "site-builder-copy-bundle-set/v1",
+    "sourceLocale": "en",
+    "bundles": {
+      "en": {
+        "schemaVersion": "site-builder-copy-bundle/v1",
+        "slotCatalogVersion": "site-builder-copy-slots/v1",
+        "locale": "en",
+        "sourceLocale": "en",
+        "status": "complete",
+        "claimSnapshot": {
+          "id": "snapshot-c36150ea2c18d6f5",
+          "digest": "efafa48830ce4e38e1abebbb4a94c8bba4bd58570d564305f7553721d5ac1e22"
+        },
+        "inputHash": "bc52ce049dc334567816d15742e57615851cee0a196ef0de2898218c8cb2cfae",
+        "slots": {
+          "detail.oem-capability-features.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.items.2.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.items.2.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-features.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.oem-capability-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.ctaprimarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.ctasecondarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.items.0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.items.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.items.1.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.items.1.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-materials.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.steps.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.steps.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.steps.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.steps.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.oem-capability-process.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "footer.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 120,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.oem-home-process-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.badge": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.badgesub": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.lefth1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.lefth1accent": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.leftstats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.leftsub": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.righth1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.righth2a": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.righth2baccent": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.rightsub": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-hero.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.oem-home-process-projects.alllabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.oem-home-process-projects.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-projects.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-projects.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-projects.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-projects.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-stats.body": {
+            "type": "rich_text",
+            "maxGraphemes": 84,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.oem-home-process-stats.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-stats.clientslabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-stats.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-stats.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.oem-home-process-stats.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.systems.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.systems.0.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.systems.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.systems.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.systems.1.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.systems.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-systems.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.steps.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.steps.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.steps.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.steps.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.steps.2.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.steps.2.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.oem-home-process-timeline.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "inquiry.field.email": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Work email",
+            "claimRefs": []
+          },
+          "inquiry.field.message": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Your inquiry",
+            "claimRefs": []
+          },
+          "inquiry.field.name": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Name",
+            "claimRefs": []
+          },
+          "inquiry.m0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "The inquiry form is enabled when the site is published.",
+            "claimRefs": []
+          },
+          "inquiry.submit": {
+            "type": "cta_label",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "nav.detail": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "nav.home": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Home",
+            "claimRefs": []
+          },
+          "seo.detail.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.detail.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          },
+          "seo.home.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.home.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          }
+        },
+        "digest": "1bb3bfbcfa8fc33f24efb8c1e3412b82fd58453f3112a0b26869052f93fc4648"
+      }
+    }
+  }
+}

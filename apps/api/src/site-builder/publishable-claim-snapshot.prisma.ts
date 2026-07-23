@@ -1,20 +1,20 @@
-import { Prisma } from '@prisma/client';
-import { hasValidClaimApprovalAudit } from '../claim/claim-verification';
-import { isCertificationClaim } from './claim-classification';
+import { Prisma } from "@prisma/client";
+import { hasValidClaimApprovalAudit } from "../claim/claim-verification";
+import { isCertificationClaim } from "./claim-classification";
 import type {
   CurrentPublishableClaimState,
   PublishableClaimCandidate,
   PublishableClaimSnapshot,
   PublishableClaimSnapshotItem,
-} from './publishable-claim-snapshot';
-import type { PublishableClaimSnapshotRepository } from './publishable-claim-snapshot.service';
+} from "./publishable-claim-snapshot";
+import type { PublishableClaimSnapshotRepository } from "./publishable-claim-snapshot.service";
 
 type SnapshotTx = Pick<
   Prisma.TransactionClient,
-  | '$queryRaw'
-  | 'site'
-  | 'brandProfileClaimBridge'
-  | 'sitePublishableClaimSnapshot'
+  | "$queryRaw"
+  | "site"
+  | "brandProfileClaimBridge"
+  | "sitePublishableClaimSnapshot"
 >;
 
 type StoredItem = {
@@ -93,7 +93,7 @@ export class PrismaPublishableClaimSnapshotRepository implements PublishableClai
         capturedAt: true,
         snapshotDigest: true,
         items: {
-          orderBy: { ordinal: 'asc' },
+          orderBy: { ordinal: "asc" },
           select: {
             claimId: true,
             claimVersion: true,
@@ -122,7 +122,62 @@ export class PrismaPublishableClaimSnapshotRepository implements PublishableClai
     if (!row) return null;
     return {
       schemaVersion:
-        row.schemaVersion as PublishableClaimSnapshot['schemaVersion'],
+        row.schemaVersion as PublishableClaimSnapshot["schemaVersion"],
+      workspaceId: row.workspaceId,
+      siteId: row.siteId,
+      companyProfileId: row.companyProfileId,
+      buildRunId: row.buildRunId,
+      capturedAt: row.capturedAt.toISOString(),
+      digest: row.snapshotDigest,
+      items: row.items.map(storedItem),
+    };
+  }
+
+  async findById(
+    workspaceId: string,
+    snapshotId: string,
+  ): Promise<PublishableClaimSnapshot | null> {
+    const row = await this.tx.sitePublishableClaimSnapshot.findFirst({
+      where: { workspaceId, id: snapshotId },
+      select: {
+        workspaceId: true,
+        siteId: true,
+        companyProfileId: true,
+        buildRunId: true,
+        schemaVersion: true,
+        capturedAt: true,
+        snapshotDigest: true,
+        items: {
+          orderBy: { ordinal: "asc" },
+          select: {
+            claimId: true,
+            claimVersion: true,
+            factKey: true,
+            claimType: true,
+            statement: true,
+            validUntil: true,
+            approvedBy: true,
+            approvedAt: true,
+            bridgeId: true,
+            brandProfileId: true,
+            evidenceRefId: true,
+            evidenceId: true,
+            sourceSnapshotId: true,
+            sourceContentHash: true,
+            quote: true,
+            quoteStart: true,
+            quoteEnd: true,
+            quotePrefix: true,
+            quoteSuffix: true,
+            certAssetId: true,
+          },
+        },
+      },
+    });
+    if (!row) return null;
+    return {
+      schemaVersion:
+        row.schemaVersion as PublishableClaimSnapshot["schemaVersion"],
       workspaceId: row.workspaceId,
       siteId: row.siteId,
       companyProfileId: row.companyProfileId,
@@ -156,14 +211,14 @@ export class PrismaPublishableClaimSnapshotRepository implements PublishableClai
         siteId,
         companyProfileId,
         claim: {
-          status: 'APPROVED',
+          status: "APPROVED",
           OR: [{ validUntil: null }, { validUntil: { gt: capturedAt } }],
         },
       },
       orderBy: [
-        { claimId: 'asc' },
-        { brandProfile: { version: 'desc' } },
-        { id: 'asc' },
+        { claimId: "asc" },
+        { brandProfile: { version: "desc" } },
+        { id: "asc" },
       ],
       select: {
         id: true,
@@ -224,8 +279,8 @@ export class PrismaPublishableClaimSnapshotRepository implements PublishableClai
       });
       const certificationProofValid =
         row.certAssetId !== null &&
-        row.certAsset?.kind === 'cert' &&
-        row.certAsset.processingStatus === 'ready' &&
+        row.certAsset?.kind === "cert" &&
+        row.certAsset.processingStatus === "ready" &&
         row.certAsset.deletedAt === null;
       if (
         !factKey ||

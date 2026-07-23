@@ -1,55 +1,62 @@
-import type { PuckBlock, SitePage, SiteSpec } from '@global/contracts';
-import type { NormalizedBuildRequest } from './build-request-contract';
+import {
+  finalizeCopyBundle,
+  type CopyBundleSetV1,
+  type CopyBundleValidationContext,
+  type PuckBlock,
+  type SitePage,
+  type SiteSpec,
+} from "@global/contracts";
+import type { NormalizedBuildRequest } from "./build-request-contract";
 
 export class BuildTargetNotFoundError extends Error {
   constructor(target: string) {
     super(
       `build target ${target} was not found in the active and generated SiteSpec`,
     );
-    this.name = 'BuildTargetNotFoundError';
+    this.name = "BuildTargetNotFoundError";
   }
 }
 
 export class BuildTargetAmbiguousError extends Error {
   constructor(target: string) {
     super(`build target ${target} is not unique in SiteSpec`);
-    this.name = 'BuildTargetAmbiguousError';
+    this.name = "BuildTargetAmbiguousError";
   }
 }
 
 export class BuildActiveSpecInvalidError extends Error {
   constructor() {
-    super('active SiteSpec is not structurally safe for a partial build');
-    this.name = 'BuildActiveSpecInvalidError';
+    super("active SiteSpec is not structurally safe for a partial build");
+    this.name = "BuildActiveSpecInvalidError";
   }
 }
 
 function assertPartialSpecShape(value: SiteSpec): void {
   if (
     !value ||
-    typeof value !== 'object' ||
+    typeof value !== "object" ||
     !Array.isArray(value.pages) ||
     !value.site ||
-    typeof value.site !== 'object' ||
+    typeof value.site !== "object" ||
     Array.isArray(value.site) ||
     !value.copyBundles ||
-    typeof value.copyBundles !== 'object' ||
+    typeof value.copyBundles !== "object" ||
     Array.isArray(value.copyBundles) ||
     value.pages.some(
       (page) =>
         !page ||
-        typeof page !== 'object' ||
-        typeof page.id !== 'string' ||
+        typeof page !== "object" ||
+        typeof page.id !== "string" ||
         !page.puck ||
-        typeof page.puck !== 'object' ||
+        typeof page.puck !== "object" ||
         Array.isArray(page.puck) ||
         !Array.isArray(page.puck.content) ||
         page.puck.content.some(
           (block) =>
             !block ||
-            typeof block !== 'object' ||
+            typeof block !== "object" ||
             !block.props ||
-            typeof block.props !== 'object' ||
+            typeof block.props !== "object" ||
             Array.isArray(block.props),
         ),
     )
@@ -63,26 +70,34 @@ export function assertActiveBuildTargets(
   request: NormalizedBuildRequest,
 ): void {
   const ids = request.options?.pages;
-  if (request.scope === 'site' && !ids) return;
+  if (request.scope === "site" && !ids) return;
   if (!active) {
     throw new BuildTargetNotFoundError(
-      request.targetId ?? ids?.join(',') ?? 'active-version',
+      request.targetId ?? ids?.join(",") ?? "active-version",
     );
   }
   assertPartialSpecShape(active);
   if (active.copyBundleSet) {
     const activeLocales = sortedUnique(active.site.locales);
-    const requestedLocales = sortedUnique(request.options?.locales ?? ['en']);
+    const requestedLocales = sortedUnique(
+      request.options?.locales ?? active.site.locales,
+    );
+    const bundleLocales = sortedUnique(
+      Object.keys(active.copyBundleSet.bundles),
+    );
     if (
       !activeLocales ||
       !requestedLocales ||
-      JSON.stringify(requestedLocales) !== JSON.stringify(activeLocales)
+      !bundleLocales ||
+      JSON.stringify(requestedLocales) !== JSON.stringify(activeLocales) ||
+      JSON.stringify(bundleLocales) !== JSON.stringify(activeLocales) ||
+      active.copyBundleSet.sourceLocale !== active.site.defaultLocale
     ) {
       throw new BuildActiveSpecInvalidError();
     }
   }
   const pages = pageMap(active);
-  if (request.scope === 'page' || ids) {
+  if (request.scope === "page" || ids) {
     for (const id of ids ?? [request.targetId!]) {
       if (!pages.has(id)) throw new BuildTargetNotFoundError(id);
     }
@@ -101,7 +116,7 @@ function pageMap(spec: SiteSpec): Map<string, SitePage> {
 }
 
 function blockId(block: PuckBlock): string | null {
-  return typeof block.props.id === 'string' ? block.props.id : null;
+  return typeof block.props.id === "string" ? block.props.id : null;
 }
 
 function findBlock(
@@ -124,9 +139,9 @@ function collectKeys(value: unknown, out: Set<string>): void {
     value.forEach((item) => collectKeys(item, out));
     return;
   }
-  if (!value || typeof value !== 'object') return;
+  if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (key.endsWith('Key') && typeof child === 'string') out.add(child);
+    if (key.endsWith("Key") && typeof child === "string") out.add(child);
     else collectKeys(child, out);
   }
 }
@@ -135,7 +150,7 @@ function mergeCopyKeys(
   active: SiteSpec,
   candidate: SiteSpec,
   keys: Set<string>,
-): SiteSpec['copyBundles'] {
+): SiteSpec["copyBundles"] {
   const merged = structuredClone(active.copyBundles);
   for (const locale of candidate.site.locales) {
     const candidateBundle = candidate.copyBundles[locale];
@@ -148,6 +163,45 @@ function mergeCopyKeys(
     merged[locale] = target;
   }
   return merged;
+}
+
+function mergeAuthoritativeCopySet(
+  active: SiteSpec,
+  candidate: SiteSpec,
+  keys: ReadonlySet<string>,
+  validationContext?: CopyBundleValidationContext,
+): CopyBundleSetV1 | undefined {
+  if (!active.copyBundleSet || !candidate.copyBundleSet) return undefined;
+  if (!validationContext) throw new BuildActiveSpecInvalidError();
+  const bundles: CopyBundleSetV1["bundles"] = {};
+  for (const locale of active.site.locales) {
+    const base = active.copyBundleSet.bundles[locale];
+    const replacement = candidate.copyBundleSet.bundles[locale];
+    if (!base || !replacement) throw new BuildActiveSpecInvalidError();
+    if (
+      base.claimSnapshot.id !== replacement.claimSnapshot.id ||
+      base.claimSnapshot.digest !== replacement.claimSnapshot.digest ||
+      base.inputHash !== replacement.inputHash
+    ) {
+      throw new BuildActiveSpecInvalidError();
+    }
+    const slots = structuredClone(base.slots);
+    for (const key of keys) {
+      if (replacement.slots[key]) {
+        slots[key] = structuredClone(replacement.slots[key]);
+      }
+    }
+    const { digest: _digest, ...draft } = base;
+    bundles[locale] = finalizeCopyBundle(
+      { ...draft, slots },
+      validationContext,
+    );
+  }
+  return {
+    schemaVersion: active.copyBundleSet.schemaVersion,
+    sourceLocale: active.copyBundleSet.sourceLocale,
+    bundles,
+  };
 }
 
 function sortedUnique(values: readonly string[]): string[] | null {
@@ -183,21 +237,22 @@ export function applyBuildScope(
   active: SiteSpec | null,
   candidate: SiteSpec,
   request: NormalizedBuildRequest,
+  copyValidationContext?: CopyBundleValidationContext,
 ): SiteSpec {
   const selectedPages = request.options?.pages;
-  const fullSite = request.scope === 'site' && !selectedPages;
+  const fullSite = request.scope === "site" && !selectedPages;
   if (fullSite) return candidate;
   assertActiveBuildTargets(active, request);
-  if (!active) throw new BuildTargetNotFoundError('active-version');
+  if (!active) throw new BuildTargetNotFoundError("active-version");
   const base = active;
   if (base.specVersion !== candidate.specVersion) {
-    throw new Error('active and generated SiteSpec versions are incompatible');
+    throw new Error("active and generated SiteSpec versions are incompatible");
   }
   assertCompleteAuthoritativeLocaleSet(base, candidate);
 
   const activePages = pageMap(base);
   const candidatePages = pageMap(candidate);
-  if (request.scope === 'page' || selectedPages) {
+  if (request.scope === "page" || selectedPages) {
     const ids = selectedPages ?? [request.targetId!];
     const replacements = new Map<string, SitePage>();
     const keys = new Set<string>();
@@ -210,16 +265,22 @@ export function applyBuildScope(
       keys.add(replacement.seo.descriptionKey);
       collectKeys(replacement.puck, keys);
     }
+    const copyBundleSet = mergeAuthoritativeCopySet(
+      base,
+      candidate,
+      keys,
+      copyValidationContext,
+    );
     return {
       ...structuredClone(base),
-      site: candidate.copyBundleSet
-        ? structuredClone(candidate.site)
-        : structuredClone(base.site),
+      site: structuredClone(base.site),
       pages: base.pages.map((page) => replacements.get(page.id) ?? page),
       copyBundles: mergeCopyKeys(base, candidate, keys),
-      ...(candidate.copyBundleSet
-        ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
-        : {}),
+      assets: {
+        ...structuredClone(base.assets),
+        ...structuredClone(candidate.assets),
+      },
+      ...(copyBundleSet ? { copyBundleSet } : {}),
     } as SiteSpec;
   }
 
@@ -228,11 +289,15 @@ export function applyBuildScope(
   const replacement = findBlock(candidate, targetId);
   const keys = new Set<string>();
   collectKeys(replacement.block, keys);
+  const copyBundleSet = mergeAuthoritativeCopySet(
+    base,
+    candidate,
+    keys,
+    copyValidationContext,
+  );
   return {
     ...structuredClone(base),
-    site: candidate.copyBundleSet
-      ? structuredClone(candidate.site)
-      : structuredClone(base.site),
+    site: structuredClone(base.site),
     pages: base.pages.map((page) =>
       page.id !== current.page.id
         ? page
@@ -247,8 +312,10 @@ export function applyBuildScope(
           },
     ),
     copyBundles: mergeCopyKeys(base, candidate, keys),
-    ...(candidate.copyBundleSet
-      ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
-      : {}),
+    assets: {
+      ...structuredClone(base.assets),
+      ...structuredClone(candidate.assets),
+    },
+    ...(copyBundleSet ? { copyBundleSet } : {}),
   } as SiteSpec;
 }

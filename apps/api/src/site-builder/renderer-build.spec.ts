@@ -5,78 +5,85 @@ import {
   rm,
   stat,
   writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildRendererEnv,
   buildSiteSpecWithTemporaryFile,
   assertRenderedOutboundDomains,
+  resolveRendererEntrypoint,
   type RendererBuildInput,
-} from './renderer-build';
+} from "./renderer-build";
 
 async function expectMissing(filePath: string): Promise<void> {
-  await expect(access(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
 }
 
-describe('buildRendererEnv — Renderer 子进程最小环境', () => {
-  it('只包含确定性构建变量，不继承数据库、对象存储或模型密钥', () => {
+describe("buildRendererEnv — Renderer 子进程最小环境", () => {
+  it("skips nonexistent candidate roots before resolving the hoisted Astro package", () => {
+    expect(resolveRendererEntrypoint(process.cwd()).rendererRoot).toBe(
+      path.resolve(process.cwd(), "..", "site-renderer"),
+    );
+  });
+
+  it("只包含确定性构建变量，不继承数据库、对象存储或模型密钥", () => {
     const env = buildRendererEnv({
-      specPath: '/tmp/spec.json',
-      outDir: '/tmp/out',
-      basePath: '/preview/acme/',
+      specPath: "/tmp/spec.json",
+      outDir: "/tmp/out",
+      basePath: "/preview/acme/",
     });
 
     expect(env).toEqual({
-      NODE_ENV: 'production',
-      LANG: 'C.UTF-8',
-      TZ: 'UTC',
-      SITESPEC_PATH: '/tmp/spec.json',
-      OUT_DIR: '/tmp/out',
-      BASE_PATH: '/preview/acme/',
-      ASTRO_TELEMETRY_DISABLED: '1',
+      NODE_ENV: "production",
+      LANG: "C.UTF-8",
+      TZ: "UTC",
+      SITESPEC_PATH: "/tmp/spec.json",
+      OUT_DIR: "/tmp/out",
+      BASE_PATH: "/preview/acme/",
+      ASTRO_TELEMETRY_DISABLED: "1",
     });
-    expect(env).not.toHaveProperty('DATABASE_URL');
-    expect(env).not.toHaveProperty('S3_SECRET_KEY');
-    expect(env).not.toHaveProperty('NEW_API_KEY');
-    expect(env).not.toHaveProperty('PATH');
-    expect(env).not.toHaveProperty('HOME');
-    expect(env).not.toHaveProperty('NODE_OPTIONS');
+    expect(env).not.toHaveProperty("DATABASE_URL");
+    expect(env).not.toHaveProperty("S3_SECRET_KEY");
+    expect(env).not.toHaveProperty("NEW_API_KEY");
+    expect(env).not.toHaveProperty("PATH");
+    expect(env).not.toHaveProperty("HOME");
+    expect(env).not.toHaveProperty("NODE_OPTIONS");
   });
 
-  it('只按显式输入传递一次性 public asset overlay', () => {
+  it("只按显式输入传递一次性 public asset overlay", () => {
     expect(
       buildRendererEnv({
-        specPath: '/tmp/spec.json',
-        outDir: '/tmp/out',
-        basePath: '/',
-        publicAssetDir: '/tmp/overlay',
+        specPath: "/tmp/spec.json",
+        outDir: "/tmp/out",
+        basePath: "/",
+        publicAssetDir: "/tmp/overlay",
       }),
     ).toMatchObject({
-      PUBLIC_ASSET_DIR: '/tmp/overlay',
+      PUBLIC_ASSET_DIR: "/tmp/overlay",
     });
   });
 });
 
-describe('rendered outbound-domain gate', () => {
-  it('allows internal/self-hosted assets and explicitly approved HTTPS domains only', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'm1d-outbound-'));
+describe("rendered outbound-domain gate", () => {
+  it("allows internal/self-hosted assets and explicitly approved HTTPS domains only", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "m1d-outbound-"));
     try {
       await writeFile(
-        path.join(dir, 'index.html'),
-        '<a href="/contact">local</a><img src="data:image/png;base64,x"><a href="https://docs.example.com/x">docs</a>',
+        path.join(dir, "index.html"),
+        '<!-- vendored license: https://remixicon.com --><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg"></svg><a href="/contact">local</a><style>@font-face{src:url(data:font/woff2;base64,abc//+v6p4f1u9glr58yni)}</style><img src="data:image/png;base64,x"><a href="https://docs.example.com/x">docs</a>',
       );
       await expect(
-        assertRenderedOutboundDomains(dir, ['docs.example.com']),
+        assertRenderedOutboundDomains(dir, ["docs.example.com"]),
       ).resolves.toBeUndefined();
 
       await writeFile(
-        path.join(dir, 'app.js'),
+        path.join(dir, "app.js"),
         'fetch("https://tracker.invalid/collect")',
       );
       await expect(
-        assertRenderedOutboundDomains(dir, ['docs.example.com']),
+        assertRenderedOutboundDomains(dir, ["docs.example.com"]),
       ).rejects.toThrowError(/RENDERER_OUTBOUND_DOMAIN_FORBIDDEN/);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -84,13 +91,13 @@ describe('rendered outbound-domain gate', () => {
   });
 });
 
-describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () => {
-  it('构建期间使用 0600 随机临时文件，成功后删除整个临时目录', async () => {
-    let observedPath = '';
+describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
+  it("构建期间使用 0600 随机临时文件，成功后删除整个临时目录", async () => {
+    let observedPath = "";
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
-      expect(path.basename(input.specPath)).toBe('site-spec.json');
-      expect(await readFile(input.specPath, 'utf8')).toBe('{"safe":true}');
+      expect(path.basename(input.specPath)).toBe("site-spec.json");
+      expect(await readFile(input.specPath, "utf8")).toBe('{"safe":true}');
       expect((await stat(path.dirname(input.specPath))).mode & 0o777).toBe(
         0o700,
       );
@@ -99,7 +106,7 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
 
     await buildSiteSpecWithTemporaryFile(
       { safe: true },
-      { outDir: '/tmp/out', basePath: '/preview/acme/' },
+      { outDir: "/tmp/out", basePath: "/preview/acme/" },
       execute,
     );
 
@@ -108,38 +115,38 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
     await expectMissing(path.dirname(observedPath));
   });
 
-  it('将可信 overlay 路径传给 renderer executor', async () => {
+  it("将可信 overlay 路径传给 renderer executor", async () => {
     const execute = vi.fn(async (input: RendererBuildInput) => {
-      expect(input.publicAssetDir).toBe('/tmp/overlay');
+      expect(input.publicAssetDir).toBe("/tmp/overlay");
     });
     await buildSiteSpecWithTemporaryFile(
       { safe: true },
       {
-        outDir: '/tmp/out',
-        basePath: '/',
-        publicAssetDir: '/tmp/overlay',
+        outDir: "/tmp/out",
+        basePath: "/",
+        publicAssetDir: "/tmp/overlay",
       },
       execute,
     );
   });
 
-  it('Renderer 抛错时仍在 finally 删除 SiteSpec 与随机临时目录，并保留原错误', async () => {
-    let observedPath = '';
+  it("Renderer 抛错时仍在 finally 删除 SiteSpec 与随机临时目录，并保留原错误", async () => {
+    let observedPath = "";
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
-      expect(await readFile(input.specPath, 'utf8')).toBe(
+      expect(await readFile(input.specPath, "utf8")).toBe(
         '{"tenant":"content"}',
       );
-      throw new Error('astro failed');
+      throw new Error("astro failed");
     });
 
     await expect(
       buildSiteSpecWithTemporaryFile(
-        { tenant: 'content' },
-        { outDir: '/tmp/out', basePath: '/preview/acme/' },
+        { tenant: "content" },
+        { outDir: "/tmp/out", basePath: "/preview/acme/" },
         execute,
       ),
-    ).rejects.toThrow('astro failed');
+    ).rejects.toThrow("astro failed");
 
     await expectMissing(observedPath);
     await expectMissing(path.dirname(observedPath));

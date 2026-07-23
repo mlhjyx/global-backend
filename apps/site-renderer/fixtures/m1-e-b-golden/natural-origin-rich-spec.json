@@ -1,0 +1,1643 @@
+{
+  "specVersion": "1.1.0",
+  "componentLibraryVersion": "m1-e-a/55-qualified",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "archetype": "ingredient-exporter",
+    "familyId": "natural-origin",
+    "dirByLocale": { "en": "ltr" },
+    "theme": { "preset": "warm-kitchen" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.detail", "pageId": "detail" }
+    ],
+    "seoGlobal": { "siteName": "natural-origin rich" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "WarmHero",
+            "props": {
+              "id": "WarmHero-home-natural-home-seasonal-hero",
+              "eyebrowKey": "home.natural-home-seasonal-hero.eyebrow",
+              "h1Key": "home.natural-home-seasonal-hero.h1",
+              "h1AccentKey": "home.natural-home-seasonal-hero.h1accent",
+              "subKey": "home.natural-home-seasonal-hero.sub",
+              "primaryCta": {
+                "labelKey": "home.natural-home-seasonal-hero.primarycta.label",
+                "pageId": "detail"
+              },
+              "secondaryCta": {
+                "labelKey": "home.natural-home-seasonal-hero.secondarycta.label",
+                "pageId": "detail"
+              },
+              "stats": [
+                {
+                  "value": "24h",
+                  "labelKey": "home.natural-home-seasonal-hero.stats.0.label"
+                },
+                {
+                  "value": "12",
+                  "labelKey": "home.natural-home-seasonal-hero.stats.1.label"
+                }
+              ],
+              "scrollKey": "home.natural-home-seasonal-hero.scroll",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "DishesShowcase",
+            "props": {
+              "id": "DishesShowcase-home-natural-home-seasonal-dishes",
+              "eyebrowKey": "home.natural-home-seasonal-dishes.eyebrow",
+              "titleKey": "home.natural-home-seasonal-dishes.title",
+              "titleAccentKey": "home.natural-home-seasonal-dishes.titleaccent",
+              "dishes": [
+                {
+                  "nameKey": "home.natural-home-seasonal-dishes.dishes.0.name",
+                  "seasonKey": "home.natural-home-seasonal-dishes.dishes.0.season",
+                  "noteKey": "home.natural-home-seasonal-dishes.dishes.0.note"
+                },
+                {
+                  "nameKey": "home.natural-home-seasonal-dishes.dishes.1.name",
+                  "seasonKey": "home.natural-home-seasonal-dishes.dishes.1.season",
+                  "noteKey": "home.natural-home-seasonal-dishes.dishes.1.note"
+                }
+              ],
+              "addLabelKey": "home.natural-home-seasonal-dishes.addlabel",
+              "addPageId": "detail",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "FeaturedSpotlight",
+            "props": {
+              "id": "FeaturedSpotlight-home-natural-home-seasonal-featured",
+              "eyebrowKey": "home.natural-home-seasonal-featured.eyebrow",
+              "titleKey": "home.natural-home-seasonal-featured.title",
+              "allLabelKey": "home.natural-home-seasonal-featured.alllabel",
+              "allPageId": "detail",
+              "items": [
+                {
+                  "nameKey": "home.natural-home-seasonal-featured.items.0.name",
+                  "categoryKey": "home.natural-home-seasonal-featured.items.0.category",
+                  "priceKey": "home.natural-home-seasonal-featured.items.0.price"
+                },
+                {
+                  "nameKey": "home.natural-home-seasonal-featured.items.1.name",
+                  "categoryKey": "home.natural-home-seasonal-featured.items.1.category",
+                  "priceKey": "home.natural-home-seasonal-featured.items.1.price"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "PhotoGallery",
+            "props": {
+              "id": "PhotoGallery-home-natural-home-seasonal-gallery",
+              "eyebrowKey": "home.natural-home-seasonal-gallery.eyebrow",
+              "titleKey": "home.natural-home-seasonal-gallery.title",
+              "titleAccentKey": "home.natural-home-seasonal-gallery.titleaccent",
+              "allLabelKey": "home.natural-home-seasonal-gallery.alllabel",
+              "allPageId": "detail",
+              "items": [
+                {
+                  "assetId": "catalog-natural-origin-process-field",
+                  "altKey": "home.natural-home-seasonal-gallery.items.0.alt",
+                  "variantUrl": "/assets/catalog/a19c441a1adf88af4eef1d443a6d171046d0ff26c2b21749dc471e69cdf5ba48.svg"
+                },
+                {
+                  "assetId": "catalog-natural-origin-process-craft",
+                  "altKey": "home.natural-home-seasonal-gallery.items.1.alt",
+                  "variantUrl": "/assets/catalog/0db4b03bf326a555a109d473d182cba576ff5118af0d0aaa101ade2b3a5dfd10.svg"
+                },
+                {
+                  "assetId": "catalog-natural-origin-process-field",
+                  "altKey": "home.natural-home-seasonal-gallery.items.2.alt",
+                  "variantUrl": "/assets/catalog/a19c441a1adf88af4eef1d443a6d171046d0ff26c2b21749dc471e69cdf5ba48.svg"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-home-natural-home-seasonal-inquiry",
+              "titleKey": "home.natural-home-seasonal-inquiry.title",
+              "subKey": "home.natural-home-seasonal-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "path": "/detail",
+      "seo": {
+        "titleKey": "seo.detail.title",
+        "descriptionKey": "seo.detail.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-detail-natural-provenance-hero",
+              "headlineKey": "detail.natural-provenance-hero.headline",
+              "subheadKey": "detail.natural-provenance-hero.subhead",
+              "cta": { "labelKey": "detail.natural-provenance-hero.cta.label" },
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "StoryChapters",
+            "props": {
+              "id": "StoryChapters-detail-natural-provenance-story",
+              "introEyebrowKey": "detail.natural-provenance-story.introeyebrow",
+              "introTitleKey": "detail.natural-provenance-story.introtitle",
+              "chapters": [
+                {
+                  "eyebrowKey": "detail.natural-provenance-story.chapters.0.eyebrow",
+                  "titleKey": "detail.natural-provenance-story.chapters.0.title",
+                  "bodyKey": "detail.natural-provenance-story.chapters.0.body"
+                },
+                {
+                  "eyebrowKey": "detail.natural-provenance-story.chapters.1.eyebrow",
+                  "titleKey": "detail.natural-provenance-story.chapters.1.title",
+                  "bodyKey": "detail.natural-provenance-story.chapters.1.body"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProcessSteps",
+            "props": {
+              "id": "ProcessSteps-detail-natural-provenance-process",
+              "eyebrowKey": "detail.natural-provenance-process.eyebrow",
+              "titleKey": "detail.natural-provenance-process.title",
+              "titleAccentKey": "detail.natural-provenance-process.titleaccent",
+              "introKey": "detail.natural-provenance-process.intro",
+              "steps": [
+                {
+                  "num": "01",
+                  "icon": "ri-search-line",
+                  "titleKey": "detail.natural-provenance-process.steps.0.title",
+                  "bodyKey": "detail.natural-provenance-process.steps.0.body"
+                },
+                {
+                  "num": "02",
+                  "icon": "ri-file-list-3-line",
+                  "titleKey": "detail.natural-provenance-process.steps.1.title",
+                  "bodyKey": "detail.natural-provenance-process.steps.1.body"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "TrustSplit",
+            "props": {
+              "id": "TrustSplit-detail-natural-provenance-trust",
+              "eyebrowKey": "detail.natural-provenance-trust.eyebrow",
+              "titleKey": "detail.natural-provenance-trust.title",
+              "titleAccentKey": "detail.natural-provenance-trust.titleaccent",
+              "introKey": "detail.natural-provenance-trust.intro",
+              "stats": [
+                {
+                  "value": "24",
+                  "labelKey": "detail.natural-provenance-trust.stats.0.label"
+                },
+                {
+                  "value": "18",
+                  "labelKey": "detail.natural-provenance-trust.stats.1.label"
+                }
+              ],
+              "badges": ["Documented review", "Material traceability"],
+              "portraitNameKey": "detail.natural-provenance-trust.portraitname",
+              "portraitRoleKey": "detail.natural-provenance-trust.portraitrole",
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-detail-natural-provenance-inquiry",
+              "titleKey": "detail.natural-provenance-inquiry.title",
+              "subKey": "detail.natural-provenance-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {
+    "catalog-natural-origin-hero-field": {
+      "source": "catalog",
+      "packId": "natural-origin-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "natural-origin-hero-field",
+      "sha256": "b096d1147eeb88927cb03913546c1b7be7b7776f7174759fdcca14584406d47f",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-natural-origin-product-samples": {
+      "source": "catalog",
+      "packId": "natural-origin-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "natural-origin-product-samples",
+      "sha256": "d34e2938a66f3c5dd521b34cdf8bd6645bf28bbd7b90705bf8124fb155e97ff4",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-natural-origin-process-field": {
+      "source": "catalog",
+      "packId": "natural-origin-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "natural-origin-process-field",
+      "sha256": "a19c441a1adf88af4eef1d443a6d171046d0ff26c2b21749dc471e69cdf5ba48",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-natural-origin-process-craft": {
+      "source": "catalog",
+      "packId": "natural-origin-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "natural-origin-process-craft",
+      "sha256": "0db4b03bf326a555a109d473d182cba576ff5118af0d0aaa101ade2b3a5dfd10",
+      "mimeType": "image/svg+xml"
+    }
+  },
+  "copyBundles": {
+    "en": {
+      "detail.natural-catalog-cta.eyebrow": "Further information is available on req…",
+      "detail.natural-catalog-cta.primarycta.label": "Get in touch",
+      "detail.natural-catalog-cta.secondarycta.label": "Get in touch",
+      "detail.natural-catalog-cta.subtitle": "Further information is available on request.",
+      "detail.natural-catalog-cta.title": "Practical solutions",
+      "detail.natural-catalog-cta.titleaccent": "Further information…",
+      "detail.natural-catalog-faq.items.0.a": "Further information is available on request.",
+      "detail.natural-catalog-faq.items.0.q": "Further information is available on request.",
+      "detail.natural-catalog-faq.items.1.a": "Further information is available on request.",
+      "detail.natural-catalog-faq.items.1.q": "Further information is available on request.",
+      "detail.natural-catalog-faq.title": "Practical solutions",
+      "detail.natural-catalog-hero.cta.label": "Get in touch",
+      "detail.natural-catalog-hero.headline": "Practical solutions",
+      "detail.natural-catalog-hero.subhead": "Further information is available on request.",
+      "detail.natural-catalog-materials.ctaprimarylabel": "Further information is…",
+      "detail.natural-catalog-materials.ctasecondarylabel": "Further information is…",
+      "detail.natural-catalog-materials.eyebrow": "Further information is available on req…",
+      "detail.natural-catalog-materials.intro": "Further information is available on request.",
+      "detail.natural-catalog-materials.items.0.name": "Further information is available on request.",
+      "detail.natural-catalog-materials.items.0.note": "Further information is available on request.",
+      "detail.natural-catalog-materials.items.0.weight": "Further information is available on request.",
+      "detail.natural-catalog-materials.items.1.name": "Further information is available on request.",
+      "detail.natural-catalog-materials.items.1.note": "Further information is available on request.",
+      "detail.natural-catalog-materials.items.1.weight": "Further information is available on request.",
+      "detail.natural-catalog-materials.title": "Practical solutions",
+      "detail.natural-catalog-materials.titleaccent": "Further information is avail…",
+      "detail.natural-catalog-products.products.0.blurb": "Further information is available on request.",
+      "detail.natural-catalog-products.products.0.name": "Further information is available on request.",
+      "detail.natural-catalog-products.products.1.blurb": "Further information is available on request.",
+      "detail.natural-catalog-products.products.1.name": "Further information is available on request.",
+      "detail.natural-catalog-products.products.2.blurb": "Further information is available on request.",
+      "detail.natural-catalog-products.products.2.name": "Further information is available on request.",
+      "detail.natural-catalog-products.title": "Practical solutions",
+      "detail.natural-provenance-hero.cta.label": "Get in touch",
+      "detail.natural-provenance-hero.headline": "Practical solutions",
+      "detail.natural-provenance-hero.subhead": "Further information is available on request.",
+      "detail.natural-provenance-inquiry.sub": "Further information is available on request.",
+      "detail.natural-provenance-inquiry.title": "Practical solutions",
+      "detail.natural-provenance-process.eyebrow": "Further information is available on req…",
+      "detail.natural-provenance-process.intro": "Further information is available on request.",
+      "detail.natural-provenance-process.steps.0.body": "Further information is available on req…",
+      "detail.natural-provenance-process.steps.0.title": "Practical solutions",
+      "detail.natural-provenance-process.steps.1.body": "Further information is available on req…",
+      "detail.natural-provenance-process.steps.1.title": "Practical solutions",
+      "detail.natural-provenance-process.title": "Practical solutions",
+      "detail.natural-provenance-process.titleaccent": "Further information is avail…",
+      "detail.natural-provenance-story.chapters.0.body": "Further information is available on request.",
+      "detail.natural-provenance-story.chapters.0.eyebrow": "Further information is available on req…",
+      "detail.natural-provenance-story.chapters.0.title": "Practical solutions",
+      "detail.natural-provenance-story.chapters.1.body": "Further information is available on request.",
+      "detail.natural-provenance-story.chapters.1.eyebrow": "Further information is available on req…",
+      "detail.natural-provenance-story.chapters.1.title": "Practical solutions",
+      "detail.natural-provenance-story.introeyebrow": "Further information is available on req…",
+      "detail.natural-provenance-story.introtitle": "Further information is available on request.",
+      "detail.natural-provenance-trust.eyebrow": "Further information is available on req…",
+      "detail.natural-provenance-trust.intro": "Further information is available on request.",
+      "detail.natural-provenance-trust.portraitname": "Further information is available on request.",
+      "detail.natural-provenance-trust.portraitrole": "Further information is available on request.",
+      "detail.natural-provenance-trust.stats.0.label": "Further information is available on request.",
+      "detail.natural-provenance-trust.stats.1.label": "Further information is available on request.",
+      "detail.natural-provenance-trust.title": "Practical solutions",
+      "detail.natural-provenance-trust.titleaccent": "Further information is avail…",
+      "footer.tagline": "Further information is available on request.",
+      "home.natural-home-origin-collection.eyebrow": "Further information is available on req…",
+      "home.natural-home-origin-collection.items.0.name": "Further information is available on request.",
+      "home.natural-home-origin-collection.items.1.name": "Further information is available on request.",
+      "home.natural-home-origin-collection.items.2.name": "Further information is available on request.",
+      "home.natural-home-origin-collection.title": "Practical solutions",
+      "home.natural-home-origin-cta.cta.label": "Get in touch",
+      "home.natural-home-origin-cta.headline": "Practical solutions",
+      "home.natural-home-origin-hero.eyebrow": "Further information is available on req…",
+      "home.natural-home-origin-hero.h1line1": "Further information is available…",
+      "home.natural-home-origin-hero.h1line2": "Further information is available…",
+      "home.natural-home-origin-hero.primarycta.label": "Get in touch",
+      "home.natural-home-origin-hero.scroll": "Further information is available on request.",
+      "home.natural-home-origin-hero.secondarycta.label": "Get in touch",
+      "home.natural-home-origin-materials.ctaprimarylabel": "Further information is…",
+      "home.natural-home-origin-materials.ctasecondarylabel": "Further information is…",
+      "home.natural-home-origin-materials.eyebrow": "Further information is available on req…",
+      "home.natural-home-origin-materials.intro": "Further information is available on request.",
+      "home.natural-home-origin-materials.items.0.name": "Further information is available on request.",
+      "home.natural-home-origin-materials.items.0.note": "Further information is available on request.",
+      "home.natural-home-origin-materials.items.0.weight": "Further information is available on request.",
+      "home.natural-home-origin-materials.items.1.name": "Further information is available on request.",
+      "home.natural-home-origin-materials.items.1.note": "Further information is available on request.",
+      "home.natural-home-origin-materials.items.1.weight": "Further information is available on request.",
+      "home.natural-home-origin-materials.title": "Practical solutions",
+      "home.natural-home-origin-materials.titleaccent": "Further information is avail…",
+      "home.natural-home-origin-story.chapters.0.body": "Further information is available on request.",
+      "home.natural-home-origin-story.chapters.0.eyebrow": "Further information is available on req…",
+      "home.natural-home-origin-story.chapters.0.title": "Practical solutions",
+      "home.natural-home-origin-story.chapters.1.body": "Further information is available on request.",
+      "home.natural-home-origin-story.chapters.1.eyebrow": "Further information is available on req…",
+      "home.natural-home-origin-story.chapters.1.title": "Practical solutions",
+      "home.natural-home-origin-story.introeyebrow": "Further information is available on req…",
+      "home.natural-home-origin-story.introtitle": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.addlabel": "Get in touch",
+      "home.natural-home-seasonal-dishes.dishes.0.name": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.dishes.0.note": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.dishes.0.season": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.dishes.1.name": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.dishes.1.note": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.dishes.1.season": "Further information is available on request.",
+      "home.natural-home-seasonal-dishes.eyebrow": "Further information is available on req…",
+      "home.natural-home-seasonal-dishes.title": "Practical solutions",
+      "home.natural-home-seasonal-dishes.titleaccent": "Further information is available on re…",
+      "home.natural-home-seasonal-featured.alllabel": "Get in touch",
+      "home.natural-home-seasonal-featured.eyebrow": "Further information is available on req…",
+      "home.natural-home-seasonal-featured.items.0.category": "Further information is available on request.",
+      "home.natural-home-seasonal-featured.items.0.name": "Further information is available on request.",
+      "home.natural-home-seasonal-featured.items.0.price": "Further information is…",
+      "home.natural-home-seasonal-featured.items.1.category": "Further information is available on request.",
+      "home.natural-home-seasonal-featured.items.1.name": "Further information is available on request.",
+      "home.natural-home-seasonal-featured.items.1.price": "Further information is…",
+      "home.natural-home-seasonal-featured.title": "Practical solutions",
+      "home.natural-home-seasonal-gallery.alllabel": "Get in touch",
+      "home.natural-home-seasonal-gallery.eyebrow": "Further information is available on req…",
+      "home.natural-home-seasonal-gallery.items.0.alt": "Further information is available on request.",
+      "home.natural-home-seasonal-gallery.items.1.alt": "Further information is available on request.",
+      "home.natural-home-seasonal-gallery.items.2.alt": "Further information is available on request.",
+      "home.natural-home-seasonal-gallery.title": "Practical solutions",
+      "home.natural-home-seasonal-gallery.titleaccent": "Further information is available on re…",
+      "home.natural-home-seasonal-hero.eyebrow": "Further information is available on req…",
+      "home.natural-home-seasonal-hero.h1": "Further information is available…",
+      "home.natural-home-seasonal-hero.h1accent": "Further information is available…",
+      "home.natural-home-seasonal-hero.primarycta.label": "Get in touch",
+      "home.natural-home-seasonal-hero.scroll": "Further information is available on request.",
+      "home.natural-home-seasonal-hero.secondarycta.label": "Get in touch",
+      "home.natural-home-seasonal-hero.stats.0.label": "Further information is available on request.",
+      "home.natural-home-seasonal-hero.stats.1.label": "Further information is available on request.",
+      "home.natural-home-seasonal-hero.sub": "Further information is available on request.",
+      "home.natural-home-seasonal-inquiry.sub": "Further information is available on request.",
+      "home.natural-home-seasonal-inquiry.title": "Practical solutions",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Your inquiry",
+      "inquiry.field.name": "Name",
+      "inquiry.m0.note": "The inquiry form is enabled when the site is published.",
+      "inquiry.submit": "Get in touch",
+      "nav.detail": "Further information is availabl…",
+      "nav.home": "Home",
+      "seo.detail.description": "Explore available solutions and ways to get in touch.",
+      "seo.detail.title": "Company website",
+      "seo.home.description": "Explore available solutions and ways to get in touch.",
+      "seo.home.title": "Company website"
+    }
+  },
+  "copyBundleSet": {
+    "schemaVersion": "site-builder-copy-bundle-set/v1",
+    "sourceLocale": "en",
+    "bundles": {
+      "en": {
+        "schemaVersion": "site-builder-copy-bundle/v1",
+        "slotCatalogVersion": "site-builder-copy-slots/v1",
+        "locale": "en",
+        "sourceLocale": "en",
+        "status": "complete",
+        "claimSnapshot": {
+          "id": "snapshot-3b9ebc699306d11d",
+          "digest": "03770ddc07191984b3c0c4aa8a33403649061974efabe70a27810b3fd0ff55be"
+        },
+        "inputHash": "3ebff4e0ebfb099f8b621abb0dbe4db4d65be0a17a058ba9ea75aacd90e63e73",
+        "slots": {
+          "detail.natural-catalog-cta.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-cta.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-cta.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-cta.subtitle": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-cta.title": {
+            "type": "plain_text",
+            "maxGraphemes": 21,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-cta.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 21,
+            "factual": false,
+            "content": "Further information…",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-faq.items.0.a": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-faq.items.0.q": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-faq.items.1.a": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-faq.items.1.q": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-faq.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.ctaprimarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.ctasecondarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.items.0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.items.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.items.1.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.items.1.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-materials.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.products.0.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.products.1.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.products.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.products.2.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.products.2.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-catalog-products.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.steps.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.steps.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.steps.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.steps.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-process.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.chapters.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.chapters.0.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.chapters.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.chapters.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.chapters.1.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.chapters.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.introeyebrow": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-story.introtitle": {
+            "type": "rich_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.portraitname": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.portraitrole": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.natural-provenance-trust.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "footer.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 120,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-collection.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-collection.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-collection.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-collection.items.2.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-collection.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-hero.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-hero.h1line1": {
+            "type": "plain_text",
+            "maxGraphemes": 33,
+            "factual": false,
+            "content": "Further information is available…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-hero.h1line2": {
+            "type": "plain_text",
+            "maxGraphemes": 33,
+            "factual": false,
+            "content": "Further information is available…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-hero.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-hero.scroll": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-hero.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.ctaprimarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.ctasecondarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.items.0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.items.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.items.1.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.items.1.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-materials.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.chapters.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.chapters.0.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.chapters.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.chapters.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.chapters.1.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.chapters.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.introeyebrow": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.natural-home-origin-story.introtitle": {
+            "type": "rich_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.addlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.dishes.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.dishes.0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.dishes.0.season": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.dishes.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.dishes.1.note": {
+            "type": "plain_text",
+            "maxGraphemes": 164,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.dishes.1.season": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.title": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-dishes.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Further information is available on re…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.alllabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.items.0.category": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.items.0.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.items.1.category": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.items.1.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-featured.title": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.alllabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.items.0.alt": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.items.1.alt": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.items.2.alt": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.title": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-gallery.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 39,
+            "factual": false,
+            "content": "Further information is available on re…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.h1": {
+            "type": "plain_text",
+            "maxGraphemes": 33,
+            "factual": false,
+            "content": "Further information is available…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.h1accent": {
+            "type": "plain_text",
+            "maxGraphemes": 33,
+            "factual": false,
+            "content": "Further information is available…",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.scroll": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-hero.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 68,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.natural-home-seasonal-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 44,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "inquiry.field.email": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Work email",
+            "claimRefs": []
+          },
+          "inquiry.field.message": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Your inquiry",
+            "claimRefs": []
+          },
+          "inquiry.field.name": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Name",
+            "claimRefs": []
+          },
+          "inquiry.m0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "The inquiry form is enabled when the site is published.",
+            "claimRefs": []
+          },
+          "inquiry.submit": {
+            "type": "cta_label",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "nav.detail": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "nav.home": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Home",
+            "claimRefs": []
+          },
+          "seo.detail.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.detail.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          },
+          "seo.home.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.home.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          }
+        },
+        "digest": "ebc9b19bb4cde4d2b093852b5e6790ccd5e9fdae0e9a11faca6d01bc47f2e2f7"
+      }
+    }
+  }
+}
