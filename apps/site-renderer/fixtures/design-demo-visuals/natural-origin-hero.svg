@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Abstract natural material landscape</title>
+  <desc id="desc">Layered fields, a horizon, and seed-like forms create a generic origin atmosphere.</desc>
+  <rect width="1200" height="800" fill="#f4ead6"/>
+  <path d="M0 430C210 340 390 500 610 410s390-20 590-120v510H0Z" fill="#b8a36b"/>
+  <path d="M0 560c250-120 430 50 680-60s360-20 520-90v390H0Z" fill="#6f7d46"/>
+  <circle cx="920" cy="180" r="88" fill="#d88c45"/>
+  <g fill="none" stroke="#3d4b2d" stroke-width="12"><path d="M220 590c0-140 45-215 130-285"/><path d="M350 305c-70 20-105 55-120 105"/><path d="M350 305c70 12 118 44 145 96"/></g>
+</svg>

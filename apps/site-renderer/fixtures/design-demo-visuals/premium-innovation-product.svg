@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic precision object study</title>
+  <desc id="desc">Exploded neutral forms suggest construction without identifying a product.</desc>
+  <rect width="1200" height="800" fill="#f2efe8"/>
+  <g transform="translate(120 150)" stroke="#25292c" stroke-width="8"><rect width="260" height="500" rx="28" fill="#c8c4ba"/><rect x="335" y="70" width="260" height="360" rx="130" fill="#f8f6f0"/><rect x="670" y="150" width="260" height="200" rx="18" fill="#85898a"/></g>
+  <g fill="#d1743d"><circle cx="250" cy="280" r="32"/><circle cx="585" cy="400" r="24"/><circle cx="920" cy="400" r="20"/></g>
+  <path d="M400 400h55M735 400h55" stroke="#25292c" stroke-width="10" stroke-dasharray="14 14"/>
+</svg>

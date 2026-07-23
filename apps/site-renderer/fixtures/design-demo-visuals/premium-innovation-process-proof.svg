@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic review matrix</title>
+  <desc id="desc">Neutral measurement lines and comparison panels form an abstract review surface.</desc>
+  <rect width="1200" height="800" fill="#171a1d"/>
+  <g stroke="#555b5e" stroke-width="3"><path d="M100 150h1000M100 300h1000M100 450h1000M100 600h1000"/><path d="M250 80v640M500 80v640M750 80v640M1000 80v640"/></g>
+  <path d="M125 540l180-155 180 65 190-220 180 120 210-175" fill="none" stroke="#e8e4db" stroke-width="16"/>
+  <g fill="#d77b42"><circle cx="305" cy="385" r="22"/><circle cx="675" cy="230" r="22"/><circle cx="1065" cy="175" r="22"/></g>
+</svg>

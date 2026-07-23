@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Abstract craft workspace</title>
+  <desc id="desc">A generic work surface with tools, material forms, and packing geometry.</desc>
+  <rect width="1200" height="800" fill="#efe3cd"/>
+  <rect x="90" y="180" width="1020" height="470" rx="32" fill="#b98a55"/>
+  <rect x="140" y="230" width="360" height="210" rx="22" fill="#f8f0e1"/>
+  <g fill="#6f7d46"><circle cx="240" cy="330" r="54"/><circle cx="345" cy="330" r="42"/><circle cx="425" cy="330" r="30"/></g>
+  <path d="M590 255h155v330H590zM790 255h230v150H790zM790 445h230v140H790z" fill="#ead3a9"/>
+  <path d="M625 300l85 240M710 300l-85 240" stroke="#5b4730" stroke-width="16"/>
+</svg>

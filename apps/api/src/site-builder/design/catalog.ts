@@ -12,7 +12,7 @@ import {
   type TemplateFamily,
   type TemplateFamilyV2,
 } from "@global/contracts";
-import { M1_E_B_B2_CATALOG_V2_DRAFT } from "./catalog-v2-b2-drafts";
+import { M1_E_B_B3_CATALOG_V2_DRAFT } from "./catalog-v2-b3-drafts";
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -46,7 +46,7 @@ export const STATIC_DESIGN_CATALOG: DesignCatalog = deepFreeze(
  * approved-family-only until the later Catalog promotion gate is complete.
  */
 export const STATIC_DESIGN_CATALOG_V2: DesignCatalogV2 = deepFreeze(
-  finalizeDesignCatalogV2(M1_E_B_B2_CATALOG_V2_DRAFT),
+  finalizeDesignCatalogV2(M1_E_B_B3_CATALOG_V2_DRAFT),
 );
 
 export function resolveDesignBriefFromCatalog(
