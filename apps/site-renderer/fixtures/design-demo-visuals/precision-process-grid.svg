@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Precision process grid placeholder">
+  <rect width="1200" height="800" fill="#1b2435"/>
+  <g fill="none" stroke="#7aa8ee" stroke-width="6" opacity=".9">
+    <path d="M180 180h840M180 400h840M180 620h840M300 100v620M600 100v620M900 100v620"/>
+    <circle cx="300" cy="180" r="52"/><circle cx="600" cy="400" r="52"/><circle cx="900" cy="620" r="52"/>
+  </g>
+  <g fill="#fff" font-family="Arial, sans-serif" text-anchor="middle">
+    <text x="600" y="72" font-size="34" letter-spacing="8">CALIBRATED WORKFLOW</text>
+    <text x="300" y="193" font-size="26">01</text><text x="600" y="413" font-size="26">02</text><text x="900" y="633" font-size="26">03</text>
+  </g>
+</svg>

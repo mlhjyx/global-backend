@@ -10,16 +10,40 @@ import {
   type BlueprintSectionV2,
   type ContentBudgetV2,
   type DesignCatalogV2Draft,
+  type DesignSourceManifest,
   type PageBlueprintV2,
   type SiteSpecComponentType,
 } from "@global/contracts";
 
-const RENDERER_BASELINE_TOKEN_DIGEST = [
-  "2109f8d9cda9c2aa",
-  "17dc67a4e3f01af9",
-  "48fdfd8be66c0056",
-  "ce8a78e4c09bc69e",
-].join("");
+const rendererTokenDigest = (...segments: string[]): string =>
+  segments.join("");
+
+const RENDERER_PRESET_TOKEN_DIGESTS = {
+  "precision-instrument": rendererTokenDigest(
+    "93f959a9c7a840de",
+    "3bed4824f26218f8",
+    "0a899f01b12b2721",
+    "14480ab05183e788",
+  ),
+  "industrial-power": rendererTokenDigest(
+    "ae9a58570a24fb7a",
+    "87cffa3077f609ad",
+    "4fb11fe6641bbd90",
+    "d175772d8ed27cb5",
+  ),
+  "precision-light": rendererTokenDigest(
+    "a1c04171434fa9b6",
+    "c50713f1235216af",
+    "8ba51b24b17c2ff3",
+    "79a91ff6f8c1f739",
+  ),
+  "modern-industrial": rendererTokenDigest(
+    "b362b54d582bb0e4",
+    "603a655095c458c0",
+    "86e22c7d4027c276",
+    "cf6e7c8dbccffba6",
+  ),
+} as const;
 
 /** Registered provenance declares permitted transformation/training; this catalog stores no copied source asset or source code. */
 const REGISTERED_EXTERNAL_SOURCES = [
@@ -49,6 +73,25 @@ const REGISTERED_EXTERNAL_SOURCES = [
     sourceUrl: "https://www.ifm.com/us/en",
   },
 ] as const;
+
+const PLATFORM_ORIGINAL_DEMO_SOURCE: DesignSourceManifest = {
+  schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
+  id: "site-builder-demo-visual-originals",
+  title: "Site Builder original demo visual assets",
+  sourceClass: "platform_original" as const,
+  capturedAt: "2026-07-23T00:00:00.000Z",
+  allowedUses: [
+    "visual_analysis",
+    "token_abstraction",
+    "structure_abstraction",
+    "code_transformation",
+  ],
+  prohibitedUses: [],
+  retentionPolicy: "manifest_only" as const,
+  trainingPolicy: "platform_corpus" as const,
+  externalAssets: [],
+  reviewer: "site-builder-design-governance",
+};
 
 function section(
   id: string,
@@ -90,27 +133,31 @@ function budget(minimum: number, maximum: number): ContentBudgetV2 {
   return { minimum, maximum };
 }
 
-const sourceManifests: DesignCatalogV2Draft["sourceManifests"] =
-  REGISTERED_EXTERNAL_SOURCES.map(({ id, title, sourceUrl }, index) => ({
-    schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
-    id,
-    title,
-    sourceUrl,
-    sourceClass: "external_registered" as const,
-    capturedAt: "2026-07-23T00:00:00.000Z",
-    allowedUses: [
-      "visual_analysis",
-      "token_abstraction",
-      "structure_abstraction",
-      "code_transformation",
-    ],
-    prohibitedUses: [],
-    retentionPolicy: "manifest_only" as const,
-    trainingPolicy: "permitted" as const,
-    sourceContributionGroup: `group-${index + 1}`,
-    externalAssets: [],
-    reviewer: "site-builder-design-governance",
-  }));
+const sourceManifests: DesignCatalogV2Draft["sourceManifests"] = [
+  PLATFORM_ORIGINAL_DEMO_SOURCE,
+  ...REGISTERED_EXTERNAL_SOURCES.map(
+    ({ id, title, sourceUrl }, index): DesignSourceManifest => ({
+      schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
+      id,
+      title,
+      sourceUrl,
+      sourceClass: "external_registered" as const,
+      capturedAt: "2026-07-23T00:00:00.000Z",
+      allowedUses: [
+        "visual_analysis",
+        "token_abstraction",
+        "structure_abstraction",
+        "code_transformation",
+      ],
+      prohibitedUses: [],
+      retentionPolicy: "manifest_only" as const,
+      trainingPolicy: "permitted" as const,
+      sourceContributionGroup: `group-${index + 1}`,
+      externalAssets: [],
+      reviewer: "site-builder-design-governance",
+    }),
+  ),
+];
 
 const designRules: DesignCatalogV2Draft["designRules"] = [
   {
@@ -225,7 +272,8 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
       version: "0.1.0",
       status: "draft",
       rendererPresetId: "precision-instrument",
-      rendererTokenDigest: RENDERER_BASELINE_TOKEN_DIGEST,
+      rendererTokenDigest:
+        RENDERER_PRESET_TOKEN_DIGESTS["precision-instrument"],
       defaultComponentVariants: { IndustrialHero: "technical-grid" },
     },
     {
@@ -234,7 +282,7 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
       version: "0.1.0",
       status: "draft",
       rendererPresetId: "industrial-power",
-      rendererTokenDigest: RENDERER_BASELINE_TOKEN_DIGEST,
+      rendererTokenDigest: RENDERER_PRESET_TOKEN_DIGESTS["industrial-power"],
       defaultComponentVariants: { IndustrialHero: "quiet" },
     },
     {
@@ -243,7 +291,7 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
       version: "0.1.0",
       status: "draft",
       rendererPresetId: "precision-light",
-      rendererTokenDigest: RENDERER_BASELINE_TOKEN_DIGEST,
+      rendererTokenDigest: RENDERER_PRESET_TOKEN_DIGESTS["precision-light"],
       defaultComponentVariants: { HeroBanner: "technical-grid" },
     },
     {
@@ -252,7 +300,7 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
       version: "0.1.0",
       status: "draft",
       rendererPresetId: "modern-industrial",
-      rendererTokenDigest: RENDERER_BASELINE_TOKEN_DIGEST,
+      rendererTokenDigest: RENDERER_PRESET_TOKEN_DIGESTS["modern-industrial"],
       defaultComponentVariants: { ProductShowcaseAlt: "technical-grid" },
     },
   ],
@@ -273,7 +321,40 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
             "e211f711fc4f545e9c1f4c8e41151f3b561f5d30044d7d4438093806bb90e1ac",
           mimeType: "image/svg+xml",
           altTemplate: "precision-industrial-technical-field",
-          sourceManifestId: "festo-industrial-automation-study",
+          sourceManifestId: "site-builder-demo-visual-originals",
+        },
+        {
+          id: "precision-industrial-product-module",
+          role: "generic-product",
+          repositoryPath:
+            "apps/site-renderer/fixtures/design-demo-visuals/precision-product-module.svg",
+          sha256:
+            "b235da342eb1dd5748ec8fcb6b66a52106600f3421a74869d49c64e05526b853",
+          mimeType: "image/svg+xml",
+          altTemplate: "precision-industrial-product-module",
+          sourceManifestId: "site-builder-demo-visual-originals",
+        },
+        {
+          id: "precision-industrial-process-grid",
+          role: "generic-process",
+          repositoryPath:
+            "apps/site-renderer/fixtures/design-demo-visuals/precision-process-grid.svg",
+          sha256:
+            "ded1503373af761c99dfd88917f292193c7536f3a22be69ac857343afafef537",
+          mimeType: "image/svg+xml",
+          altTemplate: "precision-industrial-process-grid",
+          sourceManifestId: "site-builder-demo-visual-originals",
+        },
+        {
+          id: "precision-industrial-process-inspection",
+          role: "generic-process",
+          repositoryPath:
+            "apps/site-renderer/fixtures/design-demo-visuals/precision-process-inspection.svg",
+          sha256:
+            "3dd7012b059610c4582fa02566fcef0cd8ae42840d6243e62f3264e8034546b7",
+          mimeType: "image/svg+xml",
+          altTemplate: "precision-industrial-process-inspection",
+          sourceManifestId: "site-builder-demo-visual-originals",
         },
       ],
       paletteTags: ["technical", "dark", "precision"],
@@ -295,7 +376,40 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
             "20e7d3d704767fc633a57422f7918880141e75c0b406bf5f209d1f017a1eb411",
           mimeType: "image/svg+xml",
           altTemplate: "technical-catalog-product-field",
-          sourceManifestId: "swagelok-fluid-systems-study",
+          sourceManifestId: "site-builder-demo-visual-originals",
+        },
+        {
+          id: "technical-catalog-product-module",
+          role: "generic-product",
+          repositoryPath:
+            "apps/site-renderer/fixtures/design-demo-visuals/technical-product-module.svg",
+          sha256:
+            "2b232e7ba02b4141df9a4fea836efd114a4487c8ddf5d2d9b1f4dea6ee55131e",
+          mimeType: "image/svg+xml",
+          altTemplate: "technical-catalog-product-module",
+          sourceManifestId: "site-builder-demo-visual-originals",
+        },
+        {
+          id: "technical-catalog-process-flow",
+          role: "generic-process",
+          repositoryPath:
+            "apps/site-renderer/fixtures/design-demo-visuals/technical-process-catalog.svg",
+          sha256:
+            "42be3f10168cf17aaba127c37195675b5f2991817e3f7b6d157b7c5c6bc6d44f",
+          mimeType: "image/svg+xml",
+          altTemplate: "technical-catalog-process-flow",
+          sourceManifestId: "site-builder-demo-visual-originals",
+        },
+        {
+          id: "technical-catalog-process-validation",
+          role: "generic-process",
+          repositoryPath:
+            "apps/site-renderer/fixtures/design-demo-visuals/technical-process-validation.svg",
+          sha256:
+            "795f9fe8dc1333507d78ec762901774b3f6cc5e945915f2f935868eac0166d07",
+          mimeType: "image/svg+xml",
+          altTemplate: "technical-catalog-process-validation",
+          sourceManifestId: "site-builder-demo-visual-originals",
         },
       ],
       paletteTags: ["technical", "light", "catalog"],

@@ -19,6 +19,7 @@ import {
   validateDesignBriefV2AgainstCatalog,
   type DesignCatalogV2Draft,
 } from "@global/contracts";
+import { THEME_PRESETS } from "../../../../site-renderer/src/lib/themes";
 import { STATIC_DESIGN_CATALOG, STATIC_DESIGN_CATALOG_V2 } from "./catalog";
 
 const SHA256 = "a".repeat(64);
@@ -315,10 +316,13 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
         (family) => family.status === "draft",
       ),
     ).toBe(true);
+    const externalSources = STATIC_DESIGN_CATALOG_V2.sourceManifests.filter(
+      (source) => source.sourceClass === "external_registered",
+    );
+    expect(externalSources).toHaveLength(5);
     expect(
-      STATIC_DESIGN_CATALOG_V2.sourceManifests.every(
+      externalSources.every(
         (source) =>
-          source.sourceClass === "external_registered" &&
           source.allowedUses.includes("visual_analysis") &&
           source.allowedUses.includes("token_abstraction") &&
           source.allowedUses.includes("structure_abstraction") &&
@@ -327,33 +331,44 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
           source.trainingPolicy === "permitted",
       ),
     ).toBe(true);
+    expect(
+      STATIC_DESIGN_CATALOG_V2.sourceManifests.find(
+        (source) => source.id === "site-builder-demo-visual-originals",
+      ),
+    ).toMatchObject({
+      sourceClass: "platform_original",
+      trainingPolicy: "platform_corpus",
+    });
     expect(Object.isFrozen(STATIC_DESIGN_CATALOG_V2)).toBe(true);
   });
 
   it("pins B1 DemoVisualPack assets to the actual local original files", () => {
+    const originalSourceId = "site-builder-demo-visual-originals";
     for (const pack of STATIC_DESIGN_CATALOG_V2.demoVisualPacks) {
+      expect(pack.assets).toHaveLength(4);
+      expect(
+        pack.assets.filter((asset) => asset.role === "generic-product"),
+      ).toHaveLength(1);
+      expect(
+        pack.assets.filter((asset) => asset.role === "generic-process"),
+      ).toHaveLength(2);
       for (const asset of pack.assets) {
         const bytes = readFileSync(
           resolve(process.cwd(), "../..", asset.repositoryPath),
         );
         const digest = createHash("sha256").update(bytes).digest("hex");
         expect(digest).toBe(asset.sha256);
+        expect(asset.sourceManifestId).toBe(originalSourceId);
       }
     }
 
-    const rendererTokenDigest = createHash("sha256")
-      .update(
-        readFileSync(
-          resolve(
-            process.cwd(),
-            "../../apps/site-renderer/src/styles/global.css",
-          ),
-        ),
-      )
-      .digest("hex");
     expect(
       STATIC_DESIGN_CATALOG_V2.stylePresets.every(
-        (preset) => preset.rendererTokenDigest === rendererTokenDigest,
+        (preset) =>
+          preset.rendererTokenDigest ===
+          createHash("sha256")
+            .update(JSON.stringify(THEME_PRESETS[preset.rendererPresetId]))
+            .digest("hex"),
       ),
     ).toBe(true);
   });
