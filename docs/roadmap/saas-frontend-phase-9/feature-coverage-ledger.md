@@ -6,6 +6,7 @@
 > Owner：`OWN-PRODUCT`
 > 协作责任帽子：`OWN-DESIGN`、`OWN-SAAS-PLATFORM`、`OWN-SAAS-FE`、`OWN-QA-EVIDENCE`、`OWN-DATA-PRIVACY`、`OWN-SEC-COMMERCIAL`、`OWN-OPS`
 > 工程核验基线：`8dcbbcb8254a561f33abc59c49da4cb6a3de30b1`，2026-07-22
+> 最新增量对账：`e0e51075df8ee8bb14dc5141f83365c6a2a4dec1`，2026-07-23（OpenAPI 仍为 56 paths / 64 operations）
 > 边界：本文件只做功能完整性、对象/页面候选与设计追踪；不恢复 Buyer Intelligence 新增开发，不创建正式 `CAP-*`、`OBJ-FE-*` 或 `PAGE-FE-*` 登记
 
 ## 1. 目的、来源与读法

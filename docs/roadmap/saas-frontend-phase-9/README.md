@@ -6,6 +6,7 @@
 > 事实 Owner：`OWN-PRODUCT`
 > 设计 Owner：`OWN-DESIGN`
 > 工程基线：`origin/main@8dcbbcb8254a561f33abc59c49da4cb6a3de30b1`
+> 最新增量对账：`origin/main@e0e51075df8ee8bb14dc5141f83365c6a2a4dec1`（2026-07-23）
 > 最后核验：2026-07-23
 
 ## 1. 本阶段要解决的问题

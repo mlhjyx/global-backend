@@ -28,7 +28,7 @@
 | `DSDISC-P9-002` | 五张基线的主蓝并不完全一致，抽样约在 `#1B4CCD` 至 `#626FB1` | 不逐图复制颜色；先以 `#2D5BCC` 为品牌主色候选中心建立语义色阶，再用同状态并排比较、对比度和高风险动作识别测试校正 |
 | `DSDISC-P9-003` | 五张基线共享布局语法，但 Shell、侧栏宽度、圆角和控件高度存在差异 | 固化共同模式，不把截图中的偶然尺寸当 Token；所有数值先标 `MEASURED_DRAFT` |
 | `DSDISC-P9-004` | 两个既有 FigJam 曾含固定规格、独立准备度和 RFQ/技术评审遗留节点 | Phase 1 前已按 current 对象边界修正指定节点和连接；状态恢复为 `RESEARCH_MAPPED`，仍不等于页面或 Journey 已验证 |
-| `DSDISC-P9-005` | 四个正式 Design file 已创建；Phase 1 已写入 Foundations、五张 SaaS 核心页面、产品官网首页和客户生成站首页 | `FIG-P9-003` 为 `FOUNDATIONS_DRAFT`，`FIG-P9-004/005/006` 为 `HIGH_FIDELITY_DRAFT`；代表页不等于文件内全部页面已完成 |
+| `DSDISC-P9-005` | 四个正式 Design file 已创建；Phase 1 已写入 Foundations、12 张 SaaS 桌面代表、4 张公共表面、1 张客户生成站、5 个关键状态和 3 张移动端代表 | `FIG-P9-003` 为 `FOUNDATIONS_DRAFT`，`FIG-P9-004/005/006` 为 `HIGH_FIDELITY_DRAFT`；代表页不等于文件内全部页面已完成 |
 | `DSDISC-P9-006` | 可用外部库中的 Simple Design System 有基础 Input/Navigation，但缺少本产品所需的高密度表格、Evidence、长任务、Inbox 和多轴状态，视觉也不匹配 | 不导入为核心库；只参考公开模式。核心组件在本地 Figma 文件中净室建立，避免形成外部库依赖 |
 | `DSDISC-P9-007` | 中文优先且需要英文、德语长文本与 RTL；Figma 环境可用 Noto Sans SC 与 Inter | 推荐中文 UI 使用 Noto Sans SC，拉丁字符与数字使用 Inter；正式冻结前必须完成缺字、数字对齐、400% zoom 和伪本地化验证 |
 
@@ -101,10 +101,10 @@
 1. 两个 FigJam 的越界节点和连接关系已修正；
 2. `FIG-P9-003` 已建立 4 个 Variable Collection、70 个 Variables、11 个 Text Styles、9 组组件和 12 状态 State Lab；
 3. Today、Site Editor、Buyer Development、Unified Inbox 和 AI Task Strategy 已完成 `1586 × 992` 第一轮高保真及同视口对照；
-4. 产品官网首页和客户生成站首页已完成 `1440 × 1024` 代表页与作者检查，分别验证公共产品表达和动态客户资料输出；
-5. 五个关键异常状态、三张 `390 × 844` 移动端代表页、四个跨域页面族代表和三条可点击原型骨架已完成；
+4. 产品官网、身份激活、帮助中心、开发者中心和客户生成站已完成 `1440 × 1024` 代表页与作者检查，分别验证公共产品表达、安全激活、指南/合同入口和动态客户资料输出；
+5. 五个关键异常状态、三张 `390 × 844` 移动端代表页、七个跨域/退出页面族代表和六条可点击原型骨架已完成；
 6. 76/76 Page Manifest 2.0 已完成第一轮登记；Token、组件属性、全断点、a11y、长文本和用户验证尚未冻结；
-7. 下一步进入其余状态、页面族、断点和 12 条完整 Journey。
+7. 下一步进入其余状态、页面族、断点和剩余 6 条完整 Journey。
 
 ## 6. Phase 1 批准记录与剩余门
 

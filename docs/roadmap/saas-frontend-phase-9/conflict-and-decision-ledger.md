@@ -6,6 +6,7 @@
 > 事实 Owner：`OWN-DOC-GOV`
 > 产品裁决 Owner：`OWN-PRODUCT`
 > 工程基线：`origin/main@8dcbbcb8254a561f33abc59c49da4cb6a3de30b1`
+> 最新增量对账：`origin/main@e0e51075df8ee8bb14dc5141f83365c6a2a4dec1`（2026-07-23）
 > 核验日期：2026-07-23
 > 来源：[Phase 9 来源与事实总账](source-and-truth-ledger.md)
 
@@ -43,9 +44,9 @@
 
 | Conflict ID | 主题与证据 | 当前裁决 | Owner | 状态 | 关闭门 |
 |---|---|---|---|---|---|
-| `CON-FE-P9-001` | Phase 1–8 固定在 `c3f0cca/676c6cd`；当前 main 已到 `8dcbbcb` 并合入 #178–#181 | 旧阶段保持冻结；Phase 9 只写 post-baseline delta，current 真值按主题回到 L1/机器源 | `OWN-DOC-GOV` | `RESOLVED_WITH_REMEDIATION` | Phase 9 trace matrix 不再引用旧数字作当前值，且 docs verifier 通过 |
+| `CON-FE-P9-001` | Phase 1–8 固定在 `c3f0cca/676c6cd`；Phase 9 初始基线为 `8dcbbcb`，当前增量已到 `e0e5107` 并合入 #178–#190 | 旧阶段和初始快照保持冻结；Phase 9 以 post-baseline refresh 记录 current delta，真值按主题回到 L1/机器源 | `OWN-DOC-GOV` | `RESOLVED_WITH_REMEDIATION` | Phase 9 trace matrix 不再引用旧数字作当前值，指纹重算且 docs verifier 通过 |
 | `CON-FE-P9-002` | Site 00/08/09 仍出现 M1-e “26 型”；ADR-015、contracts 和 Renderer 的当前目标集合为 55 型 | 55 型是 current target/machine set；26 型只保留历史 provenance，不得作为现行验收边界 | `OWN-SITE-BE` | `RESOLVED_WITH_REMEDIATION` | Site 事实 Owner truth-sync 所有 current 26 型残留或加精确 history qualifier，机器/文档测试锁定 55 型 |
-| `CON-FE-P9-003` | Site 04 摘要写 9 qualified/1 transitional/45 gallery；`status/current`、资格目录和当前代码显示 13/1/41 | 资格注册表和证据字节是实现真值；当前设计只可写 13/1/41，M1-e-A 仍未完成 | `OWN-SITE-BE` | `RESOLVED_WITH_REMEDIATION` | Site 04/相关活文档同步且 CI 从同一 registry 生成或验证计数 |
+| `CON-FE-P9-003` | Site 04 保留了多个分批合并时点的资格摘要；`status/current`、资格目录和当前代码已显示 44 qualified/0 transitional/11 gallery | 资格注册表和证据字节是实现真值；当前设计只可写 44/0/11，M1-e-A 仍未完成 | `OWN-SITE-BE` | `RESOLVED_WITH_REMEDIATION` | Site 04/相关活文档同步且 CI 从同一 registry 生成或验证计数 |
 | `CON-FE-P9-004` | 项目记忆仍记录 #165 冲突/失败、26 型和 no-readiness；当前 main 已合 #165 并继续四批资格化 | 记忆只作历史搜索索引；`main + current docs + machine evidence` 优先 | `OWN-DOC-GOV` | `MITIGATED` | 后续记忆刷新由独立显式授权完成；产品文档不再引用旧结论 |
 | `CON-FE-P9-005` | Gate 6 称 76 Page ID `MAP_COMPLETE`；用户要求完整公共站、身份、SaaS、生成站、帮助/开发者和运营体验 | 76 页只证明旧地图覆盖；Phase 9 必须先做功能/对象/页面 gap audit，再提出新增页面族 | `OWN-PRODUCT` | `RESOLVED_WITH_REMEDIATION` | 每个既有/新增页面在 Feature Coverage Ledger 关联用户问题、对象、SoR、状态、Scenario、Metric、Guide、Figma node |
 | `CON-FE-P9-006` | architecture/旧文档手写 40 paths；当前机器 OpenAPI 为 56 paths/64 operations；原型页数又被当成能力数 | OpenAPI 数量与页面数量均不代表用户闭环；API 唯一真值按 operationId 机器读取 | `OWN-SITE-BE` | `RESOLVED_WITH_REMEDIATION` | 64 operations 全部归类为用户动作、运营动作或 backend-only，且删除长期手抄 count 依赖 |
@@ -54,7 +55,7 @@
 | `CON-FE-P9-009` | BaoTa 官网开源协议允许 API 应用但限制源码修改/分发场景；GitHub `license.txt` 是另一软件许可文本；现 Registry 无 BaoTa Card | 不按宽松 OSS 处理。设计只保留 optional API Adapter，商业使用前需书面许可适用性确认 | `OWN-SEC-COMMERCIAL` | `OPEN_DECISION` | 固定产品/版本/API 文档、许可书面确认、账号/secret/tenant/审计、能力 probe、替换与卸载证据齐全 |
 | `CON-FE-P9-010` | Postiz 官方 API 可作分发候选；当前 OSS Registry 无 Card，计划只把它当退出候选 | 仅作为 Aitoearn Adapter 合同的可替换性对照，不安装、不双写两个主分发器 | `OWN-GROWTH-PRODUCT` | `RESOLVED_WITH_REMEDIATION` | 新 Card 经产品/许可/安全批准，或从正式方案删除并保留研究记录 |
 | `CON-FE-P9-011` | ZIP 自述“47 页全部完成”，但含 `src/mocks`、Supabase/Firebase 配置且无 Git/Owner/CI/deploy；正式前端仍 `BLK-FE-001` | ZIP 为 `LOCAL_UNCONTROLLED` 设计/路由输入，不是正式 repo 或实现真值 | `OWN-SAAS-FE` | `INPUT_BLOCKED` | 正式 repo/remote/branch protection/CI/deploy/Owner 和 OpenAPI client provenance 明确 |
-| `CON-FE-P9-012` | 用户要求 Figma 项目/原型；两张 FigJam 已纠偏，四个 Design 文件均已有受控内容，SaaS 已有九张桌面代表、关键状态、移动端和三条原型骨架，公共站/生成站各有一张代表页 | locator、结构纠偏、首批 Node、文件非空和原型 API 可用性已关闭；Library 发布、组件属性、全页面/12 旅程、全断点/a11y 和 reviewer 尚未闭环。代表页不得标 `SPEC_DESIGNED` | `OWN-DESIGN` | `RESOLVED_WITH_REMEDIATION` | 六文件权限/Owner、Variables/Library、资产权利、current 节点、页面 Frame、responsive/a11y、reviewer 和版本登记完整 |
+| `CON-FE-P9-012` | 用户要求 Figma 项目/原型；两张 FigJam 已纠偏，四个 Design 文件均已有受控内容，已登记 12 张 SaaS 桌面代表、4 张公共表面、1 张生成站、5 个高风险状态、3 张移动端和 6 条原型骨架 | locator、结构纠偏、首批 Node、文件非空和原型 API 可用性已关闭；Library 发布、组件属性、全页面、剩余 6 旅程、全断点/a11y 和 reviewer 尚未闭环。代表页不得标 `SPEC_DESIGNED` | `OWN-DESIGN` | `RESOLVED_WITH_REMEDIATION` | 六文件权限/Owner、Variables/Library、资产权利、current 节点、页面 Frame、responsive/a11y、reviewer 和版本登记完整 |
 | `CON-FE-P9-013` | 完整产品前端需要 Campaign/Content/Conversation/Opportunity/Identity；本仓明确不拥有这些 SoR | 设计全产品接缝，但状态必须为 `EXTERNAL_OWNED/PROPOSED`，不能把目标 API 或外部 Provider 冒充 current backend | `OWN-SAAS-PLATFORM` | `CONTRACT_BLOCKED` | 每个外部域有正式 SoR/repo/Owner、对象/状态/allowed actions、API/event/read model 与 E2E evidence |
 | `CON-FE-P9-014` | ADR/Hosting 文档描述 immutable Publish 目标；当前公开 API止于开发 Preview，Domain/TLS/Publish/Rollback 未闭环 | 目标旅程完整设计，当前入口和文案保持 `TARGET_NOT_RUNNABLE` | `OWN-SITE-BE` | `CONTRACT_BLOCKED` | Publish/Deployment/DomainBinding/Certificate 合同、infra、安全、运营和真实 release/rollback evidence |
 | `CON-FE-P9-015` | 宝塔截图展示用户自配 AI 模型/new-api；平台边界要求 new-api 为后台 gateway | 普通用户不配置 endpoint/key/provider；只选择服务端批准档位/别名。平台运营可看 route/evidence/cost，但不回显 secret | `OWN-AI-PLATFORM` | `RESOLVED` | 设计稿、Page Manifest 和 client contract 均无通用 key/base URL 字段 |
@@ -75,13 +76,14 @@
 | `CON-FE-P9-030` | 文档和设计可形成全产品闭环；正式用户研究、前端 E2E、外部 Provider Pilot、生产 release 仍不存在 | 设计状态最高只能到相应证据轴；不得从文档完整推出 `VALIDATED/DEPLOYED/GA` | `OWN-QA-EVIDENCE` | `INPUT_BLOCKED` | 真实责任角色评审、目标用户任务测试、formal FE E2E、Provider/Release evidence 分别完成并记录环境/版本 |
 | `CON-FE-P9-031` | 原三方向先后使用“买家详情 + RFQ 技术资格化”和固定“资料准备度”内容，都把示例字段误当产品事实 | 两批旧图统一降为 `SUPERSEDED_RESEARCH_PROVENANCE`；按 `DEC-FE-P9-016` 采用五张用户确认基线，不再生成新三图 | `OWN-DESIGN` | `RESOLVED_WITH_REMEDIATION` | 资产登记、Fixture、交互、Journey 和 Figma register 只保留五张基线；每张基线明确“视觉批准不等于功能批准” |
 | `CON-FE-P9-032` | Profile/KB 当前支持通用五组资料、上传/导入来源和动态 gaps；设计稿曾把行业字段变成固定规格库与独立 Readiness 对象 | 行业差异由引导元数据、KB 抽取、Offering attributes 和 Claim/Evidence 表达；gaps 是派生读模型 | `OWN-PRODUCT` | `RESOLVED_WITH_REMEDIATION` | current 文档、对象总账和页面不再声明独立 ProductFamily/TechnicalSpecification/Readiness 合同；新增 schema 前另过对象评审 |
+| `CON-FE-P9-033` | 旧 Site Builder D16 要求 Google Maps Embed API、Geocoding、key 和 CSP/referrer 白名单；2026-07-23 current 合同已改为无外呼 `MapLocation` 地址文本卡 | 新合同为唯一 current 真值；设计不得出现 iframe、交互地图、Geocoding、坐标推断、地图 key 或 consent 依赖 | `OWN-SITE-BE` | `RESOLVED` | 02/04/05/06 已一致，资格 fixture/三断点证据已绑定字节；Phase 9 生成站后续页只能消费文本合同 |
 
 ## 4. 阻塞项
 
 | Blocker ID | 缺失输入 | Owner | 阻止 | 安全降级 | 关闭门 |
 |---|---|---|---|---|---|
 | `BLK-FE-P9-001` | 正式 SaaS 前端 repo、remote、CI/deploy 与实际 assignee | `OWN-SAAS-FE` | 前端实现、Storybook、E2E、发布 | 仅做 stack-neutral 规格/Figma | repo/Owner/branch protection/CI/env/deploy/rollback 书面登记 |
-| `BLK-FE-P9-002` | Figma Library 发布/别名迁移、组件文本属性、全页面、剩余九条 Journey、全断点/a11y 和实际 reviewer；六文件 locator、FigJam 纠偏、首批 Variables/Frame、九张 SaaS 桌面代表、五个状态、三张移动端、三条原型骨架与两张产品表面代表页已登记 | `OWN-DESIGN` | 组件定稿、页面原型和无孤儿 Frame 验收 | `FIG-P9-003` 保持 `FOUNDATIONS_DRAFT`，`FIG-P9-004/005/006` 保持 `HIGH_FIDELITY_DRAFT`；不生成替代视觉方向 | 六文件权限/Owner、Library、source/rights、页面 node URL、版本、responsive/a11y、12 条 Journey、无孤儿 Frame 和 reviewer 齐全 |
+| `BLK-FE-P9-002` | Figma Library 发布/别名迁移、组件文本属性、全页面、剩余六条 Journey、全断点/a11y 和实际 reviewer；六文件 locator、FigJam 纠偏、首批 Variables/Frame、12 张 SaaS 桌面代表、4 张公共表面、1 张生成站、5 个状态、3 张移动端和 6 条原型骨架已登记 | `OWN-DESIGN` | 组件定稿、页面原型和无孤儿 Frame 验收 | `FIG-P9-003` 保持 `FOUNDATIONS_DRAFT`，`FIG-P9-004/005/006` 保持 `HIGH_FIDELITY_DRAFT`；不生成替代视觉方向 | 六文件权限/Owner、Library、source/rights、页面 node URL、版本、responsive/a11y、12 条 Journey、无孤儿 Frame 和 reviewer 齐全 |
 | `BLK-FE-P9-003` | Workspace/Membership/Entitlement/allowed-actions 机器合同 | `OWN-SAAS-PLATFORM` | Shell、入口可见性、跨域动作和外部授权 | UI 只读/隐藏高风险动作；服务端 fail-closed | projection/Guard/contract tests + actor/object/version/policy actions |
 | `BLK-FE-P9-004` | Claim public review/impact/紧急下架合同 | `OWN-TRUTH-BE` | 事实审核、发布审查、撤销影响旅程 | 显式阻塞或经批准运营兜底 | public API/event/allowed actions/impact read model/audit/E2E |
 | `BLK-FE-P9-005` | 指标定义、事件、baseline、隐私/保留和 Data Owner assignee | `OWN-DATA-PRIVACY` | KPI、产品验证、分析/归因页面 | 显示 unavailable/definition，禁止 Mock 数字 | MetricDefinition/Event schema/consent/retention/baseline/QA evidence |

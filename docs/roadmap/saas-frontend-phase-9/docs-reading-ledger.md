@@ -6,6 +6,7 @@
 > 事实 Owner：`OWN-DOC-GOV`
 > 快照日期：2026-07-23
 > 工程基线：`origin/main@8dcbbcb8254a561f33abc59c49da4cb6a3de30b1`
+> 最新增量指纹刷新：`origin/main@e0e51075df8ee8bb14dc5141f83365c6a2a4dec1`（2026-07-23）
 > 快照范围：创建本总账前 `docs/**` 下全部 Markdown/DOCX；本文件不纳入自身快照
 
 ## 1. 完整性结论
@@ -18,6 +19,8 @@
 - 目录分布：根目录 5、adr 1、architecture 1、backend 6、design 4、evidence 1、frontend 29、governance 10、implementation-records 8、platform 12、releases 1、research 7、roadmap 63、site-builder 18、status 2、templates 3。
 
 `FULL_READ_RECONCILED` 表示正文已进入本轮语义审计并按更高层真值处理冲突；不表示每份文档仍然 current、内容全部获批或功能已经实现。DOCX 的图片、嵌入对象和版式不是机器合同；其中主文档正文只作为历史输入。
+
+初始 171 份快照不重写；增量基线上发生变化的 current 文档使用 `POST_BASELINE_HASH_REFRESH` 更新指纹和处理说明，且必须在提交前通过全 175 条指纹复核。
 
 ## 2. 权威与采用规则
 
@@ -193,25 +196,25 @@
 | `docs/roadmap/saas-frontend-phase-8/history-disposition-proposal.md` | MD | 70 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `416ddcd8ae0de3e1901343b58b80912bf9487150b4057ed50eba632e5d877e0c` | 冻结证据；只做 provenance/delta |
 | `docs/roadmap/saas-frontend-phase-8/reading-route-acceptance.md` | MD | 72 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `d41f13f95e0aa11e74b989c35858037c5ff16bfc481a60fa6cebde74403eec62` | 冻结证据；只做 provenance/delta |
 | `docs/roadmap/saas-frontend-phase-8/verification-report.md` | MD | 67 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `a619042a381b842c5bc8e4b1e1c5cac27c3b8cb52f84869b6c02e1d5b2b2addf` | 冻结证据；只做 provenance/delta |
-| `docs/roadmap/saas-frontend-phase-9/README.md` | MD | 129 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `d80f298d46d5f091800aa972502f3a4f8b1019b489a580c6c7c5d75cd137465e` | 工作/参考；同步 Phase 0、Foundations、17 张桌面代表、关键状态/移动端、六条原型和 76/76 Manifest；不得覆盖 current |
-| `docs/roadmap/saas-frontend-phase-9/conflict-and-decision-ledger.md` | MD | 108 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `69a2d2751c16a576c37ceeee7ff1dad352d074101463c670e609ddb7bfa982e5` | 工作/参考；同步 Phase 0 批准、四个 Design 文件、九张 SaaS 桌面代表、部分响应式/原型和剩余验证阻塞；不得覆盖 current |
-| `docs/roadmap/saas-frontend-phase-9/feature-coverage-ledger.md` | MD | 209 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `e701665819f88f294ec21b6c73a05d90ac6c018578c1097b23bf32185c6b8ec2` | 工作/参考；不得覆盖 current |
+| `docs/roadmap/saas-frontend-phase-9/README.md` | MD | 130 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA + POST_BASELINE_HASH_REFRESH` | `03dec5196663b79080d182383fc2566a8166ec656f544223976e2cd31f91856a` | 工作/参考；同步 Phase 0、Foundations、17 张桌面代表、关键状态/移动端、六条原型、76/76 Manifest 和 `e0e5107` 增量对账；不得覆盖 current |
+| `docs/roadmap/saas-frontend-phase-9/conflict-and-decision-ledger.md` | MD | 110 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA + POST_BASELINE_HASH_REFRESH` | `9ec2338cab019999796304983bb2da3e65fa0841696021fae80fa6fe59c9914b` | 工作/参考；同步 17 张桌面代表、6 条原型、44/11 组件资格和 MapLocation 文本合同；不得覆盖 current |
+| `docs/roadmap/saas-frontend-phase-9/feature-coverage-ledger.md` | MD | 210 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + POST_BASELINE_HASH_REFRESH` | `a7acaaa341f370505b6c69f80aa36b5289029e1c3a9f3e8afb0f454b41870ca7` | 工作/参考；OpenAPI 在 `e0e5107` 仍为 56 paths / 64 operations；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/figma-delivery-register.md` | MD | 148 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `f0719cd96eea178bd710266886e55bf34316ed65cb77ca44a0bc86a0b0cdd853` | 工作/参考；登记 FigJam、Foundations、十二张 SaaS 桌面代表、状态/移动端、六条原型与五张产品表面代表页 Node；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/interaction-language-and-visual-semantics.md` | MD | 237 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `90a7b9792bfe6ea012fa79a60f7a78fa27caf063e561c202b84d2aeb234b3c41` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/journey-and-prototype-catalog.md` | MD | 112 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `390739a1bb9c9dacf2ab5f72119f2dc10bc5dd0e190ce46d66d7fd49a08ce818` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/object-page-family-review.md` | MD | 286 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `b7cec59c2142a3d191c518acdf0e983cef84747fdd6b5a9967bf8ee1adc8b8d8` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/provider-and-sor-architecture.md` | MD | 638 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `060009a32974a67745d7ce273672a8ea80b97a46e06c6152c17fd977714a35a7` | 工作/参考；不得覆盖 current |
-| `docs/roadmap/saas-frontend-phase-9/source-and-truth-ledger.md` | MD | 215 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `c5292e51cbf58d8c059a5ab038c53dece6d58c5fc6dd65f706e408e0073f8686` | 工作/参考；更新 FigJam、Foundations、11 张桌面代表、关键状态/移动端/原型和逐页后续门；不得覆盖 current |
+| `docs/roadmap/saas-frontend-phase-9/source-and-truth-ledger.md` | MD | 219 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA + POST_BASELINE_HASH_REFRESH` | `1aad629a6758a713d9d57041f587f32f6f6664a7c189e773cb7a474d36dcab3e` | 工作/参考；更新 Figma 交付、44/11 组件资格、MapLocation 合同和 `e0e5107` 增量事实；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/visual-direction-content-fixture.md` | MD | 132 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `ed4a7a292be7daa62596356921072867de82d1869a14e9691330a7d13f340512` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/sam-sources-sought-p4-design.md` | MD | 158 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `17fafbf7b3547d9a3cb870f6fee5db2cbfcee10bdbe1211337edcab52695dead` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/sanctions-screening-design.md` | MD | 206 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `a73f7755174f4a6fa4c2628b0ff3f160dc82535cd9d6e4e3eeeeffc3450368f3` | 工作/参考；不得覆盖 current |
 | `docs/site-builder/00-decisions-and-coordination.md` | MD | 53 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `68e389d73a666136aa0901aaa1ff31a6eef9da0fa3c3b8cf24434cddb84868c9` | 活规格/治理；须与机器事实一致 |
 | `docs/site-builder/01-prd.md` | MD | 165 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `ee827a484ab628a91729e6cc5c5518b9e9008e5fd061ebeb030ef8d8d71f5d41` | 活规格/治理；须与机器事实一致 |
-| `docs/site-builder/02-architecture.md` | MD | 378 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `1f5a304f922e883b481429702f44807888f3f2f11260363b012a703177b3f795` | 活规格/治理；须与机器事实一致 |
+| `docs/site-builder/02-architecture.md` | MD | 378 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED + POST_BASELINE_HASH_REFRESH` | `4824e1e3553e2ee83798a84a68abc550bf3cf88895a020546977206be55c775b` | 活规格/治理；D16 已改为无外呼 MapLocation 文本卡；须与机器事实一致 |
 | `docs/site-builder/03-agents.md` | MD | 220 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `21ffee79038cc7f6566d5ac4bc9be850926744207dbfaaabf401a8e193affd7a` | 活规格/治理；须与机器事实一致 |
-| `docs/site-builder/04-sitespec-contract.md` | MD | 288 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `4c9491dc9b29b23ecb8b0f31da81e1afca62f96c32d100ed07da592cf56f214a` | 活规格/治理；须与机器事实一致 |
-| `docs/site-builder/05-deployment-hosting.md` | MD | 166 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `b65ec860b5d4437f3fe756e633ab40d1b1e4288500b0ff4c0d2cad3dc08cd404` | 活规格/治理；须与机器事实一致 |
-| `docs/site-builder/06-security-abuse.md` | MD | 243 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `11178bfed942e57070df888082ba34d6df7c3bce5637e10b9ef3629947800401` | 活规格/治理；须与机器事实一致 |
+| `docs/site-builder/04-sitespec-contract.md` | MD | 286 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED + POST_BASELINE_HASH_REFRESH` | `b7b47f6922e198106ec77d0802bbc0cddf8488516c8246ff5e3b536e11452c04` | 活规格/治理；分批资格摘要不作 current 总数，MapLocation 为文本合同；须与机器事实一致 |
+| `docs/site-builder/05-deployment-hosting.md` | MD | 166 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED + POST_BASELINE_HASH_REFRESH` | `62861fd7b4d7820fe5b0f2ac07c5de6f027825207b987002ab07d56543ecde10` | 活规格/治理；MapLocation 不再需要地图 key/CSP 白名单；须与机器事实一致 |
+| `docs/site-builder/06-security-abuse.md` | MD | 243 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED + POST_BASELINE_HASH_REFRESH` | `53b472e1b7ddf1bda75f17b9d416115b91a97f907c144503b481e6934a64c35c` | 活规格/治理；MapLocation 禁 iframe/Geocoding/坐标和位置推断；须与机器事实一致 |
 | `docs/site-builder/07-api-contract-draft.md` | MD | 228 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `34b71b7d7faffb97b1c20eed42027dec87aacecb7e9e3bf1f191d71233c7da22` | 活规格/治理；须与机器事实一致 |
 | `docs/site-builder/08-eval-testing.md` | MD | 367 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `602631a594d31fc45d93d5434e1759e8cded8b602798bcf07d65b9916f0a8de3` | 活规格/治理；须与机器事实一致 |
 | `docs/site-builder/09-m1-implementation-design.md` | MD | 364 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `9f05a9571a3728b00cd8fbf1d73fd6b97383d7a7da0b5c06b7c59d94dc5bbaf0` | 活规格/治理；须与机器事实一致 |
@@ -223,7 +226,7 @@
 | `docs/site-builder/14-media-foundation-mf0.md` | MD | 209 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `b8d6ab907a168795ebe5759a87836fe0977d59a54fb18bab116dab2d086b4792` | 活规格/治理；须与机器事实一致 |
 | `docs/site-builder/DQ-1-shared-sitespec-contract.md` | MD | 68 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `db2baa359e4f3d7c72a149e60b994207051842f1ca47cf307de9b4a4c82c1f1d` | 活规格/治理；须与机器事实一致 |
 | `docs/site-builder/handoffs/r1-min-execution-brief.md` | MD | 343 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `40d2a2167537d4f76ad30f8bd8501a1007a13d33dacfe5705763b0c1e925167b` | 活规格/治理；须与机器事实一致 |
-| `docs/status/current.md` | MD | 59 行 | `L1_CURRENT` | `FULL_READ_RECONCILED` | `d87f296ca69c8e6844a076b86b190f02f79142d25e8b9429a413c2c540a3a0bb` | current 真值；冲突时优先 |
+| `docs/status/current.md` | MD | 59 行 | `L1_CURRENT` | `FULL_READ_RECONCILED + POST_BASELINE_HASH_REFRESH` | `b4339da4c9e201eeeeebbeb42bf12aa65a80e03a16be3496156df70918688ff7` | current 真值；已对账 44/55 资格、308 份证据和 132 张截图；冲突时优先 |
 | `docs/status/pilot-readiness-gap-report.md` | MD | 45 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `a75259a9f2a8502c9c0b50a46725fa6a25a1cd1b5c4229d94efb836a69032a73` | 工作/参考；不得覆盖 current |
 | `docs/templates/release-bundle-template.md` | MD | 107 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `75a03cebd34e74b2b74784054fbfcb4fba830689ffab53db6937f3af44360e0a` | 工作/参考；不得覆盖 current |
 | `docs/templates/release-learning-template.md` | MD | 50 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `aadd41d04533f53a50aaa170f88e3685f9d608fb965d06e3dc28d693cb919c5f` | 工作/参考；不得覆盖 current |
@@ -240,7 +243,7 @@
 
 | 路径 | 类型 | 规模 | 权威层级 | 读取状态 | SHA-256 | 采用规则 |
 |---|---:|---:|---|---|---|---|
-| `docs/roadmap/saas-frontend-phase-9/design-system-v1-scope.md` | MD | 119 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ + PHASE1_DELTA` | `7288b1ec0d1edcb293a0e33b261a2f178a1cb4a2e57c4431115f303a0efd7272` | Phase 0 已批准并记录四个 Design 文件、九张 SaaS 桌面代表、关键状态、移动端和原型骨架的 Phase 1 草稿；不得冒充已冻结 Token/组件 |
+| `docs/roadmap/saas-frontend-phase-9/design-system-v1-scope.md` | MD | 119 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ + PHASE1_DELTA + POST_BASELINE_HASH_REFRESH` | `52598ea0dcebd90eb3b6f455225b336115bb7629c6d7e3054954890efbe8d4e8` | Phase 0 已批准并记录四个 Design 文件、17 张桌面代表、5 个关键状态、3 张移动端和 6 条原型骨架的 Phase 1 草稿；不得冒充已冻结 Token/组件 |
 | `docs/roadmap/saas-frontend-phase-9/canva-review-delivery.md` | MD | 64 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ` | `6a9b654119ff393ced6aca5d46fe1e1a05b5d2bb618e33ac4482b8cae0d275b4` | Canva 传播层登记；不得覆盖 Figma 设计真值 |
 | `docs/roadmap/saas-frontend-phase-9/phase-1-design-evidence.md` | MD | 193 行 | `L4_FROZEN_EVIDENCE` | `PHASE9_SUCCESSOR_READ` | `bed644f85b965baf9fedbe5a5db2bb571671fc39fde6d7091e7802e2a57b1f48` | Phase 1 四个 Design 文件 Node、17 张桌面代表、状态/移动端/六条原型 QA、生成素材和已知限制；不证明用户验证或实现 |
 | `docs/roadmap/saas-frontend-phase-9/page-manifest-v2.md` | MD | 167 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ` | `b72ed15bd9d7715418624080b7f1ece24ae8c4e9f35e66a359fc493f54fe7fd4` | 76 个稳定 Page ID、已设计跨域代表/状态/响应式/六条原型 Node 与公共站候选的 Manifest 2.0 登记；不改变 current Page Registry 或产品状态 |
