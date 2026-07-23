@@ -21,7 +21,7 @@ const RENDERER_BASELINE_TOKEN_DIGEST = [
   "ce8a78e4c09bc69e",
 ].join("");
 
-/** URLs remain registered external-source provenance; this catalog stores no copied source asset or source code. */
+/** Registered provenance declares permitted transformation/training; this catalog stores no copied source asset or source code. */
 const REGISTERED_EXTERNAL_SOURCES = [
   {
     id: "festo-industrial-automation-study",
