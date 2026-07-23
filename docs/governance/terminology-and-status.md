@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 批准来源：Gate 2 推荐组合，产品负责人于 2026-07-20 明确批准
-> 最后核验：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
+> 最后核验：`origin/main@76b8c243e7d7b78b25d8f82956667f3133f9286d`
 
 本文只定义跨文档可复用的名称、状态和责任语义，不替代 [产品边界](../product-scope.md)、[as-built 架构](../architecture/current.md)、[ADR](../adr/registry.md)、[当前状态](../status/current.md)或机器契约。任何新文档使用不同词义时，必须先登记冲突，不能在正文中自行改义。
 
@@ -22,7 +22,7 @@
 | 当前主线与完成度 | [status/current.md](../status/current.md) | 只写本能力局部状态和核验点 |
 | 施工顺序 | [release-plan.md](../roadmap/release-plan.md) | 用 milestone ID 引用 |
 | 文档、能力、对象、场景、冲突和追踪 ID | [governance/](README.md) 对应登记表 | 形成读者视图，不再建平行清单 |
-| OSS/外部能力 Card、采用决定与状态 | [OSS / 外部能力注册表](../backend/oss-registry.md) | 分组 Card 解释边界；PRD/代码不得形成影子采用清单 |
+| OSS/外部能力 Card、采用决定与状态 | [OSS / 外部能力注册表](../backend/oss-registry.md) | 其他文档只引用 Card；PRD/代码不得形成影子采用清单 |
 | API | `packages/contracts/openapi/openapi.json` | 使用 operationId/路径引用，不手抄总数作长期真值 |
 | Schema、RLS 和迁移 | Prisma schema 与已合并 migration | 文档解释业务含义，不复制可漂移结构 |
 | 测试、真机和发布证明 | 对应测试、evidence bundle、Release Bundle | 摘要结论并指向精确证据 |
@@ -73,7 +73,7 @@
 | `LOCAL_UNCONTROLLED` | 无 Git/Owner/版本 provenance 的本地输入 | 只读；不得视为发布或设计真值 |
 | `RETIRED` | 已不再支持且引用已清零 | 只有引用映射和授权完成后使用 |
 
-`SUPERSEDED` 不等于“可以删除”。Gate 8 已批准“原位保留 + 强 banner + Registry successor”；任何未来移动、删除或归档仍需满足独立文件动作门并另获授权。
+`SUPERSEDED` 不自动等于“可以删除”。是否保留取决于当前引用、承重事实承接、恢复路径和明确授权。2026-07-23 的文档瘦身只授权已列明的 Phase 工作包、重复入口和空模板退出工作树；Site 10–12、Word 和其他历史输入仍原位保留。
 
 ## 5. 决策与 Gate 状态
 
@@ -134,7 +134,7 @@
 | `DEFER` | 当前不安装；只有 Card 触发器出现后才重新研究 |
 | `*_HARDEN` | 已有代码或开发运行事实，但固定版本、生产安全/恢复/Owner/退出证据未完成 |
 
-精确准入门和组合在 [adoption policy](../platform/oss-adoption/adoption-policy.md)；`INTEGRATE`、宽松许可证或开发容器运行均不等于 `DEPLOYED/GA/APPROVED_FOR_PRODUCTION`。
+精确准入门和组合只在 [OSS / 外部能力注册表](../backend/oss-registry.md)维护；`INTEGRATE`、宽松许可证或开发容器运行均不等于 `DEPLOYED/GA/APPROVED_FOR_PRODUCTION`。
 
 ## 7. 能力入口可见性
 
@@ -237,4 +237,4 @@ Fixture 必须使用合成企业、合成联系人和有明确使用权的资产
 2. 变更产品边界或承重技术决定时，先走 PDR/ADR，再更新 Registry 引用。
 3. 变更能力/对象/场景 ID 时不得复用旧 ID；被取代项保留并指向 successor。
 4. 修正当前实现状态时，记录最后核验提交；不要重写冻结 Gate 包。
-5. 删除或移动旧文档前，必须先在 [文档登记](document-register.md)完成引用映射并获得单独授权。
+5. 删除或移动旧文档前，必须确认唯一事实已由当前 Owner 承接、清零当前链接、保留可恢复 provenance，并获得明确授权。
