@@ -44,6 +44,19 @@ describe('buildRendererEnv — Renderer 子进程最小环境', () => {
     expect(env).not.toHaveProperty('HOME');
     expect(env).not.toHaveProperty('NODE_OPTIONS');
   });
+
+  it('只按显式输入传递一次性 public asset overlay', () => {
+    expect(
+      buildRendererEnv({
+        specPath: '/tmp/spec.json',
+        outDir: '/tmp/out',
+        basePath: '/',
+        publicAssetDir: '/tmp/overlay',
+      }),
+    ).toMatchObject({
+      PUBLIC_ASSET_DIR: '/tmp/overlay',
+    });
+  });
 });
 
 describe('rendered outbound-domain gate', () => {
@@ -93,6 +106,21 @@ describe('buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期', () =
     expect(execute).toHaveBeenCalledTimes(1);
     await expectMissing(observedPath);
     await expectMissing(path.dirname(observedPath));
+  });
+
+  it('将可信 overlay 路径传给 renderer executor', async () => {
+    const execute = vi.fn(async (input: RendererBuildInput) => {
+      expect(input.publicAssetDir).toBe('/tmp/overlay');
+    });
+    await buildSiteSpecWithTemporaryFile(
+      { safe: true },
+      {
+        outDir: '/tmp/out',
+        basePath: '/',
+        publicAssetDir: '/tmp/overlay',
+      },
+      execute,
+    );
   });
 
   it('Renderer 抛错时仍在 finally 删除 SiteSpec 与随机临时目录，并保留原错误', async () => {

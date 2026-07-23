@@ -220,7 +220,7 @@ export function applyBuildScope(
       ...(candidate.copyBundleSet
         ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
         : {}),
-    };
+    } as SiteSpec;
   }
 
   const targetId = request.targetId!;
@@ -250,5 +250,5 @@ export function applyBuildScope(
     ...(candidate.copyBundleSet
       ? { copyBundleSet: structuredClone(candidate.copyBundleSet) }
       : {}),
-  };
+  } as SiteSpec;
 }

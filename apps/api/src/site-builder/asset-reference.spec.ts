@@ -104,8 +104,13 @@ describe('MF0-B asset reference extraction', () => {
   });
 
   it('matches a manifest-only reference when the DELETE UUID uses uppercase hex', () => {
-    const value = { ...spec(), assets: { [ALPHA_ASSET]: { kind: 'logo', hash: 'c'.repeat(64) } } };
-    expect(scanSiteSpecAssetReferences(value, ALPHA_ASSET.toUpperCase())).toEqual([
+    const value = {
+      ...spec(),
+      assets: { [ALPHA_ASSET]: { kind: 'logo', hash: 'c'.repeat(64) } },
+    };
+    expect(
+      scanSiteSpecAssetReferences(value, ALPHA_ASSET.toUpperCase()),
+    ).toEqual([
       expect.objectContaining({
         component: '$assets',
         fieldPath: `/assets/${ALPHA_ASSET}`,
@@ -155,7 +160,12 @@ describe('MF0-B asset reference extraction', () => {
   });
 
   it('conservatively finds an exact asset UUID in an unknown historical Profile path', () => {
-    expect(profileUsagesForAsset({ legacyMedia: { hero: { source: ASSET } } }, ASSET)).toEqual([
+    expect(
+      profileUsagesForAsset(
+        { legacyMedia: { hero: { source: ASSET } } },
+        ASSET,
+      ),
+    ).toEqual([
       {
         source: 'profile',
         page: '$profile',
@@ -166,7 +176,12 @@ describe('MF0-B asset reference extraction', () => {
   });
 
   it('matches uppercase UUID values while preserving their JSON Pointer location', () => {
-    expect(profileUsagesForAsset({ legacyMedia: { source: ASSET.toUpperCase() } }, ASSET)).toEqual([
+    expect(
+      profileUsagesForAsset(
+        { legacyMedia: { source: ASSET.toUpperCase() } },
+        ASSET,
+      ),
+    ).toEqual([
       expect.objectContaining({
         component: 'legacyMedia',
         fieldPath: '/legacyMedia/source',
@@ -177,22 +192,30 @@ describe('MF0-B asset reference extraction', () => {
   it('fails closed when a historical Profile exceeds the scan depth budget', () => {
     let profile: Record<string, unknown> = { ref: ASSET };
     for (let depth = 0; depth < 40; depth += 1) profile = { nested: profile };
-    expect(() => profileUsagesForAsset(profile, ASSET)).toThrow(AssetReferenceScanError);
+    expect(() => profileUsagesForAsset(profile, ASSET)).toThrow(
+      AssetReferenceScanError,
+    );
   });
 
   it('fails closed instead of filtering malformed manifest ids', () => {
     expect(() =>
-      scanSiteSpecAssetReferences({ specVersion: '1.0.0', assets: { 'asset~/id': {} }, pages: [] }, ASSET),
+      scanSiteSpecAssetReferences(
+        { specVersion: '1.0.0', assets: { 'asset~/id': {} }, pages: [] },
+        ASSET,
+      ),
     ).toThrow(AssetReferenceScanError);
   });
 
   it('fails closed for unknown versions, malformed envelopes and excessive nesting', () => {
-    expect(() => scanSiteSpecAssetReferences({ specVersion: '1.1.0', assets: {}, pages: [] }, ASSET)).toThrow(
-      AssetReferenceScanError,
-    );
-    expect(() => scanSiteSpecAssetReferences({ specVersion: '1.0.0', assets: {} }, ASSET)).toThrow(
-      AssetReferenceScanError,
-    );
+    expect(() =>
+      scanSiteSpecAssetReferences(
+        { specVersion: '2.0.0', assets: {}, pages: [] },
+        ASSET,
+      ),
+    ).toThrow(AssetReferenceScanError);
+    expect(() =>
+      scanSiteSpecAssetReferences({ specVersion: '1.0.0', assets: {} }, ASSET),
+    ).toThrow(AssetReferenceScanError);
     expect(() =>
       scanSiteSpecAssetReferences(
         {
@@ -225,7 +248,9 @@ describe('MF0-B asset reference extraction', () => {
         {
           specVersion: '1.0.0',
           assets: {},
-          pages: [{ id: 'home', puck: { root: { props: nested }, content: [] } }],
+          pages: [
+            { id: 'home', puck: { root: { props: nested }, content: [] } },
+          ],
         },
         ASSET,
       ),

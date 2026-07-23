@@ -13,6 +13,7 @@ export interface RendererBuildInput {
   specPath: string;
   outDir: string;
   basePath: string;
+  publicAssetDir?: string;
   allowedOutboundDomains?: string[];
 }
 
@@ -32,6 +33,7 @@ export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
     SITESPEC_PATH: input.specPath,
     OUT_DIR: input.outDir,
     BASE_PATH: input.basePath,
+    ...(input.publicAssetDir ? { PUBLIC_ASSET_DIR: input.publicAssetDir } : {}),
     ASTRO_TELEMETRY_DISABLED: '1',
   };
 }
@@ -161,7 +163,7 @@ function allowedOutboundDomains(spec: unknown): string[] {
  */
 export async function buildSiteSpecWithTemporaryFile(
   spec: unknown,
-  output: { outDir: string; basePath: string },
+  output: { outDir: string; basePath: string; publicAssetDir?: string },
   execute: RendererBuildExecutor = runAstroBuild,
 ): Promise<void> {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'global-site-renderer-'));
@@ -176,6 +178,7 @@ export async function buildSiteSpecWithTemporaryFile(
       specPath,
       outDir: output.outDir,
       basePath: output.basePath,
+      publicAssetDir: output.publicAssetDir,
       allowedOutboundDomains: allowedOutboundDomains(spec),
     });
   } finally {

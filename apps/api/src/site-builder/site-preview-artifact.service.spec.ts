@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { PrismaService } from '../prisma/prisma.service';
 import {
+  releaseArtifactDigest,
   releaseManifestDigest,
   type ReleaseManifestV1,
 } from './release-artifact';
@@ -20,7 +21,7 @@ const manifest: ReleaseManifestV1 = {
   producerToken: '66666666-6666-4666-8666-666666666666',
   artifactPrefix:
     'sites/33333333-3333-4333-8333-333333333333/releases/11111111-1111-4111-8111-111111111111',
-  artifactDigest: 'a'.repeat(64),
+  artifactDigest: '',
   specVersion: '1.0.0',
   specDigest: 'b'.repeat(64),
   buildIdentity: 'site-renderer@1.0.0+sha.abc123',
@@ -37,6 +38,7 @@ const manifest: ReleaseManifestV1 = {
     },
   ],
 };
+manifest.artifactDigest = releaseArtifactDigest(manifest.files);
 
 function service(overrides?: { manifestDigest?: string; body?: Buffer }) {
   const query = vi.fn(async () => [

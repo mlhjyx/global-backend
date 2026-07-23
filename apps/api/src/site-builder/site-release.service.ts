@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import type { SiteSpec } from '@global/contracts';
+import type { DesignBriefV2, SiteSpec } from '@global/contracts';
 
 import type { PrismaService } from '../prisma/prisma.service';
 import {
@@ -43,6 +43,7 @@ export interface MaterializeSiteReleaseInput {
   root: string;
   spec: SiteSpec;
   storedSpecVersion: string;
+  designBrief?: DesignBriefV2;
   createdBy?: string;
 }
 
@@ -173,7 +174,12 @@ export class SiteReleaseService {
           data: { producerToken, leaseUntil, error: null },
         });
         if (renewed.count !== 1) throw new Error('SITE_RELEASE_CLAIM_FENCED');
-        return { ...release, producerToken, leaseUntil, error: null } as CandidateRelease;
+        return {
+          ...release,
+          producerToken,
+          leaseUntil,
+          error: null,
+        } as CandidateRelease;
       }
 
       if (run?.status !== 'running') {
@@ -222,6 +228,7 @@ export class SiteReleaseService {
       artifactPrefix: candidate.artifactPrefix,
       releaseCreatedAt: candidate.createdAt,
       buildIdentity: this.options.buildIdentity,
+      designBrief: input.designBrief,
     });
     if (
       candidate.status === 'ready' &&

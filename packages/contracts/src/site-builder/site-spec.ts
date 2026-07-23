@@ -15,8 +15,11 @@
 
 import type { CopyBundleSetV1 } from "./copy-bundle";
 
-/** 当前 SiteSpec 版本（semver，见 04 §8）。 */
-export const SITE_SPEC_VERSION = "1.0.0";
+/** Published SiteSpec versions. Demo v0 is permanently pinned to v1. */
+export const SITE_SPEC_V1_VERSION = "1.0.0" as const;
+export const SITE_SPEC_V1_1_VERSION = "1.1.0" as const;
+/** Latest version emitted by the controlled assembler. */
+export const SITE_SPEC_VERSION = SITE_SPEC_V1_1_VERSION;
 
 /** API-facing SiteSpec identifiers are bounded strings, not database UUIDs. */
 export const SITE_SPEC_IDENTIFIER_PATTERN_SOURCE =
@@ -44,17 +47,61 @@ export type SiteSpecStylePreset = (typeof SITE_SPEC_STYLE_PRESETS)[number];
  * `Section.spec.ts` 断言 registry keys 与本数组完全相等。
  */
 export const SITE_SPEC_COMPONENT_TYPES = [
-  "HeroBanner", "StatsBand", "ProductGrid", "AboutBlock", "CertWall",
-  "ProcessTimeline", "FaqAccordion", "CtaBanner", "InquiryForm", "MapLocation",
-  "HeroFull", "AreaMarquee", "ServicesGrid", "TrustSplit", "ProcessSteps",
-  "PricingTable", "Testimonials", "AreaGallery", "FaqSplit", "CtaCenter",
-  "EditorialHero", "ProjectsGrid", "ServicesDark", "StatsCountup", "MaterialsLibrary",
-  "LogoMarquee", "SplitAbout", "WarmHero", "ServiceRows", "DishesShowcase",
-  "PhotoGallery", "MediaCta", "FarmhouseHero", "ValueStrip", "FeaturedSpotlight",
-  "StoryChapters", "CollectionCards", "DispatchHero", "LedgerStats", "ServicesEditorial",
-  "DispatchTimeline", "CrewGrid", "CoverageMap", "AxiomHero", "ChapterShowcase",
-  "ColorwayPicker", "SaaSHero", "FeatureCards", "PricingTiers", "ArticleGrid",
-  "IndustrialHero", "ProductShowcaseAlt", "TechSystems", "MinimalHero", "StatementBlock",
+  "HeroBanner",
+  "StatsBand",
+  "ProductGrid",
+  "AboutBlock",
+  "CertWall",
+  "ProcessTimeline",
+  "FaqAccordion",
+  "CtaBanner",
+  "InquiryForm",
+  "MapLocation",
+  "HeroFull",
+  "AreaMarquee",
+  "ServicesGrid",
+  "TrustSplit",
+  "ProcessSteps",
+  "PricingTable",
+  "Testimonials",
+  "AreaGallery",
+  "FaqSplit",
+  "CtaCenter",
+  "EditorialHero",
+  "ProjectsGrid",
+  "ServicesDark",
+  "StatsCountup",
+  "MaterialsLibrary",
+  "LogoMarquee",
+  "SplitAbout",
+  "WarmHero",
+  "ServiceRows",
+  "DishesShowcase",
+  "PhotoGallery",
+  "MediaCta",
+  "FarmhouseHero",
+  "ValueStrip",
+  "FeaturedSpotlight",
+  "StoryChapters",
+  "CollectionCards",
+  "DispatchHero",
+  "LedgerStats",
+  "ServicesEditorial",
+  "DispatchTimeline",
+  "CrewGrid",
+  "CoverageMap",
+  "AxiomHero",
+  "ChapterShowcase",
+  "ColorwayPicker",
+  "SaaSHero",
+  "FeatureCards",
+  "PricingTiers",
+  "ArticleGrid",
+  "IndustrialHero",
+  "ProductShowcaseAlt",
+  "TechSystems",
+  "MinimalHero",
+  "StatementBlock",
 ] as const;
 export type SiteSpecComponentType = (typeof SITE_SPEC_COMPONENT_TYPES)[number];
 
@@ -140,11 +187,35 @@ export interface PuckData {
   root: { props?: Record<string, unknown> };
 }
 
-/** 资产引用（04 §4）：assetId → `{ kind, hash }`。 */
-export interface AssetRef {
+/** SiteSpec 1.0 asset reference (kept for immutable v1 releases). */
+export interface AssetRefV1 {
   kind: string;
   hash: string;
 }
+
+/** @deprecated Use AssetRefV1 or AssetRefV1_1 for version-aware code. */
+export type AssetRef = AssetRefV1;
+
+export interface TenantAssetRefV1_1 {
+  source: "tenant";
+  assetId: string;
+  kind: string;
+  contentHash: string;
+  variantId: string;
+  variantHash: string;
+  mimeType: string;
+}
+
+export interface CatalogAssetRefV1_1 {
+  source: "catalog";
+  packId: string;
+  packVersion: string;
+  catalogAssetId: string;
+  sha256: string;
+  mimeType: string;
+}
+
+export type AssetRefV1_1 = TenantAssetRefV1_1 | CatalogAssetRefV1_1;
 
 /** 单页。 */
 export interface SitePage {
@@ -154,24 +225,48 @@ export interface SitePage {
   seo: { titleKey: string; descriptionKey: string };
 }
 
-/** SiteSpec 顶层信封（04 §1）——组装 agent 产出 ↔ 渲染器消费 的唯一契约。 */
-export interface SiteSpec {
-  specVersion: string;
-  site: {
-    defaultLocale: string;
-    locales: string[];
-    /** `tokenOverrides` 可选：生产端可不发，消费端主题覆写时读取（04 §6）。 */
-    theme: { preset: SiteSpecStylePreset; tokenOverrides?: Record<string, string> };
-    nav: { labelKey: string; pageId: string }[];
-    seoGlobal: { siteName: string };
-    /** Exact HTTPS host allowlist enforced against rendered HTML/CSS/JS. */
-    outboundDomains?: string[];
+interface SiteSpecSiteCommon {
+  defaultLocale: string;
+  locales: string[];
+  /** `tokenOverrides` remains a renderer-owned, bounded compatibility seam. */
+  theme: {
+    preset: SiteSpecStylePreset;
+    tokenOverrides?: Record<string, string>;
   };
+  nav: { labelKey: string; pageId: string }[];
+  seoGlobal: { siteName: string };
+  /** Exact HTTPS host allowlist enforced against rendered HTML/CSS/JS. */
+  outboundDomains?: string[];
+}
+
+interface SiteSpecCommon {
   pages: SitePage[];
-  /** assetId → 引用；生产端可为空对象（尚无资产），消费端按需读取。 */
-  assets: Record<string, AssetRef>;
   /** locale → (textKey → 文案)（04 §3 结构/内容分离）。 */
   copyBundles: Record<string, Record<string, string>>;
   /** M1-d authoritative immutable documents; legacy copyBundles is a one-cycle projection. */
   copyBundleSet?: CopyBundleSetV1;
 }
+
+/** Immutable legacy contract used by Demo v0 and ReleaseManifest v1. */
+export interface SiteSpecV1 extends SiteSpecCommon {
+  specVersion: typeof SITE_SPEC_V1_VERSION;
+  site: SiteSpecSiteCommon;
+  assets: Record<string, AssetRefV1>;
+}
+
+/** Controlled-assembly contract. All design/runtime identities are frozen. */
+export interface SiteSpecV1_1 extends SiteSpecCommon {
+  specVersion: typeof SITE_SPEC_V1_1_VERSION;
+  componentLibraryVersion: string;
+  rendererVersion: string;
+  site: {
+    archetype: string;
+    familyId: string;
+    dirByLocale: Record<string, "ltr" | "rtl">;
+  } & SiteSpecSiteCommon;
+  /** Logical reference id → immutable tenant/catalog source. */
+  assets: Record<string, AssetRefV1_1>;
+}
+
+/** Explicit version union. Consumers must narrow on `specVersion`. */
+export type SiteSpec = SiteSpecV1 | SiteSpecV1_1;
