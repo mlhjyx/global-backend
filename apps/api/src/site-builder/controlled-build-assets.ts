@@ -18,6 +18,13 @@ const TENANT_ASSET_KINDS = new Set([
   "factory_image",
   "cert",
 ]);
+const RENDERABLE_IMAGE_MIMES = new Set([
+  "image/avif",
+  "image/jpeg",
+  "image/png",
+  "image/svg+xml",
+  "image/webp",
+]);
 const MAX_CONTROLLED_VARIANT_BYTES = 64 * 1024 * 1024;
 
 type AssetManifestTx = Pick<Prisma.TransactionClient, "asset">;
@@ -83,7 +90,9 @@ export async function buildControlledAssetManifest(
     },
   });
   for (const asset of assets) {
-    const variant = asset.variants[0];
+    const variant = asset.variants.find((candidate) =>
+      RENDERABLE_IMAGE_MIMES.has(candidate.mime),
+    );
     if (
       !asset.contentHash ||
       !/^[a-f0-9]{64}$/.test(asset.contentHash) ||

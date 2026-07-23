@@ -39,6 +39,18 @@ describe("M1-e-B controlled runtime assets", () => {
         contentHash: "not-a-sha",
         variants: [],
       },
+      {
+        id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        kind: "cert",
+        contentHash: "d".repeat(64),
+        variants: [
+          {
+            id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            contentHash: "e".repeat(64),
+            mime: "application/pdf",
+          },
+        ],
+      },
     ]);
     const manifest = await buildControlledAssetManifest(
       { asset: { findMany } } as unknown as Pick<
@@ -70,6 +82,9 @@ describe("M1-e-B controlled runtime assets", () => {
     });
     expect(
       Object.keys(manifest).some((key) => key.includes("cccccccc-cccc")),
+    ).toBe(false);
+    expect(
+      Object.keys(manifest).some((key) => key.includes("dddddddd-dddd")),
     ).toBe(false);
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({

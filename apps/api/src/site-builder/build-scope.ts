@@ -79,11 +79,19 @@ export function assertActiveBuildTargets(
   assertPartialSpecShape(active);
   if (active.copyBundleSet) {
     const activeLocales = sortedUnique(active.site.locales);
-    const requestedLocales = sortedUnique(request.options?.locales ?? ["en"]);
+    const requestedLocales = sortedUnique(
+      request.options?.locales ?? active.site.locales,
+    );
+    const bundleLocales = sortedUnique(
+      Object.keys(active.copyBundleSet.bundles),
+    );
     if (
       !activeLocales ||
       !requestedLocales ||
-      JSON.stringify(requestedLocales) !== JSON.stringify(activeLocales)
+      !bundleLocales ||
+      JSON.stringify(requestedLocales) !== JSON.stringify(activeLocales) ||
+      JSON.stringify(bundleLocales) !== JSON.stringify(activeLocales) ||
+      active.copyBundleSet.sourceLocale !== active.site.defaultLocale
     ) {
       throw new BuildActiveSpecInvalidError();
     }

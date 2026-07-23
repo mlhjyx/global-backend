@@ -196,6 +196,24 @@ export async function runBrandProfilePersistenceWithRetry<T>(
   throw new Error("unreachable BrandProfile persistence retry state");
 }
 
+export function controlledAssemblyEffectiveBrief(
+  requested: DesignBriefV2,
+  assembled: DesignBriefV2,
+  expectedFamilyId: string,
+  partialBuild: boolean,
+): DesignBriefV2 {
+  if (
+    assembled.familyId !== expectedFamilyId ||
+    assembled.stylePresetId !== requested.stylePresetId
+  ) {
+    throw new Error("CONTROLLED_ASSEMBLY_IDENTITY_DRIFT");
+  }
+  if (partialBuild && assembled.digest !== requested.digest) {
+    throw new Error("PARTIAL_BUILD_DESIGN_BRIEF_DRIFT");
+  }
+  return assembled;
+}
+
 export interface DemoV0ActivityInput {
   workspaceId: string;
   siteId: string;
@@ -684,12 +702,12 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       claimSnapshot: state.snapshot,
       siteName: state.site.name,
     });
-    if (
-      assembled.designBrief.familyId !== family.id ||
-      assembled.designBrief.stylePresetId !== brief.stylePresetId
-    ) {
-      throw new Error("CONTROLLED_ASSEMBLY_IDENTITY_DRIFT");
-    }
+    const effectiveBrief = controlledAssemblyEffectiveBrief(
+      brief,
+      assembled.designBrief,
+      family.id,
+      Boolean(state.base),
+    );
     const generatedDoc = state.base
       ? (applyBuildScope(
           state.base.spec,
@@ -715,11 +733,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       : validateSiteSpecV1_1(generatedDoc);
     const finalFindings = validateControlledAssembly({
       spec: doc,
-      brief,
+      brief: effectiveBrief,
       catalog: STATIC_DESIGN_CATALOG_V2,
       claimSnapshot: state.snapshot,
       copySlots: deriveCopySlotDefinitions({
-        brief,
+        brief: effectiveBrief,
         catalog: STATIC_DESIGN_CATALOG_V2,
         templates: qualifiedTemplates,
       }),
@@ -783,7 +801,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       workspaceId,
       siteId,
       spec: doc,
-      designBrief: brief,
+      designBrief: effectiveBrief,
       catalog: STATIC_DESIGN_CATALOG_V2,
       repositoryRoot,
       tenantReader: storage
@@ -839,7 +857,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       root: outDir,
       spec: doc,
       storedSpecVersion: SITE_SPEC_V1_1_VERSION,
-      designBrief: brief,
+      designBrief: effectiveBrief,
       createdBy: "system",
     });
     return { previewSlug: state.site.slug, versionId: version.id };

@@ -100,7 +100,7 @@ describe('applyBuildScope', () => {
         scope: 'page',
         targetId: 'products',
       }),
-    ).toThrow(BuildActiveSpecInvalidError);
+    ).not.toThrow();
   });
 
   it('replaces one unique section without changing its sibling blocks', () => {

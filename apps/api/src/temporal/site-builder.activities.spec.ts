@@ -8,6 +8,7 @@ import type { PrismaService } from "../prisma/prisma.service";
 import {
   createSiteBuilderActivities,
   buildCompensatedSteps,
+  controlledAssemblyEffectiveBrief,
   intakeToMarkdown,
   neutralCopyOutput,
   runBrandProfilePersistenceWithRetry,
@@ -178,6 +179,41 @@ describe("runBrandProfilePersistenceWithRetry", () => {
       failure,
     );
     expect(operation).toHaveBeenCalledOnce();
+  });
+});
+
+describe("controlledAssemblyEffectiveBrief", () => {
+  const requested = {
+    familyId: "oem-capability",
+    stylePresetId: "oem-industrial-power",
+    digest: "a".repeat(64),
+  } as never;
+  const fallback = {
+    familyId: "oem-capability",
+    stylePresetId: "oem-industrial-power",
+    digest: "b".repeat(64),
+  } as never;
+
+  it("uses the same-family fallback Brief for a full build", () => {
+    expect(
+      controlledAssemblyEffectiveBrief(
+        requested,
+        fallback,
+        "oem-capability",
+        false,
+      ),
+    ).toBe(fallback);
+  });
+
+  it("keeps a partial build pinned to its frozen base Brief", () => {
+    expect(() =>
+      controlledAssemblyEffectiveBrief(
+        requested,
+        fallback,
+        "oem-capability",
+        true,
+      ),
+    ).toThrow("PARTIAL_BUILD_DESIGN_BRIEF_DRIFT");
   });
 });
 
