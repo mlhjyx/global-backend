@@ -287,6 +287,13 @@ export interface CopyGenerationSummary {
   taskAttemptIds: Record<string, string>;
 }
 
+export interface RefurbishBuildSummary {
+  previewSlug: string;
+  versionId: string;
+  /** Present on the M1-e-B path so finalization follows a same-family safe fallback. */
+  designBrief?: DesignBriefV2;
+}
+
 export interface RefurbishCompensationInput extends RefurbishActivityInput {
   terminalStatus?: "failed" | "cancelled";
   progressV1?: boolean;
@@ -319,7 +326,7 @@ export interface RefurbishFinalizeInput extends RefurbishActivityInput {
     SiteImagePipelineSummary,
     "status" | "processed" | "failed" | "variants"
   >;
-  build: { previewSlug: string; versionId: string };
+  build: RefurbishBuildSummary;
   progressV1?: boolean;
 }
 
@@ -585,7 +592,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
 
   async function assembleControlledBuild(
     input: RefurbishActivityInput,
-  ): Promise<{ previewSlug: string; versionId: string }> {
+  ): Promise<RefurbishBuildSummary> {
     const { workspaceId, siteId, buildRunId } = input;
     const brief = input.designBrief?.designBrief;
     const copy = input.copy;
@@ -666,12 +673,21 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const manifest = validateReleaseManifest(state.existing.release.manifest);
       if (
         manifest.schemaVersion !== "site-builder-release-manifest/v2" ||
-        manifest.designBrief.digest !== brief.digest ||
         replay.specVersion !== SITE_SPEC_V1_1_VERSION
       ) {
         throw new Error("CONTROLLED_ASSEMBLY_REPLAY_INVALID");
       }
-      return { previewSlug: state.site.slug, versionId: state.existing.id };
+      const replayBrief = controlledAssemblyEffectiveBrief(
+        brief,
+        manifest.designBrief,
+        family.id,
+        Boolean(state.base),
+      );
+      return {
+        previewSlug: state.site.slug,
+        versionId: state.existing.id,
+        designBrief: replayBrief,
+      };
     }
     if (state.existing && state.existing.buildStatus !== "building") {
       throw new Error(`run ${buildRunId} has a non-retryable SiteVersion`);
@@ -860,7 +876,11 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       designBrief: effectiveBrief,
       createdBy: "system",
     });
-    return { previewSlug: state.site.slug, versionId: version.id };
+    return {
+      previewSlug: state.site.slug,
+      versionId: version.id,
+      designBrief: effectiveBrief,
+    };
   }
 
   return {
@@ -2339,7 +2359,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
     async assembleAndBuild(
       input: RefurbishActivityInput,
-    ): Promise<{ previewSlug: string; versionId: string }> {
+    ): Promise<RefurbishBuildSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       if (input.designBrief) {

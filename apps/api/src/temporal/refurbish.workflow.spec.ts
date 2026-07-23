@@ -190,6 +190,30 @@ describe("refurbishWorkflow — happy path（P1 → P3 → P5）", () => {
     );
   });
 
+  it("同 Family safe fallback 后以 assembly 返回的有效 Brief 完成激活", async () => {
+    primeHappyPath();
+    acts.assembleAndBuild.mockResolvedValue({
+      previewSlug: "acme-abc123",
+      versionId: "ver-1",
+      designBrief: { digest: "fallback-brief-digest" },
+    });
+
+    await refurbishWorkflow(INPUT);
+
+    expect(acts.finalizeRefurbish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        designBrief: {
+          source: "generated",
+          designBrief: { digest: "fallback-brief-digest" },
+          taskAttemptId: "attempt-design",
+        },
+        build: expect.objectContaining({
+          designBrief: { digest: "fallback-brief-digest" },
+        }),
+      }),
+    );
+  });
+
   it("图片按冻结 ID workset 分成有限 activity，并累计真实摘要", async () => {
     primeHappyPath();
     acts.listImages.mockResolvedValue({

@@ -319,6 +319,10 @@ export async function refurbishWorkflow(
       ...(copy ? { copy } : {}),
       ...(progressV1 ? { progressV1: true } : {}),
     });
+    const finalizedDesignBrief =
+      designBrief && build.designBrief
+        ? { ...designBrief, designBrief: build.designBrief }
+        : designBrief;
     await progress({
       ...input,
       key: "assemble_build",
@@ -335,7 +339,7 @@ export async function refurbishWorkflow(
     });
     return await activities.finalizeRefurbish({
       ...input,
-      ...(designBrief ? { designBrief } : {}),
+      ...(finalizedDesignBrief ? { designBrief: finalizedDesignBrief } : {}),
       ...(copy ? { copy } : {}),
       kb,
       profile,
