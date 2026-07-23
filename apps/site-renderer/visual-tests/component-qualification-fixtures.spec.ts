@@ -50,6 +50,12 @@ const QUALIFIED_COMPONENTS = {
   DispatchTimeline: "section.dispatch-timeline",
   CrewGrid: "section.crew-grid",
   CoverageMap: "section.coverage-map",
+  HeroFull: "section.hero-full",
+  AxiomHero: "section.axiom-hero",
+  ColorwayPicker: "section.colorway-picker",
+  SaaSHero: "section.saas-hero",
+  IndustrialHero: "section.industrial-hero",
+  MinimalHero: "section.minimal-hero",
 } as const;
 
 const componentType = process.env.COMPONENT_QUALIFICATION_COMPONENT;
@@ -223,6 +229,31 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
     await expect(section.locator(".coverage-index ol > li")).toHaveCount(2);
     await expect(section.locator(".pin-list > li")).toHaveCount(2);
     await expect(section.locator("[style*='animation']")).toHaveCount(0);
+  }
+  if (componentType === "HeroFull" || componentType === "SaaSHero" || componentType === "IndustrialHero" || componentType === "MinimalHero") {
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/book");
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
+  }
+  if (componentType === "AxiomHero") {
+    await expect(section.locator("a, button")).toHaveCount(0);
+  }
+  if (componentType === "ColorwayPicker") {
+    const radios = section.locator('input[type="radio"]');
+    const first = radios.nth(0);
+    const second = radios.nth(1);
+    await expect(radios).toHaveCount(2);
+    await first.focus();
+    await expect(first).toBeFocused();
+    await expect(first.locator('xpath=..')).toHaveCSS('outline-style', 'solid');
+    await page.keyboard.press('ArrowRight');
+    await expect(first).not.toBeChecked();
+    await expect(second).toBeChecked();
+    await expect(section.locator('.selected [data-code]')).toHaveText('AX-02');
+    await expect(section.locator('.selected [data-name]')).toHaveText('Foundry bronze');
+    await expect(section.locator('.selected [data-finish]')).toHaveText('Satin');
+    await expect(section.locator('a')).toHaveAttribute('href', '/book');
+    await page.keyboard.press('ArrowLeft');
+    await expect(first).toBeChecked();
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",

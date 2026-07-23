@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"AxiomHero","status":"pass","part":"schema","assertions":["The presentation accepts only closed copy fields and controlled variants."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

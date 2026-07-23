@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"HeroFull","status":"pass","part":"visualRegression","assertions":["375, 768, and 1440 pixel screenshots are independently hashed."],"sources":["apps/site-renderer/visual-tests/__screenshots__/qualification"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

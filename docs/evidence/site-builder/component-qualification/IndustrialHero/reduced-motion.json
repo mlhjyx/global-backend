@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"IndustrialHero","status":"pass","part":"reducedMotion","assertions":["No continuous or reveal animation remains."],"sources":["apps/site-renderer/src/components/IndustrialHero.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

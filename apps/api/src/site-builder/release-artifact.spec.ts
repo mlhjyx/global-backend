@@ -123,6 +123,12 @@ describe('R1 release contract gate', () => {
       'DispatchTimeline',
       'CrewGrid',
       'CoverageMap',
+      'HeroFull',
+      'AxiomHero',
+      'ColorwayPicker',
+      'SaaSHero',
+      'IndustrialHero',
+      'MinimalHero',
     ]);
     expect(() =>
       assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
@@ -295,6 +301,27 @@ describe('R1 release contract gate', () => {
       { chapterKey: 'crew.chapter', h1aKey: 'crew.one', h1bKey: 'crew.two', bodyKey: 'crew.body', stats: [{ labelKey: 'crew.stat', value: '24', subKey: 'crew.sub' }], members: [{ roleKey: 'crew.role', years: '8', regionsKey: 'crew.regions', scopeKey: 'crew.scope', truckKey: 'crew.unit' }], footnoteKey: 'crew.footnote', requestKey: 'crew.book', requestPageId: 'missing', variant: 'technical-grid' },
       'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: CrewGrid.requestPageId.pageId=missing',
     ],
+    [
+      'HeroFull.primaryCta',
+      'HeroFull',
+      { eyebrowKey: 'hero.eyebrow', h1aKey: 'hero.a', h1bKey: 'hero.b', h1cKey: 'hero.c', subKey: 'hero.sub', primaryCta: { labelKey: 'hero.book', pageId: 'missing' }, variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: HeroFull.primaryCta.pageId=missing',
+    ],
+    [
+      'HeroFull.revealCta',
+      'HeroFull',
+      { eyebrowKey: 'hero.eyebrow', h1aKey: 'hero.a', h1bKey: 'hero.b', h1cKey: 'hero.c', subKey: 'hero.sub', primaryCta: { labelKey: 'hero.book', pageId: 'home' }, revealSuffixKey: 'hero.reveal', revealCta: { labelKey: 'hero.revealCta', pageId: 'missing' }, variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: HeroFull.revealCta.pageId=missing',
+    ],
+    ['ColorwayPicker.reserveCta', 'ColorwayPicker', { chapterKey: 'color.chapter', titleKey: 'color.title', titleAccentKey: 'color.accent', introKey: 'color.intro', items: [{ code: 'AX-01', nameKey: 'color.name', subtitleKey: 'color.sub', finishKey: 'color.finish', hex: '#2457A6', editionKey: 'color.edition' }], reserveCta: { labelKey: 'color.book', pageId: 'missing' }, variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ColorwayPicker.reserveCta.pageId=missing'],
+    ['ColorwayPicker.reservePageId', 'ColorwayPicker', { chapterKey: 'color.chapter', titleKey: 'color.title', titleAccentKey: 'color.accent', introKey: 'color.intro', items: [{ code: 'AX-01', nameKey: 'color.name', subtitleKey: 'color.sub', finishKey: 'color.finish', hex: '#2457A6', editionKey: 'color.edition' }], reserveLabelKey: 'color.book', reservePageId: 'missing', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ColorwayPicker.reservePageId.pageId=missing'],
+    ['SaaSHero.primaryCta', 'SaaSHero', { eyebrowKey: 'saas.eyebrow', h1aKey: 'saas.a', h1bKey: 'saas.b', subKey: 'saas.sub', primaryCta: { labelKey: 'saas.book', pageId: 'missing' }, scrollKey: 'saas.scroll', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: SaaSHero.primaryCta.pageId=missing'],
+    ['SaaSHero.cta1PageId', 'SaaSHero', { eyebrowKey: 'saas.eyebrow', h1aKey: 'saas.a', h1bKey: 'saas.b', subKey: 'saas.sub', cta1Key: 'saas.book', cta1PageId: 'missing', scrollKey: 'saas.scroll', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: SaaSHero.cta1PageId.pageId=missing'],
+    ['SaaSHero.legacyPrimary.secondaryCta', 'SaaSHero', { eyebrowKey: 'saas.eyebrow', h1aKey: 'saas.a', h1bKey: 'saas.b', subKey: 'saas.sub', cta1Key: 'saas.book', cta1PageId: 'home', secondaryCta: { labelKey: 'saas.more', pageId: 'missing' }, scrollKey: 'saas.scroll', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: SaaSHero.secondaryCta.pageId=missing'],
+    ['IndustrialHero.primaryCta', 'IndustrialHero', { badgeKey: 'industrial.badge', badgeSubKey: 'industrial.sub', leftH1Key: 'industrial.left', leftH1AccentKey: 'industrial.accent', leftSubKey: 'industrial.leftSub', leftStats: [{ value: '24', labelKey: 'industrial.stat' }], rightH1Key: 'industrial.right', rightH2aKey: 'industrial.two', rightH2bAccentKey: 'industrial.accent', rightSubKey: 'industrial.rightSub', primaryCta: { labelKey: 'industrial.book', pageId: 'missing' }, variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: IndustrialHero.primaryCta.pageId=missing'],
+    ['IndustrialHero.cta1PageId', 'IndustrialHero', { badgeKey: 'industrial.badge', badgeSubKey: 'industrial.sub', leftH1Key: 'industrial.left', leftH1AccentKey: 'industrial.accent', leftSubKey: 'industrial.leftSub', leftStats: [{ value: '24', labelKey: 'industrial.stat' }], rightH1Key: 'industrial.right', rightH2aKey: 'industrial.two', rightH2bAccentKey: 'industrial.accent', rightSubKey: 'industrial.rightSub', cta1Key: 'industrial.book', cta1PageId: 'missing', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: IndustrialHero.cta1PageId.pageId=missing'],
+    ['MinimalHero.primaryCta', 'MinimalHero', { eyebrowKey: 'minimal.eyebrow', h1Key: 'minimal.title', h1AccentKey: 'minimal.accent', subKey: 'minimal.sub', primaryCta: { labelKey: 'minimal.book', pageId: 'missing' }, scrollKey: 'minimal.scroll', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: MinimalHero.primaryCta.pageId=missing'],
+    ['MinimalHero.cta1PageId', 'MinimalHero', { eyebrowKey: 'minimal.eyebrow', h1Key: 'minimal.title', h1AccentKey: 'minimal.accent', subKey: 'minimal.sub', cta1Key: 'minimal.book', cta1PageId: 'missing', scrollKey: 'minimal.scroll', variant: 'technical-grid' }, 'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: MinimalHero.cta1PageId.pageId=missing'],
   ])('rejects unknown internal page target for %s', (_label, type, props, expected) => {
     expect(() => assertReleaseContract(spec([type], props), '1.0.0')).toThrow(expected);
   });

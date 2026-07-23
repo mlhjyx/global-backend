@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MinimalHero","status":"pass","part":"contentBudget","assertions":["Hero copy and CTA labels have bounded budgets."],"sources":["packages/contracts/src/site-builder/component-content-budget.ts"],"verification":["pnpm --filter @global/api test"]}

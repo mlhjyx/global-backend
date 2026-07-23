@@ -115,6 +115,12 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "DispatchTimeline",
   "CrewGrid",
   "CoverageMap",
+  "HeroFull",
+  "AxiomHero",
+  "ColorwayPicker",
+  "SaaSHero",
+  "IndustrialHero",
+  "MinimalHero",
 ] as const satisfies readonly SiteSpecComponentType[];
 export type SiteSpecReleaseComponentType =
   (typeof SITE_SPEC_RELEASE_COMPONENT_TYPES)[number];

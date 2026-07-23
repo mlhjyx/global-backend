@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"AxiomHero","status":"pass","part":"fixtures","assertions":["A dedicated minimal SiteSpec fixture isolates this component."],"sources":["apps/site-renderer/fixtures/component-qualification/axiom-hero-spec.json"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

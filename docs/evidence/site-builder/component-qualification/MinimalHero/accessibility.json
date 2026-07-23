@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MinimalHero","status":"pass","part":"accessibility","assertions":["The hero has a labelled heading, genuine page links and visible focus."],"sources":["apps/site-renderer/src/components/MinimalHero.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}
