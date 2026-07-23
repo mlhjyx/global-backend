@@ -81,6 +81,9 @@ describe('R1 release contract gate', () => {
       'DishesShowcase',
       'EditorialHero',
       'CollectionCards',
+      'ChapterShowcase',
+      'FarmhouseHero',
+      'FeaturedSpotlight',
       'LedgerStats',
       'CertWall',
       'CtaBanner',
@@ -93,6 +96,7 @@ describe('R1 release contract gate', () => {
       'MapLocation',
       'MaterialsLibrary',
       'LogoMarquee',
+      'MediaCta',
       'ProcessTimeline',
       'PricingTable',
       'PricingTiers',
@@ -108,6 +112,7 @@ describe('R1 release contract gate', () => {
       'StatsBand',
       'StatsCountup',
       'StatementBlock',
+      'StoryChapters',
       'TechSystems',
       'Testimonials',
       'TrustSplit',
@@ -279,10 +284,30 @@ describe('R1 release contract gate', () => {
   });
 
   it('keeps an explicit legacy external CTA URL releaseable', () => {
-    expect(() => assertReleaseContract(spec(['CtaCenter'], {
+    const external = spec(['CtaCenter'], {
       eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', subtitleKey: 'cta.subtitle',
       primaryCta: { labelKey: 'cta.primary', url: 'https://example.test/contact' },
-    }), '1.0.0')).not.toThrow();
+    });
+    external.site.outboundDomains = ['example.test'];
+    expect(() => assertReleaseContract(external, '1.0.0')).not.toThrow();
+  });
+
+  it('rejects unsafe external CTA protocols before publication', () => {
+    expect(() => assertReleaseContract(spec(['CtaCenter'], {
+      eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', subtitleKey: 'cta.subtitle',
+      primaryCta: { labelKey: 'cta.primary', url: 'javascript:alert(1)' },
+    }), '1.0.0')).toThrow('INVALID_BLOCK_PROPS: CtaCenter');
+  });
+
+  it('requires MediaCta WhatsApp links to be paired and allowlisted', () => {
+    const props = {
+      eyebrowKey: 'cta.eyebrow', titleKey: 'cta.title', titleAccentKey: 'cta.accent', subKey: 'cta.sub',
+      primaryCta: { labelKey: 'cta.primary', pageId: 'home' }, whatsappLabelKey: 'cta.whatsapp', whatsappUrl: 'https://wa.me/15551234567',
+    };
+    expect(() => assertReleaseContract(spec(['MediaCta'], props), '1.0.0')).toThrow('SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl');
+    const allowed = spec(['MediaCta'], props);
+    allowed.site.outboundDomains = ['wa.me'];
+    expect(() => assertReleaseContract(allowed, '1.0.0')).not.toThrow();
   });
 
   it('rejects a free-form HeroBanner variant before release publication', () => {

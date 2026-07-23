@@ -111,6 +111,9 @@ export function assertReleaseContract(
     );
   }
   const pageIds = new Set(spec.pages.map((page) => page.id));
+  const allowedOutboundDomains = new Set(
+    (spec.site.outboundDomains ?? []).map((domain) => domain.toLowerCase()),
+  );
   for (const page of spec.pages) {
     for (const block of page.puck.content) {
       validateBlock(block);
@@ -145,6 +148,12 @@ export function assertReleaseContract(
                   ? ['addPageId']
                 : block.type === 'PhotoGallery'
                   ? (props.allLabelKey ? ['allPageId'] : [])
+                : block.type === 'MediaCta'
+                  ? ['primaryCta', 'secondaryCta']
+                : block.type === 'FarmhouseHero'
+                  ? ['primaryCta', 'secondaryCta']
+                : block.type === 'FeaturedSpotlight'
+                  ? (props.allLabelKey ? ['allPageId'] : [])
                 : [];
       for (const field of ctaFields) {
         const value = props[field]
@@ -157,15 +166,35 @@ export function assertReleaseContract(
           : block.type === 'SplitAbout' ? 'contact'
           : block.type === 'DishesShowcase' ? 'services'
           : block.type === 'PhotoGallery' ? 'gallery'
+          : block.type === 'FeaturedSpotlight' ? 'home'
           : undefined;
         const resolvedValue = value ?? defaultPageId;
         const cta = typeof resolvedValue === 'string'
           ? { pageId: resolvedValue }
           : resolvedValue as { pageId?: string; url?: string } | undefined;
-        if (cta && !cta.url && !pageIds.has(cta.pageId ?? '')) {
+        if (cta?.url) {
+          const parsed = new URL(cta.url);
+          if (
+            parsed.protocol !== 'https:' ||
+            !allowedOutboundDomains.has(parsed.hostname.toLowerCase())
+          ) {
+            throw new Error(
+              `SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: ${block.type}.${field}`,
+            );
+          }
+        } else if (cta && !pageIds.has(cta.pageId ?? '')) {
           throw new Error(
             `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ${block.type}.${field}.pageId=${cta.pageId ?? ''}`,
           );
+        }
+      }
+      if (block.type === 'MediaCta' && (props.whatsappLabelKey || props.whatsappUrl)) {
+        if (typeof props.whatsappLabelKey !== 'string' || typeof props.whatsappUrl !== 'string') {
+          throw new Error('SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl');
+        }
+        const parsed = new URL(props.whatsappUrl);
+        if (parsed.protocol !== 'https:' || !allowedOutboundDomains.has(parsed.hostname.toLowerCase())) {
+          throw new Error('SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl');
         }
       }
     }

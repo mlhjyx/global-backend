@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MediaCta","status":"pass","part":"contentBudget","assertions":["Headings, body copy, cards and CTA labels are bounded."],"sources":["packages/contracts/src/site-builder/component-content-budget.ts"],"verification":["pnpm --filter @global/api test -- component-technical-baseline.spec.ts"]}
