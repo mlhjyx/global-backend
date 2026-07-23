@@ -60,7 +60,7 @@ Actor 是体验责任帽子，不等于未定义的 RBAC role 字符串。一个
 | `JRN-FE-007` | 失败 → 安全恢复 | 原则批准，统一前端未建 | 错误、长任务、旧结果、人工兜底 |
 | `JRN-FE-008` | 多 Workspace 代理交付 | `HYPOTHESIS/DEFERRED` | 委派、隔离、白标、汇总和审计 |
 
-完整步骤和批准 provenance 保留在 [Phase 2 旅程基线](../roadmap/saas-frontend-phase-2/user-problem-and-journey-baseline.md)；本文件是跨模块使用入口，不重复页面级流程。
+本文件是跨模块用户与旅程的当前入口；页面级步骤和状态由[页面与能力目录](04-page-and-capability-catalog.md)及相应 Capability Pack 维护，不在这里复制。
 
 ## 5. 旅程交付合同
 

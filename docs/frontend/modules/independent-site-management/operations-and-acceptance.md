@@ -146,9 +146,9 @@ Fixture 必须带 `fixture_version`、source/rights、PII classification、seed/
 
 发布评审必须同时检查 `ANTI-FE-001..010`：页面数、Build succeeded、Demo 更快、字段完成率、AI/Token 次数、发布站数量、Lead 数、通知数、停留时间、运营解决率都不能单独当成功。
 
-## 8. Gate 5 验收与 Release readiness
+## 8. 当前规格验收与 Release readiness
 
-| 检查 | Phase 5 结果 | 后续关闭条件 |
+| 检查 | 当前结果 | 后续关闭条件 |
 |---|---|---|
 | 模块范围/旅程/Page 完整 | `APPROVED_AT_GATE_5` | 变更须重新走模块 Gate |
 | 当前/目标/as-built/Mock 分开 | `PASS` | 持续 drift check |

@@ -3,16 +3,12 @@
   "controlledMarkdown": {
     "exact": [
       "docs/README.md",
-      "docs/backend/oss-registry.md",
-      "docs/roadmap/saas-frontend-documentation-program-plan.md"
+      "docs/backend/oss-registry.md"
     ],
     "prefixes": [
       "docs/design/",
       "docs/frontend/",
       "docs/governance/",
-      "docs/platform/oss-adoption/",
-      "docs/releases/",
-      "docs/roadmap/saas-frontend-phase-",
       "docs/templates/"
     ],
     "documentIdExceptions": ["docs/templates/前端技术方案模板.md"]
@@ -115,7 +111,6 @@
   ],
   "releaseBundles": {
     "directory": "docs/releases",
-    "index": "docs/releases/README.md",
     "requiredMetadata": [
       "Release ID",
       "状态",
