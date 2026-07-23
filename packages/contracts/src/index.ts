@@ -27,6 +27,7 @@ export * from "./site-builder/template-family";
 export * from "./site-builder/design-brief";
 export * from "./site-builder/design-evaluation";
 export * from "./site-builder/design-catalog";
+export * from "./site-builder/design-catalog-v2";
 export * from "./site-builder/component-qualification";
 export * from "./site-builder/component-content-budget";
 
