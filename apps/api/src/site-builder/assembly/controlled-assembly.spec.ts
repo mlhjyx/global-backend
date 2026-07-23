@@ -562,7 +562,7 @@ describe('M1-e-B controlled asset materialization', () => {
     await duplicateOverlay.cleanup();
   });
 
-  it('fails closed on tenant hash drift and catalog symlinks', async () => {
+  it('fails closed on tenant hash drift and forbidden catalog paths', async () => {
     const data = await fixture();
     const tenantId = '55555555-5555-4555-8555-555555555555';
     const variantId = '66666666-6666-4666-8666-666666666666';
@@ -666,6 +666,32 @@ describe('M1-e-B controlled asset materialization', () => {
           tenantReader: { readReadyVariant: async () => null },
         }),
       ).rejects.toThrow('CONTROLLED_ASSET_PATH_FORBIDDEN');
+
+      for (const repositoryPath of [
+        'apps/site-renderer/fixtures/design-demo-visuals-private/secret.svg',
+        'apps/site-renderer/fixtures/design-demo-visuals/../../../.env',
+      ]) {
+        pack.assets[0]!.repositoryPath = repositoryPath;
+        const { digest: _briefDigest, ...briefDraft } = brief;
+        const maliciousBrief = finalizeDesignBriefV2({
+          ...briefDraft,
+          assetStrategy: {
+            ...briefDraft.assetStrategy,
+            demoVisualPackDigest: demoVisualPackV2Digest(pack),
+          },
+        });
+        await expect(
+          materializeControlledAssetOverlay({
+            workspaceId: snapshot.workspaceId,
+            siteId: snapshot.siteId,
+            spec: { ...spec, assets: { linked: catalogRef } },
+            designBrief: maliciousBrief,
+            catalog,
+            repositoryRoot: temp,
+            tenantReader: { readReadyVariant: async () => null },
+          }),
+        ).rejects.toThrow('CONTROLLED_ASSET_PATH_FORBIDDEN');
+      }
     } finally {
       await rm(temp, { recursive: true, force: true });
     }

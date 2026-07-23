@@ -130,15 +130,22 @@ async function readCatalogAsset(
   repositoryRoot: string,
   repositoryPath: string,
 ): Promise<Buffer> {
-  if (!repositoryPath.startsWith(APPROVED_CATALOG_ASSET_DIRECTORY)) {
+  const pathParts = repositoryPath.split('/');
+  if (
+    path.isAbsolute(repositoryPath) ||
+    repositoryPath.includes('\\') ||
+    pathParts.some((part) => part === '' || part === '.' || part === '..') ||
+    !repositoryPath.startsWith(APPROVED_CATALOG_ASSET_DIRECTORY)
+  ) {
     throw new ControlledAssetMaterializationError(
       'CONTROLLED_ASSET_PATH_FORBIDDEN',
       repositoryPath,
     );
   }
   const root = await realpath(repositoryRoot);
+  const approvedRoot = path.resolve(root, APPROVED_CATALOG_ASSET_DIRECTORY);
   const candidate = path.resolve(root, repositoryPath);
-  if (!beneath(root, candidate)) {
+  if (!beneath(approvedRoot, candidate)) {
     throw new ControlledAssetMaterializationError(
       'CONTROLLED_ASSET_PATH_FORBIDDEN',
       repositoryPath,
