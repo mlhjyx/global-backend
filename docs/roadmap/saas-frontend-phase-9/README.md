@@ -58,7 +58,7 @@ SaaS 一级导航冻结为用户任务，而不是供应商或技术模块：
 | [交互语言与视觉语义](interaction-language-and-visual-semantics.md) | Shell、对象工作台、状态、模式、Token 和视觉方向 | `DRAFT` |
 | [资料与知识引导 Fixture](visual-direction-content-fixture.md) | 动态资料采集、知识库输入、允许数据、禁止硬编码行业字段与旧图处置 | `DRAFT` |
 | [旅程与原型目录](journey-and-prototype-catalog.md) | 12 条制造业端到端旅程与异常覆盖 | `DRAFT` |
-| [Figma 交付登记](figma-delivery-register.md) | 文件、Frame、Scenario、状态和验证证据 | `FOUNDATIONS / 11 DESKTOP / 5 STATES / 3 MOBILE / 3 PROTOTYPE DRAFTS` |
+| [Figma 交付登记](figma-delivery-register.md) | 文件、Frame、Scenario、状态和验证证据 | `FOUNDATIONS / 17 DESKTOP / 5 STATES / 3 MOBILE / 6 PROTOTYPE DRAFTS` |
 | [设计系统 v1 范围与差距分析](design-system-v1-scope.md) | Phase 0 来源、差距、Token/组件范围和进入 Phase 1 的批准门 | `PHASE_0_APPROVED / PHASE_1 CORE DRAFT COMPLETE` |
 | [Phase 1 设计证据](phase-1-design-evidence.md) | Figma Node、同视口 QA、生成素材、已知限制和剩余门 | `DRAFT EVIDENCE` |
 | [Page Manifest 2.0](page-manifest-v2.md) | 76 个稳定页面的任务、对象/SoR、状态、Scenario、动作、异常和 Figma 去向 | `76/76 MAPPED / DRAFT` |
@@ -126,4 +126,4 @@ Phase 9 只有在以下证据齐全后才可请求 Gate：
 7. 状态实验室覆盖 normal、empty、loading、partial、degraded、stale、denied、conflict、offline、ACK unknown、cancel-confirming 和 late result；
 8. 真实目标角色完成两轮任务验证；AI 自评和作者走查不冒充用户验收。
 
-当前包仍为工作稿；五张视觉基线已经选定，Phase 0 已获确认，Foundations、九张 SaaS 桌面代表页、产品官网首页和客户生成站首页完成第一轮 Figma 草稿与作者视觉 QA，76/76 Page Manifest 2.0 已完成第一轮登记；另已补五个关键状态、三张 390 宽移动端代表页、三条可点击原型骨架和一条桌面接力。其余状态/断点、12 条完整 Journey、逐页 Node、独立人工验证和任何实现/发布均未完成。
+当前包仍为工作稿；五张视觉基线已经选定，Phase 0 已获确认，Foundations、十二张 SaaS 桌面代表页、四张产品公共表面代表页和客户生成站首页完成第一轮 Figma 草稿与作者视觉 QA，76/76 Page Manifest 2.0 已完成第一轮登记；另已补五个关键状态、三张 390 宽移动端代表页、六条可点击原型骨架和一条桌面接力。其余状态/断点、尚未闭合的六条完整 Journey、逐页 Node、独立人工验证和任何实现/发布均未完成。

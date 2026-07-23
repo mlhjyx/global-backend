@@ -34,8 +34,8 @@
 | `FIG-P9-001` | Research & Provenance | FigJam | 来源、截图、权利、比较、finding、Conflict/Decision | [Figma board](https://www.figma.com/board/vWBA5KkOtB56ECRGj2PXb4) · file key `vWBA5KkOtB56ECRGj2PXb4` · board node `1:2` | `RESEARCH_MAPPED` |
 | `FIG-P9-002` | IA & Journeys | FigJam | 产品表面、六项任务域、对象接力、12 旅程、Provider 双引擎 | [Figma board](https://www.figma.com/board/8crRdLFh46S3V3z5vU8pLA) · file key `8crRdLFh46S3V3z5vU8pLA` · root `0:1` | `RESEARCH_MAPPED` |
 | `FIG-P9-003` | Foundations, Components & Patterns | Design | Variables、Foundations、组件、状态和模式板 | [Figma Design](https://www.figma.com/design/Ujjt9lNj0YibvXJjALyc0c) · file key `Ujjt9lNj0YibvXJjALyc0c` · State Lab `16:2` · Product Patterns `18:2` | `FOUNDATIONS_DRAFT` |
-| `FIG-P9-004` | SaaS App & Platform Ops | Design | 全页面线框、高保真代表、状态实验室、响应式和原型 | [Figma Design](https://www.figma.com/design/RSZk3Xgg814cDmmqtaxZZw) · file key `RSZk3Xgg814cDmmqtaxZZw` · Core `6:2/9:2/10:2/11:2/12:2` · Cross-domain `23:2/23:119/23:236/23:335` · 状态 `18:*` · Mobile `20:*` · Prototypes `22:*/24:*` | `HIGH_FIDELITY_DRAFT` |
-| `FIG-P9-005` | Product Public Web, Help & Developer | Design | 产品官网、身份、信任、帮助、开发者、状态 | [Figma Design](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · file key `IMLSUMTQViEEauwBdzbczr` · 产品官网首页 `3:10` | `HIGH_FIDELITY_DRAFT` |
+| `FIG-P9-004` | SaaS App & Platform Ops | Design | 全页面线框、高保真代表、状态实验室、响应式和原型 | [Figma Design](https://www.figma.com/design/RSZk3Xgg814cDmmqtaxZZw) · file key `RSZk3Xgg814cDmmqtaxZZw` · Core `6:2/9:2/10:2/11:2/12:2` · Cross-domain `23:2/23:119/23:236/23:335/29:119/30:2/31:2` · 状态 `18:*` · Mobile `20:*` · Prototypes `22:*/24:*/32:*` | `HIGH_FIDELITY_DRAFT` |
+| `FIG-P9-005` | Product Public Web, Help & Developer | Design | 产品官网、身份、信任、帮助、开发者、状态 | [Figma Design](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · file key `IMLSUMTQViEEauwBdzbczr` · 产品官网 `3:10` · 身份激活 `8:2` · 帮助 `6:2` · 开发者 `6:45` · Prototype `9:*` | `HIGH_FIDELITY_DRAFT` |
 | `FIG-P9-006` | Generated Manufacturing Sites | Design | 使用客户审核资料生成企业、产品/服务、能力、信任、案例和通用询盘入口 | [Figma Design](https://www.figma.com/design/XlpWnitQlAodiF18wxPbDp) · file key `XlpWnitQlAodiF18wxPbDp` · 生成站首页 `3:10` | `HIGH_FIDELITY_DRAFT` |
 
 ## 3. Frame 命名
@@ -140,8 +140,8 @@ Figma 链接存在不等于文件内容、图片、原型或验证已完成。
 - `FIG-P9-001`：node `3:46` 已改为动态企业资料与知识，node `4:67` 已改为五张视觉基线 Gate；旧固定规格和三方向 RFQ 选择门不再作为页面输入。
 - `FIG-P9-002`：node `1:22`、`3:223`、`3:226`、`7:532` 和 connector `5:421` 已改为私密会话、通用分派/AI 草稿、商机上下文/外部交接和动态缺口。
 - `FIG-P9-003`：已建立 4 个 Variable Collection、70 个 Variables、11 个 Text Styles、基础/产品组件、12 状态 State Lab 和五类 Product Patterns；当前为 `FOUNDATIONS_DRAFT`。
-- `FIG-P9-004`：已建立 11 个 Page、42 个本地 Variables、9 个 Text Styles、九张桌面代表页、五个关键状态、三张 390 宽移动端代表页和三条原型骨架；当前为 `HIGH_FIDELITY_DRAFT`。
-- `FIG-P9-005`：已建立 9 个 Page 和产品官网首页 `3:10`；无虚构 KPI、客户或上线承诺，当前为 `HIGH_FIDELITY_DRAFT`。
+- `FIG-P9-004`：已建立 11 个 Page、42 个本地 Variables、9 个 Text Styles、十二张桌面代表页、五个关键状态、三张 390 宽移动端代表页和五条 SaaS 原型骨架；当前为 `HIGH_FIDELITY_DRAFT`。
+- `FIG-P9-005`：已建立 9 个 Page，以及产品官网 `3:10`、身份激活 `8:2`、帮助中心 `6:2`、开发者中心 `6:45` 和产品官网→安全激活原型 `9:*`；无虚构 KPI、客户或上线承诺，当前为 `HIGH_FIDELITY_DRAFT`。
 - `FIG-P9-006`：已建立 9 个 Page 和客户生成站首页 `3:10`；动态资料和审核边界已写入页面，当前为 `HIGH_FIDELITY_DRAFT`。
 - Figma API 当前不支持修改文件名；因此文件外壳可能保留创建时的英文名称，但板内标题、节点和后续界面文案均以中文为主。
 

@@ -71,7 +71,7 @@
 | `docs/backend/worktree-management.md` | MD | 99 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `870186b0813458d34952c8cb3fcf77fe843663e6f6a85823e52f9925de24668d` | 活规格/治理；须与机器事实一致 |
 | `docs/design/README.md` | MD | 16 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `19e7b11671dfbdde608f8fd33c6af787dc0638e5f42efcec2dbaf9fe9cf8f754` | 活规格/治理；须与机器事实一致 |
 | `docs/design/content-and-microcopy-catalog.md` | MD | 96 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `d6968862ee03e8ccfd5b3f7c5cd6a876874d9a23aed2d59c945092a02fe6fe83` | 活规格/治理；须与机器事实一致 |
-| `docs/design/design-asset-register.md` | MD | 89 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `1bd8cce93a2ac1d8a18a2314bb2f6ee7d486c64ce26f103446c78b453ba0f51e` | 活规格/治理；登记 Foundations、九张 SaaS 桌面代表、状态/移动端/原型、两张产品表面代表页和生成素材；须与机器事实一致 |
+| `docs/design/design-asset-register.md` | MD | 89 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `0eb12cdf873c850f1b62e3eff28ce9499914e2cc007d4068fa2a3886d9c49457` | 活规格/治理；登记 Foundations、十二张 SaaS 桌面代表、状态/移动端/原型、四张公共表面代表页和生成素材；须与机器事实一致 |
 | `docs/design/independent-site-management-wireframes.md` | MD | 256 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `0a393bbb0264f0775cd2dc35808b42b94154cb1d7f0f9e8fd6bb0a0ef73341f9` | 活规格/治理；须与机器事实一致 |
 | `docs/evidence/model-routing/model1-brand-profile-20260719-v20/README.md` | MD | 31 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `01df8693abd318527295cf238906d73c5a5e3e62aba94b1807abeb867122edfc` | 冻结证据；只做 provenance/delta |
 | `docs/frontend/00-scope-authority-and-status.md` | MD | 77 行 | `L2_ACTIVE_GOVERNED` | `FULL_READ_RECONCILED` | `83b589bd37efa5d582016a906833be2eb7819eb2a245b80cf5913ca65f4f6caa` | 活规格/治理；须与机器事实一致 |
@@ -193,10 +193,10 @@
 | `docs/roadmap/saas-frontend-phase-8/history-disposition-proposal.md` | MD | 70 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `416ddcd8ae0de3e1901343b58b80912bf9487150b4057ed50eba632e5d877e0c` | 冻结证据；只做 provenance/delta |
 | `docs/roadmap/saas-frontend-phase-8/reading-route-acceptance.md` | MD | 72 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `d41f13f95e0aa11e74b989c35858037c5ff16bfc481a60fa6cebde74403eec62` | 冻结证据；只做 provenance/delta |
 | `docs/roadmap/saas-frontend-phase-8/verification-report.md` | MD | 67 行 | `L3_FROZEN_EVIDENCE` | `FULL_READ_RECONCILED` | `a619042a381b842c5bc8e4b1e1c5cac27c3b8cb52f84869b6c02e1d5b2b2addf` | 冻结证据；只做 provenance/delta |
-| `docs/roadmap/saas-frontend-phase-9/README.md` | MD | 129 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `222e644600a8507efd5893f79bbe1842a248307b468cfbd11f8384aae7050961` | 工作/参考；同步 Phase 0、Foundations、11 张桌面代表、关键状态/移动端/原型和 76/76 Manifest；不得覆盖 current |
+| `docs/roadmap/saas-frontend-phase-9/README.md` | MD | 129 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `d80f298d46d5f091800aa972502f3a4f8b1019b489a580c6c7c5d75cd137465e` | 工作/参考；同步 Phase 0、Foundations、17 张桌面代表、关键状态/移动端、六条原型和 76/76 Manifest；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/conflict-and-decision-ledger.md` | MD | 108 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `69a2d2751c16a576c37ceeee7ff1dad352d074101463c670e609ddb7bfa982e5` | 工作/参考；同步 Phase 0 批准、四个 Design 文件、九张 SaaS 桌面代表、部分响应式/原型和剩余验证阻塞；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/feature-coverage-ledger.md` | MD | 209 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `e701665819f88f294ec21b6c73a05d90ac6c018578c1097b23bf32185c6b8ec2` | 工作/参考；不得覆盖 current |
-| `docs/roadmap/saas-frontend-phase-9/figma-delivery-register.md` | MD | 148 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `9f82f3cb68149cb357322c5fa2d696b239d08f2793f37b366bd0cc4932a4fcf6` | 工作/参考；登记 FigJam、Foundations、九张 SaaS 桌面代表、状态/移动端/原型与两张产品表面代表页 Node；不得覆盖 current |
+| `docs/roadmap/saas-frontend-phase-9/figma-delivery-register.md` | MD | 148 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED + PHASE1_DELTA` | `f0719cd96eea178bd710266886e55bf34316ed65cb77ca44a0bc86a0b0cdd853` | 工作/参考；登记 FigJam、Foundations、十二张 SaaS 桌面代表、状态/移动端、六条原型与五张产品表面代表页 Node；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/interaction-language-and-visual-semantics.md` | MD | 237 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `90a7b9792bfe6ea012fa79a60f7a78fa27caf063e561c202b84d2aeb234b3c41` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/journey-and-prototype-catalog.md` | MD | 112 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `390739a1bb9c9dacf2ab5f72119f2dc10bc5dd0e190ce46d66d7fd49a08ce818` | 工作/参考；不得覆盖 current |
 | `docs/roadmap/saas-frontend-phase-9/object-page-family-review.md` | MD | 286 行 | `L3_WORKING_REFERENCE` | `FULL_READ_RECONCILED` | `b7cec59c2142a3d191c518acdf0e983cef84747fdd6b5a9967bf8ee1adc8b8d8` | 工作/参考；不得覆盖 current |
@@ -242,8 +242,8 @@
 |---|---:|---:|---|---|---|---|
 | `docs/roadmap/saas-frontend-phase-9/design-system-v1-scope.md` | MD | 119 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ + PHASE1_DELTA` | `7288b1ec0d1edcb293a0e33b261a2f178a1cb4a2e57c4431115f303a0efd7272` | Phase 0 已批准并记录四个 Design 文件、九张 SaaS 桌面代表、关键状态、移动端和原型骨架的 Phase 1 草稿；不得冒充已冻结 Token/组件 |
 | `docs/roadmap/saas-frontend-phase-9/canva-review-delivery.md` | MD | 64 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ` | `6a9b654119ff393ced6aca5d46fe1e1a05b5d2bb618e33ac4482b8cae0d275b4` | Canva 传播层登记；不得覆盖 Figma 设计真值 |
-| `docs/roadmap/saas-frontend-phase-9/phase-1-design-evidence.md` | MD | 174 行 | `L4_FROZEN_EVIDENCE` | `PHASE9_SUCCESSOR_READ` | `95a101a6f9fa4c02cfb7f91eb8d42c14d4fa170ef948b6542cb24ca2f86a05d0` | Phase 1 四个 Design 文件 Node、11 张桌面代表、状态/移动端/原型 QA、生成素材和已知限制；不证明用户验证或实现 |
-| `docs/roadmap/saas-frontend-phase-9/page-manifest-v2.md` | MD | 167 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ` | `5fdacd80d4486b4c70b9115e1e86f36a20566ed5f53c2bb0b4f47b31a74421fd` | 76 个稳定 Page ID、已设计跨域代表/状态/响应式/原型 Node 与公共站候选的 Manifest 2.0 登记；不改变 current Page Registry 或产品状态 |
+| `docs/roadmap/saas-frontend-phase-9/phase-1-design-evidence.md` | MD | 193 行 | `L4_FROZEN_EVIDENCE` | `PHASE9_SUCCESSOR_READ` | `bed644f85b965baf9fedbe5a5db2bb571671fc39fde6d7091e7802e2a57b1f48` | Phase 1 四个 Design 文件 Node、17 张桌面代表、状态/移动端/六条原型 QA、生成素材和已知限制；不证明用户验证或实现 |
+| `docs/roadmap/saas-frontend-phase-9/page-manifest-v2.md` | MD | 167 行 | `L3_WORKING_REFERENCE` | `PHASE9_SUCCESSOR_READ` | `b72ed15bd9d7715418624080b7f1ece24ae8c4e9f35e66a359fc493f54fe7fd4` | 76 个稳定 Page ID、已设计跨域代表/状态/响应式/六条原型 Node 与公共站候选的 Manifest 2.0 登记；不改变 current Page Registry 或产品状态 |
 
 出现以下任一情况时，不能沿用本总账的“已读”结论：
 
