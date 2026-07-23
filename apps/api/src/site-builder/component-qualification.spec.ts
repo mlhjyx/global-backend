@@ -106,7 +106,7 @@ describe("M1-e-A component qualification gate", () => {
     });
   });
 
-  it("registers forty-nine qualified components and keeps unqualified types gallery-only", () => {
+  it("registers all fifty-five components as qualified", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("AreaGallery")).toMatchObject({
       status: "m1_e_a_qualified",
@@ -116,9 +116,11 @@ describe("M1-e-A component qualification gate", () => {
       "AreaGallery",
       "AreaMarquee",
       "ArticleGrid",
+      "AxiomHero",
       "CertWall",
       "ChapterShowcase",
       "CollectionCards",
+      "ColorwayPicker",
       "CoverageMap",
       "CrewGrid",
       "CtaBanner",
@@ -133,12 +135,15 @@ describe("M1-e-A component qualification gate", () => {
       "FeatureCards",
       "FeaturedSpotlight",
       "HeroBanner",
+      "HeroFull",
+      "IndustrialHero",
       "InquiryForm",
       "LedgerStats",
       "LogoMarquee",
       "MapLocation",
       "MaterialsLibrary",
       "MediaCta",
+      "MinimalHero",
       "PhotoGallery",
       "PricingTable",
       "PricingTiers",
@@ -147,6 +152,7 @@ describe("M1-e-A component qualification gate", () => {
       "ProductGrid",
       "ProductShowcaseAlt",
       "ProjectsGrid",
+      "SaaSHero",
       "ServiceRows",
       "ServicesDark",
       "ServicesEditorial",
@@ -163,7 +169,7 @@ describe("M1-e-A component qualification gate", () => {
       "WarmHero",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      343,
+      385,
     );
     for (const componentType of [
       "CtaBanner",
@@ -210,6 +216,12 @@ describe("M1-e-A component qualification gate", () => {
       "DispatchTimeline",
       "CrewGrid",
       "CoverageMap",
+      "HeroFull",
+      "AxiomHero",
+      "ColorwayPicker",
+      "SaaSHero",
+      "IndustrialHero",
+      "MinimalHero",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",
@@ -281,14 +293,11 @@ describe("M1-e-A component qualification gate", () => {
     ).toThrow("COMPONENT_QUALIFICATION_INVALID: HeroBanner");
   });
 
-  it("rejects manually extending the release list without qualification", () => {
+  it("rejects a released component when its qualification is removed", () => {
     expect(() =>
       assertReleaseQualificationRegistryIntegrity({
-        releaseTypes: [
-          ...SITE_SPEC_RELEASE_COMPONENT_TYPES,
-          "HeroFull",
-        ],
-        qualifications: M1_E_A_COMPONENT_QUALIFICATIONS,
+        releaseTypes: SITE_SPEC_RELEASE_COMPONENT_TYPES,
+        qualifications: { ...M1_E_A_COMPONENT_QUALIFICATIONS, HeroFull: undefined },
         artifacts: M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
       }),
     ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: HeroFull");

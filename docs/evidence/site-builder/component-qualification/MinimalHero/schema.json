@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MinimalHero","status":"pass","part":"schema","assertions":["Primary and optional secondary actions are closed internal page CTAs."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

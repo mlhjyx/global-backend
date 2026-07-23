@@ -162,6 +162,12 @@ export function assertReleaseContract(
                   ? ['ctaPageId']
                 : block.type === 'CrewGrid'
                   ? ['requestPageId']
+                : block.type === 'HeroFull'
+                  ? ['primaryCta', ...(props.secondaryCta ? ['secondaryCta'] : []), ...(props.revealCta ? ['revealCta'] : [])]
+                : block.type === 'ColorwayPicker'
+                  ? (props.reserveCta ? ['reserveCta'] : props.reserveLabelKey ? ['reservePageId'] : [])
+                : block.type === 'SaaSHero' || block.type === 'IndustrialHero' || block.type === 'MinimalHero'
+                  ? (props.primaryCta ? ['primaryCta', ...(props.secondaryCta ? ['secondaryCta'] : [])] : ['cta1PageId', ...(props.cta2Key ? ['cta2PageId'] : []), ...(props.secondaryCta ? ['secondaryCta'] : [])])
                 : [];
       for (const field of ctaFields) {
         const value = props[field]
@@ -179,6 +185,8 @@ export function assertReleaseContract(
           : block.type === 'ServicesEditorial' ? 'book'
           : block.type === 'DispatchTimeline' ? 'book'
           : block.type === 'CrewGrid' ? 'book'
+          : block.type === 'SaaSHero' || block.type === 'IndustrialHero' || block.type === 'MinimalHero' ? 'book'
+          : block.type === 'ColorwayPicker' ? 'book'
           : undefined;
         const resolvedValue = value ?? defaultPageId;
         const cta = typeof resolvedValue === 'string'

@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MinimalHero","status":"pass","part":"fixtures","assertions":["A dedicated fixture provides page-backed primary and secondary actions."],"sources":["apps/site-renderer/fixtures/component-qualification/minimal-hero-spec.json"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

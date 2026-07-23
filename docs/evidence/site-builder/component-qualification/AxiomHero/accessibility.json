@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"AxiomHero","status":"pass","part":"accessibility","assertions":["A labelled section, heading hierarchy, and decorative status marker are semantic."],"sources":["apps/site-renderer/src/components/AxiomHero.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

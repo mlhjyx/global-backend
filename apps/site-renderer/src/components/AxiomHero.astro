@@ -1,65 +1,9 @@
 ---
-interface Props {
-  brandKey: string;
-  brandSubKey: string;
-  chapterKey: string;
-  liveKey: string;
-  h1aKey: string;
-  h1bKey: string;
-  h1cKey: string;
-  serialKey: string;
-  subKey: string;
-  scrollKey: string;
-  t: (key: string) => string;
-}
-const { brandKey, brandSubKey, chapterKey, liveKey, h1aKey, h1bKey, h1cKey, serialKey, subKey, scrollKey, t } = Astro.props;
+import { createRequire } from 'node:module';
+interface Props { brandKey:string; brandSubKey:string; chapterKey:string; liveKey:string; h1aKey:string; h1bKey:string; h1cKey:string; serialKey:string; subKey:string; scrollKey:string; variant?:'technical-grid'|'quiet'; t:(key:string)=>string; instanceId:string }
+const { assertQualifiedComponentContentBudget }=createRequire(import.meta.url)('@global/contracts'); const {brandKey,brandSubKey,chapterKey,liveKey,h1aKey,h1bKey,h1cKey,serialKey,subKey,scrollKey,variant='technical-grid',t,instanceId}=Astro.props; const content={brand:t(brandKey),brandSub:t(brandSubKey),chapter:t(chapterKey),status:t(liveKey),title:`${t(h1aKey)} ${t(h1bKey)} ${t(h1cKey)}`,serial:t(serialKey),sub:t(subKey),scroll:t(scrollKey)}; assertQualifiedComponentContentBudget('AxiomHero',content); const headingId=`${instanceId}-axiom-hero-heading`;
 ---
-
-<section class="axiom-hero">
-  <div class="grid-bg" aria-hidden="true"></div>
-  <nav class="top-nav">
-    <div class="brand"><span class="brand-mark"></span><span class="brand-name">{t(brandKey)}</span><span class="brand-sub">{t(brandSubKey)}</span></div>
-    <div class="chapter">{t(chapterKey)}</div>
-    <div class="live"><span class="live-dot"></span>{t(liveKey)}</div>
-  </nav>
-
-  <div class="stage">
-    <div class="word word-left reveal">{t(h1aKey)}</div>
-    <div class="word word-tr reveal" style="transition-delay:200ms">{t(h1bKey)}</div>
-    <div class="divider reveal" style="transition-delay:300ms"><span class="serial">{t(serialKey)}</span><span class="line"></span></div>
-    <div class="word word-br reveal" style="transition-delay:400ms">{t(h1cKey)}</div>
-  </div>
-
-  <div class="sub reveal" style="transition-delay:600ms">{t(subKey)}</div>
-  <div class="scroll-cue reveal" style="transition-delay:800ms"><span>{t(scrollKey)}</span><span class="scroll-line"></span></div>
-</section>
-
+<section class={`axiom-hero axiom-hero--${variant}`} data-component="AxiomHero" data-variant={variant} aria-labelledby={headingId}><div class="container"><header><p>{content.brand} <span>{content.brandSub}</span></p><p>{content.chapter}</p><p><i aria-hidden="true"></i>{content.status}</p></header><div class="stage"><p class="serial">{content.serial}</p><h1 id={headingId}>{t(h1aKey)}<br />{t(h1bKey)}<br />{t(h1cKey)}</h1><p class="sub">{content.sub}</p></div><p class="scroll">{content.scroll}</p></div></section>
 <style>
-  .axiom-hero { position: relative; min-height: 100svh; overflow: hidden; background: var(--c-surface); color: var(--c-on-surface); font-family: var(--font-body); }
-  .grid-bg { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px); background-size: 80px 80px; -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black 35%, transparent 75%); mask-image: radial-gradient(ellipse at 50% 40%, black 35%, transparent 75%); }
-  .top-nav { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 1.5rem clamp(1.5rem, 4vw, 3rem); }
-  .brand { display: flex; align-items: center; gap: 0.6rem; }
-  .brand-mark { width: 12px; height: 12px; background: var(--c-primary); }
-  .brand-name { font-size: 0.85rem; font-weight: 600; letter-spacing: 0.12em; }
-  .brand-sub { font-size: 0.85rem; color: rgba(255,255,255,0.35); }
-  .chapter { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255,255,255,0.55); font-weight: 500; }
-  @media (max-width: 767px) { .chapter { display: none; } }
-  .live { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 500; }
-  .live-dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-primary); box-shadow: 0 0 0 0 rgba(122,168,238,0.55); animation: pulse 1.8s ease-out infinite; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(122,168,238,0.55); transform: scale(1); } 70% { box-shadow: 0 0 0 8px rgba(122,168,238,0); transform: scale(1.1); } }
-  .stage { position: absolute; inset: 0; z-index: 1; }
-  .word { position: absolute; font-weight: 900; font-size: clamp(3rem, 11vw, 9rem); line-height: 0.9; letter-spacing: -0.03em; color: var(--c-on-surface); white-space: nowrap; }
-  .word-left { left: 6vw; top: 50%; transform: translateY(-50%); }
-  .word-tr { right: 6vw; top: 18vh; text-align: right; }
-  .word-br { right: 6vw; bottom: 20vh; text-align: right; }
-  .divider { position: absolute; right: 6vw; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 0.75rem; }
-  .divider .serial { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.28em; color: rgba(255,255,255,0.55); font-weight: 500; }
-  .divider .line { display: block; width: 9vw; height: 1px; background: linear-gradient(to right, rgba(255,255,255,0.45), rgba(255,255,255,0)); }
-  @media (max-width: 767px) { .word-left { top: 30%; } .word-tr { top: 45%; } .word-br { bottom: 30%; } .divider { display: none; } }
-  .sub { position: absolute; left: 6vw; bottom: 12vh; max-width: 30rem; font-size: 1rem; line-height: 1.7; color: rgba(255,255,255,0.7); z-index: 1; }
-  @media (max-width: 767px) { .sub { display: none; } }
-  .scroll-cue { position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%); z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; color: rgba(255,255,255,0.55); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.32em; }
-  .scroll-line { width: 1px; height: 2rem; background: rgba(255,255,255,0.4); }
-  .reveal { opacity: 0; transform: translateY(20px); transition: opacity 900ms ease, transform 900ms cubic-bezier(0.22,1,0.36,1); }
-  .reveal { opacity: 1; transform: translateY(0); }
+.axiom-hero{min-height:75svh;padding:clamp(4rem,9vw,8rem) 0;background:var(--c-surface);color:var(--c-on-surface)}.axiom-hero--technical-grid{background-image:linear-gradient(90deg,color-mix(in srgb,var(--c-border) 30%,transparent) 1px,transparent 1px),linear-gradient(color-mix(in srgb,var(--c-border) 30%,transparent) 1px,transparent 1px);background-size:3rem 3rem}.container{display:flex;min-height:60svh;flex-direction:column;justify-content:space-between}header{display:flex;justify-content:space-between;gap:1rem;font:.7rem var(--font-mono);letter-spacing:.13em;text-transform:uppercase;color:var(--c-on-surface-muted)}header span{opacity:.7}header i{display:inline-block;width:.55rem;height:.55rem;margin-right:.45rem;background:var(--c-primary);border-radius:50%}.stage{max-width:60rem;margin:auto 0}.serial,.scroll{font:.72rem var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--c-on-surface-muted)}h1{margin-top:1rem;font-size:clamp(3.3rem,10vw,8rem);line-height:.84;letter-spacing:-.045em}.sub{max-width:34rem;margin-top:1.5rem;line-height:1.7}.scroll{margin-top:2rem}.axiom-hero--quiet{background:var(--c-surface-alt)}
 </style>

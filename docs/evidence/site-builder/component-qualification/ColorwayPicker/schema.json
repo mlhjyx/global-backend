@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"ColorwayPicker","status":"pass","part":"schema","assertions":["Color values are six-digit hex only; the item list is bounded and reserve CTA is an internal page reference."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

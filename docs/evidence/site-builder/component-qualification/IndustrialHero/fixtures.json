@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"IndustrialHero","status":"pass","part":"fixtures","assertions":["A dedicated fixture supplies bounded stats and resolved action routes."],"sources":["apps/site-renderer/fixtures/component-qualification/industrial-hero-spec.json"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

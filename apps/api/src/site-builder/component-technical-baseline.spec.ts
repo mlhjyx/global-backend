@@ -107,6 +107,25 @@ describe("M1-e-A technical baseline component contract", () => {
     }} as never)).toThrow("INVALID_BLOCK_PROPS: CoverageMap");
   });
 
+  it("keeps A13 hero actions and color state inside the closed contract", () => {
+    expect(() => validateBlock({ type: "HeroFull", props: {
+      eyebrowKey: "hero.eyebrow", h1aKey: "hero.a", h1bKey: "hero.b", h1cKey: "hero.c", subKey: "hero.sub",
+      primaryCta: { labelKey: "hero.cta", pageId: "book" }, variant: "technical-grid",
+    }} as never)).not.toThrow();
+    expect(() => validateBlock({ type: "ColorwayPicker", props: {
+      chapterKey: "color.chapter", titleKey: "color.title", titleAccentKey: "color.accent", introKey: "color.intro",
+      items: [{ code: "AX-01", nameKey: "color.name", subtitleKey: "color.sub", finishKey: "color.finish", hex: "#2457A6", editionKey: "color.edition" }], variant: "technical-grid",
+    }} as never)).not.toThrow();
+    expect(() => assertQualifiedComponentContentBudget("ColorwayPicker", {
+      chapter: "Colorway", title: "A controlled finish", intro: "Compare documented color options.",
+      items: [{ code: "AX-01", name: "Axial blue", subtitle: "Powder coated", finish: "Satin", hex: "#abcdef", edition: "Standard" }],
+    })).not.toThrow();
+    expect(() => validateBlock({ type: "ColorwayPicker", props: {
+      chapterKey: "color.chapter", titleKey: "color.title", titleAccentKey: "color.accent", introKey: "color.intro",
+      items: [{ code: "AX-01", nameKey: "color.name", subtitleKey: "color.sub", finishKey: "color.finish", hex: "url(javascript:alert(1))", editionKey: "color.edition" }],
+    }} as never)).toThrow("INVALID_BLOCK_PROPS: ColorwayPicker");
+  });
+
   it.each([
     ["ServicesGrid", { eyebrow: "Services", title: "Engineering support", accent: "that remains traceable", intro: "Scope, delivery and records stay clear.", cards: [{ title: "Duty review", description: "Operating conditions are documented.", icon: "ri-settings-line" }] }],
     ["TrustSplit", { eyebrow: "Trust", title: "Evidence", accent: "before claims", intro: "The working basis is visible.", metrics: [{ value: "24h", label: "Reply target" }, { value: "ISO", label: "Quality system" }], badges: ["CE"], name: "Technical team", role: "Project support" }],

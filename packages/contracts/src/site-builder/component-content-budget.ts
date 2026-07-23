@@ -68,6 +68,12 @@ export const QUALIFIED_COMPONENT_CONTENT_BUDGETS = Object.freeze({
   DispatchTimeline: Object.freeze({ chapter: 48, title: 80, titleWords: 12, accent: 40, body: 240, cta: 24, call: 40, minItems: 1, maxItems: 8, time: 24, stepTitle: 40, stepBody: 160 }),
   CrewGrid: Object.freeze({ chapter: 48, title: 80, titleWords: 12, body: 240, minStats: 1, maxStats: 4, label: 48, value: 24, sub: 80, minMembers: 1, maxMembers: 8, role: 80, years: 24, regions: 120, scope: 160, truck: 48, cta: 24, footnote: 160 }),
   CoverageMap: Object.freeze({ chapter: 48, title: 80, titleWords: 12, body: 240, index: 48, minAreas: 1, maxAreas: 12, area: 80, footnote: 160, minPins: 0, maxPins: 12, pin: 80, plate: 48, updated: 48 }),
+  HeroFull: Object.freeze({ eyebrow: 48, rating: 48, title: 100, titleWords: 14, sub: 240, cta: 24, minContexts: 0, maxContexts: 6, contextTag: 48, contextTitle: 80, contextSubtitle: 160, revealSuffix: 80 }),
+  AxiomHero: Object.freeze({ brand: 48, chapter: 48, status: 48, title: 100, titleWords: 14, serial: 48, sub: 240, scroll: 48 }),
+  ColorwayPicker: Object.freeze({ chapter: 48, title: 100, titleWords: 14, intro: 240, minItems: 1, maxItems: 6, code: 24, name: 80, subtitle: 160, finish: 80, hex: 7, edition: 80, cta: 24 }),
+  SaaSHero: Object.freeze({ eyebrow: 48, title: 100, titleWords: 14, sub: 240, cta: 24, scroll: 48 }),
+  IndustrialHero: Object.freeze({ badge: 48, badgeSub: 48, title: 100, titleWords: 14, sub: 240, minStats: 1, maxStats: 4, value: 24, label: 48, cta: 24 }),
+  MinimalHero: Object.freeze({ eyebrow: 48, title: 100, titleWords: 14, sub: 240, cta: 24, scroll: 48 }),
 });
 
 export type QualifiedContentBudgetComponent =
@@ -215,6 +221,12 @@ const contentSchemas = {
   DispatchTimeline: z.object({chapter:boundedCopy(48),title:boundedCopy(80,12),accent:boundedCopy(40),body:boundedCopy(240),cta:boundedCopy(24,4),call:boundedCopy(40),steps:z.array(z.object({time:boundedCopy(24),title:boundedCopy(40),body:boundedCopy(160)}).strict()).min(1).max(8)}).strict(),
   CrewGrid: z.object({chapter:boundedCopy(48),title:boundedCopy(80,12),body:boundedCopy(240),stats:z.array(z.object({label:boundedCopy(48),value:boundedCopy(24),sub:boundedCopy(80)}).strict()).min(1).max(4),members:z.array(z.object({role:boundedCopy(80),years:boundedCopy(24),regions:boundedCopy(120),scope:boundedCopy(160),truck:boundedCopy(48)}).strict()).min(1).max(8),footnote:boundedCopy(160),cta:boundedCopy(24,4)}).strict(),
   CoverageMap: z.object({chapter:boundedCopy(48),title:boundedCopy(80,12),body:boundedCopy(240),index:boundedCopy(48),areas:z.array(boundedCopy(80)).min(1).max(12),footnote:boundedCopy(160),pins:z.array(z.object({label:boundedCopy(80),sub:boundedCopy(80)}).strict()).max(12),plate:boundedCopy(48),updated:boundedCopy(48)}).strict(),
+  HeroFull: z.object({eyebrow:boundedCopy(48),rating:boundedCopy(48).optional(),title:boundedCopy(100,14),sub:boundedCopy(240),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional(),contexts:z.array(z.object({tag:boundedCopy(48),title:boundedCopy(80),subtitle:boundedCopy(160)}).strict()).min(0).max(6),revealSuffix:boundedCopy(80).optional(),revealCta:boundedCopy(24,4).optional()}).strict(),
+  AxiomHero: z.object({brand:boundedCopy(48),brandSub:boundedCopy(48),chapter:boundedCopy(48),status:boundedCopy(48),title:boundedCopy(100,14),serial:boundedCopy(48),sub:boundedCopy(240),scroll:boundedCopy(48)}).strict(),
+  ColorwayPicker: z.object({chapter:boundedCopy(48),title:boundedCopy(100,14),intro:boundedCopy(240),items:z.array(z.object({code:boundedCopy(24),name:boundedCopy(80),subtitle:boundedCopy(160),finish:boundedCopy(80),hex:z.string().regex(/^#[0-9A-Fa-f]{6}$/),edition:boundedCopy(80)}).strict()).min(1).max(6),reserveCta:boundedCopy(24,4).optional()}).strict(),
+  SaaSHero: z.object({eyebrow:boundedCopy(48),title:boundedCopy(100,14),sub:boundedCopy(240),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional(),scroll:boundedCopy(48)}).strict(),
+  IndustrialHero: z.object({badge:boundedCopy(48),badgeSub:boundedCopy(48),leftTitle:boundedCopy(100,14),leftSub:boundedCopy(240),stats:z.array(z.object({value:boundedCopy(24),label:boundedCopy(48)}).strict()).min(1).max(4),rightTitle:boundedCopy(100,14),rightSub:boundedCopy(240),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional()}).strict(),
+  MinimalHero: z.object({eyebrow:boundedCopy(48),title:boundedCopy(100,14),sub:boundedCopy(240),primaryCta:boundedCopy(24,4),secondaryCta:boundedCopy(24,4).optional(),scroll:boundedCopy(48)}).strict(),
 } as const;
 
 export function assertQualifiedComponentContentBudget(

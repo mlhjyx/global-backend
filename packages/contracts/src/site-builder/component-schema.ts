@@ -125,17 +125,16 @@ export const COMPONENT_SCHEMAS = {
     h1bKey: str,
     h1cKey: str,
     subKey: str,
-    primaryCta: ctaSchema,
+    primaryCta: releaseCtaSchema,
     ratingKey: str.optional(),
-    secondaryCta: ctaSchema.optional(),
-    selectors: z
-      .array(
-        strictObj({ icon: str, titleKey: str, subtitleKey: str, tagKey: str }),
-      )
-      .optional(),
+    secondaryCta: releaseCtaSchema.optional(),
+    // Legacy selector/reveal inputs remain parseable for existing SiteSpec
+    // documents, but the renderer exposes them as static semantic content.
+    selectors: z.array(strictObj({ icon: str, titleKey: str, subtitleKey: str, tagKey: str })).min(1).max(6).optional(),
     revealSuffixKey: str.optional(),
-    revealCta: ctaSchema.optional(),
+    revealCta: releaseCtaSchema.optional(),
     image: strictObj({ assetId: str }).nullable().optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   AreaMarquee: obj({
     headingKey: str.optional(),
@@ -520,6 +519,7 @@ export const COMPONENT_SCHEMAS = {
     serialKey: str,
     subKey: str,
     scrollKey: str,
+    variant: technicalBaselineVariant.optional(),
   }),
   ChapterShowcase: obj({
     chapterKey: str,
@@ -539,22 +539,43 @@ export const COMPONENT_SCHEMAS = {
         nameKey: str,
         subtitleKey: str,
         finishKey: str,
-        hex: str,
+        hex: str.regex(/^#[0-9A-Fa-f]{6}$/),
         editionKey: str,
       }),
-    ),
-    reserveLabelKey: str.optional(),
-    reservePageId: str.optional(),
-  }),
+    ).min(1).max(6),
+    reserveCta: internalCtaSchema.optional(),
+    reserveLabelKey: str.optional(), reservePageId: str.optional(),
+    variant: technicalBaselineVariant.optional(),
+  }).refine(
+    (props: Record<string, unknown>) => !props.reservePageId || Boolean(props.reserveLabelKey),
+    "reservePageId requires legacy reserveLabelKey",
+  ).refine(
+    (props: Record<string, unknown>) => !props.reserveCta || (!props.reserveLabelKey && !props.reservePageId),
+    "reserveCta cannot be combined with legacy reserve fields",
+  ),
   SaaSHero: obj({
     eyebrowKey: str,
     h1aKey: str,
     h1bKey: str,
     subKey: str,
-    cta1Key: str,
-    cta2Key: str,
+    primaryCta: internalCtaSchema.optional(),
+    secondaryCta: internalCtaSchema.optional(),
+    cta1Key: str.optional(), cta1PageId: str.optional(), cta2Key: str.optional(), cta2PageId: str.optional(),
     scrollKey: str,
-  }),
+    variant: technicalBaselineVariant.optional(),
+  }).refine(
+    (props: Record<string, unknown>) => Boolean(props.primaryCta || props.cta1Key),
+    "Must provide primaryCta or legacy cta1Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.cta1PageId || Boolean(props.cta1Key),
+    "cta1PageId requires cta1Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.cta2PageId || Boolean(props.cta2Key),
+    "cta2PageId requires cta2Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.primaryCta || !(props.cta1Key || props.cta1PageId || props.cta2Key || props.cta2PageId),
+    "primaryCta cannot be combined with legacy CTA fields",
+  ),
   FeatureCards: obj({
     eyebrowKey: str,
     titleKey: str,
@@ -609,15 +630,29 @@ export const COMPONENT_SCHEMAS = {
     leftH1Key: str,
     leftH1AccentKey: str,
     leftSubKey: str,
-    leftStats: z.array(statSuffixSchema),
+    leftStats: z.array(statSuffixSchema).min(1).max(4),
     rightH1Key: str,
     rightH2aKey: str,
     rightH2bKey: str.optional(),
     rightH2bAccentKey: str,
     rightSubKey: str,
-    cta1Key: str,
-    cta2Key: str,
-  }),
+    primaryCta: internalCtaSchema.optional(),
+    secondaryCta: internalCtaSchema.optional(),
+    cta1Key: str.optional(), cta1PageId: str.optional(), cta2Key: str.optional(), cta2PageId: str.optional(),
+    variant: technicalBaselineVariant.optional(),
+  }).refine(
+    (props: Record<string, unknown>) => Boolean(props.primaryCta || props.cta1Key),
+    "Must provide primaryCta or legacy cta1Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.cta1PageId || Boolean(props.cta1Key),
+    "cta1PageId requires cta1Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.cta2PageId || Boolean(props.cta2Key),
+    "cta2PageId requires cta2Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.primaryCta || !(props.cta1Key || props.cta1PageId || props.cta2Key || props.cta2PageId),
+    "primaryCta cannot be combined with legacy CTA fields",
+  ),
   ProductShowcaseAlt: obj({
     chapterKey: str,
     titleKey: str,
@@ -670,12 +705,26 @@ export const COMPONENT_SCHEMAS = {
     h1Key: str,
     h1AccentKey: str,
     subKey: str,
-    cta1Key: str,
-    cta2Key: str,
+    primaryCta: internalCtaSchema.optional(),
+    secondaryCta: internalCtaSchema.optional(),
+    cta1Key: str.optional(), cta1PageId: str.optional(), cta2Key: str.optional(), cta2PageId: str.optional(),
     scrollKey: str,
-  }),
+    variant: technicalBaselineVariant.optional(),
+  }).refine(
+    (props: Record<string, unknown>) => Boolean(props.primaryCta || props.cta1Key),
+    "Must provide primaryCta or legacy cta1Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.cta1PageId || Boolean(props.cta1Key),
+    "cta1PageId requires cta1Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.cta2PageId || Boolean(props.cta2Key),
+    "cta2PageId requires cta2Key",
+  ).refine(
+    (props: Record<string, unknown>) => !props.primaryCta || !(props.cta1Key || props.cta1PageId || props.cta2Key || props.cta2PageId),
+    "primaryCta cannot be combined with legacy CTA fields",
+  ),
   StatementBlock: obj({ labelKey: str, statementKey: str, variant: technicalBaselineVariant.optional() }),
-} as const satisfies Record<SiteSpecComponentType, z.ZodObject<z.ZodRawShape>>;
+} as const satisfies Record<SiteSpecComponentType, z.ZodTypeAny>;
 
 // 一致性：COMPONENT_SCHEMAS keys 必须等于 SITE_SPEC_COMPONENT_TYPES（防漂移）
 const _schemaKeys = Object.keys(COMPONENT_SCHEMAS) as SiteSpecComponentType[];

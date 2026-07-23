@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"IndustrialHero","status":"pass","part":"schema","assertions":["Statistics are bounded and every retained action is a closed internal page CTA."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}
