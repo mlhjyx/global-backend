@@ -10,7 +10,9 @@ const siteSpecPath =
   process.env.SITESPEC_PATH ?? "fixtures/technical-baseline-spec.json";
 const snapshotPathTemplate = process.env.COMPONENT_QUALIFICATION_COMPONENT
   ? "{testDir}/__screenshots__/qualification/{projectName}/{arg}{ext}"
-  : "{testDir}/__screenshots__/{projectName}/{arg}{ext}";
+  : process.env.M1EB_GOLDEN_ID
+    ? "{testDir}/__screenshots__/m1-e-b/{projectName}/{arg}{ext}"
+    : "{testDir}/__screenshots__/{projectName}/{arg}{ext}";
 
 export default defineConfig({
   testDir: "./visual-tests",
@@ -33,11 +35,12 @@ export default defineConfig({
     use: { viewport: { width, height } },
   })),
   webServer: {
-    command:
-      `SITESPEC_PATH=${siteSpecPath} pnpm dev --host 127.0.0.1 --port 4325`,
+    command: `SITESPEC_PATH=${siteSpecPath} pnpm dev --host 127.0.0.1 --port 4325`,
     url: "http://127.0.0.1:4325",
     reuseExistingServer:
-      !process.env.CI && !process.env.COMPONENT_QUALIFICATION_COMPONENT,
+      !process.env.CI &&
+      !process.env.COMPONENT_QUALIFICATION_COMPONENT &&
+      !process.env.M1EB_GOLDEN_ID,
     timeout: 60_000,
   },
 });

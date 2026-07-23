@@ -1,0 +1,1348 @@
+{
+  "specVersion": "1.1.0",
+  "componentLibraryVersion": "m1-e-a/55-qualified",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "archetype": "equipment-supplier",
+    "familyId": "technical-catalog",
+    "dirByLocale": { "en": "ltr" },
+    "theme": { "preset": "modern-industrial" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.detail", "pageId": "detail" }
+    ],
+    "seoGlobal": { "siteName": "technical-catalog rich" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-home-catalog-materials-page-hero",
+              "headlineKey": "home.catalog-materials-page-hero.headline",
+              "subheadKey": "home.catalog-materials-page-hero.subhead",
+              "cta": {
+                "labelKey": "home.catalog-materials-page-hero.cta.label"
+              },
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "ProductShowcaseAlt",
+            "props": {
+              "id": "ProductShowcaseAlt-home-catalog-materials-hero",
+              "chapterKey": "home.catalog-materials-hero.chapter",
+              "titleKey": "home.catalog-materials-hero.title",
+              "titleAccentKey": "home.catalog-materials-hero.titleaccent",
+              "introKey": "home.catalog-materials-hero.intro",
+              "configureCta": {
+                "labelKey": "home.catalog-materials-hero.configurecta.label",
+                "pageId": "detail"
+              },
+              "capacityLabelKey": "home.catalog-materials-hero.capacitylabel",
+              "weightLabelKey": "home.catalog-materials-hero.weightlabel",
+              "cyclesLabelKey": "home.catalog-materials-hero.cycleslabel",
+              "fromLabelKey": "home.catalog-materials-hero.fromlabel",
+              "f1Key": "home.catalog-materials-hero.f1",
+              "f2Key": "home.catalog-materials-hero.f2",
+              "products": [
+                {
+                  "code": "PX-24",
+                  "nameKey": "home.catalog-materials-hero.products.0.name",
+                  "taglineKey": "home.catalog-materials-hero.products.0.tagline",
+                  "capacityKey": "home.catalog-materials-hero.products.0.capacity",
+                  "weightKey": "home.catalog-materials-hero.products.0.weight",
+                  "cyclesKey": "home.catalog-materials-hero.products.0.cycles",
+                  "priceKey": "home.catalog-materials-hero.products.0.price",
+                  "asset": {
+                    "assetId": "catalog-technical-catalog-hero-field",
+                    "variantUrl": "/assets/catalog/20e7d3d704767fc633a57422f7918880141e75c0b406bf5f209d1f017a1eb411.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "MaterialsLibrary",
+            "props": {
+              "id": "MaterialsLibrary-home-catalog-materials-library",
+              "eyebrowKey": "home.catalog-materials-library.eyebrow",
+              "titleKey": "home.catalog-materials-library.title",
+              "titleAccentKey": "home.catalog-materials-library.titleaccent",
+              "introKey": "home.catalog-materials-library.intro",
+              "ctaPrimaryLabelKey": "home.catalog-materials-library.ctaprimarylabel",
+              "ctaPrimaryPageId": "detail",
+              "ctaSecondaryLabelKey": "home.catalog-materials-library.ctasecondarylabel",
+              "ctaSecondaryPageId": "detail",
+              "items": [
+                {
+                  "no": "01",
+                  "nameKey": "home.catalog-materials-library.items.0.name",
+                  "weightKey": "home.catalog-materials-library.items.0.weight",
+                  "noteKey": "home.catalog-materials-library.items.0.note",
+                  "asset": {
+                    "assetId": "catalog-technical-catalog-hero-field",
+                    "variantUrl": "/assets/catalog/20e7d3d704767fc633a57422f7918880141e75c0b406bf5f209d1f017a1eb411.svg"
+                  }
+                },
+                {
+                  "no": "02",
+                  "nameKey": "home.catalog-materials-library.items.1.name",
+                  "weightKey": "home.catalog-materials-library.items.1.weight",
+                  "noteKey": "home.catalog-materials-library.items.1.note",
+                  "asset": {
+                    "assetId": "catalog-technical-catalog-product-module",
+                    "variantUrl": "/assets/catalog/2b232e7ba02b4141df9a4fea836efd114a4487c8ddf5d2d9b1f4dea6ee55131e.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "ProductGrid",
+            "props": {
+              "id": "ProductGrid-home-catalog-materials-products",
+              "titleKey": "home.catalog-materials-products.title",
+              "products": [
+                {
+                  "nameKey": "home.catalog-materials-products.products.0.name",
+                  "blurbKey": "home.catalog-materials-products.products.0.blurb"
+                },
+                {
+                  "nameKey": "home.catalog-materials-products.products.1.name",
+                  "blurbKey": "home.catalog-materials-products.products.1.blurb"
+                },
+                {
+                  "nameKey": "home.catalog-materials-products.products.2.name",
+                  "blurbKey": "home.catalog-materials-products.products.2.blurb"
+                }
+              ],
+              "columns": 3,
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "CtaBanner",
+            "props": {
+              "id": "CtaBanner-home-catalog-materials-cta",
+              "headlineKey": "home.catalog-materials-cta.headline",
+              "cta": { "labelKey": "home.catalog-materials-cta.cta.label" },
+              "variant": "quiet"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "path": "/detail",
+      "seo": {
+        "titleKey": "seo.detail.title",
+        "descriptionKey": "seo.detail.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-detail-catalog-application-page-hero",
+              "headlineKey": "detail.catalog-application-page-hero.headline",
+              "subheadKey": "detail.catalog-application-page-hero.subhead",
+              "cta": {
+                "labelKey": "detail.catalog-application-page-hero.cta.label"
+              },
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "ProductShowcaseAlt",
+            "props": {
+              "id": "ProductShowcaseAlt-detail-catalog-application-hero",
+              "chapterKey": "detail.catalog-application-hero.chapter",
+              "titleKey": "detail.catalog-application-hero.title",
+              "titleAccentKey": "detail.catalog-application-hero.titleaccent",
+              "introKey": "detail.catalog-application-hero.intro",
+              "configureCta": {
+                "labelKey": "detail.catalog-application-hero.configurecta.label",
+                "pageId": "detail"
+              },
+              "capacityLabelKey": "detail.catalog-application-hero.capacitylabel",
+              "weightLabelKey": "detail.catalog-application-hero.weightlabel",
+              "cyclesLabelKey": "detail.catalog-application-hero.cycleslabel",
+              "fromLabelKey": "detail.catalog-application-hero.fromlabel",
+              "f1Key": "detail.catalog-application-hero.f1",
+              "f2Key": "detail.catalog-application-hero.f2",
+              "products": [
+                {
+                  "code": "PX-24",
+                  "nameKey": "detail.catalog-application-hero.products.0.name",
+                  "taglineKey": "detail.catalog-application-hero.products.0.tagline",
+                  "capacityKey": "detail.catalog-application-hero.products.0.capacity",
+                  "weightKey": "detail.catalog-application-hero.products.0.weight",
+                  "cyclesKey": "detail.catalog-application-hero.products.0.cycles",
+                  "priceKey": "detail.catalog-application-hero.products.0.price",
+                  "asset": {
+                    "assetId": "catalog-technical-catalog-hero-field",
+                    "variantUrl": "/assets/catalog/20e7d3d704767fc633a57422f7918880141e75c0b406bf5f209d1f017a1eb411.svg"
+                  }
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "FeatureCards",
+            "props": {
+              "id": "FeatureCards-detail-catalog-application-features",
+              "eyebrowKey": "detail.catalog-application-features.eyebrow",
+              "titleKey": "detail.catalog-application-features.title",
+              "titleLine2Key": "detail.catalog-application-features.titleline2",
+              "introKey": "detail.catalog-application-features.intro",
+              "items": [
+                {
+                  "icon": "ri-settings-3-line",
+                  "titleKey": "detail.catalog-application-features.items.0.title",
+                  "descKey": "detail.catalog-application-features.items.0.desc"
+                },
+                {
+                  "icon": "ri-file-list-3-line",
+                  "titleKey": "detail.catalog-application-features.items.1.title",
+                  "descKey": "detail.catalog-application-features.items.1.desc"
+                },
+                {
+                  "icon": "ri-customer-service-2-line",
+                  "titleKey": "detail.catalog-application-features.items.2.title",
+                  "descKey": "detail.catalog-application-features.items.2.desc"
+                }
+              ],
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "InquiryForm",
+            "props": {
+              "id": "InquiryForm-detail-catalog-application-inquiry",
+              "titleKey": "detail.catalog-application-inquiry.title",
+              "subKey": "detail.catalog-application-inquiry.sub",
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {
+    "catalog-technical-catalog-hero-field": {
+      "source": "catalog",
+      "packId": "technical-catalog-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "technical-catalog-hero-field",
+      "sha256": "20e7d3d704767fc633a57422f7918880141e75c0b406bf5f209d1f017a1eb411",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-technical-catalog-product-module": {
+      "source": "catalog",
+      "packId": "technical-catalog-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "technical-catalog-product-module",
+      "sha256": "2b232e7ba02b4141df9a4fea836efd114a4487c8ddf5d2d9b1f4dea6ee55131e",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-technical-catalog-process-flow": {
+      "source": "catalog",
+      "packId": "technical-catalog-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "technical-catalog-process-flow",
+      "sha256": "42be3f10168cf17aaba127c37195675b5f2991817e3f7b6d157b7c5c6bc6d44f",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-technical-catalog-process-validation": {
+      "source": "catalog",
+      "packId": "technical-catalog-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "technical-catalog-process-validation",
+      "sha256": "795f9fe8dc1333507d78ec762901774b3f6cc5e945915f2f935868eac0166d07",
+      "mimeType": "image/svg+xml"
+    }
+  },
+  "copyBundles": {
+    "en": {
+      "detail.catalog-application-features.eyebrow": "Further information is available on req…",
+      "detail.catalog-application-features.intro": "Further information is available on request.",
+      "detail.catalog-application-features.items.0.desc": "Further information is…",
+      "detail.catalog-application-features.items.0.title": "Practical solutions",
+      "detail.catalog-application-features.items.1.desc": "Further information is…",
+      "detail.catalog-application-features.items.1.title": "Practical solutions",
+      "detail.catalog-application-features.items.2.desc": "Further information is…",
+      "detail.catalog-application-features.items.2.title": "Practical solutions",
+      "detail.catalog-application-features.title": "Practical solutions",
+      "detail.catalog-application-features.titleline2": "Further information is avail…",
+      "detail.catalog-application-hero.capacitylabel": "Further information is available on request.",
+      "detail.catalog-application-hero.chapter": "Further information is available on req…",
+      "detail.catalog-application-hero.configurecta.label": "Further information is…",
+      "detail.catalog-application-hero.cycleslabel": "Further information is available on request.",
+      "detail.catalog-application-hero.f1": "Further information is…",
+      "detail.catalog-application-hero.f2": "Further information is…",
+      "detail.catalog-application-hero.fromlabel": "Further information is available on request.",
+      "detail.catalog-application-hero.intro": "Further information is available on request.",
+      "detail.catalog-application-hero.products.0.capacity": "Further information is…",
+      "detail.catalog-application-hero.products.0.cycles": "Further information is…",
+      "detail.catalog-application-hero.products.0.name": "Further information is available on request.",
+      "detail.catalog-application-hero.products.0.price": "Further information is…",
+      "detail.catalog-application-hero.products.0.tagline": "Further information is available on request.",
+      "detail.catalog-application-hero.products.0.weight": "Further information is…",
+      "detail.catalog-application-hero.title": "Practical solutions",
+      "detail.catalog-application-hero.titleaccent": "Further information is avail…",
+      "detail.catalog-application-hero.weightlabel": "Further information is available on request.",
+      "detail.catalog-application-inquiry.sub": "Further information is available on request.",
+      "detail.catalog-application-inquiry.title": "Practical solutions",
+      "detail.catalog-application-page-hero.cta.label": "Get in touch",
+      "detail.catalog-application-page-hero.headline": "Practical solutions",
+      "detail.catalog-application-page-hero.subhead": "Further information is available on request.",
+      "detail.catalog-detail-faq.items.0.a": "Further information is available on request.",
+      "detail.catalog-detail-faq.items.0.q": "Further information is available on request.",
+      "detail.catalog-detail-faq.items.1.a": "Further information is available on request.",
+      "detail.catalog-detail-faq.items.1.q": "Further information is available on request.",
+      "detail.catalog-detail-faq.title": "Practical solutions",
+      "detail.catalog-detail-hero.cta.label": "Get in touch",
+      "detail.catalog-detail-hero.headline": "Practical solutions",
+      "detail.catalog-detail-hero.subhead": "Further information is available on request.",
+      "detail.catalog-detail-products.products.0.blurb": "Further information is available on request.",
+      "detail.catalog-detail-products.products.0.name": "Further information is available on request.",
+      "detail.catalog-detail-products.products.1.blurb": "Further information is available on request.",
+      "detail.catalog-detail-products.products.1.name": "Further information is available on request.",
+      "detail.catalog-detail-products.products.2.blurb": "Further information is available on request.",
+      "detail.catalog-detail-products.products.2.name": "Further information is available on request.",
+      "detail.catalog-detail-products.title": "Practical solutions",
+      "footer.tagline": "Further information is available on request.",
+      "home.catalog-home-cta.cta.label": "Get in touch",
+      "home.catalog-home-cta.headline": "Practical solutions",
+      "home.catalog-home-features.eyebrow": "Further information is available on req…",
+      "home.catalog-home-features.intro": "Further information is available on request.",
+      "home.catalog-home-features.items.0.desc": "Further information is…",
+      "home.catalog-home-features.items.0.title": "Practical solutions",
+      "home.catalog-home-features.items.1.desc": "Further information is…",
+      "home.catalog-home-features.items.1.title": "Practical solutions",
+      "home.catalog-home-features.items.2.desc": "Further information is…",
+      "home.catalog-home-features.items.2.title": "Practical solutions",
+      "home.catalog-home-features.title": "Practical solutions",
+      "home.catalog-home-features.titleline2": "Further information is avail…",
+      "home.catalog-home-hero.cta.label": "Get in touch",
+      "home.catalog-home-hero.headline": "Practical solutions",
+      "home.catalog-home-hero.subhead": "Further information is available on request.",
+      "home.catalog-home-products.products.0.blurb": "Further information is available on request.",
+      "home.catalog-home-products.products.0.name": "Further information is available on request.",
+      "home.catalog-home-products.products.1.blurb": "Further information is available on request.",
+      "home.catalog-home-products.products.1.name": "Further information is available on request.",
+      "home.catalog-home-products.products.2.blurb": "Further information is available on request.",
+      "home.catalog-home-products.products.2.name": "Further information is available on request.",
+      "home.catalog-home-products.title": "Practical solutions",
+      "home.catalog-materials-cta.cta.label": "Get in touch",
+      "home.catalog-materials-cta.headline": "Practical solutions",
+      "home.catalog-materials-hero.capacitylabel": "Further information is available on request.",
+      "home.catalog-materials-hero.chapter": "Further information is available on req…",
+      "home.catalog-materials-hero.configurecta.label": "Further information is…",
+      "home.catalog-materials-hero.cycleslabel": "Further information is available on request.",
+      "home.catalog-materials-hero.f1": "Further information is…",
+      "home.catalog-materials-hero.f2": "Further information is…",
+      "home.catalog-materials-hero.fromlabel": "Further information is available on request.",
+      "home.catalog-materials-hero.intro": "Further information is available on request.",
+      "home.catalog-materials-hero.products.0.capacity": "Further information is…",
+      "home.catalog-materials-hero.products.0.cycles": "Further information is…",
+      "home.catalog-materials-hero.products.0.name": "Further information is available on request.",
+      "home.catalog-materials-hero.products.0.price": "Further information is…",
+      "home.catalog-materials-hero.products.0.tagline": "Further information is available on request.",
+      "home.catalog-materials-hero.products.0.weight": "Further information is…",
+      "home.catalog-materials-hero.title": "Practical solutions",
+      "home.catalog-materials-hero.titleaccent": "Further information is avail…",
+      "home.catalog-materials-hero.weightlabel": "Further information is available on request.",
+      "home.catalog-materials-library.ctaprimarylabel": "Further information is…",
+      "home.catalog-materials-library.ctasecondarylabel": "Further information is…",
+      "home.catalog-materials-library.eyebrow": "Further information is available on req…",
+      "home.catalog-materials-library.intro": "Further information is available on request.",
+      "home.catalog-materials-library.items.0.name": "Further information is available on request.",
+      "home.catalog-materials-library.items.0.note": "Further information is available on request.",
+      "home.catalog-materials-library.items.0.weight": "Further information is available on request.",
+      "home.catalog-materials-library.items.1.name": "Further information is available on request.",
+      "home.catalog-materials-library.items.1.note": "Further information is available on request.",
+      "home.catalog-materials-library.items.1.weight": "Further information is available on request.",
+      "home.catalog-materials-library.title": "Practical solutions",
+      "home.catalog-materials-library.titleaccent": "Further information is avail…",
+      "home.catalog-materials-page-hero.cta.label": "Get in touch",
+      "home.catalog-materials-page-hero.headline": "Practical solutions",
+      "home.catalog-materials-page-hero.subhead": "Further information is available on request.",
+      "home.catalog-materials-products.products.0.blurb": "Further information is available on request.",
+      "home.catalog-materials-products.products.0.name": "Further information is available on request.",
+      "home.catalog-materials-products.products.1.blurb": "Further information is available on request.",
+      "home.catalog-materials-products.products.1.name": "Further information is available on request.",
+      "home.catalog-materials-products.products.2.blurb": "Further information is available on request.",
+      "home.catalog-materials-products.products.2.name": "Further information is available on request.",
+      "home.catalog-materials-products.title": "Practical solutions",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Your inquiry",
+      "inquiry.field.name": "Name",
+      "inquiry.m0.note": "The inquiry form is enabled when the site is published.",
+      "inquiry.submit": "Get in touch",
+      "nav.detail": "Further information is availabl…",
+      "nav.home": "Home",
+      "seo.detail.description": "Explore available solutions and ways to get in touch.",
+      "seo.detail.title": "Company website",
+      "seo.home.description": "Explore available solutions and ways to get in touch.",
+      "seo.home.title": "Company website"
+    }
+  },
+  "copyBundleSet": {
+    "schemaVersion": "site-builder-copy-bundle-set/v1",
+    "sourceLocale": "en",
+    "bundles": {
+      "en": {
+        "schemaVersion": "site-builder-copy-bundle/v1",
+        "slotCatalogVersion": "site-builder-copy-slots/v1",
+        "locale": "en",
+        "sourceLocale": "en",
+        "status": "complete",
+        "claimSnapshot": {
+          "id": "snapshot-0d05ab79c4205e20",
+          "digest": "498d368afbf2ef75975911b3e579b0ec6b9f92ed9730baf17913e9b14fcd0a9b"
+        },
+        "inputHash": "da584ad7cef4cc18437bdca99f8c675a767317347ac02e2e53a39a58f4556a9a",
+        "slots": {
+          "detail.catalog-application-features.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.items.2.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.items.2.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-features.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.capacitylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.configurecta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.cycleslabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.f1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.f2": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.fromlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.products.0.capacity": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.products.0.cycles": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.products.0.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.products.0.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.products.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.catalog-application-hero.weightlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-application-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-page-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.catalog-application-page-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-application-page-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-faq.items.0.a": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-faq.items.0.q": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-faq.items.1.a": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-faq.items.1.q": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-faq.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.products.0.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.products.1.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.products.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.products.2.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.products.2.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.catalog-detail-products.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "footer.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 120,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.catalog-home-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.catalog-home-features.items.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.items.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.items.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.items.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.items.2.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.items.2.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-home-features.titleline2": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.catalog-home-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.catalog-home-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-home-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.products.0.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.products.1.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.products.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.products.2.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.products.2.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-home-products.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-materials-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.catalog-materials-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.capacitylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.configurecta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.cycleslabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.f1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.f2": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.fromlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.products.0.capacity": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.products.0.cycles": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.products.0.price": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.products.0.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.products.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-hero.weightlabel": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.ctaprimarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.ctasecondarylabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.items.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.items.0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.items.0.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.items.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 80,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.items.1.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.items.1.weight": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-materials-library.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "home.catalog-materials-page-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.catalog-materials-page-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.catalog-materials-page-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 64,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.products.0.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.products.0.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.products.1.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.products.1.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.products.2.blurb": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.products.2.name": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.catalog-materials-products.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "inquiry.field.email": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Work email",
+            "claimRefs": []
+          },
+          "inquiry.field.message": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Your inquiry",
+            "claimRefs": []
+          },
+          "inquiry.field.name": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Name",
+            "claimRefs": []
+          },
+          "inquiry.m0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "The inquiry form is enabled when the site is published.",
+            "claimRefs": []
+          },
+          "inquiry.submit": {
+            "type": "cta_label",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "nav.detail": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "nav.home": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Home",
+            "claimRefs": []
+          },
+          "seo.detail.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.detail.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          },
+          "seo.home.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.home.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          }
+        },
+        "digest": "1dbc701d563fa972ffaa17455ebde189ec19b867291db454c32e9297ee0b9405"
+      }
+    }
+  }
+}

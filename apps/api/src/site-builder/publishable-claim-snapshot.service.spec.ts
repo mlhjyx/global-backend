@@ -43,6 +43,7 @@ function harness(
   const persisted: PublishableClaimSnapshot[] = [];
   const repository: PublishableClaimSnapshotRepository = {
     findByBuildRun: vi.fn(async () => options.existing ?? null),
+    findById: vi.fn(async () => options.existing ?? null),
     getSiteCompanyProfileId: vi.fn(async () =>
       options.companyProfileId === undefined
         ? COMPANY_ID

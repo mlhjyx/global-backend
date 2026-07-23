@@ -8,8 +8,8 @@
     "build": "astro build",
     "dev": "astro dev",
     "test": "vitest run",
-    "test:visual": "playwright test && node scripts/verify-component-qualification-visuals.mjs",
-    "test:visual:update": "playwright test --update-snapshots && COMPONENT_QUALIFICATION_UPDATE_SNAPSHOTS=1 node scripts/verify-component-qualification-visuals.mjs"
+    "test:visual": "playwright test && node scripts/verify-component-qualification-visuals.mjs && node scripts/verify-m1eb-golden-visuals.mjs",
+    "test:visual:update": "playwright test --update-snapshots && COMPONENT_QUALIFICATION_UPDATE_SNAPSHOTS=1 node scripts/verify-component-qualification-visuals.mjs && M1EB_GOLDEN_UPDATE_SNAPSHOTS=1 node scripts/verify-m1eb-golden-visuals.mjs"
   },
   "dependencies": {
     "@fontsource/bricolage-grotesque": "^5.2.0",

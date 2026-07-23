@@ -9,6 +9,7 @@ import {
   PaidOperationUnknownError,
 } from "../site-build-cost-ledger";
 import { STATIC_DESIGN_CATALOG_V2 } from "./catalog";
+import { M1_E_B_B3_CATALOG_V2_DRAFT } from "./catalog-v2-b3-drafts";
 import {
   DESIGN_SPEC_INPUT_VERSION,
   DESIGN_SPEC_TASK,
@@ -155,15 +156,16 @@ describe("M1-e-B DesignBrief producer", () => {
     ]);
   });
 
-  it("never selects the main draft catalog", async () => {
+  it("never selects a draft catalog", async () => {
+    const draftCatalog = finalizeDesignCatalogV2(
+      structuredClone(M1_E_B_B3_CATALOG_V2_DRAFT),
+    );
     const ledger = new Ledger();
     const producer = new DesignBriefProducer({
       ledger,
-      catalog: STATIC_DESIGN_CATALOG_V2,
+      catalog: draftCatalog,
     });
-    await expect(
-      producer.produce(input(STATIC_DESIGN_CATALOG_V2)),
-    ).rejects.toMatchObject({
+    await expect(producer.produce(input(draftCatalog))).rejects.toMatchObject({
       code: "DESIGN_BRIEF_NO_CANDIDATE",
     });
     expect(ledger.released).toBe(1);

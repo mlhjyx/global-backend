@@ -651,8 +651,16 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           ]),
           blueprint("catalog-home-materials", "home", [
             section(
-              "catalog-materials-hero",
+              "catalog-materials-page-hero",
               "hero",
+              "HeroBanner",
+              "quiet",
+              "catalog-hero",
+              { assetRoles: ["hero"] },
+            ),
+            section(
+              "catalog-materials-hero",
+              "products",
               "ProductShowcaseAlt",
               "technical-grid",
               "catalog-hero",
@@ -688,7 +696,7 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
               "catalog-detail-hero",
               "hero",
               "HeroBanner",
-              "quiet",
+              "technical-grid",
               "catalog-hero",
               { assetRoles: ["hero"], requiresEvidence: true },
             ),
@@ -710,10 +718,18 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           ]),
           blueprint("catalog-detail-application", "inner", [
             section(
-              "catalog-application-hero",
+              "catalog-application-page-hero",
               "hero",
-              "ProductShowcaseAlt",
+              "HeroBanner",
               "quiet",
+              "catalog-hero",
+              { assetRoles: ["hero"] },
+            ),
+            section(
+              "catalog-application-hero",
+              "products",
+              "ProductShowcaseAlt",
+              "technical-grid",
               "catalog-hero",
               { assetRoles: ["hero"], requiresEvidence: true },
             ),
@@ -750,7 +766,7 @@ export const M1_E_B_B1_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
       },
       heroOptions: [
         { componentType: "HeroBanner", variant: "technical-grid" },
-        { componentType: "ProductShowcaseAlt", variant: "technical-grid" },
+        { componentType: "HeroBanner", variant: "quiet" },
       ],
       compatibilityRules: [
         { code: "requires_evidence" },

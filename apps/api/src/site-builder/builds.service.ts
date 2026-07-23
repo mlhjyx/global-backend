@@ -6,31 +6,35 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-} from '@nestjs/common';
-import { Prisma, SiteBuildRun } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { RequestContext } from '../auth/request-context';
+} from "@nestjs/common";
+import { Prisma, SiteBuildRun } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { RequestContext } from "../auth/request-context";
 import {
   BuildScopeInput,
   REFURBISH_LAUNCHER,
   RefurbishLauncher,
   refurbishWorkflowId,
-} from './refurbish-launcher';
+} from "./refurbish-launcher";
 import {
   buildRequestHash,
   normalizeBuildRequest,
-} from './build-request-contract';
-import { normalizeIdempotencyKey } from './idempotency-key';
+} from "./build-request-contract";
+import { normalizeIdempotencyKey } from "./idempotency-key";
 import {
   assertActiveBuildTargets,
   BuildActiveSpecInvalidError,
   BuildTargetAmbiguousError,
   BuildTargetNotFoundError,
-} from './build-scope';
-import type { SiteSpec } from '@global/contracts';
-import { terminalizeBuildProgress } from './build-progress';
-import { siteBuildBudgetCents } from '../tools/budget';
-import { SiteBuildCostLedger } from './site-build-cost-ledger';
+} from "./build-scope";
+import type { SiteSpec } from "@global/contracts";
+import { terminalizeBuildProgress } from "./build-progress";
+import { siteBuildBudgetCents } from "../tools/budget";
+import { SiteBuildCostLedger } from "./site-build-cost-ledger";
+import {
+  loadPartialBuildBase,
+  PartialBuildRequiresV2BaseError,
+} from "./partial-build-base";
 
 /** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。配错值 fail-closed 回默认。 */
 const parsedDailyLimit = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
@@ -43,21 +47,22 @@ export interface CreateBuildInput extends BuildScopeInput {
   idempotencyKey?: string | null;
 }
 
-const ACTIVE_STATUSES = ['queued', 'running'];
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
-const BUILD_ENDPOINT = 'POST /api/v1/site-builder/sites/:id/builds';
+const ACTIVE_STATUSES = ["queued", "running"];
+const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+const BUILD_ENDPOINT = "POST /api/v1/site-builder/sites/:id/builds";
 
 type BuildErrorCode =
-  | 'BUILD_IN_PROGRESS'
-  | 'BUILD_NOT_CANCELLABLE'
-  | 'BUILD_ALREADY_TERMINAL'
-  | 'BUILD_LAUNCH_UNAVAILABLE'
-  | 'BUILD_CANCEL_UNAVAILABLE'
-  | 'BUILD_TARGET_NOT_FOUND'
-  | 'BUILD_TARGET_AMBIGUOUS'
-  | 'BUILD_ACTIVE_SPEC_INVALID'
-  | 'QUOTA_EXCEEDED'
-  | 'IDEMPOTENCY_KEY_REUSED';
+  | "BUILD_IN_PROGRESS"
+  | "BUILD_NOT_CANCELLABLE"
+  | "BUILD_ALREADY_TERMINAL"
+  | "BUILD_LAUNCH_UNAVAILABLE"
+  | "BUILD_CANCEL_UNAVAILABLE"
+  | "BUILD_TARGET_NOT_FOUND"
+  | "BUILD_TARGET_AMBIGUOUS"
+  | "BUILD_ACTIVE_SPEC_INVALID"
+  | "PARTIAL_BUILD_REQUIRES_V2_BASE"
+  | "QUOTA_EXCEEDED"
+  | "IDEMPOTENCY_KEY_REUSED";
 
 function buildHttpError(
   status: HttpStatus,
@@ -79,12 +84,12 @@ function buildHttpError(
 
 function storedBuildId(value: Prisma.JsonValue): string {
   if (
-    typeof value !== 'object' ||
+    typeof value !== "object" ||
     value === null ||
     Array.isArray(value) ||
-    typeof value.buildId !== 'string'
+    typeof value.buildId !== "string"
   ) {
-    throw new Error('corrupt site-builder build idempotency response');
+    throw new Error("corrupt site-builder build idempotency response");
   }
   return value.buildId;
 }
@@ -104,9 +109,14 @@ function sameStoredRequest(
   }
 }
 
-function storedBaseVersionId(value: Prisma.JsonValue | null): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  return typeof value.baseVersionId === 'string' ? value.baseVersionId : undefined;
+function storedBaseVersionId(
+  value: Prisma.JsonValue | null,
+): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  return typeof value.baseVersionId === "string"
+    ? value.baseVersionId
+    : undefined;
 }
 
 /**
@@ -153,7 +163,7 @@ export class BuildsService {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-${siteId}`}))`;
 
         const site = await tx.site.findUnique({ where: { id: siteId } });
-        if (!site) throw new NotFoundException('site not found');
+        if (!site) throw new NotFoundException("site not found");
         if (idempotencyKey) {
           const prior = await tx.idempotencyKey.findUnique({
             where: {
@@ -171,9 +181,9 @@ export class BuildsService {
             ) {
               throw new ConflictException({
                 error: {
-                  code: 'IDEMPOTENCY_KEY_REUSED',
+                  code: "IDEMPOTENCY_KEY_REUSED",
                   message:
-                    'idempotency-key was already used with a different build request',
+                    "idempotency-key was already used with a different build request",
                 },
               });
             }
@@ -182,7 +192,7 @@ export class BuildsService {
             });
             if (!existing || existing.siteId !== siteId) {
               throw new Error(
-                'corrupt site-builder build idempotency reference',
+                "corrupt site-builder build idempotency reference",
               );
             }
             return { run: existing, replayed: true };
@@ -191,15 +201,15 @@ export class BuildsService {
           // A pre-R3 JSON-only key has no request fingerprint. Never guess that it is the same request.
           const legacy = await tx.siteBuildRun.findFirst({
             where: {
-              scope: { path: ['idempotencyKey'], equals: idempotencyKey },
+              scope: { path: ["idempotencyKey"], equals: idempotencyKey },
             },
           });
           if (legacy) {
             throw new ConflictException({
               error: {
-                code: 'IDEMPOTENCY_KEY_REUSED',
+                code: "IDEMPOTENCY_KEY_REUSED",
                 message:
-                  'legacy idempotency-key cannot prove build request identity',
+                  "legacy idempotency-key cannot prove build request identity",
               },
             });
           }
@@ -208,13 +218,13 @@ export class BuildsService {
         // A durable idempotency replay above is independent of today's active pointer. Only a
         // genuinely new partial request validates the current active SiteSpec.
         let baseVersionId: string | undefined;
-        if (request.scope !== 'site' || request.options?.pages) {
+        if (request.scope !== "site" || request.options?.pages) {
           const active = site.activeVersionId
             ? await tx.siteVersion.findFirst({
                 where: {
                   id: site.activeVersionId,
                   siteId,
-                  buildStatus: 'succeeded',
+                  buildStatus: "succeeded",
                 },
                 select: { id: true, spec: true },
               })
@@ -224,25 +234,41 @@ export class BuildsService {
               (active?.spec ?? null) as unknown as SiteSpec | null,
               request,
             );
+            if (!active) {
+              throw new PartialBuildRequiresV2BaseError(
+                "site has no active SiteVersion",
+              );
+            }
+            await loadPartialBuildBase(tx, {
+              siteId,
+              baseVersionId: active.id,
+            });
           } catch (error) {
             if (error instanceof BuildTargetNotFoundError) {
               throw buildHttpError(
                 HttpStatus.NOT_FOUND,
-                'BUILD_TARGET_NOT_FOUND',
+                "BUILD_TARGET_NOT_FOUND",
                 error.message,
               );
             }
             if (error instanceof BuildTargetAmbiguousError) {
               throw buildHttpError(
                 HttpStatus.UNPROCESSABLE_ENTITY,
-                'BUILD_TARGET_AMBIGUOUS',
+                "BUILD_TARGET_AMBIGUOUS",
                 error.message,
               );
             }
             if (error instanceof BuildActiveSpecInvalidError) {
               throw buildHttpError(
                 HttpStatus.UNPROCESSABLE_ENTITY,
-                'BUILD_ACTIVE_SPEC_INVALID',
+                "BUILD_ACTIVE_SPEC_INVALID",
+                error.message,
+              );
+            }
+            if (error instanceof PartialBuildRequiresV2BaseError) {
+              throw buildHttpError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                error.code,
                 error.message,
               );
             }
@@ -259,7 +285,7 @@ export class BuildsService {
           // exact normalized request. Deterministic workflow identity prevents a second execution.
           if (
             !idempotencyKey &&
-            active.status === 'queued' &&
+            active.status === "queued" &&
             !active.temporalWorkflowId &&
             !active.temporalRunId &&
             sameStoredRequest(siteId, active.scope, request)
@@ -268,8 +294,8 @@ export class BuildsService {
           }
           throw buildHttpError(
             HttpStatus.CONFLICT,
-            'BUILD_IN_PROGRESS',
-            'a build is already in progress for this site',
+            "BUILD_IN_PROGRESS",
+            "a build is already in progress for this site",
             { buildId: active.id, status: active.status },
           );
         }
@@ -280,13 +306,13 @@ export class BuildsService {
           where: {
             siteId,
             createdAt: { gte: startOfDay },
-            NOT: { status: 'failed', temporalRunId: null },
+            NOT: { status: "failed", temporalRunId: null },
           },
         });
         if (todayCount >= DAILY_BUILD_LIMIT) {
           throw buildHttpError(
             HttpStatus.TOO_MANY_REQUESTS,
-            'QUOTA_EXCEEDED',
+            "QUOTA_EXCEEDED",
             `daily build quota reached (${DAILY_BUILD_LIMIT}/day)`,
             { remaining: Math.max(0, DAILY_BUILD_LIMIT - todayCount) },
           );
@@ -298,8 +324,8 @@ export class BuildsService {
             data: {
               workspaceId: ctx.workspaceId,
               siteId,
-              kind: 'refurbish',
-              status: 'queued',
+              kind: "refurbish",
+              status: "queued",
               scope: {
                 ...request,
                 ...(baseVersionId ? { baseVersionId } : {}),
@@ -309,12 +335,12 @@ export class BuildsService {
         } catch (error) {
           if (
             error instanceof Prisma.PrismaClientKnownRequestError &&
-            error.code === 'P2002'
+            error.code === "P2002"
           ) {
             throw buildHttpError(
               HttpStatus.CONFLICT,
-              'BUILD_IN_PROGRESS',
-              'a build became active concurrently for this site',
+              "BUILD_IN_PROGRESS",
+              "a build became active concurrently for this site",
             );
           }
           throw error;
@@ -335,7 +361,7 @@ export class BuildsService {
               endpoint,
               key: idempotencyKey,
               requestHash: requestHash!,
-              response: { buildId: created.id, status: 'queued' },
+              response: { buildId: created.id, status: "queued" },
             },
           });
         }
@@ -350,8 +376,8 @@ export class BuildsService {
     ) {
       throw buildHttpError(
         HttpStatus.BAD_GATEWAY,
-        'BUILD_LAUNCH_UNAVAILABLE',
-        'stored build workflow identity is invalid',
+        "BUILD_LAUNCH_UNAVAILABLE",
+        "stored build workflow identity is invalid",
         { buildId: run.id },
       );
     }
@@ -372,7 +398,7 @@ export class BuildsService {
     let launch: { workflowId: string; firstExecutionRunId: string };
     try {
       launch =
-        replayed && run.status !== 'queued'
+        replayed && run.status !== "queued"
           ? await this.launcher.recoverRefurbish(launchInput)
           : await this.launcher.launchRefurbish(launchInput);
     } catch (startError) {
@@ -384,10 +410,10 @@ export class BuildsService {
         );
         throw buildHttpError(
           HttpStatus.BAD_GATEWAY,
-          'BUILD_LAUNCH_UNAVAILABLE',
+          "BUILD_LAUNCH_UNAVAILABLE",
           idempotencyKey
-            ? 'build orchestrator acknowledgement unavailable; retry with the same idempotency-key'
-            : 'build launch acknowledgement unavailable; inspect this build before retrying',
+            ? "build orchestrator acknowledgement unavailable; retry with the same idempotency-key"
+            : "build launch acknowledgement unavailable; inspect this build before retrying",
           { buildId: run.id },
         );
       }
@@ -400,8 +426,8 @@ export class BuildsService {
       );
       throw buildHttpError(
         HttpStatus.BAD_GATEWAY,
-        'BUILD_LAUNCH_UNAVAILABLE',
-        'build orchestrator returned an invalid workflow identity',
+        "BUILD_LAUNCH_UNAVAILABLE",
+        "build orchestrator returned an invalid workflow identity",
         { buildId: run.id },
       );
     }
@@ -433,7 +459,7 @@ export class BuildsService {
         },
       );
       if (!acknowledged)
-        throw new Error('build launch acknowledgement conflict');
+        throw new Error("build launch acknowledgement conflict");
       return { buildId: run.id, status: acknowledged };
     } catch {
       this.log.error(
@@ -441,10 +467,10 @@ export class BuildsService {
       );
       throw buildHttpError(
         HttpStatus.BAD_GATEWAY,
-        'BUILD_LAUNCH_UNAVAILABLE',
+        "BUILD_LAUNCH_UNAVAILABLE",
         idempotencyKey
-          ? 'build acknowledgement unavailable; retry with the same idempotency-key'
-          : 'build acknowledgement unavailable; inspect this build before retrying',
+          ? "build acknowledgement unavailable; retry with the same idempotency-key"
+          : "build acknowledgement unavailable; inspect this build before retrying",
         { buildId: run.id },
       );
     }
@@ -454,7 +480,7 @@ export class BuildsService {
     const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.siteBuildRun.findUnique({ where: { id: buildId } }),
     );
-    if (!run) throw new NotFoundException('build not found');
+    if (!run) throw new NotFoundException("build not found");
     return run;
   }
 
@@ -468,21 +494,21 @@ export class BuildsService {
         const run = await tx.siteBuildRun.findUnique({
           where: { id: buildId },
         });
-        if (!run) throw new NotFoundException('build not found');
-        if (run.kind !== 'refurbish') {
+        if (!run) throw new NotFoundException("build not found");
+        if (run.kind !== "refurbish") {
           // demo_v0 秒级完成且无 site-refurbish-* workflow 可取消（复审 C2 附带）
           throw buildHttpError(
             HttpStatus.CONFLICT,
-            'BUILD_NOT_CANCELLABLE',
-            'this build type cannot be cancelled',
+            "BUILD_NOT_CANCELLABLE",
+            "this build type cannot be cancelled",
             { kind: run.kind },
           );
         }
         if (TERMINAL_STATUSES.has(run.status)) {
           throw buildHttpError(
             HttpStatus.CONFLICT,
-            'BUILD_ALREADY_TERMINAL',
-            'build is already terminal',
+            "BUILD_ALREADY_TERMINAL",
+            "build is already terminal",
             { status: run.status },
           );
         }
@@ -493,8 +519,8 @@ export class BuildsService {
         ) {
           throw buildHttpError(
             HttpStatus.CONFLICT,
-            'BUILD_NOT_CANCELLABLE',
-            'stored build workflow identity is invalid',
+            "BUILD_NOT_CANCELLABLE",
+            "stored build workflow identity is invalid",
             { buildId: run.id },
           );
         }
@@ -502,13 +528,13 @@ export class BuildsService {
           where: { buildRunId: run.id, paidCallsEnabled: true },
           data: {
             paidCallsEnabled: false,
-            disabledReason: 'cancellation_requested',
+            disabledReason: "cancellation_requested",
           },
         });
         return { workflowId: run.temporalWorkflowId, siteId: run.siteId };
       },
     );
-    let cancellation: Awaited<ReturnType<RefurbishLauncher['cancelRefurbish']>>;
+    let cancellation: Awaited<ReturnType<RefurbishLauncher["cancelRefurbish"]>>;
     try {
       cancellation = await this.launcher.cancelRefurbish(
         buildId,
@@ -518,14 +544,14 @@ export class BuildsService {
       const terminal = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
         tx.siteBuildRun.findUnique({ where: { id: buildId } }),
       );
-      if (terminal?.status === 'cancelled') {
-        return { buildId, status: 'cancelled' };
+      if (terminal?.status === "cancelled") {
+        return { buildId, status: "cancelled" };
       }
       if (terminal && TERMINAL_STATUSES.has(terminal.status)) {
         throw buildHttpError(
           HttpStatus.CONFLICT,
-          'BUILD_ALREADY_TERMINAL',
-          'build became terminal before cancellation completed',
+          "BUILD_ALREADY_TERMINAL",
+          "build became terminal before cancellation completed",
           { status: terminal.status },
         );
       }
@@ -536,8 +562,8 @@ export class BuildsService {
       // any transport, timeout or non-cancellation terminal error remains fail-closed here.
       throw buildHttpError(
         HttpStatus.BAD_GATEWAY,
-        'BUILD_CANCEL_UNAVAILABLE',
-        'build cancellation was not acknowledged; retry cancellation with the same buildId',
+        "BUILD_CANCEL_UNAVAILABLE",
+        "build cancellation was not acknowledged; retry cancellation with the same buildId",
         { buildId },
       );
     }
@@ -545,27 +571,27 @@ export class BuildsService {
     const current = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.siteBuildRun.findUnique({ where: { id: buildId } }),
     );
-    if (current?.status === 'cancelled') {
-      return { buildId, status: 'cancelled' };
+    if (current?.status === "cancelled") {
+      return { buildId, status: "cancelled" };
     }
     if (current && TERMINAL_STATUSES.has(current.status)) {
       throw buildHttpError(
         HttpStatus.CONFLICT,
-        'BUILD_ALREADY_TERMINAL',
-        'build became terminal before cancellation completed',
+        "BUILD_ALREADY_TERMINAL",
+        "build became terminal before cancellation completed",
         { status: current.status },
       );
     }
     if (
       current &&
       ACTIVE_STATUSES.includes(current.status) &&
-      cancellation.terminalStatus !== 'completed'
+      cancellation.terminalStatus !== "completed"
     ) {
       // Temporal is conclusively closed, but its compensation exhausted retries while DB was
       // unavailable. Redrive the minimal terminal transaction under the same Site lock; an
       // executing/unknown chain never reaches this branch and therefore never releases single-flight.
       const repairedStatus =
-        cancellation.terminalStatus === 'cancelled' ? 'cancelled' : 'failed';
+        cancellation.terminalStatus === "cancelled" ? "cancelled" : "failed";
       let repaired: SiteBuildRun | null;
       try {
         const costSummary = await this.costLedger.closeAndSummarize({
@@ -573,9 +599,7 @@ export class BuildsService {
           siteId: cancellable.siteId,
           buildRunId: buildId,
           reason:
-            repairedStatus === 'cancelled'
-              ? 'run_cancelled'
-              : 'run_failed',
+            repairedStatus === "cancelled" ? "run_cancelled" : "run_failed",
         });
         repaired = await this.prisma.withWorkspace(
           ctx.workspaceId,
@@ -586,29 +610,28 @@ export class BuildsService {
               where: { id: buildId },
             });
             await tx.siteVersion.updateMany({
-              where: { buildRunId: buildId, buildStatus: 'building' },
-              data: { buildStatus: 'failed' },
+              where: { buildRunId: buildId, buildStatus: "building" },
+              data: { buildStatus: "failed" },
             });
             const transitioned = await tx.siteBuildRun.updateMany({
               where: { id: buildId, status: { in: ACTIVE_STATUSES } },
               data: {
                 status: repairedStatus,
                 error:
-                  repairedStatus === 'failed'
-                    ? 'workflow failed after compensation retries were exhausted'
+                  repairedStatus === "failed"
+                    ? "workflow failed after compensation retries were exhausted"
                     : null,
                 finishedAt: new Date(),
-                costSummary:
-                  costSummary as unknown as Prisma.InputJsonObject,
+                costSummary: costSummary as unknown as Prisma.InputJsonObject,
               },
             });
             if (transitioned.count === 1) {
               const terminalSteps = await terminalizeBuildProgress(tx, {
                 workspaceId: ctx.workspaceId,
                 buildRunId: buildId,
-                phase: (before?.phase ?? 'P1_understanding') as Parameters<
+                phase: (before?.phase ?? "P1_understanding") as Parameters<
                   typeof terminalizeBuildProgress
-                >[1]['phase'],
+                >[1]["phase"],
                 progress: before?.progress ?? 0,
               });
               await tx.siteBuildRun.update({
@@ -621,7 +644,7 @@ export class BuildsService {
               if (site) {
                 await tx.site.update({
                   where: { id: site.id },
-                  data: { status: site.activeVersionId ? 'ready' : 'draft' },
+                  data: { status: site.activeVersionId ? "ready" : "draft" },
                 });
               }
             }
@@ -631,19 +654,19 @@ export class BuildsService {
       } catch {
         throw buildHttpError(
           HttpStatus.BAD_GATEWAY,
-          'BUILD_CANCEL_UNAVAILABLE',
-          'closed build compensation is not yet durable; retry cancellation with the same buildId',
+          "BUILD_CANCEL_UNAVAILABLE",
+          "closed build compensation is not yet durable; retry cancellation with the same buildId",
           { buildId },
         );
       }
-      if (repaired?.status === 'cancelled') {
-        return { buildId, status: 'cancelled' };
+      if (repaired?.status === "cancelled") {
+        return { buildId, status: "cancelled" };
       }
       if (repaired && TERMINAL_STATUSES.has(repaired.status)) {
         throw buildHttpError(
           HttpStatus.CONFLICT,
-          'BUILD_ALREADY_TERMINAL',
-          'build execution closed before cancellation completed',
+          "BUILD_ALREADY_TERMINAL",
+          "build execution closed before cancellation completed",
           { status: repaired.status },
         );
       }
@@ -651,8 +674,8 @@ export class BuildsService {
     // A completed chain with an active DB row is an invariant violation, not safe to guess.
     throw buildHttpError(
       HttpStatus.BAD_GATEWAY,
-      'BUILD_CANCEL_UNAVAILABLE',
-      'build cancellation closed without durable compensation; retry cancellation with the same buildId',
+      "BUILD_CANCEL_UNAVAILABLE",
+      "build cancellation closed without durable compensation; retry cancellation with the same buildId",
       { buildId },
     );
   }

@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
-import { open, readdir } from 'node:fs/promises';
-import path from 'node:path';
+import { createHash } from "node:crypto";
+import { open, readdir } from "node:fs/promises";
+import path from "node:path";
 import {
   SITE_SPEC_V1_1_VERSION,
   SITE_SPEC_V1_VERSION,
@@ -11,12 +11,12 @@ import {
   validateSiteSpec,
   type DesignBriefV2,
   type SiteSpec,
-} from '@global/contracts';
+} from "@global/contracts";
 
 export const RELEASE_MANIFEST_V1_SCHEMA_VERSION =
-  'site-builder-release-manifest/v1' as const;
+  "site-builder-release-manifest/v1" as const;
 export const RELEASE_MANIFEST_V2_SCHEMA_VERSION =
-  'site-builder-release-manifest/v2' as const;
+  "site-builder-release-manifest/v2" as const;
 /** @deprecated Immutable v1 alias retained for existing consumers. */
 export const RELEASE_MANIFEST_SCHEMA_VERSION =
   RELEASE_MANIFEST_V1_SCHEMA_VERSION;
@@ -69,7 +69,7 @@ export interface ReleaseManifestV1 {
 
 export interface ReleaseManifestV2 extends Omit<
   ReleaseManifestV1,
-  'schemaVersion' | 'specVersion'
+  "schemaVersion" | "specVersion"
 > {
   schemaVersion: typeof RELEASE_MANIFEST_V2_SCHEMA_VERSION;
   specVersion: typeof SITE_SPEC_V1_1_VERSION;
@@ -97,7 +97,7 @@ export interface ReleaseArtifactStorage {
     contentType: string,
     sha256: string,
     signal?: AbortSignal,
-  ): Promise<'created' | 'exists'>;
+  ): Promise<"created" | "exists">;
   hashObject(
     key: string,
     signal?: AbortSignal,
@@ -147,98 +147,98 @@ export function assertReleaseContract(
       assertReleaseComponentEligible(block.type);
       const props = block.props as Record<string, unknown>;
       const ctaFields =
-        block.type === 'PricingTable'
-          ? ['primaryCta', 'secondaryCta']
-          : block.type === 'CtaCenter'
-            ? ['primaryCta', 'secondaryCta']
-            : block.type === 'ServicesDark'
-              ? ['allCta']
-              : block.type === 'ServiceRows'
-                ? ['cta']
-                : block.type === 'AreaGallery'
-                  ? ['allPageId']
-                  : block.type === 'ProjectsGrid'
-                    ? ['allPageId']
-                    : block.type === 'CollectionCards'
-                      ? ['allPageId']
-                      : block.type === 'MaterialsLibrary'
-                        ? ['ctaPrimaryPageId', 'ctaSecondaryPageId']
-                        : block.type === 'ProductShowcaseAlt'
-                          ? ['configureCta', 'configurePageId']
-                          : block.type === 'EditorialHero'
-                            ? ['ctaPageId']
-                            : block.type === 'SplitAbout'
-                              ? ['ctaPageId']
-                              : block.type === 'WarmHero'
-                                ? ['primaryCta', 'secondaryCta']
-                                : block.type === 'DishesShowcase'
-                                  ? ['addPageId']
-                                  : block.type === 'PhotoGallery'
+        block.type === "PricingTable"
+          ? ["primaryCta", "secondaryCta"]
+          : block.type === "CtaCenter"
+            ? ["primaryCta", "secondaryCta"]
+            : block.type === "ServicesDark"
+              ? ["allCta"]
+              : block.type === "ServiceRows"
+                ? ["cta"]
+                : block.type === "AreaGallery"
+                  ? ["allPageId"]
+                  : block.type === "ProjectsGrid"
+                    ? ["allPageId"]
+                    : block.type === "CollectionCards"
+                      ? ["allPageId"]
+                      : block.type === "MaterialsLibrary"
+                        ? ["ctaPrimaryPageId", "ctaSecondaryPageId"]
+                        : block.type === "ProductShowcaseAlt"
+                          ? ["configureCta", "configurePageId"]
+                          : block.type === "EditorialHero"
+                            ? ["ctaPageId"]
+                            : block.type === "SplitAbout"
+                              ? ["ctaPageId"]
+                              : block.type === "WarmHero"
+                                ? ["primaryCta", "secondaryCta"]
+                                : block.type === "DishesShowcase"
+                                  ? ["addPageId"]
+                                  : block.type === "PhotoGallery"
                                     ? props.allLabelKey
-                                      ? ['allPageId']
+                                      ? ["allPageId"]
                                       : []
-                                    : block.type === 'MediaCta'
-                                      ? ['primaryCta', 'secondaryCta']
-                                      : block.type === 'FarmhouseHero'
-                                        ? ['primaryCta', 'secondaryCta']
-                                        : block.type === 'FeaturedSpotlight'
+                                    : block.type === "MediaCta"
+                                      ? ["primaryCta", "secondaryCta"]
+                                      : block.type === "FarmhouseHero"
+                                        ? ["primaryCta", "secondaryCta"]
+                                        : block.type === "FeaturedSpotlight"
                                           ? props.allLabelKey
-                                            ? ['allPageId']
+                                            ? ["allPageId"]
                                             : []
-                                          : block.type === 'DispatchHero'
-                                            ? ['cta1PageId']
-                                            : block.type === 'ServicesEditorial'
+                                          : block.type === "DispatchHero"
+                                            ? ["cta1PageId"]
+                                            : block.type === "ServicesEditorial"
                                               ? props.bookLabelKey ||
                                                 (props.notListKey &&
                                                   props.notListBodyKey &&
                                                   props.notListCtaKey)
-                                                ? ['bookPageId']
+                                                ? ["bookPageId"]
                                                 : []
                                               : block.type ===
-                                                  'DispatchTimeline'
-                                                ? ['ctaPageId']
-                                                : block.type === 'CrewGrid'
-                                                  ? ['requestPageId']
-                                                  : block.type === 'HeroFull'
+                                                  "DispatchTimeline"
+                                                ? ["ctaPageId"]
+                                                : block.type === "CrewGrid"
+                                                  ? ["requestPageId"]
+                                                  : block.type === "HeroFull"
                                                     ? [
-                                                        'primaryCta',
+                                                        "primaryCta",
                                                         ...(props.secondaryCta
-                                                          ? ['secondaryCta']
+                                                          ? ["secondaryCta"]
                                                           : []),
                                                         ...(props.revealCta
-                                                          ? ['revealCta']
+                                                          ? ["revealCta"]
                                                           : []),
                                                       ]
                                                     : block.type ===
-                                                        'ColorwayPicker'
+                                                        "ColorwayPicker"
                                                       ? props.reserveCta
-                                                        ? ['reserveCta']
+                                                        ? ["reserveCta"]
                                                         : props.reserveLabelKey
-                                                          ? ['reservePageId']
+                                                          ? ["reservePageId"]
                                                           : []
                                                       : block.type ===
-                                                            'SaaSHero' ||
+                                                            "SaaSHero" ||
                                                           block.type ===
-                                                            'IndustrialHero' ||
+                                                            "IndustrialHero" ||
                                                           block.type ===
-                                                            'MinimalHero'
+                                                            "MinimalHero"
                                                         ? props.primaryCta
                                                           ? [
-                                                              'primaryCta',
+                                                              "primaryCta",
                                                               ...(props.secondaryCta
                                                                 ? [
-                                                                    'secondaryCta',
+                                                                    "secondaryCta",
                                                                   ]
                                                                 : []),
                                                             ]
                                                           : [
-                                                              'cta1PageId',
+                                                              "cta1PageId",
                                                               ...(props.cta2Key
-                                                                ? ['cta2PageId']
+                                                                ? ["cta2PageId"]
                                                                 : []),
                                                               ...(props.secondaryCta
                                                                 ? [
-                                                                    'secondaryCta',
+                                                                    "secondaryCta",
                                                                   ]
                                                                 : []),
                                                             ]
@@ -246,80 +246,80 @@ export function assertReleaseContract(
       for (const field of ctaFields) {
         const value =
           props[field] ??
-          (block.type === 'MaterialsLibrary' ? 'contact' : undefined) ??
-          (block.type === 'AreaGallery' && props.allLabelKey
-            ? 'area'
+          (block.type === "MaterialsLibrary" ? "contact" : undefined) ??
+          (block.type === "AreaGallery" && props.allLabelKey
+            ? "area"
             : undefined) ??
-          (block.type === 'ProjectsGrid' && props.allLabelKey
-            ? 'projects'
+          (block.type === "ProjectsGrid" && props.allLabelKey
+            ? "projects"
             : undefined) ??
-          (block.type === 'CollectionCards' ? 'home' : undefined);
+          (block.type === "CollectionCards" ? "home" : undefined);
         const defaultPageId =
-          block.type === 'EditorialHero'
-            ? 'services'
-            : block.type === 'SplitAbout'
-              ? 'contact'
-              : block.type === 'DishesShowcase'
-                ? 'services'
-                : block.type === 'PhotoGallery'
-                  ? 'gallery'
-                  : block.type === 'FeaturedSpotlight'
-                    ? 'home'
-                    : block.type === 'DispatchHero'
-                      ? 'book'
-                      : block.type === 'ServicesEditorial'
-                        ? 'book'
-                        : block.type === 'DispatchTimeline'
-                          ? 'book'
-                          : block.type === 'CrewGrid'
-                            ? 'book'
-                            : block.type === 'SaaSHero' ||
-                                block.type === 'IndustrialHero' ||
-                                block.type === 'MinimalHero'
-                              ? 'book'
-                              : block.type === 'ColorwayPicker'
-                                ? 'book'
+          block.type === "EditorialHero"
+            ? "services"
+            : block.type === "SplitAbout"
+              ? "contact"
+              : block.type === "DishesShowcase"
+                ? "services"
+                : block.type === "PhotoGallery"
+                  ? "gallery"
+                  : block.type === "FeaturedSpotlight"
+                    ? "home"
+                    : block.type === "DispatchHero"
+                      ? "book"
+                      : block.type === "ServicesEditorial"
+                        ? "book"
+                        : block.type === "DispatchTimeline"
+                          ? "book"
+                          : block.type === "CrewGrid"
+                            ? "book"
+                            : block.type === "SaaSHero" ||
+                                block.type === "IndustrialHero" ||
+                                block.type === "MinimalHero"
+                              ? "book"
+                              : block.type === "ColorwayPicker"
+                                ? "book"
                                 : undefined;
         const resolvedValue = value ?? defaultPageId;
         const cta =
-          typeof resolvedValue === 'string'
+          typeof resolvedValue === "string"
             ? { pageId: resolvedValue }
             : (resolvedValue as { pageId?: string; url?: string } | undefined);
         if (cta?.url) {
           const parsed = new URL(cta.url);
           if (
-            parsed.protocol !== 'https:' ||
+            parsed.protocol !== "https:" ||
             !allowedOutboundDomains.has(parsed.hostname.toLowerCase())
           ) {
             throw new Error(
               `SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: ${block.type}.${field}`,
             );
           }
-        } else if (cta && !pageIds.has(cta.pageId ?? '')) {
+        } else if (cta && !pageIds.has(cta.pageId ?? "")) {
           throw new Error(
-            `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ${block.type}.${field}.pageId=${cta.pageId ?? ''}`,
+            `SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ${block.type}.${field}.pageId=${cta.pageId ?? ""}`,
           );
         }
       }
       if (
-        block.type === 'MediaCta' &&
+        block.type === "MediaCta" &&
         (props.whatsappLabelKey || props.whatsappUrl)
       ) {
         if (
-          typeof props.whatsappLabelKey !== 'string' ||
-          typeof props.whatsappUrl !== 'string'
+          typeof props.whatsappLabelKey !== "string" ||
+          typeof props.whatsappUrl !== "string"
         ) {
           throw new Error(
-            'SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl',
+            "SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl",
           );
         }
         const parsed = new URL(props.whatsappUrl);
         if (
-          parsed.protocol !== 'https:' ||
+          parsed.protocol !== "https:" ||
           !allowedOutboundDomains.has(parsed.hostname.toLowerCase())
         ) {
           throw new Error(
-            'SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl',
+            "SITE_RELEASE_OUTBOUND_DOMAIN_FORBIDDEN: MediaCta.whatsappUrl",
           );
         }
       }
@@ -328,33 +328,37 @@ export function assertReleaseContract(
 }
 
 function sha256(data: Buffer | string): string {
-  return createHash('sha256').update(data).digest('hex');
+  return createHash("sha256").update(data).digest("hex");
 }
 
 function canonicalJson(value: unknown): string {
-  if (value === null) return 'null';
-  if (typeof value === 'string' || typeof value === 'boolean') {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error('SITE_RELEASE_NON_JSON_VALUE');
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("SITE_RELEASE_NON_JSON_VALUE");
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
   }
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     const record = value as Record<string, unknown>;
     return `{${Object.keys(record)
       .sort()
       .map((key) => {
         const item = record[key];
-        if (item === undefined) throw new Error('SITE_RELEASE_NON_JSON_VALUE');
+        if (item === undefined) throw new Error("SITE_RELEASE_NON_JSON_VALUE");
         return `${JSON.stringify(key)}:${canonicalJson(item)}`;
       })
-      .join(',')}}`;
+      .join(",")}}`;
   }
-  throw new Error('SITE_RELEASE_NON_JSON_VALUE');
+  throw new Error("SITE_RELEASE_NON_JSON_VALUE");
+}
+
+export function releaseSpecDigest(spec: unknown): string {
+  return sha256(canonicalJson(spec));
 }
 
 export function releaseManifestDigest(manifest: ReleaseManifest): string {
@@ -369,21 +373,21 @@ export function releaseArtifactDigest(
 
 function releaseManifestCommonValid(value: Record<string, unknown>): boolean {
   const required = [
-    'schemaVersion',
-    'releaseId',
-    'workspaceId',
-    'siteId',
-    'siteVersionId',
-    'buildRunId',
-    'producerToken',
-    'artifactPrefix',
-    'artifactDigest',
-    'specVersion',
-    'specDigest',
-    'buildIdentity',
-    'createdAt',
-    'componentTypes',
-    'files',
+    "schemaVersion",
+    "releaseId",
+    "workspaceId",
+    "siteId",
+    "siteVersionId",
+    "buildRunId",
+    "producerToken",
+    "artifactPrefix",
+    "artifactDigest",
+    "specVersion",
+    "specDigest",
+    "buildIdentity",
+    "createdAt",
+    "componentTypes",
+    "files",
   ];
   const shapeValid =
     required.every((key) => Object.prototype.hasOwnProperty.call(value, key)) &&
@@ -397,39 +401,39 @@ function releaseManifestCommonValid(value: Record<string, unknown>): boolean {
       value.buildRunId,
       value.producerToken,
     ].every(
-      (identity) => typeof identity === 'string' && UUID.test(identity),
+      (identity) => typeof identity === "string" && UUID.test(identity),
     ) &&
-    typeof value.artifactPrefix === 'string' &&
-    typeof value.artifactDigest === 'string' &&
+    typeof value.artifactPrefix === "string" &&
+    typeof value.artifactDigest === "string" &&
     SHA256.test(value.artifactDigest) &&
-    typeof value.specDigest === 'string' &&
+    typeof value.specDigest === "string" &&
     SHA256.test(value.specDigest) &&
-    typeof value.buildIdentity === 'string' &&
+    typeof value.buildIdentity === "string" &&
     BUILD_IDENTITY.test(value.buildIdentity) &&
-    typeof value.createdAt === 'string' &&
+    typeof value.createdAt === "string" &&
     Number.isFinite(Date.parse(value.createdAt)) &&
     value.componentTypes.every(
-      (type) => typeof type === 'string' && type.length > 0,
+      (type) => typeof type === "string" && type.length > 0,
     ) &&
     value.files.every((file) => {
-      if (!file || typeof file !== 'object' || Array.isArray(file))
+      if (!file || typeof file !== "object" || Array.isArray(file))
         return false;
       const entry = file as Record<string, unknown>;
       return (
         Object.keys(entry).length === 5 &&
         Object.keys(entry).every((key) =>
-          ['path', 'objectKey', 'size', 'sha256', 'contentType'].includes(key),
+          ["path", "objectKey", "size", "sha256", "contentType"].includes(key),
         ) &&
-        typeof entry.path === 'string' &&
+        typeof entry.path === "string" &&
         entry.path.length > 0 &&
-        !entry.path.startsWith('/') &&
-        !entry.path.split('/').includes('..') &&
-        typeof entry.objectKey === 'string' &&
+        !entry.path.startsWith("/") &&
+        !entry.path.split("/").includes("..") &&
+        typeof entry.objectKey === "string" &&
         Number.isSafeInteger(entry.size) &&
         (entry.size as number) >= 0 &&
-        typeof entry.sha256 === 'string' &&
+        typeof entry.sha256 === "string" &&
         SHA256.test(entry.sha256) &&
-        typeof entry.contentType === 'string' &&
+        typeof entry.contentType === "string" &&
         entry.contentType.length > 0
       );
     });
@@ -453,56 +457,56 @@ function releaseManifestCommonValid(value: Record<string, unknown>): boolean {
 
 /** Closed-shape parser used by preview and replay surfaces. */
 export function validateReleaseManifest(value: unknown): ReleaseManifest {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('SITE_RELEASE_MANIFEST_INVALID');
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("SITE_RELEASE_MANIFEST_INVALID");
   }
   const manifest = value as Record<string, unknown>;
   if (!releaseManifestCommonValid(manifest)) {
-    throw new Error('SITE_RELEASE_MANIFEST_INVALID');
+    throw new Error("SITE_RELEASE_MANIFEST_INVALID");
   }
   const commonKeys = [
-    'schemaVersion',
-    'releaseId',
-    'workspaceId',
-    'siteId',
-    'siteVersionId',
-    'buildRunId',
-    'producerToken',
-    'artifactPrefix',
-    'artifactDigest',
-    'specVersion',
-    'specDigest',
-    'buildIdentity',
-    'createdAt',
-    'componentTypes',
-    'files',
+    "schemaVersion",
+    "releaseId",
+    "workspaceId",
+    "siteId",
+    "siteVersionId",
+    "buildRunId",
+    "producerToken",
+    "artifactPrefix",
+    "artifactDigest",
+    "specVersion",
+    "specDigest",
+    "buildIdentity",
+    "createdAt",
+    "componentTypes",
+    "files",
   ];
   if (manifest.schemaVersion === RELEASE_MANIFEST_V1_SCHEMA_VERSION) {
     if (
       manifest.specVersion !== SITE_SPEC_V1_VERSION ||
       Object.keys(manifest).some((key) => !commonKeys.includes(key))
     ) {
-      throw new Error('SITE_RELEASE_MANIFEST_INVALID');
+      throw new Error("SITE_RELEASE_MANIFEST_INVALID");
     }
     return manifest as unknown as ReleaseManifestV1;
   }
   if (manifest.schemaVersion === RELEASE_MANIFEST_V2_SCHEMA_VERSION) {
     const v2Keys = [
       ...commonKeys,
-      'componentLibraryVersion',
-      'rendererVersion',
-      'designBrief',
-      'designBriefDigest',
+      "componentLibraryVersion",
+      "rendererVersion",
+      "designBrief",
+      "designBriefDigest",
     ];
     if (
       manifest.specVersion !== SITE_SPEC_V1_1_VERSION ||
       Object.keys(manifest).some((key) => !v2Keys.includes(key)) ||
-      typeof manifest.componentLibraryVersion !== 'string' ||
-      typeof manifest.rendererVersion !== 'string' ||
-      typeof manifest.designBriefDigest !== 'string' ||
+      typeof manifest.componentLibraryVersion !== "string" ||
+      typeof manifest.rendererVersion !== "string" ||
+      typeof manifest.designBriefDigest !== "string" ||
       !SHA256.test(manifest.designBriefDigest)
     ) {
-      throw new Error('SITE_RELEASE_MANIFEST_INVALID');
+      throw new Error("SITE_RELEASE_MANIFEST_INVALID");
     }
     const brief = validateDesignBriefV2(manifest.designBrief);
     if (
@@ -510,11 +514,11 @@ export function validateReleaseManifest(value: unknown): ReleaseManifest {
       brief.componentLibraryVersion !== manifest.componentLibraryVersion ||
       brief.rendererVersion !== manifest.rendererVersion
     ) {
-      throw new Error('SITE_RELEASE_DESIGN_BRIEF_DIGEST_MISMATCH');
+      throw new Error("SITE_RELEASE_DESIGN_BRIEF_DIGEST_MISMATCH");
     }
     return manifest as unknown as ReleaseManifestV2;
   }
-  throw new Error('SITE_RELEASE_MANIFEST_INVALID');
+  throw new Error("SITE_RELEASE_MANIFEST_INVALID");
 }
 
 function contentTypeFor(relativePath: string): string {
@@ -522,29 +526,29 @@ function contentTypeFor(relativePath: string): string {
   return (
     (
       {
-        '.avif': 'image/avif',
-        '.css': 'text/css; charset=utf-8',
-        '.gif': 'image/gif',
-        '.htm': 'text/html; charset=utf-8',
-        '.html': 'text/html; charset=utf-8',
-        '.ico': 'image/x-icon',
-        '.jpeg': 'image/jpeg',
-        '.jpg': 'image/jpeg',
-        '.js': 'text/javascript; charset=utf-8',
-        '.json': 'application/json; charset=utf-8',
-        '.mjs': 'text/javascript; charset=utf-8',
-        '.otf': 'font/otf',
-        '.pdf': 'application/pdf',
-        '.png': 'image/png',
-        '.svg': 'image/svg+xml',
-        '.ttf': 'font/ttf',
-        '.txt': 'text/plain; charset=utf-8',
-        '.webp': 'image/webp',
-        '.woff': 'font/woff',
-        '.woff2': 'font/woff2',
-        '.xml': 'application/xml; charset=utf-8',
+        ".avif": "image/avif",
+        ".css": "text/css; charset=utf-8",
+        ".gif": "image/gif",
+        ".htm": "text/html; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+        ".ico": "image/x-icon",
+        ".jpeg": "image/jpeg",
+        ".jpg": "image/jpeg",
+        ".js": "text/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
+        ".otf": "font/otf",
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".svg": "image/svg+xml",
+        ".ttf": "font/ttf",
+        ".txt": "text/plain; charset=utf-8",
+        ".webp": "image/webp",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".xml": "application/xml; charset=utf-8",
       } as Record<string, string>
-    )[extension] ?? 'application/octet-stream'
+    )[extension] ?? "application/octet-stream"
   );
 }
 
@@ -557,17 +561,17 @@ function validateIdentity(input: BuildReleaseArtifactInput): void {
     input.buildRunId,
     input.producerToken,
   ]) {
-    if (!UUID.test(value)) throw new Error('SITE_RELEASE_INVALID_IDENTITY');
+    if (!UUID.test(value)) throw new Error("SITE_RELEASE_INVALID_IDENTITY");
   }
   const expectedPrefix = `sites/${input.siteId}/releases/${input.releaseId}`;
   if (input.artifactPrefix !== expectedPrefix) {
-    throw new Error('SITE_RELEASE_INVALID_ARTIFACT_PREFIX');
+    throw new Error("SITE_RELEASE_INVALID_ARTIFACT_PREFIX");
   }
   if (!BUILD_IDENTITY.test(input.buildIdentity)) {
-    throw new Error('SITE_RELEASE_INVALID_BUILD_IDENTITY');
+    throw new Error("SITE_RELEASE_INVALID_BUILD_IDENTITY");
   }
   if (!Number.isFinite(input.releaseCreatedAt.getTime())) {
-    throw new Error('SITE_RELEASE_INVALID_CREATED_AT');
+    throw new Error("SITE_RELEASE_INVALID_CREATED_AT");
   }
 }
 
@@ -580,49 +584,49 @@ async function collectFiles(
 
   const visit = async (directory: string, depth: number): Promise<void> => {
     if (depth > MAX_RELEASE_DEPTH) {
-      throw new Error('SITE_RELEASE_DIRECTORY_DEPTH_EXCEEDED');
+      throw new Error("SITE_RELEASE_DIRECTORY_DEPTH_EXCEEDED");
     }
     const entries = (await readdir(directory, { withFileTypes: true })).sort(
       (left, right) => left.name.localeCompare(right.name),
     );
     for (const entry of entries) {
       if (entry.isSymbolicLink()) {
-        throw new Error('SITE_RELEASE_SYMLINK_FORBIDDEN');
+        throw new Error("SITE_RELEASE_SYMLINK_FORBIDDEN");
       }
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         await visit(absolute, depth + 1);
         continue;
       }
-      if (!entry.isFile()) throw new Error('SITE_RELEASE_NON_REGULAR_FILE');
+      if (!entry.isFile()) throw new Error("SITE_RELEASE_NON_REGULAR_FILE");
       const relativePath = path
         .relative(root, absolute)
         .split(path.sep)
-        .join('/');
+        .join("/");
       if (
         relativePath.length === 0 ||
-        relativePath.startsWith('../') ||
-        relativePath.includes('/../') ||
-        relativePath.includes('\\') ||
-        relativePath.includes('\0')
+        relativePath.startsWith("../") ||
+        relativePath.includes("/../") ||
+        relativePath.includes("\\") ||
+        relativePath.includes("\0")
       ) {
-        throw new Error('SITE_RELEASE_INVALID_FILE_PATH');
+        throw new Error("SITE_RELEASE_INVALID_FILE_PATH");
       }
-      const handle = await open(absolute, 'r');
+      const handle = await open(absolute, "r");
       try {
         const fileStat = await handle.stat();
         if (!fileStat.isFile())
-          throw new Error('SITE_RELEASE_NON_REGULAR_FILE');
+          throw new Error("SITE_RELEASE_NON_REGULAR_FILE");
         if (fileStat.size > MAX_RELEASE_FILE_BYTES) {
-          throw new Error('SITE_RELEASE_FILE_SIZE_EXCEEDED');
+          throw new Error("SITE_RELEASE_FILE_SIZE_EXCEEDED");
         }
         totalBytes += fileStat.size;
         if (totalBytes > MAX_RELEASE_TOTAL_BYTES) {
-          throw new Error('SITE_RELEASE_TOTAL_SIZE_EXCEEDED');
+          throw new Error("SITE_RELEASE_TOTAL_SIZE_EXCEEDED");
         }
         const data = await handle.readFile();
         if (data.length !== fileStat.size) {
-          throw new Error('SITE_RELEASE_FILE_CHANGED_DURING_READ');
+          throw new Error("SITE_RELEASE_FILE_CHANGED_DURING_READ");
         }
         files.push({
           path: relativePath,
@@ -633,7 +637,7 @@ async function collectFiles(
           data,
         });
         if (files.length > MAX_RELEASE_FILES) {
-          throw new Error('SITE_RELEASE_FILE_COUNT_EXCEEDED');
+          throw new Error("SITE_RELEASE_FILE_COUNT_EXCEEDED");
         }
       } finally {
         await handle.close();
@@ -642,7 +646,7 @@ async function collectFiles(
   };
 
   await visit(root, 0);
-  if (files.length === 0) throw new Error('SITE_RELEASE_EMPTY_ARTIFACT');
+  if (files.length === 0) throw new Error("SITE_RELEASE_EMPTY_ARTIFACT");
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
@@ -654,7 +658,7 @@ export async function buildReleaseArtifact(
     (input.spec.specVersion === SITE_SPEC_V1_VERSION && input.designBrief) ||
     (input.spec.specVersion === SITE_SPEC_V1_1_VERSION && !input.designBrief)
   ) {
-    throw new Error('SITE_RELEASE_DESIGN_BRIEF_VERSION_MISMATCH');
+    throw new Error("SITE_RELEASE_DESIGN_BRIEF_VERSION_MISMATCH");
   }
   const designBrief = input.designBrief
     ? validateDesignBriefV2(input.designBrief)
@@ -667,7 +671,7 @@ export async function buildReleaseArtifact(
       designBrief!.archetype !== input.spec.site.archetype ||
       designBrief!.familyId !== input.spec.site.familyId)
   ) {
-    throw new Error('SITE_RELEASE_DESIGN_BRIEF_IDENTITY_MISMATCH');
+    throw new Error("SITE_RELEASE_DESIGN_BRIEF_IDENTITY_MISMATCH");
   }
   validateIdentity(input);
   const objectRoot = `${input.artifactPrefix}/attempts/${input.producerToken}`;
@@ -684,7 +688,7 @@ export async function buildReleaseArtifact(
     artifactPrefix: input.artifactPrefix,
     artifactDigest,
     specVersion: input.storedSpecVersion,
-    specDigest: sha256(canonicalJson(input.spec)),
+    specDigest: releaseSpecDigest(input.spec),
     buildIdentity: input.buildIdentity,
     createdAt: input.releaseCreatedAt.toISOString(),
     componentTypes: [
@@ -768,7 +772,7 @@ export async function uploadReleaseArtifact(
     {
       key: release.manifestObjectKey,
       data: release.manifestBytes,
-      contentType: 'application/json; charset=utf-8',
+      contentType: "application/json; charset=utf-8",
       sha256: release.manifestDigest,
     },
     signal,

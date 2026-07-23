@@ -1,0 +1,826 @@
+{
+  "specVersion": "1.1.0",
+  "componentLibraryVersion": "m1-e-a/55-qualified",
+  "rendererVersion": "site-renderer@m1-e-b/1.0.0",
+  "site": {
+    "defaultLocale": "en",
+    "locales": ["en"],
+    "archetype": "industrial-manufacturer",
+    "familyId": "precision-industrial",
+    "dirByLocale": { "en": "ltr" },
+    "theme": { "preset": "industrial-power" },
+    "nav": [
+      { "labelKey": "nav.home", "pageId": "home" },
+      { "labelKey": "nav.detail", "pageId": "detail" }
+    ],
+    "seoGlobal": { "siteName": "precision-industrial rich" }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "path": "/",
+      "seo": {
+        "titleKey": "seo.home.title",
+        "descriptionKey": "seo.home.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "IndustrialHero",
+            "props": {
+              "id": "IndustrialHero-home-precision-home-hero",
+              "badgeKey": "home.precision-home-hero.badge",
+              "badgeSubKey": "home.precision-home-hero.badgesub",
+              "leftH1Key": "home.precision-home-hero.lefth1",
+              "leftH1AccentKey": "home.precision-home-hero.lefth1accent",
+              "leftSubKey": "home.precision-home-hero.leftsub",
+              "leftStats": [
+                {
+                  "value": "24",
+                  "suffix": "h",
+                  "labelKey": "home.precision-home-hero.leftstats.0.label"
+                }
+              ],
+              "rightH1Key": "home.precision-home-hero.righth1",
+              "rightH2aKey": "home.precision-home-hero.righth2a",
+              "rightH2bAccentKey": "home.precision-home-hero.righth2baccent",
+              "rightSubKey": "home.precision-home-hero.rightsub",
+              "primaryCta": {
+                "labelKey": "home.precision-home-hero.primarycta.label",
+                "pageId": "detail"
+              },
+              "secondaryCta": {
+                "labelKey": "home.precision-home-hero.secondarycta.label",
+                "pageId": "detail"
+              },
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "TechSystems",
+            "props": {
+              "id": "TechSystems-home-precision-home-systems",
+              "chapterKey": "home.precision-home-systems.chapter",
+              "titleKey": "home.precision-home-systems.title",
+              "titleAccentKey": "home.precision-home-systems.titleaccent",
+              "introKey": "home.precision-home-systems.intro",
+              "systems": [
+                {
+                  "label": "Hydraulic",
+                  "titleKey": "home.precision-home-systems.systems.0.title",
+                  "descKey": "home.precision-home-systems.systems.0.desc",
+                  "metric": "16",
+                  "suffix": "bar",
+                  "metricLabelKey": "home.precision-home-systems.systems.0.metriclabel"
+                },
+                {
+                  "label": "Materials",
+                  "titleKey": "home.precision-home-systems.systems.1.title",
+                  "descKey": "home.precision-home-systems.systems.1.desc",
+                  "metric": "320",
+                  "suffix": "°C",
+                  "metricLabelKey": "home.precision-home-systems.systems.1.metriclabel"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "StatsBand",
+            "props": {
+              "id": "StatsBand-home-precision-home-stats",
+              "stats": [
+                {
+                  "value": "20+",
+                  "labelKey": "home.precision-home-stats.stats.0.label"
+                },
+                {
+                  "value": "40+",
+                  "labelKey": "home.precision-home-stats.stats.1.label"
+                },
+                {
+                  "value": "ISO 9001",
+                  "labelKey": "home.precision-home-stats.stats.2.label"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CtaBanner",
+            "props": {
+              "id": "CtaBanner-home-precision-home-cta",
+              "headlineKey": "home.precision-home-cta.headline",
+              "cta": { "labelKey": "home.precision-home-cta.cta.label" },
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "path": "/detail",
+      "seo": {
+        "titleKey": "seo.detail.title",
+        "descriptionKey": "seo.detail.description"
+      },
+      "puck": {
+        "root": { "props": {} },
+        "content": [
+          {
+            "type": "HeroBanner",
+            "props": {
+              "id": "HeroBanner-detail-precision-application-hero",
+              "headlineKey": "detail.precision-application-hero.headline",
+              "subheadKey": "detail.precision-application-hero.subhead",
+              "cta": {
+                "labelKey": "detail.precision-application-hero.cta.label"
+              },
+              "variant": "quiet"
+            }
+          },
+          {
+            "type": "ServicesGrid",
+            "props": {
+              "id": "ServicesGrid-detail-precision-application-services",
+              "eyebrowKey": "detail.precision-application-services.eyebrow",
+              "titleKey": "detail.precision-application-services.title",
+              "titleAccentKey": "detail.precision-application-services.titleaccent",
+              "introKey": "detail.precision-application-services.intro",
+              "services": [
+                {
+                  "icon": "ri-settings-3-line",
+                  "titleKey": "detail.precision-application-services.services.0.title",
+                  "descKey": "detail.precision-application-services.services.0.desc"
+                },
+                {
+                  "icon": "ri-file-list-3-line",
+                  "titleKey": "detail.precision-application-services.services.1.title",
+                  "descKey": "detail.precision-application-services.services.1.desc"
+                }
+              ],
+              "variant": "technical-grid"
+            }
+          },
+          {
+            "type": "CtaBanner",
+            "props": {
+              "id": "CtaBanner-detail-precision-application-cta",
+              "headlineKey": "detail.precision-application-cta.headline",
+              "cta": {
+                "labelKey": "detail.precision-application-cta.cta.label"
+              },
+              "variant": "technical-grid"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "assets": {
+    "catalog-precision-industrial-hero-field": {
+      "source": "catalog",
+      "packId": "precision-industrial-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "precision-industrial-hero-field",
+      "sha256": "e211f711fc4f545e9c1f4c8e41151f3b561f5d30044d7d4438093806bb90e1ac",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-precision-industrial-product-module": {
+      "source": "catalog",
+      "packId": "precision-industrial-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "precision-industrial-product-module",
+      "sha256": "b235da342eb1dd5748ec8fcb6b66a52106600f3421a74869d49c64e05526b853",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-precision-industrial-process-grid": {
+      "source": "catalog",
+      "packId": "precision-industrial-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "precision-industrial-process-grid",
+      "sha256": "ded1503373af761c99dfd88917f292193c7536f3a22be69ac857343afafef537",
+      "mimeType": "image/svg+xml"
+    },
+    "catalog-precision-industrial-process-inspection": {
+      "source": "catalog",
+      "packId": "precision-industrial-demo-pack",
+      "packVersion": "1.0.0",
+      "catalogAssetId": "precision-industrial-process-inspection",
+      "sha256": "3dd7012b059610c4582fa02566fcef0cd8ae42840d6243e62f3264e8034546b7",
+      "mimeType": "image/svg+xml"
+    }
+  },
+  "copyBundles": {
+    "en": {
+      "detail.precision-application-cta.cta.label": "Get in touch",
+      "detail.precision-application-cta.headline": "Practical solutions",
+      "detail.precision-application-hero.cta.label": "Get in touch",
+      "detail.precision-application-hero.headline": "Practical solutions",
+      "detail.precision-application-hero.subhead": "Further information is available on request.",
+      "detail.precision-application-services.eyebrow": "Further information is available on req…",
+      "detail.precision-application-services.intro": "Further information is available on request.",
+      "detail.precision-application-services.services.0.desc": "Further information is available on req…",
+      "detail.precision-application-services.services.0.title": "Practical solutions",
+      "detail.precision-application-services.services.1.desc": "Further information is available on req…",
+      "detail.precision-application-services.services.1.title": "Practical solutions",
+      "detail.precision-application-services.title": "Practical solutions",
+      "detail.precision-application-services.titleaccent": "Further information is avail…",
+      "detail.precision-detail-hero.cta.label": "Get in touch",
+      "detail.precision-detail-hero.headline": "Practical solutions",
+      "detail.precision-detail-hero.subhead": "Further information is available on request.",
+      "detail.precision-detail-inquiry.sub": "Further information is available on request.",
+      "detail.precision-detail-inquiry.title": "Practical solutions",
+      "detail.precision-detail-process.eyebrow": "Further information is available on req…",
+      "detail.precision-detail-process.intro": "Further information is available on request.",
+      "detail.precision-detail-process.steps.0.body": "Further information is available on req…",
+      "detail.precision-detail-process.steps.0.title": "Practical solutions",
+      "detail.precision-detail-process.steps.1.body": "Further information is available on req…",
+      "detail.precision-detail-process.steps.1.title": "Practical solutions",
+      "detail.precision-detail-process.title": "Practical solutions",
+      "detail.precision-detail-process.titleaccent": "Further information is avail…",
+      "footer.tagline": "Further information is available on request.",
+      "home.precision-home-cta.cta.label": "Get in touch",
+      "home.precision-home-cta.headline": "Practical solutions",
+      "home.precision-home-hero.badge": "Further information is available on request.",
+      "home.precision-home-hero.badgesub": "Further information is available on request.",
+      "home.precision-home-hero.lefth1": "Further information is…",
+      "home.precision-home-hero.lefth1accent": "Further information is…",
+      "home.precision-home-hero.leftstats.0.label": "Further information is available on request.",
+      "home.precision-home-hero.leftsub": "Further information is available on request.",
+      "home.precision-home-hero.primarycta.label": "Get in touch",
+      "home.precision-home-hero.righth1": "Further information is…",
+      "home.precision-home-hero.righth2a": "Further information is…",
+      "home.precision-home-hero.righth2baccent": "Further information is…",
+      "home.precision-home-hero.rightsub": "Further information is available on request.",
+      "home.precision-home-hero.secondarycta.label": "Get in touch",
+      "home.precision-home-stats.stats.0.label": "Further information is…",
+      "home.precision-home-stats.stats.1.label": "Further information is…",
+      "home.precision-home-stats.stats.2.label": "Further information is…",
+      "home.precision-home-systems.chapter": "Further information is available on req…",
+      "home.precision-home-systems.intro": "Further information is available on request.",
+      "home.precision-home-systems.systems.0.desc": "Further information is…",
+      "home.precision-home-systems.systems.0.metriclabel": "Further information is…",
+      "home.precision-home-systems.systems.0.title": "Practical solutions",
+      "home.precision-home-systems.systems.1.desc": "Further information is…",
+      "home.precision-home-systems.systems.1.metriclabel": "Further information is…",
+      "home.precision-home-systems.systems.1.title": "Practical solutions",
+      "home.precision-home-systems.title": "Practical solutions",
+      "home.precision-home-systems.titleaccent": "Further information is avail…",
+      "inquiry.field.email": "Work email",
+      "inquiry.field.message": "Your inquiry",
+      "inquiry.field.name": "Name",
+      "inquiry.m0.note": "The inquiry form is enabled when the site is published.",
+      "inquiry.submit": "Get in touch",
+      "nav.detail": "Further information is availabl…",
+      "nav.home": "Home",
+      "seo.detail.description": "Explore available solutions and ways to get in touch.",
+      "seo.detail.title": "Company website",
+      "seo.home.description": "Explore available solutions and ways to get in touch.",
+      "seo.home.title": "Company website"
+    }
+  },
+  "copyBundleSet": {
+    "schemaVersion": "site-builder-copy-bundle-set/v1",
+    "sourceLocale": "en",
+    "bundles": {
+      "en": {
+        "schemaVersion": "site-builder-copy-bundle/v1",
+        "slotCatalogVersion": "site-builder-copy-slots/v1",
+        "locale": "en",
+        "sourceLocale": "en",
+        "status": "complete",
+        "claimSnapshot": {
+          "id": "snapshot-e18f6078cb2731c9",
+          "digest": "e88d8b75aa68bb5004cde28d75a0cec042d4a60053e269c66e312b7bff7aab2e"
+        },
+        "inputHash": "ef984186f26bbbc2eaadfa76b6b60b830112a14f2a4c0cc9f21bdea92b71986a",
+        "slots": {
+          "detail.precision-application-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.precision-application-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-application-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.precision-application-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-application-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.precision-application-services.services.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.services.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.services.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.services.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-application-services.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "detail.precision-detail-hero.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "detail.precision-detail-hero.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-detail-hero.subhead": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.precision-detail-inquiry.sub": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "detail.precision-detail-inquiry.title": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.eyebrow": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.steps.0.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.steps.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.steps.1.body": {
+            "type": "rich_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on req…"
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.steps.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "detail.precision-detail-process.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "footer.tagline": {
+            "type": "plain_text",
+            "maxGraphemes": 120,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.precision-home-cta.cta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.precision-home-cta.headline": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.badge": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.badgesub": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.lefth1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.lefth1accent": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.leftstats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.leftsub": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.primarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.righth1": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.righth2a": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.righth2baccent": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.rightsub": {
+            "type": "plain_text",
+            "maxGraphemes": 72,
+            "factual": false,
+            "content": "Further information is available on request.",
+            "claimRefs": []
+          },
+          "home.precision-home-hero.secondarycta.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "home.precision-home-stats.stats.0.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-stats.stats.1.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-stats.stats.2.label": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.chapter": {
+            "type": "plain_text",
+            "maxGraphemes": 40,
+            "factual": false,
+            "content": "Further information is available on req…",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.intro": {
+            "type": "rich_text",
+            "maxGraphemes": 180,
+            "factual": false,
+            "content": {
+              "type": "doc",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Further information is available on request."
+                    }
+                  ]
+                }
+              ]
+            },
+            "claimRefs": []
+          },
+          "home.precision-home-systems.systems.0.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.systems.0.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.systems.0.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.systems.1.desc": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.systems.1.metriclabel": {
+            "type": "plain_text",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Further information is…",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.systems.1.title": {
+            "type": "plain_text",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.title": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Practical solutions",
+            "claimRefs": []
+          },
+          "home.precision-home-systems.titleaccent": {
+            "type": "plain_text",
+            "maxGraphemes": 29,
+            "factual": false,
+            "content": "Further information is avail…",
+            "claimRefs": []
+          },
+          "inquiry.field.email": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Work email",
+            "claimRefs": []
+          },
+          "inquiry.field.message": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Your inquiry",
+            "claimRefs": []
+          },
+          "inquiry.field.name": {
+            "type": "form_label",
+            "maxGraphemes": 48,
+            "factual": false,
+            "content": "Name",
+            "claimRefs": []
+          },
+          "inquiry.m0.note": {
+            "type": "plain_text",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "The inquiry form is enabled when the site is published.",
+            "claimRefs": []
+          },
+          "inquiry.submit": {
+            "type": "cta_label",
+            "maxGraphemes": 24,
+            "factual": false,
+            "content": "Get in touch",
+            "claimRefs": []
+          },
+          "nav.detail": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Further information is availabl…",
+            "claimRefs": []
+          },
+          "nav.home": {
+            "type": "plain_text",
+            "maxGraphemes": 32,
+            "factual": false,
+            "content": "Home",
+            "claimRefs": []
+          },
+          "seo.detail.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.detail.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          },
+          "seo.home.description": {
+            "type": "seo_description",
+            "maxGraphemes": 160,
+            "factual": false,
+            "content": "Explore available solutions and ways to get in touch.",
+            "claimRefs": []
+          },
+          "seo.home.title": {
+            "type": "seo_title",
+            "maxGraphemes": 60,
+            "factual": false,
+            "content": "Company website",
+            "claimRefs": []
+          }
+        },
+        "digest": "8215aceb1c44681c18ded488bcf9d2066fd08130a60488058f9a46401d4e8372"
+      }
+    }
+  }
+}
