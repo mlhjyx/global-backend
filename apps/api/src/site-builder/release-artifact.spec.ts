@@ -118,6 +118,11 @@ describe('R1 release contract gate', () => {
       'TrustSplit',
       'ValueStrip',
       'WarmHero',
+      'DispatchHero',
+      'ServicesEditorial',
+      'DispatchTimeline',
+      'CrewGrid',
+      'CoverageMap',
     ]);
     expect(() =>
       assertReleaseContract(spec(['HeroBanner']), '1.0.0'),
@@ -266,6 +271,30 @@ describe('R1 release contract gate', () => {
       },
       'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ServiceRows.cta.pageId=missing',
     ],
+    [
+      'DispatchHero.cta1PageId',
+      'DispatchHero',
+      { fileKey: 'dispatch.file', chapterKey: 'dispatch.chapter', eyebrowKey: 'dispatch.eyebrow', h1aKey: 'dispatch.one', h1bKey: 'dispatch.two', bodyKey: 'dispatch.body', cta1Key: 'dispatch.book', cta1PageId: 'missing', cta2Key: 'dispatch.call', cta2PhoneKey: 'dispatch.phone', trustOpenKey: 'dispatch.open', trustLicKey: 'dispatch.license', coverageLabelKey: 'dispatch.coverage', coverageValueKey: 'dispatch.value', etaLabelKey: 'dispatch.eta', etaValueKey: 'dispatch.window', marqueeItems: ['North', 'Harbor'], variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: DispatchHero.cta1PageId.pageId=missing',
+    ],
+    [
+      'ServicesEditorial.bookPageId',
+      'ServicesEditorial',
+      { chapterKey: 'services.chapter', services: [{ code: '01', titleKey: 'services.title', bodyKey: 'services.body', specKey: 'services.spec' }], bookLabelKey: 'services.book', bookPageId: 'missing', variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: ServicesEditorial.bookPageId.pageId=missing',
+    ],
+    [
+      'DispatchTimeline.ctaPageId',
+      'DispatchTimeline',
+      { chapterKey: 'timeline.chapter', titleKey: 'timeline.title', titleAccentKey: 'timeline.accent', bodyKey: 'timeline.body', ctaKey: 'timeline.book', ctaPageId: 'missing', callKey: 'timeline.call', callPhoneKey: 'timeline.phone', steps: [{ t: '01', titleKey: 'timeline.one', bodyKey: 'timeline.one.body' }], variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: DispatchTimeline.ctaPageId.pageId=missing',
+    ],
+    [
+      'CrewGrid.requestPageId',
+      'CrewGrid',
+      { chapterKey: 'crew.chapter', h1aKey: 'crew.one', h1bKey: 'crew.two', bodyKey: 'crew.body', stats: [{ labelKey: 'crew.stat', value: '24', subKey: 'crew.sub' }], members: [{ nameKey: 'crew.name', roleKey: 'crew.role', years: '8', regionsKey: 'crew.regions', quoteKey: 'crew.quote', truckKey: 'crew.unit', authorizedProfile: true }], footnoteKey: 'crew.footnote', requestKey: 'crew.book', requestPageId: 'missing', variant: 'technical-grid' },
+      'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: CrewGrid.requestPageId.pageId=missing',
+    ],
   ])('rejects unknown internal page target for %s', (_label, type, props, expected) => {
     expect(() => assertReleaseContract(spec([type], props), '1.0.0')).toThrow(expected);
   });
@@ -273,6 +302,12 @@ describe('R1 release contract gate', () => {
   it('keeps the legacy CollectionCards home target releaseable', () => {
     expect(() => assertReleaseContract(spec(['CollectionCards'], {
       eyebrowKey: 'collections.eyebrow', titleKey: 'collections.title', items: [], variant: 'technical-grid',
+    }), '1.0.0')).not.toThrow();
+  });
+
+  it('does not require a booking page when ServicesEditorial renders no CTA', () => {
+    expect(() => assertReleaseContract(spec(['ServicesEditorial'], {
+      chapterKey: 'services.chapter', services: [{ code: '01', titleKey: 'services.title', bodyKey: 'services.body', specKey: 'services.spec' }], variant: 'technical-grid',
     }), '1.0.0')).not.toThrow();
   });
 

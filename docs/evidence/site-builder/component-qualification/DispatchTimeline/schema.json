@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"DispatchTimeline","status":"pass","part":"schema","assertions":["Closed timeline steps and an internal booking target are bounded."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

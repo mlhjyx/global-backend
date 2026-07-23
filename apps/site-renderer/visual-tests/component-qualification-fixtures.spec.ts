@@ -45,6 +45,11 @@ const QUALIFIED_COMPONENTS = {
   FeaturedSpotlight: "section.featured-spotlight",
   StoryChapters: "section.story-chapters",
   ChapterShowcase: "section.chapter-showcase",
+  DispatchHero: "section.dispatch-hero",
+  ServicesEditorial: "section.services-editorial",
+  DispatchTimeline: "section.dispatch-timeline",
+  CrewGrid: "section.crew-grid",
+  CoverageMap: "section.coverage-map",
 } as const;
 
 const componentType = process.env.COMPONENT_QUALIFICATION_COMPONENT;
@@ -195,6 +200,29 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
   }
   if (componentType === "ChapterShowcase") {
     await expect(section.locator("ul > li > article")).toHaveCount(2);
+  }
+  if (componentType === "DispatchHero") {
+    await expect(section.locator("h1")).toHaveCount(1);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/book");
+    await expect(section.locator("ul > li")).toHaveCount(2);
+  }
+  if (componentType === "ServicesEditorial") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/book");
+  }
+  if (componentType === "DispatchTimeline") {
+    await expect(section.locator("ol > li > article")).toHaveCount(2);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/book");
+  }
+  if (componentType === "CrewGrid") {
+    await expect(section.locator(".members > li > article")).toHaveCount(2);
+    await expect(section.locator("a")).toHaveAttribute("href", "/book");
+    await expect(section.locator("script")).toHaveCount(0);
+  }
+  if (componentType === "CoverageMap") {
+    await expect(section.locator(".coverage-index ol > li")).toHaveCount(2);
+    await expect(section.locator(".pin-list > li")).toHaveCount(2);
+    await expect(section.locator("[style*='animation']")).toHaveCount(0);
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",

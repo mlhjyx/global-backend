@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"ServicesEditorial","status":"pass","part":"reducedMotion","assertions":["No continuous or motion-dependent behavior is used."],"sources":["apps/site-renderer/src/components/ServicesEditorial.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"DispatchTimeline","status":"pass","part":"contentBudget","assertions":["Timeline copy, ordered steps and contact labels are bounded."],"sources":["packages/contracts/src/site-builder/component-content-budget.ts"],"verification":["pnpm --filter @global/api test -- component-technical-baseline.spec.ts"]}

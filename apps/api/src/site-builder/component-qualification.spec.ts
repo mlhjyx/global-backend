@@ -106,7 +106,7 @@ describe("M1-e-A component qualification gate", () => {
     });
   });
 
-  it("registers forty-four qualified components and keeps unqualified types gallery-only", () => {
+  it("registers forty-nine qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("AreaGallery")).toMatchObject({
       status: "m1_e_a_qualified",
@@ -119,9 +119,13 @@ describe("M1-e-A component qualification gate", () => {
       "CertWall",
       "ChapterShowcase",
       "CollectionCards",
+      "CoverageMap",
+      "CrewGrid",
       "CtaBanner",
       "CtaCenter",
       "DishesShowcase",
+      "DispatchHero",
+      "DispatchTimeline",
       "EditorialHero",
       "FaqAccordion",
       "FaqSplit",
@@ -145,6 +149,7 @@ describe("M1-e-A component qualification gate", () => {
       "ProjectsGrid",
       "ServiceRows",
       "ServicesDark",
+      "ServicesEditorial",
       "ServicesGrid",
       "SplitAbout",
       "StatementBlock",
@@ -158,7 +163,7 @@ describe("M1-e-A component qualification gate", () => {
       "WarmHero",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      308,
+      343,
     );
     for (const componentType of [
       "CtaBanner",
@@ -200,6 +205,11 @@ describe("M1-e-A component qualification gate", () => {
       "FeaturedSpotlight",
       "StoryChapters",
       "ChapterShowcase",
+      "DispatchHero",
+      "ServicesEditorial",
+      "DispatchTimeline",
+      "CrewGrid",
+      "CoverageMap",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",
@@ -276,12 +286,12 @@ describe("M1-e-A component qualification gate", () => {
       assertReleaseQualificationRegistryIntegrity({
         releaseTypes: [
           ...SITE_SPEC_RELEASE_COMPONENT_TYPES,
-          "DispatchHero",
+          "HeroFull",
         ],
         qualifications: M1_E_A_COMPONENT_QUALIFICATIONS,
         artifacts: M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
       }),
-    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: DispatchHero");
+    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: HeroFull");
   });
 
   it("rejects placeholder qualification ids without resolved artifacts", () => {

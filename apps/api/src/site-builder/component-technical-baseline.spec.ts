@@ -81,6 +81,22 @@ describe("M1-e-A technical baseline component contract", () => {
     );
   });
 
+  it("rejects CrewGrid members without explicit profile authorization", () => {
+    expect(() => validateBlock({ type: "CrewGrid", props: {
+      chapterKey: "crew.chapter", h1aKey: "crew.one", h1bKey: "crew.two", bodyKey: "crew.body",
+      stats: [{ labelKey: "crew.stat", value: "24", subKey: "crew.sub" }],
+      members: [{ nameKey: "crew.name", roleKey: "crew.role", years: "8", regionsKey: "crew.regions", quoteKey: "crew.quote", truckKey: "crew.unit" }],
+      footnoteKey: "crew.footnote", requestKey: "crew.book",
+    }} as never)).toThrow("INVALID_BLOCK_PROPS: CrewGrid");
+  });
+
+  it("rejects CoverageMap coordinates outside the controlled percentage grammar", () => {
+    expect(() => validateBlock({ type: "CoverageMap", props: {
+      chapterKey: "coverage.chapter", titleKey: "coverage.title", titleLine2Key: "coverage.accent", bodyKey: "coverage.body", indexLabelKey: "coverage.index",
+      areas: [{ name: "North" }], footnoteKey: "coverage.footnote", pins: [{ labelKey: "coverage.pin", subKey: "coverage.sub", top: "0%;animation:spin 1s", left: "50%" }], plateLabelKey: "coverage.plate", updatedKey: "coverage.updated",
+    }} as never)).toThrow("INVALID_BLOCK_PROPS: CoverageMap");
+  });
+
   it.each([
     ["ServicesGrid", { eyebrow: "Services", title: "Engineering support", accent: "that remains traceable", intro: "Scope, delivery and records stay clear.", cards: [{ title: "Duty review", description: "Operating conditions are documented.", icon: "ri-settings-line" }] }],
     ["TrustSplit", { eyebrow: "Trust", title: "Evidence", accent: "before claims", intro: "The working basis is visible.", metrics: [{ value: "24h", label: "Reply target" }, { value: "ISO", label: "Quality system" }], badges: ["CE"], name: "Technical team", role: "Project support" }],

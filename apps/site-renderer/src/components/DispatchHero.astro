@@ -1,146 +1,19 @@
 ---
-interface Props {
-  fileKey: string;
-  chapterKey: string;
-  eyebrowKey: string;
-  h1aKey: string;
-  h1bKey: string;
-  bodyKey: string;
-  cta1Key: string;
-  cta2Key: string;
-  cta2PhoneKey: string;
-  trustOpenKey: string;
-  trustLicKey: string;
-  coverageLabelKey: string;
-  coverageValueKey: string;
-  etaLabelKey: string;
-  etaValueKey: string;
-  marqueeItems: string[];
-  t: (key: string) => string;
-}
-const { fileKey, chapterKey, eyebrowKey, h1aKey, h1bKey, bodyKey, cta1Key, cta2Key, cta2PhoneKey, trustOpenKey, trustLicKey, coverageLabelKey, coverageValueKey, etaLabelKey, etaValueKey, marqueeItems = [], t } = Astro.props;
-const now = new Date();
-const time = now.toLocaleTimeString('en-US', { hour12: false });
-const doubled = [...marqueeItems, ...marqueeItems];
+import { createRequire } from 'node:module';
+import { localeQualifiedPageHref } from '../lib/page-reference';
+
+interface Props { fileKey:string; chapterKey:string; eyebrowKey:string; h1aKey:string; h1bKey:string; bodyKey:string; cta1Key:string; cta1PageId?:string; cta2Key:string; cta2PhoneKey:string; trustOpenKey:string; trustLicKey:string; coverageLabelKey:string; coverageValueKey:string; etaLabelKey:string; etaValueKey:string; marqueeItems:string[]; variant?:'technical-grid'|'quiet'; t:(key:string)=>string; locale:string; defaultLocale:string; instanceId:string; pagePathById?:Record<string,string> }
+const { assertQualifiedComponentContentBudget } = createRequire(import.meta.url)('@global/contracts');
+const { fileKey, chapterKey, eyebrowKey, h1aKey, h1bKey, bodyKey, cta1Key, cta1PageId='book', cta2Key, cta2PhoneKey, trustOpenKey, trustLicKey, coverageLabelKey, coverageValueKey, etaLabelKey, etaValueKey, marqueeItems, variant='technical-grid', t, locale, defaultLocale, instanceId, pagePathById={} } = Astro.props;
+const phone=t(cta2PhoneKey).replace(/[^0-9+]/g,'');
+const hasValidPhone=/^\+?[1-9]\d{6,14}$/.test(phone);
+const content={file:t(fileKey),chapter:t(chapterKey),eyebrow:t(eyebrowKey),title:`${t(h1aKey)} ${t(h1bKey)}`,body:t(bodyKey),cta:t(cta1Key),call:t(cta2Key),phone:t(cta2PhoneKey),trustOpen:t(trustOpenKey),trustLicense:t(trustLicKey),coverageLabel:t(coverageLabelKey),coverageValue:t(coverageValueKey),etaLabel:t(etaLabelKey),etaValue:t(etaValueKey),areas:marqueeItems};
+assertQualifiedComponentContentBudget('DispatchHero',content);
+const headingId=`${instanceId}-dispatch-hero-heading`;
 ---
-
-<section class="dispatch-hero grain">
-  <div class="util-bar">
-    <span>{t(fileKey)}</span>
-    <span class="hide-sm">{t(chapterKey)}</span>
-    <span>{time} PST</span>
-  </div>
-
-  <div class="content">
-    <div class="left">
-      <div class="chapter-row">
-        <span class="chapter-num">01</span>
-        <span class="chapter-mono">Hero<br />/ Call now</span>
-      </div>
-      <p class="eyebrow"><span class="rule"></span>{t(eyebrowKey)}</p>
-      <h1 class="display">
-        <span class="scramble" data-scramble data-text={t(h1aKey)}>{t(h1aKey)}</span>
-        <span class="scramble" data-scramble data-text={t(h1bKey)}>{t(h1bKey)}</span>
-      </h1>
-      <p class="body">{t(bodyKey)}</p>
-      <div class="ctas">
-        <a class="cta-ink" href="#book">{t(cta1Key)}<span class="arr">-&gt;</span></a>
-        <a class="cta-outline" href={`tel:${t(cta2PhoneKey).replace(/[^0-9+]/g, '')}`}>{t(cta2Key)}<span class="arr">{t(cta2PhoneKey)}</span></a>
-      </div>
-      <div class="trust">
-        <span><span class="flicker"></span>{t(trustOpenKey)}</span>
-        <span>{t(trustLicKey)}</span>
-        <span class="hide-sm">Bonded · $2M GL</span>
-      </div>
-    </div>
-
-    <div class="right">
-      <div class="plate">
-        <div class="plate-bg"></div>
-        <div class="plate-overlay"></div>
-        <div class="plate-top"><span>PLATE 01 · ACTIVE LEAK</span><span class="dim">N 36.169° / W 115.139°</span></div>
-        <div class="plate-bottom">
-          <div><div class="dim">{t(coverageLabelKey)}</div><div class="plate-value">{t(coverageValueKey)}</div></div>
-          <div class="right-align"><div class="dim">{t(etaLabelKey)}</div><div class="plate-value">{t(etaValueKey)}</div></div>
-        </div>
-      </div>
-      <div class="plate-cap"><span>FIG. 01 - Active leak, Henderson site</span><span>↳ on-call</span></div>
-    </div>
-  </div>
-
-  <div class="marquee">
-    <div class="marquee-track">
-      {doubled.map((c, i) => (<span class="marquee-item">{c}<span class="sep">/</span></span>))}
-    </div>
-  </div>
+<section class={`dispatch-hero dispatch-hero--${variant}`} data-component="DispatchHero" data-variant={variant} aria-labelledby={headingId}>
+  <div class="container"><header><p>{content.file}</p><p>{content.chapter}</p></header><div class="grid"><div><p class="eyebrow">{content.eyebrow}</p><h1 id={headingId}>{t(h1aKey)}<br />{t(h1bKey)}</h1><p class="body">{content.body}</p><div class="ctas"><a href={localeQualifiedPageHref(cta1PageId,pagePathById,locale,defaultLocale)}>{content.cta}<span aria-hidden="true">→</span></a>{hasValidPhone ? <a class="secondary" href={`tel:${phone}`}>{content.call} <span>{content.phone}</span></a> : <p class="secondary">{content.call} <span>{content.phone}</span></p>}</div><p class="trust">{content.trustOpen} · {content.trustLicense}</p></div><aside aria-label={`${content.coverageLabel} and ${content.etaLabel}`}><p>{content.coverageLabel}</p><strong>{content.coverageValue}</strong><p>{content.etaLabel}</p><strong>{content.etaValue}</strong></aside></div><ul aria-label="Service coverage">{content.areas.map((area)=><li>{area}</li>)}</ul></div>
 </section>
-
-<script>
-  const POOL = '!<>-_\\/[]{}-=+*^?#01ABCXYZ';
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  document.querySelectorAll<HTMLElement>('[data-scramble]').forEach((host) => {
-    const text = host.getAttribute('data-text') ?? '';
-    if (reduced) { host.textContent = text; return; }
-    const final = Array.from(text);
-    const cur = final.map((c) => (c === ' ' ? ' ' : POOL[Math.floor(Math.random() * POOL.length)]));
-    host.textContent = cur.join('');
-    final.forEach((_, i) => {
-      const startAt = 200 + i * 35;
-      for (let cyc = 0; cyc < 10; cyc++) {
-        setTimeout(() => { if (cur[i] !== final[i] && final[i] !== ' ') { cur[i] = POOL[Math.floor(Math.random() * POOL.length)]; host.textContent = cur.join(''); } }, startAt + cyc * 45);
-      }
-      setTimeout(() => { cur[i] = final[i]; host.textContent = cur.join(''); }, startAt + 10 * 45);
-    });
-  });
-</script>
-
 <style>
-  :global(.dispatch-hero) { }
-  .dispatch-hero { position: relative; min-height: 100svh; overflow: hidden; background: var(--c-surface); padding-top: 4rem; }
-  .grain { position: relative; }
-  .grain::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.05; background-image: radial-gradient(rgba(0,0,0,0.9) 1px, transparent 1px); background-size: 3px 3px; mix-blend-mode: multiply; }
-  .util-bar { position: relative; z-index: 2; max-width: 88rem; margin: 0 auto; padding: 0 clamp(1rem, 5vw, 4rem); border-top: 1px solid rgba(31,31,31,0.15); border-bottom: 1px solid rgba(31,31,31,0.15); padding-top: 0.75rem; padding-bottom: 0.75rem; display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
-  .hide-sm { display: none; }
-  @media (min-width: 640px) { .hide-sm { display: inline; } }
-  .content { position: relative; z-index: 2; max-width: 88rem; margin: 0 auto; padding: clamp(4rem, 9vw, 7rem) clamp(1rem, 5vw, 4rem) clamp(6rem, 12vw, 9rem); display: grid; grid-template-columns: 1fr; gap: 3.5rem; }
-  @media (min-width: 1024px) { .content { grid-template-columns: 1fr 1fr; gap: 3rem; align-items: start; } }
-  .chapter-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; }
-  .chapter-num { font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(3rem, 6vw, 4.5rem); line-height: 1; color: var(--c-on-surface); }
-  .chapter-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); line-height: 1.4; }
-  .eyebrow { display: flex; align-items: center; gap: 0.75rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); margin-bottom: 1.5rem; }
-  .rule { display: inline-block; width: 2rem; height: 1px; background: var(--c-accent); }
-  .display { font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; color: var(--c-on-surface); line-height: 1.02; letter-spacing: -0.02em; }
-  .display .scramble { display: block; font-size: clamp(2.75rem, 9vw, 6.5rem); white-space: nowrap; }
-  .display .scramble + .scramble { margin-top: 0.25rem; }
-  .body { margin-top: 2rem; max-width: 32rem; font-size: 1.05rem; line-height: 1.7; color: color-mix(in srgb, var(--c-on-surface) 80%, transparent); }
-  .ctas { margin-top: 2.5rem; display: flex; flex-direction: column; gap: 1rem; }
-  @media (min-width: 640px) { .ctas { flex-direction: row; align-items: center; } }
-  .cta-ink, .cta-outline { display: inline-flex; align-items: center; justify-content: space-between; gap: 1.5rem; height: 3.5rem; padding: 0 1.5rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 0.18em; transition: background .2s ease, color .2s ease; white-space: nowrap; }
-  .cta-ink { background: var(--c-primary); color: var(--c-on-primary); }
-  .cta-ink:hover { background: var(--c-accent); color: var(--c-on-accent); }
-  .cta-outline { border: 2px solid var(--c-on-surface); color: var(--c-on-surface); }
-  .cta-outline:hover { background: var(--c-on-surface); color: var(--c-surface); }
-  .arr { font-family: var(--font-heading); font-size: 0.95rem; }
-  .trust { margin-top: 2.5rem; display: flex; flex-wrap: wrap; gap: 1.5rem 2rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
-  .trust span { display: inline-flex; align-items: center; gap: 0.5rem; }
-  .flicker { width: 8px; height: 8px; border-radius: 9999px; background: var(--c-accent); animation: flicker 1.8s ease-in-out infinite; }
-  @keyframes flicker { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .right { margin-top: 1rem; }
-  @media (min-width: 1024px) { .right { margin-top: 0; } }
-  .plate { position: relative; aspect-ratio: 4 / 5; overflow: hidden; background: var(--c-secondary); }
-  @media (min-width: 768px) { .plate { aspect-ratio: auto; height: clamp(30rem, 50vw, 45rem); } }
-  .plate-bg { position: absolute; inset: 0; background: radial-gradient(60% 50% at 40% 30%, color-mix(in srgb, var(--c-accent) 14%, transparent), transparent 60%), linear-gradient(140deg, #2a2a2a, #0e0e0e); }
-  .plate-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.5), transparent 40%, rgba(0,0,0,0.1)); }
-  .plate-top { position: absolute; top: 1.25rem; left: 1.25rem; right: 1.25rem; display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-dark); }
-  .plate-top .dim, .dim { color: rgba(244,241,234,0.7); }
-  .plate-bottom { position: absolute; bottom: 0; left: 0; right: 0; padding: 1.25rem; display: flex; justify-content: space-between; color: var(--c-on-dark); }
-  .plate-value { font-family: var(--font-heading); font-weight: 900; font-stretch: 125%; font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1; margin-top: 0.25rem; }
-  .right-align { text-align: right; }
-  .plate-cap { margin-top: 1rem; display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface-muted); }
-  .marquee { position: absolute; bottom: 0; left: 0; right: 0; border-top: 1px solid rgba(31,31,31,0.15); background: var(--c-surface); overflow: hidden; }
-  .marquee-track { display: flex; width: max-content; padding: 1rem 0; animation: scroll 30s linear infinite; }
-  @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-  @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; flex-wrap: wrap; } }
-  .marquee-item { display: inline-flex; align-items: center; gap: 2.5rem; padding: 0 1.25rem; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--c-on-surface); }
-  .sep { color: var(--c-accent); }
+.dispatch-hero{background:var(--c-surface);color:var(--c-on-surface);padding:clamp(5rem,10vw,9rem) 0 0}.dispatch-hero--technical-grid{background-image:linear-gradient(90deg,color-mix(in srgb,var(--c-border) 28%,transparent) 1px,transparent 1px);background-size:2rem 2rem}header{display:flex;justify-content:space-between;gap:1rem;font:.7rem var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--c-on-surface-muted);border-block:1px solid var(--c-border);padding:.8rem 0}.grid{display:grid;gap:2rem;padding-block:clamp(3rem,7vw,6rem)}@media(min-width:800px){.grid{grid-template-columns:3fr 2fr}}.eyebrow{font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--c-on-surface-muted)}h1{margin-top:1rem;font-size:clamp(2.8rem,7vw,6rem);line-height:.95}.body{max-width:40rem;margin-top:1.25rem;line-height:1.7}.ctas{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:2rem}.ctas a,.ctas .secondary{min-height:2.75rem;display:inline-flex;align-items:center;gap:.5rem;padding:.55rem 1rem;background:var(--c-primary);color:var(--c-on-primary)}.ctas .secondary{background:transparent;border:1px solid currentColor;color:inherit}.ctas a:focus-visible{outline:2px solid currentColor;outline-offset:3px}.trust{margin-top:1.5rem;color:var(--c-on-surface-muted)}aside{padding:1.5rem;border:1px solid var(--c-border);align-self:start}aside p{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--c-on-surface-muted)}aside strong{display:block;margin:.35rem 0 1.5rem;font-size:clamp(1.6rem,4vw,3rem)}ul{display:flex;gap:.5rem;flex-wrap:wrap;list-style:none;margin:0;padding:1rem 0;border-top:1px solid var(--c-border)}li{padding:.4rem .65rem;border:1px solid var(--c-border);font-size:.8rem}.dispatch-hero--quiet{background:var(--c-surface-alt)}
 </style>

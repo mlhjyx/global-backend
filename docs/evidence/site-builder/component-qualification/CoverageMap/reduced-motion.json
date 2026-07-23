@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"CoverageMap","status":"pass","part":"reducedMotion","assertions":["Map pins are static; legacy pulse input cannot produce an animation."],"sources":["apps/site-renderer/src/components/CoverageMap.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

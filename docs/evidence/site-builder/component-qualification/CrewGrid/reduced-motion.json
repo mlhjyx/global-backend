@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"CrewGrid","status":"pass","part":"reducedMotion","assertions":["Authorized profiles remain static without flip, reveal or timed motion."],"sources":["apps/site-renderer/src/components/CrewGrid.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

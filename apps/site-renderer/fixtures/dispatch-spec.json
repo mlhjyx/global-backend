@@ -67,12 +67,12 @@
             { "labelKey": "crew.st4", "value": "0", "subKey": "crew.su4" }
           ],
           "members": [
-            { "nameKey": "crew.m1.name", "roleKey": "crew.m1.role", "years": "22", "regionsKey": "crew.m1.regions", "quoteKey": "crew.m1.quote", "truckKey": "crew.m1.truck" },
-            { "nameKey": "crew.m2.name", "roleKey": "crew.m2.role", "years": "14", "regionsKey": "crew.m2.regions", "quoteKey": "crew.m2.quote", "truckKey": "crew.m2.truck" },
-            { "nameKey": "crew.m3.name", "roleKey": "crew.m3.role", "years": "9", "regionsKey": "crew.m3.regions", "quoteKey": "crew.m3.quote", "truckKey": "crew.m3.truck" },
-            { "nameKey": "crew.m4.name", "roleKey": "crew.m4.role", "years": "18", "regionsKey": "crew.m4.regions", "quoteKey": "crew.m4.quote", "truckKey": "crew.m4.truck" },
-            { "nameKey": "crew.m5.name", "roleKey": "crew.m5.role", "years": "11", "regionsKey": "crew.m5.regions", "quoteKey": "crew.m5.quote", "truckKey": "crew.m5.truck" },
-            { "nameKey": "crew.m6.name", "roleKey": "crew.m6.role", "years": "7", "regionsKey": "crew.m6.regions", "quoteKey": "crew.m6.quote", "truckKey": "crew.m6.truck" }
+            { "nameKey": "crew.m1.name", "roleKey": "crew.m1.role", "years": "22", "regionsKey": "crew.m1.regions", "quoteKey": "crew.m1.quote", "truckKey": "crew.m1.truck", "authorizedProfile": true },
+            { "nameKey": "crew.m2.name", "roleKey": "crew.m2.role", "years": "14", "regionsKey": "crew.m2.regions", "quoteKey": "crew.m2.quote", "truckKey": "crew.m2.truck", "authorizedProfile": true },
+            { "nameKey": "crew.m3.name", "roleKey": "crew.m3.role", "years": "9", "regionsKey": "crew.m3.regions", "quoteKey": "crew.m3.quote", "truckKey": "crew.m3.truck", "authorizedProfile": true },
+            { "nameKey": "crew.m4.name", "roleKey": "crew.m4.role", "years": "18", "regionsKey": "crew.m4.regions", "quoteKey": "crew.m4.quote", "truckKey": "crew.m4.truck", "authorizedProfile": true },
+            { "nameKey": "crew.m5.name", "roleKey": "crew.m5.role", "years": "11", "regionsKey": "crew.m5.regions", "quoteKey": "crew.m5.quote", "truckKey": "crew.m5.truck", "authorizedProfile": true },
+            { "nameKey": "crew.m6.name", "roleKey": "crew.m6.role", "years": "7", "regionsKey": "crew.m6.regions", "quoteKey": "crew.m6.quote", "truckKey": "crew.m6.truck", "authorizedProfile": true }
           ]
         } },
         { "type": "CoverageMap", "props": { "id": "CoverageMap-1",

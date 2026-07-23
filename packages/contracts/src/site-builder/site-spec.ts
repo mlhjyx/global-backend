@@ -110,6 +110,11 @@ export const SITE_SPEC_RELEASE_COMPONENT_TYPES = [
   "TrustSplit",
   "ValueStrip",
   "WarmHero",
+  "DispatchHero",
+  "ServicesEditorial",
+  "DispatchTimeline",
+  "CrewGrid",
+  "CoverageMap",
 ] as const satisfies readonly SiteSpecComponentType[];
 export type SiteSpecReleaseComponentType =
   (typeof SITE_SPEC_RELEASE_COMPONENT_TYPES)[number];

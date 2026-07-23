@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"DispatchTimeline","status":"pass","part":"reducedMotion","assertions":["The response sequence is static and contains no timed animation."],"sources":["apps/site-renderer/src/components/DispatchTimeline.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

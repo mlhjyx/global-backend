@@ -24,6 +24,9 @@ const safeExternalUrl = z
   .string()
   .url()
   .refine((value) => new URL(value).protocol === "https:");
+const percentageCoordinate = z
+  .string()
+  .regex(/^(?:100(?:\.0+)?|(?:[0-9]|[1-9][0-9])(?:\.\d+)?)%$/);
 const releaseCtaSchema = strictObj({
   labelKey: str,
   pageId: str.min(1).optional(),
@@ -428,7 +431,9 @@ export const COMPONENT_SCHEMAS = {
     coverageValueKey: str,
     etaLabelKey: str,
     etaValueKey: str,
-    marqueeItems: strArr,
+    marqueeItems: strArr.min(2).max(12),
+    cta1PageId: str.min(1).optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   LedgerStats: obj({
     chapterKey: str,
@@ -441,6 +446,7 @@ export const COMPONENT_SCHEMAS = {
   }),
   ServicesEditorial: obj({
     chapterKey: str,
+    titleKey: str.optional(),
     services: z.array(
       strictObj({ code: str, titleKey: str, bodyKey: str, specKey: str }),
     ),
@@ -448,6 +454,8 @@ export const COMPONENT_SCHEMAS = {
     notListBodyKey: str.optional(),
     notListCtaKey: str.optional(),
     bookLabelKey: str.optional(),
+    bookPageId: str.min(1).optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   DispatchTimeline: obj({
     chapterKey: str,
@@ -457,14 +465,16 @@ export const COMPONENT_SCHEMAS = {
     ctaKey: str,
     callKey: str,
     callPhoneKey: str,
-    steps: z.array(strictObj({ t: str, titleKey: str, bodyKey: str })),
+    steps: z.array(strictObj({ t: str, titleKey: str, bodyKey: str })).min(1).max(8),
+    ctaPageId: str.min(1).optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   CrewGrid: obj({
     chapterKey: str,
     h1aKey: str,
     h1bKey: str,
     bodyKey: str,
-    stats: z.array(strictObj({ labelKey: str, value: str, subKey: str })),
+    stats: z.array(strictObj({ labelKey: str, value: str, subKey: str })).min(1).max(4),
     members: z.array(
       strictObj({
         nameKey: str,
@@ -473,10 +483,12 @@ export const COMPONENT_SCHEMAS = {
         regionsKey: str,
         quoteKey: str,
         truckKey: str,
-      }),
-    ),
+        authorizedProfile: z.literal(true),
+      })).min(1).max(8),
     footnoteKey: str,
     requestKey: str,
+    requestPageId: str.min(1).optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   CoverageMap: obj({
     chapterKey: str,
@@ -484,19 +496,20 @@ export const COMPONENT_SCHEMAS = {
     titleLine2Key: str,
     bodyKey: str,
     indexLabelKey: str,
-    areas: z.array(strictObj({ name: str })),
+    areas: z.array(strictObj({ name: str })).min(1).max(12),
     footnoteKey: str,
     pins: z.array(
       strictObj({
         labelKey: str,
         subKey: str,
-        top: str,
-        left: str,
+        top: percentageCoordinate,
+        left: percentageCoordinate,
         pulse: z.boolean().optional(),
       }),
-    ),
+    ).max(12),
     plateLabelKey: str,
     updatedKey: str,
+    variant: technicalBaselineVariant.optional(),
   }),
   AxiomHero: obj({
     brandKey: str,
