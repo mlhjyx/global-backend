@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Precision product module placeholder">
+  <rect width="1200" height="800" fill="#141b2a"/>
+  <g fill="none" stroke="#7aa8ee" stroke-width="10">
+    <rect x="290" y="170" width="620" height="460" rx="28"/>
+    <circle cx="600" cy="400" r="142"/>
+    <path d="M170 400h190m480 0h190M600 60v190m0 300v190"/>
+  </g>
+  <g fill="#9aa0ac" font-family="Arial, sans-serif" text-anchor="middle">
+    <text x="600" y="105" font-size="34" letter-spacing="8">PRECISION MODULE</text>
+    <text x="600" y="710" font-size="26" letter-spacing="5">PRODUCT PLACEHOLDER</text>
+  </g>
+</svg>

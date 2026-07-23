@@ -12,6 +12,7 @@ import {
   type TemplateFamily,
   type TemplateFamilyV2,
 } from "@global/contracts";
+import { M1_E_B_B1_CATALOG_V2_DRAFT } from "./catalog-v2-b1-drafts";
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -40,21 +41,12 @@ export const STATIC_DESIGN_CATALOG: DesignCatalog = deepFreeze(
 );
 
 /**
- * M1-e-B starts a separate v2 catalog rather than mutating DI-0's published
- * v1 envelope. B1-B3 populate this only after each Family passes its draft
- * gates; an empty immutable envelope is intentionally not an approved family.
+ * M1-e-B uses a separate v2 catalog rather than mutating DI-0's published v1
+ * envelope. B1 contributes two draft-only Families; the resolver remains
+ * approved-family-only until the later Catalog promotion gate is complete.
  */
 export const STATIC_DESIGN_CATALOG_V2: DesignCatalogV2 = deepFreeze(
-  finalizeDesignCatalogV2({
-    schemaVersion: DESIGN_CATALOG_V2_SCHEMA_VERSION,
-    catalogVersion: "m1-e-b-foundation/2",
-    sourceManifests: [],
-    designRules: [],
-    designDnas: [],
-    stylePresets: [],
-    demoVisualPacks: [],
-    families: [],
-  }),
+  finalizeDesignCatalogV2(M1_E_B_B1_CATALOG_V2_DRAFT),
 );
 
 export function resolveDesignBriefFromCatalog(

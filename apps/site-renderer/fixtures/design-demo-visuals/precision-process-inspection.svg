@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Precision inspection placeholder">
+  <rect width="1200" height="800" fill="#141b2a"/>
+  <g fill="none" stroke="#7aa8ee" stroke-width="9">
+    <circle cx="520" cy="390" r="190"/>
+    <path d="m650 520 170 170M400 390l80 80 160-190"/>
+  </g>
+  <g fill="#9aa0ac" font-family="Arial, sans-serif" text-anchor="middle">
+    <text x="600" y="105" font-size="34" letter-spacing="8">INSPECTION GATE</text>
+    <text x="600" y="735" font-size="26" letter-spacing="5">PROCESS PLACEHOLDER</text>
+  </g>
+</svg>

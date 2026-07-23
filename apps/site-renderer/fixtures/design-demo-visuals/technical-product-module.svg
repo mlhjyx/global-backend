@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Technical catalog product placeholder">
+  <rect width="1200" height="800" fill="#f2f5f8"/>
+  <g fill="none" stroke="#0e5fa8" stroke-width="10">
+    <rect x="280" y="160" width="640" height="480" rx="18"/>
+    <path d="M370 270h460M370 400h460M370 530h290"/>
+    <circle cx="780" cy="530" r="48"/>
+  </g>
+  <g fill="#16212c" font-family="Arial, sans-serif" text-anchor="middle">
+    <text x="600" y="105" font-size="34" letter-spacing="8">TECHNICAL ASSEMBLY</text>
+    <text x="600" y="720" font-size="26" letter-spacing="5">PRODUCT PLACEHOLDER</text>
+  </g>
+</svg>

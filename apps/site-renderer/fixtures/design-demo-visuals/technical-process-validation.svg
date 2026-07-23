@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Technical validation placeholder">
+  <rect width="1200" height="800" fill="#e6ecf2"/>
+  <g fill="none" stroke="#0e5fa8" stroke-width="9">
+    <path d="M260 570 470 350l150 130 320-270"/>
+    <path d="M850 210h90v90"/>
+    <circle cx="260" cy="570" r="24"/><circle cx="470" cy="350" r="24"/><circle cx="620" cy="480" r="24"/><circle cx="940" cy="210" r="24"/>
+  </g>
+  <g fill="#16212c" font-family="Arial, sans-serif" text-anchor="middle">
+    <text x="600" y="110" font-size="34" letter-spacing="8">VALIDATION TRACE</text>
+    <text x="600" y="710" font-size="26" letter-spacing="5">PROCESS PLACEHOLDER</text>
+  </g>
+</svg>
