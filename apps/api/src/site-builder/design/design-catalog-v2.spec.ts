@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEMO_VISUAL_PACK_V2_SCHEMA_VERSION,
@@ -300,12 +303,59 @@ function brief(catalog = finalizeDesignCatalogV2(draft())) {
 }
 
 describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
-  it("keeps DI-0 v1 intact while exposing an immutable empty v2 foundation", () => {
+  it("keeps DI-0 v1 intact while exposing an immutable B1 draft catalog", () => {
     expect(STATIC_DESIGN_CATALOG.catalogVersion).toBe("di-0-foundation/1");
     expect(STATIC_DESIGN_CATALOG.families).toEqual([]);
-    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-foundation/2");
-    expect(STATIC_DESIGN_CATALOG_V2.families).toEqual([]);
+    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-b1-drafts/2");
+    expect(
+      STATIC_DESIGN_CATALOG_V2.families.map((family) => family.id),
+    ).toEqual(["precision-industrial", "technical-catalog"]);
+    expect(
+      STATIC_DESIGN_CATALOG_V2.families.every(
+        (family) => family.status === "draft",
+      ),
+    ).toBe(true);
+    expect(
+      STATIC_DESIGN_CATALOG_V2.sourceManifests.every(
+        (source) =>
+          source.sourceClass === "external_registered" &&
+          source.allowedUses.includes("visual_analysis") &&
+          source.allowedUses.includes("token_abstraction") &&
+          source.allowedUses.includes("structure_abstraction") &&
+          source.allowedUses.includes("code_transformation") &&
+          source.prohibitedUses.length === 0 &&
+          source.trainingPolicy === "permitted",
+      ),
+    ).toBe(true);
     expect(Object.isFrozen(STATIC_DESIGN_CATALOG_V2)).toBe(true);
+  });
+
+  it("pins B1 DemoVisualPack assets to the actual local original files", () => {
+    for (const pack of STATIC_DESIGN_CATALOG_V2.demoVisualPacks) {
+      for (const asset of pack.assets) {
+        const bytes = readFileSync(
+          resolve(process.cwd(), "../..", asset.repositoryPath),
+        );
+        const digest = createHash("sha256").update(bytes).digest("hex");
+        expect(digest).toBe(asset.sha256);
+      }
+    }
+
+    const rendererTokenDigest = createHash("sha256")
+      .update(
+        readFileSync(
+          resolve(
+            process.cwd(),
+            "../../apps/site-renderer/src/styles/global.css",
+          ),
+        ),
+      )
+      .digest("hex");
+    expect(
+      STATIC_DESIGN_CATALOG_V2.stylePresets.every(
+        (preset) => preset.rendererTokenDigest === rendererTokenDigest,
+      ),
+    ).toBe(true);
   });
 
   it("accepts an approved family only with qualified variants and the B0 minimums", () => {

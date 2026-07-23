@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Technical catalog abstract product field</title>
+  <desc id="desc">Original abstract product silhouettes, specification grid, and neutral planes.</desc>
+  <rect width="1600" height="900" fill="#f4f7f8"/>
+  <g fill="none" stroke="#183347" stroke-width="5">
+    <rect x="180" y="170" width="360" height="560" rx="24"/>
+    <rect x="620" y="230" width="360" height="440" rx="24"/>
+    <rect x="1060" y="140" width="360" height="620" rx="24"/>
+  </g>
+  <g fill="#4f9eb7" fill-opacity=".2">
+    <path d="M250 620V300h220v320Z"/>
+    <path d="M690 570V330h220v240Z"/>
+    <path d="M1130 650V250h220v400Z"/>
+  </g>
+  <g stroke="#d28b32" stroke-width="12">
+    <path d="M250 690h220M690 630h220M1130 720h220"/>
+  </g>
+</svg>
