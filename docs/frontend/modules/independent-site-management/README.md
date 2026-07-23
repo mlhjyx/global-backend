@@ -6,7 +6,7 @@
 > 评审状态：`APPROVED_AT_GATE_5`
 > Capability Owner：`OWN-PRODUCT`
 > 设计 Owner：`OWN-DESIGN`（责任帽子；实际人员未指派）
-> 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
+> 工程基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
 > 关联：`CAP-SITE-001..005`、`PAGE-FE-030..057`、`BLK-FE-001..007`
 
 本包把“独立站管理”定义为统一 SaaS 内的一级能力。它不是另一个管理前端；Astro 站是该能力产生的版本化输出。本文档包同时写清当前合同能支撑的纵切、完整目标旅程和不可运行部分，防止从内部地基推导出公网发布已经存在。
@@ -44,7 +44,6 @@
 | [运营与验收](operations-and-acceptance.md) | 运行手册、人工兜底、Scenario/Fixture、指标、证据和 Release readiness |
 | [低保真线框](../../../design/independent-site-management-wireframes.md) | 页面流、宽/窄/移动布局和关键状态；不是视觉定稿 |
 | [前端实施蓝图](../../implementation/independent-site-management-blueprint.md) | 技术栈中立的前端架构、接入顺序、测试与依赖门 |
-| [Gate 5 批准证据](../../../roadmap/saas-frontend-phase-5/gate-5-review.md) | Phase 5 决定、验收、blocker 和批准记录 |
 
 全局 Shell、权限、状态、AI 控制、设计系统、a11y、合同和 Release evidence 不在本包复制，仍以 [统一前端规范](../../README.md)为准。本包只补 Site 特有差异。
 

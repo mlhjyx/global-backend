@@ -5,9 +5,9 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-QA-EVIDENCE`
 > 产品批准范围：Gate 2 首个纵切及完整产品地图
-> 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
+> 工程核验基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
 
-本目录为产品评审、设计、前端、后端、E2E、演示和指南提供同一组稳定场景 ID。它只登记 Fixture 语义和验收关系；Phase 5 已建立 Site 页面/运营规格，但没有创建可执行测试数据或浏览器 E2E，也不把后置能力冒充可运行。
+本目录为产品评审、设计、前端、后端、E2E、演示和指南提供同一组稳定场景 ID。它只登记 Fixture 语义和验收关系；Site 已有页面/运营规格，但没有创建可执行测试数据或浏览器 E2E，也不把后置能力冒充可运行。
 
 ## 1. Fixture 安全规则
 
@@ -38,9 +38,9 @@
 | `FX-FE-INSIGHT-001` | 指标与成本读模型 | current/stale/partial/no-data；reported/estimated/unknown cost | 合成指标；口径待定 | `CATALOG_ONLY_BLOCKED` | `OWN-DATA-PRIVACY` |
 | `FX-FE-CONTROL-001` | 团队/集成/套餐/事故 | pending invite、last admin、expiring OAuth、quota、break-glass request | 合成控制面数据 | `CATALOG_ONLY_BLOCKED` | `OWN-QA-EVIDENCE` |
 
-Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-and-release-evidence.md#4-标准场景与-fixture)和 Phase 5 [Site 运营验收](../frontend/modules/independent-site-management/operations-and-acceptance.md#4-标准-fixture-manifest)已定义 manifest 字段；实际版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence 均未创建，因此继续 `CATALOG_ONLY`。
+当前[分析、测试与发布证据规范](../frontend/12-analytics-testing-and-release-evidence.md#4-标准场景与-fixture)和 [Site 运营验收](../frontend/modules/independent-site-management/operations-and-acceptance.md#4-标准-fixture-manifest)已定义 manifest 字段；实际版本、文件路径/schema、seed/reset 命令、预期 hash、适用环境、清理策略和 License evidence 均未创建，因此继续 `CATALOG_ONLY`。
 
-### 2.1 Phase 5 Site Fixture 组合
+### 2.1 Site Fixture 组合
 
 | 组合 | Fixture | 覆盖 Scenario | 规格入口 | 可执行状态 |
 |---|---|---|---|---|
@@ -101,7 +101,7 @@ Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-a
 | `SCN-FE-HANDOFF-001` | ACT-004 接收 qualified package | immutable package + Outbox/ACK | SaaS 创建 Opportunity candidate；本仓不创建 QGO/SAO | `EXTERNAL_OWNED`；本仓 side code-backed | `OWN-SAAS-PLATFORM` |
 | `SCN-FE-HANDOFF-002` | ACT-004 回写 Outcome | SaaS Opportunity closed | 只回传结构化学习标签，不覆盖 Lead/Company 主状态 | `EXTERNAL_OWNED` | `OWN-SAAS-PLATFORM` |
 
-## 7. Phase 6 地图级跨域场景
+## 7. 地图级跨域场景
 
 这些场景保证非 Site 域没有丢失关键成功、失败和下一动作，但均未创建 Fixture 文件、正式合同、前端或测试。`MAP_ONLY/TARGET_NOT_RUNNABLE` 不能用于 Release 验收。
 
@@ -155,4 +155,4 @@ Gate 4 [分析、测试与发布证据规范](../frontend/12-analytics-testing-a
 5. 产品、设计、前端、后端、QA、运营各自验收范围；
 6. 任何不可执行依赖和不得声称的用户承诺。
 
-AI 生成场景或自评不能成为唯一 Evidence Owner。Phase 5 只创建了 Site UI/运营规格，Phase 6 只补了非 Site 地图级 Scenario/Fixture 目录；测试代码、Fixture 文件、seed/reset 和真实数据仍未创建，必须由后续明确授权和真实 QA/数据 Owner 承接。
+AI 生成场景或自评不能成为唯一 Evidence Owner。当前 Site 只有 UI/运营规格，非 Site 只有地图级 Scenario/Fixture 目录；测试代码、Fixture 文件、seed/reset 和真实数据仍未创建，必须由后续明确授权和真实 QA/数据 Owner 承接。

@@ -4,10 +4,10 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；Gate 8 保留独立人工、真实 Release 与全部 blocker
-> 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
+> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
+> 工程核验基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
 
-本表只保存 Conflict ID、当前状态、唯一 Owner、裁决位置和下一 Gate。完整证据与方案比较仍留在 Phase 1 [冲突证据](../roadmap/saas-frontend-phase-1/conflict-register.md)、[风险/开放决策](../roadmap/saas-frontend-phase-1/open-decisions-and-risks.md)和 Phase 2 [IA 决策包](../roadmap/saas-frontend-phase-2/ia-conflict-and-decision-register.md)，不在这里复制。
+本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
 ## 1. 状态
 
@@ -115,13 +115,13 @@
 | `DEC-FE-P4-004` | 数据社会属性；管理员不默认读取个人工作数据 | `APPROVED_AT_GATE_4` | `OWN-DATA-PRIVACY` | [权限 §2–3](../frontend/06-permissions-and-data-visibility.md#2-数据社会属性) |
 | `DEC-FE-P4-005` | 全局状态/错误/长任务/恢复模式 | `APPROVED_AT_GATE_4` | `OWN-DESIGN` | [状态与恢复](../frontend/07-state-error-degradation-and-recovery.md) |
 | `DEC-FE-P4-006` | AI/Evidence/Approval/执行授权控制链 | `APPROVED_AT_GATE_4` | `OWN-PRODUCT` | [AI 与人工控制](../frontend/08-ai-approval-evidence-and-human-control.md) |
-| `DEC-FE-P4-007` | Semantic Token、组件合同、设计资产/Copy ID 治理 | `APPROVED_AT_GATE_4` | `OWN-DESIGN` | [设计系统](../frontend/09-design-system-and-content-guidelines.md) + [设计登记](../design/README.md) |
+| `DEC-FE-P4-007` | Semantic Token、组件合同、设计资产/Copy ID 治理 | `APPROVED_AT_GATE_4` | `OWN-DESIGN` | [设计系统](../frontend/09-design-system-and-content-guidelines.md) + [微文案](../design/content-and-microcopy-catalog.md) |
 | `DEC-FE-P4-008` | WCAG 2.2 AA、响应式/i18n/性能进入发布门 | `APPROVED_AT_GATE_4` | `OWN-DESIGN` | [a11y/性能/i18n](../frontend/10-responsive-accessibility-and-performance.md) |
 | `DEC-FE-P4-009` | analytics 分层、隐私门和反指标 | `APPROVED_AT_GATE_4` | `OWN-DATA-PRIVACY` | [分析/测试](../frontend/12-analytics-testing-and-release-evidence.md) |
 | `DEC-FE-P4-010` | Release Bundle 与发布后学习 | `APPROVED_AT_GATE_4` | `OWN-QA-EVIDENCE` | [发布证据](../frontend/12-analytics-testing-and-release-evidence.md#7-release-bundle-schema) |
-| `DEC-FE-P4-011` | 模块复用全局模式，例外需登记 | `APPROVED_AT_GATE_4` | `OWN-DOC-GOV` | [范围与例外](../frontend/00-scope-authority-and-status.md#6-例外流程) |
+| `DEC-FE-P4-011` | 模块复用全局模式，例外需登记 | `APPROVED_AT_GATE_4` | `OWN-DOC-GOV` | [前端规范使用规则](../frontend/README.md#4-使用规则) |
 
-详细取舍、非含义和批准记录见 [Gate 4 决策记录](../frontend/13-open-decisions.md)。
+本节保留当前批准结论；完整审批 provenance 由 Git/PR 历史承担。
 
 ## 7. Gate 5 已批准决策
 
@@ -179,11 +179,11 @@
 | `DEC-FE-P8-001` | 批准 `pnpm docs:verify`、机器政策与普通 CI 文档门 | `APPROVED_AT_GATE_8` | `OWN-DOC-GOV` |
 | `DEC-FE-P8-002` | 批准 current/受控文档硬失败、冻结历史结构问题告警和显式例外机制 | `APPROVED_AT_GATE_8` | `OWN-DOC-GOV` |
 | `DEC-FE-P8-003` | 批准 Document ID、状态、链接、Registry 引用、历史 banner、Release schema 与敏感模式检查边界 | `APPROVED_AT_GATE_8` | `OWN-DOC-GOV` |
-| `DEC-FE-P8-004` | Site 10–12、Word、Phase Gate 原位保留；不在本阶段移动/删除/重写历史 | `APPROVED_AT_GATE_8` | `OWN-DOC-GOV` |
-| `DEC-FE-P8-005` | 旧前端技术方案模板降为 `REFERENCE_ONLY`；采用受控 Release/Learning 模板 | `APPROVED_AT_GATE_8` | `OWN-DOC-GOV` |
+| `DEC-FE-P8-004` | Site 10–12 与 Word 继续原位保留；Phase 1–8 工作包由 2026-07-23 用户授权退出工作树，provenance 由 Git/PR 保留 | `SUPERSEDED_DECISION`（仅 Phase Gate 处置部分） | `OWN-DOC-GOV` |
+| `DEC-FE-P8-005` | 旧前端技术方案模板保持 `REFERENCE_ONLY`；Release 字段由当前发布证据规范维护，不保留空模板 | `SUPERSEDED_DECISION`（模板处置部分） | `OWN-DOC-GOV` |
 | `DEC-FE-P8-006` | 批准 `ROUTE-FE-001..009` 作为按角色文档可用性任务 | `APPROVED_AT_GATE_8` | `OWN-QA-EVIDENCE` |
 | `DEC-FE-P8-007` | 接受作者 dry-run 不等于独立人工验收；`BLK-FE-006` 未关闭前保持 `NOT_RUN` | `APPROVED_AT_GATE_8` | `OWN-QA-EVIDENCE` |
-| `DEC-FE-P8-008` | 批准 Release Bundle 生命周期、证据强度、责任帽、空索引与自动 schema 门 | `APPROVED_AT_GATE_8` | `OWN-QA-EVIDENCE` |
+| `DEC-FE-P8-008` | 批准 Release Bundle 生命周期、证据强度、责任帽和真实 Bundle schema 门；未发生用户发布时不保留空索引 | `APPROVED_AT_GATE_8` | `OWN-QA-EVIDENCE` |
 | `DEC-FE-P8-009` | 批准发布学习四态与 Capability/Decision/Scenario/Guide/OSS 回写规则 | `APPROVED_AT_GATE_8` | `OWN-PRODUCT` |
 | `DEC-FE-P8-010` | 当前无真实用户发布，Release 追踪记 `NOT_APPLICABLE_NO_USER_RELEASE` 而非 PASS | `APPROVED_AT_GATE_8` | `OWN-QA-EVIDENCE` |
 | `DEC-FE-P8-011` | Gate 8 后文档项目标记 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`，不升级任何产品实现轴 | `APPROVED_AT_GATE_8` | `OWN-PRODUCT` |
@@ -197,4 +197,4 @@
 4. 权利/安全冲突：真实责任 Owner、适用条款/License、威胁/隐私评审和退出方案。
 5. 可用性冲突：正式前端入口、部署环境、标准场景与 Release evidence。
 
-执行者不能因为决定获批自行把无关 `OPEN_DECISION` 改成 `RESOLVED`。Gate 4–8 已通过，其中 Gate 8 为保留独立人工、真实 Release 和全部 blocker 的条件通过；任何产品/采用实现、历史移动或 Git 外部动作仍需相应授权。
+执行者不能因为决定获批自行把无关 `OPEN_DECISION` 改成 `RESOLVED`。Gate 4–8 已通过，其中 Gate 8 为保留独立人工、真实 Release 和全部 blocker 的条件通过。2026-07-23 的文档瘦身授权只覆盖已列明的冗余文档与对应导航收口，不授权产品/OSS 实现、Site 10–12 或 Word 处置，也不关闭任何 blocker/gap。

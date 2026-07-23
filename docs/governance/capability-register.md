@@ -5,9 +5,9 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-PRODUCT`
 > 产品批准来源：Gate 2 推荐组合；全局前端来源：Gate 4；Site UX 来源：Gate 5；非 Site 产品域来源：Gate 6；外部采用组合来源：Gate 7（2026-07-20）
-> 工程核验基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
+> 工程核验基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
 
-本表是 Capability ID、用户结果和多轴状态的唯一登记。Phase 1 [能力状态矩阵](../roadmap/saas-frontend-phase-1/capability-status-matrix.md)保留审计时点，Phase 2 [页面与能力目录](../roadmap/saas-frontend-phase-2/page-and-capability-catalog.md)保留批准论证；后续前端规范和 Capability Pack 只能引用本表 ID。
+本表是 Capability ID、用户结果和多轴状态的唯一登记。当前前端规范、页面目录和 Capability Pack 只能引用本表 ID；审批与审计过程保留在 Git/PR，不再维护平行能力清单。
 
 ## 1. 读表规则
 
@@ -21,30 +21,30 @@
 
 | Capability ID | 用户结果 / 产品区域 | 产品 | UX / 前端 | API / 数据与工作流 | 质量 / 可用性 | Accountable Owner | 正式能力包 |
 |---|---|---|---|---|---|---|---|
-| `CAP-SHELL-001` | 在正确 Workspace 中导航、搜索和恢复上下文 / 公共 Shell | `APPROVED` IA 原则 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 Shell/Today](../frontend/modules/workspace-shell-and-today/README.md) |
-| `CAP-ID-001` | 安全注册、登录、会话和账户恢复 / Shell | `APPROVED` 为 SaaS 所有 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 旧 Spring 与目标冲突；正式 `EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 Shell/Today](../frontend/modules/workspace-shell-and-today/README.md) |
-| `CAP-ONB-001` | 首次建立 Workspace、企业草案和目标 / Shell+企业 | `PROPOSED`；Site intake 子集已建 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 跨域合同未定 | `UNTESTED / UNKNOWN` | `OWN-PRODUCT` | [Phase 6 Shell/Today](../frontend/modules/workspace-shell-and-today/README.md) + [Site intake](../frontend/modules/independent-site-management/journeys-and-page-spec.md) |
-| `CAP-TODAY-001` | 看见今天最重要的任务、审批、异常和机会 / 今日 | `APPROVED` IA 原则 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 跨域读模型 `NONE/EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 Shell/Today](../frontend/modules/workspace-shell-and-today/README.md) |
-| `CAP-TRUTH-001` | 维护可追溯、可审核、可撤销并可跨域复用的企业/产品事实 / 企业与信任 | `APPROVED` 共享事实域原则 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | Company/Claim `VERIFIED`；Offering/Knowledge/Asset/impact 跨域合同不完整 | `CONTRACT+REAL_SERVICE` 子集；统一用户可用性 `UNKNOWN` | `OWN-PRODUCT` | [Phase 6 企业事实](../frontend/modules/enterprise-trust-and-knowledge/README.md) |
-| `CAP-BUYER-001` | 发现、富集和资格化可解释目标客户 / 客户开发 | `FROZEN` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `EXPORTED / VERIFIED` | `REAL_SERVICE / 后端维护态` | `OWN-BUYER-BE` | [Phase 6 客户开发](../frontend/modules/buyer-development/README.md) |
-| `CAP-INTENT-001` | 理解需求、时机和为什么现在 / 客户开发 | `FROZEN` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `EXPORTED / VERIFIED` | `REAL_SERVICE / 后端维护态` | `OWN-BUYER-BE` | [Phase 6 客户开发](../frontend/modules/buyer-development/README.md) |
-| `CAP-CAMP-001` | 把目标、受众、内容、渠道和预算组织为增长计划 / 增长执行 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE / EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 增长执行](../frontend/modules/growth-execution/README.md) |
-| `CAP-CONTENT-001` | 基于批准事实生成、审核和复用内容 / 增长执行 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE`；Site 内部 Claim 不能替代平台合同 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 增长执行](../frontend/modules/growth-execution/README.md) |
-| `CAP-PUBLISH-001` | 受控发布多渠道内容并恢复部分失败 / 增长执行 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 增长执行](../frontend/modules/growth-execution/README.md) |
-| `CAP-ENGAGE-001` | 聚合互动、回复和升级 / 互动与商机 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE / EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 互动与商机](../frontend/modules/engagement-and-opportunity/README.md) |
-| `CAP-OPP-001` | 把互动推进为 QGO/SAO/Outcome / 互动与商机 | `APPROVED` 为 SaaS 所有 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 本仓 `NONE`；SaaS `EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 互动与商机](../frontend/modules/engagement-and-opportunity/README.md) |
-| `CAP-INSIGHT-001` | 解释质量、成本、归因和下一步 / 洞察 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 平台读模型 `NONE`；Site cost 子集已建 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 洞察与学习](../frontend/modules/insights-and-learning/README.md) |
+| `CAP-SHELL-001` | 在正确 Workspace 中导航、搜索和恢复上下文 / 公共 Shell | `APPROVED` IA 原则 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-ID-001` | 安全注册、登录、会话和账户恢复 / Shell | `APPROVED` 为 SaaS 所有 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 旧 Spring 与目标冲突；正式 `EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-ONB-001` | 首次建立 Workspace、企业草案和目标 / Shell+企业 | `PROPOSED`；Site intake 子集已建 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 跨域合同未定 | `UNTESTED / UNKNOWN` | `OWN-PRODUCT` | [页面目录](../frontend/04-page-and-capability-catalog.md) + [Site intake](../frontend/modules/independent-site-management/journeys-and-page-spec.md) |
+| `CAP-TODAY-001` | 看见今天最重要的任务、审批、异常和机会 / 今日 | `APPROVED` IA 原则 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 跨域读模型 `NONE/EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-TRUTH-001` | 维护可追溯、可审核、可撤销并可跨域复用的企业/产品事实 / 企业与信任 | `APPROVED` 共享事实域原则 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | Company/Claim `VERIFIED`；Offering/Knowledge/Asset/impact 跨域合同不完整 | `CONTRACT+REAL_SERVICE` 子集；统一用户可用性 `UNKNOWN` | `OWN-PRODUCT` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-BUYER-001` | 发现、富集和资格化可解释目标客户 / 客户开发 | `FROZEN` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `EXPORTED / VERIFIED` | `REAL_SERVICE / 后端维护态` | `OWN-BUYER-BE` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-INTENT-001` | 理解需求、时机和为什么现在 / 客户开发 | `FROZEN` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `EXPORTED / VERIFIED` | `REAL_SERVICE / 后端维护态` | `OWN-BUYER-BE` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-CAMP-001` | 把目标、受众、内容、渠道和预算组织为增长计划 / 增长执行 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE / EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-CONTENT-001` | 基于批准事实生成、审核和复用内容 / 增长执行 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE`；Site 内部 Claim 不能替代平台合同 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-PUBLISH-001` | 受控发布多渠道内容并恢复部分失败 / 增长执行 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-ENGAGE-001` | 聚合互动、回复和升级 / 互动与商机 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | `NONE / EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-OPP-001` | 把互动推进为 QGO/SAO/Outcome / 互动与商机 | `APPROVED` 为 SaaS 所有 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 本仓 `NONE`；SaaS `EXTERNAL_OWNED` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-INSIGHT-001` | 解释质量、成本、归因和下一步 / 洞察 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 平台读模型 `NONE`；Site cost 子集已建 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
 | `CAP-SITE-001` | 在统一 SaaS 中持续管理海外独立站 / 独立站管理 | `APPROVED` 一级区域 | UX `SPEC_READY`；正式 FE `NONE/MOCK_PROTOTYPE`；限定词 `SPEC_READY_WITH_BLOCKERS` | 本仓子域部分 `VERIFIED` | 后端 `CONTRACT+REAL_SERVICE`；用户 `INTERNAL_ONLY` | `OWN-PRODUCT` | [Phase 5 Capability Pack](../frontend/modules/independent-site-management/README.md) |
 | `CAP-SITE-002` | 完成 intake、资料、素材、知识与事实准备 / 独立站管理 | `APPROVED` 首个纵切 | UX `SPEC_READY`；正式 FE `NONE`；限定词 `SPEC_READY_WITH_BLOCKERS` | intake/profile/asset/KB `VERIFIED`；Site Claim contract 缺 | `CONTRACT+REAL_SERVICE / INTERNAL_ONLY` | `OWN-PRODUCT` | [Phase 5 Capability Pack](../frontend/modules/independent-site-management/README.md) |
 | `CAP-SITE-003` | 启动 Build、观察/取消/恢复并打开可信开发预览 / 独立站管理 | `APPROVED` 首个纵切 | UX `SPEC_READY`；正式 FE `NONE`；限定词 `SPEC_READY_WITH_BLOCKERS` | Build/cancel/status + internal Release/preview `VERIFIED` | `CONTRACT` + 历史真机；`INTERNAL_ONLY` | `OWN-PRODUCT` | [Phase 5 Capability Pack](../frontend/modules/independent-site-management/README.md) |
 | `CAP-SITE-004` | 管理 Release、公开发布、域名、SSL 和回滚 / 独立站管理 | `APPROVED_NOT_BUILT` | `TARGET_SPECIFIED_NOT_RUNNABLE`；正式 FE `NONE` | internal immutable Release `AS_BUILT`；public management/publish/domain `NONE` | public chain `UNTESTED / DISABLED` | `OWN-PRODUCT` | [Phase 5 target lane](../frontend/modules/independent-site-management/journeys-and-page-spec.md#4-后置页面摘要) |
 | `CAP-SITE-005` | 接收询盘并理解站点转化 / 独立站管理→互动 | `DEFERRED/PROPOSED` | `TARGET_SPECIFIED_NOT_RUNNABLE`；正式 FE `NONE` | receiver `NONE`；Inquiry 边界禁用 | `CONTRACT` 禁用边界 / `DISABLED` | `OWN-PRODUCT` | [Phase 5 target lane](../frontend/modules/independent-site-management/public-site-output-spec.md) |
-| `CAP-KNOW-001` | 跨 Site/Content/Campaign 治理企业知识与资料 | `APPROVED` 共享底座原则；全平台能力未建 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | Site KB 子集 `VERIFIED`；平台合同 `NONE` | Site 子集 `REAL_SERVICE / INTERNAL_ONLY` | `OWN-PRODUCT` | [Phase 6 企业事实](../frontend/modules/enterprise-trust-and-knowledge/README.md) |
-| `CAP-COMP-001` | 维护可解释的市场/竞品观察 | `PROPOSED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `NONE` | `UNTESTED / UNKNOWN` | `OWN-PRODUCT` | [Phase 6 客户开发](../frontend/modules/buyer-development/README.md) |
-| `CAP-INTEG-001` | 授权、诊断和退出外部连接 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 vault/OAuth/scope `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) + [外部能力 Registry](../backend/oss-registry.md) |
-| `CAP-TEAM-001` | 管理成员、角色、审批和数据范围 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 Workspace policy `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |
-| `CAP-SET-001` | 管理个人、Workspace、安全、套餐和偏好 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / 旧 API 局部接入`；Phase 6 `MAP_COMPLETE` | 旧 Spring 与目标边界冲突 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |
-| `CAP-ADMIN-001` | 平台运营以最小权限管理租户和事故 | `UNKNOWN/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 旧 Spring 局部实现不构成目标 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [Phase 6 控制面](../frontend/modules/team-integrations-settings-and-operations/README.md) |
+| `CAP-KNOW-001` | 跨 Site/Content/Campaign 治理企业知识与资料 | `APPROVED` 共享底座原则；全平台能力未建 | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | Site KB 子集 `VERIFIED`；平台合同 `NONE` | Site 子集 `REAL_SERVICE / INTERNAL_ONLY` | `OWN-PRODUCT` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-COMP-001` | 维护可解释的市场/竞品观察 | `PROPOSED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `FROZEN_MAP_ONLY` | `NONE` | `UNTESTED / UNKNOWN` | `OWN-PRODUCT` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-INTEG-001` | 授权、诊断和退出外部连接 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 vault/OAuth/scope `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) + [外部能力 Registry](../backend/oss-registry.md) |
+| `CAP-TEAM-001` | 管理成员、角色、审批和数据范围 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 正式 Workspace policy `NONE` | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-SET-001` | 管理个人、Workspace、安全、套餐和偏好 | `PROPOSED/EXTERNAL_OWNED` | `PROTOTYPE / 旧 API 局部接入`；Phase 6 `MAP_COMPLETE` | 旧 Spring 与目标边界冲突 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
+| `CAP-ADMIN-001` | 平台运营以最小权限管理租户和事故 | `UNKNOWN/EXTERNAL_OWNED` | `PROTOTYPE / MOCK_PROTOTYPE`；Phase 6 `MAP_COMPLETE` | 旧 Spring 局部实现不构成目标 | `UNTESTED / UNKNOWN` | `OWN-SAAS-PLATFORM` | [页面目录](../frontend/04-page-and-capability-catalog.md) |
 
 ## 3. 独立站管理能力分解
 
@@ -94,10 +94,10 @@ Gate 4 已批准以下 `CURRENT` 横切规范；它们不改变任何 Capability
 | 全部对象与动作 | [权限与数据可见性](../frontend/06-permissions-and-data-visibility.md) | 正式 role/entitlement/allowed actions/privacy policy |
 | 全部长任务/异步 | [状态与恢复](../frontend/07-state-error-degradation-and-recovery.md) | 域 error/state mapping、页面设计、E2E |
 | 含 AI/事实/外部动作 | [AI/Evidence/Approval](../frontend/08-ai-approval-evidence-and-human-control.md) | task/Claim/Approval/execution auth 合同 |
-| 全部 UI | [设计系统与内容](../frontend/09-design-system-and-content-guidelines.md)、[设计登记](../design/README.md) | 受控设计源、Token values、组件实现、视觉验证 |
+| 全部 UI | [设计系统与内容](../frontend/09-design-system-and-content-guidelines.md)、[微文案目录](../design/content-and-microcopy-catalog.md) | 受控设计源、Token values、组件实现、视觉验证 |
 | 全部 Release | [a11y/性能/i18n](../frontend/10-responsive-accessibility-and-performance.md)、[分析/测试/证据](../frontend/12-analytics-testing-and-release-evidence.md) | 正式 repo、场景 Fixture、真实测试、Release Bundle |
 | `CAP-SITE-001..005` | [独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)、[低保真线框](../design/independent-site-management-wireframes.md)、[实施蓝图](../frontend/implementation/independent-site-management-blueprint.md) | 正式 repo/设计源/权限/Claim/QA-Ops；发布链合同与 infra |
-| 其余非 Site Capability | [全 SaaS 产品域入口](../frontend/modules/README.md)与七个地图级 Pack | 正式 SoR/repo/Owner、页面级 UX、合同、设计、Fixture、实现和证据 |
+| 其余非 Site Capability | [页面与能力目录](../frontend/04-page-and-capability-catalog.md)与本 Registry | 只保留地图级归属；仍需正式 SoR/repo/Owner、页面级 UX、合同、设计、Fixture、实现和证据 |
 
 这些全局规则已在 Gate 4 升级为当前目标规范，Site 规格已在 Gate 5 获批；Phase 6 Pack 同样不会把 Mock/`NONE` 的实现轴升级。
 
