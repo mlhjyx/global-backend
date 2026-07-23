@@ -12,6 +12,7 @@ export const DESIGN_SOURCE_CLASSES = [
   "platform_original",
   "permissive_licensed",
   "owned_export_authorized",
+  "external_registered",
   "visual_research_only",
 ] as const;
 export type DesignSourceClass = (typeof DESIGN_SOURCE_CLASSES)[number];
@@ -27,7 +28,7 @@ export type DesignUse = (typeof DESIGN_USES)[number];
 export type DesignSourceRetentionPolicy =
   "manifest_only" | "ephemeral_source" | "licensed_archive";
 export type DesignSourceTrainingPolicy =
-  "platform_corpus" | "license_permits" | "prohibited";
+  "platform_corpus" | "license_permits" | "permitted" | "prohibited";
 export type ExternalDesignAssetKind =
   "image" | "font" | "icon" | "script" | "copy";
 export type ExternalDesignAssetDisposition =
@@ -94,7 +95,8 @@ export type DesignSourceManifest =
       approvedAt?: never;
     })
   | (DesignSourceManifestBase & {
-      sourceClass: "platform_original" | "permissive_licensed";
+      sourceClass:
+        "platform_original" | "permissive_licensed" | "external_registered";
       ownerAuthorization?: never;
       approvedAt?: string;
     });
@@ -102,7 +104,6 @@ export type DesignSourceManifest =
 export type DesignSourceManifestContractErrorCode =
   | "DESIGN_SOURCE_INVALID"
   | "DESIGN_SOURCE_POLICY_CONFLICT"
-  | "DESIGN_SOURCE_LICENSE_REQUIRED"
   | "DESIGN_SOURCE_AUTHORIZATION_INVALID"
   | "DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED"
   | "DESIGN_SOURCE_RESEARCH_ONLY";
@@ -361,7 +362,7 @@ export function validateDesignSourceManifest(
     !["manifest_only", "ephemeral_source", "licensed_archive"].includes(
       String(manifest.retentionPolicy),
     ) ||
-    !["platform_corpus", "license_permits", "prohibited"].includes(
+    !["platform_corpus", "license_permits", "permitted", "prohibited"].includes(
       String(manifest.trainingPolicy),
     )
   ) {
@@ -401,19 +402,6 @@ export function validateDesignSourceManifest(
     fail(
       "DESIGN_SOURCE_POLICY_CONFLICT",
       "a use cannot be both allowed and prohibited",
-    );
-  }
-
-  const needsClearLicense =
-    allowedUses.has("code_transformation") ||
-    manifest.trainingPolicy !== "prohibited";
-  if (
-    needsClearLicense &&
-    (!nonBlank(manifest.licenseSpdx) || !nonBlank(manifest.licenseEvidencePath))
-  ) {
-    fail(
-      "DESIGN_SOURCE_LICENSE_REQUIRED",
-      "code transformation and licensed training require SPDX and evidence",
     );
   }
 
