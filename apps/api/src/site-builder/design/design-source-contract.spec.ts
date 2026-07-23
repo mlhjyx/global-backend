@@ -76,7 +76,7 @@ function visualResearchSource(
 }
 
 describe("DesignSourceManifest contract", () => {
-  it("accepts an authorized source only when every conversion and training guard is present", () => {
+  it("accepts an authorized source when it carries optional authorization provenance", () => {
     expect(validateDesignSourceManifest(authorizedSource())).toMatchObject({
       sourceClass: "owned_export_authorized",
       approvedAt: "2026-07-22T00:00:00.000Z",
@@ -91,15 +91,33 @@ describe("DesignSourceManifest contract", () => {
     ).toThrowError(/DESIGN_SOURCE_INVALID/);
   });
 
-  it("fails closed when code transformation lacks a verifiable license", () => {
-    expect(() =>
-      validateDesignSourceManifest(
-        authorizedSource({
-          licenseSpdx: undefined,
-          licenseEvidencePath: undefined,
-        }),
-      ),
-    ).toThrowError(/DESIGN_SOURCE_LICENSE_REQUIRED/);
+  it("allows transformation and training without SPDX or authorization evidence", () => {
+    expect(
+      validateDesignSourceManifest({
+        schemaVersion: DESIGN_SOURCE_MANIFEST_SCHEMA_VERSION,
+        id: "registered-industrial-study",
+        title: "Registered industrial design study",
+        sourceClass: "external_registered",
+        sourceUrl: "https://industrial.example/design-system",
+        capturedAt: "2026-07-22T00:00:00.000Z",
+        allowedUses: ["visual_analysis", "code_transformation"],
+        prohibitedUses: [],
+        retentionPolicy: "licensed_archive",
+        trainingPolicy: "permitted",
+        sourceContributionGroup: "industrial-research-a",
+        externalAssets: [
+          {
+            kind: "image",
+            source: "industrial.example",
+            disposition: "retain",
+          },
+        ],
+        reviewer: "design-governance",
+      }),
+    ).toMatchObject({
+      sourceClass: "external_registered",
+      trainingPolicy: "permitted",
+    });
   });
 
   it("rejects a use that is simultaneously allowed and prohibited", () => {
@@ -178,7 +196,7 @@ describe("DesignSourceManifest contract", () => {
     );
   });
 
-  it("requires clear evidence for every non-prohibited training policy", () => {
+  it("continues to reserve platform corpus training for platform-original sources", () => {
     const thirdPartyTraining = authorizedSource({
       sourceClass: "permissive_licensed",
       ownerAuthorization: undefined,
@@ -189,16 +207,8 @@ describe("DesignSourceManifest contract", () => {
       licenseEvidencePath: undefined,
     });
     expect(() => validateDesignSourceManifest(thirdPartyTraining)).toThrowError(
-      /DESIGN_SOURCE_LICENSE_REQUIRED/,
+      /DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED/,
     );
-
-    expect(() =>
-      validateDesignSourceManifest({
-        ...thirdPartyTraining,
-        licenseSpdx: "MIT",
-        licenseEvidencePath: "licenses/template.txt",
-      }),
-    ).toThrowError(/DESIGN_SOURCE_TRAINING_NOT_AUTHORIZED/);
   });
 
   it("rejects approvals and authorization records that are not yet effective", () => {
