@@ -304,10 +304,10 @@ function brief(catalog = finalizeDesignCatalogV2(draft())) {
 }
 
 describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
-  it("keeps DI-0 v1 intact while exposing the immutable B2 draft catalog", () => {
+  it("keeps DI-0 v1 intact while exposing the immutable six-family B3 catalog", () => {
     expect(STATIC_DESIGN_CATALOG.catalogVersion).toBe("di-0-foundation/1");
     expect(STATIC_DESIGN_CATALOG.families).toEqual([]);
-    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-b2-drafts/1");
+    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-b3-drafts/1");
     expect(
       STATIC_DESIGN_CATALOG_V2.families.map((family) => family.id),
     ).toEqual([
@@ -315,6 +315,8 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
       "technical-catalog",
       "oem-capability",
       "scientific-trust",
+      "natural-origin",
+      "premium-innovation",
     ]);
     expect(
       STATIC_DESIGN_CATALOG_V2.families.every(
@@ -347,7 +349,7 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
     expect(Object.isFrozen(STATIC_DESIGN_CATALOG_V2)).toBe(true);
   });
 
-  it("pins B1/B2 DemoVisualPack assets to the actual local original files", () => {
+  it("pins every B1-B3 DemoVisualPack asset to the actual local original file", () => {
     const originalSourceId = "site-builder-demo-visual-originals";
     for (const pack of STATIC_DESIGN_CATALOG_V2.demoVisualPacks) {
       expect(pack.assets).toHaveLength(4);
@@ -376,6 +378,150 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
             .digest("hex"),
       ),
     ).toBe(true);
+  });
+
+  it("enforces the six-family B3 total gate and distinct sparse/rich evidence", () => {
+    expect(STATIC_DESIGN_CATALOG_V2.families).toHaveLength(6);
+    const goldenIds = STATIC_DESIGN_CATALOG_V2.families.flatMap(
+      (family) => family.goldenFixtureIds,
+    );
+    expect(new Set(goldenIds).size).toBe(12);
+
+    for (const family of STATIC_DESIGN_CATALOG_V2.families) {
+      expect(family.blueprints.home.length).toBeGreaterThanOrEqual(2);
+      expect(family.blueprints.detail.length).toBeGreaterThanOrEqual(2);
+      expect(family.heroOptions.length).toBeGreaterThanOrEqual(2);
+      expect(family.stylePresetIds.length).toBeGreaterThanOrEqual(2);
+      expect(family.demoVisualPackIds).toHaveLength(1);
+      expect(family.goldenFixtureIds).toHaveLength(2);
+
+      for (const [pageKey, fallbackId] of Object.entries(
+        family.safeFallbackBlueprintIds,
+      )) {
+        expect(
+          family.blueprints[pageKey as keyof typeof family.blueprints].some(
+            (blueprint) => blueprint.id === fallbackId,
+          ),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("keeps Natural and Premium factual surfaces evidence-bound", () => {
+    const natural = STATIC_DESIGN_CATALOG_V2.families.find(
+      (family) => family.id === "natural-origin",
+    )!;
+    const premium = STATIC_DESIGN_CATALOG_V2.families.find(
+      (family) => family.id === "premium-innovation",
+    )!;
+
+    for (const family of [natural, premium]) {
+      const sections = Object.values(family.blueprints)
+        .flat()
+        .flatMap((blueprint) => blueprint.sections);
+      for (const section of sections) {
+        if (
+          ["CertWall", "ProjectsGrid", "Testimonials"].includes(
+            section.componentType,
+          )
+        ) {
+          expect(section.requiresEvidence).toBe(true);
+        }
+      }
+    }
+    const naturalDna = STATIC_DESIGN_CATALOG_V2.designDnas.find(
+      (dna) => dna.id === natural.designDnaId,
+    )!;
+    const premiumDna = STATIC_DESIGN_CATALOG_V2.designDnas.find(
+      (dna) => dna.id === premium.designDnaId,
+    )!;
+    expect(naturalDna.antiPatterns).toContain(
+      "unsupported-organic-or-sustainability-claim",
+    );
+    expect(premiumDna.antiPatterns).toContain(
+      "invented-award-client-patent-or-release",
+    );
+  });
+
+  it("pins the approved B3 blueprint compositions without free-form sections", () => {
+    const expected: Record<string, Record<string, string[]>> = {
+      "natural-origin": {
+        "natural-home-origin": [
+          "FarmhouseHero",
+          "StoryChapters",
+          "MaterialsLibrary",
+          "CollectionCards",
+          "CtaBanner",
+        ],
+        "natural-home-seasonal": [
+          "WarmHero",
+          "DishesShowcase",
+          "FeaturedSpotlight",
+          "PhotoGallery",
+          "InquiryForm",
+        ],
+        "natural-inner-catalog": [
+          "HeroBanner",
+          "ProductGrid",
+          "MaterialsLibrary",
+          "FaqAccordion",
+          "CtaCenter",
+        ],
+        "natural-inner-provenance": [
+          "HeroBanner",
+          "StoryChapters",
+          "ProcessSteps",
+          "TrustSplit",
+          "InquiryForm",
+        ],
+      },
+      "premium-innovation": {
+        "premium-home-editorial": [
+          "EditorialHero",
+          "StatementBlock",
+          "ChapterShowcase",
+          "FeaturedSpotlight",
+          "ArticleGrid",
+          "CtaCenter",
+        ],
+        "premium-home-product-stage": [
+          "HeroFull",
+          "ProductShowcaseAlt",
+          "MaterialsLibrary",
+          "ProjectsGrid",
+          "InquiryForm",
+        ],
+        "premium-inner-innovation": [
+          "HeroBanner",
+          "ChapterShowcase",
+          "TechSystems",
+          "FaqSplit",
+          "CtaBanner",
+        ],
+        "premium-inner-proof": [
+          "HeroBanner",
+          "ProjectsGrid",
+          "TrustSplit",
+          "ArticleGrid",
+          "InquiryForm",
+        ],
+      },
+    };
+
+    for (const [familyId, blueprints] of Object.entries(expected)) {
+      const family = STATIC_DESIGN_CATALOG_V2.families.find(
+        (candidate) => candidate.id === familyId,
+      )!;
+      const actual = Object.values(family.blueprints)
+        .flat()
+        .reduce<Record<string, string[]>>((result, blueprint) => {
+          result[blueprint.id] = blueprint.sections.map(
+            (section) => section.componentType,
+          );
+          return result;
+        }, {});
+      expect(actual).toEqual(blueprints);
+    }
   });
 
   it("accepts an approved family only with qualified variants and the B0 minimums", () => {

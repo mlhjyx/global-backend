@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic natural material samples</title>
+  <desc id="desc">Abstract vessels and neutral sample shapes without product or origin claims.</desc>
+  <rect width="1200" height="800" fill="#fbf4e7"/>
+  <rect x="100" y="610" width="1000" height="24" rx="12" fill="#6b5638"/>
+  <path d="M170 270h250l-30 330H200Z" fill="#c99155"/><path d="M475 210h250l-18 390H493Z" fill="#efe2c4"/>
+  <path d="M785 330h240l-45 270H830Z" fill="#87945a"/>
+  <g fill="#5b673f"><ellipse cx="295" cy="250" rx="130" ry="38"/><ellipse cx="600" cy="195" rx="125" ry="35"/><ellipse cx="905" cy="315" rx="120" ry="32"/></g>
+  <g fill="#d9b978"><circle cx="260" cy="330" r="18"/><circle cx="310" cy="365" r="14"/><circle cx="345" cy="315" r="20"/></g>
+</svg>

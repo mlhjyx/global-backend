@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic concept development sequence</title>
+  <desc id="desc">An abstract grid moves from sketch geometry to a neutral resolved form.</desc>
+  <rect width="1200" height="800" fill="#ece9e2"/>
+  <g fill="none" stroke="#2a2d30" stroke-width="9"><rect x="90" y="120" width="300" height="560"/><rect x="450" y="120" width="300" height="560"/><rect x="810" y="120" width="300" height="560"/></g>
+  <g fill="none" stroke="#8a8d8e" stroke-width="10"><path d="M145 550L335 245M145 245l190 305"/><circle cx="600" cy="400" r="120"/><path d="M880 300h160v200H880z"/></g>
+  <g fill="#d07640"><circle cx="240" cy="400" r="24"/><circle cx="600" cy="400" r="24"/><circle cx="960" cy="400" r="24"/></g>
+</svg>

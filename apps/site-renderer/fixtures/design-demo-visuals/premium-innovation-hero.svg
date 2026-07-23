@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Abstract premium product stage</title>
+  <desc id="desc">A neutral geometric object is presented on a restrained editorial stage.</desc>
+  <rect width="1200" height="800" fill="#eeeae1"/>
+  <rect x="70" y="70" width="1060" height="660" rx="18" fill="#171a1d"/>
+  <ellipse cx="620" cy="610" rx="360" ry="62" fill="#090b0d"/>
+  <path d="M430 245h390l75 300-275 80-280-80Z" fill="#c9c5bb"/>
+  <path d="M430 245l190 380V315z" fill="#777b7c"/><path d="M820 245L620 625V315z" fill="#f3f0e8"/>
+  <circle cx="985" cy="180" r="38" fill="#d77b42"/>
+</svg>
