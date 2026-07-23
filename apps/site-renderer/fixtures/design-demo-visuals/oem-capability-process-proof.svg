@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic inspection grid</title>
+  <desc id="desc">A platform-original inspection plane with repeatable measurement markers.</desc>
+  <rect width="1200" height="800" fill="#0b0b0b"/>
+  <g stroke="#353535" stroke-width="2">
+    <path d="M100 100h1000M100 250h1000M100 400h1000M100 550h1000M100 700h1000"/>
+    <path d="M100 100v600M300 100v600M500 100v600M700 100v600M900 100v600M1100 100v600"/>
+  </g>
+  <path d="M220 540 420 300l190 120 210-220 160 190" fill="none" stroke="#ff5a1f" stroke-width="18"/>
+  <g fill="#f4f1ea"><circle cx="420" cy="300" r="18"/><circle cx="610" cy="420" r="18"/><circle cx="820" cy="200" r="18"/></g>
+</svg>

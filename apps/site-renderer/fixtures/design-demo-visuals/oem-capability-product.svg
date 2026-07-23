@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic engineered module</title>
+  <desc id="desc">A platform-original non-factual product module with serviceable layers.</desc>
+  <rect width="1200" height="800" fill="#f5f2eb"/>
+  <g transform="translate(240 150)">
+    <path d="M0 120 360 0l360 120-360 120z" fill="#171717"/>
+    <path d="m0 120 360 120v280L0 400z" fill="#404040"/>
+    <path d="m720 120-360 120v280l360-120z" fill="#737373"/>
+    <g fill="#ff5a1f"><circle cx="160" cy="300" r="34"/><circle cx="560" cy="300" r="34"/></g>
+    <path d="M280 342h160v64H280z" fill="#f5f2eb"/>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic production sequence</title>
+  <desc id="desc">A platform-original four-stage manufacturing sequence without factual claims.</desc>
+  <rect width="1200" height="800" fill="#fafafa"/>
+  <path d="M140 400h920" stroke="#171717" stroke-width="8"/>
+  <g fill="#fff" stroke="#dc2626" stroke-width="8">
+    <circle cx="180" cy="400" r="80"/><circle cx="460" cy="400" r="80"/>
+    <circle cx="740" cy="400" r="80"/><circle cx="1020" cy="400" r="80"/>
+  </g>
+  <g fill="#171717">
+    <rect x="140" y="380" width="80" height="40"/><rect x="420" y="360" width="80" height="80"/>
+    <path d="m740 350 50 50-50 50-50-50z"/><circle cx="1020" cy="400" r="28"/>
+  </g>
+</svg>

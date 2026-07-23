@@ -304,13 +304,18 @@ function brief(catalog = finalizeDesignCatalogV2(draft())) {
 }
 
 describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
-  it("keeps DI-0 v1 intact while exposing an immutable B1 draft catalog", () => {
+  it("keeps DI-0 v1 intact while exposing the immutable B2 draft catalog", () => {
     expect(STATIC_DESIGN_CATALOG.catalogVersion).toBe("di-0-foundation/1");
     expect(STATIC_DESIGN_CATALOG.families).toEqual([]);
-    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-b1-drafts/2");
+    expect(STATIC_DESIGN_CATALOG_V2.catalogVersion).toBe("m1-e-b-b2-drafts/1");
     expect(
       STATIC_DESIGN_CATALOG_V2.families.map((family) => family.id),
-    ).toEqual(["precision-industrial", "technical-catalog"]);
+    ).toEqual([
+      "precision-industrial",
+      "technical-catalog",
+      "oem-capability",
+      "scientific-trust",
+    ]);
     expect(
       STATIC_DESIGN_CATALOG_V2.families.every(
         (family) => family.status === "draft",
@@ -342,7 +347,7 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
     expect(Object.isFrozen(STATIC_DESIGN_CATALOG_V2)).toBe(true);
   });
 
-  it("pins B1 DemoVisualPack assets to the actual local original files", () => {
+  it("pins B1/B2 DemoVisualPack assets to the actual local original files", () => {
     const originalSourceId = "site-builder-demo-visual-originals";
     for (const pack of STATIC_DESIGN_CATALOG_V2.demoVisualPacks) {
       expect(pack.assets).toHaveLength(4);
