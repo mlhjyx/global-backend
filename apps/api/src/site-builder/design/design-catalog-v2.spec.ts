@@ -335,6 +335,18 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
     expect(() => finalizeDesignCatalogV2(unapprovedDependency)).toThrowError(
       /DESIGN_CATALOG_V2_APPROVAL_INVALID/,
     );
+
+    const detachedHeroOption = clone(draft());
+    detachedHeroOption.families[0].componentVariants.StatsBand = [
+      "technical-grid",
+    ];
+    detachedHeroOption.families[0].heroOptions[1] = {
+      componentType: "StatsBand",
+      variant: "technical-grid",
+    };
+    expect(() => finalizeDesignCatalogV2(detachedHeroOption)).toThrowError(
+      /hero option must match a home hero section/,
+    );
   });
 
   it("resolves only a fully pinned approved family and exact selected components", () => {

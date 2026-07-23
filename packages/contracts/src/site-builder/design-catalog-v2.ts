@@ -654,6 +654,13 @@ export function validateTemplateFamilyV2(value: unknown): TemplateFamilyV2 {
     fail("DESIGN_FAMILY_V2_INVALID", "safe fallback blueprints are invalid");
   }
   const allowedVariants = typedFamily.componentVariants;
+  const homeHeroOptionKeys = new Set(
+    blueprints
+      .filter((blueprint) => blueprint.pageKind === "home")
+      .flatMap((blueprint) => blueprint.sections)
+      .filter((section) => section.role === "hero")
+      .map((section) => `${section.componentType}:${section.variant}`),
+  );
   for (const blueprint of blueprints) {
     for (const section of blueprint.sections) {
       const allowed = allowedVariants[section.componentType];
@@ -688,6 +695,12 @@ export function validateTemplateFamilyV2(value: unknown): TemplateFamilyV2 {
       )
     ) {
       fail("DESIGN_FAMILY_V2_INVALID", "hero option is invalid");
+    }
+    if (!homeHeroOptionKeys.has(`${item.componentType}:${item.variant}`)) {
+      fail(
+        "DESIGN_FAMILY_V2_INVALID",
+        "hero option must match a home hero section",
+      );
     }
     heroKeys.add(`${item.componentType}:${item.variant}`);
   }
