@@ -106,7 +106,7 @@ describe("M1-e-A component qualification gate", () => {
     });
   });
 
-  it("registers thirty-nine qualified components and keeps unqualified types gallery-only", () => {
+  it("registers forty-four qualified components and keeps unqualified types gallery-only", () => {
     expect(SITE_SPEC_COMPONENT_TYPES).toHaveLength(55);
     expect(getComponentReleaseReadiness("AreaGallery")).toMatchObject({
       status: "m1_e_a_qualified",
@@ -117,6 +117,7 @@ describe("M1-e-A component qualification gate", () => {
       "AreaMarquee",
       "ArticleGrid",
       "CertWall",
+      "ChapterShowcase",
       "CollectionCards",
       "CtaBanner",
       "CtaCenter",
@@ -124,13 +125,16 @@ describe("M1-e-A component qualification gate", () => {
       "EditorialHero",
       "FaqAccordion",
       "FaqSplit",
+      "FarmhouseHero",
       "FeatureCards",
+      "FeaturedSpotlight",
       "HeroBanner",
       "InquiryForm",
       "LedgerStats",
       "LogoMarquee",
       "MapLocation",
       "MaterialsLibrary",
+      "MediaCta",
       "PhotoGallery",
       "PricingTable",
       "PricingTiers",
@@ -146,6 +150,7 @@ describe("M1-e-A component qualification gate", () => {
       "StatementBlock",
       "StatsBand",
       "StatsCountup",
+      "StoryChapters",
       "TechSystems",
       "Testimonials",
       "TrustSplit",
@@ -153,7 +158,7 @@ describe("M1-e-A component qualification gate", () => {
       "WarmHero",
     ]);
     expect(Object.keys(M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS)).toHaveLength(
-      273,
+      308,
     );
     for (const componentType of [
       "CtaBanner",
@@ -190,6 +195,11 @@ describe("M1-e-A component qualification gate", () => {
       "WarmHero",
       "DishesShowcase",
       "PhotoGallery",
+      "MediaCta",
+      "FarmhouseHero",
+      "FeaturedSpotlight",
+      "StoryChapters",
+      "ChapterShowcase",
     ] as const) {
       expect(getComponentReleaseReadiness(componentType)).toMatchObject({
         status: "m1_e_a_qualified",
@@ -266,12 +276,12 @@ describe("M1-e-A component qualification gate", () => {
       assertReleaseQualificationRegistryIntegrity({
         releaseTypes: [
           ...SITE_SPEC_RELEASE_COMPONENT_TYPES,
-          "FarmhouseHero",
+          "DispatchHero",
         ],
         qualifications: M1_E_A_COMPONENT_QUALIFICATIONS,
         artifacts: M1_E_A_COMPONENT_QUALIFICATION_ARTIFACTS,
       }),
-    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: FarmhouseHero");
+    ).toThrow("COMPONENT_RELEASE_REGISTRY_INVALID: DispatchHero");
   });
 
   it("rejects placeholder qualification ids without resolved artifacts", () => {

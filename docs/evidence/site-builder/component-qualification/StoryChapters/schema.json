@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"StoryChapters","status":"pass","part":"schema","assertions":["Closed props accept only bounded copy, explicit true CTA targets where applicable, and technical-grid or quiet."],"sources":["packages/contracts/src/site-builder/component-schema.ts"],"verification":["pnpm --filter @global/contracts build"]}

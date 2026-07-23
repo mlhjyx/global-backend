@@ -40,6 +40,11 @@ const QUALIFIED_COMPONENTS = {
   LedgerStats: "section.ledger-stats",
   ValueStrip: "section.value-strip",
   WarmHero: "section.warm-hero",
+  MediaCta: "section.media-cta",
+  FarmhouseHero: "section.farmhouse-hero",
+  FeaturedSpotlight: "section.featured-spotlight",
+  StoryChapters: "section.story-chapters",
+  ChapterShowcase: "section.chapter-showcase",
 } as const;
 
 const componentType = process.env.COMPONENT_QUALIFICATION_COMPONENT;
@@ -170,6 +175,26 @@ test(`${componentType} isolated fixture matches its byte-pinned visual evidence`
   if (componentType === "PhotoGallery") {
     await expect(section.locator("ul > li figure")).toHaveCount(3);
     await expect(section.locator("a")).toHaveAttribute("href", "/archive");
+  }
+  if (componentType === "MediaCta") {
+    await expect(section.locator("h2")).toHaveCount(1);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/contact");
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
+  }
+  if (componentType === "FarmhouseHero") {
+    await expect(section.locator("h1")).toHaveCount(1);
+    await expect(section.locator("a").first()).toHaveAttribute("href", "/collections");
+    await expect(section.locator('a[href="#"]')).toHaveCount(0);
+  }
+  if (componentType === "FeaturedSpotlight") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
+    await expect(section.locator("a")).toHaveAttribute("href", "/catalog");
+  }
+  if (componentType === "StoryChapters") {
+    await expect(section.locator("ol > li > article")).toHaveCount(2);
+  }
+  if (componentType === "ChapterShowcase") {
+    await expect(section.locator("ul > li > article")).toHaveCount(2);
   }
   await expect(section).toHaveScreenshot(`${componentType}.png`, {
     animations: "disabled",

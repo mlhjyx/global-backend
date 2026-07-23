@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"StoryChapters","status":"pass","part":"accessibility","assertions":["A labelled section uses an ordered list of readable article chapters."],"sources":["apps/site-renderer/src/components/StoryChapters.astro"],"verification":["pnpm --filter @global/site-renderer test:visual"]}

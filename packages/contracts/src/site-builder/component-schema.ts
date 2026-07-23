@@ -20,10 +20,14 @@ const ctaSchema = strictObj({
   pageId: str.optional(),
   url: str.optional(),
 });
+const safeExternalUrl = z
+  .string()
+  .url()
+  .refine((value) => new URL(value).protocol === "https:");
 const releaseCtaSchema = strictObj({
   labelKey: str,
   pageId: str.min(1).optional(),
-  url: str.min(1).optional(),
+  url: safeExternalUrl.optional(),
 }).refine((cta) => Boolean(cta.pageId || cta.url));
 const internalCtaSchema = strictObj({ labelKey: str, pageId: str.min(1) });
 const statSchema = strictObj({ value: str, labelKey: str });
@@ -361,19 +365,21 @@ export const COMPONENT_SCHEMAS = {
     titleKey: str,
     titleAccentKey: str,
     subKey: str,
-    primaryCta: ctaSchema,
-    secondaryCta: ctaSchema.optional(),
+    primaryCta: releaseCtaSchema,
+    secondaryCta: releaseCtaSchema.optional(),
     whatsappLabelKey: str.optional(),
-    whatsappUrl: str.optional(),
+    whatsappUrl: safeExternalUrl.optional(),
     primaryIcon: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   FarmhouseHero: obj({
     eyebrowKey: str,
     h1Line1Key: str,
     h1Line2Key: str,
-    primaryCta: ctaSchema,
+    primaryCta: releaseCtaSchema,
     scrollKey: str,
-    secondaryCta: ctaSchema.optional(),
+    secondaryCta: releaseCtaSchema.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   ValueStrip: obj({ headingKey: str, items: z.array(strictObj({ icon: str, labelKey: str })).min(2).max(6), variant: technicalBaselineVariant.optional() }),
   FeaturedSpotlight: obj({
@@ -381,9 +387,10 @@ export const COMPONENT_SCHEMAS = {
     titleKey: str,
     items: z.array(
       strictObj({ nameKey: str, categoryKey: str, priceKey: str }),
-    ),
+    ).max(8),
     allLabelKey: str.optional(),
     allPageId: str.optional(),
+    variant: technicalBaselineVariant.optional(),
   }),
   StoryChapters: obj({
     introEyebrowKey: str,
@@ -395,7 +402,8 @@ export const COMPONENT_SCHEMAS = {
         bodyKey: str,
         align: z.enum(["left", "right"]).optional(),
       }),
-    ),
+    ).max(8),
+    variant: technicalBaselineVariant.optional(),
   }),
   CollectionCards: obj({
     eyebrowKey: str,
@@ -506,7 +514,8 @@ export const COMPONENT_SCHEMAS = {
     chapterKey: str,
     h1aKey: str,
     h1bKey: str,
-    pieces: z.array(strictObj({ tagKey: str, nameKey: str, specKey: str })),
+    pieces: z.array(strictObj({ tagKey: str, nameKey: str, specKey: str })).max(8),
+    variant: technicalBaselineVariant.optional(),
   }),
   ColorwayPicker: obj({
     chapterKey: str,

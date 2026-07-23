@@ -1,0 +1,1 @@
+{"schemaVersion":"component-qualification-evidence/v1","componentType":"MediaCta","status":"pass","part":"visualRegression","assertions":["The isolated fixture is checked at 375, 768 and 1440 pixels."],"sources":["apps/site-renderer/visual-tests/component-qualification-fixtures.spec.ts"],"verification":["pnpm --filter @global/site-renderer test:visual"]}
