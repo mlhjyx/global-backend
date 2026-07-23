@@ -2,7 +2,7 @@ name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
 # 55 型三断点视觉回归仅在渲染输出、其消费的契约或本工作流变更时运行；
-# 每日定时与手动触发始终跑全量视觉门，避免路径过滤遗漏或运行器漂移长期未被发现。
+# 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终跑全量视觉门，避免路径过滤遗漏或运行器漂移长期未被发现。
 # 绿了才合。测试是纯单测（解析器/评分/身份解析等纯函数，无 DB/网络），故 CI 不需要 Postgres/服务。
 # 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 AGENTS.md §5「真实数据不用 sandbox」），不进 CI。
 # contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
