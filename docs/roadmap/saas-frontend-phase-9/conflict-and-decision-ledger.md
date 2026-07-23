@@ -23,7 +23,7 @@
 |---|---|---|---|---|
 | `DEC-FE-P9-001` | Phase 9 以 `8dcbbcb` 为工程事实基线；Phase 1–8 原样冻结并以 delta 承接 | `APPROVED_WITH_CONDITION` | `OWN-DOC-GOV` | 所有 current 数字必须机器重算；不得改写旧 Gate 证据 |
 | `DEC-FE-P9-002` | 产品覆盖公共站、身份/激活、SaaS、客户生成站、帮助/开发者、平台运营六个表面 | `APPROVED_WITH_CONDITION` | `OWN-PRODUCT` | 六个表面共享品牌与对象接缝，但不共享一套导航、权限或页面模板 |
-| `DEC-FE-P9-003` | SaaS 一级 IA 继续采用“今日/客户开发/站点管理/增长执行/互动与商机/洞察” | `APPROVED_WITH_CONDITION` | `OWN-PRODUCT` | 企业真相、任务、审批、通知、集成、权限和事故是横向控制面；公共站/帮助/运营不塞进主导航 |
+| `DEC-FE-P9-003` | SaaS 一级 IA 继续采用“今日/客户开发/站点管理/增长执行/互动与商机/洞察” | `SUPERSEDED` | `OWN-PRODUCT` | 2026-07-23 被 `DEC-FE-P9-019` 取代；原六域把企业资料与知识压成横向入口，不能覆盖其持续业务责任 |
 | `DEC-FE-P9-004` | 我方平台拥有业务对象、权限、批准/授权、回执、成本、审计与 Provider 映射；外部系统只经 Adapter 执行 | `APPROVED_WITH_CONDITION` | `OWN-SAAS-PLATFORM` | 设计可先做；runtime 必须有 Contract、数据最小化、幂等、退出和实际 Owner |
 | `DEC-FE-P9-005` | 内容分发/公开互动与私密会话采用双引擎边界：Aitoearn 候选执行前者，Chatwoot 候选执行后者 | `APPROVED_WITH_CONDITION` | `OWN-PRODUCT` | 只批准设计与受控 Pilot 方案，不覆盖 Gate 7 的 `DEFER` runtime 状态；Campaign/Content/Conversation/Opportunity SoR 留我方 SaaS |
 | `DEC-FE-P9-006` | 默认发布目标为 immutable SiteRelease → object storage/CDN → Caddy/ACME；BaoTa 仅为客户自管服务器的可选 Hosting Adapter | `APPROVED_WITH_CONDITION` | `OWN-SITE-BE` | BaoTa 不嵌 UI、不改源码、不拥有 Site/Release/Domain/Certificate；许可与 API Pilot 未过门 |
@@ -39,6 +39,8 @@
 | `DEC-FE-P9-016` | 用户提供并确认的五张界面是当前视觉基线：Today、Site Editor、Buyer Development、Unified Inbox、AI Task Strategy | `APPROVED_WITH_CONDITION` | `OWN-DESIGN` | 只批准布局、密度、层级和视觉语言；示例内容不证明对象/API。Phase 0 已确认，Foundations 和五张核心页面为草稿；仍须完成响应式、a11y、全状态和用户评审 |
 | `DEC-FE-P9-017` | 当前不建立 `RFQ Lite` 独立聚合和工程生命周期；Inbox 只设计私密会话、分派、上下文、AI 草稿和可追踪外部交接 | `APPROVED_WITH_CONDITION` | `OWN-PRODUCT` | Conversation/Opportunity 均属待确认 SaaS SoR；未来若有结构化询盘对象，必须基于真实用户任务、合同、权限、附件和外部系统边界另过 Gate |
 | `DEC-FE-P9-018` | 视觉与功能设计前必须完成 `docs` 全量阅读总账，且 current truth 优先级固定为产品边界 → as-built/代码/OpenAPI → ADR → 当前状态/Release Plan → 活文档 → 实施记录 → 历史输入 | `APPROVED_WITH_CONDITION` | `OWN-DOC-GOV` | 旧 Word、Mock、截图、竞品和记忆只能发现候选；没有 current 合同支持的内容必须明确 `PROPOSED/BLOCKED` |
+| `DEC-FE-P9-019` | SaaS 使用“今日/企业资料与知识/客户开发/独立站管理/增长执行/互动与商机/洞察”七个一级业务域；管理与设置为独立入口 | `APPROVED_WITH_CONDITION` | `OWN-PRODUCT` | 企业资料与知识拥有 canonical 工作区但不复制对象；任务/审批/通知/长任务/事故仍是横向控制面；公共/身份/帮助/运营不进入主导航；移动端通过“更多”访问完整 IA |
+| `DEC-FE-P9-020` | 五张视觉基线不得决定栏目；推荐完整管理员 SaaS 侧栏使用 8 个一级入口、38 个二级入口，其中 7 个业务一级/30 个业务二级，另有 1 个管理一级/8 个管理二级；7 个全局 Shell 控件不计入导航 | `PROPOSED_FOR_PRODUCT_REVIEW` | `OWN-PRODUCT` | 数量由 36 项 Feature、24 个 Page Family、76 个 Page ID、8 个 Capability Pack 和 10 条 Handoff 归类得出；对象 Tab/Drawer/向导承载三级复杂度；完整 Manifest 见 `AUD-FE-P9-006`。产品评审前不得批量重写 Figma 导航或把候选页标为 available |
 
 ## 3. 事实冲突
 
@@ -77,6 +79,8 @@
 | `CON-FE-P9-031` | 原三方向先后使用“买家详情 + RFQ 技术资格化”和固定“资料准备度”内容，都把示例字段误当产品事实 | 两批旧图统一降为 `SUPERSEDED_RESEARCH_PROVENANCE`；按 `DEC-FE-P9-016` 采用五张用户确认基线，不再生成新三图 | `OWN-DESIGN` | `RESOLVED_WITH_REMEDIATION` | 资产登记、Fixture、交互、Journey 和 Figma register 只保留五张基线；每张基线明确“视觉批准不等于功能批准” |
 | `CON-FE-P9-032` | Profile/KB 当前支持通用五组资料、上传/导入来源和动态 gaps；设计稿曾把行业字段变成固定规格库与独立 Readiness 对象 | 行业差异由引导元数据、KB 抽取、Offering attributes 和 Claim/Evidence 表达；gaps 是派生读模型 | `OWN-PRODUCT` | `RESOLVED_WITH_REMEDIATION` | current 文档、对象总账和页面不再声明独立 ProductFamily/TechnicalSpecification/Readiness 合同；新增 schema 前另过对象评审 |
 | `CON-FE-P9-033` | 旧 Site Builder D16 要求 Google Maps Embed API、Geocoding、key 和 CSP/referrer 白名单；2026-07-23 current 合同已改为无外呼 `MapLocation` 地址文本卡 | 新合同为唯一 current 真值；设计不得出现 iframe、交互地图、Geocoding、坐标推断、地图 key 或 consent 依赖 | `OWN-SITE-BE` | `RESOLVED` | 02/04/05/06 已一致，资格 fixture/三断点证据已绑定字节；Phase 9 生成站后续页只能消费文本合同 |
+| `CON-FE-P9-034` | Gate 4/6 与 Phase 9 初稿使用六项 IA，同时企业资料与知识已有 7 个稳定 Page、canonical 对象和持续维护/审核任务 | 按 `DEC-FE-P9-019` 提升为第七个一级业务域；保留原对象 SoR，不建立第二份企业真相 | `OWN-PRODUCT` | `RESOLVED_WITH_REMEDIATION` | L2 IA、Shell、Phase 9 页面族、Figma/Canva 登记和受控设计节点全部同步，旧 Gate 证据保留 successor 说明 |
+| `CON-FE-P9-035` | SaaS Figma 侧栏存在“工作台/概览/企业资料/站点管理/管理”多套顺序，二级栏目也被参考图临时内容决定；洞察 Design Page 为空，移动底栏无完整入口 | 按 `DEC-FE-P9-020` 的多层 Manifest 先评审后同步；管理与设置移出业务组；补洞察代表页和移动“更多”入口 | `OWN-DESIGN` | `OPEN_REMEDIATION` | 一级/二级/对象 Tab 均与 `AUD-FE-P9-006` 一致；受影响 Frame 字体/选中态/间距无错位；洞察不使用伪 KPI；移动抽屉可达全部域 |
 
 ## 4. 阻塞项
 

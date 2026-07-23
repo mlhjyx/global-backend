@@ -77,6 +77,7 @@
 | `CAND-P9-DSA-013` | Product Public Web, Help & Developer Figma 文件 | [Figma Design](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · 产品官网 `3:10` · 身份 `8:2` · 帮助 `6:2` · 开发者 `6:45` · Prototype `9:*` | `OWN-DESIGN` | 四张公共表面代表页和一条产品官网→安全激活原型；价格/信任/状态全页面与用户验证未完成 | `HIGH_FIDELITY_DRAFT` |
 | `CAND-P9-DSA-014` | Generated Manufacturing Sites Figma 文件 | [Figma Design](https://www.figma.com/design/XlpWnitQlAodiF18wxPbDp) · 生成站首页 `3:10` | `OWN-DESIGN` | 动态资料驱动的生成站代表页；仍服从 TemplateFamily/DesignDNA，其余页面未完成 | `HIGH_FIDELITY_DRAFT` |
 | `CAND-P9-DSA-015` | Site Editor 工业横幅生成素材 | [industrial-hero-v1.png](../roadmap/saas-frontend-phase-9/assets/generated/industrial-hero-v1.png) · SHA-256 `252261158dc7ecb0dc4140d9841110fff4e59f1e2a91d865cce74540f769fad3` | `OWN-DESIGN` | 无品牌/文字/人脸/技术声明的演示 Fixture；生产前仍需权利与相似性审核 | `VISUAL_REFERENCE_ONLY` |
+| `CAND-P9-DSA-016` | 全产品多层 IA Manifest | [Phase 9 IA 审计](../roadmap/saas-frontend-phase-9/information-architecture-and-coverage-audit.md) / `DEC-FE-P9-020` | `OWN-PRODUCT` | 完整管理员视图 8 个一级/38 个二级，其中 7 个业务一级/30 个业务二级 + 1 个管理一级/8 个管理二级；另有 7 个 Shell 控件及对象 Tab；评审前不批量改 Figma | `SPEC_REVIEW_CANDIDATE` |
 
 ## 5. 外部/本地参考
 

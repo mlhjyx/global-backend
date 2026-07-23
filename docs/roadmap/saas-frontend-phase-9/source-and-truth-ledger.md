@@ -98,6 +98,7 @@ Phase 9 不修改 Phase 1–8 正文。任何新事实使用新 ID 和 delta 载
 | `SRC-FE-P9-023` | governance capability/object/page/scenario/traceability | Gate 3–8；`L1 Registry` | `CROSS_CHECKED_AT_BASELINE` | 既有 76 Page ID、27 Object、Capability/Scenario/Handoff 关系 | 新页面/对象未过裁决；指标与 Guide 关系不够完整 | Phase 9 audit → 后续 Registry Gate |
 | `SRC-FE-P9-024` | current Phase 9 package | `main@8dcbbcb` 后新增；`L2/L3 proposal` | `CROSS_CHECKED_AT_BASELINE + POST_BASELINE_REFRESH` | 设计范围、交互语言、Figma 交付 schema，以及 12 张 SaaS 桌面代表页、4 张公共表面、1 张生成站、5 个高风险状态、3 张移动端和 6 条原型骨架 | 全部仍 `DRAFT`；不得表示为全量设计、用户验证或前端实现 | 本阶段评审包 |
 | `SRC-FE-P9-025` | [docs 全量阅读总账](docs-reading-ledger.md) | 2026-07-23 读取快照；`L3` | `FULL_READ_RECONCILED` | 快照中 171 份 Markdown/DOCX 的路径、SHA-256、行/段落数、权威层级和采用规则 | 总账本身为本轮新增文件，不纳入自身快照；文件变更后须重算指纹 | 每轮设计前的来源完整性门 |
+| `SRC-FE-P9-026` | [信息架构与遗漏覆盖审计](information-architecture-and-coverage-audit.md) | 2026-07-23；`L3 proposal` | `PHASE9_SUCCESSOR_READ / PRODUCT_REVIEW_PENDING` | 将 36 个 Feature、24 个 Page Family、76 个稳定 Page、8 个 Capability Pack 和 10 条 Handoff 归类为完整管理员 8 个一级/38 个二级、7 个 Shell 控件和对象 Tab | 不能覆盖 Gate 4 current IA、不能把候选二级页或目标 API表示为已实现、不能在批准前批量重写 Figma | `DEC-FE-P9-020` 产品评审 → L2 IA/Shell successor → Figma 同步 |
 
 ## 6. Site Builder 00–14、DQ-1 与交接记录
 

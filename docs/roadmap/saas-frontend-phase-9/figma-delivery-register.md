@@ -32,7 +32,7 @@
 | File ID | 文件 | 类型 | 内容 | URL / File Key | 状态 |
 |---|---|---|---|---|---|
 | `FIG-P9-001` | Research & Provenance | FigJam | 来源、截图、权利、比较、finding、Conflict/Decision | [Figma board](https://www.figma.com/board/vWBA5KkOtB56ECRGj2PXb4) · file key `vWBA5KkOtB56ECRGj2PXb4` · board node `1:2` | `RESEARCH_MAPPED` |
-| `FIG-P9-002` | IA & Journeys | FigJam | 产品表面、六项任务域、对象接力、12 旅程、Provider 双引擎 | [Figma board](https://www.figma.com/board/8crRdLFh46S3V3z5vU8pLA) · file key `8crRdLFh46S3V3z5vU8pLA` · root `0:1` | `RESEARCH_MAPPED` |
+| `FIG-P9-002` | IA & Journeys | FigJam | 产品表面、旧六域结构、对象接力、12 旅程、Provider 双引擎；待按 `AUD-FE-P9-006` 重构为完整管理员视图 8 个一级/38 个二级、7 个 Shell 控件和对象 Tab | [Figma board](https://www.figma.com/board/8crRdLFh46S3V3z5vU8pLA) · file key `8crRdLFh46S3V3z5vU8pLA` · root `0:1` | `RESEARCH_MAPPED_WITH_STALE_NODES` |
 | `FIG-P9-003` | Foundations, Components & Patterns | Design | Variables、Foundations、组件、状态和模式板 | [Figma Design](https://www.figma.com/design/Ujjt9lNj0YibvXJjALyc0c) · file key `Ujjt9lNj0YibvXJjALyc0c` · State Lab `16:2` · Product Patterns `18:2` | `FOUNDATIONS_DRAFT` |
 | `FIG-P9-004` | SaaS App & Platform Ops | Design | 全页面线框、高保真代表、状态实验室、响应式和原型 | [Figma Design](https://www.figma.com/design/RSZk3Xgg814cDmmqtaxZZw) · file key `RSZk3Xgg814cDmmqtaxZZw` · Core `6:2/9:2/10:2/11:2/12:2` · Cross-domain `23:2/23:119/23:236/23:335/29:119/30:2/31:2` · 状态 `18:*` · Mobile `20:*` · Prototypes `22:*/24:*/32:*` | `HIGH_FIDELITY_DRAFT` |
 | `FIG-P9-005` | Product Public Web, Help & Developer | Design | 产品官网、身份、信任、帮助、开发者、状态 | [Figma Design](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · file key `IMLSUMTQViEEauwBdzbczr` · 产品官网 `3:10` · 身份激活 `8:2` · 帮助 `6:2` · 开发者 `6:45` · Prototype `9:*` | `HIGH_FIDELITY_DRAFT` |
@@ -73,7 +73,7 @@
 
 ### 4.2 SaaS Screens
 
-按六项任务域组织，再放横向模式和控制面。页面 Frame 不按部门或 Provider 分组。公共站、生成站和平台运营使用明显 Section 隔离。
+产品评审通过 `DEC-FE-P9-020` 后，按完整管理员视图 8 个一级/38 个二级组织，其中 7 个业务一级/30 个业务二级，另有 1 个管理一级/8 个管理二级；再放 7 个横向 Shell 控件。对象详情使用对象 Tab，不在侧栏复制。页面 Frame 不按参考图、部门或 Provider 分组。公共站、生成站和平台运营使用明显 Section 隔离。
 
 ### 4.3 Research
 

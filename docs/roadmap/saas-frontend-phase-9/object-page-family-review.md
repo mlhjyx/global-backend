@@ -213,7 +213,7 @@ SiteVersion → BuildRun → READY SiteRelease → PublishReview/Authorization
 
 ### 6.1 一级 IA 不因新增页面族膨胀
 
-SaaS 一级任务域继续是：今日、客户开发、站点管理、增长执行、互动与商机、洞察。企业真相、任务、审批、通知、集成、权限和事故是横向控制面；设置、帮助和平台运营为 utility/role-gated 入口。
+Phase 9 推荐的完整管理员侧栏为 8 个一级/38 个二级：今日、企业资料、客户开发、独立站、增长执行、互动与商机、洞察七个业务域，以及独立的“管理与设置”入口。任务、审批、通知、长任务、事故、帮助和对象 Inspector 是横向能力；个人设置、平台运营和公共产品表面仍不混入业务导航。精确二级和对象 Tab 以 `AUD-FE-P9-006` 为准；`DEC-FE-P9-020` 通过产品评审前，本结构保持提案态。
 
 - Public Marketing、Identity、Help/Developer public docs 和 Generated Manufacturing Site 位于 SaaS Shell 外。
 - Public Engagement 与 Direct Outbound 进入“增长执行”或“互动与商机”的任务上下文，不新增供应商/渠道命名的一级导航。
@@ -250,7 +250,7 @@ SaaS 一级任务域继续是：今日、客户开发、站点管理、增长执
 | 字段 | 要求 |
 |---|---|
 | `candidate_page_key` | 继续使用 `CAND-P9-*`，批准前不得占 `PAGE-FE-*` |
-| `family/area/shell_mode` | 页面族、六项 IA/utility/public、full shell/compact/no shell |
+| `family/area/shell_mode` | 页面族、七个一级业务域/management/utility/public、full shell/management/compact/no shell；二级与对象 Tab 见 `AUD-FE-P9-006` |
 | `primary_actor/job/outcome` | 首要角色、任务和完成结果；不是功能列表 |
 | `canonical_object/sor/social_class` | 对象、唯一 SoR、数据社会属性和敏感字段 |
 | `route/deep_link/object_context` | 稳定 ID、Workspace、返回上下文和跨域链接 |

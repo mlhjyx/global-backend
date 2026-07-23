@@ -68,7 +68,7 @@ SaaS 文件已建立 11 个 Page、42 个本地语义/尺寸 Variables 和 9 个
 
 | 产品表面 | 文件 / Figma Node | Frame 名称 / 状态 | 当前边界 |
 |---|---|---|---|
-| 产品官网 | [`FIG-P9-005`](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · `3:10` | `CAND-P9-PUBLIC-HOME / CAND-P9-SCN-PUBLIC-001 / Visitor / Normal / PROPOSED / v0.1` | 解释产品价值、六项任务域、设计预览与信任边界；不使用虚构客户、KPI、部署状态或“所有模块已上线”文案 |
+| 产品官网 | [`FIG-P9-005`](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · `3:10` | `CAND-P9-PUBLIC-HOME / CAND-P9-SCN-PUBLIC-001 / Visitor / Normal / PROPOSED / v0.1` | 当前 Frame 仍解释旧六项任务域，已按 `DEC-FE-P9-020` 标记为待修正设计债；不使用虚构客户、KPI、部署状态或“所有模块已上线”文案 |
 | 身份与安全激活 | [`FIG-P9-005`](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · `8:2` | `CAND-P9-PUBLIC-ACTIVATION / CAND-P9-SCN-ACTIVATION-001 / NewWorkspaceOwner / GuidedActivation / PROPOSED / v0.1` | 邮箱验证、Workspace、角色、安全 Demo、导入和恢复；明确身份由 SaaS/IdP 持有 |
 | 帮助中心 | [`FIG-P9-005`](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · `6:2` | `CAND-P9-PUBLIC-HELP / CAND-P9-SCN-HELP-001 / ProductUser / TaskOrientedHelp / PROPOSED / v0.1` | 按 Tutorial、How-to、Reference、Explanation 分流；指南回链对象、状态和原任务 |
 | 开发者中心 | [`FIG-P9-005`](https://www.figma.com/design/IMLSUMTQViEEauwBdzbczr) · `6:45` | `CAND-P9-PUBLIC-DEVELOPER / CAND-P9-SCN-DEVELOPER-001 / Developer / ContractFirst / PROPOSED / v0.1` | 从 Workspace、scope、OpenAPI、签名 Webhook、幂等和退出开始；不暴露 Provider secret |

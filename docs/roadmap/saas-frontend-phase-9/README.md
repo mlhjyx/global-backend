@@ -28,23 +28,24 @@ Phase 9 同时覆盖六个表面，但不把它们混成一套导航或视觉模
 |---|---|---|---|
 | 产品公共站 | 潜在客户、合作伙伴、采购与安全评审人员 | 产品、制造业方案、价格、案例、信任、帮助、开发者与状态入口 | `PROPOSED` |
 | 身份与激活 | 新用户、受邀成员、管理员 | 注册、验证、恢复、Workspace、Onboarding、导入迁移 | `PROPOSED`；Site intake 只有局部合同 |
-| SaaS 工作台 | 老板、海外增长、内容、销售、审批、管理员 | 六项任务域 + 横向控制面 | 地图已批准；正式前端未定位 |
+| SaaS 工作台 | 老板、海外增长、内容、销售、审批、管理员 | 完整管理员视图 8 个一级/38 个二级：7 个业务一级/30 个业务二级 + 1 个管理一级/8 个管理二级；另有 7 个 Shell 控件和对象 Tab | 七个业务域方向已批准；精确数量见 `DEC-FE-P9-020` 提案；正式前端未定位 |
 | 客户生成站 | 海外买家、采购、工程、经销商 | 经客户提供并审核的企业、产品、能力、认证、资料、案例和有同意的询盘入口 | Renderer 局部 as-built；公开发布链未闭环 |
 | 帮助与开发者 | 用户、管理员、开发者、运营 | Tutorial、How-to、Reference、Explanation、Changelog、Status | `PROPOSED` |
 | 平台运营 | 客户成功、数据运营、安全、平台运维 | Provider、Workflow、Model、Incident、DSR、受控 support access | `TARGET_EXTERNAL`；不得与客户 UI 混权 |
 
-## 3. 六项任务域
+## 3. 八个侧栏一级入口：七个业务域与一个管理入口
 
-SaaS 一级导航冻结为用户任务，而不是供应商或技术模块：
+SaaS 的七个业务域方向已冻结为用户任务，而不是供应商或技术模块；完整 8/38 侧栏数量仍由 `DEC-FE-P9-020` 评审：
 
 1. 今日；
-2. 客户开发；
-3. 站点管理；
-4. 增长执行；
-5. 互动与商机；
-6. 洞察。
+2. 企业资料与知识；
+3. 客户开发；
+4. 独立站管理；
+5. 增长执行；
+6. 互动与商机；
+7. 洞察。
 
-企业真相、全局搜索、任务、审批、通知、长任务、事故、帮助和对象 Inspector 是横向能力；个人设置、Workspace 设置、集成、安全、账单和平台运营使用独立入口。
+企业资料与知识拥有 Company/Profile/Offering/Claim/Evidence/Asset/KnowledgeSource 的 canonical 工作区，但不会复制这些对象。全局搜索、任务、审批、通知、长任务、事故、帮助和对象 Inspector 是横向能力；管理与设置是第八个侧栏一级入口，但不是第八个业务价值域；公共站、身份、帮助/开发者和平台运营不进入 SaaS 主导航。完整管理员视图为 8 个一级/38 个二级，完整归属与遗漏处理见[信息架构与遗漏覆盖审计](information-architecture-and-coverage-audit.md)。
 
 ## 4. 交付物
 
@@ -55,6 +56,7 @@ SaaS 一级导航冻结为用户任务，而不是供应商或技术模块：
 | [冲突与决定总账](conflict-and-decision-ledger.md) | 状态漂移、对象折叠、SoR 和产品边界冲突 | `ACTIVE_LEDGER` |
 | [功能覆盖总账](feature-coverage-ledger.md) | `Keep / Deepen / Split / New / Park / Reject` | `64/64 OPENAPI + 76/76 PAGE MAPPED` |
 | [对象与页面族评审](object-page-family-review.md) | 候选对象分类、现有 76 页加深和新增页面族 | `24 PAGE FAMILIES MAPPED / GATE_PENDING` |
+| [信息架构与遗漏覆盖审计](information-architecture-and-coverage-audit.md) | 完整管理员视图 8 个一级/38 个二级（7 个业务一级/30 个业务二级 + 1 个管理一级/8 个管理二级）、7 个 Shell 控件、对象 Tab、24 个页面族唯一归属和遗漏处置 | `STRUCTURE_RECOMMENDATION / REVIEW_BEFORE_FIGMA` |
 | [Provider 与 SoR 架构](provider-and-sor-architecture.md) | Aitoearn、Chatwoot、BaoTa、new-api 与替代/退出 | `DESIGN CONTRACT DRAFT / RUNTIME_DEFERRED` |
 | [交互语言与视觉语义](interaction-language-and-visual-semantics.md) | Shell、对象工作台、状态、模式、Token 和视觉方向 | `DRAFT` |
 | [资料与知识引导 Fixture](visual-direction-content-fixture.md) | 动态资料采集、知识库输入、允许数据、禁止硬编码行业字段与旧图处置 | `DRAFT` |
@@ -103,7 +105,7 @@ SaaS 一级导航冻结为用户任务，而不是供应商或技术模块：
 - 不建立独立“资料准备度工作台”；Today 或 Site Onboarding 只显示可追溯的缺口、解析/审核状态和下一动作，不显示伪精确总分。
 - Unified Inbox 当前只按目标产品设计为私密会话、分派、上下文和 AI 草稿面；在 SaaS SoR/合同未确定前，不新增 `RFQ Lite` 聚合或工程评审生命周期。
 - 原 RFQ 技术资格化、固定 CNC 技术规格准备度和旧三方向图片只保留为 `SUPERSEDED_RESEARCH_PROVENANCE`，不得作为组件、Fixture 或工程事实。
-- 全量文档快照、对象/SoR 校正和六个 Figma locator 已完成；用户已批准 Phase 0 范围，Foundations、State Lab 和五张核心高保真已进入草稿。正式组件库、全量页面、响应式、a11y 和用户验证仍未完成。
+- 全量文档快照、对象/SoR 校正和六个 Figma file locator 已完成；SaaS 一级方向已按 `DEC-FE-P9-019` 修正，完整二级/对象结构由 `DEC-FE-P9-020` 提案承接，产品评审前不批量改 Figma。Foundations、State Lab 和五张核心高保真已进入草稿；正式组件库、全量页面、响应式、a11y 和用户验证仍未完成。
 
 本纠偏优先于本阶段其他工作稿中关于旧 RFQ 视觉基准、旧三张图或完整工程评审的描述；相关 successor 未同步前，一律按上述边界解释，不得继续使用旧稿推进设计。
 
