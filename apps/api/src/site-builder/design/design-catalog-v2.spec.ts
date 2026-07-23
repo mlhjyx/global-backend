@@ -347,6 +347,38 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
     expect(() => finalizeDesignCatalogV2(detachedHeroOption)).toThrowError(
       /hero option must match a home hero section/,
     );
+
+    const unqualifiedDeclaredVariant = clone(draft());
+    unqualifiedDeclaredVariant.families[0].componentVariants.StatsBand = [
+      "invented",
+    ];
+    expect(() =>
+      finalizeDesignCatalogV2(unqualifiedDeclaredVariant),
+    ).toThrowError(/DESIGN_FAMILY_V2_VARIANT_UNQUALIFIED/);
+
+    const repeatedGoldenFixture = clone(draft());
+    repeatedGoldenFixture.families[0].goldenFixtureIds = [
+      "industrial-rich",
+      "industrial-rich",
+    ];
+    expect(() => finalizeDesignCatalogV2(repeatedGoldenFixture)).toThrowError(
+      /DESIGN_FAMILY_V2_INVALID/,
+    );
+
+    const duplicateSourceIdentity = clone(draft());
+    duplicateSourceIdentity.sourceManifests[0].sourceUrl =
+      "https://reference.example/design";
+    duplicateSourceIdentity.sourceManifests[1].sourceUrl =
+      "https://reference.example/design/?utm_source=review";
+    expect(() => finalizeDesignCatalogV2(duplicateSourceIdentity)).toThrowError(
+      /independent sources/,
+    );
+
+    const missingDnaRule = clone(draft());
+    missingDnaRule.designDnas[0].ruleIds = ["unknown-rule"];
+    expect(() => finalizeDesignCatalogV2(missingDnaRule)).toThrowError(
+      /DESIGN_CATALOG_V2_REFERENCE_UNKNOWN/,
+    );
   });
 
   it("resolves only a fully pinned approved family and exact selected components", () => {
@@ -371,5 +403,29 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
     expect(() => finalizeDesignBriefV2(generatedMedia)).toThrowError(
       /DESIGN_BRIEF_V2_INVALID/,
     );
+
+    const { digest: _archetypeDigest, ...wrongArchetype } = clone(
+      brief(catalog),
+    );
+    wrongArchetype.archetype = "scientific-b2b";
+    expect(() =>
+      validateDesignBriefV2AgainstCatalog(
+        catalog,
+        finalizeDesignBriefV2(wrongArchetype),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_V2_ARCHETYPE_MISMATCH/);
+
+    const { digest: _assetDigest, ...assetless } = clone(brief(catalog));
+    assetless.assetStrategy = {
+      availableRoles: [],
+      allowGeneratedImages: false,
+      allowVideo: false,
+    };
+    expect(() =>
+      validateDesignBriefV2AgainstCatalog(
+        catalog,
+        finalizeDesignBriefV2(assetless),
+      ),
+    ).toThrowError(/DESIGN_BRIEF_V2_ASSET_MISMATCH/);
   });
 });

@@ -214,9 +214,11 @@ export type DesignCatalogV2ContractErrorCode =
   | "DESIGN_BRIEF_V2_FAMILY_UNAVAILABLE"
   | "DESIGN_BRIEF_V2_FAMILY_MISMATCH"
   | "DESIGN_BRIEF_V2_PRESET_MISMATCH"
+  | "DESIGN_BRIEF_V2_ARCHETYPE_MISMATCH"
   | "DESIGN_BRIEF_V2_BLUEPRINT_MISMATCH"
   | "DESIGN_BRIEF_V2_VARIANT_MISMATCH"
   | "DESIGN_BRIEF_V2_VISUAL_PACK_MISMATCH"
+  | "DESIGN_BRIEF_V2_ASSET_MISMATCH"
   | "DESIGN_BRIEF_V2_BUDGET_MISMATCH"
   | "DESIGN_BRIEF_V2_MOTION_MISMATCH";
 
@@ -254,6 +256,19 @@ function isRelativeRepositoryPath(value: unknown): value is string {
     !value.includes("\\") &&
     !value.split("/").includes("..")
   );
+}
+
+function canonicalSourceIdentity(manifest: DesignSourceManifest): string {
+  if (!manifest.sourceUrl) return `manifest:${manifest.id}`;
+  try {
+    const url = new URL(manifest.sourceUrl);
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return `source-url:${manifest.sourceUrl.trim().toLowerCase()}`;
+  }
 }
 
 function validBudget(value: unknown): value is ContentBudgetV2 {
@@ -595,7 +610,8 @@ export function validateTemplateFamilyV2(value: unknown): TemplateFamilyV2 {
     !isDesignAbstractionCodeArray(family.sourceManifestIds) ||
     family.sourceManifestIds.length === 0 ||
     !isDesignAbstractionCodeArray(family.goldenFixtureIds) ||
-    family.goldenFixtureIds.length < 2
+    family.goldenFixtureIds.length < 2 ||
+    !unique(family.goldenFixtureIds)
   ) {
     fail("DESIGN_FAMILY_V2_INVALID", "template family metadata is invalid");
   }
@@ -654,6 +670,15 @@ export function validateTemplateFamilyV2(value: unknown): TemplateFamilyV2 {
     fail("DESIGN_FAMILY_V2_INVALID", "safe fallback blueprints are invalid");
   }
   const allowedVariants = typedFamily.componentVariants;
+  for (const [componentType, variants] of Object.entries(allowedVariants)) {
+    const qualified = qualifiedVariants(componentType as SiteSpecComponentType);
+    if (variants.some((variant) => !qualified.includes(variant))) {
+      fail(
+        "DESIGN_FAMILY_V2_VARIANT_UNQUALIFIED",
+        `${typedFamily.id} declares an unqualified ${componentType} variant`,
+      );
+    }
+  }
   const homeHeroOptionKeys = new Set(
     blueprints
       .filter((blueprint) => blueprint.pageKind === "home")
@@ -779,7 +804,17 @@ function validateCatalogV2Draft(value: unknown): DesignCatalogV2Draft {
     fail("DESIGN_CATALOG_V2_INVALID", "catalog identifiers must be unique");
   }
   const dnaIds = new Set(designDnas.map((dna) => dna.id));
+  const ruleIds = new Set(designRules.map((rule) => rule.id));
   const sourceIds = new Set(sourceManifests.map((manifest) => manifest.id));
+  const sourceIdentities = new Set(
+    sourceManifests.map(canonicalSourceIdentity),
+  );
+  if (sourceIdentities.size !== sourceManifests.length) {
+    fail(
+      "DESIGN_CATALOG_V2_INVALID",
+      "catalog source manifests must identify independent sources",
+    );
+  }
   const presetById = new Map(stylePresets.map((preset) => [preset.id, preset]));
   const packById = new Map(demoVisualPacks.map((pack) => [pack.id, pack]));
   for (const pack of demoVisualPacks) {
@@ -824,6 +859,12 @@ function validateCatalogV2Draft(value: unknown): DesignCatalogV2Draft {
         `approved family ${family.id} requires approved presets and visual packs`,
       );
     }
+  }
+  if (designDnas.some((dna) => dna.ruleIds.some((id) => !ruleIds.has(id)))) {
+    fail(
+      "DESIGN_CATALOG_V2_REFERENCE_UNKNOWN",
+      "design DNA references an unknown rule",
+    );
   }
   return {
     schemaVersion: DESIGN_CATALOG_V2_SCHEMA_VERSION,
@@ -1065,6 +1106,12 @@ export function validateDesignBriefV2AgainstCatalog(
       "brief does not pin this family revision",
     );
   }
+  if (!family.compatibleArchetypes.includes(brief.archetype)) {
+    fail(
+      "DESIGN_BRIEF_V2_ARCHETYPE_MISMATCH",
+      "brief archetype is not compatible with the selected family",
+    );
+  }
   const preset = catalog.stylePresets.find(
     (item) => item.id === brief.stylePresetId,
   );
@@ -1153,6 +1200,7 @@ export function validateDesignBriefV2AgainstCatalog(
     );
   }
   const packId = brief.assetStrategy.demoVisualPackId;
+  let pinnedPack: DemoVisualPackV2 | undefined;
   if (packId) {
     const pack = catalog.demoVisualPacks.find((item) => item.id === packId);
     if (
@@ -1168,6 +1216,25 @@ export function validateDesignBriefV2AgainstCatalog(
         "brief does not pin an approved compatible visual pack",
       );
     }
+    pinnedPack = pack;
+  }
+  const availableAssetRoles = new Set([
+    ...brief.assetStrategy.availableRoles,
+    ...(pinnedPack?.assets.map((asset) => asset.role) ?? []),
+  ]);
+  const requiredAssetRoles = new Set([
+    ...family.assetRequirements,
+    ...selectedSections.flatMap((section) => section.assetRoles),
+  ]);
+  if (
+    [...requiredAssetRoles].some(
+      (assetRole) => !availableAssetRoles.has(assetRole),
+    )
+  ) {
+    fail(
+      "DESIGN_BRIEF_V2_ASSET_MISMATCH",
+      "brief assets do not satisfy selected family requirements",
+    );
   }
   return family;
 }
