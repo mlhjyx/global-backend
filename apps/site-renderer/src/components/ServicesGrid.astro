@@ -20,7 +20,7 @@ const headingId = `${instanceId}-services-heading`;
 
 <section class:list={['block', 'services-grid', `services-grid--${variant}`, { alt }]} data-component="ServicesGrid" data-variant={variant} aria-labelledby={headingId}>
   <div class="container">
-    <div class="head"><div><span class="eyebrow">{eyebrow}</span><h2 id={headingId} class="section-title">{title} <em>{accent}</em></h2><p class="muted intro">{intro}</p></div>{allHref && <a class="btn btn-outline btn-sm" href={allHref}>{t(allLabelKey!)} <span aria-hidden="true">→</span></a>}</div>
+    <div class="head"><div><span class="eyebrow">{eyebrow}</span><h2 id={headingId} class="section-title">{title} <em>{accent}</em></h2><p class="muted intro">{intro}</p></div>{allHref && <a class="btn btn-outline btn-sm" href={allHref}>{t(allLabelKey!)} <span aria-hidden="true"><i class="ri-arrow-right-line"></i></span></a>}</div>
     <ul class="grid">{cards.map((card) => <li><article class="card"><div class="icon" aria-hidden="true"><i class={card.icon}></i></div><div><h3>{card.title}</h3><p class="muted">{card.description}</p>{card.from && <p class="from">{card.from}</p>}</div></article></li>)}</ul>
   </div>
 </section>

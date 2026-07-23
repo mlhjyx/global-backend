@@ -10,6 +10,9 @@ describe('themeToCssVars', () => {
       expect(Object.keys(vars).length).toBeGreaterThan(0);
       expect(vars['--c-primary']).toBeTruthy();
       expect(vars['--c-accent']).toBeTruthy();
+      expect(vars['--font-sans']).toBe(vars['--font-body']);
+      expect(vars['--font-display']).toBe(vars['--font-heading']);
+      expect(vars['--font-mono']).toContain('JetBrains Mono');
     }
   });
 
