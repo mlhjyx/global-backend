@@ -6,7 +6,7 @@
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 工程基线：`origin/main@676c6cdc175326927ec341a2d585168aa0a1a374`
-> 最后核验：2026-07-22；Phase 9 以独立 `DRAFT` successor 承接，不回写 Gate 4 批准事实
+> 最后核验：2026-07-23；Phase 9 的 `DEC-FE-P9-019/020` 已形成 Gate 4 IA/Shell successor，旧 Gate 证据原样保留
 
 本目录把 Gate 2 批准的统一 SaaS 产品体验和 Gate 3 的治理 Registry 转成可供所有产品域复用的当前目标前端规则。它回答“整个 SaaS 的前端如何保持一致”；独立站管理的模块规格已在 Phase 5 单独建立。
 
@@ -30,7 +30,7 @@
 | 决策者 | [开放决策](13-open-decisions.md) → [Gate 4 评审](../roadmap/saas-frontend-phase-4/gate-4-review.md) |
 | 产品/模块团队 | [全 SaaS Capability Pack](modules/README.md) → 对应产品域工作簿 → 当前 Gate |
 | 独立站管理团队 | [Capability Pack](modules/independent-site-management/README.md) → [实施蓝图](implementation/independent-site-management-blueprint.md) → [Gate 5 证据](../roadmap/saas-frontend-phase-5/gate-5-review.md) |
-| 全产品体验设计 | [Phase 9 工作包](../roadmap/saas-frontend-phase-9/README.md) → [功能覆盖总账](../roadmap/saas-frontend-phase-9/feature-coverage-ledger.md) → [对象与页面族](../roadmap/saas-frontend-phase-9/object-page-family-review.md) → [设计系统 v1 范围](../roadmap/saas-frontend-phase-9/design-system-v1-scope.md) → [Figma 登记](../roadmap/saas-frontend-phase-9/figma-delivery-register.md) |
+| 全产品体验设计 | [Phase 9 工作包](../roadmap/saas-frontend-phase-9/README.md) → [功能覆盖总账](../roadmap/saas-frontend-phase-9/feature-coverage-ledger.md) → [信息架构与遗漏审计](../roadmap/saas-frontend-phase-9/information-architecture-and-coverage-audit.md) → [对象与页面族](../roadmap/saas-frontend-phase-9/object-page-family-review.md) → [设计系统 v1 范围](../roadmap/saas-frontend-phase-9/design-system-v1-scope.md) → [Figma 登记](../roadmap/saas-frontend-phase-9/figma-delivery-register.md) |
 
 ## 3. 规范文件
 
@@ -70,4 +70,4 @@
 
 ## 6. Phase 9 增量承接
 
-Phase 9 不修改本包已批准的六任务域、Shell、权限、状态、Evidence、a11y 和合同边界。它只在新工作包中审计公共产品面、完整身份/Onboarding、资料与知识引导、导入迁移、媒体/公开互动/直接触达、私密会话、Provider 退出、开发者和数据权利，并用候选 ID 等待后续 Gate。制造业字段按行业、市场、目标和资料动态出现，先复用 Profile/Offering/Asset/KB/Claim/Evidence；不预建固定规格库、独立准备度或 RFQ Lite。完整 RFQ 工程评审、CAD 签核、加工可行性、样品/报价深流程归入 `PARK / INTEGRATE`，优先连接客户 PIM/PLM/ERP/CPQ。Phase 9 的 Figma 结构板和五张用户视觉基线不能反向把 `PROPOSED`、`TARGET_EXTERNAL`、`FROZEN_MAP_ONLY` 或 `BACKEND_ONLY` 画成已可用；页面内容以 [资料与知识引导 Fixture](../roadmap/saas-frontend-phase-9/visual-direction-content-fixture.md) 和 current 合同为准。
+Phase 9 保留 Gate 4 的权限、状态、Evidence、a11y 和合同边界，并以 `DEC-FE-P9-019/020` 对 IA/Shell 建立 successor：完整管理员视图为 8 个一级/38 个二级，其中 7 个业务一级/30 个业务二级，另有 1 个管理一级/8 个管理二级；7 个全局 Shell 控件和对象 Tab 不计入栏目。企业资料成为 canonical 一级工作区，不建立第二份企业真值。媒体/公开互动/直接触达、私密会话、Provider 退出、开发者和数据权利等候选仍等待各自 Gate。制造业字段按行业、市场、目标和资料动态出现，先复用 Profile/Offering/Asset/KB/Claim/Evidence；不预建固定规格库、独立准备度或 RFQ Lite。完整 RFQ 工程评审、CAD 签核、加工可行性、样品/报价深流程归入 `PARK / INTEGRATE`，优先连接客户 PIM/PLM/ERP/CPQ。Figma 不能反向把 `PROPOSED`、`TARGET_EXTERNAL`、`FROZEN_MAP_ONLY` 或 `BACKEND_ONLY` 画成已可用；页面内容以 [资料与知识引导 Fixture](../roadmap/saas-frontend-phase-9/visual-direction-content-fixture.md) 和 current 合同为准。

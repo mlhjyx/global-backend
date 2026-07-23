@@ -28,7 +28,7 @@
 | `DSDISC-P9-002` | 五张基线的主蓝并不完全一致，抽样约在 `#1B4CCD` 至 `#626FB1` | 不逐图复制颜色；先以 `#2D5BCC` 为品牌主色候选中心建立语义色阶，再用同状态并排比较、对比度和高风险动作识别测试校正 |
 | `DSDISC-P9-003` | 五张基线共享布局语法，但 Shell、侧栏宽度、圆角和控件高度存在差异 | 固化共同模式，不把截图中的偶然尺寸当 Token；所有数值先标 `MEASURED_DRAFT` |
 | `DSDISC-P9-004` | 两个既有 FigJam 曾含固定规格、独立准备度和 RFQ/技术评审遗留节点 | Phase 1 前已按 current 对象边界修正指定节点和连接；状态恢复为 `RESEARCH_MAPPED`，仍不等于页面或 Journey 已验证 |
-| `DSDISC-P9-005` | 四个正式 Design file 已创建；Phase 1 已写入 Foundations、12 张 SaaS 桌面代表、4 张公共表面、1 张客户生成站、5 个关键状态和 3 张移动端代表 | `FIG-P9-003` 为 `FOUNDATIONS_DRAFT`，`FIG-P9-004/005/006` 为 `HIGH_FIDELITY_DRAFT`；代表页不等于文件内全部页面已完成 |
+| `DSDISC-P9-005` | 四个正式 Design file 已创建；Phase 1 已写入 Foundations、13 张 SaaS 桌面代表、4 张公共表面、1 张客户生成站、5 个关键状态和 3 张移动端代表 | `FIG-P9-003` 为 `FOUNDATIONS_DRAFT`，`FIG-P9-004/005/006` 为 `HIGH_FIDELITY_DRAFT`；代表页不等于文件内全部页面已完成 |
 | `DSDISC-P9-006` | 可用外部库中的 Simple Design System 有基础 Input/Navigation，但缺少本产品所需的高密度表格、Evidence、长任务、Inbox 和多轴状态，视觉也不匹配 | 不导入为核心库；只参考公开模式。核心组件在本地 Figma 文件中净室建立，避免形成外部库依赖 |
 | `DSDISC-P9-007` | 中文优先且需要英文、德语长文本与 RTL；Figma 环境可用 Noto Sans SC 与 Inter | 推荐中文 UI 使用 Noto Sans SC，拉丁字符与数字使用 Inter；正式冻结前必须完成缺字、数字对齐、400% zoom 和伪本地化验证 |
 

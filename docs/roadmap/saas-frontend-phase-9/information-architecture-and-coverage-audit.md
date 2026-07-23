@@ -3,7 +3,8 @@
 > 文档 ID：`AUD-FE-P9-006`
 > 层级：`L3 / Product IA audit and design successor`
 > 状态：`DRAFT`
-> 评审阶段：`STRUCTURE_RECOMMENDATION / REVIEW_BEFORE_FIGMA`
+> 批准：`APPROVED_WITH_CONDITION`
+> 评审阶段：`STRUCTURE_APPROVED / FIGMA_CORE_SYNC_COMPLETED`
 > 产品 Owner：`OWN-PRODUCT`
 > 设计 Owner：`OWN-DESIGN`
 > 关联决定：`DEC-FE-P9-019`、`DEC-FE-P9-020`
@@ -267,7 +268,7 @@
 | `FIND-FE-P9-IA-001` | 原 L2 把企业资料写成横向入口，但已有 7 个 Page、canonical 对象和持续维护责任 | 提升为一级业务入口；不复制对象 |
 | `FIND-FE-P9-IA-002` | 五张参考图的一级/二级名称、数量、顺序不一致 | 只继承视觉模式；导航以本 Manifest 为唯一设计输入 |
 | `FIND-FE-P9-IA-003` | Unified Inbox 使用局部产品菜单，像独立客服系统 | 使用全产品 Shell；队列、渠道和 SLA 留在 Inbox 页内 |
-| `FIND-FE-P9-IA-004` | 洞察 Design Page 为空 | 补诚实的指标可用性/成本代表页，不填伪 KPI |
+| `FIND-FE-P9-IA-004` | 洞察 Design Page 原为空 | 已补 `61:2` 指标可用性代表页；未知不显示为 0，指标定义/水位/权限/新鲜度不足时不生成趋势或归因结论 |
 | `FIND-FE-P9-IA-005` | 移动底栏无法容纳完整产品域 | 底栏保留高频/当前域，增加“更多”抽屉覆盖 7 域和管理入口 |
 | `FIND-FE-P9-IA-006` | 导入/迁移/退出被当成同一功能 | Onboarding 导入、企业资料导入、Site Import 和数据退出分别归属 |
 | `FIND-FE-P9-IA-007` | 渠道账号在增长和集成页重复管理 | 连接/Scope/轮换/退出只在管理；任务页只选已绑定能力 |

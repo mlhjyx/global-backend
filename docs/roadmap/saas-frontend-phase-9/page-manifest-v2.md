@@ -118,7 +118,7 @@
 | `PAGE-FE-081` 会话详情 | 回复、备注和查看上下文 | ConversationProjection / SaaS + Provider | `TARGET_NOT_RUNNABLE` | `SCN-FE-ENGAGE-001` | Inbox → 回复/升级/交接 → Inbox/对象 | opt-out、approval、delivery receipt、translation | `NOT_CREATED` |
 | `PAGE-FE-082` Opportunity 列表/看板 | 管理业务机会候选 | Opportunity / SaaS | `TARGET_NOT_RUNNABLE` | `SCN-FE-ENGAGE-002/003` | Handoff/Inbox → 分派/阶段变更 → 详情 | candidate、QGO/SAO target、owner missing | `NOT_CREATED` |
 | `PAGE-FE-083` Opportunity 详情 | 记录证据、Owner、下一步和 Outcome | Opportunity / SaaS | `TARGET_NOT_RUNNABLE` | `SCN-FE-ENGAGE-002/003` | 列表 → 接受/更新/关闭 → 洞察 | evidence incomplete、provisional outcome、conflict | `NOT_CREATED` |
-| `PAGE-FE-084` 经营洞察 | 理解指标定义和对象贡献 | Insight projection / SaaS | `TARGET_NOT_RUNNABLE` | `SCN-FE-INSIGHT-001` | Shell → 下钻 → canonical object | no data、partial、stale、denied | `NOT_CREATED` |
+| `PAGE-FE-084` 经营洞察 | 理解指标定义和对象贡献 | Insight projection / SaaS | `TARGET_NOT_RUNNABLE` | `SCN-FE-INSIGHT-001` | Shell → 下钻 → canonical object | no data、partial、stale、denied | `FIG-P9-004 MetricUnavailable 61:2` |
 | `PAGE-FE-085` 归因与实验 | 比较不确定结果 | Attribution/Experiment target / Data | `TARGET_NOT_RUNNABLE` | `SCN-FE-INSIGHT-002` | 洞察 → 查看方法/样本 → 对象/报告 | inconclusive、sample low、privacy limited | `NOT_CREATED` |
 | `PAGE-FE-086` 成本与用量 | 查看来源明确的成本/额度 | Cost projection / SaaS+Site | `TARGET_NOT_RUNNABLE`；Site 局部 code-backed | `SCN-FE-INSIGHT-002`、`SCN-FE-SITE-012/013` | 管理/Build → 下钻 → 任务/账单 | reported/estimated/unknown、late settlement | `NOT_CREATED` |
 
@@ -157,7 +157,7 @@
 
 ## 8. Figma 与验证关闭门
 
-当前有十二张 SaaS 桌面代表页、五个关键状态、三张移动端代表页、六条原型骨架、四张产品公共表面代表页和客户生成站首页代表页的高保真 Node。其余 `NOT_CREATED` 不表示遗漏被忽略，而是明确待交付。Page Manifest 只有同时满足以下条件才可从 `DRAFT` 升级：
+当前有十三张 SaaS 桌面代表页、五个关键状态、三张移动端代表页、六条原型骨架、四张产品公共表面代表页和客户生成站首页代表页的高保真 Node。其余 `NOT_CREATED` 不表示遗漏被忽略，而是明确待交付。Page Manifest 只有同时满足以下条件才可从 `DRAFT` 升级：
 
 1. Page 对象/投影、SoR、权限和 allowed actions 有正式 Owner；
 2. 页面状态与当前合同一致，目标态动作不会表现为已运行；

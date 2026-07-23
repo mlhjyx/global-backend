@@ -213,7 +213,7 @@ SiteVersion → BuildRun → READY SiteRelease → PublishReview/Authorization
 
 ### 6.1 一级 IA 不因新增页面族膨胀
 
-Phase 9 推荐的完整管理员侧栏为 8 个一级/38 个二级：今日、企业资料、客户开发、独立站、增长执行、互动与商机、洞察七个业务域，以及独立的“管理与设置”入口。任务、审批、通知、长任务、事故、帮助和对象 Inspector 是横向能力；个人设置、平台运营和公共产品表面仍不混入业务导航。精确二级和对象 Tab 以 `AUD-FE-P9-006` 为准；`DEC-FE-P9-020` 通过产品评审前，本结构保持提案态。
+Phase 9 完整管理员侧栏已按 `DEC-FE-P9-020` 有条件批准为 8 个一级/38 个二级：今日、企业资料、客户开发、独立站、增长执行、互动与商机、洞察七个业务域，以及独立的“管理与设置”入口。任务、审批、通知、长任务、事故、帮助和对象 Inspector 是横向能力；个人设置、平台运营和公共产品表面仍不混入业务导航。精确二级和对象 Tab 以 `AUD-FE-P9-006` 为准；候选二级页仍受各自合同门约束，不因 IA 批准而变成可用能力。
 
 - Public Marketing、Identity、Help/Developer public docs 和 Generated Manufacturing Site 位于 SaaS Shell 外。
 - Public Engagement 与 Direct Outbound 进入“增长执行”或“互动与商机”的任务上下文，不新增供应商/渠道命名的一级导航。
