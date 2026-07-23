@@ -417,8 +417,7 @@ const releaseDirectory = join(root, policy.releaseBundles.directory);
 if (existsSync(releaseDirectory)) {
   const bundles = readdirSync(releaseDirectory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && extname(entry.name) === ".md")
-    .map((entry) => join(releaseDirectory, entry.name))
-    .filter((path) => repoPath(path) !== policy.releaseBundles.index);
+    .map((entry) => join(releaseDirectory, entry.name));
   stats.releaseBundles = bundles.length;
   for (const path of bundles) {
     const content = readFileSync(path, "utf8");

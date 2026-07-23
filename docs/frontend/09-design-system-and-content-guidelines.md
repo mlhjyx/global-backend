@@ -5,7 +5,7 @@
 > 生命周期：`CURRENT`
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
-> 设计资产：[design-asset-register.md](../design/design-asset-register.md)
+> 设计交付状态：正式设计事实源和资产 Registry 尚未建立；当前仅有[微文案目录](../design/content-and-microcopy-catalog.md)与[独立站线框](../design/independent-site-management-wireframes.md)
 > 微文案：[content-and-microcopy-catalog.md](../design/content-and-microcopy-catalog.md)
 
 ## 1. 当前边界
@@ -127,4 +127,4 @@ Foundations
 
 ## 10. 设计评审与版本
 
-设计资产只有同时进入 [资产登记](../design/design-asset-register.md)、有受控 source/version/Owner/rights、覆盖关键状态/响应式/a11y、关联 Capability/Page/Scenario，并有 finding 处置记录，才可标 `DESIGNED`。截图、导出代码、Markdown 表格或 AI 自评单独均不够。
+设计资产只有同时进入未来正式设计事实源、具备稳定 ID/source/version/Owner/rights、覆盖关键状态/响应式/a11y、关联 Capability/Page/Scenario，并有 finding 处置记录，才可标 `DESIGNED`。当前 Markdown 线框、截图、导出代码或 AI 自评单独均不够。
