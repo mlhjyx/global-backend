@@ -81,13 +81,23 @@ describe("M1-e-A technical baseline component contract", () => {
     );
   });
 
-  it("rejects CrewGrid members without explicit profile authorization", () => {
+  it("rejects personal-profile fields in the release CrewGrid", () => {
     expect(() => validateBlock({ type: "CrewGrid", props: {
       chapterKey: "crew.chapter", h1aKey: "crew.one", h1bKey: "crew.two", bodyKey: "crew.body",
       stats: [{ labelKey: "crew.stat", value: "24", subKey: "crew.sub" }],
-      members: [{ nameKey: "crew.name", roleKey: "crew.role", years: "8", regionsKey: "crew.regions", quoteKey: "crew.quote", truckKey: "crew.unit" }],
+      members: [{ nameKey: "crew.name", roleKey: "crew.role", years: "8", regionsKey: "crew.regions", quoteKey: "crew.quote", truckKey: "crew.unit", authorizedProfile: true }],
       footnoteKey: "crew.footnote", requestKey: "crew.book",
     }} as never)).toThrow("INVALID_BLOCK_PROPS: CrewGrid");
+  });
+
+  it("enforces ServicesEditorial and DispatchTimeline release budgets at their documented limits", () => {
+    expect(() => validateBlock({ type: "ServicesEditorial", props: {
+      chapterKey: "services.chapter", services: [], variant: "technical-grid",
+    }} as never)).toThrow("INVALID_BLOCK_PROPS: ServicesEditorial");
+    expect(() => assertQualifiedComponentContentBudget("DispatchTimeline", {
+      chapter: "Timeline", title: "Dispatch sequence", accent: "Clear", body: "Documented handoffs.", cta: "Book", call: "Call",
+      steps: [{ time: "01", title: "x".repeat(41), body: "x".repeat(161) }],
+    })).toThrow("COMPONENT_CONTENT_BUDGET_EXCEEDED: DispatchTimeline");
   });
 
   it("rejects CoverageMap coordinates outside the controlled percentage grammar", () => {

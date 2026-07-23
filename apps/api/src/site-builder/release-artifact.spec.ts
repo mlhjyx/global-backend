@@ -292,7 +292,7 @@ describe('R1 release contract gate', () => {
     [
       'CrewGrid.requestPageId',
       'CrewGrid',
-      { chapterKey: 'crew.chapter', h1aKey: 'crew.one', h1bKey: 'crew.two', bodyKey: 'crew.body', stats: [{ labelKey: 'crew.stat', value: '24', subKey: 'crew.sub' }], members: [{ nameKey: 'crew.name', roleKey: 'crew.role', years: '8', regionsKey: 'crew.regions', quoteKey: 'crew.quote', truckKey: 'crew.unit', authorizedProfile: true }], footnoteKey: 'crew.footnote', requestKey: 'crew.book', requestPageId: 'missing', variant: 'technical-grid' },
+      { chapterKey: 'crew.chapter', h1aKey: 'crew.one', h1bKey: 'crew.two', bodyKey: 'crew.body', stats: [{ labelKey: 'crew.stat', value: '24', subKey: 'crew.sub' }], members: [{ roleKey: 'crew.role', years: '8', regionsKey: 'crew.regions', scopeKey: 'crew.scope', truckKey: 'crew.unit' }], footnoteKey: 'crew.footnote', requestKey: 'crew.book', requestPageId: 'missing', variant: 'technical-grid' },
       'SITE_RELEASE_PAGE_REFERENCE_UNKNOWN: CrewGrid.requestPageId.pageId=missing',
     ],
   ])('rejects unknown internal page target for %s', (_label, type, props, expected) => {

@@ -449,7 +449,7 @@ export const COMPONENT_SCHEMAS = {
     titleKey: str.optional(),
     services: z.array(
       strictObj({ code: str, titleKey: str, bodyKey: str, specKey: str }),
-    ),
+    ).min(1).max(8),
     notListKey: str.optional(),
     notListBodyKey: str.optional(),
     notListCtaKey: str.optional(),
@@ -477,13 +477,11 @@ export const COMPONENT_SCHEMAS = {
     stats: z.array(strictObj({ labelKey: str, value: str, subKey: str })).min(1).max(4),
     members: z.array(
       strictObj({
-        nameKey: str,
         roleKey: str,
         years: str,
         regionsKey: str,
-        quoteKey: str,
         truckKey: str,
-        authorizedProfile: z.literal(true),
+        scopeKey: str,
       })).min(1).max(8),
     footnoteKey: str,
     requestKey: str,
