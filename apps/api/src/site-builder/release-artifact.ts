@@ -154,6 +154,14 @@ export function assertReleaseContract(
                   ? ['primaryCta', 'secondaryCta']
                 : block.type === 'FeaturedSpotlight'
                   ? (props.allLabelKey ? ['allPageId'] : [])
+                : block.type === 'DispatchHero'
+                  ? ['cta1PageId']
+                : block.type === 'ServicesEditorial'
+                  ? (props.bookLabelKey || (props.notListKey && props.notListBodyKey && props.notListCtaKey) ? ['bookPageId'] : [])
+                : block.type === 'DispatchTimeline'
+                  ? ['ctaPageId']
+                : block.type === 'CrewGrid'
+                  ? ['requestPageId']
                 : [];
       for (const field of ctaFields) {
         const value = props[field]
@@ -167,6 +175,10 @@ export function assertReleaseContract(
           : block.type === 'DishesShowcase' ? 'services'
           : block.type === 'PhotoGallery' ? 'gallery'
           : block.type === 'FeaturedSpotlight' ? 'home'
+          : block.type === 'DispatchHero' ? 'book'
+          : block.type === 'ServicesEditorial' ? 'book'
+          : block.type === 'DispatchTimeline' ? 'book'
+          : block.type === 'CrewGrid' ? 'book'
           : undefined;
         const resolvedValue = value ?? defaultPageId;
         const cta = typeof resolvedValue === 'string'

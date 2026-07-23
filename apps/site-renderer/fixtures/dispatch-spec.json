@@ -67,12 +67,12 @@
             { "labelKey": "crew.st4", "value": "0", "subKey": "crew.su4" }
           ],
           "members": [
-            { "nameKey": "crew.m1.name", "roleKey": "crew.m1.role", "years": "22", "regionsKey": "crew.m1.regions", "quoteKey": "crew.m1.quote", "truckKey": "crew.m1.truck" },
-            { "nameKey": "crew.m2.name", "roleKey": "crew.m2.role", "years": "14", "regionsKey": "crew.m2.regions", "quoteKey": "crew.m2.quote", "truckKey": "crew.m2.truck" },
-            { "nameKey": "crew.m3.name", "roleKey": "crew.m3.role", "years": "9", "regionsKey": "crew.m3.regions", "quoteKey": "crew.m3.quote", "truckKey": "crew.m3.truck" },
-            { "nameKey": "crew.m4.name", "roleKey": "crew.m4.role", "years": "18", "regionsKey": "crew.m4.regions", "quoteKey": "crew.m4.quote", "truckKey": "crew.m4.truck" },
-            { "nameKey": "crew.m5.name", "roleKey": "crew.m5.role", "years": "11", "regionsKey": "crew.m5.regions", "quoteKey": "crew.m5.quote", "truckKey": "crew.m5.truck" },
-            { "nameKey": "crew.m6.name", "roleKey": "crew.m6.role", "years": "7", "regionsKey": "crew.m6.regions", "quoteKey": "crew.m6.quote", "truckKey": "crew.m6.truck" }
+            { "roleKey": "crew.m1.role", "years": "22", "regionsKey": "crew.m1.regions", "scopeKey": "crew.m1.scope", "truckKey": "crew.m1.truck" },
+            { "roleKey": "crew.m2.role", "years": "14", "regionsKey": "crew.m2.regions", "scopeKey": "crew.m2.scope", "truckKey": "crew.m2.truck" },
+            { "roleKey": "crew.m3.role", "years": "9", "regionsKey": "crew.m3.regions", "scopeKey": "crew.m3.scope", "truckKey": "crew.m3.truck" },
+            { "roleKey": "crew.m4.role", "years": "18", "regionsKey": "crew.m4.regions", "scopeKey": "crew.m4.scope", "truckKey": "crew.m4.truck" },
+            { "roleKey": "crew.m5.role", "years": "11", "regionsKey": "crew.m5.regions", "scopeKey": "crew.m5.scope", "truckKey": "crew.m5.truck" },
+            { "roleKey": "crew.m6.role", "years": "7", "regionsKey": "crew.m6.regions", "scopeKey": "crew.m6.scope", "truckKey": "crew.m6.truck" }
           ]
         } },
         { "type": "CoverageMap", "props": { "id": "CoverageMap-1",
@@ -156,12 +156,12 @@
       "crew.body": "Every truck has one licensed journeyman or master plumber - not 'a guy with the tools.' Below is the actual rotation, with badge numbers you can verify against the Nevada State Contractors Board.",
       "crew.st1": "On payroll", "crew.su1": "Full-time W-2", "crew.st2": "Combined years", "crew.su2": "On the wrench", "crew.st3": "Calls in 2025", "crew.su3": "From this crew alone", "crew.st4": "Subcontractors", "crew.su4": "Day-of, ever",
       "crew.footnote": "Verify any license at nscb.nv.gov · We'll tell you who's coming before they arrive.", "crew.request": "Request a specific tech",
-      "crew.m1.name": "Daryl Halverson", "crew.m1.role": "Lead journeyman", "crew.m1.regions": "Las Vegas · Henderson · Boulder City", "crew.m1.quote": "If it's behind a wall, I've already met it twice.", "crew.m1.truck": "Truck 14",
-      "crew.m2.name": "Marisol Vega", "crew.m2.role": "Service plumber", "crew.m2.regions": "Reno · Sparks · Carson City", "crew.m2.quote": "Tankless isn't magic. It's just measured math and a clean install.", "crew.m2.truck": "Truck 07",
-      "crew.m3.name": "Anthony Brooks", "crew.m3.role": "Drain & sewer tech", "crew.m3.regions": "North Las Vegas · Mesquite · Pahrump", "crew.m3.quote": "Every clog tells you what the last plumber missed.", "crew.m3.truck": "Truck 21",
-      "crew.m4.name": "Sarah Engle", "crew.m4.role": "Master plumber · Dispatch lead", "crew.m4.regions": "Statewide oversight", "crew.m4.quote": "I don't turn wrenches anymore. I send the right person to your door.", "crew.m4.truck": "Desk 01",
-      "crew.m5.name": "Wesley Okafor", "crew.m5.role": "Rural journeyman", "crew.m5.regions": "Elko · Winnemucca · Pahrump", "crew.m5.quote": "Out here, the nearest backup is two hours away. So the truck carries it.", "crew.m5.truck": "Truck 33",
-      "crew.m6.name": "Carla Reyes", "crew.m6.role": "Residential service", "crew.m6.regions": "Henderson · Boulder City · Las Vegas", "crew.m6.quote": "I leave the kitchen cleaner than I found it. Every time.", "crew.m6.truck": "Truck 09",
+      "crew.m1.role": "Lead journeyman", "crew.m1.regions": "Las Vegas · Henderson · Boulder City", "crew.m1.scope": "Wall and concealed-service investigation.", "crew.m1.truck": "Truck 14",
+      "crew.m2.role": "Service plumber", "crew.m2.regions": "Reno · Sparks · Carson City", "crew.m2.scope": "Measured tankless and clean-install support.", "crew.m2.truck": "Truck 07",
+      "crew.m3.role": "Drain & sewer tech", "crew.m3.regions": "North Las Vegas · Mesquite · Pahrump", "crew.m3.scope": "Drain diagnosis and recorded remediation.", "crew.m3.truck": "Truck 21",
+      "crew.m4.role": "Dispatch lead", "crew.m4.regions": "Statewide oversight", "crew.m4.scope": "Routes each request to the correct operational scope.", "crew.m4.truck": "Desk 01",
+      "crew.m5.role": "Rural journeyman", "crew.m5.regions": "Elko · Winnemucca · Pahrump", "crew.m5.scope": "Remote-call preparation and stocked-truck coverage.", "crew.m5.truck": "Truck 33",
+      "crew.m6.role": "Residential service", "crew.m6.regions": "Henderson · Boulder City · Las Vegas", "crew.m6.scope": "Clean residential service and handover.", "crew.m6.truck": "Truck 09",
 
       "coverage.chapter": "06 / Coverage", "coverage.title": "From the Strip", "coverage.title2": "to the Sierra.",
       "coverage.body": "Crews are stationed in three hubs - Las Vegas, Reno, and Elko - so the truck coming to you isn't an hour of freeway away from your kitchen flood.",
