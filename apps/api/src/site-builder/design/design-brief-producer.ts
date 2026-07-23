@@ -793,6 +793,7 @@ export class DesignBriefProducer {
         }
         modelOutput = undefined;
       }
+      this.ensureNotCancelled();
       const selected =
         candidates.find(
           (candidate) => candidate.summary.id === modelOutput?.candidateId,
@@ -805,6 +806,7 @@ export class DesignBriefProducer {
         variationSeed,
         modelOutput,
       );
+      this.ensureNotCancelled();
       await this.deps.ledger.storeTaskOutput(fence, {
         candidateId: selected.summary.id,
         selectionSource: modelOutput ? "model" : "deterministic",
@@ -814,6 +816,7 @@ export class DesignBriefProducer {
         taskAttemptId: claim.attempt.id,
         designBrief,
       };
+      this.ensureNotCancelled();
       await this.deps.ledger.completeTask(
         fence,
         result as unknown as Record<string, unknown>,

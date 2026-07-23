@@ -329,6 +329,30 @@ describe("M1-e-B DesignBrief producer", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("does not persist when cancellation arrives while the model is in flight", async () => {
+    const catalog = approvedCatalog();
+    const ledger = new Ledger();
+    let cancelled = false;
+    await expect(
+      new DesignBriefProducer({
+        ledger,
+        catalog,
+        isCancelled: () => cancelled,
+        executeTask: async (taskInput) => {
+          cancelled = true;
+          return {
+            candidateId: taskInput.candidates[0].id,
+            reasons: [],
+            warnings: [],
+          };
+        },
+      }).produce(input(catalog)),
+    ).rejects.toMatchObject({ code: "DESIGN_BRIEF_CANCELLED" });
+    expect(ledger.stored).toBeUndefined();
+    expect(ledger.completed).toBeUndefined();
+    expect(ledger.released).toBe(1);
+  });
+
   it("replays the exact frozen input and survives a completion ACK loss", async () => {
     const catalog = approvedCatalog();
     const ledger = new Ledger();
