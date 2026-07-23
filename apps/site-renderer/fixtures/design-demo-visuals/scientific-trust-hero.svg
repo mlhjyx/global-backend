@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Abstract scientific observation field</title>
+  <desc id="desc">A platform-original monochrome field of samples and observation rings.</desc>
+  <rect width="1200" height="800" fill="#ffffff"/>
+  <g fill="none" stroke="#0a0a0a" stroke-width="3">
+    <circle cx="420" cy="400" r="250"/><circle cx="420" cy="400" r="140"/>
+    <path d="M670 400h350M420 150V70M420 650v80"/>
+  </g>
+  <g fill="#0a0a0a"><circle cx="420" cy="400" r="38"/><circle cx="820" cy="400" r="18"/></g>
+  <g fill="#737373"><rect x="760" y="470" width="260" height="12"/><rect x="760" y="510" width="180" height="12"/></g>
+</svg>

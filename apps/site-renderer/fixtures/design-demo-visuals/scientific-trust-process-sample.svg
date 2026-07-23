@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic sample workflow</title>
+  <desc id="desc">A platform-original sequence of sample preparation, observation, and record.</desc>
+  <rect width="1200" height="800" fill="#ffffff"/>
+  <g fill="none" stroke="#0a0a0a" stroke-width="6">
+    <path d="M180 400h840"/>
+    <rect x="120" y="300" width="180" height="200"/><circle cx="600" cy="400" r="100"/>
+    <path d="M900 300h180v200H900zM940 350h100M940 400h100M940 450h70"/>
+  </g>
+  <g fill="#0a0a0a"><circle cx="300" cy="400" r="14"/><circle cx="700" cy="400" r="14"/></g>
+</svg>

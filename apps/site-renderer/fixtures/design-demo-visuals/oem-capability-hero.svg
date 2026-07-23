@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Abstract modular manufacturing field</title>
+  <desc id="desc">A platform-original arrangement of production cells and alignment marks.</desc>
+  <rect width="1200" height="800" fill="#111827"/>
+  <g fill="none" stroke="#f97316" stroke-width="4">
+    <path d="M120 160h420v240H120zM660 160h420v240H660zM120 520h960"/>
+    <circle cx="330" cy="280" r="92"/><circle cx="870" cy="280" r="92"/>
+  </g>
+  <g fill="#f8fafc">
+    <rect x="240" y="252" width="180" height="56"/><rect x="780" y="252" width="180" height="56"/>
+    <rect x="120" y="588" width="280" height="20"/><rect x="460" y="588" width="160" height="20"/>
+  </g>
+</svg>

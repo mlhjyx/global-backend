@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic laboratory instrument</title>
+  <desc id="desc">A platform-original non-factual instrument silhouette with a neutral sample bay.</desc>
+  <rect width="1200" height="800" fill="#fafafa"/>
+  <g transform="translate(260 120)">
+    <path d="M80 0h520l80 120v440H0V120z" fill="#fff" stroke="#0a0a0a" stroke-width="8"/>
+    <rect x="100" y="120" width="480" height="210" fill="#f5f5f5" stroke="#525252" stroke-width="4"/>
+    <circle cx="220" cy="430" r="56" fill="#0a0a0a"/>
+    <rect x="340" y="390" width="240" height="80" fill="#e5e5e5"/>
+    <path d="M160 210h360" stroke="#737373" stroke-width="10"/>
+  </g>
+</svg>

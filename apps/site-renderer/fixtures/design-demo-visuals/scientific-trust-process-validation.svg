@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Generic validation matrix</title>
+  <desc id="desc">A platform-original matrix of neutral checks and bounded observations.</desc>
+  <rect width="1200" height="800" fill="#0a0a0a"/>
+  <g transform="translate(180 140)" stroke="#d4d4d4" stroke-width="3">
+    <path d="M0 0h840v520H0zM0 130h840M0 260h840M0 390h840"/>
+    <path d="M210 0v520M420 0v520M630 0v520"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="285" cy="205" r="22"/><circle cx="705" cy="335" r="22"/>
+    <circle cx="495" cy="465" r="22"/><circle cx="915" cy="595" r="22"/>
+  </g>
+</svg>
