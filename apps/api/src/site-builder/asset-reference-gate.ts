@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
-import { AssetReferenceScanError, siteSpecPotentialAssetIds } from './asset-reference';
+import {
+  AssetReferenceScanError,
+  siteSpecPotentialAssetIds,
+} from './asset-reference';
 
 type AssetReferenceTx = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
@@ -93,9 +96,17 @@ export async function lockSiteSpecAssetsForActivation(
   tx: AssetReferenceTx,
   input: { workspaceId: string; siteId: string; spec: unknown },
 ): Promise<LockedReferenceAsset[]> {
-  const { manifestIds, manifestRefs, propAssetIds } = siteSpecPotentialAssetIds(input.spec);
+  const { manifestIds, manifestRefs, propAssetIds, undeclaredAssetRefs } =
+    siteSpecPotentialAssetIds(input.spec);
+  if (undeclaredAssetRefs.length > 0) {
+    throw new AssetReferenceScanError(
+      `SiteSpec props reference assets missing from the manifest: ${undeclaredAssetRefs.join(',')}`,
+    );
+  }
   const manifest = new Set(manifestIds);
-  const undeclaredAssets = propAssetIds.filter((assetId) => !manifest.has(assetId));
+  const undeclaredAssets = propAssetIds.filter(
+    (assetId) => !manifest.has(assetId),
+  );
   if (undeclaredAssets.length > 0) {
     throw new AssetReferenceScanError(
       `SiteSpec props reference Asset ids missing from the manifest: ${undeclaredAssets.join(',')}`,
@@ -103,7 +114,9 @@ export async function lockSiteSpecAssetsForActivation(
   }
   const candidates = sortedUnique(manifestIds);
   if (candidates.length === 0) return [];
-  const rows = await tx.$queryRaw<Array<LockedReferenceAsset & { siteId: string; deletedAt: Date | null }>>(Prisma.sql`
+  const rows = await tx.$queryRaw<
+    Array<LockedReferenceAsset & { siteId: string; deletedAt: Date | null }>
+  >(Prisma.sql`
     SELECT id,
            site_id AS "siteId",
            kind,

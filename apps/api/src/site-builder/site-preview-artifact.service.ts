@@ -3,10 +3,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  RELEASE_MANIFEST_SCHEMA_VERSION,
   releaseManifestDigest,
+  validateReleaseManifest,
   type ReleaseManifestFile,
-  type ReleaseManifestV1,
+  type ReleaseManifest,
 } from './release-artifact';
 import { StorageService } from './storage.service';
 
@@ -38,18 +38,25 @@ function previewPath(input: string): string {
   ) {
     throw new Error('SITE_PREVIEW_INVALID_PATH');
   }
-  const candidate = input === '' ? 'index.html' : input.endsWith('/') ? `${input}index.html` : input;
+  const candidate =
+    input === ''
+      ? 'index.html'
+      : input.endsWith('/')
+        ? `${input}index.html`
+        : input;
   if (candidate.length > 1024) throw new Error('SITE_PREVIEW_INVALID_PATH');
   return candidate;
 }
 
-function manifestFile(value: unknown, requestedPath: string): ReleaseManifestFile {
+function manifestFile(
+  value: unknown,
+  requestedPath: string,
+): ReleaseManifestFile {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('SITE_PREVIEW_MANIFEST_INVALID');
   }
-  const manifest = value as Partial<ReleaseManifestV1>;
+  const manifest = validateReleaseManifest(value);
   if (
-    manifest.schemaVersion !== RELEASE_MANIFEST_SCHEMA_VERSION ||
     !Array.isArray(manifest.files) ||
     typeof manifest.releaseId !== 'string' ||
     typeof manifest.siteId !== 'string' ||
@@ -59,7 +66,9 @@ function manifestFile(value: unknown, requestedPath: string): ReleaseManifestFil
   ) {
     throw new Error('SITE_PREVIEW_MANIFEST_INVALID');
   }
-  const file = manifest.files.find((candidate) => candidate.path === requestedPath);
+  const file = manifest.files.find(
+    (candidate) => candidate.path === requestedPath,
+  );
   if (
     !file ||
     !Number.isSafeInteger(file.size) ||
@@ -110,7 +119,7 @@ export class SitePreviewArtifactService {
     ) {
       throw new NotFoundException('SITE_PREVIEW_RELEASE_NOT_FOUND');
     }
-    const manifest = row.manifest as ReleaseManifestV1;
+    const manifest: ReleaseManifest = validateReleaseManifest(row.manifest);
     if (releaseManifestDigest(manifest) !== row.manifestDigest) {
       throw new Error('SITE_PREVIEW_MANIFEST_DIGEST_MISMATCH');
     }

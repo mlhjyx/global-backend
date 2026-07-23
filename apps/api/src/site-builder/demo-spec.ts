@@ -1,7 +1,8 @@
 import {
   QUALIFIED_COMPONENT_CONTENT_BUDGETS,
+  SITE_SPEC_V1_VERSION,
   assertQualifiedComponentContentBudget,
-  type SiteSpec,
+  type SiteSpecV1,
   type SiteSpecComponentType,
   type SiteSpecStylePreset,
 } from '@global/contracts';
@@ -16,7 +17,7 @@ import type { IntakeInput } from './intake.service';
  * 双闸：确定性模板本身中性 + sanitizePolish 剔除 LLM 回灌的虚构角色；demo-spec.spec.ts 有强制守卫。
  */
 
-export const DEMO_SPEC_VERSION = '1.0.0';
+export const DEMO_SPEC_VERSION = SITE_SPEC_V1_VERSION;
 
 export interface DemoCopyPolish {
   headline?: string;
@@ -113,7 +114,7 @@ interface Block {
  * 保留 `MaterializedDemoDoc` 别名以不惊动既有 import；本 demo 产出恒不含资产
  * （`assets` 为空对象，SiteSpec 的 `Record<string, AssetRef>` 允许零条目）。
  */
-export type MaterializedDemoDoc = SiteSpec;
+export type MaterializedDemoDoc = SiteSpecV1;
 
 const PRECISION_KEYWORDS =
   /electro|electronic|medical|device|instrument|precision|optic|sensor|diagnostic|ultrasound|pcb|semiconductor|pharma|lab/i;
@@ -228,7 +229,10 @@ export function buildDemoSpec(input: DemoSpecInput): MaterializedDemoDoc {
     });
     en[`products.p${i + 1}.blurb`] = constrainCopy(
       `Learn more about our ${products[i]} range — full specifications available on request.`,
-      { characters: QUALIFIED_COMPONENT_CONTENT_BUDGETS.ProductGrid.productBlurb },
+      {
+        characters:
+          QUALIFIED_COMPONENT_CONTENT_BUDGETS.ProductGrid.productBlurb,
+      },
     );
   }
 

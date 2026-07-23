@@ -7,11 +7,11 @@ import {
   type CopyBundleSetV1,
   type CopySlotType,
   type RestrictedRichTextNode,
-} from "@global/contracts";
+} from '@global/contracts';
 import type {
   PublishableClaimSnapshot,
   PublishableClaimSnapshotItem,
-} from "./publishable-claim-snapshot";
+} from './publishable-claim-snapshot';
 
 export interface CopySlotDefinition {
   key: string;
@@ -24,7 +24,7 @@ export interface CopySlotGeneratorInput {
   locale: string;
   sourceLocale: string;
   slot: CopySlotDefinition;
-  snapshot: Pick<PublishableClaimSnapshot, "digest" | "items">;
+  snapshot: Pick<PublishableClaimSnapshot, 'digest' | 'items'>;
 }
 
 export interface CopySlotGeneratorResult {
@@ -38,12 +38,12 @@ export interface CopySlotGenerator {
 
 export class CopyBundleGenerationError extends Error {
   constructor(
-    readonly code: "COPY_DEFAULT_LOCALE_FAILED" | "COPY_LOCALE_SET_INVALID",
+    readonly code: 'COPY_DEFAULT_LOCALE_FAILED' | 'COPY_LOCALE_SET_INVALID',
     message: string,
     readonly cause?: unknown,
   ) {
     super(`${code}: ${message}`);
-    this.name = "CopyBundleGenerationError";
+    this.name = 'CopyBundleGenerationError';
   }
 }
 
@@ -75,51 +75,75 @@ function graphemeCount(value: string): number {
   type SegmenterLike = { segment(input: string): Iterable<unknown> };
   type SegmenterConstructor = new (
     locale?: string,
-    options?: { granularity: "grapheme" },
+    options?: { granularity: 'grapheme' },
   ) => SegmenterLike;
   const Segmenter = (Intl as unknown as { Segmenter?: SegmenterConstructor })
     .Segmenter;
   return Segmenter
     ? Array.from(
-        new Segmenter(undefined, { granularity: "grapheme" }).segment(value),
+        new Segmenter(undefined, { granularity: 'grapheme' }).segment(value),
       ).length
-    : Array.from(value.normalize("NFC")).length;
+    : Array.from(value.normalize('NFC')).length;
+}
+
+function constrainGraphemes(value: string, maximum: number): string {
+  if (graphemeCount(value) <= maximum) return value;
+  type SegmenterLike = {
+    segment(input: string): Iterable<{ segment: string }>;
+  };
+  type SegmenterConstructor = new (
+    locale?: string,
+    options?: { granularity: 'grapheme' },
+  ) => SegmenterLike;
+  const Segmenter = (Intl as unknown as { Segmenter?: SegmenterConstructor })
+    .Segmenter;
+  const graphemes = Segmenter
+    ? Array.from(
+        new Segmenter(undefined, { granularity: 'grapheme' }).segment(value),
+        (item) => item.segment,
+      )
+    : Array.from(value.normalize('NFC'));
+  if (maximum === 1) return graphemes[0] ?? '';
+  return `${graphemes
+    .slice(0, maximum - 1)
+    .join('')
+    .trimEnd()}…`;
 }
 
 export function neutralCopySlotContent(key: string, locale: string): string {
-  const german = locale === "de-DE";
-  if (/^nav\.home$/.test(key)) return german ? "Startseite" : "Home";
-  if (/^nav\.products$/.test(key)) return german ? "Lösungen" : "Solutions";
-  if (/^nav\.contact$/.test(key)) return german ? "Kontakt" : "Contact";
+  const german = locale === 'de-DE';
+  if (/^nav\.home$/.test(key)) return german ? 'Startseite' : 'Home';
+  if (/^nav\.products$/.test(key)) return german ? 'Lösungen' : 'Solutions';
+  if (/^nav\.contact$/.test(key)) return german ? 'Kontakt' : 'Contact';
   if (/\.cta$|\.submit$/.test(key))
-    return german ? "Kontakt aufnehmen" : "Get in touch";
-  if (/^inquiry\.field\.name$/.test(key)) return "Name";
+    return german ? 'Kontakt aufnehmen' : 'Get in touch';
+  if (/^inquiry\.field\.name$/.test(key)) return 'Name';
   if (/^inquiry\.field\.email$/.test(key))
-    return german ? "Geschäftliche E-Mail" : "Work email";
+    return german ? 'Geschäftliche E-Mail' : 'Work email';
   if (/^inquiry\.field\.message$/.test(key))
-    return german ? "Ihre Anfrage" : "Your inquiry";
+    return german ? 'Ihre Anfrage' : 'Your inquiry';
   if (/^inquiry\.m0\.note$/.test(key)) {
     return german
-      ? "Das Anfrageformular wird mit der Veröffentlichung aktiviert."
-      : "The inquiry form is enabled when the site is published.";
+      ? 'Das Anfrageformular wird mit der Veröffentlichung aktiviert.'
+      : 'The inquiry form is enabled when the site is published.';
   }
   if (/^seo\..*\.title$/.test(key))
-    return german ? "Unternehmenswebsite" : "Company website";
+    return german ? 'Unternehmenswebsite' : 'Company website';
   if (/^seo\./.test(key)) {
     return german
-      ? "Informieren Sie sich über verfügbare Lösungen und Kontaktmöglichkeiten."
-      : "Explore available solutions and ways to get in touch.";
+      ? 'Informieren Sie sich über verfügbare Lösungen und Kontaktmöglichkeiten.'
+      : 'Explore available solutions and ways to get in touch.';
   }
   if (/\.title$|\.headline$/.test(key))
-    return german ? "Praktische Lösungen" : "Practical solutions";
+    return german ? 'Praktische Lösungen' : 'Practical solutions';
   if (/^faq\.q/.test(key))
     return german
-      ? "Wie erhalte ich weitere Informationen?"
-      : "How can I learn more?";
-  if (/^products\.p\d+\.name$/.test(key)) return german ? "Lösung" : "Solution";
+      ? 'Wie erhalte ich weitere Informationen?'
+      : 'How can I learn more?';
+  if (/^products\.p\d+\.name$/.test(key)) return german ? 'Lösung' : 'Solution';
   return german
-    ? "Weitere Informationen sind auf Anfrage verfügbar."
-    : "Further information is available on request.";
+    ? 'Weitere Informationen sind auf Anfrage verfügbar.'
+    : 'Further information is available on request.';
 }
 
 function canonicalSlotOutput(
@@ -132,31 +156,34 @@ function canonicalSlotOutput(
   >,
 ): CopySlotGeneratorResult & { factual: boolean } {
   const claimRefs: string[] = [];
-  let content = "";
+  let content = '';
   for (const claimId of output.claimRefs) {
     if (claimRefs.includes(claimId)) continue;
     const claim = claims.get(claimId);
     if (!claim) continue;
     const candidate = [...claimRefs, claimId]
       .map((id) => claims.get(id)!.statement)
-      .join(" · ");
+      .join(' · ');
     if (graphemeCount(candidate) <= slot.maxGraphemes) {
       claimRefs.push(claimId);
       content = candidate;
     }
   }
   if (claimRefs.length === 0) {
-    content = neutralCopySlotContent(slot.key, locale);
+    content = constrainGraphemes(
+      neutralCopySlotContent(slot.key, locale),
+      slot.maxGraphemes,
+    );
   }
   return {
     content:
-      slot.type === "rich_text"
+      slot.type === 'rich_text'
         ? {
-            type: "doc",
+            type: 'doc',
             content: [
               {
-                type: "paragraph",
-                content: [{ type: "text", text: content }],
+                type: 'paragraph',
+                content: [{ type: 'text', text: content }],
               },
             ],
           }
@@ -182,8 +209,8 @@ export class CopyBundleService {
       new Set(input.slots.map((slot) => slot.key)).size !== input.slots.length
     ) {
       throw new CopyBundleGenerationError(
-        "COPY_LOCALE_SET_INVALID",
-        "source locale must be first and locales/slots must be unique",
+        'COPY_LOCALE_SET_INVALID',
+        'source locale must be first and locales/slots must be unique',
       );
     }
 
@@ -196,7 +223,7 @@ export class CopyBundleService {
         },
       ]),
     );
-    const bundles: CopyBundleSetV1["bundles"] = {};
+    const bundles: CopyBundleSetV1['bundles'] = {};
     const degradedLocales: string[] = [];
 
     for (const locale of input.locales) {
@@ -227,7 +254,7 @@ export class CopyBundleService {
             slotCatalogVersion: COPY_SLOT_CATALOG_VERSION,
             locale,
             sourceLocale: input.sourceLocale,
-            status: "complete",
+            status: 'complete',
             claimSnapshot: {
               id: input.snapshotId,
               digest: input.snapshot.digest,
@@ -263,7 +290,7 @@ export class CopyBundleService {
       } catch (error) {
         if (locale === input.sourceLocale) {
           throw new CopyBundleGenerationError(
-            "COPY_DEFAULT_LOCALE_FAILED",
+            'COPY_DEFAULT_LOCALE_FAILED',
             `source locale ${locale} did not produce a valid CopyBundle`,
             error,
           );

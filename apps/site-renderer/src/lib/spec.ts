@@ -3,8 +3,11 @@ import { createRequire } from 'node:module';
 import type { SiteSpec } from '@global/contracts';
 import { withBase } from './links';
 
-const contracts = createRequire(import.meta.url)('@global/contracts') as typeof import('@global/contracts');
-const { resolveSiteCopyBundle, resolveSiteLocale } = contracts;
+const contracts = createRequire(import.meta.url)(
+  '@global/contracts',
+) as typeof import('@global/contracts');
+const { resolveSiteCopyBundle, resolveSiteLocale, validateSiteSpec } =
+  contracts;
 
 /**
  * 物化 SiteSpec（04 契约顶层信封 + per-locale CopyBundle）。
@@ -19,16 +22,20 @@ export function loadSpec(): MaterializedSpec {
   if (cached) return cached;
   const path = process.env.SITESPEC_PATH;
   if (!path) throw new Error('SITESPEC_PATH not set');
-  cached = JSON.parse(readFileSync(path, 'utf8')) as MaterializedSpec;
+  cached = validateSiteSpec(JSON.parse(readFileSync(path, 'utf8')));
   return cached;
 }
 
 /** textKey → 文案；缺 key 输出可见标记（QA 期一眼看出，绝不静默空串）。 */
-export function makeT(spec: MaterializedSpec, locale: string): (key: string) => string {
+export function makeT(
+  spec: MaterializedSpec,
+  locale: string,
+): (key: string) => string {
   const bundle = resolveSiteCopyBundle(spec, locale);
   return (key: string) => {
     const value = bundle[key];
-    if (value === undefined) throw new Error(`COPY_SLOT_MISSING: ${locale}/${key}`);
+    if (value === undefined)
+      throw new Error(`COPY_SLOT_MISSING: ${locale}/${key}`);
     return value;
   };
 }
@@ -37,7 +44,10 @@ export function makeT(spec: MaterializedSpec, locale: string): (key: string) => 
  * 可选 slot 安全探测：缺 key（COPY_SLOT_MISSING）返回空串（UI 按空值隐藏）；
  * 其他异常一律 rethrow -- 不吞 CopyBundle/完整性错误，避免破坏 fail-closed。
  */
-export function safeOptionalSlot(t: (key: string) => string, key: string): string {
+export function safeOptionalSlot(
+  t: (key: string) => string,
+  key: string,
+): string {
   try {
     return t(key);
   } catch (e) {
