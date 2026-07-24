@@ -178,15 +178,14 @@ model CompanyProfile {
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  workspace                     Workspace                          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  offerings                     Offering[]
-  sources                       KnowledgeSource[]
-  claims                        Claim[]
-  icps                          IcpDefinition[]
-  sites                         Site[]
-  claimBridges                  BrandProfileClaimBridge[]
-  publishableClaimSnapshots     SitePublishableClaimSnapshot[]
-  publishableClaimSnapshotItems SitePublishableClaimSnapshotItem[]
+  workspace                 Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  offerings                 Offering[]
+  sources                   KnowledgeSource[]
+  claims                    Claim[]
+  icps                      IcpDefinition[]
+  sites                     Site[]
+  claimBridges              BrandProfileClaimBridge[]
+  publishableClaimSnapshots SitePublishableClaimSnapshot[]
 
   @@unique([id, workspaceId], map: "company_profile_id_workspace_id_key")
   @@index([workspaceId])
@@ -1326,7 +1325,7 @@ model SiteVersion {
 /// Immutable preview artifact and recovery/retention unit. SiteVersion remains
 /// the content/build version; Site.activeVersionId remains the sole preview pointer.
 model SiteRelease {
-  id              String    @id @default(uuid()) @db.Uuid
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId     String    @map("workspace_id") @db.Uuid
   siteId          String    @map("site_id") @db.Uuid
   siteVersionId   String    @unique(map: "site_release_site_version_key") @map("site_version_id") @db.Uuid
@@ -1347,7 +1346,7 @@ model SiteRelease {
   deletedAt       DateTime? @map("deleted_at")
   error           String?
   createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
   site        Site         @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction, map: "site_release_site_scope_fkey")
   siteVersion SiteVersion  @relation(fields: [siteVersionId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_release_version_scope_fkey")
@@ -1435,7 +1434,7 @@ model SiteBuildBudget {
   disabledReason   String?   @map("disabled_reason")
   exhaustedAt      DateTime? @map("exhausted_at")
   createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
 
   buildRun SiteBuildRun @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_budget_run_scope_fkey")
 
@@ -1461,7 +1460,7 @@ model SiteBuildTaskAttempt {
   outputJson  Json?    @map("output_json")
   resultJson  Json?    @map("result_json")
   createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
   buildRun     SiteBuildRun     @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_task_attempt_run_scope_fkey")
   spendRecords SiteBuildSpend[]
@@ -1762,7 +1761,7 @@ model BrandProfileClaimBridge {
 /// M1-d immutable run-scoped publication input. Empty item sets are valid and
 /// force deterministic neutral copy rather than fabricated facts.
 model SitePublishableClaimSnapshot {
-  id               String   @id @default(uuid()) @db.Uuid
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId      String   @map("workspace_id") @db.Uuid
   siteId           String   @map("site_id") @db.Uuid
   companyProfileId String   @map("company_profile_id") @db.Uuid
@@ -1788,7 +1787,7 @@ model SitePublishableClaimSnapshot {
 /// Frozen Claim version plus the exact R4-A2 bridge/evidence provenance selected
 /// for one publication snapshot. Current Claim state is revalidated before activation.
 model SitePublishableClaimSnapshotItem {
-  id                String    @id @default(uuid()) @db.Uuid
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId       String    @map("workspace_id") @db.Uuid
   siteId            String    @map("site_id") @db.Uuid
   companyProfileId  String    @map("company_profile_id") @db.Uuid
@@ -1824,7 +1823,6 @@ model SitePublishableClaimSnapshotItem {
   evidence       Evidence                     @relation(fields: [evidenceId, workspaceId, claimId], references: [id, workspaceId, claimId], onDelete: NoAction, onUpdate: NoAction, map: "site_publishable_claim_snapshot_item_evidence_scope_fkey")
   sourceSnapshot SiteEvidenceSourceSnapshot   @relation(fields: [sourceSnapshotId, workspaceId, siteId, sourceContentHash], references: [id, workspaceId, siteId, contentHash], onDelete: NoAction, onUpdate: NoAction, map: "site_publishable_claim_snapshot_item_source_scope_fkey")
   certAsset      Asset?                       @relation(fields: [certAssetId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_publishable_claim_snapshot_item_cert_asset_scope_fkey")
-  companyProfile CompanyProfile               @relation(fields: [companyProfileId], references: [id])
 
   @@unique([snapshotId, claimId], map: "site_publishable_claim_snapshot_item_claim_key")
   @@unique([snapshotId, ordinal], map: "site_publishable_claim_snapshot_item_ordinal_key")
@@ -1835,7 +1833,7 @@ model SitePublishableClaimSnapshotItem {
 /// M1-d authoritative, immutable locale document. SiteSpec keeps a legacy string
 /// projection during one dual-read window, but facts/provenance live here.
 model SiteCopyBundle {
-  id                 String   @id @default(uuid()) @db.Uuid
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId        String   @map("workspace_id") @db.Uuid
   siteId             String   @map("site_id") @db.Uuid
   siteVersionId      String   @map("site_version_id") @db.Uuid
@@ -1859,7 +1857,6 @@ model SiteCopyBundle {
   taskAttempt   SiteBuildTaskAttempt         @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_copy_bundle_attempt_scope_fkey")
 
   @@unique([siteVersionId, locale], map: "site_copy_bundle_version_locale_key")
-  @@unique([id, workspaceId, siteId], map: "site_copy_bundle_id_workspace_site_key")
   @@index([workspaceId, siteId, locale], map: "site_copy_bundle_workspace_site_locale_idx")
   @@index([buildRunId], map: "site_copy_bundle_build_run_idx")
   @@map("site_copy_bundle")
