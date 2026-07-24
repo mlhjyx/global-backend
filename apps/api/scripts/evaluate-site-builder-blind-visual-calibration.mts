@@ -23,11 +23,8 @@ import {
 } from "../src/model-gateway/providers/provider-output-error";
 import { RouterModelGateway } from "../src/model-gateway/router-model-gateway";
 import type { ModelResult } from "../src/model-gateway/types";
-import { BudgetLedger } from "../src/tools/budget";
 import {
-  BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
   BLIND_VISUAL_COST_ESTIMATOR_VERSION,
-  BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
   BLIND_VISUAL_CANDIDATES,
   BLIND_VISUAL_SYSTEM_PROMPT,
   assertBlindVisualOutput,
@@ -58,6 +55,12 @@ const execFileAsync = promisify(execFile);
 const TASK = "site_builder.aesthetic_review.eval";
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const CATALOG_TIMEOUT_MS = 10_000;
+/**
+ * The gateway vision-input contract requires this bounded integer. The
+ * calibration runner deliberately opens no BudgetLedger account, so this is
+ * schema compatibility rather than a pre-dispatch campaign budget gate.
+ */
+const VISION_GATEWAY_SCHEMA_MAX_COST_CENTS = 100;
 const EXECUTION_CONFIRMATION = "BLIND_VISUAL_CALIBRATION_EXECUTE";
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -66,6 +69,7 @@ const repositoryRoot = path.resolve(
 
 const STATIC_SOURCE_PATHS = [
   "apps/api/scripts/evaluate-site-builder-blind-visual-calibration.mts",
+  "apps/api/scripts/evaluate-site-builder-blind-visual-calibration-campaign.mts",
   "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
   "apps/api/src/site-builder/eval/blind-visual-calibration-gateway.ts",
   "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
@@ -102,13 +106,11 @@ interface ArtifactManifestEntry {
 
 interface GatewayRuntime {
   gateway: RouterModelGateway;
-  budget: BudgetLedger;
   budgetRunId: string;
 }
 
 interface CostPreflight {
   estimatorVersion: typeof BLIND_VISUAL_COST_ESTIMATOR_VERSION;
-  maxAllowedEstimatedCostCents: number;
   maxEstimatedCostCents: number;
   calls: Array<{
     phase: BlindVisualInvocationRequest["phase"];
@@ -270,23 +272,16 @@ function fixtureDigestCatalog(
   return Object.freeze(Object.fromEntries(entries));
 }
 
-function costPreflight(
+function costForecast(
   candidate: (typeof BLIND_VISUAL_CANDIDATES)[BlindVisualCandidateModel],
   requests: readonly BlindVisualInvocationRequest[],
 ): CostPreflight {
-  const maxAllowedEstimatedCostCents =
-    candidate.maxCostCents - BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS;
   const calls = requests.map((request) => {
     const estimate = estimateBlindVisualCallCostUpperBound({
       candidate,
       request,
       systemPrompt: BLIND_VISUAL_SYSTEM_PROMPT,
     });
-    if (estimate.totalCostCents > maxAllowedEstimatedCostCents) {
-      throw new Error(
-        `BLIND_VISUAL_EVAL_ESTIMATED_CALL_COST_EXCEEDED: ${request.opaqueRunId}`,
-      );
-    }
     return {
       phase: request.phase,
       opaqueRunId: request.opaqueRunId,
@@ -297,7 +292,6 @@ function costPreflight(
   });
   return {
     estimatorVersion: BLIND_VISUAL_COST_ESTIMATOR_VERSION,
-    maxAllowedEstimatedCostCents,
     maxEstimatedCostCents: Math.max(
       ...calls.map((call) => call.estimatedCostCents),
     ),
@@ -319,11 +313,8 @@ function createGateway(
   const registry = new ModelProviderRegistry();
   registry.register(provider);
   const gateway = new RouterModelGateway(new ModelRouter(registry));
-  const budget = new BudgetLedger();
   const budgetRunId = `blind-visual-calibration:${commitSha}:${model}`;
-  budget.open(budgetRunId, BLIND_VISUAL_MODEL_COST_BOUND_CENTS);
-  gateway.budget = budget;
-  return { gateway, budget, budgetRunId };
+  return { gateway, budgetRunId };
 }
 
 async function catalogSnapshot(
@@ -389,7 +380,7 @@ function gatewayInvoke(
                 request.images.length === 3 ? 3 : 2,
               ),
             maxTokens: request.maxTokens,
-            maxCostCents: request.maxCostCents,
+            maxCostCents: VISION_GATEWAY_SCHEMA_MAX_COST_CENTS,
             signal: request.signal,
           },
           {
@@ -569,31 +560,27 @@ async function main(): Promise<void> {
     }
     const requests = plannedRequests(candidate, pairs);
     const fixtureDigests = fixtureDigestCatalog(requests);
-    const callCostPreflight = costPreflight(candidate, requests);
     const runtime = createGateway(fixtureDigests, model, commitSha);
     reportHandle = await open(outputPath, "wx");
     let report: BlindVisualModelReport;
-    let budgetRemainingCents: number;
     const invoke = gatewayInvoke(
       runtime.gateway,
       model,
       runtime.budgetRunId,
       runtime.budgetRunId,
     );
-    try {
-      report = await runBlindVisualCalibrationCandidate({
-        repositoryRoot,
-        candidate,
-        provenance: { commitSha, sourceBundleSha256 },
-        invoke: (request) => {
-          paidCallsStarted = true;
-          return invoke(request);
-        },
-      });
-      budgetRemainingCents = runtime.budget.remainingCents(runtime.budgetRunId);
-    } finally {
-      runtime.budget.close(runtime.budgetRunId, { force: true });
-    }
+    // The first calibration pass is intentionally not budget-gated. The
+    // gateway has no opened ledger account, while every response still
+    // records token and cost evidence for the post-run forecast.
+    report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate,
+      provenance: { commitSha, sourceBundleSha256 },
+      invoke: (request) => {
+        paidCallsStarted = true;
+        return invoke(request);
+      },
+    });
     const sourceEnd = await endFingerprints(sourcePaths);
     const sourceIntegrity = inspectEvaluationSourceBundle(
       sourceStart,
@@ -616,11 +603,7 @@ async function main(): Promise<void> {
         sourceFiles: sourceStart,
         sourceIntegrity,
         fixtureCatalogSha256: sha256CanonicalJson(fixtureDigests),
-        budget: {
-          capCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
-          remainingCents: budgetRemainingCents,
-        },
-        callCostPreflight,
+        postExecutionCostForecast: costForecast(candidate, requests),
         artifactManifest,
       },
       failure: sourceIntegrity.stable

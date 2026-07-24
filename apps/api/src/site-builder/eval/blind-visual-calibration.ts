@@ -24,11 +24,8 @@ export const BLIND_VISUAL_EXPECTED_RUNS =
 export const BLIND_VISUAL_TIMEOUT_MS = 120_000;
 export const BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS = 10_000;
 export const BLIND_VISUAL_MAX_TOKENS = 800;
-export const BLIND_VISUAL_MAX_COST_CENTS = 5;
-export const BLIND_VISUAL_MODEL_COST_BOUND_CENTS = 95;
 export const BLIND_VISUAL_COST_ESTIMATOR_VERSION =
   "site-builder-blind-visual-cost-upper-bound/v3";
-export const BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS = 0.01;
 
 export const BLIND_VISUAL_CHOICES = ["left", "right", "tie"] as const;
 export const BLIND_VISUAL_SEVERITIES = ["blocker", "major", "minor"] as const;
@@ -44,8 +41,6 @@ export interface BlindVisualCandidateConfig {
   upstreamModelFamily: BlindVisualUpstreamModelFamily;
   timeoutMs: typeof BLIND_VISUAL_TIMEOUT_MS;
   maxTokens: typeof BLIND_VISUAL_MAX_TOKENS;
-  maxCostCents: typeof BLIND_VISUAL_MAX_COST_CENTS;
-  perModelCostBoundCents: typeof BLIND_VISUAL_MODEL_COST_BOUND_CENTS;
   price: {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
@@ -59,8 +54,6 @@ export const BLIND_VISUAL_CANDIDATES = Object.freeze({
     upstreamModelFamily: "gemini",
     timeoutMs: BLIND_VISUAL_TIMEOUT_MS,
     maxTokens: BLIND_VISUAL_MAX_TOKENS,
-    maxCostCents: BLIND_VISUAL_MAX_COST_CENTS,
-    perModelCostBoundCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
     price: {
       inputUsdPerMillionTokens: 1.5,
       outputUsdPerMillionTokens: 9,
@@ -72,8 +65,6 @@ export const BLIND_VISUAL_CANDIDATES = Object.freeze({
     upstreamModelFamily: "claude",
     timeoutMs: BLIND_VISUAL_TIMEOUT_MS,
     maxTokens: BLIND_VISUAL_MAX_TOKENS,
-    maxCostCents: BLIND_VISUAL_MAX_COST_CENTS,
-    perModelCostBoundCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
     price: {
       inputUsdPerMillionTokens: 2,
       outputUsdPerMillionTokens: 10,
@@ -85,8 +76,6 @@ export const BLIND_VISUAL_CANDIDATES = Object.freeze({
     upstreamModelFamily: "gpt-5.6",
     timeoutMs: BLIND_VISUAL_TIMEOUT_MS,
     maxTokens: BLIND_VISUAL_MAX_TOKENS,
-    maxCostCents: BLIND_VISUAL_MAX_COST_CENTS,
-    perModelCostBoundCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
     price: {
       inputUsdPerMillionTokens: 2.5,
       outputUsdPerMillionTokens: 15,
@@ -98,8 +87,6 @@ export const BLIND_VISUAL_CANDIDATES = Object.freeze({
     upstreamModelFamily: "gpt-5.6",
     timeoutMs: BLIND_VISUAL_TIMEOUT_MS,
     maxTokens: BLIND_VISUAL_MAX_TOKENS,
-    maxCostCents: BLIND_VISUAL_MAX_COST_CENTS,
-    perModelCostBoundCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
     price: {
       inputUsdPerMillionTokens: 5,
       outputUsdPerMillionTokens: 30,
@@ -110,6 +97,14 @@ export const BLIND_VISUAL_CANDIDATES = Object.freeze({
 >);
 
 export type BlindVisualCandidateModel = keyof typeof BLIND_VISUAL_CANDIDATES;
+
+/** Fixed serial order. Model outputs never become inputs for a later model. */
+export const BLIND_VISUAL_CAMPAIGN_MODELS = Object.freeze([
+  "gemini-3.5-flash",
+  "claude-sonnet-5",
+  "gpt-5.6-terra",
+  "gpt-5.6-sol",
+] as const satisfies readonly BlindVisualCandidateModel[]);
 
 for (const candidate of Object.values(BLIND_VISUAL_CANDIDATES)) {
   Object.freeze(candidate.price);
@@ -231,7 +226,6 @@ export interface BlindVisualInvocationRequest {
   transport: GatewayVisionTransport;
   timeoutMs: typeof BLIND_VISUAL_TIMEOUT_MS;
   maxTokens: typeof BLIND_VISUAL_MAX_TOKENS;
-  maxCostCents: typeof BLIND_VISUAL_MAX_COST_CENTS;
   signal: AbortSignal;
 }
 
@@ -272,6 +266,26 @@ export interface BlindVisualCallCostUpperBound {
   totalCostCents: number;
 }
 
+export interface BlindVisualCampaignCallPreflight {
+  phase: BlindVisualInvocationRequest["phase"];
+  opaqueRunId: string;
+  estimatedInputTokens: number;
+  outputTokenCeiling: number;
+  estimatedCostCents: number;
+}
+
+export interface BlindVisualCampaignModelPreflight {
+  model: BlindVisualCandidateModel;
+  transport: GatewayVisionTransport;
+  estimatedTotalCostCents: number;
+  calls: BlindVisualCampaignCallPreflight[];
+}
+
+export interface BlindVisualCampaignPreflight {
+  estimatedTotalCostCents: number;
+  models: BlindVisualCampaignModelPreflight[];
+}
+
 export interface BlindVisualExecutionProvenance {
   commitSha: string;
   sourceBundleSha256: string;
@@ -286,7 +300,6 @@ export type BlindVisualUnavailableReason =
   | "protocol_mismatch"
   | "provider_provenance_mismatch"
   | "usage_invalid"
-  | "cost_bound_exceeded"
   | "invocation_failed";
 
 export interface BlindVisualCanonicalFinding {
@@ -408,8 +421,6 @@ export interface BlindVisualModelReport {
     timeoutMs: typeof BLIND_VISUAL_TIMEOUT_MS;
     timeoutSettlementGraceMs: typeof BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS;
     maxTokens: typeof BLIND_VISUAL_MAX_TOKENS;
-    maxCostCentsPerCall: typeof BLIND_VISUAL_MAX_COST_CENTS;
-    maxCostCentsPerModel: typeof BLIND_VISUAL_MODEL_COST_BOUND_CENTS;
   };
   provenance: BlindVisualExecutionProvenance;
   matrixDefinition: BlindVisualPairDefinition[];
@@ -596,8 +607,10 @@ function assertCandidateConfig(candidate: BlindVisualCandidateConfig): void {
     candidate !== BLIND_VISUAL_CANDIDATES[candidate.model] ||
     candidate.timeoutMs !== BLIND_VISUAL_TIMEOUT_MS ||
     candidate.maxTokens !== BLIND_VISUAL_MAX_TOKENS ||
-    candidate.maxCostCents !== BLIND_VISUAL_MAX_COST_CENTS ||
-    candidate.perModelCostBoundCents !== BLIND_VISUAL_MODEL_COST_BOUND_CENTS
+    !Number.isFinite(candidate.price.inputUsdPerMillionTokens) ||
+    candidate.price.inputUsdPerMillionTokens < 0 ||
+    !Number.isFinite(candidate.price.outputUsdPerMillionTokens) ||
+    candidate.price.outputUsdPerMillionTokens < 0
   ) {
     throw new Error("BLIND_VISUAL_CANDIDATE_CONFIG_INVALID");
   }
@@ -842,7 +855,6 @@ export function buildBlindVisualPairPlans(
           transport: candidate.transport,
           timeoutMs: candidate.timeoutMs,
           maxTokens: candidate.maxTokens,
-          maxCostCents: candidate.maxCostCents,
           signal: controller.signal,
         },
       });
@@ -879,9 +891,67 @@ export function buildBlindVisualProbePlan(
       transport: candidate.transport,
       timeoutMs: candidate.timeoutMs,
       maxTokens: candidate.maxTokens,
-      maxCostCents: candidate.maxCostCents,
       signal: controller.signal,
     },
+  };
+}
+
+/**
+ * Computes a post-execution forecast from the exact frozen source bundle.
+ * It is reporting-only: calibration quality gates run before future budget
+ * policy is calibrated from this campaign's observed cost evidence.
+ */
+export function buildBlindVisualCampaignPreflight(
+  pairs: readonly BlindVisualPair[],
+): BlindVisualCampaignPreflight {
+  if (
+    BLIND_VISUAL_CAMPAIGN_MODELS.length !== 4 ||
+    new Set(BLIND_VISUAL_CAMPAIGN_MODELS).size !==
+      BLIND_VISUAL_CAMPAIGN_MODELS.length
+  ) {
+    throw new Error("BLIND_VISUAL_CAMPAIGN_MODELS_INVALID");
+  }
+  const models = BLIND_VISUAL_CAMPAIGN_MODELS.map((model) => {
+    const candidate = BLIND_VISUAL_CANDIDATES[model];
+    assertCandidateConfig(candidate);
+    const requests = [
+      buildBlindVisualProbePlan(candidate, pairs).request,
+      ...buildBlindVisualPairPlans(candidate, pairs).map(
+        (plan) => plan.request,
+      ),
+    ];
+    const calls = requests.map((request) => {
+      const estimate = estimateBlindVisualCallCostUpperBound({
+        candidate,
+        request,
+        systemPrompt: BLIND_VISUAL_SYSTEM_PROMPT,
+      });
+      return {
+        phase: request.phase,
+        opaqueRunId: request.opaqueRunId,
+        estimatedInputTokens: estimate.inputTokens,
+        outputTokenCeiling: estimate.outputTokens,
+        estimatedCostCents: estimate.totalCostCents,
+      };
+    });
+    const estimatedTotalCostCents = round(
+      calls.reduce((sum, call) => sum + call.estimatedCostCents, 0),
+      6,
+    );
+    return {
+      model,
+      transport: candidate.transport,
+      estimatedTotalCostCents,
+      calls,
+    };
+  });
+  const estimatedTotalCostCents = round(
+    models.reduce((sum, model) => sum + model.estimatedTotalCostCents, 0),
+    6,
+  );
+  return {
+    estimatedTotalCostCents,
+    models,
   };
 }
 
@@ -943,6 +1013,7 @@ function assertProviderResult(
     result.usage.inputTokens < 0 ||
     !Number.isInteger(result.usage.outputTokens) ||
     result.usage.outputTokens < 0 ||
+    result.usage.outputTokens > candidate.maxTokens ||
     (result.usage.costUsd !== undefined &&
       result.usage.costUsd !== null &&
       (!Number.isFinite(result.usage.costUsd) || result.usage.costUsd < 0))
@@ -952,9 +1023,6 @@ function assertProviderResult(
   const calculated = calculatedCostUsd(candidate, result);
   const reported = result.usage.costUsd ?? null;
   const accounted = round(Math.max(calculated, reported ?? 0));
-  if (accounted * 100 > candidate.maxCostCents) {
-    throw new BlindVisualCallRejected("cost_bound_exceeded");
-  }
   let output: BlindVisualOutput;
   try {
     output = assertBlindVisualOutput(result.data, imageCount);
@@ -1068,6 +1136,7 @@ function assertCostEvidence(
     record.inputTokens < 0 ||
     !Number.isInteger(record.outputTokens) ||
     record.outputTokens < 0 ||
+    record.outputTokens > candidate.maxTokens ||
     (record.reportedCostUsd !== null &&
       (!Number.isFinite(record.reportedCostUsd) || record.reportedCostUsd < 0))
   ) {
@@ -1103,7 +1172,6 @@ function assertProbeRecord(
     probe.resolvedModel !== candidate.model ||
     probe.provider !== "gateway" ||
     probe.transport !== candidate.transport ||
-    probe.accountedCostUsd * 100 > candidate.maxCostCents ||
     !Number.isFinite(probe.elapsedMs) ||
     probe.elapsedMs < 0 ||
     probe.elapsedMs > candidate.timeoutMs ||
@@ -1271,13 +1339,7 @@ export function summarizeBlindVisualCandidate(
       formatAndProvenanceCorrect === BLIND_VISUAL_EXPECTED_RUNS &&
       knownIssueHits >= 17 &&
       consistentFamilies >= 5 &&
-      runs.every(
-        (run) =>
-          run.elapsedMs <= candidate.timeoutMs &&
-          run.accountedCostUsd * 100 <= candidate.maxCostCents,
-      ) &&
-      probe.accountedCostUsd * 100 <= candidate.maxCostCents &&
-      totalCostUsd * 100 <= candidate.perModelCostBoundCents,
+      runs.every((run) => run.elapsedMs <= candidate.timeoutMs),
   };
   return metrics;
 }
@@ -1358,6 +1420,7 @@ function assertReportEnvelope(
   report: BlindVisualModelReport,
   canonicalMatrixDefinition: readonly BlindVisualPairDefinition[],
 ): void {
+  const candidate = BLIND_VISUAL_CANDIDATES[report.model];
   assertExecutionProvenance(report.provenance);
   assertMatrixDefinition(report.matrixDefinition);
   assertMatrixDefinition(canonicalMatrixDefinition);
@@ -1369,6 +1432,7 @@ function assertReportEnvelope(
       "deterministic_render_baseline_not_aesthetic_gold" ||
     report.matrixDefinitionSha256 !==
       matrixDefinitionSha256(report.matrixDefinition) ||
+    JSON.stringify(report.limits) !== JSON.stringify(modelLimits(candidate)) ||
     JSON.stringify(report.matrixDefinition) !==
       JSON.stringify(canonicalMatrixDefinition)
   ) {
@@ -1385,6 +1449,7 @@ function comparisonMatrixFingerprint(report: BlindVisualModelReport): string {
       harnessVersion: report.harnessVersion,
       promptVersion: report.promptVersion,
       benchmarkQualification: report.benchmarkQualification,
+      limits: report.limits,
       provenance: report.provenance,
       matrixDefinitionSha256: report.matrixDefinitionSha256,
       runs: [...report.runs]
@@ -1603,8 +1668,6 @@ function modelLimits(
     timeoutMs: candidate.timeoutMs,
     timeoutSettlementGraceMs: BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS,
     maxTokens: candidate.maxTokens,
-    maxCostCentsPerCall: candidate.maxCostCents,
-    maxCostCentsPerModel: candidate.perModelCostBoundCents,
   };
 }
 
@@ -1633,12 +1696,6 @@ function failureRecord(input: {
   const { candidate, request, result } = input;
   const timeout =
     input.error instanceof BlindVisualTimedOutCall ? input.error : undefined;
-  const hasMeasuredUsage =
-    result !== undefined &&
-    Number.isInteger(result.usage.inputTokens) &&
-    result.usage.inputTokens >= 0 &&
-    Number.isInteger(result.usage.outputTokens) &&
-    result.usage.outputTokens >= 0;
   let calculatedCost: number | null = null;
   if (
     result &&
@@ -1680,8 +1737,7 @@ function failureRecord(input: {
     finishReason: result?.finishReason ?? null,
     outputSha256: result ? hashUnknownOutput(result.data) : null,
     timeoutSettlement: timeout?.timeoutSettlement ?? "not_applicable",
-    preflightCostCeilingCents:
-      timeout && !hasMeasuredUsage ? candidate.maxCostCents : null,
+    preflightCostCeilingCents: null,
     inputImages: request.images.map((image, index) => ({
       imageNumber: (index + 1) as 1 | 2 | 3,
       sha256: image.sha256,
@@ -1852,39 +1908,6 @@ export async function runBlindVisualCalibrationCandidate(input: {
     matrixDefinition,
     matrixDefinition,
   );
-  if (metrics.totalCostUsd * 100 > candidate.perModelCostBoundCents) {
-    return unavailableReport(
-      candidate,
-      provenance,
-      matrixDefinition,
-      definitionSha256,
-      "cost_bound_exceeded",
-      probe,
-      runs,
-      {
-        phase: "pair",
-        runKey: null,
-        reason: "cost_bound_exceeded",
-        expectedModel: candidate.model,
-        requestedModel: null,
-        reportedModel: null,
-        resolvedModel: null,
-        provider: null,
-        expectedTransport: candidate.transport,
-        actualTransport: null,
-        elapsedMs: null,
-        inputTokens: null,
-        outputTokens: null,
-        reportedCostUsd: null,
-        calculatedCostUsd: null,
-        finishReason: null,
-        outputSha256: null,
-        timeoutSettlement: "not_applicable",
-        preflightCostCeilingCents: null,
-        inputImages: [],
-      },
-    );
-  }
   if (!metrics.passed) {
     return {
       schemaVersion: BLIND_VISUAL_CALIBRATION_SCHEMA_VERSION,
