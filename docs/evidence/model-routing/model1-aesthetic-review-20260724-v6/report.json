@@ -1,6 +1,6 @@
 {
   "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
-  "evidenceId": "model1-aesthetic-review-20260724-v1-reconciled-v2",
+  "evidenceId": "model1-aesthetic-review-20260724-v1-unanchored-inventory-v1",
   "candidateState": "unavailable",
   "routePromoted": false,
   "reconciliation": {
@@ -10,6 +10,16 @@
     "modelCallsMade": 0,
     "originalArtifactManifestPresent": false,
     "originalRunnerSourceAvailable": false,
+    "historicalContract": {
+      "evidenceId": "model1-aesthetic-review-20260724-v1",
+      "evaluatorVersion": "site-builder-aesthetic-review-eval@1.0.0",
+      "promptVersion": "site-builder-aesthetic-review-prompt/v1"
+    },
+    "currentContract": {
+      "evidenceId": "model1-aesthetic-review-20260724-v2",
+      "evaluatorVersion": "site-builder-aesthetic-review-eval@2.0.0",
+      "promptVersion": "site-builder-aesthetic-review-prompt/v2"
+    },
     "limitation": "The source report did not anchor a partial artifact manifest or preserve the exact runner source. File hashes below prove only the bytes inventoried during reconciliation, not exact original-execution provenance.",
     "originalExecutionSourceFiles": [
       {
@@ -146,9 +156,9 @@
     "inventoryCompleteForFilesPresent": true,
     "originalArtifactSetAnchored": false,
     "originalExecutionProvenanceExact": false,
-    "allInventoriedArtifactsSchemaValidUnderReconciliationCode": true,
+    "allInventoriedArtifactsClosedOutputValidUnderReconciliationCode": false,
     "allInventoriedArtifactsSelfReportedIdentityFieldsConsistent": true,
-    "allInventoriedArtifactsForbiddenFieldsAbsentUnderReconciliationCode": true
+    "allInventoriedArtifactsForbiddenFieldsAbsentUnderReconciliationCode": false
   },
   "diagnosticInventory": [
     {
@@ -171,11 +181,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "d3a8b3cfece4f4ae290fd61930ef91e5c6d309b20695379b43258c0544729f1d",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-2.json",
@@ -197,11 +207,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "064881429bd7f72a678cde4238c647177c42679e068e789a3df5f239e630e1ff",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-3.json",
@@ -223,11 +233,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "1e4043f055834f48f0901ecabc6dcd336efbb51cddd0a0192b86d62822f07495",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-4.json",
@@ -249,11 +259,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "71b9ba1e254317704feb6818738bdb025618e02e396ef2367e769efec19b31fe",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-5.json",
@@ -275,11 +285,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "8b354ffb15212349945853f72607121d9aeb72d61ea6a56d392fd9ad6ec66f45",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-6.json",
@@ -301,11 +311,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "a6661d3681b1266b6cae05d041460e963c1409d5b6c919f09ac9b79152500e28",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-7.json",
@@ -327,11 +337,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "93198f3c981b012af901db3b069174746bc6d517a27a04c9f8cba230e2ad1997",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-8.json",
@@ -353,11 +363,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "27fa32046031ab180b14e7fdd461866771ad9b8828c068c6cadf0dd4db432797",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-9.json",
@@ -379,11 +389,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "2afb0f26c85322ac5fc90138c29a4f25a2db8fb7c9ea3469186b4eba2027a435",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-10.json",
@@ -405,11 +415,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "f73a014dbeecd0275a7ed38f7e07473267a995045dacf6ff0ae2f238dc1a5aa0",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-11.json",
@@ -431,11 +441,11 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "4963c5ff8239ddea4ac120261158a219ae965509a2d96afdbe453a611bb63722",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     },
     {
       "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-12.json",
@@ -457,21 +467,21 @@
       "provider": "gateway",
       "transport": "openai-chat-completions",
       "artifactSha256": "caa25a2976b857ab065dbfe466f4ef09a0fb8ed89349e8e8c45bca89b79fda33",
-      "schemaValidUnderReconciliationCode": true,
-      "forbiddenFieldsAbsentUnderReconciliationCode": true,
+      "closedOutputValidUnderReconciliationCode": false,
+      "forbiddenFieldsAbsentUnderReconciliationCode": false,
       "selfReportedIdentityFieldsConsistent": true,
       "originalExecutionProvenanceExact": false,
-      "selfReportedScoringInternallyConsistent": true
+      "selfReportedScoringInternallyConsistent": false
     }
   ],
   "sourceFiles": [
     {
       "path": "apps/api/scripts/evaluate-site-builder-aesthetic-review.mts",
-      "sha256": "6fadc119586edfa09655f440bfa102b7e5d44f963a31c66062d74907b98235fa"
+      "sha256": "154e998d82463522969af0132d8c9dea898b31aee722f18e93ff337e307c24e0"
     },
     {
       "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
-      "sha256": "76b6c9f8e551621553f1d0666e41533ecc311f00d8e5c9e80e464b7dc9b07b8c"
+      "sha256": "2d394b370cb59b04554786a7fd5df4c75d3b7380f876d8ad3da7eb322204b1d6"
     },
     {
       "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
@@ -523,8 +533,8 @@
     }
   ],
   "sourceIntegrity": {
-    "startBundleSha256": "5c2185fb98ccfbeff1a36f88738660a3e9cf21580420708da433ad8edba3649c",
-    "endBundleSha256": "5c2185fb98ccfbeff1a36f88738660a3e9cf21580420708da433ad8edba3649c",
+    "startBundleSha256": "b00b62dc39b3288b52b4140aea3b508d290a9c5b59fa8e21cd23875cf5811bc5",
+    "endBundleSha256": "b00b62dc39b3288b52b4140aea3b508d290a9c5b59fa8e21cd23875cf5811bc5",
     "stable": true,
     "changedPaths": []
   },

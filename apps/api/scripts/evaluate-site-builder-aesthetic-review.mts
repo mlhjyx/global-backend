@@ -40,7 +40,12 @@ import type {
 const MODEL = "gemini-3.5-flash";
 const TASK = "site_builder.aesthetic_review.eval";
 const TRANSPORT = "openai-chat-completions";
-const EVIDENCE_ID = "model1-aesthetic-review-20260724-v1";
+const EVIDENCE_ID = "model1-aesthetic-review-20260724-v2";
+const HISTORICAL_INCIDENT_EVIDENCE_ID = "model1-aesthetic-review-20260724-v1";
+const HISTORICAL_INCIDENT_EVALUATOR_VERSION =
+  "site-builder-aesthetic-review-eval@1.0.0";
+const HISTORICAL_INCIDENT_PROMPT_VERSION =
+  "site-builder-aesthetic-review-prompt/v1";
 const REPEATS = 2;
 const EXPECTED_CASES = 12;
 const EXPECTED_RUNS = EXPECTED_CASES * REPEATS;
@@ -395,6 +400,7 @@ async function reconcileInterruptedEvidence(
   const sourceProbe = sourceReport.probe as Record<string, unknown> | undefined;
   if (
     sourceReport.candidateState !== "unavailable" ||
+    sourceReport.evidenceId !== HISTORICAL_INCIDENT_EVIDENCE_ID ||
     sourceMatrix?.reason !== "timeout" ||
     sourceProbe?.accepted !== true
   ) {
@@ -435,9 +441,9 @@ async function reconcileInterruptedEvidence(
       evalCase !== expectedCase ||
       artifact.attempt !== expectedAttempt ||
       artifact.schemaVersion !== AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION ||
-      artifact.evidenceId !== EVIDENCE_ID ||
-      artifact.evaluatorVersion !== AESTHETIC_REVIEW_EVALUATOR_VERSION ||
-      artifact.promptVersion !== AESTHETIC_REVIEW_PROMPT_VERSION ||
+      artifact.evidenceId !== HISTORICAL_INCIDENT_EVIDENCE_ID ||
+      artifact.evaluatorVersion !== HISTORICAL_INCIDENT_EVALUATOR_VERSION ||
+      artifact.promptVersion !== HISTORICAL_INCIDENT_PROMPT_VERSION ||
       artifact.familyId !== evalCase.familyId ||
       artifact.kind !== evalCase.kind ||
       artifact.expectedIssue !== evalCase.expectedIssue ||
@@ -460,12 +466,18 @@ async function reconcileInterruptedEvidence(
     ) {
       throw new Error(`INTERRUPTED_EVIDENCE_ARTIFACT_INVALID: ${name}`);
     }
-    const validated = assertAestheticReviewOutput(output, evalCase.images);
-    const scoring = evaluateAestheticCaseOutput(evalCase, validated);
-    if (
-      sha256CanonicalJson(scoring) !== sha256CanonicalJson(artifact.scoring)
-    ) {
-      throw new Error(`INTERRUPTED_EVIDENCE_SCORING_MISMATCH: ${name}`);
+    let closedOutputValidUnderReconciliationCode = false;
+    let selfReportedScoringInternallyConsistent = false;
+    try {
+      const validated = assertAestheticReviewOutput(output, evalCase.images);
+      const scoring = evaluateAestheticCaseOutput(evalCase, validated);
+      closedOutputValidUnderReconciliationCode = true;
+      selfReportedScoringInternallyConsistent =
+        sha256CanonicalJson(scoring) === sha256CanonicalJson(artifact.scoring);
+    } catch {
+      // Diagnostic inventory only. A historical file that fails the current
+      // closed evaluator stays inventoried but can never become positive
+      // MODEL-1 evidence retroactively.
     }
     recoveredRuns.push({
       artifactPath: path.relative(repositoryRoot, absolute),
@@ -483,19 +495,20 @@ async function reconcileInterruptedEvidence(
       modelResolutionSource: "upstream_response",
       provider: "gateway",
       transport: TRANSPORT,
-      artifactSha256: sha256CanonicalJson(validated),
-      schemaValidUnderReconciliationCode: true,
-      forbiddenFieldsAbsentUnderReconciliationCode: true,
+      artifactSha256: sha256CanonicalJson(output),
+      closedOutputValidUnderReconciliationCode,
+      forbiddenFieldsAbsentUnderReconciliationCode:
+        closedOutputValidUnderReconciliationCode,
       selfReportedIdentityFieldsConsistent: true,
       originalExecutionProvenanceExact: false,
-      selfReportedScoringInternallyConsistent: true,
+      selfReportedScoringInternallyConsistent,
     });
   }
   const sourceEnd = await fingerprints();
   const sourceIntegrity = inspectEvaluationSourceBundle(sourceStart, sourceEnd);
   const report = {
     schemaVersion: AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION,
-    evidenceId: `${EVIDENCE_ID}-reconciled-v2`,
+    evidenceId: `${HISTORICAL_INCIDENT_EVIDENCE_ID}-unanchored-inventory-v1`,
     candidateState: "unavailable",
     routePromoted: false,
     reconciliation: {
@@ -505,6 +518,16 @@ async function reconcileInterruptedEvidence(
       modelCallsMade: 0,
       originalArtifactManifestPresent: false,
       originalRunnerSourceAvailable: false,
+      historicalContract: {
+        evidenceId: HISTORICAL_INCIDENT_EVIDENCE_ID,
+        evaluatorVersion: HISTORICAL_INCIDENT_EVALUATOR_VERSION,
+        promptVersion: HISTORICAL_INCIDENT_PROMPT_VERSION,
+      },
+      currentContract: {
+        evidenceId: EVIDENCE_ID,
+        evaluatorVersion: AESTHETIC_REVIEW_EVALUATOR_VERSION,
+        promptVersion: AESTHETIC_REVIEW_PROMPT_VERSION,
+      },
       limitation:
         "The source report did not anchor a partial artifact manifest or preserve the exact runner source. File hashes below prove only the bytes inventoried during reconciliation, not exact original-execution provenance.",
       originalExecutionSourceFiles: sourceReport.sourceFiles,
@@ -522,8 +545,10 @@ async function reconcileInterruptedEvidence(
       inventoryCompleteForFilesPresent: true,
       originalArtifactSetAnchored: false,
       originalExecutionProvenanceExact: false,
-      allInventoriedArtifactsSchemaValidUnderReconciliationCode:
-        recoveredRuns.every((run) => run.schemaValidUnderReconciliationCode),
+      allInventoriedArtifactsClosedOutputValidUnderReconciliationCode:
+        recoveredRuns.every(
+          (run) => run.closedOutputValidUnderReconciliationCode,
+        ),
       allInventoriedArtifactsSelfReportedIdentityFieldsConsistent:
         recoveredRuns.every((run) => run.selfReportedIdentityFieldsConsistent),
       allInventoriedArtifactsForbiddenFieldsAbsentUnderReconciliationCode:

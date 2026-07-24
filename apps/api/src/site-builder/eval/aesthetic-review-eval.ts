@@ -11,11 +11,11 @@ import type {
 import type { VisionReviewImage } from "../../model-gateway/types";
 
 export const AESTHETIC_REVIEW_EVALUATOR_VERSION =
-  "site-builder-aesthetic-review-eval@1.0.0";
+  "site-builder-aesthetic-review-eval@2.0.0";
 export const AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION =
   "site-builder-model1-aesthetic-review-report/v1";
 export const AESTHETIC_REVIEW_PROMPT_VERSION =
-  "site-builder-aesthetic-review-prompt/v1";
+  "site-builder-aesthetic-review-prompt/v2";
 export const AESTHETIC_REVIEW_DEGRADATION_VERSION =
   "site-builder-aesthetic-degradation/v1";
 
@@ -30,6 +30,18 @@ export const AESTHETIC_DIMENSIONS = [
   "credibility",
   "originality",
 ] as const satisfies readonly DesignEvaluationDimension[];
+
+export const AESTHETIC_DIMENSION_WEIGHTS = Object.freeze({
+  hierarchy: 15,
+  consistency: 15,
+  spacing: 10,
+  contrast: 10,
+  imagery: 10,
+  mobileComposition: 15,
+  ctaClarity: 10,
+  credibility: 10,
+  originality: 5,
+} as const satisfies Readonly<Record<DesignEvaluationDimension, number>>);
 
 export const AESTHETIC_RULE_CODES = [
   "AESTHETIC_HIERARCHY",
@@ -303,7 +315,8 @@ function promptForCase(
     "They show one site at mobile 375, tablet 768, and desktop 1440.",
     "Judge only visible design quality. Return the exact JSON schema.",
     "Use only the frozen AESTHETIC_* rule codes. Do not propose repairs, code, components, variants, CSS, HTML, Astro, paths, or free-form targets.",
-    "passed requires overallScore >= 85, every dimension >= 60, and no blocker or major finding; otherwise return failed.",
+    "Set overallScore to the nearest integer of the weighted dimension score: hierarchy 15%, consistency 15%, spacing 10%, contrast 10%, imagery 10%, mobileComposition 15%, ctaClarity 10%, credibility 10%, originality 5%.",
+    "passed requires that deterministic weighted overallScore >= 85, every dimension >= 60, and no blocker or major finding; otherwise return failed.",
     `Evidence artifact ids: ${images.map((image) => image.artifactId).join(", ")}`,
   ].join("\n");
 }
@@ -416,6 +429,17 @@ function isBoundedToken(value: unknown): value is string {
   );
 }
 
+export function calculateAestheticWeightedScore(
+  dimensions: Readonly<Record<DesignEvaluationDimension, number>>,
+): number {
+  const weightedHundredths = AESTHETIC_DIMENSIONS.reduce(
+    (total, dimension) =>
+      total + dimensions[dimension] * AESTHETIC_DIMENSION_WEIGHTS[dimension],
+    0,
+  );
+  return Math.round(weightedHundredths / 100);
+}
+
 export function assertAestheticReviewOutput(
   value: unknown,
   inputImages: readonly VisionReviewImage[],
@@ -481,6 +505,11 @@ export function assertAestheticReviewOutput(
     }
   }
   const output = value as unknown as AestheticReviewOutput;
+  if (
+    output.overallScore !== calculateAestheticWeightedScore(output.dimensions)
+  ) {
+    throw new Error("AESTHETIC_REVIEW_OUTPUT_SCORE_INCONSISTENT");
+  }
   const hasHardFinding = output.findings.some(
     (finding) => finding.severity === "blocker" || finding.severity === "major",
   );
@@ -513,8 +542,11 @@ export function evaluateAestheticCaseOutput(
   const seededIssueDetected =
     evalCase.expectedIssue === null
       ? null
-      : output.findings.some(
-          (finding) => finding.ruleCode === evalCase.expectedIssue,
+      : output.verdict === "failed" &&
+        output.findings.some(
+          (finding) =>
+            finding.ruleCode === evalCase.expectedIssue &&
+            (finding.severity === "blocker" || finding.severity === "major"),
         );
   return {
     falseBlocker,

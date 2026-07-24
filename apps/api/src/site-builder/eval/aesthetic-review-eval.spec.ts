@@ -10,6 +10,7 @@ import {
   AESTHETIC_DIMENSIONS,
   AESTHETIC_REVIEW_OUTPUT_SCHEMA,
   assertAestheticReviewOutput,
+  calculateAestheticWeightedScore,
   degradeAestheticScreenshot,
   evaluateAestheticCaseOutput,
   loadAestheticEvalCases,
@@ -194,6 +195,19 @@ describe("M1-f aesthetic review closed output", () => {
     ).toThrow("AESTHETIC_REVIEW_OUTPUT_INCONSISTENT");
   });
 
+  it("derives overallScore from the frozen dimension weights", async () => {
+    const evalCase = (await loadAestheticEvalCases(repositoryRoot))[0];
+    const inflated = validOutput(evalCase.images);
+    for (const dimension of AESTHETIC_DIMENSIONS) {
+      inflated.dimensions[dimension] = 60;
+    }
+    inflated.overallScore = 85;
+    expect(calculateAestheticWeightedScore(inflated.dimensions)).toBe(60);
+    expect(() =>
+      assertAestheticReviewOutput(inflated, evalCase.images),
+    ).toThrow("AESTHETIC_REVIEW_OUTPUT_SCORE_INCONSISTENT");
+  });
+
   it("binds every finding target to its referenced screenshot", async () => {
     const evalCase = (await loadAestheticEvalCases(repositoryRoot))[0];
     const mismatched = validOutput(evalCase.images);
@@ -219,10 +233,25 @@ describe("M1-f aesthetic review closed output", () => {
     });
 
     const missed = validOutput(degraded.images);
+    missed.findings[0].ruleCode = degraded.expectedIssue!;
     expect(evaluateAestheticCaseOutput(degraded, missed)).toEqual({
       falseBlocker: false,
       seededIssueDetected: false,
       accepted: false,
+    });
+
+    const detected = validOutput(degraded.images);
+    detected.verdict = "failed";
+    detected.findings[0].ruleCode = degraded.expectedIssue!;
+    detected.findings[0].severity = "major";
+    const validatedDetected = assertAestheticReviewOutput(
+      detected,
+      degraded.images,
+    );
+    expect(evaluateAestheticCaseOutput(degraded, validatedDetected)).toEqual({
+      falseBlocker: false,
+      seededIssueDetected: true,
+      accepted: true,
     });
   });
 });
