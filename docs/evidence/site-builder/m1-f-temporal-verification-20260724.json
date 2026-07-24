@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "site-builder-m1f-temporal-evidence/v1",
+  "recordedAt": "2026-07-24T10:45:42.000Z",
+  "environment": {
+    "temporalAddress": "127.0.0.1:7233",
+    "namespace": "default",
+    "temporalSdk": "1.20.3",
+    "claim": "Ubuntu development verification only; not production deployment evidence"
+  },
+  "replay": {
+    "runner": "Worker.runReplayHistory",
+    "histories": [
+      {
+        "workflowId": "site-refurbish-7ce47b91-396b-4c5d-97a6-dc2e6ec6563d",
+        "eventCount": 143,
+        "terminalState": "completed",
+        "result": "passed"
+      },
+      {
+        "workflowId": "site-refurbish-4c1d20ab-08c5-4e35-922e-5779db1db7db",
+        "eventCount": 131,
+        "terminalState": "failed",
+        "result": "passed"
+      }
+    ]
+  },
+  "injectedScenarios": {
+    "taskQueue": "site-builder-m1f-verification-5671a034-2bc1-4786-84eb-88136032de95",
+    "paidActivityCallsExpectedPerRun": 3,
+    "results": [
+      {
+        "scenario": "round0_pass_ack_loss",
+        "workflowId": "m1f-round0_pass_ack_loss-a578d1f9-efbd-4d26-8e52-0775071f3b38",
+        "outcome": "completed",
+        "buildingVersions": 1,
+        "releases": 1,
+        "materializeCalls": 2,
+        "finalizeCalls": 1,
+        "compensated": null,
+        "activePointer": "new",
+        "evaluationCalls": 1,
+        "workerRestartRequested": false,
+        "paidActivityCalls": 3
+      },
+      {
+        "scenario": "round2_pass",
+        "workflowId": "m1f-round2_pass-0c35dda7-29b4-4cd3-ad6b-8d65a7ea7c5c",
+        "outcome": "completed",
+        "buildingVersions": 1,
+        "releases": 1,
+        "materializeCalls": 1,
+        "finalizeCalls": 1,
+        "compensated": null,
+        "activePointer": "new",
+        "evaluationCalls": 3,
+        "workerRestartRequested": false,
+        "paidActivityCalls": 3
+      },
+      {
+        "scenario": "round3_fail",
+        "workflowId": "m1f-round3_fail-2b8f6374-a311-442b-af1c-11eb93f49070",
+        "outcome": "failed",
+        "buildingVersions": 1,
+        "releases": 0,
+        "materializeCalls": 0,
+        "finalizeCalls": 0,
+        "compensated": "failed",
+        "activePointer": "old",
+        "evaluationCalls": 4,
+        "workerRestartRequested": false,
+        "paidActivityCalls": 3
+      },
+      {
+        "scenario": "pointer_conflict",
+        "workflowId": "m1f-pointer_conflict-4f694bb3-c4a2-4da3-b39b-632d42a937b2",
+        "outcome": "failed",
+        "buildingVersions": 1,
+        "releases": 1,
+        "materializeCalls": 1,
+        "finalizeCalls": 2,
+        "compensated": "failed",
+        "activePointer": "old",
+        "evaluationCalls": 1,
+        "workerRestartRequested": false,
+        "paidActivityCalls": 3
+      },
+      {
+        "scenario": "worker_restart",
+        "workflowId": "m1f-worker_restart-bd85533d-5c43-4149-b8b4-d29bf6df901c",
+        "outcome": "completed",
+        "buildingVersions": 1,
+        "releases": 1,
+        "materializeCalls": 1,
+        "finalizeCalls": 1,
+        "compensated": null,
+        "activePointer": "new",
+        "evaluationCalls": 2,
+        "workerRestartRequested": true,
+        "paidActivityCalls": 3
+      },
+      {
+        "scenario": "cancel_during_quality",
+        "workflowId": "m1f-cancel_during_quality-2247299d-68f8-444b-b990-20ed25e30199",
+        "outcome": "cancelled",
+        "buildingVersions": 1,
+        "releases": 0,
+        "materializeCalls": 0,
+        "finalizeCalls": 0,
+        "compensated": "cancelled",
+        "activePointer": "old",
+        "evaluationCalls": 1,
+        "workerRestartRequested": false,
+        "paidActivityCalls": 3
+      }
+    ]
+  },
+  "commands": [
+    "node --import tsx scripts/verify-site-builder-m1f-replay.mts --workflow-id=site-refurbish-7ce47b91-396b-4c5d-97a6-dc2e6ec6563d --workflow-id=site-refurbish-4c1d20ab-08c5-4e35-922e-5779db1db7db",
+    "node --import tsx scripts/verify-site-builder-m1f-temporal.mts"
+  ]
+}

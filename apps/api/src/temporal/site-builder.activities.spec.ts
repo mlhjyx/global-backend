@@ -1488,6 +1488,7 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     startedAt?: Date | null;
     brandProfile?: unknown;
     siteVersion?: unknown;
+    siteReleaseStatus?: string | null;
     steps?: unknown;
     transitionCount?: number;
   }) {
@@ -1499,6 +1500,14 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
       siteVersion: {
         updateMany: vi.fn(async () => ({ count: 0 })),
         findFirst: svFindFirst,
+      },
+      siteRelease: {
+        findUnique: vi.fn(async () =>
+          over.siteReleaseStatus
+            ? { id: "release-1", status: over.siteReleaseStatus }
+            : null,
+        ),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       site: {
         findUnique: vi.fn(async () => ({
@@ -1698,6 +1707,62 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
       },
       data: { buildStatus: "failed" },
     });
+  });
+
+  it("M1-f pointer CAS 失败时保留 READY inactive Release 与 succeeded SiteVersion", async () => {
+    spyBudget();
+    const { tx } = compensateTx({
+      siteVersion: { id: "candidate" },
+      siteReleaseStatus: "ready",
+    });
+    const deletePrefix = vi.fn(async () => 3);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      storage: { deletePrefix } as never,
+    });
+
+    await acts.compensateRefurbish({ ...INPUT, qualityV1: true });
+
+    expect(tx.siteRelease.findUnique).toHaveBeenCalledWith({
+      where: { buildRunId: "run-1" },
+      select: { id: true, status: true },
+    });
+    expect(tx.siteRelease.updateMany).not.toHaveBeenCalled();
+    expect(tx.siteVersion.updateMany).not.toHaveBeenCalled();
+    expect(deletePrefix).toHaveBeenCalledWith(
+      "sites/site-1/quality-candidates/run-1",
+    );
+  });
+
+  it("M1-f 未完成 candidate Release 会标 failed，且候选版本与临时证据一并收口", async () => {
+    spyBudget();
+    const { tx } = compensateTx({
+      siteVersion: { id: "candidate" },
+      siteReleaseStatus: "candidate",
+    });
+    const deletePrefix = vi.fn(async () => 3);
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      storage: { deletePrefix } as never,
+    });
+
+    await acts.compensateRefurbish({ ...INPUT, qualityV1: true });
+
+    expect(tx.siteRelease.updateMany).toHaveBeenCalledWith({
+      where: { id: "release-1", status: "candidate" },
+      data: {
+        status: "failed",
+        error: "quality materialization did not complete",
+      },
+    });
+    expect(tx.siteVersion.updateMany).toHaveBeenCalledWith({
+      where: {
+        buildRunId: "run-1",
+        buildStatus: { in: ["building", "succeeded"] },
+      },
+      data: { buildStatus: "failed" },
+    });
+    expect(deletePrefix).toHaveBeenCalledOnce();
   });
 
   it("startedAt 为 null（无从归属）→ brand_profile:aborted，不发探测查询", async () => {

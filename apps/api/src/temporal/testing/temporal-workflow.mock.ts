@@ -1,5 +1,5 @@
-import { vi } from 'vitest';
-import type { Mock } from 'vitest';
+import { vi } from "vitest";
+import type { Mock } from "vitest";
 
 /**
  * 工作流编排单测地基：把 `@temporalio/workflow` 的 `proxyActivities` 换成**惰性 spy 注册表**。
@@ -25,12 +25,15 @@ const registry: Record<string, Mock> = {};
  * understanding 各有多个代理常量，但 activity 名全局唯一，共享一表即可。
  * `then`/Symbol 返回 undefined：防代理被误当 thenable（await/Promise 互操作），以及 Symbol 探测。
  */
-export const acts: Record<string, Mock> = new Proxy({} as Record<string, Mock>, {
-  get(_target, prop): Mock | undefined {
-    if (typeof prop !== 'string' || prop === 'then') return undefined;
-    return (registry[prop] ??= vi.fn());
+export const acts: Record<string, Mock> = new Proxy(
+  {} as Record<string, Mock>,
+  {
+    get(_target, prop): Mock | undefined {
+      if (typeof prop !== "string" || prop === "then") return undefined;
+      return (registry[prop] ??= vi.fn());
+    },
   },
-});
+);
 
 /** 模拟 `@temporalio/workflow` 的 `proxyActivities`：忽略选项，返回惰性 spy 代理。 */
 export function proxyActivities<T>(_opts?: unknown): T {
@@ -55,13 +58,28 @@ export function setPatched(fn: (patchId: string) => boolean): void {
  * `Object.assign(new Error('…'), { name: 'CancelledFailure' })` 构造取消）。
  */
 export function isCancellation(err: unknown): boolean {
-  return err instanceof Error && err.name === 'CancelledFailure';
+  return err instanceof Error && err.name === "CancelledFailure";
 }
 
 /** 模拟 `CancellationScope`：单测无取消语义，nonCancellable 直接执行回调。 */
 export const CancellationScope = {
   nonCancellable: <T>(fn: () => Promise<T>): Promise<T> => fn(),
 };
+
+export class ApplicationFailure extends Error {
+  readonly type: string;
+  readonly nonRetryable = true;
+
+  private constructor(message: string, type: string) {
+    super(message);
+    this.name = "ApplicationFailure";
+    this.type = type;
+  }
+
+  static nonRetryable(message: string, type: string): ApplicationFailure {
+    return new ApplicationFailure(message, type);
+  }
+}
 
 /** 模拟 `@temporalio/workflow` 的 workflow logger（编排里 `log.warn(...)` 等）：无副作用 spy。 */
 export const log = {
