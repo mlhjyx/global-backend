@@ -949,7 +949,8 @@ try {
   progress("capability_unavailable", {
     model: MODEL,
     ...unavailable,
-    matrix: "skipped",
+    matrix: probe?.accepted === true ? "interrupted" : "skipped",
+    completedRuns: completedRuns.length,
     reportPath: path.relative(repositoryRoot, absoluteReportPath),
   });
   process.exitCode = 3;

@@ -477,7 +477,7 @@
   "sourceFiles": [
     {
       "path": "apps/api/scripts/evaluate-site-builder-aesthetic-review.mts",
-      "sha256": "3a262ba8616d41c57e89f2c73959fee3619f3fcbfceae69ffc3258f529649a51"
+      "sha256": "94d23745d6b7663f538258f5ec5d834629e2d063b42b03d4407a9728026201b6"
     },
     {
       "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
@@ -533,8 +533,8 @@
     }
   ],
   "sourceIntegrity": {
-    "startBundleSha256": "777d59ec0142661e4ebe93cf9a3f45c603de6dc9fc815a64b268dedf91d26b3d",
-    "endBundleSha256": "777d59ec0142661e4ebe93cf9a3f45c603de6dc9fc815a64b268dedf91d26b3d",
+    "startBundleSha256": "2364ef587390c7a9dd2d294ed0c413f7abad58978c61740eacfe4fdabf75dbad",
+    "endBundleSha256": "2364ef587390c7a9dd2d294ed0c413f7abad58978c61740eacfe4fdabf75dbad",
     "stable": true,
     "changedPaths": []
   },
