@@ -63,6 +63,143 @@ describe("M1-f approved quality materialization Activity", () => {
     ).toBe(false);
   });
 
+  it("replays a closed repair after the SiteVersion mutation committed but its Activity acknowledgement was lost", async () => {
+    const originalSpec = fixture.spec;
+    const repairedSpec = structuredClone(fixture.spec);
+    const repairableBlock = repairedSpec.pages
+      .flatMap((page) => page.puck.content)
+      .find((block) =>
+        Object.values(block.props).some(
+          (value) => Array.isArray(value) && value.length > 1,
+        ),
+      );
+    const repairableEntry = repairableBlock
+      ? Object.entries(repairableBlock.props).find(
+          ([, value]) => Array.isArray(value) && value.length > 1,
+        )
+      : undefined;
+    if (!repairableBlock || !repairableEntry) {
+      throw new Error("golden fixture has no closed item-count repair");
+    }
+    repairableBlock.props = {
+      ...repairableBlock.props,
+      [repairableEntry[0]]: (repairableEntry[1] as unknown[]).slice(0, -1),
+    };
+    const originalDigest = releaseSpecDigest(originalSpec);
+    const repairedDigest = releaseSpecDigest(repairedSpec);
+    expect(repairedDigest).not.toBe(originalDigest);
+
+    const applyQualityRepair = vi.fn(
+      async (input: {
+        identity: { specDigest: string };
+        context: { spec: typeof originalSpec };
+      }) => {
+        expect(input.identity.specDigest).toBe(originalDigest);
+        expect(releaseSpecDigest(input.context.spec)).toBe(originalDigest);
+        return {
+          identity: {
+            ...input.identity,
+            specDigest: repairedDigest,
+            rendererOutputDigest: "e".repeat(64),
+          },
+          designBrief: fixture.designBrief,
+          spec: repairedSpec,
+          catalogDigest: "f".repeat(64),
+          selectedOptionId: "items:home:section:2",
+        };
+      },
+    );
+    const tx = {
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({ status: "running" })),
+      },
+      siteBuildBudget: {
+        findUnique: vi.fn(async () => ({ paidCallsEnabled: true })),
+      },
+      siteBuildSpend: { count: vi.fn(async () => 0) },
+      site: {
+        findFirst: vi.fn(async () => ({ name: "Acme", slug: "acme" })),
+      },
+      siteVersion: {
+        findFirst: vi.fn(async () => ({
+          spec: repairedSpec,
+          specVersion: "1.1.0",
+          buildStatus: "building",
+        })),
+      },
+      sitePublishableClaimSnapshot: {
+        findFirst: vi.fn(async () => ({
+          workspaceId: "ws-1",
+          siteId: "site-1",
+          companyProfileId: "company-1",
+          buildRunId: "run-1",
+          schemaVersion: "site-builder-publishable-claim-snapshot/v1",
+          capturedAt: new Date("2026-07-24T00:00:00.000Z"),
+          snapshotDigest: "c".repeat(64),
+          items: [],
+        })),
+      },
+      asset: { findMany: vi.fn(async () => []) },
+    };
+    const activities = createSiteBuilderActivities({
+      prisma: {
+        withWorkspace: vi.fn(
+          async (
+            _workspaceId: string,
+            callback: (transaction: typeof tx) => Promise<unknown>,
+          ) => callback(tx),
+        ),
+      } as unknown as PrismaService,
+      qualityCandidateService: { applyQualityRepair } as never,
+      closedRepairService: {
+        generateCatalog: vi.fn(() => ({
+          catalog: {
+            options: [{ optionId: "items:home:section:2", rank: 1 }],
+          },
+        })),
+      } as never,
+    });
+    const candidate = {
+      workspaceId: "ws-1",
+      siteId: "site-1",
+      siteVersionId: "version-1",
+      buildRunId: "run-1",
+      designBriefDigest: fixture.designBrief.digest,
+      specDigest: originalDigest,
+      rendererOutputDigest: "d".repeat(64),
+      basePath: "/preview/acme",
+      siteOrigin: "https://preview.example.test",
+      root: "/private/candidate",
+    };
+
+    const result = await activities.applyQualityRepair({
+      workspaceId: "ws-1",
+      siteId: "site-1",
+      buildRunId: "run-1",
+      copy: {
+        snapshotId: "snapshot-1",
+        set: { bundles: {} },
+        degradedLocales: [],
+        taskAttemptIds: {},
+      } as never,
+      qualityCandidate: {
+        previewSlug: "acme",
+        versionId: "version-1",
+        designBrief: fixture.designBrief,
+        candidateSpec: originalSpec,
+        candidate,
+      },
+      qualityEvaluation: {
+        evaluation: { round: 0 },
+        artifactSet: { artifactSetDigest: "a".repeat(64) },
+      } as never,
+    });
+
+    expect(applyQualityRepair).toHaveBeenCalledOnce();
+    expect(result.candidate.specDigest).toBe(repairedDigest);
+    expect(releaseSpecDigest(result.candidateSpec)).toBe(repairedDigest);
+  });
+
   it("copies only final evidence into the private Release prefix and rebinds v3 digests", async () => {
     const candidateSpecDigest = releaseSpecDigest(fixture.spec);
     const sourceObjects = new Map<string, Buffer>();
@@ -209,6 +346,7 @@ describe("M1-f approved quality materialization Activity", () => {
         previewSlug: "acme",
         versionId: "version-1",
         designBrief: fixture.designBrief,
+        candidateSpec: fixture.spec,
         candidate: {
           workspaceId: "ws-1",
           siteId: "site-1",

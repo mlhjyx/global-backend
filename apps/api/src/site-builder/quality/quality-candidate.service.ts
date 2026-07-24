@@ -199,6 +199,7 @@ export class QualityCandidateService {
   }): Promise<{
     identity: QualityCandidateIdentity;
     designBrief: DesignBriefV2;
+    spec: SiteSpecV1_1;
     catalogDigest: string;
     selectedOptionId: string;
   }> {
@@ -326,6 +327,7 @@ export class QualityCandidateService {
           designBriefDigest: candidate.designBrief.digest,
         },
         designBrief: candidate.designBrief,
+        spec: candidate.spec,
         catalogDigest: generated.catalog.catalogDigest,
         selectedOptionId: input.selection.optionId,
       };

@@ -238,6 +238,7 @@ describe("QualityCandidateService fencing", () => {
 
     const replay = await service.applyQualityRepair(repairInput);
     expect(replay.identity).toEqual(first.identity);
+    expect(releaseSpecDigest(replay.spec)).toBe(releaseSpecDigest(nextSpec));
     expect(repairs.applySelection).toHaveBeenCalledTimes(2);
   });
 

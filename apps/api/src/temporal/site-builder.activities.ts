@@ -354,6 +354,13 @@ export interface RefurbishBuildSummary {
 export interface RefurbishQualityCandidateSummary extends RefurbishBuildSummary {
   designBrief: DesignBriefV2;
   candidate: QualityCandidateIdentity;
+  /**
+   * Frozen server-generated input for the next closed repair. This is carried
+   * only in the internal Temporal payload; it is never exposed to a model.
+   * Keeping it separate from the mutable SiteVersion makes a repair Activity
+   * replayable after its database commit acknowledgement is lost.
+   */
+  candidateSpec: SiteSpecV1_1;
 }
 
 export interface RefurbishQualityEvaluationSummary {
@@ -1088,6 +1095,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       previewSlug: state.site.slug,
       versionId: version.id,
       designBrief: effectiveBrief,
+      candidateSpec: doc,
       candidate: {
         workspaceId,
         siteId,
@@ -1133,6 +1141,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     copy: CopyGenerationSummary;
     designBrief: DesignBriefV2;
     candidate: QualityCandidateIdentity;
+    candidateSpec?: SiteSpecV1_1;
+    allowCommittedRepairReplay?: boolean;
   }) {
     return prisma.withWorkspace(input.workspaceId, async (tx) => {
       const [run, site, version] = await Promise.all([
@@ -1162,10 +1172,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       ) {
         throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
       }
-      const spec = validateSiteSpecV1_1(version.spec);
+      const persistedSpec = validateSiteSpecV1_1(version.spec);
+      const spec = input.candidateSpec
+        ? validateSiteSpecV1_1(input.candidateSpec)
+        : persistedSpec;
       if (
         releaseSpecDigest(spec) !== input.candidate.specDigest ||
-        input.designBrief.digest !== input.candidate.designBriefDigest
+        input.designBrief.digest !== input.candidate.designBriefDigest ||
+        (!input.allowCommittedRepairReplay &&
+          releaseSpecDigest(persistedSpec) !== input.candidate.specDigest)
       ) {
         throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
       }
@@ -2997,6 +3012,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         ...input,
         designBrief: input.qualityCandidate.designBrief,
         candidate: input.qualityCandidate.candidate,
+        candidateSpec: input.qualityCandidate.candidateSpec,
+        allowCommittedRepairReplay: true,
       });
       const closedContext = {
         brief: input.qualityCandidate.designBrief,
@@ -3039,6 +3056,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         previewSlug: input.qualityCandidate.previewSlug,
         versionId: input.qualityCandidate.versionId,
         designBrief: repaired.designBrief,
+        candidateSpec: repaired.spec,
         candidate: repaired.identity,
         repairCatalogDigest: repaired.catalogDigest,
         selectedRepairOptionId: repaired.selectedOptionId,
