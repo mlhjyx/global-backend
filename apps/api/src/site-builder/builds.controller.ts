@@ -24,6 +24,7 @@ import { RequestContext } from "../auth/request-context";
 import { ApiEnvelope } from "../common/api-envelope.decorator";
 import { Enveloped, envelope } from "../common/envelope";
 import { BuildsService } from "./builds.service";
+import { BUILD_PHASES } from "./build-progress";
 import { CreateBuildDto } from "./dto/build.dto";
 import { IDEMPOTENCY_KEY_PATTERN_SOURCE } from "./idempotency-key";
 
@@ -131,7 +132,7 @@ class BuildStatusResponseDto {
   @ApiProperty()
   status!: string;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({ type: String, nullable: true, enum: BUILD_PHASES })
   phase!: string | null;
 
   @ApiProperty()

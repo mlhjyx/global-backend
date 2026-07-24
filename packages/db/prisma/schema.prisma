@@ -1398,21 +1398,22 @@ model SiteBuildRun {
 
 /// Build progress source of truth. SiteBuildRun.steps is the bounded public read model.
 model SiteBuildStep {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  buildRunId  String    @map("build_run_id") @db.Uuid
-  key         String
-  itemKey     String    @default("") @map("item_key")
-  attempt     Int       @default(1)
-  status      String // queued | running | done | degraded | failed | skipped | aborted
-  phase       String
-  progress    Float
-  degraded    Boolean   @default(false)
-  errorCode   String?   @map("error_code")
-  startedAt   DateTime? @map("started_at")
-  finishedAt  DateTime? @map("finished_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  buildRunId   String    @map("build_run_id") @db.Uuid
+  key          String
+  itemKey      String    @default("") @map("item_key")
+  attempt      Int       @default(1)
+  status       String // queued | running | done | degraded | failed | skipped | aborted
+  phase        String
+  progress     Float
+  degraded     Boolean   @default(false)
+  errorCode    String?   @map("error_code")
+  artifactRefs Json?     @map("artifact_refs")
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
 
   buildRun SiteBuildRun @relation(fields: [buildRunId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
 

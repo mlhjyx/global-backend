@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
+import {
+  BUILD_STEP_ARTIFACT_REFS_SCHEMA_VERSION,
+  buildStepArtifactRefsDigest,
+} from './build-step-artifact-refs';
 import { buildStepReadModel, recordBuildProgress } from './build-progress';
 
 describe('buildStepReadModel', () => {
@@ -119,6 +123,16 @@ describe('recordBuildProgress', () => {
       ) => fn(tx),
     } as unknown as PrismaService;
     const input = { workspaceId: 'ws-1', buildRunId: 'run-1' };
+    const artifacts = [
+      {
+        artifactId: 'batch-a-report',
+        objectKey: 'private/quality/run-1/round-0/report.json',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 1024,
+        mimeType: 'application/json' as const,
+        kind: 'deterministic_evaluation' as const,
+      },
+    ];
 
     await recordBuildProgress(prisma, input, {
       key: 'image_pipeline',
@@ -127,6 +141,11 @@ describe('recordBuildProgress', () => {
       status: 'done',
       phase: 'P2_assets',
       progress: 0.6,
+      artifactRefs: {
+        schemaVersion: BUILD_STEP_ARTIFACT_REFS_SCHEMA_VERSION,
+        collectionDigest: buildStepArtifactRefsDigest(artifacts),
+        artifacts,
+      },
     });
     await recordBuildProgress(prisma, input, {
       key: 'image_pipeline',
@@ -142,8 +161,12 @@ describe('recordBuildProgress', () => {
       attempt: 2,
       status: 'done',
       progress: 0.6,
+      artifactRefs: expect.objectContaining({
+        schemaVersion: BUILD_STEP_ARTIFACT_REFS_SCHEMA_VERSION,
+      }),
     });
     expect(run).toMatchObject({ phase: 'P2_assets', progress: 0.6 });
+    expect(JSON.stringify(run.steps)).not.toContain('objectKey');
     expect(upsert).toHaveBeenCalledTimes(1);
   });
 
@@ -217,5 +240,75 @@ describe('recordBuildProgress', () => {
       status: 'done',
       progress: 0.2,
     });
+  });
+
+  it('does not allow private artifact metadata to appear after an attempt is terminal', async () => {
+    const row = {
+      id: 'step-1',
+      workspaceId: 'ws-1',
+      buildRunId: 'run-1',
+      key: 'quality_loop',
+      itemKey: 'round-0',
+      attempt: 1,
+      status: 'done',
+      phase: 'P4_quality',
+      progress: 0.9,
+      degraded: false,
+      errorCode: null,
+      artifactRefs: null,
+      startedAt: new Date('2026-07-24T00:00:00Z'),
+      finishedAt: new Date('2026-07-24T00:01:00Z'),
+    };
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      siteBuildRun: {
+        findUnique: vi.fn(async () => ({
+          status: 'running',
+          phase: 'P4_quality',
+          progress: 0.9,
+        })),
+      },
+      siteBuildStep: {
+        findFirst: vi.fn(async () => row),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = {
+      withWorkspace: async (
+        _workspaceId: string,
+        fn: (client: typeof tx) => Promise<unknown>,
+      ) => fn(tx),
+    } as unknown as PrismaService;
+    const artifacts = [
+      {
+        artifactId: 'round-0-evaluation',
+        objectKey: 'private/quality/run-1/round-0/evaluation.json',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 1024,
+        mimeType: 'application/json' as const,
+        kind: 'deterministic_evaluation' as const,
+      },
+    ];
+
+    await expect(
+      recordBuildProgress(
+        prisma,
+        { workspaceId: 'ws-1', buildRunId: 'run-1' },
+        {
+          key: 'quality_loop',
+          itemKey: 'round-0',
+          attempt: 1,
+          status: 'done',
+          phase: 'P4_quality',
+          progress: 0.9,
+          artifactRefs: {
+            schemaVersion: BUILD_STEP_ARTIFACT_REFS_SCHEMA_VERSION,
+            collectionDigest: buildStepArtifactRefsDigest(artifacts),
+            artifacts,
+          },
+        },
+      ),
+    ).rejects.toThrow('QUALITY_ARTIFACT_INVALID');
+    expect(tx.siteBuildStep.upsert).not.toHaveBeenCalled();
   });
 });

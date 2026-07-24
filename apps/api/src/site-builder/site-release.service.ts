@@ -6,6 +6,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import {
   buildReleaseArtifact,
   uploadReleaseArtifact,
+  type BuildReleaseQualityInputV3,
   type ReleaseArtifactStorage,
 } from './release-artifact';
 
@@ -44,6 +45,8 @@ export interface MaterializeSiteReleaseInput {
   spec: SiteSpec;
   storedSpecVersion: string;
   designBrief?: DesignBriefV2;
+  /** Omitted until the M1-f workflow writer is enabled; omission preserves v2. */
+  quality?: BuildReleaseQualityInputV3;
   createdBy?: string;
 }
 
@@ -229,6 +232,7 @@ export class SiteReleaseService {
       releaseCreatedAt: candidate.createdAt,
       buildIdentity: this.options.buildIdentity,
       designBrief: input.designBrief,
+      quality: input.quality,
     });
     if (
       candidate.status === 'ready' &&

@@ -8,9 +8,11 @@ import {
 import type { BuildScopeInput } from "./refurbish-launcher";
 import {
   RELEASE_MANIFEST_V2_SCHEMA_VERSION,
+  RELEASE_MANIFEST_V3_SCHEMA_VERSION,
   releaseSpecDigest,
   validateReleaseManifest,
   type ReleaseManifestV2,
+  type ReleaseManifestV3,
 } from "./release-artifact";
 
 export class PartialBuildRequiresV2BaseError extends Error {
@@ -50,7 +52,7 @@ type PartialBaseTx = Pick<Prisma.TransactionClient, "siteVersion">;
 
 export interface PartialBuildBase {
   spec: SiteSpecV1_1;
-  manifest: ReleaseManifestV2;
+  manifest: ReleaseManifestV2 | ReleaseManifestV3;
   designBrief: DesignBriefV2;
   claimSnapshotId: string;
   taskAttemptIds: Record<string, string>;
@@ -104,8 +106,27 @@ export async function loadPartialBuildBase(
       "base manifest or SiteSpec is invalid",
     );
   }
+  const v3QualityScopeMatches =
+    manifest.schemaVersion !== RELEASE_MANIFEST_V3_SCHEMA_VERSION ||
+    (() => {
+      const expected = new Set(
+        spec.site.locales.flatMap((locale) =>
+          spec.pages.map((page) => `${locale}\u0000${page.id}`),
+        ),
+      );
+      const declared = new Set(
+        manifest.quality.artifactSet.expectedTargets.map(
+          (target) => `${target.locale}\u0000${target.pageId}`,
+        ),
+      );
+      return (
+        expected.size === declared.size &&
+        [...expected].every((target) => declared.has(target))
+      );
+    })();
   if (
-    manifest.schemaVersion !== RELEASE_MANIFEST_V2_SCHEMA_VERSION ||
+    (manifest.schemaVersion !== RELEASE_MANIFEST_V2_SCHEMA_VERSION &&
+      manifest.schemaVersion !== RELEASE_MANIFEST_V3_SCHEMA_VERSION) ||
     manifest.siteVersionId !== input.baseVersionId ||
     manifest.siteId !== input.siteId ||
     manifest.specDigest !== releaseSpecDigest(spec) ||
@@ -113,10 +134,11 @@ export async function loadPartialBuildBase(
       spec.componentLibraryVersion ||
     manifest.designBrief.rendererVersion !== spec.rendererVersion ||
     manifest.designBrief.familyId !== spec.site.familyId ||
-    manifest.designBrief.archetype !== spec.site.archetype
+    manifest.designBrief.archetype !== spec.site.archetype ||
+    !v3QualityScopeMatches
   ) {
     throw new PartialBuildRequiresV2BaseError(
-      "base Release v2 identity does not match its SiteSpec",
+      "base Release v2/v3 identity does not match its SiteSpec",
     );
   }
   const snapshotIds = new Set(
