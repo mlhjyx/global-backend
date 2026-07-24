@@ -128,4 +128,40 @@ describe('buildGatewayProvider — verified production model transports', () => 
     });
     expect(request().url).toBe('http://gw.test/v1/chat/completions');
   });
+
+  it('accepts a reviewed eval fixture catalog only through the explicit evaluation seam', async () => {
+    mockResponse({
+      model: 'gemini-3.5-flash',
+      choices: [
+        { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+    const bytes = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const provider = buildGatewayProvider(providerEnv(), {
+      visionEvalFixtureDigests: { 'fixture-home-375': digest },
+    });
+    await provider!.reviewVision({
+      task: 'site_builder.aesthetic_review.eval',
+      model: 'gemini-3.5-flash',
+      prompt: 'review fixture',
+      schema: {},
+      maxTokens: 100,
+      maxCostCents: 20,
+      images: [
+        {
+          materialClass: 'model_eval_fixture',
+          artifactId: 'fixture-home-375',
+          sha256: digest,
+          mimeType: 'image/png',
+          bytes,
+          target: { locale: 'en', pageId: 'home', breakpoint: 375 },
+        },
+      ],
+    });
+    expect(request().url).toBe('http://gw.test/v1/chat/completions');
+  });
 });
