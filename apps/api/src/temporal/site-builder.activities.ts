@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Logger } from "@nestjs/common";
@@ -52,13 +52,19 @@ import { lockSiteSpecAssetsForActivation } from "../site-builder/asset-reference
 import { applyBuildScope } from "../site-builder/build-scope";
 import {
   copyBundleToLegacyStrings,
+  canonicalDesignEvaluationV2Json,
+  designEvaluationV2Digest,
+  qualityArtifactSetDigest,
   SITE_SPEC_STYLE_PRESETS,
   SITE_SPEC_V1_1_VERSION,
   validateDesignBriefV2AgainstCatalog,
+  validateQualityArtifactSet,
   validateSiteSpecV1_1,
   type CopyBundleSetV1,
   type CopySlotType,
+  type DesignEvaluationV2,
   type DesignBriefV2,
+  type QualityArtifactSetV1,
   type SiteSpec,
   type SiteSpecStylePreset,
   type SiteSpecV1_1,
@@ -85,6 +91,7 @@ import { gateCertificationFactsForPersistence } from "../site-builder/claim-evid
 import {
   PaidOperationUnknownError,
   SiteBuildCostLedger,
+  type SiteBuildCostSummary,
 } from "../site-builder/site-build-cost-ledger";
 import {
   CopyBundleService,
@@ -102,9 +109,17 @@ import { PublishableClaimSnapshotService } from "../site-builder/publishable-cla
 import { PrismaPublishableClaimSnapshotRepository } from "../site-builder/publishable-claim-snapshot.prisma";
 import {
   RELEASE_MANIFEST_V2_SCHEMA_VERSION,
+  RELEASE_MANIFEST_V3_SCHEMA_VERSION,
+  RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION,
+  RELEASE_QUALITY_SCHEMA_VERSION,
   assertReleaseContract,
+  releaseAestheticEvidenceBytes,
+  releaseAestheticEvidenceDigest,
+  releaseScreenshotSetDigest,
   releaseSpecDigest,
   validateReleaseManifest,
+  type ReleaseAestheticEvidenceV1,
+  type ReleaseQualityRoundProvenanceV1,
 } from "../site-builder/release-artifact";
 import type { SiteReleaseService } from "../site-builder/site-release.service";
 import type { StorageService } from "../site-builder/storage.service";
@@ -133,6 +148,19 @@ import {
   controlledAssetUrls,
   materializeControlledAssetOverlay,
 } from "../site-builder/controlled-asset-materializer";
+import {
+  BUILD_STEP_ARTIFACT_REFS_SCHEMA_VERSION,
+  buildStepArtifactRefsDigest,
+  type BuildStepArtifactRefsV1,
+} from "../site-builder/build-step-artifact-refs";
+import {
+  composeUnavailableAestheticEvaluation,
+  DETERMINISTIC_QUALITY_EVALUATOR_VERSION,
+  sha256Bytes,
+} from "../site-builder/quality/deterministic-quality";
+import type { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
+import type { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
+import type { QualityCandidateIdentity } from "../site-builder/quality/quality-candidate.service";
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -214,6 +242,25 @@ export function controlledAssemblyEffectiveBrief(
   return assembled;
 }
 
+export function qualitySettlementIsPublishable(
+  costSummary: SiteBuildCostSummary | undefined,
+  budget:
+    | {
+        paidCallsEnabled: boolean;
+        disabledReason: string | null;
+      }
+    | undefined,
+): boolean {
+  return Boolean(
+    costSummary &&
+    costSummary.totals.unknownOperations === 0 &&
+    costSummary.budget.paidCallsEnabled === false &&
+    costSummary.budget.disabledReason === "run_succeeded" &&
+    budget?.paidCallsEnabled === false &&
+    budget.disabledReason === "run_succeeded",
+  );
+}
+
 export interface DemoV0ActivityInput {
   workspaceId: string;
   siteId: string;
@@ -246,9 +293,19 @@ export interface SiteBuilderActivityDeps {
   /** Preview pointer seam for deterministic post-commit reconciliation tests. */
   promotePreview?: typeof preparePreviewPromotion;
   /** R1 durable object Release commit protocol; required by every new progressV1 build. */
-  releaseService?: Pick<SiteReleaseService, "materialize">;
-  /** Trusted MinIO reader used only by the controlled asset materializer. */
-  storage?: Pick<StorageService, "getBufferBounded">;
+  releaseService?: Pick<
+    SiteReleaseService,
+    "materialize" | "reserveMaterialization"
+  >;
+  /** M1-f fenced candidate/evaluate/repair/materialize boundary. */
+  qualityCandidateService?: QualityCandidateService;
+  /** Server-only closed option generator used for deterministic repair fallback. */
+  closedRepairService?: ClosedRepairService;
+  /** Trusted private object store; quality evidence is never exposed as a public site file. */
+  storage?: Pick<
+    StorageService,
+    "getBufferBounded" | "putBufferImmutable" | "hashObject" | "deletePrefix"
+  >;
   /** Immutable Renderer identity frozen into DesignBrief and ReleaseManifest v2. */
   rendererBuildIdentity?: string;
   /** Test seam; production resolves the monorepo root from the worker cwd. */
@@ -294,9 +351,68 @@ export interface RefurbishBuildSummary {
   designBrief?: DesignBriefV2;
 }
 
+export interface RefurbishQualityCandidateSummary extends RefurbishBuildSummary {
+  designBrief: DesignBriefV2;
+  candidate: QualityCandidateIdentity;
+  /**
+   * Frozen server-generated input for the next closed repair. This is carried
+   * only in the internal Temporal payload; it is never exposed to a model.
+   * Keeping it separate from the mutable SiteVersion makes a repair Activity
+   * replayable after its database commit acknowledgement is lost.
+   */
+  candidateSpec: SiteSpecV1_1;
+}
+
+export interface RefurbishQualityEvaluationSummary {
+  candidate: QualityCandidateIdentity;
+  designBrief: DesignBriefV2;
+  evaluation: DesignEvaluationV2;
+  designEvaluationDigest: string;
+  artifactSet: QualityArtifactSetV1;
+  passed: boolean;
+  artifactRefs: BuildStepArtifactRefsV1;
+}
+
+export interface RefurbishQualityRepairSummary extends RefurbishQualityCandidateSummary {
+  repairCatalogDigest: string;
+  selectedRepairOptionId: string;
+  repairSelectionMode: "deterministic_fallback";
+}
+
+export type RefurbishQualityRoundSummary = ReleaseQualityRoundProvenanceV1;
+
+export interface RefurbishQualityMaterializationSummary {
+  build: RefurbishBuildSummary;
+  artifactRefs: BuildStepArtifactRefsV1;
+}
+
+export interface RefurbishQualityCandidateInput extends RefurbishActivityInput {
+  copy: CopyGenerationSummary;
+  designBrief: DesignBriefGenerationSummary;
+}
+
+export interface RefurbishQualityEvaluationInput extends RefurbishActivityInput {
+  copy: CopyGenerationSummary;
+  qualityCandidate: RefurbishQualityCandidateSummary;
+  round: 0 | 1 | 2 | 3;
+}
+
+export interface RefurbishQualityRepairInput extends RefurbishActivityInput {
+  copy: CopyGenerationSummary;
+  qualityCandidate: RefurbishQualityCandidateSummary;
+  qualityEvaluation: RefurbishQualityEvaluationSummary;
+}
+
+export interface RefurbishQualityMaterializationInput extends RefurbishActivityInput {
+  qualityCandidate: RefurbishQualityCandidateSummary;
+  qualityEvaluation: RefurbishQualityEvaluationSummary;
+  rounds: RefurbishQualityRoundSummary[];
+}
+
 export interface RefurbishCompensationInput extends RefurbishActivityInput {
   terminalStatus?: "failed" | "cancelled";
   progressV1?: boolean;
+  qualityV1?: boolean;
 }
 
 export interface RefurbishProgressInput
@@ -328,6 +444,8 @@ export interface RefurbishFinalizeInput extends RefurbishActivityInput {
   >;
   build: RefurbishBuildSummary;
   progressV1?: boolean;
+  /** Present only on patched M1-f histories; requires a passed ReleaseManifest v3. */
+  qualityV1?: boolean;
 }
 
 /** 本地预览产物根目录（M0 雏形；M1 迁对象存储 + 边缘节点，05 §1）。 */
@@ -347,6 +465,51 @@ function previewVersionDir(buildRunId: string): string {
 
 function previewLiveDir(slug: string): string {
   return path.join(previewRoot(), slug);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+/**
+ * Installs a freshly rendered closed repair at the canonical candidate path.
+ * A committed-result replay may find that a previous worker crashed after
+ * moving the old tree aside but before installing the new tree. In that exact
+ * state the database already fences the deterministic repaired digest, so the
+ * retry can safely install its independently verified rendering even though
+ * the canonical directory is absent.
+ */
+export async function promoteQualityRepairDirectory(input: {
+  candidateRoot: string;
+  repairRoot: string;
+  backupRoot: string;
+  allowMissingCandidate: boolean;
+}): Promise<void> {
+  await rm(input.backupRoot, { recursive: true, force: true });
+  let backedUp = false;
+  try {
+    await rename(input.candidateRoot, input.backupRoot);
+    backedUp = true;
+  } catch (error) {
+    if (!input.allowMissingCandidate || !isMissingPathError(error)) {
+      throw error;
+    }
+  }
+  try {
+    await rename(input.repairRoot, input.candidateRoot);
+    await rm(input.backupRoot, { recursive: true, force: true });
+  } catch (error) {
+    if (backedUp) {
+      await rename(input.backupRoot, input.candidateRoot).catch(
+        () => undefined,
+      );
+    }
+    throw error;
+  }
 }
 
 /** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
@@ -449,6 +612,54 @@ function activityCancelled(): boolean {
   }
 }
 
+function activityCancellationSignal(): AbortSignal | undefined {
+  try {
+    return ActivityContext.current().cancellationSignal;
+  } catch {
+    return undefined;
+  }
+}
+
+function qualityArtifactRefs(
+  artifactSet: QualityArtifactSetV1,
+): BuildStepArtifactRefsV1 {
+  const artifacts = artifactSet.artifacts.map(
+    ({ artifactId, objectKey, sha256, sizeBytes, mimeType, kind }) => ({
+      artifactId,
+      objectKey,
+      sha256,
+      sizeBytes,
+      mimeType,
+      kind,
+    }),
+  );
+  return {
+    schemaVersion: BUILD_STEP_ARTIFACT_REFS_SCHEMA_VERSION,
+    collectionDigest: buildStepArtifactRefsDigest(artifacts),
+    artifacts,
+  };
+}
+
+function qualityPasses(evaluation: DesignEvaluationV2): boolean {
+  return (
+    evaluation.deterministic.status === "passed" &&
+    evaluation.deterministic.hardFailures.length === 0 &&
+    ![
+      ...evaluation.deterministic.findings,
+      ...evaluation.aesthetic.findings,
+    ].some(
+      (finding) =>
+        finding.severity === "blocker" || finding.severity === "major",
+    ) &&
+    (evaluation.aesthetic.status === "passed" ||
+      evaluation.aesthetic.status === "unavailable")
+  );
+}
+
+function qualityCandidatePrefix(siteId: string, buildRunId: string): string {
+  return `sites/${siteId}/quality-candidates/${buildRunId}`;
+}
+
 export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const {
     prisma,
@@ -459,6 +670,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ownerDb,
     imagePipeline,
     releaseService,
+    qualityCandidateService,
+    closedRepairService,
     storage,
     rendererBuildIdentity = "site-renderer@dev-unpinned",
     repositoryRoot = resolveRepositoryRoot(),
@@ -495,6 +708,44 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       buildRunId,
       reason,
     });
+  };
+
+  const assertQualityExecutionEligible = async (input: {
+    workspaceId: string;
+    buildRunId: string;
+  }): Promise<void> => {
+    const eligible = await prisma.withWorkspace(
+      input.workspaceId,
+      async (tx) => {
+        const [run, budget, unresolvedSpends] = await Promise.all([
+          tx.siteBuildRun.findUnique({
+            where: { id: input.buildRunId },
+            select: { status: true },
+          }),
+          tx.siteBuildBudget.findUnique({
+            where: { buildRunId: input.buildRunId },
+            select: { paidCallsEnabled: true },
+          }),
+          tx.siteBuildSpend.count({
+            where: {
+              buildRunId: input.buildRunId,
+              OR: [
+                { status: { in: ["RESERVED", "UNKNOWN"] } },
+                { costBasis: "unknown" },
+              ],
+            },
+          }),
+        ]);
+        return (
+          run?.status === "running" &&
+          budget?.paidCallsEnabled === true &&
+          unresolvedSpends === 0
+        );
+      },
+    );
+    if (!eligible) {
+      throw new Error("QUALITY_GATE_FAILED: paid execution gate is closed");
+    }
   };
 
   async function polishCopy(
@@ -601,9 +852,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
   }
 
-  async function assembleControlledBuild(
+  async function assembleControlledCandidate(
     input: RefurbishActivityInput,
-  ): Promise<RefurbishBuildSummary> {
+    mode: "legacy_release_v2" | "quality_candidate",
+  ): Promise<RefurbishBuildSummary | RefurbishQualityCandidateSummary> {
     const { workspaceId, siteId, buildRunId } = input;
     const brief = input.designBrief?.designBrief;
     const copy = input.copy;
@@ -612,6 +864,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
     if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
     if (!releaseService) throw new Error("SITE_RELEASE_SERVICE_UNAVAILABLE");
+    if (mode === "quality_candidate" && !qualityCandidateService) {
+      throw new Error("QUALITY_CANDIDATE_SERVICE_UNAVAILABLE");
+    }
     assertPartialBuildContract(input.scope);
     const family = validateDesignBriefV2AgainstCatalog(
       STATIC_DESIGN_CATALOG_V2,
@@ -672,6 +927,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       return { site, existing, base, snapshot, assets };
     });
     if (state.existing?.buildStatus === "succeeded") {
+      if (mode === "quality_candidate") {
+        throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
+      }
       const replaySpec = state.existing.spec as unknown;
       if (
         !state.existing.release ||
@@ -845,8 +1103,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           })
         : { readReadyVariant: async () => null },
     });
+    let rendererManifest;
     try {
-      await renderSiteSpec(doc, {
+      rendererManifest = await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(state.site.slug),
         siteOrigin: previewOrigin(state.site.slug),
@@ -877,6 +1136,31 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         `run ${buildRunId} no longer running — controlled candidate discarded`,
       );
     }
+    const summary: RefurbishQualityCandidateSummary = {
+      previewSlug: state.site.slug,
+      versionId: version.id,
+      designBrief: effectiveBrief,
+      candidateSpec: doc,
+      candidate: {
+        workspaceId,
+        siteId,
+        siteVersionId: version.id,
+        buildRunId,
+        specDigest: releaseSpecDigest(doc),
+        designBriefDigest: effectiveBrief.digest,
+        rendererOutputDigest: rendererManifest.treeDigest,
+        basePath: previewBasePath(state.site.slug),
+        siteOrigin: previewOrigin(state.site.slug),
+        root: outDir,
+      },
+    };
+    if (mode === "quality_candidate") {
+      await qualityCandidateService!.assembleQualityCandidate({
+        identity: summary.candidate,
+        designBrief: effectiveBrief,
+      });
+      return summary;
+    }
     await releaseService.materialize({
       workspaceId,
       siteId,
@@ -889,9 +1173,320 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       createdBy: "system",
     });
     return {
-      previewSlug: state.site.slug,
-      versionId: version.id,
-      designBrief: effectiveBrief,
+      previewSlug: summary.previewSlug,
+      versionId: summary.versionId,
+      designBrief: summary.designBrief,
+    };
+  }
+
+  async function loadQualityContext(input: {
+    workspaceId: string;
+    siteId: string;
+    buildRunId: string;
+    copy: CopyGenerationSummary;
+    designBrief: DesignBriefV2;
+    candidate: QualityCandidateIdentity;
+    candidateSpec?: SiteSpecV1_1;
+    allowCommittedRepairReplay?: boolean;
+  }) {
+    return prisma.withWorkspace(input.workspaceId, async (tx) => {
+      const [run, site, version] = await Promise.all([
+        tx.siteBuildRun.findUnique({
+          where: { id: input.buildRunId },
+          select: { status: true },
+        }),
+        tx.site.findFirst({
+          where: { id: input.siteId, workspaceId: input.workspaceId },
+          select: { name: true, slug: true },
+        }),
+        tx.siteVersion.findFirst({
+          where: {
+            id: input.candidate.siteVersionId,
+            siteId: input.siteId,
+            buildRunId: input.buildRunId,
+          },
+          select: { spec: true, specVersion: true, buildStatus: true },
+        }),
+      ]);
+      if (
+        run?.status !== "running" ||
+        !site ||
+        !version ||
+        version.specVersion !== SITE_SPEC_V1_1_VERSION ||
+        version.buildStatus !== "building"
+      ) {
+        throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
+      }
+      const persistedSpec = validateSiteSpecV1_1(version.spec);
+      const spec = input.candidateSpec
+        ? validateSiteSpecV1_1(input.candidateSpec)
+        : persistedSpec;
+      if (
+        releaseSpecDigest(spec) !== input.candidate.specDigest ||
+        input.designBrief.digest !== input.candidate.designBriefDigest ||
+        (!input.allowCommittedRepairReplay &&
+          releaseSpecDigest(persistedSpec) !== input.candidate.specDigest)
+      ) {
+        throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
+      }
+      const repository = new PrismaPublishableClaimSnapshotRepository(tx);
+      const claimSnapshot = await repository.findById(
+        input.workspaceId,
+        input.copy.snapshotId,
+      );
+      if (!claimSnapshot || claimSnapshot.siteId !== input.siteId) {
+        throw new Error("COPY_CLAIM_SNAPSHOT_MISSING");
+      }
+      const assets = await buildControlledAssetManifest(tx, {
+        siteId: input.siteId,
+        brief: input.designBrief,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+      });
+      return {
+        site,
+        spec,
+        claimSnapshot,
+        assets,
+        copySlots: deriveCopySlotDefinitions({
+          brief: input.designBrief,
+          catalog: STATIC_DESIGN_CATALOG_V2,
+          templates: qualifiedTemplates,
+        }),
+      };
+    });
+  }
+
+  async function prepareRepairRenderer(input: {
+    workspaceId: string;
+    siteId: string;
+    buildRunId: string;
+    candidate: QualityCandidateIdentity;
+    spec: SiteSpecV1_1;
+    designBrief: DesignBriefV2;
+    replayingCommittedResult: boolean;
+  }) {
+    const repairRoot = path.join(
+      previewRoot(),
+      ".quality-repairs",
+      input.buildRunId,
+      randomUUID(),
+    );
+    const backupRoot = `${repairRoot}.previous`;
+    await mkdir(repairRoot, { recursive: true });
+    const overlay = await materializeControlledAssetOverlay({
+      workspaceId: input.workspaceId,
+      siteId: input.siteId,
+      spec: input.spec,
+      designBrief: input.designBrief,
+      catalog: STATIC_DESIGN_CATALOG_V2,
+      repositoryRoot,
+      tenantReader: storage
+        ? createTenantVariantReader({
+            prisma,
+            storage,
+            signal: activityCancellationSignal(),
+          })
+        : { readReadyVariant: async () => null },
+    });
+    let manifest;
+    try {
+      manifest = await renderSiteSpec(input.spec, {
+        outDir: repairRoot,
+        basePath: input.candidate.basePath,
+        siteOrigin: input.candidate.siteOrigin,
+        publicAssetDir: overlay.publicDir,
+      });
+    } finally {
+      await overlay.cleanup();
+    }
+    let promoted = false;
+    return {
+      root: repairRoot,
+      manifest,
+      promote: async () => {
+        await promoteQualityRepairDirectory({
+          candidateRoot: input.candidate.root,
+          repairRoot,
+          backupRoot,
+          allowMissingCandidate: input.replayingCommittedResult,
+        });
+        promoted = true;
+      },
+      cleanup: async () => {
+        if (!promoted) {
+          await rm(repairRoot, { recursive: true, force: true });
+        }
+        await rm(backupRoot, { recursive: true, force: true });
+      },
+    };
+  }
+
+  async function putQualityObject(input: {
+    objectKey: string;
+    bytes: Buffer;
+    mimeType: string;
+    sha256: string;
+  }): Promise<void> {
+    if (!storage) throw new Error("QUALITY_ARTIFACT_INVALID");
+    await storage.putBufferImmutable(
+      input.objectKey,
+      input.bytes,
+      input.mimeType,
+      input.sha256,
+      activityCancellationSignal(),
+    );
+    const observed = await storage.hashObject(
+      input.objectKey,
+      activityCancellationSignal(),
+    );
+    if (
+      observed.sha256 !== input.sha256 ||
+      observed.size !== input.bytes.length
+    ) {
+      throw new Error("QUALITY_ARTIFACT_INVALID");
+    }
+  }
+
+  async function prepareReleaseQuality(input: {
+    releaseIdentity: {
+      artifactPrefix: string;
+      producerToken: string;
+    };
+    evaluation: DesignEvaluationV2;
+    artifactSet: QualityArtifactSetV1;
+    rounds: RefurbishQualityRoundSummary[];
+  }) {
+    if (!storage) throw new Error("QUALITY_ARTIFACT_INVALID");
+    const finalRound = input.evaluation.round;
+    const qualityPrefix = `${input.releaseIdentity.artifactPrefix}/attempts/${input.releaseIdentity.producerToken}/quality/round-${finalRound}`;
+    const copiedArtifacts = [];
+    for (const artifact of input.artifactSet.artifacts) {
+      const bytes = await storage.getBufferBounded(
+        artifact.objectKey,
+        artifact.sizeBytes,
+        activityCancellationSignal(),
+      );
+      if (
+        bytes.length !== artifact.sizeBytes ||
+        sha256Bytes(bytes) !== artifact.sha256
+      ) {
+        throw new Error("QUALITY_ARTIFACT_INVALID");
+      }
+      const extension = artifact.mimeType === "image/png" ? "png" : "json";
+      const objectKey = `${qualityPrefix}/${artifact.artifactId}-${artifact.sha256}.${extension}`;
+      await putQualityObject({
+        objectKey,
+        bytes,
+        mimeType: artifact.mimeType,
+        sha256: artifact.sha256,
+      });
+      copiedArtifacts.push({ ...artifact, objectKey });
+    }
+    const aestheticEvidence: ReleaseAestheticEvidenceV1 = {
+      schemaVersion: RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION,
+      status: "unavailable",
+      requestedModel: "gemini-3.5-flash",
+      reportedModel: null,
+      resolvedModel: null,
+      transport: "openai-chat-completions",
+      routePolicyVersion: "site-builder-aesthetic-route-unavailable@2026-07-24",
+      errorClassification: "timeout",
+    };
+    const aestheticBytes = releaseAestheticEvidenceBytes(aestheticEvidence);
+    const aestheticDigest = releaseAestheticEvidenceDigest(aestheticEvidence);
+    const aestheticObjectKey = `${qualityPrefix}/aesthetic-unavailable-${aestheticDigest}.json`;
+    await putQualityObject({
+      objectKey: aestheticObjectKey,
+      bytes: aestheticBytes,
+      mimeType: "application/json",
+      sha256: aestheticDigest,
+    });
+    const artifactSetDraft = {
+      schemaVersion: input.artifactSet.schemaVersion,
+      candidateSpecDigest: input.artifactSet.candidateSpecDigest,
+      designBriefDigest: input.artifactSet.designBriefDigest,
+      round: input.artifactSet.round,
+      expectedTargets: input.artifactSet.expectedTargets,
+      artifacts: [
+        ...copiedArtifacts,
+        {
+          artifactId: "aesthetic-unavailable",
+          objectKey: aestheticObjectKey,
+          sha256: aestheticDigest,
+          sizeBytes: aestheticBytes.length,
+          mimeType: "application/json" as const,
+          kind: "aesthetic_response" as const,
+        },
+      ],
+    };
+    const artifactSet = validateQualityArtifactSet({
+      ...artifactSetDraft,
+      artifactSetDigest: qualityArtifactSetDigest(artifactSetDraft),
+    });
+    const evaluation = {
+      ...input.evaluation,
+      artifactSetDigest: artifactSet.artifactSetDigest,
+    };
+    const evaluationBytes = Buffer.from(
+      canonicalDesignEvaluationV2Json(evaluation, artifactSet),
+      "utf8",
+    );
+    const evaluationDigest = designEvaluationV2Digest(evaluation, artifactSet);
+    const evaluationObjectKey = `${qualityPrefix}/design-evaluation-${evaluationDigest}.json`;
+    await putQualityObject({
+      objectKey: evaluationObjectKey,
+      bytes: evaluationBytes,
+      mimeType: "application/json",
+      sha256: evaluationDigest,
+    });
+    const rounds = input.rounds.map((round) =>
+      round.round === finalRound
+        ? {
+            ...round,
+            artifactSetDigest: artifactSet.artifactSetDigest,
+            designEvaluationDigest: evaluationDigest,
+          }
+        : round,
+    );
+    const evidenceRef = {
+      objectKey: aestheticObjectKey,
+      sha256: aestheticDigest,
+      sizeBytes: aestheticBytes.length,
+      mimeType: "application/json" as const,
+      kind: "aesthetic_response" as const,
+    };
+    return {
+      manifest: {
+        schemaVersion: RELEASE_QUALITY_SCHEMA_VERSION,
+        status: "passed_deterministic_aesthetic_unavailable" as const,
+        deterministicEvaluatorVersion: DETERMINISTIC_QUALITY_EVALUATOR_VERSION,
+        finalRound,
+        artifactSet,
+        screenshotSetDigest: releaseScreenshotSetDigest(artifactSet),
+        designEvaluationDigest: evaluationDigest,
+        designEvaluationRef: {
+          objectKey: evaluationObjectKey,
+          sha256: evaluationDigest,
+          sizeBytes: evaluationBytes.length,
+          mimeType: "application/json" as const,
+          kind: "design_evaluation" as const,
+        },
+        rounds,
+        aesthetic: {
+          status: "unavailable" as const,
+          requestedModel: aestheticEvidence.requestedModel,
+          reportedModel: null,
+          resolvedModel: null,
+          transport: aestheticEvidence.transport,
+          routePolicyVersion: aestheticEvidence.routePolicyVersion,
+          errorClassification: "timeout" as const,
+          evidenceDigest: aestheticDigest,
+          evidenceRef,
+        },
+      },
+      designEvaluation: evaluation,
+      aestheticEvidence,
+      artifactRefs: qualityArtifactRefs(artifactSet),
     };
   }
 
@@ -2369,6 +2964,210 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       };
     },
 
+    /**
+     * M1-f P3: build and persist exactly one fenced `building` candidate.
+     * No Release identity exists until a later P4 evaluation passes.
+     */
+    async assembleQualityCandidate(
+      input: RefurbishQualityCandidateInput,
+    ): Promise<RefurbishQualityCandidateSummary> {
+      ensureRunBudget(input.buildRunId);
+      return assembleControlledCandidate(
+        input,
+        "quality_candidate",
+      ) as Promise<RefurbishQualityCandidateSummary>;
+    },
+
+    /** M1-f P4 deterministic gate; aesthetic remains explicitly unavailable. */
+    async evaluateQualityCandidate(
+      input: RefurbishQualityEvaluationInput,
+    ): Promise<RefurbishQualityEvaluationSummary> {
+      if (!qualityCandidateService) {
+        throw new Error("QUALITY_CANDIDATE_SERVICE_UNAVAILABLE");
+      }
+      await assertQualityExecutionEligible(input);
+      const context = await loadQualityContext({
+        ...input,
+        designBrief: input.qualityCandidate.designBrief,
+        candidate: input.qualityCandidate.candidate,
+      });
+      const deterministic =
+        await qualityCandidateService.evaluateQualityCandidate({
+          identity: input.qualityCandidate.candidate,
+          designBrief: input.qualityCandidate.designBrief,
+          quality: {
+            round: input.round,
+            artifactPrefix: `${qualityCandidatePrefix(
+              input.siteId,
+              input.buildRunId,
+            )}/quality/round-${input.round}`,
+            validation: {
+              designBrief: input.qualityCandidate.designBrief,
+              catalog: STATIC_DESIGN_CATALOG_V2,
+              claimSnapshot: context.claimSnapshot,
+              copySlots: context.copySlots,
+            },
+            signal: activityCancellationSignal(),
+          },
+        });
+      const evaluation = composeUnavailableAestheticEvaluation(
+        {
+          spec: context.spec,
+          candidateSpecDigest: input.qualityCandidate.candidate.specDigest,
+          designBriefDigest: input.qualityCandidate.candidate.designBriefDigest,
+          round: input.round,
+          pages: [],
+          lighthouse: [],
+        },
+        deterministic,
+        "timeout",
+      );
+      return {
+        candidate: input.qualityCandidate.candidate,
+        designBrief: input.qualityCandidate.designBrief,
+        evaluation,
+        designEvaluationDigest: designEvaluationV2Digest(
+          evaluation,
+          deterministic.artifactSet,
+        ),
+        artifactSet: deterministic.artifactSet,
+        passed: qualityPasses(evaluation),
+        artifactRefs: qualityArtifactRefs(deterministic.artifactSet),
+      };
+    },
+
+    /**
+     * M1-f repair selection is deterministic while no aesthetic route is
+     * promoted. Only an optionId from the server-generated closed catalog is
+     * fed back into the candidate service.
+     */
+    async applyQualityRepair(
+      input: RefurbishQualityRepairInput,
+    ): Promise<RefurbishQualityRepairSummary> {
+      if (!qualityCandidateService || !closedRepairService) {
+        throw new Error("QUALITY_CANDIDATE_SERVICE_UNAVAILABLE");
+      }
+      if (input.qualityEvaluation.evaluation.round > 2) {
+        throw new Error("QUALITY_GATE_FAILED");
+      }
+      await assertQualityExecutionEligible(input);
+      const context = await loadQualityContext({
+        ...input,
+        designBrief: input.qualityCandidate.designBrief,
+        candidate: input.qualityCandidate.candidate,
+        candidateSpec: input.qualityCandidate.candidateSpec,
+        allowCommittedRepairReplay: true,
+      });
+      const closedContext = {
+        brief: input.qualityCandidate.designBrief,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+        spec: context.spec,
+        copyBundleSet: input.copy.set,
+        templates: qualifiedTemplates,
+        assets: context.assets,
+        assetUrls: controlledAssetUrls(context.assets),
+        claimSnapshot: context.claimSnapshot,
+        siteName: context.site.name,
+      };
+      const generated = closedRepairService.generateCatalog({
+        context: closedContext,
+        evaluation: input.qualityEvaluation.evaluation,
+        artifactSet: input.qualityEvaluation.artifactSet,
+      });
+      const option = [...generated.catalog.options].sort(
+        (left, right) =>
+          left.rank - right.rank || left.optionId.localeCompare(right.optionId),
+      )[0];
+      if (!option) throw new Error("QUALITY_REPAIR_OPTION_UNAVAILABLE");
+      const repaired = await qualityCandidateService.applyQualityRepair({
+        identity: input.qualityCandidate.candidate,
+        context: closedContext,
+        evaluation: input.qualityEvaluation.evaluation,
+        artifactSet: input.qualityEvaluation.artifactSet,
+        selection: { optionId: option.optionId },
+        render: ({ spec, designBrief, replayingCommittedResult }) =>
+          prepareRepairRenderer({
+            workspaceId: input.workspaceId,
+            siteId: input.siteId,
+            buildRunId: input.buildRunId,
+            candidate: input.qualityCandidate.candidate,
+            spec,
+            designBrief,
+            replayingCommittedResult,
+          }),
+      });
+      return {
+        previewSlug: input.qualityCandidate.previewSlug,
+        versionId: input.qualityCandidate.versionId,
+        designBrief: repaired.designBrief,
+        candidateSpec: repaired.spec,
+        candidate: repaired.identity,
+        repairCatalogDigest: repaired.catalogDigest,
+        selectedRepairOptionId: repaired.selectedOptionId,
+        repairSelectionMode: "deterministic_fallback",
+      };
+    },
+
+    /** M1-f P4→P5 seam: copy only final evidence, then create the sole v3 Release. */
+    async materializeApprovedRelease(
+      input: RefurbishQualityMaterializationInput,
+    ): Promise<RefurbishQualityMaterializationSummary> {
+      if (!qualityCandidateService) {
+        throw new Error("QUALITY_CANDIDATE_SERVICE_UNAVAILABLE");
+      }
+      if (!input.qualityEvaluation.passed) {
+        throw new Error("QUALITY_GATE_FAILED");
+      }
+      await assertQualityExecutionEligible(input);
+      let artifactRefs: BuildStepArtifactRefsV1 | undefined;
+      await qualityCandidateService.materializeApprovedRelease({
+        workspaceId: input.workspaceId,
+        siteId: input.siteId,
+        siteVersionId: input.qualityCandidate.versionId,
+        buildRunId: input.buildRunId,
+        root: input.qualityCandidate.candidate.root,
+        spec: validateSiteSpecV1_1(
+          (
+            await prisma.withWorkspace(input.workspaceId, (tx) =>
+              tx.siteVersion.findUnique({
+                where: { id: input.qualityCandidate.versionId },
+                select: { spec: true },
+              }),
+            )
+          )?.spec,
+        ),
+        storedSpecVersion: SITE_SPEC_V1_1_VERSION,
+        designBrief: input.qualityCandidate.designBrief,
+        createdBy: "system",
+        candidate: input.qualityCandidate.candidate,
+        prepareQuality: async (releaseIdentity) => {
+          const prepared = await prepareReleaseQuality({
+            releaseIdentity,
+            evaluation: input.qualityEvaluation.evaluation,
+            artifactSet: input.qualityEvaluation.artifactSet,
+            rounds: input.rounds,
+          });
+          artifactRefs = prepared.artifactRefs;
+          return {
+            manifest: prepared.manifest,
+            designEvaluation: prepared.designEvaluation,
+            aestheticEvidence: prepared.aestheticEvidence,
+          };
+        },
+      });
+      if (!artifactRefs) {
+        throw new Error("QUALITY_ARTIFACT_INVALID");
+      }
+      return {
+        build: {
+          previewSlug: input.qualityCandidate.previewSlug,
+          versionId: input.qualityCandidate.versionId,
+          designBrief: input.qualityCandidate.designBrief,
+        },
+        artifactRefs,
+      };
+    },
+
     /** P3（M1-a 最小组装=确定性 spec 重建 + 真 Astro 构建；M1-e 换 agent 组装）。 */
     async assembleAndBuild(
       input: RefurbishActivityInput,
@@ -2376,7 +3175,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
       if (input.designBrief) {
-        return assembleControlledBuild(input);
+        return assembleControlledCandidate(
+          input,
+          "legacy_release_v2",
+        ) as Promise<RefurbishBuildSummary>;
       }
       const partialBuild =
         input.scope?.scope === "page" ||
@@ -2647,6 +3449,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           if (!runBefore || !siteBefore) {
             throw new Error(`run ${buildRunId} publication state is missing`);
           }
+          if (input.qualityV1) {
+            const budgetRows = await tx.$queryRaw<
+              Array<{
+                paid_calls_enabled: boolean;
+                disabled_reason: string | null;
+              }>
+            >`
+              SELECT paid_calls_enabled, disabled_reason
+              FROM site_build_budget
+              WHERE build_run_id = ${buildRunId}::uuid
+              FOR UPDATE
+            `;
+            const budget = budgetRows[0];
+            if (
+              !qualitySettlementIsPublishable(
+                costSummary,
+                budget
+                  ? {
+                      paidCallsEnabled: budget.paid_calls_enabled,
+                      disabledReason: budget.disabled_reason,
+                    }
+                  : undefined,
+              )
+            ) {
+              throw new Error(
+                "QUALITY_GATE_FAILED: budget settlement is not publishable",
+              );
+            }
+          }
           const storedScope =
             runBefore.scope &&
             typeof runBefore.scope === "object" &&
@@ -2793,17 +3624,38 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             const manifest = validateReleaseManifest(
               targetVersion.release?.manifest,
             );
+            const designManifest =
+              manifest.schemaVersion === RELEASE_MANIFEST_V2_SCHEMA_VERSION ||
+              manifest.schemaVersion === RELEASE_MANIFEST_V3_SCHEMA_VERSION
+                ? manifest
+                : null;
+            const expectedManifestVersion = input.qualityV1
+              ? RELEASE_MANIFEST_V3_SCHEMA_VERSION
+              : RELEASE_MANIFEST_V2_SCHEMA_VERSION;
             if (
               targetVersion.release?.status !== "ready" ||
-              manifest.schemaVersion !== RELEASE_MANIFEST_V2_SCHEMA_VERSION ||
-              manifest.designBriefDigest !==
+              !designManifest ||
+              designManifest.schemaVersion !== expectedManifestVersion ||
+              designManifest.designBriefDigest !==
                 input.designBrief.designBrief.digest ||
-              manifest.specDigest !== releaseSpecDigest(spec) ||
-              manifest.componentLibraryVersion !==
+              designManifest.specDigest !== releaseSpecDigest(spec) ||
+              designManifest.componentLibraryVersion !==
                 spec.componentLibraryVersion ||
-              manifest.rendererVersion !== spec.rendererVersion
+              designManifest.rendererVersion !== spec.rendererVersion ||
+              (input.qualityV1 &&
+                (designManifest.schemaVersion !==
+                  RELEASE_MANIFEST_V3_SCHEMA_VERSION ||
+                  ![
+                    "passed",
+                    "passed_with_minor_findings",
+                    "passed_deterministic_aesthetic_unavailable",
+                  ].includes(designManifest.quality.status)))
             ) {
-              throw new Error("SITE_RELEASE_V2_ACTIVATION_MISMATCH");
+              throw new Error(
+                input.qualityV1
+                  ? "SITE_RELEASE_V3_ACTIVATION_MISMATCH"
+                  : "SITE_RELEASE_V2_ACTIVATION_MISMATCH",
+              );
             }
           }
           if (input.copy) {
@@ -2989,6 +3841,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       }
       // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
       budgetLedger.close(buildRunId, { force: true });
+      if (input.qualityV1 && storage) {
+        await storage
+          .deletePrefix(qualityCandidatePrefix(siteId, buildRunId))
+          .catch((cleanupError) =>
+            log.warn(
+              `quality candidate cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
+            ),
+          );
+      }
       return { previewSlug: build.previewSlug };
     },
 
@@ -3058,14 +3919,33 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             // actually owned the active slot may change Site status; stale compensation is inert.
             if (transitioned.count === 1) {
               // Renderer completion uses the same advisory lock. Whichever side wins, a run that
-              // really transitions terminal cannot retain a successful but unpublished candidate.
-              await tx.siteVersion.updateMany({
-                where: {
-                  buildRunId,
-                  buildStatus: { in: ["building", "succeeded"] },
-                },
-                data: { buildStatus: "failed" },
-              });
+              // really transitions terminal cannot retain an unpublished candidate. M1-f keeps a
+              // fully materialized READY v3 Release inactive if the active-pointer CAS later loses;
+              // that immutable Release is safe for reconciliation/GC and the old pointer stays live.
+              const qualityRelease = input.qualityV1
+                ? await tx.siteRelease.findUnique({
+                    where: { buildRunId },
+                    select: { id: true, status: true },
+                  })
+                : null;
+              if (qualityRelease?.status === "candidate") {
+                await tx.siteRelease.updateMany({
+                  where: { id: qualityRelease.id, status: "candidate" },
+                  data: {
+                    status: "failed",
+                    error: "quality materialization did not complete",
+                  },
+                });
+              }
+              if (qualityRelease?.status !== "ready") {
+                await tx.siteVersion.updateMany({
+                  where: {
+                    buildRunId,
+                    buildStatus: { in: ["building", "succeeded"] },
+                  },
+                  data: { buildStatus: "failed" },
+                });
+              }
               if (input.progressV1) {
                 const terminalSteps = await terminalizeBuildProgress(tx, {
                   workspaceId,
@@ -3108,6 +3988,15 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               `preview staging cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
             ),
           );
+        }
+        if (input.qualityV1 && storage) {
+          await storage
+            .deletePrefix(qualityCandidatePrefix(siteId, buildRunId))
+            .catch((cleanupError) =>
+              log.warn(
+                `quality evidence cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
+              ),
+            );
         }
         // 预算门收尾（改动 1）：run 终点强制关账，即便补偿 DB 工作失败也释放账户（force 无视 refs）。
         budgetLedger.close(buildRunId, { force: true });

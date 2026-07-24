@@ -1,4 +1,5 @@
 import {
+  ApplicationFailure,
   CancellationScope,
   isCancellation,
   patched,
@@ -23,6 +24,11 @@ const kbActivities = proxyActivities<SiteBuilderActivities>({
   retry: { maximumAttempts: 2 },
 });
 
+const qualityActivities = proxyActivities<SiteBuilderActivities>({
+  startToCloseTimeout: "15 minutes",
+  retry: { maximumAttempts: 2 },
+});
+
 /**
  * 精装修管线（M1-a 骨架 + M1-b P1 brandProfile，09 §2.3）：
  * P1 理解（KB 摄入 → brandProfile，fail-safe 降级）→
@@ -35,6 +41,7 @@ const kbActivities = proxyActivities<SiteBuilderActivities>({
 export async function refurbishWorkflow(
   input: RefurbishActivityInput,
 ): Promise<{ previewSlug: string }> {
+  let qualityLoopV1 = false;
   try {
     await activities.beginRefurbishRun(input);
     const progressV1 = patched("site-builder-r3b2-progress-v1");
@@ -313,30 +320,181 @@ export async function refurbishWorkflow(
       phase: "P3_assembly",
       progress: controlledAssemblyV1 ? 0.74 : 0.65,
     });
-    const build = await activities.assembleAndBuild({
-      ...input,
-      ...(designBrief ? { designBrief } : {}),
-      ...(copy ? { copy } : {}),
-      ...(progressV1 ? { progressV1: true } : {}),
-    });
-    const finalizedDesignBrief =
-      designBrief && build.designBrief
-        ? { ...designBrief, designBrief: build.designBrief }
-        : designBrief;
-    await progress({
-      ...input,
-      key: "assemble_build",
-      status: "done",
-      phase: "P3_assembly",
-      progress: 0.9,
-    });
-    await progress({
-      ...input,
-      key: "quality_loop",
-      status: "skipped",
-      phase: "P5_publish",
-      progress: 0.95,
-    });
+    qualityLoopV1 = patched("site-builder-m1f-quality-loop-v1");
+    let build: Awaited<ReturnType<SiteBuilderActivities["assembleAndBuild"]>>;
+    let finalizedDesignBrief = designBrief;
+    if (!qualityLoopV1) {
+      // Replay-only path. The command and payload below are intentionally kept
+      // byte-for-byte compatible with pre-M1-f histories.
+      build = await activities.assembleAndBuild({
+        ...input,
+        ...(designBrief ? { designBrief } : {}),
+        ...(copy ? { copy } : {}),
+        ...(progressV1 ? { progressV1: true } : {}),
+      });
+      finalizedDesignBrief =
+        designBrief && build.designBrief
+          ? { ...designBrief, designBrief: build.designBrief }
+          : designBrief;
+      await progress({
+        ...input,
+        key: "assemble_build",
+        status: "done",
+        phase: "P3_assembly",
+        progress: 0.9,
+      });
+      await progress({
+        ...input,
+        key: "quality_loop",
+        status: "skipped",
+        phase: "P5_publish",
+        progress: 0.95,
+      });
+    } else {
+      if (!designBrief || !copy) {
+        throw ApplicationFailure.nonRetryable(
+          "QUALITY_CANDIDATE_INPUT_MISSING",
+          "QUALITY_CANDIDATE_INPUT_MISSING",
+        );
+      }
+      let qualityCandidate = await qualityActivities.assembleQualityCandidate({
+        ...input,
+        designBrief,
+        copy,
+        ...(progressV1 ? { progressV1: true } : {}),
+      });
+      await progress({
+        ...input,
+        key: "assemble_build",
+        status: "done",
+        phase: "P3_assembly",
+        progress: 0.78,
+      });
+      const rounds: Parameters<
+        SiteBuilderActivities["materializeApprovedRelease"]
+      >[0]["rounds"] = [];
+      let materialized:
+        | Awaited<
+            ReturnType<SiteBuilderActivities["materializeApprovedRelease"]>
+          >
+        | undefined;
+      for (const round of [0, 1, 2, 3] as const) {
+        const itemKey = `round-${round}`;
+        await progress({
+          ...input,
+          key: "quality_loop",
+          itemKey,
+          attempt: round + 1,
+          status: "running",
+          phase: "P4_quality",
+          progress: 0.8 + round * 0.035,
+        });
+        const qualityEvaluation =
+          await qualityActivities.evaluateQualityCandidate({
+            ...input,
+            copy,
+            qualityCandidate,
+            round,
+            ...(progressV1 ? { progressV1: true } : {}),
+          });
+        const evaluationDigest = qualityEvaluation.designEvaluationDigest;
+        if (qualityEvaluation.passed) {
+          rounds.push({
+            round,
+            candidateSpecDigest: qualityCandidate.candidate.specDigest,
+            artifactSetDigest: qualityEvaluation.artifactSet.artifactSetDigest,
+            designEvaluationDigest: evaluationDigest,
+            repairCatalogDigest: null,
+            selectedRepairOptionId: null,
+            repairSelectionMode: null,
+          });
+          materialized = await qualityActivities.materializeApprovedRelease({
+            ...input,
+            qualityCandidate,
+            qualityEvaluation,
+            rounds,
+            ...(progressV1 ? { progressV1: true } : {}),
+          });
+          await progress({
+            ...input,
+            key: "quality_loop",
+            itemKey,
+            attempt: round + 1,
+            status: "degraded",
+            phase: "P4_quality",
+            progress: 0.95,
+            errorCode: "AESTHETIC_MODEL_UNAVAILABLE",
+            artifactRefs: materialized.artifactRefs,
+          });
+          break;
+        }
+        if (round === 3) {
+          rounds.push({
+            round,
+            candidateSpecDigest: qualityCandidate.candidate.specDigest,
+            artifactSetDigest: qualityEvaluation.artifactSet.artifactSetDigest,
+            designEvaluationDigest: evaluationDigest,
+            repairCatalogDigest: null,
+            selectedRepairOptionId: null,
+            repairSelectionMode: null,
+          });
+          await progress({
+            ...input,
+            key: "quality_loop",
+            itemKey,
+            attempt: round + 1,
+            status: "failed",
+            phase: "P4_quality",
+            progress: 0.92,
+            errorCode: "QUALITY_GATE_FAILED",
+            artifactRefs: qualityEvaluation.artifactRefs,
+          });
+          throw ApplicationFailure.nonRetryable(
+            "QUALITY_GATE_FAILED",
+            "QUALITY_GATE_FAILED",
+          );
+        }
+        const repaired = await qualityActivities.applyQualityRepair({
+          ...input,
+          copy,
+          qualityCandidate,
+          qualityEvaluation,
+          ...(progressV1 ? { progressV1: true } : {}),
+        });
+        rounds.push({
+          round,
+          candidateSpecDigest: qualityCandidate.candidate.specDigest,
+          artifactSetDigest: qualityEvaluation.artifactSet.artifactSetDigest,
+          designEvaluationDigest: evaluationDigest,
+          repairCatalogDigest: repaired.repairCatalogDigest,
+          selectedRepairOptionId: repaired.selectedRepairOptionId,
+          repairSelectionMode: repaired.repairSelectionMode,
+        });
+        await progress({
+          ...input,
+          key: "quality_loop",
+          itemKey,
+          attempt: round + 1,
+          status: "degraded",
+          phase: "P4_quality",
+          progress: 0.82 + round * 0.035,
+          errorCode: "QUALITY_REPAIR_APPLIED",
+          artifactRefs: qualityEvaluation.artifactRefs,
+        });
+        qualityCandidate = repaired;
+      }
+      if (!materialized) {
+        throw ApplicationFailure.nonRetryable(
+          "QUALITY_GATE_FAILED",
+          "QUALITY_GATE_FAILED",
+        );
+      }
+      build = materialized.build;
+      finalizedDesignBrief = {
+        ...designBrief,
+        designBrief: qualityCandidate.designBrief,
+      };
+    }
     return await activities.finalizeRefurbish({
       ...input,
       ...(finalizedDesignBrief ? { designBrief: finalizedDesignBrief } : {}),
@@ -346,6 +504,7 @@ export async function refurbishWorkflow(
       images,
       build,
       ...(progressV1 ? { progressV1: true } : {}),
+      ...(qualityLoopV1 ? { qualityV1: true } : {}),
     });
   } catch (err) {
     // 🔴 nonCancellable（复审 C1）：workflow 已被取消时，根作用域再调度 activity 会立即
@@ -356,6 +515,7 @@ export async function refurbishWorkflow(
         ...input,
         terminalStatus: isCancellation(err) ? "cancelled" : "failed",
         ...(progressV1 ? { progressV1: true } : {}),
+        ...(qualityLoopV1 ? { qualityV1: true } : {}),
       });
     });
     throw err;

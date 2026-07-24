@@ -491,6 +491,11 @@ export class BuildsService {
     const cancellable = await this.prisma.withWorkspace(
       ctx.workspaceId,
       async (tx) => {
+        // Serialize cancellation with the final publication transaction. A
+        // provisional run_succeeded budget summary may already exist, but the
+        // old active pointer is still authoritative until this lock winner
+        // commits either cancellation_requested or publication.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildId}`}))`;
         const run = await tx.siteBuildRun.findUnique({
           where: { id: buildId },
         });
@@ -525,7 +530,7 @@ export class BuildsService {
           );
         }
         await tx.siteBuildBudget.updateMany({
-          where: { buildRunId: run.id, paidCallsEnabled: true },
+          where: { buildRunId: run.id },
           data: {
             paidCallsEnabled: false,
             disabledReason: "cancellation_requested",

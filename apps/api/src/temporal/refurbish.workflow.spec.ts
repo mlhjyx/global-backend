@@ -72,7 +72,10 @@ function primeHappyPath() {
 
 const firstOrder = (m: Mock): number => m.mock.invocationCallOrder[0];
 
-beforeEach(() => resetActivities());
+beforeEach(() => {
+  resetActivities();
+  setPatched((patchId) => patchId !== "site-builder-m1f-quality-loop-v1");
+});
 
 describe("refurbishWorkflow — happy path（P1 → P3 → P5）", () => {
   it("顺序 begin < ingest < brandProfile < imagePipeline < designBrief < copy < assemble < finalize；不触发补偿", async () => {
@@ -159,7 +162,9 @@ describe("refurbishWorkflow — happy path（P1 → P3 → P5）", () => {
   it("仅 M1-e-B patch 未记录时保留旧 copy/assemble 命令输入", async () => {
     primeHappyPath();
     setPatched(
-      (patchId) => patchId !== "site-builder-m1eb-controlled-assembly-v1",
+      (patchId) =>
+        patchId !== "site-builder-m1eb-controlled-assembly-v1" &&
+        patchId !== "site-builder-m1f-quality-loop-v1",
     );
 
     await refurbishWorkflow(INPUT);
@@ -255,7 +260,11 @@ describe("refurbishWorkflow — happy path（P1 → P3 → P5）", () => {
 
   it("已记录 pipeline patch、未记录 batches patch 的历史仍只调一次旧 activity", async () => {
     primeHappyPath();
-    setPatched((patchId) => patchId !== "site-builder-m1c-image-batches-v1");
+    setPatched(
+      (patchId) =>
+        patchId !== "site-builder-m1c-image-batches-v1" &&
+        patchId !== "site-builder-m1f-quality-loop-v1",
+    );
 
     await refurbishWorkflow(INPUT);
 
@@ -266,7 +275,11 @@ describe("refurbishWorkflow — happy path（P1 → P3 → P5）", () => {
 
   it("旧 cursor 批次历史 replay 保持原命令和摘要行为", async () => {
     primeHappyPath();
-    setPatched((patchId) => patchId !== "site-builder-m1c-image-workset-v1");
+    setPatched(
+      (patchId) =>
+        patchId !== "site-builder-m1c-image-workset-v1" &&
+        patchId !== "site-builder-m1f-quality-loop-v1",
+    );
     acts.processImages.mockResolvedValue({
       status: "done",
       processed: 1,

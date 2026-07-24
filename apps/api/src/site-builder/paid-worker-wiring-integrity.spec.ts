@@ -44,10 +44,15 @@ describe("R1 production worker Release wiring", () => {
       /const releaseService = new SiteReleaseService\([\s\S]*?prisma,[\s\S]*?siteBuilderStorage,[\s\S]*?buildIdentity: rendererBuildIdentity/,
     );
     expect(worker).toMatch(
+      /const qualityCandidateService = new QualityCandidateService\([\s\S]*?new DeterministicQualityService\([\s\S]*?new StorageQualityArtifactSink\(siteBuilderStorage\)[\s\S]*?closedRepairService,[\s\S]*?releaseService/,
+    );
+    expect(worker).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?releaseService,[\s\S]*?\}\)/,
     );
     expect(worker).toMatch(
       /new KbService\([\s\S]*?siteBuilderStorage[\s\S]*?\)/,
     );
+    expect(worker).toContain("qualityCandidateService,");
+    expect(worker).toContain("closedRepairService,");
   });
 });

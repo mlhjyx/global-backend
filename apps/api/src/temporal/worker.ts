@@ -49,6 +49,10 @@ import {
   resolveSiteRendererBuildIdentity,
 } from "../site-builder/site-release.service";
 import { createSiteReleaseMaintenanceActivities } from "./site-release-maintenance.activities";
+import { StorageQualityArtifactSink } from "../site-builder/quality/quality-artifact-sink";
+import { DeterministicQualityService } from "../site-builder/quality/deterministic-quality.service";
+import { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
+import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -64,6 +68,15 @@ async function main(): Promise<void> {
   const releaseService = new SiteReleaseService(prisma, siteBuilderStorage, {
     buildIdentity: rendererBuildIdentity,
   });
+  const closedRepairService = new ClosedRepairService();
+  const qualityCandidateService = new QualityCandidateService(
+    prisma,
+    new DeterministicQualityService(
+      new StorageQualityArtifactSink(siteBuilderStorage),
+    ),
+    closedRepairService,
+    releaseService,
+  );
   const imagePipeline = new ImagePipelineService(
     prisma,
     siteBuilderStorage,
@@ -208,6 +221,8 @@ async function main(): Promise<void> {
         broker,
         imagePipeline,
         releaseService,
+        qualityCandidateService,
+        closedRepairService,
         storage: siteBuilderStorage,
         rendererBuildIdentity,
         kb: new KbService(

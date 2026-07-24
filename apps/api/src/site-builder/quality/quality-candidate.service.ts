@@ -195,10 +195,12 @@ export class QualityCandidateService {
     render(candidate: {
       spec: SiteSpecV1_1;
       designBrief: DesignBriefV2;
+      replayingCommittedResult: boolean;
     }): Promise<PreparedQualityRepair>;
   }): Promise<{
     identity: QualityCandidateIdentity;
     designBrief: DesignBriefV2;
+    spec: SiteSpecV1_1;
     catalogDigest: string;
     selectedOptionId: string;
   }> {
@@ -240,6 +242,7 @@ export class QualityCandidateService {
     const prepared = await input.render({
       spec: candidate.spec,
       designBrief: candidate.designBrief,
+      replayingCommittedResult,
     });
     try {
       await assertRendererOutputMatches({
@@ -326,6 +329,7 @@ export class QualityCandidateService {
           designBriefDigest: candidate.designBrief.digest,
         },
         designBrief: candidate.designBrief,
+        spec: candidate.spec,
         catalogDigest: generated.catalog.catalogDigest,
         selectedOptionId: input.selection.optionId,
       };

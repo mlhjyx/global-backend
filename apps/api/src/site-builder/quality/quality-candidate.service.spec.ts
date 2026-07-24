@@ -190,7 +190,7 @@ describe("QualityCandidateService fencing", () => {
         },
       })),
     };
-    const render = async () => {
+    const render = vi.fn(async () => {
       const preparedRoot = await mkdtemp(
         path.join(tmpdir(), "quality-repair-prepared-"),
       );
@@ -211,7 +211,7 @@ describe("QualityCandidateService fencing", () => {
         },
         cleanup: async () => rm(preparedRoot, { recursive: true, force: true }),
       };
-    };
+    });
     const service = new QualityCandidateService(
       prisma as never,
       {} as never,
@@ -238,6 +238,11 @@ describe("QualityCandidateService fencing", () => {
 
     const replay = await service.applyQualityRepair(repairInput);
     expect(replay.identity).toEqual(first.identity);
+    expect(releaseSpecDigest(replay.spec)).toBe(releaseSpecDigest(nextSpec));
+    expect(render.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining({ replayingCommittedResult: false }),
+      expect.objectContaining({ replayingCommittedResult: true }),
+    ]);
     expect(repairs.applySelection).toHaveBeenCalledTimes(2);
   });
 
