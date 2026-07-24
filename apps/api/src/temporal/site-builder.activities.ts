@@ -91,6 +91,7 @@ import { gateCertificationFactsForPersistence } from "../site-builder/claim-evid
 import {
   PaidOperationUnknownError,
   SiteBuildCostLedger,
+  type SiteBuildCostSummary,
 } from "../site-builder/site-build-cost-ledger";
 import {
   CopyBundleService,
@@ -239,6 +240,25 @@ export function controlledAssemblyEffectiveBrief(
     throw new Error("PARTIAL_BUILD_DESIGN_BRIEF_DRIFT");
   }
   return assembled;
+}
+
+export function qualitySettlementIsPublishable(
+  costSummary: SiteBuildCostSummary | undefined,
+  budget:
+    | {
+        paidCallsEnabled: boolean;
+        disabledReason: string | null;
+      }
+    | undefined,
+): boolean {
+  return Boolean(
+    costSummary &&
+    costSummary.totals.unknownOperations === 0 &&
+    costSummary.budget.paidCallsEnabled === false &&
+    costSummary.budget.disabledReason === "run_succeeded" &&
+    budget?.paidCallsEnabled === false &&
+    budget.disabledReason === "run_succeeded",
+  );
 }
 
 export interface DemoV0ActivityInput {
@@ -636,6 +656,44 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       buildRunId,
       reason,
     });
+  };
+
+  const assertQualityExecutionEligible = async (input: {
+    workspaceId: string;
+    buildRunId: string;
+  }): Promise<void> => {
+    const eligible = await prisma.withWorkspace(
+      input.workspaceId,
+      async (tx) => {
+        const [run, budget, unresolvedSpends] = await Promise.all([
+          tx.siteBuildRun.findUnique({
+            where: { id: input.buildRunId },
+            select: { status: true },
+          }),
+          tx.siteBuildBudget.findUnique({
+            where: { buildRunId: input.buildRunId },
+            select: { paidCallsEnabled: true },
+          }),
+          tx.siteBuildSpend.count({
+            where: {
+              buildRunId: input.buildRunId,
+              OR: [
+                { status: { in: ["RESERVED", "UNKNOWN"] } },
+                { costBasis: "unknown" },
+              ],
+            },
+          }),
+        ]);
+        return (
+          run?.status === "running" &&
+          budget?.paidCallsEnabled === true &&
+          unresolvedSpends === 0
+        );
+      },
+    );
+    if (!eligible) {
+      throw new Error("QUALITY_GATE_FAILED: paid execution gate is closed");
+    }
   };
 
   async function polishCopy(
@@ -2869,6 +2927,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       if (!qualityCandidateService) {
         throw new Error("QUALITY_CANDIDATE_SERVICE_UNAVAILABLE");
       }
+      await assertQualityExecutionEligible(input);
       const context = await loadQualityContext({
         ...input,
         designBrief: input.qualityCandidate.designBrief,
@@ -2933,6 +2992,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       if (input.qualityEvaluation.evaluation.round > 2) {
         throw new Error("QUALITY_GATE_FAILED");
       }
+      await assertQualityExecutionEligible(input);
       const context = await loadQualityContext({
         ...input,
         designBrief: input.qualityCandidate.designBrief,
@@ -2996,6 +3056,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       if (!input.qualityEvaluation.passed) {
         throw new Error("QUALITY_GATE_FAILED");
       }
+      await assertQualityExecutionEligible(input);
       let artifactRefs: BuildStepArtifactRefsV1 | undefined;
       await qualityCandidateService.materializeApprovedRelease({
         workspaceId: input.workspaceId,
@@ -3325,6 +3386,35 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           ]);
           if (!runBefore || !siteBefore) {
             throw new Error(`run ${buildRunId} publication state is missing`);
+          }
+          if (input.qualityV1) {
+            const budgetRows = await tx.$queryRaw<
+              Array<{
+                paid_calls_enabled: boolean;
+                disabled_reason: string | null;
+              }>
+            >`
+              SELECT paid_calls_enabled, disabled_reason
+              FROM site_build_budget
+              WHERE build_run_id = ${buildRunId}::uuid
+              FOR UPDATE
+            `;
+            const budget = budgetRows[0];
+            if (
+              !qualitySettlementIsPublishable(
+                costSummary,
+                budget
+                  ? {
+                      paidCallsEnabled: budget.paid_calls_enabled,
+                      disabledReason: budget.disabled_reason,
+                    }
+                  : undefined,
+              )
+            ) {
+              throw new Error(
+                "QUALITY_GATE_FAILED: budget settlement is not publishable",
+              );
+            }
           }
           const storedScope =
             runBefore.scope &&

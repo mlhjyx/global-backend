@@ -12,7 +12,10 @@ import type { PrismaService } from "../prisma/prisma.service";
 import { buildM1ebGoldenFixtures } from "../site-builder/design/m1eb-golden";
 import { releaseSpecDigest } from "../site-builder/release-artifact";
 import type { StorageService } from "../site-builder/storage.service";
-import { createSiteBuilderActivities } from "./site-builder.activities";
+import {
+  createSiteBuilderActivities,
+  qualitySettlementIsPublishable,
+} from "./site-builder.activities";
 
 let fixture: Awaited<ReturnType<typeof buildM1ebGoldenFixtures>>[number];
 
@@ -29,6 +32,37 @@ function sha256(bytes: Buffer): string {
 }
 
 describe("M1-f approved quality materialization Activity", () => {
+  it("accepts only a clean terminal settlement owned by successful finalization", () => {
+    const summary = {
+      totals: { unknownOperations: 0 },
+      budget: {
+        paidCallsEnabled: false,
+        disabledReason: "run_succeeded",
+      },
+    } as never;
+    const budget = {
+      paidCallsEnabled: false,
+      disabledReason: "run_succeeded",
+    };
+
+    expect(qualitySettlementIsPublishable(summary, budget)).toBe(true);
+    expect(
+      qualitySettlementIsPublishable(
+        {
+          ...summary,
+          totals: { unknownOperations: 1 },
+        },
+        budget,
+      ),
+    ).toBe(false);
+    expect(
+      qualitySettlementIsPublishable(summary, {
+        paidCallsEnabled: false,
+        disabledReason: "manual_kill_switch",
+      }),
+    ).toBe(false);
+  });
+
   it("copies only final evidence into the private Release prefix and rebinds v3 digests", async () => {
     const candidateSpecDigest = releaseSpecDigest(fixture.spec);
     const sourceObjects = new Map<string, Buffer>();
@@ -144,10 +178,19 @@ describe("M1-f approved quality materialization Activity", () => {
           }) => Promise<unknown>,
         ) =>
           callback({
+            siteBuildRun: {
+              findUnique: vi.fn(async () => ({ status: "running" })),
+            },
+            siteBuildBudget: {
+              findUnique: vi.fn(async () => ({ paidCallsEnabled: true })),
+            },
+            siteBuildSpend: {
+              count: vi.fn(async () => 0),
+            },
             siteVersion: {
               findUnique: vi.fn(async () => ({ spec: fixture.spec })),
             },
-          }),
+          } as never),
       ),
     } as unknown as PrismaService;
     const activities = createSiteBuilderActivities({
@@ -270,4 +313,58 @@ describe("M1-f approved quality materialization Activity", () => {
       ),
     ).toBe(false);
   });
+
+  it.each([
+    {
+      condition: "durable budget kill switch closes",
+      paidCallsEnabled: false,
+      unresolvedSpends: 0,
+    },
+    {
+      condition: "a paid settlement remains unknown",
+      paidCallsEnabled: true,
+      unresolvedSpends: 1,
+    },
+  ])(
+    "blocks deterministic fallback publication when $condition",
+    async ({ paidCallsEnabled, unresolvedSpends }) => {
+      const materializeApprovedRelease = vi.fn();
+      const prisma = {
+        withWorkspace: vi.fn(
+          async (
+            _workspaceId: string,
+            callback: (tx: unknown) => Promise<unknown>,
+          ) =>
+            callback({
+              siteBuildRun: {
+                findUnique: vi.fn(async () => ({ status: "running" })),
+              },
+              siteBuildBudget: {
+                findUnique: vi.fn(async () => ({ paidCallsEnabled })),
+              },
+              siteBuildSpend: {
+                count: vi.fn(async () => unresolvedSpends),
+              },
+            }),
+        ),
+      } as unknown as PrismaService;
+      const activities = createSiteBuilderActivities({
+        prisma,
+        storage: {} as StorageService,
+        qualityCandidateService: {
+          materializeApprovedRelease,
+        } as never,
+      });
+
+      await expect(
+        activities.materializeApprovedRelease({
+          workspaceId: "ws-1",
+          siteId: "site-1",
+          buildRunId: "run-1",
+          qualityEvaluation: { passed: true },
+        } as never),
+      ).rejects.toThrow("QUALITY_GATE_FAILED: paid execution gate is closed");
+      expect(materializeApprovedRelease).not.toHaveBeenCalled();
+    },
+  );
 });
