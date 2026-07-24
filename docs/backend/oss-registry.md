@@ -59,12 +59,14 @@
 | `ADP-FE-029` | Storybook | 组件文档/测试 | `DEFER / FORMAL_FE_REPO_TRIGGER`；方法 `LEARN` | MIT；addons/服务另审 | 正式组件库后作为 `COMP-FE-*` 展示/测试层 | `OWN-SAAS-FE` |
 | `ADP-FE-030` | Playwright | 前端 E2E | `LEARN / CURRENT_QUALITY_METHOD`；工具 `DEFER / FORMAL_FE_REPO_TRIGGER` | Apache-2.0；浏览器包/CI 镜像另管 | 场景 ID/证据方法先用；正式前端后接 runner | `OWN-QA-EVIDENCE` |
 | `ADP-FE-031` | GoodJob | 功能设计/使用文档方法 | `LEARN / CURRENT_METHOD` | 外部仓库；只吸收方法，不复制代码/内容 | 功能闭环、页面 IA、取舍、FAQ；真值治理用我方体系 | `OWN-DOC-GOV` |
+| `ADP-FE-032` | `@modelcontextprotocol/server-memory` | 受控长期记忆 | `ADAPT / LOCAL_READ_ONLY_WITH_CONTROLLED_WRITER` | MIT；固定 `2026.1.26`；本地 JSONL，不发送项目数据；上游整文件写入无锁 | Git/Registry 仍为真值；普通会话只读；`memoryctl` 做候选、原子晋升、备份与审计；可退回内置记忆与文件阅读 | `OWN-PLATFORM` |
 
 ## 3. 组合结论
 
 - **八项现用、继续硬化**：`001/002/005/018/019/021/022/024`。它们均不得从开发 as-built 推导生产已批准。
 - **一个受阻 Spike**：`003` Puck；正式 SaaS 前端、编辑 API、Claim/权限合同和设计源未定位前不得安装。
 - **一个用途级避免项**：`004` Readdy；禁止运行时、代码、素材、训练/RAG/蒸馏复用，只保留多来源净室学习。
+- **受控本地记忆**：`032` 仅在固定版本、只读 MCP 工具面和受控 writer 下运行；旧会话排空、绝对安装路径和卸载演练仍是后续运维门。
 - **其余候选**：按 Card 维持 `LEARN` 或 `DEFER`；没有新增采购、账号、依赖、部署或生产流量授权。
 - **我方必须 Build 的部分**：Contract、Adapter、SoR、allowed actions、审计、数据分类、测试夹具、退出导出和替换机制，不交给候选项目。
 

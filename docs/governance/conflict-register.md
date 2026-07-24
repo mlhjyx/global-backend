@@ -159,7 +159,7 @@
 
 | Decision ID | 推荐决定 | 状态 | Owner |
 |---|---|---|---|
-| `DEC-FE-P7-001` | 批准 `ADP-FE-001..031` 全量 Registry 与稳定 Card | `APPROVED_AT_GATE_7` | `OWN-SEC-COMMERCIAL` |
+| `DEC-FE-P7-001` | 批准 `ADP-FE-001..031` 初始全量 Registry 与稳定 Card；后续 Card 依各自批准记录追加 | `APPROVED_AT_GATE_7` | `OWN-SEC-COMMERCIAL` |
 | `DEC-FE-P7-002` | 批准七类采用词汇、状态变更证据和 fail-closed 准入政策 | `APPROVED_AT_GATE_7` | `OWN-SEC-COMMERCIAL` |
 | `DEC-FE-P7-003` | 外部运行时只在我方 Contract/Adapter 后，业务对象/身份/权限不进入 OSS SoR | `APPROVED_AT_GATE_7` | `OWN-PLATFORM` |
 | `DEC-FE-P7-004` | 8 项现用能力保持 `INTEGRATE / *_HARDEN`，生产证据另过门 | `APPROVED_AT_GATE_7` | `OWN-PLATFORM` |
@@ -196,6 +196,7 @@
 | Decision ID | 批准内容 | 状态 | Decision Owner | 唯一回写位置 |
 |---|---|---|---|---|
 | `DEC-AIDEV-001` | 批准 AI 辅助开发运行模型、非技术需求与业务验收、记忆/知识事实优先级和受控工具试点门；每个 PR 最终合并仍需产品负责人对该 PR 明确授权 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [AI 辅助开发协作入口](../ai-development/README.md) |
+| `DEC-AIDEV-002` | 批准受控 MCP Memory 第一阶段：固定本机版本、普通会话只读、`memoryctl` 候选/原子晋升/备份/审计与非技术合并决策卡；不把记忆升级为项目真值，旧写入会话排空前不执行首次晋升 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [记忆、知识与派生认知政策](../ai-development/memory-and-context-policy.md) |
 
 ## 12. 关闭冲突的证据要求
 

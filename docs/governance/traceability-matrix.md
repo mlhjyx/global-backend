@@ -111,7 +111,7 @@ Segment/Actor/Problem/Job
 |---|---|---|---|
 | Phase 1 audit | source/evidence/conflict IDs、implementation truth caveats | 稳定结论已收口，原过程可由 Git/PR 恢复 | 用当前 main 重写历史审计 |
 | Phase 2 product baseline | Segment/Actor/Problem/Job/Journey/Page/Decision IDs | 当前 Registry、前端规范和 Site Pack 已承接；后续用户研究/实现仍待 | 把评审过程或规格当已实现页面 |
-| 五份 Word | 用户/对象/场景/治理方法输入已进入 Phase 2/4/5/6；OSS/技术候选已进入 `ADP-FE-001..031` | Gate 7 已批采用决定；Phase 8 建自动治理；实现门保留 | 整份复制为 current PRD，或把候选写成已实现 |
+| 五份 Word | 用户/对象/场景/治理方法输入已进入 Phase 2/4/5/6；初始 OSS/技术候选已进入 `ADP-FE-001..031` | Gate 7 已批采用决定；后续 Card 依独立批准追加；实现门保留 | 整份复制为 current PRD，或把候选写成已实现 |
 | Site v3.1/v3.2 | 已映射到 Site 00–14、Capability/Object/Scenario/Traceability 和 Phase 5 Pack | Phase 8 建议原位保留强 banner；移动另授权 | 因篇幅或位置认定为现行施工真值 |
 | 本地 React/Readdy/HTML | 原型、视觉和流程冲突已登记 | Phase 4/7 逐资产/页面采用决定 | 当作正式 repo、设计系统、License 或部署证明 |
 | GoodJob/竞品/OSS | 功能生命周期表达、权限社会属性、Guide/FAQ、采用方法已映入 `ADP-FE-031` 与采用政策 | 后续真实 Guide/用户验证 | 从竞品功能反推我们的范围或“测试全绿” |
@@ -135,4 +135,4 @@ Segment/Actor/Problem/Job
 - Fixture 仍为 `CATALOG_ONLY`；正式 frontend、E2E、受控视觉设计资产、面向真实用户的 Guide、真实 Release Bundle 和发布学习记录不存在。
 - `architecture/current.md` 的手写 OpenAPI 数字和 `INTEGRATION.md` 的 R3-B1 文案仍有已登记漂移。
 
-因此，本表证明“关系已登记”，不证明 Dev-Ready、实现、部署或用户可用。全局前端规则为 `APPROVED_AT_GATE_4`，Site 文档轴为 `APPROVED_AT_GATE_5 / SPEC_READY_WITH_BLOCKERS`，非 Site 域为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`；31 项外部候选保留已批准决定，但八项现用能力也仍只标 `*_HARDEN`。独立人工仍 `NOT_RUN / BLK-FE-006`，真实 Release Bundle 数仍为 0，Site 发布链继续 `TARGET_NOT_RUNNABLE`。
+因此，本表证明“关系已登记”，不证明 Dev-Ready、实现、部署或用户可用。全局前端规则为 `APPROVED_AT_GATE_4`，Site 文档轴为 `APPROVED_AT_GATE_5 / SPEC_READY_WITH_BLOCKERS`，非 Site 域为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`；32 项外部候选保留各自已批准决定，但八项现用能力也仍只标 `*_HARDEN`。独立人工仍 `NOT_RUN / BLK-FE-006`，真实 Release Bundle 数仍为 0，Site 发布链继续 `TARGET_NOT_RUNNABLE`。
