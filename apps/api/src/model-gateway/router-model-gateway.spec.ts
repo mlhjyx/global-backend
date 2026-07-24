@@ -430,6 +430,101 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
     expect(provider.reviewVision).not.toHaveBeenCalled();
   });
 
+  it('rejects an accessor-backed image list without invoking or copying it', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const imagesGetter = vi.fn(() => input.images);
+    Object.defineProperty(input, 'images', {
+      get: imagesGetter,
+      enumerable: true,
+    });
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
+    expect(imagesGetter).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects accessor-backed image bytes without invoking or copying them', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const image = { ...input.images[0]! };
+    const bytesGetter = vi.fn(() => input.images[0]!.bytes);
+    Object.defineProperty(image, 'bytes', {
+      get: bytesGetter,
+      enumerable: true,
+    });
+    input.images = [image];
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(bytesGetter).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects a Proxy input without invoking value traps or copying bytes', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const get = vi.fn((target: ReviewVisionInput, key: PropertyKey) => {
+      if (key === 'images') return new Array(1_000_000);
+      return Reflect.get(target, key);
+    });
+    const input = new Proxy(visionInput(), { get });
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
+    expect(get).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects Proxy-backed bytes without reading traps or copying data', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const get = vi.fn(() => 100_000_000);
+    input.images = [
+      {
+        ...input.images[0]!,
+        bytes: new Proxy(input.images[0]!.bytes, { get }),
+      },
+    ];
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(get).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
   it('binds the compiled schema before await so caller mutation cannot relax the result gate', async () => {
     let resolveReview!: (result: typeof exactResult) => void;
     const provider = {

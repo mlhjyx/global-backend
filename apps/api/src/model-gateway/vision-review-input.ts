@@ -1,3 +1,4 @@
+import { types as utilTypes } from 'node:util';
 import {
   VISION_REVIEW_MATERIAL_CLASSES,
   type ReviewVisionInput,
@@ -30,10 +31,222 @@ function hasOnlyAllowedEnumerableKeys(
   return true;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    utilTypes.isProxy(value)
+  ) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function ownDataValue(
+  value: Record<string, unknown>,
+  key: string,
+  errorCode: string,
+): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor) return undefined;
+  if (!('value' in descriptor)) throw new Error(errorCode);
+  return descriptor.value;
+}
+
+function captureVisionReviewInput(input: ReviewVisionInput): ReviewVisionInput {
+  if (
+    !isPlainRecord(input) ||
+    !hasOnlyAllowedEnumerableKeys(input, [
+      'task',
+      'prompt',
+      'system',
+      'model',
+      'schema',
+      'images',
+      'validateOutput',
+      'maxTokens',
+      'maxCostCents',
+      'signal',
+    ])
+  ) {
+    throw new Error('VISION_REVIEW_INPUT_INVALID');
+  }
+  const imagesValue = ownDataValue(
+    input,
+    'images',
+    'VISION_REVIEW_INPUT_INVALID',
+  );
+  if (
+    !Array.isArray(imagesValue) ||
+    utilTypes.isProxy(imagesValue)
+  ) {
+    throw new Error('VISION_REVIEW_INPUT_INVALID');
+  }
+  const imageCountValue = ownDataValue(
+    imagesValue as unknown as Record<string, unknown>,
+    'length',
+    'VISION_REVIEW_INPUT_INVALID',
+  );
+  if (
+    !Number.isInteger(imageCountValue) ||
+    (imageCountValue as number) < 1 ||
+    (imageCountValue as number) > MAX_VISION_IMAGES
+  ) {
+    throw new Error('VISION_REVIEW_INPUT_INVALID');
+  }
+  const imageCount = imageCountValue as number;
+  const images: ReviewVisionInput['images'][number][] = [];
+  for (let index = 0; index < imageCount; index += 1) {
+    const imageDescriptor = Object.getOwnPropertyDescriptor(imagesValue, index);
+    if (!imageDescriptor || !('value' in imageDescriptor)) {
+      throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    const image = imageDescriptor.value;
+    if (!isPlainRecord(image)) {
+      throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    let forbiddenRemoteField = false;
+    for (const key in image) {
+      if (!Object.prototype.hasOwnProperty.call(image, key)) continue;
+      if (key === 'url' || key === 'imageUrl' || key === 'path') {
+        forbiddenRemoteField = true;
+        break;
+      }
+    }
+    if (forbiddenRemoteField) {
+      throw new Error('VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN');
+    }
+    if (
+      !hasOnlyAllowedEnumerableKeys(image, [
+        'materialClass',
+        'workspaceId',
+        'artifactId',
+        'sha256',
+        'mimeType',
+        'bytes',
+        'target',
+      ])
+    ) {
+      throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    const workspaceId = ownDataValue(
+      image,
+      'workspaceId',
+      'VISION_REVIEW_IMAGE_INVALID',
+    ) as string | undefined;
+    const targetValue = ownDataValue(
+      image,
+      'target',
+      'VISION_REVIEW_IMAGE_INVALID',
+    );
+    if (
+      !isPlainRecord(targetValue) ||
+      !hasOnlyAllowedEnumerableKeys(targetValue, [
+        'locale',
+        'pageId',
+        'breakpoint',
+      ])
+    ) {
+      throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    images.push({
+      materialClass: ownDataValue(
+        image,
+        'materialClass',
+        'VISION_REVIEW_IMAGE_INVALID',
+      ) as ReviewVisionInput['images'][number]['materialClass'],
+      ...(workspaceId !== undefined ? { workspaceId } : {}),
+      artifactId: ownDataValue(
+        image,
+        'artifactId',
+        'VISION_REVIEW_IMAGE_INVALID',
+      ) as string,
+      sha256: ownDataValue(
+        image,
+        'sha256',
+        'VISION_REVIEW_IMAGE_INVALID',
+      ) as string,
+      mimeType: ownDataValue(
+        image,
+        'mimeType',
+        'VISION_REVIEW_IMAGE_INVALID',
+      ) as 'image/png',
+      bytes: ownDataValue(
+        image,
+        'bytes',
+        'VISION_REVIEW_IMAGE_INVALID',
+      ) as Uint8Array,
+      target: {
+        locale: ownDataValue(
+          targetValue,
+          'locale',
+          'VISION_REVIEW_IMAGE_INVALID',
+        ) as string,
+        pageId: ownDataValue(
+          targetValue,
+          'pageId',
+          'VISION_REVIEW_IMAGE_INVALID',
+        ) as string,
+        breakpoint: ownDataValue(
+          targetValue,
+          'breakpoint',
+          'VISION_REVIEW_IMAGE_INVALID',
+        ) as 375 | 768 | 1440,
+      },
+    });
+  }
+  const system = ownDataValue(
+    input,
+    'system',
+    'VISION_REVIEW_INPUT_INVALID',
+  ) as string | undefined;
+  const validateOutput = ownDataValue(
+    input,
+    'validateOutput',
+    'VISION_REVIEW_INPUT_INVALID',
+  ) as ((data: unknown) => void) | undefined;
+  const signal = ownDataValue(
+    input,
+    'signal',
+    'VISION_REVIEW_INPUT_INVALID',
+  ) as AbortSignal | undefined;
+  return {
+    task: ownDataValue(input, 'task', 'VISION_REVIEW_INPUT_INVALID') as string,
+    prompt: ownDataValue(
+      input,
+      'prompt',
+      'VISION_REVIEW_INPUT_INVALID',
+    ) as string,
+    ...(system !== undefined ? { system } : {}),
+    model: ownDataValue(input, 'model', 'VISION_REVIEW_INPUT_INVALID') as string,
+    schema: ownDataValue(
+      input,
+      'schema',
+      'VISION_REVIEW_INPUT_INVALID',
+    ) as Record<string, unknown>,
+    images,
+    ...(validateOutput !== undefined ? { validateOutput } : {}),
+    maxTokens: ownDataValue(
+      input,
+      'maxTokens',
+      'VISION_REVIEW_INPUT_INVALID',
+    ) as number,
+    maxCostCents: ownDataValue(
+      input,
+      'maxCostCents',
+      'VISION_REVIEW_INPUT_INVALID',
+    ) as number,
+    ...(signal !== undefined ? { signal } : {}),
+  };
+}
+
 function assertBoundedJsonSchema(schema: unknown): void {
   if (
     !schema ||
     typeof schema !== 'object' ||
+    utilTypes.isProxy(schema) ||
     Array.isArray(schema) ||
     (Object.getPrototypeOf(schema) !== Object.prototype &&
       Object.getPrototypeOf(schema) !== null)
@@ -71,6 +284,9 @@ function assertBoundedJsonSchema(schema: unknown): void {
       throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
     }
     const object = current.value as object;
+    if (utilTypes.isProxy(object)) {
+      throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+    }
     if (seen.has(object)) {
       // Reject cycles and shared mutable graph nodes before structuredClone.
       throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
@@ -159,7 +375,7 @@ function assertBoundedJsonSchema(schema: unknown): void {
  * Allocation-safe synchronous preflight. This must run before cloning bytes,
  * hashing images, reserving budget, or awaiting any external dependency.
  */
-export function preflightVisionReviewInput(input: ReviewVisionInput): void {
+function assertVisionReviewInput(input: ReviewVisionInput): void {
   const runtimeInput = input as unknown as Record<string, unknown>;
   if (
     !input ||
@@ -187,6 +403,11 @@ export function preflightVisionReviewInput(input: ReviewVisionInput): void {
     input.prompt.length > 32_000 ||
     (input.system !== undefined &&
       (typeof input.system !== 'string' || input.system.length > 16_000)) ||
+    (input.validateOutput !== undefined &&
+      typeof input.validateOutput !== 'function') ||
+    (input.signal !== undefined &&
+      (utilTypes.isProxy(input.signal) ||
+        !(input.signal instanceof AbortSignal))) ||
     !Number.isInteger(input.maxTokens) ||
     input.maxTokens < 1 ||
     input.maxTokens > 16_000 ||
@@ -230,6 +451,7 @@ export function preflightVisionReviewInput(input: ReviewVisionInput): void {
       !SHA256.test(image.sha256) ||
       image.mimeType !== 'image/png' ||
       !(image.bytes instanceof Uint8Array) ||
+      utilTypes.isProxy(image.bytes) ||
       image.bytes.byteLength < PNG_SIGNATURE.length ||
       image.bytes.byteLength > MAX_VISION_IMAGE_BYTES ||
       PNG_SIGNATURE.some((byte, index) => image.bytes[index] !== byte) ||
@@ -250,6 +472,10 @@ export function preflightVisionReviewInput(input: ReviewVisionInput): void {
   if (totalBytes > MAX_VISION_TOTAL_BYTES) {
     throw new Error('VISION_REVIEW_IMAGE_BUDGET_EXCEEDED');
   }
+}
+
+export function preflightVisionReviewInput(input: ReviewVisionInput): void {
+  assertVisionReviewInput(captureVisionReviewInput(input));
 }
 
 function freezeJson(value: unknown): void {
@@ -277,15 +503,16 @@ function freezeJson(value: unknown): void {
 export function snapshotVisionReviewInput(
   input: ReviewVisionInput,
 ): ReviewVisionInput {
-  preflightVisionReviewInput(input);
+  const captured = captureVisionReviewInput(input);
+  assertVisionReviewInput(captured);
   let schema: Record<string, unknown>;
   try {
-    schema = structuredClone(input.schema);
+    schema = structuredClone(captured.schema);
   } catch (error) {
     throw new Error('VISION_REVIEW_INPUT_INVALID', { cause: error });
   }
   freezeJson(schema);
-  const images = input.images.map((image) =>
+  const images = captured.images.map((image) =>
     Object.freeze({
       ...image,
       bytes: Uint8Array.from(image.bytes),
@@ -293,17 +520,17 @@ export function snapshotVisionReviewInput(
     }),
   );
   return Object.freeze({
-    task: input.task,
-    prompt: input.prompt,
-    ...(input.system !== undefined ? { system: input.system } : {}),
-    model: input.model,
+    task: captured.task,
+    prompt: captured.prompt,
+    ...(captured.system !== undefined ? { system: captured.system } : {}),
+    model: captured.model,
     schema,
     images: Object.freeze(images),
-    ...(input.validateOutput
-      ? { validateOutput: input.validateOutput }
+    ...(captured.validateOutput
+      ? { validateOutput: captured.validateOutput }
       : {}),
-    maxTokens: input.maxTokens,
-    maxCostCents: input.maxCostCents,
-    ...(input.signal ? { signal: input.signal } : {}),
+    maxTokens: captured.maxTokens,
+    maxCostCents: captured.maxCostCents,
+    ...(captured.signal ? { signal: captured.signal } : {}),
   });
 }
