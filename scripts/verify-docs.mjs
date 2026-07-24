@@ -18,6 +18,7 @@ const stats = {
   releaseBundles: 0,
   authoritativeFiles: 0,
   historicalFiles: 0,
+  evidenceFiles: 0,
 };
 
 function repoPath(path) {
@@ -54,8 +55,16 @@ function isHistoricalProvenance(path) {
   const historical = policy.historicalProvenance ?? {};
   return (
     historical.exact?.includes(pathFromRoot) ||
-    historical.prefixes?.some((prefix) => pathFromRoot.startsWith(prefix)) ||
-    historical.evidencePrefixes?.some((prefix) => pathFromRoot.startsWith(prefix))
+    historical.prefixes?.some((prefix) => pathFromRoot.startsWith(prefix))
+  );
+}
+
+function isImmutableEvidence(path) {
+  const pathFromRoot = repoPath(path);
+  return (
+    policy.immutableEvidence?.prefixes?.some((prefix) =>
+      pathFromRoot.startsWith(prefix),
+    ) ?? false
   );
 }
 
@@ -214,9 +223,11 @@ for (const [path, content] of markdownByPath) {
   const controlled = isControlled(path);
   const authoritativeCurrent = isAuthoritativeCurrent(path);
   const historicalProvenance = isHistoricalProvenance(path);
+  const immutableEvidence = isImmutableEvidence(path);
   if (controlled) stats.controlledFiles += 1;
   if (authoritativeCurrent) stats.authoritativeFiles += 1;
   if (historicalProvenance) stats.historicalFiles += 1;
+  if (immutableEvidence) stats.evidenceFiles += 1;
 
   const h1Count = withoutFencedCode(content)
     .split("\n")
@@ -313,6 +324,27 @@ for (const [path, content] of markdownByPath) {
           `authoritative current document requires ${field} metadata`,
         );
       }
+    }
+    if (!/^> 生命周期：`CURRENT`\s*$/m.test(metadata)) {
+      report(
+        "error",
+        "AUTHORITY_LIFECYCLE_NOT_CURRENT",
+        path,
+        "authoritative current document lifecycle must be `CURRENT`",
+      );
+    }
+  }
+
+  if (historicalProvenance) {
+    const preamble = content.split("\n").slice(0, 20).join("\n").toLowerCase();
+    const requiredAny = policy.historicalProvenance.requiredAny ?? [];
+    if (!requiredAny.some((term) => preamble.includes(term.toLowerCase()))) {
+      report(
+        "error",
+        "HISTORY_BANNER",
+        path,
+        `historical provenance preamble lacks one of: ${requiredAny.join(", ")}`,
+      );
     }
   }
 

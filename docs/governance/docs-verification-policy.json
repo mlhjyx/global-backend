@@ -49,9 +49,18 @@
     "requiredMetadata": ["文档 ID", "生命周期", "当前事实来源"]
   },
   "historicalProvenance": {
-    "exact": ["docs/site-builder/DQ-1-shared-sitespec-contract.md"],
+    "exact": [
+      "docs/site-builder/DQ-1-shared-sitespec-contract.md",
+      "docs/site-builder/10-model-selection-study.md",
+      "docs/site-builder/11-readdy-component-source-study.md",
+      "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.1.md",
+      "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md"
+    ],
     "prefixes": ["docs/site-builder/handoffs/"],
-    "evidencePrefixes": ["docs/evidence/"]
+    "requiredAny": ["FROZEN", "DATED", "SUPERSEDED", "历史", "证据", "provenance"]
+  },
+  "immutableEvidence": {
+    "prefixes": ["docs/evidence/"]
   },
   "allowedStatusTokens": [
     "ACTIVE_INPUT",
