@@ -13,14 +13,17 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import {
+  assertNoUntrackedIndexInputs,
   calculatePathPrecision,
   CodeGraphEvaluationV1,
   CodeGraphIndexEvidenceV1,
   CodeGraphStatusV1,
+  contractImpactPaths,
   contractSearchPaths,
   evaluateAdoptionGates,
   evaluateCodeGraphStatus,
   extractGitArchive,
+  measureIncrementalUpdate,
 } from "./codegraph-pilot";
 import { ContractGraphV1, GraphNodeV1 } from "./schema";
 
@@ -257,6 +260,73 @@ test("ContractGraph search freezes initial matches before one-hop expansion", ()
   assert.deepEqual(contractSearchPaths(graph, "A"), ["a.ts", "b.ts"]);
 });
 
+test("ContractGraph impact resolves dynamic and data nodes back to source paths", () => {
+  const graph: ContractGraphV1 = {
+    schemaVersion: "contract-graph/v1",
+    evidence: {
+      schemaVersion: "evidence-ref/v1",
+      repositoryRoot: "/repo",
+      worktreePath: "/repo",
+      branch: "main",
+      commit: "a".repeat(40),
+      commitTime: "2026-07-25T00:00:00.000Z",
+      dirty: false,
+      sourceHash: "b".repeat(64),
+    },
+    nodes: [
+      {
+        id: "activity:temporal:buildSite",
+        kind: "activity",
+        label: "buildSite",
+        attributes: {},
+        locations: [
+          {
+            path: "apps/api/src/temporal/site-builder.activities.ts",
+            line: 10,
+          },
+          {
+            path: "apps/api/src/temporal/site-builder.activities.spec.ts",
+            line: 20,
+          },
+          {
+            path: "apps/api/scripts/verify-site-builder.mts",
+            line: 30,
+          },
+        ],
+      },
+      {
+        id: "data-model:prisma:SiteRelease",
+        kind: "data_model",
+        label: "SiteRelease",
+        attributes: {},
+        locations: [{ path: "packages/db/prisma/schema.prisma", line: 1327 }],
+      },
+      {
+        id: "file:apps/api/src/site-builder/builds.service.ts",
+        kind: "source_file",
+        label: "apps/api/src/site-builder/builds.service.ts",
+        attributes: {},
+        locations: [],
+      },
+    ],
+    edges: [],
+    diagnostics: [],
+  };
+
+  assert.deepEqual(
+    contractImpactPaths(graph, [
+      "activity:temporal:buildSite",
+      "data-model:prisma:SiteRelease",
+      "file:apps/api/src/site-builder/builds.service.ts",
+    ]),
+    [
+      "apps/api/src/site-builder/builds.service.ts",
+      "apps/api/src/temporal/site-builder.activities.ts",
+      "packages/db/prisma/schema.prisma",
+    ],
+  );
+});
+
 test("path precision counts extra returned paths as false positives", () => {
   assert.equal(
     calculatePathPrecision(
@@ -267,6 +337,42 @@ test("path precision counts extra returned paths as false positives", () => {
     0.5,
   );
   assert.equal(calculatePathPrecision([], ["expected.ts"], true), 0);
+});
+
+test("active indexing rejects every non-ignored untracked file", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codegraph-untracked-"));
+  try {
+    await execFile("git", ["init", "--quiet"], { cwd: root });
+    await execFile("git", ["config", "user.email", "test@example.invalid"], {
+      cwd: root,
+    });
+    await execFile("git", ["config", "user.name", "ContractGraph Test"], {
+      cwd: root,
+    });
+    await writeFile(path.join(root, ".gitignore"), ".codegraph/\n");
+    await writeFile(path.join(root, "tracked.ts"), "export const safe = 1;\n");
+    await execFile("git", ["add", ".gitignore", "tracked.ts"], { cwd: root });
+    await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
+      cwd: root,
+    });
+    await assertNoUntrackedIndexInputs(root);
+
+    await writeFile(
+      path.join(root, "recovery.ts"),
+      "export const secret = 'must-not-index';\n",
+    );
+    await assert.rejects(assertNoUntrackedIndexInputs(root), /recovery\.ts/);
+    await execFile("git", ["add", "recovery.ts"], { cwd: root });
+    await assertNoUntrackedIndexInputs(root);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("incremental benchmark proves old symbol removal and new symbol indexing", async () => {
+  const elapsedMs = await measureIncrementalUpdate();
+  assert.equal(Number.isFinite(elapsedMs), true);
+  assert.equal(elapsedMs >= 0, true);
 });
 
 test("main archive extraction replaces a pre-existing wrong snapshot", async () => {

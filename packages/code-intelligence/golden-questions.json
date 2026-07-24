@@ -43,6 +43,24 @@
       "query": "SaaS frontend SiteRelease consumer",
       "baselinePattern": "SiteRelease",
       "expectedPaths": [],
+      "expectedNodes": [
+        "governance:OWN-SAAS-FE",
+        "governance:OBJ-BLK-001",
+        "data-model:prisma:SiteRelease"
+      ],
+      "expectedEdges": [
+        {
+          "from": "governance:OWN-SAAS-FE",
+          "to": "governance:OBJ-BLK-001",
+          "kind": "owns",
+          "confidence": null
+        }
+      ],
+      "externalBoundary": {
+        "ownerNode": "governance:OWN-SAAS-FE",
+        "boundaryNode": "governance:OBJ-BLK-001",
+        "contractNode": "data-model:prisma:SiteRelease"
+      },
       "expectedOutcome": "EXTERNAL_OWNED"
     },
     {
@@ -193,14 +211,36 @@
       "allowedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
       "forbiddenPaths": ["apps/api/src/temporal/worker.ts"],
       "expectedNodes": [
-        "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent"
+        "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
+        "service:outbox-event-registry:INTERNAL_COMMANDS",
+        "service:outbox-event-registry:INTEGRATION_EVENTS",
+        "event:outbox:AssetObjectCleanupRequested",
+        "event:outbox:LeadQualified"
       ],
       "expectedEdges": [
         {
           "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
-          "to": "data-model:prisma:OutboxDelivery",
-          "kind": "writes",
-          "confidence": null
+          "to": "service:outbox-event-registry:INTERNAL_COMMANDS",
+          "kind": "consumes",
+          "confidence": "PROVEN_STATIC_SET_MEMBERSHIP"
+        },
+        {
+          "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
+          "to": "service:outbox-event-registry:INTEGRATION_EVENTS",
+          "kind": "consumes",
+          "confidence": "PROVEN_STATIC_SET_MEMBERSHIP"
+        },
+        {
+          "from": "service:outbox-event-registry:INTERNAL_COMMANDS",
+          "to": "event:outbox:AssetObjectCleanupRequested",
+          "kind": "registers",
+          "confidence": "PROVEN_STATIC_SET_REGISTRATION"
+        },
+        {
+          "from": "service:outbox-event-registry:INTEGRATION_EVENTS",
+          "to": "event:outbox:LeadQualified",
+          "kind": "registers",
+          "confidence": "PROVEN_STATIC_SET_REGISTRATION"
         }
       ],
       "criticalDynamic": true

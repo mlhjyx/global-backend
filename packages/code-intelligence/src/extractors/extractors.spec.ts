@@ -417,6 +417,83 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
   }
 });
 
+test("Outbox Set registries emit exact registration and membership-dispatch edges", async () => {
+  const root = await fixture();
+  try {
+    const relay = path.join(root, "apps", "api", "src", "relay");
+    const prisma = path.join(root, "packages", "db", "prisma");
+    const temporal = path.join(root, "apps", "api", "src", "temporal");
+    await mkdir(relay, { recursive: true });
+    await mkdir(prisma, { recursive: true });
+    await mkdir(path.join(prisma, "migrations"), { recursive: true });
+    await mkdir(temporal, { recursive: true });
+    await writeFile(
+      path.join(prisma, "schema.prisma"),
+      'datasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
+    );
+    await writeFile(path.join(temporal, "workflows.ts"), "");
+    await writeFile(
+      path.join(relay, "event-registry.ts"),
+      [
+        "export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([",
+        "  'AssetObjectCleanupRequested',",
+        "]);",
+        "export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([",
+        "  'LeadQualified',",
+        "]);",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(relay, "outbox-relay.service.ts"),
+      [
+        "import { INTERNAL_COMMANDS, INTEGRATION_EVENTS } from './event-registry';",
+        "export class OutboxRelayService {",
+        "  async routeEvent(ev: { eventType: string }) {",
+        "    if (INTERNAL_COMMANDS.has(ev.eventType)) return 'internal';",
+        "    if (INTEGRATION_EVENTS.has(ev.eventType)) return 'integration';",
+        "    return 'unknown';",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    const prismaCatalog = await extractPrisma(builder, root);
+    await extractTypeScript(builder, root, prismaCatalog);
+    const graph = builder.finalize(EVIDENCE);
+    const routeEvent =
+      "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent";
+    for (const registry of ["INTERNAL_COMMANDS", "INTEGRATION_EVENTS"]) {
+      assert.equal(
+        graph.edges.some(
+          (edge) =>
+            edge.kind === "consumes" &&
+            edge.from === routeEvent &&
+            edge.to === `service:outbox-event-registry:${registry}` &&
+            edge.attributes.confidence === "PROVEN_STATIC_SET_MEMBERSHIP",
+        ),
+        true,
+      );
+    }
+    for (const [registry, eventType] of [
+      ["INTERNAL_COMMANDS", "AssetObjectCleanupRequested"],
+      ["INTEGRATION_EVENTS", "LeadQualified"],
+    ]) {
+      assert.equal(
+        graph.edges.some(
+          (edge) =>
+            edge.kind === "registers" &&
+            edge.from === `service:outbox-event-registry:${registry}` &&
+            edge.to === `event:outbox:${eventType}` &&
+            edge.attributes.confidence === "PROVEN_STATIC_SET_REGISTRATION",
+        ),
+        true,
+      );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Astro extraction records component render edges", async () => {
   const root = await fixture();
   try {

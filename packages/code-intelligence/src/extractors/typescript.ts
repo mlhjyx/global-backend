@@ -185,6 +185,41 @@ interface VisitContext {
   className?: string;
 }
 
+interface StaticEventRegistry {
+  name: string;
+  path: string;
+  values: string[];
+}
+
+function staticEventRegistry(
+  relative: string,
+  declaration: ts.VariableDeclaration,
+): StaticEventRegistry | undefined {
+  if (
+    !ts.isIdentifier(declaration.name) ||
+    !/^(?:INTERNAL_COMMANDS|INTEGRATION_EVENTS)$/.test(declaration.name.text) ||
+    !declaration.initializer ||
+    !ts.isNewExpression(declaration.initializer) ||
+    !ts.isIdentifier(declaration.initializer.expression) ||
+    declaration.initializer.expression.text !== "Set"
+  ) {
+    return undefined;
+  }
+  const valuesArgument = declaration.initializer.arguments?.[0];
+  if (!valuesArgument || !ts.isArrayLiteralExpression(valuesArgument)) {
+    return undefined;
+  }
+  const values = valuesArgument.elements
+    .map((element) => literalValue(element))
+    .filter((value): value is string => value !== undefined);
+  if (values.length !== valuesArgument.elements.length) return undefined;
+  return {
+    name: declaration.name.text,
+    path: relative,
+    values: [...new Set(values)].sort(),
+  };
+}
+
 export async function extractTypeScript(
   builder: GraphBuilder,
   repositoryRoot: string,
@@ -235,6 +270,25 @@ export async function extractTypeScript(
   } catch {
     // A repository without the canonical Temporal registry simply emits no
     // proven workflow declarations; client starts remain UNKNOWN.
+  }
+  const eventRegistries = new Map<string, StaticEventRegistry>();
+  for (const absolute of absoluteFiles) {
+    const relative = relativePath(repositoryRoot, absolute);
+    const text = await readUtf8(absolute);
+    const sourceFile = ts.createSourceFile(
+      absolute,
+      text,
+      ts.ScriptTarget.Latest,
+      true,
+      relative.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    for (const statement of sourceFile.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        const registry = staticEventRegistry(relative, declaration);
+        if (registry) eventRegistries.set(registry.name, registry);
+      }
+    }
   }
   const observations: MechanismObservation[] = [];
 
@@ -298,6 +352,52 @@ export async function extractTypeScript(
         to: testNode,
         location: { path: relative, line: 1 },
       });
+    }
+    for (const statement of sourceFile.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        const registry = staticEventRegistry(relative, declaration);
+        if (!registry) continue;
+        const location = sourceLocation(sourceFile, relative, declaration);
+        const registryNode = builder.addNode({
+          id: `service:outbox-event-registry:${registry.name}`,
+          kind: "service",
+          label: registry.name,
+          attributes: {
+            subtype: "outbox-event-registry",
+            confidence: "PROVEN_STATIC_SET_REGISTRATION",
+            transport: "transactional-outbox",
+          },
+          location,
+        });
+        builder.addEdge({
+          kind: "contains",
+          from: fileNode,
+          to: registryNode,
+          location,
+        });
+        for (const eventType of registry.values) {
+          const event = builder.addNode({
+            id: `event:outbox:${eventType}`,
+            kind: "event",
+            label: eventType,
+            attributes: {
+              registeredBy: registry.name,
+              transport: "transactional-outbox",
+            },
+            location,
+          });
+          builder.addEdge({
+            kind: "registers",
+            from: registryNode,
+            to: event,
+            attributes: {
+              confidence: "PROVEN_STATIC_SET_REGISTRATION",
+            },
+            location,
+          });
+        }
+      }
     }
 
     const proxyVariables = new Map<string, string>();
@@ -807,6 +907,35 @@ export async function extractTypeScript(
       if (ts.isCallExpression(node)) {
         const location = sourceLocation(sourceFile, relative, node);
         const chain = propertyChain(node.expression);
+        if (
+          chain.length === 2 &&
+          chain[1] === "has" &&
+          eventRegistries.has(chain[0])
+        ) {
+          const registry = eventRegistries.get(chain[0])!;
+          const target = builder.addNode({
+            id: `service:outbox-event-registry:${registry.name}`,
+            kind: "service",
+            label: registry.name,
+            attributes: {
+              subtype: "outbox-event-registry",
+              confidence: "PROVEN_STATIC_SET_REGISTRATION",
+              transport: "transactional-outbox",
+            },
+            location,
+          });
+          builder.addEdge({
+            kind: "consumes",
+            from: context.owner,
+            to: target,
+            attributes: {
+              binding: "set-membership-dispatch",
+              confidence: "PROVEN_STATIC_SET_MEMBERSHIP",
+              requiresRuntimeEvidence: true,
+            },
+            location,
+          });
+        }
         if (chain.length === 1 && context.workflow) {
           const proxyFunction = proxyFunctions.get(chain[0]);
           if (proxyFunction) {

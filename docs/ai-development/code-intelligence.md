@@ -33,7 +33,7 @@ flowchart LR
 | 治理 Registry | Capability、Scenario、Page、Object、Decision、Owner 与引用 | 产品状态自动升级或真实人员批准 |
 | TypeScript / NestJS | 文件、符号、import、Controller route、Module、constructor DI | 运行时条件分支和容器实际解析结果 |
 | Temporal | `workflows.ts` 真实导出、proxy Activity、client start、worker factory、Schedule | workflow history 已执行或 Activity 成功 |
-| Outbox | `eventType` 发布与明确 `eventType` switch 消费 | 外部 SaaS 已拉取、ACK 或正确处理 |
+| Outbox | `eventType` 发布、`INTERNAL_COMMANDS`/`INTEGRATION_EVENTS` Set 注册、`.has(eventType)` 消费与明确 switch 分支 | 外部 SaaS 已拉取、ACK 或正确处理 |
 | Prisma | model/table、relation、migration、由 migration SQL 证明的 RLS、常见 client 读写 | SQL 运行计划、触发器效果和真实数据状态 |
 | AI / 外部边界 | task ID、model-policy/Broker/Provider 静态分支与动态机制、非测试源码中的 URL 候选 | 实际模型路由、kill switch、Secret、配额、许可或外部可用性 |
 | workspace / deployment | package 依赖、tsconfig alias、Astro render、CI job、Compose/systemd | 目标环境已部署或健康 |
@@ -81,9 +81,10 @@ pnpm code-intelligence:codegraph:evaluate
 - CLI 在加载依赖前设置 `CODEGRAPH_TELEMETRY=0` 与 `DO_NOT_TRACK=1`。
 - 禁止运行 `codegraph install`、`upgrade`、watcher、MCP 或任何会写 `AGENTS.md`、Hooks、编辑器配置的自动安装。
 - main 索引来自 `origin/main` 的 Git archive 干净快照，不读取 `/global/backend` 的用户未跟踪资料；另只保留当前活跃 worktree 一个索引。
+- active 索引在施工 worktree 存在任何非忽略的未跟踪文件时拒绝构建；新源码须先进入 Git 暂存区，避免 recovery 文件、临时提示词、客户资料或凭据被持久化进 SQLite。
 - 新 main 快照和证据完整写入后，只清理 `.code-intelligence/codegraph-main/` 下通过 40 位提交哈希校验的旧派生快照；不触碰 Git worktree 或用户文件。
 - 查询必须同时通过版本、branch、commit、source hash、project path、index state、pending references、pending changes 与 extraction freshness 校验，否则拒答。
-- `unified-impact` 合并 Git diff、ContractGraph 与 CodeGraph；冲突进入人工复核队列，不自动选择一方。
+- `unified-impact` 合并 Git diff、ContractGraph 与 CodeGraph；ContractGraph 的 Activity、Workflow、Prisma model 等非文件节点先由 location 还原为源码路径，冲突进入人工复核队列，不自动选择一方。
 
 索引和证据仍只写被忽略的派生目录：
 
@@ -138,19 +139,19 @@ pnpm code-intelligence:check
 | 门 | 结果 | 要求 | 判定 |
 |---|---:|---:|---|
 | 职责路由后的统一 precision | 100%（45/45 返回路径） | ≥90% | 通过 |
-| 预期事实召回 | 100%（41/41 路径、节点、边） | ≥90% | 通过 |
+| 预期事实召回 | 100%（52/52 路径、节点、边） | ≥90% | 通过 |
 | 关键动态精确边召回 | 100%（核对 `from/to/kind/confidence`） | 100% | 通过 |
 | CodeGraph 原始 precision / recall | 42.2% / 65.5% | 观察项 | 不能单独使用 |
 | CodeGraph 参与表面的 precision | 100% | ≥90% | 通过 |
 | CodeGraph 参与表面的 recall | 89.5%（17/19） | ≥90% | **未通过** |
 | worktree/commit 识别 | 100% | 100% | 通过 |
 | 敏感路径泄漏 | 0 | 0 | 通过 |
-| 完整构建 | 重复运行约 5.7–9.0 秒 | ≤5 分钟 | 通过 |
+| 完整构建 | 重复运行约 5.0–9.0 秒 | ≤5 分钟 | 通过 |
 | 增量更新 | 重复运行约 108–115 毫秒 | ≤30 秒 | 通过 |
 | 最慢常见查询 | 重复运行约 19–21 毫秒 | ≤10 秒 | 通过 |
 | 相比 `rg + 文件读取` 的中位提速 | 重复运行约 42%–45% | ≥30% | 通过 |
 
-评测不再把“题目命中率”冒充准确率：每个额外返回路径都计为误报；关键动态题必须命中精确边，只有文件名相同不能过门。Prisma、业务追踪、Compose/systemd 与 Astro 非语言依赖按已声明职责只采用 ContractGraph，但仍单独公开 CodeGraph 的原始 precision/recall，不能用路由隐藏其缺陷。
+评测不再把“题目命中率”冒充准确率：每个额外返回路径都计为误报；关键动态题必须命中精确边，只有文件名相同不能过门。Outbox 题同时断言 Set 注册边和 `.has(eventType)` 消费边；外部消费控制绑定精确的 `OWN-SAAS-FE → OBJ-BLK-001` 边界及 `SiteRelease` 合同节点，不能被无关外部依赖误通过。增量耗时只在旧符号消失、新符号与源码可查询、索引 complete、引用和变更队列归零后才计为有效。Prisma、业务追踪、Compose/systemd 与 Astro 非语言依赖按已声明职责只采用 ContractGraph，但仍单独公开 CodeGraph 的原始 precision/recall，不能用路由隐藏其缺陷。
 
 因此采用结果仍固定为 `PILOT_ONLY`：统一路由结果与速度门通过，但 CodeGraph 在自己获准参与的表面仍漏 2/19，89.5% 未达到 90% 独立采用门。ContractGraph + `rg` + 当前源码继续是默认路径；CodeGraph 只在复杂静态调用问题中按需启用，不能据此减少 CI。评测保留真实失败门，不因已经安装而强行采用。
 

@@ -103,6 +103,11 @@ interface GoldenQuestionV1 {
   unifiedSources?: Array<"codegraph" | "contractgraph">;
   expectedNodes?: string[];
   expectedEdges?: ExpectedEdgeV1[];
+  externalBoundary?: {
+    ownerNode: string;
+    boundaryNode: string;
+    contractNode: string;
+  };
   expectedOutcome?: string;
   criticalDynamic?: boolean;
 }
@@ -401,6 +406,26 @@ function sensitivePath(relative: string): boolean {
   );
 }
 
+export async function assertNoUntrackedIndexInputs(
+  repositoryRoot: string,
+): Promise<void> {
+  const output = await git(repositoryRoot, [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+  ]);
+  const untracked = output
+    .split("\u0000")
+    .filter(Boolean)
+    .map((value) => value.replaceAll("\\", "/"))
+    .sort();
+  if (untracked.length === 0) return;
+  throw new Error(
+    `refusing active CodeGraph index with non-ignored untracked files: ${untracked.slice(0, 20).join(", ")}${untracked.length > 20 ? ` (+${untracked.length - 20} more)` : ""}`,
+  );
+}
+
 async function indexProject(projectPath: string): Promise<{
   graph: CodeGraphInstance;
   fullBuildMs: number;
@@ -494,6 +519,9 @@ export async function buildCodeGraphIndex(
   target: CodeGraphIndexTarget,
 ): Promise<CodeGraphIndexEvidenceV1> {
   const resolved = path.resolve(repositoryRoot);
+  if (target === "active") {
+    await assertNoUntrackedIndexInputs(resolved);
+  }
   const mainCommit = await git(resolved, ["rev-parse", "origin/main"]);
   const projectPath =
     target === "active" ? resolved : mainSnapshotRoot(resolved, mainCommit);
@@ -793,6 +821,40 @@ export function contractSearchPaths(
   );
 }
 
+export function contractImpactPaths(
+  graph: ContractGraphV1,
+  impactedNodeIds: string[],
+): string[] {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const isTestEvidence = (value: string): boolean =>
+    /\.(?:spec|test)\.(?:ts|tsx|mts)$/.test(value) ||
+    /(?:^|\/)scripts\/verify-/.test(value);
+  return uniqueSorted(
+    impactedNodeIds.flatMap((id) => {
+      const node = nodes.get(id);
+      const candidates = id.startsWith("file:")
+        ? [id.slice(5)]
+        : (node?.locations.map((location) => location.path) ?? []);
+      const normalized = candidates
+        .map((value) => value.replaceAll("\\", "/").replace(/^\.\//, ""))
+        .filter(
+          (value) =>
+            value.length > 0 &&
+            !path.posix.isAbsolute(value) &&
+            !value.startsWith("../") &&
+            !value.startsWith("docs/archive/") &&
+            !sensitivePath(value),
+        );
+      const implementationLocations = normalized.filter(
+        (value) => !isTestEvidence(value),
+      );
+      return implementationLocations.length > 0
+        ? implementationLocations
+        : normalized;
+    }),
+  );
+}
+
 function edgeMatchesExpectation(
   graph: ContractGraphV1,
   expected: ExpectedEdgeV1,
@@ -884,10 +946,9 @@ export async function createUnifiedImpactReport(
       }
     }
     const codeGraphPaths = uniqueSorted(affected.keys());
-    const contractPaths = uniqueSorted(
-      contract.codeImpact
-        .filter((id) => id.startsWith("file:"))
-        .map((id) => id.slice(5)),
+    const contractPaths = contractImpactPaths(
+      contractGraph,
+      contract.codeImpact,
     );
     const gitDiff = (
       await git(resolved, [
@@ -1089,7 +1150,7 @@ function routedResults(
   return results.filter((result) => result.unifiedSources.includes(engine));
 }
 
-async function measureIncrementalUpdate(): Promise<number> {
+export async function measureIncrementalUpdate(): Promise<number> {
   const root = await mkdtemp(path.join(os.tmpdir(), "codegraph-incremental-"));
   try {
     await writeFile(
@@ -1105,7 +1166,33 @@ async function measureIncrementalUpdate(): Promise<number> {
       );
       const started = performance.now();
       await graph.sync();
-      return performance.now() - started;
+      const elapsedMs = performance.now() - started;
+      const before = graph
+        .searchNodes("before", { limit: 20 })
+        .map((result) => result.node)
+        .find((node) => node.name === "before");
+      const after = graph
+        .searchNodes("after", { limit: 20 })
+        .map((result) => result.node)
+        .find((node) => node.name === "after");
+      const afterCode = after ? await graph.getCode(after.id) : null;
+      const changes = graph.getChangedFiles();
+      const pendingChanges =
+        changes.added.length + changes.modified.length + changes.removed.length;
+      if (
+        before !== undefined ||
+        after === undefined ||
+        !afterCode?.includes("function after") ||
+        graph.getIndexState() !== "complete" ||
+        graph.getPendingReferenceCount() !== 0 ||
+        pendingChanges !== 0 ||
+        graph.isIndexStale()
+      ) {
+        throw new Error(
+          `incremental CodeGraph sync did not prove updated graph state: before=${before?.id ?? "absent"} after=${after?.id ?? "absent"} state=${graph.getIndexState()} refs=${graph.getPendingReferenceCount()} changes=${pendingChanges} stale=${graph.isIndexStale()}`,
+        );
+      }
+      return elapsedMs;
     } finally {
       graph.close();
     }
@@ -1277,19 +1364,47 @@ export async function evaluateCodeGraphPilot(
       }
       if (question.kind === "EXTERNAL_OWNED_CONTROL") {
         const started = performance.now();
-        const externalOwned = contractGraph.nodes.some(
-          (node) =>
-            node.kind === "external_system" &&
-            node.attributes.ownership === "EXTERNAL_OWNED",
+        const boundary = question.externalBoundary;
+        if (!boundary) {
+          throw new Error(
+            `external-owned control ${question.id} requires an exact externalBoundary contract`,
+          );
+        }
+        const expectedNodes = question.expectedNodes ?? [];
+        const foundExpectedNodes = expectedNodes.filter((value) =>
+          contractGraph.nodes.some((node) => node.id === value),
         );
-        const unsupportedConsumerClaim = contractGraph.nodes.some(
-          (node) =>
-            /saas.*(?:frontend|consumer)|(?:frontend|consumer).*saas/i.test(
-              `${node.id}\n${node.label}`,
-            ) && node.attributes.confidence === "PROVEN_RUNTIME",
+        const expectedEdges = question.expectedEdges ?? [];
+        const foundExpectedEdges = expectedEdges.filter((value) =>
+          edgeMatchesExpectation(contractGraph, value),
+        );
+        const owner = contractGraph.nodes.find(
+          (node) => node.id === boundary.ownerNode,
+        );
+        const boundaryNode = contractGraph.nodes.find(
+          (node) => node.id === boundary.boundaryNode,
+        );
+        const contractNode = contractGraph.nodes.find(
+          (node) => node.id === boundary.contractNode,
+        );
+        const exactBoundary =
+          owner?.kind === "owner" &&
+          owner.attributes.assignee === "UNASSIGNED" &&
+          boundaryNode?.kind === "business_object" &&
+          contractNode?.kind === "data_model";
+        const unsupportedConsumerClaim = contractGraph.edges.some(
+          (edge) =>
+            [boundary.ownerNode, boundary.boundaryNode].includes(edge.from) &&
+            edge.to === boundary.contractNode &&
+            ["consumes", "reads", "routes_to"].includes(edge.kind) &&
+            edge.attributes.confidence === "PROVEN_RUNTIME",
         );
         const elapsedMs = performance.now() - started;
-        const passed = externalOwned && !unsupportedConsumerClaim;
+        const passed =
+          exactBoundary &&
+          foundExpectedNodes.length === expectedNodes.length &&
+          foundExpectedEdges.length === expectedEdges.length &&
+          !unsupportedConsumerClaim;
         results.push({
           id: question.id,
           category: question.category,
@@ -1307,12 +1422,16 @@ export async function evaluateCodeGraphPilot(
           missingExpectedPaths: [],
           falsePositivePaths: [],
           returnedForbiddenPaths: [],
-          expectedNodes: [],
-          foundExpectedNodes: [],
-          missingExpectedNodes: [],
-          expectedEdges: [],
-          foundExpectedEdges: [],
-          missingExpectedEdges: [],
+          expectedNodes,
+          foundExpectedNodes,
+          missingExpectedNodes: expectedNodes.filter(
+            (value) => !foundExpectedNodes.includes(value),
+          ),
+          expectedEdges,
+          foundExpectedEdges,
+          missingExpectedEdges: expectedEdges.filter(
+            (value) => !foundExpectedEdges.includes(value),
+          ),
           pathPrecision: 1,
           sourceClassification: "CONTROL",
           controlOutcome: {
