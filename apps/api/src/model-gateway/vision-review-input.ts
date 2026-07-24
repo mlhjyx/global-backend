@@ -15,6 +15,42 @@ const MAX_SCHEMA_DEPTH = 64;
 const MAX_SCHEMA_NODES = 10_000;
 const BOUNDED_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(
+  Uint8Array.prototype,
+) as object;
+const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  'byteLength',
+)!.get!;
+const TYPED_ARRAY_BUFFER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  'buffer',
+)!.get!;
+
+function isClosedUint8Array(value: unknown): value is Uint8Array {
+  return (
+    !utilTypes.isProxy(value) &&
+    utilTypes.isUint8Array(value) &&
+    Object.getPrototypeOf(value) === Uint8Array.prototype &&
+    !Object.getOwnPropertyDescriptor(value, 'byteLength') &&
+    !Object.getOwnPropertyDescriptor(value, 'byteOffset') &&
+    !Object.getOwnPropertyDescriptor(value, 'buffer') &&
+    !Object.getOwnPropertyDescriptor(value, Symbol.iterator) &&
+    !utilTypes.isSharedArrayBuffer(TYPED_ARRAY_BUFFER.call(value))
+  );
+}
+
+function intrinsicUint8ArrayByteLength(value: Uint8Array): number {
+  return TYPED_ARRAY_BYTE_LENGTH.call(value) as number;
+}
+
+function copyClosedUint8Array(value: Uint8Array): Uint8Array {
+  const copy = new Uint8Array(intrinsicUint8ArrayByteLength(value));
+  // TypedArray#set consumes the source's internal slots directly; unlike
+  // Uint8Array.from it does not consult a caller-controlled Symbol.iterator.
+  Uint8Array.prototype.set.call(copy, value);
+  return copy;
+}
 
 function hasOnlyAllowedEnumerableKeys(
   value: Record<string, unknown>,
@@ -35,8 +71,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (
     !value ||
     typeof value !== 'object' ||
-    Array.isArray(value) ||
-    utilTypes.isProxy(value)
+    utilTypes.isProxy(value) ||
+    Array.isArray(value)
   ) {
     return false;
   }
@@ -79,8 +115,8 @@ function captureVisionReviewInput(input: ReviewVisionInput): ReviewVisionInput {
     'VISION_REVIEW_INPUT_INVALID',
   );
   if (
-    !Array.isArray(imagesValue) ||
-    utilTypes.isProxy(imagesValue)
+    utilTypes.isProxy(imagesValue) ||
+    !Array.isArray(imagesValue)
   ) {
     throw new Error('VISION_REVIEW_INPUT_INVALID');
   }
@@ -450,10 +486,9 @@ function assertVisionReviewInput(input: ReviewVisionInput): void {
       artifactIds.has(image.artifactId) ||
       !SHA256.test(image.sha256) ||
       image.mimeType !== 'image/png' ||
-      !(image.bytes instanceof Uint8Array) ||
-      utilTypes.isProxy(image.bytes) ||
-      image.bytes.byteLength < PNG_SIGNATURE.length ||
-      image.bytes.byteLength > MAX_VISION_IMAGE_BYTES ||
+      !isClosedUint8Array(image.bytes) ||
+      intrinsicUint8ArrayByteLength(image.bytes) < PNG_SIGNATURE.length ||
+      intrinsicUint8ArrayByteLength(image.bytes) > MAX_VISION_IMAGE_BYTES ||
       PNG_SIGNATURE.some((byte, index) => image.bytes[index] !== byte) ||
       !image.target ||
       !hasOnlyAllowedEnumerableKeys(
@@ -467,7 +502,7 @@ function assertVisionReviewInput(input: ReviewVisionInput): void {
       throw new Error('VISION_REVIEW_IMAGE_INVALID');
     }
     artifactIds.add(image.artifactId);
-    totalBytes += image.bytes.byteLength;
+    totalBytes += intrinsicUint8ArrayByteLength(image.bytes);
   }
   if (totalBytes > MAX_VISION_TOTAL_BYTES) {
     throw new Error('VISION_REVIEW_IMAGE_BUDGET_EXCEEDED');
@@ -515,7 +550,7 @@ export function snapshotVisionReviewInput(
   const images = captured.images.map((image) =>
     Object.freeze({
       ...image,
-      bytes: Uint8Array.from(image.bytes),
+      bytes: copyClosedUint8Array(image.bytes),
       target: Object.freeze({ ...image.target }),
     }),
   );
