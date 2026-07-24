@@ -132,6 +132,7 @@ interface EvaluationRun {
   reportedCostUsd: number | null;
   calculatedCostUsd: number;
   artifactSha256: string;
+  artifactFileSha256: string;
   schemaValid: true;
   provenanceExact: true;
   forbiddenFieldsAbsent: true;
@@ -359,14 +360,18 @@ function assertExactProvenance(
 async function writeArtifact(
   filename: string,
   value: unknown,
-): Promise<string> {
+): Promise<{ path: string; sha256: string }> {
   await mkdir(artifactDirectory, { recursive: true });
   const target = path.join(artifactDirectory, filename);
-  await writeFile(target, `${JSON.stringify(value, null, 2)}\n`, {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(target, bytes, {
     encoding: "utf8",
     flag: "wx",
   });
-  return path.relative(repositoryRoot, target);
+  return {
+    path: path.relative(repositoryRoot, target),
+    sha256: sha256Bytes(bytes),
+  };
 }
 
 function artifactImageEvidence(images: readonly VisionReviewImage[]) {
@@ -588,7 +593,12 @@ if (cases.length !== EXPECTED_CASES) {
 }
 
 let catalog: ModelCatalogSnapshot | undefined;
-let probeArtifactPath: string | undefined;
+let probeArtifact:
+  | {
+      path: string;
+      sha256: string;
+    }
+  | undefined;
 let probe: Record<string, unknown> | undefined;
 let probeCalculatedCostUsd = 0;
 let probeReportedCostUsd: number | null = null;
@@ -639,7 +649,7 @@ try {
     artifactSha256: sha256CanonicalJson(probeOutput),
     imageEvidence: artifactImageEvidence(probeCase.images),
   };
-  probeArtifactPath = await writeArtifact("capability-probe.json", {
+  probeArtifact = await writeArtifact("capability-probe.json", {
     schemaVersion: AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION,
     evidenceId: EVIDENCE_ID,
     probe,
@@ -672,7 +682,7 @@ try {
       );
       const scored = evaluateAestheticCaseOutput(evalCase, output);
       const artifactName = `run-${sequence}.json`;
-      const artifactPath = await writeArtifact(artifactName, {
+      const artifactFile = await writeArtifact(artifactName, {
         schemaVersion: AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION,
         evidenceId: EVIDENCE_ID,
         evaluatorVersion: AESTHETIC_REVIEW_EVALUATOR_VERSION,
@@ -712,6 +722,7 @@ try {
         reportedCostUsd: call.result.usage?.costUsd ?? null,
         calculatedCostUsd: calculatedCost(call.result),
         artifactSha256: sha256CanonicalJson(output),
+        artifactFileSha256: artifactFile.sha256,
         schemaValid: true,
         provenanceExact: true,
         forbiddenFieldsAbsent: true,
@@ -720,7 +731,7 @@ try {
         caseAccepted: scored.accepted,
         overallScore: output.overallScore,
         verdict: output.verdict,
-        artifactPath,
+        artifactPath: artifactFile.path,
       });
       progress("matrix_run_completed", {
         sequence,
@@ -800,7 +811,7 @@ try {
       provider: "gateway",
     },
     catalog,
-    probe: { ...probe, artifactPath: probeArtifactPath },
+    probe: { ...probe, artifact: probeArtifact },
     contract: {
       taskId: TASK,
       evaluatorVersion: AESTHETIC_REVIEW_EVALUATOR_VERSION,
@@ -906,7 +917,10 @@ try {
       completedRuns: completedRuns.length,
       expectedRuns: EXPECTED_RUNS,
       remainingRunsNotExecuted: EXPECTED_RUNS - completedRuns.length,
-      artifacts: completedRuns.map((run) => run.artifactPath),
+      artifactManifest: completedRuns.map((run) => ({
+        path: run.artifactPath,
+        sha256: run.artifactFileSha256,
+      })),
     },
     sourceFiles: sourceStart,
     sourceIntegrity,
