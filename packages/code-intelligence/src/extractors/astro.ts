@@ -21,6 +21,28 @@ function resolveAstroImport(
   return candidates.find((candidate) => knownFiles.has(candidate)) ?? base;
 }
 
+function localImportNames(clause: string): string[] {
+  const names = new Set<string>();
+  const normalized = clause.trim().replace(/^type\s+/, "");
+  const defaultImport = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(normalized)?.[1];
+  if (defaultImport) names.add(defaultImport);
+  const namespace = /\*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)/.exec(
+    normalized,
+  )?.[1];
+  if (namespace) names.add(namespace);
+  const named = /\{([^}]+)\}/.exec(normalized)?.[1];
+  if (named) {
+    for (const entry of named.split(",")) {
+      const value = entry.trim().replace(/^type\s+/, "");
+      if (!value) continue;
+      const alias = /\bas\s+([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(value)?.[1];
+      const imported = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(value)?.[1];
+      if (alias ?? imported) names.add(alias ?? imported!);
+    }
+  }
+  return [...names];
+}
+
 export async function extractAstro(
   builder: GraphBuilder,
   repositoryRoot: string,
@@ -60,10 +82,9 @@ export async function extractAstro(
     });
 
     const imports = new Map<string, string>();
-    const importPattern =
-      /import\s+([A-Za-z][A-Za-z0-9_]*)\s+from\s+["']([^"']+)["']/g;
+    const importPattern = /import\s+([^;"']+?)\s+from\s+["']([^"']+)["']/g;
     for (const match of text.matchAll(importPattern)) {
-      const name = match[1];
+      const names = localImportNames(match[1]);
       const specifier = match[2];
       const location = {
         path: relative,
@@ -71,7 +92,7 @@ export async function extractAstro(
       };
       if (specifier.startsWith(".")) {
         const targetPath = resolveAstroImport(relative, specifier, knownFiles);
-        imports.set(name, targetPath);
+        for (const name of names) imports.set(name, targetPath);
         const target = builder.addNode({
           id: `file:${targetPath}`,
           kind: "source_file",

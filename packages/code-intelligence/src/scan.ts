@@ -27,7 +27,7 @@ import { readUtf8, relativePath, sha256, stableJson, walkFiles } from "./utils";
 const execFile = promisify(execFileCallback);
 
 const SOURCE_EXTENSIONS =
-  /\.(?:ts|tsx|mts|mjs|cjs|json|md|prisma|sql|ya?ml|service)$/;
+  /\.(?:ts|tsx|mts|mjs|cjs|astro|json|md|prisma|sql|ya?ml|service)$/;
 
 async function git(repositoryRoot: string, args: string[]): Promise<string> {
   const { stdout } = await execFile("git", ["-C", repositoryRoot, ...args], {
@@ -60,7 +60,14 @@ export async function computeSourceHash(
   repositoryRoot: string,
 ): Promise<string> {
   const files = await walkFiles(repositoryRoot, (relative) => {
-    if (!SOURCE_EXTENSIONS.test(relative)) return false;
+    if (
+      !SOURCE_EXTENSIONS.test(relative) &&
+      !/(?:^|\/)(?:Dockerfile|Containerfile)(?:\.[A-Za-z0-9_.-]+)?$/.test(
+        relative,
+      )
+    ) {
+      return false;
+    }
     if (relative.startsWith("docs/archive/")) return false;
     if (/^(?:tmp|template)\//.test(relative)) return false;
     if (/(?:^|\/)\.env(?:\.|$)/.test(relative)) return false;

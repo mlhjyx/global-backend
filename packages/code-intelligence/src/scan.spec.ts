@@ -20,6 +20,14 @@ test("source hashing excludes secrets while binding relevant source", async () =
       path.join(root, "apps", "api", "source.ts"),
       "export const value = 1;\n",
     );
+    await writeFile(
+      path.join(root, "apps", "api", "page.astro"),
+      "<h1>first</h1>\n",
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "Dockerfile"),
+      "FROM scratch\n",
+    );
     await writeFile(path.join(root, "apps", "api", ".env"), "SECRET=first\n");
     await writeFile(
       path.join(root, "apps", "api", "credentials-prod.json"),
@@ -33,10 +41,22 @@ test("source hashing excludes secrets while binding relevant source", async () =
     );
     assert.equal(await computeSourceHash(root), first);
     await writeFile(
+      path.join(root, "apps", "api", "page.astro"),
+      "<h1>second</h1>\n",
+    );
+    const afterAstro = await computeSourceHash(root);
+    assert.notEqual(afterAstro, first);
+    await writeFile(
+      path.join(root, "apps", "api", "Dockerfile"),
+      "FROM node:22\n",
+    );
+    const afterDockerfile = await computeSourceHash(root);
+    assert.notEqual(afterDockerfile, afterAstro);
+    await writeFile(
       path.join(root, "apps", "api", "source.ts"),
       "export const value = 2;\n",
     );
-    assert.notEqual(await computeSourceHash(root), first);
+    assert.notEqual(await computeSourceHash(root), afterDockerfile);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

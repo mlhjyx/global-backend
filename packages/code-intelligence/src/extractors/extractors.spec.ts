@@ -345,17 +345,25 @@ test("Astro extraction records component render edges", async () => {
     await mkdir(path.join(root, "apps", "site", "src", "pages"), {
       recursive: true,
     });
+    await mkdir(path.join(root, "apps", "site", "src", "lib"), {
+      recursive: true,
+    });
     await writeFile(
       path.join(root, "apps", "site", "src", "components", "Hero.astro"),
       "<h1>Hero</h1>",
+    );
+    await writeFile(
+      path.join(root, "apps", "site", "src", "lib", "page-reference.ts"),
+      "export const localeQualifiedPageHref = () => '/';",
     );
     await writeFile(
       path.join(root, "apps", "site", "src", "pages", "index.astro"),
       [
         "---",
         'import Hero from "../components/Hero.astro";',
+        'import { localeQualifiedPageHref } from "../lib/page-reference";',
         "---",
-        "<Hero />",
+        "<Hero href={localeQualifiedPageHref()} />",
       ].join("\n"),
     );
     const builder = new GraphBuilder();
@@ -367,6 +375,15 @@ test("Astro extraction records component render edges", async () => {
           edge.kind === "calls" &&
           edge.from.endsWith("pages/index.astro#default") &&
           edge.to.endsWith("components/Hero.astro#default"),
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "depends_on" &&
+          edge.from === "file:apps/site/src/pages/index.astro" &&
+          edge.to === "file:apps/site/src/lib/page-reference.ts",
       ),
       true,
     );
