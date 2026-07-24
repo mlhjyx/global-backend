@@ -79,23 +79,33 @@ function v3Manifest(): ReleaseManifestV3 {
   const expectedTargets = golden.spec.site.locales.flatMap((locale) =>
     golden.spec.pages.map((page) => ({ locale, pageId: page.id })),
   );
+  const aestheticEvidenceRef = {
+    objectKey: `${base.artifactPrefix}/attempts/${base.producerToken}/quality/round-0/aesthetic-evidence.json`,
+    sha256: "f".repeat(64),
+    sizeBytes: 512,
+    mimeType: "application/json" as const,
+    kind: "aesthetic_response" as const,
+  };
   const artifactDraft = {
     schemaVersion: QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
     candidateSpecDigest: base.specDigest,
     designBriefDigest: base.designBriefDigest,
     round: 0 as const,
     expectedTargets,
-    artifacts: expectedTargets.flatMap((target) =>
-      ([375, 768, 1440] as const).map((breakpoint) => ({
-        artifactId: `${target.pageId}-${target.locale}-${breakpoint}`,
-        objectKey: `${base.artifactPrefix}/attempts/${base.producerToken}/quality/round-0/${target.pageId}-${target.locale}-${breakpoint}.png`,
-        sha256: releaseSpecDigest({ ...target, breakpoint }),
-        sizeBytes: 512_000,
-        mimeType: "image/png" as const,
-        kind: "screenshot" as const,
-        target: { ...target, breakpoint },
-      })),
-    ),
+    artifacts: [
+      ...expectedTargets.flatMap((target) =>
+        ([375, 768, 1440] as const).map((breakpoint) => ({
+          artifactId: `${target.pageId}-${target.locale}-${breakpoint}`,
+          objectKey: `${base.artifactPrefix}/attempts/${base.producerToken}/quality/round-0/${target.pageId}-${target.locale}-${breakpoint}.png`,
+          sha256: releaseSpecDigest({ ...target, breakpoint }),
+          sizeBytes: 512_000,
+          mimeType: "image/png" as const,
+          kind: "screenshot" as const,
+          target: { ...target, breakpoint },
+        })),
+      ),
+      { artifactId: "aesthetic-evidence", ...aestheticEvidenceRef },
+    ],
   };
   const artifactSet: QualityArtifactSetV1 = {
     ...artifactDraft,
@@ -139,6 +149,8 @@ function v3Manifest(): ReleaseManifestV3 {
         transport: "openai.responses",
         routePolicyVersion: "site-builder-aesthetic@target",
         errorClassification: "rate_limited",
+        evidenceDigest: aestheticEvidenceRef.sha256,
+        evidenceRef: aestheticEvidenceRef,
       },
     },
   };

@@ -174,6 +174,12 @@ export async function recordBuildProgress(
     }
     if (
       latest?.attempt === attempt &&
+      TERMINAL_STEP.has(latest.status as BuildStepStatus)
+    ) {
+      return;
+    }
+    if (
+      latest?.attempt === attempt &&
       (STATUS_RANK[latest.status as BuildStepStatus] >
         STATUS_RANK[event.status] ||
         (TERMINAL_STEP.has(latest.status as BuildStepStatus) &&

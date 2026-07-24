@@ -1,4 +1,5 @@
 import {
+  canonicalDesignJson,
   designSha256,
   hasOnlyKeys,
   isNonBlankString,
@@ -635,6 +636,25 @@ export function validateDesignEvaluationV2(
   }
 
   return evaluation as unknown as DesignEvaluationV2;
+}
+
+/**
+ * The only byte representation permitted for persisted DesignEvaluation v2
+ * evidence. Writers store these exact UTF-8 bytes without a trailing newline;
+ * refs and manifests use the matching digest below.
+ */
+export function canonicalDesignEvaluationV2Json(
+  value: unknown,
+  artifactSet: QualityArtifactSetV1,
+): string {
+  return canonicalDesignJson(validateDesignEvaluationV2(value, artifactSet));
+}
+
+export function designEvaluationV2Digest(
+  value: unknown,
+  artifactSet: QualityArtifactSetV1,
+): string {
+  return designSha256(validateDesignEvaluationV2(value, artifactSet));
 }
 
 export function validateDesignEvaluationEnvelope(

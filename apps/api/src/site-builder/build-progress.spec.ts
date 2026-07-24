@@ -309,6 +309,24 @@ describe('recordBuildProgress', () => {
         },
       ),
     ).rejects.toThrow('QUALITY_ARTIFACT_INVALID');
+    await recordBuildProgress(
+      prisma,
+      { workspaceId: 'ws-1', buildRunId: 'run-1' },
+      {
+        key: 'quality_loop',
+        itemKey: 'round-0',
+        attempt: 1,
+        status: 'done',
+        phase: 'P5_publish',
+        progress: 1,
+        errorCode: 'LATE_REPLAY',
+      },
+    );
     expect(tx.siteBuildStep.upsert).not.toHaveBeenCalled();
+    expect(row).toMatchObject({
+      phase: 'P4_quality',
+      progress: 0.9,
+      errorCode: null,
+    });
   });
 });

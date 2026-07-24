@@ -7,6 +7,8 @@ import {
   SITE_SPEC_RELEASE_COMPONENT_TYPES,
   AESTHETIC_UNAVAILABLE_REASONS,
   assertReleaseComponentEligible,
+  canonicalDesignEvaluationV2Json,
+  designEvaluationV2Digest,
   hasDesignEvaluationHardFailures,
   validateDesignBriefV2,
   validateBlock,
@@ -30,6 +32,8 @@ export const RELEASE_QUALITY_SCHEMA_VERSION =
   "site-builder-release-quality/v1" as const;
 export const RELEASE_SCREENSHOT_SET_SCHEMA_VERSION =
   "site-builder-release-screenshot-set/v1" as const;
+export const RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION =
+  "site-builder-release-aesthetic-evidence/v1" as const;
 /** @deprecated Immutable v1 alias retained for existing consumers. */
 export const RELEASE_MANIFEST_SCHEMA_VERSION =
   RELEASE_MANIFEST_V1_SCHEMA_VERSION;
@@ -102,7 +106,7 @@ export interface ReleaseQualityObjectRefV1 {
   sha256: string;
   sizeBytes: number;
   mimeType: "application/json";
-  kind: "design_evaluation";
+  kind: "design_evaluation" | "aesthetic_response";
 }
 
 export interface ReleaseQualityRoundProvenanceV1 {
@@ -116,6 +120,19 @@ export interface ReleaseQualityRoundProvenanceV1 {
 }
 
 export interface ReleaseAestheticProvenanceV1 {
+  status: "passed" | "unavailable";
+  requestedModel: string;
+  reportedModel: string | null;
+  resolvedModel: string | null;
+  transport: string;
+  routePolicyVersion: string;
+  errorClassification: AestheticUnavailableReason | null;
+  evidenceDigest: string;
+  evidenceRef: ReleaseQualityObjectRefV1;
+}
+
+export interface ReleaseAestheticEvidenceV1 {
+  schemaVersion: typeof RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION;
   status: "passed" | "unavailable";
   requestedModel: string;
   reportedModel: string | null;
@@ -175,6 +192,7 @@ export interface ReleaseArtifactStorage {
 export interface BuildReleaseQualityInputV3 {
   manifest: ReleaseManifestQualityV3;
   designEvaluation: DesignEvaluationV2;
+  aestheticEvidence: ReleaseAestheticEvidenceV1;
 }
 
 export interface BuildReleaseArtifactInput {
@@ -467,6 +485,55 @@ function boundedIdentity(value: unknown): value is string {
   return typeof value === "string" && BUILD_IDENTITY.test(value);
 }
 
+export function validateReleaseAestheticEvidence(
+  value: unknown,
+): ReleaseAestheticEvidenceV1 {
+  if (
+    !record(value) ||
+    !exactKeys(value, [
+      "schemaVersion",
+      "status",
+      "requestedModel",
+      "reportedModel",
+      "resolvedModel",
+      "transport",
+      "routePolicyVersion",
+      "errorClassification",
+    ]) ||
+    value.schemaVersion !== RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION ||
+    !boundedIdentity(value.requestedModel) ||
+    !boundedIdentity(value.transport) ||
+    !boundedIdentity(value.routePolicyVersion) ||
+    (value.reportedModel !== null && !boundedIdentity(value.reportedModel)) ||
+    (value.resolvedModel !== null && !boundedIdentity(value.resolvedModel))
+  ) {
+    throw new Error("SITE_RELEASE_AESTHETIC_EVIDENCE_INVALID");
+  }
+  const passed =
+    value.status === "passed" &&
+    value.reportedModel === value.requestedModel &&
+    value.resolvedModel === value.requestedModel &&
+    value.errorClassification === null;
+  const unavailable =
+    value.status === "unavailable" &&
+    AESTHETIC_UNAVAILABLE_REASONS.includes(
+      value.errorClassification as AestheticUnavailableReason,
+    );
+  if (!passed && !unavailable) {
+    throw new Error("SITE_RELEASE_AESTHETIC_EVIDENCE_INVALID");
+  }
+  return value as unknown as ReleaseAestheticEvidenceV1;
+}
+
+/** Exact UTF-8 bytes that must be persisted at the aesthetic evidence ref. */
+export function releaseAestheticEvidenceBytes(value: unknown): Buffer {
+  return Buffer.from(canonicalJson(validateReleaseAestheticEvidence(value)));
+}
+
+export function releaseAestheticEvidenceDigest(value: unknown): string {
+  return sha256(releaseAestheticEvidenceBytes(value));
+}
+
 function round(value: unknown): value is 0 | 1 | 2 | 3 {
   return value === 0 || value === 1 || value === 2 || value === 3;
 }
@@ -475,6 +542,7 @@ function releaseQualityObjectRef(
   value: unknown,
   artifactPrefix: string,
   producerToken: string,
+  kind: ReleaseQualityObjectRefV1["kind"],
 ): value is ReleaseQualityObjectRefV1 {
   if (!record(value)) return false;
   const expectedPrefix = `${artifactPrefix}/attempts/${producerToken}/quality/`;
@@ -498,7 +566,7 @@ function releaseQualityObjectRef(
     (value.sizeBytes as number) >= 1 &&
     (value.sizeBytes as number) <= MAX_RELEASE_TOTAL_BYTES &&
     value.mimeType === "application/json" &&
-    value.kind === "design_evaluation"
+    value.kind === kind
   );
 }
 
@@ -565,6 +633,7 @@ export function validateReleaseManifestQuality(
       value.designEvaluationRef,
       context.artifactPrefix,
       context.producerToken,
+      "design_evaluation",
     ) ||
     !Array.isArray(value.rounds) ||
     !record(value.aesthetic)
@@ -678,6 +747,8 @@ export function validateReleaseManifestQuality(
       "transport",
       "routePolicyVersion",
       "errorClassification",
+      "evidenceDigest",
+      "evidenceRef",
     ]) ||
     !boundedIdentity(aesthetic.requestedModel) ||
     !boundedIdentity(aesthetic.transport) ||
@@ -685,7 +756,36 @@ export function validateReleaseManifestQuality(
     (aesthetic.reportedModel !== null &&
       !boundedIdentity(aesthetic.reportedModel)) ||
     (aesthetic.resolvedModel !== null &&
-      !boundedIdentity(aesthetic.resolvedModel))
+      !boundedIdentity(aesthetic.resolvedModel)) ||
+    typeof aesthetic.evidenceDigest !== "string" ||
+    !SHA256.test(aesthetic.evidenceDigest) ||
+    !releaseQualityObjectRef(
+      aesthetic.evidenceRef,
+      context.artifactPrefix,
+      context.producerToken,
+      "aesthetic_response",
+    ) ||
+    aesthetic.evidenceDigest !==
+      (aesthetic.evidenceRef as ReleaseQualityObjectRefV1).sha256 ||
+    !(aesthetic.evidenceRef as ReleaseQualityObjectRefV1).objectKey.startsWith(
+      `${qualityPrefix}round-${value.finalRound}/`,
+    )
+  ) {
+    throw new Error("SITE_RELEASE_QUALITY_INVALID");
+  }
+  const aestheticEvidenceRef =
+    aesthetic.evidenceRef as ReleaseQualityObjectRefV1;
+  const aestheticEvidenceArtifact = artifactSet.artifacts.find(
+    (artifact) =>
+      artifact.kind === "aesthetic_response" &&
+      artifact.objectKey === aestheticEvidenceRef.objectKey,
+  );
+  if (
+    !aestheticEvidenceArtifact ||
+    aestheticEvidenceArtifact.target !== undefined ||
+    aestheticEvidenceArtifact.sha256 !== aestheticEvidenceRef.sha256 ||
+    aestheticEvidenceArtifact.sizeBytes !== aestheticEvidenceRef.sizeBytes ||
+    aestheticEvidenceArtifact.mimeType !== aestheticEvidenceRef.mimeType
   ) {
     throw new Error("SITE_RELEASE_QUALITY_INVALID");
   }
@@ -1076,6 +1176,28 @@ export async function buildReleaseArtifact(
     } catch {
       throw new Error("SITE_RELEASE_QUALITY_GATE_NOT_PASSED");
     }
+    let aestheticEvidence: ReleaseAestheticEvidenceV1;
+    try {
+      aestheticEvidence = validateReleaseAestheticEvidence(
+        input.quality!.aestheticEvidence,
+      );
+    } catch {
+      throw new Error("SITE_RELEASE_QUALITY_GATE_NOT_PASSED");
+    }
+    const evaluationBytes = Buffer.from(
+      canonicalDesignEvaluationV2Json(evaluation, quality.artifactSet),
+    );
+    const aestheticEvidenceBytes =
+      releaseAestheticEvidenceBytes(aestheticEvidence);
+    const manifestAestheticEvidence = {
+      status: quality.aesthetic.status,
+      requestedModel: quality.aesthetic.requestedModel,
+      reportedModel: quality.aesthetic.reportedModel,
+      resolvedModel: quality.aesthetic.resolvedModel,
+      transport: quality.aesthetic.transport,
+      routePolicyVersion: quality.aesthetic.routePolicyVersion,
+      errorClassification: quality.aesthetic.errorClassification,
+    };
     const unavailable =
       evaluation.aesthetic.status === "unavailable" &&
       quality.aesthetic.status === "unavailable" &&
@@ -1086,15 +1208,43 @@ export async function buildReleaseArtifact(
       evaluation.aesthetic.status === "passed" &&
       quality.aesthetic.status === "passed" &&
       quality.status !== "passed_deterministic_aesthetic_unavailable";
+    const findings = [
+      ...evaluation.deterministic.findings,
+      ...evaluation.aesthetic.findings,
+    ];
+    const hasMajorFinding = findings.some(
+      (finding) => finding.severity === "major",
+    );
+    const hasMinorFinding = findings.some(
+      (finding) => finding.severity === "minor",
+    );
+    const statusMatchesFindings = unavailable
+      ? quality.status === "passed_deterministic_aesthetic_unavailable"
+      : hasMinorFinding
+        ? quality.status === "passed_with_minor_findings"
+        : quality.status === "passed";
     if (
       hasDesignEvaluationHardFailures(evaluation) ||
+      hasMajorFinding ||
       evaluation.deterministic.status !== "passed" ||
       evaluation.candidateSpecDigest !== common.specDigest ||
       evaluation.designBriefDigest !== designBrief!.digest ||
       evaluation.artifactSetDigest !== quality.artifactSet.artifactSetDigest ||
       evaluation.round !== quality.finalRound ||
       evaluation.evaluatorVersion !== quality.deterministicEvaluatorVersion ||
-      releaseSpecDigest(evaluation) !== quality.designEvaluationDigest ||
+      designEvaluationV2Digest(evaluation, quality.artifactSet) !==
+        quality.designEvaluationDigest ||
+      evaluationBytes.length !== quality.designEvaluationRef.sizeBytes ||
+      releaseAestheticEvidenceDigest(aestheticEvidence) !==
+        quality.aesthetic.evidenceDigest ||
+      aestheticEvidenceBytes.length !==
+        quality.aesthetic.evidenceRef.sizeBytes ||
+      canonicalJson(aestheticEvidence) !==
+        canonicalJson({
+          schemaVersion: RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION,
+          ...manifestAestheticEvidence,
+        }) ||
+      !statusMatchesFindings ||
       (!unavailable && !aestheticallyPassed)
     ) {
       throw new Error("SITE_RELEASE_QUALITY_GATE_NOT_PASSED");

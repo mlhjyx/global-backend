@@ -3,8 +3,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  canonicalDesignEvaluationV2Json,
   DESIGN_EVALUATION_V2_SCHEMA_VERSION,
   QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
+  designEvaluationV2Digest,
   qualityArtifactSetDigest,
   type DesignEvaluationV2,
   type QualityArtifactRefV1,
@@ -15,13 +17,17 @@ import { buildM1ebGoldenFixtures } from "./design/m1eb-golden";
 import {
   RELEASE_MANIFEST_V2_SCHEMA_VERSION,
   RELEASE_MANIFEST_V3_SCHEMA_VERSION,
+  RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION,
   RELEASE_QUALITY_SCHEMA_VERSION,
   buildReleaseArtifact,
   releaseScreenshotSetDigest,
   releaseSpecDigest,
+  releaseAestheticEvidenceBytes,
+  releaseAestheticEvidenceDigest,
   uploadReleaseArtifact,
   validateReleaseManifest,
   type ReleaseManifestQualityV3,
+  type ReleaseAestheticEvidenceV1,
 } from "./release-artifact";
 
 let golden: Awaited<ReturnType<typeof buildM1ebGoldenFixtures>>[number];
@@ -70,21 +76,56 @@ function screenshot(
   };
 }
 
-function artifactSet(): QualityArtifactSetV1 {
+function aestheticEvidence(
+  status: "passed" | "unavailable",
+): ReleaseAestheticEvidenceV1 {
+  return {
+    schemaVersion: RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION,
+    status,
+    requestedModel: "gemini-3.5-flash",
+    reportedModel: status === "passed" ? "gemini-3.5-flash" : null,
+    resolvedModel: status === "passed" ? "gemini-3.5-flash" : null,
+    transport: "openai.responses",
+    routePolicyVersion: "site-builder-aesthetic@target",
+    errorClassification: status === "passed" ? null : "rate_limited",
+  };
+}
+
+function aestheticEvidenceRef(evidence: ReleaseAestheticEvidenceV1) {
+  const bytes = releaseAestheticEvidenceBytes(evidence);
+  return {
+    objectKey: `${identity.artifactPrefix}/attempts/${identity.producerToken}/quality/round-0/aesthetic-evidence.json`,
+    sha256: releaseAestheticEvidenceDigest(evidence),
+    sizeBytes: bytes.length,
+    mimeType: "application/json" as const,
+    kind: "aesthetic_response" as const,
+  };
+}
+
+function artifactSet(
+  evidence: ReleaseAestheticEvidenceV1 = aestheticEvidence("unavailable"),
+): QualityArtifactSetV1 {
   const expectedTargets = golden.spec.site.locales.flatMap((locale) =>
     golden.spec.pages.map((page) => ({ locale, pageId: page.id })),
   );
+  const evidenceRef = aestheticEvidenceRef(evidence);
   const draft = {
     schemaVersion: QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
     candidateSpecDigest: releaseSpecDigest(golden.spec),
     designBriefDigest: golden.designBrief.digest,
     round: 0 as const,
     expectedTargets,
-    artifacts: expectedTargets.flatMap((target) =>
-      ([375, 768, 1440] as const).map((breakpoint) =>
-        screenshot(target.locale, target.pageId, breakpoint),
+    artifacts: [
+      ...expectedTargets.flatMap((target) =>
+        ([375, 768, 1440] as const).map((breakpoint) =>
+          screenshot(target.locale, target.pageId, breakpoint),
+        ),
       ),
-    ),
+      {
+        artifactId: "aesthetic-evidence",
+        ...evidenceRef,
+      },
+    ],
   };
   return {
     ...draft,
@@ -137,16 +178,55 @@ function designEvaluation(
   };
 }
 
+function deterministicVisualFinding(
+  artifacts: QualityArtifactSetV1,
+  severity: "major" | "minor",
+) {
+  const screenshot = artifacts.artifacts.find(
+    (artifact) => artifact.kind === "screenshot",
+  );
+  if (!screenshot?.target) throw new Error("missing screenshot fixture");
+  return {
+    source: "deterministic" as const,
+    severity,
+    ruleCode: "HORIZONTAL_OVERFLOW" as const,
+    target: screenshot.target,
+    evidenceRef: { artifactId: screenshot.artifactId },
+  };
+}
+
+function bindEvaluation(
+  snapshot: ReleaseManifestQualityV3,
+  evaluation: DesignEvaluationV2,
+): void {
+  const digest = designEvaluationV2Digest(evaluation, snapshot.artifactSet);
+  const sizeBytes = Buffer.byteLength(
+    canonicalDesignEvaluationV2Json(evaluation, snapshot.artifactSet),
+  );
+  snapshot.designEvaluationDigest = digest;
+  snapshot.designEvaluationRef = {
+    ...snapshot.designEvaluationRef,
+    sha256: digest,
+    sizeBytes,
+  };
+  snapshot.rounds[snapshot.finalRound]!.designEvaluationDigest = digest;
+}
+
 function quality(
   aestheticStatus: "passed" | "unavailable" = "unavailable",
   overrides: Partial<ReleaseManifestQualityV3> = {},
 ): ReleaseManifestQualityV3 {
-  const artifacts = artifactSet();
+  const evidence = aestheticEvidence(aestheticStatus);
+  const evidenceRef = aestheticEvidenceRef(evidence);
+  const artifacts = artifactSet(evidence);
   const evaluation = designEvaluation(artifacts, aestheticStatus);
+  const evaluationBytes = Buffer.from(
+    canonicalDesignEvaluationV2Json(evaluation, artifacts),
+  );
   const evaluationRef = {
     objectKey: `${identity.artifactPrefix}/attempts/${identity.producerToken}/quality/round-0/design-evaluation.json`,
-    sha256: releaseSpecDigest(evaluation),
-    sizeBytes: 2048,
+    sha256: designEvaluationV2Digest(evaluation, artifacts),
+    sizeBytes: evaluationBytes.length,
     mimeType: "application/json" as const,
     kind: "design_evaluation" as const,
   };
@@ -183,6 +263,8 @@ function quality(
             transport: "openai.responses",
             routePolicyVersion: "site-builder-aesthetic@target",
             errorClassification: null,
+            evidenceDigest: evidenceRef.sha256,
+            evidenceRef,
           }
         : {
             status: "unavailable",
@@ -192,6 +274,8 @@ function quality(
             transport: "openai.responses",
             routePolicyVersion: "site-builder-aesthetic@target",
             errorClassification: "rate_limited",
+            evidenceDigest: evidenceRef.sha256,
+            evidenceRef,
           },
     ...overrides,
   };
@@ -200,6 +284,7 @@ function quality(
 async function build(
   qualitySnapshot?: ReleaseManifestQualityV3,
   evaluationOverride?: DesignEvaluationV2,
+  aestheticEvidenceOverride?: ReleaseAestheticEvidenceV1,
 ) {
   return buildReleaseArtifact({
     root,
@@ -216,6 +301,19 @@ async function build(
               qualitySnapshot.artifactSet,
               qualitySnapshot.aesthetic.status,
             ),
+          aestheticEvidence:
+            aestheticEvidenceOverride ??
+            ({
+              schemaVersion: RELEASE_AESTHETIC_EVIDENCE_SCHEMA_VERSION,
+              status: qualitySnapshot.aesthetic.status,
+              requestedModel: qualitySnapshot.aesthetic.requestedModel,
+              reportedModel: qualitySnapshot.aesthetic.reportedModel,
+              resolvedModel: qualitySnapshot.aesthetic.resolvedModel,
+              transport: qualitySnapshot.aesthetic.transport,
+              routePolicyVersion: qualitySnapshot.aesthetic.routePolicyVersion,
+              errorClassification:
+                qualitySnapshot.aesthetic.errorClassification,
+            } satisfies ReleaseAestheticEvidenceV1),
         }
       : undefined,
   });
@@ -254,6 +352,20 @@ describe("M1-f ReleaseManifest v3 expand/write seam", () => {
       resolvedModel: "gemini-3.5-flash",
       errorClassification: null,
     });
+    const evaluation = designEvaluation(
+      release.manifest.quality.artifactSet,
+      "passed",
+    );
+    expect(release.manifest.quality.designEvaluationDigest).toBe(
+      createHash("sha256")
+        .update(
+          canonicalDesignEvaluationV2Json(
+            evaluation,
+            release.manifest.quality.artifactSet,
+          ),
+        )
+        .digest("hex"),
+    );
   });
 
   it("rejects evidence outside the fenced Release private prefix", async () => {
@@ -285,20 +397,55 @@ describe("M1-f ReleaseManifest v3 expand/write seam", () => {
   });
 
   it("does not call an unavailable or mismatched model a passed aesthetic review", async () => {
-    const invalid = quality("passed", {
-      status: "passed",
-      aesthetic: {
-        status: "passed",
-        requestedModel: "gemini-3.5-flash",
-        reportedModel: "stub-fallback",
-        resolvedModel: "gemini-3.5-flash",
-        transport: "openai.responses",
-        routePolicyVersion: "site-builder-aesthetic@target",
-        errorClassification: null,
-      },
-    });
+    const invalid = quality("passed");
+    invalid.aesthetic = {
+      ...invalid.aesthetic,
+      reportedModel: "stub-fallback",
+    };
     await expect(build(invalid)).rejects.toThrow(
       "SITE_RELEASE_QUALITY_INVALID",
+    );
+  });
+
+  it("requires a closed canonical aesthetic evidence object instead of trusting manifest strings", async () => {
+    const snapshot = quality("passed");
+    const forged = aestheticEvidence("passed");
+    forged.reportedModel = "stub-fallback";
+    await expect(build(snapshot, undefined, forged)).rejects.toThrow(
+      "SITE_RELEASE_QUALITY_GATE_NOT_PASSED",
+    );
+  });
+
+  it("derives passed versus passed_with_minor_findings from the bound evaluation", async () => {
+    const snapshot = quality("passed");
+    const evaluation = designEvaluation(snapshot.artifactSet, "passed");
+    evaluation.deterministic.findings = [
+      deterministicVisualFinding(snapshot.artifactSet, "minor"),
+    ];
+    bindEvaluation(snapshot, evaluation);
+
+    await expect(build(snapshot, evaluation)).rejects.toThrow(
+      "SITE_RELEASE_QUALITY_GATE_NOT_PASSED",
+    );
+    snapshot.status = "passed_with_minor_findings";
+    await expect(build(snapshot, evaluation)).resolves.toMatchObject({
+      manifest: {
+        schemaVersion: RELEASE_MANIFEST_V3_SCHEMA_VERSION,
+        quality: { status: "passed_with_minor_findings" },
+      },
+    });
+  });
+
+  it("keeps every major finding out of an activatable Release", async () => {
+    const snapshot = quality("passed");
+    snapshot.status = "passed_with_minor_findings";
+    const evaluation = designEvaluation(snapshot.artifactSet, "passed");
+    evaluation.deterministic.findings = [
+      deterministicVisualFinding(snapshot.artifactSet, "major"),
+    ];
+    bindEvaluation(snapshot, evaluation);
+    await expect(build(snapshot, evaluation)).rejects.toThrow(
+      "SITE_RELEASE_QUALITY_GATE_NOT_PASSED",
     );
   });
 

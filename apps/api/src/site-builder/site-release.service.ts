@@ -36,18 +36,33 @@ export interface SiteReleaseServiceOptions {
   leaseMs?: number;
 }
 
-export interface MaterializeSiteReleaseInput {
+export interface ReserveSiteReleaseInput {
   workspaceId: string;
   siteId: string;
   siteVersionId: string;
   buildRunId: string;
+  createdBy?: string;
+}
+
+export interface SiteReleaseMaterializationIdentity {
+  releaseId: string;
+  artifactPrefix: string;
+  producerToken: string;
+  releaseCreatedAt: string;
+}
+
+export interface MaterializeSiteReleaseInput extends ReserveSiteReleaseInput {
   root: string;
   spec: SiteSpec;
   storedSpecVersion: string;
   designBrief?: DesignBriefV2;
   /** Omitted until the M1-f workflow writer is enabled; omission preserves v2. */
   quality?: BuildReleaseQualityInputV3;
-  createdBy?: string;
+  /**
+   * Required for v3. Reserve after P4 passes, then copy canonical final
+   * evidence into this fenced prefix before materialization.
+   */
+  releaseIdentity?: SiteReleaseMaterializationIdentity;
 }
 
 export interface MaterializedSiteRelease {
@@ -79,7 +94,7 @@ interface CandidateRelease {
 
 function assertReleaseScope(
   release: CandidateRelease,
-  input: MaterializeSiteReleaseInput,
+  input: ReserveSiteReleaseInput,
 ): void {
   if (
     release.workspaceId !== input.workspaceId ||
@@ -88,6 +103,32 @@ function assertReleaseScope(
     release.buildRunId !== input.buildRunId
   ) {
     throw new Error('SITE_RELEASE_SCOPE_MISMATCH');
+  }
+}
+
+function materializationIdentity(
+  release: CandidateRelease,
+): SiteReleaseMaterializationIdentity {
+  return {
+    releaseId: release.id,
+    artifactPrefix: release.artifactPrefix,
+    producerToken: release.producerToken,
+    releaseCreatedAt: release.createdAt.toISOString(),
+  };
+}
+
+function assertMaterializationIdentity(
+  release: CandidateRelease,
+  expected: SiteReleaseMaterializationIdentity,
+): void {
+  const actual = materializationIdentity(release);
+  if (
+    actual.releaseId !== expected.releaseId ||
+    actual.artifactPrefix !== expected.artifactPrefix ||
+    actual.producerToken !== expected.producerToken ||
+    actual.releaseCreatedAt !== expected.releaseCreatedAt
+  ) {
+    throw new Error('SITE_RELEASE_MATERIALIZATION_IDENTITY_FENCED');
   }
 }
 
@@ -118,7 +159,7 @@ export class SiteReleaseService {
   }
 
   private async claim(
-    input: MaterializeSiteReleaseInput,
+    input: ReserveSiteReleaseInput,
   ): Promise<CandidateRelease> {
     const now = this.now();
     return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
@@ -214,10 +255,27 @@ export class SiteReleaseService {
     });
   }
 
+  /**
+   * Called only after P4 passes. This allocates the sole candidate Release
+   * identity so the caller can copy canonical final quality evidence into its
+   * private fenced prefix. Repeating the call renews or fences the lease.
+   */
+  async reserveMaterialization(
+    input: ReserveSiteReleaseInput,
+  ): Promise<SiteReleaseMaterializationIdentity> {
+    return materializationIdentity(await this.claim(input));
+  }
+
   async materialize(
     input: MaterializeSiteReleaseInput,
   ): Promise<MaterializedSiteRelease> {
+    if (input.quality && !input.releaseIdentity) {
+      throw new Error('SITE_RELEASE_QUALITY_IDENTITY_REQUIRED');
+    }
     const candidate = await this.claim(input);
+    if (input.releaseIdentity) {
+      assertMaterializationIdentity(candidate, input.releaseIdentity);
+    }
     const artifact = await buildReleaseArtifact({
       root: input.root,
       spec: input.spec,
