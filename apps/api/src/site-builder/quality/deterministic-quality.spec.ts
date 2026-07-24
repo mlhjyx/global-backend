@@ -215,11 +215,8 @@ describe("deterministic M1-f quality evaluation", () => {
       ),
     ).toBe(true);
     expect(
-      composeUnavailableAestheticEvaluation(
-        facts,
-        result,
-        "timeout",
-      ).deterministic.status,
+      composeUnavailableAestheticEvaluation(facts, result, "timeout")
+        .deterministic.status,
     ).toBe("failed");
   });
 
@@ -263,5 +260,43 @@ describe("deterministic M1-f quality evaluation", () => {
       ),
     ).rejects.toThrow("candidateSpecDigest mismatch");
     expect(sink.bytes.size).toBe(0);
+  });
+
+  it("keeps artifact identities distinct for valid normalized-lookalike page ids", async () => {
+    const facts = cleanFacts();
+    const detail = structuredClone(facts.spec.pages[1]!);
+    facts.spec.pages[1] = {
+      ...facts.spec.pages[1]!,
+      id: "foo:bar",
+      path: "/colon",
+    };
+    facts.spec.pages.push({
+      ...detail,
+      id: "foo_bar",
+      path: "/underscore",
+    });
+    facts.spec.site.nav = facts.spec.site.nav.map((item) =>
+      item.pageId === "detail" ? { ...item, pageId: "foo:bar" } : item,
+    );
+    facts.candidateSpecDigest = releaseSpecDigest(facts.spec);
+    const template = facts.pages[0]!;
+    facts.pages = facts.spec.site.locales.flatMap((locale) =>
+      facts.spec.pages.map((page) => ({
+        ...template,
+        target: { locale, pageId: page.id },
+        canonical: `https://preview.invalid${page.path}`,
+      })),
+    );
+    const result = await evaluateDeterministicQuality(
+      facts,
+      "private/build/quality/round-0",
+      new MemorySink(),
+    );
+    const screenshots = result.artifactSet.artifacts.filter(
+      ({ kind }) => kind === "screenshot",
+    );
+    expect(new Set(screenshots.map(({ artifactId }) => artifactId)).size).toBe(
+      screenshots.length,
+    );
   });
 });

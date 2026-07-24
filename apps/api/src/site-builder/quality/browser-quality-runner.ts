@@ -40,6 +40,17 @@ const MAX_STATIC_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_DOM_ISSUES_PER_KIND = 32;
 const MAX_URL_FACTS_PER_PAGE = 512;
 const CHROME_CANDIDATES = ["/usr/bin/google-chrome", "/usr/bin/chromium"];
+const NETWORK_API_GUARD = `<script>
+for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection"]) {
+  try {
+    Object.defineProperty(globalThis, name, {
+      value: undefined,
+      writable: false,
+      configurable: false
+    });
+  } catch {}
+}
+</script>`;
 
 interface DomAudit {
   h1Count: number;
@@ -68,6 +79,8 @@ interface AxeResult {
 export interface BrowserQualityRunnerInput {
   spec: SiteSpecV1_1;
   buildRoot: string;
+  /** Exact BASE_PATH used for the Renderer build, including leading/trailing slash. */
+  basePath: string;
   candidateSpecDigest: string;
   designBriefDigest: string;
   round: 0 | 1 | 2 | 3;
@@ -110,6 +123,30 @@ function mimeType(filePath: string): string {
       ".woff2": "font/woff2",
     }[extension] ?? "application/octet-stream"
   );
+}
+
+function normalizeBasePath(value: string): string {
+  if (
+    value === "/" ||
+    (/^\/[A-Za-z0-9._~!$&'()*+,;=:@/-]+\/$/.test(value) &&
+      !value.includes("//") &&
+      !value.includes("\\") &&
+      !value.split("/").some((segment) => segment === "." || segment === ".."))
+  ) {
+    return value;
+  }
+  throw new Error("QUALITY_ARTIFACT_INVALID: basePath");
+}
+
+function mountedPathname(pathname: string, basePath: string): string | null {
+  if (basePath === "/") return pathname;
+  if (!pathname.startsWith(basePath)) return null;
+  return `/${pathname.slice(basePath.length)}`;
+}
+
+function withBasePath(basePath: string, logicalPath: string): string {
+  const suffix = logicalPath.replace(/^\/+/, "");
+  return basePath === "/" ? `/${suffix}` : `${basePath}${suffix}`;
 }
 
 async function resolveStaticFile(
@@ -155,7 +192,9 @@ async function resolveStaticFile(
 
 export async function startLoopbackStaticServer(
   root: string,
+  rawBasePath = "/",
 ): Promise<{ origin: string; close: () => Promise<void> }> {
+  const basePath = normalizeBasePath(rawBasePath);
   const entry = await lstat(root);
   if (!entry.isDirectory() || entry.isSymbolicLink()) {
     throw new Error("QUALITY_ARTIFACT_INVALID: build root");
@@ -166,13 +205,31 @@ export async function startLoopbackStaticServer(
       return;
     }
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-    const filePath = await resolveStaticFile(root, requestUrl.pathname);
+    const pathname = mountedPathname(requestUrl.pathname, basePath);
+    const filePath = pathname ? await resolveStaticFile(root, pathname) : null;
     if (!filePath) {
       response.writeHead(404, { "cache-control": "no-store" }).end();
       return;
     }
     try {
-      const bytes = await readFile(filePath);
+      const source = await readFile(filePath);
+      let bytes = source;
+      if (path.extname(filePath).toLowerCase() === ".html") {
+        const html = source.toString("utf8");
+        const guarded = html.replace(
+          /<head(\s[^>]*)?>/i,
+          (head) => `${head}${NETWORK_API_GUARD}`,
+        );
+        if (guarded === html) {
+          response.writeHead(422, { "cache-control": "no-store" }).end();
+          return;
+        }
+        bytes = Buffer.from(guarded, "utf8");
+      }
+      if (bytes.length > MAX_STATIC_FILE_BYTES) {
+        response.writeHead(413, { "cache-control": "no-store" }).end();
+        return;
+      }
       response.writeHead(200, {
         "content-type": mimeType(filePath),
         "content-length": String(bytes.length),
@@ -287,10 +344,14 @@ function pagePath(
   spec: SiteSpecV1_1,
   locale: string,
   pathValue: string,
+  basePath: string,
 ): string {
   const pagePath = pathValue.replace(/^\/+|\/+$/g, "");
   const localePrefix = locale === spec.site.defaultLocale ? "" : locale;
-  return `/${[localePrefix, pagePath].filter(Boolean).join("/")}`;
+  return withBasePath(
+    basePath,
+    `/${[localePrefix, pagePath].filter(Boolean).join("/")}`,
+  );
 }
 
 async function auditDom(page: Page): Promise<DomAudit> {
@@ -512,9 +573,11 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-function expectedPagePaths(spec: SiteSpecV1_1): string[] {
+function expectedPagePaths(spec: SiteSpecV1_1, basePath: string): string[] {
   return spec.site.locales.flatMap((locale) =>
-    spec.pages.map((sitePage) => pagePath(spec, locale, sitePage.path)),
+    spec.pages.map((sitePage) =>
+      pagePath(spec, locale, sitePage.path, basePath),
+    ),
   );
 }
 
@@ -549,7 +612,9 @@ function structuredDataUsesFrozenFacts(
   documents: unknown[],
   snapshot: PublishableClaimSnapshot,
   spec: SiteSpecV1_1,
+  expected: { locale: string; path: string },
 ): boolean {
+  if (documents.length < 1) return false;
   const approved = new Set(snapshot.items.map((item) => item.statement.trim()));
   const visit = (value: unknown, parentKey?: string): boolean => {
     if (Array.isArray(value))
@@ -561,7 +626,7 @@ function structuredDataUsesFrozenFacts(
     if (typeof value === "string") {
       if (parentKey === "@context") return value === "https://schema.org";
       if (parentKey === "@type") return value === "WebPage";
-      if (parentKey === "inLanguage") return spec.site.locales.includes(value);
+      if (parentKey === "inLanguage") return value === expected.locale;
       if (parentKey === "url" || parentKey === "@id") {
         try {
           const parsed = new URL(value, "https://preview.invalid");
@@ -570,7 +635,8 @@ function structuredDataUsesFrozenFacts(
             !value.startsWith("//") &&
             parsed.origin === "https://preview.invalid" &&
             !parsed.search &&
-            !parsed.hash
+            !parsed.hash &&
+            (parentKey !== "url" || parsed.pathname === expected.path)
           );
         } catch {
           return false;
@@ -580,7 +646,18 @@ function structuredDataUsesFrozenFacts(
     }
     return false;
   };
-  return documents.every((document) => visit(document));
+  return documents.every(
+    (document) =>
+      document !== null &&
+      typeof document === "object" &&
+      !Array.isArray(document) &&
+      (document as Record<string, unknown>)["@context"] ===
+        "https://schema.org" &&
+      (document as Record<string, unknown>)["@type"] === "WebPage" &&
+      (document as Record<string, unknown>).url === expected.path &&
+      (document as Record<string, unknown>).inLanguage === expected.locale &&
+      visit(document),
+  );
 }
 
 async function closeContext(context: BrowserContext): Promise<void> {
@@ -720,15 +797,11 @@ async function runLighthouse(
   }
 }
 
-export async function collectBrowserQualityFacts(
+export function assertBrowserQualityCandidate(
   input: BrowserQualityRunnerInput,
-): Promise<CollectedQualityFacts> {
-  const deadline = AbortSignal.timeout(QUALITY_RUN_TIMEOUT_MS);
-  const signal = input.signal
-    ? AbortSignal.any([input.signal, deadline])
-    : deadline;
-  throwIfAborted(signal);
+): { basePath: string; targets: string[] } {
   assertReleaseContract(input.spec, input.spec.specVersion);
+  const basePath = normalizeBasePath(input.basePath);
   if (input.validation.designBrief.digest !== input.designBriefDigest) {
     throw new Error("QUALITY_ARTIFACT_INVALID: designBriefDigest mismatch");
   }
@@ -742,23 +815,53 @@ export async function collectBrowserQualityFacts(
   if (releaseSpecDigest(input.spec) !== input.candidateSpecDigest) {
     throw new Error("QUALITY_ARTIFACT_INVALID: candidateSpecDigest mismatch");
   }
-  const targets = expectedPagePaths(input.spec);
+  const targets = expectedPagePaths(input.spec, basePath);
   if (targets.length < 1 || targets.length > 24) {
     throw new Error("QUALITY_ARTIFACT_INVALID: locale-page target limit");
   }
+  return { basePath, targets };
+}
+
+export async function collectBrowserQualityFacts(
+  input: BrowserQualityRunnerInput,
+): Promise<CollectedQualityFacts> {
+  const deadline = AbortSignal.timeout(QUALITY_RUN_TIMEOUT_MS);
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, deadline])
+    : deadline;
+  throwIfAborted(signal);
+  const { basePath, targets } = assertBrowserQualityCandidate(input);
   const executablePath = await chromePath(input.chromeExecutablePath);
-  const staticServer = await startLoopbackStaticServer(input.buildRoot);
+  const staticServer = await startLoopbackStaticServer(
+    input.buildRoot,
+    basePath,
+  );
   const lighthouseProxy = await startLoopbackOnlyProxy(staticServer.origin);
   let browser: Browser | null = null;
   try {
     browser = await chromium.launch({
       executablePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      args: [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-domain-reliability",
+        "--disable-quic",
+        "--disable-sync",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--metrics-recording-only",
+        "--no-first-run",
+        `--proxy-server=${lighthouseProxy.origin}`,
+        "--proxy-bypass-list=<-loopback>",
+        "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1",
+      ],
     });
-    const robotsResponse = await fetch(`${staticServer.origin}/robots.txt`, {
-      signal,
-    });
+    const robotsResponse = await fetch(
+      `${staticServer.origin}${withBasePath(basePath, "/robots.txt")}`,
+      { signal },
+    );
     const robotsText = robotsResponse.ok
       ? (await robotsResponse.text()).slice(0, 64 * 1024)
       : "";
@@ -766,9 +869,10 @@ export async function collectBrowserQualityFacts(
       robotsResponse.ok &&
       /^user-agent\s*:/im.test(robotsText) &&
       /^disallow\s*:\s*\/\s*$/im.test(robotsText);
-    const sitemapResponse = await fetch(`${staticServer.origin}/sitemap.xml`, {
-      signal,
-    });
+    const sitemapResponse = await fetch(
+      `${staticServer.origin}${withBasePath(basePath, "/sitemap.xml")}`,
+      { signal },
+    );
     const sitemapText = sitemapResponse.ok
       ? (await sitemapResponse.text()).slice(0, 1024 * 1024)
       : "";
@@ -792,7 +896,12 @@ export async function collectBrowserQualityFacts(
       for (const sitePage of input.spec.pages) {
         throwIfAborted(signal);
         const target = { locale, pageId: sitePage.id };
-        const targetPath = pagePath(input.spec, locale, sitePage.path);
+        const targetPath = pagePath(
+          input.spec,
+          locale,
+          sitePage.path,
+          basePath,
+        );
         const screenshots = {} as Record<QualityBreakpoint, Buffer>;
         const axeResults: AxeResult[] = [];
         const domByBreakpoint = new Map<QualityBreakpoint, DomAudit>();
@@ -811,6 +920,22 @@ export async function collectBrowserQualityFacts(
             serviceWorkers: "block",
           });
           try {
+            await context.addInitScript(() => {
+              for (const name of [
+                "RTCPeerConnection",
+                "webkitRTCPeerConnection",
+              ]) {
+                try {
+                  Object.defineProperty(globalThis, name, {
+                    value: undefined,
+                    writable: false,
+                    configurable: false,
+                  });
+                } catch {
+                  // The loopback HTML guard provides the same fail-closed seam.
+                }
+              }
+            });
             await context.routeWebSocket("**", (socket) => {
               const url = new URL(socket.url());
               externalRequests.add(`${url.protocol}//${url.host}`);
@@ -959,6 +1084,7 @@ export async function collectBrowserQualityFacts(
                   input.spec,
                   expectedLocale,
                   sitePage.path,
+                  basePath,
                 );
                 return (
                   entry.lang === expectedLocale &&
@@ -982,6 +1108,7 @@ export async function collectBrowserQualityFacts(
               canonicalDom.jsonLd,
               input.validation.claimSnapshot,
               input.spec,
+              { locale, path: targetPath },
             ),
           unresolvedPlaceholder: [...domByBreakpoint.values()].some(
             (audit) => audit.unresolvedPlaceholder,
@@ -1015,6 +1142,7 @@ export async function collectBrowserQualityFacts(
       input.spec,
       input.spec.site.defaultLocale,
       home.path,
+      basePath,
     );
     const lighthouseFacts: LighthouseFacts[] = [];
     for (const breakpoint of [375, 1440] as const) {

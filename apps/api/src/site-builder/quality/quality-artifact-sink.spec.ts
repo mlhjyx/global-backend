@@ -107,11 +107,14 @@ describe("private quality artifact sink", () => {
     const identity = {
       candidateSpecDigest: "a".repeat(64),
       designBriefDigest: "b".repeat(64),
+      basePath: "/preview/acme/",
       round: 0 as const,
     };
     const artifactDraft = {
       schemaVersion: QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
-      ...identity,
+      candidateSpecDigest: identity.candidateSpecDigest,
+      designBriefDigest: identity.designBriefDigest,
+      round: identity.round,
       expectedTargets: [{ locale: "en", pageId: "home" }],
       artifacts: ([375, 768, 1440] as const).map((breakpoint) => ({
         artifactId: `home-${breakpoint}`,

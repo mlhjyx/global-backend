@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { request as httpRequest } from "node:http";
+import { createSocket, type Socket as DgramSocket } from "node:dgram";
 import { describe, expect, it } from "vitest";
 import {
   collectBrowserQualityFacts,
@@ -71,7 +72,7 @@ async function loadSpecFromDisk() {
   );
 }
 
-function html(canonicalPath: string): string {
+function html(canonicalPath: string, stunPort?: number): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -88,6 +89,17 @@ function html(canonicalPath: string): string {
     <img src="https://outside.invalid/blocked.png" alt="blocked egress probe">
     <img loading="lazy" src="/missing-lazy.png" alt="missing asset probe">
     <script>try { new WebSocket("ws://169.254.169.254/private"); } catch {}</script>
+    ${
+      stunPort
+        ? `<script>
+      try {
+        const peer = new RTCPeerConnection({iceServers:[{urls:"stun:127.0.0.1:${stunPort}"}]});
+        peer.createDataChannel("probe");
+        peer.createOffer().then((offer) => peer.setLocalDescription(offer));
+      } catch {}
+    </script>`
+        : ""
+    }
   </body>
 </html>`;
 }
@@ -138,12 +150,13 @@ describe("bounded browser quality runner", () => {
       cleanupAssets = overlay.cleanup;
       await buildSiteSpecWithTemporaryFile(spec, {
         outDir: root,
-        basePath: "/",
+        basePath: "/preview/quality/",
         publicAssetDir: overlay.publicDir,
       });
       const facts = await collectBrowserQualityFacts({
         spec,
         buildRoot: root,
+        basePath: "/preview/quality/",
         candidateSpecDigest: releaseSpecDigest(spec),
         designBriefDigest: designBrief.digest,
         round: 0,
@@ -170,10 +183,23 @@ describe("bounded browser quality runner", () => {
 
   it("captures all breakpoints, runs axe and Lighthouse, and records blocked egress", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "m1f-quality-"));
+    let udp: DgramSocket | null = createSocket("udp4");
+    let stunPacketObserved = false;
     try {
+      udp.on("message", () => {
+        stunPacketObserved = true;
+      });
+      await new Promise<void>((resolve) =>
+        udp!.bind(0, "127.0.0.1", () => resolve()),
+      );
+      const address = udp.address();
+      if (typeof address === "string") throw new Error("UDP address invalid");
       await mkdir(path.join(root, "detail"), { recursive: true });
-      await writeFile(path.join(root, "index.html"), html("/"));
-      await writeFile(path.join(root, "detail", "index.html"), html("/detail"));
+      await writeFile(path.join(root, "index.html"), html("/", address.port));
+      await writeFile(
+        path.join(root, "detail", "index.html"),
+        html("/detail", address.port),
+      );
       await writeFile(
         path.join(root, "robots.txt"),
         "User-agent: *\nDisallow: /\n",
@@ -187,6 +213,7 @@ describe("bounded browser quality runner", () => {
       const facts = await collectBrowserQualityFacts({
         spec,
         buildRoot: root,
+        basePath: "/",
         candidateSpecDigest: releaseSpecDigest(spec),
         designBriefDigest: designBrief.digest,
         round: 0,
@@ -210,7 +237,11 @@ describe("bounded browser quality runner", () => {
       expect(facts.lighthouse.map(({ breakpoint }) => breakpoint)).toEqual([
         375, 1440,
       ]);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(stunPacketObserved).toBe(false);
     } finally {
+      udp?.close();
+      udp = null;
       await rm(root, { recursive: true, force: true });
     }
   }, 180_000);
@@ -218,7 +249,10 @@ describe("bounded browser quality runner", () => {
   it("serves only files below the selected root", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "m1f-static-"));
     try {
-      await writeFile(path.join(root, "index.html"), "<h1>ok</h1>");
+      await writeFile(
+        path.join(root, "index.html"),
+        "<html><head></head><body><h1>ok</h1></body></html>",
+      );
       const server = await startLoopbackStaticServer(root);
       try {
         expect((await fetch(server.origin)).status).toBe(200);
@@ -238,7 +272,10 @@ describe("bounded browser quality runner", () => {
   it("denies proxy traffic to DNS names and literal IPs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "m1f-proxy-"));
     try {
-      await writeFile(path.join(root, "index.html"), "<h1>ok</h1>");
+      await writeFile(
+        path.join(root, "index.html"),
+        "<html><head></head><body><h1>ok</h1></body></html>",
+      );
       const staticServer = await startLoopbackStaticServer(root);
       const proxy = await startLoopbackOnlyProxy(staticServer.origin);
       try {

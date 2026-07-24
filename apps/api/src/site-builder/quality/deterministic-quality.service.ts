@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  assertBrowserQualityCandidate,
   collectBrowserQualityFacts,
   type BrowserQualityRunnerInput,
 } from "./browser-quality-runner";
@@ -28,9 +29,11 @@ export class DeterministicQualityService {
     input: RunDeterministicQualityInput,
   ): Promise<DeterministicQualityResult> {
     const { artifactPrefix, ...browserInput } = input;
+    assertBrowserQualityCandidate(browserInput);
     const identity = {
       candidateSpecDigest: input.candidateSpecDigest,
       designBriefDigest: input.designBriefDigest,
+      basePath: input.basePath,
       round: input.round,
     };
     const existing = await this.artifacts.loadCheckpoint(
@@ -42,7 +45,9 @@ export class DeterministicQualityService {
       composeUnavailableAestheticEvaluation(
         {
           spec: input.spec,
-          ...identity,
+          candidateSpecDigest: identity.candidateSpecDigest,
+          designBriefDigest: identity.designBriefDigest,
+          round: identity.round,
           pages: [],
           lighthouse: [],
         } satisfies CollectedQualityFacts,

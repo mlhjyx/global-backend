@@ -154,6 +154,24 @@ function lighthouseId(fact: LighthouseFacts): string {
   return `lighthouse-${safeToken(fact.target.locale)}-${safeToken(fact.target.pageId)}-${fact.breakpoint}`;
 }
 
+function assertArtifactIdsUnique(input: CollectedQualityFacts): void {
+  const planned = input.pages.flatMap(({ target }) => [
+    ...QUALITY_BREAKPOINTS.map((breakpoint) =>
+      screenshotId(target, breakpoint),
+    ),
+    reportId("axe", target),
+    reportId("seo", target),
+    reportId("deterministic", target),
+  ]);
+  planned.push(...input.lighthouse.map(lighthouseId));
+  if (
+    planned.some((artifactId) => artifactId.length > 128) ||
+    new Set(planned).size !== planned.length
+  ) {
+    throw new Error("QUALITY_ARTIFACT_INVALID: artifact identity collision");
+  }
+}
+
 function assertDigest(value: string, field: string): void {
   if (!/^[0-9a-f]{64}$/.test(value)) {
     throw new Error(`QUALITY_ARTIFACT_INVALID: ${field}`);
@@ -341,6 +359,7 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
   ) {
     throw new Error("QUALITY_ARTIFACT_INVALID: target order");
   }
+  assertArtifactIdsUnique(input);
   for (const page of input.pages) {
     if (
       page.axeViolations.length > 128 ||
