@@ -545,17 +545,10 @@ function sitemapPaths(xml: string, origin: string): string[] {
   });
 }
 
-const JSON_LD_VOCABULARY_KEYS = new Set([
-  "@context",
-  "@type",
-  "@id",
-  "url",
-  "inLanguage",
-]);
-
 function structuredDataUsesFrozenFacts(
   documents: unknown[],
   snapshot: PublishableClaimSnapshot,
+  spec: SiteSpecV1_1,
 ): boolean {
   const approved = new Set(snapshot.items.map((item) => item.statement.trim()));
   const visit = (value: unknown, parentKey?: string): boolean => {
@@ -565,8 +558,26 @@ function structuredDataUsesFrozenFacts(
       return Object.entries(value).every(([key, child]) => visit(child, key));
     }
     if (value === null) return true;
-    if (parentKey && JSON_LD_VOCABULARY_KEYS.has(parentKey)) return true;
-    if (typeof value === "string") return approved.has(value.trim());
+    if (typeof value === "string") {
+      if (parentKey === "@context") return value === "https://schema.org";
+      if (parentKey === "@type") return value === "WebPage";
+      if (parentKey === "inLanguage") return spec.site.locales.includes(value);
+      if (parentKey === "url" || parentKey === "@id") {
+        try {
+          const parsed = new URL(value, "https://preview.invalid");
+          return (
+            value.startsWith("/") &&
+            !value.startsWith("//") &&
+            parsed.origin === "https://preview.invalid" &&
+            !parsed.search &&
+            !parsed.hash
+          );
+        } catch {
+          return false;
+        }
+      }
+      return approved.has(value.trim());
+    }
     return false;
   };
   return documents.every((document) => visit(document));
@@ -970,6 +981,7 @@ export async function collectBrowserQualityFacts(
             !structuredDataUsesFrozenFacts(
               canonicalDom.jsonLd,
               input.validation.claimSnapshot,
+              input.spec,
             ),
           unresolvedPlaceholder: [...domByBreakpoint.values()].some(
             (audit) => audit.unresolvedPlaceholder,
