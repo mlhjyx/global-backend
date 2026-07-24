@@ -1,0 +1,88 @@
+import { Injectable } from "@nestjs/common";
+import {
+  assertBrowserQualityCandidate,
+  collectBrowserQualityFacts,
+  type BrowserQualityRunnerInput,
+} from "./browser-quality-runner";
+import { assertRendererOutputMatches } from "../renderer-build";
+import {
+  evaluateDeterministicQuality,
+  composeUnavailableAestheticEvaluation,
+  type DeterministicQualityResult,
+  type CollectedQualityFacts,
+} from "./deterministic-quality";
+import { StorageQualityArtifactSink } from "./quality-artifact-sink";
+
+export interface RunDeterministicQualityInput extends BrowserQualityRunnerInput {
+  /** Producer-isolated staging prefix ending in quality/round-N. */
+  artifactPrefix: string;
+}
+
+/**
+ * P4 deterministic seam. It intentionally stops before aesthetic review,
+ * repair selection, Release materialization, or active-pointer mutation.
+ */
+@Injectable()
+export class DeterministicQualityService {
+  constructor(private readonly artifacts: StorageQualityArtifactSink) {}
+
+  async evaluate(
+    input: RunDeterministicQualityInput,
+  ): Promise<DeterministicQualityResult> {
+    const { artifactPrefix, ...browserInput } = input;
+    assertBrowserQualityCandidate(browserInput);
+    const identity = {
+      candidateSpecDigest: input.candidateSpecDigest,
+      designBriefDigest: input.designBriefDigest,
+      basePath: input.basePath,
+      siteOrigin: input.siteOrigin,
+      rendererOutputDigest: input.rendererOutputDigest,
+      round: input.round,
+    };
+    const existing = await this.artifacts.loadCheckpoint(
+      artifactPrefix,
+      identity,
+      input.signal,
+    );
+    if (existing) {
+      await assertRendererOutputMatches({
+        root: input.buildRoot,
+        candidateSpecDigest: identity.candidateSpecDigest,
+        basePath: identity.basePath,
+        siteOrigin: identity.siteOrigin,
+        treeDigest: identity.rendererOutputDigest,
+      });
+      composeUnavailableAestheticEvaluation(
+        {
+          spec: input.spec,
+          candidateSpecDigest: identity.candidateSpecDigest,
+          designBriefDigest: identity.designBriefDigest,
+          round: identity.round,
+          pages: [],
+          lighthouse: [],
+        } satisfies CollectedQualityFacts,
+        existing,
+        "protocol_mismatch",
+      );
+      return existing;
+    }
+    const facts = await collectBrowserQualityFacts(browserInput);
+    const result = await evaluateDeterministicQuality(
+      facts,
+      artifactPrefix,
+      this.artifacts,
+      input.signal,
+    );
+    const committed = await this.artifacts.commitCheckpoint(
+      artifactPrefix,
+      { ...identity, result },
+      input.signal,
+    );
+    composeUnavailableAestheticEvaluation(
+      facts,
+      committed,
+      "protocol_mismatch",
+    );
+    return committed;
+  }
+}

@@ -12,10 +12,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildRendererEnv,
   buildSiteSpecWithTemporaryFile,
+  assertRendererOutputMatches,
   assertRenderedOutboundDomains,
   resolveRendererEntrypoint,
+  writeRendererOutputManifest,
   type RendererBuildInput,
 } from "./renderer-build";
+
+const SITE_ORIGIN = "https://preview.example.test";
 
 async function expectMissing(filePath: string): Promise<void> {
   await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
@@ -33,6 +37,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       specPath: "/tmp/spec.json",
       outDir: "/tmp/out",
       basePath: "/preview/acme/",
+      siteOrigin: SITE_ORIGIN,
     });
 
     expect(env).toEqual({
@@ -42,6 +47,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       SITESPEC_PATH: "/tmp/spec.json",
       OUT_DIR: "/tmp/out",
       BASE_PATH: "/preview/acme/",
+      SITE_ORIGIN,
       ASTRO_TELEMETRY_DISABLED: "1",
     });
     expect(env).not.toHaveProperty("DATABASE_URL");
@@ -58,6 +64,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
         specPath: "/tmp/spec.json",
         outDir: "/tmp/out",
         basePath: "/",
+        siteOrigin: SITE_ORIGIN,
         publicAssetDir: "/tmp/overlay",
       }),
     ).toMatchObject({
@@ -89,11 +96,101 @@ describe("rendered outbound-domain gate", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("allows schema vocabulary only inside JSON-LD, not navigable links", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "m1f-schema-domain-"));
+    try {
+      await writeFile(
+        path.join(dir, "index.html"),
+        '<script type="application/ld+json">{"@context":"https://schema.org"}</script>',
+      );
+      await expect(
+        assertRenderedOutboundDomains(dir, [], SITE_ORIGIN),
+      ).resolves.toBeUndefined();
+      await writeFile(
+        path.join(dir, "index.html"),
+        '<a href="https://schema.org/escape">escape</a>',
+      );
+      await expect(
+        assertRenderedOutboundDomains(dir, [], SITE_ORIGIN),
+      ).rejects.toThrow("RENDERER_OUTBOUND_DOMAIN_FORBIDDEN");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("renderer output candidate binding", () => {
+  it("binds the complete bounded output tree to the candidate and detects mutation", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "m1f-render-tree-"));
+    const candidateSpecDigest = "a".repeat(64);
+    try {
+      await writeFile(path.join(dir, "index.html"), "<h1>candidate A</h1>");
+      const manifest = await writeRendererOutputManifest({
+        root: dir,
+        candidateSpecDigest,
+        basePath: "/preview/acme/",
+        siteOrigin: SITE_ORIGIN,
+      });
+      await expect(
+        assertRendererOutputMatches({
+          root: dir,
+          candidateSpecDigest,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+          treeDigest: manifest.treeDigest,
+        }),
+      ).resolves.toEqual(manifest);
+
+      await writeFile(
+        path.join(dir, ".site-builder-render-output.json.tmp"),
+        "incomplete",
+      );
+      await expect(
+        assertRendererOutputMatches({
+          root: dir,
+          candidateSpecDigest,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+          treeDigest: manifest.treeDigest,
+        }),
+      ).rejects.toThrow("RENDERER_OUTPUT_TREE_MISMATCH");
+      await rm(path.join(dir, ".site-builder-render-output.json.tmp"));
+
+      await writeFile(path.join(dir, "index.html"), "<h1>stale output</h1>");
+      await expect(
+        assertRendererOutputMatches({
+          root: dir,
+          candidateSpecDigest,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+          treeDigest: manifest.treeDigest,
+        }),
+      ).rejects.toThrow("RENDERER_OUTPUT_TREE_MISMATCH");
+
+      await writeFile(
+        path.join(dir, ".site-builder-render-output.json"),
+        Buffer.alloc(4097),
+      );
+      await expect(
+        assertRendererOutputMatches({
+          root: dir,
+          candidateSpecDigest,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+          treeDigest: manifest.treeDigest,
+        }),
+      ).rejects.toThrow("RENDERER_OUTPUT_MANIFEST_INVALID");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
   it("构建期间使用 0600 随机临时文件，成功后删除整个临时目录", async () => {
     let observedPath = "";
+    const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
       expect(path.basename(input.specPath)).toBe("site-spec.json");
@@ -102,36 +199,53 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         0o700,
       );
       expect((await stat(input.specPath)).mode & 0o777).toBe(0o600);
+      await writeFile(path.join(input.outDir, "index.html"), "<h1>ok</h1>");
     });
 
-    await buildSiteSpecWithTemporaryFile(
-      { safe: true },
-      { outDir: "/tmp/out", basePath: "/preview/acme/" },
-      execute,
-    );
+    try {
+      await buildSiteSpecWithTemporaryFile(
+        { safe: true },
+        {
+          outDir,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+        },
+        execute,
+      );
 
-    expect(execute).toHaveBeenCalledTimes(1);
-    await expectMissing(observedPath);
-    await expectMissing(path.dirname(observedPath));
+      expect(execute).toHaveBeenCalledTimes(1);
+      await expectMissing(observedPath);
+      await expectMissing(path.dirname(observedPath));
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
   });
 
   it("将可信 overlay 路径传给 renderer executor", async () => {
+    const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       expect(input.publicAssetDir).toBe("/tmp/overlay");
+      await writeFile(path.join(input.outDir, "index.html"), "<h1>ok</h1>");
     });
-    await buildSiteSpecWithTemporaryFile(
-      { safe: true },
-      {
-        outDir: "/tmp/out",
-        basePath: "/",
-        publicAssetDir: "/tmp/overlay",
-      },
-      execute,
-    );
+    try {
+      await buildSiteSpecWithTemporaryFile(
+        { safe: true },
+        {
+          outDir,
+          basePath: "/",
+          siteOrigin: SITE_ORIGIN,
+          publicAssetDir: "/tmp/overlay",
+        },
+        execute,
+      );
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
   });
 
   it("Renderer 抛错时仍在 finally 删除 SiteSpec 与随机临时目录，并保留原错误", async () => {
     let observedPath = "";
+    const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       observedPath = input.specPath;
       expect(await readFile(input.specPath, "utf8")).toBe(
@@ -140,15 +254,23 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
       throw new Error("astro failed");
     });
 
-    await expect(
-      buildSiteSpecWithTemporaryFile(
-        { tenant: "content" },
-        { outDir: "/tmp/out", basePath: "/preview/acme/" },
-        execute,
-      ),
-    ).rejects.toThrow("astro failed");
+    try {
+      await expect(
+        buildSiteSpecWithTemporaryFile(
+          { tenant: "content" },
+          {
+            outDir,
+            basePath: "/preview/acme/",
+            siteOrigin: SITE_ORIGIN,
+          },
+          execute,
+        ),
+      ).rejects.toThrow("astro failed");
 
-    await expectMissing(observedPath);
-    await expectMissing(path.dirname(observedPath));
+      await expectMissing(observedPath);
+      await expectMissing(path.dirname(observedPath));
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
   });
 });

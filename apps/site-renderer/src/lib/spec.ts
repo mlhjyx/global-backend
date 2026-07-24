@@ -26,6 +26,27 @@ export function loadSpec(): MaterializedSpec {
   return cached;
 }
 
+export function siteOrigin(): string {
+  const raw = process.env.SITE_ORIGIN;
+  if (!raw) throw new Error('SITE_ORIGIN not set');
+  const parsed = new URL(raw);
+  const loopback =
+    parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (
+    parsed.origin !== raw ||
+    parsed.username ||
+    parsed.password ||
+    (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback))
+  ) {
+    throw new Error('SITE_ORIGIN_INVALID');
+  }
+  return parsed.origin;
+}
+
+export function absoluteSiteHref(pathname: string): string {
+  return new URL(pathname, siteOrigin()).href;
+}
+
 /** textKey → 文案；缺 key 输出可见标记（QA 期一眼看出，绝不静默空串）。 */
 export function makeT(
   spec: MaterializedSpec,

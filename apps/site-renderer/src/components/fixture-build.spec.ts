@@ -13,10 +13,16 @@ const astroBin =
   process.platform === 'win32'
     ? 'node_modules\\.bin\\astro.CMD'
     : 'node_modules/.bin/astro';
+const TEST_SITE_ORIGIN = 'https://preview.example.test';
 
 function runBuild(specPath: string, outDir: string): void {
   execSync(`${astroBin} build`, {
-    env: { ...process.env, SITESPEC_PATH: specPath, OUT_DIR: outDir },
+    env: {
+      ...process.env,
+      SITESPEC_PATH: specPath,
+      OUT_DIR: outDir,
+      SITE_ORIGIN: TEST_SITE_ORIGIN,
+    },
     stdio: 'pipe',
     timeout: 60000,
   });

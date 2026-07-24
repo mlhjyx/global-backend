@@ -121,6 +121,7 @@ jobs:
         env:
           SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json
           OUT_DIR: ${{ runner.temp }}/site-renderer-multilingual
+          SITE_ORIGIN: https://preview.example.test
 
   contracts:
     name: contracts · drift · lint · breaking

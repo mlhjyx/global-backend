@@ -35,7 +35,7 @@ export default defineConfig({
     use: { viewport: { width, height } },
   })),
   webServer: {
-    command: `SITESPEC_PATH=${siteSpecPath} pnpm dev --host 127.0.0.1 --port 4325`,
+    command: `SITESPEC_PATH=${siteSpecPath} SITE_ORIGIN=http://127.0.0.1:4325 pnpm dev --host 127.0.0.1 --port 4325`,
     url: "http://127.0.0.1:4325",
     reuseExistingServer:
       !process.env.CI &&
