@@ -425,6 +425,10 @@ describe('R1 deterministic release artifact', () => {
     await mkdir(path.join(root, 'assets'));
     await writeFile(path.join(root, 'z.html'), '<h1>Z</h1>');
     await writeFile(path.join(root, 'assets', 'app.css'), 'body{}');
+    await writeFile(
+      path.join(root, '.site-builder-render-output.json'),
+      '{"private":"producer binding"}',
+    );
 
     const first = await buildReleaseArtifact({
       ...identity,

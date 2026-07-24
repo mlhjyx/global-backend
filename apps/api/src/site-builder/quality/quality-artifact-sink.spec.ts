@@ -109,6 +109,7 @@ describe("private quality artifact sink", () => {
       designBriefDigest: "b".repeat(64),
       basePath: "/preview/acme/",
       siteOrigin: "https://preview.example.test",
+      rendererOutputDigest: "c".repeat(64),
       round: 0 as const,
     };
     const artifactDraft = {

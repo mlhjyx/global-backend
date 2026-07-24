@@ -30,7 +30,10 @@ import {
   type QualityPageFacts,
 } from "./deterministic-quality";
 import { assertReleaseContract, releaseSpecDigest } from "../release-artifact";
-import { validateRendererSiteOrigin } from "../renderer-build";
+import {
+  assertRendererOutputMatches,
+  validateRendererSiteOrigin,
+} from "../renderer-build";
 import { assertControlledAssemblyValid } from "../assembly/controlled-assembly-validator";
 import type { CopySlotDefinition } from "../copy-bundle.service";
 import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
@@ -84,6 +87,8 @@ export interface BrowserQualityRunnerInput {
   basePath: string;
   /** Server-controlled platform preview origin; custom domains remain M2. */
   siteOrigin: string;
+  /** Content-addressed digest returned by the Renderer output manifest. */
+  rendererOutputDigest: string;
   candidateSpecDigest: string;
   designBriefDigest: string;
   round: 0 | 1 | 2 | 3;
@@ -805,6 +810,9 @@ export function assertBrowserQualityCandidate(
   assertReleaseContract(input.spec, input.spec.specVersion);
   const basePath = normalizeBasePath(input.basePath);
   const siteOrigin = validateRendererSiteOrigin(input.siteOrigin);
+  if (!/^[a-f0-9]{64}$/.test(input.rendererOutputDigest)) {
+    throw new Error("QUALITY_ARTIFACT_INVALID: rendererOutputDigest");
+  }
   if (input.validation.designBrief.digest !== input.designBriefDigest) {
     throw new Error("QUALITY_ARTIFACT_INVALID: designBriefDigest mismatch");
   }
@@ -835,6 +843,13 @@ export async function collectBrowserQualityFacts(
   throwIfAborted(signal);
   const { basePath, siteOrigin, targets } =
     assertBrowserQualityCandidate(input);
+  await assertRendererOutputMatches({
+    root: input.buildRoot,
+    candidateSpecDigest: input.candidateSpecDigest,
+    basePath,
+    siteOrigin,
+    treeDigest: input.rendererOutputDigest,
+  });
   const executablePath = await chromePath(input.chromeExecutablePath);
   const staticServer = await startLoopbackStaticServer(
     input.buildRoot,
@@ -1162,6 +1177,13 @@ export async function collectBrowserQualityFacts(
         ),
       );
     }
+    await assertRendererOutputMatches({
+      root: input.buildRoot,
+      candidateSpecDigest: input.candidateSpecDigest,
+      basePath,
+      siteOrigin,
+      treeDigest: input.rendererOutputDigest,
+    });
     return {
       spec: input.spec,
       candidateSpecDigest: input.candidateSpecDigest,

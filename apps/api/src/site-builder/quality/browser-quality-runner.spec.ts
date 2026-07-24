@@ -22,7 +22,10 @@ import { STATIC_DESIGN_CATALOG_V2 } from "../design/catalog";
 import { loadQualifiedComponentTemplates } from "../assembly/qualified-component-templates";
 import { deriveCopySlotDefinitions } from "../assembly/copy-slot-derivation";
 import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
-import { buildSiteSpecWithTemporaryFile } from "../renderer-build";
+import {
+  buildSiteSpecWithTemporaryFile,
+  writeRendererOutputManifest,
+} from "../renderer-build";
 import { materializeControlledAssetOverlay } from "../controlled-asset-materializer";
 
 const repositoryRoot = path.resolve(
@@ -149,22 +152,24 @@ describe("bounded browser quality runner", () => {
         },
       });
       cleanupAssets = overlay.cleanup;
-      await buildSiteSpecWithTemporaryFile(spec, {
+      const outputManifest = await buildSiteSpecWithTemporaryFile(spec, {
         outDir: root,
         basePath: "/preview/quality/",
         siteOrigin: SITE_ORIGIN,
         publicAssetDir: overlay.publicDir,
       });
-      const facts = await collectBrowserQualityFacts({
+      const qualityInput = {
         spec,
         buildRoot: root,
         basePath: "/preview/quality/",
         siteOrigin: SITE_ORIGIN,
+        rendererOutputDigest: outputManifest.treeDigest,
         candidateSpecDigest: releaseSpecDigest(spec),
         designBriefDigest: designBrief.digest,
-        round: 0,
+        round: 0 as const,
         validation,
-      });
+      };
+      const facts = await collectBrowserQualityFacts(qualityInput);
       expect(facts.pages).toHaveLength(2);
       for (const page of facts.pages) {
         expect(page.h1Count).toBe(1);
@@ -178,6 +183,13 @@ describe("bounded browser quality runner", () => {
         expect(page.brokenInternalLinks).toEqual([]);
         expect(page.missingStaticAssets).toEqual([]);
       }
+      await writeFile(
+        path.join(root, "index.html"),
+        "<html><head></head><body>stale candidate</body></html>",
+      );
+      await expect(collectBrowserQualityFacts(qualityInput)).rejects.toThrow(
+        "RENDERER_OUTPUT_TREE_MISMATCH",
+      );
     } finally {
       await cleanupAssets?.();
       await rm(root, { recursive: true, force: true });
@@ -212,12 +224,19 @@ describe("bounded browser quality runner", () => {
         `<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/detail</loc></url></urlset>`,
       );
       const { spec, designBrief, validation } = await loadFixture();
+      const outputManifest = await writeRendererOutputManifest({
+        root,
+        candidateSpecDigest: releaseSpecDigest(spec),
+        basePath: "/",
+        siteOrigin: SITE_ORIGIN,
+      });
       expect(spec).toEqual(await loadSpecFromDisk());
       const facts = await collectBrowserQualityFacts({
         spec,
         buildRoot: root,
         basePath: "/",
         siteOrigin: SITE_ORIGIN,
+        rendererOutputDigest: outputManifest.treeDigest,
         candidateSpecDigest: releaseSpecDigest(spec),
         designBriefDigest: designBrief.digest,
         round: 0,
