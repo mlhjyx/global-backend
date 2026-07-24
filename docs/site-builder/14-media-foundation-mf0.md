@@ -1,10 +1,13 @@
 # 14 · MF-0 媒体地基契约 — 施工级展开（media foundation）
 
-> **薄版媒体合同的裁决已在别处，本文只做施工级展开。** 决策真值 = [00-decisions MF-0 裁决](00-decisions-and-coordination.md)（2026-07-15）+ [`docs/adr/registry.md` ADR-018](../adr/registry.md)（MF-0 媒体地基·薄版）；契约周边真值 = [02-architecture §8](02-architecture.md)（素材与版权基线）+ [04-sitespec-contract §4](04-sitespec-contract.md)（资产引用约定）+ DQ-1 `@global/contracts`（SiteSpec 1.0.0）。本文**非权威**、不自封"单一入口"；它把 ADR-018 的两句薄合同展开成可施工的表结构、扫描器、处理矩阵与分期触发条件，并把 v3.2 §20–§21 里关于图片/视频/音频的实质设计**回写归档**，好让 v3.2 归档时零内容损失。
+> 文档 ID：`SITE-MEDIA-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：资产引用门、受控 overlay 与 [状态](../status/current.md)。
+> **薄版媒体合同的裁决已在别处，本文只做施工级展开。** 决策真值 = [00-decisions MF-0 裁决](00-decisions-and-coordination.md)（2026-07-15）+ [`docs/adr/registry.md` ADR-018](../adr/registry.md)（MF-0 媒体地基·薄版）；契约周边真值 = [02-architecture §8](02-architecture.md)（素材与版权基线）+ [04-sitespec-contract §4](04-sitespec-contract.md)（资产引用约定）+ DQ-1 `@global/contracts`（SiteSpec 1.0/1.1）。本文**非权威**、不自封"单一入口"；它把 ADR-018 的两句薄合同展开成可施工的表结构、扫描器、处理矩阵与分期触发条件，并把 v3.2 §20–§21 里关于图片/视频/音频的实质设计**回写归档**，好让 v3.2 归档时零内容损失。
 >
 > **严格分层（勿混淆 as-built 与 target）**：
-> - **当前 as-built（MF0-A + MF0-B，2026-07-17）**：`AssetVariant` 数据地基、Profile + 当前 `activeVersionId` 引用守卫、共享 Asset 行锁、`409 ASSET_IN_USE`、严格 canonical/Variant Temporal 回收与历史 parked 对账已落；`MediaJob`/`AssetUsage`/`SiteRelease`、Sharp writer 仍不存在。
-> - **M1-c as-built**（本文 §4，2026-07-17 当前交付分支）：MF0-B 之上已落纯 Sharp 确定性图片管线并写 `AssetVariant`；是否进入 `main` 以 PR/CI/合并证据为准。
+> - **当前 as-built（2026-07-24）**：`AssetVariant` 数据地基、Profile + 当前 `activeVersionId` 引用守卫、共享 Asset 行锁、`409 ASSET_IN_USE`、严格 canonical/Variant Temporal 回收、M1-c 纯 Sharp writer 与 immutable `SiteRelease` 均已落。
+> - **M1-e-B as-built**：受控 assembly 把冻结 tenant/catalog asset 引用物化为 Renderer public overlay，并对 catalog 字节 hash、tenant variant/RLS 与 manifest 对账；`MediaJob`/`AssetUsage` 仍未建立。
 > - **MF-1 目标**（本文 §6，事件触发补建，YAGNI）：`MediaJob`/`AssetUsage`——**接生成式/异步媒体或跨 Release 持久反查的第一个真实消费者前**才落，不提前建。
 > - **M3 目标**（本文 §7–§8，远期，全为 target）：视频与音频（VideoBrief/Shot/Seedance/旁白/播放/ReleaseManifest 媒体组合）。
 
@@ -56,7 +59,7 @@ MF-0-thin 阶段的删除保护是一个**确定性扫描器**，不是 `AssetUs
 
 - **输入**：待删 `assetId`。
 - **当前扫描面**：Profile 三个正式引用面（`brand.logoAssetId`、认证 `certificateAssetIds`、客户案例 `assetIds`）+ `Site.activeVersionId` 指向的**唯一当前 SiteVersion**。当前 schema 没有 preview/published 双指针；历史版本不阻止删除，但未来重新激活时必须在切指针事务内重新验证。
-- **SiteSpec 1.0.0**：manifest 的 UUID、kind、hash 必须与同站 ready/checksummed Asset 对账；开放 `root.props`/`content[].props` 采用有界递归，并按媒体字段语义识别 `assetId`/`*AssetId`/`*AssetIds` 与 `videoRef` 引用，明确排除组件 `id`、`offeringRef` 等业务 UUID。任何语义媒体引用未进 manifest、畸形 envelope/page/puck/block、重复大小写 UUID、未知版本、超深/超量均 fail-closed。
+- **SiteSpec 版本感知扫描**：1.0 legacy manifest 的 UUID、kind、hash 必须与同站 ready/checksummed Asset 对账；1.1 同时校验 tenant/catalog 联合引用、catalog pack 与字节 hash。开放 `root.props`/`content[].props` 采用有界递归，并按媒体字段语义识别 `assetId`/`*AssetId`/`*AssetIds` 与 `videoRef` 引用，明确排除组件 `id`、`offeringRef` 等业务 UUID。任何语义媒体引用未进 manifest、畸形 envelope/page/puck/block、重复大小写 UUID、未知版本、超深/超量均 fail-closed；catalog 引用不进入 tenant Asset 删除锁。
 - **命中即拒**：返回 **HTTP 409 `ASSET_IN_USE`** + `details.usages[]`；每项稳定含 `source/page/component/fieldPath`，SiteSpec 项另带 `siteVersionId`。替换流程 = **先改 Profile/Spec 再删**。
 - **并发不变量**：Profile PATCH、activeVersion 指针切换、Variant INSERT/UPDATE 与 DELETE 使用同一 Asset 行锁纪律；Variant 另有 DB trigger backstop。任一顺序都不能让引用写与 tombstone 同时成功。
 - **接口不变式**：MF-1 上线后由**同一接口**切换到 `AssetUsage` 查询实现，**调用方无感**（先扫描器、后反查表，API 契约稳定）。
@@ -87,7 +90,7 @@ M1-c 图片管线 = **确定性 Sharp**，零模型、零生成式（ADR-018 + D
 
 - **格式**：每档尺寸输出 AVIF + WebP + fallback（渲染器统一 `<picture>` 消费，见下）。
 - **焦点裁剪**：`focalPoint`（04 §4，`[x,y]∈[0,1]`）驱动 contain/cover 受控裁切，避免主体被裁掉。
-- **失败隔离**：M1-c 逐图返回结构化成功/失败，坏图只令本步骤 `degraded`，取消必须穿透。当前 SiteSpec/DesignBrief 尚无可靠 required-media 声明，故“必需 Hero 无 fallback 才阻断”由 M1-e 消费者落地，M1-c 不猜测。
+- **失败隔离**：M1-c 逐图返回结构化成功/失败，坏图只令本步骤 `degraded`，取消必须穿透。M1-e-B 已由 Blueprint/adapter 的 asset role、evidence 与 DemoVisualPack fallback 固定 required-media；M1-c 不自行猜测页面语义。
 - 🔴 **不接 rembg**（D-M1c-1）：抠图容器唯一消费者=生成式重绘，已延后；M1-c 不加 rembg 容器、不写生成式图片调用。
 - 🔴 **cert/person/logo 不进入生成式分支**；本 PR 无任何 provider 调用。
 

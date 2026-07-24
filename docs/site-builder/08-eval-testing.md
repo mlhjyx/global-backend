@@ -1,8 +1,11 @@
 # 评测与测试策略 v1（活文档，分阶段实施）
 
+> 文档 ID：`SITE-EVAL-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：资格证据、Golden 资产与 [状态](../status/current.md)。
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 build 内的审核/SEO/审美三评审，02 §4 P4，已设计）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
-> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；BrandProfile 有 MODEL-1 task-shaped 评测。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**，不能宣称 copy MODEL-1 晋级。design/assemble/QA/审美等其余目标仍未覆盖；55 型封闭组件库已落地（蒸馏），当前 55 型 as-built。
+> **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；只有 BrandProfile 已完成 MODEL-1 task-shaped 晋级。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**。M1-e-B 已使 design/assemble 成为真实受控消费者，但其 402 后确定性降级不构成模型成功证据；QA/SEO/审美质量循环仍属 M1-f。55 型均为 `m1_e_a_qualified`，不是蒸馏产物状态。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 
@@ -12,8 +15,8 @@
 
 | 位置 | 当前痛点 | 质量环内容 | 状态 |
 |---|---|---|---|
-| Demo v0 | 三页固定结构、无素材、仅两种主题 | TemplateFamily 排序 + Blueprint + 安全 DemoVisualPack；全程确定性，P95<10s | 目标（DV-0） |
-| M1-e | 有组件但无整站设计语法，易组件拼盘 | DesignDNA + TemplateFamily + 兼容矩阵 + 内容预算 + 26 组件变体 | 目标（M1-e） |
+| Demo v0 | 兼容 1.0 路径 | 固定确定性 spec；不继承受控 1.1 结论 | as-built compatibility |
+| M1-e | 六 Family 的受控整站组装 | DesignBrief、Blueprint、内容预算、四层 validator、12 个 sparse/rich Golden 与 36 张三断点整站快照 | 已完成（M1-e-A/B） |
 | M1-f | 只检查能否运行，无法识别模板感/空洞感/节奏差 | 三断点截图 + 确定性检查 + 审美评审 + 通用感检测 + 最多三轮结构化修补 | 目标（M1-f） |
 
 **生成与评审分离三原则**（v3.2 §14.1 回写，评测公信力地基）：
