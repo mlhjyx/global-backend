@@ -111,6 +111,7 @@ export type DesignEvaluationSeverity = "blocker" | "major" | "minor";
 export type QualityBreakpoint = 375 | 768 | 1440;
 
 export interface DesignEvaluationTargetV2 {
+  locale: string;
   pageId: string;
   sectionId?: string;
   breakpoint?: QualityBreakpoint;
@@ -305,7 +306,8 @@ function isEvaluationTarget(value: unknown): value is DesignEvaluationTargetV2 {
   const target = isRecord(value) ? value : null;
   return (
     !!target &&
-    hasOnlyKeys(target, ["pageId", "sectionId", "breakpoint"]) &&
+    hasOnlyKeys(target, ["locale", "pageId", "sectionId", "breakpoint"]) &&
+    isBoundedToken(target.locale, 64) &&
     isBoundedToken(target.pageId) &&
     (target.sectionId === undefined || isBoundedToken(target.sectionId)) &&
     (target.breakpoint === undefined || isBreakpoint(target.breakpoint))
@@ -621,9 +623,13 @@ export function validateDesignEvaluationV2(
       );
       return (
         !sourceAcceptsKind ||
+        artifact.target.locale !== finding.target.locale ||
         artifact.target.pageId !== finding.target.pageId ||
-        (finding.target.breakpoint !== undefined &&
-          artifact.target.breakpoint !== finding.target.breakpoint)
+        (artifact.kind === "screenshot"
+          ? finding.target.breakpoint === undefined ||
+            artifact.target.breakpoint !== finding.target.breakpoint
+          : finding.target.breakpoint !== undefined &&
+            artifact.target.breakpoint !== finding.target.breakpoint)
       );
     })
   ) {

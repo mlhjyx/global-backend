@@ -266,7 +266,7 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
             source: "deterministic",
             severity: "blocker",
             ruleCode: "AXE_CRITICAL",
-            target: { pageId: "home", breakpoint: 375 },
+            target: { locale: "en", pageId: "home", breakpoint: 375 },
             evidenceRef: { artifactId: "axe-home" },
           },
         ],
@@ -309,7 +309,7 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       source: "deterministic",
       severity: "blocker",
       ruleCode: "AXE_CRITICAL",
-      target: { pageId: "home", breakpoint: 375 },
+      target: { locale: "en", pageId: "home", breakpoint: 375 },
       evidenceRef: { artifactId: "axe-home" },
       [key]: forbidden,
     };
@@ -363,7 +363,7 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
                 source: "deterministic",
                 severity: "blocker",
                 ruleCode: "AESTHETIC_HIERARCHY",
-                target: { pageId: "home", breakpoint: 375 },
+                target: { locale: "en", pageId: "home", breakpoint: 375 },
                 evidenceRef: { artifactId: "home-en-375" },
               },
             ],
@@ -378,7 +378,7 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       source: "deterministic",
       severity: "blocker",
       ruleCode: "AXE_CRITICAL",
-      target: { pageId: "home", breakpoint: 375 },
+      target: { locale: "en", pageId: "home", breakpoint: 375 },
       evidenceRef: { artifactId: "missing" },
     };
     expect(() =>
@@ -396,14 +396,14 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
     ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
   });
 
-  it("binds each finding to evidence from the same page and breakpoint", () => {
+  it("binds each finding to evidence from the same locale, page and breakpoint", () => {
     const artifacts = artifactSet();
     const evaluation = unavailableEvaluation(artifacts);
     const mismatchedFinding = {
       source: "deterministic",
       severity: "blocker",
       ruleCode: "HORIZONTAL_OVERFLOW",
-      target: { pageId: "products", breakpoint: 375 },
+      target: { locale: "en", pageId: "products", breakpoint: 375 },
       evidenceRef: { artifactId: "home-en-375" },
     };
     expect(() =>
@@ -420,11 +420,38 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       ),
     ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
 
+    for (const target of [
+      { locale: "de-DE", pageId: "home", breakpoint: 375 },
+      { locale: "en", pageId: "home" },
+    ]) {
+      expect(() =>
+        validateDesignEvaluationV2(
+          {
+            ...evaluation,
+            deterministic: {
+              status: "failed",
+              hardFailures: [
+                {
+                  source: "deterministic",
+                  severity: "blocker",
+                  ruleCode: "HORIZONTAL_OVERFLOW",
+                  target,
+                  evidenceRef: { artifactId: "home-en-375" },
+                },
+              ],
+              findings: [],
+            },
+          },
+          artifacts,
+        ),
+      ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
+    }
+
     const aestheticAgainstJson = {
       source: "aesthetic",
       severity: "blocker",
       ruleCode: "AESTHETIC_HIERARCHY",
-      target: { pageId: "home", breakpoint: 375 },
+      target: { locale: "en", pageId: "home", breakpoint: 375 },
       evidenceRef: { artifactId: "axe-home" },
     };
     const artifactsWithReport = artifactSet({
