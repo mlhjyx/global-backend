@@ -48,5 +48,5 @@
 - `DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 和仍适用的 `DEC-FE-P8-*` 结论保留在[冲突登记](conflict-register.md)。
 - [独立站管理 Capability Pack](../frontend/modules/independent-site-management/README.md)是当前唯一详细产品域包。
 - 其他非 Site 域只在[能力登记](capability-register.md)和[页面目录](../frontend/04-page-and-capability-catalog.md)保留地图级覆盖，仍为 `MAP_COMPLETE / NOT_DEV_READY`。
-- [OSS / 外部能力注册表](../backend/oss-registry.md)保留 31 项当前决定，但不等于依赖、部署或生产许可。
+- [OSS / 外部能力注册表](../backend/oss-registry.md)保留 32 项当前决定，但不等于依赖、部署或生产许可。
 - `BLK-FE-001..007`、`GAP-FE-P6-001..012`、全部 OSS 准入门、独立人工验收和首个真实 Release 前置门继续有效。

@@ -21,6 +21,7 @@
       "docs/site-builder/14-media-foundation-mf0.md"
     ],
     "prefixes": [
+      "docs/ai-development/",
       "docs/design/",
       "docs/frontend/",
       "docs/governance/",

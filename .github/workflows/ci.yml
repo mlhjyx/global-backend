@@ -94,6 +94,9 @@ jobs:
       - name: Docs governance（structure · links · status · evidence）
         run: pnpm docs:verify
 
+      - name: Memory control transaction tests
+        run: pnpm memory:test
+
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
