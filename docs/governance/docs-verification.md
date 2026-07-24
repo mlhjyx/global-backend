@@ -36,7 +36,15 @@ pnpm docs:verify
 
 ## 3. 受控范围
 
-受控范围包括：文档门户、治理 Registry、全局前端规范、设计规范、OSS 总账和仍保留的模板。Site Builder、研究、实施记录和历史输入仍参与链接、围栏、结尾换行、Document ID 唯一性和敏感模式扫描，但已登记的历史表格问题只告警，不因此改写 provenance。
+受控范围包括：文档门户、治理 Registry、全局前端规范、设计规范、OSS 总账和仍保留的模板；五份权威页与指定活跃 Site Builder 专题页也在机器清单中，必须有单 H1、稳定 Document ID、`CURRENT` 生命周期和“当前事实来源”元数据。
+
+机器政策明确区分三类文件：
+
+- **权威当前页**：承载当下合同与阶段事实，改动能力时须按阶段回写清单人工复核；机器校验结构、链接、ID、事实来源元数据，并要求生命周期**恰为** `CURRENT`。
+- **历史 / provenance 页**：保留当时决策、实施记录与 handoff；机器要求已登记路径的前言含显著历史 banner、结构和链接，不为消除 warning 改写正文。
+- **不可改写 evidence**：证据原文只作路径、结构、链接和敏感模式校验；不以当前文档格式或日期要求重写。
+
+研究、实施记录和其他历史输入仍参与链接、围栏、结尾换行、Document ID 唯一性和敏感模式扫描，但已登记的历史表格问题只告警，不因此改写 provenance。
 
 受控范围只能在[机器政策](docs-verification-policy.json)中扩展。不得为使单个 PR 变绿而在脚本里按内容字符串临时跳过。
 
@@ -71,8 +79,21 @@ pnpm docs:verify
 - `AS_BUILT` 声明必须在 Capability/Traceability/Release Bundle 中链接到代码或机器合同，并把 `TEST_ANCHOR` 与当前运行结果分开。
 - 只有真实用户可见发布才创建 Release Bundle；不预建空目录、索引或模板，Gate、文档提交或开发机探针不能伪造 release。
 - 大体积日志、截图、扫描报告和含敏感字段的证据放受控 artifact store；Markdown 只保存脱敏索引、hash、环境、提交、时间、结果和 Owner。
+- “最后核验”日期仅是人工追溯信息，**不**作为自动过期门；模型、运行环境、阶段完成或发布事实必须由 PR 阶段回写清单和人工事实核验更新，不能让无关代码提交触发机械失败。
 
-## 7. 变更与例外流程
+## 7. 阶段完成回写清单
+
+任何 PR 若改变当前能力、阶段完成度、运行时合同、模型晋级或发布边界，审查必须逐项确认并在 PR 中列出更新或不适用原因：
+
+1. [当前状态](../status/current.md)、[路线图](../roadmap/release-plan.md) 与 [as-built 架构](../architecture/current.md)；
+2. [产品边界](../product-scope.md) 与相关 ADR 的 dated as-built 注记；
+3. 对应 Site Builder 专题合同页、API/评测/媒体页；
+4. 历史入口、handoff、实施记录是否仍须显著标记为历史，而非改写 provenance；
+5. 变更是否涉及模型、运行环境、发布或来源政策；若涉及，已否以代码/运行证据核验，而非从文档措辞推定。
+
+不改变当前能力的纯文案、链接或格式 PR 也必须在 PR 模板中明确说明为何不触发本清单。
+
+## 8. 变更与例外流程
 
 1. 在本地运行校验并阅读全部 error/warning；
 2. 修正 current 文档；若问题来自冻结证据，先登记例外或 successor，不静默改写历史；
@@ -80,6 +101,6 @@ pnpm docs:verify
 4. CI 失败不得以删链接、删状态或把文件移出受控目录规避；
 5. Release 前另做人类任务走查，机器 PASS 不替代独立 reviewer。
 
-## 8. 当前边界
+## 9. 当前边界
 
 该校验器不校验外部 URL 在线状态、DOCX 内部链接、Figma/原型内容、OpenAPI 业务兼容、生产证据真伪或用户可用性。外部来源有效期由相应 Owner 管理；机器合同继续使用现有 OpenAPI drift/lint/breaking 门；文档可用性必须由非作者的真实角色走查。

@@ -16,6 +16,9 @@ const stats = {
   anchors: 0,
   tables: 0,
   releaseBundles: 0,
+  authoritativeFiles: 0,
+  historicalFiles: 0,
+  evidenceFiles: 0,
 };
 
 function repoPath(path) {
@@ -40,6 +43,28 @@ function isControlled(path) {
     policy.controlledMarkdown.prefixes.some((prefix) =>
       pathFromRoot.startsWith(prefix),
     )
+  );
+}
+
+function isAuthoritativeCurrent(path) {
+  return policy.authoritativeCurrent?.exact.includes(repoPath(path)) ?? false;
+}
+
+function isHistoricalProvenance(path) {
+  const pathFromRoot = repoPath(path);
+  const historical = policy.historicalProvenance ?? {};
+  return (
+    historical.exact?.includes(pathFromRoot) ||
+    historical.prefixes?.some((prefix) => pathFromRoot.startsWith(prefix))
+  );
+}
+
+function isImmutableEvidence(path) {
+  const pathFromRoot = repoPath(path);
+  return (
+    policy.immutableEvidence?.prefixes?.some((prefix) =>
+      pathFromRoot.startsWith(prefix),
+    ) ?? false
   );
 }
 
@@ -181,10 +206,28 @@ const markdownByPath = new Map(
 );
 stats.markdownFiles = markdownPaths.length;
 
+for (const pathFromRoot of policy.authoritativeCurrent?.exact ?? []) {
+  const path = join(root, pathFromRoot);
+  if (!existsSync(path)) {
+    report(
+      "error",
+      "AUTHORITY_DOCUMENT_MISSING",
+      path,
+      "registered authoritative current document is missing",
+    );
+  }
+}
+
 const documentIds = new Map();
 for (const [path, content] of markdownByPath) {
   const controlled = isControlled(path);
+  const authoritativeCurrent = isAuthoritativeCurrent(path);
+  const historicalProvenance = isHistoricalProvenance(path);
+  const immutableEvidence = isImmutableEvidence(path);
   if (controlled) stats.controlledFiles += 1;
+  if (authoritativeCurrent) stats.authoritativeFiles += 1;
+  if (historicalProvenance) stats.historicalFiles += 1;
+  if (immutableEvidence) stats.evidenceFiles += 1;
 
   const h1Count = withoutFencedCode(content)
     .split("\n")
@@ -266,6 +309,42 @@ for (const [path, content] of markdownByPath) {
           );
         }
       }
+    }
+  }
+
+  if (authoritativeCurrent) {
+    const metadata = content.split("\n").slice(0, 20).join("\n");
+    for (const field of policy.authoritativeCurrent.requiredMetadata) {
+      const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (!new RegExp(`^> ${escaped}：\\s*\\S`, "m").test(metadata)) {
+        report(
+          "error",
+          "AUTHORITY_METADATA_MISSING",
+          path,
+          `authoritative current document requires ${field} metadata`,
+        );
+      }
+    }
+    if (!/^> 生命周期：`CURRENT`\s*$/m.test(metadata)) {
+      report(
+        "error",
+        "AUTHORITY_LIFECYCLE_NOT_CURRENT",
+        path,
+        "authoritative current document lifecycle must be `CURRENT`",
+      );
+    }
+  }
+
+  if (historicalProvenance) {
+    const preamble = content.split("\n").slice(0, 20).join("\n").toLowerCase();
+    const requiredAny = policy.historicalProvenance.requiredAny ?? [];
+    if (!requiredAny.some((term) => preamble.includes(term.toLowerCase()))) {
+      report(
+        "error",
+        "HISTORY_BANNER",
+        path,
+        `historical provenance preamble lacks one of: ${requiredAny.join(", ")}`,
+      );
     }
   }
 

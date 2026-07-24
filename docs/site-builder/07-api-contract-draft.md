@@ -1,8 +1,11 @@
 # API 契约草案 v1（草稿，待用户确认）
 
+> 文档 ID：`SITE-API-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：code-first OpenAPI；本稿只作面向 SaaS 的解释与目标标注。
 > 给 SaaS 前端开发者**先行动工**的接口对齐稿（注册引导页/建站工作台）；正式契约照旧 code-first OpenAPI **JSON** 生成后以 Scalar 门户为准（ADR-009）。基于 [02 §3](02-architecture.md) 展开到请求/响应级。
 >
-> Reviewed against `12` v3.2（2026-07-16 DOC-12 回写）；#125 已完成 truth-sync，#126 已完成 intake R0 contract closeout。SiteSpec 当前仍为 `1.0.0` type-only。
+> Reviewed against `12` v3.2（2026-07-16 DOC-12 回写）；#125 已完成 truth-sync，#126 已完成 intake R0 contract closeout。当前共享合同为 `SiteSpec 1.0.0 | 1.1.0`：Demo v0 固定 1.0，受控精装修新历史使用 1.1；本稿不替代 code-first OpenAPI 或共享合同。
 
 **里程碑标记**（每节标注，便于前端排优先级）：🟢 **M0 as-built**（端点已落地，形状以代码为准，但下列 ⚠️ 项须按目标契约对齐）· 🎯 **M1**（M1-a 构建契约 / M1-c 媒体地基 / M1-d 精装修，工作台目标）· **M2**（询盘、域名、Release 发布）· **M3**（店铺导入、媒体作业扩展、有站诊断）。
 

@@ -1,5 +1,8 @@
 # product-scope —— 产品范围、价值与边界（L0/L1 模块层 · why 权威）
 
+> 文档 ID：`DOC-PRODUCT-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：[当前状态](status/current.md) · [as-built 架构](architecture/current.md) · [路线](roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001~012/OD-01~06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [roadmap/release-plan.md](roadmap/release-plan.md)。
 > **2026-07-16 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。自 2026-07-13 起当前主线为**独立站建设（Site Builder）**——为出海企业一键生成/精装修独立站的第二产品面；其范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。获客侧暂停开发、边界不变。
@@ -67,13 +70,13 @@ Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost /
 - **改边界的唯一途径**：修订 ADR-001 并经 A/B/业务负责人三方书面确认——不存在其他「过流程就能加」的后门。
 - **身份归属（已拍板）与两条硬规矩**：身份 SoR 维持在 A（独立库），本仓只 JWKS 验签；为拦住交付包 AR-01/AR-02 风险，锁定：① **A 的库永远不存业务对象**——Company/ICP/Lead/Campaign/Opportunity/QGO 唯一主数据在增长库；② **权限执行点在服务端**（B 层 claims→scopes），任何接口不信任前端提交的 role。详见 ADR-011。
 
-## 4A. Site Builder 产品面与当前边界【2026-07-17 真值】
+## 4A. Site Builder 产品面与当前边界【2026-07-24 真值】
 
 - **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
 - **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
-- **as-built 审计基线（R4-A1 交付分支基于 `main@24decd10`）**：M0 快路径、Astro 渲染器、DQ-1 SiteSpec 1.0.0、素材/KB/构建端点，以及 R0、R1-safety、R2-A1–A4、MF0-A/B、M1-c、R3-A/B1/B2 均已落地。R3-B2 已提供本地 durable artifact + 原子 symlink pointer，但生产对象存储不可变 Release、跨节点恢复/回收与 unknown component 门仍属 R1-min。
-- **当前施工**：R4-A1 已冻结 intake/KB/storefront/research 来源并落 EvidenceRef v2 的精确 source/hash/quote/provenance 基础；它不改变公开 API，也不等于公共 Claim 已 APPROVED 或事实已可发布。关键路径下一步为 R4-A2 truth bridge → R4-B-min → M1-d；R4-A2 才负责 value/quote 语义对齐、snippet 发布降级与认证 Asset/人工 verified 门。
-- **权威规则**：承重决策只进 ADR-013~019；具体产品/施工真值在 Site Builder 00–14。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
+- **as-built 审计基线**：M0、R0–R4、M1-c、M1-d、R1-min、DI-0、M1-e-A 与 M1-e-B 均已进入主线。Demo v0 固定 `SiteSpec 1.0` / ReleaseManifest v1；受控精装修链使用 `SiteSpec 1.1` / ReleaseManifest v2，旧版本保持双读兼容且不后台迁移。
+- **当前施工**：M1-e-B 已提供六个 approved Family、冻结 DesignBrief、封闭 adapter 组装、tenant/catalog asset overlay 与可重放的局部 v2-base 构建。下一阶段是 M1-f 的确定性与审美质量循环；它不扩 Family、不自动晋级模型、不改变现有发布边界。
+- **权威规则**：承重决策只进 ADR-013~020；具体产品/施工真值在 Site Builder 00–14、当前状态和路线。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
 
 ## 5. 业务层级四层（PDR-002，已收敛=交付包 TA-003，待 A/B 会签）
 

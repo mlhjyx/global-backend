@@ -7,6 +7,12 @@
 <!-- 按主题分组，每组一句话说清「做了什么 + 为什么」 -->
 -
 
+## 文档与阶段回写
+
+- 本次事实基线：`origin/main@<sha>`
+- 是否触发“阶段完成回写清单”：是 / 否；原因：
+- 若触发：已核对状态页、路线图、架构、产品边界、ADR 注记、专题合同页与历史入口；更新项 / 不适用原因：
+
 ## 测试 / 验证
 - [ ] `pnpm --filter @global/api build` 绿（nest build = tsc 全量类型检查）
 - [ ] `pnpm --filter @global/api test` 绿（vitest）
