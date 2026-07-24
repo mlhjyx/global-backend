@@ -26,6 +26,7 @@ const TYPED_ARRAY_BUFFER = Object.getOwnPropertyDescriptor(
   TYPED_ARRAY_PROTOTYPE,
   'buffer',
 )!.get!;
+const TYPED_ARRAY_SET = Uint8Array.prototype.set;
 
 function isClosedUint8Array(value: unknown): value is Uint8Array {
   return (
@@ -48,7 +49,7 @@ function copyClosedUint8Array(value: Uint8Array): Uint8Array {
   const copy = new Uint8Array(intrinsicUint8ArrayByteLength(value));
   // TypedArray#set consumes the source's internal slots directly; unlike
   // Uint8Array.from it does not consult a caller-controlled Symbol.iterator.
-  Uint8Array.prototype.set.call(copy, value);
+  TYPED_ARRAY_SET.call(copy, value);
   return copy;
 }
 
