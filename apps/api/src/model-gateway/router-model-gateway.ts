@@ -67,6 +67,7 @@ import {
   ModelResult,
   ReviewVisionInput,
 } from './types';
+import { snapshotVisionReviewInput } from './vision-review-input';
 
 /**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
@@ -219,9 +220,10 @@ export class RouterModelGateway extends ModelGateway {
     input: ReviewVisionInput,
     ctx: AiContext,
   ): Promise<ModelResult<T>> {
-    assertModelOutputSchemaCompiles(input.schema);
+    const snapshot = snapshotVisionReviewInput(input);
+    assertModelOutputSchemaCompiles(snapshot.schema);
     if (
-      input.images.some(
+      snapshot.images.some(
         (image) =>
           image.materialClass === 'workspace_site_screenshot' &&
           image.workspaceId !== ctx.workspaceId,
@@ -229,15 +231,15 @@ export class RouterModelGateway extends ModelGateway {
     ) {
       throw new Error('VISION_REVIEW_WORKSPACE_MISMATCH');
     }
-    return this.run('reviewVision', input, ctx, async (provider) => {
-      const result = await provider.reviewVision<T>(input, ctx);
+    return this.run('reviewVision', snapshot, ctx, async (provider) => {
+      const result = await provider.reviewVision<T>(snapshot, ctx);
       if (
         result.modelResolutionSource !== 'upstream_response' ||
-        result.reportedModel !== input.model ||
-        result.model !== input.model
+        result.reportedModel !== snapshot.model ||
+        result.model !== snapshot.model
       ) {
         throw new ProviderIdentityError(
-          `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${result.reportedModel ?? 'missing'}, resolved=${result.model}`,
+          `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${snapshot.model}, reported=${result.reportedModel ?? 'missing'}, resolved=${result.model}`,
           result.usage,
           {
             provider: result.provider,
@@ -247,7 +249,7 @@ export class RouterModelGateway extends ModelGateway {
           },
         );
       }
-      const check = checkAgainstSchema(input.schema, result.data);
+      const check = checkAgainstSchema(snapshot.schema, result.data);
       if (!check.valid) {
         throw new ProviderOutputError(
           `VISION_REVIEW_SCHEMA_INVALID: ${(check.errors ?? []).join('; ')}`,
@@ -261,7 +263,7 @@ export class RouterModelGateway extends ModelGateway {
         );
       }
       try {
-        input.validateOutput?.(result.data);
+        snapshot.validateOutput?.(result.data);
       } catch (error) {
         throw new TaskOutputValidationError(
           `vision review hard gate rejected: ${

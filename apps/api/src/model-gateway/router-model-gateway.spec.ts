@@ -352,6 +352,33 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
     ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
     expect(provider.reviewVision).not.toHaveBeenCalled();
   });
+
+  it('binds the compiled schema before await so caller mutation cannot relax the result gate', async () => {
+    let resolveReview!: (result: typeof exactResult) => void;
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(
+        () =>
+          new Promise<typeof exactResult>((resolve) => {
+            resolveReview = resolve;
+          }),
+      ),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const pending = gatewayWith(
+      provider,
+      new BudgetLedger(),
+    ).reviewVision(input, { workspaceId: 'ws-1' });
+    expect(provider.reviewVision).toHaveBeenCalledTimes(1);
+    input.schema = {};
+    input.model = 'provider-fallback';
+    resolveReview({
+      ...exactResult,
+      data: { unexpected: true } as never,
+    });
+
+    await expect(pending).rejects.toThrow('VISION_REVIEW_SCHEMA_INVALID');
+  });
 });
 
 /**

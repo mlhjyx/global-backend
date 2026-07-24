@@ -501,6 +501,31 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('copies the eval fixture catalog at construction so later caller mutation grants no authority', async () => {
+    const mutableCatalog: Record<string, string> = {};
+    const input = visionInput();
+    const providerWithMutableSource = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'default-model',
+      visionModelTransports: {
+        'gemini-3.5-flash': 'openai-chat-completions',
+      },
+      visionEvalFixtureDigests: mutableCatalog,
+    });
+    for (const image of input.images) {
+      mutableCatalog[image.artifactId] = image.sha256;
+    }
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      providerWithMutableSource.reviewVision(input),
+    ).rejects.toThrow('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects unregistered model transports before any provider call', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -524,6 +549,45 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     await expect(
       visionProvider().reviewVision(visionInput()),
     ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
+
+  it('binds the real requested model before await so caller mutation cannot rewrite provenance', async () => {
+    let resolveFetch!: (response: {
+      ok: boolean;
+      status: number;
+      json(): Promise<unknown>;
+      text(): Promise<string>;
+    }) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          }),
+      ),
+    );
+    const input = visionInput();
+    const pending = visionProvider().reviewVision(input);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    input.model = 'provider-fallback';
+    input.schema = {};
+    input.images[0]!.bytes.fill(0);
+    resolveFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        model: 'provider-fallback',
+        choices: [
+          { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+        ],
+        usage: { prompt_tokens: 12, completion_tokens: 4 },
+      }),
+      text: async () => '',
+    });
+
+    await expect(pending).rejects.toBeInstanceOf(ProviderIdentityError);
+    expect(lastRequestBody().model).toBe('gemini-3.5-flash');
   });
 
   it('rejects every non-stop finish reason even when the body contains valid JSON', async () => {

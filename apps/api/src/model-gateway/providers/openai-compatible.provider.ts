@@ -16,6 +16,7 @@ import {
   ReviewVisionInput,
   VISION_REVIEW_MATERIAL_CLASSES,
 } from '../types';
+import { snapshotVisionReviewInput } from '../vision-review-input';
 
 /**
  * The application still has one gateway credential and one logical model name.
@@ -84,7 +85,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 
 function assertVisionReviewInput(
   input: ReviewVisionInput,
-  evalFixtureDigests: Readonly<Record<string, string>>,
+  evalFixtureDigests: ReadonlyMap<string, string>,
 ): void {
   let schemaBytes = Number.POSITIVE_INFINITY;
   try {
@@ -189,7 +190,7 @@ function assertVisionReviewInput(
     }
     if (
       image.materialClass === 'model_eval_fixture' &&
-      evalFixtureDigests[image.artifactId] !== actualDigest
+      evalFixtureDigests.get(image.artifactId) !== actualDigest
     ) {
       throw new Error('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
     }
@@ -209,9 +210,29 @@ function assertVisionReviewInput(
  */
 export class OpenAICompatibleProvider implements ModelProvider {
   readonly id: string;
+  private readonly cfg: OpenAICompatConfig;
+  private readonly visionEvalFixtureDigests: ReadonlyMap<string, string>;
 
-  constructor(private readonly cfg: OpenAICompatConfig) {
+  constructor(cfg: OpenAICompatConfig) {
     this.id = cfg.id;
+    this.cfg = {
+      ...cfg,
+      ...(cfg.modelTransports
+        ? { modelTransports: Object.freeze({ ...cfg.modelTransports }) }
+        : {}),
+      ...(cfg.visionModelTransports
+        ? {
+            visionModelTransports: Object.freeze({
+              ...cfg.visionModelTransports,
+            }),
+          }
+        : {}),
+      // The private Map below is the sole runtime authority.
+      visionEvalFixtureDigests: undefined,
+    };
+    this.visionEvalFixtureDigests = new Map(
+      Object.entries(cfg.visionEvalFixtureDigests ?? {}),
+    );
   }
 
   supports(op: ModelOp): boolean {
@@ -296,19 +317,20 @@ export class OpenAICompatibleProvider implements ModelProvider {
   async reviewVision<T = unknown>(
     input: ReviewVisionInput,
   ): Promise<ModelResult<T>> {
+    const snapshot = snapshotVisionReviewInput(input);
     assertVisionReviewInput(
-      input,
-      this.cfg.visionEvalFixtureDigests ?? {},
+      snapshot,
+      this.visionEvalFixtureDigests,
     );
-    const transport = this.cfg.visionModelTransports?.[input.model];
+    const transport = this.cfg.visionModelTransports?.[snapshot.model];
     if (!transport) {
       throw new Error(
-        `VISION_REVIEW_MODEL_TRANSPORT_UNPROVEN: ${input.model}`,
+        `VISION_REVIEW_MODEL_TRANSPORT_UNPROVEN: ${snapshot.model}`,
       );
     }
     switch (transport) {
       case 'openai-chat-completions':
-        return this.reviewVisionChatCompletions<T>(input);
+        return this.reviewVisionChatCompletions<T>(snapshot);
     }
   }
 
