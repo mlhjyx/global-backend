@@ -349,6 +349,8 @@ export interface BlindVisualCallRecord {
 
 export interface BlindVisualProbeRecord {
   accepted: true;
+  /** Diagnostic only: pair-matrix quality gates decide candidate eligibility. */
+  semanticExpectationMet: boolean;
   requestedModel: BlindVisualCandidateModel;
   reportedModel: string;
   resolvedModel: string;
@@ -1190,11 +1192,12 @@ function assertProbeRecord(
     probe.inputImages[1]?.byteLength !== pair.sourceImage.byteLength ||
     probe.inputImages[2]?.byteLength !== pair.degradedImage.byteLength ||
     probe.inputImages.some((image) => image.breakpoint !== pair.breakpoint) ||
-    output.choice !== "tie" ||
-    !output.findings.some(
-      (finding) =>
-        finding.imageNumber === 3 && finding.ruleCode === pair.knownIssue,
-    )
+    probe.semanticExpectationMet !==
+      (output.choice === "tie" &&
+        output.findings.some(
+          (finding) =>
+            finding.imageNumber === 3 && finding.ruleCode === pair.knownIssue,
+        ))
   ) {
     throw new Error("BLIND_VISUAL_STATS_PROBE_INVALID");
   }
@@ -1776,18 +1779,15 @@ export async function runBlindVisualCalibrationCandidate(input: {
     probeResult = result;
     const validated = assertProviderResult(candidate, result, 3);
     const probeOutput = assertBlindVisualOutput(validated.output, 3);
-    if (
-      probeOutput.choice !== "tie" ||
-      !probeOutput.findings.some(
-        (finding) =>
-          finding.imageNumber === 3 &&
-          finding.ruleCode === probePlan.knownIssue,
-      )
-    ) {
-      throw new BlindVisualCallRejected("probe_failed");
-    }
     probe = {
       accepted: true,
+      semanticExpectationMet:
+        probeOutput.choice === "tie" &&
+        probeOutput.findings.some(
+          (finding) =>
+            finding.imageNumber === 3 &&
+            finding.ruleCode === probePlan.knownIssue,
+        ),
       requestedModel: candidate.model,
       reportedModel: result.reportedModel,
       resolvedModel: result.resolvedModel,

@@ -528,6 +528,30 @@ describe("blind visual candidate runner", () => {
     );
   });
 
+  it("records a semantically missed probe without suppressing the pair matrix", async () => {
+    const invoke = vi.fn(async (request: Parameters<BlindVisualInvoke>[0]) =>
+      resultFor(
+        request,
+        request.images.length === 3
+          ? { data: { choice: "left", findings: [] } }
+          : {},
+      ),
+    );
+    const report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate: candidate(),
+      provenance: PROVENANCE,
+      invoke,
+    });
+    expect(invoke).toHaveBeenCalledTimes(19);
+    expect(report.probe).toMatchObject({
+      accepted: true,
+      semanticExpectationMet: false,
+    });
+    expect(report.status).toBe("single_model_gate_passed");
+    expect(report.metrics?.knownIssueHits).toBe(18);
+  });
+
   it.each([
     ["requested", { requestedModel: "wrong-requested-model" }],
     ["reported", { reportedModel: "wrong-reported-model" }],
