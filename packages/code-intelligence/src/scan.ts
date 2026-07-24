@@ -26,8 +26,40 @@ import { readUtf8, relativePath, sha256, stableJson, walkFiles } from "./utils";
 
 const execFile = promisify(execFileCallback);
 
-const SOURCE_EXTENSIONS =
-  /\.(?:ts|tsx|mts|mjs|cjs|astro|json|md|prisma|sql|ya?ml|service)$/;
+const SOURCE_ROOT = /^(?:apps|packages|scripts|docs|infra|\.github|\.agents)\//;
+const BINARY_EXTENSIONS =
+  /\.(?:7z|avi|avif|bmp|class|db|dmg|docx?|eot|exe|gif|gz|ico|jpe?g|mov|mp3|mp4|o|ogg|otf|pdf|png|pptx?|pyc|sqlite3?|tar|tiff?|ttf|wav|webm|webp|woff2?|xlsx?|zip)$/i;
+
+function isSensitiveSourcePath(relative: string): boolean {
+  if (/(?:^|\/)\.env(?:\.|$)/.test(relative)) return true;
+  const segments = relative.toLowerCase().split("/");
+  if (
+    segments.some((segment) =>
+      [".secrets", "credentials", "secrets"].includes(segment),
+    )
+  ) {
+    return true;
+  }
+  const basename = segments.at(-1) ?? "";
+  return (
+    /^(?:credentials?|service-account|service_account|secrets?)(?:[._-].*)?\.json$/.test(
+      basename,
+    ) ||
+    /^(?:id_rsa|id_ed25519)(?:\.pub)?$/.test(basename) ||
+    /\.(?:pem|key|p12|pfx|crt|cer|der)$/.test(basename)
+  );
+}
+
+function isProbablyText(value: Buffer): boolean {
+  if (value.includes(0)) return false;
+  let disallowedControls = 0;
+  for (const byte of value) {
+    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) {
+      disallowedControls += 1;
+    }
+  }
+  return value.length === 0 || disallowedControls / value.length < 0.01;
+}
 
 async function git(repositoryRoot: string, args: string[]): Promise<string> {
   const { stdout } = await execFile("git", ["-C", repositoryRoot, ...args], {
@@ -60,45 +92,18 @@ export async function computeSourceHash(
   repositoryRoot: string,
 ): Promise<string> {
   const files = await walkFiles(repositoryRoot, (relative) => {
-    if (
-      !SOURCE_EXTENSIONS.test(relative) &&
-      !/(?:^|\/)(?:Dockerfile|Containerfile)(?:\.[A-Za-z0-9_.-]+)?$/.test(
-        relative,
-      )
-    ) {
-      return false;
-    }
+    if (!SOURCE_ROOT.test(relative) && relative.includes("/")) return false;
     if (relative.startsWith("docs/archive/")) return false;
     if (/^(?:tmp|template)\//.test(relative)) return false;
-    if (/(?:^|\/)\.env(?:\.|$)/.test(relative)) return false;
-    const basename = path.posix.basename(relative).toLowerCase();
-    if (
-      /^(?:credentials?|service-account|service_account|secrets?)(?:[._-].*)?\.json$/.test(
-        basename,
-      ) ||
-      /^(?:id_rsa|id_ed25519)(?:\.pub)?$/.test(basename) ||
-      /\.(?:pem|key|p12|pfx|crt|cer)$/.test(basename)
-    ) {
-      return false;
-    }
-    return (
-      /^(?:apps|packages|scripts|docs|infra|\.github|\.agents)\//.test(
-        relative,
-      ) ||
-      [
-        "AGENTS.md",
-        "package.json",
-        "pnpm-lock.yaml",
-        "pnpm-workspace.yaml",
-        "tsconfig.base.json",
-        "docker-compose.yml",
-      ].includes(relative)
-    );
+    if (isSensitiveSourcePath(relative)) return false;
+    return !BINARY_EXTENSIONS.test(relative);
   });
   const entries: string[] = [];
   for (const file of files) {
     const relative = relativePath(repositoryRoot, file);
-    entries.push(`${relative}\u0000${sha256(await readFile(file))}`);
+    const contents = await readFile(file);
+    if (!isProbablyText(contents)) continue;
+    entries.push(`${relative}\u0000${sha256(contents)}`);
   }
   return sha256(entries.join("\n"));
 }

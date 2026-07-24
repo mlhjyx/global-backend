@@ -26,6 +26,7 @@ function codeNeighborhood(
     "deployment",
     "dynamic_mechanism",
   ]);
+  const reverseImpactKinds = new Set(["calls", "depends_on"]);
   const allowed = (id: string): boolean => {
     const node = nodes.get(id);
     return (
@@ -50,6 +51,12 @@ function codeNeighborhood(
       adjacent.set(edge.to, to);
     }
     if (fromTestSurface && edge.kind !== "contains") continue;
+    if (reverseImpactKinds.has(edge.kind)) {
+      const to = adjacent.get(edge.to) ?? new Set<string>();
+      to.add(edge.from);
+      adjacent.set(edge.to, to);
+      continue;
+    }
     const from = adjacent.get(edge.from) ?? new Set<string>();
     from.add(edge.to);
     adjacent.set(edge.from, from);
@@ -125,12 +132,14 @@ export function createImpactReport(
     "service",
     "code_symbol",
     "deployment",
+    "source_file",
   ]);
   const codeImpact = graph.nodes
     .filter(
       (node) =>
         codeKinds.has(node.kind) &&
         reached.has(node.id) &&
+        !starts.has(node.id) &&
         !node.id.startsWith("symbol-ref:") &&
         !node.locations.every(
           (location) =>

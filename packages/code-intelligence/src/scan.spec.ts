@@ -16,6 +16,7 @@ test("source hashing excludes secrets while binding relevant source", async () =
   const root = await mkdtemp(path.join(os.tmpdir(), "contract-hash-test-"));
   try {
     await mkdir(path.join(root, "apps", "api"), { recursive: true });
+    await writeFile(path.join(root, ".gitleaks.toml"), "[allowlist]\n");
     await writeFile(
       path.join(root, "apps", "api", "source.ts"),
       "export const value = 1;\n",
@@ -27,6 +28,18 @@ test("source hashing excludes secrets while binding relevant source", async () =
     await writeFile(
       path.join(root, "apps", "api", "Dockerfile"),
       "FROM scratch\n",
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "global.css"),
+      "body { color: black; }\n",
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "egress.py"),
+      "def allow_public_only(): return True\n",
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "runtime.toml"),
+      'mode = "safe"\n',
     );
     await writeFile(path.join(root, "apps", "api", ".env"), "SECRET=first\n");
     await writeFile(
@@ -53,10 +66,39 @@ test("source hashing excludes secrets while binding relevant source", async () =
     const afterDockerfile = await computeSourceHash(root);
     assert.notEqual(afterDockerfile, afterAstro);
     await writeFile(
+      path.join(root, "apps", "api", "global.css"),
+      "body { color: white; }\n",
+    );
+    const afterCss = await computeSourceHash(root);
+    assert.notEqual(afterCss, afterDockerfile);
+    await writeFile(
+      path.join(root, "apps", "api", "egress.py"),
+      "def allow_public_only(): return False\n",
+    );
+    const afterPython = await computeSourceHash(root);
+    assert.notEqual(afterPython, afterCss);
+    await writeFile(
+      path.join(root, "apps", "api", "runtime.toml"),
+      'mode = "blocked"\n',
+    );
+    const afterToml = await computeSourceHash(root);
+    assert.notEqual(afterToml, afterPython);
+    await writeFile(
+      path.join(root, ".gitleaks.toml"),
+      "[allowlist]\npaths=[]\n",
+    );
+    const afterRootConfig = await computeSourceHash(root);
+    assert.notEqual(afterRootConfig, afterToml);
+    await writeFile(
+      path.join(root, "apps", "api", "logo.png"),
+      Buffer.from([0, 1, 2, 3]),
+    );
+    assert.equal(await computeSourceHash(root), afterRootConfig);
+    await writeFile(
       path.join(root, "apps", "api", "source.ts"),
       "export const value = 2;\n",
     );
-    assert.notEqual(await computeSourceHash(root), afterDockerfile);
+    assert.notEqual(await computeSourceHash(root), afterRootConfig);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

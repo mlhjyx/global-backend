@@ -53,7 +53,9 @@ export async function extractAstro(
   const knownFiles = new Set(
     (
       await walkFiles(repositoryRoot, (relative) =>
-        /^(?:apps|packages)\/.*\.(?:astro|ts|tsx)$/.test(relative),
+        /^(?:apps|packages)\/.*\.(?:astro|ts|tsx|css|scss|sass|less|styl)$/.test(
+          relative,
+        ),
       )
     ).map((file) => relativePath(repositoryRoot, file)),
   );
@@ -82,9 +84,10 @@ export async function extractAstro(
     });
 
     const imports = new Map<string, string>();
-    const importPattern = /import\s+([^;"']+?)\s+from\s+["']([^"']+)["']/g;
+    const importPattern =
+      /\bimport\s+(?:((?:type\s+)?[^;"']+?)\s+from\s+)?["']([^"']+)["']/g;
     for (const match of text.matchAll(importPattern)) {
-      const names = localImportNames(match[1]);
+      const names = localImportNames(match[1] ?? "");
       const specifier = match[2];
       const location = {
         path: relative,

@@ -348,6 +348,9 @@ test("Astro extraction records component render edges", async () => {
     await mkdir(path.join(root, "apps", "site", "src", "lib"), {
       recursive: true,
     });
+    await mkdir(path.join(root, "apps", "site", "src", "styles"), {
+      recursive: true,
+    });
     await writeFile(
       path.join(root, "apps", "site", "src", "components", "Hero.astro"),
       "<h1>Hero</h1>",
@@ -357,11 +360,17 @@ test("Astro extraction records component render edges", async () => {
       "export const localeQualifiedPageHref = () => '/';",
     );
     await writeFile(
+      path.join(root, "apps", "site", "src", "styles", "global.css"),
+      "body { color: black; }\n",
+    );
+    await writeFile(
       path.join(root, "apps", "site", "src", "pages", "index.astro"),
       [
         "---",
         'import Hero from "../components/Hero.astro";',
         'import { localeQualifiedPageHref } from "../lib/page-reference";',
+        'import "../styles/global.css";',
+        'import "@fontsource/noto-sans/latin-400.css";',
         "---",
         "<Hero href={localeQualifiedPageHref()} />",
       ].join("\n"),
@@ -383,8 +392,33 @@ test("Astro extraction records component render edges", async () => {
         (edge) =>
           edge.kind === "depends_on" &&
           edge.from === "file:apps/site/src/pages/index.astro" &&
+          edge.to === "file:apps/site/src/styles/global.css",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "depends_on" &&
+          edge.from === "file:apps/site/src/pages/index.astro" &&
+          edge.to === "package:@fontsource/noto-sans",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "depends_on" &&
+          edge.from === "file:apps/site/src/pages/index.astro" &&
           edge.to === "file:apps/site/src/lib/page-reference.ts",
       ),
+      true,
+    );
+    const styleImpact = createImpactReport(graph, [
+      "apps/site/src/styles/global.css",
+    ]);
+    assert.equal(
+      styleImpact.codeImpact.includes("file:apps/site/src/pages/index.astro"),
       true,
     );
   } finally {
