@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-v1",
+  "evaluatorVersion": "site-builder-aesthetic-review-eval@1.0.0",
+  "promptVersion": "site-builder-aesthetic-review-prompt/v1",
+  "caseId": "precision-industrial-degraded",
+  "familyId": "precision-industrial",
+  "kind": "degraded",
+  "expectedIssue": "AESTHETIC_SPACING",
+  "attempt": 2,
+  "requestedModel": "gemini-3.5-flash",
+  "reportedModel": "gemini-3.5-flash",
+  "resolvedModel": "gemini-3.5-flash",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "openai-chat-completions",
+  "elapsedMs": 6196.167,
+  "usage": {
+    "inputTokens": 4140,
+    "outputTokens": 1827
+  },
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:precision-industrial:degraded:375",
+      "sha256": "2cbd84f1c60ab003c61705b9348f7a21c7eac8f01a8a6f19d58b4bf66f67431b",
+      "mimeType": "image/png",
+      "byteLength": 138542,
+      "target": {
+        "locale": "en",
+        "pageId": "precision-industrial",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:precision-industrial:degraded:768",
+      "sha256": "28c113b4c03d79787842e18713a3646697c07dcd97dd59f849ef962ff5dd4698",
+      "mimeType": "image/png",
+      "byteLength": 160950,
+      "target": {
+        "locale": "en",
+        "pageId": "precision-industrial",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:precision-industrial:degraded:1440",
+      "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+      "mimeType": "image/png",
+      "byteLength": 258276,
+      "target": {
+        "locale": "en",
+        "pageId": "precision-industrial",
+        "breakpoint": 1440
+      }
+    }
+  ],
+  "output": {
+    "verdict": "failed",
+    "overallScore": 35,
+    "dimensions": {
+      "hierarchy": 40,
+      "consistency": 50,
+      "spacing": 50,
+      "contrast": 20,
+      "imagery": 50,
+      "mobileComposition": 45,
+      "ctaClarity": 60,
+      "credibility": 30,
+      "originality": 40
+    },
+    "findings": [
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:degraded:1440"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:degraded:1440"
+        }
+      }
+    ]
+  },
+  "scoring": {
+    "falseBlocker": false,
+    "seededIssueDetected": false,
+    "accepted": false
+  }
+}
