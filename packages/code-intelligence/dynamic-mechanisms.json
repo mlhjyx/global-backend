@@ -89,7 +89,8 @@
       "patterns": [
         "buildToolBroker\\s*\\(",
         "registerBuiltinTools\\s*\\(",
-        "registerSourceTools\\s*\\("
+        "registerSourceTools\\s*\\(",
+        "this\\.tools\\.set\\s*\\("
       ]
     },
     {
@@ -99,7 +100,20 @@
       "extractor": "typescript.provider-registry",
       "accountableRole": "OWN-DISCOVERY-BE",
       "assignee": "UNASSIGNED",
-      "patterns": ["ProviderRegistry", "\\.register\\s*\\([^)]*Provider"]
+      "patterns": [
+        "ProviderRegistry",
+        "\\.register\\s*\\([^)]*Provider",
+        "this\\.providers\\.set\\s*\\("
+      ]
+    },
+    {
+      "id": "contractgraph.internal-static-map",
+      "category": "build",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.ai-route",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["routes\\.set\\s*\\("]
     },
     {
       "id": "pnpm.workspace-and-alias",

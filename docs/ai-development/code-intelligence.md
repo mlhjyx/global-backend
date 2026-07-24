@@ -33,8 +33,8 @@ flowchart LR
 | TypeScript / NestJS | 文件、符号、import、Controller route、Module、constructor DI | 运行时条件分支和容器实际解析结果 |
 | Temporal | `workflows.ts` 真实导出、proxy Activity、client start、worker factory、Schedule | workflow history 已执行或 Activity 成功 |
 | Outbox | `eventType` 发布与明确 `eventType` switch 消费 | 外部 SaaS 已拉取、ACK 或正确处理 |
-| Prisma | model/table、relation、migration、RLS 语句、常见 client 读写 | SQL 运行计划、触发器效果和真实数据状态 |
-| AI / 外部边界 | task ID、model-policy/Broker/Provider 动态机制、静态 URL origin | 实际模型路由、Secret、配额、许可或外部可用性 |
+| Prisma | model/table、relation、migration、由 migration SQL 证明的 RLS、常见 client 读写 | SQL 运行计划、触发器效果和真实数据状态 |
+| AI / 外部边界 | task ID、model-policy/Broker/Provider 静态分支与动态机制、非测试源码中的 URL 候选 | 实际模型路由、kill switch、Secret、配额、许可或外部可用性 |
 | workspace / deployment | package 依赖、tsconfig alias、Astro render、CI job、Compose/systemd | 目标环境已部署或健康 |
 
 生成代码只记录生成源或依赖，不重复索引 `dist`、`node_modules` 和已声明 generated 目录。`.env`、凭据、构建产物、测试截图和临时目录排除在 source hash 与派生图之外。
@@ -47,6 +47,7 @@ flowchart LR
 pnpm code-intelligence:scan
 pnpm --filter @global/code-intelligence exec tsx src/cli.ts status --repo ../..
 pnpm --filter @global/code-intelligence exec tsx src/cli.ts query CAP-SITE-BUILD-001 --repo ../..
+pnpm --filter @global/code-intelligence exec tsx src/cli.ts impact apps/api/src/site-builder/builds.controller.ts --repo ../..
 ```
 
 `scan` 原子写入：
@@ -55,10 +56,12 @@ pnpm --filter @global/code-intelligence exec tsx src/cli.ts query CAP-SITE-BUILD
 .code-intelligence/
 ├── graph-v1.json
 ├── coverage-v1.json
-└── diagnostics-v1.json
+├── diagnostics-v1.json
+└── manifest-v1.json
 ```
 
 这些文件被 Git 忽略，不承担备份职责。`query` 和 `status` 会重新计算当前 worktree、commit 与 source hash；不匹配即返回 `WRONG_WORKTREE` 或 `STALE_GRAPH`，拒绝用 main 图回答功能分支问题。
+`manifest-v1.json` 绑定派生文件哈希；手工篡改 JSON 或 schema/content 形状不完整时查询同样拒绝。`impact` 只做高精度、两跳的 ContractGraph 基线：输出仍标 `INFERRED/UNKNOWN`；PR 3 才合并 CodeGraph 与 Git diff 的更深影响分析。
 
 CI 使用：
 
@@ -83,12 +86,12 @@ pnpm code-intelligence:check
 @dynamic-mechanism <registry-id>
 ```
 
-未登记 ID 产生 `UNCLAIMED_DYNAMIC_MECHANISM` 并阻断 CI。临时例外到期同样阻断。责任帽存在但未记录真实人员只产生可见的 `UNASSIGNED` 信息，不伪造批准。
+未登记 ID 产生 `UNCLAIMED_DYNAMIC_MECHANISM` 并阻断 CI。除此之外，生产源码中的 Temporal/Outbox/函数注册表/计算分派/dynamic import/反射等通用动态表面必须被 Registry pattern 或附近已登记 marker 覆盖；只声明不存在的 extractor、`EXTRACTOR` 零匹配和临时例外到期也会阻断。测试与 `verify-*` 夹具不被误报成生产动态机制或真实外部路由。责任帽存在但未记录真实人员只产生可见的 `UNASSIGNED` 信息，不伪造批准。
 
 ## 5. 正确使用顺序
 
 1. 确认查询的是当前 worktree，并运行 `status`。
-2. 用 Capability、场景、API、workflow、event 或 model 名查询第一张地图。
+2. 对改动文件先运行 `impact`；它从 canonical Traceability Matrix 的显式边返回 Capability、Scenario、Page、实现锚和测试候选，再用稳定 ID 查询第一张地图。
 3. 打开返回的精确文件和行，核对当前分支源码。
 4. 对动态边使用完整性测试；对真实发生使用 API correlation ID、Temporal workflow ID、Outbox event ID、migration 与健康证据。
 5. 仍无法证明的外部仓库、消费者和运行状态写成 `UNKNOWN/EXTERNAL_OWNED`。

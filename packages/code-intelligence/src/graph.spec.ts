@@ -94,6 +94,32 @@ test("an explicit unregistered dynamic mechanism fails closed", () => {
   );
 });
 
+test("an unmarked semantic function registry fails closed", () => {
+  const builder = new GraphBuilder();
+  evaluateDynamicMechanisms(
+    builder,
+    [
+      {
+        path: "apps/api/src/example.ts",
+        text: [
+          "const handlerRegistry = new Map<string, () => void>();",
+          "handlerRegistry.set(kind, fn);",
+        ].join("\n"),
+      },
+    ],
+    "2026-07-25",
+  );
+  const graph = builder.finalize(EVIDENCE);
+  assert.equal(
+    graph.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === "UNCLAIMED_DYNAMIC_MECHANISM" &&
+        diagnostic.attributes?.detector === "semantic-function-registry",
+    ),
+    true,
+  );
+});
+
 test("a registered marker is attributed without an unclaimed diagnostic", () => {
   const builder = new GraphBuilder();
   const coverage = evaluateDynamicMechanisms(

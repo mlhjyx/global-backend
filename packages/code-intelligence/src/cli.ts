@@ -7,6 +7,7 @@ import {
   readGraph,
   writeDerivedArtifacts,
 } from "./scan";
+import { createImpactReport } from "./impact";
 import { ContractGraphV1, GraphNodeV1 } from "./schema";
 import { sha256, stableJson } from "./utils";
 
@@ -41,6 +42,7 @@ Commands:
   scan [--repo PATH]          Build worktree-bound derived graph artifacts
   check [--repo PATH]         Build twice and enforce deterministic/error gates
   query TERM [--repo PATH]    Query a fresh graph; stale/wrong-worktree graphs fail
+  impact PATH... [--repo PATH] Create a ContractGraph-only impact report
   status [--repo PATH]        Show evidence, coverage and freshness
 
 Derived artifacts are written only under .code-intelligence/ and are never truth.`);
@@ -147,6 +149,19 @@ async function main(): Promise<void> {
       if (!term) throw new Error("query requires a term");
       const graph = await requireFreshGraph(args.repositoryRoot);
       console.log(stableJson(queryGraph(graph, term)));
+      return;
+    }
+    case "impact": {
+      const changedPaths = args.terms
+        .map((value) => value.replaceAll("\\", "/").replace(/^\.\//, ""))
+        .filter(Boolean);
+      if (changedPaths.length === 0) {
+        throw new Error(
+          "impact requires at least one repository-relative path",
+        );
+      }
+      const graph = await requireFreshGraph(args.repositoryRoot);
+      console.log(stableJson(createImpactReport(graph, changedPaths)));
       return;
     }
     case "status": {

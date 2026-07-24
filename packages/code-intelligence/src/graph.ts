@@ -138,6 +138,22 @@ export class GraphBuilder {
     return this.nodes.has(id);
   }
 
+  snapshotNodes(): GraphNodeV1[] {
+    return [...this.nodes.values()].map((node) => ({
+      ...node,
+      attributes: { ...node.attributes },
+      locations: [...node.locations],
+    }));
+  }
+
+  snapshotEdges(): GraphEdgeV1[] {
+    return [...this.edges.values()].map((edge) => ({
+      ...edge,
+      attributes: { ...edge.attributes },
+      locations: [...edge.locations],
+    }));
+  }
+
   finalize(evidence: EvidenceRefV1): ContractGraphV1 {
     for (const edge of this.edges.values()) {
       if (!this.nodes.has(edge.from) || !this.nodes.has(edge.to)) {

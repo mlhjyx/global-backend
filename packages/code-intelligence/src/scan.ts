@@ -12,6 +12,7 @@ import { extractGovernance } from "./extractors/governance";
 import { extractInfrastructure } from "./extractors/infrastructure";
 import { extractOssRegistry } from "./extractors/oss-registry";
 import { extractPrisma } from "./extractors/prisma";
+import { extractTraceability } from "./extractors/traceability";
 import { extractTypeScript } from "./extractors/typescript";
 import { extractWorkspace } from "./extractors/workspace";
 import { GraphBuilder } from "./graph";
@@ -63,6 +64,16 @@ export async function computeSourceHash(
     if (relative.startsWith("docs/archive/")) return false;
     if (/^(?:tmp|template)\//.test(relative)) return false;
     if (/(?:^|\/)\.env(?:\.|$)/.test(relative)) return false;
+    const basename = path.posix.basename(relative).toLowerCase();
+    if (
+      /^(?:credentials?|service-account|service_account|secrets?)(?:[._-].*)?\.json$/.test(
+        basename,
+      ) ||
+      /^(?:id_rsa|id_ed25519)(?:\.pub)?$/.test(basename) ||
+      /\.(?:pem|key|p12|pfx|crt|cer)$/.test(basename)
+    ) {
+      return false;
+    }
     return (
       /^(?:apps|packages|scripts|docs|infra|\.github|\.agents)\//.test(
         relative,
@@ -161,6 +172,7 @@ export async function buildContractGraph(
   await extractAiAndTools(builder, resolved);
   await extractAstro(builder, resolved);
   await extractInfrastructure(builder, resolved);
+  await extractTraceability(builder, resolved);
   const mechanisms = evaluateDynamicMechanisms(
     builder,
     [...sourceObservations, ...(await configurationObservations(resolved))],
@@ -203,6 +215,7 @@ export async function writeDerivedArtifacts(
   graphPath: string;
   coveragePath: string;
   diagnosticsPath: string;
+  manifestPath: string;
 }> {
   const outputDirectory = path.join(
     path.resolve(repositoryRoot),
@@ -212,28 +225,65 @@ export async function writeDerivedArtifacts(
   const graphPath = path.join(outputDirectory, "graph-v1.json");
   const coveragePath = path.join(outputDirectory, "coverage-v1.json");
   const diagnosticsPath = path.join(outputDirectory, "diagnostics-v1.json");
-  await atomicWrite(graphPath, stableJson(result.graph));
-  await atomicWrite(coveragePath, stableJson(result.coverage));
+  const manifestPath = path.join(outputDirectory, "manifest-v1.json");
+  const graphBody = stableJson(result.graph);
+  const coverageBody = stableJson(result.coverage);
+  const diagnosticsBody = stableJson({
+    schemaVersion: "contract-graph-diagnostics/v1",
+    evidence: result.graph.evidence,
+    diagnostics: result.graph.diagnostics,
+  });
+  await atomicWrite(graphPath, graphBody);
+  await atomicWrite(coveragePath, coverageBody);
+  await atomicWrite(diagnosticsPath, diagnosticsBody);
   await atomicWrite(
-    diagnosticsPath,
+    manifestPath,
     stableJson({
-      schemaVersion: "contract-graph-diagnostics/v1",
+      schemaVersion: "contract-graph-artifact-manifest/v1",
       evidence: result.graph.evidence,
-      diagnostics: result.graph.diagnostics,
+      files: {
+        "coverage-v1.json": sha256(coverageBody),
+        "diagnostics-v1.json": sha256(diagnosticsBody),
+        "graph-v1.json": sha256(graphBody),
+      },
     }),
   );
-  return { graphPath, coveragePath, diagnosticsPath };
+  return { graphPath, coveragePath, diagnosticsPath, manifestPath };
 }
 
 export async function readGraph(
   repositoryRoot: string,
 ): Promise<ContractGraphV1> {
-  const file = path.join(
+  const outputDirectory = path.join(
     path.resolve(repositoryRoot),
     ".code-intelligence",
-    "graph-v1.json",
   );
-  return JSON.parse(await readUtf8(file)) as ContractGraphV1;
+  const file = path.join(outputDirectory, "graph-v1.json");
+  const manifestFile = path.join(outputDirectory, "manifest-v1.json");
+  const [body, manifestBody] = await Promise.all([
+    readUtf8(file),
+    readUtf8(manifestFile),
+  ]);
+  const manifest = JSON.parse(manifestBody) as {
+    schemaVersion?: string;
+    files?: Record<string, string>;
+  };
+  if (
+    manifest.schemaVersion !== "contract-graph-artifact-manifest/v1" ||
+    manifest.files?.["graph-v1.json"] !== sha256(body)
+  ) {
+    throw new Error("derived ContractGraph artifact integrity check failed");
+  }
+  const graph = JSON.parse(body) as ContractGraphV1;
+  if (
+    graph.schemaVersion !== "contract-graph/v1" ||
+    !Array.isArray(graph.nodes) ||
+    !Array.isArray(graph.edges) ||
+    !Array.isArray(graph.diagnostics)
+  ) {
+    throw new Error("derived ContractGraph schema/content check failed");
+  }
+  return graph;
 }
 
 export async function graphFreshnessDiagnostics(

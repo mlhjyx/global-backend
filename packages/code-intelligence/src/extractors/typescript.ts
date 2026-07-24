@@ -199,6 +199,23 @@ export async function extractTypeScript(
   const knownFiles = new Set(
     absoluteFiles.map((absolute) => relativePath(repositoryRoot, absolute)),
   );
+  const literalConstants = new Map<string, string>();
+  const conflictedConstants = new Set<string>();
+  for (const absolute of absoluteFiles) {
+    const text = await readUtf8(absolute);
+    for (const match of text.matchAll(
+      /\b(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(['"`])([^'"`\r\n]+)\2/g,
+    )) {
+      const [, name, , value] = match;
+      const existing = literalConstants.get(name);
+      if (existing !== undefined && existing !== value) {
+        conflictedConstants.add(name);
+        literalConstants.delete(name);
+      } else if (!conflictedConstants.has(name)) {
+        literalConstants.set(name, value);
+      }
+    }
+  }
   const registeredWorkflowNames = new Set<string>();
   const workflowRegistryPath = path.join(
     repositoryRoot,
@@ -232,7 +249,9 @@ export async function extractTypeScript(
       true,
       relative.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
-    const isTest = /\.(?:spec|test)\.(?:ts|tsx)$/.test(relative);
+    const isTest =
+      /\.(?:spec|test)\.(?:ts|tsx)$/.test(relative) ||
+      /(?:^|\/)scripts\/verify-[^/]+\.mts$/.test(relative);
     const fileNode = builder.addNode({
       id: `file:${relative}`,
       kind: "source_file",
@@ -246,7 +265,11 @@ export async function extractTypeScript(
           kind: "test",
           label: relative,
           attributes: {
-            framework: text.includes("vitest") ? "vitest" : "unknown",
+            framework: text.includes("vitest")
+              ? "vitest"
+              : relative.includes("/scripts/verify-")
+                ? "verification-script"
+                : "unknown",
           },
           location: { path: relative, line: 1 },
         })
@@ -261,6 +284,10 @@ export async function extractTypeScript(
     }
 
     const proxyVariables = new Map<string, string>();
+    const proxyFunctions = new Map<
+      string,
+      { activityName: string; typeName: string }
+    >();
     for (const statement of sourceFile.statements) {
       if (!ts.isImportDeclaration(statement)) continue;
       const specifier = literalValue(statement.moduleSpecifier);
@@ -312,14 +339,125 @@ export async function extractTypeScript(
     }
 
     const registerProxyVariable = (node: ts.VariableDeclaration): void => {
-      if (!ts.isIdentifier(node.name) || !node.initializer) return;
+      if (!node.initializer) return;
       if (!ts.isCallExpression(node.initializer)) return;
       const expression = node.initializer.expression;
       if (!ts.isIdentifier(expression) || expression.text !== "proxyActivities")
         return;
       const typeName =
         node.initializer.typeArguments?.[0]?.getText(sourceFile) ?? "unknown";
-      proxyVariables.set(node.name.text, typeName);
+      if (ts.isIdentifier(node.name)) {
+        proxyVariables.set(node.name.text, typeName);
+        return;
+      }
+      if (ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name)) continue;
+          const activityName =
+            element.propertyName &&
+            (ts.isIdentifier(element.propertyName) ||
+              ts.isStringLiteral(element.propertyName))
+              ? element.propertyName.text
+              : element.name.text;
+          proxyFunctions.set(element.name.text, { activityName, typeName });
+        }
+      }
+    };
+
+    const resolveStaticString = (
+      expression: ts.Expression | undefined,
+    ): string | undefined => {
+      const direct = literalValue(expression);
+      if (direct !== undefined) return direct;
+      return expression && ts.isIdentifier(expression)
+        ? literalConstants.get(expression.text)
+        : undefined;
+    };
+
+    const extractScheduleSpecs = (): void => {
+      for (const statement of sourceFile.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          if (
+            !ts.isIdentifier(declaration.name) ||
+            declaration.name.text !== "SPECS" ||
+            !declaration.initializer ||
+            !ts.isArrayLiteralExpression(declaration.initializer)
+          ) {
+            continue;
+          }
+          for (const element of declaration.initializer.elements) {
+            if (!ts.isObjectLiteralExpression(element)) continue;
+            const properties = new Map<string, ts.Expression>();
+            for (const property of element.properties) {
+              if (!ts.isPropertyAssignment(property)) continue;
+              const name = declarationName(property);
+              if (name) properties.set(name, property.initializer);
+            }
+            const scheduleId =
+              resolveStaticString(properties.get("id")) ??
+              properties.get("id")?.getText(sourceFile);
+            const workflowName =
+              resolveStaticString(properties.get("workflowType")) ??
+              properties.get("workflowType")?.getText(sourceFile);
+            if (!scheduleId || !workflowName) continue;
+            const location = sourceLocation(sourceFile, relative, element);
+            const schedule = builder.addNode({
+              id: `service:temporal-schedule:${scheduleId}`,
+              kind: "service",
+              label: scheduleId,
+              attributes: {
+                subtype: "temporal-schedule",
+                configuredWorkflow: workflowName,
+                confidence: "REGISTERED_STATIC_CONFIG",
+                requiresRuntimeEvidence: true,
+              },
+              location,
+            });
+            builder.addEdge({
+              kind: "registers",
+              from: fileNode,
+              to: schedule,
+              attributes: { confidence: "REGISTERED_STATIC_CONFIG" },
+              location,
+            });
+            const proven = registeredWorkflowNames.has(workflowName);
+            const workflow = proven
+              ? workflowNode(builder, workflowName, location)
+              : builder.addNode({
+                  id: `workflow:temporal:unknown:schedule:${scheduleId}`,
+                  kind: "workflow",
+                  label: `[UNKNOWN] ${workflowName}`,
+                  attributes: {
+                    runtime: "temporal",
+                    resolution: "UNKNOWN",
+                    expression: workflowName,
+                  },
+                  location,
+                });
+            builder.addEdge({
+              kind: "calls",
+              from: schedule,
+              to: workflow,
+              attributes: {
+                temporalOperation: "startWorkflow",
+                confidence: proven ? "REGISTERED_STATIC_CONFIG" : "UNKNOWN",
+                requiresRuntimeEvidence: true,
+              },
+              location,
+            });
+            if (!proven) {
+              builder.addDiagnostic({
+                code: "UNKNOWN_RELATION",
+                severity: "warning",
+                message: `Temporal schedule ${scheduleId} target ${workflowName} is not proven by workflows.ts`,
+                nodeId: schedule,
+                location,
+              });
+            }
+          }
+        }
+      }
     };
 
     const addSymbol = (
@@ -522,19 +660,27 @@ export async function extractTypeScript(
 
       if (ts.isStringLiteralLike(node)) {
         const origin = externalOrigin(node.text);
-        if (origin) {
+        if (origin && !isTest) {
           const location = sourceLocation(sourceFile, relative, node);
           const external = builder.addNode({
             id: `external:${origin}`,
             kind: "external_system",
             label: origin,
-            attributes: { ownership: "EXTERNAL_OWNED" },
+            attributes: {
+              ownership: "EXTERNAL_OWNED",
+              confidence: "INFERRED_STATIC_CANDIDATE",
+              requiresRuntimeEvidence: true,
+            },
             location,
           });
           builder.addEdge({
             kind: "routes_to",
             from: context.owner,
             to: external,
+            attributes: {
+              confidence: "INFERRED_STATIC_CANDIDATE",
+              requiresRuntimeEvidence: true,
+            },
             location,
           });
         }
@@ -559,6 +705,33 @@ export async function extractTypeScript(
       if (ts.isCallExpression(node)) {
         const location = sourceLocation(sourceFile, relative, node);
         const chain = propertyChain(node.expression);
+        if (chain.length === 1 && context.workflow) {
+          const proxyFunction = proxyFunctions.get(chain[0]);
+          if (proxyFunction) {
+            const activity = activityNode(
+              builder,
+              proxyFunction.activityName,
+              location,
+            );
+            builder.addNode({
+              id: activity,
+              kind: "activity",
+              label: proxyFunction.activityName,
+              attributes: {
+                interface: proxyFunction.typeName,
+                runtime: "temporal",
+              },
+              location,
+            });
+            builder.addEdge({
+              kind: "calls",
+              from: context.workflow,
+              to: activity,
+              attributes: { binding: "destructured-proxy-activity" },
+              location,
+            });
+          }
+        }
         if (chain.length >= 2) {
           const proxyType = proxyVariables.get(chain[0]);
           if (proxyType && context.workflow) {
@@ -636,10 +809,14 @@ export async function extractTypeScript(
           }
           if (lastTwo === "schedule.create") {
             const schedule = builder.addNode({
-              id: `service:temporal-schedule:${relative}:${location.line}`,
+              id: `service:temporal-schedule-registration:${relative}:${location.line}`,
               kind: "service",
-              label: `Temporal schedule at ${relative}:${location.line}`,
-              attributes: { subtype: "temporal-schedule" },
+              label: `Temporal schedule registration at ${relative}:${location.line}`,
+              attributes: {
+                subtype: "temporal-schedule-registration",
+                confidence: "PROVEN_STATIC_CALL",
+                requiresRuntimeEvidence: true,
+              },
               location,
             });
             builder.addEdge({
@@ -733,6 +910,7 @@ export async function extractTypeScript(
         }
       }
     }
+    extractScheduleSpecs();
 
     for (const statement of sourceFile.statements) {
       if (ts.isClassDeclaration(statement)) {

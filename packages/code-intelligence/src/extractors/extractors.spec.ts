@@ -7,8 +7,10 @@ import { extractAstro } from "./astro";
 import { extractAiAndTools } from "./ai-tools";
 import { extractGovernance } from "./governance";
 import { extractPrisma } from "./prisma";
+import { extractTraceability } from "./traceability";
 import { extractTypeScript } from "./typescript";
 import { GraphBuilder } from "../graph";
+import { createImpactReport } from "../impact";
 import { EvidenceRefV1 } from "../schema";
 
 const EVIDENCE: EvidenceRefV1 = {
@@ -71,6 +73,101 @@ test("governance extraction separates responsibility role from real assignee", a
   }
 });
 
+test("canonical traceability links Capability to API, implementation, test, and impact report", async () => {
+  const root = await fixture();
+  try {
+    await mkdir(path.join(root, "docs", "governance"), { recursive: true });
+    await mkdir(path.join(root, "apps", "api", "src", "temporal"), {
+      recursive: true,
+    });
+    await mkdir(path.join(root, "packages", "db", "prisma", "migrations"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, "docs", "governance", "traceability-matrix.md"),
+      [
+        "| Capability | Public contract | Controller/DTO | TEST_ANCHOR | Scenario |",
+        "|---|---|---|---|---|",
+        "| `CAP-SITE-INTAKE-001` | `IntakeController_create_v1` | `apps/api/src/intake.controller.ts` | `apps/api/src/intake.controller.spec.ts` | `SCN-FE-SITE-001` |",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "packages", "db", "prisma", "schema.prisma"),
+      'datasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "temporal", "workflows.ts"),
+      "",
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "intake.controller.ts"),
+      [
+        'import { Controller, Post } from "@nestjs/common";',
+        '@Controller("intake")',
+        "export class IntakeController {",
+        '  @Post("")',
+        "  async create() { return {}; }",
+        "}",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "intake.controller.spec.ts"),
+      [
+        'import { IntakeController } from "./intake.controller";',
+        "void IntakeController;",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    await extractGovernance(builder, root);
+    const prisma = await extractPrisma(builder, root);
+    await extractTypeScript(builder, root, prisma);
+    await extractTraceability(builder, root);
+    const graph = builder.finalize(EVIDENCE);
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.from === "governance:CAP-SITE-INTAKE-001" &&
+          edge.to === "api:POST:/intake" &&
+          edge.attributes.relation === "public-contract",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.from === "governance:CAP-SITE-INTAKE-001" &&
+          edge.to === "file:apps/api/src/intake.controller.ts",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.from === "test:apps/api/src/intake.controller.spec.ts" &&
+          edge.to === "governance:CAP-SITE-INTAKE-001",
+      ),
+      true,
+    );
+    const impact = createImpactReport(graph, [
+      "apps/api/src/intake.controller.ts",
+    ]);
+    assert.equal(
+      impact.businessImpact.some(
+        (item) => item.capabilityId === "CAP-SITE-INTAKE-001",
+      ),
+      true,
+    );
+    assert.equal(
+      impact.recommendedTests.includes(
+        "apps/api/src/intake.controller.spec.ts",
+      ),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, and data access", async () => {
   const root = await fixture();
   try {
@@ -89,7 +186,13 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
         'datasource db { provider = "postgresql" url = env("DATABASE_URL") }',
         "model Site {",
         "  id String @id",
+        "  workspaceId String",
         '  @@map("site")',
+        "}",
+        "model Secured {",
+        "  id String @id",
+        "  workspaceId String",
+        '  @@map("secured")',
         "}",
       ].join("\n"),
     );
@@ -103,7 +206,11 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
         "001_init",
         "migration.sql",
       ),
-      'CREATE TABLE "site" ("id" text primary key);',
+      [
+        'CREATE TABLE "site" ("id" text primary key);',
+        'CREATE TABLE "secured" ("id" text primary key);',
+        'ALTER TABLE "secured" ENABLE ROW LEVEL SECURITY;',
+      ].join("\n"),
     );
     await writeFile(
       path.join(root, "apps", "api", "src", "temporal", "workflows.ts"),
@@ -114,7 +221,32 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       [
         'import { proxyActivities } from "@temporalio/workflow";',
         "const acts = proxyActivities<Activities>({ startToCloseTimeout: '1 minute' });",
-        "export async function siteWorkflow() { await acts.buildSite(); }",
+        "const { publishSite } = proxyActivities<Activities>({ startToCloseTimeout: '1 minute' });",
+        "export async function siteWorkflow() { await acts.buildSite(); await publishSite(); }",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(
+        root,
+        "apps",
+        "api",
+        "src",
+        "temporal",
+        "understanding.constants.ts",
+      ),
+      [
+        "export const SITE_WORKFLOW = 'siteWorkflow';",
+        "export const SITE_SCHEDULE_ID = 'site-daily';",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "temporal", "ensure-schedules.ts"),
+      [
+        "import { SITE_SCHEDULE_ID, SITE_WORKFLOW } from './understanding.constants';",
+        "const SPECS = [{ id: SITE_SCHEDULE_ID, workflowType: SITE_WORKFLOW }];",
+        "export async function ensureSchedules(client: any) {",
+        "  for (const spec of SPECS) await client.schedule.create({ scheduleId: spec.id, action: { workflowType: spec.workflowType } });",
+        "}",
       ].join("\n"),
     );
     await writeFile(
@@ -130,6 +262,10 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
         "  }",
         "}",
       ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "site.controller.spec.ts"),
+      'const adversarialFixture = "http://169.254.169.254/latest/meta-data";\nvoid adversarialFixture;\n',
     );
     const builder = new GraphBuilder();
     const prisma = await extractPrisma(builder, root);
@@ -154,6 +290,25 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
     );
     assert.equal(
       graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.from === "workflow:temporal:siteWorkflow" &&
+          edge.to === "activity:temporal:publishSite" &&
+          edge.attributes.binding === "destructured-proxy-activity",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.from === "service:temporal-schedule:site-daily" &&
+          edge.to === "workflow:temporal:siteWorkflow",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
         (edge) => edge.kind === "reads" && edge.to === "data-model:prisma:Site",
       ),
       true,
@@ -161,6 +316,20 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
     assert.equal(
       graph.nodes.some((node) => node.id === "event:outbox:SiteRead"),
       true,
+    );
+    assert.equal(
+      graph.nodes.find((node) => node.id === "data-model:prisma:Site")
+        ?.attributes.hasRlsContract,
+      false,
+    );
+    assert.equal(
+      graph.nodes.find((node) => node.id === "data-model:prisma:Secured")
+        ?.attributes.hasRlsContract,
+      true,
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "external:http://169.254.169.254"),
+      false,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -268,7 +437,17 @@ test("AI and ToolBroker extraction preserves route, budget, evidence, and person
     assert.equal(task?.attributes.routeState, "promotedRoute");
     assert.equal(task?.attributes.maxCostCents, 20);
     assert.equal(task?.attributes.timeoutMs, 120000);
+    assert.equal(
+      task?.attributes.killSwitch,
+      "UNKNOWN_NOT_PROVEN_BY_TASK_BINDING",
+    );
+    assert.equal(task?.attributes.budgetContract, "DECLARED_STATIC_TASK_LIMIT");
     assert.equal(tool?.attributes.personalData, true);
+    assert.equal(
+      graph.nodes.find((node) => node.id === "service:tool-broker")?.attributes
+        .sourcePolicy,
+      "UNKNOWN",
+    );
     assert.equal(
       graph.edges.some(
         (edge) =>

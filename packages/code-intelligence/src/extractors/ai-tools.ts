@@ -295,6 +295,10 @@ export async function extractAiAndTools(
         bindingsRelative,
         candidate,
       );
+      const maxCostCents = resolvedNumber(
+        bindingsSource,
+        property(binding, "maxCostCents")?.initializer,
+      );
       builder.addNode({
         id: `service:ai-task:${taskId}`,
         kind: "service",
@@ -313,29 +317,60 @@ export async function extractAiAndTools(
               bindingsSource,
               property(binding, "timeoutMs")?.initializer,
             ) ?? null,
-          maxCostCents:
-            resolvedNumber(
-              bindingsSource,
-              property(binding, "maxCostCents")?.initializer,
-            ) ?? null,
-          killSwitch: "budget-and-run-state-fail-closed",
+          maxCostCents: maxCostCents ?? null,
+          budgetContract:
+            maxCostCents === undefined
+              ? "UNKNOWN"
+              : "DECLARED_STATIC_TASK_LIMIT",
+          killSwitch: "UNKNOWN_NOT_PROVEN_BY_TASK_BINDING",
+          confidence: "PROVEN_STATIC_CONFIG",
+          requiresRuntimeEvidence: true,
         },
         location: bindingLocation,
       });
     }
   }
 
+  const brokerPath = path.join(
+    repositoryRoot,
+    "apps",
+    "api",
+    "src",
+    "tools",
+    "tool-broker.ts",
+  );
+  const brokerRelative = relativePath(repositoryRoot, brokerPath);
+  const brokerText = await readUtf8(brokerPath);
+  const brokerSourcePolicyProven =
+    /checkSourcePolicy\s*\(/.test(brokerText) &&
+    /mode\s*===\s*['"]required['"]/.test(brokerText) &&
+    /policy_unavailable|unregistered/.test(brokerText);
+  const brokerBudgetProven =
+    /\.reserve\s*\(/.test(brokerText) && /\.settle\s*\(/.test(brokerText);
+  const brokerAllowlistProven =
+    /allowedTools/.test(brokerText) &&
+    /\.includes\s*\(\s*toolId\s*\)/.test(brokerText);
   const broker = builder.addNode({
     id: "service:tool-broker",
     kind: "service",
     label: "ToolBroker",
     attributes: {
       subtype: "execution-gateway",
-      sourcePolicy: "fail-closed-by-tool-contract",
-      budget: "reserve-settle",
+      sourcePolicy: brokerSourcePolicyProven
+        ? "PROVEN_STATIC_FAIL_CLOSED_BRANCH"
+        : "UNKNOWN",
+      budget: brokerBudgetProven ? "PROVEN_STATIC_RESERVE_SETTLE" : "UNKNOWN",
+      allowedTools: brokerAllowlistProven
+        ? "PROVEN_STATIC_ALLOWLIST_CHECK"
+        : "UNKNOWN",
+      confidence:
+        brokerSourcePolicyProven && brokerBudgetProven && brokerAllowlistProven
+          ? "PROVEN_STATIC_BRANCH"
+          : "UNKNOWN",
+      requiresRuntimeEvidence: true,
     },
     location: {
-      path: "apps/api/src/tools/tool-broker.ts",
+      path: brokerRelative,
       line: 1,
     },
   });

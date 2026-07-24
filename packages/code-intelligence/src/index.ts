@@ -1,4 +1,6 @@
 export * from "./schema";
+export * from "./graph";
+export * from "./impact";
 export {
   buildContractGraph,
   computeSourceHash,

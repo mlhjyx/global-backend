@@ -34,6 +34,35 @@ export async function extractPrisma(
   );
   const schema = await readUtf8(schemaPath);
   const relativeSchema = relativePath(repositoryRoot, schemaPath);
+  const migrationsRoot = path.join(
+    repositoryRoot,
+    "packages",
+    "db",
+    "prisma",
+    "migrations",
+  );
+  const migrationPaths = await walkFiles(
+    migrationsRoot,
+    (relative) =>
+      relative.endsWith("/migration.sql") || relative === "migration.sql",
+  );
+  const migrations = await Promise.all(
+    migrationPaths.map(async (migrationPath) => ({
+      migrationPath,
+      sql: await readUtf8(migrationPath),
+      relative: relativePath(repositoryRoot, migrationPath),
+      migrationName: path.basename(path.dirname(migrationPath)),
+    })),
+  );
+  const rlsTables = new Set<string>();
+  for (const { sql } of migrations) {
+    for (const pattern of [
+      /ALTER\s+TABLE\s+(?:(?:"?public"?\.)?)"?([A-Za-z_][A-Za-z0-9_]*)"?[\s\S]{0,200}?ENABLE\s+ROW\s+LEVEL\s+SECURITY/gi,
+      /CREATE\s+POLICY[\s\S]{0,300}?\sON\s+(?:(?:"?public"?\.)?)"?([A-Za-z_][A-Za-z0-9_]*)"?/gi,
+    ]) {
+      for (const match of sql.matchAll(pattern)) rlsTables.add(match[1]);
+    }
+  }
   const models: PrismaModelInfo[] = [];
   const modelBlock = /^model\s+([A-Za-z][A-Za-z0-9_]*)\s*\{([\s\S]*?)^\}/gm;
   for (const match of schema.matchAll(modelBlock)) {
@@ -53,7 +82,8 @@ export async function extractPrisma(
         prismaModel: name,
         databaseTable: mapped,
         tenantScoped: /\bworkspaceId\b/.test(body),
-        hasRlsContract: /\bworkspaceId\b/.test(body),
+        hasRlsContract: rlsTables.has(mapped),
+        rlsEvidence: rlsTables.has(mapped) ? "MIGRATION_SQL" : "NONE",
         complianceSurface:
           /(Claim|Evidence|Personal|Contact|Suppression|Retention|Deletion|Privacy|Consent|License|SourcePolicy)/.test(
             name,
@@ -99,22 +129,7 @@ export async function extractPrisma(
     }
   }
 
-  const migrationsRoot = path.join(
-    repositoryRoot,
-    "packages",
-    "db",
-    "prisma",
-    "migrations",
-  );
-  const migrations = await walkFiles(
-    migrationsRoot,
-    (relative) =>
-      relative.endsWith("/migration.sql") || relative === "migration.sql",
-  );
-  for (const migrationPath of migrations) {
-    const sql = await readUtf8(migrationPath);
-    const relative = relativePath(repositoryRoot, migrationPath);
-    const migrationName = path.basename(path.dirname(migrationPath));
+  for (const { sql, relative, migrationName } of migrations) {
     const migrationNode = builder.addNode({
       id: `migration:${migrationName}`,
       kind: "migration",

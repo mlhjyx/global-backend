@@ -7,8 +7,10 @@ import {
   computeSourceHash,
   createEvidence,
   graphFreshnessDiagnostics,
+  readGraph,
+  writeDerivedArtifacts,
 } from "./scan";
-import { ContractGraphV1 } from "./schema";
+import { ContractGraphV1, CoverageReportV1, EvidenceRefV1 } from "./schema";
 
 test("source hashing excludes secrets while binding relevant source", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "contract-hash-test-"));
@@ -19,14 +21,61 @@ test("source hashing excludes secrets while binding relevant source", async () =
       "export const value = 1;\n",
     );
     await writeFile(path.join(root, "apps", "api", ".env"), "SECRET=first\n");
+    await writeFile(
+      path.join(root, "apps", "api", "credentials-prod.json"),
+      '{"private_key":"first"}\n',
+    );
     const first = await computeSourceHash(root);
     await writeFile(path.join(root, "apps", "api", ".env"), "SECRET=second\n");
+    await writeFile(
+      path.join(root, "apps", "api", "credentials-prod.json"),
+      '{"private_key":"second"}\n',
+    );
     assert.equal(await computeSourceHash(root), first);
     await writeFile(
       path.join(root, "apps", "api", "source.ts"),
       "export const value = 2;\n",
     );
     assert.notEqual(await computeSourceHash(root), first);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("derived graph manifest rejects artifact tampering", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "contract-artifact-test-"));
+  const evidence: EvidenceRefV1 = {
+    schemaVersion: "evidence-ref/v1",
+    repositoryRoot: root,
+    worktreePath: root,
+    branch: "codex/test",
+    commit: "a".repeat(40),
+    commitTime: "2026-07-25T00:00:00Z",
+    dirty: false,
+    sourceHash: "b".repeat(64),
+  };
+  const graph: ContractGraphV1 = {
+    schemaVersion: "contract-graph/v1",
+    evidence,
+    nodes: [],
+    edges: [],
+    diagnostics: [],
+  };
+  const coverage: CoverageReportV1 = {
+    schemaVersion: "contract-graph-coverage/v1",
+    evidence,
+    totals: { nodes: 0, edges: 0, files: 0, errors: 0, warnings: 0 },
+    mechanisms: [],
+    unknownMechanisms: [],
+  };
+  try {
+    await writeDerivedArtifacts(root, { graph, coverage });
+    assert.equal((await readGraph(root)).schemaVersion, "contract-graph/v1");
+    await writeFile(
+      path.join(root, ".code-intelligence", "graph-v1.json"),
+      '{"schemaVersion":"contract-graph/v1","nodes":[],"edges":[],"diagnostics":[]}\n',
+    );
+    await assert.rejects(readGraph(root), /artifact integrity check failed/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

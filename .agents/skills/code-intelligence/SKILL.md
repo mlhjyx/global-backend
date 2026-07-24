@@ -15,16 +15,20 @@ deployment entry, Capability, or scenario a change can affect.
    a main graph to answer a feature-branch question.
 5. Query the smallest stable identifier or symbol with
    `pnpm --filter @global/code-intelligence exec tsx src/cli.ts query <term> --repo ../..`.
-6. Open the returned source locations. Treat graph edges as candidates until
+6. For changed files, run
+   `pnpm --filter @global/code-intelligence exec tsx src/cli.ts impact <repo-relative-path...> --repo ../..`.
+   The report is a bounded, high-precision static baseline, not runtime proof.
+7. Open the returned source locations. Treat graph edges as candidates until
    current source or a deterministic completeness test confirms them.
-7. For “does this really happen,” require runtime evidence such as an API
+8. For “does this really happen,” require runtime evidence such as an API
    correlation ID, Temporal workflow ID, Outbox event ID, migration status, or
    health result. Report missing external repositories as `EXTERNAL_OWNED` and
    unproven relationships as `UNKNOWN`.
-8. Lead the final impact report with Capability, scenario, and user path; then
+9. Lead the final impact report with Capability, scenario, and user path; then
    list code, data, tests, risks, unknowns, and rollback.
 
 The graph is derived, ignored by Git, and safe to delete. It cannot change
 Registry/ADR truth, authorize frozen product work, prove deployment, or justify
 skipping existing CI. Do not index `.env`, credentials, customer data, prompts,
-or personal data.
+or personal data. Do not bypass the artifact manifest if a derived JSON file
+fails integrity validation.
