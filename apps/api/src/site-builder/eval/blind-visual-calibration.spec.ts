@@ -11,16 +11,20 @@ import type { VisionReviewImage } from "../../model-gateway/types";
 import {
   BLIND_VISUAL_CALIBRATION_HARNESS_VERSION,
   BLIND_VISUAL_CANDIDATES,
+  BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
+  BLIND_VISUAL_COST_ESTIMATOR_VERSION,
   BLIND_VISUAL_EXPECTED_RUNS,
   BLIND_VISUAL_MAX_COST_CENTS,
   BLIND_VISUAL_MAX_TOKENS,
   BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
+  BLIND_VISUAL_SYSTEM_PROMPT,
   BLIND_VISUAL_OUTPUT_SCHEMA,
   BLIND_VISUAL_TIMEOUT_MS,
   assertBlindVisualOutput,
   buildBlindVisualMatrixDefinition,
   buildBlindVisualPairPlans,
   buildBlindVisualProbePlan,
+  estimateBlindVisualCallCostUpperBound,
   loadBlindVisualPairs,
   runBlindVisualCalibrationCandidate,
   summarizeBlindVisualCandidate,
@@ -220,6 +224,82 @@ function makeRunMiss(run: BlindVisualCallRecord): void {
 }
 
 describe("blind visual calibration fixture and invocation plans", () => {
+  it("preflights affordable calls and rejects over-cap GPT-5.6 calls before dispatch", () => {
+    const maximums = new Map<BlindVisualCandidateModel, number>();
+    for (const candidateConfig of Object.values(BLIND_VISUAL_CANDIDATES)) {
+      const requests = [
+        buildBlindVisualProbePlan(candidateConfig, pairs).request,
+        ...buildBlindVisualPairPlans(candidateConfig, pairs).map(
+          (plan) => plan.request,
+        ),
+      ];
+      const estimates = requests.map((request) =>
+        estimateBlindVisualCallCostUpperBound({
+          candidate: candidateConfig,
+          request,
+          systemPrompt: BLIND_VISUAL_SYSTEM_PROMPT,
+        }),
+      );
+      maximums.set(
+        candidateConfig.model,
+        Math.max(...estimates.map((estimate) => estimate.totalCostCents)),
+      );
+      for (const estimate of estimates) {
+        expect(estimate.estimatorVersion).toBe(
+          BLIND_VISUAL_COST_ESTIMATOR_VERSION,
+        );
+        expect(estimate.outputTokens).toBe(BLIND_VISUAL_MAX_TOKENS);
+      }
+    }
+    for (const model of ["gemini-3.5-flash", "claude-sonnet-5"] as const) {
+      expect(maximums.get(model)).toBeLessThanOrEqual(
+        BLIND_VISUAL_MAX_COST_CENTS - BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
+      );
+    }
+    for (const model of ["gpt-5.6-terra", "gpt-5.6-sol"] as const) {
+      expect(maximums.get(model)).toBeGreaterThan(
+        BLIND_VISUAL_MAX_COST_CENTS - BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
+      );
+    }
+  });
+
+  it("rejects a forged oversized or malformed PNG cost envelope before dispatch", () => {
+    const candidateConfig = candidate("gpt-5.6-sol");
+    const request = buildBlindVisualProbePlan(candidateConfig, pairs).request;
+    const oversizedImages = request.images.map((image) => {
+      const bytes = Buffer.from(image.bytes);
+      bytes.writeUInt32BE(100_000, 16);
+      bytes.writeUInt32BE(100_000, 20);
+      return { ...image, bytes };
+    });
+    const forgedRequest = {
+      ...request,
+      images: oversizedImages,
+    };
+    expect(
+      estimateBlindVisualCallCostUpperBound({
+        candidate: candidateConfig,
+        request: forgedRequest,
+        systemPrompt: "closed output",
+      }).totalCostCents,
+    ).toBeGreaterThan(candidateConfig.maxCostCents);
+
+    const malformedRequest = {
+      ...request,
+      images: [
+        { ...request.images[0], bytes: new Uint8Array([1, 2, 3]) },
+        ...request.images.slice(1),
+      ],
+    };
+    expect(() =>
+      estimateBlindVisualCallCostUpperBound({
+        candidate: candidateConfig,
+        request: malformedRequest,
+        systemPrompt: "closed output",
+      }),
+    ).toThrow("BLIND_VISUAL_COST_ESTIMATE_PNG_INVALID");
+  });
+
   it("builds six same-breakpoint source/degradation pairs from deterministic render baselines", () => {
     expect(pairs).toHaveLength(6);
     expect(matrixDefinition).toHaveLength(6);

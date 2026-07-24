@@ -25,12 +25,16 @@ import { RouterModelGateway } from "../src/model-gateway/router-model-gateway";
 import type { ModelResult } from "../src/model-gateway/types";
 import { BudgetLedger } from "../src/tools/budget";
 import {
+  BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
+  BLIND_VISUAL_COST_ESTIMATOR_VERSION,
   BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
   BLIND_VISUAL_CANDIDATES,
+  BLIND_VISUAL_SYSTEM_PROMPT,
   assertBlindVisualOutput,
   buildBlindVisualMatrixDefinition,
   buildBlindVisualPairPlans,
   buildBlindVisualProbePlan,
+  estimateBlindVisualCallCostUpperBound,
   loadBlindVisualPairs,
   runBlindVisualCalibrationCandidate,
   type BlindVisualCandidateModel,
@@ -100,6 +104,19 @@ interface GatewayRuntime {
   gateway: RouterModelGateway;
   budget: BudgetLedger;
   budgetRunId: string;
+}
+
+interface CostPreflight {
+  estimatorVersion: typeof BLIND_VISUAL_COST_ESTIMATOR_VERSION;
+  maxAllowedEstimatedCostCents: number;
+  maxEstimatedCostCents: number;
+  calls: Array<{
+    phase: BlindVisualInvocationRequest["phase"];
+    opaqueRunId: string;
+    estimatedInputTokens: number;
+    outputTokenCeiling: number;
+    estimatedCostCents: number;
+  }>;
 }
 
 function help(): string {
@@ -229,14 +246,19 @@ async function endFingerprints(
   );
 }
 
-function fixtureDigestCatalog(
+function plannedRequests(
   candidate: (typeof BLIND_VISUAL_CANDIDATES)[BlindVisualCandidateModel],
   pairs: Awaited<ReturnType<typeof loadBlindVisualPairs>>,
-): Readonly<Record<string, string>> {
-  const requests = [
+): BlindVisualInvocationRequest[] {
+  return [
     buildBlindVisualProbePlan(candidate, pairs).request,
     ...buildBlindVisualPairPlans(candidate, pairs).map((plan) => plan.request),
   ];
+}
+
+function fixtureDigestCatalog(
+  requests: readonly BlindVisualInvocationRequest[],
+): Readonly<Record<string, string>> {
   const entries = requests.flatMap((request) =>
     request.images.map((image) => [image.artifactId, image.sha256] as const),
   );
@@ -246,6 +268,41 @@ function fixtureDigestCatalog(
     throw new Error("BLIND_VISUAL_EVAL_FIXTURE_ID_DUPLICATE");
   }
   return Object.freeze(Object.fromEntries(entries));
+}
+
+function costPreflight(
+  candidate: (typeof BLIND_VISUAL_CANDIDATES)[BlindVisualCandidateModel],
+  requests: readonly BlindVisualInvocationRequest[],
+): CostPreflight {
+  const maxAllowedEstimatedCostCents =
+    candidate.maxCostCents - BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS;
+  const calls = requests.map((request) => {
+    const estimate = estimateBlindVisualCallCostUpperBound({
+      candidate,
+      request,
+      systemPrompt: BLIND_VISUAL_SYSTEM_PROMPT,
+    });
+    if (estimate.totalCostCents > maxAllowedEstimatedCostCents) {
+      throw new Error(
+        `BLIND_VISUAL_EVAL_ESTIMATED_CALL_COST_EXCEEDED: ${request.opaqueRunId}`,
+      );
+    }
+    return {
+      phase: request.phase,
+      opaqueRunId: request.opaqueRunId,
+      estimatedInputTokens: estimate.inputTokens,
+      outputTokenCeiling: estimate.outputTokens,
+      estimatedCostCents: estimate.totalCostCents,
+    };
+  });
+  return {
+    estimatorVersion: BLIND_VISUAL_COST_ESTIMATOR_VERSION,
+    maxAllowedEstimatedCostCents,
+    maxEstimatedCostCents: Math.max(
+      ...calls.map((call) => call.estimatedCostCents),
+    ),
+    calls,
+  };
 }
 
 function createGateway(
@@ -322,8 +379,7 @@ function gatewayInvoke(
           {
             task: TASK,
             prompt: request.prompt,
-            system:
-              "Judge only the supplied screenshots. Return the exact closed JSON shape. Do not emit scores, verdicts, repairs, code, or prose.",
+            system: BLIND_VISUAL_SYSTEM_PROMPT,
             model: request.model,
             schema: request.schema,
             images: request.images,
@@ -511,7 +567,9 @@ async function main(): Promise<void> {
     if (!catalog.requestedModelListed) {
       throw new Error(`BLIND_VISUAL_EVAL_MODEL_NOT_LISTED: ${model}`);
     }
-    const fixtureDigests = fixtureDigestCatalog(candidate, pairs);
+    const requests = plannedRequests(candidate, pairs);
+    const fixtureDigests = fixtureDigestCatalog(requests);
+    const callCostPreflight = costPreflight(candidate, requests);
     const runtime = createGateway(fixtureDigests, model, commitSha);
     reportHandle = await open(outputPath, "wx");
     let report: BlindVisualModelReport;
@@ -562,6 +620,7 @@ async function main(): Promise<void> {
           capCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
           remainingCents: budgetRemainingCents,
         },
+        callCostPreflight,
         artifactManifest,
       },
       failure: sourceIntegrity.stable

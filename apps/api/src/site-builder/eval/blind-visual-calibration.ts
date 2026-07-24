@@ -14,6 +14,8 @@ export const BLIND_VISUAL_CALIBRATION_SCHEMA_VERSION =
   "site-builder-blind-visual-calibration-report/v1";
 export const BLIND_VISUAL_CALIBRATION_PROMPT_VERSION =
   "site-builder-blind-visual-calibration-prompt/v1";
+export const BLIND_VISUAL_SYSTEM_PROMPT =
+  "Judge only the supplied screenshots. Return the exact closed JSON shape. Do not emit scores, verdicts, repairs, code, or prose.";
 
 export const BLIND_VISUAL_REPEATS = 3;
 export const BLIND_VISUAL_PAIR_COUNT = 6;
@@ -23,6 +25,9 @@ export const BLIND_VISUAL_TIMEOUT_MS = 120_000;
 export const BLIND_VISUAL_MAX_TOKENS = 800;
 export const BLIND_VISUAL_MAX_COST_CENTS = 5;
 export const BLIND_VISUAL_MODEL_COST_BOUND_CENTS = 95;
+export const BLIND_VISUAL_COST_ESTIMATOR_VERSION =
+  "site-builder-blind-visual-cost-upper-bound/v3";
+export const BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS = 0.01;
 
 export const BLIND_VISUAL_CHOICES = ["left", "right", "tie"] as const;
 export const BLIND_VISUAL_SEVERITIES = ["blocker", "major", "minor"] as const;
@@ -256,6 +261,16 @@ export type BlindVisualInvoke = (
   request: BlindVisualInvocationRequest,
 ) => Promise<BlindVisualProviderResult>;
 
+export interface BlindVisualCallCostUpperBound {
+  estimatorVersion: typeof BLIND_VISUAL_COST_ESTIMATOR_VERSION;
+  inputTokens: number;
+  outputTokens: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  totalCostUsd: number;
+  totalCostCents: number;
+}
+
 export interface BlindVisualExecutionProvenance {
   commitSha: string;
   sourceBundleSha256: string;
@@ -457,6 +472,98 @@ function round(value: number, places = 8): number {
   return Number(value.toFixed(places));
 }
 
+function pngDimensions(bytes: Uint8Array): {
+  width: number;
+  height: number;
+} {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const pngSignature = "89504e470d0a1a0a";
+  if (
+    buffer.byteLength < 24 ||
+    buffer.subarray(0, 8).toString("hex") !== pngSignature ||
+    buffer.subarray(12, 16).toString("ascii") !== "IHDR"
+  ) {
+    throw new Error("BLIND_VISUAL_COST_ESTIMATE_PNG_INVALID");
+  }
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  if (width <= 0 || height <= 0) {
+    throw new Error("BLIND_VISUAL_COST_ESTIMATE_DIMENSIONS_INVALID");
+  }
+  return { width, height };
+}
+
+function gpt56HighDetailTokenCeiling(width: number, height: number): number {
+  /*
+   * GPT-5.6 vision uses 32px patches, not the GPT-4o 512px tile formula.
+   * The provider sends detail=high, whose finite normalization may only reduce
+   * the original patch count. GPT-5.6 has no additional multiplier in the
+   * published patch-multiplier table, so the unresized patch count is a
+   * conservative, auditable input-token ceiling even if its high-detail limit
+   * changes below that ceiling.
+   */
+  return Math.ceil(width / 32) * Math.ceil(height / 32);
+}
+
+function imageTokenCeiling(
+  candidate: BlindVisualCandidateConfig,
+  bytes: Uint8Array,
+): number {
+  const { width, height } = pngDimensions(bytes);
+  if (
+    candidate.transport === "openai-responses" ||
+    candidate.transport === "openai-chat-completions"
+  ) {
+    return gpt56HighDetailTokenCeiling(width, height);
+  }
+  if (candidate.transport === "anthropic-messages") {
+    // Anthropic resizes oversized inputs to its bounded vision envelope.
+    return Math.min(2_000, Math.ceil((width * height) / 750));
+  }
+  // Gemini media resolution uses bounded 768px tiles. One extra tile is kept
+  // as framing headroom instead of treating compressed PNG bytes as text.
+  return (Math.ceil(width / 768) * Math.ceil(height / 768) + 1) * 258;
+}
+
+/**
+ * Transport-aware pre-dispatch ceiling using each frozen vision transport's
+ * bounded image normalization (or the original GPT-5.6 patch count when that
+ * is the safer ceiling), plus conservative text/schema/framing tokens. The CLI
+ * enforces this below 5¢ with additional headroom; actual reported usage is
+ * still checked after every call.
+ */
+export function estimateBlindVisualCallCostUpperBound(input: {
+  candidate: BlindVisualCandidateConfig;
+  request: BlindVisualInvocationRequest;
+  systemPrompt: string;
+}): BlindVisualCallCostUpperBound {
+  const textBytes =
+    Buffer.byteLength(input.systemPrompt, "utf8") +
+    Buffer.byteLength(input.request.prompt, "utf8") +
+    Buffer.byteLength(JSON.stringify(input.request.schema), "utf8");
+  const textTokenCeiling = Math.ceil(textBytes / 3);
+  const imageTokens = input.request.images.reduce((sum, image) => {
+    return sum + imageTokenCeiling(input.candidate, image.bytes) + 64;
+  }, 0);
+  const inputTokens = 256 + textTokenCeiling + imageTokens;
+  const outputTokens = input.request.maxTokens;
+  const inputCostUsd =
+    (inputTokens * input.candidate.price.inputUsdPerMillionTokens) / 1_000_000;
+  const outputCostUsd =
+    (outputTokens * input.candidate.price.outputUsdPerMillionTokens) /
+    1_000_000;
+  const totalCostUsd = inputCostUsd + outputCostUsd;
+  return {
+    estimatorVersion: BLIND_VISUAL_COST_ESTIMATOR_VERSION,
+    inputTokens,
+    outputTokens,
+    inputCostUsd: round(inputCostUsd),
+    outputCostUsd: round(outputCostUsd),
+    totalCostUsd: round(totalCostUsd),
+    totalCostCents: round(totalCostUsd * 100, 6),
+  };
+}
+
 function assertExecutionProvenance(
   provenance: BlindVisualExecutionProvenance,
 ): void {
@@ -554,6 +661,12 @@ function probePrompt(opaqueRunId: string): string {
     `Allowed severity values: ${BLIND_VISUAL_SEVERITIES.join(", ")}.`,
     "Do not output scores, dimensions, pass/fail decisions, repairs, code, or free text.",
   ].join("\n");
+}
+
+function probePair<T extends { breakpoint: QualityBreakpoint }>(
+  pairs: readonly T[],
+): T | undefined {
+  return pairs.find((candidate) => candidate.breakpoint === 768) ?? pairs[0];
 }
 
 function assignmentFor(
@@ -727,7 +840,7 @@ export function buildBlindVisualProbePlan(
   pairs: readonly BlindVisualPair[],
 ): BlindVisualProbePlan {
   assertCandidateConfig(candidate);
-  const pair = pairs[0];
+  const pair = probePair(pairs);
   if (!pair) throw new Error("BLIND_VISUAL_PROBE_PAIR_MISSING");
   const opaqueRunId = `blind-probe-${sha256(
     `${pair.pairId}:${BLIND_VISUAL_CALIBRATION_PROMPT_VERSION}`,
@@ -963,7 +1076,7 @@ function assertProbeRecord(
   probe: BlindVisualProbeRecord,
   definition: readonly BlindVisualPairDefinition[],
 ): void {
-  const pair = definition[0];
+  const pair = probePair(definition);
   if (!pair) throw new Error("BLIND_VISUAL_STATS_PROBE_INVALID");
   const output = assertBlindVisualOutput(probe.output, 3);
   assertCostEvidence(candidate, probe);
