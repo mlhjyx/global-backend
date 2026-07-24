@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
   constants,
-  copyFile,
   mkdir,
   open,
   readdir,
@@ -242,7 +241,7 @@ export function mergeCandidate(graph, candidate) {
 
 async function ensurePrivateDirectory(path) {
   await mkdir(path, { recursive: true, mode: 0o700 });
-  await (await open(path, constants.O_RDONLY)).close();
+  await securePathStatus(path, "directory", false);
 }
 
 async function readRegularFile(path, allowMissing = false) {
@@ -268,6 +267,27 @@ async function securePathStatus(path, kind, allowMissing = true) {
     if (allowMissing && error?.code === "ENOENT") return { exists: false };
     throw error;
   }
+}
+
+async function assertCandidateIsInInbox(candidatePath, inboxDir) {
+  const candidateInfo = await lstat(candidatePath);
+  assert(candidateInfo.isFile() && candidateInfo.nlink === 1, "UNSAFE_CANDIDATE", "candidate must be a regular non-linked file", { candidatePath });
+  assert((candidateInfo.mode & 0o077) === 0, "INSECURE_PERMISSIONS", "candidate is readable or writable by group or others", { candidatePath, mode: (candidateInfo.mode & 0o777).toString(8) });
+  assert(candidateInfo.uid === process.getuid?.(), "INSECURE_OWNERSHIP", "candidate is not owned by the current user", { candidatePath, uid: candidateInfo.uid });
+  const inboxRoot = await realpath(inboxDir);
+  const realCandidate = await realpath(candidatePath);
+  const pathFromInbox = relative(inboxRoot, realCandidate);
+  assert(pathFromInbox && !pathFromInbox.startsWith(".."), "UNSAFE_CANDIDATE", "candidate must be in the configured Inbox", { candidatePath, inboxDir });
+}
+
+async function assertSecureGraphWritePaths(paths, { audit = false, backup = false, inbox = false } = {}) {
+  await securePathStatus(paths.graphDir, "directory", false);
+  await securePathStatus(paths.graphPath, "file");
+  await securePathStatus(paths.lockPath, "file");
+  await securePathStatus(paths.journalPath, "file");
+  if (audit) await securePathStatus(paths.auditDir, "directory", false);
+  if (backup) await securePathStatus(paths.backupDir, "directory", false);
+  if (inbox) await securePathStatus(paths.inboxDir, "directory", false);
 }
 
 async function fsyncDirectory(path) {
@@ -350,6 +370,7 @@ export async function createCandidate(input, options) {
   const paths = defaultPaths(options);
   const candidate = validateCandidate({ ...input, schemaVersion: CANDIDATE_SCHEMA });
   await ensurePrivateDirectory(paths.inboxDir);
+  await assertSecureGraphWritePaths(paths, { inbox: true });
   const path = join(paths.inboxDir, `${candidate.id}.json`);
   const content = `${canonicalJson(candidate)}\n`;
   try {
@@ -401,6 +422,8 @@ export async function verifyGraph(options) {
 
 export async function backupGraph(options) {
   const paths = defaultPaths(options);
+  await ensurePrivateDirectory(paths.backupDir);
+  await assertSecureGraphWritePaths(paths, { backup: true });
   const content = await readRegularFile(paths.graphPath, true);
   parseGraphText(content);
   return { backupPath: await createBackup(paths, content), graphHash: sha256(content) };
@@ -409,6 +432,7 @@ export async function backupGraph(options) {
 export async function restoreGraph(backupPath, options) {
   const paths = defaultPaths(options);
   await ensurePrivateDirectory(paths.backupDir);
+  await assertSecureGraphWritePaths(paths, { backup: true });
   const backupRoot = await realpath(paths.backupDir);
   const resolvedBackup = resolve(backupPath);
   const backupInfo = await lstat(resolvedBackup);
@@ -439,11 +463,23 @@ async function verifyMergedPr(candidate, options) {
   assert(Number.isInteger(source.prNumber) && source.prNumber > 0, "PROMOTION_PENDING", "merged PR receipt requires a PR number");
   assert(source.baseRef === "main", "PROMOTION_PENDING", "automatic promotion only permits PRs merged to main");
   assert(source.mergeSha === candidate.sourceCommit, "PROMOTION_PENDING", "merged PR receipt must bind mergeSha to sourceCommit");
+  const expectedReference = `https://github.com/${source.repository}/pull/${source.prNumber}`;
+  const expectedEntityName = `merged_pr:${source.repository}#${source.prNumber}@${candidate.sourceCommit}`;
+  const expectedObservation = canonicalJson({ baseRef: "main", mergeSha: candidate.sourceCommit, prNumber: source.prNumber, repository: source.repository });
+  assert(Object.keys(source).sort().join(",") === "baseRef,kind,mergeSha,prNumber,reference,repository", "PROMOTION_PENDING", "merged PR receipt contains unverified source fields");
+  assert(source.kind === "merged_pr" && source.reference === expectedReference, "PROMOTION_PENDING", "merged PR receipt source is not canonical");
+  assert(candidate.authority === "derived", "PROMOTION_PENDING", "automatic merged PR receipt must be derived");
+  assert(candidate.entity.name === expectedEntityName && candidate.entity.entityType === "merged_pr", "PROMOTION_PENDING", "automatic promotion may only record the verified PR receipt");
+  assert(candidate.observations.length === 1 && candidate.observations[0] === expectedObservation, "PROMOTION_PENDING", "automatic promotion may only record verified PR metadata");
+  assert(candidate.relations.length === 0 && candidate.supersedes.length === 0, "PROMOTION_PENDING", "automatic merged PR receipt cannot create relationships");
   if (options.verifyMergedPr) {
     await options.verifyMergedPr(candidate);
     return;
   }
   try {
+    const { stdout: remote } = await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: candidate.project });
+    const normalizedRemote = remote.trim().replace(/^git@github\.com:/, "https://github.com/").replace(/\.git$/, "").replace(/^https?:\/\/github\.com\//, "");
+    assert(normalizedRemote === source.repository, "PROMOTION_PENDING", "merged PR repository does not match the candidate project origin");
     await execFileAsync("git", ["merge-base", "--is-ancestor", candidate.sourceCommit, "origin/main"], { cwd: candidate.project });
     const { stdout } = await execFileAsync("gh", ["pr", "view", String(source.prNumber), "--repo", source.repository, "--json", "state,baseRefName,mergeCommit"]);
     const pr = JSON.parse(stdout);
@@ -472,9 +508,12 @@ async function validatePromotion(candidate, options) {
 
 export async function promoteCandidate(candidatePath, options) {
   const paths = defaultPaths(options);
-  const candidate = validateCandidate(JSON.parse(await readRegularFile(resolve(candidatePath))));
+  await Promise.all([ensurePrivateDirectory(paths.auditDir), ensurePrivateDirectory(paths.backupDir), ensurePrivateDirectory(paths.inboxDir)]);
+  const resolvedCandidatePath = resolve(candidatePath);
+  await assertSecureGraphWritePaths(paths, { audit: true, backup: true, inbox: true });
+  await assertCandidateIsInInbox(resolvedCandidatePath, paths.inboxDir);
+  const candidate = validateCandidate(JSON.parse(await readRegularFile(resolvedCandidatePath)));
   await validatePromotion(candidate, options);
-  await Promise.all([ensurePrivateDirectory(paths.auditDir), ensurePrivateDirectory(paths.backupDir)]);
   const release = await acquireLock(paths.lockPath, options.lockTimeoutMs);
   try {
     const before = await readRegularFile(paths.graphPath, true);

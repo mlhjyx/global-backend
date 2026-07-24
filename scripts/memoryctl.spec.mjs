@@ -101,13 +101,15 @@ test("merged PR promotion requires a live mechanical verifier", async () => {
   const value = candidate("merged-pr-0001", "merged_pr");
   value.source = {
     kind: "merged_pr",
-    reference: "PR #1",
+    reference: "https://github.com/mlhjyx/global-backend/pull/1",
     repository: "mlhjyx/global-backend",
     prNumber: 1,
     baseRef: "main",
     mergeSha: "b".repeat(40),
   };
   value.sourceCommit = "b".repeat(40);
+  value.entity = { name: `merged_pr:mlhjyx/global-backend#1@${value.sourceCommit}`, entityType: "merged_pr" };
+  value.observations = [JSON.stringify({ baseRef: "main", mergeSha: value.sourceCommit, prNumber: 1, repository: "mlhjyx/global-backend" })];
   const created = await createCandidate(value, paths);
   const before = await verifyGraph(paths);
   await assert.rejects(() => promoteCandidate(created.candidatePath, {
@@ -125,8 +127,43 @@ test("merged PR promotion requires a live mechanical verifier", async () => {
   assert.equal(result.changed, true);
 });
 
+test("merged PR receipt rejects arbitrary facts even with a verified PR", async () => {
+  const paths = await fixture();
+  const value = candidate("merged-pr-0002", "merged_pr");
+  value.source = {
+    kind: "merged_pr",
+    reference: "https://github.com/mlhjyx/global-backend/pull/1",
+    repository: "mlhjyx/global-backend",
+    prNumber: 1,
+    baseRef: "main",
+    mergeSha: "c".repeat(40),
+  };
+  value.sourceCommit = "c".repeat(40);
+  const created = await createCandidate(value, paths);
+  const before = await verifyGraph(paths);
+  await assert.rejects(() => promoteCandidate(created.candidatePath, {
+    ...paths,
+    expectedCandidateHash: created.candidateHash,
+    expectedGraphHash: before.graphHash,
+    verifyMergedPr: async () => {},
+  }), (error) => error instanceof MemoryCtlError && error.code === "PROMOTION_PENDING");
+});
+
 test("verify rejects group-readable managed memory files", async () => {
   const paths = await fixture();
   await chmod(paths.graphPath, 0o644);
   await assert.rejects(() => verifyGraph(paths), (error) => error instanceof MemoryCtlError && error.code === "INSECURE_PERMISSIONS");
+});
+
+test("promotion refuses an insecure backup directory before writing", async () => {
+  const paths = await fixture();
+  const created = await createCandidate(candidate("decision-0100"), paths);
+  await mkdir(paths.backupDir, { mode: 0o700 });
+  await chmod(paths.backupDir, 0o777);
+  const before = await verifyGraph({ ...paths, backupDir: join(paths.root, "not-created") });
+  await assert.rejects(() => promoteCandidate(created.candidatePath, {
+    ...paths,
+    expectedCandidateHash: created.candidateHash,
+    expectedGraphHash: before.graphHash,
+  }), (error) => error instanceof MemoryCtlError && error.code === "INSECURE_PERMISSIONS");
 });
