@@ -10,18 +10,15 @@ import {
 import type { VisionReviewImage } from "../../model-gateway/types";
 import {
   BLIND_VISUAL_CALIBRATION_HARNESS_VERSION,
+  BLIND_VISUAL_CAMPAIGN_MODELS,
   BLIND_VISUAL_CANDIDATES,
-  BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
-  BLIND_VISUAL_COST_ESTIMATOR_VERSION,
   BLIND_VISUAL_EXPECTED_RUNS,
-  BLIND_VISUAL_MAX_COST_CENTS,
   BLIND_VISUAL_MAX_TOKENS,
-  BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
-  BLIND_VISUAL_SYSTEM_PROMPT,
   BLIND_VISUAL_OUTPUT_SCHEMA,
   BLIND_VISUAL_TIMEOUT_MS,
   BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS,
   assertBlindVisualOutput,
+  buildBlindVisualCampaignPreflight,
   buildBlindVisualMatrixDefinition,
   buildBlindVisualPairPlans,
   buildBlindVisualProbePlan,
@@ -225,43 +222,35 @@ function makeRunMiss(run: BlindVisualCallRecord): void {
 }
 
 describe("blind visual calibration fixture and invocation plans", () => {
-  it("preflights affordable calls and rejects over-cap GPT-5.6 calls before dispatch", () => {
-    const maximums = new Map<BlindVisualCandidateModel, number>();
-    for (const candidateConfig of Object.values(BLIND_VISUAL_CANDIDATES)) {
-      const requests = [
-        buildBlindVisualProbePlan(candidateConfig, pairs).request,
-        ...buildBlindVisualPairPlans(candidateConfig, pairs).map(
-          (plan) => plan.request,
-        ),
-      ];
-      const estimates = requests.map((request) =>
-        estimateBlindVisualCallCostUpperBound({
-          candidate: candidateConfig,
-          request,
-          systemPrompt: BLIND_VISUAL_SYSTEM_PROMPT,
-        }),
-      );
-      maximums.set(
-        candidateConfig.model,
-        Math.max(...estimates.map((estimate) => estimate.totalCostCents)),
-      );
-      for (const estimate of estimates) {
-        expect(estimate.estimatorVersion).toBe(
-          BLIND_VISUAL_COST_ESTIMATOR_VERSION,
-        );
-        expect(estimate.outputTokens).toBe(BLIND_VISUAL_MAX_TOKENS);
+  it("forecasts all original-image calls without making cost an execution gate", () => {
+    const preflight = buildBlindVisualCampaignPreflight(pairs);
+    expect(preflight.estimatedTotalCostCents).toBeCloseTo(282.6564, 6);
+    expect(preflight.models.map((model) => model.model)).toEqual(
+      BLIND_VISUAL_CAMPAIGN_MODELS,
+    );
+    for (const model of preflight.models) {
+      expect(model.calls).toHaveLength(1 + BLIND_VISUAL_EXPECTED_RUNS);
+      for (const call of model.calls) {
+        expect(call.outputTokenCeiling).toBe(BLIND_VISUAL_MAX_TOKENS);
+        expect(call.estimatedCostCents).toBeGreaterThan(0);
       }
     }
-    for (const model of ["gemini-3.5-flash", "claude-sonnet-5"] as const) {
-      expect(maximums.get(model)).toBeLessThanOrEqual(
-        BLIND_VISUAL_MAX_COST_CENTS - BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
-      );
-    }
-    for (const model of ["gpt-5.6-terra", "gpt-5.6-sol"] as const) {
-      expect(maximums.get(model)).toBeGreaterThan(
-        BLIND_VISUAL_MAX_COST_CENTS - BLIND_VISUAL_COST_ESTIMATE_HEADROOM_CENTS,
-      );
-    }
+  });
+
+  it("reports an oversized original-image forecast without rejecting the campaign", () => {
+    const oversizedPairs = structuredClone(pairs);
+    const pair = oversizedPairs.find(
+      (candidate) => candidate.familyId === "scientific-trust",
+    );
+    if (!pair) throw new Error("test pair missing");
+    const bytes = Buffer.from(pair.sourceImage.bytes);
+    bytes.writeUInt32BE(100_000, 16);
+    bytes.writeUInt32BE(100_000, 20);
+    pair.sourceImage = { ...pair.sourceImage, bytes };
+    const forecast = buildBlindVisualCampaignPreflight(oversizedPairs);
+    expect(forecast.estimatedTotalCostCents).toBeGreaterThan(
+      buildBlindVisualCampaignPreflight(pairs).estimatedTotalCostCents,
+    );
   });
 
   it("rejects a forged oversized or malformed PNG cost envelope before dispatch", () => {
@@ -283,7 +272,7 @@ describe("blind visual calibration fixture and invocation plans", () => {
         request: forgedRequest,
         systemPrompt: "closed output",
       }).totalCostCents,
-    ).toBeGreaterThan(candidateConfig.maxCostCents);
+    ).toBeGreaterThan(11);
 
     const malformedRequest = {
       ...request,
@@ -480,25 +469,19 @@ describe("blind visual candidate runner", () => {
     expect(classifyBlindVisualGatewayFailure(error)).toBe(reason);
   });
 
-  it("freezes the four candidates to 1 probe + 18 calls and the requested budgets", () => {
+  it("freezes four candidates for a 1 probe + 18-call quality calibration", () => {
     expect(Object.keys(BLIND_VISUAL_CANDIDATES)).toEqual([
       "gemini-3.5-flash",
       "claude-sonnet-5",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
     ]);
+    expect(Object.isFrozen(BLIND_VISUAL_CAMPAIGN_MODELS)).toBe(true);
     for (const config of Object.values(BLIND_VISUAL_CANDIDATES)) {
       expect(Object.isFrozen(config)).toBe(true);
       expect(Object.isFrozen(config.price)).toBe(true);
       expect(config.timeoutMs).toBe(BLIND_VISUAL_TIMEOUT_MS);
       expect(config.maxTokens).toBe(BLIND_VISUAL_MAX_TOKENS);
-      expect(config.maxCostCents).toBe(BLIND_VISUAL_MAX_COST_CENTS);
-      expect(config.perModelCostBoundCents).toBe(
-        BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
-      );
-      expect((1 + BLIND_VISUAL_EXPECTED_RUNS) * config.maxCostCents).toBe(
-        config.perModelCostBoundCents,
-      );
     }
     expect(BLIND_VISUAL_CANDIDATES["gpt-5.6-terra"].upstreamModelFamily).toBe(
       BLIND_VISUAL_CANDIDATES["gpt-5.6-sol"].upstreamModelFamily,
@@ -619,13 +602,13 @@ describe("blind visual candidate runner", () => {
         resultFor(request, { provider: "direct-upstream" }),
     ],
     [
-      "cost_bound_exceeded",
+      "usage_invalid",
       (request: Parameters<BlindVisualInvoke>[0]) =>
         resultFor(request, {
           usage: {
             inputTokens: 100,
-            outputTokens: 30,
-            costUsd: 0.0501,
+            outputTokens: BLIND_VISUAL_MAX_TOKENS + 1,
+            costUsd: 0.001,
           },
         }),
     ],
@@ -765,7 +748,7 @@ describe("blind visual candidate runner", () => {
           reason: "timeout",
           requestedModel: null,
           timeoutSettlement: "unknown_after_grace",
-          preflightCostCeilingCents: BLIND_VISUAL_MAX_COST_CENTS,
+          preflightCostCeilingCents: null,
         },
       });
     } finally {
@@ -916,12 +899,12 @@ describe("server-side single and dual model aggregation", () => {
       ),
     ).toThrow("BLIND_VISUAL_STATS_RUN_INVALID");
 
-    const exactBoundRuns = report.runs.map((run) => ({
+    const observedCostRuns = report.runs.map((run) => ({
       ...structuredClone(run),
       reportedCostUsd: 0.05,
       accountedCostUsd: 0.05,
     }));
-    const exactBoundProbe = {
+    const observedCostProbe = {
       ...structuredClone(report.probe!),
       reportedCostUsd: 0.05,
       accountedCostUsd: 0.05,
@@ -929,8 +912,8 @@ describe("server-side single and dual model aggregation", () => {
     expect(
       summarizeBlindVisualCandidate(
         candidate(),
-        exactBoundRuns,
-        exactBoundProbe,
+        observedCostRuns,
+        observedCostProbe,
         report.matrixDefinition,
         matrixDefinition,
       ),
@@ -941,20 +924,20 @@ describe("server-side single and dual model aggregation", () => {
       passed: true,
     });
 
-    const overBoundProbe = {
+    const higherObservedCostProbe = {
       ...structuredClone(report.probe!),
-      reportedCostUsd: 0.06,
-      accountedCostUsd: 0.06,
+      reportedCostUsd: 0.2,
+      accountedCostUsd: 0.2,
     };
-    expect(() =>
+    expect(
       summarizeBlindVisualCandidate(
         candidate(),
         report.runs,
-        overBoundProbe,
+        higherObservedCostProbe,
         report.matrixDefinition,
         matrixDefinition,
       ),
-    ).toThrow("BLIND_VISUAL_STATS_PROBE_INVALID");
+    ).toMatchObject({ passed: true, probeCostUsd: 0.2 });
   });
 
   it("rejects duplicate run keys instead of inflating statistics", async () => {
@@ -1160,6 +1143,12 @@ describe("server-side single and dual model aggregation", () => {
     ).harnessVersion = "tampered";
     expect(() =>
       summarizeBlindVisualEnsemble([wrongHarness], matrixDefinition),
+    ).toThrow("BLIND_VISUAL_STATS_REPORT_ENVELOPE_INVALID");
+
+    const wrongLimits = structuredClone(report);
+    wrongLimits.limits.maxTokens = BLIND_VISUAL_MAX_TOKENS + 1;
+    expect(() =>
+      summarizeBlindVisualEnsemble([wrongLimits], matrixDefinition),
     ).toThrow("BLIND_VISUAL_STATS_REPORT_ENVELOPE_INVALID");
   });
 
