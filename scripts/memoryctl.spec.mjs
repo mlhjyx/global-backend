@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { backupGraph, createCandidate, promoteCandidate, restoreGraph, verifyGraph, MemoryCtlError } from "./memoryctl-lib.mjs";
+import { backupGraph, createCandidate, promoteCandidate, restoreGraph, unlockGraph, verifyGraph, MemoryCtlError } from "./memoryctl-lib.mjs";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "memoryctl-"));
@@ -94,6 +94,37 @@ test("restore requires the current hash and preserves a preimage backup", async 
   const result = await restoreGraph(saved.backupPath, { ...paths, expectedGraphHash: changed.graphHash });
   assert.equal(result.graphHash, saved.graphHash);
   assert.match(await readFile(paths.graphPath, "utf8"), /seed/);
+  assert.equal((await verifyGraph(paths)).untrackedDrift, false);
+});
+
+test("promotion retry recovers a graph replacement whose audit write was interrupted", async () => {
+  const paths = await fixture();
+  const created = await createCandidate(candidate("decision-0200"), paths);
+  const before = await verifyGraph(paths);
+  const published = await promoteCandidate(created.candidatePath, { ...paths, expectedCandidateHash: created.candidateHash, expectedGraphHash: before.graphHash });
+  const auditPath = join(paths.root, "audit", "decision-0200.json");
+  const audit = JSON.parse(await readFile(auditPath, "utf8"));
+  await unlink(auditPath);
+  await writeFile(`${paths.graphPath}.journal`, `${JSON.stringify({ audit, auditName: "decision-0200.json", candidateId: "decision-0200", newHash: published.graphHash, oldHash: before.graphHash, operation: "promote", state: "prepared" })}\n`, { mode: 0o600 });
+  const recovered = await promoteCandidate(created.candidatePath, { ...paths, expectedCandidateHash: created.candidateHash, expectedGraphHash: before.graphHash });
+  assert.equal(recovered.recovered, true);
+  assert.equal((await verifyGraph(paths)).journalPresent, false);
+});
+
+test("restore rejects a backup created for another graph target", async () => {
+  const source = await fixture();
+  const target = await fixture();
+  const saved = await backupGraph(source);
+  const current = await verifyGraph(target);
+  await assert.rejects(() => restoreGraph(saved.backupPath, { ...target, backupDir: source.backupDir, expectedGraphHash: current.graphHash }), (error) => error instanceof MemoryCtlError && error.code === "BACKUP_TARGET");
+});
+
+test("restore rejects a backup whose private mode changed", async () => {
+  const paths = await fixture();
+  const saved = await backupGraph(paths);
+  await chmod(saved.backupPath, 0o644);
+  const current = await verifyGraph(paths);
+  await assert.rejects(() => restoreGraph(saved.backupPath, { ...paths, expectedGraphHash: current.graphHash }), (error) => error instanceof MemoryCtlError && error.code === "INSECURE_PERMISSIONS");
 });
 
 test("merged PR promotion requires a live mechanical verifier", async () => {
@@ -166,4 +197,25 @@ test("promotion refuses an insecure backup directory before writing", async () =
     expectedCandidateHash: created.candidateHash,
     expectedGraphHash: before.graphHash,
   }), (error) => error instanceof MemoryCtlError && error.code === "INSECURE_PERMISSIONS");
+});
+
+test("verify checks the host MCP package, path, read allowlist, and write denylist", async () => {
+  const paths = await fixture();
+  const configPath = join(paths.root, "config.toml");
+  await writeFile(configPath, `[mcp_servers.memory]\nenabled = true\ncommand = "npx"\nargs = ["-y", "@modelcontextprotocol/server-memory@2026.1.26"]\nenv = { MEMORY_FILE_PATH = "${paths.graphPath}" }\nenabled_tools = ["read_graph", "search_nodes", "open_nodes"]\ndisabled_tools = ["create_entities", "create_relations", "add_observations", "delete_entities", "delete_observations", "delete_relations"]\n`, { mode: 0o600 });
+  const verified = await verifyGraph({ ...paths, codexConfigPath: configPath });
+  assert.equal(verified.hostConfig.package, "@modelcontextprotocol/server-memory@2026.1.26");
+  await writeFile(configPath, (await readFile(configPath, "utf8")).replace('enabled_tools = ["read_graph", "search_nodes", "open_nodes"]', 'enabled_tools = ["read_graph", "create_entities"]'), { mode: 0o600 });
+  await assert.rejects(() => verifyGraph({ ...paths, codexConfigPath: configPath }), (error) => error instanceof MemoryCtlError && error.code === "MEMORY_CONFIG");
+});
+
+test("audited unlock requires a dead stale owner and exact lock and graph hashes", async () => {
+  const paths = await fixture();
+  const lockPath = `${paths.graphPath}.lock`;
+  const lock = JSON.stringify({ token: "orphan", pid: 99999999, createdAt: "2020-01-01T00:00:00.000Z" });
+  await writeFile(lockPath, lock, { mode: 0o600 });
+  const graph = await verifyGraph(paths);
+  const result = await unlockGraph({ ...paths, expectedGraphHash: graph.graphHash, expectedLockHash: (await import("./memoryctl-lib.mjs")).sha256(lock), reason: "operator confirmed terminated writer" });
+  assert.equal(result.graphHash, graph.graphHash);
+  await assert.rejects(() => readFile(lockPath, "utf8"), { code: "ENOENT" });
 });

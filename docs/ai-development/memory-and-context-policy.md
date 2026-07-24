@@ -99,8 +99,9 @@ Obsidian/
 本机 MCP Memory 只保留官方兼容的 `entity` / `relation` JSONL 记录；来源、审批、有效期和哈希以独立的 `memory_fact_v1` receipt entity、候选文件、审计文件和备份 manifest 保存。不能向官方 JSONL 添加私有字段，因为上游重写图时会丢弃未知字段。
 
 - 普通 Codex 会话只允许 `read_graph`、`search_nodes`、`open_nodes`；六个 create/add/delete 工具必须在客户端配置中同时列入 allowlist/denylist 以防误用。
-- `memoryctl candidate` 只在 Inbox 写不可变候选；`promote` 必须带候选哈希和当前图哈希，拒绝任意自由文本写入；`verify` 只读检查 JSONL、哈希、权限和残留 journal。
-- `promote` 在锁内重新读取和校验图，先耐久备份，再写 journal、同目录临时文件、`fsync`、原子替换、目录 `fsync` 和写后重读验证。备份放 `/data/codex-memory/backups`，目录 `0700`、文件 `0600`；保留所有 90 天内备份且至少最近 100 份。
+- `memoryctl candidate` 只在 Inbox 写不可变候选；`promote` 必须带候选哈希和当前图哈希，拒绝任意自由文本写入；`verify` 只读检查 JSONL、哈希、权限和残留 journal。首次 promote 前必须执行 `node scripts/memoryctl.mjs verify --graph /root/.codex/mcp-memory/knowledge-graph.jsonl --codex-config /root/.codex/config.toml`，由工具核验固定 MCP 版本、持久路径、三项只读 allowlist 和六项写工具 denylist，且不输出配置中的其他值。
+- `promote` 在锁内重新读取和校验图，先耐久备份并同步备份目录，再写 journal、同目录临时文件、`fsync`、原子替换、目录 `fsync` 和写后重读验证。journal 保存待发布 audit，可在图已替换但 audit 未完成时通过同一 promote/restore 重试收口。restore 必须验证备份的目标图、schema、大小、哈希、owner 和权限，并发布 restore audit。备份放 `/data/codex-memory/backups`，目录 `0700`、文件 `0600`；保留所有 90 天内备份且至少最近 100 份。
+- 遗留 lock 默认 fail-closed；只能用带精确 lock/graph 哈希和原因的 `memoryctl unlock` 处理，并且 lock 至少 60 秒、记录的进程已不存在。unlock 先写审计再释放，不能用于抢占活跃写入者。
 - 候选创建和晋升时都执行 Secret、凭据 URL、常见 token、邮箱、电话和 `personalData=true` 拦截；拒绝日志只返回检测器和字段路径，不回显敏感值。
 - 已合并 PR 的自动晋升必须实时复核 GitHub 的 `MERGED/main/merge SHA` 与本地 `origin/main` 祖先关系；候选中的任何 “mechanically verified” 字段都不构成证据。自动路径只可写入由验证器构造的 PR receipt（仓库、编号、base 和 merge SHA），不能携带任意实体、观察或关系；PR 标题、正文、评论、提交信息和模型总结必须走人工批准路径。v1 尚未实现白名单运维验证器，运维结论保持 Inbox。用户决定必须由人工操作员使用含任务/消息引用、批准人、时间和声明哈希的结构化回执晋升；该本机工具只能保存回执，不能自行证明聊天身份。
 - `supersedes` 只能建立替代关系；旧事实保留并标记有效期，不能静默删除或覆盖。

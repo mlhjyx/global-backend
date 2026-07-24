@@ -32,6 +32,7 @@ const WRITE_TOOL_NAMES = [
   "delete_relations",
 ];
 const READ_TOOL_NAMES = ["read_graph", "search_nodes", "open_nodes"];
+const MEMORY_SERVER_PACKAGE = "@modelcontextprotocol/server-memory@2026.1.26";
 
 export class MemoryCtlError extends Error {
   constructor(code, message, details = undefined) {
@@ -99,6 +100,31 @@ function scanValue(value, field = "$") {
       scanValue(item, `${field}.${key}`);
     }
   }
+}
+
+function sameStringSet(actual, expected) {
+  return Array.isArray(actual) && actual.length === expected.length && [...actual].sort().join("\0") === [...expected].sort().join("\0");
+}
+
+export function verifyCodexMemoryConfigText(text, graphPath) {
+  const sectionMatch = text.match(/(?:^|\n)\[mcp_servers\.memory\]([\s\S]*?)(?=\n\[[^\n]+\]|$)/);
+  assert(sectionMatch, "MEMORY_CONFIG", "Codex config has no mcp_servers.memory section");
+  const section = sectionMatch[1];
+  const arrayValue = (key) => {
+    const match = section.match(new RegExp(`(?:^|\\n)${key}\\s*=\\s*(\\[[\\s\\S]*?\\])`, "m"));
+    assert(match, "MEMORY_CONFIG", `Codex memory config is missing ${key}`);
+    try { return JSON.parse(match[1]); } catch { throw new MemoryCtlError("MEMORY_CONFIG", `Codex memory config has invalid ${key}`); }
+  };
+  const args = arrayValue("args");
+  const enabledTools = arrayValue("enabled_tools");
+  const disabledTools = arrayValue("disabled_tools");
+  const pathMatch = section.match(/MEMORY_FILE_PATH\s*=\s*"([^"]+)"/);
+  assert(/(?:^|\n)enabled\s*=\s*true(?:\s|$)/m.test(section), "MEMORY_CONFIG", "Codex memory MCP is not enabled");
+  assert(args.includes(MEMORY_SERVER_PACKAGE), "MEMORY_CONFIG", "Codex memory MCP package is not pinned to the reviewed version");
+  assert(sameStringSet(enabledTools, READ_TOOL_NAMES), "MEMORY_CONFIG", "Codex memory MCP read allowlist is not exact");
+  assert(sameStringSet(disabledTools, WRITE_TOOL_NAMES), "MEMORY_CONFIG", "Codex memory MCP write denylist is not exact");
+  assert(pathMatch && resolve(pathMatch[1]) === resolve(graphPath), "MEMORY_CONFIG", "Codex memory MCP path does not match the verified graph");
+  return { disabledTools, enabledTools, graphPath: resolve(graphPath), package: MEMORY_SERVER_PACKAGE };
 }
 
 function normalizeEntity(entity) {
@@ -316,7 +342,42 @@ async function createBackup(paths, content) {
   const backupPath = join(paths.backupDir, `knowledge-graph-${stamp}-${hash}-${randomUUID()}.jsonl`);
   await writeDurable(backupPath, content, "wx");
   await writeDurable(`${backupPath}.manifest.json`, `${canonicalJson({ hash, path: paths.graphPath, schema: GRAPH_SCHEMA, size: Buffer.byteLength(content) })}\n`, "wx");
+  await fsyncDirectory(paths.backupDir);
   return backupPath;
+}
+
+async function writeAuditIdempotently(paths, name, audit) {
+  assert(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}\.json$/.test(name), "AUDIT_NAME", "audit receipt name is invalid");
+  const auditPath = join(paths.auditDir, name);
+  const content = `${canonicalJson(audit)}\n`;
+  try {
+    await writeDurable(auditPath, content, "wx");
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    assert(await readRegularFile(auditPath) === content, "AUDIT_CONFLICT", "audit receipt exists with different content", { name });
+  }
+  await fsyncDirectory(paths.auditDir);
+  return auditPath;
+}
+
+async function clearJournal(paths) {
+  await unlink(paths.journalPath);
+  await fsyncDirectory(paths.graphDir);
+}
+
+async function recoverPendingTransaction(paths, expected) {
+  const text = await readRegularFile(paths.journalPath, true);
+  if (!text) return null;
+  const journal = JSON.parse(text);
+  if (journal.state !== "prepared" || journal.operation !== expected.operation || journal.newHash !== expected.graphHash) return null;
+  if (expected.candidateId && journal.candidateId !== expected.candidateId) return null;
+  if (expected.candidateHash && journal.audit?.candidateHash !== expected.candidateHash) return null;
+  if (expected.restoreFrom && journal.restoreFrom !== expected.restoreFrom) return null;
+  assert(journal.audit && typeof journal.auditName === "string", "JOURNAL_INVALID", "pending transaction is missing its audit receipt");
+  assert(journal.audit.graphHash === journal.newHash, "JOURNAL_INVALID", "pending transaction audit does not match the published graph hash");
+  await writeAuditIdempotently(paths, journal.auditName, journal.audit);
+  await clearJournal(paths);
+  return { auditPath: join(paths.auditDir, journal.auditName), recovered: true };
 }
 
 async function replaceGraphAtomically(paths, content, journal) {
@@ -350,6 +411,35 @@ async function acquireLock(lockPath, timeoutMs = 10_000) {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     }
   }
+}
+
+export async function unlockGraph(options) {
+  const paths = defaultPaths(options);
+  await ensurePrivateDirectory(paths.auditDir);
+  await assertSecureGraphWritePaths(paths, { audit: true });
+  const lock = await readRegularFile(paths.lockPath, true);
+  assert(lock, "LOCK_NOT_FOUND", "there is no lock to release");
+  const lockHash = sha256(lock);
+  assert(options.expectedLockHash === lockHash, "LOCK_HASH", "lock changed or its exact hash was not supplied");
+  let lockReceipt;
+  try { lockReceipt = JSON.parse(lock); } catch { throw new MemoryCtlError("LOCK_INVALID", "lock receipt is not valid JSON"); }
+  assert(Number.isInteger(lockReceipt.pid) && isIsoDate(lockReceipt.createdAt), "LOCK_INVALID", "lock receipt is missing pid or creation time");
+  assert(Date.now() - Date.parse(lockReceipt.createdAt) >= 60_000, "LOCK_NOT_STALE", "lock is younger than the minimum stale-lock age");
+  let processAlive = true;
+  try { process.kill(lockReceipt.pid, 0); } catch (error) { if (error?.code === "ESRCH") processAlive = false; else throw error; }
+  assert(!processAlive, "LOCK_PROCESS_ALIVE", "lock owner process is still alive");
+  assert(typeof options.reason === "string" && options.reason.trim().length >= 8, "UNLOCK_REASON", "audited unlock requires a reason of at least 8 characters");
+  scanString(options.reason, "reason");
+  const graphHash = sha256(await readRegularFile(paths.graphPath, true));
+  assert(options.expectedGraphHash === graphHash, "GRAPH_HASH", "memory graph changed before audited unlock");
+  const completedAt = new Date().toISOString();
+  const audit = { completedAt, graphHash, lockHash, operation: "unlock", reason: options.reason.trim() };
+  const auditName = `unlock-${completedAt.replace(/[:.]/g, "-")}-${randomUUID()}.json`;
+  await writeAuditIdempotently(paths, auditName, audit);
+  assert(sha256(await readRegularFile(paths.lockPath)) === lockHash, "LOCK_HASH", "lock changed before audited release");
+  await unlink(paths.lockPath);
+  await fsyncDirectory(paths.graphDir);
+  return { auditPath: join(paths.auditDir, auditName), graphHash, lockHash };
 }
 
 function defaultPaths(options) {
@@ -391,6 +481,8 @@ export async function verifyGraph(options) {
     graph: await securePathStatus(paths.graphPath, "file"),
     graphDir: await securePathStatus(paths.graphDir, "directory", false),
     inboxDir: await securePathStatus(paths.inboxDir, "directory"),
+    journal: await securePathStatus(paths.journalPath, "file"),
+    lock: await securePathStatus(paths.lockPath, "file"),
   };
   const text = await readRegularFile(paths.graphPath, true);
   const graph = parseGraphText(text);
@@ -400,15 +492,23 @@ export async function verifyGraph(options) {
     const names = await readdir(paths.auditDir);
     for (const name of names.filter((item) => item.endsWith(".json"))) {
       const audit = JSON.parse(await readRegularFile(join(paths.auditDir, name)));
-      if (!latestAudit || audit.promotedAt > latestAudit.promotedAt) latestAudit = audit;
+      const auditTime = audit.completedAt ?? audit.promotedAt;
+      const latestTime = latestAudit ? (latestAudit.completedAt ?? latestAudit.promotedAt) : null;
+      if (auditTime && (!latestTime || auditTime > latestTime)) latestAudit = audit;
     }
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
   const graphHash = sha256(text);
+  let hostConfig = null;
+  if (options.codexConfigPath) {
+    await securePathStatus(resolve(options.codexConfigPath), "file", false);
+    hostConfig = verifyCodexMemoryConfigText(await readRegularFile(resolve(options.codexConfigPath)), paths.graphPath);
+  }
   return {
     graphHash,
     graphPath: paths.graphPath,
+    hostConfig,
     entityCount: graph.entities.length,
     journalPresent: Boolean(journal),
     lastPublishedGraphHash: latestAudit?.graphHash ?? null,
@@ -431,27 +531,40 @@ export async function backupGraph(options) {
 
 export async function restoreGraph(backupPath, options) {
   const paths = defaultPaths(options);
-  await ensurePrivateDirectory(paths.backupDir);
-  await assertSecureGraphWritePaths(paths, { backup: true });
+  await Promise.all([ensurePrivateDirectory(paths.auditDir), ensurePrivateDirectory(paths.backupDir)]);
+  await assertSecureGraphWritePaths(paths, { audit: true, backup: true });
   const backupRoot = await realpath(paths.backupDir);
   const resolvedBackup = resolve(backupPath);
   const backupInfo = await lstat(resolvedBackup);
   assert(backupInfo.isFile() && backupInfo.nlink === 1, "UNSAFE_BACKUP", "backup must be a regular non-linked file");
   const realBackup = await realpath(resolvedBackup);
   assert(relative(backupRoot, realBackup) && !relative(backupRoot, realBackup).startsWith(".."), "UNSAFE_BACKUP", "backup must be inside the configured backup directory");
+  const manifestPath = `${realBackup}.manifest.json`;
+  await securePathStatus(realBackup, "file", false);
+  await securePathStatus(manifestPath, "file", false);
   const content = await readRegularFile(realBackup);
   parseGraphText(content);
-  const manifest = JSON.parse(await readRegularFile(`${realBackup}.manifest.json`));
+  const manifest = JSON.parse(await readRegularFile(manifestPath));
+  assert(manifest.schema === GRAPH_SCHEMA, "BACKUP_MANIFEST", "backup manifest schema does not match memoryctl");
+  assert(typeof manifest.path === "string" && resolve(manifest.path) === paths.graphPath, "BACKUP_TARGET", "backup belongs to a different memory graph");
+  assert(manifest.size === Buffer.byteLength(content), "BACKUP_SIZE", "backup manifest size does not match its content");
   assert(manifest.hash === sha256(content), "BACKUP_HASH", "backup manifest hash does not match its content");
   const release = await acquireLock(paths.lockPath, options.lockTimeoutMs);
   try {
     const before = await readRegularFile(paths.graphPath, true);
     const beforeHash = sha256(before);
+    const targetHash = sha256(content);
+    const recovered = await recoverPendingTransaction(paths, { operation: "restore", graphHash: beforeHash, restoreFrom: realBackup });
+    if (recovered) return { ...recovered, graphHash: beforeHash, restoredFrom: realBackup };
     assert(options.expectedGraphHash === beforeHash, "GRAPH_HASH", "memory graph changed before restore", { expected: options.expectedGraphHash, actual: beforeHash });
     const currentBackupPath = await createBackup(paths, before);
-    await replaceGraphAtomically(paths, content, { candidateId: "restore", newHash: sha256(content), oldHash: beforeHash, restoreFrom: realBackup });
-    await unlink(paths.journalPath);
-    return { backupPath: currentBackupPath, graphHash: sha256(content), restoredFrom: realBackup };
+    const completedAt = new Date().toISOString();
+    const audit = { completedAt, graphHash: targetHash, operation: "restore", previousGraphHash: beforeHash, restoredFrom: realBackup, sourceBackupHash: manifest.hash };
+    const auditName = `restore-${completedAt.replace(/[:.]/g, "-")}-${randomUUID()}.json`;
+    await replaceGraphAtomically(paths, content, { audit, auditName, candidateId: "restore", newHash: targetHash, oldHash: beforeHash, operation: "restore", restoreFrom: realBackup });
+    const auditPath = await writeAuditIdempotently(paths, auditName, audit);
+    await clearJournal(paths);
+    return { auditPath, backupPath: currentBackupPath, graphHash: targetHash, restoredFrom: realBackup };
   } finally {
     await release();
   }
@@ -518,6 +631,8 @@ export async function promoteCandidate(candidatePath, options) {
   try {
     const before = await readRegularFile(paths.graphPath, true);
     const beforeHash = sha256(before);
+    const recovered = await recoverPendingTransaction(paths, { operation: "promote", graphHash: beforeHash, candidateId: candidate.id, candidateHash: options.expectedCandidateHash });
+    if (recovered) return { ...recovered, changed: false, graphHash: beforeHash };
     assert(options.expectedGraphHash === beforeHash, "GRAPH_HASH", "memory graph changed since the candidate was prepared", { expected: options.expectedGraphHash, actual: beforeHash });
     const graph = parseGraphText(before);
     const next = mergeCandidate(graph, candidate);
@@ -525,19 +640,23 @@ export async function promoteCandidate(candidatePath, options) {
     const afterHash = sha256(after);
     if (after === before) return { changed: false, graphHash: beforeHash };
     const backupPath = await createBackup(paths, before);
-    await replaceGraphAtomically(paths, after, { candidateId: candidate.id, newHash: afterHash, oldHash: beforeHash });
+    const promotedAt = new Date().toISOString();
     const audit = {
       approval: candidate.approval ?? null,
       candidateHash: options.expectedCandidateHash,
       candidateId: candidate.id,
       graphHash: afterHash,
       previousGraphHash: beforeHash,
-      promotedAt: new Date().toISOString(),
+      promotedAt,
       sourceCommit: candidate.sourceCommit ?? null,
     };
-    await writeDurable(join(paths.auditDir, `${candidate.id}.json`), `${canonicalJson(audit)}\n`, "wx");
-    await unlink(paths.journalPath);
-    return { changed: true, graphHash: afterHash, backupPath };
+    const auditName = `${candidate.id}.json`;
+    const existingAudit = await readRegularFile(join(paths.auditDir, auditName), true);
+    assert(!existingAudit, "AUDIT_CONFLICT", "audit receipt already exists before graph publication", { name: auditName });
+    await replaceGraphAtomically(paths, after, { audit, auditName, candidateId: candidate.id, newHash: afterHash, oldHash: beforeHash, operation: "promote" });
+    const auditPath = await writeAuditIdempotently(paths, auditName, audit);
+    await clearJournal(paths);
+    return { auditPath, changed: true, graphHash: afterHash, backupPath };
   } finally {
     await release();
   }
