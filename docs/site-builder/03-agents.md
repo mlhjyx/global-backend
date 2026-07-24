@@ -1,5 +1,8 @@
 # Site Builder Agent 详细设计 v1
 
+> 文档 ID：`SITE-AGENTS-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：`task-routes.ts`、受控组装服务与 [状态](../status/current.md)。
 > 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型路由）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent（对应 as-built 7 个 task id，见 §0.4）。**
 > Agent 卡**只绑定 `modelProfile`，不绑定供应商型号**。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 active route 为准（见 §0.4）；ADR-020 是已批准 target portfolio，但只有 BrandProfile 已经逐任务评测成为代码级 `promotedRoute`，其余仍待。换型号只改 ModelPolicyRegistry，并保存 model snapshot；不得散落回卡片。
 > **卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
@@ -66,11 +69,11 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 | Brand & Evidence | brand_profile、claim_projection（目标） | 品牌、术语、引用、gaps | 不批准 Claim；不输出具名个人 |
 | Content & SEO | copy、localize（目标）、seo_review | 多语言文案、FAQ、metadata、Schema 文本 | 只消费允许公开的 ClaimSnapshot |
 | Visual Media Director | image_*（选/质检/编辑）、video_*、aesthetic_review（目标） | 媒体用途、编辑 brief、多模态质检 | 不改原件；证书/人像/Logo 禁生成式改造 |
-| Site Composer & Fixer | design_spec、assemble、assembly_fix | Archetype/Family、组件、SiteSpec、受限 JSON Patch | 不生成代码；不绕过白名单 |
+| Site Composer & Fixer | design_spec、assemble、assembly_fix | Archetype/Family、冻结选择与结构化 findings | 不生成代码、props、CSS、HTML、Astro 或任意 JSON Patch；不绕过白名单 |
 
 **确定性服务（非 Agent，无人格 / 模型自由度 / 自主规划权）**：Workflow Orchestrator、Budget Guard、SiteSpec Validator、Asset Processor、Safety/License Gate、Accessibility/Performance Scanner、Release Manager、Publisher/Domain Manager、Analytics/Event Collector。
 
-**不设 Planner + 审核三角**（续卡1 D13、v3.2 §5.4、引 ADR-013）：固定建站由 DAG/scope/规则选择，不设 Planner；M2 自由语言改站只增 `edit_intent` → 受限 PatchPlan（不获任意编排或代码生成权）。**QA / SEO / Aesthetic 是三个独立视角，生成者不得给自己打最终分**；修复者只消费**冻结** finding、输出 allowlist JSON Patch，**每轮必须让硬门单调改善，最多三轮**（详见卡7）。
+**不设 Planner + 审核三角**（续卡1 D13、v3.2 §5.4、引 ADR-013）：固定建站由 DAG/scope/规则选择，不设 Planner；M2 自由语言改站只增 `edit_intent` → 受限 PatchPlan（不获任意编排或代码生成权）。**QA / SEO / Aesthetic 是三个独立视角，生成者不得给自己打最终分**；当前受控修复者只消费**冻结** finding、输出受限 selection，服务端 adapter 再生成 props，**每轮必须让硬门单调改善，最多三轮**（详见卡7）。
 
 ## 1. planner —— 规划　❌ 已砍（D13，v1 不实现，仅历史记录）
 
@@ -136,11 +139,11 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 
 - **职责/触发**：生成期（P3 头）产 DesignSpec；评审期（P4）看整站截图挑毛病。
 - **输入 → 输出**：生成 `{brandBrief, industryTemplate, userStylePick}` → `DesignSpec{themeTokens, pageLayouts{[page]: section 顺序+变体}, imageryDirection, motionIntensity}`；评审 `{screenshots(3 断点全页), designSpec}` → `Findings[{severity, page, section, issue, suggestion}] + score(0-100)`。
-- **执行流程**：生成期 [模型] 从主题 token 预设包+布局变体中**选择与微调**（不发明新组件）→ [确定性] token 合法性校验（对比度 WCAG AA 自动检查）；评审期 [确定性] Playwright 截图（375/768/1440 三断点全页）→ [模型-视觉] 按 rubric 打分出 findings。
+- **执行流程**：生成期 [模型] 只从合法候选中选择 Family / Blueprint / preset / pack ID 并说明原因；[确定性] 服务校验并冻结 Brief，adapter 从冻结 ID 构造 props。评审期 [确定性] Playwright 截图（375/768/1440 三断点全页）→ [模型-视觉] 按 rubric 打分出 findings。
 - **Prompt 内化来源**：设计方向法 ← 当前已安装的 `ecc:frontend-design-direction`（direction→tokens 流程）；token 体系 ← `ecc:design-system` + `product-design:ideate`；评审 rubric ← `product-design:audit` + `ecc:frontend-a11y`（视觉层次/一致性/留白/对齐/CTA 显著度五维，各 0-20）。
 - **工具**：Playwright（库内化截图；开发期可用已安装的 `playwright-interactive` / `ecc:browser-qa` 现场调试，生产不依赖 Codex/plugin/MCP）。
 - **护栏**：只能在预设 token 空间内选择（保风格体系一致）；score ≥85 过，findings 必须落到具体 section（不许"整体感觉不好"式空评）。
-- **DesignSpec 职责边界（v3.2 §19.2 回写，引 ADR-015/ADR-019）**：DesignSpec **只**从候选 Family 中选 Blueprint / StylePreset / 组件变体，按素材/事实/文案长度取舍并**解释选择原因与风险**。**禁**：写 JSX/Astro/CSS、发明组件类型、生成无证据支撑的 section、更改工作流、自己抓取 Readdy。
+- **DesignSpec 职责边界（v3.2 §19.2 回写，引 ADR-015/ADR-019）**：DesignBrief producer **只**从合法候选中选 Family / Blueprint / StylePreset / DemoVisualPack，并解释选择原因与风险；模型不输出组件变体、props、正文或素材路径。**禁**：写 JSX/Astro/CSS、发明组件类型、生成无证据支撑的 section、更改工作流、自己抓取 Readdy。
 - **受控差异化 7 来源（v3.2 §17.3 回写）**：每次生成的差异**只**来自 ① BusinessArchetype ② TemplateFamily ③ Blueprint ④ StylePreset ⑤ 组件 variant ⑥ 素材完整度 ⑦ `variationSeed`。**`variationSeed` 只能在合法候选中做确定性选择，不能改变事实和组件契约**（反"换皮同版式"通用感；配套 M1-f genericness 检查见 02/08）。
 - **审美评审隔离（aestheticReview，v3.2 §23.5 回写）**：评审与生成**必须隔离**——不同 prompt/rubric，**最好不同 provider**；评审**只看冻结截图 + DesignBrief + 事实摘要 + deterministic findings**，输出 `DesignEvaluation` + 结构化 Findings（禁"好看/不好看"自由文本）。**多模态能力探针失败**时审美维**弃权**、确定性 QA 继续、Release 标 `aesthetic_review_unavailable`（不阻断发布门其余维度）。
 - **降级**：评审失败 → 该维弃权（不阻断质量环其余维度）。
@@ -148,13 +151,13 @@ ADR-020 的目标映射是：`structured.default → gpt-5.6-terra / claude-sonn
 
 ## 7. siteAssembly + assemblyFix —— 站点组装（生成+修复双模式）
 
-- **职责/触发**：P3 产出 SiteSpec；P4 质量环内按 findings 出 patch。
-- **输入 → 输出**：组装 `{designSpec, copyBundles, assetManifest, pageStructure}` → `SiteSpec`（完整 JSON）；修复 `{siteSpec, findings[]}` → `SiteSpecPatch`（JSON Patch，最小变更）。
-- **执行流程（八道校验门顺序，v3.2 §19.3 回写，引 ADR-014/ADR-015）**：[模型] 生成 SiteSpec/Patch → [确定性] 依次过 **① Zod / JSON Schema → ② 组件 + variant 白名单 → ③ 素材引用存在性（assetManifest 对账）→ ④ copy key 完整性 → ⑤ 内链 + locale 完整性 → ⑥ 证据门 → ⑦ 兼容矩阵（见下）→ ⑧ Astro 构建**；任一门不过=带结构化错误回填重试（构建期编译错误同样回填）。
+- **职责/触发**：P3 的受控服务从冻结 Brief、CopyBundle 和 AssetManifest 物化 SiteSpec；P4/M1-f 质量环仅把结构化 findings 交给受限修复选择。
+- **输入 → 输出**：组装 `{designBrief, copyBundles, assetManifest}` → 由 adapter registry 纯函数生成 `SiteSpec`；修复 `{candidateDigest, findings[]}` → 受限 section/copy/asset/claim 选择，服务端再组装，模型不产生完整 JSON 或 patch。
+- **执行流程（八道校验门顺序，v3.2 §19.3 回写，引 ADR-014/ADR-015）**：[模型] 在冻结 allowlist 内提出选择 → [确定性] adapter 物化 → **① Zod / JSON Schema → ② 组件 + variant 白名单 → ③ 素材引用存在性（assetManifest 对账）→ ④ copy key 完整性 → ⑤ 内链 + locale 完整性 → ⑥ 证据门 → ⑦ 兼容矩阵（见下）→ ⑧ Astro 构建**；任一门不过=带结构化 findings 的有界重试（构建期编译错误同样回填）。
 - **兼容矩阵（Assembler 调模型/写 SiteSpec 前必过的 11 条硬约束，v3.2 §17.2 回写）**：① full_bleed Hero 后不接另一个 full_bleed ImageText；② 禁连续三个 card-grid；③ 深色大区块连续最多两个；④ StatsBand 需 ≥2 个有证据数值否则删；⑤ Testimonials 需用户可验证引用否则删；⑥ TeamGrid 需明确授权人物资料否则删；⑦ Certificates/CertWall 需资产或事实证据否则删；⑧ MapLocation 需可验证地址，否则只显地址文本；⑨ 产品 <3 不用 dense ProductGrid；⑩ 缺宽图不选 full_bleed Hero；⑪ 文案超预算优先换变体/定向重写，禁 CSS 缩到不可读。（无证据的 section 一律删，不留空壳。）
 - **Prompt 内化来源**：组件组装约束 ← 我们自建组件库的 section 目录文档（prompt 里给组件清单+props 契约，"菜单点菜"式）；修复模式 ← `build-web-apps:frontend-testing-debugging` 的定位/最小改动原则（只改 findings 涉及的节点）。
 - **工具**：SiteSpec 校验器、Astro 构建器（库内化）。
-- **护栏**：修复模式**只接受结构化 Findings、只许输出 JSON Patch 或受限 SiteSpec Patch**（防重写全 spec 引入回归）；每轮 patch 后 diff 记录进 run steps（可审计谁改了什么）；**每轮必须让硬门单调改善**。
+- **护栏**：修复模式**只接受结构化 Findings、只许输出冻结 allowlist 的受限选择**（防重写全 spec 引入回归）；每轮由 adapter 重组并记录候选 digest/diff（可审计谁改了什么）；**每轮必须让硬门单调改善**。
 - **降级（assemblyFix 三轮修补失败语义，v3.2 §19.3 回写，引 ADR-013）**：assemblyFix **最多三轮**；三轮仍失败则——**保留最近一次可构建版本** + 标 `quality_degraded` + **回退到同 Family 的安全 Blueprint** + **绝不删除用户现有站点**（ADR-013：异步失败绝不删除用户现有 Site）。run 标记 partial、findings 转人工。
 - **modelProfile**：首次组装/普通修复=`structured.default`；连续两次失败后才允许 `reasoning.high` escalation；再失败走确定性安全 Blueprint。as-built 型号见 §0.4。
 

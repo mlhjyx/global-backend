@@ -1,10 +1,15 @@
 # 09 · M1 精装修管线 — 落地设计（implementation design）
 
-> 状态：**已认可（2026-07-14 用户拍板；2026-07-17 ADR-020 模型组合补充）**。设计真值 = 本目录活文档；决策真值 = `docs/adr/registry.md`（ADR-013~020）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
+> 文档 ID：`SITE-M1-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：[状态](../status/current.md)、[路线](../roadmap/release-plan.md) 与当前代码。
+> 历史设计记录：**已认可（2026-07-14 用户拍板；2026-07-17 ADR-020 模型组合补充）**。设计真值 = 本目录活文档；决策真值 = `docs/adr/registry.md`（ADR-013~020）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
 >
 > **2026-07-16 回写（v3.2 §24/§26 分发入本文，Reviewed against 12 v3.2）**：新增 §10 生产化审计（R0–R4 定点修复 + 各阶段前置门）、§11 施工 PR 图（粒度/顺序/风险分级）、§12 目标态消费契约与 schema；并就地校正过时表述（组件库 17→55 型/ADR-015；rembg 移出 M1-c/ADR-018；「终选」改四态路由 currentRoute/targetCandidate/ADR-016；R0-3 禁虚构身份引 ADR-017）。**严格区分 as-built（§2 触点 + `@global/contracts` SiteSpec 1.0.0 type-only）与目标态（§12，SiteSpec 1.1 / 内容生命周期，未落地）**。
 >
 > **2026-07-24 as-built**：R1-safety ①+②、**R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2/B-min、M1-d、R1-min、DI-0 与 M1-e-A/B 均已落地**。六个 Family、DesignBrief、受控组装、SiteSpec 1.1、ReleaseManifest v2 与真实 Renderer/Release 消费已完成；DesignEvaluation 运行时仍归 M1-f。`template-distillation` 未采纳。
+>
+> **阅读规则**：下文仍标作 M1-e 待办的段落仅保留施工 provenance，不覆盖上列 as-built；当前 Catalog 已有六个 approved Family，R1-min/DI-0 已被真实消费者使用，下一消费者门是 M1-f quality。
 
 ---
 
@@ -60,12 +65,12 @@
 - `brandProfile`：KB digest（来源标注+截断，D4 注入防线）+ SearXNG/Crawl4AI 研究（**robots 遵守复用 web_watch 先例**；R1-safety API/Crawl4AI 双层 egress gate 已落地，C1/C3）→ 模型综合 → **确定性出口闸**：factSheet 逐项 evidence 非空 + web_research 单源不支撑认证类断言（降 gaps）；输出 schema 不设个人字段（C4 结构性排除）。
 - `copy`：每 locale 独立原生写作；确定性槽位完整/长度校验+超长定向重写；**只引 factSheet**（认证/数字断言关键词表比对，`FABRICATION_PATTERNS`/`sanitizePolish` 从 demo-spec.ts 上移共享）；richtext=受限 ProseMirror JSON（D15 白名单节点）。
 - `designSpec`：预设 token 空间内选择/微调，WCAG AA 对比度校验器拒绝不合格 overrides（themes.ts 白名单同步扩展）。
-- `siteAssembly` / `assemblyFix`：输出完整 SiteSpec（Puck 形状，04）/ **只许 JSON-Patch**；三重门（zod/引用完整性/语义规则：每页恰 1 H1、询盘 ≤2 击、Footer 必在、alt 100%、nav 无孤岛）+ Astro 构建错误回填重试；`collectTextKeys` 升级为门 2 的 copyBundle 覆盖率断言，产物 grep `⟦` 做缺 key 零成本门。
+- `siteAssembly` / `assemblyFix`：由受控 adapter 从冻结 DesignBrief、CopyBundle 与 AssetManifest 物化 SiteSpec；模型只可输出 allowlist selection，**不输出完整 SiteSpec 或 JSON Patch**。四层门（schema/引用/语义/兼容）与 Astro 构建错误回填重试；`collectTextKeys` 作为 copyBundle 覆盖率断言，产物 grep `⟦` 做缺 key 零成本门。
 - `qa` / `seo`：确定性主体（Playwright 三断点遍历 + Lighthouse 四分；SEO 检查表含 hreflang 互指、noindex 硬检查、**产物 HTML 第三方外呼域黑名单**——F1 字体判例的可执行化）+ 模型只做 findings 归并（flash 档）。qa 硬门：零死链/表单可用/console 零 error/Perf≥85/A11y≥90。
 - `imagePipeline`（✅ **M1-c as-built = 纯 Sharp 确定性算法**，ADR-018/D-M1c-1 已把 rembg 与生成式重绘移出）：固定序为严格 MIME/20 MiB/40 MP/4 channels/单页解码 → 自动方向/sRGB → 重编码/去 EXIF·GPS·XMP → 版本化质量 warning → 显式 focal 的受控 cover、其他路径不放大 → 源图可承受的 320/640/960/1440/1920 AVIF/WebP/fallback。inspection 与编码均在可超时终止、全 worker 默认并发 1、有协议/路径/输出硬上限的子进程；Ubuntu 编译子进程另有 `prlimit`，仍不能表述为生产容器/cgroup/独立 UID/禁网隔离。writer 在首次对象写前持久预占完整 recipe set；过期 producer 只能写带一日 lifecycle tag 的 token 隔离 attempt key，当前 token 重新取得 Asset/key fence 才能在 15 秒有界窗口内 promote canonical 并转 ready，copy 去除 TTL tag；ready 账本缺对象 fail-closed，attempt 在重试前以 8 路有界 IO 对账压缩，settled cleanup 重放只重删冻结 attempt，cleanup IO 接 cancellation+110 秒 deadline。新 cleanup 原件+Variant+attempt 总对象≤128，历史无 attempt 合同保留 129 对象上界。生产 lifecycle 默认 validate-only/缺失阻启，仅单一部署 owner 可管理。refurbish 首个 Activity 物化≤512 个排序 Asset ID 的不可变 workset，再按两张/Activity 有界执行；旧 cursor 仅保留 replay。坏图逐项降级；`hasPerson` 只沿用已有真值，`aiEdited=false`；cert 图片只走确定性处理，PDF 跳过。生成式重绘/rembg/视觉质检/pHash+embedding = M1-c2/M3；公开 process/select API 与 Renderer 固定 Variant 消费不在 M1-c。
 
 ### 2.5 渲染器（apps/site-renderer）
-- 组件库补齐 04 §5 v1 封闭 **55 型**（D12/ADR-015，17→55；渲染器已注册 **55** 个：AboutBlock/CertWall/CtaBanner/FaqAccordion/HeroBanner/InquiryForm/MapLocation/ProcessTimeline/ProductGrid/StatsBand）：+蒸馏 55 型 + 既有组件补变体位；封闭枚举 `type`/`variant`，Section.astro 注册表扩展（🔴 **R1-4 修**：未知 type 从静默 null 改 **fail-closed**——契约漂移不再被掩盖）。55 型清单是 04 契约真值，本文只引不复述。
+- 组件库 v1 已为封闭 **55 型**（D12/ADR-015），全部 `m1_e_a_qualified`；封闭枚举 `type`/`variant`，Section.astro 对未知 type fail-closed。资格来自证据、fixture 与三断点回归，**不采纳** `template-distillation`；55 型清单是 04 契约真值，本文只引不复述。
 - 多语种：`getStaticPaths` 扩 locale 维（`/{locale}/...`，默认 locale 免前缀），CopyBundle per-locale，`ar` 触发 `dir="rtl"`；hreflang 互指由 seo 检查兜底。
 - **自托管字体对**（F1 🔴）：fontsource 包内嵌构建，`typography.fontPair` 枚举；构建产物禁 `fonts.googleapis.com` 等外呼域（qa 静态检查）。
 - 图片（v3.2 §20.5）：`props.image={assetId,usage,focalPoint?}` + 顶层 assets manifest 对账；M1-e 图片组件**统一输出 `<picture>`**（AVIF/WebP/fallback + `width/height` 避免 CLS + `loading/fetchpriority/sizes` 按角色）；**build 时固定 `variantId`**——禁组件自拼对象存储 URL、禁 Renderer 自选最新 Variant、**禁外链 URL 直嵌**（🔴 ADR-014，校验器已管）。
@@ -138,7 +143,7 @@
 | M1-c ✅ | P2 图片纯 Sharp 管线：严格解码、方向/sRGB、EXIF/GPS/XMP 剥离、warning-only 质量指标、focal crop、无放大响应式 AVIF/WebP/fallback；inspection/编码子进程可超时终止且低并发/有输出上限（不等于生产沙箱）；写前 durable owner + attempt→canonical token/key fencing、对象回读、当前 recipe manifest 原子发布；refurbish 冻结 ID workset + 两张有界批次/逐图降级/旧载荷兼容。无生成式、公开 API 或 Renderer 消费 | image-pipeline、runner/child、service、Temporal activity/workflow | 专项单测 + `verify-site-builder-m1c.mts` 真 PG/RLS/MinIO 30 断言 |
 | M1-d | P2 文案：copy AiTask（多 locale/槽位/长度/factSheet-only 闸/受限 richtext）、CopyBundle 落 SiteVersion、渲染器多语种路径+RTL+自托管字体+外呼域检查 | agents/copy、renderer pages/layouts/themes | copy.spec、copy-bundle-validate.spec、renderer 侧 locale/字体检查进 verify |
 | M1-e | P3 组装：designSpec+siteAssembly AiTask、三重门校验器（含语义规则）、构建错误回填重试、组件库补齐 **55 型**（#165 只落提取/schema/dev gallery 基线；M1-e-A 逐型完成 variant、内容预算、a11y、`<picture>` 固定 variantId、motion/reduced-motion、fixture 与三断点视觉回归后才晋级 Release；M1-e-B：DesignBrief + Family/Blueprint/兼容矩阵受控组装）。**依赖 R1-min 已合**（可见预览原子化） | agents/design-spec、agents/assemble、spec-validator、renderer 组件 ×55 | spec-validator.spec（三门逐条）、assemble.spec、design-spec.spec、picture 消费测试 |
-| M1-f | P4 质量环：qa（Playwright+Lighthouse+外呼域/⟦key⟧ 门）、seo 检查表、aesthetic capability-gate、assemblyFix JSON-Patch-only、≤3 轮编排 | agents/qa、agents/seo、agents/fix、workflow 循环 | qa-checks.spec、seo-checks.spec、fix-patch.spec（只许 patch）、loop 分支入 workflow.spec |
+| M1-f | P4 质量环：qa（Playwright+Lighthouse+外呼域/⟦key⟧ 门）、seo 检查表、aesthetic capability-gate、受限 assembly fix selection、≤3 轮编排 | agents/qa、agents/seo、agents/fix、workflow 循环 | qa-checks.spec、seo-checks.spec、fix-selection.spec、loop 分支入 workflow.spec |
 | M1-g | 收尾：`verify-site-builder-m1.mts`（§8）、执行完整 **Bootstrap 6 fixture** 并按门扩成 **12 个视觉 fixture**、eval 硬门基线（factSheet 零虚构/主体保护占位）、OpenAPI 重导出、状态文档更新；2 fixture 只可作日常 smoke，不算阶段覆盖 | scripts、test/fixtures/golden-companies、contracts | verify 脚本 + 6→12 分阶段评测报告=验收 |
 
 ## 8. 真机验证计划（verify-site-builder-m1.mts，真库真容器真网关，无 sandbox）

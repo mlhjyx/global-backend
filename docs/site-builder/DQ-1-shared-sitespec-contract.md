@@ -1,7 +1,7 @@
 # DQ-1 · SiteSpec 共享契约（落地设计 + 实施记录）
 
-> 状态：✅ **已由 PR #117 合并**（commit `af87fd1`，2026-07-15）；SiteSpec 1.0.0 type-only 共享契约已进入 main。本页以下保留实施记录与当时的本地验证证据。
-> 协同背景见 [00-decisions-and-coordination.md](00-decisions-and-coordination.md) §3。后续分支必须以 #117 为基线，DQ-1 不再列为待做；运行时 Zod、DesignBrief 与 SiteSpec 1.1.0 仍是独立消费者驱动的 follow-up。
+> ⚠️ **历史 1.0 实施记录**：PR #117（commit `af87fd1`，2026-07-15）把 SiteSpec 1.0.0 type-only 共享契约合入 main；本页以下保留当时的实施记录与本地验证证据，不改写历史正文。
+> 当前兼容合同为 `SiteSpec 1.0.0 | 1.1.0`：Demo v0 固定 1.0，M1-e-B 的受控链使用 1.1；DesignBrief 已由 producer/assembly/ReleaseManifest v2 消费，DesignEvaluation 仍属 M1-f。协同背景见 [00-decisions-and-coordination.md](00-decisions-and-coordination.md) §3。
 
 ## 1. 问题：契约有文档、无代码执行 → 双真值静默漂移
 

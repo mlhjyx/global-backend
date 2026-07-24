@@ -3,7 +3,22 @@
   "controlledMarkdown": {
     "exact": [
       "docs/README.md",
-      "docs/backend/oss-registry.md"
+      "docs/backend/oss-registry.md",
+      "docs/product-scope.md",
+      "docs/status/current.md",
+      "docs/architecture/current.md",
+      "docs/adr/registry.md",
+      "docs/roadmap/release-plan.md",
+      "docs/site-builder/00-decisions-and-coordination.md",
+      "docs/site-builder/01-prd.md",
+      "docs/site-builder/02-architecture.md",
+      "docs/site-builder/03-agents.md",
+      "docs/site-builder/04-sitespec-contract.md",
+      "docs/site-builder/07-api-contract-draft.md",
+      "docs/site-builder/08-eval-testing.md",
+      "docs/site-builder/09-m1-implementation-design.md",
+      "docs/site-builder/13-design-domain-model.md",
+      "docs/site-builder/14-media-foundation-mf0.md"
     ],
     "prefixes": [
       "docs/design/",
@@ -12,6 +27,40 @@
       "docs/templates/"
     ],
     "documentIdExceptions": ["docs/templates/前端技术方案模板.md"]
+  },
+  "authoritativeCurrent": {
+    "exact": [
+      "docs/product-scope.md",
+      "docs/status/current.md",
+      "docs/architecture/current.md",
+      "docs/adr/registry.md",
+      "docs/roadmap/release-plan.md",
+      "docs/site-builder/00-decisions-and-coordination.md",
+      "docs/site-builder/01-prd.md",
+      "docs/site-builder/02-architecture.md",
+      "docs/site-builder/03-agents.md",
+      "docs/site-builder/04-sitespec-contract.md",
+      "docs/site-builder/07-api-contract-draft.md",
+      "docs/site-builder/08-eval-testing.md",
+      "docs/site-builder/09-m1-implementation-design.md",
+      "docs/site-builder/13-design-domain-model.md",
+      "docs/site-builder/14-media-foundation-mf0.md"
+    ],
+    "requiredMetadata": ["文档 ID", "生命周期", "当前事实来源"]
+  },
+  "historicalProvenance": {
+    "exact": [
+      "docs/site-builder/DQ-1-shared-sitespec-contract.md",
+      "docs/site-builder/10-model-selection-study.md",
+      "docs/site-builder/11-readdy-component-source-study.md",
+      "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.1.md",
+      "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md"
+    ],
+    "prefixes": ["docs/site-builder/handoffs/"],
+    "requiredAny": ["FROZEN", "DATED", "SUPERSEDED", "历史", "证据", "provenance"]
+  },
+  "immutableEvidence": {
+    "prefixes": ["docs/evidence/"]
   },
   "allowedStatusTokens": [
     "ACTIVE_INPUT",
