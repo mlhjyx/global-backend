@@ -227,4 +227,40 @@ describe("ClosedRepairService", () => {
       }),
     ).toThrow("QUALITY_REPAIR_OPTION_UNAVAILABLE");
   });
+
+  it("only claims findings on the page targeted by each repair option", () => {
+    const service = new ClosedRepairService();
+    const targeted = structuredClone(evaluation);
+    const otherPage = fixture.spec.pages[1]!;
+    const otherEvidence = artifactSet.artifacts.find(
+      (artifact) =>
+        artifact.kind === "screenshot" &&
+        artifact.target?.pageId === otherPage.id,
+    )!;
+    targeted.deterministic.findings.push({
+      source: "deterministic",
+      severity: "major",
+      ruleCode: "HORIZONTAL_OVERFLOW",
+      target: {
+        locale: "en",
+        pageId: otherPage.id,
+        breakpoint: otherEvidence.target!.breakpoint,
+      },
+      evidenceRef: { artifactId: otherEvidence.artifactId },
+    });
+
+    const generated = service.generateCatalog({
+      context,
+      evaluation: targeted,
+      artifactSet,
+    });
+    for (const option of generated.catalog.options) {
+      if (option.change.pageId === fixture.spec.pages[0]!.id) {
+        expect(option.addresses).not.toContain("HORIZONTAL_OVERFLOW");
+      }
+      if (option.change.pageId === otherPage.id) {
+        expect(option.addresses).not.toContain("GENERICNESS_CARD_DENSITY");
+      }
+    }
+  });
 });

@@ -81,14 +81,16 @@ export class QualityCandidateService {
       QualityCandidateIdentity,
       "workspaceId" | "siteId" | "siteVersionId" | "buildRunId"
     >,
+    options: { allowReadyReplay?: boolean } = {},
   ): Promise<{
     spec: SiteSpecV1_1;
     specDigest: string;
     specVersion: string;
+    readyReplay: boolean;
   }> {
     return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-release-build-${input.buildRunId}`}))`;
-      const [run, version] = await Promise.all([
+      const [run, version, release] = await Promise.all([
         tx.siteBuildRun.findUnique({
           where: { id: input.buildRunId },
           select: { status: true },
@@ -104,14 +106,24 @@ export class QualityCandidateService {
             specVersion: true,
           },
         }),
+        options.allowReadyReplay
+          ? tx.siteRelease.findUnique({
+              where: { buildRunId: input.buildRunId },
+              select: { status: true },
+            })
+          : Promise.resolve(null),
       ]);
+      const readyReplay =
+        options.allowReadyReplay === true &&
+        version?.buildStatus === "succeeded" &&
+        release?.status === "ready";
       if (
         run?.status !== "running" ||
         !version ||
         version.workspaceId !== input.workspaceId ||
         version.siteId !== input.siteId ||
         version.buildRunId !== input.buildRunId ||
-        version.buildStatus !== "building" ||
+        (version.buildStatus !== "building" && !readyReplay) ||
         version.specVersion !== "1.1.0"
       ) {
         throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
@@ -121,6 +133,7 @@ export class QualityCandidateService {
         spec,
         specDigest: releaseSpecDigest(spec),
         specVersion: version.specVersion,
+        readyReplay,
       };
     });
   }
@@ -195,6 +208,18 @@ export class QualityCandidateService {
     ) {
       throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
     }
+    const persisted = await this.loadPersistedCandidate(input.identity);
+    const replayingCommittedResult =
+      persisted.specDigest !== input.identity.specDigest;
+    if (!replayingCommittedResult) {
+      await assertRendererOutputMatches({
+        root: input.identity.root,
+        candidateSpecDigest: input.identity.specDigest,
+        basePath: input.identity.basePath,
+        siteOrigin: input.identity.siteOrigin,
+        treeDigest: input.identity.rendererOutputDigest,
+      });
+    }
     const generated = this.repairs.generateCatalog({
       context: input.context,
       evaluation: input.evaluation,
@@ -206,6 +231,12 @@ export class QualityCandidateService {
       expectedArtifactSetDigest: input.artifactSet.artifactSetDigest,
     });
     const resultDigest = releaseSpecDigest(candidate.spec);
+    if (
+      replayingCommittedResult &&
+      persisted.specDigest !== resultDigest
+    ) {
+      throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
+    }
     const prepared = await input.render({
       spec: candidate.spec,
       designBrief: candidate.designBrief,
@@ -315,10 +346,26 @@ export class QualityCandidateService {
     },
   ): Promise<MaterializedSiteRelease> {
     const { candidate, prepareQuality, ...materializeInput } = input;
-    const spec = await this.assembleQualityCandidate({
-      identity: candidate,
-      designBrief: materializeInput.designBrief!,
+    const brief = validateDesignBriefV2(materializeInput.designBrief);
+    const persisted = await this.loadPersistedCandidate(candidate, {
+      allowReadyReplay: true,
     });
+    if (
+      persisted.specDigest !== candidate.specDigest ||
+      brief.digest !== candidate.designBriefDigest
+    ) {
+      throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
+    }
+    if (!persisted.readyReplay) {
+      await assertRendererOutputMatches({
+        root: candidate.root,
+        candidateSpecDigest: candidate.specDigest,
+        basePath: candidate.basePath,
+        siteOrigin: candidate.siteOrigin,
+        treeDigest: candidate.rendererOutputDigest,
+      });
+    }
+    const spec = persisted.spec;
     if (releaseSpecDigest(materializeInput.spec) !== releaseSpecDigest(spec)) {
       throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
     }

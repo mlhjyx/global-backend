@@ -239,6 +239,17 @@ function addressedRules(
     ...evaluation.deterministic.findings,
     ...evaluation.aesthetic.findings,
   ]
+    .filter((finding) => {
+      if (finding.target.pageId !== change.pageId) return false;
+      if (
+        finding.target.sectionId &&
+        "sectionId" in change &&
+        finding.target.sectionId !== change.sectionId
+      ) {
+        return false;
+      }
+      return true;
+    })
     .map((finding) => finding.ruleCode)
     .filter((code) => allowed.has(code))
     .filter((code, index, values) => values.indexOf(code) === index)

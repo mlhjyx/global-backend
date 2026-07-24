@@ -59,7 +59,7 @@ function fakePrisma() {
     runStatus: "running",
     versionStatus: "building",
     spec: structuredClone(golden.spec),
-    release: null as null | { id: string },
+    release: null as null | { id: string; status: string },
   };
   return {
     state,
@@ -239,5 +239,87 @@ describe("QualityCandidateService fencing", () => {
     const replay = await service.applyQualityRepair(repairInput);
     expect(replay.identity).toEqual(first.identity);
     expect(repairs.applySelection).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-fences the evaluated renderer tree before consuming a repair selection", async () => {
+    const identity = await renderedIdentity();
+    const prisma = fakePrisma();
+    const repairs = {
+      generateCatalog: vi.fn(),
+    };
+    const service = new QualityCandidateService(
+      prisma as never,
+      {} as never,
+      repairs as never,
+      {} as never,
+    );
+    await writeFile(path.join(identity.root, "index.html"), "<h1>stale</h1>");
+
+    await expect(
+      service.applyQualityRepair({
+        identity,
+        context: {
+          spec: golden.spec,
+          brief: golden.designBrief,
+        } as never,
+        evaluation: {} as never,
+        artifactSet: { artifactSetDigest: "b".repeat(64) } as never,
+        selection: { optionId: "items:home:section:2" },
+        render: vi.fn(),
+      }),
+    ).rejects.toThrow("RENDERER_OUTPUT_TREE_MISMATCH");
+    expect(repairs.generateCatalog).not.toHaveBeenCalled();
+  });
+
+  it("reaches ready-release idempotency after a materialization ACK loss", async () => {
+    const identity = await renderedIdentity();
+    const prisma = fakePrisma();
+    prisma.state.versionStatus = "succeeded";
+    prisma.state.release = { id: "release-1", status: "ready" };
+    await rm(identity.root, { recursive: true, force: true });
+    const releaseIdentity = {
+      releaseId: "release-1",
+      artifactPrefix: "sites/site/releases/release-1",
+      producerToken: "producer-1",
+      releaseCreatedAt: "2026-07-24T00:00:00.000Z",
+    };
+    const materialized = {
+      releaseId: "release-1",
+      artifactKey: "release:release-1",
+      artifactPrefix: releaseIdentity.artifactPrefix,
+      artifactDigest: "a".repeat(64),
+      manifestDigest: "b".repeat(64),
+      producerToken: releaseIdentity.producerToken,
+    };
+    const releases = {
+      reserveMaterialization: vi.fn(async () => releaseIdentity),
+      materialize: vi.fn(async () => materialized),
+    };
+    const prepareQuality = vi.fn(async () => ({ manifest: {} }));
+    const service = new QualityCandidateService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      releases as never,
+    );
+
+    await expect(
+      service.materializeApprovedRelease({
+        workspaceId: identity.workspaceId,
+        siteId: identity.siteId,
+        siteVersionId: identity.siteVersionId,
+        buildRunId: identity.buildRunId,
+        root: identity.root,
+        spec: golden.spec,
+        storedSpecVersion: "1.1.0",
+        designBrief: golden.designBrief,
+        candidate: identity,
+        prepareQuality,
+      }),
+    ).resolves.toEqual(materialized);
+    expect(releases.reserveMaterialization).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedSpecDigest: identity.specDigest }),
+    );
+    expect(releases.materialize).toHaveBeenCalledTimes(1);
   });
 });
