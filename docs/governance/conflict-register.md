@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001` 于 2026-07-24 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
+> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
 > 工程核验基线：`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
@@ -191,12 +191,13 @@
 
 ## 11. AIDEV Gate 1 已批准决策
 
-2026-07-24，产品负责人在 Codex 当前任务中明确认可并批准第一阶段制度建设；PR #211 记录指南、验证与后续审查处置。该批准只覆盖协作制度，不授权安装候选工具、修改产品代码、自动写入项目真值或跳过逐 PR 合并授权。
+2026-07-24，产品负责人在 Codex 当前任务中明确认可并批准第一阶段制度建设；PR #211 记录指南、验证与后续审查处置。2026-07-25 又明确批准四 PR 的记忆与代码智能实施计划及其独立审查后自动合并门。两次批准都不授权修改产品范围、自动写入项目真值、生产部署或跳过 CI/审查；自动合并例外只适用于 `DEC-AIDEV-003` 的四 PR。
 
 | Decision ID | 批准内容 | 状态 | Decision Owner | 唯一回写位置 |
 |---|---|---|---|---|
-| `DEC-AIDEV-001` | 批准 AI 辅助开发运行模型、非技术需求与业务验收、记忆/知识事实优先级和受控工具试点门；每个 PR 最终合并仍需产品负责人对该 PR 明确授权 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [AI 辅助开发协作入口](../ai-development/README.md) |
+| `DEC-AIDEV-001` | 批准 AI 辅助开发运行模型、非技术需求与业务验收、记忆/知识事实优先级和受控工具试点门；默认每个 PR 最终合并仍需产品负责人明确授权，后续精确范围决定可以建立独立审查后自动合并例外 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [AI 辅助开发协作入口](../ai-development/README.md) |
 | `DEC-AIDEV-002` | 批准受控 MCP Memory 第一阶段：固定本机版本、普通会话只读、`memoryctl` 候选/原子晋升/备份/审计与非技术合并决策卡；不把记忆升级为项目真值，旧写入会话排空前不执行首次晋升 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [记忆、知识与派生认知政策](../ai-development/memory-and-context-policy.md) |
+| `DEC-AIDEV-003` | 批准四 PR 的 AI 记忆与代码智能实施计划：ContractGraph 补动态契约，CodeGraph 仅作受控静态试点，运行证据关闭静态推断；本计划各 PR 在独立只读审查通过、CI 全绿、审查线程清零且基于最新 main 后由 Codex 合并，无需逐 PR 重复授权；不授权生产观测、产品范围变化或把派生图升级为真值 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [ContractGraph 使用与边界](../ai-development/code-intelligence.md) |
 
 ## 12. 关闭冲突的证据要求
 

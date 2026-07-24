@@ -1,0 +1,24 @@
+{
+  "name": "@global/code-intelligence",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "global-code-intelligence": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test src/*.spec.ts src/**/*.spec.ts",
+    "scan": "tsx src/cli.ts scan --repo ../..",
+    "check": "tsx src/cli.ts check --repo ../.."
+  },
+  "dependencies": {
+    "typescript": "^5.6.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.1"
+  }
+}

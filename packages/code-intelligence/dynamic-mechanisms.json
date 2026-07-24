@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "dynamic-mechanism-registry/v1",
+  "mechanisms": [
+    {
+      "id": "nestjs.decorators",
+      "category": "api-and-di",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.nestjs",
+      "accountableRole": "OWN-SITE-BE",
+      "assignee": "UNASSIGNED",
+      "patterns": ["@Controller\\(", "@Module\\(", "@Inject\\("]
+    },
+    {
+      "id": "temporal.proxy-activities",
+      "category": "workflow",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.temporal",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["proxyActivities\\s*<"]
+    },
+    {
+      "id": "temporal.worker-registration",
+      "category": "workflow",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.temporal-worker",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["Worker\\.create\\s*\\(", "workflowsPath\\s*:"]
+    },
+    {
+      "id": "temporal.client-start",
+      "category": "workflow",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.temporal-client",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["workflow\\.start\\s*\\(", "workflow\\.execute\\s*\\("]
+    },
+    {
+      "id": "temporal.schedules",
+      "category": "workflow",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.temporal-schedule",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["schedule\\.create\\s*\\(", "ensurePlatformSchedules\\s*\\("]
+    },
+    {
+      "id": "outbox.string-event",
+      "category": "event",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.outbox",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["eventType\\s*:"]
+    },
+    {
+      "id": "prisma.dynamic-client",
+      "category": "data",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.prisma",
+      "accountableRole": "OWN-DATA-BE",
+      "assignee": "UNASSIGNED",
+      "patterns": [
+        "\\b(?:prisma|tx|ownerDb)\\.[A-Za-z][A-Za-z0-9_]*\\.(?:find|create|update|upsert|delete|count|aggregate|groupBy)"
+      ]
+    },
+    {
+      "id": "site-builder.model-policy",
+      "category": "ai-route",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.ai-route",
+      "accountableRole": "OWN-AI-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": [
+        "promotedRoute",
+        "SITE_BUILDER_TASK_IDS",
+        "resolveTaskRoute\\s*\\("
+      ]
+    },
+    {
+      "id": "tool-broker.registration",
+      "category": "external-execution",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.tool-broker",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": [
+        "buildToolBroker\\s*\\(",
+        "registerBuiltinTools\\s*\\(",
+        "registerSourceTools\\s*\\(",
+        "this\\.tools\\.set\\s*\\("
+      ]
+    },
+    {
+      "id": "provider.registry",
+      "category": "external-execution",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.provider-registry",
+      "accountableRole": "OWN-DISCOVERY-BE",
+      "assignee": "UNASSIGNED",
+      "patterns": [
+        "ProviderRegistry",
+        "\\.register\\s*\\([^)]*Provider",
+        "this\\.providers\\.set\\s*\\("
+      ]
+    },
+    {
+      "id": "contractgraph.internal-static-map",
+      "category": "build",
+      "status": "EXTRACTOR",
+      "extractor": "typescript.ai-route",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["routes\\.set\\s*\\("]
+    },
+    {
+      "id": "pnpm.workspace-and-alias",
+      "category": "build",
+      "status": "EXTRACTOR",
+      "extractor": "workspace.packages",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["workspace:\\*", "\"paths\"\\s*:"]
+    },
+    {
+      "id": "deployment.compose-systemd-ci",
+      "category": "deployment",
+      "status": "EXTRACTOR",
+      "extractor": "infrastructure",
+      "accountableRole": "OWN-PLATFORM",
+      "assignee": "UNASSIGNED",
+      "patterns": ["^services:", "^\\[Service\\]", "^jobs:"]
+    }
+  ]
+}

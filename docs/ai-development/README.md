@@ -18,6 +18,7 @@
 | 不知道怎样把想法交给开发              | [非技术需求与业务验收](requirement-and-acceptance.md)    | 需求合同、验收路径、交付证据清单 |
 | 不知道当前处于什么模式、谁负责什么    | [AI 辅助开发运行模型](operating-model.md)                | 模式、职责、升级规则、风险闭环   |
 | 不知道 Obsidian、记忆或代码图能否相信 | [记忆、知识与派生认知政策](memory-and-context-policy.md) | 事实优先级、写入边界、工具试点门和 `memoryctl` |
+| 改代码前不知道影响哪些业务、工作流与数据 | [ContractGraph 使用与边界](code-intelligence.md) | 当前 worktree 的派生影响地图、未知项和源码证据 |
 
 第一次提出需求时，只需说明“谁遇到了什么问题、希望得到什么结果”。缺失内容由 Codex 通过需求编译过程补齐，并把需要产品负责人决定的少数问题单独列出。
 

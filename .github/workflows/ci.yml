@@ -97,6 +97,11 @@ jobs:
       - name: Memory control transaction tests
         run: pnpm memory:test
 
+      - name: ContractGraph extractor tests and deterministic full-repository gate
+        run: |
+          pnpm code-intelligence:test
+          pnpm code-intelligence:check
+
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
