@@ -4,7 +4,7 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-07-23，`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
+> 最后核验：2026-07-24，`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
 
 这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；本仓当前开发主线是 Site Builder 后端能力。独立站管理属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
 
@@ -30,6 +30,7 @@
 | 查询稳定 ID、状态与责任 | [治理入口](governance/README.md) | Capability、Object、Scenario、Conflict 与追踪关系 |
 | 查询 OSS/外部能力决定 | [OSS / 外部能力注册表](backend/oss-registry.md) | 31 项采用决定、许可边界、Adapter/SoR、Owner 与退出门 |
 | 运行和维护开发环境 | [后端运行文档](backend/compose-project-migration.md) | Compose 迁移、Worktree、CI 及现役后端专题 |
+| 用自然语言需求与 Codex 协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界 |
 | 核验文档一致性 | [文档自动校验](governance/docs-verification.md) | 运行 `pnpm docs:verify` |
 
 ### 产品、设计与前端交接
@@ -85,7 +86,7 @@
 |---|---|---|
 | Authority | 当前边界、架构、决策、状态和路线 | `product-scope.md`、`architecture/`、`adr/`、`status/`、`roadmap/release-plan.md` |
 | Normative / Registry | 当前目标规则、稳定 ID、责任和关系 | `frontend/`、`governance/`、`backend/oss-registry.md` |
-| Capability / Guide | 完成具体产品或运行任务 | `frontend/modules/independent-site-management/`、`site-builder/`、`backend/` |
+| Capability / Guide | 完成具体产品或运行任务 | `frontend/modules/independent-site-management/`、`site-builder/`、`backend/`、`ai-development/` |
 | Evidence / Record | 实现、测试、模型和专题实施证明 | `evidence/`、`implementation-records/`、`roadmap/changelog.md` |
 | Research / Historical input | 研究、旧 Word 和 dated proposal | `research/`、`platform/`、明确标记的 Site Builder 历史稿 |
 
