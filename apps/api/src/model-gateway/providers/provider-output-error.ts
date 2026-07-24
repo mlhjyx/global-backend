@@ -44,6 +44,40 @@ export class TaskOutputValidationError extends ProviderOutputError {
     this.name = 'TaskOutputValidationError';
   }
 }
+
+/** A response cannot prove it came from the exact requested model. */
+export class ProviderIdentityError extends ProviderOutputError {
+  constructor(
+    message: string,
+    usage?: { inputTokens?: number; outputTokens?: number },
+    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
+  ) {
+    super(message, usage, opts);
+    this.name = 'ProviderIdentityError';
+  }
+}
+
+/** Stable HTTP status surface used by capability probes and unavailable mapping. */
+export class ProviderHttpError extends Error {
+  readonly status: number;
+  readonly provider: string;
+  readonly model: string;
+
+  constructor(input: {
+    status: number;
+    provider: string;
+    model: string;
+    responseExcerpt: string;
+  }) {
+    super(
+      `${input.provider} ${input.model}: HTTP ${input.status}: ${input.responseExcerpt}`,
+    );
+    this.name = 'ProviderHttpError';
+    this.status = input.status;
+    this.provider = input.provider;
+    this.model = input.model;
+  }
+}
 import type { ModelResolutionSource } from '../types';
 
 export interface ProviderErrorProvenance {

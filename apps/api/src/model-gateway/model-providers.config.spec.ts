@@ -92,4 +92,36 @@ describe('buildGatewayProvider — verified production model transports', () => 
     });
     expect(request().url).toBe('http://gw.test/v1/chat/completions');
   });
+
+  it('registers the Gemini vision adapter without changing any active text route', async () => {
+    mockResponse({
+      model: 'gemini-3.5-flash',
+      choices: [
+        { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+    const provider = buildGatewayProvider(providerEnv());
+    expect(provider?.supports('reviewVision')).toBe(true);
+    await provider!.reviewVision({
+      task: 'site_builder.aesthetic_review.eval',
+      model: 'gemini-3.5-flash',
+      prompt: 'review',
+      schema: {},
+      maxTokens: 100,
+      maxCostCents: 20,
+      images: [
+        {
+          materialClass: 'model_eval_fixture',
+          artifactId: 'case-home-375',
+          mimeType: 'image/png',
+          bytes: Uint8Array.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ]),
+          target: { locale: 'en', pageId: 'home', breakpoint: 375 },
+        },
+      ],
+    });
+    expect(request().url).toBe('http://gw.test/v1/chat/completions');
+  });
 });

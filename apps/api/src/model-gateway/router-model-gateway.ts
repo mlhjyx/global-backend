@@ -11,6 +11,7 @@ import {
   DEFAULT_LLM_EST_CENTS,
 } from '../tools/budget';
 import {
+  ProviderIdentityError,
   ProviderOutputError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
@@ -61,6 +62,7 @@ import {
   GenerateTextInput,
   ModelOp,
   ModelResult,
+  ReviewVisionInput,
 } from './types';
 
 /**
@@ -210,6 +212,71 @@ export class RouterModelGateway extends ModelGateway {
     });
   }
 
+  async reviewVision<T = unknown>(
+    input: ReviewVisionInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<T>> {
+    if (
+      input.images.some(
+        (image) =>
+          image.materialClass === 'workspace_site_screenshot' &&
+          image.workspaceId !== ctx.workspaceId,
+      )
+    ) {
+      throw new Error('VISION_REVIEW_WORKSPACE_MISMATCH');
+    }
+    return this.run('reviewVision', input, ctx, async (provider) => {
+      const result = await provider.reviewVision<T>(input, ctx);
+      if (
+        result.modelResolutionSource !== 'upstream_response' ||
+        result.reportedModel !== input.model ||
+        result.model !== input.model
+      ) {
+        throw new ProviderIdentityError(
+          `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${result.reportedModel ?? 'missing'}, resolved=${result.model}`,
+          result.usage,
+          {
+            provider: result.provider,
+            model: result.model,
+            reportedModel: result.reportedModel,
+            modelResolutionSource: result.modelResolutionSource,
+          },
+        );
+      }
+      const check = checkAgainstSchema(input.schema, result.data);
+      if (!check.valid) {
+        throw new ProviderOutputError(
+          `VISION_REVIEW_SCHEMA_INVALID: ${(check.errors ?? []).join('; ')}`,
+          result.usage,
+          {
+            provider: result.provider,
+            model: result.model,
+            reportedModel: result.reportedModel,
+            modelResolutionSource: result.modelResolutionSource,
+          },
+        );
+      }
+      try {
+        input.validateOutput?.(result.data);
+      } catch (error) {
+        throw new TaskOutputValidationError(
+          `vision review hard gate rejected: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          result.usage,
+          {
+            cause: error,
+            provider: result.provider,
+            model: result.model,
+            reportedModel: result.reportedModel,
+            modelResolutionSource: result.modelResolutionSource,
+          },
+        );
+      }
+      return result;
+    });
+  }
+
   embed(input: EmbedInput, ctx: AiContext): Promise<ModelResult<number[][]>> {
     return this.run('embed', input, ctx, (p) => p.embed(input, ctx));
   }
@@ -333,7 +400,12 @@ export class RouterModelGateway extends ModelGateway {
             correlationId: ctx.correlationId,
             modelPolicy: ctx.modelPolicy,
           });
-          if (err instanceof TaskOutputValidationError) throw err;
+          if (
+            err instanceof TaskOutputValidationError ||
+            err instanceof ProviderIdentityError
+          ) {
+            throw err;
+          }
           lastErr = err; // try the next provider (fallback)
         }
       }
@@ -476,7 +548,12 @@ export class RouterModelGateway extends ModelGateway {
           correlationId: ctx.correlationId,
           modelPolicy: ctx.modelPolicy,
         });
-        if (error instanceof TaskOutputValidationError) throw error;
+        if (
+          error instanceof TaskOutputValidationError ||
+          error instanceof ProviderIdentityError
+        ) {
+          throw error;
+        }
         lastErr = error;
         continue;
       }

@@ -3,11 +3,12 @@ import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
 import {
+  ProviderIdentityError,
   ProviderOutputError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
 import { BudgetLedger, BudgetExceededError } from '../tools/budget';
-import { ModelResult } from './types';
+import { ModelResult, type ReviewVisionInput } from './types';
 import { AiTraceSink } from './ai-trace.sink';
 
 /**
@@ -30,6 +31,31 @@ function fakeProvider(impl?: () => Promise<ModelResult<string>>): ModelProvider 
     health: vi.fn(async () => ({ healthy: true })),
   } as unknown as ModelProvider;
 }
+
+const visionInput = (): ReviewVisionInput => ({
+  task: 'site_builder.aesthetic_review.eval',
+  prompt: 'review',
+  model: 'gemini-3.5-flash',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['ok'],
+    properties: { ok: { type: 'boolean' } },
+  },
+  images: [
+    {
+      materialClass: 'model_eval_fixture',
+      artifactId: 'case-home-375',
+      mimeType: 'image/png',
+      bytes: Uint8Array.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      target: { locale: 'en', pageId: 'home', breakpoint: 375 },
+    },
+  ],
+  maxTokens: 1000,
+  maxCostCents: 20,
+});
 
 function gatewayWith(provider: ModelProvider, budget: BudgetLedger): RouterModelGateway {
   const router = { route: () => [provider] } as unknown as ModelRouter;
@@ -213,6 +239,93 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
         }),
       }),
     );
+  });
+});
+
+describe('RouterModelGateway — vision identity and closed output gate', () => {
+  const exactResult = {
+    data: { ok: true },
+    provider: 'gateway',
+    model: 'gemini-3.5-flash',
+    reportedModel: 'gemini-3.5-flash',
+    modelResolutionSource: 'upstream_response' as const,
+    usage: { inputTokens: 10, outputTokens: 2 },
+  };
+
+  it('accepts only exact upstream provenance plus schema-valid output', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const result = await gatewayWith(
+      provider,
+      new BudgetLedger(),
+    ).reviewVision(visionInput(), { workspaceId: 'ws-1' });
+    expect(result).toEqual(exactResult);
+  });
+
+  it('treats model identity mismatch as terminal and never tries another provider', async () => {
+    const mismatched = {
+      ...fakeProvider(),
+      id: 'mismatched',
+      reviewVision: vi.fn(async () => ({
+        ...exactResult,
+        provider: 'mismatched',
+        model: 'provider-fallback',
+        reportedModel: 'provider-fallback',
+      })),
+    } as unknown as ModelProvider;
+    const fallback = {
+      ...fakeProvider(),
+      id: 'fallback',
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const router = {
+      route: () => [mismatched, fallback],
+    } as unknown as ModelRouter;
+    const gateway = new RouterModelGateway(router);
+
+    await expect(
+      gateway.reviewVision(visionInput(), { workspaceId: 'ws-1' }),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+    expect(fallback.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects schema-invalid vision output without calling it success', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => ({
+        ...exactResult,
+        data: { unexpected: true },
+      })),
+    } as unknown as ModelProvider;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(visionInput(), {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_SCHEMA_INVALID');
+  });
+
+  it('rejects a runtime screenshot bound to another workspace before routing', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    input.task = 'site_builder.aesthetic_review';
+    input.images = [
+      {
+        ...input.images[0]!,
+        materialClass: 'workspace_site_screenshot',
+        workspaceId: 'workspace-b',
+      },
+    ];
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'workspace-a',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_WORKSPACE_MISMATCH');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
   });
 });
 

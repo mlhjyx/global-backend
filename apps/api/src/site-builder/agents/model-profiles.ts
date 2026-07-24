@@ -79,8 +79,9 @@ const profiles = {
   'multimodal.review': {
     id: 'multimodal.review',
     requiredCapabilities: ['text_generation', 'vision_review', 'structured_output'],
-    dataPolicy: GATEWAY_COMPANY_FACTS_ONLY,
-    description: 'Screenshot and media findings only; cannot directly rewrite a site.',
+    dataPolicy: GATEWAY_WORKSPACE_SITE_MATERIALS,
+    description:
+      'Controlled workspace screenshots and media findings only; cannot directly rewrite a site.',
   },
   'image.bulk.creative': {
     id: 'image.bulk.creative',

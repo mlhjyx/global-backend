@@ -1,4 +1,5 @@
 import type { GatewayModelTransport } from './providers/openai-compatible.provider';
+import type { GatewayVisionTransport } from './providers/openai-compatible.provider';
 
 /**
  * Model-to-wire-protocol bindings proven through the current New API gateway.
@@ -13,4 +14,16 @@ export const VERIFIED_GATEWAY_MODEL_TRANSPORTS: Readonly<
   // to business output as a workaround.
   'gpt-5.6-terra': 'openai-responses',
   'claude-sonnet-5': 'anthropic-messages',
+});
+
+/**
+ * Explicit wire adapter registrations for MODEL-1 vision probes. Registration
+ * means only that the application knows how to shape the request; it is not a
+ * capability or promotion claim. PR6 must still prove the live model, schema,
+ * provenance, latency, and cost before any route can be activated.
+ */
+export const CANDIDATE_GATEWAY_VISION_TRANSPORTS: Readonly<
+  Record<string, GatewayVisionTransport>
+> = Object.freeze({
+  'gemini-3.5-flash': 'openai-chat-completions',
 });
