@@ -5,7 +5,7 @@
 > 生命周期：`GUIDE`
 > 维护 Owner：`OWN-DOC-GOV（当前 UNASSIGNED）`
 > 产品批准：[`DEC-AIDEV-003`](../governance/conflict-register.md#11-aidev-gate-1-已批准决策)
-> 最后核验：2026-07-25，`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
+> 最后核验：2026-07-25，`origin/main@af5bf03a995689d5ad6224a32920b23395819898` + `codex/runtime-evidence` 实施候选
 
 ## 1. 结论
 
@@ -20,7 +20,8 @@ flowchart LR
     E["pnpm / CI / Compose / systemd"] --> G
     G --> H["影响候选与 UNKNOWN"]
     K["CodeGraph<br/>普通静态调用"] --> H
-    H --> I["源码、测试和运行证据复核"]
+    H --> I["源码、测试复核"]
+    R["RuntimeEvidence<br/>开发环境元数据"] --> I
     I --> J["非技术合并决策卡"]
 ```
 
@@ -105,6 +106,46 @@ pnpm code-intelligence:check
 
 `check` 在内存中完整构建两次，要求字节等价，并拒绝 error 级诊断。仓库完整性测试还锁定 `routeEvent` 对两个 Outbox Registry 的消费边，并逐项核对 Registry 全部字面量的注册边；删除 `.has(eventType)` 或漏登记事件会使 CI 失败。它只增加验证，不能据此跳过 API、契约、Renderer 或现有完整 CI。
 
+### 3.2 开发环境运行证据
+
+PR4 增加仓库 CLI，不增加常驻 MCP、生产追踪或公共 API：
+
+```bash
+pnpm code-intelligence:scan
+pnpm code-intelligence:runtime:capture
+pnpm code-intelligence:runtime:status
+pnpm code-intelligence:runtime:diff
+```
+
+`runtime:capture` 当前只接受 `development`，并要求 ContractGraph 与当前 worktree、commit、source hash 完全一致且工作区干净。它从 Ubuntu 开发环境采集：
+
+- `/api/v1/health` 与 `/api/v1/health/db` 的状态、耗时和允许字段；
+- `global-api.service`、`global-worker.service`、`temporal-dev.service` 的 systemd 状态；
+- `global` Compose 的服务名、状态、健康、镜像和创建配置来源；
+- Temporal cluster health、Schedule、最近 workflow/run ID 与状态；
+- 最新 Prisma migration ID、Outbox event ID/type/delivery state、SiteBuildRun ID/status/Temporal identity。
+
+派生结果仍只写 Git 忽略目录：
+
+```text
+.code-intelligence/
+├── runtime-evidence-v1.json
+├── runtime-evidence-manifest-v1.json
+└── runtime-difference-v1.json
+```
+
+每条 `RuntimeEvidenceV1` 都有内容哈希；bundle manifest 再绑定整份文件。禁止元数据键包含 payload、body、prompt、Secret、token、credential、email 或 personal data，Outbox payload、业务正文和模型输入永不读取。API 只有在响应精确回显本次 `X-Request-Id` 时才记录 correlation ID；当前健康接口未回显，因此必须报告为未知，不能把客户端自造 ID 冒充服务端关联证据。
+
+运行中的 systemd/Compose/Temporal 当前没有暴露可验证的部署 commit。CLI 把记录的 `commit` 保持为 `UNKNOWN`，另用 bundle 的 `collector` 绑定“由哪个 worktree/commit 采集”；不得用采集器 HEAD 冒充运行二进制版本。`runtime:diff` 只把真实 Schedule→Workflow 最近动作认作运行边；Outbox 行只证明该 event type 发生，不证明任意消费者已执行。报告含：
+
+- `observed*`：当前图中已有且成功观察到的节点/边；
+- `staticOnly*`：静态标记需要运行证据、但本次未观察到；
+- `runtimeOnly*`：运行证据指向当前图不存在的目标，属于矛盾；
+- `PARTIAL`：存在未知 commit、未观察关系或 correlation 缺口；
+- `CONTRADICTED`：健康/迁移失败或运行目标不在当前图，命令失败退出。
+
+absence of evidence 不是 evidence of absence：`staticOnly` 只能增加验证建议，不能声称能力未接通。生产或预发布采集仍需另行批准部署、隐私、成本、保留和回退方案。
+
 ## 4. 动态机制登记
 
 动态行为登记在 `packages/code-intelligence/dynamic-mechanisms.json`。每项必须是：
@@ -155,4 +196,4 @@ pnpm code-intelligence:check
 
 因此采用结果仍固定为 `PILOT_ONLY`：统一路由结果与速度门通过，但 CodeGraph 在自己获准参与的表面仍漏 2/19，89.5% 未达到 90% 独立采用门。ContractGraph + `rg` + 当前源码继续是默认路径；CodeGraph 只在复杂静态调用问题中按需启用，不能据此减少 CI。评测保留真实失败门，不因已经安装而强行采用。
 
-ContractGraph 不需要常驻服务、数据库或网络；删除 `.codegraph/` 与 `.code-intelligence/` 即可完整退出并回到 `rg + 文件阅读`。PR 4 才增加开发环境运行证据闭环；本阶段不启用生产追踪。
+ContractGraph 不需要常驻服务、数据库或网络；删除 `.codegraph/` 与 `.code-intelligence/` 即可完整退出并回到 `rg + 文件阅读`。开发环境 RuntimeEvidence 同样是可重建派生物；本阶段不启用生产追踪。

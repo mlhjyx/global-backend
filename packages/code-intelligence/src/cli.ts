@@ -16,6 +16,12 @@ import {
   evaluateCodeGraphPilot,
   getCodeGraphStatus,
 } from "./codegraph-pilot";
+import {
+  buildRuntimeDifferenceReport,
+  collectDevelopmentRuntimeEvidence,
+  readRuntimeEvidenceBundle,
+  runtimeEvidenceFreshnessDiagnostics,
+} from "./runtime-evidence";
 import { ContractGraphV1, GraphNodeV1 } from "./schema";
 import { sha256, stableJson } from "./utils";
 
@@ -60,6 +66,11 @@ Commands:
                               Merge Git diff, ContractGraph and CodeGraph candidates
   evaluate-codegraph [--repo PATH]
                               Run the fixed 30-question adoption evaluation
+  runtime-capture development [--repo PATH]
+                              Capture metadata-only Ubuntu development evidence
+  runtime-status [--repo PATH]
+                              Verify runtime evidence integrity, worktree and commit
+  runtime-diff [--repo PATH]  Compare static required relations with runtime evidence
 
 Derived artifacts are written only under .code-intelligence/ and are never truth.`);
 }
@@ -250,6 +261,63 @@ async function main(): Promise<void> {
           gates: report.gates,
         }),
       );
+      return;
+    }
+    case "runtime-capture": {
+      const environment = args.terms[0] ?? "";
+      if (environment !== "development") {
+        throw new Error(
+          "runtime-capture currently supports development only; production/preproduction require separate approval",
+        );
+      }
+      const bundle = await collectDevelopmentRuntimeEvidence(
+        args.repositoryRoot,
+      );
+      console.log(
+        stableJson({
+          schemaVersion: bundle.schemaVersion,
+          environment: bundle.environment,
+          capturedAt: bundle.capturedAt,
+          collector: bundle.collector,
+          records: bundle.records.length,
+          outcomes: {
+            success: bundle.records.filter(
+              (record) => record.outcome === "SUCCESS",
+            ).length,
+            failure: bundle.records.filter(
+              (record) => record.outcome === "FAILURE",
+            ).length,
+            unknown: bundle.records.filter(
+              (record) => record.outcome === "UNKNOWN",
+            ).length,
+          },
+        }),
+      );
+      return;
+    }
+    case "runtime-status": {
+      const bundle = await readRuntimeEvidenceBundle(args.repositoryRoot);
+      const diagnostics = await runtimeEvidenceFreshnessDiagnostics(
+        args.repositoryRoot,
+        bundle,
+      );
+      console.log(
+        stableJson({
+          ok: diagnostics.length === 0,
+          environment: bundle.environment,
+          capturedAt: bundle.capturedAt,
+          collector: bundle.collector,
+          records: bundle.records.length,
+          diagnostics,
+        }),
+      );
+      if (diagnostics.length > 0) process.exitCode = 1;
+      return;
+    }
+    case "runtime-diff": {
+      const report = await buildRuntimeDifferenceReport(args.repositoryRoot);
+      console.log(stableJson(report));
+      if (report.conclusion === "CONTRADICTED") process.exitCode = 1;
       return;
     }
     case "help":
