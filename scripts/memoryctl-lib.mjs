@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import {
   constants,
   copyFile,
@@ -8,11 +9,14 @@ import {
   readFile,
   realpath,
   rename,
-  stat,
+  lstat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export const GRAPH_SCHEMA = "memoryctl-graph/v1";
 export const CANDIDATE_SCHEMA = "memoryctl-candidate/v1";
@@ -44,9 +48,10 @@ export function sha256(value) {
 }
 
 export function canonicalJson(value) {
+  if (value === undefined) return "null";
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.keys(value)
+    return `{${Object.keys(value).filter((key) => value[key] !== undefined)
       .sort()
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
       .join(",")}}`;
@@ -109,6 +114,7 @@ export function validateCandidate(candidate) {
   assert(candidate.schemaVersion === CANDIDATE_SCHEMA, "CANDIDATE_SCHEMA", "unsupported candidate schema");
   assert(typeof candidate.id === "string" && /^[a-z0-9][a-z0-9-]{7,127}$/.test(candidate.id), "CANDIDATE_ID", "invalid candidate id");
   assert(typeof candidate.project === "string" && candidate.project.length > 0, "CANDIDATE_PROJECT", "project is required");
+  assert(["inbox", "reviewed"].includes(candidate.status), "CANDIDATE_STATUS", "candidate status must be inbox or reviewed");
   assert(["merged_pr", "user_decision", "verified_operation", "lesson", "research", "navigation", "proposal", "inference"].includes(candidate.kind), "CANDIDATE_KIND", "unsupported candidate kind");
   assert(["derived", "approved_reference", "external", "unverified"].includes(candidate.authority), "CANDIDATE_AUTHORITY", "unsupported candidate authority");
   const entity = normalizeEntity(candidate.entity);
@@ -118,6 +124,17 @@ export function validateCandidate(candidate) {
   }
   assert(candidate.source && typeof candidate.source === "object", "CANDIDATE_SOURCE", "candidate requires a source receipt");
   assert(typeof candidate.source.kind === "string" && typeof candidate.source.reference === "string", "CANDIDATE_SOURCE", "source kind and reference are required");
+  if (["merged_pr", "verified_operation"].includes(candidate.kind)) {
+    assert(typeof candidate.sourceCommit === "string" && /^[0-9a-f]{40}$/.test(candidate.sourceCommit), "CANDIDATE_SOURCE_COMMIT", "automatic candidates require a full sourceCommit");
+  }
+  if (candidate.kind === "user_decision") {
+    const approval = candidate.approval;
+    assert(approval && approval.kind === "user_explicit", "CANDIDATE_APPROVAL", "user decision requires an explicit approval receipt");
+    assert(typeof approval.reference === "string" && approval.reference.length > 0, "CANDIDATE_APPROVAL", "approval reference is required");
+    assert(typeof approval.approvedBy === "string" && approval.approvedBy.length > 0, "CANDIDATE_APPROVAL", "approval approver is required");
+    assert(isIsoDate(approval.approvedAt), "CANDIDATE_APPROVAL", "approval timestamp must be an ISO date");
+    assert(typeof approval.statementHash === "string" && /^[0-9a-f]{64}$/.test(approval.statementHash), "CANDIDATE_APPROVAL", "approval requires a statement hash");
+  }
   assert(isIsoDate(candidate.validAsOf), "CANDIDATE_DATE", "validAsOf must be an ISO date");
   assert(isIsoDate(candidate.reviewAfter), "CANDIDATE_DATE", "reviewAfter must be an ISO date");
   assert(typeof candidate.owner === "string" && candidate.owner.startsWith("OWN-"), "CANDIDATE_OWNER", "owner must be an existing Owner ID");
@@ -193,11 +210,13 @@ export function mergeCandidate(graph, candidate) {
     observations: [canonicalJson({
       authority: candidate.authority,
       candidateHash: sha256(canonicalJson(candidate)),
+      approval: candidate.approval ?? null,
       kind: candidate.kind,
       owner: candidate.owner,
       project: candidate.project,
       reviewAfter: candidate.reviewAfter,
       source: candidate.source,
+      sourceCommit: candidate.sourceCommit ?? null,
       validAsOf: candidate.validAsOf,
     })],
   };
@@ -228,11 +247,25 @@ async function ensurePrivateDirectory(path) {
 
 async function readRegularFile(path, allowMissing = false) {
   try {
-    const info = await stat(path);
+    const info = await lstat(path);
     assert(info.isFile(), "UNSAFE_PATH", "path must be a regular file", { path });
     return await readFile(path, "utf8");
   } catch (error) {
     if (allowMissing && error?.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+async function securePathStatus(path, kind, allowMissing = true) {
+  try {
+    const info = await lstat(path);
+    assert(!info.isSymbolicLink(), "UNSAFE_PATH", "managed memory path cannot be a symbolic link", { path, kind });
+    assert(kind === "directory" ? info.isDirectory() : info.isFile(), "UNSAFE_PATH", "managed memory path has an unexpected type", { path, kind });
+    assert((info.mode & 0o077) === 0, "INSECURE_PERMISSIONS", "managed memory path is readable or writable by group or others", { path, mode: (info.mode & 0o777).toString(8) });
+    assert(info.uid === process.getuid?.(), "INSECURE_OWNERSHIP", "managed memory path is not owned by the current user", { path, uid: info.uid });
+    return { exists: true, mode: info.mode & 0o777 };
+  } catch (error) {
+    if (allowMissing && error?.code === "ENOENT") return { exists: false };
     throw error;
   }
 }
@@ -331,6 +364,13 @@ export async function createCandidate(input, options) {
 
 export async function verifyGraph(options) {
   const paths = defaultPaths(options);
+  const pathSecurity = {
+    auditDir: await securePathStatus(paths.auditDir, "directory"),
+    backupDir: await securePathStatus(paths.backupDir, "directory"),
+    graph: await securePathStatus(paths.graphPath, "file"),
+    graphDir: await securePathStatus(paths.graphDir, "directory", false),
+    inboxDir: await securePathStatus(paths.inboxDir, "directory"),
+  };
   const text = await readRegularFile(paths.graphPath, true);
   const graph = parseGraphText(text);
   const journal = await readRegularFile(paths.journalPath, true);
@@ -352,6 +392,7 @@ export async function verifyGraph(options) {
     journalPresent: Boolean(journal),
     lastPublishedGraphHash: latestAudit?.graphHash ?? null,
     relationCount: graph.relations.length,
+    pathSecurity,
     untrackedDrift: latestAudit ? latestAudit.graphHash !== graphHash : null,
     writeToolsBlocked: WRITE_TOOL_NAMES,
     readToolsRequired: READ_TOOL_NAMES,
@@ -370,7 +411,7 @@ export async function restoreGraph(backupPath, options) {
   await ensurePrivateDirectory(paths.backupDir);
   const backupRoot = await realpath(paths.backupDir);
   const resolvedBackup = resolve(backupPath);
-  const backupInfo = await stat(resolvedBackup);
+  const backupInfo = await lstat(resolvedBackup);
   assert(backupInfo.isFile() && backupInfo.nlink === 1, "UNSAFE_BACKUP", "backup must be a regular non-linked file");
   const realBackup = await realpath(resolvedBackup);
   assert(relative(backupRoot, realBackup) && !relative(backupRoot, realBackup).startsWith(".."), "UNSAFE_BACKUP", "backup must be inside the configured backup directory");
@@ -392,12 +433,39 @@ export async function restoreGraph(backupPath, options) {
   }
 }
 
-function validatePromotion(candidate, options) {
-  const automaticKinds = new Set(["merged_pr", "verified_operation"]);
-  if (automaticKinds.has(candidate.kind)) {
-    assert(candidate.source.mechanicallyVerified === true, "PROMOTION_PENDING", "automatic promotion needs a mechanical source receipt");
+async function verifyMergedPr(candidate, options) {
+  const source = candidate.source;
+  assert(typeof source.repository === "string" && /^[^/\s]+\/[^/\s]+$/.test(source.repository), "PROMOTION_PENDING", "merged PR receipt requires an owner/repository");
+  assert(Number.isInteger(source.prNumber) && source.prNumber > 0, "PROMOTION_PENDING", "merged PR receipt requires a PR number");
+  assert(source.baseRef === "main", "PROMOTION_PENDING", "automatic promotion only permits PRs merged to main");
+  assert(source.mergeSha === candidate.sourceCommit, "PROMOTION_PENDING", "merged PR receipt must bind mergeSha to sourceCommit");
+  if (options.verifyMergedPr) {
+    await options.verifyMergedPr(candidate);
+    return;
+  }
+  try {
+    await execFileAsync("git", ["merge-base", "--is-ancestor", candidate.sourceCommit, "origin/main"], { cwd: candidate.project });
+    const { stdout } = await execFileAsync("gh", ["pr", "view", String(source.prNumber), "--repo", source.repository, "--json", "state,baseRefName,mergeCommit"]);
+    const pr = JSON.parse(stdout);
+    assert(pr.state === "MERGED", "PROMOTION_PENDING", "PR is not merged");
+    assert(pr.baseRefName === "main", "PROMOTION_PENDING", "PR was not merged to main");
+    assert(pr.mergeCommit?.oid === candidate.sourceCommit, "PROMOTION_PENDING", "PR merge commit does not match sourceCommit");
+  } catch (error) {
+    if (error instanceof MemoryCtlError) throw error;
+    throw new MemoryCtlError("PROMOTION_PENDING", "could not mechanically verify the merged PR; keep the candidate in Inbox", { cause: error?.message });
+  }
+}
+
+async function validatePromotion(candidate, options) {
+  if (candidate.kind === "merged_pr") {
+    await verifyMergedPr(candidate, options);
+  } else if (candidate.kind === "verified_operation") {
+    throw new MemoryCtlError("PROMOTION_PENDING", "verified operations require a future allowlisted verifier; keep the candidate in Inbox");
+  } else if (candidate.kind === "user_decision") {
+    // This receipt records an explicit human approval; local tooling cannot attest to a chat identity.
+    assert(candidate.approval?.kind === "user_explicit", "PROMOTION_PENDING", "candidate requires a structured explicit user approval");
   } else {
-    assert(candidate.approval?.kind === "user_explicit" && typeof candidate.approval.reference === "string", "PROMOTION_PENDING", "candidate requires a structured explicit user approval");
+    throw new MemoryCtlError("PROMOTION_PENDING", "only a verified merged PR or structured user decision can be promoted in v1");
   }
   assert(options.expectedCandidateHash === sha256(canonicalJson(candidate)), "CANDIDATE_HASH", "candidate hash changed or was not supplied");
 }
@@ -405,7 +473,7 @@ function validatePromotion(candidate, options) {
 export async function promoteCandidate(candidatePath, options) {
   const paths = defaultPaths(options);
   const candidate = validateCandidate(JSON.parse(await readRegularFile(resolve(candidatePath))));
-  validatePromotion(candidate, options);
+  await validatePromotion(candidate, options);
   await Promise.all([ensurePrivateDirectory(paths.auditDir), ensurePrivateDirectory(paths.backupDir)]);
   const release = await acquireLock(paths.lockPath, options.lockTimeoutMs);
   try {
@@ -420,11 +488,13 @@ export async function promoteCandidate(candidatePath, options) {
     const backupPath = await createBackup(paths, before);
     await replaceGraphAtomically(paths, after, { candidateId: candidate.id, newHash: afterHash, oldHash: beforeHash });
     const audit = {
+      approval: candidate.approval ?? null,
       candidateHash: options.expectedCandidateHash,
       candidateId: candidate.id,
       graphHash: afterHash,
       previousGraphHash: beforeHash,
       promotedAt: new Date().toISOString(),
+      sourceCommit: candidate.sourceCommit ?? null,
     };
     await writeDurable(join(paths.auditDir, `${candidate.id}.json`), `${canonicalJson(audit)}\n`, "wx");
     await unlink(paths.journalPath);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,15 +17,22 @@ function candidate(id, kind = "user_decision") {
     schemaVersion: "memoryctl-candidate/v1",
     id,
     project: "/global/backend",
+    status: "inbox",
     kind,
     authority: kind === "user_decision" ? "approved_reference" : "derived",
     entity: { name: `decision:${id}`, entityType: "decision" },
     observations: ["A concise approved decision receipt."],
-    source: { kind, reference: "task:example", mechanicallyVerified: kind === "merged_pr" },
+    source: { kind, reference: "task:example" },
     validAsOf: "2026-07-25T00:00:00.000Z",
     reviewAfter: "2027-07-25T00:00:00.000Z",
     owner: "OWN-PRODUCT",
-    approval: kind === "user_decision" ? { kind: "user_explicit", reference: "task:example#user-message" } : undefined,
+    approval: kind === "user_decision" ? {
+      kind: "user_explicit",
+      reference: "task:example#user-message",
+      approvedBy: "product-owner",
+      approvedAt: "2026-07-25T00:00:00.000Z",
+      statementHash: "a".repeat(64),
+    } : undefined,
   };
 }
 
@@ -87,4 +94,39 @@ test("restore requires the current hash and preserves a preimage backup", async 
   const result = await restoreGraph(saved.backupPath, { ...paths, expectedGraphHash: changed.graphHash });
   assert.equal(result.graphHash, saved.graphHash);
   assert.match(await readFile(paths.graphPath, "utf8"), /seed/);
+});
+
+test("merged PR promotion requires a live mechanical verifier", async () => {
+  const paths = await fixture();
+  const value = candidate("merged-pr-0001", "merged_pr");
+  value.source = {
+    kind: "merged_pr",
+    reference: "PR #1",
+    repository: "mlhjyx/global-backend",
+    prNumber: 1,
+    baseRef: "main",
+    mergeSha: "b".repeat(40),
+  };
+  value.sourceCommit = "b".repeat(40);
+  const created = await createCandidate(value, paths);
+  const before = await verifyGraph(paths);
+  await assert.rejects(() => promoteCandidate(created.candidatePath, {
+    ...paths,
+    expectedCandidateHash: created.candidateHash,
+    expectedGraphHash: before.graphHash,
+    verifyMergedPr: async () => { throw new Error("not merged"); },
+  }), /not merged/);
+  const result = await promoteCandidate(created.candidatePath, {
+    ...paths,
+    expectedCandidateHash: created.candidateHash,
+    expectedGraphHash: before.graphHash,
+    verifyMergedPr: async () => {},
+  });
+  assert.equal(result.changed, true);
+});
+
+test("verify rejects group-readable managed memory files", async () => {
+  const paths = await fixture();
+  await chmod(paths.graphPath, 0o644);
+  await assert.rejects(() => verifyGraph(paths), (error) => error instanceof MemoryCtlError && error.code === "INSECURE_PERMISSIONS");
 });
