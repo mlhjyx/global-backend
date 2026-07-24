@@ -169,7 +169,18 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       unavailableReason: "rate_limited",
     });
     expect(hasDesignEvaluationHardFailures(evaluation)).toBe(false);
-    expect(validateDesignEvaluationEnvelope(evaluation)).toEqual(evaluation);
+    expect(() => validateDesignEvaluationEnvelope(evaluation)).toThrowError(
+      "DESIGN_EVALUATION_V2_ARTIFACT_SET_REQUIRED",
+    );
+    expect(validateDesignEvaluationEnvelope(evaluation, artifacts)).toEqual(
+      evaluation,
+    );
+    expect(() =>
+      validateDesignEvaluationEnvelope(
+        { ...evaluation, artifactSetDigest: "9".repeat(64) },
+        artifacts,
+      ),
+    ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
   });
 
   it("accepts a scored aesthetic pass only at the quality threshold", () => {
@@ -188,19 +199,25 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       evaluation,
     );
     expect(() =>
-      validateDesignEvaluationV2({
-        ...evaluation,
-        aesthetic: { ...evaluation.aesthetic, overallScore: 84 },
-      }),
+      validateDesignEvaluationV2(
+        {
+          ...evaluation,
+          aesthetic: { ...evaluation.aesthetic, overallScore: 84 },
+        },
+        artifacts,
+      ),
     ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
     expect(() =>
-      validateDesignEvaluationV2({
-        ...evaluation,
-        aesthetic: {
-          ...evaluation.aesthetic,
-          dimensions: { ...dimensions(85), hierarchy: 59 },
+      validateDesignEvaluationV2(
+        {
+          ...evaluation,
+          aesthetic: {
+            ...evaluation.aesthetic,
+            dimensions: { ...dimensions(85), hierarchy: 59 },
+          },
         },
-      }),
+        artifacts,
+      ),
     ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
   });
 
@@ -297,14 +314,17 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       [key]: forbidden,
     };
     expect(() =>
-      validateDesignEvaluationV2({
-        ...evaluation,
-        deterministic: {
-          status: "failed",
-          hardFailures: [finding],
-          findings: [],
+      validateDesignEvaluationV2(
+        {
+          ...evaluation,
+          deterministic: {
+            status: "failed",
+            hardFailures: [finding],
+            findings: [],
+          },
         },
-      }),
+        artifacts,
+      ),
     ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
   });
 
@@ -319,33 +339,39 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       evidenceRef: { artifactId: "missing" },
     };
     expect(() =>
-      validateDesignEvaluationV2({
-        ...evaluation,
-        deterministic: {
-          status: "failed",
-          hardFailures: [finding],
-          findings: [],
+      validateDesignEvaluationV2(
+        {
+          ...evaluation,
+          deterministic: {
+            status: "failed",
+            hardFailures: [finding],
+            findings: [],
+          },
         },
-      }),
+        artifacts,
+      ),
     ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
 
     expect(() =>
-      validateDesignEvaluationV2({
-        ...evaluation,
-        deterministic: {
-          status: "failed",
-          hardFailures: [
-            {
-              source: "deterministic",
-              severity: "blocker",
-              ruleCode: "AESTHETIC_HIERARCHY",
-              target: { pageId: "home", breakpoint: 375 },
-              evidenceRef: { artifactId: "home-en-375" },
-            },
-          ],
-          findings: [],
+      validateDesignEvaluationV2(
+        {
+          ...evaluation,
+          deterministic: {
+            status: "failed",
+            hardFailures: [
+              {
+                source: "deterministic",
+                severity: "blocker",
+                ruleCode: "AESTHETIC_HIERARCHY",
+                target: { pageId: "home", breakpoint: 375 },
+                evidenceRef: { artifactId: "home-en-375" },
+              },
+            ],
+            findings: [],
+          },
         },
-      }),
+        artifacts,
+      ),
     ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
 
     const validFinding = {

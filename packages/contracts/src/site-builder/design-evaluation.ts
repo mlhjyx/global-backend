@@ -476,7 +476,7 @@ export function validateDesignEvaluation(value: unknown): DesignEvaluation {
 
 export function validateDesignEvaluationV2(
   value: unknown,
-  artifactSet?: QualityArtifactSetV1,
+  artifactSet: QualityArtifactSetV1,
 ): DesignEvaluationV2 {
   const evaluation = isRecord(value) ? value : null;
   const deterministic =
@@ -590,46 +590,44 @@ export function validateDesignEvaluationV2(
     throw new Error("DESIGN_EVALUATION_V2_INVALID");
   }
 
-  if (artifactSet) {
-    const validatedArtifactSet = validateQualityArtifactSet(artifactSet);
-    const artifactsById = new Map(
-      validatedArtifactSet.artifacts.map((artifact) => [
-        artifact.artifactId,
-        artifact,
-      ]),
-    );
-    const allFindings = [
-      ...(hardFailures ?? []),
-      ...(deterministicFindings ?? []),
-      ...(aestheticFindings ?? []),
-    ];
-    if (
-      evaluation.candidateSpecDigest !==
-        validatedArtifactSet.candidateSpecDigest ||
-      evaluation.designBriefDigest !== validatedArtifactSet.designBriefDigest ||
-      evaluation.artifactSetDigest !== validatedArtifactSet.artifactSetDigest ||
-      evaluation.round !== validatedArtifactSet.round ||
-      allFindings.some((finding) => {
-        if (!isRecord(finding) || !isRecord(finding.evidenceRef)) return true;
-        const artifact = artifactsById.get(
-          String(finding.evidenceRef.artifactId),
-        );
-        if (!artifact?.target || !isRecord(finding.target)) return true;
-        const sourceAcceptsKind = artifactKindSupportsFinding(
-          finding.source,
-          finding.ruleCode,
-          artifact.kind,
-        );
-        return (
-          !sourceAcceptsKind ||
-          artifact.target.pageId !== finding.target.pageId ||
-          (finding.target.breakpoint !== undefined &&
-            artifact.target.breakpoint !== finding.target.breakpoint)
-        );
-      })
-    ) {
-      throw new Error("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
-    }
+  const validatedArtifactSet = validateQualityArtifactSet(artifactSet);
+  const artifactsById = new Map(
+    validatedArtifactSet.artifacts.map((artifact) => [
+      artifact.artifactId,
+      artifact,
+    ]),
+  );
+  const allFindings = [
+    ...(hardFailures ?? []),
+    ...(deterministicFindings ?? []),
+    ...(aestheticFindings ?? []),
+  ];
+  if (
+    evaluation.candidateSpecDigest !==
+      validatedArtifactSet.candidateSpecDigest ||
+    evaluation.designBriefDigest !== validatedArtifactSet.designBriefDigest ||
+    evaluation.artifactSetDigest !== validatedArtifactSet.artifactSetDigest ||
+    evaluation.round !== validatedArtifactSet.round ||
+    allFindings.some((finding) => {
+      if (!isRecord(finding) || !isRecord(finding.evidenceRef)) return true;
+      const artifact = artifactsById.get(
+        String(finding.evidenceRef.artifactId),
+      );
+      if (!artifact?.target || !isRecord(finding.target)) return true;
+      const sourceAcceptsKind = artifactKindSupportsFinding(
+        finding.source,
+        finding.ruleCode,
+        artifact.kind,
+      );
+      return (
+        !sourceAcceptsKind ||
+        artifact.target.pageId !== finding.target.pageId ||
+        (finding.target.breakpoint !== undefined &&
+          artifact.target.breakpoint !== finding.target.breakpoint)
+      );
+    })
+  ) {
+    throw new Error("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
   }
 
   return evaluation as unknown as DesignEvaluationV2;
@@ -637,12 +635,16 @@ export function validateDesignEvaluationV2(
 
 export function validateDesignEvaluationEnvelope(
   value: unknown,
+  artifactSet?: QualityArtifactSetV1,
 ): DesignEvaluationEnvelope {
   if (
     isRecord(value) &&
     value.schemaVersion === DESIGN_EVALUATION_V2_SCHEMA_VERSION
   ) {
-    return validateDesignEvaluationV2(value);
+    if (!artifactSet) {
+      throw new Error("DESIGN_EVALUATION_V2_ARTIFACT_SET_REQUIRED");
+    }
+    return validateDesignEvaluationV2(value, artifactSet);
   }
   return validateDesignEvaluation(value);
 }
