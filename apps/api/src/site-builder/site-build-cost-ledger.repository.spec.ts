@@ -21,6 +21,35 @@ const SCOPE = {
 };
 
 describe('SiteBuildCostLedger paid-operation replay gate', () => {
+  it('serializes a manual kill switch with final pointer publication', async () => {
+    const executeRaw = vi.fn(async () => 0);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const ledger = new SiteBuildCostLedger(
+      fakePrisma({
+        $executeRaw: executeRaw,
+        siteBuildBudget: { updateMany },
+      }),
+    );
+
+    await ledger.disablePaidCalls(
+      SCOPE.workspaceId,
+      SCOPE.buildRunId,
+      'manual_kill_switch',
+    );
+
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { buildRunId: SCOPE.buildRunId },
+      data: {
+        paidCallsEnabled: false,
+        disabledReason: 'manual_kill_switch',
+      },
+    });
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      updateMany.mock.invocationCallOrder[0],
+    );
+  });
+
   it('returns an already-settled success without authorizing another execution', async () => {
     const tx = {
       $queryRaw: vi.fn(async () => [

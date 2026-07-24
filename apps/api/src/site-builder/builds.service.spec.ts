@@ -7,7 +7,7 @@ import {
   type ReleaseManifestV2,
 } from "./release-artifact";
 import type { SiteSpec, SiteSpecV1_1 } from "@global/contracts";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { BuildsService } from "./builds.service";
 import type {
   RefurbishLaunchResult,
@@ -140,8 +140,9 @@ function makeService(
     idempotencies: [...(opts.existingIdempotencies ?? [])],
   };
   let seq = db.runs.length;
+  const executeRaw = vi.fn(async () => 0);
   const tx = {
-    $executeRaw: async () => 0,
+    $executeRaw: executeRaw,
     $queryRaw: async () => [{ reconciled: 0 }],
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
@@ -387,6 +388,7 @@ function makeService(
     launchedInputs,
     recovered,
     cancelled,
+    executeRaw,
   };
 }
 
@@ -1045,6 +1047,37 @@ describe("BuildsService.get / cancel", () => {
       details: { buildId: "cancel-best-effort" },
     });
     expect(db.runs[0]).toMatchObject({ status: "queued" });
+    expect(db.budgets[0]).toMatchObject({
+      paidCallsEnabled: false,
+      disabledReason: "cancellation_requested",
+    });
+  });
+
+  it("serializes cancellation with publication and overwrites a provisional success summary", async () => {
+    const { service, db, executeRaw } = makeService({
+      existingRuns: [
+        {
+          id: "cancel-after-summary",
+          siteId: SITE_ID,
+          kind: "refurbish",
+          status: "running",
+          createdAt: new Date(),
+        },
+      ],
+      launcher: {
+        cancelRefurbish: async () => {
+          throw new Error("Temporal unavailable");
+        },
+      },
+    });
+    Object.assign(db.budgets[0]!, {
+      paidCallsEnabled: false,
+      disabledReason: "run_succeeded",
+    });
+
+    await service.cancel(CTX, "cancel-after-summary").catch(() => undefined);
+
+    expect(executeRaw).toHaveBeenCalledOnce();
     expect(db.budgets[0]).toMatchObject({
       paidCallsEnabled: false,
       disabledReason: "cancellation_requested",
