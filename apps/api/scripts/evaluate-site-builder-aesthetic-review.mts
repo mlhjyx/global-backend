@@ -36,11 +36,77 @@ import type {
   ModelResult,
   VisionReviewImage,
 } from "../src/model-gateway/types";
+import type { GatewayVisionTransport } from "../src/model-gateway/providers/openai-compatible.provider";
 
-const MODEL = "gemini-3.5-flash";
+interface CandidateConfig {
+  transport: GatewayVisionTransport;
+  timeoutMs: number;
+  maxTokens: number;
+  maxCostCents: number;
+  price: {
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+  };
+}
+
+const CANDIDATES = Object.freeze({
+  "gemini-3.5-flash": {
+    transport: "google-generate-content",
+    timeoutMs: 180_000,
+    maxTokens: 2_000,
+    maxCostCents: 10,
+    price: {
+      inputUsdPerMillionTokens: 1.5,
+      outputUsdPerMillionTokens: 9,
+    },
+  },
+  "gpt-5.6-terra": {
+    transport: "openai-responses",
+    timeoutMs: 180_000,
+    maxTokens: 3_000,
+    maxCostCents: 15,
+    price: {
+      inputUsdPerMillionTokens: 2.5,
+      outputUsdPerMillionTokens: 15,
+    },
+  },
+  "gpt-5.6-sol": {
+    transport: "openai-responses",
+    timeoutMs: 180_000,
+    maxTokens: 3_000,
+    maxCostCents: 20,
+    price: {
+      inputUsdPerMillionTokens: 5,
+      outputUsdPerMillionTokens: 30,
+    },
+  },
+  "claude-sonnet-5": {
+    transport: "anthropic-messages",
+    timeoutMs: 180_000,
+    maxTokens: 4_000,
+    maxCostCents: 15,
+    price: {
+      inputUsdPerMillionTokens: 2,
+      outputUsdPerMillionTokens: 10,
+    },
+  },
+} as const satisfies Readonly<Record<string, CandidateConfig>>);
+
+type CandidateModel = keyof typeof CANDIDATES;
+
+function candidateModel(): CandidateModel {
+  const requested = process.env.MODEL_EVAL_MODEL?.trim() || "gemini-3.5-flash";
+  if (!(requested in CANDIDATES)) {
+    throw new Error(`MODEL_EVAL_MODEL_UNSUPPORTED: ${requested}`);
+  }
+  return requested as CandidateModel;
+}
+
+const MODEL = candidateModel();
+const CANDIDATE = CANDIDATES[MODEL];
 const TASK = "site_builder.aesthetic_review.eval";
-const TRANSPORT = "openai-chat-completions";
-const EVIDENCE_ID = "model1-aesthetic-review-20260724-v2";
+const TRANSPORT = CANDIDATE.transport;
+const EVIDENCE_ID = `model1-aesthetic-review-20260724-${MODEL.replaceAll(".", "-")}-v4`;
 const HISTORICAL_INCIDENT_EVIDENCE_ID = "model1-aesthetic-review-20260724-v1";
 const HISTORICAL_INCIDENT_EVALUATOR_VERSION =
   "site-builder-aesthetic-review-eval@1.0.0";
@@ -49,14 +115,13 @@ const HISTORICAL_INCIDENT_PROMPT_VERSION =
 const REPEATS = 2;
 const EXPECTED_CASES = 12;
 const EXPECTED_RUNS = EXPECTED_CASES * REPEATS;
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = CANDIDATE.timeoutMs;
 const CATALOG_TIMEOUT_MS = 10_000;
-const MAX_TOKENS = 2_000;
-const MAX_COST_CENTS = 10;
+const MAX_TOKENS = CANDIDATE.maxTokens;
+const MAX_COST_CENTS = CANDIDATE.maxCostCents;
 const PRICE_SNAPSHOT = {
   source: "docs/site-builder/10-model-selection-study.md",
-  inputUsdPerMillionTokens: 1.5,
-  outputUsdPerMillionTokens: 9,
+  ...CANDIDATE.price,
 } as const;
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -89,6 +154,7 @@ const SOURCE_PATHS = [
   "apps/api/src/model-gateway/types.ts",
   "apps/api/src/model-gateway/vision-review-input.ts",
   "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+  "docker-compose.yml",
   "docs/site-builder/10-model-selection-study.md",
   "pnpm-lock.yaml",
 ] as const;
@@ -117,7 +183,8 @@ type UnavailableReason =
 interface EvaluationRun {
   caseId: string;
   familyId: string;
-  kind: "approved" | "degraded";
+  kind: "baseline" | "degraded";
+  qualification: AestheticEvalCase["qualification"];
   expectedIssue: string | null;
   attempt: number;
   requestedModel: string;
@@ -144,10 +211,20 @@ interface EvaluationRun {
   artifactPath: string;
 }
 
+const BENCHMARK_CALIBRATION =
+  "uncalibrated_deterministic_render_baseline" as const;
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+const GATEWAY_IMAGE_DIGEST = required(
+  "MODEL_EVAL_GATEWAY_IMAGE_DIGEST",
+);
+if (!/^sha256:[a-f0-9]{64}$/.test(GATEWAY_IMAGE_DIGEST)) {
+  throw new Error("MODEL_EVAL_GATEWAY_IMAGE_DIGEST_INVALID");
 }
 
 function progress(event: string, detail: Record<string, unknown>): void {
@@ -158,6 +235,22 @@ function progress(event: string, detail: Record<string, unknown>): void {
 
 function round(value: number, places = 6): number {
   return Number(value.toFixed(places));
+}
+
+class EvaluationInvocationError extends Error {
+  readonly elapsedMs: number;
+  readonly original: unknown;
+
+  constructor(original: unknown, elapsedMs: number) {
+    super("MODEL_EVAL_INVOCATION_FAILED", { cause: original });
+    this.name = "EvaluationInvocationError";
+    this.elapsedMs = elapsedMs;
+    this.original = original;
+  }
+}
+
+function originalError(error: unknown): unknown {
+  return error instanceof EvaluationInvocationError ? error.original : error;
 }
 
 function calculatedCost(result: ModelResult<unknown>): number {
@@ -286,12 +379,18 @@ async function invoke(
       { workspaceId: WORKSPACE_ID, correlationId: EVIDENCE_ID },
     );
     return { result, elapsedMs: round(performance.now() - startedAt, 3) };
+  } catch (error) {
+    throw new EvaluationInvocationError(
+      error,
+      round(performance.now() - startedAt, 3),
+    );
   } finally {
     clearTimeout(timer);
   }
 }
 
 function classifyUnavailable(error: unknown): UnavailableReason {
+  error = originalError(error);
   if (error instanceof ProviderHttpError) {
     if (error.status === 401) return "authentication";
     if (error.status === 402) return "payment_required";
@@ -327,24 +426,89 @@ function safeError(error: unknown): {
   name: string;
   reason: UnavailableReason;
   httpStatus?: number;
+  elapsedMs: number | null;
+  provider: string | null;
+  reportedModel: string | null;
+  resolvedModel: string | null;
+  modelResolutionSource: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  reportedCostUsd: number | null;
+  calculatedCostUsd: number | null;
+  gateCode: string;
+  messageSha256: string;
 } {
+  const invocation =
+    error instanceof EvaluationInvocationError ? error : undefined;
+  const failure = originalError(error);
+  const usage =
+    failure instanceof ProviderOutputError ? failure.usage : undefined;
+  const message =
+    failure instanceof Error ? failure.message : String(failure);
+  const gateCode =
+    message.match(
+      /(?:AESTHETIC|VISION|MODEL_EVAL)_[A-Z0-9_]+/,
+    )?.[0] ??
+    (failure instanceof ProviderHttpError
+      ? `PROVIDER_HTTP_${failure.status}`
+      : "MODEL_EVAL_UNCLASSIFIED_FAILURE");
+  const calculatedCostUsd =
+    usage?.inputTokens === undefined && usage?.outputTokens === undefined
+      ? null
+      : round(
+          ((usage.inputTokens ?? 0) *
+            PRICE_SNAPSHOT.inputUsdPerMillionTokens +
+            (usage.outputTokens ?? 0) *
+              PRICE_SNAPSHOT.outputUsdPerMillionTokens) /
+            1_000_000,
+          8,
+        );
   return {
     name:
-      error instanceof Error
-        ? error.name
-        : typeof error === "string"
+      failure instanceof Error
+        ? failure.name
+        : typeof failure === "string"
           ? "AbortReason"
           : "UnknownError",
-    reason: classifyUnavailable(error),
-    ...(error instanceof ProviderHttpError ? { httpStatus: error.status } : {}),
+    reason: classifyUnavailable(failure),
+    ...(failure instanceof ProviderHttpError
+      ? { httpStatus: failure.status }
+      : {}),
+    elapsedMs: invocation?.elapsedMs ?? null,
+    provider:
+      failure instanceof ProviderOutputError
+        ? (failure.provider ?? null)
+        : failure instanceof ProviderHttpError
+          ? failure.provider
+          : null,
+    reportedModel:
+      failure instanceof ProviderOutputError
+        ? (failure.reportedModel ?? null)
+        : null,
+    resolvedModel:
+      failure instanceof ProviderOutputError
+        ? (failure.model ?? null)
+        : failure instanceof ProviderHttpError
+          ? failure.model
+          : null,
+    modelResolutionSource:
+      failure instanceof ProviderOutputError
+        ? (failure.modelResolutionSource ?? null)
+        : null,
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    reportedCostUsd: null,
+    calculatedCostUsd,
+    gateCode,
+    messageSha256: createHash("sha256").update(message).digest("hex"),
   };
 }
 
 function assertExactProvenance(
   result: ModelResult<unknown>,
 ): asserts result is ModelResult<unknown> & {
-  model: typeof MODEL;
-  reportedModel: typeof MODEL;
+  model: CandidateModel;
+  reportedModel: CandidateModel;
   modelResolutionSource: "upstream_response";
 } {
   if (
@@ -394,6 +558,9 @@ async function writeFinalReport(report: unknown): Promise<void> {
 async function reconcileInterruptedEvidence(
   sourceReportPath: string,
 ): Promise<void> {
+  if (MODEL !== "gemini-3.5-flash") {
+    throw new Error("INTERRUPTED_EVIDENCE_RECONCILIATION_REQUIRES_GEMINI");
+  }
   await prepareEvaluationReportPath(absoluteReportPath);
   const sourceStart = await fingerprints();
   const sourceAbsolute = path.resolve(repositoryRoot, sourceReportPath);
@@ -603,6 +770,17 @@ let probe: Record<string, unknown> | undefined;
 let probeCalculatedCostUsd = 0;
 let probeReportedCostUsd: number | null = null;
 const completedRuns: EvaluationRun[] = [];
+let activeInvocation:
+  | {
+      phase: "capability_probe" | "matrix_run";
+      sequence: number | null;
+      caseId: string;
+      familyId: string;
+      kind: AestheticEvalCase["kind"];
+      attempt: number;
+      images: readonly VisionReviewImage[];
+    }
+  | undefined;
 try {
   catalog = await modelCatalog();
   progress("model_catalog_checked", {
@@ -617,7 +795,7 @@ try {
   const gateway = createGateway(cases);
   const probeCase = cases.find(
     (evalCase) =>
-      evalCase.familyId === "natural-origin" && evalCase.kind === "approved",
+      evalCase.familyId === "natural-origin" && evalCase.kind === "baseline",
   );
   if (!probeCase) throw new Error("CAPABILITY_PROBE_FIXTURE_MISSING");
   progress("capability_probe_started", {
@@ -626,6 +804,15 @@ try {
     imageCount: probeCase.images.length,
     timeoutMs: TIMEOUT_MS,
   });
+  activeInvocation = {
+    phase: "capability_probe",
+    sequence: null,
+    caseId: probeCase.caseId,
+    familyId: probeCase.familyId,
+    kind: probeCase.kind,
+    attempt: 1,
+    images: probeCase.images,
+  };
   const probeCall = await invoke(gateway, probeCase);
   assertExactProvenance(probeCall.result);
   const probeOutput = assertAestheticReviewOutput(
@@ -658,6 +845,7 @@ try {
   // The probe is not accepted evidence until its immutable artifact and file
   // digest exist. A write failure must not leave an unanchored success claim.
   probe = acceptedProbe;
+  activeInvocation = undefined;
   progress("capability_probe_accepted", {
     model: MODEL,
     elapsedMs: probeCall.elapsedMs,
@@ -677,6 +865,15 @@ try {
         caseId: evalCase.caseId,
         attempt,
       });
+      activeInvocation = {
+        phase: "matrix_run",
+        sequence,
+        caseId: evalCase.caseId,
+        familyId: evalCase.familyId,
+        kind: evalCase.kind,
+        attempt,
+        images: evalCase.images,
+      };
       const call = await invoke(gateway, evalCase);
       assertExactProvenance(call.result);
       const output = assertAestheticReviewOutput(
@@ -693,6 +890,7 @@ try {
         caseId: evalCase.caseId,
         familyId: evalCase.familyId,
         kind: evalCase.kind,
+        qualification: evalCase.qualification,
         expectedIssue: evalCase.expectedIssue,
         attempt,
         requestedModel: MODEL,
@@ -711,6 +909,7 @@ try {
         caseId: evalCase.caseId,
         familyId: evalCase.familyId,
         kind: evalCase.kind,
+        qualification: evalCase.qualification,
         expectedIssue: evalCase.expectedIssue,
         attempt,
         requestedModel: MODEL,
@@ -736,6 +935,7 @@ try {
         verdict: output.verdict,
         artifactPath: artifactFile.path,
       });
+      activeInvocation = undefined;
       progress("matrix_run_completed", {
         sequence,
         caseId: evalCase.caseId,
@@ -747,37 +947,36 @@ try {
   }
 
   const degradedRuns = runs.filter((run) => run.kind === "degraded");
-  const approvedRuns = runs.filter((run) => run.kind === "approved");
+  const baselineRuns = runs.filter((run) => run.kind === "baseline");
   const seededIssueHits = degradedRuns.filter(
     (run) => run.seededIssueDetected,
   ).length;
   const seededIssueRecall =
     degradedRuns.length === 0 ? 0 : seededIssueHits / degradedRuns.length;
-  const falseBlockers = approvedRuns.filter((run) => run.falseBlocker).length;
   const pairedPreferences = Object.keys(
     Object.fromEntries(cases.map((evalCase) => [evalCase.familyId, true])),
   ).map((familyId) => {
-    const approvedScores = approvedRuns
+    const baselineScores = baselineRuns
       .filter((run) => run.familyId === familyId)
       .map((run) => run.overallScore);
     const degradedScores = degradedRuns
       .filter((run) => run.familyId === familyId)
       .map((run) => run.overallScore);
-    const approvedAverage =
-      approvedScores.reduce((sum, score) => sum + score, 0) /
-      approvedScores.length;
+    const baselineAverage =
+      baselineScores.reduce((sum, score) => sum + score, 0) /
+      baselineScores.length;
     const degradedAverage =
       degradedScores.reduce((sum, score) => sum + score, 0) /
       degradedScores.length;
     return {
       familyId,
-      approvedAverage: round(approvedAverage, 3),
+      baselineAverage: round(baselineAverage, 3),
       degradedAverage: round(degradedAverage, 3),
-      preferredApproved: approvedAverage > degradedAverage,
+      preferredBaseline: baselineAverage > degradedAverage,
     };
   });
   const preferredPairs = pairedPreferences.filter(
-    (pair) => pair.preferredApproved,
+    (pair) => pair.preferredBaseline,
   ).length;
   const matrixCalculatedCostUsd = round(
     runs.reduce((sum, run) => sum + run.calculatedCostUsd, 0),
@@ -798,7 +997,9 @@ try {
           run.schemaValid && run.provenanceExact && run.forbiddenFieldsAbsent,
       ).length === EXPECTED_RUNS,
     seededIssueRecallAtLeast90: seededIssueRecall >= 0.9,
-    goodFixtureFalseBlockersZero: falseBlockers === 0,
+    aestheticGoldCalibrationReady: cases.every(
+      (evalCase) => evalCase.qualification === "aesthetic_gold",
+    ),
     pairedPreferenceAtLeastFiveOfSix: preferredPairs >= 5,
     sourceBundleStable: sourceIntegrity.stable,
   };
@@ -806,16 +1007,18 @@ try {
   const report = {
     schemaVersion: AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION,
     evidenceId: EVIDENCE_ID,
-    candidateState: passed ? "evaluatedCandidate" : "rejectedCandidate",
+    candidateState: passed ? "evaluatedCandidate" : "diagnosticOnly",
     routePromoted: false,
     model: {
       requested: MODEL,
       transport: TRANSPORT,
       provider: "gateway",
+      gatewayImageDigest: GATEWAY_IMAGE_DIGEST,
     },
     catalog,
     probe: { ...probe, artifact: probeArtifact },
     contract: {
+      benchmarkCalibration: BENCHMARK_CALIBRATION,
       taskId: TASK,
       evaluatorVersion: AESTHETIC_REVIEW_EVALUATOR_VERSION,
       promptVersion: AESTHETIC_REVIEW_PROMPT_VERSION,
@@ -833,7 +1036,10 @@ try {
       seededIssueHits,
       degradedRunCount: degradedRuns.length,
       seededIssueRecall: round(seededIssueRecall, 4),
-      goodFixtureFalseBlockers: falseBlockers,
+      aestheticGoldFalseBlockers: null,
+      baselineFailures: baselineRuns.filter(
+        (run) => run.verdict === "failed",
+      ).length,
       preferredPairs,
       familyCount: pairedPreferences.length,
       pairedPreferences,
@@ -842,9 +1048,13 @@ try {
       matrixCalculatedCostUsd,
       totalCalculatedCostUsd,
       acceptedArtifactUnitCostUsd:
-        acceptedRunCount === 0
+        !gates.aestheticGoldCalibrationReady || acceptedRunCount === 0
           ? null
           : round(totalCalculatedCostUsd / acceptedRunCount, 8),
+      diagnosticInvocationUnitCostUsd:
+        runs.length === 0
+          ? null
+          : round(totalCalculatedCostUsd / (runs.length + 1), 8),
       totalReportedCostUsd:
         probeReportedCostUsd !== null &&
         runs.every((run) => run.reportedCostUsd !== null)
@@ -885,7 +1095,7 @@ try {
     runs,
     conclusion: passed
       ? "Task-shaped MODEL-1 gates passed. Candidate is evaluated only; promotion requires a separate owner-approved PR."
-      : "Task-shaped MODEL-1 gates failed. Candidate is not eligible for promotion.",
+      : "Diagnostic baseline completed, but these deterministic render fixtures are not aesthetic gold. Candidate is not eligible for promotion.",
   };
   await writeFinalReport(report);
   progress("evaluation_completed", {
@@ -897,6 +1107,35 @@ try {
   if (!passed) process.exitCode = 2;
 } catch (error) {
   const unavailable = safeError(error);
+  const failureArtifact = await writeArtifact("failure.json", {
+    schemaVersion: AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION,
+    evidenceId: EVIDENCE_ID,
+    phase: activeInvocation?.phase ?? "preflight",
+    sequence: activeInvocation?.sequence ?? null,
+    caseId: activeInvocation?.caseId ?? null,
+    familyId: activeInvocation?.familyId ?? null,
+    kind: activeInvocation?.kind ?? null,
+    attempt: activeInvocation?.attempt ?? null,
+    requestedModel: MODEL,
+    reportedModel: unavailable.reportedModel,
+    resolvedModel: unavailable.resolvedModel,
+    modelResolutionSource: unavailable.modelResolutionSource,
+    provider: unavailable.provider,
+    transport: TRANSPORT,
+    elapsedMs: unavailable.elapsedMs,
+    usage: {
+      inputTokens: unavailable.inputTokens,
+      outputTokens: unavailable.outputTokens,
+    },
+    reportedCostUsd: unavailable.reportedCostUsd,
+    calculatedCostUsd: unavailable.calculatedCostUsd,
+    reason: unavailable.reason,
+    gateCode: unavailable.gateCode,
+    messageSha256: unavailable.messageSha256,
+    imageEvidence: activeInvocation
+      ? artifactImageEvidence(activeInvocation.images)
+      : [],
+  });
   const sourceEnd = await fingerprints();
   const sourceIntegrity = inspectEvaluationSourceBundle(sourceStart, sourceEnd);
   const unavailableReport = {
@@ -908,6 +1147,7 @@ try {
       requested: MODEL,
       transport: TRANSPORT,
       provider: "gateway",
+      gatewayImageDigest: GATEWAY_IMAGE_DIGEST,
     },
     catalog: catalog ?? null,
     probe:
@@ -938,7 +1178,16 @@ try {
           path: run.artifactPath,
           sha256: run.artifactFileSha256,
         })),
+        {
+          kind: "failure",
+          path: failureArtifact.path,
+          sha256: failureArtifact.sha256,
+        },
       ],
+    },
+    failure: {
+      ...unavailable,
+      artifact: failureArtifact,
     },
     sourceFiles: sourceStart,
     sourceIntegrity,

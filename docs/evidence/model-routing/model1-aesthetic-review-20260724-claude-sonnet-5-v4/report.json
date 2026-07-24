@@ -1,0 +1,271 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-claude-sonnet-5-v4",
+  "candidateState": "unavailable",
+  "routePromoted": false,
+  "model": {
+    "requested": "claude-sonnet-5",
+    "transport": "anthropic-messages",
+    "provider": "gateway",
+    "gatewayImageDigest": "sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c"
+  },
+  "catalog": {
+    "baseUrl": "http://localhost:3001/v1",
+    "modelCount": 38,
+    "modelCatalogSha256": "96ff68253b20984d12dd5eada3f805af861b5324f90b7189b015ab8a00537328",
+    "requestedModelListed": true
+  },
+  "probe": {
+    "accepted": true,
+    "requestedModel": "claude-sonnet-5",
+    "reportedModel": "claude-sonnet-5",
+    "resolvedModel": "claude-sonnet-5",
+    "modelResolutionSource": "upstream_response",
+    "provider": "gateway",
+    "transport": "anthropic-messages",
+    "elapsedMs": 33235.55,
+    "usage": {
+      "inputTokens": 6232,
+      "outputTokens": 2539
+    },
+    "reportedCostUsd": null,
+    "calculatedCostUsd": 0.037854,
+    "artifactSha256": "31322ab1726efe736460c4686b4a3170dc7ac4f179d223db41af3fab1a53affd",
+    "imageEvidence": [
+      {
+        "artifactId": "m1f:natural-origin:sample-596767fb542b:375",
+        "sha256": "53bc46f65d9ea4a0f2f7322e66474e30dc78e96be59ef1d8b69123fb3c3b3505",
+        "mimeType": "image/png",
+        "byteLength": 412748,
+        "target": {
+          "locale": "en",
+          "pageId": "natural-origin",
+          "breakpoint": 375
+        }
+      },
+      {
+        "artifactId": "m1f:natural-origin:sample-2d45e59c85f8:768",
+        "sha256": "44050f8d4638ed3e3cf27dd0676b6e37f73ef2b9eeeda3a898d4c350197cda26",
+        "mimeType": "image/png",
+        "byteLength": 563702,
+        "target": {
+          "locale": "en",
+          "pageId": "natural-origin",
+          "breakpoint": 768
+        }
+      },
+      {
+        "artifactId": "m1f:natural-origin:sample-21bc5c1c1172:1440",
+        "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+        "mimeType": "image/png",
+        "byteLength": 766732,
+        "target": {
+          "locale": "en",
+          "pageId": "natural-origin",
+          "breakpoint": 1440
+        }
+      }
+    ],
+    "artifact": {
+      "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/capability-probe.json",
+      "sha256": "226b758748b3bb0116aeca7b6a61cb1c53ccf07ec37a00b224bcff807d64d403"
+    }
+  },
+  "matrix": {
+    "status": "interrupted",
+    "reason": "empty_or_invalid_output",
+    "completedRuns": 18,
+    "expectedRuns": 24,
+    "remainingRunsNotExecuted": 6,
+    "artifactManifest": [
+      {
+        "kind": "capability_probe",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/capability-probe.json",
+        "sha256": "226b758748b3bb0116aeca7b6a61cb1c53ccf07ec37a00b224bcff807d64d403"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-1.json",
+        "sha256": "e0536be34296f7bb9ddf9eb858ab3971fe946d3a2457abad1abc330591391e1f"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-2.json",
+        "sha256": "16c02d2c8cf504ffe33df71e2097a6f1962864ddb5157c3590071b6d8cb00f36"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-3.json",
+        "sha256": "44f086acebd34c7bfc399b596bbfe340ec9f59c077b95789ad0bc051d6f53649"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-4.json",
+        "sha256": "876f6ed8fd8aadb569b885b86cd65ed43a5f0c85b1b43bab6633214cacb340f0"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-5.json",
+        "sha256": "2fbd754eb59fcea5071dc56f19795aa8e0b34dff72fbd09e6d76f8b19e1304e1"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-6.json",
+        "sha256": "68a61124594cc5123335237c0d547ff9eae977eaa6719881d7a3c3ea06ab4b21"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-7.json",
+        "sha256": "7495fbb447d47f09a6164bd0a431d3b66eebc420b9308f0b38e3326e2613e20b"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-8.json",
+        "sha256": "b7fb3ed83a7c1ae42999e8f2ed65096217ef01fb91d881dac646f0d0bd59158c"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-9.json",
+        "sha256": "652426ca25bd4c204d5f6da5876a32804d62d2e809870bb5540082beaae7765b"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-10.json",
+        "sha256": "b5a225d813a8c2b2b1631375156e6e56f5a236bbbd37639ca4506a68e39bbd04"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-11.json",
+        "sha256": "e1e0803a85a32fd4383e249ea441b81fec81c380243094ce3bdb3d211c03b632"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-12.json",
+        "sha256": "7c4e1cb15cb41fd138c57c85a34a7f4cbf8d90e27b43f03a5abe4d54d6db7f3e"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-13.json",
+        "sha256": "8dbd4c98e16f63fb1a249e32b5af888cb6d23c529912d16f9e547704639a57a2"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-14.json",
+        "sha256": "73adcaa94361ee9c8c4abf2a7e724538985e044934fcdc41ddee465aaf9151cd"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-15.json",
+        "sha256": "85a9754688b6e2a392ffe667da6c35efcdc6189b5d53801567d02affb741424a"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-16.json",
+        "sha256": "01b4c2e36f09cecac4711cd324a185c3922b8307b0fbedaf2dd11f1bbfce67d7"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-17.json",
+        "sha256": "3f1383aae6988315e1cd548478f822c9f9288f54c7fc1cb3a834e3d4c3a39818"
+      },
+      {
+        "kind": "matrix_run",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/run-18.json",
+        "sha256": "5accc73b9506f696ea26b084fbde65a697429434af096ab9cb516438d4844bc5"
+      },
+      {
+        "kind": "failure",
+        "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/failure.json",
+        "sha256": "86f9dde65b5c286e30c5fe0a984a4518f30564da6edd899b055ac060634f32e3"
+      }
+    ]
+  },
+  "failure": {
+    "name": "ProviderOutputError",
+    "reason": "empty_or_invalid_output",
+    "elapsedMs": 43104.893,
+    "provider": "gateway",
+    "reportedModel": "claude-sonnet-5",
+    "resolvedModel": "claude-sonnet-5",
+    "modelResolutionSource": "upstream_response",
+    "inputTokens": 6233,
+    "outputTokens": 4000,
+    "reportedCostUsd": null,
+    "calculatedCostUsd": 0.052466,
+    "gateCode": "VISION_REVIEW_OUTPUT_TRUNCATED",
+    "messageSha256": "f09afe0d65908589c2ce8369ab5423aa6a73c5d7c55dca678b2a3f5c06cedc8a",
+    "artifact": {
+      "path": "docs/evidence/model-routing/model1-aesthetic-review-20260724-claude-sonnet-5-v4/artifacts/failure.json",
+      "sha256": "86f9dde65b5c286e30c5fe0a984a4518f30564da6edd899b055ac060634f32e3"
+    }
+  },
+  "sourceFiles": [
+    {
+      "path": "apps/api/scripts/evaluate-site-builder-aesthetic-review.mts",
+      "sha256": "861a7d077a4f7457719f305e12a27a4f38b73f25d2c9fcd84a65756a2f2fade1"
+    },
+    {
+      "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
+      "sha256": "559c80bd7ab1863edc46e41ab04537ec844be24c32bbceefd80eaf0fe1d81434"
+    },
+    {
+      "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+      "sha256": "950e0e3fb59fcdbc464978db79b60288ab8ac8ae670321fb06a600124b7b5f9f"
+    },
+    {
+      "path": "apps/api/src/model-gateway/model-providers.config.ts",
+      "sha256": "1c55328d20a6c337e6346b15c6166157c99d18205a3dc23134eda4f45ca469fd"
+    },
+    {
+      "path": "apps/api/src/model-gateway/model-transports.ts",
+      "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+    },
+    {
+      "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+      "sha256": "7093c8a8ac0bfecfdfd305e8ef2729404ed4d0eac37c1e010d042bfd33760815"
+    },
+    {
+      "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+      "sha256": "b87fa8d83e405867689075c5c97dfec631fcb7c43cee46a84759a13baf636428"
+    },
+    {
+      "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+      "sha256": "94dca2579c6fe18500b0266e3835c9811cb8a5eeb1daaeb3e8e39879a598c665"
+    },
+    {
+      "path": "apps/api/src/model-gateway/schema-validate.ts",
+      "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+    },
+    {
+      "path": "apps/api/src/model-gateway/types.ts",
+      "sha256": "58b83ad1f78e989c5217a64b3958154ca9fec0173b14fa3e3d10bc26d62b6bd4"
+    },
+    {
+      "path": "apps/api/src/model-gateway/vision-review-input.ts",
+      "sha256": "d472b920155806180c28c864c39c6fa2e28bf71f565a3fe9945a4d658205a096"
+    },
+    {
+      "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+      "sha256": "6dd20bd020c172a4aa89ba6ec4fd5a20c0d72cc58f0bf4d25133d6eed64b762e"
+    },
+    {
+      "path": "docker-compose.yml",
+      "sha256": "3a769eb6ea90032a4841d1918db1ab5cf7fc0d46e619baf3e0ccb3f3b36c0713"
+    },
+    {
+      "path": "docs/site-builder/10-model-selection-study.md",
+      "sha256": "16608f79e84b7cd4115d4cf510f37cd10b1770bc4880c859b0df901787e6346c"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "8dff8ea747a914ebfc87d92ae084b20a38dc3f4fc2d017bbc9ecd280b5b799ee"
+    }
+  ],
+  "sourceIntegrity": {
+    "startBundleSha256": "aecea978907212df0fdea399785fe56b6b901fc8d3717a90d7d72f27cf3d7dec",
+    "endBundleSha256": "aecea978907212df0fdea399785fe56b6b901fc8d3717a90d7d72f27cf3d7dec",
+    "stable": true,
+    "changedPaths": []
+  },
+  "conclusion": "Aesthetic model capability is unavailable. No model-success claim was created; deterministic P4 remains the explicit fallback."
+}

@@ -37,7 +37,7 @@ services:
   # Web UI at http://localhost:3001 — the app calls only its one OpenAI-compatible
   # endpoint (http://localhost:3001/v1). First-run admin: root / 123456.
   new-api:
-    image: calciumion/new-api:latest
+    image: calciumion/new-api@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c
     container_name: global-new-api
     restart: unless-stopped
     ports:

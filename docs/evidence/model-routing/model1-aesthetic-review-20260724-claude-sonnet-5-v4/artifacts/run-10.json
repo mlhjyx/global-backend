@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-claude-sonnet-5-v4",
+  "evaluatorVersion": "site-builder-aesthetic-review-eval@2.0.0",
+  "promptVersion": "site-builder-aesthetic-review-prompt/v2",
+  "caseId": "precision-industrial-baseline",
+  "familyId": "precision-industrial",
+  "kind": "baseline",
+  "qualification": "deterministic_render_baseline",
+  "expectedIssue": null,
+  "attempt": 2,
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 30839.935,
+  "usage": {
+    "inputTokens": 9176,
+    "outputTokens": 2418
+  },
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:precision-industrial:sample-4927d1dcb77b:375",
+      "sha256": "860aa2b7790e4e7546e9d525f5fc001549dfb080c189227c30773518b51d8856",
+      "mimeType": "image/png",
+      "byteLength": 121810,
+      "target": {
+        "locale": "en",
+        "pageId": "precision-industrial",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:precision-industrial:sample-6435ff1b7add:768",
+      "sha256": "af04b99982fe03871afe286f43bc0b922609213926c68f2b72258b25b9f3dca9",
+      "mimeType": "image/png",
+      "byteLength": 134448,
+      "target": {
+        "locale": "en",
+        "pageId": "precision-industrial",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:precision-industrial:sample-f4979bc7bff3:1440",
+      "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+      "mimeType": "image/png",
+      "byteLength": 209350,
+      "target": {
+        "locale": "en",
+        "pageId": "precision-industrial",
+        "breakpoint": 1440
+      }
+    }
+  ],
+  "output": {
+    "verdict": "failed",
+    "overallScore": 55,
+    "dimensions": {
+      "hierarchy": 40,
+      "consistency": 65,
+      "spacing": 70,
+      "contrast": 85,
+      "imagery": 30,
+      "mobileComposition": 55,
+      "ctaClarity": 70,
+      "credibility": 35,
+      "originality": 40
+    },
+    "findings": [
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:sample-4927d1dcb77b:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:sample-4927d1dcb77b:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:sample-6435ff1b7add:768"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:sample-4927d1dcb77b:375"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_ORIGINALITY",
+        "target": {
+          "locale": "en",
+          "pageId": "precision-industrial",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:precision-industrial:sample-f4979bc7bff3:1440"
+        }
+      }
+    ]
+  },
+  "scoring": {
+    "falseBlocker": false,
+    "seededIssueDetected": null,
+    "accepted": true
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-gemini-3-5-flash-v4",
+  "phase": "capability_probe",
+  "sequence": null,
+  "caseId": "natural-origin-baseline",
+  "familyId": "natural-origin",
+  "kind": "baseline",
+  "attempt": 1,
+  "requestedModel": "gemini-3.5-flash",
+  "reportedModel": "gemini-3.5-flash",
+  "resolvedModel": "gemini-3.5-flash",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "google-generate-content",
+  "elapsedMs": 50654.042,
+  "usage": {
+    "inputTokens": 3598,
+    "outputTokens": 2298
+  },
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.026079,
+  "reason": "schema_invalid",
+  "gateCode": "VISION_REVIEW_SCHEMA_INVALID",
+  "messageSha256": "0593dff4f31c0de9dfcbf6881fc4984db38046020abe1f016cf1b180a80a082a",
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:natural-origin:sample-596767fb542b:375",
+      "sha256": "53bc46f65d9ea4a0f2f7322e66474e30dc78e96be59ef1d8b69123fb3c3b3505",
+      "mimeType": "image/png",
+      "byteLength": 412748,
+      "target": {
+        "locale": "en",
+        "pageId": "natural-origin",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:natural-origin:sample-2d45e59c85f8:768",
+      "sha256": "44050f8d4638ed3e3cf27dd0676b6e37f73ef2b9eeeda3a898d4c350197cda26",
+      "mimeType": "image/png",
+      "byteLength": 563702,
+      "target": {
+        "locale": "en",
+        "pageId": "natural-origin",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:natural-origin:sample-21bc5c1c1172:1440",
+      "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+      "mimeType": "image/png",
+      "byteLength": 766732,
+      "target": {
+        "locale": "en",
+        "pageId": "natural-origin",
+        "breakpoint": 1440
+      }
+    }
+  ]
+}

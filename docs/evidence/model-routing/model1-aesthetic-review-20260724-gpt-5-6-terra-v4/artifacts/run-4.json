@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-gpt-5-6-terra-v4",
+  "evaluatorVersion": "site-builder-aesthetic-review-eval@2.0.0",
+  "promptVersion": "site-builder-aesthetic-review-prompt/v2",
+  "caseId": "natural-origin-degraded",
+  "familyId": "natural-origin",
+  "kind": "degraded",
+  "qualification": "deterministic_render_baseline",
+  "expectedIssue": "AESTHETIC_IMAGERY",
+  "attempt": 2,
+  "requestedModel": "gpt-5.6-terra",
+  "reportedModel": "gpt-5.6-terra",
+  "resolvedModel": "gpt-5.6-terra",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 20401.983,
+  "usage": {
+    "inputTokens": 3547,
+    "outputTokens": 614
+  },
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:natural-origin:sample-92510072c0ff:375",
+      "sha256": "b0da0113e0d61787bf4ce908d1972cdf7704660a4c71fac163a30f0f637482c5",
+      "mimeType": "image/png",
+      "byteLength": 481805,
+      "target": {
+        "locale": "en",
+        "pageId": "natural-origin",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:natural-origin:sample-ceef636b04f5:768",
+      "sha256": "083660d10f1427904d257ff47839af39f6f9c1e9fc770bd09fc29f64a6cee8d0",
+      "mimeType": "image/png",
+      "byteLength": 660486,
+      "target": {
+        "locale": "en",
+        "pageId": "natural-origin",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:natural-origin:sample-9c2d3b5be0c2:1440",
+      "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+      "mimeType": "image/png",
+      "byteLength": 892561,
+      "target": {
+        "locale": "en",
+        "pageId": "natural-origin",
+        "breakpoint": 1440
+      }
+    }
+  ],
+  "output": {
+    "dimensions": {
+      "consistency": 72,
+      "contrast": 59,
+      "credibility": 55,
+      "ctaClarity": 60,
+      "hierarchy": 60,
+      "imagery": 38,
+      "mobileComposition": 48,
+      "originality": 45,
+      "spacing": 40
+    },
+    "findings": [
+      {
+        "evidenceRef": {
+          "artifactId": "m1f:natural-origin:sample-9c2d3b5be0c2:1440"
+        },
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "major",
+        "target": {
+          "breakpoint": 1440,
+          "locale": "en",
+          "pageId": "natural-origin"
+        }
+      },
+      {
+        "evidenceRef": {
+          "artifactId": "m1f:natural-origin:sample-ceef636b04f5:768"
+        },
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "major",
+        "target": {
+          "breakpoint": 768,
+          "locale": "en",
+          "pageId": "natural-origin"
+        }
+      },
+      {
+        "evidenceRef": {
+          "artifactId": "m1f:natural-origin:sample-92510072c0ff:375"
+        },
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "severity": "major",
+        "target": {
+          "breakpoint": 375,
+          "locale": "en",
+          "pageId": "natural-origin"
+        }
+      },
+      {
+        "evidenceRef": {
+          "artifactId": "m1f:natural-origin:sample-9c2d3b5be0c2:1440"
+        },
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "severity": "minor",
+        "target": {
+          "breakpoint": 1440,
+          "locale": "en",
+          "pageId": "natural-origin"
+        }
+      },
+      {
+        "evidenceRef": {
+          "artifactId": "m1f:natural-origin:sample-92510072c0ff:375"
+        },
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "minor",
+        "target": {
+          "breakpoint": 375,
+          "locale": "en",
+          "pageId": "natural-origin"
+        }
+      }
+    ],
+    "overallScore": 54,
+    "verdict": "failed"
+  },
+  "scoring": {
+    "falseBlocker": false,
+    "seededIssueDetected": false,
+    "accepted": false
+  }
+}
