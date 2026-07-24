@@ -160,6 +160,7 @@ export class SiteReleaseService {
 
   private async claim(
     input: ReserveSiteReleaseInput,
+    expectedIdentity?: SiteReleaseMaterializationIdentity,
   ): Promise<CandidateRelease> {
     const now = this.now();
     return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
@@ -196,6 +197,9 @@ export class SiteReleaseService {
       if (existing) {
         const release = existing as CandidateRelease;
         assertReleaseScope(release, input);
+        if (expectedIdentity) {
+          assertMaterializationIdentity(release, expectedIdentity);
+        }
         if (release.status === 'ready') return release;
         if (release.status !== 'candidate') {
           throw new Error(`SITE_RELEASE_NOT_RETRYABLE: ${release.status}`);
@@ -205,6 +209,9 @@ export class SiteReleaseService {
         }
 
         const expired = release.leaseUntil <= now;
+        if (expectedIdentity && expired) {
+          throw new Error('SITE_RELEASE_MATERIALIZATION_IDENTITY_FENCED');
+        }
         const producerToken = expired
           ? this.randomUuid()
           : release.producerToken;
@@ -228,6 +235,9 @@ export class SiteReleaseService {
 
       if (run?.status !== 'running') {
         throw new Error('SITE_RELEASE_RUN_NOT_RUNNING');
+      }
+      if (expectedIdentity) {
+        throw new Error('SITE_RELEASE_MATERIALIZATION_IDENTITY_FENCED');
       }
       const releaseId = this.randomUuid();
       const producerToken = this.randomUuid();
@@ -272,10 +282,7 @@ export class SiteReleaseService {
     if (input.quality && !input.releaseIdentity) {
       throw new Error('SITE_RELEASE_QUALITY_IDENTITY_REQUIRED');
     }
-    const candidate = await this.claim(input);
-    if (input.releaseIdentity) {
-      assertMaterializationIdentity(candidate, input.releaseIdentity);
-    }
+    const candidate = await this.claim(input, input.releaseIdentity);
     const artifact = await buildReleaseArtifact({
       root: input.root,
       spec: input.spec,

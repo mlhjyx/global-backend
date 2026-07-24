@@ -424,6 +424,70 @@ describe('SiteReleaseService cross-system commit protocol', () => {
     expect(prisma.state.release).toBeNull();
   });
 
+  it('does not let a late T1 identity renew or rotate T2 and T2 can still finalize', async () => {
+    const prisma = fakePrisma();
+    const storage = fakeStorage();
+    const ids = [
+      '50000000-0000-0000-0000-000000000001',
+      '60000000-0000-0000-0000-000000000001',
+      '60000000-0000-0000-0000-000000000002',
+    ];
+    let now = new Date('2026-07-24T00:00:00Z');
+    const service = new SiteReleaseService(prisma as never, storage, {
+      buildIdentity: 'site-renderer@test',
+      now: () => now,
+      randomUuid: () => ids.shift()!,
+    });
+    const scope = {
+      workspaceId: input.workspaceId,
+      siteId: input.siteId,
+      siteVersionId: input.siteVersionId,
+      buildRunId: input.buildRunId,
+    };
+    const t1 = await service.reserveMaterialization(scope);
+    now = new Date('2026-07-24T00:06:00Z');
+    const t2 = await service.reserveMaterialization(scope);
+    expect(t2.producerToken).not.toBe(t1.producerToken);
+    const t2Lease = prisma.state.release!.leaseUntil.getTime();
+    const golden = (
+      await buildM1ebGoldenFixtures(
+        new URL('../../../../', import.meta.url).pathname,
+      )
+    )[0]!;
+    const quality = await releaseQualityFixture(golden, t2, storage);
+    const root = await outputRoot();
+
+    await expect(
+      service.materialize({
+        ...scope,
+        root,
+        spec: golden.spec,
+        storedSpecVersion: golden.spec.specVersion,
+        designBrief: golden.designBrief,
+        releaseIdentity: t1,
+        quality,
+      }),
+    ).rejects.toThrow('SITE_RELEASE_MATERIALIZATION_IDENTITY_FENCED');
+    expect(prisma.state.release).toMatchObject({
+      producerToken: t2.producerToken,
+      status: 'candidate',
+    });
+    expect(prisma.state.release!.leaseUntil.getTime()).toBe(t2Lease);
+
+    await expect(
+      service.materialize({
+        ...scope,
+        root,
+        spec: golden.spec,
+        storedSpecVersion: golden.spec.specVersion,
+        designBrief: golden.designBrief,
+        releaseIdentity: t2,
+        quality,
+      }),
+    ).resolves.toMatchObject({ releaseId: t2.releaseId });
+    expect(prisma.state.release?.status).toBe('ready');
+  });
+
   it('keeps an uploaded candidate retryable when database finalize fails', async () => {
     const prisma = fakePrisma();
     prisma.failNextFinalize();
