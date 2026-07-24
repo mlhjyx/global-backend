@@ -22,6 +22,7 @@ export const BLIND_VISUAL_PAIR_COUNT = 6;
 export const BLIND_VISUAL_EXPECTED_RUNS =
   BLIND_VISUAL_PAIR_COUNT * BLIND_VISUAL_REPEATS;
 export const BLIND_VISUAL_TIMEOUT_MS = 120_000;
+export const BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS = 10_000;
 export const BLIND_VISUAL_MAX_TOKENS = 800;
 export const BLIND_VISUAL_MAX_COST_CENTS = 5;
 export const BLIND_VISUAL_MODEL_COST_BOUND_CENTS = 95;
@@ -368,6 +369,9 @@ export interface BlindVisualFailureRecord {
   calculatedCostUsd: number | null;
   finishReason: string | null;
   outputSha256: string | null;
+  timeoutSettlement:
+    "not_applicable" | "settled_after_deadline" | "unknown_after_grace";
+  preflightCostCeilingCents: number | null;
   inputImages: Array<{
     imageNumber: 1 | 2 | 3;
     sha256: string;
@@ -402,6 +406,7 @@ export interface BlindVisualModelReport {
     probeCalls: 1;
     pairCalls: typeof BLIND_VISUAL_EXPECTED_RUNS;
     timeoutMs: typeof BLIND_VISUAL_TIMEOUT_MS;
+    timeoutSettlementGraceMs: typeof BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS;
     maxTokens: typeof BLIND_VISUAL_MAX_TOKENS;
     maxCostCentsPerCall: typeof BLIND_VISUAL_MAX_COST_CENTS;
     maxCostCentsPerModel: typeof BLIND_VISUAL_MODEL_COST_BOUND_CENTS;
@@ -445,6 +450,17 @@ class BlindVisualCallRejected extends Error {
   constructor(readonly reason: BlindVisualUnavailableReason) {
     super(`BLIND_VISUAL_CALL_REJECTED: ${reason}`);
     this.name = "BlindVisualCallRejected";
+  }
+}
+
+class BlindVisualTimedOutCall extends BlindVisualCallRejected {
+  constructor(
+    readonly result: BlindVisualProviderResult | undefined,
+    readonly timeoutSettlement:
+      "settled_after_deadline" | "unknown_after_grace",
+  ) {
+    super("timeout");
+    this.name = "BlindVisualTimedOutCall";
   }
 }
 
@@ -1495,19 +1511,54 @@ async function invokeWithDeadline(
     ...request,
     signal: controller.signal,
   };
-  let timer: NodeJS.Timeout | undefined;
+  const invocation = Promise.resolve().then(() => invoke(forwarded));
+  type InvocationOutcome =
+    | { kind: "result"; result: BlindVisualProviderResult }
+    | { kind: "error"; error: unknown };
+  const settledInvocation: Promise<InvocationOutcome> = invocation.then(
+    (result) => ({ kind: "result", result }),
+    (error: unknown) => ({ kind: "error", error }),
+  );
+  let deadlineTimer: NodeJS.Timeout | undefined;
+  let graceTimer: NodeJS.Timeout | undefined;
   try {
-    return await Promise.race([
-      invoke(forwarded),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(new BlindVisualCallRejected("timeout"));
+    const initial = await Promise.race([
+      settledInvocation,
+      new Promise<{ kind: "deadline" }>((resolve) => {
+        deadlineTimer = setTimeout(() => {
+          resolve({ kind: "deadline" });
         }, candidate.timeoutMs);
       }),
     ]);
+    if (initial.kind === "result") return initial.result;
+    if (initial.kind === "error") throw initial.error;
+
+    controller.abort();
+    const afterDeadline = await Promise.race([
+      settledInvocation,
+      new Promise<{ kind: "grace_expired" }>((resolve) => {
+        graceTimer = setTimeout(() => {
+          resolve({ kind: "grace_expired" });
+        }, BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS);
+      }),
+    ]);
+    if (afterDeadline.kind === "result") {
+      throw new BlindVisualTimedOutCall(
+        afterDeadline.result,
+        "settled_after_deadline",
+      );
+    }
+    if (afterDeadline.kind === "error") {
+      throw new BlindVisualTimedOutCall(undefined, "settled_after_deadline");
+    }
+
+    // Keep a terminal handler attached so a provider that ignored abort cannot
+    // create an unhandled rejection after the evidence envelope is finalized.
+    void invocation.catch(() => undefined);
+    throw new BlindVisualTimedOutCall(undefined, "unknown_after_grace");
   } finally {
-    if (timer) clearTimeout(timer);
+    if (deadlineTimer) clearTimeout(deadlineTimer);
+    if (graceTimer) clearTimeout(graceTimer);
   }
 }
 
@@ -1529,14 +1580,7 @@ function unavailableReport(
     model: candidate.model,
     upstreamModelFamily: candidate.upstreamModelFamily,
     transport: candidate.transport,
-    limits: {
-      probeCalls: 1,
-      pairCalls: BLIND_VISUAL_EXPECTED_RUNS,
-      timeoutMs: candidate.timeoutMs,
-      maxTokens: candidate.maxTokens,
-      maxCostCentsPerCall: candidate.maxCostCents,
-      maxCostCentsPerModel: candidate.perModelCostBoundCents,
-    },
+    limits: modelLimits(candidate),
     provenance,
     matrixDefinition,
     matrixDefinitionSha256: definitionSha256,
@@ -1547,6 +1591,20 @@ function unavailableReport(
     unavailableReason: reason,
     failure,
     conclusion: "unavailable_no_model_selection_claim",
+  };
+}
+
+function modelLimits(
+  candidate: BlindVisualCandidateConfig,
+): BlindVisualModelReport["limits"] {
+  return {
+    probeCalls: 1,
+    pairCalls: BLIND_VISUAL_EXPECTED_RUNS,
+    timeoutMs: candidate.timeoutMs,
+    timeoutSettlementGraceMs: BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS,
+    maxTokens: candidate.maxTokens,
+    maxCostCentsPerCall: candidate.maxCostCents,
+    maxCostCentsPerModel: candidate.perModelCostBoundCents,
   };
 }
 
@@ -1573,6 +1631,14 @@ function failureRecord(input: {
   result?: BlindVisualProviderResult;
 }): BlindVisualFailureRecord {
   const { candidate, request, result } = input;
+  const timeout =
+    input.error instanceof BlindVisualTimedOutCall ? input.error : undefined;
+  const hasMeasuredUsage =
+    result !== undefined &&
+    Number.isInteger(result.usage.inputTokens) &&
+    result.usage.inputTokens >= 0 &&
+    Number.isInteger(result.usage.outputTokens) &&
+    result.usage.outputTokens >= 0;
   let calculatedCost: number | null = null;
   if (
     result &&
@@ -1613,6 +1679,9 @@ function failureRecord(input: {
     calculatedCostUsd: calculatedCost,
     finishReason: result?.finishReason ?? null,
     outputSha256: result ? hashUnknownOutput(result.data) : null,
+    timeoutSettlement: timeout?.timeoutSettlement ?? "not_applicable",
+    preflightCostCeilingCents:
+      timeout && !hasMeasuredUsage ? candidate.maxCostCents : null,
     inputImages: request.images.map((image, index) => ({
       imageNumber: (index + 1) as 1 | 2 | 3,
       sha256: image.sha256,
@@ -1680,6 +1749,9 @@ export async function runBlindVisualCalibrationCandidate(input: {
       output: probeOutput,
     };
   } catch (error) {
+    if (error instanceof BlindVisualTimedOutCall) {
+      probeResult = error.result;
+    }
     return unavailableReport(
       candidate,
       provenance,
@@ -1753,6 +1825,9 @@ export async function runBlindVisualCalibrationCandidate(input: {
     }
   } catch (error) {
     if (!activePlan) throw error;
+    if (error instanceof BlindVisualTimedOutCall) {
+      activeResult = error.result;
+    }
     return unavailableReport(
       candidate,
       provenance,
@@ -1804,6 +1879,8 @@ export async function runBlindVisualCalibrationCandidate(input: {
         calculatedCostUsd: null,
         finishReason: null,
         outputSha256: null,
+        timeoutSettlement: "not_applicable",
+        preflightCostCeilingCents: null,
         inputImages: [],
       },
     );
@@ -1818,14 +1895,7 @@ export async function runBlindVisualCalibrationCandidate(input: {
       model: candidate.model,
       upstreamModelFamily: candidate.upstreamModelFamily,
       transport: candidate.transport,
-      limits: {
-        probeCalls: 1,
-        pairCalls: BLIND_VISUAL_EXPECTED_RUNS,
-        timeoutMs: candidate.timeoutMs,
-        maxTokens: candidate.maxTokens,
-        maxCostCentsPerCall: candidate.maxCostCents,
-        maxCostCentsPerModel: candidate.perModelCostBoundCents,
-      },
+      limits: modelLimits(candidate),
       provenance,
       matrixDefinition,
       matrixDefinitionSha256: definitionSha256,
@@ -1846,14 +1916,7 @@ export async function runBlindVisualCalibrationCandidate(input: {
     model: candidate.model,
     upstreamModelFamily: candidate.upstreamModelFamily,
     transport: candidate.transport,
-    limits: {
-      probeCalls: 1,
-      pairCalls: BLIND_VISUAL_EXPECTED_RUNS,
-      timeoutMs: candidate.timeoutMs,
-      maxTokens: candidate.maxTokens,
-      maxCostCentsPerCall: candidate.maxCostCents,
-      maxCostCentsPerModel: candidate.perModelCostBoundCents,
-    },
+    limits: modelLimits(candidate),
     provenance,
     matrixDefinition,
     matrixDefinitionSha256: definitionSha256,

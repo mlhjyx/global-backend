@@ -20,6 +20,7 @@ import {
   BLIND_VISUAL_SYSTEM_PROMPT,
   BLIND_VISUAL_OUTPUT_SCHEMA,
   BLIND_VISUAL_TIMEOUT_MS,
+  BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS,
   assertBlindVisualOutput,
   buildBlindVisualMatrixDefinition,
   buildBlindVisualPairPlans,
@@ -742,8 +743,17 @@ describe("blind visual candidate runner", () => {
       await started;
       expect(observedSignal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(BLIND_VISUAL_TIMEOUT_MS);
-      const report = await reportPromise;
       expect(observedSignal?.aborted).toBe(true);
+      let finalized = false;
+      void reportPromise.then(() => {
+        finalized = true;
+      });
+      await vi.advanceTimersByTimeAsync(
+        BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS - 1,
+      );
+      expect(finalized).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const report = await reportPromise;
       expect(invoke).toHaveBeenCalledTimes(1);
       expect(report).toMatchObject({
         status: "unavailable",
@@ -754,8 +764,68 @@ describe("blind visual candidate runner", () => {
           phase: "probe",
           reason: "timeout",
           requestedModel: null,
+          timeoutSettlement: "unknown_after_grace",
+          preflightCostCeilingCents: BLIND_VISUAL_MAX_COST_CENTS,
         },
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for a late timed-out result and retains its settlement evidence", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let capturedRequest: Parameters<BlindVisualInvoke>[0] | undefined;
+    let resolveInvoke!: (result: BlindVisualProviderResult) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const invoke = vi.fn((request: Parameters<BlindVisualInvoke>[0]) => {
+      capturedRequest = request;
+      markStarted();
+      return new Promise<BlindVisualProviderResult>((resolve) => {
+        resolveInvoke = resolve;
+      });
+    });
+    try {
+      const reportPromise = runBlindVisualCalibrationCandidate({
+        repositoryRoot,
+        candidate: candidate(),
+        provenance: PROVENANCE,
+        invoke,
+      });
+      await started;
+      await vi.advanceTimersByTimeAsync(BLIND_VISUAL_TIMEOUT_MS);
+      expect(capturedRequest?.signal.aborted).toBe(true);
+      if (!capturedRequest) throw new Error("request missing");
+      resolveInvoke(
+        resultFor(capturedRequest, {
+          elapsedMs: BLIND_VISUAL_TIMEOUT_MS + 1,
+          usage: {
+            inputTokens: 321,
+            outputTokens: 123,
+            costUsd: 0.004,
+          },
+        }),
+      );
+      const report = await reportPromise;
+      expect(report).toMatchObject({
+        status: "unavailable",
+        unavailableReason: "timeout",
+        failure: {
+          reason: "timeout",
+          requestedModel: "gpt-5.6-terra",
+          reportedModel: "gpt-5.6-terra",
+          resolvedModel: "gpt-5.6-terra",
+          inputTokens: 321,
+          outputTokens: 123,
+          reportedCostUsd: 0.004,
+          timeoutSettlement: "settled_after_deadline",
+          preflightCostCeilingCents: null,
+        },
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
