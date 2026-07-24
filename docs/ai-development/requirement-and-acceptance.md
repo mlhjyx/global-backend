@@ -4,7 +4,7 @@
 > 层级：`L5 / Guide`
 > 生命周期：`GUIDE`
 > 维护 Owner：`OWN-DOC-GOV（当前 UNASSIGNED）`
-> 产品批准：`OWN-PRODUCT`，2026-07-24 明确批准第一阶段制度建设
+> 产品批准：[`DEC-AIDEV-001`](../governance/conflict-register.md#11-aidev-gate-1-已批准决策)
 > 最后核验：2026-07-24，`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
 
 ## 1. 产品负责人可以怎样提出需求

@@ -4,8 +4,8 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 工程核验基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
+> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001` 于 2026-07-24 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
+> 工程核验基线：`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -189,7 +189,15 @@
 | `DEC-FE-P8-011` | Gate 8 后文档项目标记 `GOVERNANCE_BASELINE_COMPLETE_WITH_BLOCKERS`，不升级任何产品实现轴 | `APPROVED_AT_GATE_8` | `OWN-PRODUCT` |
 | `DEC-FE-P8-012` | 保留全部 blocker/gap/准入门；Gate 8 不授权产品/OSS 实现、历史移动或 Git 外部动作 | `APPROVED_AT_GATE_8` | `OWN-PRODUCT` |
 
-## 11. 关闭冲突的证据要求
+## 11. AIDEV Gate 1 已批准决策
+
+2026-07-24，产品负责人在 Codex 当前任务中明确认可并批准第一阶段制度建设；PR #211 记录指南、验证与后续审查处置。该批准只覆盖协作制度，不授权安装候选工具、修改产品代码、自动写入项目真值或跳过逐 PR 合并授权。
+
+| Decision ID | 批准内容 | 状态 | Decision Owner | 唯一回写位置 |
+|---|---|---|---|---|
+| `DEC-AIDEV-001` | 批准 AI 辅助开发运行模型、非技术需求与业务验收、记忆/知识事实优先级和受控工具试点门；每个 PR 最终合并仍需产品负责人对该 PR 明确授权 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [AI 辅助开发协作入口](../ai-development/README.md) |
+
+## 12. 关闭冲突的证据要求
 
 1. 产品冲突：Decision/PDR、真实批准人、范围和被放弃方案。
 2. 技术冲突：ADR 或机器合同、main 实现和相称测试。
