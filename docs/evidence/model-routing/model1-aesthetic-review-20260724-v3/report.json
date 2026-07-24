@@ -1,0 +1,568 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-v1-reconciled-v2",
+  "candidateState": "unavailable",
+  "routePromoted": false,
+  "reconciliation": {
+    "kind": "read_only_interrupted_evidence_reconciliation",
+    "sourceReportPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/report.json",
+    "sourceReportSha256": "db17af253b9a6096c573b85f4fa845dfc823ed93dcd56c6c96f8b6103a72bb7f",
+    "modelCallsMade": 0,
+    "originalExecutionSourceFiles": [
+      {
+        "path": "apps/api/scripts/evaluate-site-builder-aesthetic-review.mts",
+        "sha256": "3db07b7c7dfdbe810657edf18558218498b5d2548297d41343e1db8387d41aa4"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
+        "sha256": "1199ad4a19f22639d003d62de2a09977e54852fe46687efc35fba892dec59691"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "950e0e3fb59fcdbc464978db79b60288ab8ac8ae670321fb06a600124b7b5f9f"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-providers.config.ts",
+        "sha256": "1c55328d20a6c337e6346b15c6166157c99d18205a3dc23134eda4f45ca469fd"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "f0f026e6e7d49f96d662f99a4aa3d044d5b09e6a87c96b5619c5c5bbe6ce32b8"
+      },
+      {
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "b1fb9dd1437b95c6aec0fd264c2558e76dfa9d89ffcec0ca858171555f2d38c2"
+      },
+      {
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "b87fa8d83e405867689075c5c97dfec631fcb7c43cee46a84759a13baf636428"
+      },
+      {
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "94dca2579c6fe18500b0266e3835c9811cb8a5eeb1daaeb3e8e39879a598c665"
+      },
+      {
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+      },
+      {
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "58b83ad1f78e989c5217a64b3958154ca9fec0173b14fa3e3d10bc26d62b6bd4"
+      },
+      {
+        "path": "apps/api/src/model-gateway/vision-review-input.ts",
+        "sha256": "d472b920155806180c28c864c39c6fa2e28bf71f565a3fe9945a4d658205a096"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+        "sha256": "6dd20bd020c172a4aa89ba6ec4fd5a20c0d72cc58f0bf4d25133d6eed64b762e"
+      },
+      {
+        "path": "docs/site-builder/10-model-selection-study.md",
+        "sha256": "16608f79e84b7cd4115d4cf510f37cd10b1770bc4880c859b0df901787e6346c"
+      },
+      {
+        "path": "pnpm-lock.yaml",
+        "sha256": "8dff8ea747a914ebfc87d92ae084b20a38dc3f4fc2d017bbc9ecd280b5b799ee"
+      }
+    ],
+    "originalExecutionSourceIntegrity": {
+      "startBundleSha256": "b8937f1a2aba34d25e50eedfb40e0ff1931294ea4b2f4b31bbd36a7fc87a076e",
+      "endBundleSha256": "b8937f1a2aba34d25e50eedfb40e0ff1931294ea4b2f4b31bbd36a7fc87a076e",
+      "stable": true,
+      "changedPaths": []
+    }
+  },
+  "model": {
+    "requested": "gemini-3.5-flash",
+    "transport": "openai-chat-completions",
+    "provider": "gateway"
+  },
+  "catalog": {
+    "baseUrl": "http://localhost:3001/v1",
+    "modelCount": 39,
+    "modelCatalogSha256": "889ee8d78d1219b0cfeea43fc65adba57373a812248ebcc0f0f6486f3ad805bd",
+    "requestedModelListed": true
+  },
+  "probe": {
+    "accepted": true,
+    "requestedModel": "gemini-3.5-flash",
+    "reportedModel": "gemini-3.5-flash",
+    "resolvedModel": "gemini-3.5-flash",
+    "modelResolutionSource": "upstream_response",
+    "provider": "gateway",
+    "transport": "openai-chat-completions",
+    "elapsedMs": 39902.978,
+    "usage": {
+      "inputTokens": 4014,
+      "outputTokens": 2183
+    },
+    "artifactSha256": "65f18aca58f663ee6094cacc0e49fdbdb202534e52fe9a9742202465e37f5524",
+    "imageEvidence": [
+      {
+        "artifactId": "m1f:natural-origin:approved:375",
+        "sha256": "53bc46f65d9ea4a0f2f7322e66474e30dc78e96be59ef1d8b69123fb3c3b3505",
+        "mimeType": "image/png",
+        "byteLength": 412748,
+        "target": {
+          "locale": "en",
+          "pageId": "natural-origin",
+          "breakpoint": 375
+        }
+      },
+      {
+        "artifactId": "m1f:natural-origin:approved:768",
+        "sha256": "44050f8d4638ed3e3cf27dd0676b6e37f73ef2b9eeeda3a898d4c350197cda26",
+        "mimeType": "image/png",
+        "byteLength": 563702,
+        "target": {
+          "locale": "en",
+          "pageId": "natural-origin",
+          "breakpoint": 768
+        }
+      },
+      {
+        "artifactId": "m1f:natural-origin:approved:1440",
+        "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+        "mimeType": "image/png",
+        "byteLength": 766732,
+        "target": {
+          "locale": "en",
+          "pageId": "natural-origin",
+          "breakpoint": 1440
+        }
+      }
+    ]
+  },
+  "matrix": {
+    "status": "interrupted",
+    "reason": "timeout",
+    "completedRuns": 12,
+    "expectedRuns": 24,
+    "remainingRunsNotExecuted": 12,
+    "allRecoveredArtifactsSchemaValid": true,
+    "allRecoveredArtifactsProvenanceExact": true,
+    "allRecoveredArtifactsForbiddenFieldsAbsent": true
+  },
+  "partialMetrics": {
+    "caseAccepted": 4,
+    "falseBlockers": 6,
+    "seededIssueHits": 4,
+    "seededIssueOpportunities": 6
+  },
+  "recoveredRuns": [
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-1.json",
+      "fileSha256": "898b660dcb2035f71dc8182de8853dcb336076c0bacc3a1db46c9bbe632786a6",
+      "caseId": "natural-origin-approved",
+      "familyId": "natural-origin",
+      "kind": "approved",
+      "expectedIssue": null,
+      "attempt": 1,
+      "elapsedMs": 29272.459,
+      "usage": {
+        "inputTokens": 4014,
+        "outputTokens": 1979
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "d3a8b3cfece4f4ae290fd61930ef91e5c6d309b20695379b43258c0544729f1d",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": true,
+      "seededIssueDetected": null,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 55
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-2.json",
+      "fileSha256": "c06807135bc83b47589c1c4d8685f3bd97a6d85008f1b2334c871c373557c7e8",
+      "caseId": "natural-origin-approved",
+      "familyId": "natural-origin",
+      "kind": "approved",
+      "expectedIssue": null,
+      "attempt": 2,
+      "elapsedMs": 13280.863,
+      "usage": {
+        "inputTokens": 4014,
+        "outputTokens": 2469
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "064881429bd7f72a678cde4238c647177c42679e068e789a3df5f239e630e1ff",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": true,
+      "seededIssueDetected": null,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 52
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-3.json",
+      "fileSha256": "7559e426f86164019f3a55fb3fbd9797d1ab9cafa6ecf8e9b8b254e09498e97a",
+      "caseId": "natural-origin-degraded",
+      "familyId": "natural-origin",
+      "kind": "degraded",
+      "expectedIssue": "AESTHETIC_IMAGERY",
+      "attempt": 1,
+      "elapsedMs": 11376.513,
+      "usage": {
+        "inputTokens": 4021,
+        "outputTokens": 1525
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "1e4043f055834f48f0901ecabc6dcd336efbb51cddd0a0192b86d62822f07495",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": false,
+      "seededIssueDetected": true,
+      "accepted": true,
+      "verdict": "failed",
+      "overallScore": 52
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-4.json",
+      "fileSha256": "a65788087a3fae13692d0516e50c266c90e3c5125721d57ecf03848063fb2696",
+      "caseId": "natural-origin-degraded",
+      "familyId": "natural-origin",
+      "kind": "degraded",
+      "expectedIssue": "AESTHETIC_IMAGERY",
+      "attempt": 2,
+      "elapsedMs": 35492.66,
+      "usage": {
+        "inputTokens": 4021,
+        "outputTokens": 1459
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "71b9ba1e254317704feb6818738bdb025618e02e396ef2367e769efec19b31fe",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": false,
+      "seededIssueDetected": true,
+      "accepted": true,
+      "verdict": "failed",
+      "overallScore": 50
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-5.json",
+      "fileSha256": "07aa5605dac93336cfa91d5536ef520d865b592de4fd26b7366d47ec64448e74",
+      "caseId": "oem-capability-approved",
+      "familyId": "oem-capability",
+      "kind": "approved",
+      "expectedIssue": null,
+      "attempt": 1,
+      "elapsedMs": 19745.761,
+      "usage": {
+        "inputTokens": 4074,
+        "outputTokens": 1796
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "8b354ffb15212349945853f72607121d9aeb72d61ea6a56d392fd9ad6ec66f45",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": true,
+      "seededIssueDetected": null,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 58
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-6.json",
+      "fileSha256": "51fa8546359ec8313513810eae5ecfd6aa7b29ed5aef76e9db505dc085ef461c",
+      "caseId": "oem-capability-approved",
+      "familyId": "oem-capability",
+      "kind": "approved",
+      "expectedIssue": null,
+      "attempt": 2,
+      "elapsedMs": 7429.505,
+      "usage": {
+        "inputTokens": 4073,
+        "outputTokens": 1946
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "a6661d3681b1266b6cae05d041460e963c1409d5b6c919f09ac9b79152500e28",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": true,
+      "seededIssueDetected": null,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 55
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-7.json",
+      "fileSha256": "9427cf84c384b10b385af6652c4a2d736d6cd078c8939916b330322c0cd1882c",
+      "caseId": "oem-capability-degraded",
+      "familyId": "oem-capability",
+      "kind": "degraded",
+      "expectedIssue": "AESTHETIC_CONTRAST",
+      "attempt": 1,
+      "elapsedMs": 25675.697,
+      "usage": {
+        "inputTokens": 4081,
+        "outputTokens": 2540
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "93198f3c981b012af901db3b069174746bc6d517a27a04c9f8cba230e2ad1997",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": false,
+      "seededIssueDetected": true,
+      "accepted": true,
+      "verdict": "failed",
+      "overallScore": 35
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-8.json",
+      "fileSha256": "40568dbd112edd80b9368fcd18ef16baf360fc7909353b82bb566771ff65ec05",
+      "caseId": "oem-capability-degraded",
+      "familyId": "oem-capability",
+      "kind": "degraded",
+      "expectedIssue": "AESTHETIC_CONTRAST",
+      "attempt": 2,
+      "elapsedMs": 9352.022,
+      "usage": {
+        "inputTokens": 4333,
+        "outputTokens": 1646
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "27fa32046031ab180b14e7fdd461866771ad9b8828c068c6cadf0dd4db432797",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": false,
+      "seededIssueDetected": true,
+      "accepted": true,
+      "verdict": "failed",
+      "overallScore": 30
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-9.json",
+      "fileSha256": "a9355ff27ff75d58bee0eeb739a67115b265dcf938402e8edee0aa48f5fd6e45",
+      "caseId": "precision-industrial-approved",
+      "familyId": "precision-industrial",
+      "kind": "approved",
+      "expectedIssue": null,
+      "attempt": 1,
+      "elapsedMs": 5858.885,
+      "usage": {
+        "inputTokens": 4134,
+        "outputTokens": 1664
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "2afb0f26c85322ac5fc90138c29a4f25a2db8fb7c9ea3469186b4eba2027a435",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": true,
+      "seededIssueDetected": null,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 55
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-10.json",
+      "fileSha256": "61205289539493b6a0d1c139804c133995668ec4f579fa1f8b8cac4cc5932013",
+      "caseId": "precision-industrial-approved",
+      "familyId": "precision-industrial",
+      "kind": "approved",
+      "expectedIssue": null,
+      "attempt": 2,
+      "elapsedMs": 8281.691,
+      "usage": {
+        "inputTokens": 4134,
+        "outputTokens": 1919
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "f73a014dbeecd0275a7ed38f7e07473267a995045dacf6ff0ae2f238dc1a5aa0",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": true,
+      "seededIssueDetected": null,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 50
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-11.json",
+      "fileSha256": "09cfee158abe5a4b8f4589110491efaa59cba0cb4da574dce21c5459df747217",
+      "caseId": "precision-industrial-degraded",
+      "familyId": "precision-industrial",
+      "kind": "degraded",
+      "expectedIssue": "AESTHETIC_SPACING",
+      "attempt": 1,
+      "elapsedMs": 6628.028,
+      "usage": {
+        "inputTokens": 4141,
+        "outputTokens": 1554
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "4963c5ff8239ddea4ac120261158a219ae965509a2d96afdbe453a611bb63722",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": false,
+      "seededIssueDetected": false,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 40
+    },
+    {
+      "artifactPath": "docs/evidence/model-routing/model1-aesthetic-review-20260724-v1/artifacts/run-12.json",
+      "fileSha256": "155831006670a5060057ed48c3e5db4669db9417630c18bacefa1ea17203d6ad",
+      "caseId": "precision-industrial-degraded",
+      "familyId": "precision-industrial",
+      "kind": "degraded",
+      "expectedIssue": "AESTHETIC_SPACING",
+      "attempt": 2,
+      "elapsedMs": 6196.167,
+      "usage": {
+        "inputTokens": 4140,
+        "outputTokens": 1827
+      },
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-3.5-flash",
+      "resolvedModel": "gemini-3.5-flash",
+      "modelResolutionSource": "upstream_response",
+      "provider": "gateway",
+      "transport": "openai-chat-completions",
+      "artifactSha256": "caa25a2976b857ab065dbfe466f4ef09a0fb8ed89349e8e8c45bca89b79fda33",
+      "schemaValid": true,
+      "provenanceExact": true,
+      "forbiddenFieldsAbsent": true,
+      "falseBlocker": false,
+      "seededIssueDetected": false,
+      "accepted": false,
+      "verdict": "failed",
+      "overallScore": 35
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "apps/api/scripts/evaluate-site-builder-aesthetic-review.mts",
+      "sha256": "d44583f9148c2165e242ea382f496891e80b40c3b88c8b2fa392d16ced2bbf1b"
+    },
+    {
+      "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
+      "sha256": "1199ad4a19f22639d003d62de2a09977e54852fe46687efc35fba892dec59691"
+    },
+    {
+      "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+      "sha256": "950e0e3fb59fcdbc464978db79b60288ab8ac8ae670321fb06a600124b7b5f9f"
+    },
+    {
+      "path": "apps/api/src/model-gateway/model-providers.config.ts",
+      "sha256": "1c55328d20a6c337e6346b15c6166157c99d18205a3dc23134eda4f45ca469fd"
+    },
+    {
+      "path": "apps/api/src/model-gateway/model-transports.ts",
+      "sha256": "f0f026e6e7d49f96d662f99a4aa3d044d5b09e6a87c96b5619c5c5bbe6ce32b8"
+    },
+    {
+      "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+      "sha256": "b1fb9dd1437b95c6aec0fd264c2558e76dfa9d89ffcec0ca858171555f2d38c2"
+    },
+    {
+      "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+      "sha256": "b87fa8d83e405867689075c5c97dfec631fcb7c43cee46a84759a13baf636428"
+    },
+    {
+      "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+      "sha256": "94dca2579c6fe18500b0266e3835c9811cb8a5eeb1daaeb3e8e39879a598c665"
+    },
+    {
+      "path": "apps/api/src/model-gateway/schema-validate.ts",
+      "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+    },
+    {
+      "path": "apps/api/src/model-gateway/types.ts",
+      "sha256": "58b83ad1f78e989c5217a64b3958154ca9fec0173b14fa3e3d10bc26d62b6bd4"
+    },
+    {
+      "path": "apps/api/src/model-gateway/vision-review-input.ts",
+      "sha256": "d472b920155806180c28c864c39c6fa2e28bf71f565a3fe9945a4d658205a096"
+    },
+    {
+      "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+      "sha256": "6dd20bd020c172a4aa89ba6ec4fd5a20c0d72cc58f0bf4d25133d6eed64b762e"
+    },
+    {
+      "path": "docs/site-builder/10-model-selection-study.md",
+      "sha256": "16608f79e84b7cd4115d4cf510f37cd10b1770bc4880c859b0df901787e6346c"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "8dff8ea747a914ebfc87d92ae084b20a38dc3f4fc2d017bbc9ecd280b5b799ee"
+    }
+  ],
+  "sourceIntegrity": {
+    "startBundleSha256": "49ae1343ab5da82fe4fdb2898e2228b18ec81c17ae791e148c3207bcf4206b81",
+    "endBundleSha256": "49ae1343ab5da82fe4fdb2898e2228b18ec81c17ae791e148c3207bcf4206b81",
+    "stable": true,
+    "changedPaths": []
+  },
+  "conclusion": "Capability probe passed with exact model provenance, but the matrix timed out after the recorded partial runs. The model is runtime-unavailable for M1-f; the candidate is not evaluatedCandidate and the deterministic P4 fallback remains explicit."
+}
