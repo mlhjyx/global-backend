@@ -15,7 +15,7 @@ Git 仓库继续保存项目权威真值；Obsidian 适合作为人的知识工�
 
 `DEC-AIDEV-002` 已批准本机受控 MCP Memory 的第一阶段实施：普通会话只读、`memoryctl` 作为唯一受控写入路径、候选与晋升分离，以及可核验的备份和审计。它不把记忆变成项目真值，也不授权自动从聊天、PR 正文或模型摘要推断产品决定。
 
-`DEC-AIDEV-003` 已批准仓库原生 ContractGraph 与受控 CodeGraph 试点：前者用 TypeScript Compiler API 与确定性配置提取器把业务 Registry、NestJS、Temporal、Outbox、Prisma、workspace、Astro 和部署关系连接为当前 worktree 的派生图；后者固定 `1.5.0`，只补普通静态调用关系。查询必须先核对 worktree、commit 和 source hash，且动态注册、运行时 DI、外部消费和数据库真实行为仍须回到当前源码、测试和运行证据。CodeGraph 的 30 题正确性门通过但速度门未达标，当前仅 `PILOT_ONLY`。
+`DEC-AIDEV-003` 已批准仓库原生 ContractGraph 与受控 CodeGraph 试点：前者用 TypeScript Compiler API 与确定性配置提取器把业务 Registry、NestJS、Temporal、Outbox、Prisma、workspace、Astro 和部署关系连接为当前 worktree 的派生图；后者固定 `1.5.0`，只补普通静态调用关系。查询必须先核对 worktree、commit 和 source hash，且动态注册、运行时 DI、外部消费和数据库真实行为仍须回到当前源码、测试和运行证据。30 题的职责路由统一结果通过，但 CodeGraph 在其参与表面的 recall 只有 89.5%，未达到 90% 独立采用门，当前仅 `PILOT_ONLY`。
 
 ## 2. 五层真值
 
@@ -134,7 +134,7 @@ flowchart LR
 | Obsidian               | 人的知识工作台和导航               | 项目当前状态、机器合同或自动批准         | 建立独立 Vault、备份和权限分区     |
 | QMD                    | 对指定 Markdown 的只读检索试点     | 自动改笔记、替代权威搜索                 | 中文检索有明确收益且资源成本可接受 |
 | 仓库 ContractGraph     | 当前 worktree 的业务、动态契约和部署影响地图 | 覆盖权威真值、把静态边当运行事实 | 已进入只读仓库 CLI；继续以漏报回归门约束 |
-| CodeGraph              | 当前 worktree 的普通静态调用关系试点 | 用 main 图回答分支、把图当运行事实       | 已完成 30 题；速度门未过，维持 `PILOT_ONLY` |
+| CodeGraph              | 当前 worktree 的普通静态调用关系试点 | 用 main 图回答分支、把图当运行事实       | 已完成 30 题；参与表面 recall 89.5% 未过门，维持 `PILOT_ONLY` |
 | Basic Memory 类工具    | 独立 Agent Inbox 的受控写入候选    | 指向仓库权威目录、自由移动或删除当前事实 | 有细粒度权限、审计和可恢复写入     |
 | Serena 类工具          | 大规模符号重构的专项试点           | 默认编辑器或无审查批量改写               | 跨文件符号重构成为高频瓶颈         |
 | GitNexus 类工具        | 经审计后的代码图研究               | 自动安装技能、Hook 或改写 AGENTS/CLAUDE  | 可关闭全部治理文件副作用           |

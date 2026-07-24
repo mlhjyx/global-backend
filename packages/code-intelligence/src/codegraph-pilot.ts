@@ -1,5 +1,5 @@
 import type { CodeGraph as CodeGraphInstance } from "@colbymchenry/codegraph";
-import { execFile as execFileCallback, spawn } from "node:child_process";
+import { execFile as execFileCallback } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -7,6 +7,7 @@ import {
   readFile,
   rename,
   rm,
+  lstat,
   stat,
   writeFile,
 } from "node:fs/promises";
@@ -22,7 +23,7 @@ import {
   graphFreshnessDiagnostics,
   readGraph,
 } from "./scan";
-import { ContractGraphV1, GraphNodeV1 } from "./schema";
+import { ContractGraphV1, GraphEdgeKind, GraphNodeV1 } from "./schema";
 import { sha256, stableJson, uniqueSorted } from "./utils";
 
 const execFile = promisify(execFileCallback);
@@ -97,8 +98,20 @@ interface GoldenQuestionV1 {
   query: string;
   baselinePattern: string;
   expectedPaths: string[];
+  allowedPaths?: string[];
+  forbiddenPaths?: string[];
+  unifiedSources?: Array<"codegraph" | "contractgraph">;
+  expectedNodes?: string[];
+  expectedEdges?: ExpectedEdgeV1[];
   expectedOutcome?: string;
   criticalDynamic?: boolean;
+}
+
+interface ExpectedEdgeV1 {
+  from: string;
+  to: string;
+  kind: GraphEdgeKind;
+  confidence: string | null;
 }
 
 interface GoldenQuestionDocumentV1 {
@@ -116,6 +129,9 @@ interface GoldenQuestionResultV1 {
   category: string;
   question: string;
   expectedPaths: string[];
+  allowedPaths: string[];
+  forbiddenPaths: string[];
+  unifiedSources: Array<"codegraph" | "contractgraph">;
   codeGraph: EngineObservationV1;
   contractGraph: EngineObservationV1;
   rgAndRead: EngineObservationV1;
@@ -123,6 +139,15 @@ interface GoldenQuestionResultV1 {
   unifiedPaths: string[];
   foundExpectedPaths: string[];
   missingExpectedPaths: string[];
+  falsePositivePaths: string[];
+  returnedForbiddenPaths: string[];
+  expectedNodes: string[];
+  foundExpectedNodes: string[];
+  missingExpectedNodes: string[];
+  expectedEdges: ExpectedEdgeV1[];
+  foundExpectedEdges: ExpectedEdgeV1[];
+  missingExpectedEdges: ExpectedEdgeV1[];
+  pathPrecision: number;
   sourceClassification:
     | "BOTH_STATIC_GRAPHS"
     | "CODEGRAPH_ONLY"
@@ -150,13 +175,19 @@ export interface CodeGraphEvaluationV1 {
     questions: number;
     expectedFacts: number;
     foundFacts: number;
+    returnedPaths: number;
+    relevantReturnedPaths: number;
     passedQuestions: number;
   };
   metrics: {
     overallAccuracy: number;
     overallRecall: number;
     criticalDynamicRecall: number;
+    codeGraphPrecision: number;
     codeGraphRecall: number;
+    codeGraphRoutedPrecision: number;
+    codeGraphRoutedRecall: number;
+    contractGraphPrecision: number;
     contractGraphRecall: number;
     rgBaselineRecall: number;
     medianCodeGraphMs: number;
@@ -266,60 +297,95 @@ async function pathExists(value: string): Promise<boolean> {
   }
 }
 
-async function extractGitArchive(
+async function assertNoSymlinkComponents(
+  repositoryRoot: string,
+  target: string,
+): Promise<void> {
+  const relative = path.relative(repositoryRoot, target);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`snapshot path escapes repository root: ${target}`);
+  }
+  let current = repositoryRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`snapshot path contains symlink: ${current}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
+}
+
+async function assertArchiveHasNoSymlinks(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`git archive contains unsupported symlink: ${absolute}`);
+    }
+    if (entry.isDirectory()) await assertArchiveHasNoSymlinks(absolute);
+  }
+}
+
+export async function extractGitArchive(
   repositoryRoot: string,
   commit: string,
   destination: string,
 ): Promise<void> {
-  if (await pathExists(destination)) return;
   const parent = path.dirname(destination);
+  await assertNoSymlinkComponents(repositoryRoot, parent);
   await mkdir(parent, { recursive: true, mode: 0o700 });
-  const temporary = `${destination}.tmp-${process.pid}`;
+  await assertNoSymlinkComponents(repositoryRoot, destination);
+  const temporaryRoot = await mkdtemp(path.join(parent, ".source-tmp-"));
+  const temporary = path.join(temporaryRoot, "source");
+  const archivePath = path.join(temporaryRoot, "archive.tar");
   await mkdir(temporary, { recursive: true, mode: 0o700 });
-  await new Promise<void>((resolve, reject) => {
-    const archive = spawn(
+  const backup = path.join(parent, `.source-old-${process.pid}-${Date.now()}`);
+  let movedExisting = false;
+  try {
+    await execFile(
       "git",
-      ["-C", repositoryRoot, "archive", "--format=tar", commit],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      [
+        "-C",
+        repositoryRoot,
+        "archive",
+        "--format=tar",
+        `--output=${archivePath}`,
+        commit,
+      ],
+      { maxBuffer: 16 * 1024 * 1024 },
     );
-    const extract = spawn("tar", ["-x", "-C", temporary], {
-      stdio: [archive.stdout, "ignore", "pipe"],
+    await execFile("tar", ["-xf", archivePath, "-C", temporary], {
+      maxBuffer: 16 * 1024 * 1024,
     });
-    let archiveError = "";
-    let extractError = "";
-    archive.stderr.on("data", (chunk: Buffer) => {
-      archiveError += chunk.toString("utf8");
-    });
-    extract.stderr.on("data", (chunk: Buffer) => {
-      extractError += chunk.toString("utf8");
-    });
-    let archiveExit: number | null = null;
-    let extractExit: number | null = null;
-    const finish = (): void => {
-      if (archiveExit == null || extractExit == null) return;
-      if (archiveExit === 0 && extractExit === 0) resolve();
-      else
-        reject(
-          new Error(
-            `git archive failed (${archiveExit}/${extractExit}): ${archiveError}${extractError}`,
-          ),
-        );
-    };
-    archive.on("close", (code) => {
-      archiveExit = code;
-      finish();
-    });
-    extract.on("close", (code) => {
-      extractExit = code;
-      finish();
-    });
-    archive.on("error", reject);
-    extract.on("error", reject);
-  }).catch(async (error: unknown) => {
-    await rm(temporary, { recursive: true, force: true });
-    throw error;
-  });
-  await rename(temporary, destination);
+    await rm(archivePath, { force: true });
+    await assertArchiveHasNoSymlinks(temporary);
+    if (await pathExists(destination)) {
+      await rename(destination, backup);
+      movedExisting = true;
+    }
+    try {
+      await rename(temporary, destination);
+    } catch (error) {
+      if (movedExisting) await rename(backup, destination);
+      throw error;
+    }
+    if (movedExisting) {
+      await rm(backup, { recursive: true, force: true });
+      movedExisting = false;
+    }
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+    if (movedExisting && !(await pathExists(destination))) {
+      await rename(backup, destination);
+      movedExisting = false;
+    }
+    if (!movedExisting) {
+      await rm(backup, { recursive: true, force: true });
+    }
+  }
 }
 
 function sensitivePath(relative: string): boolean {
@@ -669,35 +735,88 @@ async function requireHealthyCodeGraph(
   return { graph, evidence: status.evidence };
 }
 
-function contractSearchPaths(graph: ContractGraphV1, query: string): string[] {
+export function contractSearchPaths(
+  graph: ContractGraphV1,
+  query: string,
+): string[] {
   const normalized = query.toLowerCase();
-  const searchable = (node: GraphNodeV1): boolean =>
+  const searchValues = (node: GraphNodeV1): string[] =>
     [
       node.id,
       node.label,
       ...Object.values(node.attributes).flatMap((value) =>
         Array.isArray(value) ? value : value == null ? [] : [String(value)],
       ),
-    ]
-      .join("\n")
-      .toLowerCase()
-      .includes(normalized);
-  const matched = graph.nodes.filter(searchable).slice(0, 50);
-  const ids = new Set(matched.map((node) => node.id));
+    ].map((value) => value.toLowerCase());
+  const exact = graph.nodes.filter((node) => {
+    const values = searchValues(node);
+    return (
+      values.includes(normalized) ||
+      node.label.toLowerCase().endsWith(`/${normalized}`)
+    );
+  });
+  const concreteExact = exact.filter(
+    (node) => !node.id.startsWith("symbol-ref:"),
+  );
+  const matched = (
+    concreteExact.length > 0
+      ? concreteExact
+      : exact.length > 0
+        ? exact
+        : graph.nodes.filter((node) =>
+            searchValues(node).some((value) => value.includes(normalized)),
+          )
+  ).slice(0, 20);
+  const initialIds = new Set(matched.map((node) => node.id));
+  const ids = new Set(initialIds);
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const edge of graph.edges) {
-    if (ids.has(edge.from)) ids.add(edge.to);
-    if (ids.has(edge.to)) ids.add(edge.from);
+    const neighbor = initialIds.has(edge.from)
+      ? nodesById.get(edge.to)
+      : initialIds.has(edge.to)
+        ? nodesById.get(edge.from)
+        : undefined;
+    if (neighbor?.kind === "source_file") {
+      ids.add(neighbor.id);
+    }
+    if (ids.size >= 100) break;
   }
   return uniqueSorted(
     graph.nodes
       .filter((node) => ids.has(node.id))
-      .flatMap((node) => [
-        ...(node.kind === "source_file" || node.kind === "test"
+      .flatMap((node) =>
+        node.kind === "source_file" || node.kind === "test"
           ? [node.label]
-          : []),
-        ...node.locations.map((location) => location.path),
-      ])
+          : node.locations.map((location) => location.path),
+      )
       .filter((value) => !value.startsWith("docs/archive/")),
+  );
+}
+
+function edgeMatchesExpectation(
+  graph: ContractGraphV1,
+  expected: ExpectedEdgeV1,
+): boolean {
+  return graph.edges.some(
+    (edge) =>
+      edge.from === expected.from &&
+      edge.to === expected.to &&
+      edge.kind === expected.kind &&
+      (typeof edge.attributes.confidence === "string"
+        ? edge.attributes.confidence
+        : null) === expected.confidence,
+  );
+}
+
+export function calculatePathPrecision(
+  returnedPaths: string[],
+  allowedPaths: string[],
+  hasExpectedPaths: boolean,
+): number {
+  if (returnedPaths.length === 0) return hasExpectedPaths ? 0 : 1;
+  return (
+    returnedPaths.filter((value) => allowedPaths.includes(value)).length /
+    returnedPaths.length
   );
 }
 
@@ -848,9 +967,20 @@ async function observeCodeGraph(
 ): Promise<EngineObservationV1> {
   const started = performance.now();
   const results = graph.searchNodes(question.query, { limit: 50 });
-  const paths = uniqueSorted(results.map((result) => result.node.filePath));
+  const normalized = question.query.toLowerCase();
+  const exact = results.filter((result) => {
+    const name = result.node.name.toLowerCase();
+    const qualified = result.node.qualifiedName.toLowerCase();
+    return (
+      name === normalized ||
+      qualified === normalized ||
+      qualified.endsWith(`.${normalized}`)
+    );
+  });
+  const selected = exact.length > 0 ? exact : results.slice(0, 5);
+  const paths = uniqueSorted(selected.map((result) => result.node.filePath));
   await Promise.all(
-    results.slice(0, 10).map((result) => graph.getCode(result.node.id)),
+    selected.slice(0, 10).map((result) => graph.getCode(result.node.id)),
   );
   return { paths, elapsedMs: performance.now() - started };
 }
@@ -936,6 +1066,29 @@ function recall(results: GoldenQuestionResultV1[], engine: string): number {
   return found / expected.length;
 }
 
+function precision(results: GoldenQuestionResultV1[], engine: string): number {
+  let returned = 0;
+  let relevant = 0;
+  for (const result of results) {
+    const paths =
+      engine === "codegraph"
+        ? result.codeGraph.paths
+        : result.contractGraph.paths;
+    returned += paths.length;
+    relevant += paths.filter((value) =>
+      result.allowedPaths.includes(value),
+    ).length;
+  }
+  return returned === 0 ? 1 : relevant / returned;
+}
+
+function routedResults(
+  results: GoldenQuestionResultV1[],
+  engine: "codegraph" | "contractgraph",
+): GoldenQuestionResultV1[] {
+  return results.filter((result) => result.unifiedSources.includes(engine));
+}
+
 async function measureIncrementalUpdate(): Promise<number> {
   const root = await mkdtemp(path.join(os.tmpdir(), "codegraph-incremental-"));
   try {
@@ -980,6 +1133,16 @@ export function evaluateAdoptionGates(
       actual: metrics.criticalDynamicRecall,
       required: "1.00",
     },
+    codeGraphRoutedPrecision: {
+      passed: metrics.codeGraphRoutedPrecision >= 0.9,
+      actual: metrics.codeGraphRoutedPrecision,
+      required: ">=0.90",
+    },
+    codeGraphRoutedRecall: {
+      passed: metrics.codeGraphRoutedRecall >= 0.9,
+      actual: metrics.codeGraphRoutedRecall,
+      required: ">=0.90",
+    },
     worktreeCommitAccuracy: {
       passed: metrics.worktreeCommitAccuracy === 1,
       actual: metrics.worktreeCommitAccuracy,
@@ -1022,6 +1185,36 @@ export async function evaluateCodeGraphPilot(
   if (questions.length !== 30) {
     throw new Error(`expected 30 golden questions, found ${questions.length}`);
   }
+  for (const question of questions) {
+    const allowed = question.allowedPaths ?? question.expectedPaths;
+    const forbidden = question.forbiddenPaths ?? [];
+    const unifiedSources = question.unifiedSources ?? [
+      "codegraph",
+      "contractgraph",
+    ];
+    const missingAllowed = question.expectedPaths.filter(
+      (value) => !allowed.includes(value),
+    );
+    const contradictory = allowed.filter((value) => forbidden.includes(value));
+    if (
+      missingAllowed.length > 0 ||
+      contradictory.length > 0 ||
+      unifiedSources.length === 0
+    ) {
+      throw new Error(
+        `invalid golden path contract for ${question.id}: missingAllowed=${missingAllowed.join(",")} contradictory=${contradictory.join(",")} unifiedSources=${unifiedSources.join(",")}`,
+      );
+    }
+    if (
+      question.criticalDynamic === true &&
+      ((question.expectedNodes?.length ?? 0) === 0 ||
+        (question.expectedEdges?.length ?? 0) === 0)
+    ) {
+      throw new Error(
+        `critical dynamic question ${question.id} requires exact nodes and edges`,
+      );
+    }
+  }
   const activeStatus = await getCodeGraphStatus(resolved, "active");
   const mainStatus = await getCodeGraphStatus(resolved, "main");
   if (!activeStatus.ok || !mainStatus.ok) {
@@ -1052,6 +1245,9 @@ export async function evaluateCodeGraphPilot(
           category: question.category,
           question: question.question,
           expectedPaths: [],
+          allowedPaths: [],
+          forbiddenPaths: [],
+          unifiedSources: [],
           codeGraph: { paths: [], elapsedMs: 0 },
           contractGraph: { paths: [], elapsedMs: 0 },
           rgAndRead: { paths: [], elapsedMs: 0 },
@@ -1059,6 +1255,15 @@ export async function evaluateCodeGraphPilot(
           unifiedPaths: [],
           foundExpectedPaths: [],
           missingExpectedPaths: [],
+          falsePositivePaths: [],
+          returnedForbiddenPaths: [],
+          expectedNodes: [],
+          foundExpectedNodes: [],
+          missingExpectedNodes: [],
+          expectedEdges: [],
+          foundExpectedEdges: [],
+          missingExpectedEdges: [],
+          pathPrecision: 1,
           sourceClassification: "CONTROL",
           controlOutcome: {
             expected: question.expectedOutcome ?? "WRONG_BRANCH_REJECTED",
@@ -1090,6 +1295,9 @@ export async function evaluateCodeGraphPilot(
           category: question.category,
           question: question.question,
           expectedPaths: [],
+          allowedPaths: [],
+          forbiddenPaths: [],
+          unifiedSources: [],
           codeGraph: { paths: [], elapsedMs: 0 },
           contractGraph: { paths: [], elapsedMs },
           rgAndRead: { paths: [], elapsedMs: 0 },
@@ -1097,6 +1305,15 @@ export async function evaluateCodeGraphPilot(
           unifiedPaths: [],
           foundExpectedPaths: [],
           missingExpectedPaths: [],
+          falsePositivePaths: [],
+          returnedForbiddenPaths: [],
+          expectedNodes: [],
+          foundExpectedNodes: [],
+          missingExpectedNodes: [],
+          expectedEdges: [],
+          foundExpectedEdges: [],
+          missingExpectedEdges: [],
+          pathPrecision: 1,
           sourceClassification: "CONTROL",
           controlOutcome: {
             expected: question.expectedOutcome ?? "EXTERNAL_OWNED",
@@ -1115,12 +1332,44 @@ export async function evaluateCodeGraphPilot(
       ]);
       const unifiedElapsedMs = performance.now() - unifiedStarted;
       const rgObservation = await observeRgAndRead(resolved, question);
+      const unifiedSources = question.unifiedSources ?? [
+        "codegraph",
+        "contractgraph",
+      ];
       const unifiedPaths = uniqueSorted([
-        ...codeObservation.paths,
-        ...contractObservation.paths,
+        ...(unifiedSources.includes("codegraph") ? codeObservation.paths : []),
+        ...(unifiedSources.includes("contractgraph")
+          ? contractObservation.paths
+          : []),
       ]);
+      const allowedPaths = uniqueSorted(
+        question.allowedPaths ?? question.expectedPaths,
+      );
+      const forbiddenPaths = uniqueSorted(question.forbiddenPaths ?? []);
       const foundExpectedPaths = question.expectedPaths.filter((value) =>
         unifiedPaths.includes(value),
+      );
+      const falsePositivePaths = unifiedPaths.filter(
+        (value) => !allowedPaths.includes(value),
+      );
+      const returnedForbiddenPaths = unifiedPaths.filter((value) =>
+        forbiddenPaths.includes(value),
+      );
+      const expectedNodes = question.expectedNodes ?? [];
+      const foundExpectedNodes = expectedNodes.filter((value) =>
+        contractGraph.nodes.some((node) => node.id === value),
+      );
+      const expectedEdges = question.expectedEdges ?? [];
+      const foundExpectedEdges = expectedEdges.filter((value) =>
+        edgeMatchesExpectation(contractGraph, value),
+      );
+      const relevantReturnedPaths = unifiedPaths.filter((value) =>
+        allowedPaths.includes(value),
+      );
+      const pathPrecision = calculatePathPrecision(
+        unifiedPaths,
+        allowedPaths,
+        question.expectedPaths.length > 0,
       );
       const codeFound = question.expectedPaths.some((value) =>
         codeObservation.paths.includes(value),
@@ -1154,14 +1403,23 @@ export async function evaluateCodeGraphPilot(
       }
       const allPathsFound =
         foundExpectedPaths.length === question.expectedPaths.length;
+      const allNodesFound = foundExpectedNodes.length === expectedNodes.length;
+      const allEdgesFound = foundExpectedEdges.length === expectedEdges.length;
       const passed =
         allPathsFound &&
+        allNodesFound &&
+        allEdgesFound &&
+        falsePositivePaths.length === 0 &&
+        returnedForbiddenPaths.length === 0 &&
         (controlOutcome === undefined || controlOutcome.passed);
       results.push({
         id: question.id,
         category: question.category,
         question: question.question,
         expectedPaths: question.expectedPaths,
+        allowedPaths,
+        forbiddenPaths,
+        unifiedSources,
         codeGraph: codeObservation,
         contractGraph: contractObservation,
         rgAndRead: rgObservation,
@@ -1171,6 +1429,19 @@ export async function evaluateCodeGraphPilot(
         missingExpectedPaths: question.expectedPaths.filter(
           (value) => !foundExpectedPaths.includes(value),
         ),
+        falsePositivePaths,
+        returnedForbiddenPaths,
+        expectedNodes,
+        foundExpectedNodes,
+        missingExpectedNodes: expectedNodes.filter(
+          (value) => !foundExpectedNodes.includes(value),
+        ),
+        expectedEdges,
+        foundExpectedEdges,
+        missingExpectedEdges: expectedEdges.filter(
+          (value) => !foundExpectedEdges.includes(value),
+        ),
+        pathPrecision,
         sourceClassification:
           codeFound && contractFound
             ? "BOTH_STATIC_GRAPHS"
@@ -1190,14 +1461,41 @@ export async function evaluateCodeGraphPilot(
     codeGraph.close();
   }
   const expectedFacts = results.reduce(
-    (sum, result) => sum + result.expectedPaths.length,
+    (sum, result) =>
+      sum +
+      result.expectedPaths.length +
+      result.expectedNodes.length +
+      result.expectedEdges.length,
     0,
   );
   const foundFacts = results.reduce(
-    (sum, result) => sum + result.foundExpectedPaths.length,
+    (sum, result) =>
+      sum +
+      result.foundExpectedPaths.length +
+      result.foundExpectedNodes.length +
+      result.foundExpectedEdges.length,
+    0,
+  );
+  const returnedPaths = results.reduce(
+    (sum, result) => sum + result.unifiedPaths.length,
+    0,
+  );
+  const relevantReturnedPaths = results.reduce(
+    (sum, result) =>
+      sum +
+      result.unifiedPaths.filter((value) => result.allowedPaths.includes(value))
+        .length,
     0,
   );
   const critical = results.filter((result) => result.criticalDynamic);
+  const criticalExpectedEdges = critical.reduce(
+    (sum, result) => sum + result.expectedEdges.length,
+    0,
+  );
+  const criticalFoundEdges = critical.reduce(
+    (sum, result) => sum + result.foundExpectedEdges.length,
+    0,
+  );
   const sensitivePathLeaks = (
     await (async () => {
       const { graph } = await requireHealthyCodeGraph(resolved, "active");
@@ -1224,13 +1522,23 @@ export async function evaluateCodeGraphPilot(
   const medianUnifiedMs = median(unifiedTimes);
   const metrics: CodeGraphEvaluationV1["metrics"] = {
     overallAccuracy:
-      results.filter((result) => result.passed).length / results.length,
+      returnedPaths === 0 ? 1 : relevantReturnedPaths / returnedPaths,
     overallRecall: expectedFacts === 0 ? 1 : foundFacts / expectedFacts,
     criticalDynamicRecall:
-      critical.length === 0
+      criticalExpectedEdges === 0
         ? 1
-        : critical.filter((result) => result.passed).length / critical.length,
+        : criticalFoundEdges / criticalExpectedEdges,
+    codeGraphPrecision: precision(results, "codegraph"),
     codeGraphRecall: recall(results, "codegraph"),
+    codeGraphRoutedPrecision: precision(
+      routedResults(results, "codegraph"),
+      "codegraph",
+    ),
+    codeGraphRoutedRecall: recall(
+      routedResults(results, "codegraph"),
+      "codegraph",
+    ),
+    contractGraphPrecision: precision(results, "contractgraph"),
     contractGraphRecall: recall(results, "contractgraph"),
     rgBaselineRecall: recall(results, "rg"),
     medianCodeGraphMs,
@@ -1267,6 +1575,8 @@ export async function evaluateCodeGraphPilot(
       questions: results.length,
       expectedFacts,
       foundFacts,
+      returnedPaths,
+      relevantReturnedPaths,
       passedQuestions: results.filter((result) => result.passed).length,
     },
     metrics,
@@ -1274,6 +1584,10 @@ export async function evaluateCodeGraphPilot(
     adoption,
     results,
     notes: [
+      "overallAccuracy is micro path precision: every returned path outside the question allowlist is a false positive. overallRecall counts exact expected paths, nodes, and edges.",
+      "Unified paths obey the declared tool responsibility for each golden question. Raw CodeGraph and ContractGraph precision/recall remain separately visible, so routing cannot hide an individual tool's false positives.",
+      "CodeGraph can become a default contributor only if precision and recall are both at least 90% on the questions whose routed unified answer includes CodeGraph.",
+      "criticalDynamicRecall is computed only from exact ContractGraph from/to/kind/confidence edge assertions; a matching file path alone cannot pass it.",
       "Latency compares in-process CodeGraph/ContractGraph source retrieval with rg plus reading up to ten matching files; it is not an LLM wall-clock benchmark.",
       "CodeGraph-only misses remain visible. CONTRACT_GRAPH_ONLY is an expected complement, never proof that CodeGraph found a dynamic or non-language edge.",
       "No static result proves runtime execution; PR 4 adds runtime evidence.",

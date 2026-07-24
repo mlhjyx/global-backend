@@ -40,7 +40,9 @@ or personal data. Do not bypass the artifact manifest if a derived JSON file
 fails integrity validation.
 
 The fixed 30-question evaluation currently classifies CodeGraph as
-`PILOT_ONLY`: the combined graph met correctness, dynamic-recall, isolation,
-leakage, build and query gates, but did not reach the required 30% median
-analysis-time reduction versus `rg + file reads`. ContractGraph, current source,
-tests and runtime evidence therefore remain the default path.
+`PILOT_ONLY`: responsibility-routed unified precision/recall, exact dynamic
+edges, isolation, leakage, build, query, and speed gates pass, but CodeGraph
+recall is only 89.5% on the questions where it is allowed to contribute. Raw
+CodeGraph precision/recall remain visible and cannot be hidden by routing.
+ContractGraph, current source, tests, and runtime evidence therefore remain the
+default path.

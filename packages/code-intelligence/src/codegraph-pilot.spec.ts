@@ -1,12 +1,30 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { execFile as execFileCallback } from "node:child_process";
 import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { promisify } from "node:util";
+import {
+  calculatePathPrecision,
   CodeGraphEvaluationV1,
   CodeGraphIndexEvidenceV1,
   CodeGraphStatusV1,
+  contractSearchPaths,
   evaluateAdoptionGates,
   evaluateCodeGraphStatus,
+  extractGitArchive,
 } from "./codegraph-pilot";
+import { ContractGraphV1, GraphNodeV1 } from "./schema";
+
+const execFile = promisify(execFileCallback);
 
 function evidence(): CodeGraphIndexEvidenceV1 {
   return {
@@ -65,7 +83,11 @@ function metrics(): CodeGraphEvaluationV1["metrics"] {
     overallAccuracy: 0.9,
     overallRecall: 0.9,
     criticalDynamicRecall: 1,
+    codeGraphPrecision: 0.8,
     codeGraphRecall: 0.8,
+    codeGraphRoutedPrecision: 0.9,
+    codeGraphRoutedRecall: 0.9,
+    contractGraphPrecision: 0.9,
     contractGraphRecall: 0.9,
     rgBaselineRecall: 1,
     medianCodeGraphMs: 1,
@@ -175,4 +197,122 @@ test("default adoption requires every gate without exceptions", () => {
     Object.values(failing).every((gate) => gate.passed),
     false,
   );
+
+  const routedFailureMetrics = metrics();
+  routedFailureMetrics.codeGraphRoutedRecall = 0.899;
+  const routedFailure = evaluateAdoptionGates(routedFailureMetrics);
+  assert.equal(routedFailure.codeGraphRoutedRecall.passed, false);
+});
+
+test("ContractGraph search freezes initial matches before one-hop expansion", () => {
+  const node = (
+    id: string,
+    file: string,
+    kind: GraphNodeV1["kind"] = "code_symbol",
+  ): GraphNodeV1 => ({
+    id,
+    kind,
+    label: kind === "source_file" ? file : id,
+    attributes: {},
+    locations: [{ path: file, line: 1 }],
+  });
+  const graph: ContractGraphV1 = {
+    schemaVersion: "contract-graph/v1",
+    evidence: {
+      schemaVersion: "evidence-ref/v1",
+      repositoryRoot: "/repo",
+      worktreePath: "/repo",
+      branch: "main",
+      commit: "a".repeat(40),
+      commitTime: "2026-07-25T00:00:00.000Z",
+      dirty: false,
+      sourceHash: "b".repeat(64),
+    },
+    nodes: [
+      node("A", "a.ts"),
+      node("B", "b.ts", "source_file"),
+      node("C", "c.ts", "source_file"),
+    ],
+    edges: [
+      {
+        id: "edge:A:B",
+        kind: "calls",
+        from: "A",
+        to: "B",
+        attributes: {},
+        locations: [],
+      },
+      {
+        id: "edge:B:C",
+        kind: "calls",
+        from: "B",
+        to: "C",
+        attributes: {},
+        locations: [],
+      },
+    ],
+    diagnostics: [],
+  };
+
+  assert.deepEqual(contractSearchPaths(graph, "A"), ["a.ts", "b.ts"]);
+});
+
+test("path precision counts extra returned paths as false positives", () => {
+  assert.equal(
+    calculatePathPrecision(
+      ["expected.ts", "unrelated.ts"],
+      ["expected.ts"],
+      true,
+    ),
+    0.5,
+  );
+  assert.equal(calculatePathPrecision([], ["expected.ts"], true), 0);
+});
+
+test("main archive extraction replaces a pre-existing wrong snapshot", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codegraph-archive-"));
+  try {
+    await execFile("git", ["init", "--quiet"], { cwd: root });
+    await execFile("git", ["config", "user.email", "test@example.invalid"], {
+      cwd: root,
+    });
+    await execFile("git", ["config", "user.name", "ContractGraph Test"], {
+      cwd: root,
+    });
+    await writeFile(path.join(root, "truth.txt"), "from git\n");
+    await execFile("git", ["add", "truth.txt"], { cwd: root });
+    await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
+      cwd: root,
+    });
+    const { stdout } = await execFile("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    const destination = path.join(
+      root,
+      ".code-intelligence",
+      "codegraph-main",
+      stdout.trim(),
+      "source",
+    );
+    await mkdir(destination, { recursive: true });
+    await writeFile(path.join(destination, "wrong.txt"), "not from git\n");
+
+    await extractGitArchive(root, stdout.trim(), destination);
+
+    assert.equal(
+      await readFile(path.join(destination, "truth.txt"), "utf8"),
+      "from git\n",
+    );
+    await assert.rejects(readFile(path.join(destination, "wrong.txt"), "utf8"));
+
+    await rm(destination, { recursive: true, force: true });
+    await symlink(path.join(root, "truth.txt"), destination);
+    await assert.rejects(
+      extractGitArchive(root, stdout.trim(), destination),
+      /symlink/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

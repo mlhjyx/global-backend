@@ -232,7 +232,10 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
         "export function createSiteActivities() {",
         "  return {",
         "    async buildSite() { return undefined; },",
+        "    arrowSite: async () => undefined,",
+        "    functionSite: async function () { return undefined; },",
         "    publishSite,",
+        "    missingActivity,",
         "  };",
         "}",
       ].join("\n"),
@@ -300,13 +303,60 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       ),
       true,
     );
+    for (const expected of [
+      {
+        from: "symbol:apps/api/src/temporal/site.activities.ts#createSiteActivities.arrowSite",
+        to: "activity:temporal:arrowSite",
+      },
+      {
+        from: "symbol:apps/api/src/temporal/site.activities.ts#createSiteActivities.functionSite",
+        to: "activity:temporal:functionSite",
+      },
+      {
+        from: "symbol:apps/api/src/temporal/site.activities.ts#publishSite",
+        to: "activity:temporal:publishSite",
+      },
+    ]) {
+      assert.equal(
+        graph.edges.some(
+          (edge) =>
+            edge.kind === "implements" &&
+            edge.from === expected.from &&
+            edge.to === expected.to &&
+            edge.attributes.binding === "activity-factory-return" &&
+            edge.attributes.confidence === "PROVEN_STATIC_FACTORY",
+        ),
+        true,
+      );
+    }
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "implements" &&
+          edge.from ===
+            "symbol-ref:apps/api/src/temporal/site.activities.ts#missingActivity" &&
+          edge.to === "activity:temporal:missingActivity" &&
+          edge.attributes.confidence === "UNKNOWN",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "UNKNOWN_RELATION" &&
+          diagnostic.nodeId ===
+            "symbol-ref:apps/api/src/temporal/site.activities.ts#missingActivity",
+      ),
+      true,
+    );
     assert.equal(
       graph.edges.some(
         (edge) =>
           edge.kind === "implements" &&
           edge.from.endsWith("#createSiteActivities.buildSite") &&
           edge.to === "activity:temporal:buildSite" &&
-          edge.attributes.binding === "activity-factory-return",
+          edge.attributes.binding === "activity-factory-return" &&
+          edge.attributes.confidence === "PROVEN_STATIC_FACTORY",
       ),
       true,
     );

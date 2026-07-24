@@ -249,6 +249,23 @@ export async function extractTypeScript(
       true,
       relative.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
+    const localCallableDeclarations = new Map<string, ts.Node>();
+    for (const statement of sourceFile.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) {
+        localCallableDeclarations.set(statement.name.text, statement);
+      }
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (
+          ts.isIdentifier(declaration.name) &&
+          declaration.initializer &&
+          (ts.isArrowFunction(declaration.initializer) ||
+            ts.isFunctionExpression(declaration.initializer))
+        ) {
+          localCallableDeclarations.set(declaration.name.text, declaration);
+        }
+      }
+    }
     const isTest =
       /\.(?:spec|test)\.(?:ts|tsx)$/.test(relative) ||
       /(?:^|\/)scripts\/verify-[^/]+\.mts$/.test(relative);
@@ -620,6 +637,7 @@ export async function extractTypeScript(
           if (!name) continue;
           const location = sourceLocation(sourceFile, relative, property);
           let implementation: string | undefined;
+          let confidence = "PROVEN_STATIC_FACTORY";
           if (ts.isMethodDeclaration(property)) {
             implementation = addSymbol(name, property, factoryName);
           } else if (
@@ -629,16 +647,29 @@ export async function extractTypeScript(
           ) {
             implementation = addSymbol(name, property, factoryName);
           } else if (ts.isShorthandPropertyAssignment(property)) {
-            implementation = builder.addNode({
-              id: `symbol-ref:${name}`,
-              kind: "code_symbol",
-              label: name,
-              attributes: {
-                activityFactory: factoryName,
-                unresolvedReference: true,
-              },
-              location,
-            });
+            const declaration = localCallableDeclarations.get(name);
+            if (declaration) {
+              implementation = addSymbol(name, declaration);
+            } else {
+              confidence = "UNKNOWN";
+              implementation = builder.addNode({
+                id: `symbol-ref:${relative}#${name}`,
+                kind: "code_symbol",
+                label: name,
+                attributes: {
+                  activityFactory: factoryName,
+                  unresolvedReference: true,
+                },
+                location,
+              });
+              builder.addDiagnostic({
+                code: "UNKNOWN_RELATION",
+                severity: "warning",
+                message: `Temporal activity factory ${factoryName} shorthand ${name} has no local callable declaration`,
+                nodeId: implementation,
+                location,
+              });
+            }
           }
           if (!implementation) continue;
           const activity = activityNode(builder, name, location);
@@ -648,7 +679,7 @@ export async function extractTypeScript(
             label: name,
             attributes: {
               factory: factoryName,
-              implementationDeclared: true,
+              implementationDeclared: confidence === "PROVEN_STATIC_FACTORY",
               runtime: "temporal",
             },
             location,
@@ -659,7 +690,7 @@ export async function extractTypeScript(
             to: activity,
             attributes: {
               binding: "activity-factory-return",
-              confidence: "PROVEN_STATIC_FACTORY",
+              confidence,
             },
             location,
           });

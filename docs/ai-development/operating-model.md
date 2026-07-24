@@ -33,7 +33,7 @@ flowchart LR
     L --> F
 ```
 
-图中的 QMD 仍是未安装候选；CodeGraph 已按 `DEC-AIDEV-003` 以固定版本、本地只读方式完成受控试点，但 30 题速度门未通过，状态为 `PILOT_ONLY`，不是默认工具。受控 MCP Memory 与仓库 ContractGraph 已分别按 `DEC-AIDEV-002/003` 进入限定范围。它们仍是低于 Registry、源码和运行证据的辅助层。准入规则见[记忆、知识与派生认知政策](memory-and-context-policy.md)，代码智能使用门见[专门指南](code-intelligence.md)。
+图中的 QMD 仍是未安装候选；CodeGraph 已按 `DEC-AIDEV-003` 以固定版本、本地只读方式完成受控试点，但在 30 题评测中其参与表面的 recall 门未通过，状态为 `PILOT_ONLY`，不是默认工具。受控 MCP Memory 与仓库 ContractGraph 已分别按 `DEC-AIDEV-002/003` 进入限定范围。它们仍是低于 Registry、源码和运行证据的辅助层。准入规则见[记忆、知识与派生认知政策](memory-and-context-policy.md)，代码智能使用门见[专门指南](code-intelligence.md)。
 
 ## 2. 一次任务只处于一个主要模式
 

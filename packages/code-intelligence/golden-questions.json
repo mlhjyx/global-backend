@@ -92,6 +92,22 @@
       "query": "sanctionsRefreshWorkflow",
       "baselinePattern": "function sanctionsRefreshWorkflow",
       "expectedPaths": ["apps/api/src/temporal/sanctions-refresh.workflow.ts"],
+      "allowedPaths": [
+        "apps/api/src/temporal/ensure-schedules.ts",
+        "apps/api/src/temporal/sanctions-refresh.workflow.ts"
+      ],
+      "forbiddenPaths": [
+        "apps/api/src/temporal/sanctions-refresh.activities.ts"
+      ],
+      "expectedNodes": ["workflow:temporal:sanctionsRefreshWorkflow"],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/sanctions-refresh.workflow.ts#sanctionsRefreshWorkflow",
+          "to": "workflow:temporal:sanctionsRefreshWorkflow",
+          "kind": "implements",
+          "confidence": null
+        }
+      ],
       "criticalDynamic": true
     },
     {
@@ -103,6 +119,20 @@
       "expectedPaths": [
         "apps/api/src/temporal/sanctions-refresh.activities.ts"
       ],
+      "allowedPaths": [
+        "apps/api/src/temporal/sanctions-refresh.activities.ts",
+        "apps/api/src/temporal/sanctions-refresh.workflow.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "expectedNodes": ["activity:temporal:refreshSanctionsLists"],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/sanctions-refresh.activities.ts#createSanctionsRefreshActivities.refreshSanctionsLists",
+          "to": "activity:temporal:refreshSanctionsLists",
+          "kind": "implements",
+          "confidence": "PROVEN_STATIC_FACTORY"
+        }
+      ],
       "criticalDynamic": true
     },
     {
@@ -112,6 +142,20 @@
       "query": "registerWatchesForRun",
       "baselinePattern": "registerWatchesForRun",
       "expectedPaths": ["apps/api/src/temporal/discovery.activities.ts"],
+      "allowedPaths": [
+        "apps/api/src/temporal/discovery.activities.ts",
+        "apps/api/src/temporal/discovery.workflow.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/temporal/worker.ts"],
+      "expectedNodes": ["activity:temporal:registerWatchesForRun"],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/discovery.activities.ts#createDiscoveryActivities.registerWatchesForRun",
+          "to": "activity:temporal:registerWatchesForRun",
+          "kind": "implements",
+          "confidence": "PROVEN_STATIC_FACTORY"
+        }
+      ],
       "criticalDynamic": true
     },
     {
@@ -121,6 +165,22 @@
       "query": "OutboxRelayService",
       "baselinePattern": "class OutboxRelayService",
       "expectedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "allowedPaths": [
+        "apps/api/src/relay/outbox-relay.service.ts",
+        "apps/api/src/relay/relay.module.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/site-builder/outbox.ts"],
+      "expectedNodes": [
+        "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService"
+      ],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.tick",
+          "to": "data-model:prisma:OutboxEvent",
+          "kind": "reads",
+          "confidence": null
+        }
+      ],
       "criticalDynamic": true
     },
     {
@@ -130,6 +190,19 @@
       "query": "routeEvent",
       "baselinePattern": "routeEvent",
       "expectedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "allowedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "forbiddenPaths": ["apps/api/src/temporal/worker.ts"],
+      "expectedNodes": [
+        "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent"
+      ],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
+          "to": "data-model:prisma:OutboxDelivery",
+          "kind": "writes",
+          "confidence": null
+        }
+      ],
       "criticalDynamic": true
     },
     {
@@ -138,7 +211,8 @@
       "question": "Site 数据模型在哪里定义？",
       "query": "Site",
       "baselinePattern": "model Site {",
-      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-DATA-002",
@@ -146,7 +220,8 @@
       "question": "SiteRelease 数据模型在哪里定义？",
       "query": "SiteRelease",
       "baselinePattern": "model SiteRelease {",
-      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-DATA-003",
@@ -154,7 +229,8 @@
       "question": "SiteBuildRun 数据模型在哪里定义？",
       "query": "SiteBuildRun",
       "baselinePattern": "model SiteBuildRun {",
-      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-DATA-004",
@@ -162,7 +238,8 @@
       "question": "Asset 数据模型在哪里定义？",
       "query": "Asset",
       "baselinePattern": "model Asset {",
-      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-DATA-005",
@@ -170,7 +247,8 @@
       "question": "OutboxEvent 数据模型在哪里定义？",
       "query": "OutboxEvent",
       "baselinePattern": "model OutboxEvent {",
-      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-EXT-001",
@@ -215,6 +293,22 @@
       "query": "ensurePlatformSchedules",
       "baselinePattern": "function ensurePlatformSchedules",
       "expectedPaths": ["apps/api/src/temporal/ensure-schedules.ts"],
+      "allowedPaths": [
+        "apps/api/src/temporal/ensure-schedules.ts",
+        "apps/api/src/temporal/worker.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/temporal/workflows.ts"],
+      "expectedNodes": [
+        "symbol:apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules"
+      ],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules",
+          "to": "service:temporal-schedule-registration:apps/api/src/temporal/ensure-schedules.ts:56",
+          "kind": "registers",
+          "confidence": null
+        }
+      ],
       "criticalDynamic": true
     },
     {
@@ -223,7 +317,21 @@
       "question": "CAP-SITE-INTAKE-001 如何追踪到实现？",
       "query": "CAP-SITE-INTAKE-001",
       "baselinePattern": "CAP-SITE-INTAKE-001",
-      "expectedPaths": ["docs/governance/traceability-matrix.md"]
+      "expectedPaths": ["docs/governance/traceability-matrix.md"],
+      "allowedPaths": [
+        "apps/api/src/site-builder/dto/intake.dto.spec.ts",
+        "apps/api/src/site-builder/dto/intake.dto.ts",
+        "apps/api/src/site-builder/intake.controller.spec.ts",
+        "apps/api/src/site-builder/intake.controller.ts",
+        "apps/api/src/site-builder/intake.service.spec.ts",
+        "apps/api/src/site-builder/intake.service.ts",
+        "apps/api/src/site-builder/temporal-demo-launcher.spec.ts",
+        "apps/api/src/site-builder/temporal-demo-launcher.ts",
+        "docs/governance/capability-register.md",
+        "docs/governance/scenario-catalog.md",
+        "docs/governance/traceability-matrix.md"
+      ],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-TRACE-002",
@@ -234,7 +342,13 @@
       "expectedPaths": [
         "apps/site-renderer/src/layouts/Base.astro",
         "apps/site-renderer/src/pages/gallery.astro"
-      ]
+      ],
+      "allowedPaths": [
+        "apps/site-renderer/src/layouts/Base.astro",
+        "apps/site-renderer/src/pages/gallery.astro",
+        "apps/site-renderer/src/styles/global.css"
+      ],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-OPS-001",
@@ -242,7 +356,8 @@
       "question": "global-api systemd 服务定义在哪里？",
       "query": "global-api.service",
       "baselinePattern": "global-api.service",
-      "expectedPaths": ["infra/systemd/global-api.service"]
+      "expectedPaths": ["infra/systemd/global-api.service"],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-OPS-002",
@@ -250,7 +365,13 @@
       "question": "new-api Compose 服务在哪里定义？",
       "query": "new-api",
       "baselinePattern": "new-api:",
-      "expectedPaths": ["docker-compose.yml"]
+      "expectedPaths": ["docker-compose.yml"],
+      "allowedPaths": [
+        "apps/api/src/site-builder/agents/model-policy.registry.ts",
+        "docker-compose.yml",
+        "docs/backend/oss-registry.md"
+      ],
+      "unifiedSources": ["contractgraph"]
     },
     {
       "id": "GQ-ASTRO-001",

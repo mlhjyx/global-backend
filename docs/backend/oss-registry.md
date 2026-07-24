@@ -61,7 +61,7 @@
 | `ADP-FE-031` | GoodJob | 功能设计/使用文档方法 | `LEARN / CURRENT_METHOD` | 外部仓库；只吸收方法，不复制代码/内容 | 功能闭环、页面 IA、取舍、FAQ；真值治理用我方体系 | `OWN-DOC-GOV` |
 | `ADP-FE-032` | `@modelcontextprotocol/server-memory` | 受控长期记忆 | `ADAPT / LOCAL_READ_ONLY_WITH_CONTROLLED_WRITER` | MIT；固定 `2026.1.26`；本地 JSONL，不发送项目数据；上游整文件写入无锁 | Git/Registry 仍为真值；普通会话只读；`memoryctl` 做候选、原子晋升、备份与审计；可退回内置记忆与文件阅读 | `OWN-PLATFORM` |
 | `ADP-FE-033` | `@global/code-intelligence` | 仓库代码智能 | `BUILD / REPO_CLI_AS_BUILT` | 本仓私有代码；复用现有 TypeScript Compiler API（Apache-2.0）；无网络、遥测或常驻数据库 | 只生成 worktree/commit/hash 绑定的 `.code-intelligence/` 派生图；Git/Registry/源码/运行证据仍为真值；可删除输出并退回 `rg` | `OWN-PLATFORM` |
-| `ADP-FE-034` | `@colbymchenry/codegraph` | 静态代码关系图 | `PILOT / READ_ONLY_NOT_DEFAULT` | MIT；精确固定 `1.5.0`；本地 SQLite；启动前关闭遥测；不运行 agent/Hook/MCP 自动安装 | main Git archive 快照 + 一个活跃 worktree 隔离；查询强制版本/branch/commit/hash/path/完整性门；30 题速度未过采用门，可删除 `.codegraph/` 回退 ContractGraph + `rg` | `OWN-PLATFORM` |
+| `ADP-FE-034` | `@colbymchenry/codegraph` | 静态代码关系图 | `PILOT / READ_ONLY_NOT_DEFAULT` | MIT；精确固定 `1.5.0`；本地 SQLite；启动前关闭遥测；不运行 agent/Hook/MCP 自动安装 | main Git archive 每次重建并拒绝 symlink + 一个活跃 worktree 隔离；查询强制版本/branch/commit/hash/path/完整性门；参与表面 recall 89.5% 未过 90% 采用门，可删除 `.codegraph/` 回退 ContractGraph + `rg` | `OWN-PLATFORM` |
 
 ## 3. 组合结论
 
@@ -70,7 +70,7 @@
 - **一个用途级避免项**：`004` Readdy；禁止运行时、代码、素材、训练/RAG/蒸馏复用，只保留多来源净室学习。
 - **受控本地记忆**：`032` 仅在固定版本、只读 MCP 工具面和受控 writer 下运行；旧会话排空、绝对安装路径和卸载演练仍是后续运维门。
 - **仓库原生代码智能**：`033` 是内部 Build，不安装外部服务；只读 CLI、项目 Skill 和 CI 确定性门已接入，派生图不得冒充运行事实。
-- **CodeGraph 只读试点**：`034` 的 30 题正确性、关键动态召回、隔离和泄漏门通过，但重复运行只取得约 15%–19% 中位分析提速，低于 30% 采用门；保留 `PILOT_ONLY`，不开放常驻 MCP、写工具或自动 agent 配置。
+- **CodeGraph 只读试点**：`034` 的职责路由统一 precision/recall、精确动态边、隔离、泄漏和速度门通过；CodeGraph 原始 precision/recall 为 42.2%/65.5%，在其参与表面 recall 为 89.5%，低于 90% 采用门；保留 `PILOT_ONLY`，不开放常驻 MCP、写工具或自动 agent 配置。
 - **其余候选**：按 Card 维持 `LEARN` 或 `DEFER`；没有新增采购、账号、依赖、部署或生产流量授权。
 - **我方必须 Build 的部分**：Contract、Adapter、SoR、allowed actions、审计、数据分类、测试夹具、退出导出和替换机制，不交给候选项目。
 
