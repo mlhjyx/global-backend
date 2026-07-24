@@ -42,6 +42,17 @@ pnpm worktree:new r4-b-min
 pnpm worktree:new r4-b-min --dry-run
 ```
 
+### 2.1 规划、审计与实施的新鲜度门
+
+每次开始规划、只读审计或实施前，都执行：
+
+```bash
+git fetch origin --prune
+git rev-list --count HEAD..origin/main
+```
+
+输出必须为 `0`，才能把该 worktree 当作当前事实基线。若有 origin-only 提交，停止以该路径输出当前结论；从刚 fetch 的 `origin/main` 新建正式 worktree，或先受控同步后重做核验。这个门检查的是远端是否领先，不以本分支自己的功能提交为“已同步”证据。
+
 ## 3. legacy `/global/wt` 迁移判定
 
 迁移按单个 worktree 决策，禁止批量搬运。

@@ -1,5 +1,8 @@
 # ADR/PDR 注册表（唯一决策真值）
 
+> 文档 ID：`DOC-ADR-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
 > 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（按各批追加日期拍板/收敛），标注 ⚠ 者待 A/B 会签。
 > 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档）。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
@@ -31,7 +34,7 @@
 ### 独立站建设子系统 ADR（2026-07-16 回写，来源 `docs/site-builder/`）
 
 13. **ADR-013 SITE-BUILDER-SCOPE 建站边界与产物**：独立站建设子系统产出 = 从 **SiteSpec** 物化的已发布静态站（Astro 构建）；编排 = **固定 DAG 的 Temporal 工作流 + 有界 AI Task（L2 任务契约）**，**非自由 Agent、无 Planner**（D13）。每次发布产出**不可变 Release**（内容寻址、可回放、可回滚），异步失败绝不删除用户现有 Site。子系统止于建站与发布，运营/成交归 SaaS。出处：02-architecture D11/D13、09 施工图。
-14. **ADR-014 SITESPEC-CONTRACT SiteSpec 三方契约**：SiteSpec = 建站三方（组装 agent 产出 ↔ 渲染器构建消费 ↔ SaaS 前端 Puck 编辑器）**唯一契约**——Puck 兼容页面数据形状 + i18n **键间接层**（CopyBundle，结构/内容分离）+ 资产**引用**（🔴 禁外链 URL 直嵌，版权链与稳定性）+ `specVersion` semver（minor=容忍新增可选字段，major 附迁移器）。**类型级单一真值 = `@global/contracts`**（DQ-1 #117 已落地 `SITE_SPEC_VERSION=1.0.0`，两端 `import type` 编译期防漂移；设计目标态 1.1.0）；渲染器侧 Zod 三重门（结构/引用完整性/语义规则）为紧接 follow-up。出处：04-sitespec-contract、DQ-1 记录。
+14. **ADR-014 SITESPEC-CONTRACT SiteSpec 三方契约**：SiteSpec = 建站三方（组装 agent 产出 ↔ 渲染器构建消费 ↔ SaaS 前端 Puck 编辑器）**唯一契约**——Puck 兼容页面数据形状 + i18n **键间接层**（CopyBundle，结构/内容分离）+ 资产**引用**（🔴 禁外链 URL 直嵌，版权链与稳定性）+ `specVersion` semver（minor=容忍新增可选字段，major 附迁移器）。**类型级单一真值 = `@global/contracts`**。DQ-1/#117 留下 Demo v0 固定使用的 `1.0.0`；2026-07-24 M1-e-B 已将 `1.1.0` 作为受控精装修的新历史合同，冻结组件库/Renderer/archetype/Family/locale direction，并与 v2 ReleaseManifest 双读兼容。渲染器侧结构、引用、语义和兼容门已随受控组装落地；旧 Release 不后台迁移。出处：04-sitespec-contract、DQ-1 记录。
 15. **ADR-015 CLOSED-COMPONENT-LIBRARY 封闭组件库**：v1 = **55 型封闭 section 组件**（D12，17→55）；组件 `type`/`variant`/原子字段类型**封闭枚举**，校验器 + 渲染器对未知组件**拒绝/返回空**（Section.astro 未知 type fail-closed throw），组装 agent **禁生成任意 JSX/CSS**、禁发明组件类型。扩库 = 显式加注册 + 版本 minor；ScrollVideoHero/Interactive3DHero 不进封闭库。出处：04 §5、11 号 + D12、Section.astro as-built。
 16. **ADR-016 MODEL-PROFILE-ROUTING 模型档四态路由**：Agent 卡绑 **ModelProfile 语义档**（能力/成本/延迟约束），**非硬编码模型字符串**；路由四态 = `currentRoute`（现役 as-built）/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + **deterministicFallback**；候选晋升**只经评测**（Golden Set 回归 + 成本/质量门），**不是采购承诺或永久终选**。每个 `promotedRoute` 必须绑定不可变 evidence id、实际生产 transport、任务失败门与可回滚 legacy route；紧急 model/fallback override 继续可用且必须进入 trace。deepseek 一律**显式 `v4-pro`/`v4-flash`**（chat/reasoner 官方 2026-07-24 关停）。出处：10-model-selection-study、02 §6、task-routes.ts as-built。
 17. **ADR-017 NO-FABRICATED-IDENTITY 禁虚构身份（🔴 合规红线）**：demo-spec 与文案 agent **只用 intake 事实**；对未知企业类型**禁止**默认写 manufacturer / 工程团队 / QC / 出口包装 / 认证 / 产能 / 年限 / 客户名单等身份声明；缺 = **留空或中性措辞 + 提示补录**，绝不虚构。与 ADR-010 存储侧"证据先行/最小化"红线同源，**建站侧不可回退**。出处：01 事实红线、00-decisions R0-3。

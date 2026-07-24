@@ -1,5 +1,8 @@
 # roadmap/release-plan —— 当前主线与获客封版路线（L2）
 
+> 文档 ID：`DOC-ROADMAP-001`
+> 生命周期：`CURRENT`
+> 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md)。
 > 2026-07-10 v2（获客合流定稿）；**2026-07-24 M1-e-B 六 Family 与受控组装更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 

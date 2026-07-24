@@ -23,6 +23,21 @@ const schema = readFileSync(
 );
 
 describe("R3-B2 SiteBuildStep database invariants", () => {
+  it("keeps Prisma defaults aligned with the database-owned row defaults", () => {
+    expect(migration).toContain(
+      '"id" UUID NOT NULL DEFAULT gen_random_uuid()',
+    );
+    expect(migration).toContain(
+      '"updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    );
+    expect(schema).toMatch(
+      /model SiteBuildStep \{[\s\S]+id\s+String\s+@id @default\(dbgenerated\("gen_random_uuid\(\)"\)\) @db\.Uuid/,
+    );
+    expect(schema).toMatch(
+      /model SiteBuildStep \{[\s\S]+updatedAt\s+DateTime\s+@default\(now\(\)\) @updatedAt @map\("updated_at"\)/,
+    );
+  });
+
   it("binds every step to the same-workspace BuildRun without mutable provenance", () => {
     expect(migration).toContain("SET LOCAL lock_timeout = '5s'");
     expect(migration).toContain('LOCK TABLE "site_build_run"');
