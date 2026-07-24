@@ -15,6 +15,21 @@ const MAX_SCHEMA_NODES = 10_000;
 const BOUNDED_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
+function hasOnlyAllowedEnumerableKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  for (const key in value) {
+    if (
+      Object.prototype.hasOwnProperty.call(value, key) &&
+      !allowed.includes(key)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function assertBoundedJsonSchema(schema: unknown): void {
   if (
     !schema ||
@@ -61,21 +76,72 @@ function assertBoundedJsonSchema(schema: unknown): void {
       throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
     }
     seen.add(object);
+    if (Object.getOwnPropertyDescriptor(object, 'toJSON')) {
+      // JSON.stringify invokes even a non-enumerable own toJSON hook. Reject it
+      // before serialization so user code cannot allocate or rewrite the value
+      // after the bounded structural walk.
+      throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+    }
+    if (Array.isArray(object)) {
+      if (object.length > MAX_SCHEMA_NODES) {
+        // JSON.stringify expands sparse array holes to null; cap length before
+        // it can allocate output proportional to attacker-controlled length.
+        throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+      }
+      for (let index = 0; index < object.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(object, index);
+        // JSON schemas are JSON values, so sparse arrays and accessors are not
+        // accepted. The length cap makes this index walk strictly bounded.
+        if (!descriptor || !('value' in descriptor)) {
+          throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+        }
+        if (nodes + stack.length >= MAX_SCHEMA_NODES) {
+          throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+        }
+        stack.push({
+          value: descriptor.value,
+          depth: current.depth + 1,
+        });
+      }
+      for (const key in object) {
+        if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
+        const index = Number(key);
+        if (
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= object.length ||
+          String(index) !== key
+        ) {
+          // Named array properties survive structuredClone but are omitted by
+          // JSON.stringify, so accepting them would make the checked schema
+          // differ from the owned snapshot.
+          throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+        }
+      }
+      continue;
+    }
     if (
-      !Array.isArray(object) &&
       Object.getPrototypeOf(object) !== Object.prototype &&
       Object.getPrototypeOf(object) !== null
     ) {
       throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
     }
-    for (const [key, child] of Object.entries(
-      object as Record<string, unknown>,
-    )) {
+    // Do not use Object.entries/Object.keys here: either creates an unbounded
+    // intermediate array before the node/character limits can reject it.
+    for (const key in object as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(object, key);
+      if (!descriptor || !('value' in descriptor)) {
+        throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+      }
       approximateChars += key.length;
       if (approximateChars > MAX_SCHEMA_JSON_CHARS) {
         throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
       }
-      stack.push({ value: child, depth: current.depth + 1 });
+      if (nodes + stack.length >= MAX_SCHEMA_NODES) {
+        throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+      }
+      stack.push({ value: descriptor.value, depth: current.depth + 1 });
     }
   }
   let json: string;
@@ -98,21 +164,18 @@ export function preflightVisionReviewInput(input: ReviewVisionInput): void {
   if (
     !input ||
     typeof input !== 'object' ||
-    Object.keys(runtimeInput).some(
-      (key) =>
-        ![
-          'task',
-          'prompt',
-          'system',
-          'model',
-          'schema',
-          'images',
-          'validateOutput',
-          'maxTokens',
-          'maxCostCents',
-          'signal',
-        ].includes(key),
-    ) ||
+    !hasOnlyAllowedEnumerableKeys(runtimeInput, [
+      'task',
+      'prompt',
+      'system',
+      'model',
+      'schema',
+      'images',
+      'validateOutput',
+      'maxTokens',
+      'maxCostCents',
+      'signal',
+    ]) ||
     ![
       'site_builder.aesthetic_review',
       'site_builder.aesthetic_review.eval',
@@ -146,18 +209,15 @@ export function preflightVisionReviewInput(input: ReviewVisionInput): void {
       throw new Error('VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN');
     }
     if (
-      Object.keys(runtime).some(
-        (key) =>
-          ![
-            'materialClass',
-            'workspaceId',
-            'artifactId',
-            'sha256',
-            'mimeType',
-            'bytes',
-            'target',
-          ].includes(key),
-      ) ||
+      !hasOnlyAllowedEnumerableKeys(runtime, [
+        'materialClass',
+        'workspaceId',
+        'artifactId',
+        'sha256',
+        'mimeType',
+        'bytes',
+        'target',
+      ]) ||
       !VISION_REVIEW_MATERIAL_CLASSES.includes(image.materialClass) ||
       (image.materialClass === 'workspace_site_screenshot'
         ? !image.workspaceId || !BOUNDED_TOKEN.test(image.workspaceId)
@@ -174,8 +234,9 @@ export function preflightVisionReviewInput(input: ReviewVisionInput): void {
       image.bytes.byteLength > MAX_VISION_IMAGE_BYTES ||
       PNG_SIGNATURE.some((byte, index) => image.bytes[index] !== byte) ||
       !image.target ||
-      Object.keys(image.target).some(
-        (key) => !['locale', 'pageId', 'breakpoint'].includes(key),
+      !hasOnlyAllowedEnumerableKeys(
+        image.target as unknown as Record<string, unknown>,
+        ['locale', 'pageId', 'breakpoint'],
       ) ||
       !BOUNDED_TOKEN.test(image.target.locale) ||
       !BOUNDED_TOKEN.test(image.target.pageId) ||

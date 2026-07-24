@@ -369,6 +369,67 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
     expect(provider.reviewVision).not.toHaveBeenCalled();
   });
 
+  it('rejects a limit-sized sparse schema array before JSON serialization can expand its holes', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const sparse: unknown[] = [];
+    sparse.length = 10_000;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        {
+          ...visionInput(),
+          schema: { type: 'object', anyOf: sparse },
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects an over-wide schema object without materializing Object.entries', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const properties: Record<string, unknown> = {};
+    for (let index = 0; index < 10_001; index += 1) {
+      properties[`p${index}`] = { type: 'string' };
+    }
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        {
+          ...visionInput(),
+          schema: { type: 'object', properties },
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects a hidden toJSON hook before serialization can invoke caller code', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const schema = { type: 'object' };
+    const toJSON = vi.fn(() => 'x'.repeat(100_000_000));
+    Object.defineProperty(schema, 'toJSON', {
+      value: toJSON,
+      enumerable: false,
+    });
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        { ...visionInput(), schema },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(toJSON).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
   it('binds the compiled schema before await so caller mutation cannot relax the result gate', async () => {
     let resolveReview!: (result: typeof exactResult) => void;
     const provider = {
