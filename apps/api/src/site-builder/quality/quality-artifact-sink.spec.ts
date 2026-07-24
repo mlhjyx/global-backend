@@ -108,6 +108,7 @@ describe("private quality artifact sink", () => {
       candidateSpecDigest: "a".repeat(64),
       designBriefDigest: "b".repeat(64),
       basePath: "/preview/acme/",
+      siteOrigin: "https://preview.example.test",
       round: 0 as const,
     };
     const artifactDraft = {

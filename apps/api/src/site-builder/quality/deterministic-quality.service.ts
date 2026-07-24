@@ -34,6 +34,7 @@ export class DeterministicQualityService {
       candidateSpecDigest: input.candidateSpecDigest,
       designBriefDigest: input.designBriefDigest,
       basePath: input.basePath,
+      siteOrigin: input.siteOrigin,
       round: input.round,
     };
     const existing = await this.artifacts.loadCheckpoint(

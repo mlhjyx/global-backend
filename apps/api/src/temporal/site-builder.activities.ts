@@ -360,6 +360,17 @@ export function previewBasePath(slug: string): string {
   }
 }
 
+/** 平台 preview origin；M2 的租户域名与公网发布不在此处决定。 */
+export function previewOrigin(slug: string): string {
+  const pattern =
+    process.env.PREVIEW_URL_PATTERN ?? "http://localhost:3000/preview/{slug}/";
+  try {
+    return new URL(pattern.replace("{slug}", slug)).origin;
+  } catch {
+    return "http://localhost:3000";
+  }
+}
+
 function copySlotType(key: string): CopySlotType {
   if (/^seo\..*\.title$/.test(key)) return "seo_title";
   if (/^seo\./.test(key)) return "seo_description";
@@ -838,6 +849,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(state.site.slug),
+        siteOrigin: previewOrigin(state.site.slug),
         publicAssetDir: overlay.publicDir,
       });
     } finally {
@@ -1046,6 +1058,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(claimed.site.slug),
+        siteOrigin: previewOrigin(claimed.site.slug),
       });
 
       const accepted = await prisma.withWorkspace(workspaceId, async (tx) => {
@@ -2523,6 +2536,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       await renderSiteSpec(doc, {
         outDir,
         basePath: previewBasePath(site.slug),
+        siteOrigin: previewOrigin(site.slug),
       });
 
       const accepted = await prisma.withWorkspace(workspaceId, async (tx) => {

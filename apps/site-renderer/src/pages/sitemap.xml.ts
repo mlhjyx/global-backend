@@ -1,5 +1,6 @@
 import {
   buildStaticLocalePaths,
+  absoluteSiteHref,
   loadSpec,
   localePagePathHref,
 } from "../lib/spec";
@@ -18,7 +19,9 @@ export function GET(): Response {
   const urls = buildStaticLocalePaths(spec).map(({ pageId, locale }) => {
     const page = spec.pages.find((candidate) => candidate.id === pageId);
     if (!page) throw new Error(`SITEMAP_PAGE_MISSING: ${pageId}`);
-    return localePagePathHref(page.path, locale, spec.site.defaultLocale);
+    return absoluteSiteHref(
+      localePagePathHref(page.path, locale, spec.site.defaultLocale),
+    );
   });
   const body =
     '<?xml version="1.0" encoding="UTF-8"?>' +

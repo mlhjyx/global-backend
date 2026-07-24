@@ -28,6 +28,7 @@ import { materializeControlledAssetOverlay } from "../controlled-asset-materiali
 const repositoryRoot = path.resolve(
   new URL("../../../../../", import.meta.url).pathname,
 );
+const SITE_ORIGIN = "https://preview.example.test";
 
 async function loadFixture() {
   const fixtures = await buildM1ebGoldenFixtures(repositoryRoot);
@@ -79,10 +80,10 @@ function html(canonicalPath: string, stunPort?: number): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
-    <link rel="canonical" href="${canonicalPath}">
+    <link rel="canonical" href="${SITE_ORIGIN}${canonicalPath}">
     <title>Quality fixture</title>
     <meta name="description" content="A deterministic quality fixture.">
-    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","url":"${canonicalPath}","inLanguage":"en"}</script>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","url":"${SITE_ORIGIN}${canonicalPath}","inLanguage":"en"}</script>
   </head>
   <body>
     <main><h1>Quality fixture</h1><p>Bounded local content.</p><a class="btn" href="/detail">Details</a></main>
@@ -151,12 +152,14 @@ describe("bounded browser quality runner", () => {
       await buildSiteSpecWithTemporaryFile(spec, {
         outDir: root,
         basePath: "/preview/quality/",
+        siteOrigin: SITE_ORIGIN,
         publicAssetDir: overlay.publicDir,
       });
       const facts = await collectBrowserQualityFacts({
         spec,
         buildRoot: root,
         basePath: "/preview/quality/",
+        siteOrigin: SITE_ORIGIN,
         candidateSpecDigest: releaseSpecDigest(spec),
         designBriefDigest: designBrief.digest,
         round: 0,
@@ -206,7 +209,7 @@ describe("bounded browser quality runner", () => {
       );
       await writeFile(
         path.join(root, "sitemap.xml"),
-        '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>/</loc></url><url><loc>/detail</loc></url></urlset>',
+        `<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${SITE_ORIGIN}/</loc></url><url><loc>${SITE_ORIGIN}/detail</loc></url></urlset>`,
       );
       const { spec, designBrief, validation } = await loadFixture();
       expect(spec).toEqual(await loadSpecFromDisk());
@@ -214,6 +217,7 @@ describe("bounded browser quality runner", () => {
         spec,
         buildRoot: root,
         basePath: "/",
+        siteOrigin: SITE_ORIGIN,
         candidateSpecDigest: releaseSpecDigest(spec),
         designBriefDigest: designBrief.digest,
         round: 0,

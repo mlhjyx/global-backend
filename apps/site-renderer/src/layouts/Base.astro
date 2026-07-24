@@ -3,6 +3,7 @@ import { themeToCssVars } from '../lib/themes';
 import {
   localePageHref,
   localePagePathHref,
+  absoluteSiteHref,
   siteLocaleDirection,
   safeOptionalSlot,
 } from '../lib/spec';
@@ -68,10 +69,14 @@ const whatsapp = safe('contact.whatsapp');
 const email = safe('contact.email');
 const brandTagline = safe('brand.tagline');
 const bookLabel = safe('nav.book');
-const canonicalHref = localePagePathHref(pagePath, locale, spec.site.defaultLocale);
+const canonicalHref = absoluteSiteHref(
+  localePagePathHref(pagePath, locale, spec.site.defaultLocale),
+);
 const alternates = spec.site.locales.map((candidateLocale) => ({
   locale: candidateLocale,
-  href: localePagePathHref(pagePath, candidateLocale, spec.site.defaultLocale),
+  href: absoluteSiteHref(
+    localePagePathHref(pagePath, candidateLocale, spec.site.defaultLocale),
+  ),
 }));
 const structuredData = JSON.stringify({
   '@context': 'https://schema.org',

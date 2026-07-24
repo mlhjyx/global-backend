@@ -18,6 +18,7 @@ interface DeterministicQualityCheckpoint {
   candidateSpecDigest: string;
   designBriefDigest: string;
   basePath: string;
+  siteOrigin: string;
   round: 0 | 1 | 2 | 3;
   result: DeterministicQualityResult;
 }
@@ -99,7 +100,11 @@ export class StorageQualityArtifactSink implements QualityArtifactSink {
     prefix: string,
     identity: Pick<
       DeterministicQualityCheckpoint,
-      "candidateSpecDigest" | "designBriefDigest" | "round" | "basePath"
+      | "candidateSpecDigest"
+      | "designBriefDigest"
+      | "round"
+      | "basePath"
+      | "siteOrigin"
     >,
     signal?: AbortSignal,
   ): Promise<DeterministicQualityResult | null> {
@@ -122,10 +127,11 @@ export class StorageQualityArtifactSink implements QualityArtifactSink {
       parsed?.schemaVersion !==
         "site-builder-deterministic-quality-checkpoint/v1" ||
       Object.keys(parsed).sort().join(",") !==
-        "basePath,candidateSpecDigest,designBriefDigest,result,round,schemaVersion" ||
+        "basePath,candidateSpecDigest,designBriefDigest,result,round,schemaVersion,siteOrigin" ||
       parsed.candidateSpecDigest !== identity.candidateSpecDigest ||
       parsed.designBriefDigest !== identity.designBriefDigest ||
       parsed.basePath !== identity.basePath ||
+      parsed.siteOrigin !== identity.siteOrigin ||
       parsed.round !== identity.round ||
       !parsed.result ||
       typeof parsed.result !== "object" ||

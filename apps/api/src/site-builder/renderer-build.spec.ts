@@ -17,6 +17,8 @@ import {
   type RendererBuildInput,
 } from "./renderer-build";
 
+const SITE_ORIGIN = "https://preview.example.test";
+
 async function expectMissing(filePath: string): Promise<void> {
   await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
 }
@@ -33,6 +35,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       specPath: "/tmp/spec.json",
       outDir: "/tmp/out",
       basePath: "/preview/acme/",
+      siteOrigin: SITE_ORIGIN,
     });
 
     expect(env).toEqual({
@@ -42,6 +45,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       SITESPEC_PATH: "/tmp/spec.json",
       OUT_DIR: "/tmp/out",
       BASE_PATH: "/preview/acme/",
+      SITE_ORIGIN,
       ASTRO_TELEMETRY_DISABLED: "1",
     });
     expect(env).not.toHaveProperty("DATABASE_URL");
@@ -58,6 +62,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
         specPath: "/tmp/spec.json",
         outDir: "/tmp/out",
         basePath: "/",
+        siteOrigin: SITE_ORIGIN,
         publicAssetDir: "/tmp/overlay",
       }),
     ).toMatchObject({
@@ -89,6 +94,28 @@ describe("rendered outbound-domain gate", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("allows schema vocabulary only inside JSON-LD, not navigable links", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "m1f-schema-domain-"));
+    try {
+      await writeFile(
+        path.join(dir, "index.html"),
+        '<script type="application/ld+json">{"@context":"https://schema.org"}</script>',
+      );
+      await expect(
+        assertRenderedOutboundDomains(dir, [], SITE_ORIGIN),
+      ).resolves.toBeUndefined();
+      await writeFile(
+        path.join(dir, "index.html"),
+        '<a href="https://schema.org/escape">escape</a>',
+      );
+      await expect(
+        assertRenderedOutboundDomains(dir, [], SITE_ORIGIN),
+      ).rejects.toThrow("RENDERER_OUTBOUND_DOMAIN_FORBIDDEN");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () => {
@@ -106,7 +133,11 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
 
     await buildSiteSpecWithTemporaryFile(
       { safe: true },
-      { outDir: "/tmp/out", basePath: "/preview/acme/" },
+      {
+        outDir: "/tmp/out",
+        basePath: "/preview/acme/",
+        siteOrigin: SITE_ORIGIN,
+      },
       execute,
     );
 
@@ -124,6 +155,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
       {
         outDir: "/tmp/out",
         basePath: "/",
+        siteOrigin: SITE_ORIGIN,
         publicAssetDir: "/tmp/overlay",
       },
       execute,
@@ -143,7 +175,11 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
     await expect(
       buildSiteSpecWithTemporaryFile(
         { tenant: "content" },
-        { outDir: "/tmp/out", basePath: "/preview/acme/" },
+        {
+          outDir: "/tmp/out",
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+        },
         execute,
       ),
     ).rejects.toThrow("astro failed");

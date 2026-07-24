@@ -38,6 +38,7 @@ describe("DeterministicQualityService replay fence", () => {
         spec: fixture.spec,
         buildRoot: "/not-reached",
         basePath: "/preview/acme/",
+        siteOrigin: "https://preview.example.test",
         candidateSpecDigest: "c".repeat(64),
         designBriefDigest: fixture.designBrief.digest,
         round: 0,

@@ -14,6 +14,7 @@ export interface RendererBuildInput {
   specPath: string;
   outDir: string;
   basePath: string;
+  siteOrigin: string;
   publicAssetDir?: string;
   allowedOutboundDomains?: string[];
 }
@@ -22,11 +23,32 @@ export type RendererBuildExecutor = (
   input: RendererBuildInput,
 ) => Promise<void>;
 
+export function validateRendererSiteOrigin(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("RENDERER_SITE_ORIGIN_INVALID");
+  }
+  const loopback =
+    parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (
+    parsed.origin !== value ||
+    parsed.username ||
+    parsed.password ||
+    (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback))
+  ) {
+    throw new Error("RENDERER_SITE_ORIGIN_INVALID");
+  }
+  return parsed.origin;
+}
+
 /**
  * Renderer 是处理租户内容的低信任子进程，不能继承 API/worker 的数据库、对象存储、
  * 模型网关、代理或 Node 注入变量。这里不读取 process.env，新增变量必须逐项评审。
  */
 export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
+  const siteOrigin = validateRendererSiteOrigin(input.siteOrigin);
   return {
     NODE_ENV: "production",
     LANG: "C.UTF-8",
@@ -34,6 +56,7 @@ export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
     SITESPEC_PATH: input.specPath,
     OUT_DIR: input.outDir,
     BASE_PATH: input.basePath,
+    SITE_ORIGIN: siteOrigin,
     ...(input.publicAssetDir ? { PUBLIC_ASSET_DIR: input.publicAssetDir } : {}),
     ASTRO_TELEMETRY_DISABLED: "1",
   };
@@ -90,6 +113,7 @@ export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   await assertRenderedOutboundDomains(
     input.outDir,
     input.allowedOutboundDomains ?? [],
+    input.siteOrigin,
   );
 }
 
@@ -108,10 +132,13 @@ const SCANNED_RENDER_EXTENSIONS = new Set([
 const OUTBOUND_URL =
   /(?<![A-Za-z0-9+/=])(?:https?:\/\/[^\s"'<>)}\\]+|\/\/(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?[^\s"'<>)}\\]*)/giu;
 const MAX_SCANNED_OUTPUT_BYTES = 32 * 1024 * 1024;
-const RENDERER_METADATA_DOMAINS = new Set(["schema.org"]);
 
 function navigableOutputText(value: string): string {
   return value
+    .replace(
+      /<script\b[^>]*type\s*=\s*(?:"application\/ld\+json"|'application\/ld\+json')[^>]*>[\s\S]*?<\/script>/gi,
+      "",
+    )
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<!DOCTYPE[\s\S]*?>/gi, "")
     .replace(/\bxmlns(?::[A-Za-z][\w.-]*)?\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
@@ -121,10 +148,12 @@ function navigableOutputText(value: string): string {
 export async function assertRenderedOutboundDomains(
   root: string,
   allowedDomains: readonly string[],
+  siteOrigin?: string,
 ): Promise<void> {
   const approved = new Set(
     allowedDomains.map((domain) => domain.trim().toLowerCase()).filter(Boolean),
   );
+  const ownOrigin = siteOrigin ? validateRendererSiteOrigin(siteOrigin) : null;
   let scannedBytes = 0;
   const visit = async (directory: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true });
@@ -155,10 +184,11 @@ export async function assertRenderedOutboundDomains(
         } catch {
           throw new Error(`RENDERER_OUTBOUND_URL_INVALID: ${raw}`);
         }
+        const ownUrl = ownOrigin !== null && parsed.origin === ownOrigin;
         if (
-          parsed.protocol !== "https:" ||
-          (!approved.has(parsed.hostname.toLowerCase()) &&
-            !RENDERER_METADATA_DOMAINS.has(parsed.hostname.toLowerCase()))
+          !ownUrl &&
+          (parsed.protocol !== "https:" ||
+            !approved.has(parsed.hostname.toLowerCase()))
         ) {
           throw new Error(
             `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname}`,
@@ -188,7 +218,12 @@ function allowedOutboundDomains(spec: unknown): string[] {
  */
 export async function buildSiteSpecWithTemporaryFile(
   spec: unknown,
-  output: { outDir: string; basePath: string; publicAssetDir?: string },
+  output: {
+    outDir: string;
+    basePath: string;
+    siteOrigin: string;
+    publicAssetDir?: string;
+  },
   execute: RendererBuildExecutor = runAstroBuild,
 ): Promise<void> {
   const tempDir = await mkdtemp(path.join(tmpdir(), "global-site-renderer-"));
@@ -203,6 +238,7 @@ export async function buildSiteSpecWithTemporaryFile(
       specPath,
       outDir: output.outDir,
       basePath: output.basePath,
+      siteOrigin: output.siteOrigin,
       publicAssetDir: output.publicAssetDir,
       allowedOutboundDomains: allowedOutboundDomains(spec),
     });

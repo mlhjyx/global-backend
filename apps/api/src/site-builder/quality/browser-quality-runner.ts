@@ -30,6 +30,7 @@ import {
   type QualityPageFacts,
 } from "./deterministic-quality";
 import { assertReleaseContract, releaseSpecDigest } from "../release-artifact";
+import { validateRendererSiteOrigin } from "../renderer-build";
 import { assertControlledAssemblyValid } from "../assembly/controlled-assembly-validator";
 import type { CopySlotDefinition } from "../copy-bundle.service";
 import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
@@ -81,6 +82,8 @@ export interface BrowserQualityRunnerInput {
   buildRoot: string;
   /** Exact BASE_PATH used for the Renderer build, including leading/trailing slash. */
   basePath: string;
+  /** Server-controlled platform preview origin; custom domains remain M2. */
+  siteOrigin: string;
   candidateSpecDigest: string;
   designBriefDigest: string;
   round: 0 | 1 | 2 | 3;
@@ -581,7 +584,7 @@ function expectedPagePaths(spec: SiteSpecV1_1, basePath: string): string[] {
   );
 }
 
-function sitemapPaths(xml: string, origin: string): string[] {
+function sitemapPaths(xml: string, expectedOrigin: string): string[] {
   const parsed = new XMLParser({
     ignoreAttributes: false,
     processEntities: false,
@@ -600,8 +603,8 @@ function sitemapPaths(xml: string, origin: string): string[] {
     if (typeof loc !== "string" || !loc.trim()) {
       throw new Error("QUALITY_ARTIFACT_INVALID: sitemap loc");
     }
-    const url = new URL(loc.trim(), origin);
-    if (url.origin !== origin || url.search || url.hash) {
+    const url = new URL(loc.trim());
+    if (url.origin !== expectedOrigin || url.search || url.hash) {
       throw new Error("QUALITY_ARTIFACT_INVALID: sitemap origin");
     }
     return url.pathname.replace(/\/+$/, "") || "/";
@@ -612,7 +615,7 @@ function structuredDataUsesFrozenFacts(
   documents: unknown[],
   snapshot: PublishableClaimSnapshot,
   spec: SiteSpecV1_1,
-  expected: { locale: string; path: string },
+  expected: { locale: string; path: string; origin: string },
 ): boolean {
   if (documents.length < 1) return false;
   const approved = new Set(snapshot.items.map((item) => item.statement.trim()));
@@ -627,16 +630,14 @@ function structuredDataUsesFrozenFacts(
       if (parentKey === "@context") return value === "https://schema.org";
       if (parentKey === "@type") return value === "WebPage";
       if (parentKey === "inLanguage") return value === expected.locale;
-      if (parentKey === "url" || parentKey === "@id") {
+      if (parentKey === "url") {
+        return value === `${expected.origin}${expected.path}`;
+      }
+      if (parentKey === "@id") {
         try {
-          const parsed = new URL(value, "https://preview.invalid");
+          const parsed = new URL(value, expected.origin);
           return (
-            value.startsWith("/") &&
-            !value.startsWith("//") &&
-            parsed.origin === "https://preview.invalid" &&
-            !parsed.search &&
-            !parsed.hash &&
-            (parentKey !== "url" || parsed.pathname === expected.path)
+            parsed.origin === expected.origin && !parsed.search && !parsed.hash
           );
         } catch {
           return false;
@@ -654,7 +655,8 @@ function structuredDataUsesFrozenFacts(
       (document as Record<string, unknown>)["@context"] ===
         "https://schema.org" &&
       (document as Record<string, unknown>)["@type"] === "WebPage" &&
-      (document as Record<string, unknown>).url === expected.path &&
+      (document as Record<string, unknown>).url ===
+        `${expected.origin}${expected.path}` &&
       (document as Record<string, unknown>).inLanguage === expected.locale &&
       visit(document),
   );
@@ -799,9 +801,10 @@ async function runLighthouse(
 
 export function assertBrowserQualityCandidate(
   input: BrowserQualityRunnerInput,
-): { basePath: string; targets: string[] } {
+): { basePath: string; siteOrigin: string; targets: string[] } {
   assertReleaseContract(input.spec, input.spec.specVersion);
   const basePath = normalizeBasePath(input.basePath);
+  const siteOrigin = validateRendererSiteOrigin(input.siteOrigin);
   if (input.validation.designBrief.digest !== input.designBriefDigest) {
     throw new Error("QUALITY_ARTIFACT_INVALID: designBriefDigest mismatch");
   }
@@ -819,7 +822,7 @@ export function assertBrowserQualityCandidate(
   if (targets.length < 1 || targets.length > 24) {
     throw new Error("QUALITY_ARTIFACT_INVALID: locale-page target limit");
   }
-  return { basePath, targets };
+  return { basePath, siteOrigin, targets };
 }
 
 export async function collectBrowserQualityFacts(
@@ -830,7 +833,8 @@ export async function collectBrowserQualityFacts(
     ? AbortSignal.any([input.signal, deadline])
     : deadline;
   throwIfAborted(signal);
-  const { basePath, targets } = assertBrowserQualityCandidate(input);
+  const { basePath, siteOrigin, targets } =
+    assertBrowserQualityCandidate(input);
   const executablePath = await chromePath(input.chromeExecutablePath);
   const staticServer = await startLoopbackStaticServer(
     input.buildRoot,
@@ -879,7 +883,7 @@ export async function collectBrowserQualityFacts(
     let sitemapOk = false;
     if (sitemapResponse.ok) {
       try {
-        const actual = sitemapPaths(sitemapText, staticServer.origin);
+        const actual = sitemapPaths(sitemapText, siteOrigin);
         const expected = targets.map(
           (value) => value.replace(/\/+$/, "") || "/",
         );
@@ -1066,7 +1070,7 @@ export async function collectBrowserQualityFacts(
           h1Count: canonicalDom.h1Count,
           canonical:
             canonicalDom.canonical &&
-            new URL(canonicalDom.canonical).origin === staticServer.origin &&
+            new URL(canonicalDom.canonical).origin === siteOrigin &&
             !new URL(canonicalDom.canonical).search &&
             !new URL(canonicalDom.canonical).hash &&
             (new URL(canonicalDom.canonical).pathname.replace(/\/+$/, "") ||
@@ -1088,7 +1092,7 @@ export async function collectBrowserQualityFacts(
                 );
                 return (
                   entry.lang === expectedLocale &&
-                  href.origin === staticServer.origin &&
+                  href.origin === siteOrigin &&
                   !href.search &&
                   !href.hash &&
                   (href.pathname.replace(/\/+$/, "") || "/") ===
@@ -1108,7 +1112,7 @@ export async function collectBrowserQualityFacts(
               canonicalDom.jsonLd,
               input.validation.claimSnapshot,
               input.spec,
-              { locale, path: targetPath },
+              { locale, path: targetPath, origin: siteOrigin },
             ),
           unresolvedPlaceholder: [...domByBreakpoint.values()].some(
             (audit) => audit.unresolvedPlaceholder,
