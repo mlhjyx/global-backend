@@ -634,7 +634,7 @@ try {
   );
   probeCalculatedCostUsd = calculatedCost(probeCall.result);
   probeReportedCostUsd = probeCall.result.usage?.costUsd ?? null;
-  probe = {
+  const acceptedProbe = {
     accepted: true,
     requestedModel: MODEL,
     reportedModel: probeCall.result.reportedModel,
@@ -652,9 +652,12 @@ try {
   probeArtifact = await writeArtifact("capability-probe.json", {
     schemaVersion: AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION,
     evidenceId: EVIDENCE_ID,
-    probe,
+    probe: acceptedProbe,
     output: probeOutput,
   });
+  // The probe is not accepted evidence until its immutable artifact and file
+  // digest exist. A write failure must not leave an unanchored success claim.
+  probe = acceptedProbe;
   progress("capability_probe_accepted", {
     model: MODEL,
     elapsedMs: probeCall.elapsedMs,
@@ -907,20 +910,35 @@ try {
       provider: "gateway",
     },
     catalog: catalog ?? null,
-    probe: probe ?? {
-      accepted: false,
-      ...unavailable,
-    },
+    probe:
+      probe && probeArtifact
+        ? { ...probe, artifact: probeArtifact }
+        : {
+            accepted: false,
+            ...unavailable,
+          },
     matrix: {
       status: probe?.accepted === true ? "interrupted" : "skipped",
       reason: unavailable.reason,
       completedRuns: completedRuns.length,
       expectedRuns: EXPECTED_RUNS,
       remainingRunsNotExecuted: EXPECTED_RUNS - completedRuns.length,
-      artifactManifest: completedRuns.map((run) => ({
-        path: run.artifactPath,
-        sha256: run.artifactFileSha256,
-      })),
+      artifactManifest: [
+        ...(probeArtifact
+          ? [
+              {
+                kind: "capability_probe",
+                path: probeArtifact.path,
+                sha256: probeArtifact.sha256,
+              },
+            ]
+          : []),
+        ...completedRuns.map((run) => ({
+          kind: "matrix_run",
+          path: run.artifactPath,
+          sha256: run.artifactFileSha256,
+        })),
+      ],
     },
     sourceFiles: sourceStart,
     sourceIntegrity,
