@@ -1,0 +1,68 @@
+{
+  "runKey": "blind-pair-244c0985dd6bf91fa7c2:1",
+  "pairId": "blind-pair-244c0985dd6bf91fa7c2",
+  "familyId": "premium-innovation",
+  "attempt": 1,
+  "knownIssue": "AESTHETIC_HIERARCHY",
+  "assignment": {
+    "left": "degraded",
+    "right": "source"
+  },
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 12841.116,
+  "inputTokens": 5743,
+  "outputTokens": 565,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.017136,
+  "accountedCostUsd": 0.017136,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+      "byteLength": 381329,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8",
+      "byteLength": 332238,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "left",
+    "findings": [
+      {
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker",
+        "imageNumber": 1
+      },
+      {
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major",
+        "imageNumber": 1
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_CONTRAST",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

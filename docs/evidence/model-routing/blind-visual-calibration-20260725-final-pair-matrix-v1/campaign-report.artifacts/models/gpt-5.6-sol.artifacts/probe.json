@@ -1,0 +1,61 @@
+{
+  "accepted": true,
+  "semanticExpectationMet": false,
+  "requestedModel": "gpt-5.6-sol",
+  "reportedModel": "gpt-5.6-sol",
+  "resolvedModel": "gpt-5.6-sol",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 10271.451,
+  "inputTokens": 3585,
+  "outputTokens": 267,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.025935,
+  "accountedCostUsd": 0.025935,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+      "byteLength": 272347,
+      "breakpoint": 768
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+      "byteLength": 272347,
+      "breakpoint": 768
+    },
+    {
+      "imageNumber": 3,
+      "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+      "byteLength": 271683,
+      "breakpoint": 768
+    }
+  ],
+  "output": {
+    "choice": "tie",
+    "findings": [
+      {
+        "imageNumber": 3,
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 2,
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 3,
+        "ruleCode": "AESTHETIC_CTA_CLARITY",
+        "severity": "major"
+      }
+    ]
+  }
+}

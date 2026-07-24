@@ -1,0 +1,442 @@
+{
+  "schemaVersion": "site-builder-blind-visual-calibration-evidence/v1",
+  "evidenceStatus": "complete",
+  "execution": {
+    "commitSha": "e6320d6ffb61a1a8be9a06e152be2acbfe369140",
+    "sourceBundleSha256": "ffa1cd087f31b894eee01b63d6a3dc99df3b9e6fff836d617a83449b8bdc945e",
+    "gatewayImageDigest": "sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c",
+    "model": "gemini-3.5-flash",
+    "transport": "google-generate-content",
+    "catalog": {
+      "baseUrl": "http://localhost:3001/v1",
+      "modelCount": 38,
+      "modelCatalogSha256": "96ff68253b20984d12dd5eada3f805af861b5324f90b7189b015ab8a00537328",
+      "requestedModelListed": true
+    },
+    "sourceFiles": [
+      {
+        "path": "apps/api/scripts/evaluate-site-builder-blind-visual-calibration-campaign.mts",
+        "sha256": "d509641ee5e25592f36698eb5d1b4ab0ba3408ebfae9d60f16963cb2081437c0"
+      },
+      {
+        "path": "apps/api/scripts/evaluate-site-builder-blind-visual-calibration.mts",
+        "sha256": "17a6be4347b5701af9128b85925a33be843f9586cf60753ec360e861d0da377d"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+        "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-provider.ts",
+        "sha256": "abb9b015b782feb5d8d67b0ee706c6d0887df8817e02829212b8381cfdfa0c19"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-providers.config.ts",
+        "sha256": "1c55328d20a6c337e6346b15c6166157c99d18205a3dc23134eda4f45ca469fd"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-router.ts",
+        "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+      },
+      {
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "7093c8a8ac0bfecfdfd305e8ef2729404ed4d0eac37c1e010d042bfd33760815"
+      },
+      {
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "b87fa8d83e405867689075c5c97dfec631fcb7c43cee46a84759a13baf636428"
+      },
+      {
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "94dca2579c6fe18500b0266e3835c9811cb8a5eeb1daaeb3e8e39879a598c665"
+      },
+      {
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+      },
+      {
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "58b83ad1f78e989c5217a64b3958154ca9fec0173b14fa3e3d10bc26d62b6bd4"
+      },
+      {
+        "path": "apps/api/src/model-gateway/vision-review-input.ts",
+        "sha256": "d472b920155806180c28c864c39c6fa2e28bf71f565a3fe9945a4d658205a096"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
+        "sha256": "559c80bd7ab1863edc46e41ab04537ec844be24c32bbceefd80eaf0fe1d81434"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/blind-visual-calibration-gateway.ts",
+        "sha256": "df38949f45a4d4f749f3447d25b3bc9e2ac279698c8e3e11a653a3495a321632"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
+        "sha256": "9fe24fef68e296241ada87ede20c98178bb87dbb1048fbc599235ecceb51863f"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "950e0e3fb59fcdbc464978db79b60288ab8ac8ae670321fb06a600124b7b5f9f"
+      },
+      {
+        "path": "apps/api/src/tools/budget.ts",
+        "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/natural-origin-rich.png",
+        "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/oem-capability-rich.png",
+        "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/precision-industrial-rich.png",
+        "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/premium-innovation-rich.png",
+        "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+        "sha256": "6dd20bd020c172a4aa89ba6ec4fd5a20c0d72cc58f0bf4d25133d6eed64b762e"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/mobile-375/technical-catalog-rich.png",
+        "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/tablet-768/scientific-trust-rich.png",
+        "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8"
+      },
+      {
+        "path": "docs/site-builder/08-eval-testing.md",
+        "sha256": "864f3f66441b2546c43b013809260a3370008cb410e34e5b0a1ee207d4cf5bc4"
+      },
+      {
+        "path": "pnpm-lock.yaml",
+        "sha256": "8dff8ea747a914ebfc87d92ae084b20a38dc3f4fc2d017bbc9ecd280b5b799ee"
+      }
+    ],
+    "sourceIntegrity": {
+      "startBundleSha256": "1e6834fefe977c6645b169b9b2fa818517cede774fa9830c4750a31b0b457560",
+      "endBundleSha256": "1e6834fefe977c6645b169b9b2fa818517cede774fa9830c4750a31b0b457560",
+      "stable": true,
+      "changedPaths": []
+    },
+    "fixtureCatalogSha256": "5c7be0082addbd85f55994686ed62c20fa851c3b9ddc6e720dc1811a2fac0ab7",
+    "postExecutionCostForecast": {
+      "estimatorVersion": "site-builder-blind-visual-cost-upper-bound/v3",
+      "maxEstimatedCostCents": 4.98045,
+      "calls": [
+        {
+          "phase": "probe",
+          "opaqueRunId": "blind-probe-dbe94a944ee41dd9e229",
+          "estimatedInputTokens": 6374,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.6425
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-3aa00358615aadbadb67",
+          "estimatedInputTokens": 7595,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.82565
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-65a38a50d1e4753eaadf",
+          "estimatedInputTokens": 7595,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.82565
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-497fb30762f527d560eb",
+          "estimatedInputTokens": 7595,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.82565
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-b8075318b97332c7a472",
+          "estimatedInputTokens": 7595,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.82565
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-beee0e77c92ac453ffe5",
+          "estimatedInputTokens": 7595,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.82565
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-593c4c8f821dc47c4633",
+          "estimatedInputTokens": 7595,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.82565
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-b20011ef4e94e3fdc0ae",
+          "estimatedInputTokens": 5531,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.51605
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-f2aecfa6d6d947abb624",
+          "estimatedInputTokens": 5531,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.51605
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-96a7fd29c993bd1d0b40",
+          "estimatedInputTokens": 5531,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.51605
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-9af7e5924d8bc346c752",
+          "estimatedInputTokens": 8627,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.98045
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-8585f4ddc504599aaa7c",
+          "estimatedInputTokens": 8627,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.98045
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-0caba72fa789bd08a8fc",
+          "estimatedInputTokens": 8627,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.98045
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-8ce32fff821ec4ee2f3f",
+          "estimatedInputTokens": 4499,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.36125
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-1003696624eb0bb1e134",
+          "estimatedInputTokens": 4499,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.36125
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-385ac5f212ac1e443ee9",
+          "estimatedInputTokens": 4499,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.36125
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-db0445744571ba9526fa",
+          "estimatedInputTokens": 5015,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.43865
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-c23e95118282dc3ae08e",
+          "estimatedInputTokens": 5015,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.43865
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-d902b4553bb9e04b7327",
+          "estimatedInputTokens": 5015,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 4.43865
+        }
+      ]
+    },
+    "artifactManifest": [
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gemini-3.5-flash.artifacts/failure.json",
+        "sha256": "b5b84571c64c3a739c29e3daffdb63c1bec4be1d74f07469dcf84979ffddb313",
+        "byteLength": 1218
+      }
+    ]
+  },
+  "failure": null,
+  "report": {
+    "schemaVersion": "site-builder-blind-visual-calibration-report/v1",
+    "harnessVersion": "site-builder-blind-visual-calibration@1.1.0",
+    "promptVersion": "site-builder-blind-visual-calibration-prompt/v1",
+    "benchmarkQualification": "deterministic_render_baseline_not_aesthetic_gold",
+    "model": "gemini-3.5-flash",
+    "upstreamModelFamily": "gemini",
+    "transport": "google-generate-content",
+    "limits": {
+      "probeCalls": 1,
+      "pairCalls": 18,
+      "timeoutMs": 900000,
+      "timeoutSettlementGraceMs": 10000,
+      "maxTokens": 4096
+    },
+    "provenance": {
+      "commitSha": "e6320d6ffb61a1a8be9a06e152be2acbfe369140",
+      "sourceBundleSha256": "ffa1cd087f31b894eee01b63d6a3dc99df3b9e6fff836d617a83449b8bdc945e"
+    },
+    "matrixDefinition": [
+      {
+        "pairId": "blind-pair-6394dac00292d71fc9fb",
+        "familyId": "natural-origin",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_IMAGERY",
+        "sourceImage": {
+          "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+          "byteLength": 766732
+        },
+        "degradedImage": {
+          "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+          "byteLength": 892561
+        }
+      },
+      {
+        "pairId": "blind-pair-048043661b1fd096ac9c",
+        "familyId": "oem-capability",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_CONTRAST",
+        "sourceImage": {
+          "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+          "byteLength": 324255
+        },
+        "degradedImage": {
+          "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+          "byteLength": 347039
+        }
+      },
+      {
+        "pairId": "blind-pair-24e60717a133f7950b26",
+        "familyId": "precision-industrial",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_SPACING",
+        "sourceImage": {
+          "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+          "byteLength": 209350
+        },
+        "degradedImage": {
+          "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+          "byteLength": 258276
+        }
+      },
+      {
+        "pairId": "blind-pair-244c0985dd6bf91fa7c2",
+        "familyId": "premium-innovation",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_HIERARCHY",
+        "sourceImage": {
+          "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8",
+          "byteLength": 332238
+        },
+        "degradedImage": {
+          "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+          "byteLength": 381329
+        }
+      },
+      {
+        "pairId": "blind-pair-d678468053e83c909695",
+        "familyId": "scientific-trust",
+        "breakpoint": 768,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_CONSISTENCY",
+        "sourceImage": {
+          "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+          "byteLength": 272347
+        },
+        "degradedImage": {
+          "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+          "byteLength": 271683
+        }
+      },
+      {
+        "pairId": "blind-pair-bf921d80aa1079403fbf",
+        "familyId": "technical-catalog",
+        "breakpoint": 375,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+        "sourceImage": {
+          "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+          "byteLength": 233976
+        },
+        "degradedImage": {
+          "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+          "byteLength": 256649
+        }
+      }
+    ],
+    "matrixDefinitionSha256": "a711a9e5754fffb5cb97350556955af68624f58f97a4a6c1b2ea328aca48f511",
+    "status": "unavailable",
+    "probe": null,
+    "runs": [],
+    "metrics": null,
+    "unavailableReason": "model_identity_mismatch",
+    "failure": {
+      "phase": "probe",
+      "runKey": null,
+      "reason": "model_identity_mismatch",
+      "expectedModel": "gemini-3.5-flash",
+      "requestedModel": "gemini-3.5-flash",
+      "reportedModel": "gemini-default",
+      "resolvedModel": "gemini-default",
+      "provider": "gateway",
+      "expectedTransport": "google-generate-content",
+      "actualTransport": "google-generate-content",
+      "elapsedMs": 5665.604,
+      "inputTokens": 3940,
+      "outputTokens": 1354,
+      "reportedCostUsd": null,
+      "calculatedCostUsd": 0.018096,
+      "finishReason": null,
+      "outputSha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "timeoutSettlement": "not_applicable",
+      "preflightCostCeilingCents": null,
+      "inputImages": [
+        {
+          "imageNumber": 1,
+          "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+          "byteLength": 272347,
+          "breakpoint": 768
+        },
+        {
+          "imageNumber": 2,
+          "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+          "byteLength": 272347,
+          "breakpoint": 768
+        },
+        {
+          "imageNumber": 3,
+          "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+          "byteLength": 271683,
+          "breakpoint": 768
+        }
+      ]
+    },
+    "conclusion": "unavailable_no_model_selection_claim"
+  },
+  "conclusion": "no_promotion_or_runtime_route_change"
+}

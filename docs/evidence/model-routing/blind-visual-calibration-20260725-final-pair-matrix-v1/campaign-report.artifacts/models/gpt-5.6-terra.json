@@ -1,0 +1,1879 @@
+{
+  "schemaVersion": "site-builder-blind-visual-calibration-evidence/v1",
+  "evidenceStatus": "complete",
+  "execution": {
+    "commitSha": "e6320d6ffb61a1a8be9a06e152be2acbfe369140",
+    "sourceBundleSha256": "ffa1cd087f31b894eee01b63d6a3dc99df3b9e6fff836d617a83449b8bdc945e",
+    "gatewayImageDigest": "sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c",
+    "model": "gpt-5.6-terra",
+    "transport": "openai-responses",
+    "catalog": {
+      "baseUrl": "http://localhost:3001/v1",
+      "modelCount": 38,
+      "modelCatalogSha256": "96ff68253b20984d12dd5eada3f805af861b5324f90b7189b015ab8a00537328",
+      "requestedModelListed": true
+    },
+    "sourceFiles": [
+      {
+        "path": "apps/api/scripts/evaluate-site-builder-blind-visual-calibration-campaign.mts",
+        "sha256": "d509641ee5e25592f36698eb5d1b4ab0ba3408ebfae9d60f16963cb2081437c0"
+      },
+      {
+        "path": "apps/api/scripts/evaluate-site-builder-blind-visual-calibration.mts",
+        "sha256": "17a6be4347b5701af9128b85925a33be843f9586cf60753ec360e861d0da377d"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+        "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-provider.ts",
+        "sha256": "abb9b015b782feb5d8d67b0ee706c6d0887df8817e02829212b8381cfdfa0c19"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-providers.config.ts",
+        "sha256": "1c55328d20a6c337e6346b15c6166157c99d18205a3dc23134eda4f45ca469fd"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-router.ts",
+        "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+      },
+      {
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "7093c8a8ac0bfecfdfd305e8ef2729404ed4d0eac37c1e010d042bfd33760815"
+      },
+      {
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "b87fa8d83e405867689075c5c97dfec631fcb7c43cee46a84759a13baf636428"
+      },
+      {
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "94dca2579c6fe18500b0266e3835c9811cb8a5eeb1daaeb3e8e39879a598c665"
+      },
+      {
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+      },
+      {
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "58b83ad1f78e989c5217a64b3958154ca9fec0173b14fa3e3d10bc26d62b6bd4"
+      },
+      {
+        "path": "apps/api/src/model-gateway/vision-review-input.ts",
+        "sha256": "d472b920155806180c28c864c39c6fa2e28bf71f565a3fe9945a4d658205a096"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
+        "sha256": "559c80bd7ab1863edc46e41ab04537ec844be24c32bbceefd80eaf0fe1d81434"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/blind-visual-calibration-gateway.ts",
+        "sha256": "df38949f45a4d4f749f3447d25b3bc9e2ac279698c8e3e11a653a3495a321632"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
+        "sha256": "9fe24fef68e296241ada87ede20c98178bb87dbb1048fbc599235ecceb51863f"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "950e0e3fb59fcdbc464978db79b60288ab8ac8ae670321fb06a600124b7b5f9f"
+      },
+      {
+        "path": "apps/api/src/tools/budget.ts",
+        "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/natural-origin-rich.png",
+        "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/oem-capability-rich.png",
+        "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/precision-industrial-rich.png",
+        "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/desktop-1440/premium-innovation-rich.png",
+        "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+        "sha256": "6dd20bd020c172a4aa89ba6ec4fd5a20c0d72cc58f0bf4d25133d6eed64b762e"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/mobile-375/technical-catalog-rich.png",
+        "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff"
+      },
+      {
+        "path": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/tablet-768/scientific-trust-rich.png",
+        "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8"
+      },
+      {
+        "path": "docs/site-builder/08-eval-testing.md",
+        "sha256": "864f3f66441b2546c43b013809260a3370008cb410e34e5b0a1ee207d4cf5bc4"
+      },
+      {
+        "path": "pnpm-lock.yaml",
+        "sha256": "8dff8ea747a914ebfc87d92ae084b20a38dc3f4fc2d017bbc9ecd280b5b799ee"
+      }
+    ],
+    "sourceIntegrity": {
+      "startBundleSha256": "1e6834fefe977c6645b169b9b2fa818517cede774fa9830c4750a31b0b457560",
+      "endBundleSha256": "1e6834fefe977c6645b169b9b2fa818517cede774fa9830c4750a31b0b457560",
+      "stable": true,
+      "changedPaths": []
+    },
+    "fixtureCatalogSha256": "5c7be0082addbd85f55994686ed62c20fa851c3b9ddc6e720dc1811a2fac0ab7",
+    "postExecutionCostForecast": {
+      "estimatorVersion": "site-builder-blind-visual-cost-upper-bound/v3",
+      "maxEstimatedCostCents": 10.05575,
+      "calls": [
+        {
+          "phase": "probe",
+          "opaqueRunId": "blind-probe-dbe94a944ee41dd9e229",
+          "estimatedInputTokens": 10604,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 8.795
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-3aa00358615aadbadb67",
+          "estimatedInputTokens": 13847,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 9.60575
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-65a38a50d1e4753eaadf",
+          "estimatedInputTokens": 13847,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 9.60575
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-497fb30762f527d560eb",
+          "estimatedInputTokens": 13847,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 9.60575
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-b8075318b97332c7a472",
+          "estimatedInputTokens": 12227,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 9.20075
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-beee0e77c92ac453ffe5",
+          "estimatedInputTokens": 12227,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 9.20075
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-593c4c8f821dc47c4633",
+          "estimatedInputTokens": 12227,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 9.20075
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-b20011ef4e94e3fdc0ae",
+          "estimatedInputTokens": 8717,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 8.32325
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-f2aecfa6d6d947abb624",
+          "estimatedInputTokens": 8717,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 8.32325
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-96a7fd29c993bd1d0b40",
+          "estimatedInputTokens": 8717,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 8.32325
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-9af7e5924d8bc346c752",
+          "estimatedInputTokens": 15647,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 10.05575
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-8585f4ddc504599aaa7c",
+          "estimatedInputTokens": 15647,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 10.05575
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-0caba72fa789bd08a8fc",
+          "estimatedInputTokens": 15647,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 10.05575
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-8ce32fff821ec4ee2f3f",
+          "estimatedInputTokens": 7319,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 7.97375
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-1003696624eb0bb1e134",
+          "estimatedInputTokens": 7319,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 7.97375
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-385ac5f212ac1e443ee9",
+          "estimatedInputTokens": 7319,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 7.97375
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-db0445744571ba9526fa",
+          "estimatedInputTokens": 4463,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 7.25975
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-c23e95118282dc3ae08e",
+          "estimatedInputTokens": 4463,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 7.25975
+        },
+        {
+          "phase": "pair",
+          "opaqueRunId": "blind-run-d902b4553bb9e04b7327",
+          "estimatedInputTokens": 4463,
+          "outputTokenCeiling": 4096,
+          "estimatedCostCents": 7.25975
+        }
+      ]
+    },
+    "artifactManifest": [
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/probe.json",
+        "sha256": "1e6622e56b6d05a2374f92beed4bab4964e6cb8e8039fa318cf5dd29d0580b40",
+        "byteLength": 1477
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-01.json",
+        "sha256": "b1b0310400aebcd3c321b54ad46d8cb624085e323436120ccbcfe223fad6f302",
+        "byteLength": 1861
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-02.json",
+        "sha256": "ca87658901da14ed55dca6a12aaf9d88a17b09fe2b21c8ae530e2a1e9135aa90",
+        "byteLength": 1865
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-03.json",
+        "sha256": "a1a6e9b2ad3f4d05823491713d590eff1ca4c3dd17a0ed1e54727991525195a3",
+        "byteLength": 1865
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-04.json",
+        "sha256": "31970042f749bf74abd909d8656d99d6f81e7a92cb14528e25e2c32b09e64292",
+        "byteLength": 1415
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-05.json",
+        "sha256": "35a6df5bb270489ebf2bc72438ae897ae1470b69d9cea51b82d848298f509994",
+        "byteLength": 1636
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-06.json",
+        "sha256": "7a49521a70ce3c0d2a1ed568f431fc3c378014bd2ec07ac4fbf7b8becef01c2d",
+        "byteLength": 1415
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-07.json",
+        "sha256": "7773b233dcfe6cec223636ca99ff32777299b3e5b4ae7f1d0f83ed71810fcbbf",
+        "byteLength": 1883
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-08.json",
+        "sha256": "f06dc97b5ed712227036a4b2088a36354e0e6a6120faefa5b6782b25b31b182a",
+        "byteLength": 2077
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-09.json",
+        "sha256": "14030275897d0fe80139314cacef5480a54dcfc66cf070137cf35f70e234b030",
+        "byteLength": 1662
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-10.json",
+        "sha256": "c1d793ebfc1bbeeceb6fb86f1882eff4b95da0073f19de1f94fc5ec8aaa8f1f4",
+        "byteLength": 1639
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-11.json",
+        "sha256": "436d19d0effe45a8809a3dfafa3771860122b140482e7e43a97535ed273950a0",
+        "byteLength": 1645
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-12.json",
+        "sha256": "d4b347da3eef0f5376313f4426be33315b8fe8b0c5b2d191cc362685ae272f4e",
+        "byteLength": 1643
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-13.json",
+        "sha256": "f03877a6fca0689e48773b72278cf122e18a19bcfeca9062af0191ff328ba99f",
+        "byteLength": 1871
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-14.json",
+        "sha256": "ae5486336bd98760945dd4a57649442fcc1a49a17d91d313304048056a357bfd",
+        "byteLength": 1636
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-15.json",
+        "sha256": "2fd2ae511733045627f877866fee3e31dc8bdb1f3a5a07112f15e038117234bf",
+        "byteLength": 1643
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-16.json",
+        "sha256": "ed6929fa60fcd877251de4522a6d2fbd2ad9eddbbfdeea55d40405aa4bac1924",
+        "byteLength": 1888
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-17.json",
+        "sha256": "0b400d098f90a32079cc325117caef27d05adadcb962e9a9cb5e68a59999d1fd",
+        "byteLength": 1893
+      },
+      {
+        "path": "docs/evidence/model-routing/blind-visual-calibration-20260725-final-pair-matrix-v1/campaign-report.artifacts/models/gpt-5.6-terra.artifacts/run-18.json",
+        "sha256": "a8fd958ac75c1e78e44d02ff521b1cd05265e1be167b0b9f8a6af1c897a9abf7",
+        "byteLength": 2112
+      }
+    ]
+  },
+  "failure": null,
+  "report": {
+    "schemaVersion": "site-builder-blind-visual-calibration-report/v1",
+    "harnessVersion": "site-builder-blind-visual-calibration@1.1.0",
+    "promptVersion": "site-builder-blind-visual-calibration-prompt/v1",
+    "benchmarkQualification": "deterministic_render_baseline_not_aesthetic_gold",
+    "model": "gpt-5.6-terra",
+    "upstreamModelFamily": "gpt-5.6",
+    "transport": "openai-responses",
+    "limits": {
+      "probeCalls": 1,
+      "pairCalls": 18,
+      "timeoutMs": 900000,
+      "timeoutSettlementGraceMs": 10000,
+      "maxTokens": 4096
+    },
+    "provenance": {
+      "commitSha": "e6320d6ffb61a1a8be9a06e152be2acbfe369140",
+      "sourceBundleSha256": "ffa1cd087f31b894eee01b63d6a3dc99df3b9e6fff836d617a83449b8bdc945e"
+    },
+    "matrixDefinition": [
+      {
+        "pairId": "blind-pair-6394dac00292d71fc9fb",
+        "familyId": "natural-origin",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_IMAGERY",
+        "sourceImage": {
+          "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+          "byteLength": 766732
+        },
+        "degradedImage": {
+          "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+          "byteLength": 892561
+        }
+      },
+      {
+        "pairId": "blind-pair-048043661b1fd096ac9c",
+        "familyId": "oem-capability",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_CONTRAST",
+        "sourceImage": {
+          "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+          "byteLength": 324255
+        },
+        "degradedImage": {
+          "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+          "byteLength": 347039
+        }
+      },
+      {
+        "pairId": "blind-pair-24e60717a133f7950b26",
+        "familyId": "precision-industrial",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_SPACING",
+        "sourceImage": {
+          "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+          "byteLength": 209350
+        },
+        "degradedImage": {
+          "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+          "byteLength": 258276
+        }
+      },
+      {
+        "pairId": "blind-pair-244c0985dd6bf91fa7c2",
+        "familyId": "premium-innovation",
+        "breakpoint": 1440,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_HIERARCHY",
+        "sourceImage": {
+          "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8",
+          "byteLength": 332238
+        },
+        "degradedImage": {
+          "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+          "byteLength": 381329
+        }
+      },
+      {
+        "pairId": "blind-pair-d678468053e83c909695",
+        "familyId": "scientific-trust",
+        "breakpoint": 768,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_CONSISTENCY",
+        "sourceImage": {
+          "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+          "byteLength": 272347
+        },
+        "degradedImage": {
+          "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+          "byteLength": 271683
+        }
+      },
+      {
+        "pairId": "blind-pair-bf921d80aa1079403fbf",
+        "familyId": "technical-catalog",
+        "breakpoint": 375,
+        "qualification": "deterministic_render_baseline",
+        "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+        "sourceImage": {
+          "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+          "byteLength": 233976
+        },
+        "degradedImage": {
+          "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+          "byteLength": 256649
+        }
+      }
+    ],
+    "matrixDefinitionSha256": "a711a9e5754fffb5cb97350556955af68624f58f97a4a6c1b2ea328aca48f511",
+    "status": "single_model_gate_failed",
+    "probe": {
+      "accepted": true,
+      "semanticExpectationMet": false,
+      "requestedModel": "gpt-5.6-terra",
+      "reportedModel": "gpt-5.6-terra",
+      "resolvedModel": "gpt-5.6-terra",
+      "provider": "gateway",
+      "transport": "openai-responses",
+      "elapsedMs": 10017.409,
+      "inputTokens": 3281,
+      "outputTokens": 207,
+      "reportedCostUsd": null,
+      "calculatedCostUsd": 0.0113075,
+      "accountedCostUsd": 0.0113075,
+      "finishReason": null,
+      "inputImages": [
+        {
+          "imageNumber": 1,
+          "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+          "byteLength": 272347,
+          "breakpoint": 768
+        },
+        {
+          "imageNumber": 2,
+          "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+          "byteLength": 272347,
+          "breakpoint": 768
+        },
+        {
+          "imageNumber": 3,
+          "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+          "byteLength": 271683,
+          "breakpoint": 768
+        }
+      ],
+      "output": {
+        "choice": "tie",
+        "findings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageNumber": 3
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageNumber": 1
+          },
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "minor",
+            "imageNumber": 1
+          },
+          {
+            "ruleCode": "AESTHETIC_CREDIBILITY",
+            "severity": "major",
+            "imageNumber": 1
+          }
+        ]
+      }
+    },
+    "runs": [
+      {
+        "runKey": "blind-pair-6394dac00292d71fc9fb:1",
+        "pairId": "blind-pair-6394dac00292d71fc9fb",
+        "familyId": "natural-origin",
+        "attempt": 1,
+        "knownIssue": "AESTHETIC_IMAGERY",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6327.315,
+        "inputTokens": 3712,
+        "outputTokens": 140,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.01138,
+        "accountedCostUsd": 0.01138,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+            "byteLength": 892561,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+            "byteLength": 766732,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_CREDIBILITY",
+              "severity": "major",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CREDIBILITY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": false
+      },
+      {
+        "runKey": "blind-pair-6394dac00292d71fc9fb:2",
+        "pairId": "blind-pair-6394dac00292d71fc9fb",
+        "familyId": "natural-origin",
+        "attempt": 2,
+        "knownIssue": "AESTHETIC_IMAGERY",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6993.517,
+        "inputTokens": 3712,
+        "outputTokens": 84,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.01054,
+        "accountedCostUsd": 0.01054,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+            "byteLength": 766732,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+            "byteLength": 892561,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CREDIBILITY",
+              "severity": "blocker",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CREDIBILITY",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": false
+      },
+      {
+        "runKey": "blind-pair-6394dac00292d71fc9fb:3",
+        "pairId": "blind-pair-6394dac00292d71fc9fb",
+        "familyId": "natural-origin",
+        "attempt": 3,
+        "knownIssue": "AESTHETIC_IMAGERY",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6854.603,
+        "inputTokens": 3714,
+        "outputTokens": 119,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.01107,
+        "accountedCostUsd": 0.01107,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+            "byteLength": 892561,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+            "byteLength": 766732,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CREDIBILITY",
+              "severity": "blocker",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CREDIBILITY",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": false
+      },
+      {
+        "runKey": "blind-pair-048043661b1fd096ac9c:1",
+        "pairId": "blind-pair-048043661b1fd096ac9c",
+        "familyId": "oem-capability",
+        "attempt": 1,
+        "knownIssue": "AESTHETIC_CONTRAST",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 4401.653,
+        "inputTokens": 4019,
+        "outputTokens": 41,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0106625,
+        "accountedCostUsd": 0.0106625,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+            "byteLength": 324255,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+            "byteLength": 347039,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "blocker",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-048043661b1fd096ac9c:2",
+        "pairId": "blind-pair-048043661b1fd096ac9c",
+        "familyId": "oem-capability",
+        "attempt": 2,
+        "knownIssue": "AESTHETIC_CONTRAST",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 5325.352,
+        "inputTokens": 4016,
+        "outputTokens": 120,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.01184,
+        "accountedCostUsd": 0.01184,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+            "byteLength": 347039,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+            "byteLength": 324255,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "blocker",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-048043661b1fd096ac9c:3",
+        "pairId": "blind-pair-048043661b1fd096ac9c",
+        "familyId": "oem-capability",
+        "attempt": 3,
+        "knownIssue": "AESTHETIC_CONTRAST",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 3982.144,
+        "inputTokens": 4017,
+        "outputTokens": 41,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0106575,
+        "accountedCostUsd": 0.0106575,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+            "byteLength": 324255,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+            "byteLength": 347039,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "blocker",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-24e60717a133f7950b26:1",
+        "pairId": "blind-pair-24e60717a133f7950b26",
+        "familyId": "precision-industrial",
+        "attempt": 1,
+        "knownIssue": "AESTHETIC_SPACING",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6781.281,
+        "inputTokens": 5710,
+        "outputTokens": 165,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.01675,
+        "accountedCostUsd": 0.01675,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+            "byteLength": 209350,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+            "byteLength": 258276,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+              "severity": "blocker",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_SPACING",
+              "severity": "major",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-24e60717a133f7950b26:2",
+        "pairId": "blind-pair-24e60717a133f7950b26",
+        "familyId": "precision-industrial",
+        "attempt": 2,
+        "knownIssue": "AESTHETIC_SPACING",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 7548.547,
+        "inputTokens": 5710,
+        "outputTokens": 275,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0184,
+        "accountedCostUsd": 0.0184,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+            "byteLength": 258276,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+            "byteLength": 209350,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_SPACING",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "source"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-24e60717a133f7950b26:3",
+        "pairId": "blind-pair-24e60717a133f7950b26",
+        "familyId": "precision-industrial",
+        "attempt": 3,
+        "knownIssue": "AESTHETIC_SPACING",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6200.665,
+        "inputTokens": 5713,
+        "outputTokens": 143,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0164275,
+        "accountedCostUsd": 0.0164275,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+            "byteLength": 209350,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+            "byteLength": 258276,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+              "severity": "blocker",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_SPACING",
+              "severity": "major",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-244c0985dd6bf91fa7c2:1",
+        "pairId": "blind-pair-244c0985dd6bf91fa7c2",
+        "familyId": "premium-innovation",
+        "attempt": 1,
+        "knownIssue": "AESTHETIC_HIERARCHY",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 7765.789,
+        "inputTokens": 3254,
+        "outputTokens": 111,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0098,
+        "accountedCostUsd": 0.0098,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+            "byteLength": 381329,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8",
+            "byteLength": 332238,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "blocker",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-244c0985dd6bf91fa7c2:2",
+        "pairId": "blind-pair-244c0985dd6bf91fa7c2",
+        "familyId": "premium-innovation",
+        "attempt": 2,
+        "knownIssue": "AESTHETIC_HIERARCHY",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 5535.411,
+        "inputTokens": 3249,
+        "outputTokens": 96,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0095625,
+        "accountedCostUsd": 0.0095625,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8",
+            "byteLength": 332238,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+            "byteLength": 381329,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "blocker",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-244c0985dd6bf91fa7c2:3",
+        "pairId": "blind-pair-244c0985dd6bf91fa7c2",
+        "familyId": "premium-innovation",
+        "attempt": 3,
+        "knownIssue": "AESTHETIC_HIERARCHY",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6387.423,
+        "inputTokens": 3252,
+        "outputTokens": 119,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.009915,
+        "accountedCostUsd": 0.009915,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+            "byteLength": 381329,
+            "breakpoint": 1440
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "8a1fd5ff3f658c08ecd92dce851b6532803eb36d3592a48e648c4b508debded8",
+            "byteLength": 332238,
+            "breakpoint": 1440
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "blocker",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-d678468053e83c909695:1",
+        "pairId": "blind-pair-d678468053e83c909695",
+        "familyId": "scientific-trust",
+        "attempt": 1,
+        "knownIssue": "AESTHETIC_CONSISTENCY",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 5756.768,
+        "inputTokens": 2326,
+        "outputTokens": 148,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.008035,
+        "accountedCostUsd": 0.008035,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+            "byteLength": 272347,
+            "breakpoint": 768
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+            "byteLength": 271683,
+            "breakpoint": 768
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_CONSISTENCY",
+              "severity": "major",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_CREDIBILITY",
+              "severity": "minor",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CONSISTENCY",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CREDIBILITY",
+            "severity": "minor",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-d678468053e83c909695:2",
+        "pairId": "blind-pair-d678468053e83c909695",
+        "familyId": "scientific-trust",
+        "attempt": 2,
+        "knownIssue": "AESTHETIC_CONSISTENCY",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6633.856,
+        "inputTokens": 2318,
+        "outputTokens": 159,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.00818,
+        "accountedCostUsd": 0.00818,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+            "byteLength": 271683,
+            "breakpoint": 768
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+            "byteLength": 272347,
+            "breakpoint": 768
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "minor",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "minor",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": false
+      },
+      {
+        "runKey": "blind-pair-d678468053e83c909695:3",
+        "pairId": "blind-pair-d678468053e83c909695",
+        "familyId": "scientific-trust",
+        "attempt": 3,
+        "knownIssue": "AESTHETIC_CONSISTENCY",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 5518.313,
+        "inputTokens": 2338,
+        "outputTokens": 138,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.007915,
+        "accountedCostUsd": 0.007915,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+            "byteLength": 272347,
+            "breakpoint": 768
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+            "byteLength": 271683,
+            "breakpoint": 768
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "major",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_CREDIBILITY",
+              "severity": "minor",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CREDIBILITY",
+            "severity": "minor",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": false
+      },
+      {
+        "runKey": "blind-pair-bf921d80aa1079403fbf:1",
+        "pairId": "blind-pair-bf921d80aa1079403fbf",
+        "familyId": "technical-catalog",
+        "attempt": 1,
+        "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 6300.402,
+        "inputTokens": 1406,
+        "outputTokens": 147,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.00572,
+        "accountedCostUsd": 0.00572,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+            "byteLength": 256649,
+            "breakpoint": 375
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+            "byteLength": 233976,
+            "breakpoint": 375
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+              "severity": "blocker",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_SPACING",
+              "severity": "major",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-bf921d80aa1079403fbf:2",
+        "pairId": "blind-pair-bf921d80aa1079403fbf",
+        "familyId": "technical-catalog",
+        "attempt": 2,
+        "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+        "assignment": {
+          "left": "source",
+          "right": "degraded"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 5625.755,
+        "inputTokens": 1399,
+        "outputTokens": 166,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.0059875,
+        "accountedCostUsd": 0.0059875,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+            "byteLength": 233976,
+            "breakpoint": 375
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+            "byteLength": 256649,
+            "breakpoint": 375
+          }
+        ],
+        "output": {
+          "choice": "right",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+              "severity": "blocker",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_SPACING",
+              "severity": "major",
+              "imageNumber": 2
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 2
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      },
+      {
+        "runKey": "blind-pair-bf921d80aa1079403fbf:3",
+        "pairId": "blind-pair-bf921d80aa1079403fbf",
+        "familyId": "technical-catalog",
+        "attempt": 3,
+        "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+        "assignment": {
+          "left": "degraded",
+          "right": "source"
+        },
+        "requestedModel": "gpt-5.6-terra",
+        "reportedModel": "gpt-5.6-terra",
+        "resolvedModel": "gpt-5.6-terra",
+        "provider": "gateway",
+        "transport": "openai-responses",
+        "elapsedMs": 7543.01,
+        "inputTokens": 1408,
+        "outputTokens": 265,
+        "reportedCostUsd": null,
+        "calculatedCostUsd": 0.007495,
+        "accountedCostUsd": 0.007495,
+        "finishReason": null,
+        "inputImages": [
+          {
+            "imageNumber": 1,
+            "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+            "byteLength": 256649,
+            "breakpoint": 375
+          },
+          {
+            "imageNumber": 2,
+            "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+            "byteLength": 233976,
+            "breakpoint": 375
+          }
+        ],
+        "output": {
+          "choice": "left",
+          "findings": [
+            {
+              "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+              "severity": "blocker",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_SPACING",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_HIERARCHY",
+              "severity": "major",
+              "imageNumber": 1
+            },
+            {
+              "ruleCode": "AESTHETIC_CONTRAST",
+              "severity": "minor",
+              "imageNumber": 1
+            }
+          ]
+        },
+        "semanticChoice": "degraded",
+        "canonicalFindings": [
+          {
+            "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+            "severity": "blocker",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_SPACING",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_HIERARCHY",
+            "severity": "major",
+            "imageRole": "degraded"
+          },
+          {
+            "ruleCode": "AESTHETIC_CONTRAST",
+            "severity": "minor",
+            "imageRole": "degraded"
+          }
+        ],
+        "formatValid": true,
+        "provenanceExact": true,
+        "knownIssueDetected": true
+      }
+    ],
+    "metrics": {
+      "expectedRuns": 18,
+      "actualRuns": 18,
+      "formatAndProvenanceCorrect": 18,
+      "knownIssueHits": 13,
+      "consistentFamilies": 5,
+      "pairP95ElapsedMs": 7765.789,
+      "p95ElapsedMs": 10017.409,
+      "pairCostUsd": 0.1903375,
+      "probeCostUsd": 0.0113075,
+      "totalCostUsd": 0.201645,
+      "passed": false
+    },
+    "unavailableReason": null,
+    "failure": null,
+    "conclusion": "single_model_gate_failed_no_model_selection_claim"
+  },
+  "conclusion": "no_promotion_or_runtime_route_change"
+}

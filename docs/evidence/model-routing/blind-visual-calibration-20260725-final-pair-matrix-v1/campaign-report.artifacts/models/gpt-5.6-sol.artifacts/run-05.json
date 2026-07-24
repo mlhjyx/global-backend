@@ -1,0 +1,88 @@
+{
+  "runKey": "blind-pair-048043661b1fd096ac9c:2",
+  "pairId": "blind-pair-048043661b1fd096ac9c",
+  "familyId": "oem-capability",
+  "attempt": 2,
+  "knownIssue": "AESTHETIC_CONTRAST",
+  "assignment": {
+    "left": "degraded",
+    "right": "source"
+  },
+  "requestedModel": "gpt-5.6-sol",
+  "reportedModel": "gpt-5.6-sol",
+  "resolvedModel": "gpt-5.6-sol",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 7932.626,
+  "inputTokens": 4320,
+  "outputTokens": 168,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.02664,
+  "accountedCostUsd": 0.02664,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+      "byteLength": 347039,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+      "byteLength": 324255,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "left",
+    "findings": [
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CTA_CLARITY",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "severity": "minor"
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_CONTRAST",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CTA_CLARITY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CREDIBILITY",
+      "severity": "minor",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

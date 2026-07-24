@@ -1,0 +1,88 @@
+{
+  "runKey": "blind-pair-6394dac00292d71fc9fb:3",
+  "pairId": "blind-pair-6394dac00292d71fc9fb",
+  "familyId": "natural-origin",
+  "attempt": 3,
+  "knownIssue": "AESTHETIC_IMAGERY",
+  "assignment": {
+    "left": "degraded",
+    "right": "source"
+  },
+  "requestedModel": "gpt-5.6-sol",
+  "reportedModel": "gpt-5.6-sol",
+  "resolvedModel": "gpt-5.6-sol",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 9153.716,
+  "inputTokens": 4018,
+  "outputTokens": 190,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.02579,
+  "accountedCostUsd": 0.02579,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "12dc63038a36ead573b9a36c2c72d39d5a84ea68df2b82fbc004741eb60a9f59",
+      "byteLength": 892561,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d",
+      "byteLength": 766732,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "left",
+    "findings": [
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CONSISTENCY",
+        "severity": "major"
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_CONTRAST",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CREDIBILITY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CONSISTENCY",
+      "severity": "major",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": false
+}

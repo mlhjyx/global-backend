@@ -1,0 +1,78 @@
+{
+  "runKey": "blind-pair-24e60717a133f7950b26:3",
+  "pairId": "blind-pair-24e60717a133f7950b26",
+  "familyId": "precision-industrial",
+  "attempt": 3,
+  "knownIssue": "AESTHETIC_SPACING",
+  "assignment": {
+    "left": "source",
+    "right": "degraded"
+  },
+  "requestedModel": "gpt-5.6-sol",
+  "reportedModel": "gpt-5.6-sol",
+  "resolvedModel": "gpt-5.6-sol",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 7440.199,
+  "inputTokens": 6017,
+  "outputTokens": 190,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.035785,
+  "accountedCostUsd": 0.035785,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+      "byteLength": 209350,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+      "byteLength": 258276,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "right",
+    "findings": [
+      {
+        "imageNumber": 2,
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "severity": "blocker"
+      },
+      {
+        "imageNumber": 2,
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 2,
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "minor"
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_SPACING",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "minor",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}
