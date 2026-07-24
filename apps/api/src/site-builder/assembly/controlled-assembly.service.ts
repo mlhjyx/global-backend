@@ -69,6 +69,17 @@ export interface ControlledAssemblyResult {
   fallbackUsed: boolean;
 }
 
+export interface DeterministicAssemblyInput {
+  brief: DesignBriefV2;
+  catalog: DesignCatalogV2;
+  copyBundleSet: CopyBundleSetV1;
+  templates: QualifiedComponentTemplateRepository;
+  assets: Record<string, AssetRefV1_1>;
+  assetUrls: Readonly<Record<string, string>>;
+  claimSnapshot: PublishableClaimSnapshot;
+  siteName: string;
+}
+
 export class ControlledAssemblyError extends Error {
   constructor(
     readonly code: "CONTROLLED_ASSEMBLY_INVALID",
@@ -232,6 +243,48 @@ function deterministicSelection(input: {
       },
     ),
   };
+}
+
+/**
+ * Server-owned assembly path used by the quality repair catalog. It has no
+ * model-visible prop surface: a caller can only provide a validated DesignBrief,
+ * and the existing adapters derive the complete SiteSpec deterministically.
+ */
+export function assembleDeterministically(
+  input: DeterministicAssemblyInput,
+): SiteSpecV1_1 {
+  const copySlots = deriveCopySlotDefinitions({
+    brief: input.brief,
+    catalog: input.catalog,
+    templates: input.templates,
+  });
+  const spec = buildSpec({
+    ...input,
+    selection: deterministicSelection({
+      brief: input.brief,
+      catalog: input.catalog,
+      copyKeys: copySlots.map((slot) => slot.key),
+      assetIds: Object.keys(input.assets),
+      claimIds: input.claimSnapshot.items.map((item) => item.claimId),
+    }),
+  });
+  const findings = validateControlledAssembly({
+    spec,
+    brief: input.brief,
+    catalog: input.catalog,
+    claimSnapshot: input.claimSnapshot,
+    copySlots,
+  });
+  if (findings.length > 0) {
+    throw new ControlledAssemblyError(
+      "CONTROLLED_ASSEMBLY_INVALID",
+      findings
+        .map((finding) => `${finding.layer}/${finding.code}:${finding.message}`)
+        .join("; "),
+      [{ taskId: "same-family-safe-fallback", findings }],
+    );
+  }
+  return spec;
 }
 
 function copyBundles(
