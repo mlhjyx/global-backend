@@ -97,6 +97,7 @@ function repairCatalog(): RepairOptionCatalogV1 {
     schemaVersion: REPAIR_OPTION_CATALOG_SCHEMA_VERSION,
     candidateSpecDigest: SPEC_DIGEST,
     designBriefDigest: BRIEF_DIGEST,
+    artifactSetDigest: artifactSet().artifactSetDigest,
     designCatalogDigest: DESIGN_CATALOG_DIGEST,
     familyId: "industrial-authority",
     round: 0 as const,
@@ -230,7 +231,15 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
         overallScore: 84,
         dimensions: dimensions(84),
         unavailableReason: null,
-        findings: [],
+        findings: [
+          {
+            source: "aesthetic",
+            severity: "major",
+            ruleCode: "AESTHETIC_HIERARCHY",
+            target: { locale: "en", pageId: "home", breakpoint: 375 },
+            evidenceRef: { artifactId: "home-en-375" },
+          },
+        ],
       },
     };
     expect(
@@ -238,6 +247,23 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
         validateDesignEvaluationV2(evaluation, artifacts),
       ),
     ).toBe(true);
+  });
+
+  it("rejects an aesthetic failure without screenshot-backed findings", () => {
+    const artifacts = artifactSet();
+    const evaluation: DesignEvaluationV2 = {
+      ...unavailableEvaluation(artifacts),
+      aesthetic: {
+        status: "failed",
+        overallScore: 84,
+        dimensions: dimensions(84),
+        unavailableReason: null,
+        findings: [],
+      },
+    };
+    expect(() =>
+      validateDesignEvaluationV2(evaluation, artifacts),
+    ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
   });
 
   it("accepts a deterministic hard failure only when it is blocker evidence", () => {
@@ -394,6 +420,44 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
         artifacts,
       ),
     ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
+
+    const artifactsWithBreakpointReport = artifactSet({
+      artifacts: [
+        screenshot(375),
+        screenshot(768),
+        screenshot(1440),
+        {
+          artifactId: "axe-home",
+          objectKey: "private/quality/run-1/round-0/axe-home.json",
+          sha256: "6".repeat(64),
+          sizeBytes: 1024,
+          mimeType: "application/json",
+          kind: "axe_report",
+          target: { locale: "en", pageId: "home", breakpoint: 375 },
+        },
+      ],
+    });
+    expect(() =>
+      validateDesignEvaluationV2(
+        {
+          ...unavailableEvaluation(artifactsWithBreakpointReport),
+          deterministic: {
+            status: "failed",
+            hardFailures: [
+              {
+                source: "deterministic",
+                severity: "blocker",
+                ruleCode: "AXE_CRITICAL",
+                target: { locale: "en", pageId: "home" },
+                evidenceRef: { artifactId: "axe-home" },
+              },
+            ],
+            findings: [],
+          },
+        },
+        artifactsWithBreakpointReport,
+      ),
+    ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
   });
 
   it("binds each finding to evidence from the same locale, page and breakpoint", () => {
@@ -541,10 +605,35 @@ describe("M1-f closed repair selection", () => {
       validateRepairOptionSelection(
         { optionId: "repair-hero-variant" },
         catalog,
+        catalog.artifactSetDigest,
       ),
     ).toEqual({ optionId: "repair-hero-variant" });
     expect(() =>
-      validateRepairOptionSelection({ optionId: "not-in-catalog" }, catalog),
+      validateRepairOptionSelection(
+        { optionId: "not-in-catalog" },
+        catalog,
+        catalog.artifactSetDigest,
+      ),
+    ).toThrowError("REPAIR_OPTION_SELECTION_INVALID");
+  });
+
+  it("rejects a repair catalog from a stale evaluation artifact set", () => {
+    const currentArtifactSetDigest = repairCatalog().artifactSetDigest;
+    const staleDraft = {
+      ...repairCatalog(),
+      artifactSetDigest: "8".repeat(64),
+    };
+    const { catalogDigest: _catalogDigest, ...digestInput } = staleDraft;
+    const staleCatalog = {
+      ...staleDraft,
+      catalogDigest: repairOptionCatalogDigest(digestInput),
+    };
+    expect(() =>
+      validateRepairOptionSelection(
+        { optionId: "repair-hero-variant" },
+        staleCatalog,
+        currentArtifactSetDigest,
+      ),
     ).toThrowError("REPAIR_OPTION_SELECTION_INVALID");
   });
 
@@ -562,6 +651,7 @@ describe("M1-f closed repair selection", () => {
       validateRepairOptionSelection(
         { optionId: "repair-hero-variant", [key]: forbidden },
         catalog,
+        catalog.artifactSetDigest,
       ),
     ).toThrowError("REPAIR_OPTION_SELECTION_INVALID");
   });
@@ -585,6 +675,12 @@ describe("M1-f closed repair selection", () => {
       validateRepairOptionCatalog({
         ...catalog,
         candidateSpecDigest: "9".repeat(64),
+      }),
+    ).toThrowError("REPAIR_OPTION_CATALOG_INVALID");
+    expect(() =>
+      validateRepairOptionCatalog({
+        ...catalog,
+        artifactSetDigest: "8".repeat(64),
       }),
     ).toThrowError("REPAIR_OPTION_CATALOG_INVALID");
     expect(() =>

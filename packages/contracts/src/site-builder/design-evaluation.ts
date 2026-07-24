@@ -250,6 +250,7 @@ export interface RepairOptionCatalogV1 {
   catalogDigest: string;
   candidateSpecDigest: string;
   designBriefDigest: string;
+  artifactSetDigest: string;
   designCatalogDigest: string;
   familyId: string;
   round: 0 | 1 | 2;
@@ -551,6 +552,7 @@ export function validateDesignEvaluationV2(
       !hasAestheticBlocker &&
       !hasAestheticDimensionHardFailure) ||
       (aesthetic.status === "failed" &&
+        (aestheticFindings?.length ?? 0) > 0 &&
         (aesthetic.overallScore < 85 ||
           hasAestheticBlocker === true ||
           hasAestheticDimensionHardFailure)));
@@ -625,11 +627,7 @@ export function validateDesignEvaluationV2(
         !sourceAcceptsKind ||
         artifact.target.locale !== finding.target.locale ||
         artifact.target.pageId !== finding.target.pageId ||
-        (artifact.kind === "screenshot"
-          ? finding.target.breakpoint === undefined ||
-            artifact.target.breakpoint !== finding.target.breakpoint
-          : finding.target.breakpoint !== undefined &&
-            artifact.target.breakpoint !== finding.target.breakpoint)
+        artifact.target.breakpoint !== finding.target.breakpoint
       );
     })
   ) {
@@ -965,6 +963,7 @@ export function validateRepairOptionCatalog(
       "catalogDigest",
       "candidateSpecDigest",
       "designBriefDigest",
+      "artifactSetDigest",
       "designCatalogDigest",
       "familyId",
       "round",
@@ -974,6 +973,7 @@ export function validateRepairOptionCatalog(
     !isSha256(catalog.catalogDigest) ||
     !isSha256(catalog.candidateSpecDigest) ||
     !isSha256(catalog.designBriefDigest) ||
+    !isSha256(catalog.artifactSetDigest) ||
     !isSha256(catalog.designCatalogDigest) ||
     !isBoundedToken(catalog.familyId) ||
     !isRepairRound(catalog.round) ||
@@ -992,6 +992,7 @@ export function validateRepairOptionCatalog(
     schemaVersion: REPAIR_OPTION_CATALOG_SCHEMA_VERSION,
     candidateSpecDigest: String(catalog.candidateSpecDigest),
     designBriefDigest: String(catalog.designBriefDigest),
+    artifactSetDigest: String(catalog.artifactSetDigest),
     designCatalogDigest: String(catalog.designCatalogDigest),
     familyId: String(catalog.familyId),
     round: catalog.round as 0 | 1 | 2,
@@ -1011,10 +1012,13 @@ export function validateRepairOptionCatalog(
 export function validateRepairOptionSelection(
   value: unknown,
   catalog: RepairOptionCatalogV1,
+  expectedArtifactSetDigest: string,
 ): RepairOptionSelectionV1 {
   const validatedCatalog = validateRepairOptionCatalog(catalog);
   const selection = isRecord(value) ? value : null;
   if (
+    !isSha256(expectedArtifactSetDigest) ||
+    validatedCatalog.artifactSetDigest !== expectedArtifactSetDigest ||
     !selection ||
     !hasOnlyKeys(selection, ["optionId"]) ||
     !isBoundedToken(selection.optionId) ||
