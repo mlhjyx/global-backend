@@ -92,6 +92,7 @@ export interface VisionReviewImage {
   /** Required for runtime screenshots; forbidden for immutable eval fixtures. */
   workspaceId?: string;
   artifactId: string;
+  sha256: string;
   mimeType: 'image/png';
   bytes: Uint8Array;
   target: {

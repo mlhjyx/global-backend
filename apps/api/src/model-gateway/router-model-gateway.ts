@@ -3,7 +3,10 @@ import { ModelGateway } from './model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
 import { AiTraceSink } from './ai-trace.sink';
-import { checkAgainstSchema } from './schema-validate';
+import {
+  assertModelOutputSchemaCompiles,
+  checkAgainstSchema,
+} from './schema-validate';
 import {
   BudgetLedger,
   BudgetExceededError,
@@ -216,6 +219,7 @@ export class RouterModelGateway extends ModelGateway {
     input: ReviewVisionInput,
     ctx: AiContext,
   ): Promise<ModelResult<T>> {
+    assertModelOutputSchemaCompiles(input.schema);
     if (
       input.images.some(
         (image) =>

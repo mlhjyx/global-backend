@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ModelProvider } from '../model-provider';
 import {
   ProviderHttpError,
@@ -38,6 +39,11 @@ export interface OpenAICompatConfig {
    * MODEL-1 must still probe the live endpoint before route promotion.
    */
   visionModelTransports?: Readonly<Record<string, GatewayVisionTransport>>;
+  /**
+   * Immutable repository fixture identity -> SHA-256. Runtime providers omit
+   * this; PR6 supplies the reviewed fixture catalog to its evaluation client.
+   */
+  visionEvalFixtureDigests?: Readonly<Record<string, string>>;
 }
 
 /** 剥 markdown 围栏（部分模型在 json_object 模式下仍偶发 ```json…``` 包裹结构化输出）。 */
@@ -74,8 +80,12 @@ const MAX_VISION_IMAGES = 3;
 const MAX_VISION_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_VISION_TOTAL_BYTES = 6 * 1024 * 1024;
 const BOUNDED_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
 
-function assertVisionReviewInput(input: ReviewVisionInput): void {
+function assertVisionReviewInput(
+  input: ReviewVisionInput,
+  evalFixtureDigests: Readonly<Record<string, string>>,
+): void {
   let schemaBytes = Number.POSITIVE_INFINITY;
   try {
     schemaBytes = JSON.stringify(input.schema).length;
@@ -140,6 +150,7 @@ function assertVisionReviewInput(input: ReviewVisionInput): void {
             'materialClass',
             'workspaceId',
             'artifactId',
+            'sha256',
             'mimeType',
             'bytes',
             'target',
@@ -154,6 +165,7 @@ function assertVisionReviewInput(input: ReviewVisionInput): void {
         : image.materialClass !== 'workspace_site_screenshot') ||
       !BOUNDED_TOKEN.test(image.artifactId) ||
       artifactIds.has(image.artifactId) ||
+      !SHA256.test(image.sha256) ||
       image.mimeType !== 'image/png' ||
       !(image.bytes instanceof Uint8Array) ||
       image.bytes.byteLength < PNG_SIGNATURE.length ||
@@ -168,6 +180,18 @@ function assertVisionReviewInput(input: ReviewVisionInput): void {
       ![375, 768, 1440].includes(image.target.breakpoint)
     ) {
       throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    const actualDigest = createHash('sha256')
+      .update(image.bytes)
+      .digest('hex');
+    if (actualDigest !== image.sha256) {
+      throw new Error('VISION_REVIEW_IMAGE_DIGEST_MISMATCH');
+    }
+    if (
+      image.materialClass === 'model_eval_fixture' &&
+      evalFixtureDigests[image.artifactId] !== actualDigest
+    ) {
+      throw new Error('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
     }
     artifactIds.add(image.artifactId);
     totalBytes += image.bytes.byteLength;
@@ -272,7 +296,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
   async reviewVision<T = unknown>(
     input: ReviewVisionInput,
   ): Promise<ModelResult<T>> {
-    assertVisionReviewInput(input);
+    assertVisionReviewInput(
+      input,
+      this.cfg.visionEvalFixtureDigests ?? {},
+    );
     const transport = this.cfg.visionModelTransports?.[input.model];
     if (!transport) {
       throw new Error(
@@ -457,16 +484,23 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
     const finishReason = json.choices?.[0]?.finish_reason;
     const raw = json.choices?.[0]?.message?.content ?? '';
-    if (!raw.trim()) {
+    if (finishReason === 'length') {
       throw new ProviderOutputError(
-        `VISION_REVIEW_EMPTY_OUTPUT: finish_reason=${finishReason ?? 'unknown'}`,
+        'VISION_REVIEW_OUTPUT_TRUNCATED',
         usage,
         { provider: this.id, ...provenance },
       );
     }
-    if (finishReason === 'length') {
+    if (finishReason !== 'stop') {
       throw new ProviderOutputError(
-        'VISION_REVIEW_OUTPUT_TRUNCATED',
+        `VISION_REVIEW_FINISH_REASON_INVALID: ${finishReason ?? 'missing'}`,
+        usage,
+        { provider: this.id, ...provenance },
+      );
+    }
+    if (!raw.trim()) {
+      throw new ProviderOutputError(
+        'VISION_REVIEW_EMPTY_OUTPUT: finish_reason=stop',
         usage,
         { provider: this.id, ...provenance },
       );

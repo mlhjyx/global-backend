@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAICompatibleProvider, stripJsonFence } from './openai-compatible.provider';
 import {
@@ -52,6 +53,8 @@ const png = (suffix = 0): Uint8Array =>
   Uint8Array.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, suffix,
   ]);
+const sha256 = (bytes: Uint8Array): string =>
+  createHash('sha256').update(bytes).digest('hex');
 
 const visionInput = () => ({
   task: 'site_builder.aesthetic_review.eval',
@@ -66,13 +69,17 @@ const visionInput = () => ({
   },
   maxTokens: 1000,
   maxCostCents: 20,
-  images: ([375, 768, 1440] as const).map((breakpoint, index) => ({
-    materialClass: 'model_eval_fixture' as const,
-    artifactId: `case-home-${breakpoint}`,
-    mimeType: 'image/png' as const,
-    bytes: png(index),
-    target: { locale: 'en', pageId: 'home', breakpoint },
-  })),
+  images: ([375, 768, 1440] as const).map((breakpoint, index) => {
+    const bytes = png(index);
+    return {
+      materialClass: 'model_eval_fixture' as const,
+      artifactId: `case-home-${breakpoint}`,
+      sha256: sha256(bytes),
+      mimeType: 'image/png' as const,
+      bytes,
+      target: { locale: 'en', pageId: 'home', breakpoint },
+    };
+  }),
 });
 
 describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
@@ -395,6 +402,12 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       visionModelTransports: {
         'gemini-3.5-flash': 'openai-chat-completions',
       },
+      visionEvalFixtureDigests: Object.fromEntries(
+        visionInput().images.map((image) => [
+          image.artifactId,
+          image.sha256,
+        ]),
+      ),
     });
 
   it('sends at most three controlled PNGs as local data payloads and proves exact model provenance', async () => {
@@ -470,6 +483,24 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('requires every eval fixture ID and digest to exist in the immutable provider catalog', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const providerWithoutCatalog = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'default-model',
+      visionModelTransports: {
+        'gemini-3.5-flash': 'openai-chat-completions',
+      },
+    });
+    await expect(
+      providerWithoutCatalog.reviewVision(visionInput()),
+    ).rejects.toThrow('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects unregistered model transports before any provider call', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -493,6 +524,22 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     await expect(
       visionProvider().reviewVision(visionInput()),
     ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
+
+  it('rejects every non-stop finish reason even when the body contains valid JSON', async () => {
+    mockChatResponse({
+      model: 'gemini-3.5-flash',
+      choices: [
+        {
+          message: { content: '{"ok":true}' },
+          finish_reason: 'content_filter',
+        },
+      ],
+      usage: { prompt_tokens: 12, completion_tokens: 4 },
+    });
+    await expect(
+      visionProvider().reviewVision(visionInput()),
+    ).rejects.toThrow('VISION_REVIEW_FINISH_REASON_INVALID');
   });
 
   it('preserves HTTP status for capability-probe unavailable mapping', async () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
@@ -50,6 +51,13 @@ const visionInput = (): ReviewVisionInput => ({
       bytes: Uint8Array.from([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
       ]),
+      sha256: createHash('sha256')
+        .update(
+          Uint8Array.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ]),
+        )
+        .digest('hex'),
       target: { locale: 'en', pageId: 'home', breakpoint: 375 },
     },
   ],
@@ -325,6 +333,23 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
         workspaceId: 'workspace-a',
       }),
     ).rejects.toThrow('VISION_REVIEW_WORKSPACE_MISMATCH');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('compiles the vision schema before routing and fails closed on an invalid schema', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        {
+          ...visionInput(),
+          schema: { type: 'not-a-json-schema-type' },
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
     expect(provider.reviewVision).not.toHaveBeenCalled();
   });
 });
