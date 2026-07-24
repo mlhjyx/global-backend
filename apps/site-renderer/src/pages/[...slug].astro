@@ -23,6 +23,7 @@ const pagePathById = Object.fromEntries(spec.pages.map((candidate) => [candidate
   locale={locale}
   t={t}
   pageId={pageId}
+  pagePath={page.path}
   title={t(page.seo.titleKey)}
   description={t(page.seo.descriptionKey)}
 >

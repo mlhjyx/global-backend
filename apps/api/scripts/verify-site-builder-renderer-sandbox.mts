@@ -22,6 +22,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '../../..');
 const fixturePath = path.join(repoRoot, 'apps/site-renderer/fixtures/demo-spec.json');
 const outDir = await mkdtemp(path.join(tmpdir(), 'global-renderer-verify-'));
+const siteOrigin = 'https://preview.example.test';
 
 process.env.DATABASE_URL = 'must-not-reach-renderer';
 process.env.S3_SECRET_KEY = 'must-not-reach-renderer';
@@ -34,8 +35,9 @@ try {
     specPath: fixturePath,
     outDir,
     basePath: '/preview/r1-safety/',
+    siteOrigin,
   });
-  check(Object.keys(env).length === 7, 'Renderer 环境固定为 7 个显式变量');
+  check(Object.keys(env).length === 8, 'Renderer 环境固定为 8 个显式变量');
   check(!('DATABASE_URL' in env), '数据库连接串未传入 Renderer');
   check(!('S3_SECRET_KEY' in env), '对象存储密钥未传入 Renderer');
   check(!('NEW_API_KEY' in env), '模型网关密钥未传入 Renderer');
@@ -47,6 +49,7 @@ try {
   await buildSiteSpecWithTemporaryFile(spec, {
     outDir,
     basePath: '/preview/r1-safety/',
+    siteOrigin,
   });
 
   for (const relative of ['index.html', 'products/index.html', 'contact/index.html']) {
@@ -55,6 +58,10 @@ try {
   check(true, '首页、产品页、联系页均由真 Astro 生成');
   const index = await readFile(path.join(outDir, 'index.html'), 'utf8');
   check(index.includes('/preview/r1-safety/_astro/'), '静态资产路径使用受控 BASE_PATH');
+  check(
+    index.includes(`${siteOrigin}/preview/r1-safety/`),
+    'SEO 元数据使用受控平台 preview origin',
+  );
 
   console.log('\n🎉 R1 Renderer 隔离真机探针全绿。');
 } finally {

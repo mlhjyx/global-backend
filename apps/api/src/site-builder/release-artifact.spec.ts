@@ -425,6 +425,10 @@ describe('R1 deterministic release artifact', () => {
     await mkdir(path.join(root, 'assets'));
     await writeFile(path.join(root, 'z.html'), '<h1>Z</h1>');
     await writeFile(path.join(root, 'assets', 'app.css'), 'body{}');
+    await writeFile(
+      path.join(root, '.site-builder-render-output.json'),
+      '{"private":"producer binding"}',
+    );
 
     const first = await buildReleaseArtifact({
       ...identity,
@@ -472,6 +476,25 @@ describe('R1 deterministic release artifact', () => {
         storedSpecVersion: '1.0.0',
       }),
     ).rejects.toThrow('SITE_RELEASE_SYMLINK_FORBIDDEN');
+  });
+
+  it('rejects an incomplete private renderer-manifest write', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-release-'));
+    roots.push(root);
+    await writeFile(path.join(root, 'index.html'), 'safe');
+    await writeFile(
+      path.join(root, '.site-builder-render-output.json.tmp'),
+      'incomplete',
+    );
+
+    await expect(
+      buildReleaseArtifact({
+        ...identity,
+        root,
+        spec: spec(),
+        storedSpecVersion: '1.0.0',
+      }),
+    ).rejects.toThrow('SITE_RELEASE_RENDER_MANIFEST_INCOMPLETE');
   });
 
   it('makes ACK-loss retries idempotent and verifies every stored digest', async () => {

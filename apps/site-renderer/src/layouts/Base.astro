@@ -1,6 +1,12 @@
 ---
 import { themeToCssVars } from '../lib/themes';
-import { localePageHref, siteLocaleDirection, safeOptionalSlot } from '../lib/spec';
+import {
+  localePageHref,
+  localePagePathHref,
+  absoluteSiteHref,
+  siteLocaleDirection,
+  safeOptionalSlot,
+} from '../lib/spec';
 import '@fontsource/noto-sans/latin-400.css';
 import '@fontsource/noto-sans/latin-600.css';
 import '@fontsource/noto-sans/latin-700.css';
@@ -36,8 +42,9 @@ interface Props {
   description: string;
   t: (key: string) => string;
   pageId?: string;
+  pagePath: string;
 }
-const { spec, locale, title, description, t, pageId } = Astro.props;
+const { spec, locale, title, description, t, pageId, pagePath } = Astro.props;
 const vars = themeToCssVars(spec.site.theme.preset, spec.site.theme.tokenOverrides ?? {});
 const fontFamily = locale === 'ar' ? 'Noto Sans Arabic' : 'Inter Variable';
 const styleVars = [
@@ -62,6 +69,21 @@ const whatsapp = safe('contact.whatsapp');
 const email = safe('contact.email');
 const brandTagline = safe('brand.tagline');
 const bookLabel = safe('nav.book');
+const canonicalHref = absoluteSiteHref(
+  localePagePathHref(pagePath, locale, spec.site.defaultLocale),
+);
+const alternates = spec.site.locales.map((candidateLocale) => ({
+  locale: candidateLocale,
+  href: absoluteSiteHref(
+    localePagePathHref(pagePath, candidateLocale, spec.site.defaultLocale),
+  ),
+}));
+const structuredData = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  url: canonicalHref,
+  inLanguage: locale,
+});
 ---
 
 <!doctype html>
@@ -71,8 +93,13 @@ const bookLabel = safe('nav.book');
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- 预览产物默认 noindex；发布链路（M2）按站点开关放开 -->
     <meta name="robots" content="noindex" />
+    <link rel="canonical" href={canonicalHref} />
+    {alternates.map((alternate) => (
+      <link rel="alternate" hreflang={alternate.locale} href={alternate.href} />
+    ))}
     <title>{title}</title>
     <meta name="description" content={description} />
+    <script type="application/ld+json" set:html={structuredData}></script>
   </head>
   <body style={styleVars} data-page={pageId} class:list={[{ 'is-home': isHome }]}>
     <header class="site-header" data-transparent-over-hero={isHome ? 'true' : 'false'}>
