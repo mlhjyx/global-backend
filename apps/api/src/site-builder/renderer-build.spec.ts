@@ -142,6 +142,21 @@ describe("renderer output candidate binding", () => {
         }),
       ).resolves.toEqual(manifest);
 
+      await writeFile(
+        path.join(dir, ".site-builder-render-output.json.tmp"),
+        "incomplete",
+      );
+      await expect(
+        assertRendererOutputMatches({
+          root: dir,
+          candidateSpecDigest,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+          treeDigest: manifest.treeDigest,
+        }),
+      ).rejects.toThrow("RENDERER_OUTPUT_TREE_MISMATCH");
+      await rm(path.join(dir, ".site-builder-render-output.json.tmp"));
+
       await writeFile(path.join(dir, "index.html"), "<h1>stale output</h1>");
       await expect(
         assertRendererOutputMatches({
@@ -152,6 +167,20 @@ describe("renderer output candidate binding", () => {
           treeDigest: manifest.treeDigest,
         }),
       ).rejects.toThrow("RENDERER_OUTPUT_TREE_MISMATCH");
+
+      await writeFile(
+        path.join(dir, ".site-builder-render-output.json"),
+        Buffer.alloc(4097),
+      );
+      await expect(
+        assertRendererOutputMatches({
+          root: dir,
+          candidateSpecDigest,
+          basePath: "/preview/acme/",
+          siteOrigin: SITE_ORIGIN,
+          treeDigest: manifest.treeDigest,
+        }),
+      ).rejects.toThrow("RENDERER_OUTPUT_MANIFEST_INVALID");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

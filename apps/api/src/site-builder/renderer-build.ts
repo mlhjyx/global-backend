@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import {
   mkdtemp,
   open,
+  opendir,
   readFile,
   readdir,
   rename,
@@ -23,6 +24,8 @@ const MAX_RENDER_FILES = 4096;
 const MAX_RENDER_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_RENDER_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_RENDER_DEPTH = 32;
+const MAX_RENDER_ENTRIES = 8192;
+const MAX_RENDER_MANIFEST_BYTES = 4096;
 const SHA256 = /^[a-f0-9]{64}$/;
 export const RENDERER_OUTPUT_MANIFEST_FILE =
   ".site-builder-render-output.json" as const;
@@ -83,34 +86,37 @@ async function collectRendererOutputTree(
 ): Promise<RendererOutputTree> {
   const files: Array<{ path: string; size: number; sha256: string }> = [];
   let totalBytes = 0;
+  let entryCount = 0;
 
   const visit = async (directory: string, depth: number): Promise<void> => {
     if (depth > MAX_RENDER_DEPTH) {
       throw new Error("RENDERER_OUTPUT_DEPTH_EXCEEDED");
     }
-    const entries = (await readdir(directory, { withFileTypes: true })).sort(
-      (left, right) => left.name.localeCompare(right.name),
-    );
-    for (const entry of entries) {
+    const entries = await opendir(directory);
+    for await (const entry of entries) {
       const absolute = path.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error("RENDERER_OUTPUT_SYMLINK_FORBIDDEN");
+      }
+      const relative = path
+        .relative(root, absolute)
+        .split(path.sep)
+        .join("/");
+      if (relative === RENDERER_OUTPUT_MANIFEST_FILE) {
+        if (!entry.isFile()) {
+          throw new Error("RENDERER_OUTPUT_MANIFEST_INVALID");
+        }
+        continue;
+      }
+      entryCount += 1;
+      if (entryCount > MAX_RENDER_ENTRIES) {
+        throw new Error("RENDERER_OUTPUT_ENTRY_COUNT_EXCEEDED");
       }
       if (entry.isDirectory()) {
         await visit(absolute, depth + 1);
         continue;
       }
       if (!entry.isFile()) throw new Error("RENDERER_OUTPUT_NON_REGULAR_FILE");
-      const relative = path
-        .relative(root, absolute)
-        .split(path.sep)
-        .join("/");
-      if (
-        relative === RENDERER_OUTPUT_MANIFEST_FILE ||
-        relative === `${RENDERER_OUTPUT_MANIFEST_FILE}.tmp`
-      ) {
-        continue;
-      }
       if (
         !relative ||
         relative.startsWith("../") ||
@@ -233,8 +239,26 @@ export async function assertRendererOutputMatches(input: {
   treeDigest: string;
 }): Promise<RendererOutputManifestV1> {
   const manifestPath = path.join(input.root, RENDERER_OUTPUT_MANIFEST_FILE);
-  const bytes = await readFile(manifestPath);
-  if (bytes.length > 4096) throw new Error("RENDERER_OUTPUT_MANIFEST_INVALID");
+  const handle = await open(
+    manifestPath,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  let bytes: Buffer;
+  try {
+    const manifestStat = await handle.stat();
+    if (
+      !manifestStat.isFile() ||
+      manifestStat.size > MAX_RENDER_MANIFEST_BYTES
+    ) {
+      throw new Error("RENDERER_OUTPUT_MANIFEST_INVALID");
+    }
+    bytes = await handle.readFile();
+    if (bytes.length !== manifestStat.size) {
+      throw new Error("RENDERER_OUTPUT_MANIFEST_INVALID");
+    }
+  } finally {
+    await handle.close();
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(bytes.toString("utf8"));

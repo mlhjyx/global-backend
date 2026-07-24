@@ -5,6 +5,7 @@ import { loadQualifiedComponentTemplates } from "../assembly/qualified-component
 import { STATIC_DESIGN_CATALOG_V2 } from "../design/catalog";
 import { buildM1ebGoldenFixtures } from "../design/m1eb-golden";
 import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
+import { releaseSpecDigest } from "../release-artifact";
 import { DeterministicQualityService } from "./deterministic-quality.service";
 import type { StorageQualityArtifactSink } from "./quality-artifact-sink";
 
@@ -33,29 +34,39 @@ describe("DeterministicQualityService replay fence", () => {
     const service = new DeterministicQualityService({
       loadCheckpoint,
     } as unknown as StorageQualityArtifactSink);
+    const input = {
+      spec: fixture.spec,
+      buildRoot: "/not-reached",
+      basePath: "/preview/acme/",
+      siteOrigin: "https://preview.example.test",
+      rendererOutputDigest: "d".repeat(64),
+      candidateSpecDigest: "c".repeat(64),
+      designBriefDigest: fixture.designBrief.digest,
+      round: 0 as const,
+      artifactPrefix: "site/attempt/quality/round-0",
+      validation: {
+        designBrief: fixture.designBrief,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+        claimSnapshot,
+        copySlots: deriveCopySlotDefinitions({
+          brief: fixture.designBrief,
+          catalog: STATIC_DESIGN_CATALOG_V2,
+          templates: loadQualifiedComponentTemplates(repositoryRoot),
+        }),
+      },
+    };
+    await expect(service.evaluate(input)).rejects.toThrow(
+      "candidateSpecDigest mismatch",
+    );
+    expect(loadCheckpoint).not.toHaveBeenCalled();
+
+    loadCheckpoint.mockResolvedValue({});
     await expect(
       service.evaluate({
-        spec: fixture.spec,
-        buildRoot: "/not-reached",
-        basePath: "/preview/acme/",
-        siteOrigin: "https://preview.example.test",
-        rendererOutputDigest: "d".repeat(64),
-        candidateSpecDigest: "c".repeat(64),
-        designBriefDigest: fixture.designBrief.digest,
-        round: 0,
-        artifactPrefix: "site/attempt/quality/round-0",
-        validation: {
-          designBrief: fixture.designBrief,
-          catalog: STATIC_DESIGN_CATALOG_V2,
-          claimSnapshot,
-          copySlots: deriveCopySlotDefinitions({
-            brief: fixture.designBrief,
-            catalog: STATIC_DESIGN_CATALOG_V2,
-            templates: loadQualifiedComponentTemplates(repositoryRoot),
-          }),
-        },
+        ...input,
+        candidateSpecDigest: releaseSpecDigest(fixture.spec),
       }),
-    ).rejects.toThrow("candidateSpecDigest mismatch");
-    expect(loadCheckpoint).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(loadCheckpoint).toHaveBeenCalledTimes(1);
   });
 });

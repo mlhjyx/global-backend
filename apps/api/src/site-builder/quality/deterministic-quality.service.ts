@@ -4,6 +4,7 @@ import {
   collectBrowserQualityFacts,
   type BrowserQualityRunnerInput,
 } from "./browser-quality-runner";
+import { assertRendererOutputMatches } from "../renderer-build";
 import {
   evaluateDeterministicQuality,
   composeUnavailableAestheticEvaluation,
@@ -44,6 +45,13 @@ export class DeterministicQualityService {
       input.signal,
     );
     if (existing) {
+      await assertRendererOutputMatches({
+        root: input.buildRoot,
+        candidateSpecDigest: identity.candidateSpecDigest,
+        basePath: identity.basePath,
+        siteOrigin: identity.siteOrigin,
+        treeDigest: identity.rendererOutputDigest,
+      });
       composeUnavailableAestheticEvaluation(
         {
           spec: input.spec,

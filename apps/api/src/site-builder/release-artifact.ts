@@ -1063,6 +1063,9 @@ async function collectFiles(
       // P4 verifies this private producer binding before materialization; it is
       // never part of the public static release file set.
       if (relativePath === ".site-builder-render-output.json") continue;
+      if (relativePath === ".site-builder-render-output.json.tmp") {
+        throw new Error("SITE_RELEASE_RENDER_MANIFEST_INCOMPLETE");
+      }
       if (
         relativePath.length === 0 ||
         relativePath.startsWith("../") ||
