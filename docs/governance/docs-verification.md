@@ -36,7 +36,7 @@ pnpm docs:verify
 
 ## 3. 受控范围
 
-受控范围包括：文档门户、治理 Registry、全局前端规范、设计规范、OSS 总账和仍保留的模板；五份权威页与指定活跃 Site Builder 专题页也在机器清单中，必须有单 H1、稳定 Document ID、`CURRENT` 生命周期和“当前事实来源”元数据。
+受控范围包括：文档门户、治理 Registry、AI 辅助开发指南、全局前端规范、设计规范、OSS 总账和仍保留的模板；五份权威页与指定活跃 Site Builder 专题页也在机器清单中，必须有单 H1、稳定 Document ID、`CURRENT` 生命周期和“当前事实来源”元数据。
 
 机器政策明确区分三类文件：
 

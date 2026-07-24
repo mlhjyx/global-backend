@@ -28,7 +28,7 @@
 | 设计/开发独立站管理 | [Capability Pack](frontend/modules/independent-site-management/README.md) | 当前唯一达到详细规格深度的 SaaS 产品域 |
 | 实现 Site Builder 后端 | [Site Builder 决策入口](site-builder/00-decisions-and-coordination.md) | PRD、架构、SiteSpec、API、测试与施工顺序 |
 | 查询稳定 ID、状态与责任 | [治理入口](governance/README.md) | Capability、Object、Scenario、Conflict 与追踪关系 |
-| 查询 OSS/外部能力决定 | [OSS / 外部能力注册表](backend/oss-registry.md) | 31 项采用决定、许可边界、Adapter/SoR、Owner 与退出门 |
+| 查询 OSS/外部能力决定 | [OSS / 外部能力注册表](backend/oss-registry.md) | 32 项采用决定、许可边界、Adapter/SoR、Owner 与退出门 |
 | 运行和维护开发环境 | [后端运行文档](backend/compose-project-migration.md) | Compose 迁移、Worktree、CI 及现役后端专题 |
 | 用自然语言需求与 Codex 协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界 |
 | 核验文档一致性 | [文档自动校验](governance/docs-verification.md) | 运行 `pnpm docs:verify` |
