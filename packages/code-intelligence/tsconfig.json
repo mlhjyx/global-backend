@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts", "dynamic-mechanisms.json"],
+  "exclude": ["node_modules", "dist", "src/**/*.spec.ts"]
+}

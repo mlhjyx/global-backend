@@ -58,6 +58,12 @@ Temporal 固定 DAG → Brand/Asset → DesignBrief → CopyBundle → 受控 As
 - Temporal patch `site-builder-m1f-quality-loop-v1` 位于原 P3 `assembleAndBuild` 之前；旧 history 保持既有 Activity 命令序列，新 history 只依赖已记录 Activity 结果分支。Release 已 materialize 但 pointer CAS 失败时保留 ready/inactive Release 供幂等重试或 GC；失败候选临时质量对象由 compensation 有界清理。Gemini task-shaped MODEL-1 因超时为 `unavailable`、未晋级，确定性通过只可记为 `passed_deterministic_aesthetic_unavailable`。当前关键路径为 M1-g 阶段收口；M1-f 仍不代表公网发布或生产部署。
 - 🔴 **抓取 egress as-built**：Compose 已移除 broad allow-internal；Crawl4AI 固定不可变镜像 digest，保留 seed global-unicast 守卫和浏览器 pinning proxy。Ubuntu fake-IP 仅在系统答案全部位于 `198.18.0.0/15` 时经固定 Cloudflare DoH 回退；private/loopback/metadata/保留或混合答案 fail-closed。API 的 Crawl/robots/`http.get` 在每一跳解析、校验并钉扎连接，限制 redirect、超时、响应大小且跨域剥离凭证。公网与 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 真机矩阵已全绿；loopback 端口绑定仍保留为 defense-in-depth。
 
+## 1B. 开发认知层（非产品运行时）
+
+仓库内 `@global/code-intelligence` 提供只读 ContractGraph CLI。它从业务 Registry、TypeScript/NestJS、Temporal、Outbox、Prisma/migration/RLS、Astro、pnpm/tsconfig、Compose/systemd 与 GitHub Actions 确定性生成 `.code-intelligence/` 派生图；每份结果绑定 main 工作区、当前 worktree、branch、commit、commit time 和全源 source hash。查询发现 worktree 或哈希不一致时 fail-closed，CI 以双构建字节等价和 `UNCLAIMED_DYNAMIC_MECHANISM` 错误门防止动态机制静默逃逸。
+
+该层不进入 API、worker、数据库或生产部署，不索引 Secret/`.env`，派生目录被 Git 忽略且可随时重建。静态图只能提出影响候选，不能证明运行时 DI、字符串分派、外部消费者或数据库行为真实发生；完整边界与使用顺序见 [ContractGraph 使用与边界](../ai-development/code-intelligence.md)。
+
 ## 2. Bounded Contexts（9 个）
 
 | Context | 核心对象 | 数据归属 |

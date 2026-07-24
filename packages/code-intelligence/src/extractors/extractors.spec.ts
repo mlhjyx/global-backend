@@ -1,0 +1,293 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { extractAstro } from "./astro";
+import { extractAiAndTools } from "./ai-tools";
+import { extractGovernance } from "./governance";
+import { extractPrisma } from "./prisma";
+import { extractTypeScript } from "./typescript";
+import { GraphBuilder } from "../graph";
+import { EvidenceRefV1 } from "../schema";
+
+const EVIDENCE: EvidenceRefV1 = {
+  schemaVersion: "evidence-ref/v1",
+  repositoryRoot: "/repo",
+  worktreePath: "/repo",
+  branch: "main",
+  commit: "a".repeat(40),
+  commitTime: "2026-07-25T00:00:00Z",
+  dirty: false,
+  sourceHash: "b".repeat(64),
+};
+
+async function fixture(): Promise<string> {
+  return mkdtemp(path.join(os.tmpdir(), "contract-graph-test-"));
+}
+
+test("governance extraction separates responsibility role from real assignee", async () => {
+  const root = await fixture();
+  try {
+    await mkdir(path.join(root, "docs", "governance"), { recursive: true });
+    await writeFile(
+      path.join(root, "docs", "governance", "capability-register.md"),
+      [
+        "| Capability ID | Parent | 用户结果 | Pages | Owner |",
+        "|---|---|---|---|---|",
+        "| `CAP-SITE-X-001` | `CAP-SITE-001` | 完成目标 | `PAGE-FE-001` | `OWN-PRODUCT` |",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "docs", "governance", "terminology-and-status.md"),
+      [
+        "| Owner ID | Role | Status |",
+        "|---|---|---|",
+        "| `OWN-PRODUCT` | 产品负责人 | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` |",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    await extractGovernance(builder, root);
+    const graph = builder.finalize(EVIDENCE);
+    const capability = graph.nodes.find(
+      (node) => node.id === "governance:CAP-SITE-X-001",
+    );
+    const owner = graph.nodes.find(
+      (node) => node.id === "governance:OWN-PRODUCT",
+    );
+    assert.equal(capability?.attributes.userOutcome, "完成目标");
+    assert.equal(owner?.attributes.assignee, "UNASSIGNED");
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "owns" &&
+          edge.from === owner?.id &&
+          edge.to === capability?.id,
+      ),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, and data access", async () => {
+  const root = await fixture();
+  try {
+    await mkdir(
+      path.join(root, "packages", "db", "prisma", "migrations", "001_init"),
+      {
+        recursive: true,
+      },
+    );
+    await mkdir(path.join(root, "apps", "api", "src", "temporal"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, "packages", "db", "prisma", "schema.prisma"),
+      [
+        'datasource db { provider = "postgresql" url = env("DATABASE_URL") }',
+        "model Site {",
+        "  id String @id",
+        '  @@map("site")',
+        "}",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(
+        root,
+        "packages",
+        "db",
+        "prisma",
+        "migrations",
+        "001_init",
+        "migration.sql",
+      ),
+      'CREATE TABLE "site" ("id" text primary key);',
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "temporal", "workflows.ts"),
+      "export { siteWorkflow } from './site.workflow';\n",
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "temporal", "site.workflow.ts"),
+      [
+        'import { proxyActivities } from "@temporalio/workflow";',
+        "const acts = proxyActivities<Activities>({ startToCloseTimeout: '1 minute' });",
+        "export async function siteWorkflow() { await acts.buildSite(); }",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "src", "site.controller.ts"),
+      [
+        'import { Controller, Get } from "@nestjs/common";',
+        '@Controller("sites")',
+        "export class SiteController {",
+        '  @Get(":id")',
+        "  async get() {",
+        "    await this.prisma.site.findUnique({ where: { id: 'x' } });",
+        "    await this.prisma.outboxEvent.create({ data: { eventType: 'SiteRead' } });",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    const prisma = await extractPrisma(builder, root);
+    await extractTypeScript(builder, root, prisma);
+    const graph = builder.finalize(EVIDENCE);
+    assert.equal(
+      graph.nodes.some((node) => node.id === "api:GET:/sites/:id"),
+      true,
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "workflow:temporal:siteWorkflow"),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.from === "workflow:temporal:siteWorkflow" &&
+          edge.to === "activity:temporal:buildSite",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) => edge.kind === "reads" && edge.to === "data-model:prisma:Site",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "event:outbox:SiteRead"),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Astro extraction records component render edges", async () => {
+  const root = await fixture();
+  try {
+    await mkdir(path.join(root, "apps", "site", "src", "components"), {
+      recursive: true,
+    });
+    await mkdir(path.join(root, "apps", "site", "src", "pages"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, "apps", "site", "src", "components", "Hero.astro"),
+      "<h1>Hero</h1>",
+    );
+    await writeFile(
+      path.join(root, "apps", "site", "src", "pages", "index.astro"),
+      [
+        "---",
+        'import Hero from "../components/Hero.astro";',
+        "---",
+        "<Hero />",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    await extractAstro(builder, root);
+    const graph = builder.finalize(EVIDENCE);
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.from.endsWith("pages/index.astro#default") &&
+          edge.to.endsWith("components/Hero.astro#default"),
+      ),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("AI and ToolBroker extraction preserves route, budget, evidence, and personal-data gates", async () => {
+  const root = await fixture();
+  try {
+    const agents = path.join(
+      root,
+      "apps",
+      "api",
+      "src",
+      "site-builder",
+      "agents",
+    );
+    const tools = path.join(root, "apps", "api", "src", "tools");
+    await mkdir(agents, { recursive: true });
+    await mkdir(tools, { recursive: true });
+    await writeFile(
+      path.join(agents, "model-policy.registry.ts"),
+      [
+        "const EVIDENCE = { id: 'evidence-1' };",
+        "const LEGACY_TASK_POLICIES = {",
+        "  'site_builder.copy': { state: 'currentRoute', route: { primary: 'legacy', fallbacks: [] } },",
+        "};",
+        "const ACTIVE_TASK_POLICIES = {",
+        "  ...LEGACY_TASK_POLICIES,",
+        "  'site_builder.copy': { state: 'promotedRoute', route: { primary: 'primary-model', fallbacks: ['fallback-model'] }, promotionEvidenceId: EVIDENCE.id },",
+        "};",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(agents, "task-route-bindings.ts"),
+      [
+        "const TIMEOUT = 120_000;",
+        "const TASK_BINDINGS = Object.freeze({",
+        "  'site_builder.copy': Object.freeze({ profile: 'copy.premium', maxTokens: 4000, timeoutMs: TIMEOUT, maxCostCents: 20 }),",
+        "});",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(tools, "tool-broker.ts"),
+      "export class ToolBroker {}",
+    );
+    await writeFile(
+      path.join(tools, "builtin-tools.ts"),
+      [
+        "const smtpTool = {",
+        "  id: 'smtp.rcpt_probe',",
+        "  cost: { external: false },",
+        "  compliance: { sourcePolicy: 'advisory', personalData: true, allowedPurpose: ['discovery'], risk: 'medium' },",
+        "};",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    await extractAiAndTools(builder, root);
+    const graph = builder.finalize(EVIDENCE);
+    const task = graph.nodes.find(
+      (node) => node.id === "service:ai-task:site_builder.copy",
+    );
+    const tool = graph.nodes.find(
+      (node) => node.id === "service:tool:smtp.rcpt_probe",
+    );
+    assert.equal(task?.attributes.routeState, "promotedRoute");
+    assert.equal(task?.attributes.maxCostCents, 20);
+    assert.equal(task?.attributes.timeoutMs, 120000);
+    assert.equal(tool?.attributes.personalData, true);
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "routes_to" &&
+          edge.from === task?.id &&
+          edge.to === "external:model:primary-model",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "validates" &&
+          edge.from === "evidence:model-policy:evidence-1" &&
+          edge.to === task?.id,
+      ),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
