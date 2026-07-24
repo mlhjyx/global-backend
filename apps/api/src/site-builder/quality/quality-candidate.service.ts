@@ -195,6 +195,7 @@ export class QualityCandidateService {
     render(candidate: {
       spec: SiteSpecV1_1;
       designBrief: DesignBriefV2;
+      replayingCommittedResult: boolean;
     }): Promise<PreparedQualityRepair>;
   }): Promise<{
     identity: QualityCandidateIdentity;
@@ -241,6 +242,7 @@ export class QualityCandidateService {
     const prepared = await input.render({
       spec: candidate.spec,
       designBrief: candidate.designBrief,
+      replayingCommittedResult,
     });
     try {
       await assertRendererOutputMatches({

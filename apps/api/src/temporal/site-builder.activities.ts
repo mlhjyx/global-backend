@@ -467,6 +467,51 @@ function previewLiveDir(slug: string): string {
   return path.join(previewRoot(), slug);
 }
 
+function isMissingPathError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+/**
+ * Installs a freshly rendered closed repair at the canonical candidate path.
+ * A committed-result replay may find that a previous worker crashed after
+ * moving the old tree aside but before installing the new tree. In that exact
+ * state the database already fences the deterministic repaired digest, so the
+ * retry can safely install its independently verified rendering even though
+ * the canonical directory is absent.
+ */
+export async function promoteQualityRepairDirectory(input: {
+  candidateRoot: string;
+  repairRoot: string;
+  backupRoot: string;
+  allowMissingCandidate: boolean;
+}): Promise<void> {
+  await rm(input.backupRoot, { recursive: true, force: true });
+  let backedUp = false;
+  try {
+    await rename(input.candidateRoot, input.backupRoot);
+    backedUp = true;
+  } catch (error) {
+    if (!input.allowMissingCandidate || !isMissingPathError(error)) {
+      throw error;
+    }
+  }
+  try {
+    await rename(input.repairRoot, input.candidateRoot);
+    await rm(input.backupRoot, { recursive: true, force: true });
+  } catch (error) {
+    if (backedUp) {
+      await rename(input.backupRoot, input.candidateRoot).catch(
+        () => undefined,
+      );
+    }
+    throw error;
+  }
+}
+
 /** 构建 base 路径=预览 URL 的 pathname（两者必须一致，否则资产 404）。子域模式自然得 '/'。 */
 export function previewBasePath(slug: string): string {
   const pattern =
@@ -1218,6 +1263,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     candidate: QualityCandidateIdentity;
     spec: SiteSpecV1_1;
     designBrief: DesignBriefV2;
+    replayingCommittedResult: boolean;
   }) {
     const repairRoot = path.join(
       previewRoot(),
@@ -1258,16 +1304,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       root: repairRoot,
       manifest,
       promote: async () => {
-        await rm(backupRoot, { recursive: true, force: true });
-        await rename(input.candidate.root, backupRoot);
-        try {
-          await rename(repairRoot, input.candidate.root);
-          promoted = true;
-          await rm(backupRoot, { recursive: true, force: true });
-        } catch (error) {
-          await rename(backupRoot, input.candidate.root).catch(() => undefined);
-          throw error;
-        }
+        await promoteQualityRepairDirectory({
+          candidateRoot: input.candidate.root,
+          repairRoot,
+          backupRoot,
+          allowMissingCandidate: input.replayingCommittedResult,
+        });
+        promoted = true;
       },
       cleanup: async () => {
         if (!promoted) {
@@ -3042,7 +3085,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         evaluation: input.qualityEvaluation.evaluation,
         artifactSet: input.qualityEvaluation.artifactSet,
         selection: { optionId: option.optionId },
-        render: ({ spec, designBrief }) =>
+        render: ({ spec, designBrief, replayingCommittedResult }) =>
           prepareRepairRenderer({
             workspaceId: input.workspaceId,
             siteId: input.siteId,
@@ -3050,6 +3093,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             candidate: input.qualityCandidate.candidate,
             spec,
             designBrief,
+            replayingCommittedResult,
           }),
       });
       return {

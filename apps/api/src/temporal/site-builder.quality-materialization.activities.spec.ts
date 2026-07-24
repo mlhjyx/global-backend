@@ -1,4 +1,14 @@
 import { createHash } from "node:crypto";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   DESIGN_EVALUATION_V2_SCHEMA_VERSION,
@@ -14,6 +24,7 @@ import { releaseSpecDigest } from "../site-builder/release-artifact";
 import type { StorageService } from "../site-builder/storage.service";
 import {
   createSiteBuilderActivities,
+  promoteQualityRepairDirectory,
   qualitySettlementIsPublishable,
 } from "./site-builder.activities";
 
@@ -61,6 +72,48 @@ describe("M1-f approved quality materialization Activity", () => {
         disabledReason: "manual_kill_switch",
       }),
     ).toBe(false);
+  });
+
+  it("installs a verified committed repair after a worker crashed between the two directory renames", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "m1f-repair-promotion-"));
+    const candidateRoot = path.join(root, "candidate");
+    const crashedBackupRoot = path.join(root, "crashed-attempt.previous");
+    const retryRepairRoot = path.join(root, "retry-repair");
+    const retryBackupRoot = path.join(root, "retry-attempt.previous");
+    try {
+      await mkdir(candidateRoot);
+      await writeFile(path.join(candidateRoot, "index.html"), "old candidate");
+      // Exact crash state: the previous worker completed its first rename and
+      // exited before installing its freshly rendered repair.
+      await rename(candidateRoot, crashedBackupRoot);
+      await mkdir(retryRepairRoot);
+      await writeFile(path.join(retryRepairRoot, "index.html"), "new repair");
+
+      await expect(
+        promoteQualityRepairDirectory({
+          candidateRoot,
+          repairRoot: retryRepairRoot,
+          backupRoot: retryBackupRoot,
+          allowMissingCandidate: false,
+        }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+
+      await promoteQualityRepairDirectory({
+        candidateRoot,
+        repairRoot: retryRepairRoot,
+        backupRoot: retryBackupRoot,
+        allowMissingCandidate: true,
+      });
+
+      await expect(
+        readFile(path.join(candidateRoot, "index.html"), "utf8"),
+      ).resolves.toBe("new repair");
+      await expect(
+        readFile(path.join(crashedBackupRoot, "index.html"), "utf8"),
+      ).resolves.toBe("old candidate");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("replays a closed repair after the SiteVersion mutation committed but its Activity acknowledgement was lost", async () => {
