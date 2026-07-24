@@ -12,9 +12,15 @@
     "build": "tsc -p tsconfig.json",
     "test": "tsx --test src/*.spec.ts src/**/*.spec.ts",
     "scan": "tsx src/cli.ts scan --repo ../..",
-    "check": "tsx src/cli.ts check --repo ../.."
+    "check": "tsx src/cli.ts check --repo ../..",
+    "codegraph:index:active": "tsx src/cli.ts codegraph-index active --repo ../..",
+    "codegraph:index:main": "tsx src/cli.ts codegraph-index main --repo ../..",
+    "codegraph:status:active": "tsx src/cli.ts codegraph-status active --repo ../..",
+    "codegraph:status:main": "tsx src/cli.ts codegraph-status main --repo ../..",
+    "codegraph:evaluate": "tsx src/cli.ts evaluate-codegraph --repo ../.."
   },
   "dependencies": {
+    "@colbymchenry/codegraph": "1.5.0",
     "typescript": "^5.6.3"
   },
   "devDependencies": {

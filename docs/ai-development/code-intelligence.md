@@ -1,15 +1,15 @@
-# ContractGraph 使用与边界
+# 代码智能使用与边界
 
 > 文档 ID：`GUIDE-AIDEV-004`
 > 层级：`L5 / Guide`
 > 生命周期：`GUIDE`
 > 维护 Owner：`OWN-DOC-GOV（当前 UNASSIGNED）`
 > 产品批准：[`DEC-AIDEV-003`](../governance/conflict-register.md#11-aidev-gate-1-已批准决策)
-> 最后核验：2026-07-25，`origin/main@85ea6e6b4f0e00785ce17f9ba0301ce6206b535c` + `codex/contract-graph` 实施候选
+> 最后核验：2026-07-25，`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
 
 ## 1. 结论
 
-ContractGraph 是当前 worktree 的可丢弃影响地图，不是项目真值。它先回答“这个改动可能影响哪些 Capability、场景、API、事件、工作流、数据、测试和部署入口”，再由 Codex 回到当前源码、机器合同、测试与运行证据核实。
+ContractGraph 是当前 worktree 的可丢弃项目契约地图；CodeGraph 是补充普通语言调用关系的可选二级试点。两者都不是项目真值。它们先回答“这个改动可能影响哪些 Capability、场景、API、事件、工作流、数据、测试和部署入口”，再由 Codex 回到当前源码、机器合同、测试与运行证据核实。
 
 ```mermaid
 flowchart LR
@@ -19,6 +19,7 @@ flowchart LR
     D["Prisma / migration / RLS"] --> G
     E["pnpm / CI / Compose / systemd"] --> G
     G --> H["影响候选与 UNKNOWN"]
+    K["CodeGraph<br/>普通静态调用"] --> H
     H --> I["源码、测试和运行证据复核"]
     I --> J["非技术合并决策卡"]
 ```
@@ -32,7 +33,7 @@ flowchart LR
 | 治理 Registry | Capability、Scenario、Page、Object、Decision、Owner 与引用 | 产品状态自动升级或真实人员批准 |
 | TypeScript / NestJS | 文件、符号、import、Controller route、Module、constructor DI | 运行时条件分支和容器实际解析结果 |
 | Temporal | `workflows.ts` 真实导出、proxy Activity、client start、worker factory、Schedule | workflow history 已执行或 Activity 成功 |
-| Outbox | `eventType` 发布与明确 `eventType` switch 消费 | 外部 SaaS 已拉取、ACK 或正确处理 |
+| Outbox | `eventType` 发布、`INTERNAL_COMMANDS`/`INTEGRATION_EVENTS` Set 注册、`.has(eventType)` 消费与明确 switch 分支 | 外部 SaaS 已拉取、ACK 或正确处理 |
 | Prisma | model/table、relation、migration、由 migration SQL 证明的 RLS、常见 client 读写 | SQL 运行计划、触发器效果和真实数据状态 |
 | AI / 外部边界 | task ID、model-policy/Broker/Provider 静态分支与动态机制、非测试源码中的 URL 候选 | 实际模型路由、kill switch、Secret、配额、许可或外部可用性 |
 | workspace / deployment | package 依赖、tsconfig alias、Astro render、CI job、Compose/systemd | 目标环境已部署或健康 |
@@ -61,7 +62,39 @@ pnpm --filter @global/code-intelligence exec tsx src/cli.ts impact apps/api/src/
 ```
 
 这些文件被 Git 忽略，不承担备份职责。`query` 和 `status` 会重新计算当前 worktree、commit 与 source hash；不匹配即返回 `WRONG_WORKTREE` 或 `STALE_GRAPH`，拒绝用 main 图回答功能分支问题。
-`manifest-v1.json` 绑定派生文件哈希；手工篡改 JSON 或 schema/content 形状不完整时查询同样拒绝。`impact` 只做高精度、两跳的 ContractGraph 基线：输出仍标 `INFERRED/UNKNOWN`；PR 3 才合并 CodeGraph 与 Git diff 的更深影响分析。
+`manifest-v1.json` 绑定派生文件哈希；手工篡改 JSON 或 schema/content 形状不完整时查询同样拒绝。`impact` 只做高精度、两跳的 ContractGraph 基线，输出仍标 `INFERRED/UNKNOWN`。
+
+### 3.1 CodeGraph 受控试点
+
+只在本机、当前活跃 worktree 内执行：
+
+```bash
+pnpm code-intelligence:codegraph:index-main
+pnpm code-intelligence:codegraph:index-active
+pnpm code-intelligence:codegraph:status-main
+pnpm code-intelligence:codegraph:status-active
+pnpm --filter @global/code-intelligence exec tsx src/cli.ts unified-impact apps/api/src/tools/tool-broker.ts --repo ../..
+pnpm code-intelligence:codegraph:evaluate
+```
+
+- 依赖精确固定 [`@colbymchenry/codegraph@1.5.0`](https://github.com/colbymchenry/codegraph/releases/tag/v1.5.0)，不使用 `latest`。
+- CLI 在加载依赖前设置 `CODEGRAPH_TELEMETRY=0` 与 `DO_NOT_TRACK=1`。
+- 禁止运行 `codegraph install`、`upgrade`、watcher、MCP 或任何会写 `AGENTS.md`、Hooks、编辑器配置的自动安装。
+- main 索引来自 `origin/main` 的 Git archive 干净快照，不读取 `/global/backend` 的用户未跟踪资料；另只保留当前活跃 worktree 一个索引。
+- active 索引不直接读取可变施工目录：先只复制 Git 已跟踪/已暂存文件到 `.code-intelligence/codegraph-active/source` 不可变快照，再在快照中建 SQLite；索引后重新核对未跟踪集合和逐文件哈希，施工目录若在窗口内变化就删除快照和 evidence 并拒绝完成。新源码须先进入 Git 暂存区，recovery 文件、临时提示词、客户资料或凭据不会进入快照。
+- 新 main 快照和证据完整写入后，只清理 `.code-intelligence/codegraph-main/` 下通过 40 位提交哈希校验的旧派生快照；不触碰 Git worktree 或用户文件。
+- 查询必须同时通过版本、branch、commit、source hash、project path、index state、pending references、pending changes 与 extraction freshness 校验，否则拒答。
+- `unified-impact` 合并 Git diff、ContractGraph 与 CodeGraph；ContractGraph 的 Activity、Workflow、Prisma model 等非文件节点先由 location 还原为源码路径，冲突进入人工复核队列，不自动选择一方。
+
+索引和证据仍只写被忽略的派生目录：
+
+```text
+.codegraph/                     # 当前活跃 worktree 的本地 SQLite
+.code-intelligence/
+├── codegraph-active-v1.json
+├── codegraph-main/<commit>/    # origin/main 干净快照、索引和 evidence
+└── codegraph-evaluation-v1.json
+```
 
 CI 使用：
 
@@ -70,7 +103,7 @@ pnpm code-intelligence:test
 pnpm code-intelligence:check
 ```
 
-`check` 在内存中完整构建两次，要求字节等价，并拒绝 error 级诊断。它只增加验证，不能据此跳过 API、契约、Renderer 或现有完整 CI。
+`check` 在内存中完整构建两次，要求字节等价，并拒绝 error 级诊断。仓库完整性测试还锁定 `routeEvent` 对两个 Outbox Registry 的消费边，并逐项核对 Registry 全部字面量的注册边；删除 `.has(eventType)` 或漏登记事件会使 CI 失败。它只增加验证，不能据此跳过 API、契约、Renderer 或现有完整 CI。
 
 ## 4. 动态机制登记
 
@@ -99,6 +132,27 @@ pnpm code-intelligence:check
 
 发生冲突时，优先级是：业务/产品 Registry 与 ADR → 当前分支机器合同和源码 → 当前环境运行证据 → ContractGraph 派生认知。派生图永远不能覆盖前三层。
 
-## 6. 退出与下一阶段
+## 6. 30 题评测与当前采用决定
 
-ContractGraph 不需要常驻服务、数据库或网络；删除 `.code-intelligence/` 即可退出并回到 `rg + 文件阅读`。PR 3 才会在独立 worktree 固定 CodeGraph 版本、隔离 main/活跃分支索引，并用 30 个黄金问题比较静态图、ContractGraph、Git diff 与源码基线。未达到准确率、动态边召回、分支识别、泄漏和时延门时，不把 CodeGraph 设为默认工具。
+2026-07-25 实施候选执行固定 30 题，包含 TypeScript、NestJS、Temporal/Outbox、Prisma/RLS、业务追踪、Astro、部署、已知零调用者、假接通和错误分支控制：
+
+| 门 | 结果 | 要求 | 判定 |
+|---|---:|---:|---|
+| 职责路由后的统一 precision | 100%（45/45 返回路径） | ≥90% | 通过 |
+| 预期事实召回 | 100%（53/53 路径、节点、边） | ≥90% | 通过 |
+| 关键动态精确边召回 | 100%（核对 `from/to/kind/confidence`） | 100% | 通过 |
+| CodeGraph 原始 precision / recall | 42.2% / 65.5% | 观察项 | 不能单独使用 |
+| CodeGraph 参与表面的 precision | 100% | ≥90% | 通过 |
+| CodeGraph 参与表面的 recall | 89.5%（17/19） | ≥90% | **未通过** |
+| worktree/commit 识别 | 100% | 100% | 通过 |
+| 敏感路径泄漏 | 0 | 0 | 通过 |
+| 完整构建 | 重复运行约 5.0–9.0 秒 | ≤5 分钟 | 通过 |
+| 增量更新 | 重复运行约 108–115 毫秒 | ≤30 秒 | 通过 |
+| 最慢常见查询 | 重复运行约 19–21 毫秒 | ≤10 秒 | 通过 |
+| 相比 `rg + 文件读取` 的中位提速 | 重复运行约 42%–45% | ≥30% | 通过 |
+
+评测不再把“题目命中率”冒充准确率：每个额外返回路径都计为误报；关键动态题必须命中精确边，只有文件名相同不能过门。Outbox 题同时断言 Set 注册边和 `.has(eventType)` 消费边；外部消费控制绑定 Registry 中精确的 `OWN-SAAS-FE → OBJ-BLK-001` 开放 blocker、`CAP-SITE-RELEASE-001=APPROVED_NOT_BUILT` 与内部 `SiteRelease` 节点，并拒绝本仓前端出现 `PROVEN_RUNTIME` 消费边的矛盾状态。增量耗时只在旧符号消失、新符号与源码可查询、索引 complete、引用和变更队列归零后才计为有效。Prisma、业务追踪、Compose/systemd 与 Astro 非语言依赖按已声明职责只采用 ContractGraph，但仍单独公开 CodeGraph 的原始 precision/recall，不能用路由隐藏其缺陷。
+
+因此采用结果仍固定为 `PILOT_ONLY`：统一路由结果与速度门通过，但 CodeGraph 在自己获准参与的表面仍漏 2/19，89.5% 未达到 90% 独立采用门。ContractGraph + `rg` + 当前源码继续是默认路径；CodeGraph 只在复杂静态调用问题中按需启用，不能据此减少 CI。评测保留真实失败门，不因已经安装而强行采用。
+
+ContractGraph 不需要常驻服务、数据库或网络；删除 `.codegraph/` 与 `.code-intelligence/` 即可完整退出并回到 `rg + 文件阅读`。PR 4 才增加开发环境运行证据闭环；本阶段不启用生产追踪。

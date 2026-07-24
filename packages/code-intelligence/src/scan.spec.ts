@@ -46,11 +46,22 @@ test("source hashing excludes secrets while binding relevant source", async () =
       path.join(root, "apps", "api", "credentials-prod.json"),
       '{"private_key":"first"}\n',
     );
+    await mkdir(path.join(root, "apps", "api", "dist-test-fixture"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, "apps", "api", "dist-test-fixture", "generated.js"),
+      "const generated = 'first';\n",
+    );
     const first = await computeSourceHash(root);
     await writeFile(path.join(root, "apps", "api", ".env"), "SECRET=second\n");
     await writeFile(
       path.join(root, "apps", "api", "credentials-prod.json"),
       '{"private_key":"second"}\n',
+    );
+    await writeFile(
+      path.join(root, "apps", "api", "dist-test-fixture", "generated.js"),
+      "const generated = 'second';\n",
     );
     assert.equal(await computeSourceHash(root), first);
     await writeFile(

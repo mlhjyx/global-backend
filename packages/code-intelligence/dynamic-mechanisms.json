@@ -53,7 +53,13 @@
       "extractor": "typescript.outbox",
       "accountableRole": "OWN-PLATFORM",
       "assignee": "UNASSIGNED",
-      "patterns": ["eventType\\s*:"]
+      "patterns": [
+        "eventType\\s*:",
+        "INTERNAL_COMMANDS[^\\n]*new Set",
+        "INTEGRATION_EVENTS[^\\n]*new Set",
+        "INTERNAL_COMMANDS\\.has\\s*\\(",
+        "INTEGRATION_EVENTS\\.has\\s*\\("
+      ]
     },
     {
       "id": "prisma.dynamic-client",

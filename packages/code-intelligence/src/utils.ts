@@ -32,6 +32,7 @@ function sortDeep(value: unknown): unknown {
 
 const EXCLUDED_SEGMENTS = new Set([
   ".git",
+  ".codegraph",
   ".code-intelligence",
   ".codex",
   ".nx",
@@ -43,6 +44,10 @@ const EXCLUDED_SEGMENTS = new Set([
   "test-results",
 ]);
 
+function excludedDirectory(name: string): boolean {
+  return EXCLUDED_SEGMENTS.has(name) || /^dist-test-/.test(name);
+}
+
 export async function walkFiles(
   root: string,
   predicate: (relative: string) => boolean,
@@ -53,7 +58,7 @@ export async function walkFiles(
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory() && EXCLUDED_SEGMENTS.has(entry.name)) continue;
+      if (entry.isDirectory() && excludedDirectory(entry.name)) continue;
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         await visit(absolute);

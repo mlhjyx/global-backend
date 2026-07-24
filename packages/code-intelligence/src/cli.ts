@@ -8,6 +8,14 @@ import {
   writeDerivedArtifacts,
 } from "./scan";
 import { createImpactReport } from "./impact";
+import {
+  buildCodeGraphIndex,
+  CodeGraphIndexTarget,
+  createUnifiedImpactReport,
+  digestEvaluation,
+  evaluateCodeGraphPilot,
+  getCodeGraphStatus,
+} from "./codegraph-pilot";
 import { ContractGraphV1, GraphNodeV1 } from "./schema";
 import { sha256, stableJson } from "./utils";
 
@@ -44,8 +52,24 @@ Commands:
   query TERM [--repo PATH]    Query a fresh graph; stale/wrong-worktree graphs fail
   impact PATH... [--repo PATH] Create a ContractGraph-only impact report
   status [--repo PATH]        Show evidence, coverage and freshness
+  codegraph-index active|main [--repo PATH]
+                              Build one exact, telemetry-disabled local index
+  codegraph-status active|main [--repo PATH]
+                              Refuse stale, wrong-branch or wrong-worktree indexes
+  unified-impact PATH... [--repo PATH]
+                              Merge Git diff, ContractGraph and CodeGraph candidates
+  evaluate-codegraph [--repo PATH]
+                              Run the fixed 30-question adoption evaluation
 
 Derived artifacts are written only under .code-intelligence/ and are never truth.`);
+}
+
+function codeGraphTarget(terms: string[]): CodeGraphIndexTarget {
+  const target = terms[0] ?? "active";
+  if (target !== "active" && target !== "main") {
+    throw new Error("CodeGraph target must be active or main");
+  }
+  return target;
 }
 
 function searchable(node: GraphNodeV1): string {
@@ -183,6 +207,49 @@ async function main(): Promise<void> {
         }),
       );
       if (freshness.length > 0) process.exitCode = 1;
+      return;
+    }
+    case "codegraph-index": {
+      const target = codeGraphTarget(args.terms);
+      console.log(
+        stableJson(await buildCodeGraphIndex(args.repositoryRoot, target)),
+      );
+      return;
+    }
+    case "codegraph-status": {
+      const target = codeGraphTarget(args.terms);
+      const status = await getCodeGraphStatus(args.repositoryRoot, target);
+      console.log(stableJson(status));
+      if (!status.ok) process.exitCode = 1;
+      return;
+    }
+    case "unified-impact": {
+      const changedPaths = args.terms
+        .map((value) => value.replaceAll("\\", "/").replace(/^\.\//, ""))
+        .filter(Boolean);
+      if (changedPaths.length === 0) {
+        throw new Error(
+          "unified-impact requires at least one repository-relative path",
+        );
+      }
+      console.log(
+        stableJson(
+          await createUnifiedImpactReport(args.repositoryRoot, changedPaths),
+        ),
+      );
+      return;
+    }
+    case "evaluate-codegraph": {
+      const report = await evaluateCodeGraphPilot(args.repositoryRoot);
+      console.log(
+        stableJson({
+          adoption: report.adoption,
+          digest: digestEvaluation(report),
+          totals: report.totals,
+          metrics: report.metrics,
+          gates: report.gates,
+        }),
+      );
       return;
     }
     case "help":

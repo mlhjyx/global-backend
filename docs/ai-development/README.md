@@ -5,11 +5,11 @@
 > 生命周期：`GUIDE`
 > 维护 Owner：`OWN-DOC-GOV（当前 UNASSIGNED）`
 > 产品批准：[`DEC-AIDEV-001`](../governance/conflict-register.md#11-aidev-gate-1-已批准决策)
-> 最后核验：2026-07-24，`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
+> 最后核验：2026-07-25，`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
 
 这组指南把“只有业务需求、不会开发”转换成可审查的软件交付流程。产品负责人负责业务目标、优先级、风险取舍与验收；Codex 负责把自然语言需求逐步编译为范围、设计、技术方案、代码、测试和可核验结果。
 
-它不建立第二套项目真值，也不授权安装 Obsidian、QMD、CodeGraph 或其他工具。当前边界、实现、决策和施工顺序仍以[项目文档门户](../README.md)列出的权威来源为准；仓库执行规则仍以 [AGENTS.md](../../AGENTS.md) 与 [CONTRIBUTING.md](../../CONTRIBUTING.md) 为准。
+它不建立第二套项目真值，也不授权安装 Obsidian、QMD 或未列入批准计划的其他工具。`DEC-AIDEV-003` 只授权固定版本、本地只读、评测未达门即不默认采用的 CodeGraph 试点。当前边界、实现、决策和施工顺序仍以[项目文档门户](../README.md)列出的权威来源为准；仓库执行规则仍以 [AGENTS.md](../../AGENTS.md) 与 [CONTRIBUTING.md](../../CONTRIBUTING.md) 为准。
 
 ## 1. 按任务阅读
 
@@ -18,7 +18,7 @@
 | 不知道怎样把想法交给开发              | [非技术需求与业务验收](requirement-and-acceptance.md)    | 需求合同、验收路径、交付证据清单 |
 | 不知道当前处于什么模式、谁负责什么    | [AI 辅助开发运行模型](operating-model.md)                | 模式、职责、升级规则、风险闭环   |
 | 不知道 Obsidian、记忆或代码图能否相信 | [记忆、知识与派生认知政策](memory-and-context-policy.md) | 事实优先级、写入边界、工具试点门和 `memoryctl` |
-| 改代码前不知道影响哪些业务、工作流与数据 | [ContractGraph 使用与边界](code-intelligence.md) | 当前 worktree 的派生影响地图、未知项和源码证据 |
+| 改代码前不知道影响哪些业务、工作流与数据 | [代码智能使用与边界](code-intelligence.md) | 当前 worktree 的派生影响地图、未知项和源码证据 |
 
 第一次提出需求时，只需说明“谁遇到了什么问题、希望得到什么结果”。缺失内容由 Codex 通过需求编译过程补齐，并把需要产品负责人决定的少数问题单独列出。
 

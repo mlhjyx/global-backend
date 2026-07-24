@@ -1,0 +1,429 @@
+{
+  "schemaVersion": "code-intelligence-golden-questions/v1",
+  "questions": [
+    {
+      "id": "GQ-TS-001",
+      "category": "typescript-call",
+      "question": "ToolBroker 的确定性执行闸门在哪里？",
+      "query": "ToolBroker",
+      "baselinePattern": "class ToolBroker",
+      "expectedPaths": ["apps/api/src/tools/tool-broker.ts"]
+    },
+    {
+      "id": "GQ-TS-002",
+      "category": "typescript-call",
+      "question": "线索六维评分的入口在哪里？",
+      "query": "scoreLead",
+      "baselinePattern": "function scoreLead",
+      "expectedPaths": ["apps/api/src/lead/scoring.ts"]
+    },
+    {
+      "id": "GQ-TS-003",
+      "category": "typescript-call",
+      "question": "Intent 事件合并和幂等逻辑在哪里？",
+      "query": "mergeIntent",
+      "baselinePattern": "function mergeIntent",
+      "expectedPaths": ["apps/api/src/intent/intent-projection.service.ts"]
+    },
+    {
+      "id": "GQ-NEG-001",
+      "category": "known-no-caller",
+      "kind": "NO_CALLERS",
+      "question": "已知未接通的 countField 是否保持零调用者，而不是被误报为已接通？",
+      "query": "countField",
+      "baselinePattern": "function countField",
+      "expectedPaths": ["apps/api/src/adapters/openfda-api.ts"],
+      "expectedOutcome": "NO_CALLERS"
+    },
+    {
+      "id": "GQ-NEG-002",
+      "category": "fake-wiring",
+      "kind": "EXTERNAL_OWNED_CONTROL",
+      "question": "权威 Registry 是否仍把 SaaS 前端和 SiteRelease 管理能力标记为未指派外部 blocker，而不是假装已接通？",
+      "query": "SaaS frontend SiteRelease consumer",
+      "baselinePattern": "SiteRelease",
+      "expectedPaths": [],
+      "expectedNodes": [
+        "governance:OWN-SAAS-FE",
+        "governance:OBJ-BLK-001",
+        "governance:CAP-SITE-RELEASE-001",
+        "data-model:prisma:SiteRelease"
+      ],
+      "expectedEdges": [
+        {
+          "from": "governance:OWN-SAAS-FE",
+          "to": "governance:OBJ-BLK-001",
+          "kind": "owns",
+          "confidence": null
+        }
+      ],
+      "externalBoundary": {
+        "ownerNode": "governance:OWN-SAAS-FE",
+        "boundaryNode": "governance:OBJ-BLK-001",
+        "capabilityNode": "governance:CAP-SITE-RELEASE-001",
+        "contractNode": "data-model:prisma:SiteRelease",
+        "requiredBoundaryStatus": "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+        "requiredCapabilityStatus": "APPROVED_NOT_BUILT"
+      },
+      "expectedOutcome": "EXTERNAL_OWNED"
+    },
+    {
+      "id": "GQ-NEST-001",
+      "category": "nestjs-route-di",
+      "question": "建站 intake HTTP Controller 在哪里？",
+      "query": "IntakeController",
+      "baselinePattern": "class IntakeController",
+      "expectedPaths": ["apps/api/src/site-builder/intake.controller.ts"]
+    },
+    {
+      "id": "GQ-NEST-002",
+      "category": "nestjs-route-di",
+      "question": "intake 业务服务在哪里？",
+      "query": "IntakeService",
+      "baselinePattern": "class IntakeService",
+      "expectedPaths": ["apps/api/src/site-builder/intake.service.ts"]
+    },
+    {
+      "id": "GQ-NEST-003",
+      "category": "nestjs-route-di",
+      "question": "Build API Controller 在哪里？",
+      "query": "BuildsController",
+      "baselinePattern": "class BuildsController",
+      "expectedPaths": ["apps/api/src/site-builder/builds.controller.ts"]
+    },
+    {
+      "id": "GQ-NEST-004",
+      "category": "nestjs-route-di",
+      "question": "Build 业务服务在哪里？",
+      "query": "BuildsService",
+      "baselinePattern": "class BuildsService",
+      "expectedPaths": ["apps/api/src/site-builder/builds.service.ts"]
+    },
+    {
+      "id": "GQ-NEST-005",
+      "category": "nestjs-route-di",
+      "question": "immutable SiteRelease 的服务入口在哪里？",
+      "query": "SiteReleaseService",
+      "baselinePattern": "class SiteReleaseService",
+      "expectedPaths": ["apps/api/src/site-builder/site-release.service.ts"]
+    },
+    {
+      "id": "GQ-DYN-001",
+      "category": "temporal-outbox",
+      "question": "制裁名单刷新 Workflow 在哪里？",
+      "query": "sanctionsRefreshWorkflow",
+      "baselinePattern": "function sanctionsRefreshWorkflow",
+      "expectedPaths": ["apps/api/src/temporal/sanctions-refresh.workflow.ts"],
+      "allowedPaths": [
+        "apps/api/src/temporal/ensure-schedules.ts",
+        "apps/api/src/temporal/sanctions-refresh.workflow.ts"
+      ],
+      "forbiddenPaths": [
+        "apps/api/src/temporal/sanctions-refresh.activities.ts"
+      ],
+      "expectedNodes": ["workflow:temporal:sanctionsRefreshWorkflow"],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/sanctions-refresh.workflow.ts#sanctionsRefreshWorkflow",
+          "to": "workflow:temporal:sanctionsRefreshWorkflow",
+          "kind": "implements",
+          "confidence": null
+        }
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-002",
+      "category": "temporal-outbox",
+      "question": "制裁刷新 Workflow 调用的解构 Activity 在哪里？",
+      "query": "refreshSanctionsLists",
+      "baselinePattern": "refreshSanctionsLists",
+      "expectedPaths": [
+        "apps/api/src/temporal/sanctions-refresh.activities.ts"
+      ],
+      "allowedPaths": [
+        "apps/api/src/temporal/sanctions-refresh.activities.ts",
+        "apps/api/src/temporal/sanctions-refresh.workflow.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "expectedNodes": ["activity:temporal:refreshSanctionsLists"],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/sanctions-refresh.activities.ts#createSanctionsRefreshActivities.refreshSanctionsLists",
+          "to": "activity:temporal:refreshSanctionsLists",
+          "kind": "implements",
+          "confidence": "PROVEN_STATIC_FACTORY"
+        }
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-003",
+      "category": "temporal-outbox",
+      "question": "发现流程自动注册 watch 的 Activity 在哪里？",
+      "query": "registerWatchesForRun",
+      "baselinePattern": "registerWatchesForRun",
+      "expectedPaths": ["apps/api/src/temporal/discovery.activities.ts"],
+      "allowedPaths": [
+        "apps/api/src/temporal/discovery.activities.ts",
+        "apps/api/src/temporal/discovery.workflow.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/temporal/worker.ts"],
+      "expectedNodes": ["activity:temporal:registerWatchesForRun"],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/discovery.activities.ts#createDiscoveryActivities.registerWatchesForRun",
+          "to": "activity:temporal:registerWatchesForRun",
+          "kind": "implements",
+          "confidence": "PROVEN_STATIC_FACTORY"
+        }
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-004",
+      "category": "temporal-outbox",
+      "question": "Transactional Outbox relay 在哪里？",
+      "query": "OutboxRelayService",
+      "baselinePattern": "class OutboxRelayService",
+      "expectedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "allowedPaths": [
+        "apps/api/src/relay/outbox-relay.service.ts",
+        "apps/api/src/relay/relay.module.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/site-builder/outbox.ts"],
+      "expectedNodes": [
+        "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService"
+      ],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.tick",
+          "to": "data-model:prisma:OutboxEvent",
+          "kind": "reads",
+          "confidence": null
+        }
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-005",
+      "category": "temporal-outbox",
+      "question": "字符串事件分派 routeEvent 在哪里？",
+      "query": "routeEvent",
+      "baselinePattern": "routeEvent",
+      "expectedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "allowedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "forbiddenPaths": ["apps/api/src/temporal/worker.ts"],
+      "expectedNodes": [
+        "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
+        "service:outbox-event-registry:INTERNAL_COMMANDS",
+        "service:outbox-event-registry:INTEGRATION_EVENTS",
+        "event:outbox:AssetObjectCleanupRequested",
+        "event:outbox:LeadQualified"
+      ],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
+          "to": "service:outbox-event-registry:INTERNAL_COMMANDS",
+          "kind": "consumes",
+          "confidence": "PROVEN_STATIC_SET_MEMBERSHIP"
+        },
+        {
+          "from": "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent",
+          "to": "service:outbox-event-registry:INTEGRATION_EVENTS",
+          "kind": "consumes",
+          "confidence": "PROVEN_STATIC_SET_MEMBERSHIP"
+        },
+        {
+          "from": "service:outbox-event-registry:INTERNAL_COMMANDS",
+          "to": "event:outbox:AssetObjectCleanupRequested",
+          "kind": "registers",
+          "confidence": "PROVEN_STATIC_SET_REGISTRATION"
+        },
+        {
+          "from": "service:outbox-event-registry:INTEGRATION_EVENTS",
+          "to": "event:outbox:LeadQualified",
+          "kind": "registers",
+          "confidence": "PROVEN_STATIC_SET_REGISTRATION"
+        }
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DATA-001",
+      "category": "prisma-rls",
+      "question": "Site 数据模型在哪里定义？",
+      "query": "Site",
+      "baselinePattern": "model Site {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-DATA-002",
+      "category": "prisma-rls",
+      "question": "SiteRelease 数据模型在哪里定义？",
+      "query": "SiteRelease",
+      "baselinePattern": "model SiteRelease {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-DATA-003",
+      "category": "prisma-rls",
+      "question": "SiteBuildRun 数据模型在哪里定义？",
+      "query": "SiteBuildRun",
+      "baselinePattern": "model SiteBuildRun {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-DATA-004",
+      "category": "prisma-rls",
+      "question": "Asset 数据模型在哪里定义？",
+      "query": "Asset",
+      "baselinePattern": "model Asset {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-DATA-005",
+      "category": "prisma-rls",
+      "question": "OutboxEvent 数据模型在哪里定义？",
+      "query": "OutboxEvent",
+      "baselinePattern": "model OutboxEvent {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-EXT-001",
+      "category": "external-projector",
+      "question": "ICP 到 CPV 的确定性映射入口在哪里？",
+      "query": "resolveIcpToCpv",
+      "baselinePattern": "function resolveIcpToCpv",
+      "expectedPaths": ["apps/api/src/discovery/icp-to-cpv.ts"]
+    },
+    {
+      "id": "GQ-NEG-003",
+      "category": "wrong-branch",
+      "kind": "WRONG_BRANCH_CONTROL",
+      "question": "索引分支与当前分支不一致时是否拒绝回答？",
+      "query": "wrong branch",
+      "baselinePattern": "WRONG_BRANCH",
+      "expectedPaths": [],
+      "expectedOutcome": "WRONG_BRANCH_REJECTED"
+    },
+    {
+      "id": "GQ-EXT-003",
+      "category": "external-projector",
+      "question": "TED 招标 intent 投影入口在哪里？",
+      "query": "projectTenders",
+      "baselinePattern": "projectTenders",
+      "expectedPaths": ["apps/api/src/intent/ted-intent-projection.service.ts"]
+    },
+    {
+      "id": "GQ-EXT-004",
+      "category": "external-projector",
+      "question": "openFDA 510k intent 投影入口在哪里？",
+      "query": "projectClearances",
+      "baselinePattern": "projectClearances",
+      "expectedPaths": [
+        "apps/api/src/intent/openfda-intent-projection.service.ts"
+      ]
+    },
+    {
+      "id": "GQ-EXT-005",
+      "category": "external-projector",
+      "question": "Temporal Schedule 自愈入口在哪里？",
+      "query": "ensurePlatformSchedules",
+      "baselinePattern": "function ensurePlatformSchedules",
+      "expectedPaths": ["apps/api/src/temporal/ensure-schedules.ts"],
+      "allowedPaths": [
+        "apps/api/src/temporal/ensure-schedules.ts",
+        "apps/api/src/temporal/worker.ts"
+      ],
+      "forbiddenPaths": ["apps/api/src/temporal/workflows.ts"],
+      "expectedNodes": [
+        "symbol:apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules"
+      ],
+      "expectedEdges": [
+        {
+          "from": "symbol:apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules",
+          "to": "service:temporal-schedule-registration:apps/api/src/temporal/ensure-schedules.ts:56",
+          "kind": "registers",
+          "confidence": null
+        }
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-TRACE-001",
+      "category": "business-traceability",
+      "question": "CAP-SITE-INTAKE-001 如何追踪到实现？",
+      "query": "CAP-SITE-INTAKE-001",
+      "baselinePattern": "CAP-SITE-INTAKE-001",
+      "expectedPaths": ["docs/governance/traceability-matrix.md"],
+      "allowedPaths": [
+        "apps/api/src/site-builder/dto/intake.dto.spec.ts",
+        "apps/api/src/site-builder/dto/intake.dto.ts",
+        "apps/api/src/site-builder/intake.controller.spec.ts",
+        "apps/api/src/site-builder/intake.controller.ts",
+        "apps/api/src/site-builder/intake.service.spec.ts",
+        "apps/api/src/site-builder/intake.service.ts",
+        "apps/api/src/site-builder/temporal-demo-launcher.spec.ts",
+        "apps/api/src/site-builder/temporal-demo-launcher.ts",
+        "docs/governance/capability-register.md",
+        "docs/governance/scenario-catalog.md",
+        "docs/governance/traceability-matrix.md"
+      ],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-TRACE-002",
+      "category": "renderer-blind-spot",
+      "question": "global.css 的 Astro 消费者有哪些？",
+      "query": "global.css",
+      "baselinePattern": "../styles/global.css",
+      "expectedPaths": [
+        "apps/site-renderer/src/layouts/Base.astro",
+        "apps/site-renderer/src/pages/gallery.astro"
+      ],
+      "allowedPaths": [
+        "apps/site-renderer/src/layouts/Base.astro",
+        "apps/site-renderer/src/pages/gallery.astro",
+        "apps/site-renderer/src/styles/global.css"
+      ],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-OPS-001",
+      "category": "deployment",
+      "question": "global-api systemd 服务定义在哪里？",
+      "query": "global-api.service",
+      "baselinePattern": "global-api.service",
+      "expectedPaths": ["infra/systemd/global-api.service"],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-OPS-002",
+      "category": "deployment",
+      "question": "new-api Compose 服务在哪里定义？",
+      "query": "new-api",
+      "baselinePattern": "new-api:",
+      "expectedPaths": ["docker-compose.yml"],
+      "allowedPaths": [
+        "apps/api/src/site-builder/agents/model-policy.registry.ts",
+        "docker-compose.yml",
+        "docs/backend/oss-registry.md"
+      ],
+      "unifiedSources": ["contractgraph"]
+    },
+    {
+      "id": "GQ-ASTRO-001",
+      "category": "astro-import",
+      "question": "localeQualifiedPageHref 的 Renderer helper 在哪里？",
+      "query": "localeQualifiedPageHref",
+      "baselinePattern": "localeQualifiedPageHref",
+      "expectedPaths": ["apps/site-renderer/src/lib/page-reference.ts"]
+    }
+  ]
+}

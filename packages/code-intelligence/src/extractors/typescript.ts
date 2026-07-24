@@ -185,6 +185,41 @@ interface VisitContext {
   className?: string;
 }
 
+interface StaticEventRegistry {
+  name: string;
+  path: string;
+  values: string[];
+}
+
+function staticEventRegistry(
+  relative: string,
+  declaration: ts.VariableDeclaration,
+): StaticEventRegistry | undefined {
+  if (
+    !ts.isIdentifier(declaration.name) ||
+    !/^(?:INTERNAL_COMMANDS|INTEGRATION_EVENTS)$/.test(declaration.name.text) ||
+    !declaration.initializer ||
+    !ts.isNewExpression(declaration.initializer) ||
+    !ts.isIdentifier(declaration.initializer.expression) ||
+    declaration.initializer.expression.text !== "Set"
+  ) {
+    return undefined;
+  }
+  const valuesArgument = declaration.initializer.arguments?.[0];
+  if (!valuesArgument || !ts.isArrayLiteralExpression(valuesArgument)) {
+    return undefined;
+  }
+  const values = valuesArgument.elements
+    .map((element) => literalValue(element))
+    .filter((value): value is string => value !== undefined);
+  if (values.length !== valuesArgument.elements.length) return undefined;
+  return {
+    name: declaration.name.text,
+    path: relative,
+    values: [...new Set(values)].sort(),
+  };
+}
+
 export async function extractTypeScript(
   builder: GraphBuilder,
   repositoryRoot: string,
@@ -236,6 +271,25 @@ export async function extractTypeScript(
     // A repository without the canonical Temporal registry simply emits no
     // proven workflow declarations; client starts remain UNKNOWN.
   }
+  const eventRegistries = new Map<string, StaticEventRegistry>();
+  for (const absolute of absoluteFiles) {
+    const relative = relativePath(repositoryRoot, absolute);
+    const text = await readUtf8(absolute);
+    const sourceFile = ts.createSourceFile(
+      absolute,
+      text,
+      ts.ScriptTarget.Latest,
+      true,
+      relative.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    for (const statement of sourceFile.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        const registry = staticEventRegistry(relative, declaration);
+        if (registry) eventRegistries.set(registry.name, registry);
+      }
+    }
+  }
   const observations: MechanismObservation[] = [];
 
   for (const absolute of absoluteFiles) {
@@ -249,6 +303,23 @@ export async function extractTypeScript(
       true,
       relative.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
+    const localCallableDeclarations = new Map<string, ts.Node>();
+    for (const statement of sourceFile.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) {
+        localCallableDeclarations.set(statement.name.text, statement);
+      }
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (
+          ts.isIdentifier(declaration.name) &&
+          declaration.initializer &&
+          (ts.isArrowFunction(declaration.initializer) ||
+            ts.isFunctionExpression(declaration.initializer))
+        ) {
+          localCallableDeclarations.set(declaration.name.text, declaration);
+        }
+      }
+    }
     const isTest =
       /\.(?:spec|test)\.(?:ts|tsx)$/.test(relative) ||
       /(?:^|\/)scripts\/verify-[^/]+\.mts$/.test(relative);
@@ -281,6 +352,52 @@ export async function extractTypeScript(
         to: testNode,
         location: { path: relative, line: 1 },
       });
+    }
+    for (const statement of sourceFile.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        const registry = staticEventRegistry(relative, declaration);
+        if (!registry) continue;
+        const location = sourceLocation(sourceFile, relative, declaration);
+        const registryNode = builder.addNode({
+          id: `service:outbox-event-registry:${registry.name}`,
+          kind: "service",
+          label: registry.name,
+          attributes: {
+            subtype: "outbox-event-registry",
+            confidence: "PROVEN_STATIC_SET_REGISTRATION",
+            transport: "transactional-outbox",
+          },
+          location,
+        });
+        builder.addEdge({
+          kind: "contains",
+          from: fileNode,
+          to: registryNode,
+          location,
+        });
+        for (const eventType of registry.values) {
+          const event = builder.addNode({
+            id: `event:outbox:${eventType}`,
+            kind: "event",
+            label: eventType,
+            attributes: {
+              registeredBy: registry.name,
+              transport: "transactional-outbox",
+            },
+            location,
+          });
+          builder.addEdge({
+            kind: "registers",
+            from: registryNode,
+            to: event,
+            attributes: {
+              confidence: "PROVEN_STATIC_SET_REGISTRATION",
+            },
+            location,
+          });
+        }
+      }
     }
 
     const proxyVariables = new Map<string, string>();
@@ -596,6 +713,91 @@ export async function extractTypeScript(
       }
     };
 
+    const inspectActivityFactory = (
+      node: ts.FunctionDeclaration,
+      factoryName: string,
+    ): void => {
+      if (
+        !/apps\/api\/src\/temporal\/[^/]+\.activities\.ts$/.test(relative) ||
+        !/^create[A-Za-z0-9_$]*Activities$/.test(factoryName) ||
+        !node.body
+      ) {
+        return;
+      }
+      for (const statement of node.body.statements) {
+        if (
+          !ts.isReturnStatement(statement) ||
+          !statement.expression ||
+          !ts.isObjectLiteralExpression(statement.expression)
+        ) {
+          continue;
+        }
+        for (const property of statement.expression.properties) {
+          const name = declarationName(property);
+          if (!name) continue;
+          const location = sourceLocation(sourceFile, relative, property);
+          let implementation: string | undefined;
+          let confidence = "PROVEN_STATIC_FACTORY";
+          if (ts.isMethodDeclaration(property)) {
+            implementation = addSymbol(name, property, factoryName);
+          } else if (
+            ts.isPropertyAssignment(property) &&
+            (ts.isArrowFunction(property.initializer) ||
+              ts.isFunctionExpression(property.initializer))
+          ) {
+            implementation = addSymbol(name, property, factoryName);
+          } else if (ts.isShorthandPropertyAssignment(property)) {
+            const declaration = localCallableDeclarations.get(name);
+            if (declaration) {
+              implementation = addSymbol(name, declaration);
+            } else {
+              confidence = "UNKNOWN";
+              implementation = builder.addNode({
+                id: `symbol-ref:${relative}#${name}`,
+                kind: "code_symbol",
+                label: name,
+                attributes: {
+                  activityFactory: factoryName,
+                  unresolvedReference: true,
+                },
+                location,
+              });
+              builder.addDiagnostic({
+                code: "UNKNOWN_RELATION",
+                severity: "warning",
+                message: `Temporal activity factory ${factoryName} shorthand ${name} has no local callable declaration`,
+                nodeId: implementation,
+                location,
+              });
+            }
+          }
+          if (!implementation) continue;
+          const activity = activityNode(builder, name, location);
+          builder.addNode({
+            id: activity,
+            kind: "activity",
+            label: name,
+            attributes: {
+              factory: factoryName,
+              implementationDeclared: confidence === "PROVEN_STATIC_FACTORY",
+              runtime: "temporal",
+            },
+            location,
+          });
+          builder.addEdge({
+            kind: "implements",
+            from: implementation,
+            to: activity,
+            attributes: {
+              binding: "activity-factory-return",
+              confidence,
+            },
+            location,
+          });
+        }
+      }
+    };
+
     const visit = (node: ts.Node, context: VisitContext): void => {
       if (ts.isVariableDeclaration(node)) registerProxyVariable(node);
 
@@ -705,6 +907,35 @@ export async function extractTypeScript(
       if (ts.isCallExpression(node)) {
         const location = sourceLocation(sourceFile, relative, node);
         const chain = propertyChain(node.expression);
+        if (
+          chain.length === 2 &&
+          chain[1] === "has" &&
+          eventRegistries.has(chain[0])
+        ) {
+          const registry = eventRegistries.get(chain[0])!;
+          const target = builder.addNode({
+            id: `service:outbox-event-registry:${registry.name}`,
+            kind: "service",
+            label: registry.name,
+            attributes: {
+              subtype: "outbox-event-registry",
+              confidence: "PROVEN_STATIC_SET_REGISTRATION",
+              transport: "transactional-outbox",
+            },
+            location,
+          });
+          builder.addEdge({
+            kind: "consumes",
+            from: context.owner,
+            to: target,
+            attributes: {
+              binding: "set-membership-dispatch",
+              confidence: "PROVEN_STATIC_SET_MEMBERSHIP",
+              requiresRuntimeEvidence: true,
+            },
+            location,
+          });
+        }
         if (chain.length === 1 && context.workflow) {
           const proxyFunction = proxyFunctions.get(chain[0]);
           if (proxyFunction) {
@@ -940,6 +1171,7 @@ export async function extractTypeScript(
       } else if (ts.isFunctionDeclaration(statement)) {
         const name = declarationName(statement) ?? "anonymous-function";
         const owner = addSymbol(name, statement);
+        inspectActivityFactory(statement, name);
         const isWorkflow = registeredWorkflowNames.has(name);
         const workflow = isWorkflow
           ? workflowNode(

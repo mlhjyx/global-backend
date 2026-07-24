@@ -145,12 +145,35 @@ export async function extractGovernance(
           /^`?CAP-/.test(cells[1] ?? "") && cells.length >= 3
             ? cells[2]
             : cells[1];
+        const productStatus = cells
+          .map((cell) => cell.replaceAll("`", ""))
+          .map(
+            (cell) =>
+              /\b(APPROVED_NOT_BUILT|APPROVED_WITH_CONDITION|APPROVED|DEFERRED(?:\/PROPOSED)?|PROPOSED\/EXTERNAL_OWNED|UNKNOWN\/EXTERNAL_OWNED)\b/.exec(
+                cell,
+              )?.[1],
+          )
+          .find((value) => value !== undefined);
         builder.addNode({
           id: `governance:${ids[0]}`,
           kind: "capability",
           label: ids[0],
           attributes: {
             userOutcome: outcomeCell?.replaceAll("`", "").slice(0, 500) ?? "",
+            productStatus: productStatus ?? "UNKNOWN",
+          },
+          location,
+        });
+      }
+      if (ids[0].startsWith("OBJ-BLK-") && cells.length >= 3) {
+        builder.addNode({
+          id: `governance:${ids[0]}`,
+          kind: "business_object",
+          label: ids[0],
+          attributes: {
+            boundaryStatus: "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+            missingBoundary: cells[1]?.replaceAll("`", "").slice(0, 500) ?? "",
+            blockedScope: cells[2]?.replaceAll("`", "").slice(0, 500) ?? "",
           },
           location,
         });

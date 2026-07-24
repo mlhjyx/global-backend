@@ -5,7 +5,7 @@
 > 生命周期：`GUIDE`
 > 维护 Owner：`OWN-DOC-GOV（当前 UNASSIGNED）`
 > 产品批准：[`DEC-AIDEV-001`](../governance/conflict-register.md#11-aidev-gate-1-已批准决策)
-> 最后核验：2026-07-24，`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
+> 最后核验：2026-07-25，`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
 
 ## 1. 结论
 
@@ -33,7 +33,7 @@ flowchart LR
     L --> F
 ```
 
-图中的 QMD 与 CodeGraph 仍是候选能力，不表示当前已安装或获准作为默认工具；受控 MCP Memory 与仓库 ContractGraph 已分别按 `DEC-AIDEV-002/003` 进入限定范围。它们仍是低于 Registry、源码和运行证据的辅助层。准入规则见[记忆、知识与派生认知政策](memory-and-context-policy.md)，ContractGraph 使用门见[专门指南](code-intelligence.md)。
+图中的 QMD 仍是未安装候选；CodeGraph 已按 `DEC-AIDEV-003` 以固定版本、本地只读方式完成受控试点，但在 30 题评测中其参与表面的 recall 门未通过，状态为 `PILOT_ONLY`，不是默认工具。受控 MCP Memory 与仓库 ContractGraph 已分别按 `DEC-AIDEV-002/003` 进入限定范围。它们仍是低于 Registry、源码和运行证据的辅助层。准入规则见[记忆、知识与派生认知政策](memory-and-context-policy.md)，代码智能使用门见[专门指南](code-intelligence.md)。
 
 ## 2. 一次任务只处于一个主要模式
 

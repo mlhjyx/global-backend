@@ -35,9 +35,17 @@ test("governance extraction separates responsibility role from real assignee", a
     await writeFile(
       path.join(root, "docs", "governance", "capability-register.md"),
       [
-        "| Capability ID | Parent | 用户结果 | Pages | Owner |",
-        "|---|---|---|---|---|",
-        "| `CAP-SITE-X-001` | `CAP-SITE-001` | 完成目标 | `PAGE-FE-001` | `OWN-PRODUCT` |",
+        "| Capability ID | Parent | 用户结果 | Pages | 产品状态 | Owner |",
+        "|---|---|---|---|---|---|",
+        "| `CAP-SITE-X-001` | `CAP-SITE-001` | 完成目标 | `PAGE-FE-001` | `APPROVED_NOT_BUILT` | `OWN-PRODUCT` |",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "docs", "governance", "core-object-register.md"),
+      [
+        "| Blocker | 缺失 Owner/合同 | 阻止什么 |",
+        "|---|---|---|",
+        "| `OBJ-BLK-001` | 正式 SaaS repo 与 Owner | 正式前端施工 |",
       ].join("\n"),
     );
     await writeFile(
@@ -57,8 +65,16 @@ test("governance extraction separates responsibility role from real assignee", a
     const owner = graph.nodes.find(
       (node) => node.id === "governance:OWN-PRODUCT",
     );
+    const blocker = graph.nodes.find(
+      (node) => node.id === "governance:OBJ-BLK-001",
+    );
     assert.equal(capability?.attributes.userOutcome, "完成目标");
+    assert.equal(capability?.attributes.productStatus, "APPROVED_NOT_BUILT");
     assert.equal(owner?.attributes.assignee, "UNASSIGNED");
+    assert.equal(
+      blocker?.attributes.boundaryStatus,
+      "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+    );
     assert.equal(
       graph.edges.some(
         (edge) =>
@@ -226,6 +242,21 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       ].join("\n"),
     );
     await writeFile(
+      path.join(root, "apps", "api", "src", "temporal", "site.activities.ts"),
+      [
+        "async function publishSite() { return undefined; }",
+        "export function createSiteActivities() {",
+        "  return {",
+        "    async buildSite() { return undefined; },",
+        "    arrowSite: async () => undefined,",
+        "    functionSite: async function () { return undefined; },",
+        "    publishSite,",
+        "    missingActivity,",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+    await writeFile(
       path.join(
         root,
         "apps",
@@ -288,6 +319,72 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       ),
       true,
     );
+    for (const expected of [
+      {
+        from: "symbol:apps/api/src/temporal/site.activities.ts#createSiteActivities.arrowSite",
+        to: "activity:temporal:arrowSite",
+      },
+      {
+        from: "symbol:apps/api/src/temporal/site.activities.ts#createSiteActivities.functionSite",
+        to: "activity:temporal:functionSite",
+      },
+      {
+        from: "symbol:apps/api/src/temporal/site.activities.ts#publishSite",
+        to: "activity:temporal:publishSite",
+      },
+    ]) {
+      assert.equal(
+        graph.edges.some(
+          (edge) =>
+            edge.kind === "implements" &&
+            edge.from === expected.from &&
+            edge.to === expected.to &&
+            edge.attributes.binding === "activity-factory-return" &&
+            edge.attributes.confidence === "PROVEN_STATIC_FACTORY",
+        ),
+        true,
+      );
+    }
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "implements" &&
+          edge.from ===
+            "symbol-ref:apps/api/src/temporal/site.activities.ts#missingActivity" &&
+          edge.to === "activity:temporal:missingActivity" &&
+          edge.attributes.confidence === "UNKNOWN",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "UNKNOWN_RELATION" &&
+          diagnostic.nodeId ===
+            "symbol-ref:apps/api/src/temporal/site.activities.ts#missingActivity",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "implements" &&
+          edge.from.endsWith("#createSiteActivities.buildSite") &&
+          edge.to === "activity:temporal:buildSite" &&
+          edge.attributes.binding === "activity-factory-return" &&
+          edge.attributes.confidence === "PROVEN_STATIC_FACTORY",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.nodes
+        .find((node) => node.id === "activity:temporal:buildSite")
+        ?.locations.some(
+          (location) =>
+            location.path === "apps/api/src/temporal/site.activities.ts",
+        ),
+      true,
+    );
     assert.equal(
       graph.edges.some(
         (edge) =>
@@ -331,6 +428,83 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       graph.nodes.some((node) => node.id === "external:http://169.254.169.254"),
       false,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Outbox Set registries emit exact registration and membership-dispatch edges", async () => {
+  const root = await fixture();
+  try {
+    const relay = path.join(root, "apps", "api", "src", "relay");
+    const prisma = path.join(root, "packages", "db", "prisma");
+    const temporal = path.join(root, "apps", "api", "src", "temporal");
+    await mkdir(relay, { recursive: true });
+    await mkdir(prisma, { recursive: true });
+    await mkdir(path.join(prisma, "migrations"), { recursive: true });
+    await mkdir(temporal, { recursive: true });
+    await writeFile(
+      path.join(prisma, "schema.prisma"),
+      'datasource db { provider = "postgresql" url = env("DATABASE_URL") }\n',
+    );
+    await writeFile(path.join(temporal, "workflows.ts"), "");
+    await writeFile(
+      path.join(relay, "event-registry.ts"),
+      [
+        "export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([",
+        "  'AssetObjectCleanupRequested',",
+        "]);",
+        "export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([",
+        "  'LeadQualified',",
+        "]);",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(relay, "outbox-relay.service.ts"),
+      [
+        "import { INTERNAL_COMMANDS, INTEGRATION_EVENTS } from './event-registry';",
+        "export class OutboxRelayService {",
+        "  async routeEvent(ev: { eventType: string }) {",
+        "    if (INTERNAL_COMMANDS.has(ev.eventType)) return 'internal';",
+        "    if (INTEGRATION_EVENTS.has(ev.eventType)) return 'integration';",
+        "    return 'unknown';",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    const builder = new GraphBuilder();
+    const prismaCatalog = await extractPrisma(builder, root);
+    await extractTypeScript(builder, root, prismaCatalog);
+    const graph = builder.finalize(EVIDENCE);
+    const routeEvent =
+      "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent";
+    for (const registry of ["INTERNAL_COMMANDS", "INTEGRATION_EVENTS"]) {
+      assert.equal(
+        graph.edges.some(
+          (edge) =>
+            edge.kind === "consumes" &&
+            edge.from === routeEvent &&
+            edge.to === `service:outbox-event-registry:${registry}` &&
+            edge.attributes.confidence === "PROVEN_STATIC_SET_MEMBERSHIP",
+        ),
+        true,
+      );
+    }
+    for (const [registry, eventType] of [
+      ["INTERNAL_COMMANDS", "AssetObjectCleanupRequested"],
+      ["INTEGRATION_EVENTS", "LeadQualified"],
+    ]) {
+      assert.equal(
+        graph.edges.some(
+          (edge) =>
+            edge.kind === "registers" &&
+            edge.from === `service:outbox-event-registry:${registry}` &&
+            edge.to === `event:outbox:${eventType}` &&
+            edge.attributes.confidence === "PROVEN_STATIC_SET_REGISTRATION",
+        ),
+        true,
+      );
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
