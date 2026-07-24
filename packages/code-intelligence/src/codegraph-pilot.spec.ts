@@ -13,6 +13,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import {
+  assertActiveSnapshotReady,
   assertNoUntrackedIndexInputs,
   calculatePathPrecision,
   CodeGraphEvaluationV1,
@@ -22,7 +23,9 @@ import {
   contractSearchPaths,
   evaluateAdoptionGates,
   evaluateCodeGraphStatus,
+  externalBoundaryControlPasses,
   extractGitArchive,
+  extractTrackedWorktreeSnapshot,
   measureIncrementalUpdate,
 } from "./codegraph-pilot";
 import { ContractGraphV1, GraphNodeV1 } from "./schema";
@@ -327,6 +330,82 @@ test("ContractGraph impact resolves dynamic and data nodes back to source paths"
   );
 });
 
+test("external ownership control binds canonical blocker/status and rejects a proven local frontend consumer", () => {
+  const graph: ContractGraphV1 = {
+    schemaVersion: "contract-graph/v1",
+    evidence: {
+      schemaVersion: "evidence-ref/v1",
+      repositoryRoot: "/repo",
+      worktreePath: "/repo",
+      branch: "main",
+      commit: "a".repeat(40),
+      commitTime: "2026-07-25T00:00:00.000Z",
+      dirty: false,
+      sourceHash: "b".repeat(64),
+    },
+    nodes: [
+      {
+        id: "governance:OWN-SAAS-FE",
+        kind: "owner",
+        label: "OWN-SAAS-FE",
+        attributes: { assignee: "UNASSIGNED" },
+        locations: [],
+      },
+      {
+        id: "governance:OBJ-BLK-001",
+        kind: "business_object",
+        label: "OBJ-BLK-001",
+        attributes: {
+          boundaryStatus: "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+        },
+        locations: [],
+      },
+      {
+        id: "governance:CAP-SITE-RELEASE-001",
+        kind: "capability",
+        label: "CAP-SITE-RELEASE-001",
+        attributes: { productStatus: "APPROVED_NOT_BUILT" },
+        locations: [],
+      },
+      {
+        id: "data-model:prisma:SiteRelease",
+        kind: "data_model",
+        label: "SiteRelease",
+        attributes: {},
+        locations: [],
+      },
+    ],
+    edges: [],
+    diagnostics: [],
+  };
+  const boundary = {
+    ownerNode: "governance:OWN-SAAS-FE",
+    boundaryNode: "governance:OBJ-BLK-001",
+    capabilityNode: "governance:CAP-SITE-RELEASE-001",
+    contractNode: "data-model:prisma:SiteRelease",
+    requiredBoundaryStatus: "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+    requiredCapabilityStatus: "APPROVED_NOT_BUILT",
+  };
+  assert.equal(externalBoundaryControlPasses(graph, boundary), true);
+
+  graph.nodes.push({
+    id: "symbol:apps/frontend/src/releases.ts#consumeRelease",
+    kind: "code_symbol",
+    label: "consumeRelease",
+    attributes: {},
+    locations: [{ path: "apps/frontend/src/releases.ts", line: 1 }],
+  });
+  graph.edges.push({
+    id: "edge:frontend-consumer",
+    kind: "consumes",
+    from: "symbol:apps/frontend/src/releases.ts#consumeRelease",
+    to: "data-model:prisma:SiteRelease",
+    attributes: { confidence: "PROVEN_RUNTIME" },
+    locations: [{ path: "apps/frontend/src/releases.ts", line: 1 }],
+  });
+  assert.equal(externalBoundaryControlPasses(graph, boundary), false);
+});
+
 test("path precision counts extra returned paths as false positives", () => {
   assert.equal(
     calculatePathPrecision(
@@ -349,9 +428,20 @@ test("active indexing rejects every non-ignored untracked file", async () => {
     await execFile("git", ["config", "user.name", "ContractGraph Test"], {
       cwd: root,
     });
-    await writeFile(path.join(root, ".gitignore"), ".codegraph/\n");
+    await writeFile(
+      path.join(root, ".gitignore"),
+      ".codegraph/\n.code-intelligence/\n",
+    );
     await writeFile(path.join(root, "tracked.ts"), "export const safe = 1;\n");
-    await execFile("git", ["add", ".gitignore", "tracked.ts"], { cwd: root });
+    await writeFile(
+      path.join(root, "credentials.json"),
+      '{"token":"must-never-enter-snapshot"}\n',
+    );
+    await execFile(
+      "git",
+      ["add", ".gitignore", "tracked.ts", "credentials.json"],
+      { cwd: root },
+    );
     await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
       cwd: root,
     });
@@ -364,6 +454,33 @@ test("active indexing rejects every non-ignored untracked file", async () => {
     await assert.rejects(assertNoUntrackedIndexInputs(root), /recovery\.ts/);
     await execFile("git", ["add", "recovery.ts"], { cwd: root });
     await assertNoUntrackedIndexInputs(root);
+
+    const snapshot = path.join(
+      root,
+      ".code-intelligence",
+      "codegraph-active",
+      "source",
+    );
+    await writeFile(
+      path.join(root, "concurrent-recovery.ts"),
+      "export const lateSecret = 'must-never-enter-snapshot';\n",
+    );
+    await extractTrackedWorktreeSnapshot(root, snapshot);
+    await assert.rejects(
+      readFile(path.join(snapshot, "concurrent-recovery.ts"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(snapshot, "credentials.json"), "utf8"),
+    );
+    await assert.rejects(
+      assertActiveSnapshotReady(root, snapshot),
+      /untracked files/,
+    );
+    await rm(path.join(root, "concurrent-recovery.ts"));
+    assert.match(
+      await assertActiveSnapshotReady(root, snapshot),
+      /^[a-f0-9]{64}$/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

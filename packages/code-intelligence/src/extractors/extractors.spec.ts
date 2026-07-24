@@ -35,9 +35,17 @@ test("governance extraction separates responsibility role from real assignee", a
     await writeFile(
       path.join(root, "docs", "governance", "capability-register.md"),
       [
-        "| Capability ID | Parent | 用户结果 | Pages | Owner |",
-        "|---|---|---|---|---|",
-        "| `CAP-SITE-X-001` | `CAP-SITE-001` | 完成目标 | `PAGE-FE-001` | `OWN-PRODUCT` |",
+        "| Capability ID | Parent | 用户结果 | Pages | 产品状态 | Owner |",
+        "|---|---|---|---|---|---|",
+        "| `CAP-SITE-X-001` | `CAP-SITE-001` | 完成目标 | `PAGE-FE-001` | `APPROVED_NOT_BUILT` | `OWN-PRODUCT` |",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(root, "docs", "governance", "core-object-register.md"),
+      [
+        "| Blocker | 缺失 Owner/合同 | 阻止什么 |",
+        "|---|---|---|",
+        "| `OBJ-BLK-001` | 正式 SaaS repo 与 Owner | 正式前端施工 |",
       ].join("\n"),
     );
     await writeFile(
@@ -57,8 +65,16 @@ test("governance extraction separates responsibility role from real assignee", a
     const owner = graph.nodes.find(
       (node) => node.id === "governance:OWN-PRODUCT",
     );
+    const blocker = graph.nodes.find(
+      (node) => node.id === "governance:OBJ-BLK-001",
+    );
     assert.equal(capability?.attributes.userOutcome, "完成目标");
+    assert.equal(capability?.attributes.productStatus, "APPROVED_NOT_BUILT");
     assert.equal(owner?.attributes.assignee, "UNASSIGNED");
+    assert.equal(
+      blocker?.attributes.boundaryStatus,
+      "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+    );
     assert.equal(
       graph.edges.some(
         (edge) =>

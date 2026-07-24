@@ -61,7 +61,7 @@
 | `ADP-FE-031` | GoodJob | 功能设计/使用文档方法 | `LEARN / CURRENT_METHOD` | 外部仓库；只吸收方法，不复制代码/内容 | 功能闭环、页面 IA、取舍、FAQ；真值治理用我方体系 | `OWN-DOC-GOV` |
 | `ADP-FE-032` | `@modelcontextprotocol/server-memory` | 受控长期记忆 | `ADAPT / LOCAL_READ_ONLY_WITH_CONTROLLED_WRITER` | MIT；固定 `2026.1.26`；本地 JSONL，不发送项目数据；上游整文件写入无锁 | Git/Registry 仍为真值；普通会话只读；`memoryctl` 做候选、原子晋升、备份与审计；可退回内置记忆与文件阅读 | `OWN-PLATFORM` |
 | `ADP-FE-033` | `@global/code-intelligence` | 仓库代码智能 | `BUILD / REPO_CLI_AS_BUILT` | 本仓私有代码；复用现有 TypeScript Compiler API（Apache-2.0）；无网络、遥测或常驻数据库 | 只生成 worktree/commit/hash 绑定的 `.code-intelligence/` 派生图；Git/Registry/源码/运行证据仍为真值；可删除输出并退回 `rg` | `OWN-PLATFORM` |
-| `ADP-FE-034` | `@colbymchenry/codegraph` | 静态代码关系图 | `PILOT / READ_ONLY_NOT_DEFAULT` | MIT；精确固定 `1.5.0`；本地 SQLite；启动前关闭遥测；不运行 agent/Hook/MCP 自动安装 | main Git archive 每次重建并拒绝 symlink；active 拒绝非忽略未跟踪输入；一个活跃 worktree 隔离；查询强制版本/branch/commit/hash/path/完整性门；参与表面 recall 89.5% 未过 90% 采用门，可删除 `.codegraph/` 回退 ContractGraph + `rg` | `OWN-PLATFORM` |
+| `ADP-FE-034` | `@colbymchenry/codegraph` | 静态代码关系图 | `PILOT / READ_ONLY_NOT_DEFAULT` | MIT；精确固定 `1.5.0`；本地 SQLite；启动前关闭遥测；不运行 agent/Hook/MCP 自动安装 | main Git archive 每次重建并拒绝 symlink；active 仅索引 Git tracked/staged 不可变快照并做写后哈希/未跟踪复核；一个活跃 worktree 隔离；查询强制版本/branch/commit/hash/path/完整性门；参与表面 recall 89.5% 未过 90% 采用门，可删除 `.codegraph/` 回退 ContractGraph + `rg` | `OWN-PLATFORM` |
 
 ## 3. 组合结论
 

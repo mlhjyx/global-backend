@@ -55,6 +55,62 @@ test("current repository keeps representative business and dynamic chains comple
     true,
   );
 
+  const routeEvent =
+    "symbol:apps/api/src/relay/outbox-relay.service.ts#OutboxRelayService.routeEvent";
+  const expectedOutboxRegistries = new Map<string, string[]>([
+    [
+      "INTERNAL_COMMANDS",
+      [
+        "AssetObjectCleanupRequested",
+        "CompanyProfileCreated",
+        "DeletionRequested",
+        "DiscoveryRunRequested",
+        "QualifyRequested",
+      ],
+    ],
+    [
+      "INTEGRATION_EVENTS",
+      [
+        "ClaimApproved",
+        "ClaimExpired",
+        "ClaimRevoked",
+        "DeletionCompleted",
+        "DiscoveryRunCompleted",
+        "ICPActivated",
+        "KnowledgeConflictDetected",
+        "LeadQualified",
+        "LeadsScored",
+      ],
+    ],
+  ]);
+  for (const [registry, eventTypes] of expectedOutboxRegistries) {
+    const registryId = `service:outbox-event-registry:${registry}`;
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "consumes" &&
+          edge.from === routeEvent &&
+          edge.to === registryId &&
+          edge.attributes.confidence === "PROVEN_STATIC_SET_MEMBERSHIP",
+      ),
+      true,
+      `routeEvent must consume ${registry} through Set membership`,
+    );
+    assert.deepEqual(
+      graph.edges
+        .filter(
+          (edge) =>
+            edge.kind === "registers" &&
+            edge.from === registryId &&
+            edge.attributes.confidence === "PROVEN_STATIC_SET_REGISTRATION",
+        )
+        .map((edge) => edge.to.replace("event:outbox:", ""))
+        .sort(),
+      eventTypes.sort(),
+      `${registry} literals and ContractGraph registration edges must stay complete`,
+    );
+  }
+
   assert.equal(
     coverage.mechanisms.some(
       (mechanism) =>

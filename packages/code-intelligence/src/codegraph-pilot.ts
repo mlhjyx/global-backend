@@ -1,6 +1,7 @@
 import type { CodeGraph as CodeGraphInstance } from "@colbymchenry/codegraph";
 import { execFile as execFileCallback } from "node:child_process";
 import {
+  copyFile,
   mkdir,
   mkdtemp,
   readdir,
@@ -89,6 +90,15 @@ export interface CodeGraphStatusV1 {
   }>;
 }
 
+interface ExternalBoundaryContractV1 {
+  ownerNode: string;
+  boundaryNode: string;
+  capabilityNode: string;
+  contractNode: string;
+  requiredBoundaryStatus: string;
+  requiredCapabilityStatus: string;
+}
+
 interface GoldenQuestionV1 {
   id: string;
   category: string;
@@ -103,11 +113,7 @@ interface GoldenQuestionV1 {
   unifiedSources?: Array<"codegraph" | "contractgraph">;
   expectedNodes?: string[];
   expectedEdges?: ExpectedEdgeV1[];
-  externalBoundary?: {
-    ownerNode: string;
-    boundaryNode: string;
-    contractNode: string;
-  };
+  externalBoundary?: ExternalBoundaryContractV1;
   expectedOutcome?: string;
   criticalDynamic?: boolean;
 }
@@ -246,6 +252,14 @@ function activeEvidencePath(repositoryRoot: string): string {
   return path.join(
     evidenceDirectory(repositoryRoot),
     "codegraph-active-v1.json",
+  );
+}
+
+function activeSnapshotRoot(repositoryRoot: string): string {
+  return path.join(
+    evidenceDirectory(repositoryRoot),
+    "codegraph-active",
+    "source",
   );
 }
 
@@ -426,6 +440,165 @@ export async function assertNoUntrackedIndexInputs(
   );
 }
 
+async function trackedInputPaths(repositoryRoot: string): Promise<string[]> {
+  const output = await git(repositoryRoot, ["ls-files", "--cached", "-z"]);
+  return uniqueSorted(
+    output
+      .split("\u0000")
+      .filter(Boolean)
+      .map((value) => {
+        if (value.includes("\\")) {
+          throw new Error(
+            `tracked CodeGraph path contains unsupported backslash: ${value}`,
+          );
+        }
+        return value;
+      })
+      .filter((value) => {
+        if (
+          value.length === 0 ||
+          path.posix.isAbsolute(value) ||
+          value.startsWith("../") ||
+          value.includes("/../")
+        ) {
+          throw new Error(
+            `unsafe tracked path for CodeGraph snapshot: ${value}`,
+          );
+        }
+        return !sensitivePath(value);
+      }),
+  );
+}
+
+async function trackedInputHash(
+  root: string,
+  trackedPaths: string[],
+): Promise<string> {
+  const entries: string[] = [];
+  for (const relative of trackedPaths) {
+    const absolute = path.join(root, relative);
+    try {
+      const info = await lstat(absolute);
+      if (info.isSymbolicLink()) {
+        throw new Error(
+          `tracked CodeGraph input is a symlink and cannot be indexed: ${relative}`,
+        );
+      }
+      if (!info.isFile()) {
+        throw new Error(
+          `tracked CodeGraph input is not a regular file: ${relative}`,
+        );
+      }
+      entries.push(`${relative}\u0000${sha256(await readFile(absolute))}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        entries.push(`${relative}\u0000DELETED`);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return sha256(entries.join("\n"));
+}
+
+export async function extractTrackedWorktreeSnapshot(
+  repositoryRoot: string,
+  destination: string,
+): Promise<string[]> {
+  const resolved = path.resolve(repositoryRoot);
+  const parent = path.dirname(destination);
+  await assertNoSymlinkComponents(resolved, parent);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  await assertNoSymlinkComponents(resolved, destination);
+  const trackedPaths = await trackedInputPaths(resolved);
+  const temporaryRoot = await mkdtemp(path.join(parent, ".source-tmp-"));
+  const temporary = path.join(temporaryRoot, "source");
+  const backup = path.join(parent, `.source-old-${process.pid}-${Date.now()}`);
+  let movedExisting = false;
+  await mkdir(temporary, { recursive: true, mode: 0o700 });
+  try {
+    for (const relative of trackedPaths) {
+      const source = path.join(resolved, relative);
+      let info;
+      try {
+        info = await lstat(source);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if (info.isSymbolicLink()) {
+        throw new Error(
+          `tracked CodeGraph input is a symlink and cannot be indexed: ${relative}`,
+        );
+      }
+      if (!info.isFile()) {
+        throw new Error(
+          `tracked CodeGraph input is not a regular file: ${relative}`,
+        );
+      }
+      const target = path.join(temporary, relative);
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await copyFile(source, target);
+    }
+    if (await pathExists(destination)) {
+      await rename(destination, backup);
+      movedExisting = true;
+    }
+    try {
+      await rename(temporary, destination);
+    } catch (error) {
+      if (movedExisting) await rename(backup, destination);
+      throw error;
+    }
+    if (movedExisting) {
+      await rm(backup, { recursive: true, force: true });
+      movedExisting = false;
+    }
+    return trackedPaths;
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+    if (movedExisting && !(await pathExists(destination))) {
+      await rename(backup, destination);
+      movedExisting = false;
+    }
+    if (!movedExisting) {
+      await rm(backup, { recursive: true, force: true });
+    }
+  }
+}
+
+export async function assertActiveSnapshotReady(
+  repositoryRoot: string,
+  snapshotRoot: string,
+): Promise<string> {
+  await assertNoUntrackedIndexInputs(repositoryRoot);
+  const trackedPaths = await trackedInputPaths(repositoryRoot);
+  const [worktreeHash, snapshotHash] = await Promise.all([
+    trackedInputHash(repositoryRoot, trackedPaths),
+    trackedInputHash(snapshotRoot, trackedPaths),
+  ]);
+  if (worktreeHash !== snapshotHash) {
+    throw new Error(
+      "refusing active CodeGraph evidence because the tracked worktree changed while its immutable snapshot was built",
+    );
+  }
+  return worktreeHash;
+}
+
+async function activeWorktreeSourceHash(
+  repositoryRoot: string,
+): Promise<string> {
+  try {
+    await assertNoUntrackedIndexInputs(repositoryRoot);
+  } catch {
+    return "UNTRACKED_INPUTS_PRESENT";
+  }
+  return trackedInputHash(
+    repositoryRoot,
+    await trackedInputPaths(repositoryRoot),
+  );
+}
+
 async function indexProject(projectPath: string): Promise<{
   graph: CodeGraphInstance;
   fullBuildMs: number;
@@ -455,6 +628,7 @@ async function buildIndexEvidence(
   projectPath: string,
   graph: CodeGraphInstance,
   fullBuildMs: number,
+  sourceHash?: string,
 ): Promise<CodeGraphIndexEvidenceV1> {
   const stats = graph.getStats();
   const build = graph.getIndexBuildInfo();
@@ -493,7 +667,7 @@ async function buildIndexEvidence(
     commit,
     commitTime,
     dirty,
-    sourceHash: await computeSourceHash(projectPath),
+    sourceHash: sourceHash ?? (await computeSourceHash(projectPath)),
     repositoryRoot: repositoryEvidence.repositoryRoot,
     logicalWorktreePath:
       target === "main" ? repositoryEvidence.repositoryRoot : repositoryRoot,
@@ -524,30 +698,47 @@ export async function buildCodeGraphIndex(
   }
   const mainCommit = await git(resolved, ["rev-parse", "origin/main"]);
   const projectPath =
-    target === "active" ? resolved : mainSnapshotRoot(resolved, mainCommit);
+    target === "active"
+      ? activeSnapshotRoot(resolved)
+      : mainSnapshotRoot(resolved, mainCommit);
   if (target === "main") {
     await extractGitArchive(resolved, mainCommit, projectPath);
+  } else {
+    await extractTrackedWorktreeSnapshot(resolved, projectPath);
   }
-  const { graph, fullBuildMs } = await indexProject(projectPath);
   try {
-    const evidence = await buildIndexEvidence(
-      resolved,
-      target,
-      projectPath,
-      graph,
-      fullBuildMs,
-    );
-    const file =
-      target === "active"
-        ? activeEvidencePath(resolved)
-        : mainEvidencePath(resolved, mainCommit);
-    await atomicWrite(file, stableJson(evidence));
-    if (target === "main") {
-      await pruneOldMainSnapshots(resolved, mainCommit);
+    const { graph, fullBuildMs } = await indexProject(projectPath);
+    try {
+      const activeSourceHash =
+        target === "active"
+          ? await assertActiveSnapshotReady(resolved, projectPath)
+          : undefined;
+      const evidence = await buildIndexEvidence(
+        resolved,
+        target,
+        projectPath,
+        graph,
+        fullBuildMs,
+        activeSourceHash,
+      );
+      const file =
+        target === "active"
+          ? activeEvidencePath(resolved)
+          : mainEvidencePath(resolved, mainCommit);
+      await atomicWrite(file, stableJson(evidence));
+      if (target === "main") {
+        await pruneOldMainSnapshots(resolved, mainCommit);
+      }
+      return evidence;
+    } finally {
+      graph.close();
     }
-    return evidence;
-  } finally {
-    graph.close();
+  } catch (error) {
+    if (target === "active") {
+      await rm(projectPath, { recursive: true, force: true });
+      await rm(activeEvidencePath(resolved), { force: true });
+    }
+    throw error;
   }
 }
 
@@ -705,7 +896,9 @@ export async function getCodeGraphStatus(
       ? await git(resolved, ["rev-parse", "origin/main"])
       : repositoryEvidence.commit;
   const projectPath =
-    target === "main" ? mainSnapshotRoot(resolved, commit) : resolved;
+    target === "main"
+      ? mainSnapshotRoot(resolved, commit)
+      : activeSnapshotRoot(resolved);
   const CodeGraph = await loadCodeGraph();
   const graph = await CodeGraph.open(projectPath, {
     readOnly: true,
@@ -722,7 +915,7 @@ export async function getCodeGraphStatus(
       sourceHash:
         target === "main"
           ? await computeSourceHash(projectPath)
-          : repositoryEvidence.sourceHash,
+          : await activeWorktreeSourceHash(resolved),
       repositoryRoot: repositoryEvidence.repositoryRoot,
       logicalWorktreePath:
         target === "main" ? repositoryEvidence.repositoryRoot : resolved,
@@ -868,6 +1061,57 @@ function edgeMatchesExpectation(
         ? edge.attributes.confidence
         : null) === expected.confidence,
   );
+}
+
+export function externalBoundaryControlPasses(
+  graph: ContractGraphV1,
+  boundary: ExternalBoundaryContractV1,
+): boolean {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const owner = nodes.get(boundary.ownerNode);
+  const blocker = nodes.get(boundary.boundaryNode);
+  const capability = nodes.get(boundary.capabilityNode);
+  const contract = nodes.get(boundary.contractNode);
+  const exactRegistryBoundary =
+    owner?.kind === "owner" &&
+    owner.attributes.assignee === "UNASSIGNED" &&
+    blocker?.kind === "business_object" &&
+    blocker.attributes.boundaryStatus === boundary.requiredBoundaryStatus &&
+    capability?.kind === "capability" &&
+    capability.attributes.productStatus === boundary.requiredCapabilityStatus &&
+    contract?.kind === "data_model";
+
+  const localFrontendNodes = new Set(
+    graph.nodes
+      .filter(
+        (node) =>
+          /(?:^|:)(?:apps|packages)\/frontend\//.test(node.id) ||
+          node.locations.some((location) =>
+            /^(?:apps|packages)\/frontend\//.test(location.path),
+          ),
+      )
+      .map((node) => node.id),
+  );
+  const contractSurfaces = new Set(
+    graph.nodes
+      .filter(
+        (node) =>
+          node.id === boundary.contractNode ||
+          (["api", "event", "service", "data_model"].includes(node.kind) &&
+            /site.?release/i.test(`${node.id}\n${node.label}`)),
+      )
+      .map((node) => node.id),
+  );
+  const provenLocalConsumer = graph.edges.some(
+    (edge) =>
+      localFrontendNodes.has(edge.from) &&
+      contractSurfaces.has(edge.to) &&
+      ["calls", "consumes", "reads", "references", "routes_to"].includes(
+        edge.kind,
+      ) &&
+      edge.attributes.confidence === "PROVEN_RUNTIME",
+  );
+  return exactRegistryBoundary && !provenLocalConsumer;
 }
 
 export function calculatePathPrecision(
@@ -1378,33 +1622,11 @@ export async function evaluateCodeGraphPilot(
         const foundExpectedEdges = expectedEdges.filter((value) =>
           edgeMatchesExpectation(contractGraph, value),
         );
-        const owner = contractGraph.nodes.find(
-          (node) => node.id === boundary.ownerNode,
-        );
-        const boundaryNode = contractGraph.nodes.find(
-          (node) => node.id === boundary.boundaryNode,
-        );
-        const contractNode = contractGraph.nodes.find(
-          (node) => node.id === boundary.contractNode,
-        );
-        const exactBoundary =
-          owner?.kind === "owner" &&
-          owner.attributes.assignee === "UNASSIGNED" &&
-          boundaryNode?.kind === "business_object" &&
-          contractNode?.kind === "data_model";
-        const unsupportedConsumerClaim = contractGraph.edges.some(
-          (edge) =>
-            [boundary.ownerNode, boundary.boundaryNode].includes(edge.from) &&
-            edge.to === boundary.contractNode &&
-            ["consumes", "reads", "routes_to"].includes(edge.kind) &&
-            edge.attributes.confidence === "PROVEN_RUNTIME",
-        );
-        const elapsedMs = performance.now() - started;
         const passed =
-          exactBoundary &&
+          externalBoundaryControlPasses(contractGraph, boundary) &&
           foundExpectedNodes.length === expectedNodes.length &&
-          foundExpectedEdges.length === expectedEdges.length &&
-          !unsupportedConsumerClaim;
+          foundExpectedEdges.length === expectedEdges.length;
+        const elapsedMs = performance.now() - started;
         results.push({
           id: question.id,
           category: question.category,

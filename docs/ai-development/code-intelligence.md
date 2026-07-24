@@ -81,7 +81,7 @@ pnpm code-intelligence:codegraph:evaluate
 - CLI 在加载依赖前设置 `CODEGRAPH_TELEMETRY=0` 与 `DO_NOT_TRACK=1`。
 - 禁止运行 `codegraph install`、`upgrade`、watcher、MCP 或任何会写 `AGENTS.md`、Hooks、编辑器配置的自动安装。
 - main 索引来自 `origin/main` 的 Git archive 干净快照，不读取 `/global/backend` 的用户未跟踪资料；另只保留当前活跃 worktree 一个索引。
-- active 索引在施工 worktree 存在任何非忽略的未跟踪文件时拒绝构建；新源码须先进入 Git 暂存区，避免 recovery 文件、临时提示词、客户资料或凭据被持久化进 SQLite。
+- active 索引不直接读取可变施工目录：先只复制 Git 已跟踪/已暂存文件到 `.code-intelligence/codegraph-active/source` 不可变快照，再在快照中建 SQLite；索引后重新核对未跟踪集合和逐文件哈希，施工目录若在窗口内变化就删除快照和 evidence 并拒绝完成。新源码须先进入 Git 暂存区，recovery 文件、临时提示词、客户资料或凭据不会进入快照。
 - 新 main 快照和证据完整写入后，只清理 `.code-intelligence/codegraph-main/` 下通过 40 位提交哈希校验的旧派生快照；不触碰 Git worktree 或用户文件。
 - 查询必须同时通过版本、branch、commit、source hash、project path、index state、pending references、pending changes 与 extraction freshness 校验，否则拒答。
 - `unified-impact` 合并 Git diff、ContractGraph 与 CodeGraph；ContractGraph 的 Activity、Workflow、Prisma model 等非文件节点先由 location 还原为源码路径，冲突进入人工复核队列，不自动选择一方。
@@ -103,7 +103,7 @@ pnpm code-intelligence:test
 pnpm code-intelligence:check
 ```
 
-`check` 在内存中完整构建两次，要求字节等价，并拒绝 error 级诊断。它只增加验证，不能据此跳过 API、契约、Renderer 或现有完整 CI。
+`check` 在内存中完整构建两次，要求字节等价，并拒绝 error 级诊断。仓库完整性测试还锁定 `routeEvent` 对两个 Outbox Registry 的消费边，并逐项核对 Registry 全部字面量的注册边；删除 `.has(eventType)` 或漏登记事件会使 CI 失败。它只增加验证，不能据此跳过 API、契约、Renderer 或现有完整 CI。
 
 ## 4. 动态机制登记
 
@@ -139,7 +139,7 @@ pnpm code-intelligence:check
 | 门 | 结果 | 要求 | 判定 |
 |---|---:|---:|---|
 | 职责路由后的统一 precision | 100%（45/45 返回路径） | ≥90% | 通过 |
-| 预期事实召回 | 100%（52/52 路径、节点、边） | ≥90% | 通过 |
+| 预期事实召回 | 100%（53/53 路径、节点、边） | ≥90% | 通过 |
 | 关键动态精确边召回 | 100%（核对 `from/to/kind/confidence`） | 100% | 通过 |
 | CodeGraph 原始 precision / recall | 42.2% / 65.5% | 观察项 | 不能单独使用 |
 | CodeGraph 参与表面的 precision | 100% | ≥90% | 通过 |
@@ -151,7 +151,7 @@ pnpm code-intelligence:check
 | 最慢常见查询 | 重复运行约 19–21 毫秒 | ≤10 秒 | 通过 |
 | 相比 `rg + 文件读取` 的中位提速 | 重复运行约 42%–45% | ≥30% | 通过 |
 
-评测不再把“题目命中率”冒充准确率：每个额外返回路径都计为误报；关键动态题必须命中精确边，只有文件名相同不能过门。Outbox 题同时断言 Set 注册边和 `.has(eventType)` 消费边；外部消费控制绑定精确的 `OWN-SAAS-FE → OBJ-BLK-001` 边界及 `SiteRelease` 合同节点，不能被无关外部依赖误通过。增量耗时只在旧符号消失、新符号与源码可查询、索引 complete、引用和变更队列归零后才计为有效。Prisma、业务追踪、Compose/systemd 与 Astro 非语言依赖按已声明职责只采用 ContractGraph，但仍单独公开 CodeGraph 的原始 precision/recall，不能用路由隐藏其缺陷。
+评测不再把“题目命中率”冒充准确率：每个额外返回路径都计为误报；关键动态题必须命中精确边，只有文件名相同不能过门。Outbox 题同时断言 Set 注册边和 `.has(eventType)` 消费边；外部消费控制绑定 Registry 中精确的 `OWN-SAAS-FE → OBJ-BLK-001` 开放 blocker、`CAP-SITE-RELEASE-001=APPROVED_NOT_BUILT` 与内部 `SiteRelease` 节点，并拒绝本仓前端出现 `PROVEN_RUNTIME` 消费边的矛盾状态。增量耗时只在旧符号消失、新符号与源码可查询、索引 complete、引用和变更队列归零后才计为有效。Prisma、业务追踪、Compose/systemd 与 Astro 非语言依赖按已声明职责只采用 ContractGraph，但仍单独公开 CodeGraph 的原始 precision/recall，不能用路由隐藏其缺陷。
 
 因此采用结果仍固定为 `PILOT_ONLY`：统一路由结果与速度门通过，但 CodeGraph 在自己获准参与的表面仍漏 2/19，89.5% 未达到 90% 独立采用门。ContractGraph + `rg` + 当前源码继续是默认路径；CodeGraph 只在复杂静态调用问题中按需启用，不能据此减少 CI。评测保留真实失败门，不因已经安装而强行采用。
 

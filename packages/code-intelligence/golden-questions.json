@@ -39,13 +39,14 @@
       "id": "GQ-NEG-002",
       "category": "fake-wiring",
       "kind": "EXTERNAL_OWNED_CONTROL",
-      "question": "不可见的 SaaS 前端消费者是否仍报告为 EXTERNAL_OWNED，而不是假装已接通？",
+      "question": "权威 Registry 是否仍把 SaaS 前端和 SiteRelease 管理能力标记为未指派外部 blocker，而不是假装已接通？",
       "query": "SaaS frontend SiteRelease consumer",
       "baselinePattern": "SiteRelease",
       "expectedPaths": [],
       "expectedNodes": [
         "governance:OWN-SAAS-FE",
         "governance:OBJ-BLK-001",
+        "governance:CAP-SITE-RELEASE-001",
         "data-model:prisma:SiteRelease"
       ],
       "expectedEdges": [
@@ -59,7 +60,10 @@
       "externalBoundary": {
         "ownerNode": "governance:OWN-SAAS-FE",
         "boundaryNode": "governance:OBJ-BLK-001",
-        "contractNode": "data-model:prisma:SiteRelease"
+        "capabilityNode": "governance:CAP-SITE-RELEASE-001",
+        "contractNode": "data-model:prisma:SiteRelease",
+        "requiredBoundaryStatus": "OPEN_EXTERNAL_OWNERSHIP_BLOCKER",
+        "requiredCapabilityStatus": "APPROVED_NOT_BUILT"
       },
       "expectedOutcome": "EXTERNAL_OWNED"
     },
