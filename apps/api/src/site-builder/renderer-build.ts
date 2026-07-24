@@ -81,6 +81,24 @@ interface RendererOutputTree {
   totalBytes: number;
 }
 
+export function rendererOutputTreeDigest(
+  files: readonly { path: string; size: number; sha256: string }[],
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        files
+          .map((file) => ({
+            path: file.path,
+            size: file.size,
+            sha256: file.sha256,
+          }))
+          .sort((left, right) => left.path.localeCompare(right.path)),
+      ),
+    )
+    .digest("hex");
+}
+
 async function collectRendererOutputTree(
   root: string,
 ): Promise<RendererOutputTree> {
@@ -98,10 +116,7 @@ async function collectRendererOutputTree(
       if (entry.isSymbolicLink()) {
         throw new Error("RENDERER_OUTPUT_SYMLINK_FORBIDDEN");
       }
-      const relative = path
-        .relative(root, absolute)
-        .split(path.sep)
-        .join("/");
+      const relative = path.relative(root, absolute).split(path.sep).join("/");
       if (relative === RENDERER_OUTPUT_MANIFEST_FILE) {
         if (!entry.isFile()) {
           throw new Error("RENDERER_OUTPUT_MANIFEST_INVALID");
@@ -161,9 +176,7 @@ async function collectRendererOutputTree(
   if (files.length === 0) throw new Error("RENDERER_OUTPUT_EMPTY");
   files.sort((left, right) => left.path.localeCompare(right.path));
   return {
-    treeDigest: createHash("sha256")
-      .update(JSON.stringify(files))
-      .digest("hex"),
+    treeDigest: rendererOutputTreeDigest(files),
     fileCount: files.length,
     totalBytes,
   };
@@ -470,10 +483,7 @@ export async function buildSiteSpecWithTemporaryFile(
 ): Promise<RendererOutputManifestV1> {
   const tempDir = await mkdtemp(path.join(tmpdir(), "global-site-renderer-"));
   const specPath = path.join(tempDir, "site-spec.json");
-  const manifestPath = path.join(
-    output.outDir,
-    RENDERER_OUTPUT_MANIFEST_FILE,
-  );
+  const manifestPath = path.join(output.outDir, RENDERER_OUTPUT_MANIFEST_FILE);
 
   try {
     await rm(manifestPath, { force: true });

@@ -31,6 +31,7 @@ import {
   SiteReleaseService,
   type SiteReleaseMaterializationIdentity,
 } from './site-release.service';
+import { writeRendererOutputManifest } from './renderer-build';
 
 interface ReleaseRow {
   id: string;
@@ -53,6 +54,8 @@ interface ReleaseRow {
 interface State {
   runStatus: string;
   versionStatus: string;
+  versionSpec: SiteSpec;
+  versionSpecVersion: string;
   artifactKey: string | null;
   release: ReleaseRow | null;
 }
@@ -100,6 +103,8 @@ function fakePrisma(initial?: Partial<State>) {
   const state: State = {
     runStatus: 'running',
     versionStatus: 'building',
+    versionSpec: siteSpec(),
+    versionSpecVersion: '1.0.0',
     artifactKey: null,
     release: null,
     ...initial,
@@ -126,6 +131,8 @@ function fakePrisma(initial?: Partial<State>) {
               workspaceId: '10000000-0000-0000-0000-000000000001',
               buildRunId: '30000000-0000-0000-0000-000000000001',
               buildStatus: draft.versionStatus,
+              spec: draft.versionSpec,
+              specVersion: draft.versionSpecVersion,
             })),
             updateMany: vi.fn(async ({ where, data }) => {
               if (
@@ -214,6 +221,27 @@ async function outputRoot(): Promise<string> {
   roots.push(root);
   await writeFile(path.join(root, 'index.html'), '<h1>Acme</h1>');
   return root;
+}
+
+async function qualityOutputRoot(spec: SiteSpec) {
+  const root = await outputRoot();
+  const basePath = '/preview/acme';
+  const siteOrigin = 'https://preview.example.test';
+  const manifest = await writeRendererOutputManifest({
+    root,
+    candidateSpecDigest: releaseSpecDigest(spec),
+    basePath,
+    siteOrigin,
+  });
+  return {
+    root,
+    candidateFence: {
+      specDigest: releaseSpecDigest(spec),
+      rendererOutputDigest: manifest.treeDigest,
+      basePath,
+      siteOrigin,
+    },
+  };
 }
 
 async function releaseQualityFixture(
@@ -386,17 +414,21 @@ describe('SiteReleaseService cross-system commit protocol', () => {
       releaseIdentity,
       storage,
     );
-    await expect(
-      service.materialize({
-        ...scope,
-        root: await outputRoot(),
-        spec: golden.spec,
-        storedSpecVersion: golden.spec.specVersion,
-        designBrief: golden.designBrief,
-        releaseIdentity,
-        quality,
-      }),
-    ).resolves.toMatchObject({ releaseId: releaseIdentity.releaseId });
+    prisma.state.versionSpec = golden.spec;
+    prisma.state.versionSpecVersion = golden.spec.specVersion;
+    const rendered = await qualityOutputRoot(golden.spec);
+    const materializeInput = {
+      ...scope,
+      root: rendered.root,
+      spec: golden.spec,
+      storedSpecVersion: golden.spec.specVersion,
+      designBrief: golden.designBrief,
+      releaseIdentity,
+      candidateFence: rendered.candidateFence,
+      quality,
+    };
+    const first = await service.materialize(materializeInput);
+    await expect(service.materialize(materializeInput)).resolves.toEqual(first);
 
     expect(prisma.state.release?.status).toBe('ready');
     expect(prisma.state.release?.manifest).toMatchObject({
@@ -422,6 +454,133 @@ describe('SiteReleaseService cross-system commit protocol', () => {
       }),
     ).rejects.toThrow('SITE_RELEASE_QUALITY_IDENTITY_REQUIRED');
     expect(prisma.state.release).toBeNull();
+  });
+
+  it('does not reserve the sole Release identity for a stale P4 candidate', async () => {
+    const prisma = fakePrisma();
+    const service = new SiteReleaseService(prisma as never, fakeStorage(), {
+      buildIdentity: 'site-renderer@test',
+      randomUuid: vi.fn(),
+    });
+    await expect(
+      service.reserveMaterialization({
+        workspaceId: input.workspaceId,
+        siteId: input.siteId,
+        siteVersionId: input.siteVersionId,
+        buildRunId: input.buildRunId,
+        expectedSpecDigest: 'a'.repeat(64),
+      }),
+    ).rejects.toThrow('QUALITY_CANDIDATE_FENCE_LOST');
+    expect(prisma.state.release).toBeNull();
+  });
+
+  it('rejects a renderer root swap after precheck but before v3 collection', async () => {
+    const prisma = fakePrisma();
+    const storage = fakeStorage();
+    const rootToSwap: { value?: string } = {};
+    const ids = [
+      '50000000-0000-0000-0000-000000000001',
+      '60000000-0000-0000-0000-000000000001',
+    ];
+    const service = new SiteReleaseService(prisma as never, storage, {
+      buildIdentity: 'site-renderer@test',
+      randomUuid: () => ids.shift()!,
+      beforeQualityCollectionForTest: async () => {
+        await writeFile(
+          path.join(rootToSwap.value!, 'index.html'),
+          '<h1>changed after P4 precheck</h1>',
+        );
+      },
+    });
+    const golden = (
+      await buildM1ebGoldenFixtures(
+        new URL('../../../../', import.meta.url).pathname,
+      )
+    )[0]!;
+    prisma.state.versionSpec = golden.spec;
+    prisma.state.versionSpecVersion = golden.spec.specVersion;
+    const scope = {
+      workspaceId: input.workspaceId,
+      siteId: input.siteId,
+      siteVersionId: input.siteVersionId,
+      buildRunId: input.buildRunId,
+    };
+    const releaseIdentity = await service.reserveMaterialization(scope);
+    const quality = await releaseQualityFixture(
+      golden,
+      releaseIdentity,
+      storage,
+    );
+    const rendered = await qualityOutputRoot(golden.spec);
+    rootToSwap.value = rendered.root;
+
+    await expect(
+      service.materialize({
+        ...scope,
+        root: rendered.root,
+        spec: golden.spec,
+        storedSpecVersion: golden.spec.specVersion,
+        designBrief: golden.designBrief,
+        releaseIdentity,
+        candidateFence: rendered.candidateFence,
+        quality,
+      }),
+    ).rejects.toThrow('RENDERER_OUTPUT_TREE_MISMATCH');
+    expect(prisma.state.release?.status).toBe('candidate');
+    expect(prisma.state.versionStatus).toBe('building');
+  });
+
+  it('rejects a v3 materialization when the persisted SiteVersion digest drifted', async () => {
+    const prisma = fakePrisma();
+    const storage = fakeStorage();
+    const ids = [
+      '50000000-0000-0000-0000-000000000001',
+      '60000000-0000-0000-0000-000000000001',
+    ];
+    const service = new SiteReleaseService(prisma as never, storage, {
+      buildIdentity: 'site-renderer@test',
+      randomUuid: () => ids.shift()!,
+    });
+    const golden = (
+      await buildM1ebGoldenFixtures(
+        new URL('../../../../', import.meta.url).pathname,
+      )
+    )[0]!;
+    prisma.state.versionSpec = {
+      ...golden.spec,
+      site: {
+        ...golden.spec.site,
+        seoGlobal: { siteName: 'stale database candidate' },
+      },
+    };
+    prisma.state.versionSpecVersion = golden.spec.specVersion;
+    const scope = {
+      workspaceId: input.workspaceId,
+      siteId: input.siteId,
+      siteVersionId: input.siteVersionId,
+      buildRunId: input.buildRunId,
+    };
+    const releaseIdentity = await service.reserveMaterialization(scope);
+    const quality = await releaseQualityFixture(
+      golden,
+      releaseIdentity,
+      storage,
+    );
+    const rendered = await qualityOutputRoot(golden.spec);
+
+    await expect(
+      service.materialize({
+        ...scope,
+        root: rendered.root,
+        spec: golden.spec,
+        storedSpecVersion: golden.spec.specVersion,
+        designBrief: golden.designBrief,
+        releaseIdentity,
+        candidateFence: rendered.candidateFence,
+        quality,
+      }),
+    ).rejects.toThrow('QUALITY_CANDIDATE_FENCE_LOST');
+    expect(prisma.state.release?.status).toBe('candidate');
   });
 
   it('does not let a late T1 identity renew or rotate T2 and T2 can still finalize', async () => {
@@ -455,16 +614,19 @@ describe('SiteReleaseService cross-system commit protocol', () => {
       )
     )[0]!;
     const quality = await releaseQualityFixture(golden, t2, storage);
-    const root = await outputRoot();
+    prisma.state.versionSpec = golden.spec;
+    prisma.state.versionSpecVersion = golden.spec.specVersion;
+    const rendered = await qualityOutputRoot(golden.spec);
 
     await expect(
       service.materialize({
         ...scope,
-        root,
+        root: rendered.root,
         spec: golden.spec,
         storedSpecVersion: golden.spec.specVersion,
         designBrief: golden.designBrief,
         releaseIdentity: t1,
+        candidateFence: rendered.candidateFence,
         quality,
       }),
     ).rejects.toThrow('SITE_RELEASE_MATERIALIZATION_IDENTITY_FENCED');
@@ -477,11 +639,12 @@ describe('SiteReleaseService cross-system commit protocol', () => {
     await expect(
       service.materialize({
         ...scope,
-        root,
+        root: rendered.root,
         spec: golden.spec,
         storedSpecVersion: golden.spec.specVersion,
         designBrief: golden.designBrief,
         releaseIdentity: t2,
+        candidateFence: rendered.candidateFence,
         quality,
       }),
     ).resolves.toMatchObject({ releaseId: t2.releaseId });
