@@ -13,6 +13,7 @@ import {
   BLIND_VISUAL_CAMPAIGN_MODELS,
   BLIND_VISUAL_CANDIDATES,
   BLIND_VISUAL_EXPECTED_RUNS,
+  BLIND_VISUAL_LATENCY_OBSERVATION_MS,
   BLIND_VISUAL_MAX_TOKENS,
   BLIND_VISUAL_OUTPUT_SCHEMA,
   BLIND_VISUAL_TIMEOUT_MS,
@@ -224,7 +225,7 @@ function makeRunMiss(run: BlindVisualCallRecord): void {
 describe("blind visual calibration fixture and invocation plans", () => {
   it("forecasts all original-image calls without making cost an execution gate", () => {
     const preflight = buildBlindVisualCampaignPreflight(pairs);
-    expect(preflight.estimatedTotalCostCents).toBeCloseTo(282.6564, 6);
+    expect(preflight.estimatedTotalCostCents).toBeCloseTo(683.45, 6);
     expect(preflight.models.map((model) => model.model)).toEqual(
       BLIND_VISUAL_CAMPAIGN_MODELS,
     );
@@ -607,7 +608,7 @@ describe("blind visual candidate runner", () => {
         resultFor(request, {
           usage: {
             inputTokens: 100,
-            outputTokens: BLIND_VISUAL_MAX_TOKENS + 1,
+            outputTokens: -1,
             costUsd: 0.001,
           },
         }),
@@ -639,6 +640,45 @@ describe("blind visual candidate runner", () => {
       });
     },
   );
+
+  it("accepts complete closed JSON whose observed token usage exceeds the requested capacity", async () => {
+    const invoke = vi.fn(async (request: Parameters<BlindVisualInvoke>[0]) =>
+      resultFor(request, {
+        usage: {
+          inputTokens: 100,
+          outputTokens: BLIND_VISUAL_MAX_TOKENS + 1,
+          costUsd: 0.001,
+        },
+      }),
+    );
+    const report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate: candidate(),
+      provenance: PROVENANCE,
+      invoke,
+    });
+    expect(invoke).toHaveBeenCalledTimes(19);
+    expect(report.status).toBe("single_model_gate_passed");
+    expect(report.metrics?.totalCostUsd).toBeGreaterThan(0);
+  });
+
+  it("records latency above 120 seconds without treating it as a quality failure", async () => {
+    const invoke = vi.fn(async (request: Parameters<BlindVisualInvoke>[0]) =>
+      resultFor(request, {
+        elapsedMs: BLIND_VISUAL_LATENCY_OBSERVATION_MS + 1,
+      }),
+    );
+    const report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate: candidate(),
+      provenance: PROVENANCE,
+      invoke,
+    });
+    expect(report.status).toBe("single_model_gate_passed");
+    expect(report.metrics?.p95ElapsedMs).toBe(
+      BLIND_VISUAL_LATENCY_OBSERVATION_MS + 1,
+    );
+  });
 
   it("marks an exception unavailable without inventing provider evidence", async () => {
     const invoke = vi.fn(async () => {

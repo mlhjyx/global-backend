@@ -9,7 +9,7 @@ import {
 } from "./aesthetic-review-eval";
 
 export const BLIND_VISUAL_CALIBRATION_HARNESS_VERSION =
-  "site-builder-blind-visual-calibration@1.0.0";
+  "site-builder-blind-visual-calibration@1.1.0";
 export const BLIND_VISUAL_CALIBRATION_SCHEMA_VERSION =
   "site-builder-blind-visual-calibration-report/v1";
 export const BLIND_VISUAL_CALIBRATION_PROMPT_VERSION =
@@ -21,9 +21,15 @@ export const BLIND_VISUAL_REPEATS = 3;
 export const BLIND_VISUAL_PAIR_COUNT = 6;
 export const BLIND_VISUAL_EXPECTED_RUNS =
   BLIND_VISUAL_PAIR_COUNT * BLIND_VISUAL_REPEATS;
-export const BLIND_VISUAL_TIMEOUT_MS = 120_000;
+/**
+ * 120 seconds remains a reported latency observation, not a quality gate.
+ * The completion deadline exists only to recover a genuinely stranded call.
+ */
+export const BLIND_VISUAL_LATENCY_OBSERVATION_MS = 120_000;
+export const BLIND_VISUAL_TIMEOUT_MS = 900_000;
 export const BLIND_VISUAL_TIMEOUT_SETTLEMENT_GRACE_MS = 10_000;
-export const BLIND_VISUAL_MAX_TOKENS = 800;
+/** Capacity for obtaining a complete closed JSON response, not a score gate. */
+export const BLIND_VISUAL_MAX_TOKENS = 4_096;
 export const BLIND_VISUAL_COST_ESTIMATOR_VERSION =
   "site-builder-blind-visual-cost-upper-bound/v3";
 
@@ -1013,7 +1019,6 @@ function assertProviderResult(
     result.usage.inputTokens < 0 ||
     !Number.isInteger(result.usage.outputTokens) ||
     result.usage.outputTokens < 0 ||
-    result.usage.outputTokens > candidate.maxTokens ||
     (result.usage.costUsd !== undefined &&
       result.usage.costUsd !== null &&
       (!Number.isFinite(result.usage.costUsd) || result.usage.costUsd < 0))
@@ -1136,7 +1141,6 @@ function assertCostEvidence(
     record.inputTokens < 0 ||
     !Number.isInteger(record.outputTokens) ||
     record.outputTokens < 0 ||
-    record.outputTokens > candidate.maxTokens ||
     (record.reportedCostUsd !== null &&
       (!Number.isFinite(record.reportedCostUsd) || record.reportedCostUsd < 0))
   ) {
