@@ -426,6 +426,9 @@ export function assertAestheticReviewOutput(
   const allowedArtifactIds = new Set(
     inputImages.map((image) => image.artifactId),
   );
+  const targetByArtifactId = new Map(
+    inputImages.map((image) => [image.artifactId, image.target]),
+  );
   const dimensions = value.dimensions;
   const findings = value.findings;
   if (
@@ -447,6 +450,14 @@ export function assertAestheticReviewOutput(
     throw new Error("AESTHETIC_REVIEW_OUTPUT_INVALID");
   }
   for (const finding of findings) {
+    const evidenceRef = isRecord(finding) ? finding.evidenceRef : undefined;
+    const evidenceArtifactId = isRecord(evidenceRef)
+      ? evidenceRef.artifactId
+      : undefined;
+    const evidenceTarget =
+      typeof evidenceArtifactId === "string"
+        ? targetByArtifactId.get(evidenceArtifactId)
+        : undefined;
     if (
       !isRecord(finding) ||
       !hasExactKeys(finding, FINDING_KEYS) ||
@@ -460,7 +471,11 @@ export function assertAestheticReviewOutput(
       !isRecord(finding.evidenceRef) ||
       !hasExactKeys(finding.evidenceRef, EVIDENCE_REF_KEYS) ||
       !isBoundedToken(finding.evidenceRef.artifactId) ||
-      !allowedArtifactIds.has(finding.evidenceRef.artifactId)
+      !allowedArtifactIds.has(finding.evidenceRef.artifactId) ||
+      !evidenceTarget ||
+      finding.target.locale !== evidenceTarget.locale ||
+      finding.target.pageId !== evidenceTarget.pageId ||
+      finding.target.breakpoint !== evidenceTarget.breakpoint
     ) {
       throw new Error("AESTHETIC_REVIEW_OUTPUT_INVALID");
     }

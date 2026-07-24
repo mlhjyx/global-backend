@@ -194,6 +194,16 @@ describe("M1-f aesthetic review closed output", () => {
     ).toThrow("AESTHETIC_REVIEW_OUTPUT_INCONSISTENT");
   });
 
+  it("binds every finding target to its referenced screenshot", async () => {
+    const evalCase = (await loadAestheticEvalCases(repositoryRoot))[0];
+    const mismatched = validOutput(evalCase.images);
+    mismatched.findings[0].target.breakpoint =
+      evalCase.images[1].target.breakpoint;
+    expect(() =>
+      assertAestheticReviewOutput(mismatched, evalCase.images),
+    ).toThrow("AESTHETIC_REVIEW_OUTPUT_INVALID");
+  });
+
   it("scores approved false blockers and seeded-issue recall without inventing success", async () => {
     const cases = await loadAestheticEvalCases(repositoryRoot);
     const approved = cases.find((item) => item.kind === "approved")!;

@@ -415,23 +415,48 @@ async function reconcileInterruptedEvidence(
     cases.map((evalCase) => [evalCase.caseId, evalCase]),
   );
   const recoveredRuns = [];
-  for (const name of names) {
+  for (const [index, name] of names.entries()) {
+    if (name !== `run-${index + 1}.json`) {
+      throw new Error(`INTERRUPTED_EVIDENCE_SEQUENCE_GAP: ${name}`);
+    }
     const absolute = path.join(sourceArtifactDirectory, name);
     const bytes = await readFile(absolute);
     const artifact = JSON.parse(bytes.toString("utf8")) as Record<
       string,
       unknown
     >;
+    const expectedCase = cases[Math.floor(index / REPEATS)];
+    const expectedAttempt = (index % REPEATS) + 1;
     const evalCase = caseById.get(String(artifact.caseId));
     const output = artifact.output;
+    const usage = artifact.usage as Record<string, unknown> | undefined;
     if (
       !evalCase ||
+      evalCase !== expectedCase ||
+      artifact.attempt !== expectedAttempt ||
+      artifact.schemaVersion !== AESTHETIC_REVIEW_EVAL_SCHEMA_VERSION ||
+      artifact.evidenceId !== EVIDENCE_ID ||
+      artifact.evaluatorVersion !== AESTHETIC_REVIEW_EVALUATOR_VERSION ||
+      artifact.promptVersion !== AESTHETIC_REVIEW_PROMPT_VERSION ||
+      artifact.familyId !== evalCase.familyId ||
+      artifact.kind !== evalCase.kind ||
+      artifact.expectedIssue !== evalCase.expectedIssue ||
       artifact.requestedModel !== MODEL ||
       artifact.reportedModel !== MODEL ||
       artifact.resolvedModel !== MODEL ||
       artifact.modelResolutionSource !== "upstream_response" ||
       artifact.provider !== "gateway" ||
-      artifact.transport !== TRANSPORT
+      artifact.transport !== TRANSPORT ||
+      typeof artifact.elapsedMs !== "number" ||
+      !Number.isFinite(artifact.elapsedMs) ||
+      artifact.elapsedMs < 0 ||
+      !usage ||
+      !Number.isInteger(usage.inputTokens) ||
+      Number(usage.inputTokens) < 0 ||
+      !Number.isInteger(usage.outputTokens) ||
+      Number(usage.outputTokens) < 0 ||
+      sha256CanonicalJson(artifact.imageEvidence) !==
+        sha256CanonicalJson(artifactImageEvidence(evalCase.images))
     ) {
       throw new Error(`INTERRUPTED_EVIDENCE_ARTIFACT_INVALID: ${name}`);
     }
@@ -459,12 +484,11 @@ async function reconcileInterruptedEvidence(
       provider: "gateway",
       transport: TRANSPORT,
       artifactSha256: sha256CanonicalJson(validated),
-      schemaValid: true,
-      provenanceExact: true,
-      forbiddenFieldsAbsent: true,
-      ...scoring,
-      verdict: validated.verdict,
-      overallScore: validated.overallScore,
+      schemaValidUnderReconciliationCode: true,
+      forbiddenFieldsAbsentUnderReconciliationCode: true,
+      selfReportedIdentityFieldsConsistent: true,
+      originalExecutionProvenanceExact: false,
+      selfReportedScoringInternallyConsistent: true,
     });
   }
   const sourceEnd = await fingerprints();
@@ -475,10 +499,14 @@ async function reconcileInterruptedEvidence(
     candidateState: "unavailable",
     routePromoted: false,
     reconciliation: {
-      kind: "read_only_interrupted_evidence_reconciliation",
+      kind: "read_only_unanchored_incident_inventory",
       sourceReportPath: path.relative(repositoryRoot, sourceAbsolute),
       sourceReportSha256: sha256Bytes(await readFile(sourceAbsolute)),
       modelCallsMade: 0,
+      originalArtifactManifestPresent: false,
+      originalRunnerSourceAvailable: false,
+      limitation:
+        "The source report did not anchor a partial artifact manifest or preserve the exact runner source. File hashes below prove only the bytes inventoried during reconciliation, not exact original-execution provenance.",
       originalExecutionSourceFiles: sourceReport.sourceFiles,
       originalExecutionSourceIntegrity: sourceReport.sourceIntegrity,
     },
@@ -488,40 +516,32 @@ async function reconcileInterruptedEvidence(
     matrix: {
       status: "interrupted",
       reason: "timeout",
-      completedRuns: recoveredRuns.length,
+      completedRunsProven: null,
       expectedRuns: EXPECTED_RUNS,
-      remainingRunsNotExecuted: EXPECTED_RUNS - recoveredRuns.length,
-      allRecoveredArtifactsSchemaValid: recoveredRuns.every(
-        (run) => run.schemaValid,
-      ),
-      allRecoveredArtifactsProvenanceExact: recoveredRuns.every(
-        (run) => run.provenanceExact,
-      ),
-      allRecoveredArtifactsForbiddenFieldsAbsent: recoveredRuns.every(
-        (run) => run.forbiddenFieldsAbsent,
-      ),
+      diagnosticFileCount: recoveredRuns.length,
+      inventoryCompleteForFilesPresent: true,
+      originalArtifactSetAnchored: false,
+      originalExecutionProvenanceExact: false,
+      allInventoriedArtifactsSchemaValidUnderReconciliationCode:
+        recoveredRuns.every((run) => run.schemaValidUnderReconciliationCode),
+      allInventoriedArtifactsSelfReportedIdentityFieldsConsistent:
+        recoveredRuns.every((run) => run.selfReportedIdentityFieldsConsistent),
+      allInventoriedArtifactsForbiddenFieldsAbsentUnderReconciliationCode:
+        recoveredRuns.every(
+          (run) => run.forbiddenFieldsAbsentUnderReconciliationCode,
+        ),
     },
-    partialMetrics: {
-      caseAccepted: recoveredRuns.filter((run) => run.accepted).length,
-      falseBlockers: recoveredRuns.filter((run) => run.falseBlocker).length,
-      seededIssueHits: recoveredRuns.filter(
-        (run) => run.seededIssueDetected === true,
-      ).length,
-      seededIssueOpportunities: recoveredRuns.filter(
-        (run) => run.seededIssueDetected !== null,
-      ).length,
-    },
-    recoveredRuns,
+    diagnosticInventory: recoveredRuns,
     sourceFiles: sourceStart,
     sourceIntegrity,
     conclusion:
-      "Capability probe passed with exact model provenance, but the matrix timed out after the recorded partial runs. The model is runtime-unavailable for M1-f; the candidate is not evaluatedCandidate and the deterministic P4 fallback remains explicit.",
+      "The raw report recorded a successful capability probe before a matrix timeout, but its partial artifact set and exact runner source were not anchored. This reconciliation is diagnostic inventory only, not exact model provenance. The candidate remains runtime-unavailable, is not evaluatedCandidate, and deterministic P4 remains explicit.",
   };
   await writeFinalReport(report);
   progress("interrupted_evidence_reconciled", {
     model: MODEL,
     modelCallsMade: 0,
-    completedRuns: recoveredRuns.length,
+    diagnosticFileCount: recoveredRuns.length,
     expectedRuns: EXPECTED_RUNS,
     reportPath: path.relative(repositoryRoot, absoluteReportPath),
   });
@@ -545,6 +565,8 @@ if (cases.length !== EXPECTED_CASES) {
 let catalog: ModelCatalogSnapshot | undefined;
 let probeArtifactPath: string | undefined;
 let probe: Record<string, unknown> | undefined;
+let probeCalculatedCostUsd = 0;
+let probeReportedCostUsd: number | null = null;
 const completedRuns: EvaluationRun[] = [];
 try {
   catalog = await modelCatalog();
@@ -575,6 +597,8 @@ try {
     probeCall.result.data,
     probeCase.images,
   );
+  probeCalculatedCostUsd = calculatedCost(probeCall.result);
+  probeReportedCostUsd = probeCall.result.usage?.costUsd ?? null;
   probe = {
     accepted: true,
     requestedModel: MODEL,
@@ -585,6 +609,8 @@ try {
     transport: TRANSPORT,
     elapsedMs: probeCall.elapsedMs,
     usage: probeCall.result.usage ?? {},
+    reportedCostUsd: probeReportedCostUsd,
+    calculatedCostUsd: probeCalculatedCostUsd,
     artifactSha256: sha256CanonicalJson(probeOutput),
     imageEvidence: artifactImageEvidence(probeCase.images),
   };
@@ -714,8 +740,12 @@ try {
   const preferredPairs = pairedPreferences.filter(
     (pair) => pair.preferredApproved,
   ).length;
-  const totalCalculatedCostUsd = round(
+  const matrixCalculatedCostUsd = round(
     runs.reduce((sum, run) => sum + run.calculatedCostUsd, 0),
+    8,
+  );
+  const totalCalculatedCostUsd = round(
+    probeCalculatedCostUsd + matrixCalculatedCostUsd,
     8,
   );
   const acceptedRunCount = runs.filter((run) => run.caseAccepted).length;
@@ -769,17 +799,22 @@ try {
       familyCount: pairedPreferences.length,
       pairedPreferences,
       acceptedRunCount,
+      probeCalculatedCostUsd,
+      matrixCalculatedCostUsd,
       totalCalculatedCostUsd,
       acceptedArtifactUnitCostUsd:
         acceptedRunCount === 0
           ? null
           : round(totalCalculatedCostUsd / acceptedRunCount, 8),
-      totalReportedCostUsd: runs.every((run) => run.reportedCostUsd !== null)
-        ? round(
-            runs.reduce((sum, run) => sum + (run.reportedCostUsd ?? 0), 0),
-            8,
-          )
-        : null,
+      totalReportedCostUsd:
+        probeReportedCostUsd !== null &&
+        runs.every((run) => run.reportedCostUsd !== null)
+          ? round(
+              probeReportedCostUsd +
+                runs.reduce((sum, run) => sum + (run.reportedCostUsd ?? 0), 0),
+              8,
+            )
+          : null,
       latencyMs: {
         minimum: Math.min(...runs.map((run) => run.elapsedMs)),
         maximum: Math.max(...runs.map((run) => run.elapsedMs)),
@@ -789,8 +824,20 @@ try {
         ),
       },
       tokens: {
-        input: runs.reduce((sum, run) => sum + run.inputTokens, 0),
-        output: runs.reduce((sum, run) => sum + run.outputTokens, 0),
+        probe: {
+          input: Number(
+            (probe?.usage as Record<string, unknown> | undefined)
+              ?.inputTokens ?? 0,
+          ),
+          output: Number(
+            (probe?.usage as Record<string, unknown> | undefined)
+              ?.outputTokens ?? 0,
+          ),
+        },
+        matrix: {
+          input: runs.reduce((sum, run) => sum + run.inputTokens, 0),
+          output: runs.reduce((sum, run) => sum + run.outputTokens, 0),
+        },
       },
     },
     priceSnapshot: PRICE_SNAPSHOT,
