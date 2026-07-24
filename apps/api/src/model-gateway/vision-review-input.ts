@@ -1,11 +1,211 @@
-import type { ReviewVisionInput } from './types';
+import {
+  VISION_REVIEW_MATERIAL_CLASSES,
+  type ReviewVisionInput,
+} from './types';
+
+const PNG_SIGNATURE = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+const MAX_VISION_IMAGES = 3;
+const MAX_VISION_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_VISION_TOTAL_BYTES = 6 * 1024 * 1024;
+const MAX_SCHEMA_JSON_CHARS = 64_000;
+const MAX_SCHEMA_DEPTH = 64;
+const MAX_SCHEMA_NODES = 10_000;
+const BOUNDED_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+
+function assertBoundedJsonSchema(schema: unknown): void {
+  if (
+    !schema ||
+    typeof schema !== 'object' ||
+    Array.isArray(schema) ||
+    (Object.getPrototypeOf(schema) !== Object.prototype &&
+      Object.getPrototypeOf(schema) !== null)
+  ) {
+    throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+  }
+  const seen = new WeakSet<object>();
+  const stack: Array<{ value: unknown; depth: number }> = [
+    { value: schema, depth: 0 },
+  ];
+  let nodes = 0;
+  let approximateChars = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    nodes += 1;
+    if (nodes > MAX_SCHEMA_NODES || current.depth > MAX_SCHEMA_DEPTH) {
+      throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+    }
+    if (current.value === null) continue;
+    if (typeof current.value === 'string') {
+      approximateChars += current.value.length;
+      if (approximateChars > MAX_SCHEMA_JSON_CHARS) {
+        throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+      }
+      continue;
+    }
+    if (
+      typeof current.value === 'number' &&
+      Number.isFinite(current.value)
+    ) {
+      continue;
+    }
+    if (typeof current.value === 'boolean') continue;
+    if (typeof current.value !== 'object') {
+      throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+    }
+    const object = current.value as object;
+    if (seen.has(object)) {
+      // Reject cycles and shared mutable graph nodes before structuredClone.
+      throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+    }
+    seen.add(object);
+    if (
+      !Array.isArray(object) &&
+      Object.getPrototypeOf(object) !== Object.prototype &&
+      Object.getPrototypeOf(object) !== null
+    ) {
+      throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+    }
+    for (const [key, child] of Object.entries(
+      object as Record<string, unknown>,
+    )) {
+      approximateChars += key.length;
+      if (approximateChars > MAX_SCHEMA_JSON_CHARS) {
+        throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+      }
+      stack.push({ value: child, depth: current.depth + 1 });
+    }
+  }
+  let json: string;
+  try {
+    json = JSON.stringify(schema);
+  } catch (error) {
+    throw new Error('MODEL_OUTPUT_SCHEMA_INVALID', { cause: error });
+  }
+  if (json.length > MAX_SCHEMA_JSON_CHARS) {
+    throw new Error('MODEL_OUTPUT_SCHEMA_INVALID');
+  }
+}
+
+/**
+ * Allocation-safe synchronous preflight. This must run before cloning bytes,
+ * hashing images, reserving budget, or awaiting any external dependency.
+ */
+export function preflightVisionReviewInput(input: ReviewVisionInput): void {
+  const runtimeInput = input as unknown as Record<string, unknown>;
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Object.keys(runtimeInput).some(
+      (key) =>
+        ![
+          'task',
+          'prompt',
+          'system',
+          'model',
+          'schema',
+          'images',
+          'validateOutput',
+          'maxTokens',
+          'maxCostCents',
+          'signal',
+        ].includes(key),
+    ) ||
+    ![
+      'site_builder.aesthetic_review',
+      'site_builder.aesthetic_review.eval',
+    ].includes(input.task) ||
+    !BOUNDED_TOKEN.test(input.task) ||
+    !BOUNDED_TOKEN.test(input.model) ||
+    typeof input.prompt !== 'string' ||
+    input.prompt.length < 1 ||
+    input.prompt.length > 32_000 ||
+    (input.system !== undefined &&
+      (typeof input.system !== 'string' || input.system.length > 16_000)) ||
+    !Number.isInteger(input.maxTokens) ||
+    input.maxTokens < 1 ||
+    input.maxTokens > 16_000 ||
+    !Number.isInteger(input.maxCostCents) ||
+    input.maxCostCents < 1 ||
+    input.maxCostCents > 100 ||
+    !Array.isArray(input.images) ||
+    input.images.length < 1 ||
+    input.images.length > MAX_VISION_IMAGES
+  ) {
+    throw new Error('VISION_REVIEW_INPUT_INVALID');
+  }
+  assertBoundedJsonSchema(input.schema);
+
+  let totalBytes = 0;
+  const artifactIds = new Set<string>();
+  for (const image of input.images) {
+    const runtime = image as unknown as Record<string, unknown>;
+    if ('url' in runtime || 'imageUrl' in runtime || 'path' in runtime) {
+      throw new Error('VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN');
+    }
+    if (
+      Object.keys(runtime).some(
+        (key) =>
+          ![
+            'materialClass',
+            'workspaceId',
+            'artifactId',
+            'sha256',
+            'mimeType',
+            'bytes',
+            'target',
+          ].includes(key),
+      ) ||
+      !VISION_REVIEW_MATERIAL_CLASSES.includes(image.materialClass) ||
+      (image.materialClass === 'workspace_site_screenshot'
+        ? !image.workspaceId || !BOUNDED_TOKEN.test(image.workspaceId)
+        : image.workspaceId !== undefined) ||
+      (input.task === 'site_builder.aesthetic_review.eval'
+        ? image.materialClass !== 'model_eval_fixture'
+        : image.materialClass !== 'workspace_site_screenshot') ||
+      !BOUNDED_TOKEN.test(image.artifactId) ||
+      artifactIds.has(image.artifactId) ||
+      !SHA256.test(image.sha256) ||
+      image.mimeType !== 'image/png' ||
+      !(image.bytes instanceof Uint8Array) ||
+      image.bytes.byteLength < PNG_SIGNATURE.length ||
+      image.bytes.byteLength > MAX_VISION_IMAGE_BYTES ||
+      PNG_SIGNATURE.some((byte, index) => image.bytes[index] !== byte) ||
+      !image.target ||
+      Object.keys(image.target).some(
+        (key) => !['locale', 'pageId', 'breakpoint'].includes(key),
+      ) ||
+      !BOUNDED_TOKEN.test(image.target.locale) ||
+      !BOUNDED_TOKEN.test(image.target.pageId) ||
+      ![375, 768, 1440].includes(image.target.breakpoint)
+    ) {
+      throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    artifactIds.add(image.artifactId);
+    totalBytes += image.bytes.byteLength;
+  }
+  if (totalBytes > MAX_VISION_TOTAL_BYTES) {
+    throw new Error('VISION_REVIEW_IMAGE_BUDGET_EXCEEDED');
+  }
+}
 
 function freezeJson(value: unknown): void {
-  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return;
-  for (const child of Object.values(value as Record<string, unknown>)) {
-    freezeJson(child);
+  if (!value || typeof value !== 'object') return;
+  const seen = new WeakSet<object>();
+  const stack: object[] = [value as object];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const child of Object.values(
+      current as Record<string, unknown>,
+    )) {
+      if (child && typeof child === 'object') stack.push(child);
+    }
+    Object.freeze(current);
   }
-  Object.freeze(value);
 }
 
 /**
@@ -16,6 +216,7 @@ function freezeJson(value: unknown): void {
 export function snapshotVisionReviewInput(
   input: ReviewVisionInput,
 ): ReviewVisionInput {
+  preflightVisionReviewInput(input);
   let schema: Record<string, unknown>;
   try {
     schema = structuredClone(input.schema);

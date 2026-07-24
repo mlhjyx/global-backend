@@ -471,6 +471,25 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects excess image count before copying any caller byte buffer', async () => {
+    const input = visionInput();
+    input.images = [
+      ...input.images,
+      { ...input.images[0]!, artifactId: 'case-home-extra' },
+    ];
+    const boundedProvider = visionProvider();
+    const copySpy = vi.spyOn(Uint8Array, 'from');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(boundedProvider.reviewVision(input)).rejects.toThrow(
+      'VISION_REVIEW_INPUT_INVALID',
+    );
+    expect(copySpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    copySpy.mockRestore();
+  });
+
   it('keeps eval fixtures out of the future runtime task', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

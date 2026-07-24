@@ -353,6 +353,22 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
     expect(provider.reviewVision).not.toHaveBeenCalled();
   });
 
+  it('rejects a cyclic schema with a controlled error before snapshot recursion or routing', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const cyclic: Record<string, unknown> = { type: 'object' };
+    cyclic.self = cyclic;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        { ...visionInput(), schema: cyclic },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
   it('binds the compiled schema before await so caller mutation cannot relax the result gate', async () => {
     let resolveReview!: (result: typeof exactResult) => void;
     const provider = {
