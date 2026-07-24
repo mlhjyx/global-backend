@@ -185,7 +185,7 @@ jobs:
           github.event_name == 'pull_request' &&
           env.HAS_BASE == '1' &&
           !contains(github.event.pull_request.labels.*.name, 'breaking-change-approved')
-        uses: oasdiff/oasdiff-action/breaking@024f6c399f9a21ada1addb0f9a36ce1bfac995f1 # v0.1.6
+        uses: oasdiff/oasdiff-action/breaking@4bdf89062dad92caea71236f59704b04d3ce9682 # v0.1.8
         with:
           base: base-openapi.json
           revision: packages/contracts/openapi/openapi.json
