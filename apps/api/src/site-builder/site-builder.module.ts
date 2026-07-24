@@ -23,6 +23,8 @@ import { IMAGE_PIPELINE_RUNNER, ImagePipelineService } from './image-pipeline.se
 import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
 import { SitePreviewController } from './site-preview.controller';
 import { SitePreviewArtifactService } from './site-preview-artifact.service';
+import { StorageQualityArtifactSink } from './quality/quality-artifact-sink';
+import { DeterministicQualityService } from './quality/deterministic-quality.service';
 
 /**
  * 独立站建设（docs/site-builder/02 §1）。M0：intake + 站点档案 + 素材/KB 地基。
@@ -45,6 +47,8 @@ import { SitePreviewArtifactService } from './site-preview-artifact.service';
     BuildsService,
     KbService,
     StorageService,
+    StorageQualityArtifactSink,
+    DeterministicQualityService,
     SitePreviewArtifactService,
     ImagePipelineService,
     { provide: IMAGE_PIPELINE_RUNNER, useFactory: () => new IsolatedImagePipelineRunner() },
@@ -62,6 +66,8 @@ import { SitePreviewArtifactService } from './site-preview-artifact.service';
     BuildsService,
     KbService,
     StorageService,
+    StorageQualityArtifactSink,
+    DeterministicQualityService,
     ImagePipelineService,
   ],
 })
