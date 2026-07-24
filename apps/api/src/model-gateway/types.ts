@@ -78,12 +78,59 @@ export interface GenerateStructuredInput {
   signal?: AbortSignal;
 }
 
+export const VISION_REVIEW_MATERIAL_CLASSES = [
+  'workspace_site_screenshot',
+  'model_eval_fixture',
+] as const;
+
+export type VisionReviewMaterialClass =
+  (typeof VISION_REVIEW_MATERIAL_CLASSES)[number];
+
+export interface VisionReviewImage {
+  /** Bounded provenance only; callers pass bytes, never a URL or filesystem path. */
+  materialClass: VisionReviewMaterialClass;
+  /** Required for runtime screenshots; forbidden for immutable eval fixtures. */
+  workspaceId?: string;
+  artifactId: string;
+  sha256: string;
+  mimeType: 'image/png';
+  bytes: Uint8Array;
+  target: {
+    locale: string;
+    pageId: string;
+    breakpoint: 375 | 768 | 1440;
+  };
+}
+
+/**
+ * Explicit evaluation/runtime seam for screenshot review. It is deliberately
+ * separate from generateStructured so text-only callers cannot smuggle remote
+ * image URLs into generic prompts.
+ */
+export interface ReviewVisionInput {
+  task: string;
+  prompt: string;
+  system?: string;
+  /** Required: vision calls never inherit a provider default or alias silently. */
+  model: string;
+  schema: Record<string, unknown>;
+  images: readonly VisionReviewImage[];
+  validateOutput?: (data: unknown) => void;
+  maxTokens: number;
+  maxCostCents: number;
+  signal?: AbortSignal;
+}
+
 export interface EmbedInput {
   task: string;
   input: string[];
 }
 
-export type ModelOp = 'generateText' | 'generateStructured' | 'embed';
+export type ModelOp =
+  | 'generateText'
+  | 'generateStructured'
+  | 'reviewVision'
+  | 'embed';
 
 export interface HealthStatus {
   healthy: boolean;

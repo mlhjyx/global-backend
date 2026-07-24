@@ -7,6 +7,7 @@ import {
   HealthStatus,
   ModelOp,
   ModelResult,
+  ReviewVisionInput,
 } from '../types';
 
 /**
@@ -18,8 +19,9 @@ import {
 export class StubModelProvider implements ModelProvider {
   readonly id = 'stub';
 
-  supports(_op: ModelOp): boolean {
-    return true;
+  supports(op: ModelOp): boolean {
+    // A deterministic stub must never masquerade as successful visual review.
+    return op !== 'reviewVision';
   }
 
   async health(): Promise<HealthStatus> {
@@ -45,6 +47,12 @@ export class StubModelProvider implements ModelProvider {
     const required = (input.schema?.required as string[] | undefined) ?? [];
     for (const key of required) shape[key] = null;
     return { data: shape as T, provider: this.id, model: 'stub-v0', usage: { costUsd: 0 } };
+  }
+
+  async reviewVision<T = unknown>(
+    _input: ReviewVisionInput,
+  ): Promise<ModelResult<T>> {
+    throw new Error('STUB_VISION_REVIEW_FORBIDDEN');
   }
 
   async embed(input: EmbedInput): Promise<ModelResult<number[][]>> {

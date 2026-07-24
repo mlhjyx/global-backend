@@ -6,6 +6,7 @@ import {
   HealthStatus,
   ModelOp,
   ModelResult,
+  ReviewVisionInput,
 } from './types';
 
 /**
@@ -22,6 +23,10 @@ export interface ModelProvider {
   generateText(input: GenerateTextInput, ctx: AiContext): Promise<ModelResult<string>>;
   generateStructured<T = unknown>(
     input: GenerateStructuredInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<T>>;
+  reviewVision<T = unknown>(
+    input: ReviewVisionInput,
     ctx: AiContext,
   ): Promise<ModelResult<T>>;
   embed(input: EmbedInput, ctx: AiContext): Promise<ModelResult<number[][]>>;

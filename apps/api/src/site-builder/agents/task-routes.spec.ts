@@ -376,6 +376,20 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     });
   });
 
+  it('bounds multimodal review to controlled workspace site material without activating a task route', () => {
+    expect(
+      modelPolicyRegistry.getProfile('multimodal.review').dataPolicy,
+    ).toEqual({
+      transport: 'new_api_only',
+      region: 'gateway_controlled',
+      personalData: 'workspace_controlled',
+      dataScope: 'workspace_site_materials',
+    });
+    expect(SITE_BUILDER_TASK_IDS).not.toContain(
+      'site_builder.aesthetic_review',
+    );
+  });
+
   it('media candidates require a real MediaGateway and have no current task route', () => {
     for (const profile of [
       'image.bulk.creative',

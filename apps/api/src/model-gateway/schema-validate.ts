@@ -9,6 +9,28 @@ export interface SchemaCheck {
   errors?: string[];
 }
 
+/**
+ * Vision/MODEL-1 gates fail closed before a paid call. Legacy text tasks retain
+ * checkAgainstSchema's historical permissive compile-failure behavior until
+ * their contracts are migrated independently.
+ */
+export function assertModelOutputSchemaCompiles(
+  schema: Record<string, unknown>,
+): void {
+  let key: string;
+  try {
+    key = JSON.stringify(schema);
+  } catch (error) {
+    throw new Error('MODEL_OUTPUT_SCHEMA_INVALID', { cause: error });
+  }
+  if (cache.has(key)) return;
+  try {
+    cache.set(key, ajv.compile(schema));
+  } catch (error) {
+    throw new Error('MODEL_OUTPUT_SCHEMA_INVALID', { cause: error });
+  }
+}
+
 /** Validate structured model output against the AI Task Contract's JSON Schema (PRD 9.6). */
 export function checkAgainstSchema(schema: Record<string, unknown>, data: unknown): SchemaCheck {
   const key = JSON.stringify(schema);

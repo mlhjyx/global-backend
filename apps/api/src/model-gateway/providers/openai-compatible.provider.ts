@@ -1,5 +1,10 @@
+import { createHash } from 'node:crypto';
 import { ModelProvider } from '../model-provider';
-import { ProviderOutputError } from './provider-output-error';
+import {
+  ProviderHttpError,
+  ProviderIdentityError,
+  ProviderOutputError,
+} from './provider-output-error';
 import {
   EmbedInput,
   GenerateStructuredInput,
@@ -8,7 +13,10 @@ import {
   ModelOp,
   ModelResolutionSource,
   ModelResult,
+  ReviewVisionInput,
+  VISION_REVIEW_MATERIAL_CLASSES,
 } from '../types';
+import { snapshotVisionReviewInput } from '../vision-review-input';
 
 /**
  * The application still has one gateway credential and one logical model name.
@@ -17,6 +25,7 @@ import {
  * infer it from a friendly model-name prefix at runtime.
  */
 export type GatewayModelTransport = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages';
+export type GatewayVisionTransport = 'openai-chat-completions';
 
 export interface OpenAICompatConfig {
   id: string; // 'deepseek' | 'openai' | 'gemini' | 'volcengine'
@@ -26,6 +35,16 @@ export interface OpenAICompatConfig {
   embedModel?: string;
   /** Optional, explicit protocol override for models that have passed a protocol probe. */
   modelTransports?: Readonly<Record<string, GatewayModelTransport>>;
+  /**
+   * Explicit vision request adapters. Presence is not capability evidence:
+   * MODEL-1 must still probe the live endpoint before route promotion.
+   */
+  visionModelTransports?: Readonly<Record<string, GatewayVisionTransport>>;
+  /**
+   * Immutable repository fixture identity -> SHA-256. Runtime providers omit
+   * this; PR6 supplies the reviewed fixture catalog to its evaluation client.
+   */
+  visionEvalFixtureDigests?: Readonly<Record<string, string>>;
 }
 
 /** 剥 markdown 围栏（部分模型在 json_object 模式下仍偶发 ```json…``` 包裹结构化输出）。 */
@@ -52,7 +71,135 @@ function resolutionProvenance(
     : {
         model: requestedModel,
         modelResolutionSource: 'requested_fallback',
-      };
+  };
+}
+
+const PNG_SIGNATURE = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+const MAX_VISION_IMAGES = 3;
+const MAX_VISION_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_VISION_TOTAL_BYTES = 6 * 1024 * 1024;
+const BOUNDED_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+
+function assertVisionReviewInput(
+  input: ReviewVisionInput,
+  evalFixtureDigests: ReadonlyMap<string, string>,
+): void {
+  let schemaBytes = Number.POSITIVE_INFINITY;
+  try {
+    schemaBytes = JSON.stringify(input.schema).length;
+  } catch {
+    // Cyclic or otherwise non-JSON schemas are never sent to the provider.
+  }
+  if (
+    Object.keys(input as unknown as Record<string, unknown>).some(
+      (key) =>
+        ![
+          'task',
+          'prompt',
+          'system',
+          'model',
+          'schema',
+          'images',
+          'validateOutput',
+          'maxTokens',
+          'maxCostCents',
+          'signal',
+        ].includes(key),
+    ) ||
+    ![
+      'site_builder.aesthetic_review',
+      'site_builder.aesthetic_review.eval',
+    ].includes(input.task) ||
+    !BOUNDED_TOKEN.test(input.task) ||
+    !BOUNDED_TOKEN.test(input.model) ||
+    typeof input.prompt !== 'string' ||
+    input.prompt.length < 1 ||
+    input.prompt.length > 32_000 ||
+    (input.system !== undefined &&
+      (typeof input.system !== 'string' || input.system.length > 16_000)) ||
+    !input.schema ||
+    typeof input.schema !== 'object' ||
+    Array.isArray(input.schema) ||
+    schemaBytes > 64_000 ||
+    !Number.isInteger(input.maxTokens) ||
+    (input.maxTokens ?? 0) < 1 ||
+    (input.maxTokens ?? 0) > 16_000 ||
+    !Number.isInteger(input.maxCostCents) ||
+    input.maxCostCents < 1 ||
+    input.maxCostCents > 100 ||
+    !Array.isArray(input.images) ||
+    input.images.length < 1 ||
+    input.images.length > MAX_VISION_IMAGES
+  ) {
+    throw new Error('VISION_REVIEW_INPUT_INVALID');
+  }
+
+  let totalBytes = 0;
+  const artifactIds = new Set<string>();
+  for (const image of input.images) {
+    const runtime = image as unknown as Record<string, unknown>;
+    if ('url' in runtime || 'imageUrl' in runtime || 'path' in runtime) {
+      throw new Error('VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN');
+    }
+    if (
+      Object.keys(runtime).some(
+        (key) =>
+          ![
+            'materialClass',
+            'workspaceId',
+            'artifactId',
+            'sha256',
+            'mimeType',
+            'bytes',
+            'target',
+          ].includes(key),
+      ) ||
+      !VISION_REVIEW_MATERIAL_CLASSES.includes(image.materialClass) ||
+      (image.materialClass === 'workspace_site_screenshot'
+        ? !image.workspaceId || !BOUNDED_TOKEN.test(image.workspaceId)
+        : image.workspaceId !== undefined) ||
+      (input.task === 'site_builder.aesthetic_review.eval'
+        ? image.materialClass !== 'model_eval_fixture'
+        : image.materialClass !== 'workspace_site_screenshot') ||
+      !BOUNDED_TOKEN.test(image.artifactId) ||
+      artifactIds.has(image.artifactId) ||
+      !SHA256.test(image.sha256) ||
+      image.mimeType !== 'image/png' ||
+      !(image.bytes instanceof Uint8Array) ||
+      image.bytes.byteLength < PNG_SIGNATURE.length ||
+      image.bytes.byteLength > MAX_VISION_IMAGE_BYTES ||
+      PNG_SIGNATURE.some((byte, index) => image.bytes[index] !== byte) ||
+      !image.target ||
+      Object.keys(image.target).some(
+        (key) => !['locale', 'pageId', 'breakpoint'].includes(key),
+      ) ||
+      !BOUNDED_TOKEN.test(image.target.locale) ||
+      !BOUNDED_TOKEN.test(image.target.pageId) ||
+      ![375, 768, 1440].includes(image.target.breakpoint)
+    ) {
+      throw new Error('VISION_REVIEW_IMAGE_INVALID');
+    }
+    const actualDigest = createHash('sha256')
+      .update(image.bytes)
+      .digest('hex');
+    if (actualDigest !== image.sha256) {
+      throw new Error('VISION_REVIEW_IMAGE_DIGEST_MISMATCH');
+    }
+    if (
+      image.materialClass === 'model_eval_fixture' &&
+      evalFixtureDigests.get(image.artifactId) !== actualDigest
+    ) {
+      throw new Error('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
+    }
+    artifactIds.add(image.artifactId);
+    totalBytes += image.bytes.byteLength;
+  }
+  if (totalBytes > MAX_VISION_TOTAL_BYTES) {
+    throw new Error('VISION_REVIEW_IMAGE_BUDGET_EXCEEDED');
+  }
 }
 
 /**
@@ -63,13 +210,36 @@ function resolutionProvenance(
  */
 export class OpenAICompatibleProvider implements ModelProvider {
   readonly id: string;
+  private readonly cfg: OpenAICompatConfig;
+  private readonly visionEvalFixtureDigests: ReadonlyMap<string, string>;
 
-  constructor(private readonly cfg: OpenAICompatConfig) {
+  constructor(cfg: OpenAICompatConfig) {
     this.id = cfg.id;
+    this.cfg = {
+      ...cfg,
+      ...(cfg.modelTransports
+        ? { modelTransports: Object.freeze({ ...cfg.modelTransports }) }
+        : {}),
+      ...(cfg.visionModelTransports
+        ? {
+            visionModelTransports: Object.freeze({
+              ...cfg.visionModelTransports,
+            }),
+          }
+        : {}),
+      // The private Map below is the sole runtime authority.
+      visionEvalFixtureDigests: undefined,
+    };
+    this.visionEvalFixtureDigests = new Map(
+      Object.entries(cfg.visionEvalFixtureDigests ?? {}),
+    );
   }
 
   supports(op: ModelOp): boolean {
     if (op === 'embed') return !!this.cfg.embedModel;
+    if (op === 'reviewVision') {
+      return Object.keys(this.cfg.visionModelTransports ?? {}).length > 0;
+    }
     return op === 'generateText' || op === 'generateStructured';
   }
 
@@ -141,6 +311,26 @@ export class OpenAICompatibleProvider implements ModelProvider {
         usage,
         { cause: err, provider: this.id, ...resolutionProvenance(model, resolvedModel) },
       );
+    }
+  }
+
+  async reviewVision<T = unknown>(
+    input: ReviewVisionInput,
+  ): Promise<ModelResult<T>> {
+    const snapshot = snapshotVisionReviewInput(input);
+    assertVisionReviewInput(
+      snapshot,
+      this.visionEvalFixtureDigests,
+    );
+    const transport = this.cfg.visionModelTransports?.[snapshot.model];
+    if (!transport) {
+      throw new Error(
+        `VISION_REVIEW_MODEL_TRANSPORT_UNPROVEN: ${snapshot.model}`,
+      );
+    }
+    switch (transport) {
+      case 'openai-chat-completions':
+        return this.reviewVisionChatCompletions<T>(snapshot);
     }
   }
 
@@ -243,6 +433,116 @@ export class OpenAICompatibleProvider implements ModelProvider {
       finishReason: json.choices?.[0]?.finish_reason,
       model: json.model?.trim() || undefined,
     };
+  }
+
+  private async reviewVisionChatCompletions<T>(
+    input: ReviewVisionInput,
+  ): Promise<ModelResult<T>> {
+    const system = `${input.system ?? ''}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(input.schema)}`;
+    const content: Array<
+      | { type: 'text'; text: string }
+      | {
+          type: 'image_url';
+          image_url: { url: string; detail: 'high' };
+        }
+    > = [{ type: 'text', text: input.prompt }];
+    for (const image of input.images) {
+      content.push({
+        type: 'text',
+        text: `受控输入 ${image.artifactId}: locale=${image.target.locale}, page=${image.target.pageId}, breakpoint=${image.target.breakpoint}`,
+      });
+      content.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:image/png;base64,${Buffer.from(
+            image.bytes.buffer,
+            image.bytes.byteOffset,
+            image.bytes.byteLength,
+          ).toString('base64')}`,
+          detail: 'high',
+        },
+      });
+    }
+    const res = await fetch(`${this.cfg.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: this.headers(),
+      signal: this.requestSignal(input.signal),
+      body: JSON.stringify({
+        model: input.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content },
+        ],
+        max_tokens: input.maxTokens,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+      }),
+    });
+    if (!res.ok) {
+      throw new ProviderHttpError({
+        status: res.status,
+        provider: this.id,
+        model: input.model,
+        responseExcerpt: (await res.text()).slice(0, 300),
+      });
+    }
+    const json = (await res.json()) as {
+      choices?: { message?: { content?: string }; finish_reason?: string }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      model?: string;
+    };
+    const usage = {
+      inputTokens: json.usage?.prompt_tokens,
+      outputTokens: json.usage?.completion_tokens,
+    };
+    const reportedModel = json.model?.trim() || undefined;
+    const provenance = resolutionProvenance(input.model, reportedModel);
+    if (!reportedModel || reportedModel !== input.model) {
+      throw new ProviderIdentityError(
+        `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
+        usage,
+        { provider: this.id, ...provenance },
+      );
+    }
+    const finishReason = json.choices?.[0]?.finish_reason;
+    const raw = json.choices?.[0]?.message?.content ?? '';
+    if (finishReason === 'length') {
+      throw new ProviderOutputError(
+        'VISION_REVIEW_OUTPUT_TRUNCATED',
+        usage,
+        { provider: this.id, ...provenance },
+      );
+    }
+    if (finishReason !== 'stop') {
+      throw new ProviderOutputError(
+        `VISION_REVIEW_FINISH_REASON_INVALID: ${finishReason ?? 'missing'}`,
+        usage,
+        { provider: this.id, ...provenance },
+      );
+    }
+    if (!raw.trim()) {
+      throw new ProviderOutputError(
+        'VISION_REVIEW_EMPTY_OUTPUT: finish_reason=stop',
+        usage,
+        { provider: this.id, ...provenance },
+      );
+    }
+    try {
+      return {
+        data: JSON.parse(stripJsonFence(raw)) as T,
+        provider: this.id,
+        ...provenance,
+        usage,
+      };
+    } catch (error) {
+      throw new ProviderOutputError(
+        `VISION_REVIEW_OUTPUT_NOT_JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        usage,
+        { cause: error, provider: this.id, ...provenance },
+      );
+    }
   }
 
   /**

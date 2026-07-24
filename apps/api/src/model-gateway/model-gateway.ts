@@ -4,6 +4,7 @@ import {
   GenerateStructuredInput,
   GenerateTextInput,
   ModelResult,
+  ReviewVisionInput,
 } from './types';
 
 /**
@@ -15,6 +16,10 @@ export abstract class ModelGateway {
   abstract generateText(input: GenerateTextInput, ctx: AiContext): Promise<ModelResult<string>>;
   abstract generateStructured<T = unknown>(
     input: GenerateStructuredInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<T>>;
+  abstract reviewVision<T = unknown>(
+    input: ReviewVisionInput,
     ctx: AiContext,
   ): Promise<ModelResult<T>>;
   abstract embed(input: EmbedInput, ctx: AiContext): Promise<ModelResult<number[][]>>;

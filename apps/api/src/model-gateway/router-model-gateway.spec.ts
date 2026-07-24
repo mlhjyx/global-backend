@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
 import {
+  ProviderIdentityError,
   ProviderOutputError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
 import { BudgetLedger, BudgetExceededError } from '../tools/budget';
-import { ModelResult } from './types';
+import { ModelResult, type ReviewVisionInput } from './types';
 import { AiTraceSink } from './ai-trace.sink';
 
 /**
@@ -30,6 +32,38 @@ function fakeProvider(impl?: () => Promise<ModelResult<string>>): ModelProvider 
     health: vi.fn(async () => ({ healthy: true })),
   } as unknown as ModelProvider;
 }
+
+const visionInput = (): ReviewVisionInput => ({
+  task: 'site_builder.aesthetic_review.eval',
+  prompt: 'review',
+  model: 'gemini-3.5-flash',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['ok'],
+    properties: { ok: { type: 'boolean' } },
+  },
+  images: [
+    {
+      materialClass: 'model_eval_fixture',
+      artifactId: 'case-home-375',
+      mimeType: 'image/png',
+      bytes: Uint8Array.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      sha256: createHash('sha256')
+        .update(
+          Uint8Array.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ]),
+        )
+        .digest('hex'),
+      target: { locale: 'en', pageId: 'home', breakpoint: 375 },
+    },
+  ],
+  maxTokens: 1000,
+  maxCostCents: 20,
+});
 
 function gatewayWith(provider: ModelProvider, budget: BudgetLedger): RouterModelGateway {
   const router = { route: () => [provider] } as unknown as ModelRouter;
@@ -213,6 +247,421 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
         }),
       }),
     );
+  });
+});
+
+describe('RouterModelGateway — vision identity and closed output gate', () => {
+  const exactResult = {
+    data: { ok: true },
+    provider: 'gateway',
+    model: 'gemini-3.5-flash',
+    reportedModel: 'gemini-3.5-flash',
+    modelResolutionSource: 'upstream_response' as const,
+    usage: { inputTokens: 10, outputTokens: 2 },
+  };
+
+  it('accepts only exact upstream provenance plus schema-valid output', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const result = await gatewayWith(
+      provider,
+      new BudgetLedger(),
+    ).reviewVision(visionInput(), { workspaceId: 'ws-1' });
+    expect(result).toEqual(exactResult);
+  });
+
+  it('treats model identity mismatch as terminal and never tries another provider', async () => {
+    const mismatched = {
+      ...fakeProvider(),
+      id: 'mismatched',
+      reviewVision: vi.fn(async () => ({
+        ...exactResult,
+        provider: 'mismatched',
+        model: 'provider-fallback',
+        reportedModel: 'provider-fallback',
+      })),
+    } as unknown as ModelProvider;
+    const fallback = {
+      ...fakeProvider(),
+      id: 'fallback',
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const router = {
+      route: () => [mismatched, fallback],
+    } as unknown as ModelRouter;
+    const gateway = new RouterModelGateway(router);
+
+    await expect(
+      gateway.reviewVision(visionInput(), { workspaceId: 'ws-1' }),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+    expect(fallback.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects schema-invalid vision output without calling it success', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => ({
+        ...exactResult,
+        data: { unexpected: true },
+      })),
+    } as unknown as ModelProvider;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(visionInput(), {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_SCHEMA_INVALID');
+  });
+
+  it('rejects a runtime screenshot bound to another workspace before routing', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    input.task = 'site_builder.aesthetic_review';
+    input.images = [
+      {
+        ...input.images[0]!,
+        materialClass: 'workspace_site_screenshot',
+        workspaceId: 'workspace-b',
+      },
+    ];
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'workspace-a',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_WORKSPACE_MISMATCH');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('compiles the vision schema before routing and fails closed on an invalid schema', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        {
+          ...visionInput(),
+          schema: { type: 'not-a-json-schema-type' },
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cyclic schema with a controlled error before snapshot recursion or routing', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const cyclic: Record<string, unknown> = { type: 'object' };
+    cyclic.self = cyclic;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        { ...visionInput(), schema: cyclic },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects a limit-sized sparse schema array before JSON serialization can expand its holes', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const sparse: unknown[] = [];
+    sparse.length = 10_000;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        {
+          ...visionInput(),
+          schema: { type: 'object', anyOf: sparse },
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects an over-wide schema object without materializing Object.entries', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const properties: Record<string, unknown> = {};
+    for (let index = 0; index < 10_001; index += 1) {
+      properties[`p${index}`] = { type: 'string' };
+    }
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        {
+          ...visionInput(),
+          schema: { type: 'object', properties },
+        },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects a hidden toJSON hook before serialization can invoke caller code', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const schema = { type: 'object' };
+    const toJSON = vi.fn(() => 'x'.repeat(100_000_000));
+    Object.defineProperty(schema, 'toJSON', {
+      value: toJSON,
+      enumerable: false,
+    });
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        { ...visionInput(), schema },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toThrow('MODEL_OUTPUT_SCHEMA_INVALID');
+    expect(toJSON).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects an accessor-backed image list without invoking or copying it', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const imagesGetter = vi.fn(() => input.images);
+    Object.defineProperty(input, 'images', {
+      get: imagesGetter,
+      enumerable: true,
+    });
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
+    expect(imagesGetter).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects accessor-backed image bytes without invoking or copying them', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const image = { ...input.images[0]! };
+    const bytesGetter = vi.fn(() => input.images[0]!.bytes);
+    Object.defineProperty(image, 'bytes', {
+      get: bytesGetter,
+      enumerable: true,
+    });
+    input.images = [image];
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(bytesGetter).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects a Proxy input without invoking value traps or copying bytes', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const get = vi.fn((target: ReviewVisionInput, key: PropertyKey) => {
+      if (key === 'images') return new Array(1_000_000);
+      return Reflect.get(target, key);
+    });
+    const input = new Proxy(visionInput(), { get });
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
+    expect(get).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects Proxy-backed bytes without reading traps or copying data', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const get = vi.fn(() => 100_000_000);
+    input.images = [
+      {
+        ...input.images[0]!,
+        bytes: new Proxy(input.images[0]!.bytes, { get }),
+      },
+    ];
+    const copy = vi.spyOn(Uint8Array, 'from');
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(get).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+    copy.mockRestore();
+  });
+
+  it('rejects an own byteLength getter without invoking it', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const bytes = input.images[0]!.bytes;
+    const byteLength = vi.fn(() => 8);
+    Object.defineProperty(bytes, 'byteLength', {
+      get: byteLength,
+      configurable: true,
+    });
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(byteLength).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Uint8Array subclass without invoking its byteLength override', async () => {
+    const byteLength = vi.fn(() => 8);
+    class CallerBytes extends Uint8Array {
+      override get byteLength(): number {
+        return byteLength();
+      }
+    }
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    input.images = [
+      {
+        ...input.images[0]!,
+        bytes: new CallerBytes(input.images[0]!.bytes),
+      },
+    ];
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(byteLength).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects an own Symbol.iterator hook without invoking it', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const iterator = vi.fn(() => {
+      throw new Error('ITERATOR_TRAP');
+    });
+    Object.defineProperty(input.images[0]!.bytes, Symbol.iterator, {
+      value: iterator,
+      configurable: true,
+    });
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(iterator).not.toHaveBeenCalled();
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects SharedArrayBuffer-backed bytes before concurrent mutation is possible', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const sharedBytes = new Uint8Array(new SharedArrayBuffer(8));
+    sharedBytes.set(input.images[0]!.bytes);
+    input.images = [{ ...input.images[0]!, bytes: sharedBytes }];
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('rejects revoked top-level and byte Proxies with controlled errors', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => exactResult),
+    } as unknown as ModelProvider;
+    const top = Proxy.revocable(visionInput(), {});
+    top.revoke();
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(top.proxy, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
+
+    const input = visionInput();
+    const bytes = Proxy.revocable(input.images[0]!.bytes, {});
+    bytes.revoke();
+    input.images = [{ ...input.images[0]!, bytes: bytes.proxy }];
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(input, {
+        workspaceId: 'ws-1',
+      }),
+    ).rejects.toThrow('VISION_REVIEW_IMAGE_INVALID');
+    expect(provider.reviewVision).not.toHaveBeenCalled();
+  });
+
+  it('binds the compiled schema before await so caller mutation cannot relax the result gate', async () => {
+    let resolveReview!: (result: typeof exactResult) => void;
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(
+        () =>
+          new Promise<typeof exactResult>((resolve) => {
+            resolveReview = resolve;
+          }),
+      ),
+    } as unknown as ModelProvider;
+    const input = visionInput();
+    const pending = gatewayWith(
+      provider,
+      new BudgetLedger(),
+    ).reviewVision(input, { workspaceId: 'ws-1' });
+    expect(provider.reviewVision).toHaveBeenCalledTimes(1);
+    input.schema = {};
+    input.model = 'provider-fallback';
+    resolveReview({
+      ...exactResult,
+      data: { unexpected: true } as never,
+    });
+
+    await expect(pending).rejects.toThrow('VISION_REVIEW_SCHEMA_INVALID');
   });
 });
 
