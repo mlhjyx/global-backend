@@ -256,16 +256,33 @@ async function runCandidate(input: {
   });
 }
 
-async function readCandidateReport(
-  reportPath: string,
-): Promise<BlindVisualModelReport> {
+async function readCandidateReport(reportPath: string): Promise<{
+  report: BlindVisualModelReport;
+  evidenceStatus: "complete" | "unavailable_source_integrity_changed";
+  sourceIntegrity: { stable?: unknown };
+}> {
   const envelope = JSON.parse(await readFile(reportPath, "utf8")) as {
     report?: BlindVisualModelReport;
+    evidenceStatus?: unknown;
+    execution?: { sourceIntegrity?: unknown };
   };
-  if (!envelope.report) {
+  if (
+    !envelope.report ||
+    (envelope.evidenceStatus !== "complete" &&
+      envelope.evidenceStatus !== "unavailable_source_integrity_changed") ||
+    !envelope.execution ||
+    !envelope.execution.sourceIntegrity ||
+    typeof envelope.execution.sourceIntegrity !== "object"
+  ) {
     throw new Error("BLIND_VISUAL_CAMPAIGN_CANDIDATE_REPORT_INVALID");
   }
-  return envelope.report;
+  return {
+    report: envelope.report,
+    evidenceStatus: envelope.evidenceStatus,
+    sourceIntegrity: envelope.execution.sourceIntegrity as {
+      stable?: unknown;
+    },
+  };
 }
 
 function knownReportCostCents(report: BlindVisualModelReport): number {
@@ -287,13 +304,19 @@ function unknownCostCall(report: BlindVisualModelReport): {
   phase: "probe" | "pair";
   runKey: string | null;
 } | null {
-  if (report.failure?.timeoutSettlement !== "unknown_after_grace") {
+  const failure = report.failure;
+  if (
+    !failure ||
+    (failure.timeoutSettlement !== "unknown_after_grace" &&
+      failure.reportedCostUsd !== null &&
+      failure.calculatedCostUsd !== null)
+  ) {
     return null;
   }
   return {
     model: report.model,
-    phase: report.failure.phase,
-    runKey: report.failure.runKey,
+    phase: failure.phase,
+    runKey: failure.runKey,
   };
 }
 
@@ -386,7 +409,10 @@ async function main(): Promise<void> {
     }> = [];
     const candidateLaunchFailures: Array<{
       model: BlindVisualCandidateModel;
-      reason: "candidate_process_failed" | "candidate_report_invalid";
+      reason:
+        | "candidate_process_failed"
+        | "candidate_report_invalid"
+        | "candidate_evidence_unavailable";
     }> = [];
     for (const model of BLIND_VISUAL_CAMPAIGN_MODELS) {
       const candidatePath = path.join(
@@ -402,11 +428,20 @@ async function main(): Promise<void> {
           gatewayImageDigest,
         });
         const bytes = await readFile(candidatePath);
+        const candidateReport = await readCandidateReport(candidatePath);
+        if (
+          candidateReport.evidenceStatus !== "complete" ||
+          candidateReport.sourceIntegrity.stable !== true
+        ) {
+          throw new Error(
+            "BLIND_VISUAL_CAMPAIGN_CANDIDATE_EVIDENCE_UNAVAILABLE",
+          );
+        }
         reports.push({
           model,
           path: path.relative(repositoryRoot, candidatePath),
           sha256: sha256Bytes(bytes),
-          report: await readCandidateReport(candidatePath),
+          report: candidateReport.report,
         });
       } catch (error) {
         candidateLaunchFailures.push({
@@ -415,7 +450,11 @@ async function main(): Promise<void> {
             error instanceof Error &&
             error.message === "BLIND_VISUAL_CAMPAIGN_CANDIDATE_REPORT_INVALID"
               ? "candidate_report_invalid"
-              : "candidate_process_failed",
+              : error instanceof Error &&
+                  error.message ===
+                    "BLIND_VISUAL_CAMPAIGN_CANDIDATE_EVIDENCE_UNAVAILABLE"
+                ? "candidate_evidence_unavailable"
+                : "candidate_process_failed",
         });
       }
     }
@@ -430,22 +469,21 @@ async function main(): Promise<void> {
       : candidateEvidenceComplete
         ? "complete"
         : "incomplete_candidate_evidence";
-    const ensemble = evidenceStatus === "complete"
-      ? summarizeBlindVisualEnsemble(
-          reports.map((entry) => entry.report),
-          matrixDefinition,
-        )
-      : null;
+    const ensemble =
+      evidenceStatus === "complete"
+        ? summarizeBlindVisualEnsemble(
+            reports.map((entry) => entry.report),
+            matrixDefinition,
+          )
+        : null;
     const actualKnownCostCents = Number(
       reports
         .reduce((sum, entry) => sum + knownReportCostCents(entry.report), 0)
-      .toFixed(6),
+        .toFixed(6),
     );
     const unknownCostCalls = reports
       .map((entry) => unknownCostCall(entry.report))
-      .filter(
-        (call): call is NonNullable<typeof call> => call !== null,
-      );
+      .filter((call): call is NonNullable<typeof call> => call !== null);
     const postExecutionCostForecast = buildBlindVisualCampaignPreflight(pairs);
     const envelope = {
       schemaVersion:

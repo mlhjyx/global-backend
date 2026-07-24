@@ -55,6 +55,12 @@ const execFileAsync = promisify(execFile);
 const TASK = "site_builder.aesthetic_review.eval";
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const CATALOG_TIMEOUT_MS = 10_000;
+/**
+ * The gateway vision-input contract requires this bounded integer. The
+ * calibration runner deliberately opens no BudgetLedger account, so this is
+ * schema compatibility rather than a pre-dispatch campaign budget gate.
+ */
+const VISION_GATEWAY_SCHEMA_MAX_COST_CENTS = 100;
 const EXECUTION_CONFIRMATION = "BLIND_VISUAL_CALIBRATION_EXECUTE";
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -374,6 +380,7 @@ function gatewayInvoke(
                 request.images.length === 3 ? 3 : 2,
               ),
             maxTokens: request.maxTokens,
+            maxCostCents: VISION_GATEWAY_SCHEMA_MAX_COST_CENTS,
             signal: request.signal,
           },
           {
