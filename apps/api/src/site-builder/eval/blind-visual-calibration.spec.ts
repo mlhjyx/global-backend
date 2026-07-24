@@ -2,6 +2,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { assertModelOutputSchemaCompiles } from "../../model-gateway/schema-validate";
+import {
+  ProviderIdentityError,
+  ProviderOutputError,
+  TaskOutputValidationError,
+} from "../../model-gateway/providers/provider-output-error";
 import type { VisionReviewImage } from "../../model-gateway/types";
 import {
   BLIND_VISUAL_CALIBRATION_HARNESS_VERSION,
@@ -30,6 +35,7 @@ import {
   type BlindVisualPairDefinition,
   type BlindVisualProviderResult,
 } from "./blind-visual-calibration";
+import { classifyBlindVisualGatewayFailure } from "./blind-visual-calibration-gateway";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -372,6 +378,27 @@ describe("blind visual closed output", () => {
 });
 
 describe("blind visual candidate runner", () => {
+  it.each([
+    [
+      new ProviderOutputError(
+        "VISION_REVIEW_FINISH_REASON_INVALID: incomplete",
+      ),
+      "truncated",
+    ],
+    [new ProviderOutputError("VISION_REVIEW_OUTPUT_TRUNCATED"), "truncated"],
+    [new ProviderOutputError("VISION_REVIEW_SCHEMA_INVALID"), "schema_invalid"],
+    [
+      new TaskOutputValidationError("vision review hard gate rejected"),
+      "schema_invalid",
+    ],
+    [
+      new ProviderIdentityError("VISION_REVIEW_MODEL_IDENTITY_MISMATCH"),
+      "model_identity_mismatch",
+    ],
+  ] as const)("classifies bounded gateway failure %s", (error, reason) => {
+    expect(classifyBlindVisualGatewayFailure(error)).toBe(reason);
+  });
+
   it("freezes the four candidates to 1 probe + 18 calls and the requested budgets", () => {
     expect(Object.keys(BLIND_VISUAL_CANDIDATES)).toEqual([
       "gemini-3.5-flash",
@@ -572,6 +599,45 @@ describe("blind visual candidate runner", () => {
       reportedModel: null,
       outputSha256: null,
     });
+  });
+
+  it("retains safe provider failure provenance supplied by a local adapter", async () => {
+    const invoke = vi.fn(async (request) =>
+      resultFor(request, {
+        data: null,
+        failureReason: "truncated",
+        reportedModel: request.model,
+        resolvedModel: request.model,
+        usage: {
+          inputTokens: 321,
+          outputTokens: 800,
+          costUsd: null,
+        },
+        finishReason: "max_tokens",
+        truncated: true,
+      }),
+    );
+    const report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate: candidate(),
+      provenance: PROVENANCE,
+      invoke,
+    });
+    expect(report).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "truncated",
+      failure: {
+        reason: "truncated",
+        requestedModel: "gpt-5.6-terra",
+        reportedModel: "gpt-5.6-terra",
+        resolvedModel: "gpt-5.6-terra",
+        provider: "gateway",
+        inputTokens: 321,
+        outputTokens: 800,
+        finishReason: "max_tokens",
+      },
+    });
+    expect(report.failure?.calculatedCostUsd).toBeGreaterThan(0);
   });
 
   it("aborts a hanging probe at the harness deadline and starts no pair calls", async () => {

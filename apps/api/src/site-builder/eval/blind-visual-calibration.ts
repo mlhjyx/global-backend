@@ -244,6 +244,12 @@ export interface BlindVisualProviderResult {
   };
   finishReason?: string | null;
   truncated?: boolean;
+  /**
+   * A local transport adapter may turn a typed provider exception into a
+   * bounded failure result so the harness can retain safe provenance and usage
+   * without persisting raw provider output or error text.
+   */
+  failureReason?: BlindVisualUnavailableReason;
 }
 
 export type BlindVisualInvoke = (
@@ -772,6 +778,9 @@ function assertProviderResult(
   accountedCostUsd: number;
   finishReason: string | null;
 } {
+  if (result.failureReason) {
+    throw new BlindVisualCallRejected(result.failureReason);
+  }
   if (
     result.requestedModel !== candidate.model ||
     result.reportedModel !== candidate.model ||
@@ -1466,10 +1475,10 @@ function failureRecord(input: {
     runKey: input.runKey,
     reason: classifyThrown(input.error),
     expectedModel: candidate.model,
-    requestedModel: result?.requestedModel ?? null,
-    reportedModel: result?.reportedModel ?? null,
-    resolvedModel: result?.resolvedModel ?? null,
-    provider: result?.provider ?? null,
+    requestedModel: result?.requestedModel || null,
+    reportedModel: result?.reportedModel || null,
+    resolvedModel: result?.resolvedModel || null,
+    provider: result?.provider || null,
     expectedTransport: candidate.transport,
     actualTransport: result?.transport ?? null,
     elapsedMs:
