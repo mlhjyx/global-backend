@@ -252,6 +252,13 @@ test("development capture keeps only allowlisted metadata and binds dynamic evid
       report.observedEdgeIds.includes("edge:schedule-calls-acquisition"),
       true,
     );
+    assert.equal(
+      report.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "RUNTIME_CONFIGURATION_PROVENANCE_DRIFT",
+      ),
+      true,
+    );
     await writeFile(
       path.join(root, "fixture.ts"),
       "export const fixture = 2;\n",

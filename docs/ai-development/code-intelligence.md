@@ -144,6 +144,8 @@ pnpm code-intelligence:runtime:diff
 - `PARTIAL`：存在未知 commit、未观察关系或 correlation 缺口；
 - `CONTRADICTED`：健康/迁移失败或运行目标不在当前图，命令失败退出。
 
+Compose 容器创建时记录的配置根若不是 canonical `/global/backend`，报告 `RUNTIME_CONFIGURATION_PROVENANCE_DRIFT`；服务只有 `running` 而没有声明 healthcheck 时保持 `UNKNOWN`，不会伪装成健康成功。
+
 absence of evidence 不是 evidence of absence：`staticOnly` 只能增加验证建议，不能声称能力未接通。生产或预发布采集仍需另行批准部署、隐私、成本、保留和回退方案。
 
 ## 4. 动态机制登记

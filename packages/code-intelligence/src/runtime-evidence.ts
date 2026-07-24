@@ -444,9 +444,11 @@ async function probeCompose(
         observedAt,
         graphNodeIds: [`service:compose:${service}`],
         outcome:
-          state === "running" && !["unhealthy", "starting"].includes(health)
-            ? "SUCCESS"
-            : "FAILURE",
+          state !== "running" || ["unhealthy", "starting"].includes(health)
+            ? "FAILURE"
+            : health === "healthy"
+              ? "SUCCESS"
+              : "UNKNOWN",
         durationMs: result.durationMs,
         metadata: {
           state,
@@ -1002,6 +1004,25 @@ export function createRuntimeDifferenceReport(
       message: `${unprovenRuntimeCommits.length} runtime records prove metadata/health but the running artifact does not expose its source commit`,
     });
   }
+  const configurationDrift = bundle.records
+    .filter((record) => record.kind === "COMPOSE_SERVICE")
+    .filter((record) => {
+      const configurationRoot = record.metadata.configurationRoot;
+      return (
+        typeof configurationRoot === "string" &&
+        path.resolve(configurationRoot) !==
+          path.resolve(graph.evidence.repositoryRoot)
+      );
+    })
+    .map((record) => record.subject)
+    .sort();
+  if (configurationDrift.length > 0) {
+    diagnostics.push({
+      code: "RUNTIME_CONFIGURATION_PROVENANCE_DRIFT",
+      severity: "warning",
+      message: `${configurationDrift.length} Compose services were created from non-canonical worktree configuration: ${configurationDrift.join(", ")}`,
+    });
+  }
   if (runtimeOnlyNodeIds.length > 0 || runtimeOnlyEdgeIds.length > 0) {
     diagnostics.push({
       code: "RUNTIME_GRAPH_TARGET_MISSING",
@@ -1027,19 +1048,25 @@ export function createRuntimeDifferenceReport(
       message: `${staticOnlyNodeIds.length} required static nodes and ${staticOnlyEdgeIds.length} required static edges remain unobserved; absence of evidence is not proof of disconnection`,
     });
   }
-  if (
-    bundle.records.some(
-      (record) =>
-        record.outcome === "UNKNOWN" ||
-        (record.kind === "API_HEALTH" &&
-          record.metadata.requestIdEchoed === false),
-    )
-  ) {
+  const unknownEvidence = bundle.records.filter(
+    (record) => record.outcome === "UNKNOWN",
+  );
+  if (unknownEvidence.length > 0) {
     diagnostics.push({
-      code: "STATIC_RELATION_UNOBSERVED",
+      code: "RUNTIME_HEALTH_UNPROVEN",
       severity: "warning",
-      message:
-        "one or more probes remain UNKNOWN or the API did not echo a correlation ID",
+      message: `${unknownEvidence.length} runtime records remain UNKNOWN; a running service without a declared healthcheck is not treated as healthy`,
+    });
+  }
+  const missingCorrelation = bundle.records.filter(
+    (record) =>
+      record.kind === "API_HEALTH" && record.metadata.requestIdEchoed === false,
+  );
+  if (missingCorrelation.length > 0) {
+    diagnostics.push({
+      code: "API_CORRELATION_UNPROVEN",
+      severity: "warning",
+      message: `${missingCorrelation.length} API health probes did not echo the supplied X-Request-Id, so no correlation ID was claimed`,
     });
   }
   const contradicted = diagnostics.some(
