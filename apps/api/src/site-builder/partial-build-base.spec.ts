@@ -1,10 +1,19 @@
 import type { Prisma } from "@prisma/client";
+import {
+  QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
+  qualityArtifactSetDigest,
+  type QualityArtifactSetV1,
+} from "@global/contracts";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   RELEASE_MANIFEST_V2_SCHEMA_VERSION,
+  RELEASE_MANIFEST_V3_SCHEMA_VERSION,
+  RELEASE_QUALITY_SCHEMA_VERSION,
   releaseArtifactDigest,
+  releaseScreenshotSetDigest,
   releaseSpecDigest,
   type ReleaseManifestV2,
+  type ReleaseManifestV3,
 } from "./release-artifact";
 import { buildM1ebGoldenFixtures } from "./design/m1eb-golden";
 import {
@@ -65,6 +74,88 @@ function manifest(): ReleaseManifestV2 {
   };
 }
 
+function v3Manifest(): ReleaseManifestV3 {
+  const base = manifest();
+  const expectedTargets = golden.spec.site.locales.flatMap((locale) =>
+    golden.spec.pages.map((page) => ({ locale, pageId: page.id })),
+  );
+  const aestheticEvidenceRef = {
+    objectKey: `${base.artifactPrefix}/attempts/${base.producerToken}/quality/round-0/aesthetic-evidence.json`,
+    sha256: "f".repeat(64),
+    sizeBytes: 512,
+    mimeType: "application/json" as const,
+    kind: "aesthetic_response" as const,
+  };
+  const artifactDraft = {
+    schemaVersion: QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
+    candidateSpecDigest: base.specDigest,
+    designBriefDigest: base.designBriefDigest,
+    round: 0 as const,
+    expectedTargets,
+    artifacts: [
+      ...expectedTargets.flatMap((target) =>
+        ([375, 768, 1440] as const).map((breakpoint) => ({
+          artifactId: `${target.pageId}-${target.locale}-${breakpoint}`,
+          objectKey: `${base.artifactPrefix}/attempts/${base.producerToken}/quality/round-0/${target.pageId}-${target.locale}-${breakpoint}.png`,
+          sha256: releaseSpecDigest({ ...target, breakpoint }),
+          sizeBytes: 512_000,
+          mimeType: "image/png" as const,
+          kind: "screenshot" as const,
+          target: { ...target, breakpoint },
+        })),
+      ),
+      { artifactId: "aesthetic-evidence", ...aestheticEvidenceRef },
+    ],
+  };
+  const artifactSet: QualityArtifactSetV1 = {
+    ...artifactDraft,
+    artifactSetDigest: qualityArtifactSetDigest(artifactDraft),
+  };
+  const evaluationRef = {
+    objectKey: `${base.artifactPrefix}/attempts/${base.producerToken}/quality/round-0/design-evaluation.json`,
+    sha256: "e".repeat(64),
+    sizeBytes: 2048,
+    mimeType: "application/json" as const,
+    kind: "design_evaluation" as const,
+  };
+  return {
+    ...base,
+    schemaVersion: RELEASE_MANIFEST_V3_SCHEMA_VERSION,
+    quality: {
+      schemaVersion: RELEASE_QUALITY_SCHEMA_VERSION,
+      status: "passed_deterministic_aesthetic_unavailable",
+      deterministicEvaluatorVersion: "p4-deterministic@1.0.0",
+      finalRound: 0,
+      artifactSet,
+      screenshotSetDigest: releaseScreenshotSetDigest(artifactSet),
+      designEvaluationDigest: evaluationRef.sha256,
+      designEvaluationRef: evaluationRef,
+      rounds: [
+        {
+          round: 0,
+          candidateSpecDigest: base.specDigest,
+          artifactSetDigest: artifactSet.artifactSetDigest,
+          designEvaluationDigest: evaluationRef.sha256,
+          repairCatalogDigest: null,
+          selectedRepairOptionId: null,
+          repairSelectionMode: null,
+        },
+      ],
+      aesthetic: {
+        status: "unavailable",
+        requestedModel: "gemini-3.5-flash",
+        reportedModel: null,
+        resolvedModel: null,
+        transport: "openai.responses",
+        routePolicyVersion: "site-builder-aesthetic@target",
+        errorClassification: "rate_limited",
+        evidenceDigest: aestheticEvidenceRef.sha256,
+        evidenceRef: aestheticEvidenceRef,
+      },
+    },
+  };
+}
+
 function transaction(overrides: Record<string, unknown> = {}) {
   const bundle = golden.spec.copyBundleSet!.bundles.en!;
   return {
@@ -113,6 +204,54 @@ describe("M1-e-B partial build base", () => {
       golden.spec.copyBundleSet!.bundles.en!.claimSnapshot.id,
     );
     expect(base.taskAttemptIds).toEqual({ en: "attempt-copy-en" });
+  });
+
+  it("accepts a ready v3 base but still evaluates the complete frozen site", async () => {
+    const base = await loadPartialBuildBase(
+      transaction({ release: { status: "ready", manifest: v3Manifest() } }),
+      {
+        siteId: manifest().siteId,
+        baseVersionId: manifest().siteVersionId,
+      },
+    );
+    expect(base.manifest.schemaVersion).toBe(
+      RELEASE_MANIFEST_V3_SCHEMA_VERSION,
+    );
+    expect(base.spec).toEqual(golden.spec);
+  });
+
+  it("rejects a v3 base whose declared quality scope omits frozen pages", async () => {
+    const invalid = v3Manifest();
+    const retainedTarget = invalid.quality.artifactSet.expectedTargets[0]!;
+    invalid.quality.artifactSet.expectedTargets = [retainedTarget];
+    invalid.quality.artifactSet.artifacts =
+      invalid.quality.artifactSet.artifacts.filter(
+        (artifact) =>
+          artifact.target?.locale === retainedTarget.locale &&
+          artifact.target.pageId === retainedTarget.pageId,
+      );
+    invalid.quality.artifactSet.artifactSetDigest = qualityArtifactSetDigest({
+      schemaVersion: invalid.quality.artifactSet.schemaVersion,
+      candidateSpecDigest: invalid.quality.artifactSet.candidateSpecDigest,
+      designBriefDigest: invalid.quality.artifactSet.designBriefDigest,
+      round: invalid.quality.artifactSet.round,
+      expectedTargets: invalid.quality.artifactSet.expectedTargets,
+      artifacts: invalid.quality.artifactSet.artifacts,
+    });
+    invalid.quality.screenshotSetDigest = releaseScreenshotSetDigest(
+      invalid.quality.artifactSet,
+    );
+    invalid.quality.rounds[0]!.artifactSetDigest =
+      invalid.quality.artifactSet.artifactSetDigest;
+    await expect(
+      loadPartialBuildBase(
+        transaction({ release: { status: "ready", manifest: invalid } }),
+        {
+          siteId: manifest().siteId,
+          baseVersionId: manifest().siteVersionId,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "PARTIAL_BUILD_REQUIRES_V2_BASE" });
   });
 
   it.each([

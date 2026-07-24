@@ -1,10 +1,16 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaService } from "../prisma/prisma.service";
+import {
+  buildStepArtifactRefsJson,
+  validateBuildStepArtifactRefs,
+  type BuildStepArtifactRefsV1,
+} from "./build-step-artifact-refs";
 
 export const BUILD_PHASES = [
   "P1_understanding",
   "P2_assets",
   "P3_assembly",
+  "P4_quality",
   "P5_publish",
 ] as const;
 export type BuildPhase = (typeof BUILD_PHASES)[number];
@@ -35,6 +41,7 @@ export interface BuildProgressEvent {
   phase: BuildPhase;
   progress: number;
   errorCode?: string | null;
+  artifactRefs?: BuildStepArtifactRefsV1;
 }
 
 const PHASE_RANK = new Map(BUILD_PHASES.map((phase, index) => [phase, index]));
@@ -133,6 +140,10 @@ export async function recordBuildProgress(
   const attempt = event.attempt ?? 1;
   const itemKey = event.itemKey ?? "";
   const progress = Math.max(0, Math.min(1, event.progress));
+  const artifactRefs =
+    event.artifactRefs === undefined
+      ? undefined
+      : validateBuildStepArtifactRefs(event.artifactRefs);
   await prisma.withWorkspace(input.workspaceId, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${input.buildRunId}`}))`;
     const run = await tx.siteBuildRun.findUnique({
@@ -147,6 +158,26 @@ export async function recordBuildProgress(
       orderBy: { attempt: "desc" },
     });
     if (latest && latest.attempt > attempt) return;
+    if (latest?.attempt === attempt && latest.artifactRefs && artifactRefs) {
+      const persisted = validateBuildStepArtifactRefs(latest.artifactRefs);
+      if (persisted.collectionDigest !== artifactRefs.collectionDigest) {
+        throw new Error("QUALITY_ARTIFACT_INVALID");
+      }
+    }
+    if (
+      latest?.attempt === attempt &&
+      TERMINAL_STEP.has(latest.status as BuildStepStatus) &&
+      !latest.artifactRefs &&
+      artifactRefs
+    ) {
+      throw new Error("QUALITY_ARTIFACT_INVALID");
+    }
+    if (
+      latest?.attempt === attempt &&
+      TERMINAL_STEP.has(latest.status as BuildStepStatus)
+    ) {
+      return;
+    }
     if (
       latest?.attempt === attempt &&
       (STATUS_RANK[latest.status as BuildStepStatus] >
@@ -178,6 +209,9 @@ export async function recordBuildProgress(
         progress,
         degraded: event.status === "degraded",
         errorCode: event.errorCode ?? null,
+        artifactRefs: artifactRefs
+          ? buildStepArtifactRefsJson(artifactRefs)
+          : undefined,
         startedAt: event.status === "queued" ? null : now,
         finishedAt: TERMINAL_STEP.has(event.status) ? now : null,
       },
@@ -187,6 +221,9 @@ export async function recordBuildProgress(
         progress: Math.max(latest?.progress ?? 0, progress),
         degraded: latest?.degraded || event.status === "degraded",
         errorCode: event.errorCode ?? latest?.errorCode ?? null,
+        ...(artifactRefs
+          ? { artifactRefs: buildStepArtifactRefsJson(artifactRefs) }
+          : {}),
         startedAt:
           latest?.startedAt ?? (event.status === "queued" ? null : now),
         finishedAt: TERMINAL_STEP.has(event.status)

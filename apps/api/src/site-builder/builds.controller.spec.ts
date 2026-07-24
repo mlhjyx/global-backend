@@ -156,7 +156,12 @@ describe('BuildsController public progress response', () => {
           BuildStatusResponseDto: {
             properties: Record<
               string,
-              { type?: string; nullable?: boolean; items?: unknown }
+              {
+                type?: string;
+                nullable?: boolean;
+                items?: unknown;
+                enum?: string[];
+              }
             >;
           };
         };
@@ -165,7 +170,17 @@ describe('BuildsController public progress response', () => {
     const properties =
       spec.components.schemas.BuildStatusResponseDto.properties;
 
-    expect(properties.phase).toMatchObject({ type: 'string', nullable: true });
+    expect(properties.phase).toMatchObject({
+      type: 'string',
+      nullable: true,
+      enum: [
+        'P1_understanding',
+        'P2_assets',
+        'P3_assembly',
+        'P4_quality',
+        'P5_publish',
+      ],
+    });
     expect(properties.error).toMatchObject({ type: 'string', nullable: true });
     expect(properties.steps).toMatchObject({ type: 'array', nullable: true });
     expect(properties.steps.items).toMatchObject({
