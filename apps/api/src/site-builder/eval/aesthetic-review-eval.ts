@@ -162,7 +162,13 @@ export interface AestheticReviewOutput {
 export interface AestheticEvalCase {
   caseId: string;
   familyId: keyof typeof FAMILY_DEGRADATIONS;
-  kind: "approved" | "degraded";
+  kind: "baseline" | "degraded";
+  /**
+   * M1-e-B proves that these screenshots render deterministically. It does not
+   * prove that they are aesthetic gold. Until a separately reviewed gold set
+   * exists, baseline failures must not be counted as model false blockers.
+   */
+  qualification: "deterministic_render_baseline" | "aesthetic_gold";
   expectedIssue: AestheticRuleCode | null;
   images: readonly VisionReviewImage[];
   prompt: string;
@@ -307,11 +313,11 @@ export async function degradeAestheticScreenshot(
 }
 
 function promptForCase(
-  caseId: string,
+  opaqueCaseId: string,
   images: readonly VisionReviewImage[],
 ): string {
   return [
-    `Review the three screenshots for evaluation case ${caseId}.`,
+    `Review the three screenshots for evaluation case ${opaqueCaseId}.`,
     "They show one site at mobile 375, tablet 768, and desktop 1440.",
     "Judge only visible design quality. Return the exact JSON schema.",
     "Use only the frozen AESTHETIC_* rule codes. Do not propose repairs, code, components, variants, CSS, HTML, Astro, paths, or free-form targets.",
@@ -319,6 +325,16 @@ function promptForCase(
     "passed requires that deterministic weighted overallScore >= 85, every dimension >= 60, and no blocker or major finding; otherwise return failed.",
     `Evidence artifact ids: ${images.map((image) => image.artifactId).join(", ")}`,
   ].join("\n");
+}
+
+function opaqueSampleId(
+  familyId: keyof typeof FAMILY_DEGRADATIONS,
+  bytes: Uint8Array,
+  breakpoint: QualityBreakpoint,
+  privateSalt: string,
+): string {
+  const identity = Buffer.concat([Buffer.from(bytes), Buffer.from(privateSalt)]);
+  return `m1f:${familyId}:sample-${sha256(identity).slice(0, 12)}:${breakpoint}`;
 }
 
 export async function loadAestheticEvalCases(
@@ -343,7 +359,7 @@ export async function loadAestheticEvalCases(
   for (const [familyId, issue] of Object.entries(FAMILY_DEGRADATIONS) as Array<
     [keyof typeof FAMILY_DEGRADATIONS, AestheticRuleCode]
   >) {
-    const approvedImages: VisionReviewImage[] = [];
+    const baselineImages: VisionReviewImage[] = [];
     const degradedImages: VisionReviewImage[] = [];
     for (const breakpoint of BREAKPOINTS) {
       const fixtureId = `${familyId}-rich`;
@@ -363,10 +379,15 @@ export async function loadAestheticEvalCases(
           `AESTHETIC_EVAL_FIXTURE_DIGEST_MISMATCH: ${entry.path}`,
         );
       }
-      const approvedArtifactId = `m1f:${familyId}:approved:${breakpoint}`;
-      approvedImages.push({
+      const baselineArtifactId = opaqueSampleId(
+        familyId,
+        source,
+        breakpoint,
+        `${familyId}:source`,
+      );
+      baselineImages.push({
         materialClass: "model_eval_fixture",
-        artifactId: approvedArtifactId,
+        artifactId: baselineArtifactId,
         sha256: entry.sha256,
         mimeType: "image/png",
         bytes: new Uint8Array(source),
@@ -379,28 +400,41 @@ export async function loadAestheticEvalCases(
       );
       degradedImages.push({
         materialClass: "model_eval_fixture",
-        artifactId: `m1f:${familyId}:degraded:${breakpoint}`,
+        artifactId: opaqueSampleId(
+          familyId,
+          degraded,
+          breakpoint,
+          `${familyId}:${issue}`,
+        ),
         sha256: sha256(degraded),
         mimeType: "image/png",
         bytes: new Uint8Array(degraded),
         target: { locale: "en", pageId: familyId, breakpoint },
       });
     }
+    const baselinePromptId = `sample-${sha256(
+      Buffer.from(baselineImages.map((image) => image.sha256).join(":")),
+    ).slice(0, 12)}`;
+    const degradedPromptId = `sample-${sha256(
+      Buffer.from(degradedImages.map((image) => image.sha256).join(":")),
+    ).slice(0, 12)}`;
     cases.push({
-      caseId: `${familyId}-approved`,
+      caseId: `${familyId}-baseline`,
       familyId,
-      kind: "approved",
+      kind: "baseline",
+      qualification: "deterministic_render_baseline",
       expectedIssue: null,
-      images: approvedImages,
-      prompt: promptForCase(`${familyId}-approved`, approvedImages),
+      images: baselineImages,
+      prompt: promptForCase(baselinePromptId, baselineImages),
     });
     cases.push({
       caseId: `${familyId}-degraded`,
       familyId,
       kind: "degraded",
+      qualification: "deterministic_render_baseline",
       expectedIssue: issue,
       images: degradedImages,
-      prompt: promptForCase(`${familyId}-degraded`, degradedImages),
+      prompt: promptForCase(degradedPromptId, degradedImages),
     });
   }
   return cases.sort((left, right) => left.caseId.localeCompare(right.caseId));
@@ -536,7 +570,7 @@ export function evaluateAestheticCaseOutput(
   accepted: boolean;
 } {
   const falseBlocker =
-    evalCase.kind === "approved" &&
+    evalCase.qualification !== "deterministic_render_baseline" &&
     (output.verdict === "failed" ||
       output.findings.some((finding) => finding.severity === "blocker"));
   const seededIssueDetected =

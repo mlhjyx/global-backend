@@ -1,0 +1,272 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-claude-sonnet-5-v4",
+  "evaluatorVersion": "site-builder-aesthetic-review-eval@2.0.0",
+  "promptVersion": "site-builder-aesthetic-review-prompt/v2",
+  "caseId": "premium-innovation-degraded",
+  "familyId": "premium-innovation",
+  "kind": "degraded",
+  "qualification": "deterministic_render_baseline",
+  "expectedIssue": "AESTHETIC_HIERARCHY",
+  "attempt": 2,
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 37626.41,
+  "usage": {
+    "inputTokens": 6147,
+    "outputTokens": 3931
+  },
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375",
+      "sha256": "a356adccc59d6f25bf319badb09c9faebeffb4c812a9dae8567352738df6eb3f",
+      "mimeType": "image/png",
+      "byteLength": 178961,
+      "target": {
+        "locale": "en",
+        "pageId": "premium-innovation",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:premium-innovation:sample-2a1ef66845fa:768",
+      "sha256": "32767080204b0241a04a281ac038740ab0b7fbfdd79d5de82456985fee4e7026",
+      "mimeType": "image/png",
+      "byteLength": 241691,
+      "target": {
+        "locale": "en",
+        "pageId": "premium-innovation",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:premium-innovation:sample-5b19b547efd4:1440",
+      "sha256": "07674dd4c0a8e4e99952ff1728099ed6cc6c413c085d78c331645f3f5e356977",
+      "mimeType": "image/png",
+      "byteLength": 381329,
+      "target": {
+        "locale": "en",
+        "pageId": "premium-innovation",
+        "breakpoint": 1440
+      }
+    }
+  ],
+  "output": {
+    "verdict": "failed",
+    "overallScore": 39,
+    "dimensions": {
+      "hierarchy": 25,
+      "consistency": 40,
+      "spacing": 50,
+      "contrast": 15,
+      "imagery": 45,
+      "mobileComposition": 50,
+      "ctaClarity": 60,
+      "credibility": 30,
+      "originality": 40
+    },
+    "findings": [
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-2a1ef66845fa:768"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-5b19b547efd4:1440"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-2a1ef66845fa:768"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-5b19b547efd4:1440"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-2a1ef66845fa:768"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-5b19b547efd4:1440"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CONSISTENCY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CONSISTENCY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-2a1ef66845fa:768"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CONSISTENCY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-5b19b547efd4:1440"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_SPACING",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-ee10d4aca8bf:375"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-2a1ef66845fa:768"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "premium-innovation",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:premium-innovation:sample-5b19b547efd4:1440"
+        }
+      }
+    ]
+  },
+  "scoring": {
+    "falseBlocker": false,
+    "seededIssueDetected": true,
+    "accepted": true
+  }
+}

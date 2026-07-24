@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OpenAICompatibleProvider, stripJsonFence } from './openai-compatible.provider';
-import {
-  ProviderHttpError,
-  ProviderIdentityError,
-  ProviderOutputError,
-} from './provider-output-error';
+import { OpenAICompatibleProvider, stripJsonFence, type GatewayVisionTransport } from './openai-compatible.provider';
+import { ProviderHttpError, ProviderIdentityError, ProviderOutputError } from './provider-output-error';
 
 /**
  * M1-b 网关增量（09 §2.4 AiTask 工程护栏的 provider 侧）：
@@ -49,12 +45,8 @@ const lastRequestHeaders = (): Record<string, string> => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-const png = (suffix = 0): Uint8Array =>
-  Uint8Array.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, suffix,
-  ]);
-const sha256 = (bytes: Uint8Array): string =>
-  createHash('sha256').update(bytes).digest('hex');
+const png = (suffix = 0): Uint8Array => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, suffix]);
+const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 const visionInput = () => ({
   task: 'site_builder.aesthetic_review.eval',
@@ -114,13 +106,21 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
       usage: { prompt_tokens: 300, completion_tokens: 2000 },
     });
     const err = await provider
-      .generateStructured({ task: 't', prompt: 'p', schema: {}, model: 'deepseek-v4-pro' })
+      .generateStructured({
+        task: 't',
+        prompt: 'p',
+        schema: {},
+        model: 'deepseek-v4-pro',
+      })
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
     expect((err as Error).message).toMatch(/empty content.*finish_reason=length/s);
     // 🔴 改动 2：花了 token 却失败必须带 usage，供网关 catch 结算（否则绕过硬预算上界）
-    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 300, outputTokens: 2000 });
+    expect((err as ProviderOutputError).usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 2000,
+    });
   });
 
   it('content 为空 + finish_reason=stop → 明确为可见内容通道异常，不能误报截断', async () => {
@@ -129,13 +129,21 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
       usage: { prompt_tokens: 300, completion_tokens: 794 },
     });
     const err = await provider
-      .generateStructured({ task: 't', prompt: 'p', schema: {}, model: 'gpt-5.6-terra' })
+      .generateStructured({
+        task: 't',
+        prompt: 'p',
+        schema: {},
+        model: 'gpt-5.6-terra',
+      })
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProviderOutputError);
     expect((err as Error).message).toMatch(/empty content.*finish_reason=stop.*no visible message content/s);
     expect((err as Error).message).not.toMatch(/output truncated/);
-    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 300, outputTokens: 794 });
+    expect((err as ProviderOutputError).usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 794,
+    });
   });
 
   it('content 正常 → 照常解析', async () => {
@@ -157,7 +165,11 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
       usage: {},
     });
-    const r = await provider.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {} });
+    const r = await provider.generateStructured<{ ok: boolean }>({
+      task: 't',
+      prompt: 'p',
+      schema: {},
+    });
     expect(r).toMatchObject({
       model: 'upstream/claude-sonnet-5-2026-07-18',
       reportedModel: 'upstream/claude-sonnet-5-2026-07-18',
@@ -195,7 +207,10 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     expect(err).toBeInstanceOf(ProviderOutputError);
     expect((err as Error).message).toMatch(/output truncated at max_tokens/);
     expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 保留原始解析错
-    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 120, outputTokens: 800 });
+    expect((err as ProviderOutputError).usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 800,
+    });
     expect(err).toMatchObject({
       provider: 'gateway',
       model: 'default-model',
@@ -215,15 +230,27 @@ describe('OpenAICompatibleProvider — 空输出显式失败', () => {
     expect(err).toBeInstanceOf(ProviderOutputError);
     expect((err as Error).message).not.toMatch(/truncated/); // 不误报截断
     expect((err as Error).cause).toBeInstanceOf(SyntaxError); // 原始解析错保留在 cause
-    expect((err as ProviderOutputError).usage).toEqual({ inputTokens: 50, outputTokens: 10 });
+    expect((err as ProviderOutputError).usage).toEqual({
+      inputTokens: 50,
+      outputTokens: 10,
+    });
   });
 
   it('🔴 markdown 围栏包裹的 JSON（真机实证：glm-5.2 偶发 ```json）→ 剥壳后正常解析', async () => {
     mockChatResponse({
-      choices: [{ message: { content: '```json\n{"ok":true}\n```' }, finish_reason: 'stop' }],
+      choices: [
+        {
+          message: { content: '```json\n{"ok":true}\n```' },
+          finish_reason: 'stop',
+        },
+      ],
       usage: {},
     });
-    const r = await provider.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {} });
+    const r = await provider.generateStructured<{ ok: boolean }>({
+      task: 't',
+      prompt: 'p',
+      schema: {},
+    });
     expect(r.data.ok).toBe(true);
   });
 });
@@ -243,7 +270,10 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       output_text: '',
       output: [
         { type: 'reasoning', content: [] },
-        { type: 'message', content: [{ type: 'output_text', text: '```json\n{"ok":true}\n```' }] },
+        {
+          type: 'message',
+          content: [{ type: 'output_text', text: '```json\n{"ok":true}\n```' }],
+        },
       ],
       usage: { input_tokens: 101, output_tokens: 45 },
     });
@@ -285,16 +315,29 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
     mockChatResponse({
       model: 'gpt-5.6-terra',
       status: 'incomplete',
-      output: [{ type: 'message', content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+      output: [
+        {
+          type: 'message',
+          content: [{ type: 'output_text', text: '{"ok":true}' }],
+        },
+      ],
       usage: { input_tokens: 101, output_tokens: 456 },
     });
 
     const error = await responses
-      .generateStructured({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 })
+      .generateStructured({
+        task: 't',
+        prompt: 'p',
+        schema: {},
+        maxTokens: 456,
+      })
       .catch((err: unknown) => err);
     expect(error).toBeInstanceOf(ProviderOutputError);
     expect((error as Error).message).toContain('status=incomplete');
-    expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 101, outputTokens: 456 });
+    expect((error as ProviderOutputError).usage).toEqual({
+      inputTokens: 101,
+      outputTokens: 456,
+    });
     expect(error).toMatchObject({
       provider: 'gateway',
       model: 'gpt-5.6-terra',
@@ -315,13 +358,21 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       model: 'claude-sonnet-5-2026-07-18',
       stop_reason: 'end_turn',
       content: [
-        { type: 'thinking', thinking: 'private reasoning must not enter the artifact' },
+        {
+          type: 'thinking',
+          thinking: 'private reasoning must not enter the artifact',
+        },
         { type: 'text', text: '```json\n{"ok":true}\n```' },
       ],
       usage: { input_tokens: 99, output_tokens: 55 },
     });
 
-    const result = await messages.generateStructured<{ ok: boolean }>({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 });
+    const result = await messages.generateStructured<{ ok: boolean }>({
+      task: 't',
+      prompt: 'p',
+      schema: {},
+      maxTokens: 456,
+    });
 
     expect(result).toMatchObject({
       data: { ok: true },
@@ -360,11 +411,19 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       });
 
       const error = await messages
-        .generateStructured({ task: 't', prompt: 'p', schema: {}, maxTokens: 456 })
+        .generateStructured({
+          task: 't',
+          prompt: 'p',
+          schema: {},
+          maxTokens: 456,
+        })
         .catch((err: unknown) => err);
       expect(error).toBeInstanceOf(ProviderOutputError);
       expect((error as Error).message).toContain(`stop_reason=${stopReason}`);
-      expect((error as ProviderOutputError).usage).toEqual({ inputTokens: 99, outputTokens: 456 });
+      expect((error as ProviderOutputError).usage).toEqual({
+        inputTokens: 99,
+        outputTokens: 456,
+      });
       expect(error).toMatchObject({
         provider: 'gateway',
         model: 'claude-sonnet-5',
@@ -393,34 +452,31 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
 });
 
 describe('OpenAICompatibleProvider — bounded vision review', () => {
-  const visionProvider = () =>
+  const visionProviderFor = (
+    model = 'gemini-3.5-flash',
+    transport: GatewayVisionTransport = 'openai-chat-completions',
+  ) =>
     new OpenAICompatibleProvider({
       id: 'gateway',
       baseUrl: 'http://gw.test/v1',
       apiKey: 'k',
       model: 'default-model',
       visionModelTransports: {
-        'gemini-3.5-flash': 'openai-chat-completions',
+        [model]: transport,
       },
       visionEvalFixtureDigests: Object.fromEntries(
-        visionInput().images.map((image) => [
-          image.artifactId,
-          image.sha256,
-        ]),
+        visionInput().images.map((image) => [image.artifactId, image.sha256]),
       ),
     });
+  const visionProvider = () => visionProviderFor();
 
   it('sends at most three controlled PNGs as local data payloads and proves exact model provenance', async () => {
     mockChatResponse({
       model: 'gemini-3.5-flash',
-      choices: [
-        { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
-      ],
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     });
-    const result = await visionProvider().reviewVision<{ ok: boolean }>(
-      visionInput(),
-    );
+    const result = await visionProvider().reviewVision<{ ok: boolean }>(visionInput());
 
     expect(lastRequestUrl()).toBe('http://gw.test/v1/chat/completions');
     const body = lastRequestBody();
@@ -432,20 +488,15 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     });
     const messages = body.messages as Array<{
       role: string;
-      content:
-        | string
-        | Array<{ type: string; image_url?: { url: string } }>;
+      content: string | Array<{ type: string; image_url?: { url: string } }>;
     }>;
-    const userContent = messages.find(
-      (message) => message.role === 'user',
-    )!.content as Array<{ type: string; image_url?: { url: string } }>;
-    const imageUrls = userContent
-      .filter((item) => item.type === 'image_url')
-      .map((item) => item.image_url!.url);
+    const userContent = messages.find((message) => message.role === 'user')!.content as Array<{
+      type: string;
+      image_url?: { url: string };
+    }>;
+    const imageUrls = userContent.filter((item) => item.type === 'image_url').map((item) => item.image_url!.url);
     expect(imageUrls).toHaveLength(3);
-    expect(
-      imageUrls.every((url) => url.startsWith('data:image/png;base64,')),
-    ).toBe(true);
+    expect(imageUrls.every((url) => url.startsWith('data:image/png;base64,'))).toBe(true);
     expect(imageUrls.some((url) => /^https?:/i.test(url))).toBe(false);
     expect(result).toMatchObject({
       data: { ok: true },
@@ -454,6 +505,277 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       reportedModel: 'gemini-3.5-flash',
       modelResolutionSource: 'upstream_response',
     });
+  });
+
+  it('uses native Gemini inline_data and responseJsonSchema without an OpenAI conversion', async () => {
+    mockChatResponse({
+      modelVersion: 'gemini-3.5-flash',
+      candidates: [
+        {
+          content: {
+            parts: [{ thought: true, text: 'hidden reasoning' }, { text: '```json\n{"ok":true}\n```' }],
+          },
+          finishReason: 'STOP',
+        },
+      ],
+      usageMetadata: {
+        promptTokenCount: 24,
+        candidatesTokenCount: 8,
+        thoughtsTokenCount: 5,
+      },
+    });
+    const input = visionInput();
+    const result = await visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision<{ ok: boolean }>(
+      input,
+    );
+
+    expect(lastRequestUrl()).toBe('http://gw.test/v1beta/models/gemini-3.5-flash:generateContent');
+    const body = lastRequestBody();
+    expect(body).toMatchObject({
+      systemInstruction: {
+        parts: [{ text: input.system }],
+      },
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 1000,
+        responseMimeType: 'application/json',
+        responseJsonSchema: input.schema,
+      },
+    });
+    const contents = body.contents as Array<{
+      parts: Array<{
+        text?: string;
+        inline_data?: { mime_type: string; data: string };
+      }>;
+    }>;
+    const imageParts = contents.flatMap((content) => content.parts).filter((part) => part.inline_data);
+    expect(imageParts).toHaveLength(3);
+    expect(
+      imageParts.every((part) => part.inline_data?.mime_type === 'image/png' && part.inline_data.data.length > 0),
+    ).toBe(true);
+    expect(result).toMatchObject({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gemini-3.5-flash',
+      reportedModel: 'gemini-3.5-flash',
+      modelResolutionSource: 'upstream_response',
+      usage: { inputTokens: 24, outputTokens: 13 },
+    });
+  });
+
+  it('uses strict Responses JSON schema and local input_image payloads for GPT vision candidates', async () => {
+    mockChatResponse({
+      model: 'gpt-5.6-sol',
+      status: 'completed',
+      output: [
+        {
+          content: [{ type: 'output_text', text: '{"ok":true}' }],
+        },
+      ],
+      usage: { input_tokens: 24, output_tokens: 8 },
+    });
+    const input = { ...visionInput(), model: 'gpt-5.6-sol' };
+    const result = await visionProviderFor('gpt-5.6-sol', 'openai-responses').reviewVision<{ ok: boolean }>(input);
+
+    expect(lastRequestUrl()).toBe('http://gw.test/v1/responses');
+    const body = lastRequestBody();
+    expect(body).toMatchObject({
+      model: 'gpt-5.6-sol',
+      max_output_tokens: 1000,
+      temperature: 0,
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'design_evaluation',
+          strict: true,
+          schema: input.schema,
+        },
+      },
+    });
+    const responseInput = body.input as Array<{
+      role: string;
+      content: Array<{ type: string; image_url?: string }>;
+    }>;
+    const imageUrls = responseInput
+      .flatMap((message) => message.content)
+      .filter((item) => item.type === 'input_image')
+      .map((item) => item.image_url);
+    expect(imageUrls).toHaveLength(3);
+    expect(imageUrls.every((url) => url?.startsWith('data:image/png;base64,'))).toBe(true);
+    expect(result).toMatchObject({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-sol',
+      reportedModel: 'gpt-5.6-sol',
+      modelResolutionSource: 'upstream_response',
+    });
+  });
+
+  it('uses native Anthropic image blocks and structured output for Sonnet vision candidates', async () => {
+    mockChatResponse({
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: '{"ok":true}' }],
+      usage: { input_tokens: 24, output_tokens: 8 },
+    });
+    const input = {
+      ...visionInput(),
+      model: 'claude-sonnet-5',
+      maxTokens: 4000,
+    };
+    const result = await visionProviderFor('claude-sonnet-5', 'anthropic-messages').reviewVision<{ ok: boolean }>(
+      input,
+    );
+
+    expect(lastRequestUrl()).toBe('http://gw.test/v1/messages');
+    expect(lastRequestHeaders()).toMatchObject({
+      'x-api-key': 'k',
+      'anthropic-version': '2023-06-01',
+    });
+    const body = lastRequestBody();
+    expect(body).toMatchObject({
+      model: 'claude-sonnet-5',
+      max_tokens: 4000,
+      temperature: 0,
+      output_config: {
+        format: {
+          type: 'json_schema',
+          schema: input.schema,
+        },
+      },
+    });
+    const messages = body.messages as Array<{
+      content: Array<{
+        type: string;
+        source?: { type: string; media_type: string; data: string };
+      }>;
+    }>;
+    const imageBlocks = messages.flatMap((message) => message.content).filter((item) => item.type === 'image');
+    expect(imageBlocks).toHaveLength(3);
+    expect(
+      imageBlocks.every(
+        (item) =>
+          item.source?.type === 'base64' && item.source.media_type === 'image/png' && item.source.data.length > 0,
+      ),
+    ).toBe(true);
+    expect(result).toMatchObject({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'claude-sonnet-5',
+      reportedModel: 'claude-sonnet-5',
+      modelResolutionSource: 'upstream_response',
+    });
+  });
+
+  it.each([
+    {
+      name: 'Gemini model identity',
+      model: 'gemini-3.5-flash',
+      transport: 'google-generate-content' as const,
+      response: {
+        modelVersion: 'provider-fallback',
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }],
+      },
+      expected: ProviderIdentityError,
+    },
+    {
+      name: 'Gemini abnormal finish',
+      model: 'gemini-3.5-flash',
+      transport: 'google-generate-content' as const,
+      response: {
+        modelVersion: 'gemini-3.5-flash',
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'SAFETY' }],
+      },
+      expected: 'VISION_REVIEW_FINISH_REASON_INVALID',
+    },
+    {
+      name: 'Gemini empty STOP',
+      model: 'gemini-3.5-flash',
+      transport: 'google-generate-content' as const,
+      response: {
+        modelVersion: 'gemini-3.5-flash',
+        candidates: [{ content: { parts: [{ thought: true, text: 'not output' }] }, finishReason: 'STOP' }],
+      },
+      expected: 'VISION_REVIEW_EMPTY_OUTPUT',
+    },
+    {
+      name: 'Responses model identity',
+      model: 'gpt-5.6-sol',
+      transport: 'openai-responses' as const,
+      response: {
+        model: 'provider-fallback',
+        status: 'completed',
+        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+      },
+      expected: ProviderIdentityError,
+    },
+    {
+      name: 'Responses incomplete status',
+      model: 'gpt-5.6-sol',
+      transport: 'openai-responses' as const,
+      response: {
+        model: 'gpt-5.6-sol',
+        status: 'incomplete',
+        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+      },
+      expected: 'VISION_REVIEW_FINISH_REASON_INVALID',
+    },
+    {
+      name: 'Responses refusal without output text',
+      model: 'gpt-5.6-sol',
+      transport: 'openai-responses' as const,
+      response: {
+        model: 'gpt-5.6-sol',
+        status: 'completed',
+        output: [{ content: [{ type: 'refusal', text: 'no' }] }],
+      },
+      expected: 'VISION_REVIEW_EMPTY_OUTPUT',
+    },
+    {
+      name: 'Anthropic model identity',
+      model: 'claude-sonnet-5',
+      transport: 'anthropic-messages' as const,
+      response: {
+        model: 'provider-fallback',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '{"ok":true}' }],
+      },
+      expected: ProviderIdentityError,
+    },
+    {
+      name: 'Anthropic truncation',
+      model: 'claude-sonnet-5',
+      transport: 'anthropic-messages' as const,
+      response: {
+        model: 'claude-sonnet-5',
+        stop_reason: 'max_tokens',
+        content: [{ type: 'text', text: '{"ok":true}' }],
+      },
+      expected: 'VISION_REVIEW_OUTPUT_TRUNCATED',
+    },
+    {
+      name: 'Anthropic refusal without text',
+      model: 'claude-sonnet-5',
+      transport: 'anthropic-messages' as const,
+      response: {
+        model: 'claude-sonnet-5',
+        stop_reason: 'end_turn',
+        content: [{ type: 'refusal' }],
+      },
+      expected: 'VISION_REVIEW_EMPTY_OUTPUT',
+    },
+  ])('fails closed for $name', async ({ model, transport, response, expected }) => {
+    mockChatResponse(response);
+    const pending = visionProviderFor(model, transport).reviewVision({
+      ...visionInput(),
+      model,
+      maxTokens: model === 'claude-sonnet-5' ? 4000 : 1000,
+    });
+    if (typeof expected === 'string') {
+      await expect(pending).rejects.toThrow(expected);
+    } else {
+      await expect(pending).rejects.toBeInstanceOf(expected);
+    }
   });
 
   it('rejects URL/path shaped inputs before any provider call', async () => {
@@ -465,26 +787,19 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(visionProvider().reviewVision(input)).rejects.toThrow(
-      'VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN',
-    );
+    await expect(visionProvider().reviewVision(input)).rejects.toThrow('VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects excess image count before copying any caller byte buffer', async () => {
     const input = visionInput();
-    input.images = [
-      ...input.images,
-      { ...input.images[0]!, artifactId: 'case-home-extra' },
-    ];
+    input.images = [...input.images, { ...input.images[0]!, artifactId: 'case-home-extra' }];
     const boundedProvider = visionProvider();
     const copySpy = vi.spyOn(Uint8Array, 'from');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(boundedProvider.reviewVision(input)).rejects.toThrow(
-      'VISION_REVIEW_INPUT_INVALID',
-    );
+    await expect(boundedProvider.reviewVision(input)).rejects.toThrow('VISION_REVIEW_INPUT_INVALID');
     expect(copySpy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     copySpy.mockRestore();
@@ -514,9 +829,9 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
         'gemini-3.5-flash': 'openai-chat-completions',
       },
     });
-    await expect(
-      providerWithoutCatalog.reviewVision(visionInput()),
-    ).rejects.toThrow('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
+    await expect(providerWithoutCatalog.reviewVision(visionInput())).rejects.toThrow(
+      'VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -539,9 +854,9 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(
-      providerWithMutableSource.reviewVision(input),
-    ).rejects.toThrow('VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED');
+    await expect(providerWithMutableSource.reviewVision(input)).rejects.toThrow(
+      'VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -560,14 +875,10 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
   it('fails closed when the upstream omits or changes the reported model', async () => {
     mockChatResponse({
       model: 'provider-fallback-model',
-      choices: [
-        { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
-      ],
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     });
-    await expect(
-      visionProvider().reviewVision(visionInput()),
-    ).rejects.toBeInstanceOf(ProviderIdentityError);
+    await expect(visionProvider().reviewVision(visionInput())).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
   it('binds the real requested model before await so caller mutation cannot rewrite provenance', async () => {
@@ -597,9 +908,7 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       status: 200,
       json: async () => ({
         model: 'provider-fallback',
-        choices: [
-          { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
-        ],
+        choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 12, completion_tokens: 4 },
       }),
       text: async () => '',
@@ -620,9 +929,7 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       ],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     });
-    await expect(
-      visionProvider().reviewVision(visionInput()),
-    ).rejects.toThrow('VISION_REVIEW_FINISH_REASON_INVALID');
+    await expect(visionProvider().reviewVision(visionInput())).rejects.toThrow('VISION_REVIEW_FINISH_REASON_INVALID');
   });
 
   it('preserves HTTP status for capability-probe unavailable mapping', async () => {

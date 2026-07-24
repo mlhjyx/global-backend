@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-claude-sonnet-5-v4",
+  "phase": "matrix_run",
+  "sequence": 19,
+  "caseId": "scientific-trust-degraded",
+  "familyId": "scientific-trust",
+  "kind": "degraded",
+  "attempt": 1,
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 43104.893,
+  "usage": {
+    "inputTokens": 6233,
+    "outputTokens": 4000
+  },
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.052466,
+  "reason": "empty_or_invalid_output",
+  "gateCode": "VISION_REVIEW_OUTPUT_TRUNCATED",
+  "messageSha256": "f09afe0d65908589c2ce8369ab5423aa6a73c5d7c55dca678b2a3f5c06cedc8a",
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:scientific-trust:sample-c75946acc62f:375",
+      "sha256": "f8eb883fde1b2814f55c5459cfacfd5e1829fcca7f03537e5b85417721f85e61",
+      "mimeType": "image/png",
+      "byteLength": 224174,
+      "target": {
+        "locale": "en",
+        "pageId": "scientific-trust",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:scientific-trust:sample-cba7be62f51b:768",
+      "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+      "mimeType": "image/png",
+      "byteLength": 271683,
+      "target": {
+        "locale": "en",
+        "pageId": "scientific-trust",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:scientific-trust:sample-015985d8663a:1440",
+      "sha256": "369afd4f18a034bda2a8b581c5f5ae6d2e3d5b94ab3e6f870a8d8d5f529b6b66",
+      "mimeType": "image/png",
+      "byteLength": 429583,
+      "target": {
+        "locale": "en",
+        "pageId": "scientific-trust",
+        "breakpoint": 1440
+      }
+    }
+  ]
+}

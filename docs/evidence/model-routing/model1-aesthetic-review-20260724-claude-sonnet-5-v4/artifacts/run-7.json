@@ -1,0 +1,260 @@
+{
+  "schemaVersion": "site-builder-model1-aesthetic-review-report/v1",
+  "evidenceId": "model1-aesthetic-review-20260724-claude-sonnet-5-v4",
+  "evaluatorVersion": "site-builder-aesthetic-review-eval@2.0.0",
+  "promptVersion": "site-builder-aesthetic-review-prompt/v2",
+  "caseId": "oem-capability-degraded",
+  "familyId": "oem-capability",
+  "kind": "degraded",
+  "qualification": "deterministic_render_baseline",
+  "expectedIssue": "AESTHETIC_CONTRAST",
+  "attempt": 1,
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "modelResolutionSource": "upstream_response",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 31246.454,
+  "usage": {
+    "inputTokens": 7163,
+    "outputTokens": 3538
+  },
+  "imageEvidence": [
+    {
+      "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375",
+      "sha256": "fcf45ffa0bf4e582126a0f5bfb56098a8314666e839332b4eabbdd40ff3ba801",
+      "mimeType": "image/png",
+      "byteLength": 189631,
+      "target": {
+        "locale": "en",
+        "pageId": "oem-capability",
+        "breakpoint": 375
+      }
+    },
+    {
+      "artifactId": "m1f:oem-capability:sample-990056a2cb1d:768",
+      "sha256": "6bd56d8c91fbd940ddd2710c1f3ddd770c140d163113152c71a908a360e1f500",
+      "mimeType": "image/png",
+      "byteLength": 224129,
+      "target": {
+        "locale": "en",
+        "pageId": "oem-capability",
+        "breakpoint": 768
+      }
+    },
+    {
+      "artifactId": "m1f:oem-capability:sample-3b579caa7622:1440",
+      "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+      "mimeType": "image/png",
+      "byteLength": 347039,
+      "target": {
+        "locale": "en",
+        "pageId": "oem-capability",
+        "breakpoint": 1440
+      }
+    }
+  ],
+  "output": {
+    "verdict": "failed",
+    "overallScore": 37,
+    "dimensions": {
+      "hierarchy": 22,
+      "consistency": 67,
+      "spacing": 62,
+      "contrast": 12,
+      "imagery": 32,
+      "mobileComposition": 42,
+      "ctaClarity": 22,
+      "credibility": 27,
+      "originality": 32
+    },
+    "findings": [
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-990056a2cb1d:768"
+        }
+      },
+      {
+        "severity": "blocker",
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-3b579caa7622:1440"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-990056a2cb1d:768"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-3b579caa7622:1440"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CTA_CLARITY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CTA_CLARITY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-990056a2cb1d:768"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-990056a2cb1d:768"
+        }
+      },
+      {
+        "severity": "major",
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 375
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-ee34e2f39c80:375"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 768
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-990056a2cb1d:768"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_IMAGERY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-3b579caa7622:1440"
+        }
+      },
+      {
+        "severity": "minor",
+        "ruleCode": "AESTHETIC_ORIGINALITY",
+        "target": {
+          "locale": "en",
+          "pageId": "oem-capability",
+          "breakpoint": 1440
+        },
+        "evidenceRef": {
+          "artifactId": "m1f:oem-capability:sample-3b579caa7622:1440"
+        }
+      }
+    ]
+  },
+  "scoring": {
+    "falseBlocker": false,
+    "seededIssueDetected": true,
+    "accepted": true
+  }
+}

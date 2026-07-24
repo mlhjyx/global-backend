@@ -94,19 +94,20 @@ describe('buildGatewayProvider — verified production model transports', () => 
     expect(request().url).toBe('http://gw.test/v1/chat/completions');
   });
 
-  it('registers the Gemini vision adapter without changing any active text route', async () => {
+  it('registers the native Gemini vision adapter without changing any active text route', async () => {
     mockResponse({
-      model: 'gemini-3.5-flash',
-      choices: [
-        { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+      modelVersion: 'gemini-3.5-flash',
+      candidates: [
+        {
+          content: { parts: [{ text: '{"ok":true}' }] },
+          finishReason: 'STOP',
+        },
       ],
-      usage: { prompt_tokens: 1, completion_tokens: 1 },
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
     });
     const provider = buildGatewayProvider(providerEnv());
     expect(provider?.supports('reviewVision')).toBe(true);
-    const bytes = Uint8Array.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    ]);
+    const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     await provider!.reviewVision({
       task: 'site_builder.aesthetic_review',
       model: 'gemini-3.5-flash',
@@ -126,20 +127,21 @@ describe('buildGatewayProvider — verified production model transports', () => 
         },
       ],
     });
-    expect(request().url).toBe('http://gw.test/v1/chat/completions');
+    expect(request().url).toBe('http://gw.test/v1beta/models/gemini-3.5-flash:generateContent');
   });
 
   it('accepts a reviewed eval fixture catalog only through the explicit evaluation seam', async () => {
     mockResponse({
-      model: 'gemini-3.5-flash',
-      choices: [
-        { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+      modelVersion: 'gemini-3.5-flash',
+      candidates: [
+        {
+          content: { parts: [{ text: '{"ok":true}' }] },
+          finishReason: 'STOP',
+        },
       ],
-      usage: { prompt_tokens: 1, completion_tokens: 1 },
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
     });
-    const bytes = Uint8Array.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    ]);
+    const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const digest = createHash('sha256').update(bytes).digest('hex');
     const provider = buildGatewayProvider(providerEnv(), {
       visionEvalFixtureDigests: { 'fixture-home-375': digest },
@@ -162,6 +164,6 @@ describe('buildGatewayProvider — verified production model transports', () => 
         },
       ],
     });
-    expect(request().url).toBe('http://gw.test/v1/chat/completions');
+    expect(request().url).toBe('http://gw.test/v1beta/models/gemini-3.5-flash:generateContent');
   });
 });
