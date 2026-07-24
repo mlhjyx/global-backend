@@ -570,12 +570,18 @@ export async function extractTrackedWorktreeSnapshot(
 export async function assertActiveSnapshotReady(
   repositoryRoot: string,
   snapshotRoot: string,
+  initialTrackedPaths: string[],
 ): Promise<string> {
   await assertNoUntrackedIndexInputs(repositoryRoot);
-  const trackedPaths = await trackedInputPaths(repositoryRoot);
+  const currentTrackedPaths = await trackedInputPaths(repositoryRoot);
+  if (stableJson(currentTrackedPaths) !== stableJson(initialTrackedPaths)) {
+    throw new Error(
+      "refusing active CodeGraph evidence because the Git tracked path set changed while its immutable snapshot was built",
+    );
+  }
   const [worktreeHash, snapshotHash] = await Promise.all([
-    trackedInputHash(repositoryRoot, trackedPaths),
-    trackedInputHash(snapshotRoot, trackedPaths),
+    trackedInputHash(repositoryRoot, initialTrackedPaths),
+    trackedInputHash(snapshotRoot, initialTrackedPaths),
   ]);
   if (worktreeHash !== snapshotHash) {
     throw new Error(
@@ -703,15 +709,21 @@ export async function buildCodeGraphIndex(
       : mainSnapshotRoot(resolved, mainCommit);
   if (target === "main") {
     await extractGitArchive(resolved, mainCommit, projectPath);
-  } else {
-    await extractTrackedWorktreeSnapshot(resolved, projectPath);
   }
+  const initialTrackedPaths =
+    target === "active"
+      ? await extractTrackedWorktreeSnapshot(resolved, projectPath)
+      : [];
   try {
     const { graph, fullBuildMs } = await indexProject(projectPath);
     try {
       const activeSourceHash =
         target === "active"
-          ? await assertActiveSnapshotReady(resolved, projectPath)
+          ? await assertActiveSnapshotReady(
+              resolved,
+              projectPath,
+              initialTrackedPaths,
+            )
           : undefined;
       const evidence = await buildIndexEvidence(
         resolved,

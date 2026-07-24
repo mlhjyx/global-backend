@@ -465,7 +465,10 @@ test("active indexing rejects every non-ignored untracked file", async () => {
       path.join(root, "concurrent-recovery.ts"),
       "export const lateSecret = 'must-never-enter-snapshot';\n",
     );
-    await extractTrackedWorktreeSnapshot(root, snapshot);
+    const initialTrackedPaths = await extractTrackedWorktreeSnapshot(
+      root,
+      snapshot,
+    );
     await assert.rejects(
       readFile(path.join(snapshot, "concurrent-recovery.ts"), "utf8"),
     );
@@ -473,13 +476,22 @@ test("active indexing rejects every non-ignored untracked file", async () => {
       readFile(path.join(snapshot, "credentials.json"), "utf8"),
     );
     await assert.rejects(
-      assertActiveSnapshotReady(root, snapshot),
+      assertActiveSnapshotReady(root, snapshot, initialTrackedPaths),
       /untracked files/,
     );
     await rm(path.join(root, "concurrent-recovery.ts"));
     assert.match(
-      await assertActiveSnapshotReady(root, snapshot),
+      await assertActiveSnapshotReady(root, snapshot, initialTrackedPaths),
       /^[a-f0-9]{64}$/,
+    );
+    await execFile("git", ["rm", "--quiet", "tracked.ts"], { cwd: root });
+    await assert.rejects(
+      assertActiveSnapshotReady(root, snapshot, initialTrackedPaths),
+      /tracked path set changed/,
+    );
+    assert.equal(
+      await readFile(path.join(snapshot, "tracked.ts"), "utf8"),
+      "export const safe = 1;\n",
     );
   } finally {
     await rm(root, { recursive: true, force: true });
