@@ -184,6 +184,11 @@ export interface QualityArtifactTargetV1 {
   breakpoint?: QualityBreakpoint;
 }
 
+export interface QualityArtifactExpectedTargetV1 {
+  locale: string;
+  pageId: string;
+}
+
 export interface QualityArtifactRefV1 {
   artifactId: string;
   objectKey: string;
@@ -200,6 +205,7 @@ export interface QualityArtifactSetV1 {
   designBriefDigest: string;
   round: 0 | 1 | 2 | 3;
   artifactSetDigest: string;
+  expectedTargets: QualityArtifactExpectedTargetV1[];
   artifacts: QualityArtifactRefV1[];
 }
 
@@ -355,6 +361,46 @@ function isDimensionScores(
   );
 }
 
+function artifactKindSupportsFinding(
+  source: unknown,
+  ruleCode: unknown,
+  kind: QualityArtifactKind,
+): boolean {
+  if (source === "aesthetic") return kind === "screenshot";
+  if (source !== "deterministic" || !isRuleCode(ruleCode)) return false;
+  if (ruleCode === "AXE_CRITICAL" || ruleCode === "AXE_SERIOUS") {
+    return kind === "axe_report";
+  }
+  if (ruleCode.startsWith("LIGHTHOUSE_")) {
+    return kind === "lighthouse_report";
+  }
+  if (
+    [
+      "H1_COUNT_INVALID",
+      "CANONICAL_INVALID",
+      "HREFLANG_INVALID",
+      "PREVIEW_NOINDEX_INVALID",
+      "ROBOTS_INVALID",
+      "SITEMAP_INVALID",
+      "JSON_LD_INVALID",
+      "JSON_LD_FACT_UNSUPPORTED",
+    ].includes(ruleCode)
+  ) {
+    return kind === "seo_report";
+  }
+  if (
+    [
+      "HORIZONTAL_OVERFLOW",
+      "TEXT_CLIPPED",
+      "ELEMENT_OVERLAP",
+      "CTA_UNREACHABLE",
+    ].includes(ruleCode)
+  ) {
+    return kind === "screenshot";
+  }
+  return kind === "deterministic_evaluation";
+}
+
 export function validateDesignEvaluation(value: unknown): DesignEvaluation {
   const evaluation = isRecord(value) ? value : null;
   const dimensions =
@@ -479,6 +525,10 @@ export function validateDesignEvaluationV2(
       isRecord(finding) &&
       (finding.severity === "blocker" || finding.severity === "major"),
   );
+  const aestheticDimensions = aesthetic?.dimensions;
+  const hasAestheticDimensionHardFailure =
+    isDimensionScores(aestheticDimensions) &&
+    DIMENSIONS.some((dimension) => aestheticDimensions[dimension] < 60);
   const validUnavailable =
     !!aesthetic &&
     aesthetic.status === "unavailable" &&
@@ -496,9 +546,12 @@ export function validateDesignEvaluationV2(
     aesthetic.unavailableReason === null &&
     ((aesthetic.status === "passed" &&
       aesthetic.overallScore >= 85 &&
-      !hasAestheticBlocker) ||
+      !hasAestheticBlocker &&
+      !hasAestheticDimensionHardFailure) ||
       (aesthetic.status === "failed" &&
-        (aesthetic.overallScore < 85 || hasAestheticBlocker === true)));
+        (aesthetic.overallScore < 85 ||
+          hasAestheticBlocker === true ||
+          hasAestheticDimensionHardFailure)));
 
   if (
     !evaluation ||
@@ -539,8 +592,11 @@ export function validateDesignEvaluationV2(
 
   if (artifactSet) {
     const validatedArtifactSet = validateQualityArtifactSet(artifactSet);
-    const artifactIds = new Set(
-      validatedArtifactSet.artifacts.map((artifact) => artifact.artifactId),
+    const artifactsById = new Map(
+      validatedArtifactSet.artifacts.map((artifact) => [
+        artifact.artifactId,
+        artifact,
+      ]),
     );
     const allFindings = [
       ...(hardFailures ?? []),
@@ -553,12 +609,24 @@ export function validateDesignEvaluationV2(
       evaluation.designBriefDigest !== validatedArtifactSet.designBriefDigest ||
       evaluation.artifactSetDigest !== validatedArtifactSet.artifactSetDigest ||
       evaluation.round !== validatedArtifactSet.round ||
-      allFindings.some(
-        (finding) =>
-          !isRecord(finding) ||
-          !isRecord(finding.evidenceRef) ||
-          !artifactIds.has(String(finding.evidenceRef.artifactId)),
-      )
+      allFindings.some((finding) => {
+        if (!isRecord(finding) || !isRecord(finding.evidenceRef)) return true;
+        const artifact = artifactsById.get(
+          String(finding.evidenceRef.artifactId),
+        );
+        if (!artifact?.target || !isRecord(finding.target)) return true;
+        const sourceAcceptsKind = artifactKindSupportsFinding(
+          finding.source,
+          finding.ruleCode,
+          artifact.kind,
+        );
+        return (
+          !sourceAcceptsKind ||
+          artifact.target.pageId !== finding.target.pageId ||
+          (finding.target.breakpoint !== undefined &&
+            artifact.target.breakpoint !== finding.target.breakpoint)
+        );
+      })
     ) {
       throw new Error("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
     }
@@ -583,7 +651,8 @@ export function hasDesignEvaluationHardFailures(
   evaluation: DesignEvaluationEnvelope,
 ): boolean {
   return evaluation.schemaVersion === DESIGN_EVALUATION_V2_SCHEMA_VERSION
-    ? evaluation.deterministic.hardFailures.length > 0
+    ? evaluation.deterministic.hardFailures.length > 0 ||
+        evaluation.aesthetic.status === "failed"
     : evaluation.hardFailures.length > 0;
 }
 
@@ -595,6 +664,18 @@ function isArtifactTarget(value: unknown): value is QualityArtifactTargetV1 {
     isBoundedToken(target.locale, 64) &&
     isBoundedToken(target.pageId) &&
     (target.breakpoint === undefined || isBreakpoint(target.breakpoint))
+  );
+}
+
+function isExpectedArtifactTarget(
+  value: unknown,
+): value is QualityArtifactExpectedTargetV1 {
+  const target = isRecord(value) ? value : null;
+  return (
+    !!target &&
+    hasOnlyKeys(target, ["locale", "pageId"]) &&
+    isBoundedToken(target.locale, 64) &&
+    isBoundedToken(target.pageId)
   );
 }
 
@@ -674,6 +755,10 @@ export function validateQualityArtifactSet(
     artifactSet && Array.isArray(artifactSet.artifacts)
       ? artifactSet.artifacts
       : null;
+  const expectedTargets =
+    artifactSet && Array.isArray(artifactSet.expectedTargets)
+      ? artifactSet.expectedTargets
+      : null;
   if (
     !artifactSet ||
     !hasOnlyKeys(artifactSet, [
@@ -682,6 +767,7 @@ export function validateQualityArtifactSet(
       "designBriefDigest",
       "round",
       "artifactSetDigest",
+      "expectedTargets",
       "artifacts",
     ]) ||
     artifactSet.schemaVersion !== QUALITY_ARTIFACT_SET_SCHEMA_VERSION ||
@@ -689,6 +775,10 @@ export function validateQualityArtifactSet(
     !isSha256(artifactSet.designBriefDigest) ||
     !isRound(artifactSet.round) ||
     !isSha256(artifactSet.artifactSetDigest) ||
+    !expectedTargets ||
+    expectedTargets.length < 1 ||
+    expectedTargets.length > 24 ||
+    !expectedTargets.every(isExpectedArtifactTarget) ||
     !artifacts ||
     artifacts.length < 3 ||
     artifacts.length > 128 ||
@@ -698,6 +788,13 @@ export function validateQualityArtifactSet(
   }
 
   const typedArtifacts = artifacts as QualityArtifactRefV1[];
+  const typedExpectedTargets =
+    expectedTargets as QualityArtifactExpectedTargetV1[];
+  const expectedTargetKeys = new Set(
+    typedExpectedTargets.map(
+      (target) => `${target.locale}\u0000${target.pageId}`,
+    ),
+  );
   const ids = new Set(typedArtifacts.map((artifact) => artifact.artifactId));
   const keys = new Set(typedArtifacts.map((artifact) => artifact.objectKey));
   const totalBytes = typedArtifacts.reduce(
@@ -721,8 +818,16 @@ export function validateQualityArtifactSet(
   const validCoverage =
     screenshots.length >= 3 &&
     screenshots.length <= 72 &&
-    screenshotGroups.size >= 1 &&
-    screenshotGroups.size <= 24 &&
+    expectedTargetKeys.size === typedExpectedTargets.length &&
+    screenshotGroups.size === expectedTargetKeys.size &&
+    [...screenshotGroups.keys()].every((key) => expectedTargetKeys.has(key)) &&
+    typedArtifacts.every(
+      (artifact) =>
+        !artifact.target ||
+        expectedTargetKeys.has(
+          `${artifact.target.locale}\u0000${artifact.target.pageId}`,
+        ),
+    ) &&
     [...screenshotGroups.values()].every(
       (breakpoints) =>
         breakpoints.size === 3 &&
@@ -735,6 +840,7 @@ export function validateQualityArtifactSet(
     candidateSpecDigest: String(artifactSet.candidateSpecDigest),
     designBriefDigest: String(artifactSet.designBriefDigest),
     round: artifactSet.round as 0 | 1 | 2 | 3,
+    expectedTargets: typedExpectedTargets,
     artifacts: typedArtifacts,
   };
   if (

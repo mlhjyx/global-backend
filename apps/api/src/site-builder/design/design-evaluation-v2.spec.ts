@@ -57,6 +57,7 @@ function artifactSet(
     candidateSpecDigest: SPEC_DIGEST,
     designBriefDigest: BRIEF_DIGEST,
     round: 0 as const,
+    expectedTargets: [{ locale: "en", pageId: "home" }],
     artifacts: [screenshot(375), screenshot(768), screenshot(1440)],
     ...overrides,
   };
@@ -192,6 +193,34 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
         aesthetic: { ...evaluation.aesthetic, overallScore: 84 },
       }),
     ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
+    expect(() =>
+      validateDesignEvaluationV2({
+        ...evaluation,
+        aesthetic: {
+          ...evaluation.aesthetic,
+          dimensions: { ...dimensions(85), hierarchy: 59 },
+        },
+      }),
+    ).toThrowError("DESIGN_EVALUATION_V2_INVALID");
+  });
+
+  it("treats a scored aesthetic failure as release-blocking", () => {
+    const artifacts = artifactSet();
+    const evaluation: DesignEvaluationV2 = {
+      ...unavailableEvaluation(artifacts),
+      aesthetic: {
+        status: "failed",
+        overallScore: 84,
+        dimensions: dimensions(84),
+        unavailableReason: null,
+        findings: [],
+      },
+    };
+    expect(
+      hasDesignEvaluationHardFailures(
+        validateDesignEvaluationV2(evaluation, artifacts),
+      ),
+    ).toBe(true);
   });
 
   it("accepts a deterministic hard failure only when it is blocker evidence", () => {
@@ -340,6 +369,70 @@ describe("M1-f DesignEvaluation v2 contracts", () => {
       ),
     ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
   });
+
+  it("binds each finding to evidence from the same page and breakpoint", () => {
+    const artifacts = artifactSet();
+    const evaluation = unavailableEvaluation(artifacts);
+    const mismatchedFinding = {
+      source: "deterministic",
+      severity: "blocker",
+      ruleCode: "HORIZONTAL_OVERFLOW",
+      target: { pageId: "products", breakpoint: 375 },
+      evidenceRef: { artifactId: "home-en-375" },
+    };
+    expect(() =>
+      validateDesignEvaluationV2(
+        {
+          ...evaluation,
+          deterministic: {
+            status: "failed",
+            hardFailures: [mismatchedFinding],
+            findings: [],
+          },
+        },
+        artifacts,
+      ),
+    ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
+
+    const aestheticAgainstJson = {
+      source: "aesthetic",
+      severity: "blocker",
+      ruleCode: "AESTHETIC_HIERARCHY",
+      target: { pageId: "home", breakpoint: 375 },
+      evidenceRef: { artifactId: "axe-home" },
+    };
+    const artifactsWithReport = artifactSet({
+      artifacts: [
+        screenshot(375),
+        screenshot(768),
+        screenshot(1440),
+        {
+          artifactId: "axe-home",
+          objectKey: "private/quality/run-1/round-0/axe-home.json",
+          sha256: "6".repeat(64),
+          sizeBytes: 1024,
+          mimeType: "application/json",
+          kind: "axe_report",
+          target: { locale: "en", pageId: "home", breakpoint: 375 },
+        },
+      ],
+    });
+    expect(() =>
+      validateDesignEvaluationV2(
+        {
+          ...unavailableEvaluation(artifactsWithReport),
+          aesthetic: {
+            status: "failed",
+            overallScore: 80,
+            dimensions: dimensions(80),
+            unavailableReason: null,
+            findings: [aestheticAgainstJson],
+          },
+        },
+        artifactsWithReport,
+      ),
+    ).toThrowError("DESIGN_EVALUATION_V2_EVIDENCE_MISMATCH");
+  });
 });
 
 describe("M1-f bounded quality artifacts", () => {
@@ -350,6 +443,19 @@ describe("M1-f bounded quality artifacts", () => {
         artifactSet({ artifacts: [screenshot(375), screenshot(768)] }),
       ),
     ).toThrowError("QUALITY_ARTIFACT_SET");
+  });
+
+  it("requires screenshot coverage for the complete declared candidate scope", () => {
+    expect(() =>
+      validateQualityArtifactSet(
+        artifactSet({
+          expectedTargets: [
+            { locale: "en", pageId: "home" },
+            { locale: "en", pageId: "products" },
+          ],
+        }),
+      ),
+    ).toThrowError("QUALITY_ARTIFACT_SET_INVALID");
   });
 
   it("rejects remote object URLs and screenshots above 2 MiB", () => {
