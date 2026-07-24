@@ -1,6 +1,15 @@
 import "dotenv/config";
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  open,
+  readFile,
+  rmdir,
+  unlink,
+  writeFile,
+  type FileHandle,
+} from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -183,6 +192,40 @@ async function fingerprints(
         await readFile(path.join(repositoryRoot, sourcePath)),
       ),
     })),
+  );
+}
+
+async function endFingerprints(
+  sourcePaths: readonly string[],
+): Promise<EvaluationSourceFingerprint[]> {
+  const unique = [...new Set(sourcePaths)].sort();
+  return Promise.all(
+    unique.map(async (sourcePath) => {
+      try {
+        return {
+          path: sourcePath,
+          sha256: sha256Bytes(
+            await readFile(path.join(repositoryRoot, sourcePath)),
+          ),
+        };
+      } catch (error) {
+        const code =
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          typeof error.code === "string"
+            ? error.code
+            : "UNKNOWN";
+        // A missing/unreadable end source is itself deterministic drift. Hash
+        // only a bounded code; never persist host paths or raw error text.
+        return {
+          path: sourcePath,
+          sha256: sha256Bytes(
+            Buffer.from(`BLIND_VISUAL_SOURCE_END_UNAVAILABLE:${code}`),
+          ),
+        };
+      }
+    }),
   );
 }
 
@@ -397,6 +440,29 @@ async function persistArtifacts(
   return manifest;
 }
 
+async function closeReportClaim(input: {
+  claimDirectory: string;
+  reportPath: string;
+  reportHandle: FileHandle | undefined;
+  paidCallsStarted: boolean;
+  reportFinalized: boolean;
+}): Promise<void> {
+  await input.reportHandle?.close();
+  // A preflight failure is safe to retry, and a finalized report no longer
+  // needs the claim. If paid calls started but finalization failed, retain the
+  // directory as an explicit collision guard for manual recovery.
+  if (!input.paidCallsStarted || input.reportFinalized) {
+    if (
+      input.reportHandle &&
+      !input.paidCallsStarted &&
+      !input.reportFinalized
+    ) {
+      await unlink(input.reportPath);
+    }
+    await rmdir(input.claimDirectory);
+  }
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     process.stdout.write(`${help()}\n`);
@@ -414,6 +480,7 @@ async function main(): Promise<void> {
     path.dirname(outputPath),
     `${path.basename(outputPath, ".json")}.artifacts`,
   );
+  const claimDirectory = `${outputPath}.claim`;
   const gatewayImageDigest = required("BLIND_VISUAL_EVAL_GATEWAY_IMAGE_DIGEST");
   if (!/^sha256:[a-f0-9]{64}$/.test(gatewayImageDigest)) {
     throw new Error("BLIND_VISUAL_EVAL_GATEWAY_IMAGE_DIGEST_INVALID");
@@ -422,88 +489,116 @@ async function main(): Promise<void> {
   if (await pathExists(artifactDirectory)) {
     throw new Error("BLIND_VISUAL_EVAL_ARTIFACT_PATH_EXISTS");
   }
-
-  const pairs = await loadBlindVisualPairs(repositoryRoot);
-  const matrixDefinition = buildBlindVisualMatrixDefinition(pairs);
-  const sourcePaths = [
-    ...STATIC_SOURCE_PATHS,
-    ...pairs.map((pair) => pair.sourcePath),
-  ];
-  await assertSourcePathsClean(sourcePaths);
-  const sourceStart = await fingerprints(sourcePaths);
-  const commitSha = await fixedCommitSha();
-  const sourceBundleSha256 = sha256CanonicalJson({
-    sourceFiles: sourceStart,
-    matrixDefinition,
-  });
-  const catalog = await catalogSnapshot(model);
-  if (!catalog.requestedModelListed) {
-    throw new Error(`BLIND_VISUAL_EVAL_MODEL_NOT_LISTED: ${model}`);
-  }
-  const fixtureDigests = fixtureDigestCatalog(candidate, pairs);
-  const runtime = createGateway(fixtureDigests, model, commitSha);
-  let report: BlindVisualModelReport;
-  let budgetRemainingCents: number;
+  await mkdir(claimDirectory, { recursive: false });
+  let reportHandle: FileHandle | undefined;
+  let paidCallsStarted = false;
+  let reportFinalized = false;
   try {
-    report = await runBlindVisualCalibrationCandidate({
-      repositoryRoot,
-      candidate,
-      provenance: { commitSha, sourceBundleSha256 },
-      invoke: gatewayInvoke(
-        runtime.gateway,
-        model,
-        runtime.budgetRunId,
-        runtime.budgetRunId,
-      ),
-    });
-    budgetRemainingCents = runtime.budget.remainingCents(runtime.budgetRunId);
-  } finally {
-    runtime.budget.close(runtime.budgetRunId, { force: true });
-  }
-  const sourceEnd = await fingerprints(sourcePaths);
-  const sourceIntegrity = inspectEvaluationSourceBundle(sourceStart, sourceEnd);
-  if (!sourceIntegrity.stable) {
-    throw new Error(
-      `BLIND_VISUAL_EVAL_SOURCE_CHANGED: ${sourceIntegrity.changedPaths.join(",")}`,
-    );
-  }
-  const artifactManifest = await persistArtifacts(artifactDirectory, report);
-  const envelope = {
-    schemaVersion: "site-builder-blind-visual-calibration-evidence/v1",
-    execution: {
-      commitSha,
-      sourceBundleSha256,
-      gatewayImageDigest,
-      model,
-      transport: candidate.transport,
-      catalog,
+    const pairs = await loadBlindVisualPairs(repositoryRoot);
+    const matrixDefinition = buildBlindVisualMatrixDefinition(pairs);
+    const sourcePaths = [
+      ...STATIC_SOURCE_PATHS,
+      ...pairs.map((pair) => pair.sourcePath),
+    ];
+    await assertSourcePathsClean(sourcePaths);
+    const sourceStart = await fingerprints(sourcePaths);
+    const commitSha = await fixedCommitSha();
+    const sourceBundleSha256 = sha256CanonicalJson({
       sourceFiles: sourceStart,
-      sourceIntegrity,
-      fixtureCatalogSha256: sha256CanonicalJson(fixtureDigests),
-      budget: {
-        capCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
-        remainingCents: budgetRemainingCents,
-      },
-      artifactManifest,
-    },
-    report,
-    conclusion:
-      report.status === "single_model_gate_passed"
-        ? "single_model_gate_passed_only_no_promotion_or_runtime_route_change"
-        : "no_promotion_or_runtime_route_change",
-  };
-  await writeFile(outputPath, `${JSON.stringify(envelope, null, 2)}\n`, {
-    flag: "wx",
-  });
-  process.stdout.write(
-    `${JSON.stringify({
-      event: "blind_visual_calibration_complete",
+      matrixDefinition,
+    });
+    const catalog = await catalogSnapshot(model);
+    if (!catalog.requestedModelListed) {
+      throw new Error(`BLIND_VISUAL_EVAL_MODEL_NOT_LISTED: ${model}`);
+    }
+    const fixtureDigests = fixtureDigestCatalog(candidate, pairs);
+    const runtime = createGateway(fixtureDigests, model, commitSha);
+    reportHandle = await open(outputPath, "wx");
+    let report: BlindVisualModelReport;
+    let budgetRemainingCents: number;
+    const invoke = gatewayInvoke(
+      runtime.gateway,
       model,
-      status: report.status,
-      reportPath: path.relative(repositoryRoot, outputPath),
-      artifactCount: artifactManifest.length,
-    })}\n`,
-  );
+      runtime.budgetRunId,
+      runtime.budgetRunId,
+    );
+    try {
+      report = await runBlindVisualCalibrationCandidate({
+        repositoryRoot,
+        candidate,
+        provenance: { commitSha, sourceBundleSha256 },
+        invoke: (request) => {
+          paidCallsStarted = true;
+          return invoke(request);
+        },
+      });
+      budgetRemainingCents = runtime.budget.remainingCents(runtime.budgetRunId);
+    } finally {
+      runtime.budget.close(runtime.budgetRunId, { force: true });
+    }
+    const sourceEnd = await endFingerprints(sourcePaths);
+    const sourceIntegrity = inspectEvaluationSourceBundle(
+      sourceStart,
+      sourceEnd,
+    );
+    const artifactManifest = await persistArtifacts(artifactDirectory, report);
+    const evidenceStatus = sourceIntegrity.stable
+      ? "complete"
+      : "unavailable_source_integrity_changed";
+    const envelope = {
+      schemaVersion: "site-builder-blind-visual-calibration-evidence/v1",
+      evidenceStatus,
+      execution: {
+        commitSha,
+        sourceBundleSha256,
+        gatewayImageDigest,
+        model,
+        transport: candidate.transport,
+        catalog,
+        sourceFiles: sourceStart,
+        sourceIntegrity,
+        fixtureCatalogSha256: sha256CanonicalJson(fixtureDigests),
+        budget: {
+          capCents: BLIND_VISUAL_MODEL_COST_BOUND_CENTS,
+          remainingCents: budgetRemainingCents,
+        },
+        artifactManifest,
+      },
+      failure: sourceIntegrity.stable
+        ? null
+        : {
+            reason: "source_integrity_changed",
+            changedPaths: sourceIntegrity.changedPaths,
+          },
+      report,
+      conclusion: !sourceIntegrity.stable
+        ? "unavailable_source_integrity_changed_no_model_selection_claim"
+        : report.status === "single_model_gate_passed"
+          ? "single_model_gate_passed_only_no_promotion_or_runtime_route_change"
+          : "no_promotion_or_runtime_route_change",
+    };
+    await reportHandle.writeFile(`${JSON.stringify(envelope, null, 2)}\n`);
+    await reportHandle.sync();
+    reportFinalized = true;
+    process.stdout.write(
+      `${JSON.stringify({
+        event: "blind_visual_calibration_complete",
+        model,
+        status: evidenceStatus,
+        modelStatus: report.status,
+        reportPath: path.relative(repositoryRoot, outputPath),
+        artifactCount: artifactManifest.length,
+      })}\n`,
+    );
+  } finally {
+    await closeReportClaim({
+      claimDirectory,
+      reportPath: outputPath,
+      reportHandle,
+      paidCallsStarted,
+      reportFinalized,
+    });
+  }
 }
 
 await main();
