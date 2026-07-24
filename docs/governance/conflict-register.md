@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 工程核验基线：`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
+> 工程核验基线：`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -197,7 +197,7 @@
 |---|---|---|---|---|
 | `DEC-AIDEV-001` | 批准 AI 辅助开发运行模型、非技术需求与业务验收、记忆/知识事实优先级和受控工具试点门；默认每个 PR 最终合并仍需产品负责人明确授权，后续精确范围决定可以建立独立审查后自动合并例外 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [AI 辅助开发协作入口](../ai-development/README.md) |
 | `DEC-AIDEV-002` | 批准受控 MCP Memory 第一阶段：固定本机版本、普通会话只读、`memoryctl` 候选/原子晋升/备份/审计与非技术合并决策卡；不把记忆升级为项目真值，旧写入会话排空前不执行首次晋升 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [记忆、知识与派生认知政策](../ai-development/memory-and-context-policy.md) |
-| `DEC-AIDEV-003` | 批准四 PR 的 AI 记忆与代码智能实施计划：ContractGraph 补动态契约，CodeGraph 仅作受控静态试点，运行证据关闭静态推断；本计划各 PR 在独立只读审查通过、CI 全绿、审查线程清零且基于最新 main 后由 Codex 合并，无需逐 PR 重复授权；不授权生产观测、产品范围变化或把派生图升级为真值 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [ContractGraph 使用与边界](../ai-development/code-intelligence.md) |
+| `DEC-AIDEV-003` | 批准四 PR 的 AI 记忆与代码智能实施计划：ContractGraph 补动态契约，CodeGraph 仅作受控静态试点，运行证据关闭静态推断；本计划各 PR 在独立只读审查通过、CI 全绿、审查线程清零且基于最新 main 后由 Codex 合并，无需逐 PR 重复授权；不授权生产观测、产品范围变化或把派生图升级为真值 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [代码智能使用与边界](../ai-development/code-intelligence.md) |
 
 ## 12. 关闭冲突的证据要求
 

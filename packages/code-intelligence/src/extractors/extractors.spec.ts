@@ -226,6 +226,18 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       ].join("\n"),
     );
     await writeFile(
+      path.join(root, "apps", "api", "src", "temporal", "site.activities.ts"),
+      [
+        "async function publishSite() { return undefined; }",
+        "export function createSiteActivities() {",
+        "  return {",
+        "    async buildSite() { return undefined; },",
+        "    publishSite,",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+    await writeFile(
       path.join(
         root,
         "apps",
@@ -286,6 +298,25 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
           edge.from === "workflow:temporal:siteWorkflow" &&
           edge.to === "activity:temporal:buildSite",
       ),
+      true,
+    );
+    assert.equal(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "implements" &&
+          edge.from.endsWith("#createSiteActivities.buildSite") &&
+          edge.to === "activity:temporal:buildSite" &&
+          edge.attributes.binding === "activity-factory-return",
+      ),
+      true,
+    );
+    assert.equal(
+      graph.nodes
+        .find((node) => node.id === "activity:temporal:buildSite")
+        ?.locations.some(
+          (location) =>
+            location.path === "apps/api/src/temporal/site.activities.ts",
+        ),
       true,
     );
     assert.equal(

@@ -1,0 +1,264 @@
+{
+  "schemaVersion": "code-intelligence-golden-questions/v1",
+  "questions": [
+    {
+      "id": "GQ-TS-001",
+      "category": "typescript-call",
+      "question": "ToolBroker 的确定性执行闸门在哪里？",
+      "query": "ToolBroker",
+      "baselinePattern": "class ToolBroker",
+      "expectedPaths": ["apps/api/src/tools/tool-broker.ts"]
+    },
+    {
+      "id": "GQ-TS-002",
+      "category": "typescript-call",
+      "question": "线索六维评分的入口在哪里？",
+      "query": "scoreLead",
+      "baselinePattern": "function scoreLead",
+      "expectedPaths": ["apps/api/src/lead/scoring.ts"]
+    },
+    {
+      "id": "GQ-TS-003",
+      "category": "typescript-call",
+      "question": "Intent 事件合并和幂等逻辑在哪里？",
+      "query": "mergeIntent",
+      "baselinePattern": "function mergeIntent",
+      "expectedPaths": ["apps/api/src/intent/intent-projection.service.ts"]
+    },
+    {
+      "id": "GQ-NEG-001",
+      "category": "known-no-caller",
+      "kind": "NO_CALLERS",
+      "question": "已知未接通的 countField 是否保持零调用者，而不是被误报为已接通？",
+      "query": "countField",
+      "baselinePattern": "function countField",
+      "expectedPaths": ["apps/api/src/adapters/openfda-api.ts"],
+      "expectedOutcome": "NO_CALLERS"
+    },
+    {
+      "id": "GQ-NEG-002",
+      "category": "fake-wiring",
+      "kind": "EXTERNAL_OWNED_CONTROL",
+      "question": "不可见的 SaaS 前端消费者是否仍报告为 EXTERNAL_OWNED，而不是假装已接通？",
+      "query": "SaaS frontend SiteRelease consumer",
+      "baselinePattern": "SiteRelease",
+      "expectedPaths": [],
+      "expectedOutcome": "EXTERNAL_OWNED"
+    },
+    {
+      "id": "GQ-NEST-001",
+      "category": "nestjs-route-di",
+      "question": "建站 intake HTTP Controller 在哪里？",
+      "query": "IntakeController",
+      "baselinePattern": "class IntakeController",
+      "expectedPaths": ["apps/api/src/site-builder/intake.controller.ts"]
+    },
+    {
+      "id": "GQ-NEST-002",
+      "category": "nestjs-route-di",
+      "question": "intake 业务服务在哪里？",
+      "query": "IntakeService",
+      "baselinePattern": "class IntakeService",
+      "expectedPaths": ["apps/api/src/site-builder/intake.service.ts"]
+    },
+    {
+      "id": "GQ-NEST-003",
+      "category": "nestjs-route-di",
+      "question": "Build API Controller 在哪里？",
+      "query": "BuildsController",
+      "baselinePattern": "class BuildsController",
+      "expectedPaths": ["apps/api/src/site-builder/builds.controller.ts"]
+    },
+    {
+      "id": "GQ-NEST-004",
+      "category": "nestjs-route-di",
+      "question": "Build 业务服务在哪里？",
+      "query": "BuildsService",
+      "baselinePattern": "class BuildsService",
+      "expectedPaths": ["apps/api/src/site-builder/builds.service.ts"]
+    },
+    {
+      "id": "GQ-NEST-005",
+      "category": "nestjs-route-di",
+      "question": "immutable SiteRelease 的服务入口在哪里？",
+      "query": "SiteReleaseService",
+      "baselinePattern": "class SiteReleaseService",
+      "expectedPaths": ["apps/api/src/site-builder/site-release.service.ts"]
+    },
+    {
+      "id": "GQ-DYN-001",
+      "category": "temporal-outbox",
+      "question": "制裁名单刷新 Workflow 在哪里？",
+      "query": "sanctionsRefreshWorkflow",
+      "baselinePattern": "function sanctionsRefreshWorkflow",
+      "expectedPaths": ["apps/api/src/temporal/sanctions-refresh.workflow.ts"],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-002",
+      "category": "temporal-outbox",
+      "question": "制裁刷新 Workflow 调用的解构 Activity 在哪里？",
+      "query": "refreshSanctionsLists",
+      "baselinePattern": "refreshSanctionsLists",
+      "expectedPaths": [
+        "apps/api/src/temporal/sanctions-refresh.activities.ts"
+      ],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-003",
+      "category": "temporal-outbox",
+      "question": "发现流程自动注册 watch 的 Activity 在哪里？",
+      "query": "registerWatchesForRun",
+      "baselinePattern": "registerWatchesForRun",
+      "expectedPaths": ["apps/api/src/temporal/discovery.activities.ts"],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-004",
+      "category": "temporal-outbox",
+      "question": "Transactional Outbox relay 在哪里？",
+      "query": "OutboxRelayService",
+      "baselinePattern": "class OutboxRelayService",
+      "expectedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DYN-005",
+      "category": "temporal-outbox",
+      "question": "字符串事件分派 routeEvent 在哪里？",
+      "query": "routeEvent",
+      "baselinePattern": "routeEvent",
+      "expectedPaths": ["apps/api/src/relay/outbox-relay.service.ts"],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-DATA-001",
+      "category": "prisma-rls",
+      "question": "Site 数据模型在哪里定义？",
+      "query": "Site",
+      "baselinePattern": "model Site {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+    },
+    {
+      "id": "GQ-DATA-002",
+      "category": "prisma-rls",
+      "question": "SiteRelease 数据模型在哪里定义？",
+      "query": "SiteRelease",
+      "baselinePattern": "model SiteRelease {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+    },
+    {
+      "id": "GQ-DATA-003",
+      "category": "prisma-rls",
+      "question": "SiteBuildRun 数据模型在哪里定义？",
+      "query": "SiteBuildRun",
+      "baselinePattern": "model SiteBuildRun {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+    },
+    {
+      "id": "GQ-DATA-004",
+      "category": "prisma-rls",
+      "question": "Asset 数据模型在哪里定义？",
+      "query": "Asset",
+      "baselinePattern": "model Asset {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+    },
+    {
+      "id": "GQ-DATA-005",
+      "category": "prisma-rls",
+      "question": "OutboxEvent 数据模型在哪里定义？",
+      "query": "OutboxEvent",
+      "baselinePattern": "model OutboxEvent {",
+      "expectedPaths": ["packages/db/prisma/schema.prisma"]
+    },
+    {
+      "id": "GQ-EXT-001",
+      "category": "external-projector",
+      "question": "ICP 到 CPV 的确定性映射入口在哪里？",
+      "query": "resolveIcpToCpv",
+      "baselinePattern": "function resolveIcpToCpv",
+      "expectedPaths": ["apps/api/src/discovery/icp-to-cpv.ts"]
+    },
+    {
+      "id": "GQ-NEG-003",
+      "category": "wrong-branch",
+      "kind": "WRONG_BRANCH_CONTROL",
+      "question": "索引分支与当前分支不一致时是否拒绝回答？",
+      "query": "wrong branch",
+      "baselinePattern": "WRONG_BRANCH",
+      "expectedPaths": [],
+      "expectedOutcome": "WRONG_BRANCH_REJECTED"
+    },
+    {
+      "id": "GQ-EXT-003",
+      "category": "external-projector",
+      "question": "TED 招标 intent 投影入口在哪里？",
+      "query": "projectTenders",
+      "baselinePattern": "projectTenders",
+      "expectedPaths": ["apps/api/src/intent/ted-intent-projection.service.ts"]
+    },
+    {
+      "id": "GQ-EXT-004",
+      "category": "external-projector",
+      "question": "openFDA 510k intent 投影入口在哪里？",
+      "query": "projectClearances",
+      "baselinePattern": "projectClearances",
+      "expectedPaths": [
+        "apps/api/src/intent/openfda-intent-projection.service.ts"
+      ]
+    },
+    {
+      "id": "GQ-EXT-005",
+      "category": "external-projector",
+      "question": "Temporal Schedule 自愈入口在哪里？",
+      "query": "ensurePlatformSchedules",
+      "baselinePattern": "function ensurePlatformSchedules",
+      "expectedPaths": ["apps/api/src/temporal/ensure-schedules.ts"],
+      "criticalDynamic": true
+    },
+    {
+      "id": "GQ-TRACE-001",
+      "category": "business-traceability",
+      "question": "CAP-SITE-INTAKE-001 如何追踪到实现？",
+      "query": "CAP-SITE-INTAKE-001",
+      "baselinePattern": "CAP-SITE-INTAKE-001",
+      "expectedPaths": ["docs/governance/traceability-matrix.md"]
+    },
+    {
+      "id": "GQ-TRACE-002",
+      "category": "renderer-blind-spot",
+      "question": "global.css 的 Astro 消费者有哪些？",
+      "query": "global.css",
+      "baselinePattern": "../styles/global.css",
+      "expectedPaths": [
+        "apps/site-renderer/src/layouts/Base.astro",
+        "apps/site-renderer/src/pages/gallery.astro"
+      ]
+    },
+    {
+      "id": "GQ-OPS-001",
+      "category": "deployment",
+      "question": "global-api systemd 服务定义在哪里？",
+      "query": "global-api.service",
+      "baselinePattern": "global-api.service",
+      "expectedPaths": ["infra/systemd/global-api.service"]
+    },
+    {
+      "id": "GQ-OPS-002",
+      "category": "deployment",
+      "question": "new-api Compose 服务在哪里定义？",
+      "query": "new-api",
+      "baselinePattern": "new-api:",
+      "expectedPaths": ["docker-compose.yml"]
+    },
+    {
+      "id": "GQ-ASTRO-001",
+      "category": "astro-import",
+      "question": "localeQualifiedPageHref 的 Renderer helper 在哪里？",
+      "query": "localeQualifiedPageHref",
+      "baselinePattern": "localeQualifiedPageHref",
+      "expectedPaths": ["apps/site-renderer/src/lib/page-reference.ts"]
+    }
+  ]
+}

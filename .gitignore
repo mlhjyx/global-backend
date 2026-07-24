@@ -46,6 +46,7 @@ __pycache__/
 /.codex/worktrees/
 /.codex/audits/
 /.code-intelligence/
+/.codegraph/
 .astro/
 dist-test-*/
 playwright-report/

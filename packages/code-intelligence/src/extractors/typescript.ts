@@ -596,6 +596,77 @@ export async function extractTypeScript(
       }
     };
 
+    const inspectActivityFactory = (
+      node: ts.FunctionDeclaration,
+      factoryName: string,
+    ): void => {
+      if (
+        !/apps\/api\/src\/temporal\/[^/]+\.activities\.ts$/.test(relative) ||
+        !/^create[A-Za-z0-9_$]*Activities$/.test(factoryName) ||
+        !node.body
+      ) {
+        return;
+      }
+      for (const statement of node.body.statements) {
+        if (
+          !ts.isReturnStatement(statement) ||
+          !statement.expression ||
+          !ts.isObjectLiteralExpression(statement.expression)
+        ) {
+          continue;
+        }
+        for (const property of statement.expression.properties) {
+          const name = declarationName(property);
+          if (!name) continue;
+          const location = sourceLocation(sourceFile, relative, property);
+          let implementation: string | undefined;
+          if (ts.isMethodDeclaration(property)) {
+            implementation = addSymbol(name, property, factoryName);
+          } else if (
+            ts.isPropertyAssignment(property) &&
+            (ts.isArrowFunction(property.initializer) ||
+              ts.isFunctionExpression(property.initializer))
+          ) {
+            implementation = addSymbol(name, property, factoryName);
+          } else if (ts.isShorthandPropertyAssignment(property)) {
+            implementation = builder.addNode({
+              id: `symbol-ref:${name}`,
+              kind: "code_symbol",
+              label: name,
+              attributes: {
+                activityFactory: factoryName,
+                unresolvedReference: true,
+              },
+              location,
+            });
+          }
+          if (!implementation) continue;
+          const activity = activityNode(builder, name, location);
+          builder.addNode({
+            id: activity,
+            kind: "activity",
+            label: name,
+            attributes: {
+              factory: factoryName,
+              implementationDeclared: true,
+              runtime: "temporal",
+            },
+            location,
+          });
+          builder.addEdge({
+            kind: "implements",
+            from: implementation,
+            to: activity,
+            attributes: {
+              binding: "activity-factory-return",
+              confidence: "PROVEN_STATIC_FACTORY",
+            },
+            location,
+          });
+        }
+      }
+    };
+
     const visit = (node: ts.Node, context: VisitContext): void => {
       if (ts.isVariableDeclaration(node)) registerProxyVariable(node);
 
@@ -940,6 +1011,7 @@ export async function extractTypeScript(
       } else if (ts.isFunctionDeclaration(statement)) {
         const name = declarationName(statement) ?? "anonymous-function";
         const owner = addSymbol(name, statement);
+        inspectActivityFactory(statement, name);
         const isWorkflow = registeredWorkflowNames.has(name);
         const workflow = isWorkflow
           ? workflowNode(
