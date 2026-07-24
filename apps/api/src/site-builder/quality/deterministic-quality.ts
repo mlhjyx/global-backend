@@ -124,7 +124,12 @@ function canonicalJson(value: unknown): string {
 }
 
 function safeToken(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+  const readable =
+    value
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .replace(/^[-.]+/, "")
+      .slice(0, 28) || "target";
+  return `${readable}-${createHash("sha256").update(value).digest("hex").slice(0, 12)}`;
 }
 
 function targetKey(target: QualityArtifactExpectedTargetV1): string {
@@ -177,7 +182,8 @@ function hasSeoFailure(
     page.canonical === null ||
     (locales.length > 1 &&
       (page.hreflangs.length !== locales.length ||
-        new Set(page.hreflangs.map(({ lang }) => lang)).size !== locales.length ||
+        new Set(page.hreflangs.map(({ lang }) => lang)).size !==
+          locales.length ||
         locales.some(
           (locale) =>
             !page.hreflangs.some(({ lang, href }) => lang === locale && href),
@@ -233,9 +239,12 @@ function genericnessFindings(
     }
     const cardDensity =
       blocks.length > 0 &&
-      blocks.filter((block) => cardLike.test(block.type)).length / blocks.length >
+      blocks.filter((block) => cardLike.test(block.type)).length /
+        blocks.length >
         0.5;
-    const hero = blocks.find((block) => /Hero$|Hero[A-Z]|^Hero/.test(block.type));
+    const hero = blocks.find((block) =>
+      /Hero$|Hero[A-Z]|^Hero/.test(block.type),
+    );
     if (hero) {
       const variant =
         typeof hero.props.variant === "string" ? hero.props.variant : "default";
@@ -314,7 +323,9 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
     throw new Error("QUALITY_ARTIFACT_INVALID: target coverage");
   }
   const expectedKeys = new Set(expected.map(targetKey));
-  const actualKeys = new Set(input.pages.map(({ target }) => targetKey(target)));
+  const actualKeys = new Set(
+    input.pages.map(({ target }) => targetKey(target)),
+  );
   if (
     expectedKeys.size !== expected.length ||
     actualKeys.size !== input.pages.length ||
@@ -333,12 +344,14 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
   for (const page of input.pages) {
     if (
       page.axeViolations.length > 128 ||
-      page.externalRequests.length > 128 ||
-      page.brokenInternalLinks.length > 128 ||
-      page.missingStaticAssets.length > 128 ||
-      [...page.externalRequests, ...page.brokenInternalLinks, ...page.missingStaticAssets].some(
-        (value) => typeof value !== "string" || value.length > 2_048,
-      )
+      page.externalRequests.length > 512 ||
+      page.brokenInternalLinks.length > 512 ||
+      page.missingStaticAssets.length > 512 ||
+      [
+        ...page.externalRequests,
+        ...page.brokenInternalLinks,
+        ...page.missingStaticAssets,
+      ].some((value) => typeof value !== "string" || value.length > 2_048)
     ) {
       throw new Error("QUALITY_ARTIFACT_INVALID: bounded page facts");
     }
@@ -348,9 +361,9 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
         !Buffer.isBuffer(screenshot) ||
         screenshot.length < 1 ||
         screenshot.length > MAX_QUALITY_SCREENSHOT_BYTES ||
-        !screenshot.subarray(0, 8).equals(
-          Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-        )
+        !screenshot
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       ) {
         throw new Error(
           `QUALITY_ARTIFACT_INVALID: screenshot ${targetKey(page.target)} ${breakpoint}`,
@@ -367,8 +380,7 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
     }
   }
   const homePage =
-    input.spec.pages.find((page) => page.id === "home") ??
-    input.spec.pages[0]!;
+    input.spec.pages.find((page) => page.id === "home") ?? input.spec.pages[0]!;
   const expectedLighthouseTarget = targetKey({
     locale: input.spec.site.defaultLocale,
     pageId: homePage.id,
@@ -391,9 +403,8 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
     input.lighthouse.length +
     2 +
     input.pages.filter(hasBlockingAxe).length +
-    input.pages.filter((page) =>
-      hasSeoFailure(page, input.spec.site.locales),
-    ).length;
+    input.pages.filter((page) => hasSeoFailure(page, input.spec.site.locales))
+      .length;
   const pageReportBytes = input.pages.reduce((total, page) => {
     const deterministic = jsonBytes({
       unresolvedPlaceholder: page.unresolvedPlaceholder,
@@ -403,8 +414,7 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
       wcagContrastFailed: page.axeViolations.some(
         (violation) =>
           violation.id === "color-contrast" &&
-          (violation.impact === "critical" ||
-            violation.impact === "serious"),
+          (violation.impact === "critical" || violation.impact === "serious"),
       ),
     }).length;
     const axe = hasBlockingAxe(page)
@@ -501,10 +511,7 @@ function assertFactCoverage(input: CollectedQualityFacts): void {
         page.clippedText,
         page.elementOverlap,
         page.unreachableCta,
-      ].reduce(
-        (count, breakpoints) => count + new Set(breakpoints).size,
-        0,
-      );
+      ].reduce((count, breakpoints) => count + new Set(breakpoints).size, 0);
       return total + axe + seo + deterministic + visual;
     }, 0) +
     input.lighthouse.reduce(
@@ -591,9 +598,7 @@ export async function evaluateDeterministicQuality(
       );
     }
     if (
-      page.axeViolations.some(
-        (violation) => violation.impact === "critical",
-      )
+      page.axeViolations.some((violation) => violation.impact === "critical")
     ) {
       hardFailures.push(
         finding("blocker", "AXE_CRITICAL", page.target, axeArtifactId),
@@ -630,7 +635,9 @@ export async function evaluateDeterministicQuality(
               input.spec.site.locales.length ||
             input.spec.site.locales.some(
               (locale) =>
-                !page.hreflangs.some(({ lang, href }) => lang === locale && href),
+                !page.hreflangs.some(
+                  ({ lang, href }) => lang === locale && href,
+                ),
             )),
         "HREFLANG_INVALID",
       ],
@@ -668,7 +675,10 @@ export async function evaluateDeterministicQuality(
     }
 
     const deterministicArtifactId = reportId("deterministic", page.target);
-    deterministicArtifactByTarget.set(targetKey(page.target), deterministicArtifactId);
+    deterministicArtifactByTarget.set(
+      targetKey(page.target),
+      deterministicArtifactId,
+    );
     artifacts.push(
       await sink.persist(
         artifactPrefix,
@@ -688,14 +698,13 @@ export async function evaluateDeterministicQuality(
         signal,
       ),
     );
-    const deterministicFailures: Array<
-      [boolean, DesignEvaluationV2RuleCode]
-    > = [
-      [page.unresolvedPlaceholder, "PLACEHOLDER_UNRESOLVED"],
-      [page.externalRequests.length > 0, "OUTBOUND_REQUEST_FORBIDDEN"],
-      [page.brokenInternalLinks.length > 0, "INTERNAL_LINK_BROKEN"],
-      [page.missingStaticAssets.length > 0, "STATIC_ASSET_MISSING"],
-    ];
+    const deterministicFailures: Array<[boolean, DesignEvaluationV2RuleCode]> =
+      [
+        [page.unresolvedPlaceholder, "PLACEHOLDER_UNRESOLVED"],
+        [page.externalRequests.length > 0, "OUTBOUND_REQUEST_FORBIDDEN"],
+        [page.brokenInternalLinks.length > 0, "INTERNAL_LINK_BROKEN"],
+        [page.missingStaticAssets.length > 0, "STATIC_ASSET_MISSING"],
+      ];
     for (const [failed, code] of deterministicFailures) {
       if (failed) {
         hardFailures.push(
@@ -774,9 +783,7 @@ export async function evaluateDeterministicQuality(
         signal,
       ),
     );
-    const failures: Array<
-      [boolean, DesignEvaluationV2RuleCode]
-    > = [
+    const failures: Array<[boolean, DesignEvaluationV2RuleCode]> = [
       [fact.performance < 85, "LIGHTHOUSE_PERFORMANCE_BELOW_THRESHOLD"],
       [fact.accessibility < 90, "LIGHTHOUSE_ACCESSIBILITY_BELOW_THRESHOLD"],
       [fact.seo < 90, "LIGHTHOUSE_SEO_BELOW_THRESHOLD"],

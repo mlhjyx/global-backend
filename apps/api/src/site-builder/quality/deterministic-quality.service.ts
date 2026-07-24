@@ -5,12 +5,13 @@ import {
 } from "./browser-quality-runner";
 import {
   evaluateDeterministicQuality,
+  composeUnavailableAestheticEvaluation,
   type DeterministicQualityResult,
+  type CollectedQualityFacts,
 } from "./deterministic-quality";
 import { StorageQualityArtifactSink } from "./quality-artifact-sink";
 
-export interface RunDeterministicQualityInput
-  extends BrowserQualityRunnerInput {
+export interface RunDeterministicQualityInput extends BrowserQualityRunnerInput {
   /** Producer-isolated staging prefix ending in quality/round-N. */
   artifactPrefix: string;
 }
@@ -27,12 +28,46 @@ export class DeterministicQualityService {
     input: RunDeterministicQualityInput,
   ): Promise<DeterministicQualityResult> {
     const { artifactPrefix, ...browserInput } = input;
+    const identity = {
+      candidateSpecDigest: input.candidateSpecDigest,
+      designBriefDigest: input.designBriefDigest,
+      round: input.round,
+    };
+    const existing = await this.artifacts.loadCheckpoint(
+      artifactPrefix,
+      identity,
+      input.signal,
+    );
+    if (existing) {
+      composeUnavailableAestheticEvaluation(
+        {
+          spec: input.spec,
+          ...identity,
+          pages: [],
+          lighthouse: [],
+        } satisfies CollectedQualityFacts,
+        existing,
+        "protocol_mismatch",
+      );
+      return existing;
+    }
     const facts = await collectBrowserQualityFacts(browserInput);
-    return evaluateDeterministicQuality(
+    const result = await evaluateDeterministicQuality(
       facts,
       artifactPrefix,
       this.artifacts,
       input.signal,
     );
+    const committed = await this.artifacts.commitCheckpoint(
+      artifactPrefix,
+      { ...identity, result },
+      input.signal,
+    );
+    composeUnavailableAestheticEvaluation(
+      facts,
+      committed,
+      "protocol_mismatch",
+    );
+    return committed;
   }
 }

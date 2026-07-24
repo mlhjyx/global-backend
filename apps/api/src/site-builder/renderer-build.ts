@@ -108,6 +108,7 @@ const SCANNED_RENDER_EXTENSIONS = new Set([
 const OUTBOUND_URL =
   /(?<![A-Za-z0-9+/=])(?:https?:\/\/[^\s"'<>)}\\]+|\/\/(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?[^\s"'<>)}\\]*)/giu;
 const MAX_SCANNED_OUTPUT_BYTES = 32 * 1024 * 1024;
+const RENDERER_METADATA_DOMAINS = new Set(["schema.org"]);
 
 function navigableOutputText(value: string): string {
   return value
@@ -156,7 +157,8 @@ export async function assertRenderedOutboundDomains(
         }
         if (
           parsed.protocol !== "https:" ||
-          !approved.has(parsed.hostname.toLowerCase())
+          (!approved.has(parsed.hostname.toLowerCase()) &&
+            !RENDERER_METADATA_DOMAINS.has(parsed.hostname.toLowerCase()))
         ) {
           throw new Error(
             `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname}`,

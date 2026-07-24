@@ -1,15 +1,27 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 
-import type { SiteSpecV1_1, QualityBreakpoint } from "@global/contracts";
+import type {
+  DesignBriefV2,
+  DesignCatalogV2,
+  QualityBreakpoint,
+  SiteSpecV1_1,
+} from "@global/contracts";
 import { source as axeSource } from "axe-core";
 import { launch as launchChrome } from "chrome-launcher";
 import lighthouse from "lighthouse";
 import { XMLParser } from "fast-xml-parser";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { chromium, type Page, type Route } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Route,
+} from "playwright";
 import {
   QUALITY_BREAKPOINTS,
   type AxeViolationFact,
@@ -18,11 +30,15 @@ import {
   type QualityPageFacts,
 } from "./deterministic-quality";
 import { assertReleaseContract, releaseSpecDigest } from "../release-artifact";
+import { assertControlledAssemblyValid } from "../assembly/controlled-assembly-validator";
+import type { CopySlotDefinition } from "../copy-bundle.service";
+import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
 
 const PAGE_TIMEOUT_MS = 30_000;
 const QUALITY_RUN_TIMEOUT_MS = 12 * 60_000;
 const MAX_STATIC_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_DOM_ISSUES_PER_KIND = 32;
+const MAX_URL_FACTS_PER_PAGE = 512;
 const CHROME_CANDIDATES = ["/usr/bin/google-chrome", "/usr/bin/chromium"];
 
 interface DomAudit {
@@ -34,6 +50,7 @@ interface DomAudit {
   jsonLdValid: boolean;
   unresolvedPlaceholder: boolean;
   internalLinks: string[];
+  resourceUrls: string[];
   horizontalOverflow: boolean;
   clippedText: boolean;
   elementOverlap: boolean;
@@ -56,10 +73,12 @@ export interface BrowserQualityRunnerInput {
   round: 0 | 1 | 2 | 3;
   chromeExecutablePath?: string;
   signal?: AbortSignal;
-  /** Required to authorize every structured fact against frozen Claim/Offering truth. */
-  structuredDataFactValidator: (documents: unknown[]) => boolean;
-  /** Required four-layer catalog/Blueprint/Claim/Asset validation owned by controlled assembly. */
-  candidateValidator: (spec: SiteSpecV1_1) => void;
+  validation: {
+    designBrief: DesignBriefV2;
+    catalog: DesignCatalogV2;
+    claimSnapshot: PublishableClaimSnapshot;
+    copySlots: readonly CopySlotDefinition[];
+  };
 }
 
 function abortError(): Error {
@@ -183,7 +202,92 @@ export async function startLoopbackStaticServer(
   };
 }
 
-function pagePath(spec: SiteSpecV1_1, locale: string, pathValue: string): string {
+function denyTunnel(socket: Duplex): void {
+  socket.on("error", () => undefined);
+  socket.end(
+    "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+  );
+}
+
+/**
+ * Lighthouse has no Playwright-style request interception. Force its Chrome
+ * through this deny-by-default proxy so literal IPs cannot bypass DNS rules.
+ */
+export async function startLoopbackOnlyProxy(
+  allowedOrigin: string,
+): Promise<{ origin: string; close: () => Promise<void> }> {
+  const allowed = new URL(allowedOrigin);
+  if (
+    allowed.protocol !== "http:" ||
+    allowed.hostname !== "127.0.0.1" ||
+    !allowed.port
+  ) {
+    throw new Error("QUALITY_ARTIFACT_INVALID: proxy allowlist");
+  }
+  const server = createServer(async (request, response: ServerResponse) => {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      response.writeHead(405, { connection: "close" }).end();
+      return;
+    }
+    let target: URL;
+    try {
+      target = new URL(request.url ?? "");
+    } catch {
+      response.writeHead(400, { connection: "close" }).end();
+      return;
+    }
+    if (target.origin !== allowed.origin) {
+      response.writeHead(403, { connection: "close" }).end();
+      return;
+    }
+    try {
+      const upstream = await fetch(target, {
+        method: request.method,
+        redirect: "manual",
+        signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
+      });
+      const bytes = Buffer.from(await upstream.arrayBuffer());
+      if (bytes.length > MAX_STATIC_FILE_BYTES) {
+        response.writeHead(413, { connection: "close" }).end();
+        return;
+      }
+      response.writeHead(upstream.status, {
+        "content-type":
+          upstream.headers.get("content-type") ?? "application/octet-stream",
+        "content-length": String(bytes.length),
+        "cache-control": "no-store",
+        connection: "close",
+      });
+      response.end(request.method === "HEAD" ? undefined : bytes);
+    } catch {
+      response.writeHead(502, { connection: "close" }).end();
+    }
+  });
+  server.on("connect", (_request, socket) => denyTunnel(socket));
+  server.on("upgrade", (_request, socket) => denyTunnel(socket));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("QUALITY_ARTIFACT_INVALID: loopback proxy");
+  }
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  };
+}
+
+function pagePath(
+  spec: SiteSpecV1_1,
+  locale: string,
+  pathValue: string,
+): string {
   const pagePath = pathValue.replace(/^\/+|\/+$/g, "");
   const localePrefix = locale === spec.site.defaultLocale ? "" : locale;
   return `/${[localePrefix, pagePath].filter(Boolean).join("/")}`;
@@ -191,7 +295,7 @@ function pagePath(spec: SiteSpecV1_1, locale: string, pathValue: string): string
 
 async function auditDom(page: Page): Promise<DomAudit> {
   return page.evaluate(
-    ({ maxIssues }) => {
+    ({ maxIssues, maxUrls }) => {
       const visible = (element: Element): boolean => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
@@ -203,31 +307,50 @@ async function auditDom(page: Page): Promise<DomAudit> {
           rect.height > 0
         );
       };
-      const all = [...document.querySelectorAll<HTMLElement>("body *")];
-      const clipped = all
+      const textElements = [
+        ...document.querySelectorAll<HTMLElement>(
+          "h1,h2,h3,h4,h5,h6,p,a,button,li,label,span",
+        ),
+      ];
+      const clipped = textElements
         .filter(
           (element) =>
             visible(element) &&
+            Boolean(element.innerText.trim()) &&
             getComputedStyle(element).overflow !== "visible" &&
             (element.scrollWidth > element.clientWidth + 1 ||
               element.scrollHeight > element.clientHeight + 1),
         )
         .slice(0, maxIssues);
-      const interactive = [
+      const overlapCandidates = [
         ...document.querySelectorAll<HTMLElement>(
-          "a[href],button,input,select,textarea,[role=button]",
+          "a[href],button,input,select,textarea,[role=button],main h1,main h2,main h3,main p,main img",
         ),
       ].filter(visible);
       let overlaps = 0;
-      for (let left = 0; left < interactive.length && overlaps < maxIssues; left += 1) {
-        const first = interactive[left]!;
+      for (
+        let left = 0;
+        left < overlapCandidates.length && overlaps < maxIssues;
+        left += 1
+      ) {
+        const first = overlapCandidates[left]!;
         const a = first.getBoundingClientRect();
-        for (let right = left + 1; right < interactive.length; right += 1) {
-          const second = interactive[right]!;
+        for (
+          let right = left + 1;
+          right < overlapCandidates.length;
+          right += 1
+        ) {
+          const second = overlapCandidates[right]!;
           if (first.contains(second) || second.contains(first)) continue;
           const b = second.getBoundingClientRect();
-          const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
-          const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+          const width = Math.max(
+            0,
+            Math.min(a.right, b.right) - Math.max(a.left, b.left),
+          );
+          const height = Math.max(
+            0,
+            Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top),
+          );
           const overlap = width * height;
           const minimum = Math.min(a.width * a.height, b.width * b.height);
           if (minimum > 0 && overlap / minimum > 0.25) overlaps += 1;
@@ -260,6 +383,45 @@ async function auditDom(page: Page): Promise<DomAudit> {
         }
       }
       if (jsonLd.length === 0) jsonLdValid = false;
+      const resourceUrls = new Set<string>();
+      for (const element of document.querySelectorAll<
+        | HTMLImageElement
+        | HTMLScriptElement
+        | HTMLLinkElement
+        | HTMLSourceElement
+      >("img[src],script[src],link[href],source[src],source[srcset]")) {
+        if (element instanceof HTMLImageElement && element.currentSrc) {
+          resourceUrls.add(element.currentSrc);
+        } else if (
+          element instanceof HTMLScriptElement ||
+          element instanceof HTMLSourceElement
+        ) {
+          if (element.src) resourceUrls.add(element.src);
+        } else if (element instanceof HTMLLinkElement) {
+          if (
+            ["stylesheet", "icon", "preload", "modulepreload"].includes(
+              element.rel,
+            ) &&
+            element.href
+          ) {
+            resourceUrls.add(element.href);
+          }
+        }
+        if (element instanceof HTMLSourceElement && element.srcset) {
+          for (const candidate of element.srcset.split(",")) {
+            const raw = candidate.trim().split(/\s+/)[0];
+            if (raw) resourceUrls.add(new URL(raw, location.href).href);
+          }
+        }
+      }
+      const internalLinks = [
+        ...document.querySelectorAll<HTMLAnchorElement>("a[href]"),
+      ]
+        .map((anchor) => anchor.href)
+        .filter((href) => href.startsWith(location.origin));
+      if (resourceUrls.size > maxUrls || internalLinks.length > maxUrls) {
+        throw new Error("QUALITY_ARTIFACT_INVALID: DOM URL limit");
+      }
       return {
         h1Count: document.querySelectorAll("h1").length,
         canonical: (() => {
@@ -283,11 +445,8 @@ async function auditDom(page: Page): Promise<DomAudit> {
         jsonLdValid,
         unresolvedPlaceholder:
           document.documentElement.textContent?.includes("⟦") ?? false,
-        internalLinks: [
-          ...document.querySelectorAll<HTMLAnchorElement>("a[href]"),
-        ]
-          .map((anchor) => anchor.href)
-          .filter((href) => href.startsWith(location.origin)),
+        internalLinks,
+        resourceUrls: [...resourceUrls],
         horizontalOverflow:
           document.documentElement.scrollWidth >
           document.documentElement.clientWidth + 1,
@@ -296,7 +455,10 @@ async function auditDom(page: Page): Promise<DomAudit> {
         unreachableCta: unreachable.length > 0,
       };
     },
-    { maxIssues: MAX_DOM_ISSUES_PER_KIND },
+    {
+      maxIssues: MAX_DOM_ISSUES_PER_KIND,
+      maxUrls: MAX_URL_FACTS_PER_PAGE,
+    },
   );
 }
 
@@ -306,7 +468,11 @@ async function probeLocalUrls(
   signal?: AbortSignal,
 ): Promise<string[]> {
   const broken: string[] = [];
-  for (const raw of [...new Set(urls)].slice(0, 128)) {
+  const unique = [...new Set(urls)];
+  if (unique.length > MAX_URL_FACTS_PER_PAGE) {
+    throw new Error("QUALITY_ARTIFACT_INVALID: local URL limit");
+  }
+  for (const raw of unique) {
     throwIfAborted(signal);
     const url = new URL(raw);
     url.hash = "";
@@ -326,6 +492,88 @@ async function probeLocalUrls(
     await response.body?.cancel();
   }
   return broken;
+}
+
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function expectedPagePaths(spec: SiteSpecV1_1): string[] {
+  return spec.site.locales.flatMap((locale) =>
+    spec.pages.map((sitePage) => pagePath(spec, locale, sitePage.path)),
+  );
+}
+
+function sitemapPaths(xml: string, origin: string): string[] {
+  const parsed = new XMLParser({
+    ignoreAttributes: false,
+    processEntities: false,
+  }).parse(xml) as { urlset?: { url?: unknown } };
+  const rawUrls = parsed?.urlset?.url;
+  const entries = Array.isArray(rawUrls)
+    ? rawUrls
+    : rawUrls === undefined
+      ? []
+      : [rawUrls];
+  return entries.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("QUALITY_ARTIFACT_INVALID: sitemap entry");
+    }
+    const loc = (entry as Record<string, unknown>).loc;
+    if (typeof loc !== "string" || !loc.trim()) {
+      throw new Error("QUALITY_ARTIFACT_INVALID: sitemap loc");
+    }
+    const url = new URL(loc.trim(), origin);
+    if (url.origin !== origin || url.search || url.hash) {
+      throw new Error("QUALITY_ARTIFACT_INVALID: sitemap origin");
+    }
+    return url.pathname.replace(/\/+$/, "") || "/";
+  });
+}
+
+const JSON_LD_VOCABULARY_KEYS = new Set([
+  "@context",
+  "@type",
+  "@id",
+  "url",
+  "inLanguage",
+]);
+
+function structuredDataUsesFrozenFacts(
+  documents: unknown[],
+  snapshot: PublishableClaimSnapshot,
+): boolean {
+  const approved = new Set(snapshot.items.map((item) => item.statement.trim()));
+  const visit = (value: unknown, parentKey?: string): boolean => {
+    if (Array.isArray(value))
+      return value.every((item) => visit(item, parentKey));
+    if (value && typeof value === "object") {
+      return Object.entries(value).every(([key, child]) => visit(child, key));
+    }
+    if (value === null) return true;
+    if (parentKey && JSON_LD_VOCABULARY_KEYS.has(parentKey)) return true;
+    if (typeof value === "string") return approved.has(value.trim());
+    return false;
+  };
+  return documents.every((document) => visit(document));
+}
+
+async function closeContext(context: BrowserContext): Promise<void> {
+  await context.close().catch(() => undefined);
 }
 
 function mergeAxeViolations(results: AxeResult[]): AxeViolationFact[] {
@@ -376,6 +624,7 @@ async function runLighthouse(
   target: LighthouseFacts["target"],
   breakpoint: 375 | 1440,
   executablePath: string,
+  proxyOrigin: string,
   signal?: AbortSignal,
 ): Promise<LighthouseFacts> {
   throwIfAborted(signal);
@@ -388,10 +637,13 @@ async function runLighthouse(
       "--disable-background-networking",
       "--disable-component-update",
       "--disable-domain-reliability",
+      "--disable-quic",
       "--disable-sync",
+      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
       "--metrics-recording-only",
       "--no-first-run",
-      "--proxy-server=direct://",
+      `--proxy-server=${proxyOrigin}`,
+      "--proxy-bypass-list=<-loopback>",
       "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1",
     ],
     logLevel: "silent",
@@ -406,6 +658,9 @@ async function runLighthouse(
           output: "json",
           logLevel: "error",
           onlyCategories: ["performance", "accessibility", "seo"],
+          // Preview artifacts are intentionally noindex until M2 publication.
+          // The deterministic PREVIEW_NOINDEX_INVALID rule owns that invariant.
+          skipAudits: ["is-crawlable"],
           formFactor: mobile ? "mobile" : "desktop",
           screenEmulation: mobile
             ? {
@@ -440,7 +695,7 @@ async function runLighthouse(
       if (typeof value !== "number") {
         throw new Error(`QUALITY_ARTIFACT_INVALID: lighthouse ${key}`);
       }
-      return Math.round(value * 100);
+      return Math.round(value * 10_000) / 100;
     };
     return {
       target,
@@ -463,18 +718,33 @@ export async function collectBrowserQualityFacts(
     : deadline;
   throwIfAborted(signal);
   assertReleaseContract(input.spec, input.spec.specVersion);
-  input.candidateValidator(input.spec);
+  if (input.validation.designBrief.digest !== input.designBriefDigest) {
+    throw new Error("QUALITY_ARTIFACT_INVALID: designBriefDigest mismatch");
+  }
+  assertControlledAssemblyValid({
+    spec: input.spec,
+    brief: input.validation.designBrief,
+    catalog: input.validation.catalog,
+    claimSnapshot: input.validation.claimSnapshot,
+    copySlots: input.validation.copySlots,
+  });
   if (releaseSpecDigest(input.spec) !== input.candidateSpecDigest) {
     throw new Error("QUALITY_ARTIFACT_INVALID: candidateSpecDigest mismatch");
   }
+  const targets = expectedPagePaths(input.spec);
+  if (targets.length < 1 || targets.length > 24) {
+    throw new Error("QUALITY_ARTIFACT_INVALID: locale-page target limit");
+  }
   const executablePath = await chromePath(input.chromeExecutablePath);
   const staticServer = await startLoopbackStaticServer(input.buildRoot);
-  const browser = await chromium.launch({
-    executablePath,
-    headless: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-  });
+  const lighthouseProxy = await startLoopbackOnlyProxy(staticServer.origin);
+  let browser: Browser | null = null;
   try {
+    browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    });
     const robotsResponse = await fetch(`${staticServer.origin}/robots.txt`, {
       signal,
     });
@@ -494,14 +764,14 @@ export async function collectBrowserQualityFacts(
     let sitemapOk = false;
     if (sitemapResponse.ok) {
       try {
-        const parsed = new XMLParser({
-          ignoreAttributes: false,
-          processEntities: false,
-        }).parse(sitemapText) as Record<string, unknown>;
+        const actual = sitemapPaths(sitemapText, staticServer.origin);
+        const expected = targets.map(
+          (value) => value.replace(/\/+$/, "") || "/",
+        );
         sitemapOk =
-          typeof parsed === "object" &&
-          parsed !== null &&
-          ("urlset" in parsed || "sitemapindex" in parsed);
+          actual.length === expected.length &&
+          new Set(actual).size === actual.length &&
+          expected.every((value) => actual.includes(value));
       } catch {
         sitemapOk = false;
       }
@@ -517,77 +787,142 @@ export async function collectBrowserQualityFacts(
         const domByBreakpoint = new Map<QualityBreakpoint, DomAudit>();
         const externalRequests = new Set<string>();
         const missingStaticAssets = new Set<string>();
+        let urlEvidenceOverflow = false;
         for (const breakpoint of QUALITY_BREAKPOINTS) {
           const context = await browser.newContext({
             viewport: {
               width: breakpoint,
-              height: breakpoint === 375 ? 812 : breakpoint === 768 ? 1024 : 900,
+              height:
+                breakpoint === 375 ? 812 : breakpoint === 768 ? 1024 : 900,
             },
             deviceScaleFactor: 1,
             reducedMotion: "reduce",
+            serviceWorkers: "block",
           });
-          const page = await context.newPage();
-          page.setDefaultTimeout(PAGE_TIMEOUT_MS);
-          await page.route("**/*", async (route: Route) => {
-            const url = new URL(route.request().url());
-            if (
-              url.protocol === "data:" ||
-              url.protocol === "blob:" ||
-              url.origin === staticServer.origin
-            ) {
-              await route.continue();
-            } else {
+          try {
+            await context.routeWebSocket("**", (socket) => {
+              const url = new URL(socket.url());
               externalRequests.add(`${url.protocol}//${url.host}`);
-              await route.abort("blockedbyclient");
-            }
-          });
-          page.on("response", (response) => {
-            if (response.status() < 400) return;
-            const request = response.request();
-            if (
-              ["image", "font", "stylesheet", "script"].includes(
-                request.resourceType(),
-              )
-            ) {
-              missingStaticAssets.add(new URL(response.url()).pathname);
-            }
-          });
-          await page.goto(`${staticServer.origin}${targetPath}`, {
-            waitUntil: "networkidle",
-            timeout: PAGE_TIMEOUT_MS,
-          });
-          await page.addScriptTag({ content: axeSource });
-          axeResults.push(
-            await page.evaluate(async () => {
-              const axe = (
-                window as unknown as {
-                  axe: {
-                    run: (
-                      root: Document,
-                      options: unknown,
-                    ) => Promise<AxeResult>;
-                  };
+              if (externalRequests.size > MAX_URL_FACTS_PER_PAGE) {
+                urlEvidenceOverflow = true;
+              }
+              socket.close({ code: 1008, reason: "quality network policy" });
+            });
+            await context.route("**/*", async (route: Route) => {
+              const url = new URL(route.request().url());
+              if (
+                url.protocol === "data:" ||
+                url.protocol === "blob:" ||
+                url.origin === staticServer.origin
+              ) {
+                await route.continue();
+              } else {
+                externalRequests.add(`${url.protocol}//${url.host}`);
+                if (externalRequests.size > MAX_URL_FACTS_PER_PAGE) {
+                  urlEvidenceOverflow = true;
                 }
-              ).axe;
-              return axe.run(document, {
-                runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
-              });
-            }),
-          );
-          domByBreakpoint.set(breakpoint, await auditDom(page));
-          screenshots[breakpoint] = await page.screenshot({
-            fullPage: true,
-            type: "png",
-            animations: "disabled",
-          });
-          await context.close();
+                await route.abort("blockedbyclient");
+              }
+            });
+            const page = await context.newPage();
+            page.setDefaultTimeout(PAGE_TIMEOUT_MS);
+            page.on("response", (response) => {
+              if (response.status() < 400) return;
+              const request = response.request();
+              if (
+                ["document", "image", "font", "stylesheet", "script"].includes(
+                  request.resourceType(),
+                )
+              ) {
+                missingStaticAssets.add(new URL(response.url()).pathname);
+                if (missingStaticAssets.size > MAX_URL_FACTS_PER_PAGE) {
+                  urlEvidenceOverflow = true;
+                }
+              }
+            });
+            await raceAbort(
+              page.goto(`${staticServer.origin}${targetPath}`, {
+                waitUntil: "networkidle",
+                timeout: PAGE_TIMEOUT_MS,
+              }),
+              signal,
+            );
+            await raceAbort(page.addScriptTag({ content: axeSource }), signal);
+            axeResults.push(
+              await raceAbort(
+                page.evaluate(async () => {
+                  const axe = (
+                    window as unknown as {
+                      axe: {
+                        run: (
+                          root: Document,
+                          options: unknown,
+                        ) => Promise<AxeResult>;
+                      };
+                    }
+                  ).axe;
+                  return axe.run(document, {
+                    runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+                  });
+                }),
+                signal,
+              ),
+            );
+            domByBreakpoint.set(
+              breakpoint,
+              await raceAbort(auditDom(page), signal),
+            );
+            screenshots[breakpoint] = await raceAbort(
+              page.screenshot({
+                fullPage: true,
+                type: "png",
+                animations: "disabled",
+              }),
+              signal,
+            );
+          } finally {
+            await closeContext(context);
+          }
+          if (urlEvidenceOverflow) {
+            throw new Error("QUALITY_ARTIFACT_INVALID: network URL limit");
+          }
         }
         const canonicalDom = domByBreakpoint.get(1440)!;
         const brokenInternalLinks = await probeLocalUrls(
-          canonicalDom.internalLinks,
+          [...domByBreakpoint.values()].flatMap((audit) => audit.internalLinks),
           staticServer.origin,
           signal,
         );
+        const resourceUrls = [
+          ...new Set(
+            [...domByBreakpoint.values()].flatMap(
+              (audit) => audit.resourceUrls,
+            ),
+          ),
+        ];
+        const localResourceUrls: string[] = [];
+        for (const raw of resourceUrls) {
+          const resource = new URL(raw);
+          if (resource.origin === staticServer.origin) {
+            localResourceUrls.push(raw);
+          } else if (
+            resource.protocol === "http:" ||
+            resource.protocol === "https:"
+          ) {
+            externalRequests.add(`${resource.protocol}//${resource.host}`);
+          }
+        }
+        if (externalRequests.size > MAX_URL_FACTS_PER_PAGE) {
+          throw new Error("QUALITY_ARTIFACT_INVALID: external URL limit");
+        }
+        const missingProbedAssets = await probeLocalUrls(
+          localResourceUrls,
+          staticServer.origin,
+          signal,
+        );
+        for (const missing of missingProbedAssets) {
+          missingStaticAssets.add(new URL(missing).pathname);
+        }
         pages.push({
           target,
           screenshots,
@@ -595,21 +930,47 @@ export async function collectBrowserQualityFacts(
           h1Count: canonicalDom.h1Count,
           canonical:
             canonicalDom.canonical &&
-            new URL(canonicalDom.canonical).pathname.replace(/\/+$/, "") ===
-              new URL(`${staticServer.origin}${targetPath}`).pathname.replace(
-                /\/+$/,
-                "",
-              )
+            new URL(canonicalDom.canonical).origin === staticServer.origin &&
+            !new URL(canonicalDom.canonical).search &&
+            !new URL(canonicalDom.canonical).hash &&
+            (new URL(canonicalDom.canonical).pathname.replace(/\/+$/, "") ||
+              "/") === (targetPath.replace(/\/+$/, "") || "/")
               ? canonicalDom.canonical
               : null,
-          hreflangs: canonicalDom.hreflangs,
+          hreflangs:
+            canonicalDom.hreflangs.length === input.spec.site.locales.length &&
+            new Set(canonicalDom.hreflangs.map((entry) => entry.lang)).size ===
+              input.spec.site.locales.length &&
+            input.spec.site.locales.every((expectedLocale) =>
+              canonicalDom.hreflangs.some((entry) => {
+                const href = new URL(entry.href);
+                const expectedPath = pagePath(
+                  input.spec,
+                  expectedLocale,
+                  sitePage.path,
+                );
+                return (
+                  entry.lang === expectedLocale &&
+                  href.origin === staticServer.origin &&
+                  !href.search &&
+                  !href.hash &&
+                  (href.pathname.replace(/\/+$/, "") || "/") ===
+                    (expectedPath.replace(/\/+$/, "") || "/")
+                );
+              }),
+            )
+              ? canonicalDom.hreflangs
+              : [],
           robots: canonicalDom.robots,
           robotsTxtOk,
           sitemapOk,
           jsonLdValid: canonicalDom.jsonLdValid,
           jsonLdUnsupportedFacts:
             canonicalDom.jsonLd.length > 0 &&
-            !input.structuredDataFactValidator(canonicalDom.jsonLd),
+            !structuredDataUsesFrozenFacts(
+              canonicalDom.jsonLd,
+              input.validation.claimSnapshot,
+            ),
           unresolvedPlaceholder: [...domByBreakpoint.values()].some(
             (audit) => audit.unresolvedPlaceholder,
           ),
@@ -632,7 +993,8 @@ export async function collectBrowserQualityFacts(
       }
     }
     const home =
-      input.spec.pages.find((page) => page.id === "home") ?? input.spec.pages[0]!;
+      input.spec.pages.find((page) => page.id === "home") ??
+      input.spec.pages[0]!;
     const homeTarget = {
       locale: input.spec.site.defaultLocale,
       pageId: home.id,
@@ -651,6 +1013,7 @@ export async function collectBrowserQualityFacts(
           homeTarget,
           breakpoint,
           executablePath,
+          lighthouseProxy.origin,
           signal,
         ),
       );
@@ -667,7 +1030,8 @@ export async function collectBrowserQualityFacts(
     if (signal.aborted) throw abortError();
     throw error;
   } finally {
-    await browser.close();
+    await browser?.close();
+    await lighthouseProxy.close();
     await staticServer.close();
   }
 }
