@@ -17,7 +17,10 @@
     "codegraph:index:main": "tsx src/cli.ts codegraph-index main --repo ../..",
     "codegraph:status:active": "tsx src/cli.ts codegraph-status active --repo ../..",
     "codegraph:status:main": "tsx src/cli.ts codegraph-status main --repo ../..",
-    "codegraph:evaluate": "tsx src/cli.ts evaluate-codegraph --repo ../.."
+    "codegraph:evaluate": "tsx src/cli.ts evaluate-codegraph --repo ../..",
+    "runtime:capture": "tsx src/cli.ts runtime-capture development --repo ../..",
+    "runtime:status": "tsx src/cli.ts runtime-status --repo ../..",
+    "runtime:diff": "tsx src/cli.ts runtime-diff --repo ../.."
   },
   "dependencies": {
     "@colbymchenry/codegraph": "1.5.0",

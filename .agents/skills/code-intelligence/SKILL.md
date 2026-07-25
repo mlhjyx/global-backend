@@ -26,18 +26,36 @@ deployment entry, Capability, or scenario a change can affect.
    any automatic agent/Hook/`AGENTS.md` configuration.
 8. Open the returned source locations. Treat graph edges as candidates until
    current source or a deterministic completeness test confirms them.
-9. For “does this really happen,” require runtime evidence such as an API
-   correlation ID, Temporal workflow ID, Outbox event ID, migration status, or
-   health result. Report missing external repositories as `EXTERNAL_OWNED` and
-   unproven relationships as `UNKNOWN`.
-10. Lead the final impact report with Capability, scenario, and user path; then
-   list code, data, tests, risks, unknowns, and rollback.
+9. For “does this really happen” on the Ubuntu development environment, run
+   `pnpm code-intelligence:runtime:status` first. If evidence is missing or
+   stale (runtime snapshots expire after 24 hours), rebuild the exact
+   ContractGraph, commit the worktree, then run
+   `pnpm code-intelligence:runtime:capture` and
+   `pnpm code-intelligence:runtime:diff`. Never use these commands for
+   preproduction or production without separate approval.
+10. Treat `PARTIAL` honestly: the current services do not expose a deployment
+    commit and health endpoints do not echo a correlation ID. A Temporal recent
+    Schedule action can prove its Schedule-to-Workflow edge; an Outbox row proves
+    only that the event type occurred, not that a consumer ran.
+11. Report missing external repositories as `EXTERNAL_OWNED`, unproven
+    relationships as `UNKNOWN`, and static-only relationships as unobserved
+    rather than disconnected.
+12. Lead the final impact report with Capability, scenario, and user path; then
+    list code, data, tests, risks, unknowns, and rollback.
 
 The graph is derived, ignored by Git, and safe to delete. It cannot change
 Registry/ADR truth, authorize frozen product work, prove deployment, or justify
 skipping existing CI. Do not index `.env`, credentials, customer data, prompts,
 or personal data. Do not bypass the artifact manifest if a derived JSON file
 fails integrity validation.
+
+Runtime evidence is also derived and metadata-only. Never persist response
+bodies, Outbox payloads, prompts, secrets, credentials, emails, or personal
+data. Only explicitly allowlisted keys and machine-shaped values may be saved;
+free-text Outbox correlation IDs are omitted. The collector commit identifies
+the tool that observed the environment; it is not proof that the running binary
+came from that commit. The three long-running systemd units require
+`active/running`; `active/exited` is a failed health observation.
 
 The fixed 30-question evaluation currently classifies CodeGraph as
 `PILOT_ONLY`: responsibility-routed unified precision/recall, exact dynamic

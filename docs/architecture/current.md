@@ -66,6 +66,8 @@ Temporal 固定 DAG → Brand/Asset → DesignBrief → CopyBundle → 受控 As
 
 该层不进入 API、worker、数据库或生产部署，不索引 Secret/`.env`，`.codegraph/` 与 `.code-intelligence/` 均被 Git 忽略且可随时重建。静态图只能提出影响候选，不能证明运行时 DI、字符串分派、外部消费者或数据库行为真实发生；完整边界与使用顺序见 [代码智能使用与边界](../ai-development/code-intelligence.md)。
 
+开发环境运行证据 CLI 在同一 `@global/code-intelligence` 包内按需执行：只读探测 API/DB health、systemd、`global` Compose、Temporal cluster/Schedule、最新 migration、Outbox 元数据和 SiteBuildRun/Temporal identity，原子写入带 manifest 的 `.code-intelligence/runtime-*.json`。每条证据只保存按 kind 和值格式双重白名单允许的标识、状态、时间、耗时和哈希；任意 Outbox correlation 自由文本不落盘，也不读取 Outbox payload、业务正文、模型输入、Secret 或个人数据。bundle/manifest 绑定 repository、worktree、branch、commit、commit time、clean state 与 source hash，采集前后变动即拒绝，24 小时后失效。差异报告只把 Temporal 最近 Schedule action 认作真实 Schedule→Workflow 边；Outbox 行不冒充消费者已运行。当前服务未暴露部署 commit 与 API correlation 回显时明确输出 `UNKNOWN/PARTIAL`；Compose 只有 running 而无 healthcheck 不冒充健康，三个长驻 systemd unit 的 `active/exited` 也按失败；容器配置来源偏离 canonical 主工作区会单独报告 provenance drift。预发布/生产采集与 OpenTelemetry 均未启用。
+
 ## 2. Bounded Contexts（9 个）
 
 | Context | 核心对象 | 数据归属 |

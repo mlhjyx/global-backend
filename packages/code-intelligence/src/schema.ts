@@ -135,16 +135,80 @@ export interface CoverageReportV1 {
 
 export interface RuntimeEvidenceV1 {
   schemaVersion: "runtime-evidence/v1";
-  environment: string;
+  id: string;
+  kind:
+    | "API_HEALTH"
+    | "SYSTEMD_SERVICE"
+    | "COMPOSE_SERVICE"
+    | "TEMPORAL_CLUSTER"
+    | "TEMPORAL_SCHEDULE"
+    | "OUTBOX_EVENT"
+    | "DATABASE_MIGRATION"
+    | "BUILD_RUN";
+  environment: "development" | "preproduction";
+  subject: string;
+  /** Commit proven by the runtime itself; UNKNOWN must not be replaced by the collector commit. */
   commit: string;
   observedAt: string;
+  sourceObservedAt?: string;
+  graphNodeIds: string[];
+  graphEdgeIds: string[];
   correlationId?: string;
   workflowId?: string;
+  workflowRunId?: string;
   eventId?: string;
+  eventType?: string;
   migrationId?: string;
+  buildRunId?: string;
+  scheduleId?: string;
+  httpStatus?: number;
   outcome: "SUCCESS" | "FAILURE" | "UNKNOWN";
   durationMs?: number;
+  metadata: Record<string, boolean | number | string | null>;
   evidenceHash: string;
+}
+
+export interface RuntimeEvidenceBundleV1 {
+  schemaVersion: "runtime-evidence-bundle/v1";
+  environment: "development" | "preproduction";
+  capturedAt: string;
+  collector: EvidenceRefV1;
+  records: RuntimeEvidenceV1[];
+}
+
+export interface RuntimeEvidenceDiagnosticV1 {
+  code:
+    | "RUNTIME_EVIDENCE_TAMPERED"
+    | "RUNTIME_EVIDENCE_STALE"
+    | "RUNTIME_EVIDENCE_WRONG_WORKTREE"
+    | "RUNTIME_COMMIT_UNPROVEN"
+    | "RUNTIME_CONFIGURATION_PROVENANCE_DRIFT"
+    | "RUNTIME_HEALTH_UNPROVEN"
+    | "API_CORRELATION_UNPROVEN"
+    | "RUNTIME_GRAPH_TARGET_MISSING"
+    | "RUNTIME_PROBE_FAILED"
+    | "STATIC_RELATION_UNOBSERVED";
+  severity: "info" | "warning" | "error";
+  message: string;
+  evidenceId?: string;
+  graphNodeId?: string;
+  graphEdgeId?: string;
+}
+
+export interface RuntimeDifferenceReportV1 {
+  schemaVersion: "runtime-difference-report/v1";
+  evidence: EvidenceRefV1;
+  environment: "development" | "preproduction";
+  capturedAt: string;
+  conclusion: "CONSISTENT" | "PARTIAL" | "CONTRADICTED";
+  observedNodeIds: string[];
+  observedEdgeIds: string[];
+  staticOnlyNodeIds: string[];
+  staticOnlyEdgeIds: string[];
+  runtimeOnlyNodeIds: string[];
+  runtimeOnlyEdgeIds: string[];
+  failedEvidenceIds: string[];
+  diagnostics: RuntimeEvidenceDiagnosticV1[];
 }
 
 export interface ImpactReportV1 {
