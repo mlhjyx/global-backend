@@ -29,6 +29,39 @@ const SYSTEMD_UNITS = [
   "temporal-dev.service",
 ] as const;
 
+const TEMPORAL_SCHEDULE_WORKFLOW_TYPES: Readonly<Record<string, string>> = {
+  "acq-sweep": "acquisitionSweepWorkflow",
+  "backlog-sweep": "backlogSweepWorkflow",
+  "external-intent-sweep": "externalIntentSweepWorkflow",
+  "intent-sweep": "intentSweepWorkflow",
+  "patents-cache-refresh": "patentsCacheRefreshWorkflow",
+  "sanctions-refresh": "sanctionsRefreshWorkflow",
+  "site-builder-kb-recovery": "kbRecoverySweepWorkflow",
+  "site-builder-release-maintenance": "siteReleaseMaintenanceSweepWorkflow",
+};
+
+const TEMPORAL_SCHEDULE_IDS = new Set(
+  Object.keys(TEMPORAL_SCHEDULE_WORKFLOW_TYPES),
+);
+
+const OUTBOX_EVENT_TYPES = new Set([
+  "AssetObjectCleanupRequested",
+  "ClaimApproved",
+  "ClaimExpired",
+  "ClaimRevoked",
+  "CompanyProfileCreated",
+  "DeletionCompleted",
+  "DeletionRequested",
+  "DiscoveryRunCompleted",
+  "DiscoveryRunRequested",
+  "ICPActivated",
+  "KnowledgeConflictDetected",
+  "LeadQualified",
+  "LeadsScored",
+  "NotRegisteredEvent",
+  "QualifyRequested",
+]);
+
 const RUNTIME_RECORD_INPUT_KEYS = new Set([
   "kind",
   "environment",
@@ -114,20 +147,6 @@ const BOOLEAN_METADATA_KEYS = new Set([
   "workflowIdentityPersisted",
 ]);
 
-const IDENTIFIER_METADATA_KEYS = new Set([
-  "service",
-  "activeState",
-  "subState",
-  "state",
-  "health",
-  "composeProject",
-  "workflowType",
-  "executionStatus",
-  "database",
-  "deliveryState",
-  "buildKind",
-]);
-
 const KIND_METADATA_KEYS: Record<
   RuntimeEvidenceV1["kind"],
   ReadonlySet<string>
@@ -176,6 +195,74 @@ const KIND_METADATA_KEYS: Record<
   ]),
 };
 
+const ENUM_METADATA_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
+  service: new Set(["global-api"]),
+  activeState: new Set([
+    "active",
+    "inactive",
+    "failed",
+    "activating",
+    "deactivating",
+    "reloading",
+    "maintenance",
+    "UNKNOWN",
+  ]),
+  subState: new Set([
+    "running",
+    "exited",
+    "dead",
+    "failed",
+    "start",
+    "stop",
+    "auto-restart",
+    "UNKNOWN",
+  ]),
+  state: new Set([
+    "running",
+    "exited",
+    "restarting",
+    "paused",
+    "dead",
+    "created",
+    "removing",
+    "UNKNOWN",
+  ]),
+  health: new Set([
+    "healthy",
+    "unhealthy",
+    "starting",
+    "UNDECLARED",
+    "UNKNOWN",
+  ]),
+  composeProject: new Set(["global"]),
+  workflowType: new Set(Object.values(TEMPORAL_SCHEDULE_WORKFLOW_TYPES)),
+  executionStatus: new Set([
+    "UNKNOWN",
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "WORKFLOW_EXECUTION_STATUS_UNSPECIFIED",
+    "WORKFLOW_EXECUTION_STATUS_RUNNING",
+    "WORKFLOW_EXECUTION_STATUS_COMPLETED",
+    "WORKFLOW_EXECUTION_STATUS_FAILED",
+    "WORKFLOW_EXECUTION_STATUS_CANCELED",
+    "WORKFLOW_EXECUTION_STATUS_TERMINATED",
+    "WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW",
+    "WORKFLOW_EXECUTION_STATUS_TIMED_OUT",
+  ]),
+  database: new Set(["global_dev"]),
+  deliveryState: new Set(["PUBLISHED", "PARKED", "PENDING", "UNKNOWN"]),
+  buildKind: new Set(["demo_v0", "refurbish"]),
+};
+
+const NULLABLE_ENUM_METADATA_KEYS = new Set([
+  "service",
+  "workflowType",
+  "buildKind",
+]);
+
 const SAFE_MACHINE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}$/;
 const SAFE_GRAPH_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,1023}$/;
 const SAFE_IMAGE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,511}$/;
@@ -193,7 +280,7 @@ const SCHEDULE_ID = /^[a-z0-9][a-z0-9-]{1,127}$/;
 const SHA_256 = /^[a-f0-9]{64}$/;
 const GIT_COMMIT = /^[a-f0-9]{40}$/;
 const FORBIDDEN_VALUE_CONTENT =
-  /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:https?|ftp|file|data):\/\/|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/-]+=*|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:secret|token|password|credential|api[_-]?key)\s*[:=]\s*\S+)/i;
+  /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:https?|ftp|file|data):\/\/|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/-]+=*|\b(?:sk|rk|pk)-(?:live|test|proj)-[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:secret|token|password|credential|api[_-]?key)\s*[:=]\s*\S+)/i;
 
 const HEALTH_FAILURE_KINDS = new Set<RuntimeEvidenceV1["kind"]>([
   "API_HEALTH",
@@ -335,6 +422,7 @@ function assertSafeString(
 ): void {
   const normalized = value.normalize("NFKC");
   if (
+    value.length > 512 ||
     normalized !== value ||
     !pattern.test(value) ||
     /[\u0000-\u001f\u007f]/.test(value) ||
@@ -455,6 +543,7 @@ function assertSafeMetadata(metadata: RuntimeEvidenceV1["metadata"]): void {
       if (
         value !== null &&
         (typeof value !== "string" ||
+          value.length > 128 ||
           !Number.isFinite(Date.parse(value)) ||
           FORBIDDEN_VALUE_CONTENT.test(value.normalize("NFKC")))
       ) {
@@ -479,14 +568,20 @@ function assertSafeMetadata(metadata: RuntimeEvidenceV1["metadata"]): void {
       }
       continue;
     }
-    if (IDENTIFIER_METADATA_KEYS.has(key)) {
-      if (value !== null) {
-        if (typeof value !== "string") {
+    const enumValues = ENUM_METADATA_VALUES[key];
+    if (enumValues) {
+      if (value === null) {
+        if (!NULLABLE_ENUM_METADATA_KEYS.has(key)) {
           throw new Error(
-            `runtime evidence metadata value type is invalid: ${key}`,
+            `runtime evidence metadata value cannot be null: ${key}`,
           );
         }
-        assertSafeString(value, `metadata.${key}`);
+      } else {
+        if (typeof value !== "string" || !enumValues.has(value)) {
+          throw new Error(
+            `runtime evidence metadata value is outside the allowlist: ${key}`,
+          );
+        }
       }
       continue;
     }
@@ -520,14 +615,14 @@ function assertSubjectForKind(input: RuntimeRecordInput): void {
   if (
     input.kind === "TEMPORAL_SCHEDULE" &&
     input.subject !== "schedule-list" &&
-    !SCHEDULE_ID.test(input.subject)
+    !TEMPORAL_SCHEDULE_IDS.has(input.subject)
   ) {
     throw new Error("runtime evidence schedule subject is invalid");
   }
   if (
     input.kind === "OUTBOX_EVENT" &&
     input.subject !== "latest-outbox-event" &&
-    !EVENT_TYPE.test(input.subject)
+    !OUTBOX_EVENT_TYPES.has(input.subject)
   ) {
     throw new Error("runtime evidence Outbox subject is invalid");
   }
@@ -637,9 +732,18 @@ function assertRuntimeRecordFields(
   );
   assertSafeOptionalIdentifier(input.eventId, "eventId", UUID);
   assertSafeOptionalIdentifier(input.eventType, "eventType", EVENT_TYPE);
+  if (input.eventType != null && !OUTBOX_EVENT_TYPES.has(input.eventType)) {
+    throw new Error("runtime evidence eventType is outside the contract");
+  }
   assertSafeOptionalIdentifier(input.migrationId, "migrationId", MIGRATION_ID);
   assertSafeOptionalIdentifier(input.buildRunId, "buildRunId", UUID);
   assertSafeOptionalIdentifier(input.scheduleId, "scheduleId", SCHEDULE_ID);
+  if (
+    input.scheduleId != null &&
+    !TEMPORAL_SCHEDULE_IDS.has(input.scheduleId)
+  ) {
+    throw new Error("runtime evidence scheduleId is outside the contract");
+  }
   if (
     input.httpStatus != null &&
     (!Number.isInteger(input.httpStatus) ||
@@ -660,6 +764,45 @@ function assertRuntimeRecordFields(
     throw new Error(
       `runtime evidence metadata fields do not match the ${input.kind} allowlist`,
     );
+  }
+  if (
+    input.kind === "API_HEALTH" &&
+    ((input.subject === "global-api" &&
+      (metadata.expectedKey !== "status" ||
+        metadata.service !== "global-api")) ||
+      (input.subject === "global-api-db" &&
+        (metadata.expectedKey !== "db" || metadata.service !== null)))
+  ) {
+    throw new Error("runtime evidence API subject and metadata disagree");
+  }
+  if (
+    input.kind === "TEMPORAL_SCHEDULE" &&
+    input.subject !== "schedule-list" &&
+    (input.scheduleId !== input.subject ||
+      metadata.workflowType !== TEMPORAL_SCHEDULE_WORKFLOW_TYPES[input.subject])
+  ) {
+    throw new Error("runtime evidence schedule identity is inconsistent");
+  }
+  if (
+    input.kind === "OUTBOX_EVENT" &&
+    input.subject !== "latest-outbox-event" &&
+    input.eventType !== input.subject
+  ) {
+    throw new Error("runtime evidence Outbox identity is inconsistent");
+  }
+  if (
+    input.kind === "DATABASE_MIGRATION" &&
+    input.subject !== "latest-migration" &&
+    input.migrationId !== input.subject
+  ) {
+    throw new Error("runtime evidence migration identity is inconsistent");
+  }
+  if (
+    input.kind === "BUILD_RUN" &&
+    input.subject !== "latest-build-run" &&
+    input.buildRunId !== input.subject
+  ) {
+    throw new Error("runtime evidence build identity is inconsistent");
   }
 }
 

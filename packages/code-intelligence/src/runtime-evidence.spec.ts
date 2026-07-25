@@ -342,6 +342,8 @@ test("runtime evidence rejects non-allowlisted and sensitive values", () => {
     "Ｂｅａｒｅｒ abc.def",
     "person＠example.com",
     "ｈｔｔｐｓ：／／example.invalid",
+    "sk-live-AbCdEf123",
+    "JaneDoe",
   ]) {
     assert.throws(
       () =>
@@ -353,7 +355,7 @@ test("runtime evidence rejects non-allowlisted and sensitive values", () => {
           outcome: "SUCCESS",
           metadata: { service },
         }),
-      /metadata\.service is unsafe/,
+      /outside the allowlist: service/,
     );
   }
   assert.throws(
@@ -390,6 +392,26 @@ test("runtime evidence rejects non-allowlisted and sensitive values", () => {
         outcome: "SUCCESS",
       }),
     /metadata fields do not match the API_HEALTH allowlist/,
+  );
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "BUILD_RUN",
+        environment: "development",
+        subject: "00000000-0000-4000-8000-000000000002",
+        observedAt: "2026-07-25T00:00:00Z",
+        workflowId: `site-${"A".repeat(10_000)}`,
+        workflowRunId: "run-fixture",
+        buildRunId: "00000000-0000-4000-8000-000000000002",
+        outcome: "SUCCESS",
+        metadata: {
+          executionStatus: "succeeded",
+          buildKind: "refurbish",
+          workflowIdentityPersisted: true,
+          runtimeRevisionProven: false,
+        },
+      }),
+    /workflowId is unsafe/,
   );
 });
 
