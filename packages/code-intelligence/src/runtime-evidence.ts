@@ -1333,29 +1333,47 @@ async function probeMigration(
     typeof query.value?.unfinishedCount === "number"
       ? query.value.unfinishedCount
       : Number(query.value?.unfinishedCount ?? Number.NaN);
-  return createRuntimeRecord({
-    kind: "DATABASE_MIGRATION",
-    environment,
-    subject: migrationId ?? "latest-migration",
-    observedAt,
-    sourceObservedAt: finishedAt,
-    graphNodeIds: migrationId ? [`migration:${migrationId}`] : [],
-    migrationId,
-    outcome:
-      migrationId && finishedAt && !rolledBackAt && unfinishedCount === 0
-        ? "SUCCESS"
-        : "FAILURE",
-    durationMs: query.durationMs,
-    metadata: {
-      finished: Boolean(finishedAt),
-      rolledBack: Boolean(rolledBackAt),
-      unfinishedCount: Number.isFinite(unfinishedCount)
-        ? unfinishedCount
-        : null,
-      database: "global_dev",
-      runtimeRevisionProven: false,
-    },
-  });
+  try {
+    return createRuntimeRecord({
+      kind: "DATABASE_MIGRATION",
+      environment,
+      subject: migrationId ?? "latest-migration",
+      observedAt,
+      sourceObservedAt: finishedAt,
+      graphNodeIds: migrationId ? [`migration:${migrationId}`] : [],
+      migrationId,
+      outcome:
+        migrationId && finishedAt && !rolledBackAt && unfinishedCount === 0
+          ? "SUCCESS"
+          : "FAILURE",
+      durationMs: query.durationMs,
+      metadata: {
+        finished: Boolean(finishedAt),
+        rolledBack: Boolean(rolledBackAt),
+        unfinishedCount: Number.isFinite(unfinishedCount)
+          ? unfinishedCount
+          : null,
+        database: "global_dev",
+        runtimeRevisionProven: false,
+      },
+    });
+  } catch {
+    return createRuntimeRecord({
+      kind: "DATABASE_MIGRATION",
+      environment,
+      subject: "latest-migration",
+      observedAt,
+      outcome: "FAILURE",
+      durationMs: query.durationMs,
+      metadata: {
+        finished: false,
+        rolledBack: false,
+        unfinishedCount: null,
+        database: "global_dev",
+        runtimeRevisionProven: false,
+      },
+    });
+  }
 }
 
 async function probeOutbox(
@@ -1371,30 +1389,46 @@ async function probeOutbox(
   const eventType = text(query.value?.eventType);
   const deliveryState = text(query.value?.deliveryState) ?? "UNKNOWN";
   const eventNode = eventType ? `event:outbox:${eventType}` : undefined;
-  return createRuntimeRecord({
-    kind: "OUTBOX_EVENT",
-    environment,
-    subject: eventType ?? "latest-outbox-event",
-    observedAt,
-    sourceObservedAt: text(query.value?.occurredAt),
-    graphNodeIds: eventNode ? [eventNode] : [],
-    // Existence proves the event type occurred, not that a static consumer ran.
-    graphEdgeIds: [],
-    eventId,
-    eventType,
-    outcome:
-      deliveryState === "PUBLISHED"
-        ? "SUCCESS"
-        : deliveryState === "PARKED"
-          ? "FAILURE"
-          : "UNKNOWN",
-    durationMs: query.durationMs,
-    metadata: {
-      deliveryState,
-      correlationIdPresent: query.value?.correlationIdPresent === true,
-      runtimeRevisionProven: false,
-    },
-  });
+  try {
+    return createRuntimeRecord({
+      kind: "OUTBOX_EVENT",
+      environment,
+      subject: eventType ?? "latest-outbox-event",
+      observedAt,
+      sourceObservedAt: text(query.value?.occurredAt),
+      graphNodeIds: eventNode ? [eventNode] : [],
+      // Existence proves the event type occurred, not that a static consumer ran.
+      graphEdgeIds: [],
+      eventId,
+      eventType,
+      outcome:
+        deliveryState === "PUBLISHED"
+          ? "SUCCESS"
+          : deliveryState === "PARKED"
+            ? "FAILURE"
+            : "UNKNOWN",
+      durationMs: query.durationMs,
+      metadata: {
+        deliveryState,
+        correlationIdPresent: query.value?.correlationIdPresent === true,
+        runtimeRevisionProven: false,
+      },
+    });
+  } catch {
+    return createRuntimeRecord({
+      kind: "OUTBOX_EVENT",
+      environment,
+      subject: "latest-outbox-event",
+      observedAt,
+      outcome: "FAILURE",
+      durationMs: query.durationMs,
+      metadata: {
+        deliveryState: "UNKNOWN",
+        correlationIdPresent: query.value?.correlationIdPresent === true,
+        runtimeRevisionProven: false,
+      },
+    });
+  }
 }
 
 function buildWorkflowNode(kind: string | undefined): string | undefined {
@@ -1416,33 +1450,51 @@ async function probeBuildRun(
   const status = text(query.value?.status) ?? "UNKNOWN";
   const kind = text(query.value?.kind);
   const workflowNode = buildWorkflowNode(kind);
-  return createRuntimeRecord({
-    kind: "BUILD_RUN",
-    environment,
-    subject: buildRunId ?? "latest-build-run",
-    observedAt,
-    sourceObservedAt: text(query.value?.createdAt),
-    graphNodeIds: [
-      "data-model:prisma:SiteBuildRun",
-      ...(workflowNode ? [workflowNode] : []),
-    ],
-    workflowId: text(query.value?.workflowId),
-    workflowRunId: text(query.value?.workflowRunId),
-    buildRunId,
-    outcome:
-      status === "succeeded"
-        ? "SUCCESS"
-        : ["failed", "cancelled"].includes(status)
-          ? "FAILURE"
-          : "UNKNOWN",
-    durationMs: query.durationMs,
-    metadata: {
-      executionStatus: status,
-      buildKind: kind ?? null,
-      workflowIdentityPersisted: Boolean(text(query.value?.workflowId)),
-      runtimeRevisionProven: false,
-    },
-  });
+  try {
+    return createRuntimeRecord({
+      kind: "BUILD_RUN",
+      environment,
+      subject: buildRunId ?? "latest-build-run",
+      observedAt,
+      sourceObservedAt: text(query.value?.createdAt),
+      graphNodeIds: [
+        "data-model:prisma:SiteBuildRun",
+        ...(workflowNode ? [workflowNode] : []),
+      ],
+      workflowId: text(query.value?.workflowId),
+      workflowRunId: text(query.value?.workflowRunId),
+      buildRunId,
+      outcome:
+        status === "succeeded"
+          ? "SUCCESS"
+          : ["failed", "cancelled"].includes(status)
+            ? "FAILURE"
+            : "UNKNOWN",
+      durationMs: query.durationMs,
+      metadata: {
+        executionStatus: status,
+        buildKind: kind ?? null,
+        workflowIdentityPersisted: Boolean(text(query.value?.workflowId)),
+        runtimeRevisionProven: false,
+      },
+    });
+  } catch {
+    return createRuntimeRecord({
+      kind: "BUILD_RUN",
+      environment,
+      subject: "latest-build-run",
+      observedAt,
+      graphNodeIds: ["data-model:prisma:SiteBuildRun"],
+      outcome: "FAILURE",
+      durationMs: query.durationMs,
+      metadata: {
+        executionStatus: "UNKNOWN",
+        buildKind: null,
+        workflowIdentityPersisted: false,
+        runtimeRevisionProven: false,
+      },
+    });
+  }
 }
 
 async function atomicWrite(file: string, body: string): Promise<void> {

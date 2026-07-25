@@ -55,6 +55,10 @@ interface FakeAdapterOptions {
   composeHealth?: string;
   apiService?: unknown;
   fetchThrows?: boolean;
+  migrationId?: unknown;
+  outboxEventType?: unknown;
+  buildStatus?: unknown;
+  buildWorkflowId?: unknown;
 }
 
 function fakeAdapter(options: FakeAdapterOptions = {}): RuntimeProbeAdapter {
@@ -141,7 +145,7 @@ function fakeAdapter(options: FakeAdapterOptions = {}): RuntimeProbeAdapter {
         return {
           stdout:
             JSON.stringify({
-              migrationId: "20260725000000_fixture",
+              migrationId: options.migrationId ?? "20260725000000_fixture",
               finishedAt: "2026-07-25T00:00:00Z",
               rolledBackAt: null,
               unfinishedCount: 0,
@@ -154,7 +158,8 @@ function fakeAdapter(options: FakeAdapterOptions = {}): RuntimeProbeAdapter {
           stdout:
             JSON.stringify({
               eventId: "00000000-0000-4000-8000-000000000001",
-              eventType: "AssetObjectCleanupRequested",
+              eventType:
+                options.outboxEventType ?? "AssetObjectCleanupRequested",
               correlationIdPresent: options.outboxCorrelationId != null,
               occurredAt: "2026-07-25T00:00:00Z",
               deliveryState: "PUBLISHED",
@@ -167,9 +172,11 @@ function fakeAdapter(options: FakeAdapterOptions = {}): RuntimeProbeAdapter {
           stdout:
             JSON.stringify({
               buildRunId: "00000000-0000-4000-8000-000000000002",
-              status: "succeeded",
+              status: options.buildStatus ?? "succeeded",
               kind: "refurbish",
-              workflowId: "site-refurbish-00000000-0000-4000-8000-000000000002",
+              workflowId:
+                options.buildWorkflowId ??
+                "site-refurbish-00000000-0000-4000-8000-000000000002",
               workflowRunId: "run-build-fixture",
               createdAt: "2026-07-25T00:00:00Z",
             }) + "\n",
@@ -550,6 +557,64 @@ test("API probe failures remain safe FAILURE evidence", async () => {
       assert.equal(api?.outcome, "FAILURE");
       assert.equal(api?.metadata.service, null);
       assert.equal(JSON.stringify(api).includes("JaneDoe"), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("malformed database rows degrade to redacted FAILURE evidence", async () => {
+  const cases: Array<{
+    options: FakeAdapterOptions;
+    kind: "DATABASE_MIGRATION" | "OUTBOX_EVENT" | "BUILD_RUN";
+    subject: string;
+    marker: string;
+  }> = [
+    {
+      options: { migrationId: "bad-migration-JaneDoe" },
+      kind: "DATABASE_MIGRATION",
+      subject: "latest-migration",
+      marker: "bad-migration-JaneDoe",
+    },
+    {
+      options: { outboxEventType: "JaneDoe" },
+      kind: "OUTBOX_EVENT",
+      subject: "latest-outbox-event",
+      marker: "JaneDoe",
+    },
+    {
+      options: { buildStatus: "sk-live-BuildSecret123" },
+      kind: "BUILD_RUN",
+      subject: "latest-build-run",
+      marker: "sk-live-BuildSecret123",
+    },
+    {
+      options: { buildWorkflowId: `site-${"A".repeat(1_000)}` },
+      kind: "BUILD_RUN",
+      subject: "latest-build-run",
+      marker: `site-${"A".repeat(1_000)}`,
+    },
+  ];
+  for (const fixture of cases) {
+    const { root } = await fixtureRepository();
+    try {
+      const bundle = await collectDevelopmentRuntimeEvidence(
+        root,
+        fakeAdapter(fixture.options),
+      );
+      const failed = bundle.records.find(
+        (record) => record.kind === fixture.kind,
+      );
+      assert.equal(failed?.subject, fixture.subject);
+      assert.equal(failed?.outcome, "FAILURE");
+      assert.equal(JSON.stringify(bundle).includes(fixture.marker), false);
+      assert.equal(
+        bundle.records.filter(
+          (record) =>
+            record.kind === "API_HEALTH" && record.outcome === "SUCCESS",
+        ).length,
+        2,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
