@@ -53,28 +53,36 @@ interface FakeAdapterOptions {
   outboxCorrelationId?: unknown;
   echoRequestId?: boolean;
   composeHealth?: string;
+  apiService?: unknown;
+  fetchThrows?: boolean;
 }
 
 function fakeAdapter(options: FakeAdapterOptions = {}): RuntimeProbeAdapter {
   return {
     now: () => new Date("2026-07-25T00:00:00.000Z"),
-    fetchJson: async (_url, headers) => ({
-      status: 200,
-      headers: {
-        "x-request-id":
-          options.echoRequestId === false
-            ? ""
-            : (headers["x-request-id"] ?? ""),
-      },
-      body: _url.endsWith("/db")
-        ? { db: "ok" }
-        : {
-            status: "ok",
-            service: "global-api",
-            ts: "2026-07-25T00:00:00.000Z",
-          },
-      durationMs: 2,
-    }),
+    fetchJson: async (_url, headers) => {
+      if (options.fetchThrows) throw new Error("fixture API unavailable");
+      return {
+        status: 200,
+        headers: {
+          "x-request-id":
+            options.echoRequestId === false
+              ? ""
+              : (headers["x-request-id"] ?? ""),
+        },
+        body: _url.endsWith("/db")
+          ? { db: "ok" }
+          : {
+              status: "ok",
+              service:
+                options.apiService === undefined
+                  ? "global-api"
+                  : options.apiService,
+              ts: "2026-07-25T00:00:00.000Z",
+            },
+        durationMs: 2,
+      };
+    },
     run: async (file, args) => {
       const joined = `${file} ${args.join(" ")}`;
       if (file === "systemctl") {
@@ -520,6 +528,31 @@ test("collector omits free-text Outbox correlation and preserves unknown health"
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("API probe failures remain safe FAILURE evidence", async () => {
+  for (const options of [
+    { fetchThrows: true },
+    { apiService: null },
+    { apiService: "JaneDoe" },
+  ] satisfies FakeAdapterOptions[]) {
+    const { root } = await fixtureRepository();
+    try {
+      const bundle = await collectDevelopmentRuntimeEvidence(
+        root,
+        fakeAdapter(options),
+      );
+      const api = bundle.records.find(
+        (record) =>
+          record.kind === "API_HEALTH" && record.subject === "global-api",
+      );
+      assert.equal(api?.outcome, "FAILURE");
+      assert.equal(api?.metadata.service, null);
+      assert.equal(JSON.stringify(api).includes("JaneDoe"), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 

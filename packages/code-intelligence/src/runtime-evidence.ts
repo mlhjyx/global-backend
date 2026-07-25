@@ -765,14 +765,16 @@ function assertRuntimeRecordFields(
       `runtime evidence metadata fields do not match the ${input.kind} allowlist`,
     );
   }
-  if (
+  const apiIdentityMismatch =
     input.kind === "API_HEALTH" &&
     ((input.subject === "global-api" &&
       (metadata.expectedKey !== "status" ||
-        metadata.service !== "global-api")) ||
+        (input.outcome === "SUCCESS"
+          ? metadata.service !== "global-api"
+          : metadata.service !== null && metadata.service !== "global-api"))) ||
       (input.subject === "global-api-db" &&
-        (metadata.expectedKey !== "db" || metadata.service !== null)))
-  ) {
+        (metadata.expectedKey !== "db" || metadata.service !== null)));
+  if (apiIdentityMismatch) {
     throw new Error("runtime evidence API subject and metadata disagree");
   }
   if (
@@ -961,7 +963,10 @@ async function probeApi(
       response.body && typeof response.body === "object"
         ? (response.body as Record<string, unknown>)
         : {};
-    const expected = body[expectedKey] === "ok";
+    const service = text(body.service);
+    const expected =
+      body[expectedKey] === "ok" &&
+      (expectedKey === "db" || service === "global-api");
     const echoed = text(response.headers["x-request-id"]);
     return createRuntimeRecord({
       kind: "API_HEALTH",
@@ -977,7 +982,7 @@ async function probeApi(
       metadata: {
         expectedKey,
         requestIdEchoed: echoed === requestId,
-        service: expectedKey === "status" ? (text(body.service) ?? null) : null,
+        service: expectedKey === "status" ? (service ?? null) : null,
       },
     });
   } catch {
