@@ -134,9 +134,9 @@ pnpm code-intelligence:runtime:diff
 └── runtime-difference-v1.json
 ```
 
-每条 `RuntimeEvidenceV1` 都有内容哈希；bundle manifest 再绑定整份文件。禁止元数据键包含 payload、body、prompt、Secret、token、credential、email 或 personal data，Outbox payload、业务正文和模型输入永不读取。API 只有在响应精确回显本次 `X-Request-Id` 时才记录 correlation ID；当前健康接口未回显，因此必须报告为未知，不能把客户端自造 ID 冒充服务端关联证据。
+每条 `RuntimeEvidenceV1` 都有内容哈希；bundle manifest 再绑定整份文件和同一 collector。顶层字段按 evidence kind 限定，metadata 采用真正的键和值白名单，路径限于项目已知运行根，邮箱、URL、Bearer/Secret、Unicode 混淆和自由文本会 fail-closed。Outbox payload、业务正文和模型输入永不读取；任意 `TEXT` 的 Outbox correlation ID 只记录“是否存在”，不保存原值。API 只有在响应精确回显本次 `X-Request-Id` 时才记录 correlation ID；当前健康接口未回显，因此必须报告为未知，不能把客户端自造 ID 冒充服务端关联证据。
 
-运行中的 systemd/Compose/Temporal 当前没有暴露可验证的部署 commit。CLI 把记录的 `commit` 保持为 `UNKNOWN`，另用 bundle 的 `collector` 绑定“由哪个 worktree/commit 采集”；不得用采集器 HEAD 冒充运行二进制版本。`runtime:diff` 只把真实 Schedule→Workflow 最近动作认作运行边；Outbox 行只证明该 event type 发生，不证明任意消费者已执行。报告含：
+运行中的 systemd/Compose/Temporal 当前没有暴露可验证的部署 commit。CLI 把记录的 `commit` 保持为 `UNKNOWN`，另用 bundle 的 `collector` 绑定 repository root、worktree、branch、commit、commit time、clean state 和 source hash；采集前后必须一致，快照 24 小时后失效。不得用采集器 HEAD 冒充运行二进制版本。`runtime:diff` 只把真实 Schedule→Workflow 最近动作认作运行边；Outbox 行只证明该 event type 发生，不证明任意消费者已执行。报告含：
 
 - `observed*`：当前图中已有且成功观察到的节点/边；
 - `staticOnly*`：静态标记需要运行证据、但本次未观察到；
@@ -144,7 +144,7 @@ pnpm code-intelligence:runtime:diff
 - `PARTIAL`：存在未知 commit、未观察关系或 correlation 缺口；
 - `CONTRADICTED`：健康/迁移失败或运行目标不在当前图，命令失败退出。
 
-Compose 容器创建时记录的配置根若不是 canonical `/global/backend`，报告 `RUNTIME_CONFIGURATION_PROVENANCE_DRIFT`；服务只有 `running` 而没有声明 healthcheck 时保持 `UNKNOWN`，不会伪装成健康成功。
+Compose 容器创建时记录的配置根若不是 canonical `/global/backend`，报告 `RUNTIME_CONFIGURATION_PROVENANCE_DRIFT`；服务只有 `running` 而没有声明 healthcheck 时保持 `UNKNOWN`，不会伪装成健康成功。`global-api`、`global-worker`、`temporal-dev` 是长驻 systemd 服务，只有 `active/running` 算成功，`active/exited` 也按失败处理。
 
 absence of evidence 不是 evidence of absence：`staticOnly` 只能增加验证建议，不能声称能力未接通。生产或预发布采集仍需另行批准部署、隐私、成本、保留和回退方案。
 

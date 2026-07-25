@@ -20,12 +20,117 @@ const BUNDLE_FILE = "runtime-evidence-v1.json";
 const MANIFEST_FILE = "runtime-evidence-manifest-v1.json";
 const DIFFERENCE_FILE = "runtime-difference-v1.json";
 const UNKNOWN_COMMIT = "UNKNOWN";
+const MAX_RUNTIME_EVIDENCE_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const SYSTEMD_UNITS = [
   "global-api.service",
   "global-worker.service",
   "temporal-dev.service",
 ] as const;
+
+const RUNTIME_RECORD_INPUT_KEYS = new Set([
+  "kind",
+  "environment",
+  "subject",
+  "commit",
+  "observedAt",
+  "sourceObservedAt",
+  "graphNodeIds",
+  "graphEdgeIds",
+  "correlationId",
+  "workflowId",
+  "workflowRunId",
+  "eventId",
+  "eventType",
+  "migrationId",
+  "buildRunId",
+  "scheduleId",
+  "httpStatus",
+  "outcome",
+  "durationMs",
+  "metadata",
+]);
+
+const RUNTIME_RECORD_KEYS = new Set([
+  "schemaVersion",
+  "id",
+  ...RUNTIME_RECORD_INPUT_KEYS,
+  "evidenceHash",
+]);
+
+const METADATA_KEYS = new Set([
+  "expectedKey",
+  "requestIdEchoed",
+  "service",
+  "activeState",
+  "subState",
+  "workingDirectory",
+  "fragmentPath",
+  "processStartedAt",
+  "runtimeRevisionProven",
+  "state",
+  "health",
+  "image",
+  "composeProject",
+  "configurationRoot",
+  "configurationFile",
+  "serving",
+  "address",
+  "workflowType",
+  "executionStatus",
+  "finished",
+  "rolledBack",
+  "unfinishedCount",
+  "database",
+  "deliveryState",
+  "correlationIdPresent",
+  "buildKind",
+  "workflowIdentityPersisted",
+]);
+
+const BOOLEAN_METADATA_KEYS = new Set([
+  "requestIdEchoed",
+  "runtimeRevisionProven",
+  "serving",
+  "finished",
+  "rolledBack",
+  "correlationIdPresent",
+  "workflowIdentityPersisted",
+]);
+
+const IDENTIFIER_METADATA_KEYS = new Set([
+  "service",
+  "activeState",
+  "subState",
+  "state",
+  "health",
+  "composeProject",
+  "workflowType",
+  "executionStatus",
+  "database",
+  "deliveryState",
+  "buildKind",
+]);
+
+const SAFE_MACHINE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}$/;
+const SAFE_GRAPH_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,1023}$/;
+const SAFE_IMAGE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,511}$/;
+const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/;
+const RUNTIME_CORRELATION_ID =
+  /^runtime-probe-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:]*-[A-Za-z0-9._:-]+$/;
+const WORKFLOW_RUN_ID =
+  /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|run-[A-Za-z0-9._:-]+)$/i;
+const EVENT_TYPE = /^[A-Z][A-Za-z0-9.]{2,255}$/;
+const MIGRATION_ID = /^\d{14}_[a-z0-9_]{1,240}$/;
+const SCHEDULE_ID = /^[a-z0-9][a-z0-9-]{1,127}$/;
+const SHA_256 = /^[a-f0-9]{64}$/;
+const GIT_COMMIT = /^[a-f0-9]{40}$/;
+const FORBIDDEN_VALUE_CONTENT =
+  /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:https?|ftp|file|data):\/\/|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/-]+=*|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:secret|token|password|credential|api[_-]?key)\s*[:=]\s*\S+)/i;
 
 const HEALTH_FAILURE_KINDS = new Set<RuntimeEvidenceV1["kind"]>([
   "API_HEALTH",
@@ -101,7 +206,7 @@ interface MigrationRow {
 interface OutboxRow {
   eventId?: unknown;
   eventType?: unknown;
-  correlationId?: unknown;
+  correlationIdPresent?: unknown;
   occurredAt?: unknown;
   deliveryState?: unknown;
 }
@@ -125,12 +230,64 @@ function finiteDuration(value: number | undefined): number | undefined {
     : undefined;
 }
 
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: ReadonlySet<string>,
+): boolean {
+  return Object.keys(value).every((key) => expected.has(key));
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T/.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function assertSafeString(
+  value: string,
+  field: string,
+  pattern: RegExp = SAFE_MACHINE_IDENTIFIER,
+): void {
+  const normalized = value.normalize("NFKC");
+  if (
+    normalized !== value ||
+    !pattern.test(value) ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    FORBIDDEN_VALUE_CONTENT.test(normalized)
+  ) {
+    throw new Error(`runtime evidence ${field} is unsafe`);
+  }
+}
+
+function assertSafePath(value: string, field: string): void {
+  const normalized = value.normalize("NFKC");
+  if (
+    normalized !== value ||
+    !path.isAbsolute(value) ||
+    path.normalize(value) !== value ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    FORBIDDEN_VALUE_CONTENT.test(normalized)
+  ) {
+    throw new Error(`runtime evidence ${field} is unsafe`);
+  }
+}
+
+function assertSafeOptionalIdentifier(
+  value: string | undefined,
+  field: string,
+  pattern: RegExp = SAFE_MACHINE_IDENTIFIER,
+): void {
+  if (value != null) assertSafeString(value, field, pattern);
+}
+
 function assertSafeMetadata(metadata: RuntimeEvidenceV1["metadata"]): void {
-  const forbidden =
-    /(?:payload|body|prompt|secret|token|password|credential|email|personal)/i;
   for (const [key, value] of Object.entries(metadata)) {
-    if (forbidden.test(key)) {
-      throw new Error(`runtime evidence metadata key is forbidden: ${key}`);
+    if (!METADATA_KEYS.has(key)) {
+      throw new Error(
+        `runtime evidence metadata key is not allowlisted: ${key}`,
+      );
     }
     if (
       value !== null &&
@@ -143,21 +300,285 @@ function assertSafeMetadata(metadata: RuntimeEvidenceV1["metadata"]): void {
     if (typeof value === "string" && value.length > 1024) {
       throw new Error(`runtime evidence metadata value is too long: ${key}`);
     }
+    if (BOOLEAN_METADATA_KEYS.has(key)) {
+      if (typeof value !== "boolean") {
+        throw new Error(
+          `runtime evidence metadata value type is invalid: ${key}`,
+        );
+      }
+      continue;
+    }
+    if (key === "unfinishedCount") {
+      if (
+        value !== null &&
+        (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+      ) {
+        throw new Error(`runtime evidence metadata value is invalid: ${key}`);
+      }
+      continue;
+    }
+    if (key === "expectedKey") {
+      if (!["status", "db"].includes(String(value))) {
+        throw new Error(`runtime evidence metadata value is invalid: ${key}`);
+      }
+      continue;
+    }
+    if (
+      ["workingDirectory", "fragmentPath", "configurationRoot"].includes(key)
+    ) {
+      if (value !== null) {
+        if (typeof value !== "string") {
+          throw new Error(
+            `runtime evidence metadata value type is invalid: ${key}`,
+          );
+        }
+        assertSafePath(value, `metadata.${key}`);
+        const allowedRoot =
+          key === "fragmentPath"
+            ? "/etc/systemd/system"
+            : key === "workingDirectory"
+              ? "/global/backend"
+              : "/global";
+        if (value !== allowedRoot && !value.startsWith(`${allowedRoot}/`)) {
+          throw new Error(
+            `runtime evidence metadata path is outside the allowlist: ${key}`,
+          );
+        }
+      }
+      continue;
+    }
+    if (key === "configurationFile") {
+      if (value !== null) {
+        if (
+          typeof value !== "string" ||
+          value.split(",").some((file) => {
+            try {
+              assertSafePath(file, `metadata.${key}`);
+              if (!file.startsWith("/global/")) {
+                throw new Error("configuration file is outside /global");
+              }
+              return false;
+            } catch {
+              return true;
+            }
+          })
+        ) {
+          throw new Error(`runtime evidence metadata value is invalid: ${key}`);
+        }
+      }
+      continue;
+    }
+    if (key === "processStartedAt") {
+      if (
+        value !== null &&
+        (typeof value !== "string" ||
+          !Number.isFinite(Date.parse(value)) ||
+          FORBIDDEN_VALUE_CONTENT.test(value.normalize("NFKC")))
+      ) {
+        throw new Error(`runtime evidence metadata value is invalid: ${key}`);
+      }
+      continue;
+    }
+    if (key === "image") {
+      if (value !== null) {
+        if (typeof value !== "string") {
+          throw new Error(
+            `runtime evidence metadata value type is invalid: ${key}`,
+          );
+        }
+        assertSafeString(value, `metadata.${key}`, SAFE_IMAGE_REFERENCE);
+      }
+      continue;
+    }
+    if (key === "address") {
+      if (value !== "127.0.0.1:7233") {
+        throw new Error(`runtime evidence metadata value is invalid: ${key}`);
+      }
+      continue;
+    }
+    if (IDENTIFIER_METADATA_KEYS.has(key)) {
+      if (value !== null) {
+        if (typeof value !== "string") {
+          throw new Error(
+            `runtime evidence metadata value type is invalid: ${key}`,
+          );
+        }
+        assertSafeString(value, `metadata.${key}`);
+      }
+      continue;
+    }
+    throw new Error(`runtime evidence metadata key has no validator: ${key}`);
   }
+}
+
+function assertSubjectForKind(input: RuntimeRecordInput): void {
+  const exactSubjects: Partial<
+    Record<RuntimeEvidenceV1["kind"], ReadonlySet<string>>
+  > = {
+    API_HEALTH: new Set(["global-api", "global-api-db"]),
+    SYSTEMD_SERVICE: new Set(SYSTEMD_UNITS),
+    COMPOSE_SERVICE: new Set([
+      "global",
+      "postgres",
+      "redis",
+      "new-api",
+      "crawl4ai",
+      "searxng",
+      "minio",
+      "embeddings",
+      "docling",
+    ]),
+    TEMPORAL_CLUSTER: new Set(["temporal-dev"]),
+  };
+  const exact = exactSubjects[input.kind];
+  if (exact && !exact.has(input.subject)) {
+    throw new Error(`runtime evidence subject is invalid for ${input.kind}`);
+  }
+  if (
+    input.kind === "TEMPORAL_SCHEDULE" &&
+    input.subject !== "schedule-list" &&
+    !SCHEDULE_ID.test(input.subject)
+  ) {
+    throw new Error("runtime evidence schedule subject is invalid");
+  }
+  if (
+    input.kind === "OUTBOX_EVENT" &&
+    input.subject !== "latest-outbox-event" &&
+    !EVENT_TYPE.test(input.subject)
+  ) {
+    throw new Error("runtime evidence Outbox subject is invalid");
+  }
+  if (
+    input.kind === "DATABASE_MIGRATION" &&
+    input.subject !== "latest-migration" &&
+    !MIGRATION_ID.test(input.subject)
+  ) {
+    throw new Error("runtime evidence migration subject is invalid");
+  }
+  if (
+    input.kind === "BUILD_RUN" &&
+    input.subject !== "latest-build-run" &&
+    !UUID.test(input.subject)
+  ) {
+    throw new Error("runtime evidence build subject is invalid");
+  }
+}
+
+function assertKindFieldAllowlist(input: RuntimeRecordInput): void {
+  const present = new Set(
+    [
+      ["correlationId", input.correlationId],
+      ["workflowId", input.workflowId],
+      ["workflowRunId", input.workflowRunId],
+      ["eventId", input.eventId],
+      ["eventType", input.eventType],
+      ["migrationId", input.migrationId],
+      ["buildRunId", input.buildRunId],
+      ["scheduleId", input.scheduleId],
+      ["httpStatus", input.httpStatus],
+    ]
+      .filter((entry) => entry[1] != null)
+      .map((entry) => entry[0] as string),
+  );
+  const allowed: Record<RuntimeEvidenceV1["kind"], ReadonlySet<string>> = {
+    API_HEALTH: new Set(["correlationId", "httpStatus"]),
+    SYSTEMD_SERVICE: new Set(),
+    COMPOSE_SERVICE: new Set(),
+    TEMPORAL_CLUSTER: new Set(),
+    TEMPORAL_SCHEDULE: new Set(["workflowId", "workflowRunId", "scheduleId"]),
+    OUTBOX_EVENT: new Set(["eventId", "eventType"]),
+    DATABASE_MIGRATION: new Set(["migrationId"]),
+    BUILD_RUN: new Set(["workflowId", "workflowRunId", "buildRunId"]),
+  };
+  if ([...present].some((field) => !allowed[input.kind]?.has(field))) {
+    throw new Error(
+      `runtime evidence contains a field not allowlisted for ${input.kind}`,
+    );
+  }
+}
+
+function assertRuntimeRecordFields(
+  input: RuntimeRecordInput,
+  inputKeys: ReadonlySet<string> = RUNTIME_RECORD_INPUT_KEYS,
+): void {
+  if (!hasExactKeys(input as unknown as Record<string, unknown>, inputKeys)) {
+    throw new Error("runtime evidence record contains unknown fields");
+  }
+  if (
+    ![
+      "API_HEALTH",
+      "SYSTEMD_SERVICE",
+      "COMPOSE_SERVICE",
+      "TEMPORAL_CLUSTER",
+      "TEMPORAL_SCHEDULE",
+      "OUTBOX_EVENT",
+      "DATABASE_MIGRATION",
+      "BUILD_RUN",
+    ].includes(input.kind) ||
+    !["development", "preproduction"].includes(input.environment) ||
+    !isIsoTimestamp(input.observedAt) ||
+    (input.sourceObservedAt != null &&
+      !isIsoTimestamp(input.sourceObservedAt)) ||
+    !["SUCCESS", "FAILURE", "UNKNOWN"].includes(input.outcome)
+  ) {
+    throw new Error("runtime evidence record schema is invalid");
+  }
+  assertSafeString(input.subject, "subject");
+  assertSubjectForKind(input);
+  assertKindFieldAllowlist(input);
+  if (
+    input.commit != null &&
+    input.commit !== UNKNOWN_COMMIT &&
+    !GIT_COMMIT.test(input.commit)
+  ) {
+    throw new Error("runtime evidence commit is invalid");
+  }
+  for (const [field, values] of [
+    ["graphNodeIds", input.graphNodeIds ?? []],
+    ["graphEdgeIds", input.graphEdgeIds ?? []],
+  ] as const) {
+    for (const value of values) {
+      assertSafeString(value, field, SAFE_GRAPH_REFERENCE);
+    }
+  }
+  assertSafeOptionalIdentifier(
+    input.correlationId,
+    "correlationId",
+    RUNTIME_CORRELATION_ID,
+  );
+  assertSafeOptionalIdentifier(input.workflowId, "workflowId", WORKFLOW_ID);
+  assertSafeOptionalIdentifier(
+    input.workflowRunId,
+    "workflowRunId",
+    WORKFLOW_RUN_ID,
+  );
+  assertSafeOptionalIdentifier(input.eventId, "eventId", UUID);
+  assertSafeOptionalIdentifier(input.eventType, "eventType", EVENT_TYPE);
+  assertSafeOptionalIdentifier(input.migrationId, "migrationId", MIGRATION_ID);
+  assertSafeOptionalIdentifier(input.buildRunId, "buildRunId", UUID);
+  assertSafeOptionalIdentifier(input.scheduleId, "scheduleId", SCHEDULE_ID);
+  if (
+    input.httpStatus != null &&
+    (!Number.isInteger(input.httpStatus) ||
+      input.httpStatus < 100 ||
+      input.httpStatus > 599)
+  ) {
+    throw new Error("runtime evidence HTTP status is invalid");
+  }
+  if (
+    input.durationMs != null &&
+    (!Number.isFinite(input.durationMs) || input.durationMs < 0)
+  ) {
+    throw new Error("runtime evidence duration is invalid");
+  }
+  assertSafeMetadata(input.metadata ?? {});
 }
 
 export function createRuntimeRecord(
   input: RuntimeRecordInput,
 ): RuntimeEvidenceV1 {
-  if (
-    !input.subject ||
-    input.subject.length > 1024 ||
-    /[\u0000-\u001f]/.test(input.subject)
-  ) {
-    throw new Error("runtime evidence subject is missing, too long, or unsafe");
-  }
+  assertRuntimeRecordFields(input);
   const metadata = input.metadata ?? {};
-  assertSafeMetadata(metadata);
   const core = {
     schemaVersion: "runtime-evidence/v1" as const,
     kind: input.kind,
@@ -196,23 +617,37 @@ export function createRuntimeRecord(
 function verifyRuntimeRecord(record: RuntimeEvidenceV1): boolean {
   try {
     if (
+      !hasExactKeys(
+        record as unknown as Record<string, unknown>,
+        RUNTIME_RECORD_KEYS,
+      ) ||
+      record.schemaVersion !== "runtime-evidence/v1" ||
       !record.id.startsWith("runtime:") ||
-      !record.subject ||
-      record.subject.length > 1024 ||
-      /[\u0000-\u001f]/.test(record.subject) ||
-      !["development", "preproduction"].includes(record.environment) ||
       !Array.isArray(record.graphNodeIds) ||
       !Array.isArray(record.graphEdgeIds) ||
       !record.metadata ||
       typeof record.metadata !== "object" ||
-      (record.commit !== UNKNOWN_COMMIT &&
-        !/^[a-f0-9]{40}$/.test(record.commit))
+      !SHA_256.test(record.evidenceHash)
     ) {
       return false;
     }
-    assertSafeMetadata(record.metadata);
-    const { evidenceHash, ...withoutHash } = record;
-    return evidenceHash === sha256(stableJson(withoutHash));
+    const {
+      schemaVersion: _schemaVersion,
+      id,
+      evidenceHash,
+      ...input
+    } = record;
+    assertRuntimeRecordFields(input, RUNTIME_RECORD_INPUT_KEYS);
+    const expectedId = `runtime:${record.kind.toLowerCase()}:${sha256(
+      stableJson({ schemaVersion: record.schemaVersion, ...input }),
+    ).slice(0, 20)}`;
+    return (
+      id === expectedId &&
+      evidenceHash ===
+        sha256(
+          stableJson({ schemaVersion: record.schemaVersion, id, ...input }),
+        )
+    );
   } catch {
     return false;
   }
@@ -362,7 +797,7 @@ async function probeSystemd(
         const properties = parseProperties(result.stdout);
         const active =
           properties.ActiveState === "active" &&
-          ["running", "exited"].includes(properties.SubState ?? "");
+          properties.SubState === "running";
         return createRuntimeRecord({
           kind: "SYSTEMD_SERVICE",
           environment,
@@ -689,7 +1124,7 @@ async function probeOutbox(
 ): Promise<RuntimeEvidenceV1> {
   const query = await psqlJson<OutboxRow>(
     adapter,
-    `SELECT json_build_object('eventId', event_id, 'eventType', event_type, 'correlationId', correlation_id, 'occurredAt', occurred_at, 'deliveryState', CASE WHEN published_at IS NOT NULL THEN 'PUBLISHED' WHEN parked_at IS NOT NULL THEN 'PARKED' ELSE 'PENDING' END)::text FROM outbox_event ORDER BY occurred_at DESC LIMIT 1`,
+    `SELECT json_build_object('eventId', event_id, 'eventType', event_type, 'correlationIdPresent', correlation_id IS NOT NULL, 'occurredAt', occurred_at, 'deliveryState', CASE WHEN published_at IS NOT NULL THEN 'PUBLISHED' WHEN parked_at IS NOT NULL THEN 'PARKED' ELSE 'PENDING' END)::text FROM outbox_event ORDER BY occurred_at DESC LIMIT 1`,
   );
   const eventId = text(query.value?.eventId);
   const eventType = text(query.value?.eventType);
@@ -704,7 +1139,6 @@ async function probeOutbox(
     graphNodeIds: eventNode ? [eventNode] : [],
     // Existence proves the event type occurred, not that a static consumer ran.
     graphEdgeIds: [],
-    correlationId: text(query.value?.correlationId),
     eventId,
     eventType,
     outcome:
@@ -716,6 +1150,7 @@ async function probeOutbox(
     durationMs: query.durationMs,
     metadata: {
       deliveryState,
+      correlationIdPresent: query.value?.correlationIdPresent === true,
       runtimeRevisionProven: false,
     },
   });
@@ -775,10 +1210,79 @@ async function atomicWrite(file: string, body: string): Promise<void> {
   await rename(temporary, file);
 }
 
+function assertCollectorEvidence(
+  collector: RuntimeEvidenceBundleV1["collector"],
+): void {
+  const keys = new Set([
+    "schemaVersion",
+    "repositoryRoot",
+    "worktreePath",
+    "branch",
+    "commit",
+    "commitTime",
+    "dirty",
+    "sourceHash",
+  ]);
+  if (
+    !collector ||
+    typeof collector !== "object" ||
+    !hasExactKeys(collector as unknown as Record<string, unknown>, keys) ||
+    collector.schemaVersion !== "evidence-ref/v1" ||
+    !GIT_COMMIT.test(collector.commit) ||
+    !SHA_256.test(collector.sourceHash) ||
+    !isIsoTimestamp(collector.commitTime) ||
+    typeof collector.dirty !== "boolean"
+  ) {
+    throw new Error("runtime evidence collector schema is invalid");
+  }
+  assertSafePath(collector.repositoryRoot, "collector.repositoryRoot");
+  assertSafePath(collector.worktreePath, "collector.worktreePath");
+  assertSafeString(collector.branch, "collector.branch", SAFE_BRANCH);
+}
+
+function assertRuntimeEvidenceBundle(bundle: RuntimeEvidenceBundleV1): void {
+  const keys = new Set([
+    "schemaVersion",
+    "environment",
+    "capturedAt",
+    "collector",
+    "records",
+  ]);
+  if (
+    !bundle ||
+    typeof bundle !== "object" ||
+    !hasExactKeys(bundle as unknown as Record<string, unknown>, keys) ||
+    bundle.schemaVersion !== "runtime-evidence-bundle/v1" ||
+    !["development", "preproduction"].includes(bundle.environment) ||
+    !isIsoTimestamp(bundle.capturedAt) ||
+    !Array.isArray(bundle.records) ||
+    bundle.records.length === 0
+  ) {
+    throw new Error("runtime evidence bundle schema is invalid");
+  }
+  assertCollectorEvidence(bundle.collector);
+  if (bundle.collector.dirty) {
+    throw new Error(
+      "runtime evidence bundle cannot originate from a dirty worktree",
+    );
+  }
+  if (
+    bundle.records.some(
+      (record) =>
+        record.environment !== bundle.environment ||
+        record.observedAt !== bundle.capturedAt ||
+        !verifyRuntimeRecord(record),
+    )
+  ) {
+    throw new Error("runtime evidence record integrity check failed");
+  }
+}
+
 export async function writeRuntimeEvidenceBundle(
   repositoryRoot: string,
   bundle: RuntimeEvidenceBundleV1,
 ): Promise<{ bundlePath: string; manifestPath: string }> {
+  assertRuntimeEvidenceBundle(bundle);
   const outputDirectory = path.join(
     path.resolve(repositoryRoot),
     OUTPUT_DIRECTORY,
@@ -812,38 +1316,63 @@ export async function readRuntimeEvidenceBundle(
   ]);
   const manifest = JSON.parse(manifestBody) as {
     schemaVersion?: string;
+    collector?: RuntimeEvidenceBundleV1["collector"];
     files?: Record<string, string>;
   };
   if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    !hasExactKeys(
+      manifest as unknown as Record<string, unknown>,
+      new Set(["schemaVersion", "collector", "files"]),
+    ) ||
     manifest.schemaVersion !== "runtime-evidence-artifact-manifest/v1" ||
+    !manifest.collector ||
+    !manifest.files ||
+    !hasExactKeys(manifest.files, new Set([BUNDLE_FILE])) ||
+    !SHA_256.test(manifest.files[BUNDLE_FILE] ?? "") ||
     manifest.files?.[BUNDLE_FILE] !== sha256(body)
   ) {
     throw new Error("runtime evidence artifact integrity check failed");
   }
   const bundle = JSON.parse(body) as RuntimeEvidenceBundleV1;
-  if (
-    bundle.schemaVersion !== "runtime-evidence-bundle/v1" ||
-    !Array.isArray(bundle.records) ||
-    bundle.records.some(
-      (record) =>
-        record.schemaVersion !== "runtime-evidence/v1" ||
-        !verifyRuntimeRecord(record),
-    )
-  ) {
-    throw new Error("runtime evidence record integrity check failed");
+  assertRuntimeEvidenceBundle(bundle);
+  assertCollectorEvidence(manifest.collector);
+  if (stableJson(manifest.collector) !== stableJson(bundle.collector)) {
+    throw new Error(
+      "runtime evidence manifest collector does not match bundle",
+    );
   }
   return bundle;
+}
+
+export interface RuntimeEvidenceFreshnessOptions {
+  now?: Date;
+  maxAgeMs?: number;
+}
+
+export function assertDevelopmentRuntimeEnvironment(
+  environment: string,
+): asserts environment is "development" {
+  if (environment !== "development") {
+    throw new Error(
+      "runtime-capture currently supports development only; production/preproduction require separate approval",
+    );
+  }
 }
 
 export async function runtimeEvidenceFreshnessDiagnostics(
   repositoryRoot: string,
   bundle: RuntimeEvidenceBundleV1,
+  options: RuntimeEvidenceFreshnessOptions = {},
 ): Promise<RuntimeEvidenceDiagnosticV1[]> {
   const current = await createEvidence(repositoryRoot);
   const diagnostics: RuntimeEvidenceDiagnosticV1[] = [];
   if (
+    path.resolve(bundle.collector.repositoryRoot) !==
+      path.resolve(current.repositoryRoot) ||
     path.resolve(bundle.collector.worktreePath) !==
-    path.resolve(current.worktreePath)
+      path.resolve(current.worktreePath)
   ) {
     diagnostics.push({
       code: "RUNTIME_EVIDENCE_WRONG_WORKTREE",
@@ -852,14 +1381,35 @@ export async function runtimeEvidenceFreshnessDiagnostics(
     });
   }
   if (
+    bundle.collector.branch !== current.branch ||
     bundle.collector.commit !== current.commit ||
-    bundle.collector.sourceHash !== current.sourceHash
+    bundle.collector.commitTime !== current.commitTime ||
+    bundle.collector.sourceHash !== current.sourceHash ||
+    bundle.collector.dirty ||
+    current.dirty
   ) {
     diagnostics.push({
       code: "RUNTIME_EVIDENCE_STALE",
       severity: "error",
       message:
-        "runtime evidence collector commit or source hash does not match the current worktree",
+        "runtime evidence collector branch, commit, commit time, source hash, or clean state does not match the current worktree",
+    });
+  }
+  const now = options.now ?? new Date();
+  const maxAgeMs = options.maxAgeMs ?? MAX_RUNTIME_EVIDENCE_AGE_MS;
+  const capturedAt = Date.parse(bundle.capturedAt);
+  const ageMs = now.getTime() - capturedAt;
+  if (
+    !Number.isFinite(capturedAt) ||
+    !Number.isFinite(maxAgeMs) ||
+    maxAgeMs <= 0 ||
+    ageMs > maxAgeMs ||
+    ageMs < -MAX_CLOCK_SKEW_MS
+  ) {
+    diagnostics.push({
+      code: "RUNTIME_EVIDENCE_STALE",
+      severity: "error",
+      message: `runtime evidence is outside the allowed freshness window of ${maxAgeMs}ms`,
     });
   }
   return diagnostics;
@@ -926,6 +1476,15 @@ export async function collectDevelopmentRuntimeEvidence(
     outbox,
     buildRun,
   ].sort((left, right) => left.id.localeCompare(right.id));
+  const collectorAfterProbes = await createEvidence(resolved);
+  if (
+    collectorAfterProbes.dirty ||
+    stableJson(collectorAfterProbes) !== stableJson(collector)
+  ) {
+    throw new Error(
+      "refusing runtime capture because worktree provenance changed while probes were running",
+    );
+  }
   const bundle: RuntimeEvidenceBundleV1 = {
     schemaVersion: "runtime-evidence-bundle/v1",
     environment,

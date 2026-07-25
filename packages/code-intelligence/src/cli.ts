@@ -17,6 +17,7 @@ import {
   getCodeGraphStatus,
 } from "./codegraph-pilot";
 import {
+  assertDevelopmentRuntimeEnvironment,
   buildRuntimeDifferenceReport,
   collectDevelopmentRuntimeEvidence,
   readRuntimeEvidenceBundle,
@@ -265,11 +266,7 @@ async function main(): Promise<void> {
     }
     case "runtime-capture": {
       const environment = args.terms[0] ?? "";
-      if (environment !== "development") {
-        throw new Error(
-          "runtime-capture currently supports development only; production/preproduction require separate approval",
-        );
-      }
+      assertDevelopmentRuntimeEnvironment(environment);
       const bundle = await collectDevelopmentRuntimeEvidence(
         args.repositoryRoot,
       );

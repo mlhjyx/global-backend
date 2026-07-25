@@ -28,7 +28,8 @@ deployment entry, Capability, or scenario a change can affect.
    current source or a deterministic completeness test confirms them.
 9. For “does this really happen” on the Ubuntu development environment, run
    `pnpm code-intelligence:runtime:status` first. If evidence is missing or
-   stale, rebuild the exact ContractGraph, commit the worktree, then run
+   stale (runtime snapshots expire after 24 hours), rebuild the exact
+   ContractGraph, commit the worktree, then run
    `pnpm code-intelligence:runtime:capture` and
    `pnpm code-intelligence:runtime:diff`. Never use these commands for
    preproduction or production without separate approval.
@@ -50,8 +51,11 @@ fails integrity validation.
 
 Runtime evidence is also derived and metadata-only. Never persist response
 bodies, Outbox payloads, prompts, secrets, credentials, emails, or personal
-data. The collector commit identifies the tool that observed the environment;
-it is not proof that the running binary came from that commit.
+data. Only explicitly allowlisted keys and machine-shaped values may be saved;
+free-text Outbox correlation IDs are omitted. The collector commit identifies
+the tool that observed the environment; it is not proof that the running binary
+came from that commit. The three long-running systemd units require
+`active/running`; `active/exited` is a failed health observation.
 
 The fixed 30-question evaluation currently classifies CodeGraph as
 `PILOT_ONLY`: responsibility-routed unified precision/recall, exact dynamic

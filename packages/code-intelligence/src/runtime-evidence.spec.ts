@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import {
+  assertDevelopmentRuntimeEnvironment,
   collectDevelopmentRuntimeEvidence,
   createRuntimeDifferenceReport,
   createRuntimeRecord,
@@ -33,12 +34,24 @@ function node(
   };
 }
 
-function fakeAdapter(): RuntimeProbeAdapter {
+interface FakeAdapterOptions {
+  systemdSubState?: string;
+  outboxCorrelationId?: unknown;
+  echoRequestId?: boolean;
+  composeHealth?: string;
+}
+
+function fakeAdapter(options: FakeAdapterOptions = {}): RuntimeProbeAdapter {
   return {
     now: () => new Date("2026-07-25T00:00:00.000Z"),
     fetchJson: async (_url, headers) => ({
       status: 200,
-      headers: { "x-request-id": headers["x-request-id"] ?? "" },
+      headers: {
+        "x-request-id":
+          options.echoRequestId === false
+            ? ""
+            : (headers["x-request-id"] ?? ""),
+      },
       body: _url.endsWith("/db")
         ? { db: "ok" }
         : {
@@ -53,7 +66,7 @@ function fakeAdapter(): RuntimeProbeAdapter {
       if (file === "systemctl") {
         const unit = args[1];
         return {
-          stdout: `Id=${unit}\nActiveState=active\nSubState=running\nWorkingDirectory=/global/backend/apps/api\nExecMainStartTimestamp=Fri 2026-07-25 00:00:00 UTC\nFragmentPath=/etc/systemd/system/${unit}\n`,
+          stdout: `Id=${unit}\nActiveState=active\nSubState=${options.systemdSubState ?? "running"}\nWorkingDirectory=/global/backend/apps/api\nExecMainStartTimestamp=Fri 2026-07-25 00:00:00 UTC\nFragmentPath=/etc/systemd/system/${unit}\n`,
           durationMs: 1,
         };
       }
@@ -63,7 +76,7 @@ function fakeAdapter(): RuntimeProbeAdapter {
             JSON.stringify({
               Service: "postgres",
               State: "running",
-              Health: "healthy",
+              Health: options.composeHealth ?? "healthy",
               Image: "pgvector/pgvector:pg16",
               Project: "global",
               Labels:
@@ -120,7 +133,7 @@ function fakeAdapter(): RuntimeProbeAdapter {
             JSON.stringify({
               eventId: "00000000-0000-4000-8000-000000000001",
               eventType: "AssetObjectCleanupRequested",
-              correlationId: null,
+              correlationIdPresent: options.outboxCorrelationId != null,
               occurredAt: "2026-07-25T00:00:00Z",
               deliveryState: "PUBLISHED",
             }) + "\n",
@@ -274,20 +287,76 @@ test("development capture keeps only allowlisted metadata and binds dynamic evid
   }
 });
 
-test("runtime evidence rejects forbidden metadata and tampered record hashes", async () => {
+test("runtime evidence rejects non-allowlisted and sensitive values", () => {
   assert.throws(
     () =>
       createRuntimeRecord({
         kind: "API_HEALTH",
         environment: "development",
-        subject: "fixture",
+        subject: "global-api",
         observedAt: "2026-07-25T00:00:00Z",
         outcome: "SUCCESS",
         metadata: { payload: "must-not-be-saved" },
       }),
-    /metadata key is forbidden/,
+    /metadata key is not allowlisted/,
   );
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "API_HEALTH",
+        environment: "development",
+        subject: "customer@example.com",
+        observedAt: "2026-07-25T00:00:00Z",
+        outcome: "SUCCESS",
+      }),
+    /subject is unsafe/,
+  );
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "API_HEALTH",
+        environment: "development",
+        subject: "global-api",
+        correlationId: "https://example.invalid/?email=customer@example.com",
+        observedAt: "2026-07-25T00:00:00Z",
+        outcome: "SUCCESS",
+      }),
+    /correlationId is unsafe/,
+  );
+  for (const service of [
+    "Bearer abc.def",
+    "Ｂｅａｒｅｒ abc.def",
+    "person＠example.com",
+    "ｈｔｔｐｓ：／／example.invalid",
+  ]) {
+    assert.throws(
+      () =>
+        createRuntimeRecord({
+          kind: "API_HEALTH",
+          environment: "development",
+          subject: "global-api",
+          observedAt: "2026-07-25T00:00:00Z",
+          outcome: "SUCCESS",
+          metadata: { service },
+        }),
+      /metadata\.service is unsafe/,
+    );
+  }
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "API_HEALTH",
+        environment: "development",
+        subject: "global-api",
+        observedAt: "2026-07-25T00:00:00Z",
+        outcome: "SUCCESS",
+        metadata: { customerName: "Jane Doe" },
+      }),
+    /metadata key is not allowlisted/,
+  );
+});
 
+test("runtime evidence detects tampered record hashes", async () => {
   const { root } = await fixtureRepository();
   try {
     await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
@@ -320,6 +389,262 @@ test("runtime evidence rejects forbidden metadata and tampered record hashes", a
       readRuntimeEvidenceBundle(root),
       /record integrity check failed/,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("collector omits free-text Outbox correlation and preserves unknown health", async () => {
+  const { root, graph } = await fixtureRepository();
+  try {
+    const sensitiveCorrelation =
+      "https://example.invalid/customer@example.com?token=secret";
+    const bundle = await collectDevelopmentRuntimeEvidence(
+      root,
+      fakeAdapter({
+        outboxCorrelationId: sensitiveCorrelation,
+        echoRequestId: false,
+        composeHealth: "",
+      }),
+    );
+    const serialized = JSON.stringify(bundle);
+    assert.equal(serialized.includes(sensitiveCorrelation), false);
+    assert.equal(serialized.includes("customer@example.com"), false);
+    const outbox = bundle.records.find(
+      (record) => record.kind === "OUTBOX_EVENT",
+    );
+    assert.equal(outbox?.correlationId, undefined);
+    assert.equal(outbox?.metadata.correlationIdPresent, true);
+    const compose = bundle.records.find(
+      (record) => record.kind === "COMPOSE_SERVICE",
+    );
+    assert.equal(compose?.outcome, "UNKNOWN");
+    const api = bundle.records.filter((record) => record.kind === "API_HEALTH");
+    assert.equal(
+      api.every((record) => record.correlationId == null),
+      true,
+    );
+    const report = createRuntimeDifferenceReport(graph, bundle);
+    assert.equal(
+      report.diagnostics.some(
+        (diagnostic) => diagnostic.code === "API_CORRELATION_UNPROVEN",
+      ),
+      true,
+    );
+    assert.equal(
+      report.diagnostics.some(
+        (diagnostic) => diagnostic.code === "RUNTIME_HEALTH_UNPROVEN",
+      ),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("long-running systemd units require active/running", async () => {
+  const { root } = await fixtureRepository();
+  try {
+    const bundle = await collectDevelopmentRuntimeEvidence(
+      root,
+      fakeAdapter({ systemdSubState: "exited" }),
+    );
+    const systemd = bundle.records.filter(
+      (record) => record.kind === "SYSTEMD_SERVICE",
+    );
+    assert.equal(systemd.length, 3);
+    assert.equal(
+      systemd.every((record) => record.outcome === "FAILURE"),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bundle validates manifest collector, clean provenance, and environment consistency", async () => {
+  const { root } = await fixtureRepository();
+  try {
+    await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
+    const bundlePath = path.join(
+      root,
+      ".code-intelligence",
+      "runtime-evidence-v1.json",
+    );
+    const manifestPath = path.join(
+      root,
+      ".code-intelligence",
+      "runtime-evidence-manifest-v1.json",
+    );
+    const originalBundle = JSON.parse(await readFile(bundlePath, "utf8")) as {
+      environment: string;
+      collector: { branch: string; dirty: boolean };
+      records: Array<{ environment: string }>;
+    };
+    const originalManifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as {
+      collector: { branch: string; dirty: boolean };
+      files: Record<string, string>;
+    };
+
+    const mismatchedManifest = structuredClone(originalManifest);
+    mismatchedManifest.collector.branch = "codex/other";
+    await writeFile(manifestPath, stableJson(mismatchedManifest));
+    await assert.rejects(
+      readRuntimeEvidenceBundle(root),
+      /manifest collector does not match bundle/,
+    );
+
+    const mixedEnvironment = structuredClone(originalBundle);
+    mixedEnvironment.environment = "preproduction";
+    const mixedBody = stableJson(mixedEnvironment);
+    const mixedManifest = structuredClone(originalManifest);
+    mixedManifest.files["runtime-evidence-v1.json"] = sha256(mixedBody);
+    await writeFile(bundlePath, mixedBody);
+    await writeFile(manifestPath, stableJson(mixedManifest));
+    await assert.rejects(
+      readRuntimeEvidenceBundle(root),
+      /record integrity check failed/,
+    );
+
+    const dirtyBundle = structuredClone(originalBundle);
+    dirtyBundle.collector.dirty = true;
+    const dirtyBody = stableJson(dirtyBundle);
+    const dirtyManifest = structuredClone(originalManifest);
+    dirtyManifest.collector.dirty = true;
+    dirtyManifest.files["runtime-evidence-v1.json"] = sha256(dirtyBody);
+    await writeFile(bundlePath, dirtyBody);
+    await writeFile(manifestPath, stableJson(dirtyManifest));
+    await assert.rejects(
+      readRuntimeEvidenceBundle(root),
+      /cannot originate from a dirty worktree/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("freshness binds branch, clean state, repository root, and capture age", async () => {
+  const { root } = await fixtureRepository();
+  try {
+    const bundle = await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
+    const wrongBranch = structuredClone(bundle);
+    wrongBranch.collector.branch = "codex/other";
+    assert.equal(
+      (
+        await runtimeEvidenceFreshnessDiagnostics(root, wrongBranch, {
+          now: new Date("2026-07-25T00:01:00Z"),
+        })
+      ).some((diagnostic) => diagnostic.code === "RUNTIME_EVIDENCE_STALE"),
+      true,
+    );
+
+    const wrongRoot = structuredClone(bundle);
+    wrongRoot.collector.repositoryRoot = "/different/repository";
+    assert.equal(
+      (
+        await runtimeEvidenceFreshnessDiagnostics(root, wrongRoot, {
+          now: new Date("2026-07-25T00:01:00Z"),
+        })
+      ).some(
+        (diagnostic) => diagnostic.code === "RUNTIME_EVIDENCE_WRONG_WORKTREE",
+      ),
+      true,
+    );
+
+    assert.equal(
+      (
+        await runtimeEvidenceFreshnessDiagnostics(root, bundle, {
+          now: new Date("2026-07-26T00:00:01Z"),
+        })
+      ).some((diagnostic) => diagnostic.code === "RUNTIME_EVIDENCE_STALE"),
+      true,
+    );
+
+    await writeFile(
+      path.join(root, "fixture.ts"),
+      "export const fixture = 2;\n",
+    );
+    assert.equal(
+      (
+        await runtimeEvidenceFreshnessDiagnostics(root, bundle, {
+          now: new Date("2026-07-25T00:01:00Z"),
+        })
+      ).some((diagnostic) => diagnostic.code === "RUNTIME_EVIDENCE_STALE"),
+      true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("capture rejects dirty graph provenance and non-development environments", async () => {
+  assert.doesNotThrow(() => assertDevelopmentRuntimeEnvironment("development"));
+  assert.throws(
+    () => assertDevelopmentRuntimeEnvironment("preproduction"),
+    /supports development only/,
+  );
+  assert.throws(
+    () => assertDevelopmentRuntimeEnvironment("production"),
+    /supports development only/,
+  );
+
+  const { root, graph } = await fixtureRepository();
+  try {
+    await writeFile(
+      path.join(root, "fixture.ts"),
+      "export const fixture = 2;\n",
+    );
+    const dirtyEvidence = await createEvidence(root);
+    const dirtyGraph = { ...graph, evidence: dirtyEvidence };
+    await writeDerivedArtifacts(root, {
+      graph: dirtyGraph,
+      coverage: {
+        schemaVersion: "contract-graph-coverage/v1",
+        evidence: dirtyEvidence,
+        totals: {
+          nodes: dirtyGraph.nodes.length,
+          edges: dirtyGraph.edges.length,
+          files: 1,
+          errors: 0,
+          warnings: 1,
+        },
+        mechanisms: [],
+        unknownMechanisms: [],
+      },
+    });
+    await assert.rejects(
+      collectDevelopmentRuntimeEvidence(root, fakeAdapter()),
+      /dirty worktree/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runtime-only targets contradict the current graph", async () => {
+  const { root, graph } = await fixtureRepository();
+  try {
+    const bundle = await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
+    bundle.records.push(
+      createRuntimeRecord({
+        kind: "API_HEALTH",
+        environment: "development",
+        subject: "global-api",
+        observedAt: bundle.capturedAt,
+        graphNodeIds: ["service:runtime-only"],
+        outcome: "SUCCESS",
+        metadata: {
+          expectedKey: "status",
+          requestIdEchoed: false,
+          service: "global-api",
+        },
+      }),
+    );
+    const report = createRuntimeDifferenceReport(graph, bundle);
+    assert.equal(report.conclusion, "CONTRADICTED");
+    assert.deepEqual(report.runtimeOnlyNodeIds, ["service:runtime-only"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
