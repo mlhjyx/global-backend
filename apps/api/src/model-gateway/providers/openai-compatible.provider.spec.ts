@@ -563,6 +563,45 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     });
   });
 
+  it('accepts configured Gemini alias modelVersion and keeps provenance canonical', async () => {
+    mockChatResponse({
+      modelVersion: 'gemini-default',
+      candidates: [
+        {
+          content: {
+            parts: [{ thought: true, text: 'hidden reasoning' }, { text: '{"ok":true}' }],
+          },
+          finishReason: 'STOP',
+        },
+      ],
+      usageMetadata: {
+        promptTokenCount: 24,
+        candidatesTokenCount: 8,
+        thoughtsTokenCount: 5,
+      },
+    });
+    const result = await visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision<{ ok: boolean }>(
+      visionInput(),
+    );
+
+    expect(result).toMatchObject({
+      model: 'gemini-3.5-flash',
+      reportedModel: 'gemini-3.5-flash',
+      modelResolutionSource: 'upstream_response',
+      data: { ok: true },
+    });
+  });
+
+  it('fails closed when reported model changes across vendor family', async () => {
+    mockChatResponse({
+      modelVersion: 'claude-sonnet-5',
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }],
+    });
+    await expect(
+      visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision(visionInput()),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
+
   it('uses strict Responses JSON schema and local input_image payloads for GPT vision candidates', async () => {
     mockChatResponse({
       model: 'gpt-5.6-sol',

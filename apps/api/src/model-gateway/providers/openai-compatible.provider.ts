@@ -51,6 +51,20 @@ export function stripJsonFence(content: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
+const MODEL_IDENTITY_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'gemini-3.5-flash': ['gemini-default'] as const,
+});
+
+function canonicalModel(
+  requestedModel: string,
+  reportedModel?: string,
+): string | undefined {
+  if (!reportedModel) return undefined;
+  if (reportedModel === requestedModel) return reportedModel;
+  const aliases = MODEL_IDENTITY_ALIASES[requestedModel as keyof typeof MODEL_IDENTITY_ALIASES];
+  return aliases?.includes(reportedModel) ? requestedModel : undefined;
+}
+
 function resolutionProvenance(
   requestedModel: string,
   reportedModel?: string,
@@ -59,16 +73,24 @@ function resolutionProvenance(
   reportedModel?: string;
   modelResolutionSource: ModelResolutionSource;
 } {
-  return reportedModel
-    ? {
-        model: reportedModel,
-        reportedModel,
-        modelResolutionSource: 'upstream_response',
-      }
-    : {
-        model: requestedModel,
-        modelResolutionSource: 'requested_fallback',
-      };
+  const canonical = canonicalModel(requestedModel, reportedModel);
+  if (!canonical) {
+    return reportedModel
+      ? {
+          model: reportedModel,
+          reportedModel,
+          modelResolutionSource: 'upstream_response',
+        }
+      : {
+          model: requestedModel,
+          modelResolutionSource: 'requested_fallback',
+        };
+  }
+  return {
+    model: canonical,
+    reportedModel: canonical,
+    modelResolutionSource: 'upstream_response',
+  };
 }
 
 const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -497,8 +519,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: json.usage?.completion_tokens,
     };
     const reportedModel = json.model?.trim() || undefined;
+    const resolvedModel = canonicalModel(input.model, reportedModel);
     const provenance = resolutionProvenance(input.model, reportedModel);
-    if (!reportedModel || reportedModel !== input.model) {
+    if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
         usage,
@@ -612,8 +635,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: json.usage?.output_tokens,
     };
     const reportedModel = json.model?.trim() || undefined;
+    const resolvedModel = canonicalModel(input.model, reportedModel);
     const provenance = resolutionProvenance(input.model, reportedModel);
-    if (!reportedModel || reportedModel !== input.model) {
+    if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
         usage,
@@ -730,8 +754,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: json.usage?.output_tokens,
     };
     const reportedModel = json.model?.trim() || undefined;
+    const resolvedModel = canonicalModel(input.model, reportedModel);
     const provenance = resolutionProvenance(input.model, reportedModel);
-    if (!reportedModel || reportedModel !== input.model) {
+    if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
         usage,
@@ -856,8 +881,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: (json.usageMetadata?.candidatesTokenCount ?? 0) + (json.usageMetadata?.thoughtsTokenCount ?? 0),
     };
     const reportedModel = json.modelVersion?.trim() || undefined;
+    const resolvedModel = canonicalModel(input.model, reportedModel);
     const provenance = resolutionProvenance(input.model, reportedModel);
-    if (!reportedModel || reportedModel !== input.model) {
+    if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
         usage,
