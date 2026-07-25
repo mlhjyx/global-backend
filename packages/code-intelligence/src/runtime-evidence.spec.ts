@@ -20,6 +20,20 @@ import { sha256, stableJson } from "./utils";
 
 const execFile = promisify(execFileCallback);
 
+function rehashRecord(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const { evidenceHash: _evidenceHash, id: _id, ...core } = record;
+  const id = `runtime:${String(core.kind).toLowerCase()}:${sha256(
+    stableJson(core),
+  ).slice(0, 20)}`;
+  return {
+    ...core,
+    id,
+    evidenceHash: sha256(stableJson({ ...core, id })),
+  };
+}
+
 function node(
   id: string,
   kind: GraphNodeV1["kind"],
@@ -354,6 +368,29 @@ test("runtime evidence rejects non-allowlisted and sensitive values", () => {
       }),
     /metadata key is not allowlisted/,
   );
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "API_HEALTH",
+        environment: "development",
+        subject: "global-api",
+        observedAt: "2026-07-25T00:00:00Z",
+        outcome: "SUCCESS",
+        metadata: { deliveryState: "PUBLISHED" },
+      }),
+    /metadata fields do not match the API_HEALTH allowlist/,
+  );
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "API_HEALTH",
+        environment: "development",
+        subject: "global-api",
+        observedAt: "2026-07-25T00:00:00Z",
+        outcome: "SUCCESS",
+      }),
+    /metadata fields do not match the API_HEALTH allowlist/,
+  );
 });
 
 test("runtime evidence detects tampered record hashes", async () => {
@@ -385,6 +422,28 @@ test("runtime evidence detects tampered record hashes", async () => {
     > & { files: Record<string, string> };
     manifest.files["runtime-evidence-v1.json"] = sha256(body);
     await writeFile(manifestPath, stableJson(manifest));
+    await assert.rejects(
+      readRuntimeEvidenceBundle(root),
+      /record integrity check failed/,
+    );
+
+    await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
+    const withoutCommit = JSON.parse(
+      await readFile(bundlePath, "utf8"),
+    ) as Record<string, unknown> & {
+      records: Array<Record<string, unknown>>;
+    };
+    const recordWithoutCommit = { ...withoutCommit.records[0] };
+    delete recordWithoutCommit.commit;
+    withoutCommit.records[0] = rehashRecord(recordWithoutCommit);
+    const withoutCommitBody = stableJson(withoutCommit);
+    await writeFile(bundlePath, withoutCommitBody);
+    const withoutCommitManifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as Record<string, unknown> & { files: Record<string, string> };
+    withoutCommitManifest.files["runtime-evidence-v1.json"] =
+      sha256(withoutCommitBody);
+    await writeFile(manifestPath, stableJson(withoutCommitManifest));
     await assert.rejects(
       readRuntimeEvidenceBundle(root),
       /record integrity check failed/,

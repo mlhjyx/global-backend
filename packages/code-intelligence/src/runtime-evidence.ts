@@ -59,6 +59,21 @@ const RUNTIME_RECORD_KEYS = new Set([
   "evidenceHash",
 ]);
 
+const RUNTIME_RECORD_REQUIRED_KEYS = new Set([
+  "schemaVersion",
+  "id",
+  "kind",
+  "environment",
+  "subject",
+  "commit",
+  "observedAt",
+  "graphNodeIds",
+  "graphEdgeIds",
+  "outcome",
+  "metadata",
+  "evidenceHash",
+]);
+
 const METADATA_KEYS = new Set([
   "expectedKey",
   "requestIdEchoed",
@@ -112,6 +127,54 @@ const IDENTIFIER_METADATA_KEYS = new Set([
   "deliveryState",
   "buildKind",
 ]);
+
+const KIND_METADATA_KEYS: Record<
+  RuntimeEvidenceV1["kind"],
+  ReadonlySet<string>
+> = {
+  API_HEALTH: new Set(["expectedKey", "requestIdEchoed", "service"]),
+  SYSTEMD_SERVICE: new Set([
+    "activeState",
+    "subState",
+    "workingDirectory",
+    "fragmentPath",
+    "processStartedAt",
+    "runtimeRevisionProven",
+  ]),
+  COMPOSE_SERVICE: new Set([
+    "state",
+    "health",
+    "image",
+    "composeProject",
+    "configurationRoot",
+    "configurationFile",
+    "runtimeRevisionProven",
+  ]),
+  TEMPORAL_CLUSTER: new Set(["serving", "address", "runtimeRevisionProven"]),
+  TEMPORAL_SCHEDULE: new Set([
+    "workflowType",
+    "executionStatus",
+    "runtimeRevisionProven",
+  ]),
+  OUTBOX_EVENT: new Set([
+    "deliveryState",
+    "correlationIdPresent",
+    "runtimeRevisionProven",
+  ]),
+  DATABASE_MIGRATION: new Set([
+    "finished",
+    "rolledBack",
+    "unfinishedCount",
+    "database",
+    "runtimeRevisionProven",
+  ]),
+  BUILD_RUN: new Set([
+    "executionStatus",
+    "buildKind",
+    "workflowIdentityPersisted",
+    "runtimeRevisionProven",
+  ]),
+};
 
 const SAFE_MACHINE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}$/;
 const SAFE_GRAPH_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,1023}$/;
@@ -230,11 +293,31 @@ function finiteDuration(value: number | undefined): number | undefined {
     : undefined;
 }
 
-function hasExactKeys(
+function hasOnlyKeys(
   value: Record<string, unknown>,
   expected: ReadonlySet<string>,
 ): boolean {
   return Object.keys(value).every((key) => expected.has(key));
+}
+
+function hasRequiredKeys(
+  value: Record<string, unknown>,
+  required: ReadonlySet<string>,
+): boolean {
+  return [...required].every((key) =>
+    Object.prototype.hasOwnProperty.call(value, key),
+  );
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: ReadonlySet<string>,
+): boolean {
+  return (
+    Object.keys(value).length === expected.size &&
+    hasOnlyKeys(value, expected) &&
+    hasRequiredKeys(value, expected)
+  );
 }
 
 function isIsoTimestamp(value: unknown): value is string {
@@ -501,7 +584,7 @@ function assertRuntimeRecordFields(
   input: RuntimeRecordInput,
   inputKeys: ReadonlySet<string> = RUNTIME_RECORD_INPUT_KEYS,
 ): void {
-  if (!hasExactKeys(input as unknown as Record<string, unknown>, inputKeys)) {
+  if (!hasOnlyKeys(input as unknown as Record<string, unknown>, inputKeys)) {
     throw new Error("runtime evidence record contains unknown fields");
   }
   if (
@@ -527,9 +610,9 @@ function assertRuntimeRecordFields(
   assertSubjectForKind(input);
   assertKindFieldAllowlist(input);
   if (
-    input.commit != null &&
-    input.commit !== UNKNOWN_COMMIT &&
-    !GIT_COMMIT.test(input.commit)
+    input.commit !== undefined &&
+    (typeof input.commit !== "string" ||
+      (input.commit !== UNKNOWN_COMMIT && !GIT_COMMIT.test(input.commit)))
   ) {
     throw new Error("runtime evidence commit is invalid");
   }
@@ -571,7 +654,13 @@ function assertRuntimeRecordFields(
   ) {
     throw new Error("runtime evidence duration is invalid");
   }
-  assertSafeMetadata(input.metadata ?? {});
+  const metadata = input.metadata ?? {};
+  assertSafeMetadata(metadata);
+  if (!hasExactKeys(metadata, KIND_METADATA_KEYS[input.kind])) {
+    throw new Error(
+      `runtime evidence metadata fields do not match the ${input.kind} allowlist`,
+    );
+  }
 }
 
 export function createRuntimeRecord(
@@ -617,7 +706,11 @@ export function createRuntimeRecord(
 function verifyRuntimeRecord(record: RuntimeEvidenceV1): boolean {
   try {
     if (
-      !hasExactKeys(
+      !hasRequiredKeys(
+        record as unknown as Record<string, unknown>,
+        RUNTIME_RECORD_REQUIRED_KEYS,
+      ) ||
+      !hasOnlyKeys(
         record as unknown as Record<string, unknown>,
         RUNTIME_RECORD_KEYS,
       ) ||
@@ -1514,6 +1607,7 @@ export function createRuntimeDifferenceReport(
   graph: ContractGraphV1,
   bundle: RuntimeEvidenceBundleV1,
 ): RuntimeDifferenceReportV1 {
+  assertRuntimeEvidenceBundle(bundle);
   const graphNodeIds = new Set(graph.nodes.map((node) => node.id));
   const graphEdgeIds = new Set(graph.edges.map((edge) => edge.id));
   const successful = bundle.records.filter(
