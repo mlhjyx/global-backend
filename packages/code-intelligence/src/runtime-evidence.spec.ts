@@ -802,28 +802,222 @@ test("capture rejects dirty graph provenance and non-development environments", 
   }
 });
 
-test("runtime-only targets contradict the current graph", async () => {
-  const { root, graph } = await fixtureRepository();
-  try {
-    const bundle = await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
-    bundle.records.push(
+test("runtime evidence rejects cross-kind graph references", () => {
+  assert.throws(
+    () =>
+      createRuntimeRecord({
+        kind: "OUTBOX_EVENT",
+        environment: "development",
+        subject: "AssetObjectCleanupRequested",
+        observedAt: "2026-07-25T00:00:00Z",
+        sourceObservedAt: "2026-07-25T00:00:00Z",
+        graphNodeIds: ["event:outbox:AssetObjectCleanupRequested"],
+        graphEdgeIds: ["edge:registry-event"],
+        eventId: "00000000-0000-4000-8000-000000000001",
+        eventType: "AssetObjectCleanupRequested",
+        outcome: "SUCCESS",
+        metadata: {
+          deliveryState: "PUBLISHED",
+          correlationIdPresent: true,
+          runtimeRevisionProven: false,
+        },
+      }),
+    /graphEdgeIds/,
+  );
+  assert.throws(
+    () =>
       createRuntimeRecord({
         kind: "API_HEALTH",
         environment: "development",
         subject: "global-api",
-        observedAt: bundle.capturedAt,
-        graphNodeIds: ["service:runtime-only"],
+        observedAt: "2026-07-25T00:00:00Z",
+        sourceObservedAt: "2026-07-25T00:00:00Z",
+        graphNodeIds: ["workflow:temporal:refurbishWorkflow"],
+        graphEdgeIds: ["edge:registry-event"],
+        httpStatus: 200,
         outcome: "SUCCESS",
         metadata: {
           expectedKey: "status",
+          checkPassed: true,
           requestIdEchoed: false,
           service: "global-api",
         },
       }),
+    /graphNodeIds/,
+  );
+});
+
+test("runtime evidence outcome must agree with per-kind status semantics", () => {
+  const attacks: Array<Parameters<typeof createRuntimeRecord>[0]> = [
+    {
+      kind: "API_HEALTH" as const,
+      subject: "global-api",
+      graphNodeIds: ["api:GET:/health"],
+      outcome: "SUCCESS" as const,
+      sourceObservedAt: "2026-07-25T00:00:00Z",
+      metadata: {
+        expectedKey: "status",
+        checkPassed: true,
+        requestIdEchoed: false,
+        service: "global-api",
+      },
+    },
+    {
+      kind: "SYSTEMD_SERVICE" as const,
+      subject: "global-api.service",
+      graphNodeIds: ["service:systemd:global-api.service"],
+      outcome: "SUCCESS" as const,
+      metadata: {
+        activeState: "inactive",
+        subState: "dead",
+        workingDirectory: null,
+        fragmentPath: null,
+        processStartedAt: null,
+        runtimeRevisionProven: false,
+      },
+    },
+    {
+      kind: "COMPOSE_SERVICE" as const,
+      subject: "postgres",
+      graphNodeIds: ["service:compose:postgres"],
+      outcome: "SUCCESS" as const,
+      metadata: {
+        state: "running",
+        health: "unhealthy",
+        image: "pgvector/pgvector:pg16",
+        composeProject: "global",
+        configurationRoot: "/global/backend",
+        configurationFile: "/global/backend/docker-compose.yml",
+        runtimeRevisionProven: false,
+      },
+    },
+    {
+      kind: "TEMPORAL_CLUSTER" as const,
+      subject: "temporal-dev",
+      graphNodeIds: ["service:systemd:temporal-dev.service"],
+      outcome: "SUCCESS" as const,
+      metadata: {
+        serving: false,
+        address: "127.0.0.1:7233",
+        runtimeRevisionProven: false,
+      },
+    },
+    {
+      kind: "TEMPORAL_SCHEDULE" as const,
+      subject: "acq-sweep",
+      graphNodeIds: [
+        "service:temporal-schedule:acq-sweep",
+        "workflow:temporal:acquisitionSweepWorkflow",
+      ],
+      graphEdgeIds: ["edge:schedule-calls-acquisition"],
+      scheduleId: "acq-sweep",
+      outcome: "SUCCESS" as const,
+      metadata: {
+        workflowType: "acquisitionSweepWorkflow",
+        executionStatus: "UNKNOWN",
+        runtimeRevisionProven: false,
+      },
+    },
+    {
+      kind: "OUTBOX_EVENT" as const,
+      subject: "AssetObjectCleanupRequested",
+      graphNodeIds: ["event:outbox:AssetObjectCleanupRequested"],
+      sourceObservedAt: "2026-07-25T00:00:00Z",
+      eventId: "00000000-0000-4000-8000-000000000001",
+      eventType: "AssetObjectCleanupRequested",
+      outcome: "SUCCESS" as const,
+      metadata: {
+        deliveryState: "PARKED",
+        correlationIdPresent: true,
+        runtimeRevisionProven: false,
+      },
+    },
+    {
+      kind: "DATABASE_MIGRATION" as const,
+      subject: "20260725000000_fixture",
+      graphNodeIds: ["migration:20260725000000_fixture"],
+      migrationId: "20260725000000_fixture",
+      outcome: "SUCCESS" as const,
+      metadata: {
+        finished: false,
+        rolledBack: false,
+        unfinishedCount: 1,
+        database: "global_dev",
+        runtimeRevisionProven: false,
+      },
+    },
+    {
+      kind: "BUILD_RUN" as const,
+      subject: "00000000-0000-4000-8000-000000000002",
+      sourceObservedAt: "2026-07-25T00:00:00Z",
+      graphNodeIds: [
+        "data-model:prisma:SiteBuildRun",
+        "workflow:temporal:refurbishWorkflow",
+      ],
+      workflowId: "site-refurbish-00000000-0000-4000-8000-000000000002",
+      workflowRunId: "run-build-fixture",
+      buildRunId: "00000000-0000-4000-8000-000000000002",
+      outcome: "SUCCESS" as const,
+      metadata: {
+        executionStatus: "failed",
+        buildKind: "refurbish",
+        workflowIdentityPersisted: true,
+        runtimeRevisionProven: false,
+      },
+    },
+  ];
+  for (const attack of attacks) {
+    assert.throws(
+      () =>
+        createRuntimeRecord({
+          environment: "development",
+          observedAt: "2026-07-25T00:00:00Z",
+          ...attack,
+        }),
+      /outcome disagrees/,
+    );
+  }
+});
+
+test("difference report rejects a fake existing Temporal Schedule edge", async () => {
+  const { root, graph } = await fixtureRepository();
+  try {
+    const bundle = await collectDevelopmentRuntimeEvidence(root, fakeAdapter());
+    const wrongSchedule = createRuntimeRecord({
+      kind: "TEMPORAL_SCHEDULE",
+      environment: "development",
+      subject: "acq-sweep",
+      observedAt: bundle.capturedAt,
+      sourceObservedAt: bundle.capturedAt,
+      graphNodeIds: [
+        "service:temporal-schedule:acq-sweep",
+        "workflow:temporal:acquisitionSweepWorkflow",
+      ],
+      graphEdgeIds: ["edge:registry-event"],
+      workflowId: "acq-sweep-workflow-fixture",
+      workflowRunId: "run-fixture",
+      scheduleId: "acq-sweep",
+      outcome: "SUCCESS",
+      metadata: {
+        workflowType: "acquisitionSweepWorkflow",
+        executionStatus: "WORKFLOW_EXECUTION_STATUS_COMPLETED",
+        runtimeRevisionProven: false,
+      },
+    });
+    bundle.records = bundle.records.map((record) =>
+      record.kind === "TEMPORAL_SCHEDULE" ? wrongSchedule : record,
     );
     const report = createRuntimeDifferenceReport(graph, bundle);
     assert.equal(report.conclusion, "CONTRADICTED");
-    assert.deepEqual(report.runtimeOnlyNodeIds, ["service:runtime-only"]);
+    assert.equal(report.observedEdgeIds.includes("edge:registry-event"), false);
+    assert.equal(
+      report.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "RUNTIME_GRAPH_TARGET_MISSING" &&
+          diagnostic.severity === "error",
+      ),
+      true,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

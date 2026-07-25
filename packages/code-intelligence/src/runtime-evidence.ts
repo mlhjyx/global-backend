@@ -109,6 +109,7 @@ const RUNTIME_RECORD_REQUIRED_KEYS = new Set([
 
 const METADATA_KEYS = new Set([
   "expectedKey",
+  "checkPassed",
   "requestIdEchoed",
   "service",
   "activeState",
@@ -138,6 +139,7 @@ const METADATA_KEYS = new Set([
 ]);
 
 const BOOLEAN_METADATA_KEYS = new Set([
+  "checkPassed",
   "requestIdEchoed",
   "runtimeRevisionProven",
   "serving",
@@ -151,7 +153,12 @@ const KIND_METADATA_KEYS: Record<
   RuntimeEvidenceV1["kind"],
   ReadonlySet<string>
 > = {
-  API_HEALTH: new Set(["expectedKey", "requestIdEchoed", "service"]),
+  API_HEALTH: new Set([
+    "expectedKey",
+    "checkPassed",
+    "requestIdEchoed",
+    "service",
+  ]),
   SYSTEMD_SERVICE: new Set([
     "activeState",
     "subState",
@@ -287,6 +294,7 @@ const HEALTH_FAILURE_KINDS = new Set<RuntimeEvidenceV1["kind"]>([
   "SYSTEMD_SERVICE",
   "COMPOSE_SERVICE",
   "TEMPORAL_CLUSTER",
+  "TEMPORAL_SCHEDULE",
   "DATABASE_MIGRATION",
 ]);
 
@@ -675,6 +683,284 @@ function assertKindFieldAllowlist(input: RuntimeRecordInput): void {
   }
 }
 
+function assertExactReferences(
+  actual: string[] | undefined,
+  expected: string[],
+  field: "graphNodeIds" | "graphEdgeIds",
+): void {
+  const values = actual ?? [];
+  if (
+    new Set(values).size !== values.length ||
+    stableJson(uniqueSorted(values)) !== stableJson(uniqueSorted(expected))
+  ) {
+    throw new Error(
+      `runtime evidence ${field} do not match the ${field} contract`,
+    );
+  }
+}
+
+function expectedGraphNodeIds(
+  input: RuntimeRecordInput,
+  metadata: RuntimeEvidenceV1["metadata"],
+): string[] {
+  switch (input.kind) {
+    case "API_HEALTH":
+      return [
+        input.subject === "global-api"
+          ? "api:GET:/health"
+          : "api:GET:/health/db",
+      ];
+    case "SYSTEMD_SERVICE":
+      return [`service:systemd:${input.subject}`];
+    case "COMPOSE_SERVICE":
+      return input.subject === "global"
+        ? []
+        : [`service:compose:${input.subject}`];
+    case "TEMPORAL_CLUSTER":
+      return ["service:systemd:temporal-dev.service"];
+    case "TEMPORAL_SCHEDULE": {
+      if (input.subject === "schedule-list") return [];
+      return [
+        `service:temporal-schedule:${input.subject}`,
+        `workflow:temporal:${String(metadata.workflowType)}`,
+      ];
+    }
+    case "OUTBOX_EVENT":
+      return input.subject === "latest-outbox-event"
+        ? []
+        : [`event:outbox:${input.subject}`];
+    case "DATABASE_MIGRATION":
+      return input.subject === "latest-migration"
+        ? []
+        : [`migration:${input.subject}`];
+    case "BUILD_RUN": {
+      const workflowNode = buildWorkflowNode(
+        typeof metadata.buildKind === "string" ? metadata.buildKind : undefined,
+      );
+      return [
+        "data-model:prisma:SiteBuildRun",
+        ...(workflowNode ? [workflowNode] : []),
+      ];
+    }
+  }
+}
+
+function assertRuntimeGraphBindings(
+  input: RuntimeRecordInput,
+  metadata: RuntimeEvidenceV1["metadata"],
+): void {
+  assertExactReferences(
+    input.graphNodeIds,
+    expectedGraphNodeIds(input, metadata),
+    "graphNodeIds",
+  );
+  if (input.kind === "TEMPORAL_SCHEDULE" && input.subject !== "schedule-list") {
+    if (
+      input.graphEdgeIds == null ||
+      input.graphEdgeIds.length !== 1 ||
+      new Set(input.graphEdgeIds).size !== 1
+    ) {
+      throw new Error(
+        "runtime evidence graphEdgeIds do not match the Temporal Schedule contract",
+      );
+    }
+    return;
+  }
+  assertExactReferences(input.graphEdgeIds, [], "graphEdgeIds");
+}
+
+function assertRuntimeSemantics(
+  input: RuntimeRecordInput,
+  metadata: RuntimeEvidenceV1["metadata"],
+): void {
+  const reject = (): never => {
+    throw new Error(
+      `runtime evidence outcome disagrees with ${input.kind} status metadata`,
+    );
+  };
+  switch (input.kind) {
+    case "API_HEALTH":
+      if (
+        input.outcome !==
+        (input.httpStatus === 200 && metadata.checkPassed === true
+          ? "SUCCESS"
+          : "FAILURE")
+      ) {
+        reject();
+      }
+      if (
+        input.subject === "global-api" &&
+        input.outcome === "SUCCESS" &&
+        input.sourceObservedAt == null
+      ) {
+        reject();
+      }
+      return;
+    case "SYSTEMD_SERVICE": {
+      const expected =
+        metadata.activeState === "active" && metadata.subState === "running"
+          ? "SUCCESS"
+          : "FAILURE";
+      if (
+        input.outcome !== expected ||
+        (expected === "SUCCESS" && metadata.processStartedAt == null)
+      ) {
+        reject();
+      }
+      return;
+    }
+    case "COMPOSE_SERVICE": {
+      if (input.subject === "global") {
+        if (
+          input.outcome !== "FAILURE" ||
+          metadata.state !== "UNKNOWN" ||
+          metadata.health !== "UNKNOWN"
+        ) {
+          reject();
+        }
+        return;
+      }
+      const state = metadata.state;
+      const health = metadata.health;
+      const expected =
+        state !== "running" || health === "unhealthy" || health === "starting"
+          ? "FAILURE"
+          : health === "healthy"
+            ? "SUCCESS"
+            : "UNKNOWN";
+      if (input.outcome !== expected) reject();
+      return;
+    }
+    case "TEMPORAL_CLUSTER":
+      if (
+        input.outcome !== (metadata.serving === true ? "SUCCESS" : "FAILURE")
+      ) {
+        reject();
+      }
+      return;
+    case "TEMPORAL_SCHEDULE": {
+      if (input.subject === "schedule-list") {
+        if (
+          input.outcome !== "FAILURE" ||
+          metadata.workflowType !== null ||
+          metadata.executionStatus !== "UNKNOWN" ||
+          input.workflowId != null ||
+          input.workflowRunId != null ||
+          input.scheduleId != null ||
+          input.sourceObservedAt != null
+        ) {
+          reject();
+        }
+        return;
+      }
+      const expected = temporalOutcome(String(metadata.executionStatus));
+      if (input.outcome !== expected) reject();
+      if (
+        expected !== "UNKNOWN" &&
+        (input.workflowId == null ||
+          input.workflowRunId == null ||
+          input.sourceObservedAt == null)
+      ) {
+        reject();
+      }
+      return;
+    }
+    case "OUTBOX_EVENT": {
+      if (input.subject === "latest-outbox-event") {
+        if (
+          input.outcome !== "FAILURE" ||
+          metadata.deliveryState !== "UNKNOWN" ||
+          input.eventId != null ||
+          input.eventType != null ||
+          input.sourceObservedAt != null
+        ) {
+          reject();
+        }
+        return;
+      }
+      const expected =
+        metadata.deliveryState === "PUBLISHED"
+          ? "SUCCESS"
+          : metadata.deliveryState === "PARKED"
+            ? "FAILURE"
+            : "UNKNOWN";
+      if (
+        input.outcome !== expected ||
+        input.eventId == null ||
+        input.eventType == null ||
+        input.sourceObservedAt == null
+      ) {
+        reject();
+      }
+      return;
+    }
+    case "DATABASE_MIGRATION": {
+      if (input.subject === "latest-migration") {
+        if (
+          input.outcome !== "FAILURE" ||
+          metadata.finished !== false ||
+          metadata.rolledBack !== false ||
+          metadata.unfinishedCount !== null ||
+          input.migrationId != null ||
+          input.sourceObservedAt != null
+        ) {
+          reject();
+        }
+        return;
+      }
+      const expected =
+        metadata.finished === true &&
+        metadata.rolledBack === false &&
+        metadata.unfinishedCount === 0
+          ? "SUCCESS"
+          : "FAILURE";
+      if (
+        input.outcome !== expected ||
+        input.migrationId == null ||
+        (expected === "SUCCESS" && input.sourceObservedAt == null)
+      ) {
+        reject();
+      }
+      return;
+    }
+    case "BUILD_RUN": {
+      if (input.subject === "latest-build-run") {
+        if (
+          input.outcome !== "FAILURE" ||
+          metadata.executionStatus !== "UNKNOWN" ||
+          metadata.buildKind !== null ||
+          metadata.workflowIdentityPersisted !== false ||
+          input.buildRunId != null ||
+          input.workflowId != null ||
+          input.workflowRunId != null ||
+          input.sourceObservedAt != null
+        ) {
+          reject();
+        }
+        return;
+      }
+      const expected =
+        metadata.executionStatus === "succeeded"
+          ? "SUCCESS"
+          : metadata.executionStatus === "failed" ||
+              metadata.executionStatus === "cancelled"
+            ? "FAILURE"
+            : "UNKNOWN";
+      const workflowIdentityPersisted = input.workflowId != null;
+      if (
+        input.outcome !== expected ||
+        input.buildRunId == null ||
+        input.sourceObservedAt == null ||
+        metadata.workflowIdentityPersisted !== workflowIdentityPersisted ||
+        (input.workflowRunId != null && input.workflowId == null)
+      ) {
+        reject();
+      }
+      return;
+    }
+  }
+}
+
 function assertRuntimeRecordFields(
   input: RuntimeRecordInput,
   inputKeys: ReadonlySet<string> = RUNTIME_RECORD_INPUT_KEYS,
@@ -806,6 +1092,8 @@ function assertRuntimeRecordFields(
   ) {
     throw new Error("runtime evidence build identity is inconsistent");
   }
+  assertRuntimeGraphBindings(input, metadata);
+  assertRuntimeSemantics(input, metadata);
 }
 
 export function createRuntimeRecord(
@@ -981,6 +1269,7 @@ async function probeApi(
       durationMs: response.durationMs,
       metadata: {
         expectedKey,
+        checkPassed: expected,
         requestIdEchoed: echoed === requestId,
         service: expectedKey === "status" ? (service ?? null) : null,
       },
@@ -995,6 +1284,7 @@ async function probeApi(
       outcome: "FAILURE",
       metadata: {
         expectedKey,
+        checkPassed: false,
         requestIdEchoed: false,
         service: null,
       },
@@ -1803,6 +2093,31 @@ function requiredStaticTargets(graph: ContractGraphV1): {
   };
 }
 
+function temporalScheduleBindingMatchesGraph(
+  graph: ContractGraphV1,
+  record: RuntimeEvidenceV1,
+): boolean {
+  if (
+    record.kind !== "TEMPORAL_SCHEDULE" ||
+    record.subject === "schedule-list"
+  ) {
+    return true;
+  }
+  const workflowType = record.metadata.workflowType;
+  if (typeof workflowType !== "string") return false;
+  const expected = graphEdgeIds(
+    graph,
+    `service:temporal-schedule:${record.subject}`,
+    `workflow:temporal:${workflowType}`,
+    "calls",
+  );
+  return (
+    new Set(expected).size === expected.length &&
+    stableJson(uniqueSorted(record.graphEdgeIds)) ===
+      stableJson(uniqueSorted(expected))
+  );
+}
+
 export function createRuntimeDifferenceReport(
   graph: ContractGraphV1,
   bundle: RuntimeEvidenceBundleV1,
@@ -1813,6 +2128,15 @@ export function createRuntimeDifferenceReport(
   const successful = bundle.records.filter(
     (record) => record.outcome === "SUCCESS",
   );
+  const invalidScheduleBindings = bundle.records.filter(
+    (record) =>
+      record.kind === "TEMPORAL_SCHEDULE" &&
+      record.subject !== "schedule-list" &&
+      !temporalScheduleBindingMatchesGraph(graph, record),
+  );
+  const invalidScheduleBindingIds = new Set(
+    invalidScheduleBindings.map((record) => record.id),
+  );
   const observedNodeIds = uniqueSorted(
     successful.flatMap((record) =>
       record.graphNodeIds.filter((id) => graphNodeIds.has(id)),
@@ -1820,7 +2144,9 @@ export function createRuntimeDifferenceReport(
   );
   const observedEdgeIds = uniqueSorted(
     successful.flatMap((record) =>
-      record.graphEdgeIds.filter((id) => graphEdgeIds.has(id)),
+      invalidScheduleBindingIds.has(record.id)
+        ? []
+        : record.graphEdgeIds.filter((id) => graphEdgeIds.has(id)),
     ),
   );
   const runtimeOnlyNodeIds = uniqueSorted(
@@ -1881,6 +2207,13 @@ export function createRuntimeDifferenceReport(
       code: "RUNTIME_GRAPH_TARGET_MISSING",
       severity: "error",
       message: `${runtimeOnlyNodeIds.length} runtime nodes and ${runtimeOnlyEdgeIds.length} runtime edges do not exist in the current ContractGraph`,
+    });
+  }
+  if (invalidScheduleBindings.length > 0) {
+    diagnostics.push({
+      code: "RUNTIME_GRAPH_TARGET_MISSING",
+      severity: "error",
+      message: `${invalidScheduleBindings.length} Temporal Schedule records do not bind to the exact current Schedule-to-Workflow calls edge`,
     });
   }
   const failedHealth = bundle.records.filter(
