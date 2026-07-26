@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "site-builder-blind-visual-gateway-runtime-attestation/v1",
+  "evidenceKind": "post_execution_runtime_binding",
+  "observedAt": "2026-07-26T14:11:41+08:00",
+  "campaign": {
+    "reportPath": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v2/campaign-report.json",
+    "startedAt": "2026-07-26T13:28:25+08:00",
+    "completedAt": "2026-07-26T13:39:47+08:00",
+    "gatewayBaseUrl": "http://localhost:3001/v1",
+    "recordedGatewayImageDigest": "sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c"
+  },
+  "container": {
+    "name": "global-new-api",
+    "containerId": "4540229c1e9f4ee1811929ad090edbb789ae23884dc9b4ad793668dd906befa6",
+    "status": "running",
+    "startedAt": "2026-07-24T13:50:15.119266356Z",
+    "restartCount": 0,
+    "publishedPort": {
+      "container": "3000/tcp",
+      "hostIp": "127.0.0.1",
+      "hostPort": 3001
+    }
+  },
+  "image": {
+    "imageId": "sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c",
+    "configuredReference": "calciumion/new-api@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c",
+    "repoDigests": [
+      "calciumion/new-api@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c"
+    ],
+    "createdAt": "2026-07-11T15:00:32.563238363Z"
+  },
+  "bindingAssessment": {
+    "containerStartedBeforeCampaign": true,
+    "containerHadNoRecordedRestartAtObservation": true,
+    "campaignBaseUrlMatchesPublishedLoopbackPort": true,
+    "recordedDigestMatchesObservedContainerImageId": true,
+    "recordedDigestMatchesObservedRepoDigest": true
+  },
+  "limitations": [
+    "The campaign launcher validates the digest syntax but does not inspect Docker; its gatewayImageDigest field is a caller assertion.",
+    "This separate post-execution attestation records the observed container, image, port binding, campaign journal window, and zero restart count without exporting container environment variables.",
+    "The attestation supports runtime audit but is not a cryptographic proof of the image that served every individual upstream request."
+  ]
+}
