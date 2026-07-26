@@ -39,6 +39,7 @@
 | 文档 | 唯一职责 |
 |---|---|
 | [用户旅程与页面规格](journeys-and-page-spec.md) | 首次建站、资料/信任、Build/恢复/预览和目标发布旅程；`PAGE-FE-030..057` manifest |
+| [用户交互路径与服务端接口](api-by-user-journey.md) | 按前端交互逐项列出当前接口、请求/响应、调用时机和接口缺口 |
 | [对象生命周期、权限与状态](lifecycle-permissions-and-state.md) | 对象关系、服务端状态、allowed action、安全默认、错误和恢复 |
 | [公开站输出规范](public-site-output-spec.md) | SiteSpec/Astro 输出、内容、SEO、locale、a11y、性能、安全和 Preview/Publish 边界 |
 | [运营与验收](operations-and-acceptance.md) | 运行手册、人工兜底、Scenario/Fixture、指标、证据和 Release readiness |
