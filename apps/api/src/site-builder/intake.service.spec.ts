@@ -687,10 +687,15 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     );
   });
 
-  it("无 key 的同步 launch 失败仍补偿回滚新 Site/run，并返回稳定 502", async () => {
+  it("无 key 的同步 launch 失败保留资料，并可在同一 Site 原地重试", async () => {
+    let launchCount = 0;
     const launcher = {
-      launchDemoV0: async () => {
-        throw new Error("temporal unreachable at 10.0.0.1");
+      launchDemoV0: async (input: DemoV0LaunchInput) => {
+        launchCount += 1;
+        if (launchCount === 1) {
+          throw new Error("temporal unreachable at 10.0.0.1");
+        }
+        return { firstExecutionRunId: `temporal-${input.buildRunId}` };
       },
     } as unknown as DemoV0Launcher;
     const { service, db } = makeService({ launcher });
@@ -700,9 +705,42 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       HttpStatus.BAD_GATEWAY,
       "DEMO_LAUNCH_UNAVAILABLE",
     );
-    expect(db.sites).toHaveLength(0);
-    expect(db.runs).toHaveLength(0);
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]).toMatchObject({
+      id: "site-1",
+      status: "setup_failed",
+    });
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]).toMatchObject({
+      id: "run-1",
+      status: "failed",
+      error: "launch failed: orchestrator unavailable",
+    });
     expect(db.keys).toHaveLength(0);
+
+    const retry = await callCreate(service, CTX, BASE_INTAKE);
+    expect(retry).toEqual({
+      siteId: "site-1",
+      buildId: "run-2",
+      status: "generating_demo",
+    });
+    expect(db.companyProfiles).toHaveLength(1);
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]).toMatchObject({
+      id: "site-1",
+      companyProfileId: "company-1",
+      status: "building",
+      intake: BASE_INTAKE,
+    });
+    expect(db.runs).toEqual([
+      expect.objectContaining({ id: "run-1", status: "failed" }),
+      expect.objectContaining({
+        id: "run-2",
+        status: "queued",
+        temporalRunId: "temporal-run-2",
+      }),
+    ]);
+    expect(launchCount).toBe(2);
   });
 
   it("无 key：Temporal start 已成功但 ACK 写库失败时保留 Site/run，不删除运行中 workflow 的锚点", async () => {

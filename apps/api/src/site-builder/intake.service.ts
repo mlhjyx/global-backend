@@ -372,30 +372,21 @@ export class IntakeService {
         throw this.unavailable(true);
       }
 
-      // Without a key the caller cannot prove request identity across retries, so retain the existing
-      // M0 compensation boundary: new Site is removed; reused user data is kept as setup_failed.
+      // Without a key the caller cannot prove request identity across retries, so keep a recoverable
+      // draft instead of deleting submitted data. A failed launch always leaves explicit failure state.
       await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-        if (prepared.wasCreated) {
-          await tx.site.delete({ where: { id: prepared.response.siteId } });
-          if (prepared.createdCompanyProfileId) {
-            await tx.companyProfile.delete({
-              where: { id: prepared.createdCompanyProfileId },
-            });
-          }
-        } else {
-          await tx.site.update({
-            where: { id: prepared.response.siteId },
-            data: { status: "setup_failed" },
-          });
-          await tx.siteBuildRun.update({
-            where: { id: prepared.response.buildId },
-            data: {
-              status: "failed",
-              error: "launch failed: orchestrator unavailable",
-              finishedAt: new Date(),
-            },
-          });
-        }
+        await tx.site.update({
+          where: { id: prepared.response.siteId },
+          data: { status: "setup_failed" },
+        });
+        await tx.siteBuildRun.update({
+          where: { id: prepared.response.buildId },
+          data: {
+            status: "failed",
+            error: "launch failed: orchestrator unavailable",
+            finishedAt: new Date(),
+          },
+        });
       });
       throw this.unavailable(false);
     }
