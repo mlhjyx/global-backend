@@ -1,0 +1,78 @@
+{
+  "runKey": "blind-pair-24e60717a133f7950b26:3",
+  "pairId": "blind-pair-24e60717a133f7950b26",
+  "familyId": "precision-industrial",
+  "attempt": 3,
+  "knownIssue": "AESTHETIC_SPACING",
+  "assignment": {
+    "left": "source",
+    "right": "degraded"
+  },
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 25961.037,
+  "inputTokens": 9792,
+  "outputTokens": 1401,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.033594,
+  "accountedCostUsd": 0.033594,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+      "byteLength": 209350,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+      "byteLength": 258276,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "right",
+    "findings": [
+      {
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major",
+        "imageNumber": 2
+      },
+      {
+        "ruleCode": "AESTHETIC_CTA_CLARITY",
+        "severity": "major",
+        "imageNumber": 2
+      },
+      {
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "minor",
+        "imageNumber": 2
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CTA_CLARITY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_SPACING",
+      "severity": "minor",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

@@ -3,7 +3,7 @@
 > 文档 ID：`DOC-ROADMAP-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md)。
-> 2026-07-10 v2（获客合流定稿）；**2026-07-24 M1-f DesignEvaluation / P4 quality loop 更新**。历史实施日志见 [changelog.md](changelog.md)。
+> 2026-07-10 v2（获客合流定稿）；**2026-07-26 盲评视觉校准首轮证据更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成，但自 2026-07-13 起获客 R1–R3 与所有新 provider 暂停（非取消）。**当前唯一开发主线是 Site Builder**；旧 Word、v3.1/v3.2 与研究稿不具有排期权威。
 
 ## 0. Site Builder 当前路线
@@ -35,7 +35,7 @@
 13. **M1-e-A ✅ 2026-07-23**：55 型全部 `m1_e_a_qualified`；每型七件套证据与 3 断点快照完成，共 385 份资格证据、165 张 SHA-256 固定截图。
 14. **M1-e-B ✅ 2026-07-24 当前交付分支**：六个 Family/preset/DemoVisualPack 晋级 `1.0.0/approved`；DesignBrief、copy-slot、封闭 adapter、四层 validator、三轮 repair/safe fallback、tenant/catalog asset overlay、SiteSpec 1.1、ReleaseManifest v2 与 Temporal patch 已实际消费。局部构建只接受 ready v2 base 并复用 Brief/seed；旧 v1 Demo/Preview 保持兼容。12 个 sparse/rich Golden 对应 36 张 375/768/1440 快照。真 Ubuntu 链已到 PostgreSQL RLS/Temporal/new-api/Astro/MinIO/SiteRelease v2；new-api 当时 402 后走既有开发回退，不冒充模型成功或生产部署。
 15. **M1-f ✅ 2026-07-24 当前交付分支**：P3 只创建 fenced building candidate；P4 对完整站点执行确定性 QA/SEO/a11y/genericness、三断点截图和 Lighthouse，round 0 后最多三次闭合 `optionId` 修复，质量通过才 materialize 唯一 Release v3 并 active pointer CAS。旧 history 由 patch 保持原命令序列；失败、取消、预算关闭、ACK-loss 与 pointer 冲突保留旧站。v1/v2/v3 reader、v2/v3 partial base、私有质量证据与 GC 已接线。Gemini 原生图像接口及 Terra/Responses、Sol/Responses、Sonnet/Messages 均已连通；复核发现现有确定性 Golden 不能冒充独立审美 Gold，因此旧四模型结果只作诊断、不创建晋级 PR。确定性全绿时只以 `passed_deterministic_aesthetic_unavailable` 激活，不冒充模型成功。真 Temporal replay 与 round/ACK-loss/cancel/pointer 注入矩阵已通过；不代表生产部署。
-16. **盲评视觉校准 harness 🟡 2026-07-25 当前交付分支**：六 Family 的确定性来源图与冻结劣化图形成 6 对，每对同断点双图 × 3 次固定左右顺序；四候选各定义三图 probe + 18 次闭合调用与 120 秒/800 tokens。保留原始 PNG，以质量与稳定性优先。campaign launcher 在任意调用前只校验四个型号/协议、固定提交、源码 bundle 与截图哈希，随后以 Gemini→Sonnet→Terra→Sol 串行且不传递前序答案；首轮不以中转账本或成本预估拒绝调用，而是逐次记录 token/实际成本，并在结束后生成原图下一轮预测。模型只返回 left/right/tie 和最多 4 条 ruleCode/severity/imageNumber；单模型与不同 upstream family 双模型门、排序、共同命中、timeout/truncation/model/protocol/usage fail-closed 均由纯函数和单测实现。**尚未调用真实模型、没有新证据，P4/DesignEvaluation v2/ReleaseManifest/Temporal/路由完全未改**；源图不称 aesthetic Gold，最高只可进入 Gold 校准。此 harness 补丁合并后才允许从固定提交另开独立证据 PR 真跑四模型；运行时双模型门需两个稳定候选、独立 Gold 与用户另行批准。
+16. **盲评视觉校准首轮证据 🟡 2026-07-26 本证据分支**：六 Family 原始 `deterministic_render_baseline` 与冻结劣化图按同断点双图 × 3 次运行，四候选固定 1 probe+18 pairs，120 秒只观察、900 秒才回收失联、4096 tokens 只作容量；模型仍只返回 left/right/tie 和最多 4 条 ruleCode/severity/imageNumber。固定 commit/source/input/new-api image/39 型目录 provenance 全部稳定。Sonnet/Terra/Sol 均 18/18 选对问题图且格式/型号/协议 18/18，但冻结问题代码为 11/18、13/18、17/18，Family 一致为 3/6、5/6、5/6；只有 Sol 通过单模型门。Gemini 在 4 个正确 pair 后因原生响应缺 `modelVersion` fail-closed。完整 campaign 保守记账 $1.1409215，其中含该 Gemini 未终态调用的 $0.007854 token 计算值；排除它后已完成调用的计算成本为 $1.1330675，但 provider settlement 仍不完整。后验保守上界不作执行前门。只有一个通过者，故没有双模型组合结论；P4/DesignEvaluation v2/ReleaseManifest/Temporal/路由完全未改，源图不称 aesthetic Gold，Sol 最高只可进入独立 Gold 校准。下一校准先修 Gemini 实际型号回执，并用独立人工 Gold 收紧或裁决 imagery/contrast/hierarchy 与 consistency/contrast 的 taxonomy 重叠；Terra 只作同上游族对照，目标第二成员必须由 Sonnet 或修复后的 Gemini 通过。运行时双模型门仍需两个不同上游族通过、独立 Gold 与用户另行批准。
 
 下一主线按 [Site Builder 09 §11](../site-builder/09-m1-implementation-design.md) 进入 **M1-g 阶段收口**：统一 verifier、12 Golden 真链/负例、10 样本跨站 genericness、v1/v2/v3/事实/安全/性能/a11y/回滚与 OpenAPI/真值回归。M1-g 不扩 Family；30+ 系统集和 MODEL-2 明确未完成。`template-distillation` 未采纳；MF-1/MODEL-2 只由真实消费者/流量与独立 ADR 触发。
 

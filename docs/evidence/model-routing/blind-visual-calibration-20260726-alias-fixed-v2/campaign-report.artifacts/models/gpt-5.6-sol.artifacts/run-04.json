@@ -1,0 +1,78 @@
+{
+  "runKey": "blind-pair-048043661b1fd096ac9c:1",
+  "pairId": "blind-pair-048043661b1fd096ac9c",
+  "familyId": "oem-capability",
+  "attempt": 1,
+  "knownIssue": "AESTHETIC_CONTRAST",
+  "assignment": {
+    "left": "source",
+    "right": "degraded"
+  },
+  "requestedModel": "gpt-5.6-sol",
+  "reportedModel": "gpt-5.6-sol",
+  "resolvedModel": "gpt-5.6-sol",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 8313.529,
+  "inputTokens": 4315,
+  "outputTokens": 171,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.026705,
+  "accountedCostUsd": 0.026705,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+      "byteLength": 324255,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+      "byteLength": 347039,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "right",
+    "findings": [
+      {
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker",
+        "imageNumber": 2
+      },
+      {
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major",
+        "imageNumber": 2
+      },
+      {
+        "ruleCode": "AESTHETIC_CTA_CLARITY",
+        "severity": "major",
+        "imageNumber": 2
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_CONTRAST",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CTA_CLARITY",
+      "severity": "major",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "site-builder-blind-visual-calibration-campaign-interruption/v1",
+  "status": "interrupted_external_sigterm",
+  "commitSha": "c2268b737506ffa6d06391b492d0c09d43962352",
+  "sourceBundleSha256": "720ef1c0f141f53d97c95834ff93bb762368b5a081e5d39c629959b3ba73cd5b",
+  "launcherExitCode": 143,
+  "cause": "external_process_sigterm_not_harness_timeout",
+  "completedModelReports": [
+    {
+      "model": "gemini-3.5-flash",
+      "path": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v1/campaign-report.artifacts/models/gemini-3.5-flash.json",
+      "sha256": "e291bd2b4e9fe5085a8d7ad49940c0a4e42f0b960e3a02f15fa2221030f126b9"
+    },
+    {
+      "model": "claude-sonnet-5",
+      "path": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v1/campaign-report.artifacts/models/claude-sonnet-5.json",
+      "sha256": "1706fa47d27ccede1b66f69597f9d8851c7ba2baffdae24e901f5a5f17230e49"
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "path": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v1/campaign-report.artifacts/models/gpt-5.6-terra.json",
+      "sha256": "014916cccf7c05175fdda09891d60af1879805d135841b43ae26640abc43d3f2"
+    }
+  ],
+  "interruptedModel": {
+    "model": "gpt-5.6-sol",
+    "reportPath": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v1/campaign-report.artifacts/models/gpt-5.6-sol.json",
+    "reportBytes": 0,
+    "emptyReportPlaceholderRetained": true
+  },
+  "campaignReport": {
+    "path": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v1/campaign-report.json",
+    "reportBytes": 0,
+    "emptyReportPlaceholderRetained": true
+  },
+  "recovery": {
+    "strategy": "full_detached_retry_from_same_fixed_commit_to_new_create_only_path",
+    "retryReportPath": "docs/evidence/model-routing/blind-visual-calibration-20260726-alias-fixed-v2/campaign-report.json"
+  },
+  "conclusion": "partial_attempt_not_eligible_for_model_or_ensemble_selection"
+}

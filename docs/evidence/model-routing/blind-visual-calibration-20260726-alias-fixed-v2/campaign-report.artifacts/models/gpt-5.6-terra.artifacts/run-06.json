@@ -1,0 +1,68 @@
+{
+  "runKey": "blind-pair-048043661b1fd096ac9c:3",
+  "pairId": "blind-pair-048043661b1fd096ac9c",
+  "familyId": "oem-capability",
+  "attempt": 3,
+  "knownIssue": "AESTHETIC_CONTRAST",
+  "assignment": {
+    "left": "source",
+    "right": "degraded"
+  },
+  "requestedModel": "gpt-5.6-terra",
+  "reportedModel": "gpt-5.6-terra",
+  "resolvedModel": "gpt-5.6-terra",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 5369.108,
+  "inputTokens": 4313,
+  "outputTokens": 62,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.0117125,
+  "accountedCostUsd": 0.0117125,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20",
+      "byteLength": 324255,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "dcb5ddb2cde4394604a53dfaaf21d5b166a4738779cb914d70a4d7dee35c1b41",
+      "byteLength": 347039,
+      "breakpoint": 1440
+    }
+  ],
+  "output": {
+    "choice": "right",
+    "findings": [
+      {
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker",
+        "imageNumber": 2
+      },
+      {
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "severity": "major",
+        "imageNumber": 2
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_CONTRAST",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CREDIBILITY",
+      "severity": "major",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

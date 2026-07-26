@@ -1,0 +1,88 @@
+{
+  "runKey": "blind-pair-bf921d80aa1079403fbf:1",
+  "pairId": "blind-pair-bf921d80aa1079403fbf",
+  "familyId": "technical-catalog",
+  "attempt": 1,
+  "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+  "assignment": {
+    "left": "degraded",
+    "right": "source"
+  },
+  "requestedModel": "gpt-5.6-terra",
+  "reportedModel": "gpt-5.6-terra",
+  "resolvedModel": "gpt-5.6-terra",
+  "provider": "gateway",
+  "transport": "openai-responses",
+  "elapsedMs": 10827.164,
+  "inputTokens": 1414,
+  "outputTokens": 201,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.00655,
+  "accountedCostUsd": 0.00655,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+      "byteLength": 256649,
+      "breakpoint": 375
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+      "byteLength": 233976,
+      "breakpoint": 375
+    }
+  ],
+  "output": {
+    "choice": "left",
+    "findings": [
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "severity": "blocker"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major"
+      },
+      {
+        "imageNumber": 1,
+        "ruleCode": "AESTHETIC_CREDIBILITY",
+        "severity": "major"
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_SPACING",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CREDIBILITY",
+      "severity": "major",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

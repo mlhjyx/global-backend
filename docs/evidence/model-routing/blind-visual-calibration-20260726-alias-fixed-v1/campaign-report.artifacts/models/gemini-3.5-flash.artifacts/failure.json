@@ -1,0 +1,35 @@
+{
+  "phase": "pair",
+  "runKey": "blind-pair-24e60717a133f7950b26:1",
+  "reason": "model_identity_mismatch",
+  "expectedModel": "gemini-3.5-flash",
+  "requestedModel": "gemini-3.5-flash",
+  "reportedModel": null,
+  "resolvedModel": "gemini-3.5-flash",
+  "provider": "gateway",
+  "expectedTransport": "google-generate-content",
+  "actualTransport": "google-generate-content",
+  "elapsedMs": 4362.149,
+  "inputTokens": 2561,
+  "outputTokens": 546,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.0087555,
+  "finishReason": null,
+  "outputSha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+  "timeoutSettlement": "not_applicable",
+  "preflightCostCeilingCents": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d",
+      "byteLength": 209350,
+      "breakpoint": 1440
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "889e70d332bb2fd3b33990984c5c6520edbee622b5e53693039d6848ec6cd5dd",
+      "byteLength": 258276,
+      "breakpoint": 1440
+    }
+  ]
+}

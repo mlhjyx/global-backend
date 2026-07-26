@@ -1,0 +1,88 @@
+{
+  "runKey": "blind-pair-bf921d80aa1079403fbf:3",
+  "pairId": "blind-pair-bf921d80aa1079403fbf",
+  "familyId": "technical-catalog",
+  "attempt": 3,
+  "knownIssue": "AESTHETIC_MOBILE_COMPOSITION",
+  "assignment": {
+    "left": "degraded",
+    "right": "source"
+  },
+  "requestedModel": "claude-sonnet-5",
+  "reportedModel": "claude-sonnet-5",
+  "resolvedModel": "claude-sonnet-5",
+  "provider": "gateway",
+  "transport": "anthropic-messages",
+  "elapsedMs": 18407.386,
+  "inputTokens": 2428,
+  "outputTokens": 1167,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.016526,
+  "accountedCostUsd": 0.016526,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "86e9881752564dc3c1185789e53796887c31283f2eb3dc52280b45f11b4a2895",
+      "byteLength": 256649,
+      "breakpoint": 375
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "ec9339ac19a72b2804a4b84dcad3a34d9073e2c9442c8bad6457f59a8b995dff",
+      "byteLength": 233976,
+      "breakpoint": 375
+    }
+  ],
+  "output": {
+    "choice": "left",
+    "findings": [
+      {
+        "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+        "severity": "blocker",
+        "imageNumber": 1
+      },
+      {
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "major",
+        "imageNumber": 1
+      },
+      {
+        "ruleCode": "AESTHETIC_HIERARCHY",
+        "severity": "major",
+        "imageNumber": 1
+      },
+      {
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "major",
+        "imageNumber": 1
+      }
+    ]
+  },
+  "semanticChoice": "degraded",
+  "canonicalFindings": [
+    {
+      "ruleCode": "AESTHETIC_MOBILE_COMPOSITION",
+      "severity": "blocker",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_SPACING",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_HIERARCHY",
+      "severity": "major",
+      "imageRole": "degraded"
+    },
+    {
+      "ruleCode": "AESTHETIC_CONTRAST",
+      "severity": "major",
+      "imageRole": "degraded"
+    }
+  ],
+  "formatValid": true,
+  "provenanceExact": true,
+  "knownIssueDetected": true
+}

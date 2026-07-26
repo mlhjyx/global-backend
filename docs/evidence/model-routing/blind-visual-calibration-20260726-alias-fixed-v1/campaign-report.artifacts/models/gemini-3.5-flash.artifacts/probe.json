@@ -1,0 +1,56 @@
+{
+  "accepted": true,
+  "semanticExpectationMet": false,
+  "requestedModel": "gemini-3.5-flash",
+  "reportedModel": "gemini-3.5-flash",
+  "resolvedModel": "gemini-3.5-flash",
+  "provider": "gateway",
+  "transport": "google-generate-content",
+  "elapsedMs": 6664.279,
+  "inputTokens": 3688,
+  "outputTokens": 1444,
+  "reportedCostUsd": null,
+  "calculatedCostUsd": 0.018528,
+  "accountedCostUsd": 0.018528,
+  "finishReason": null,
+  "inputImages": [
+    {
+      "imageNumber": 1,
+      "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+      "byteLength": 272347,
+      "breakpoint": 768
+    },
+    {
+      "imageNumber": 2,
+      "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8",
+      "byteLength": 272347,
+      "breakpoint": 768
+    },
+    {
+      "imageNumber": 3,
+      "sha256": "af42ef99b75bdde42b08e7f986d534fde842d35bc095f0af27f5cc53ca0e7040",
+      "byteLength": 271683,
+      "breakpoint": 768
+    }
+  ],
+  "output": {
+    "choice": "tie",
+    "findings": [
+      {
+        "ruleCode": "AESTHETIC_SPACING",
+        "severity": "major",
+        "imageNumber": 1
+      },
+      {
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "major",
+        "imageNumber": 1
+      },
+      {
+        "ruleCode": "AESTHETIC_CONTRAST",
+        "severity": "blocker",
+        "imageNumber": 3
+      }
+    ]
+  }
+}
