@@ -68,6 +68,8 @@ import {
   ReviewVisionInput,
 } from './types';
 import { snapshotVisionReviewInput } from './vision-review-input';
+import { hasTrustedModelIdentity } from './model-identity';
+import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from './model-transports';
 
 /**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
@@ -235,8 +237,12 @@ export class RouterModelGateway extends ModelGateway {
       const result = await provider.reviewVision<T>(snapshot, ctx);
       if (
         result.modelResolutionSource !== 'upstream_response' ||
-        result.reportedModel !== snapshot.model ||
-        result.model !== snapshot.model
+        !hasTrustedModelIdentity({
+          requestedModel: snapshot.model,
+          reportedModel: result.reportedModel,
+          resolvedModel: result.model,
+          transport: CANDIDATE_GATEWAY_VISION_TRANSPORTS[snapshot.model],
+        })
       ) {
         throw new ProviderIdentityError(
           `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${snapshot.model}, reported=${result.reportedModel ?? 'missing'}, resolved=${result.model}`,

@@ -552,6 +552,49 @@ describe("blind visual candidate runner", () => {
     expect(report.metrics?.knownIssueHits).toBe(18);
   });
 
+  it("accepts the reviewed Gemini alias without rewriting reported provenance", async () => {
+    const invoke = vi.fn(async (request: Parameters<BlindVisualInvoke>[0]) =>
+      resultFor(request, { reportedModel: "gemini-default" }),
+    );
+    const report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate: candidate("gemini-3.5-flash"),
+      provenance: PROVENANCE,
+      invoke,
+    });
+    expect(invoke).toHaveBeenCalledTimes(19);
+    expect(report.status).toBe("single_model_gate_passed");
+    expect(report.probe?.reportedModel).toBe("gemini-default");
+    expect(report.runs).toHaveLength(18);
+    expect(
+      report.runs.every((run) => run.reportedModel === "gemini-default"),
+    ).toBe(true);
+  });
+
+  it("rejects the Gemini alias on an unreviewed protocol", async () => {
+    const invoke = vi.fn(async (request: Parameters<BlindVisualInvoke>[0]) =>
+      resultFor(request, {
+        reportedModel: "gemini-default",
+        transport: "openai-responses",
+      }),
+    );
+    const report = await runBlindVisualCalibrationCandidate({
+      repositoryRoot,
+      candidate: candidate("gemini-3.5-flash"),
+      provenance: PROVENANCE,
+      invoke,
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(report).toMatchObject({
+      status: "unavailable",
+      unavailableReason: "model_identity_mismatch",
+      failure: {
+        reportedModel: "gemini-default",
+        resolvedModel: "gemini-3.5-flash",
+      },
+    });
+  });
+
   it.each([
     ["requested", { requestedModel: "wrong-requested-model" }],
     ["reported", { reportedModel: "wrong-reported-model" }],

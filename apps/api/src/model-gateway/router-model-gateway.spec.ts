@@ -260,7 +260,7 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
     usage: { inputTokens: 10, outputTokens: 2 },
   };
 
-  it('accepts only exact upstream provenance plus schema-valid output', async () => {
+  it('accepts exact upstream provenance plus schema-valid output', async () => {
     const provider = {
       ...fakeProvider(),
       reviewVision: vi.fn(async () => exactResult),
@@ -270,6 +270,39 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
       new BudgetLedger(),
     ).reviewVision(visionInput(), { workspaceId: 'ws-1' });
     expect(result).toEqual(exactResult);
+  });
+
+  it('accepts a trusted upstream alias while preserving the reported identity', async () => {
+    const aliasResult = {
+      ...exactResult,
+      reportedModel: 'gemini-default',
+    };
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => aliasResult),
+    } as unknown as ModelProvider;
+    const result = await gatewayWith(provider, new BudgetLedger()).reviewVision(
+      visionInput(),
+      { workspaceId: 'ws-1' },
+    );
+    expect(result).toEqual(aliasResult);
+  });
+
+  it('rejects an alias when the requested model has no reviewed transport binding', async () => {
+    const provider = {
+      ...fakeProvider(),
+      reviewVision: vi.fn(async () => ({
+        ...exactResult,
+        model: 'unregistered-model',
+        reportedModel: 'gemini-default',
+      })),
+    } as unknown as ModelProvider;
+    await expect(
+      gatewayWith(provider, new BudgetLedger()).reviewVision(
+        { ...visionInput(), model: 'unregistered-model' },
+        { workspaceId: 'ws-1' },
+      ),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
   it('treats model identity mismatch as terminal and never tries another provider', async () => {

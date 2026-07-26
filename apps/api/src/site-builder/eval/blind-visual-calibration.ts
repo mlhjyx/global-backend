@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { QualityBreakpoint } from "@global/contracts";
 import type { GatewayVisionTransport } from "../../model-gateway/providers/openai-compatible.provider";
 import type { VisionReviewImage } from "../../model-gateway/types";
+import { hasTrustedModelIdentity } from "../../model-gateway/model-identity";
 import {
   AESTHETIC_RULE_CODES,
   loadAestheticEvalCases,
@@ -990,8 +991,12 @@ function assertProviderResult(
   }
   if (
     result.requestedModel !== candidate.model ||
-    result.reportedModel !== candidate.model ||
-    result.resolvedModel !== candidate.model
+    !hasTrustedModelIdentity({
+      requestedModel: candidate.model,
+      reportedModel: result.reportedModel,
+      resolvedModel: result.resolvedModel,
+      transport: result.transport,
+    })
   ) {
     throw new BlindVisualCallRejected("model_identity_mismatch");
   }
@@ -1174,8 +1179,12 @@ function assertProbeRecord(
   if (
     probe.accepted !== true ||
     probe.requestedModel !== candidate.model ||
-    probe.reportedModel !== candidate.model ||
-    probe.resolvedModel !== candidate.model ||
+    !hasTrustedModelIdentity({
+      requestedModel: candidate.model,
+      reportedModel: probe.reportedModel,
+      resolvedModel: probe.resolvedModel,
+      transport: probe.transport,
+    }) ||
     probe.provider !== "gateway" ||
     probe.transport !== candidate.transport ||
     !Number.isFinite(probe.elapsedMs) ||
@@ -1265,8 +1274,12 @@ export function summarizeBlindVisualCandidate(
       JSON.stringify(run.assignment) !== JSON.stringify(expectedAssignment) ||
       JSON.stringify(run.inputImages) !== JSON.stringify(expectedImages) ||
       run.requestedModel !== candidate.model ||
-      run.reportedModel !== candidate.model ||
-      run.resolvedModel !== candidate.model ||
+      !hasTrustedModelIdentity({
+        requestedModel: candidate.model,
+        reportedModel: run.reportedModel,
+        resolvedModel: run.resolvedModel,
+        transport: run.transport,
+      }) ||
       run.provider !== "gateway" ||
       run.transport !== candidate.transport ||
       !Number.isFinite(run.elapsedMs) ||
@@ -1398,15 +1411,23 @@ function assertReportCandidateIdentity(report: BlindVisualModelReport): void {
   const probeExact =
     report.probe === null ||
     (report.probe.requestedModel === report.model &&
-      report.probe.reportedModel === report.model &&
-      report.probe.resolvedModel === report.model &&
+      hasTrustedModelIdentity({
+        requestedModel: report.model,
+        reportedModel: report.probe.reportedModel,
+        resolvedModel: report.probe.resolvedModel,
+        transport: report.probe.transport,
+      }) &&
       report.probe.provider === "gateway" &&
       report.probe.transport === candidate.transport);
   const runsExact = report.runs.every(
     (run) =>
       run.requestedModel === report.model &&
-      run.reportedModel === report.model &&
-      run.resolvedModel === report.model &&
+      hasTrustedModelIdentity({
+        requestedModel: report.model,
+        reportedModel: run.reportedModel,
+        resolvedModel: run.resolvedModel,
+        transport: run.transport,
+      }) &&
       run.provider === "gateway" &&
       run.transport === candidate.transport &&
       run.provenanceExact,
