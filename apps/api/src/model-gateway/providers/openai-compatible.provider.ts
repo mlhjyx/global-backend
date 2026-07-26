@@ -12,6 +12,7 @@ import {
   ReviewVisionInput,
   VISION_REVIEW_MATERIAL_CLASSES,
 } from '../types';
+import { resolveReportedModelIdentity } from '../model-identity';
 import { snapshotVisionReviewInput } from '../vision-review-input';
 
 /**
@@ -51,29 +52,16 @@ export function stripJsonFence(content: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
-const MODEL_IDENTITY_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  'gemini-3.5-flash': ['gemini-default'] as const,
-});
-
-function canonicalModel(
-  requestedModel: string,
-  reportedModel?: string,
-): string | undefined {
-  if (!reportedModel) return undefined;
-  if (reportedModel === requestedModel) return reportedModel;
-  const aliases = MODEL_IDENTITY_ALIASES[requestedModel as keyof typeof MODEL_IDENTITY_ALIASES];
-  return aliases?.includes(reportedModel) ? requestedModel : undefined;
-}
-
 function resolutionProvenance(
   requestedModel: string,
   reportedModel?: string,
+  transport?: GatewayVisionTransport,
 ): {
   model: string;
   reportedModel?: string;
   modelResolutionSource: ModelResolutionSource;
 } {
-  const canonical = canonicalModel(requestedModel, reportedModel);
+  const canonical = resolveReportedModelIdentity(requestedModel, reportedModel, transport);
   if (!canonical) {
     return reportedModel
       ? {
@@ -88,7 +76,7 @@ function resolutionProvenance(
   }
   return {
     model: canonical,
-    reportedModel: canonical,
+    reportedModel,
     modelResolutionSource: 'upstream_response',
   };
 }
@@ -519,8 +507,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: json.usage?.completion_tokens,
     };
     const reportedModel = json.model?.trim() || undefined;
-    const resolvedModel = canonicalModel(input.model, reportedModel);
-    const provenance = resolutionProvenance(input.model, reportedModel);
+    const resolvedModel = resolveReportedModelIdentity(input.model, reportedModel, 'openai-chat-completions');
+    const provenance = resolutionProvenance(input.model, reportedModel, 'openai-chat-completions');
     if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
@@ -635,8 +623,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: json.usage?.output_tokens,
     };
     const reportedModel = json.model?.trim() || undefined;
-    const resolvedModel = canonicalModel(input.model, reportedModel);
-    const provenance = resolutionProvenance(input.model, reportedModel);
+    const resolvedModel = resolveReportedModelIdentity(input.model, reportedModel, 'openai-responses');
+    const provenance = resolutionProvenance(input.model, reportedModel, 'openai-responses');
     if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
@@ -754,8 +742,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: json.usage?.output_tokens,
     };
     const reportedModel = json.model?.trim() || undefined;
-    const resolvedModel = canonicalModel(input.model, reportedModel);
-    const provenance = resolutionProvenance(input.model, reportedModel);
+    const resolvedModel = resolveReportedModelIdentity(input.model, reportedModel, 'anthropic-messages');
+    const provenance = resolutionProvenance(input.model, reportedModel, 'anthropic-messages');
     if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,
@@ -881,8 +869,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
       outputTokens: (json.usageMetadata?.candidatesTokenCount ?? 0) + (json.usageMetadata?.thoughtsTokenCount ?? 0),
     };
     const reportedModel = json.modelVersion?.trim() || undefined;
-    const resolvedModel = canonicalModel(input.model, reportedModel);
-    const provenance = resolutionProvenance(input.model, reportedModel);
+    const resolvedModel = resolveReportedModelIdentity(input.model, reportedModel, 'google-generate-content');
+    const provenance = resolutionProvenance(input.model, reportedModel, 'google-generate-content');
     if (!reportedModel || !resolvedModel) {
       throw new ProviderIdentityError(
         `VISION_REVIEW_MODEL_IDENTITY_MISMATCH: requested=${input.model}, reported=${reportedModel ?? 'missing'}`,

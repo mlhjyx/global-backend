@@ -563,7 +563,7 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     });
   });
 
-  it('accepts configured Gemini alias modelVersion and keeps provenance canonical', async () => {
+  it('accepts the reviewed Gemini alias, preserves reported identity, and resolves canonically', async () => {
     mockChatResponse({
       modelVersion: 'gemini-default',
       candidates: [
@@ -586,10 +586,29 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
 
     expect(result).toMatchObject({
       model: 'gemini-3.5-flash',
-      reportedModel: 'gemini-3.5-flash',
+      reportedModel: 'gemini-default',
       modelResolutionSource: 'upstream_response',
       data: { ok: true },
     });
+  });
+
+  it('rejects the Gemini alias on a transport where it was not reviewed', async () => {
+    mockChatResponse({
+      model: 'gemini-default',
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+    });
+    await expect(
+      visionProviderFor('gemini-3.5-flash', 'openai-chat-completions').reviewVision(visionInput()),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
+  });
+
+  it('fails closed when the upstream omits the reported model', async () => {
+    mockChatResponse({
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }],
+    });
+    await expect(
+      visionProviderFor('gemini-3.5-flash', 'google-generate-content').reviewVision(visionInput()),
+    ).rejects.toBeInstanceOf(ProviderIdentityError);
   });
 
   it('fails closed when reported model changes across vendor family', async () => {
@@ -911,7 +930,7 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the upstream omits or changes the reported model', async () => {
+  it('fails closed when the upstream changes the reported model', async () => {
     mockChatResponse({
       model: 'provider-fallback-model',
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
