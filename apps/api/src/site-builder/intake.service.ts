@@ -76,6 +76,56 @@ export function intakeRequestHash(input: IntakeInput): string {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
+function storedIntakeMatches(
+  value: Prisma.JsonValue,
+  expectedHash: string,
+): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const company = value.company;
+  if (
+    typeof company !== "object" ||
+    company === null ||
+    Array.isArray(company) ||
+    typeof company.nameZh !== "string" ||
+    !(
+      company.nameEn === undefined ||
+      company.nameEn === null ||
+      typeof company.nameEn === "string"
+    ) ||
+    typeof value.industry !== "string" ||
+    !Array.isArray(value.products) ||
+    !value.products.every((item) => typeof item === "string") ||
+    !Array.isArray(value.targetMarkets) ||
+    !value.targetMarkets.every((item) => typeof item === "string") ||
+    typeof value.hasWebsite !== "boolean" ||
+    !(
+      value.websiteUrl === undefined ||
+      value.websiteUrl === null ||
+      typeof value.websiteUrl === "string"
+    ) ||
+    typeof value.businessEmail !== "string"
+  ) {
+    return false;
+  }
+
+  return (
+    intakeRequestHash({
+      company: {
+        nameZh: company.nameZh,
+        nameEn: company.nameEn,
+      },
+      industry: value.industry,
+      products: value.products,
+      targetMarkets: value.targetMarkets,
+      hasWebsite: value.hasWebsite,
+      websiteUrl: value.websiteUrl,
+      businessEmail: value.businessEmail,
+    }) === expectedHash
+  );
+}
+
 function storedIntakeResult(value: Prisma.JsonValue): IntakeResult {
   if (
     typeof value !== "object" ||
@@ -160,7 +210,7 @@ export class IntakeService {
     }
 
     const idempotencyKey = normalizeIdempotencyKey(rawIdempotencyKey);
-    const requestHash = idempotencyKey ? intakeRequestHash(input) : undefined;
+    const requestHash = intakeRequestHash(input);
     const nameEn = input.company.nameEn?.trim() || null;
 
     const prepared = await this.prisma.withWorkspace(
@@ -221,15 +271,18 @@ export class IntakeService {
             return {
               response,
               run,
-              wasCreated: false,
-              createdCompanyProfileId: null,
             };
           }
         }
 
         const existing = await tx.site.findFirst({
           where: { workspaceId: ctx.workspaceId },
-          select: { id: true, status: true, companyProfileId: true },
+          select: {
+            id: true,
+            status: true,
+            companyProfileId: true,
+            intake: true,
+          },
         });
         if (existing?.status === "setup_failed" && !existing.companyProfileId) {
           // R4-A2: mutable intake/display names are not identity. A historical Site without an
@@ -247,9 +300,33 @@ export class IntakeService {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-${existing.id}`}))`;
           const active = await tx.siteBuildRun.findFirst({
             where: { siteId: existing.id, status: { in: ['queued', 'running'] } },
-            select: { id: true },
+            select: {
+              id: true,
+              siteId: true,
+              kind: true,
+              status: true,
+              temporalRunId: true,
+            },
           });
           if (active) {
+            // An unkeyed request has no client replay identity, but the persisted intake plus the
+            // single active demo run provide a safe server-side recovery key. Reuse only an exact
+            // semantic replay whose Temporal ACK is still unknown; all other active builds fail closed.
+            if (
+              !idempotencyKey &&
+              active.kind === "demo_v0" &&
+              active.temporalRunId === null &&
+              storedIntakeMatches(existing.intake, requestHash)
+            ) {
+              return {
+                response: {
+                  siteId: existing.id,
+                  buildId: active.id,
+                  status: "generating_demo" as const,
+                },
+                run: active,
+              };
+            }
             throw new ConflictException(
               structuredError('SITE_LIMIT_REACHED', 'workspace site already has an active build'),
             );
@@ -324,8 +401,6 @@ export class IntakeService {
         return {
           response,
           run,
-          wasCreated: !existing,
-          createdCompanyProfileId: companyProfile?.id ?? null,
         };
       },
     );
@@ -366,29 +441,25 @@ export class IntakeService {
         `demo v0 launch failed for build ${prepared.response.buildId}: DEMO_LAUNCH_UNAVAILABLE`,
       );
 
-      if (idempotencyKey) {
-        // The workflow may already exist. Keep Site/run/key queued; retrying the same key invokes the
-        // same deterministic workflowId and repairs temporalRunId without duplicating a build.
-        throw this.unavailable(true);
+      // A thrown start is ambiguous: Temporal may have accepted the deterministic workflow and only
+      // lost the response. Recover its chain head before returning an error, and never overwrite
+      // queued/running/succeeded state without proof that no execution exists.
+      try {
+        const recovered = await this.demoLauncher.recoverDemoV0(launchInput);
+        await this.persistTemporalAck(
+          ctx.workspaceId,
+          prepared.response.buildId,
+          recovered.firstExecutionRunId,
+        );
+        return prepared.response;
+      } catch {
+        this.log.error(
+          `demo v0 ACK recovery failed for build ${prepared.response.buildId}: DEMO_ACK_RECOVERY_UNAVAILABLE`,
+        );
+        // Keep Site/run/key as the durable recovery anchor. A keyed replay reuses its ledger entry;
+        // an exact unkeyed replay reuses the persisted intake and active demo run above.
+        throw this.unavailable(Boolean(idempotencyKey));
       }
-
-      // Without a key the caller cannot prove request identity across retries, so keep a recoverable
-      // draft instead of deleting submitted data. A failed launch always leaves explicit failure state.
-      await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-        await tx.site.update({
-          where: { id: prepared.response.siteId },
-          data: { status: "setup_failed" },
-        });
-        await tx.siteBuildRun.update({
-          where: { id: prepared.response.buildId },
-          data: {
-            status: "failed",
-            error: "launch failed: orchestrator unavailable",
-            finishedAt: new Date(),
-          },
-        });
-      });
-      throw this.unavailable(false);
     }
 
     try {
