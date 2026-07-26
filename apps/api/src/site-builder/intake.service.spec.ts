@@ -597,7 +597,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     expect(launches).toHaveLength(2);
   });
 
-  it("ACK 丢失但 workflow 已把 run 推到终态：旧 key 只重放旧 build，绝不重启 workflow", async () => {
+  it("有 key 的 start 响应丢失可立即恢复 ACK；后续终态重放绝不重启 workflow", async () => {
     let launchCount = 0;
     let recoverCount = 0;
     const launcher = {
@@ -614,11 +614,13 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     } as unknown as DemoV0Launcher;
     const { service, db } = makeService({ launcher });
 
-    await expectHttpError(
+    await expect(
       callCreate(service, CTX, BASE_INTAKE, "terminal-after-ack-loss"),
-      HttpStatus.BAD_GATEWAY,
-      "DEMO_LAUNCH_UNAVAILABLE",
-    );
+    ).resolves.toEqual({
+      siteId: "site-1",
+      buildId: "run-1",
+      status: "generating_demo",
+    });
     Object.assign(db.sites[0]!, { status: "setup_failed" });
     Object.assign(db.runs[0]!, { status: "failed", finishedAt: new Date() });
 
@@ -663,7 +665,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       "DEMO_LAUNCH_UNAVAILABLE",
     );
     expect(launchCount).toBe(1);
-    expect(recoverCount).toBe(1);
+    expect(recoverCount).toBe(2);
     expect(db.runs[0]?.temporalRunId).toBeNull();
   });
 
@@ -687,10 +689,21 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     );
   });
 
-  it("无 key 的同步 launch 失败仍补偿回滚新 Site/run，并返回稳定 502", async () => {
+  it("无 key 且恢复服务不可用时保留 ACK-unknown 锚点；仅相同 intake 可原地重试同一 run", async () => {
+    let launchCount = 0;
+    let recoverCount = 0;
+    let temporalAvailable = false;
     const launcher = {
-      launchDemoV0: async () => {
-        throw new Error("temporal unreachable at 10.0.0.1");
+      launchDemoV0: async (input: DemoV0LaunchInput) => {
+        launchCount += 1;
+        if (!temporalAvailable) {
+          throw new Error("temporal unreachable at 10.0.0.1");
+        }
+        return { firstExecutionRunId: `temporal-${input.buildRunId}` };
+      },
+      recoverDemoV0: async () => {
+        recoverCount += 1;
+        throw new Error("temporal describe unavailable");
       },
     } as unknown as DemoV0Launcher;
     const { service, db } = makeService({ launcher });
@@ -700,9 +713,131 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       HttpStatus.BAD_GATEWAY,
       "DEMO_LAUNCH_UNAVAILABLE",
     );
-    expect(db.sites).toHaveLength(0);
-    expect(db.runs).toHaveLength(0);
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]).toMatchObject({
+      id: "site-1",
+      companyProfileId: "company-1",
+      status: "building",
+      intake: BASE_INTAKE,
+    });
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]).toMatchObject({
+      id: "run-1",
+      status: "queued",
+      temporalRunId: null,
+    });
     expect(db.keys).toHaveLength(0);
+
+    await expectHttpError(
+      callCreate(service, CTX, {
+        ...BASE_INTAKE,
+        products: ["different product"],
+      }),
+      HttpStatus.CONFLICT,
+      "SITE_LIMIT_REACHED",
+    );
+    expect(launchCount).toBe(1);
+
+    temporalAvailable = true;
+    const retry = await callCreate(service, CTX, BASE_INTAKE);
+    expect(retry).toEqual({
+      siteId: "site-1",
+      buildId: "run-1",
+      status: "generating_demo",
+    });
+    expect(db.companyProfiles).toHaveLength(1);
+    expect(db.sites).toHaveLength(1);
+    expect(db.sites[0]).toMatchObject({
+      id: "site-1",
+      companyProfileId: "company-1",
+      status: "building",
+      intake: BASE_INTAKE,
+    });
+    expect(db.runs).toEqual([
+      expect.objectContaining({
+        id: "run-1",
+        status: "queued",
+        temporalRunId: "temporal-run-1",
+      }),
+    ]);
+    expect(launchCount).toBe(2);
+    expect(recoverCount).toBe(1);
+  });
+
+  it("Temporal 已启动但 start 响应丢失时先恢复 ACK，不把 running run 标失败", async () => {
+    const holder: { db?: FakeDb } = {};
+    let launchCount = 0;
+    let recoverCount = 0;
+    const launcher = {
+      launchDemoV0: async () => {
+        launchCount += 1;
+        Object.assign(holder.db!.runs[0]!, { status: "running" });
+        throw new Error("response lost after Temporal accepted start");
+      },
+      recoverDemoV0: async () => {
+        recoverCount += 1;
+        return { firstExecutionRunId: "recovered-running-chain" };
+      },
+    } as unknown as DemoV0Launcher;
+    const harness = makeService({ launcher });
+    holder.db = harness.db;
+
+    await expect(
+      callCreate(harness.service, CTX, BASE_INTAKE),
+    ).resolves.toEqual({
+      siteId: "site-1",
+      buildId: "run-1",
+      status: "generating_demo",
+    });
+    expect(harness.db.sites).toHaveLength(1);
+    expect(harness.db.runs).toEqual([
+      expect.objectContaining({
+        id: "run-1",
+        status: "running",
+        temporalRunId: "recovered-running-chain",
+      }),
+    ]);
+    expect(launchCount).toBe(1);
+    expect(recoverCount).toBe(1);
+  });
+
+  it("Temporal 已完成但 start 响应丢失时只补 ACK，不覆写 ready/succeeded", async () => {
+    const holder: { db?: FakeDb } = {};
+    const finishedAt = new Date("2026-07-26T00:00:00.000Z");
+    const launcher = {
+      launchDemoV0: async () => {
+        Object.assign(holder.db!.sites[0]!, { status: "ready" });
+        Object.assign(holder.db!.runs[0]!, {
+          status: "succeeded",
+          finishedAt,
+        });
+        throw new Error("response lost after workflow completed");
+      },
+      recoverDemoV0: async () => ({
+        firstExecutionRunId: "recovered-completed-chain",
+      }),
+    } as unknown as DemoV0Launcher;
+    const harness = makeService({ launcher });
+    holder.db = harness.db;
+
+    await expect(
+      callCreate(harness.service, CTX, BASE_INTAKE),
+    ).resolves.toEqual({
+      siteId: "site-1",
+      buildId: "run-1",
+      status: "generating_demo",
+    });
+    expect(harness.db.sites).toEqual([
+      expect.objectContaining({ id: "site-1", status: "ready" }),
+    ]);
+    expect(harness.db.runs).toEqual([
+      expect.objectContaining({
+        id: "run-1",
+        status: "succeeded",
+        finishedAt,
+        temporalRunId: "recovered-completed-chain",
+      }),
+    ]);
   });
 
   it("无 key：Temporal start 已成功但 ACK 写库失败时保留 Site/run，不删除运行中 workflow 的锚点", async () => {
