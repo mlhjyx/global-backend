@@ -3,8 +3,8 @@
 > 文档 ID：`FE-SITE-API-001`  
 > 文档性质：前后端接入说明  
 > 生命周期：`ACTIVE_INPUT`  
-> 核验基线：`origin/main@95c312650400046240e37f3ae330329c2fb27ebd`  
-> 核验日期：2026-07-23  
+> 核验基线：`origin/main@082b0ed8c523efaee08ab2903da52181da3e7b22`
+> 核验日期：2026-07-26
 > 覆盖范围：首次建 Demo、精装修、资料与素材、事实审核、构建恢复、开发预览，以及已经规划但尚不能运行的后续路径
 
 ## 1. 先说清楚这份文档的边界
@@ -37,7 +37,15 @@
 - 运行时门户：`GET /api/portal`，挂载位置见 [apps/api/src/main.ts](../../../../apps/api/src/main.ts#L60)。
 - Swagger 调试页：`GET /api/docs`；生成逻辑见 [apps/api/src/main.ts](../../../../apps/api/src/main.ts#L13)。
 - 开发预览故意不进 OpenAPI，见 [site-preview.controller.ts](../../../../apps/api/src/site-builder/site-preview.controller.ts#L7)。
-- 当前前端纵切与后置能力边界见 [Capability Pack](README.md) 第 69 行和 [用户旅程](journeys-and-page-spec.md) 第 32 行。
+- 当前前端纵切与后置能力边界见 [Capability Pack](README.md) 第 68 行和 [用户旅程](journeys-and-page-spec.md) 第 32 行。
+
+### 2.1 本次按最新主干同步后的结论
+
+1. Site Builder 面向 SaaS 的公开管理接口仍为 13 个，没有新增 TemplateFamily、DesignBrief、质量报告、Release、发布或域名接口。
+2. Demo 启动失败的处理更稳：服务端会先恢复 Temporal ACK；无法确认时保留 Site/Build，不再把不确定结果清掉。
+3. 精装修接口形状没有变化，但接口背后的执行链已从“组装后直接预览”升级为 SiteSpec 1.1 受控组装、确定性质量检查、最多三次修复和 ReleaseManifest v3。
+4. M1-e-B/M1-f 的完成代表服务端内部可以自动选设计并守住质量门，不代表用户已经能挑 TemplateFamily、查看 DesignBrief/DesignEvaluation 或管理版本。
+5. 正式发布、域名、询盘和分析仍没有可供前端调用的公共接口。
 
 ## 3. 所有已登录接口共同遵守的规则
 
@@ -125,7 +133,7 @@
 | `slug` | string | 开发预览路径使用的 slug；不是正式域名 |
 | `mode` | `builder \| diagnosis` | 站点模式；当前首次建站写入 `builder` |
 | `status` | `draft \| building \| ready \| published \| setup_failed` | Site 汇总状态；`published` 只是历史枚举存在，不能据此宣称正式发布能力已完成 |
-| `stylePreset` | string 或 `null` | 当前样式预设；现行构建支持两种值，见 J09 |
+| `stylePreset` | string 或 `null` | 当前渲染样式预设。公开 OpenAPI 与运行时允许值存在漂移，前端接入边界见 J09 |
 | `locales` | string[] | 站点内容语言集合；OpenAPI 当前把它声明成数组，但 DTO 类型仍为 `unknown` |
 | `activeVersionId` | UUID 或 `null` | 当前激活预览版本；不是用户可见的版本管理接口 |
 | `previewUrl` | string 或 `null` | 当前 active READY Release 可访问时返回开发预览地址 |
@@ -233,6 +241,8 @@ Header：
 | 409 | `SITE_COMPANY_PROFILE_LINK_REQUIRED` | 代码可能返回但当前 OpenAPI漏列；需要受控修复，不能由前端猜测 company 关联 |
 | 502 | `DEMO_LAUNCH_UNAVAILABLE` | 结果可能已被接受；保持“正在确认”，使用同一 key、同一 body 重放 |
 
+最新主干会在 Demo 启动调用报错后，先按确定性 workflow ID 查询 Temporal，若能确认工作流已启动就仍返回 `201`，不会把“启动响应丢失”误报成失败；只有连恢复查询也不可用时才返回 `502`。此时 Site、Build 和幂等记录会保留为恢复锚点，见 [intake.service.ts L441](../../../../apps/api/src/site-builder/intake.service.ts#L441)。这也是前端必须复用同一 key 和请求体、不能看到 `502` 就换 key 的原因。
+
 ### 6.2 观察 Demo 构建
 
 首次出现，下面完整说明 Build 查询接口；J09/J11 再使用时只补充差异。
@@ -242,7 +252,7 @@ Header：
 - 请求：`GET /api/v1/site-builder/builds/{id}`
 - operationId：`BuildsController_get_v1`
 - OpenAPI：[openapi.json L6573](../../../../packages/contracts/openapi/openapi.json#L6573)
-- 实现：[builds.controller.ts L332](../../../../apps/api/src/site-builder/builds.controller.ts#L332)
+- 实现：[builds.controller.ts L333](../../../../apps/api/src/site-builder/builds.controller.ts#L333)
 - 前端请求时机：Intake 返回 `buildId` 后立即请求；随后 visibility-aware 轮询；页面重新获得焦点或网络恢复时立即重新验证；终态停止轮询。
 
 请求参数：
@@ -258,7 +268,7 @@ Header：
 | `data.buildId` | UUID | Build ID |
 | `data.kind` | string | 当前实际值包括 `demo_v0`、`refurbish` |
 | `data.status` | string | 当前实际主状态为 `queued/running/succeeded/failed/cancelled` |
-| `data.phase` | string 或 `null` | 当前 phase：`P1_understanding/P2_assets/P3_assembly/P5_publish`；前端应映射为业务文案，不直接展示内部名 |
+| `data.phase` | string 或 `null` | 当前 phase：`P1_understanding/P2_assets/P3_assembly/P4_quality/P5_publish`；前端应映射为业务文案，不直接展示内部名 |
 | `data.progress` | number | 服务端进度；当前 DTO 未在 OpenAPI声明 0–1 边界，前端要容忍并限制显示范围 |
 | `data.steps` | array 或 `null` | 构建步骤；详见下表 |
 | `data.costSummary` | object 或 `null` | 终态成本摘要；Demo 或尚未结算时可能为空 |
@@ -270,7 +280,7 @@ Header：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `key` | string | `kb_ingest/brand_profile/image_pipeline/copy/assemble_build/quality_loop` |
+| `key` | string | `kb_ingest/brand_profile/image_pipeline/design_spec/copy/assemble_build/quality_loop` |
 | `status` | string | `queued/running/done/degraded/failed/skipped/aborted` |
 | `attempt` | integer，可省略 | 当前展示采用的最新尝试次数 |
 | `progress` | number，可省略，0–1 | 单步骤进度 |
@@ -318,7 +328,7 @@ Site list/detail 不返回当前或最近 `buildId`，也没有 Build list。刷
 
 - 原来的 `idempotency-key` 永远重放原 `siteId/buildId`，用于确认原请求，不会创建新 run。
 - 用户明确选择“重新生成 Demo”时，应生成一个新的 key，并提交完整的 Intake body。
-- 新请求会复用 `setup_failed` Site 并创建新的 BuildRun，见 [intake.service.ts L230](../../../../apps/api/src/site-builder/intake.service.ts#L230)。
+- 新请求会复用 `setup_failed` Site 并创建新的 BuildRun，见 [intake.service.ts L335](../../../../apps/api/src/site-builder/intake.service.ts#L335)。
 
 ### 7.3 当前断点
 
@@ -688,7 +698,7 @@ Body：
 2. 通用接口没有 Site 影响范围、当前/未来 Release 影响、Site allowed-actions。
 3. Controller 只校验登录，没有审批角色的服务端门。
 
-因此以下接口应作为后端事实盘点，不是当前 Site 自助审核完成证明。该限制已经写入 [Capability Pack](README.md) 第 71–77 行和 [用户旅程](journeys-and-page-spec.md) 第 67–72 行。
+因此以下接口应作为后端事实盘点，不是当前 Site 自助审核完成证明。该限制已经写入 [Capability Pack](README.md) 第 70–77 行和 [用户旅程](journeys-and-page-spec.md) 第 67–72 行。
 
 ### 12.2 列出企业 Claim
 
@@ -779,9 +789,9 @@ Body：`type` 最多 50 字；`statement` 最多 2000 字；`evidence` 可选、
 - 请求：`POST /api/v1/site-builder/sites/{id}/builds`
 - operationId：`BuildsController_create_v1`
 - OpenAPI：[openapi.json L6145](../../../../packages/contracts/openapi/openapi.json#L6145)
-- 实现：[builds.controller.ts L225](../../../../apps/api/src/site-builder/builds.controller.ts#L225)
+- 实现：[builds.controller.ts L226](../../../../apps/api/src/site-builder/builds.controller.ts#L226)
 - 业务约束：[build-request-contract.ts L75](../../../../apps/api/src/site-builder/build-request-contract.ts#L75)
-- 前端请求时机：用户完成构建范围、样式和语言选择，看到资料/事实门结果后明确确认生成时。
+- 前端请求时机：用户完成构建范围和语言选择，看到资料/事实门结果后明确确认生成时。样式可以不传，由服务端从批准目录中自动选择。
 
 Header：`idempotency-key` 规则与 Intake 相同；前端应视为必填。
 
@@ -793,7 +803,7 @@ Body：
 |---|---|---|
 | `scope` | 必填：`site/page/section` | 构建范围 |
 | `targetId` | page/section 必填；site 禁止 | active SiteSpec 中的 page/block ID |
-| `options.stylePreset` | `modern-industrial/precision-light` | 只能用于完整整站构建；不能与 `pages` 同用 |
+| `options.stylePreset` | 当前公开 OpenAPI 只允许 `modern-industrial/precision-light`；可省略 | 这是渲染样式锁，不是 TemplateFamily ID。只能用于完整整站构建，不能与 `pages` 同用；省略时由服务端自动选择批准的设计方案 |
 | `options.locales` | 当前只允许 `["en"]` 或 `["en","de-DE"]` | 必须以 `en` 开头；不能只生成德语 |
 | `options.pages` | 1–32 个不重复 Page ID | 只允许 `scope=site`；表示在权威构建中选择页面范围 |
 
@@ -808,6 +818,14 @@ Body：
   }
 }
 ```
+
+**当前有一处不能忽略的合同漂移：**
+
+- 生成的 OpenAPI 仍只公布两个 `stylePreset`，见 [openapi.json L6145](../../../../packages/contracts/openapi/openapi.json#L6145)。
+- DTO 和共享 SiteSpec 已接受 11 个 renderer preset，见 [build.dto.ts L46](../../../../apps/api/src/site-builder/dto/build.dto.ts#L46) 与 [site-spec.ts L29](../../../../packages/contracts/src/site-builder/site-spec.ts#L29)。
+- Controller 的手写 `@ApiBody` 又把 OpenAPI 限回两个值，见 [builds.controller.ts L251](../../../../apps/api/src/site-builder/builds.controller.ts#L251)。
+
+因此，正式前端在合同修复并重导 OpenAPI 之前只能展示、发送两个公开值，或者完全省略 `stylePreset`。不能因为运行时校验器接受另外九个值，就绕过公开契约把它们做成用户选项。
 
 成功 `201`：
 
@@ -836,10 +854,41 @@ Body：
 
 ### 13.2 观察精装修进度
 
-复用 J02.2 `GET /site-builder/builds/{buildId}`。精装修会使用完整 steps 和 cost summary。前端必须分别展示：
+复用 J02.2 `GET /site-builder/builds/{buildId}`。精装修会使用完整 steps 和 cost summary。
+
+当前代码实际执行的主链是：
+
+```text
+KB 摄入
+→ 企业理解
+→ 图片变体处理
+→ 生成 DesignBrief
+→ 生成各语言 CopyBundle
+→ 受控组装 SiteSpec 1.1 候选站
+→ 确定性 QA / SEO / a11y / genericness + 三断点截图
+→ 若未通过，按服务端给定选项最多修复三次
+→ 质量门通过后生成 ReleaseManifest v3
+→ 原子切换 active preview
+```
+
+这条链不是规划推测：`refurbishWorkflow` 已依次调用 DesignBrief、候选组装、质量评估、闭合修复和 Release 物化，见 [refurbish.workflow.ts L258](../../../../apps/api/src/temporal/refurbish.workflow.ts#L258) 与 [refurbish.workflow.ts L360](../../../../apps/api/src/temporal/refurbish.workflow.ts#L360)。DesignBrief 只能从服务端提供的最多三个合法候选中选择，模型失败时退回排序第一的合法候选，不会生成任意模板、组件或代码，见 [design-brief-producer.ts L763](../../../../apps/api/src/site-builder/design/design-brief-producer.ts#L763)。
+
+前端能从现有 Build API 看到的仍只是 `phase/progress/steps/errorCode` 汇总，不能看到：
+
+- 最终选择的 `familyId/stylePresetId/blueprintIds`；
+- DesignBrief 内容和选择理由；
+- 每轮 DesignEvaluation、截图、Lighthouse 或 finding；
+- ReleaseManifest v3、候选 Release ID 或质量证据地址。
+
+所以前端可以说“系统正在选择版式”“正在检查并修复”，但不能展示不存在的模板选择器、具体检查分数或质量报告下载。
+
+状态展示必须区分：
 
 - `degraded`：结果可用但有明确缺失；
-- `skipped`：步骤未执行，例如 M1-f quality loop 未接线时，不能显示成质量通过；
+- `quality_loop=degraded` 且 `errorCode=AESTHETIC_MODEL_UNAVAILABLE`：确定性质量门已经通过，但审美模型没有参与；当前新工作流就是按这个状态激活，不能写成“全项质量满分”；
+- `quality_loop=degraded` 且 `errorCode=QUALITY_REPAIR_APPLIED`：至少有一轮应用过封闭修复；是否仍在检查、最终是否成功，要结合 Build 顶层 `status` 判断；
+- `quality_loop=failed`：初始候选加最多三次修复仍未通过，整个 Build 失败，不切换旧预览。当前 step 聚合会保留组内首先出现的 `errorCode`，所以修复过的失败任务未必把 `QUALITY_GATE_FAILED` 暴露为聚合错误码，见 [build-progress.ts L112](../../../../apps/api/src/site-builder/build-progress.ts#L112)；
+- `skipped`：只会出现在 M1-f 之前已存在的 Temporal 历史兼容路径；新 Build 不应把它当正常成功；
 - `unknownOperations>0`：费用或 provider ACK 不明，不能归入实际成本；
 - 新 Build 失败不改变旧 `previewUrl` 仍可用的事实。
 
@@ -905,7 +954,7 @@ Build `succeeded` 后重新 GET Site，确认 `activeVersionId/previewUrl` 已�
 - 请求：`POST /api/v1/site-builder/builds/{id}/cancel`
 - operationId：`BuildsController_cancel_v1`
 - OpenAPI：[openapi.json L6719](../../../../packages/contracts/openapi/openapi.json#L6719)
-- 实现：[builds.controller.ts L365](../../../../apps/api/src/site-builder/builds.controller.ts#L365)
+- 实现：[builds.controller.ts L366](../../../../apps/api/src/site-builder/builds.controller.ts#L366)
 - 前端请求时机：用户在 Build 详情明确确认取消后。请求发出后进入“取消确认中”，仍不能启动同 Site 新 Build。
 - Body：无。
 
@@ -940,7 +989,7 @@ Build 详情当前不返回：
 
 ### 15.4 SSE 不是现有接口
 
-当前进度只支持 polling；Controller 已明确 SSE 后置，见 [builds.controller.ts L332](../../../../apps/api/src/site-builder/builds.controller.ts#L332)。前端第一版应做带退避、页面可见性感知、终态停止的轮询。若未来新增 SSE，事件只能提示“需要刷新 snapshot”，不能替代 GET Build 的 canonical 状态。
+当前进度只支持 polling；Controller 已明确 SSE 后置，见 [builds.controller.ts L333](../../../../apps/api/src/site-builder/builds.controller.ts#L333)。前端第一版应做带退避、页面可见性感知、终态停止的轮询。若未来新增 SSE，事件只能提示“需要刷新 snapshot”，不能替代 GET Build 的 canonical 状态。
 
 ---
 
@@ -959,7 +1008,7 @@ Build 详情当前不返回：
 3. 服务端返回字段级校验、未知组件、引用影响和新草稿版本；
 4. 预览修改只能创建候选版本，不能原地覆盖 active Release。
 
-建议讨论路由：`GET /sites/{id}/draft-spec`、`POST /sites/{id}/patch-plans`、`POST /patch-plans/{id}/apply`。当前 SiteSpec 只有共享类型和部分组件运行时门，不能直接据此开放编辑器。
+建议讨论路由：`GET /sites/{id}/draft-spec`、`POST /sites/{id}/patch-plans`、`POST /patch-plans/{id}/apply`。当前 SiteSpec 1.1、组件门和受控组装校验已经被精装修内部消费，但没有草稿读取、PatchPlan 写入、并发或影响接口，不能直接据此开放编辑器。
 
 ### 16.2 内容和多语言编辑器 `PAGE-FE-046`
 
@@ -971,15 +1020,17 @@ Build 详情当前不返回：
 
 **规划状态：`APPROVED_NOT_BUILT`**
 
-当前 Build 只接受两个 `stylePreset` 字符串。M1-e-B 计划提供六个 Family、DesignBrief 和受控组装，但还没有用户选择接口。真正入口至少需要：可用 Family/变体目录、版本/digest、预览图、适用约束、当前选择、变更影响和提交并发合同。
+M1-e-B 已经在服务端内部落地六个批准的 TemplateFamily、DesignBrief、受控组装和 SiteSpec 1.1；M1-f 也已把质量检查与闭合修复接入精装修工作流。但这些是服务端自动决策能力，不是面向用户的主题管理接口。
 
-不得从空 DesignCatalog 或 renderer 内部 preset 推导用户可选模板市场。
+当前公开 Build 合同只允许前端传两个 renderer `stylePreset`，且没有 Family/Blueprint/变体目录、预览图、当前 DesignBrief 或“选择某个 Family”的命令。真正入口至少需要：可用 Family/变体目录、版本/digest、预览图、适用约束、当前选择、变更影响和提交并发合同。
+
+不得从运行时批准目录或 renderer preset 反推一个“模板市场”，也不能把 Build 的 `stylePreset` 字符串改名包装成 TemplateFamily。
 
 ### 16.4 版本历史与对比 `PAGE-FE-048`
 
 **规划状态：`TARGET_NOT_RUNNABLE`**
 
-内部存在不可变 SiteRelease 和 active pointer，但没有公共 list/detail/diff/activate API。至少需要：
+内部现在可以读取 ReleaseManifest v1/v2/v3，新的精装修成功产物写 v3，并由 active pointer 激活；但仍没有公共 list/detail/diff/activate API。至少需要：
 
 - `GET /sites/{id}/releases?cursor=`：版本、来源 Build、状态、locale、摘要、是否 active、可保留期限；
 - `GET /sites/{id}/releases/{releaseId}`：manifest 摘要、质量/事实/素材快照、完整性和 allowed actions；
@@ -996,9 +1047,9 @@ Build 详情当前不返回：
 
 **规划状态：`TARGET_NOT_RUNNABLE`**
 
-至少需要：发布授权 challenge、幂等 publish command、发布任务 snapshot、健康检查、当前 live pointer、失败保留旧站、审计，以及从已验证健康 Release 回滚的命令。规划入口见 [09-m1-implementation-design.md](../../../site-builder/09-m1-implementation-design.md) 第 295 行。
+至少需要：发布授权 challenge、幂等 publish command、发布任务 snapshot、健康检查、当前 live pointer、失败保留旧站、审计，以及从已验证健康 Release 回滚的命令。规划入口见 [09-m1-implementation-design.md](../../../site-builder/09-m1-implementation-design.md) 第 300 行。
 
-Preview URL、`Site.status=published` 枚举和内部 active pointer 都不能替代这些接口。
+Preview URL、`Site.status=published` 枚举、ReleaseManifest v3 和内部 active pointer 都不能替代这些接口。
 
 ### 16.7 域名与 SSL `PAGE-FE-051`
 
