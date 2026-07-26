@@ -52,6 +52,7 @@ const STATIC_SOURCE_PATHS = [
   "apps/api/src/model-gateway/model-provider.registry.ts",
   "apps/api/src/model-gateway/model-provider.ts",
   "apps/api/src/model-gateway/model-router.ts",
+  "apps/api/src/model-gateway/model-identity.ts",
   "apps/api/src/model-gateway/model-transports.ts",
   "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
   "apps/api/src/model-gateway/providers/provider-output-error.ts",
