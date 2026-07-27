@@ -14,7 +14,12 @@ updates:
     ignore:
       - dependency-name: "astro"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "@nestjs/core"
+      # NestJS majors must move as one compatibility-reviewed migration; a
+      # standalone package bump can leave the framework toolchain split.
+      - dependency-name: "@nestjs/*"
+        update-types: ["version-update:semver-major"]
+      # v5 changes parser behavior/API and needs fixture-based regression review.
+      - dependency-name: "fast-xml-parser"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
