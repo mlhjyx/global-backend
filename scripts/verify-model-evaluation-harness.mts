@@ -74,6 +74,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     `- admission contract：${code(MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION)}；它独立于生产 ${code("VERIFIED_GATEWAY_MODEL_TRANSPORTS")}，不能改变 runtime provider/route。`,
     "- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只有隔离的 legacy comparator 入口，legacy-only alias 不能进入 target dispatch。",
     "- actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。",
+    "- trusted probe/run 只接受 `createModelEvaluationProtocolExecutor` 私有 WeakSet 品牌化并冻结的 target execute；任意 callback、wrapper/Proxy 或 WeakSet prototype monkeypatch 均在预算 reserve 和 client dispatch 前拒绝。品牌模块不暴露 register 或测试注入入口。",
     "- adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。",
     "- cost settlement 只认显式注入、带 resolverId 的 resolver；没有 provider-reported、冻结价格或核验账单依据即 `unknown`，绝不记 0。schema/task-gate 唯一修复调用的 usage 与 callCount 必须合并。",
     "",
@@ -112,7 +113,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "## 预算与 provenance",
     "",
     "- 每次调用先 reserve campaign/per-call 上界；budget guard 使用模块私有 WeakMap 品牌、JavaScript 私有状态与捕获的 reserve/settle 原型方法，duck/Proxy budget 或实例/prototype monkeypatch 都不能绕过。每个返回 run 先整棵 deep-freeze，再由模块私有 WeakMap 绑定实际 guard；summary/ranker 必须显式收到同一个 genuine guard，并逐 run 核验对象身份与 campaignId，因此逐次新建 genuine guard、混用 guard、原地改写已绑定 run、clone/JSON reload 或只改公开 campaignId 都 fail-closed。unknown 或 malformed settlement 保留上界并冻结后续 dispatch。`rejected_before_dispatch` 只允许本地 reserve 拒绝路径，probe/matrix 在 executor 进入后声称该 reason 一律归 unknown 并冻结；当前调用超过 per-call cap 时保留质量观察，但标记预算硬失败并不可排名。",
-    "- 每个 run（schema v2）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、evaluator rubric 和所需 capability-probe attestation。原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；被拒绝输出只留 SHA-256 digest 与拒绝原因，不把 PII/schema-invalid 原文写入 evidence。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。",
+    "- 每个 run（schema v2）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、evaluator rubric 和所需 capability-probe attestation。终态原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；终态被拒输出只留 SHA-256 digest 与 failureCode，不把 PII/schema-invalid 原文写入 evidence。v2 adapter 对 repair 中间输出只聚合 usage/callCount，不保存其中间 digest 或 rejection reason，也不得把它称为已持久化 evidence；后续 fixed-commit evidence 若要求中间 repair provenance，必须先在独立 PR 显式升级 run schema/source contract。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。",
     "- 可用性、协议、身份、probe attestation、usage、artifact fingerprint、matrix、生产 P95、预算和成本任一未闭合，都不能生成可晋级排名。",
     "",
   ].join("\n");

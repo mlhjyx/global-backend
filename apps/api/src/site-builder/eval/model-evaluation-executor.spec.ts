@@ -12,12 +12,14 @@ import {
   buildCanonicalModelEvaluationCase,
   buildTaskEvaluationPlan,
   runTaskEvaluationAttempt,
+  validateCapabilityProbe,
   type CostSettlement,
   type ModelEvaluationExecutionRequest,
 } from "./model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
   createModelEvaluationProtocolExecutor,
+  isTrustedModelEvaluationProtocolExecute,
   type ModelEvaluationSettlementResolver,
   type ModelEvaluationWireClient,
   type ModelEvaluationWireResponse,
@@ -429,6 +431,77 @@ describe("model evaluation text wire adapters", () => {
   });
 
   it.each([
+    ["OpenAI Responses", 0, false],
+    ["Anthropic Messages", 1, false],
+    ["OpenAI Chat comparator", 0, true],
+  ] as const)(
+    "preserves whitespace-padded reported identity from %s and fails it closed",
+    async (_label, candidateIndex, legacyComparator) => {
+      const request = legacyComparator
+        ? {
+            ...canonicalRequest(),
+            alias: "deepseek-v4-pro",
+            expectedProtocol: "openai-chat-completions" as const,
+          }
+        : canonicalRequest(candidateIndex);
+      const artifact = canonicalAcceptedArtifact();
+      const paddedReportedModel = ` ${request.alias}\n`;
+      const client =
+        request.expectedProtocol === "openai-responses"
+          ? wireClient({
+              openAIResponses: async () =>
+                wireResponse(
+                  openAIResponsesBody(paddedReportedModel, artifact),
+                ),
+            })
+          : request.expectedProtocol === "anthropic-messages"
+            ? wireClient({
+                anthropicMessages: async () =>
+                  wireResponse(anthropicBody(paddedReportedModel, artifact)),
+              })
+            : wireClient({
+                openAIChatCompletions: async () =>
+                  wireResponse(chatBody(paddedReportedModel, artifact)),
+              });
+      const executor = createModelEvaluationProtocolExecutor({
+        wireClient: client,
+        settlementResolver: settlementResolver(),
+      });
+      const result = legacyComparator
+        ? await executor.executeLegacyComparator(request)
+        : await executor.execute(request);
+
+      expect(result).toMatchObject({
+        requestedModel: request.alias,
+        reportedModel: paddedReportedModel,
+        resolvedModel: paddedReportedModel,
+        modelResolutionSource: "upstream_response",
+      });
+      expect(
+        validateCapabilityProbe(
+          {
+            ...buildTaskEvaluationPlan("site_builder.brand_profile")
+              .candidates[0],
+            alias: request.alias,
+            expectedProtocol: request.expectedProtocol,
+          },
+          {
+            actualProtocol: result.actualProtocol,
+            requestedModel: result.requestedModel,
+            reportedModel: result.reportedModel,
+            resolvedModel: result.resolvedModel,
+            modelResolutionSource: result.modelResolutionSource,
+            outputState: result.artifactState,
+          },
+        ),
+      ).toMatchObject({
+        status: "identity_unproven",
+        identityVerified: false,
+      });
+    },
+  );
+
+  it.each([
     ["missing", undefined, "requested_fallback", "gpt-5.6-terra"],
     ["wrong", "gpt-5.6-sol", "upstream_response", "gpt-5.6-sol"],
   ] as const)(
@@ -737,6 +810,68 @@ describe("structured output, repair, errors, and settlement", () => {
 });
 
 describe("harness integration and unchanged runtime routes", () => {
+  it("rejects arbitrary or wrapped execute callbacks before dispatch and budget reservation", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const wireCall = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(
+          plan.candidates[0].alias,
+          canonicalAcceptedArtifact(),
+        ),
+      ),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: settlementResolver(),
+    });
+    const wrappedExecute = vi.fn(executor.execute);
+    const budget = new ModelEvaluationBudgetGuard(100);
+    const before = budget.snapshot();
+
+    expect(isTrustedModelEvaluationProtocolExecute(executor.execute)).toBe(
+      true,
+    );
+    expect(isTrustedModelEvaluationProtocolExecute(wrappedExecute)).toBe(false);
+    const weakSetHas = vi.spyOn(WeakSet.prototype, "has").mockReturnValue(true);
+    expect(isTrustedModelEvaluationProtocolExecute(wrappedExecute)).toBe(false);
+    weakSetHas.mockRestore();
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: budget,
+        execute: wrappedExecute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "untrusted_evaluation_executor",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(wrappedExecute).not.toHaveBeenCalled();
+    expect(wireCall).not.toHaveBeenCalled();
+    expect(budget.snapshot()).toEqual(before);
+
+    const probeBudget = new ModelEvaluationBudgetGuard(100);
+    const probeBefore = probeBudget.snapshot();
+    await expect(
+      new ModelEvaluationCapabilityCampaign(probeBudget).runCanonicalProbe({
+        plan,
+        candidate: plan.candidates[2],
+        execute: wrappedExecute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "untrusted_evaluation_executor",
+    });
+    expect(probeBudget.snapshot()).toEqual(probeBefore);
+    expect(wrappedExecute).not.toHaveBeenCalled();
+    expect(wireCall).not.toHaveBeenCalled();
+  });
+
   it("creates a canonical preflight attestation through the injected executor", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[2];

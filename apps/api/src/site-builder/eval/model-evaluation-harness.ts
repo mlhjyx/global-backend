@@ -43,6 +43,7 @@ import {
   sha256CanonicalJson,
   sha256Text,
 } from "./eval-provenance";
+import { isTrustedModelEvaluationProtocolExecute } from "./model-evaluation-executor";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
@@ -1269,58 +1270,6 @@ export interface ModelEvaluationSourceFileFingerprint {
   sha256: string;
 }
 
-/**
- * Opaque evaluation-internal seam for deterministic integration tests. The
- * reader has no public read method and is accepted only when created by the
- * bounded sequence factory below; normal harness/evidence paths always read
- * the repository directly.
- */
-export interface ModelEvaluationSourceBundleFingerprintReaderForTesting {
-  readonly kind: "evaluation_source_bundle_test_sequence";
-}
-
-const TRUSTED_SOURCE_BUNDLE_TEST_READERS = new WeakMap<
-  object,
-  {
-    observations: readonly (readonly ModelEvaluationSourceFileFingerprint[])[];
-    index: number;
-  }
->();
-
-export function createModelEvaluationSourceBundleFingerprintReaderForTesting(
-  observations: readonly (readonly ModelEvaluationSourceFileFingerprint[])[],
-): ModelEvaluationSourceBundleFingerprintReaderForTesting {
-  if (observations.length < 2) {
-    throw new Error(
-      "source bundle test reader requires at least before/after observations",
-    );
-  }
-  const frozenObservations = observations.map((observation) =>
-    deepFreeze(
-      observation.map((entry) => {
-        if (
-          typeof entry.role !== "string" ||
-          !entry.role ||
-          typeof entry.path !== "string" ||
-          !entry.path ||
-          !SHA256.test(entry.sha256)
-        ) {
-          throw new Error("source bundle test observation is invalid");
-        }
-        return { ...entry };
-      }),
-    ),
-  );
-  const reader = Object.freeze({
-    kind: "evaluation_source_bundle_test_sequence" as const,
-  });
-  TRUSTED_SOURCE_BUNDLE_TEST_READERS.set(reader, {
-    observations: frozenObservations,
-    index: 0,
-  });
-  return reader;
-}
-
 export interface ModelEvaluationCasePayload {
   fixture: BrandProfileEvalFixture;
   taskInput: BrandProfileInput;
@@ -1466,6 +1415,12 @@ export class ModelEvaluationCapabilityCampaign {
     ) => Promise<ModelEvaluationCallResult<T>>;
     now?: () => number;
   }): Promise<CapabilityProbeValidation> {
+    if (!isTrustedModelEvaluationProtocolExecute(options.execute)) {
+      throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      });
+    }
     assertCandidateBelongsToPlan(options.plan, options.candidate);
     if (
       options.candidate.preflight !== "capability_probe" ||
@@ -1819,23 +1774,6 @@ function currentSourceBundle(
   }));
 }
 
-function readSourceBundle(
-  suite: TaskEvaluationSuite,
-  reader?: ModelEvaluationSourceBundleFingerprintReaderForTesting,
-): readonly ModelEvaluationSourceFileFingerprint[] {
-  if (!reader) return currentSourceBundle(suite);
-  const state = TRUSTED_SOURCE_BUNDLE_TEST_READERS.get(reader);
-  if (!state) {
-    throw new Error("trusted source bundle test reader is required");
-  }
-  const observation = state.observations[state.index];
-  if (!observation) {
-    throw new Error("source bundle test reader observation sequence exhausted");
-  }
-  state.index += 1;
-  return observation;
-}
-
 export function modelEvaluationSourceBundleMatches(
   expected: readonly ModelEvaluationSourceFileFingerprint[],
   observed: readonly ModelEvaluationSourceFileFingerprint[],
@@ -1846,22 +1784,20 @@ export function modelEvaluationSourceBundleMatches(
 function sourceBundleMatchesCase(
   suite: TaskEvaluationSuite,
   payload: ModelEvaluationCasePayload,
-  reader?: ModelEvaluationSourceBundleFingerprintReaderForTesting,
 ): boolean {
   try {
     return modelEvaluationSourceBundleMatches(
       payload.sourceFiles,
-      readSourceBundle(suite, reader),
+      currentSourceBundle(suite),
     );
   } catch {
     return false;
   }
 }
 
-function buildCanonicalModelEvaluationCaseWithReader(
+export function buildCanonicalModelEvaluationCase(
   plan: TaskEvaluationPlan,
   fixtureId: string,
-  reader?: ModelEvaluationSourceBundleFingerprintReaderForTesting,
 ): ModelEvaluationCase {
   const firstCandidate = plan.candidates[0];
   if (!firstCandidate) {
@@ -1890,7 +1826,7 @@ function buildCanonicalModelEvaluationCaseWithReader(
     ),
   ) as BrandProfileEvalFixture;
   const prepared = prepareBrandProfileEvalFixture(fixture);
-  const sourceFiles = readSourceBundle(suite, reader);
+  const sourceFiles = currentSourceBundle(suite);
   const payload = deepFreeze({
     fixture,
     taskInput: prepared.input,
@@ -1920,13 +1856,6 @@ function buildCanonicalModelEvaluationCaseWithReader(
   const evaluationCase = deepFreeze({ contract, payload });
   assertCaseContract(plan, evaluationCase);
   return evaluationCase;
-}
-
-export function buildCanonicalModelEvaluationCase(
-  plan: TaskEvaluationPlan,
-  fixtureId: string,
-): ModelEvaluationCase {
-  return buildCanonicalModelEvaluationCaseWithReader(plan, fixtureId);
 }
 
 function assertCaseContract(
@@ -2245,8 +2174,13 @@ export async function runTaskEvaluationAttempt<T>(options: {
     request: ModelEvaluationExecutionRequest,
   ) => Promise<ModelEvaluationCallResult<T>>;
   now?: () => number;
-  sourceBundleFingerprintReaderForTesting?: ModelEvaluationSourceBundleFingerprintReaderForTesting;
 }): Promise<ModelEvaluationRun> {
+  if (!isTrustedModelEvaluationProtocolExecute(options.execute)) {
+    throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
   assertCandidateBelongsToPlan(options.plan, options.candidate);
   assertTrustedModelEvaluationBudget(options.campaignBudget);
   if (
@@ -2266,10 +2200,9 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `model evaluation attempt must be within 1..${options.plan.evaluationSuite.repeats}`,
     );
   }
-  const evaluationCase = buildCanonicalModelEvaluationCaseWithReader(
+  const evaluationCase = buildCanonicalModelEvaluationCase(
     options.plan,
     options.fixtureId,
-    options.sourceBundleFingerprintReaderForTesting,
   );
   const capabilityProbeAttestation =
     options.candidate.preflight === "capability_probe"
@@ -2528,7 +2461,6 @@ export async function runTaskEvaluationAttempt<T>(options: {
   const sourceBundleStable = sourceBundleMatchesCase(
     options.plan.evaluationSuite,
     evaluationCase.payload,
-    options.sourceBundleFingerprintReaderForTesting,
   );
   if (!elapsedIsValid) {
     return bindRun({

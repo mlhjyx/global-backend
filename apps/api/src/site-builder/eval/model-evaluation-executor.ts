@@ -209,6 +209,24 @@ export interface ModelEvaluationProtocolExecutor {
 type EvaluationExecutionRequest =
   ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest;
 
+const TRUSTED_MODEL_EVALUATION_EXECUTES = new WeakSet<object>();
+const TRUSTED_EXECUTE_ADD = WeakSet.prototype.add;
+const TRUSTED_EXECUTE_HAS = WeakSet.prototype.has;
+const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
+
+export function isTrustedModelEvaluationProtocolExecute(
+  value: unknown,
+): value is ModelEvaluationProtocolExecutor["execute"] {
+  return (
+    typeof value === "function" &&
+    APPLY_TRUSTED_EXECUTE_INTRINSIC(
+      TRUSTED_EXECUTE_HAS,
+      TRUSTED_MODEL_EVALUATION_EXECUTES,
+      [value],
+    )
+  );
+}
+
 type TextEvaluationProtocol =
   "openai-responses" | "anthropic-messages" | "openai-chat-completions";
 
@@ -484,8 +502,8 @@ function stripJsonFence(content: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
-function optionalTrimmedString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function nonEmptyReportedModel(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function nonNegativeInteger(value: unknown): number | null {
@@ -542,7 +560,7 @@ function normalizeOpenAIResponses(body: unknown): NormalizedTextResponse {
   const usage = isRecord(body.usage)
     ? responseUsage(body.usage.input_tokens, body.usage.output_tokens)
     : null;
-  const reportedModel = optionalTrimmedString(body.model);
+  const reportedModel = nonEmptyReportedModel(body.model);
   if (body.status === "incomplete") {
     return normalizedText("", reportedModel, usage, true);
   }
@@ -577,7 +595,7 @@ function normalizeAnthropicMessages(body: unknown): NormalizedTextResponse {
   const usage = isRecord(body.usage)
     ? responseUsage(body.usage.input_tokens, body.usage.output_tokens)
     : null;
-  const reportedModel = optionalTrimmedString(body.model);
+  const reportedModel = nonEmptyReportedModel(body.model);
   if (
     body.stop_reason === "max_tokens" ||
     body.stop_reason === "model_context_window_exceeded"
@@ -609,7 +627,7 @@ function normalizeOpenAIChatCompletions(body: unknown): NormalizedTextResponse {
   const usage = isRecord(body.usage)
     ? responseUsage(body.usage.prompt_tokens, body.usage.completion_tokens)
     : null;
-  const reportedModel = optionalTrimmedString(body.model);
+  const reportedModel = nonEmptyReportedModel(body.model);
   const first = Array.isArray(body.choices) ? body.choices[0] : undefined;
   if (!isRecord(first)) {
     throw new Error("openai_chat_choice_missing");
@@ -916,12 +934,23 @@ export function createModelEvaluationProtocolExecutor(deps: {
     return result as ModelEvaluationCallResult<T>;
   };
 
-  return Object.freeze({
-    execute: <T>(
+  const execute = Object.freeze(
+    <T>(
       request:
         ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest,
     ) => executeWithMode<T>(request, "target"),
-    executeLegacyComparator: <T>(request: ModelEvaluationExecutionRequest) =>
+  );
+  APPLY_TRUSTED_EXECUTE_INTRINSIC(
+    TRUSTED_EXECUTE_ADD,
+    TRUSTED_MODEL_EVALUATION_EXECUTES,
+    [execute],
+  );
+  const executeLegacyComparator = Object.freeze(
+    <T>(request: ModelEvaluationExecutionRequest) =>
       executeWithMode<T>(request, "legacy_comparator"),
+  );
+  return Object.freeze({
+    execute,
+    executeLegacyComparator,
   });
 }

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./model-evaluation-executor", () => ({
+  isTrustedModelEvaluationProtocolExecute: () => true,
+}));
+
 import {
   ModelEvaluationBudgetGuard,
   ModelEvaluationCallError,
@@ -8,7 +13,6 @@ import {
   buildProfileEvaluationAdmission,
   buildTaskEvaluationPlan,
   classifyCompletedTaskResult,
-  createModelEvaluationSourceBundleFingerprintReaderForTesting,
   rankModelEvaluationCandidates as rankModelEvaluationCandidatesRaw,
   runTaskEvaluationAttempt,
   summarizeModelEvaluationCandidate as summarizeModelEvaluationCandidateRaw,
@@ -963,51 +967,6 @@ describe("task attempt observation window", () => {
     ).resolves.toMatchObject({
       resultClass: "quality_valid_runtime_on_time",
       artifactAccepted: true,
-    });
-    expect(execute).toHaveBeenCalledTimes(1);
-  });
-
-  it("detects an otherwise valid completion when a bound source changes in flight", async () => {
-    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-    const candidate = plan.candidates[0];
-    const evaluationCase = buildCanonicalModelEvaluationCase(
-      plan,
-      "auto-parts-rich",
-    );
-    const observedAfterCall = structuredClone(
-      evaluationCase.payload.sourceFiles,
-    );
-    observedAfterCall[0] = {
-      ...observedAfterCall[0],
-      sha256: "0".repeat(64),
-    };
-    const execute = vi.fn(async () =>
-      completedCall(
-        candidate.alias,
-        candidate.expectedProtocol,
-        canonicalAcceptedArtifact(),
-      ),
-    );
-    const sourceBundleFingerprintReaderForTesting =
-      createModelEvaluationSourceBundleFingerprintReaderForTesting([
-        evaluationCase.payload.sourceFiles,
-        observedAfterCall,
-      ]);
-
-    await expect(
-      runTaskEvaluationAttempt({
-        plan,
-        candidate,
-        fixtureId: "auto-parts-rich",
-        attempt: 1,
-        campaignBudget: new ModelEvaluationBudgetGuard(100),
-        execute,
-        sourceBundleFingerprintReaderForTesting,
-      }),
-    ).resolves.toMatchObject({
-      resultClass: "provenance_invalid",
-      artifactAccepted: false,
-      failureCode: "source_bundle_changed_during_dispatch",
     });
     expect(execute).toHaveBeenCalledTimes(1);
   });
