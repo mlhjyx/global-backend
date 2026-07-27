@@ -2,22 +2,24 @@
 
 > 文档 ID：`SITE-EVAL-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：资格证据、Golden 资产与 [状态](../status/current.md)。
+> 当前事实来源：资格证据、Golden 资产、[状态](../status/current.md)与候选基线 `site-builder-model-candidate-baseline/2026-07-27-v1`。
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 refurbish build 内的确定性 QA/SEO/a11y/genericness 与 capability-gated 审美评审，02 §4 P4，M1-f 已落）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
 > **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；只有 BrandProfile 已完成 MODEL-1 task-shaped 晋级。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**。M1-e-B 已使 design/assemble 成为真实受控消费者，但其 402 后确定性降级不构成模型成功证据。M1-f 已落确定性 P4 与 closed repair；Gemini task-shaped 矩阵超时，因此审美状态只能明确为 unavailable，未晋级、不得冒充模型成功。55 型均为 `m1_e_a_qualified`，不是蒸馏产物状态。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
+>
+> **2026-07-27 候选重基线**：后续可评测型号、精确 alias、状态、预期协议与 task/Profile 池只认[生成候选基线](model-candidate-baseline.md)，不得从 `/models` 可见性直接推导能力、质量或晋级。后续真实评测必须按各 task 的生产 envelope 加扩展诊断观察窗，分别记录 `quality_valid_runtime_late` 与 `content_invalid`；先按质量、结构、事实、稳定性判断，P95 与 accepted-artifact cost 后评判，同时保留绝对预算止损、未知结算 fail-closed。此规则不回写本文件下方的历史报告。
 
 ## 0. 定位与两层质量体系
 
 **质量闭环落在三个构建位置**（v3.2 §0.2 回写），本文的离线评测为这三处提供回归基线：
 
-| 位置 | 当前痛点 | 质量环内容 | 状态 |
-|---|---|---|---|
-| Demo v0 | 兼容 1.0 路径 | 固定确定性 spec；不继承受控 1.1 结论 | as-built compatibility |
-| M1-e | 六 Family 的受控整站组装 | DesignBrief、Blueprint、内容预算、四层 validator、12 个 sparse/rich Golden 与 36 张三断点整站快照 | 已完成（M1-e-A/B） |
-| M1-f | 每个候选必须先过发布前质量门 | 三断点截图 + 确定性 QA/SEO/a11y/genericness + capability-gated 审美评审 + round 0 后最多三次闭合修补 | 已完成；审美 unavailable、未晋级 |
+| 位置    | 当前痛点                     | 质量环内容                                                                                           | 状态                             |
+| ------- | ---------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Demo v0 | 兼容 1.0 路径                | 固定确定性 spec；不继承受控 1.1 结论                                                                 | as-built compatibility           |
+| M1-e    | 六 Family 的受控整站组装     | DesignBrief、Blueprint、内容预算、四层 validator、12 个 sparse/rich Golden 与 36 张三断点整站快照    | 已完成（M1-e-A/B）               |
+| M1-f    | 每个候选必须先过发布前质量门 | 三断点截图 + 确定性 QA/SEO/a11y/genericness + capability-gated 审美评审 + round 0 后最多三次闭合修补 | 已完成；审美 unavailable、未晋级 |
 
 **生成与评审分离三原则**（v3.2 §14.1 回写，评测公信力地基）：
 
@@ -104,17 +106,17 @@ Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包
 
 审美 evaluator 的 closed output 支持**结构化 9 维加权分**（v3.2 §28 回写）；当前运行时 route 因 MODEL-1 未晋级而明确 unavailable，不伪造分数。未来模型可用时，硬失败仍**不靠总分抵消**：
 
-| 维度 | 权重 | 高分标准 | 典型扣分 |
-|---|---:|---|---|
-| 信息层级 | 15 | 一眼理解业务、主次清晰 | 首屏无业务对象、H1 与正文同权 |
-| 全站一致性 | 15 | 同一视觉语法贯穿多页 | 每个 section 像不同模板 |
-| 留白与节奏 | 10 | 密度有变化、呼吸合理 | 全站等距、连续卡片墙 |
-| 对比与可读性 | 10 | 文本/背景/CTA 清楚 | 灰字过浅、叠图不可读 |
-| 图片策略 | 10 | 角色明确、裁切稳定 | 重复占位、拉伸、主题不符 |
-| 移动端构图 | 15 | 重排自然、CTA 可触达 | 只是缩小、横向溢出 |
-| CTA 清晰度 | 10 | 主要 CTA 单一、路径明确 | 每段都抢主 CTA |
-| 可信度 | 10 | 事实与证据匹配 | 虚构数字、空洞形容词 |
-| 原创性 / 非模板感 | 5 | 家族一致但不机械重复 | 只换色、结构全同 |
+| 维度              | 权重 | 高分标准                | 典型扣分                      |
+| ----------------- | ---: | ----------------------- | ----------------------------- |
+| 信息层级          |   15 | 一眼理解业务、主次清晰  | 首屏无业务对象、H1 与正文同权 |
+| 全站一致性        |   15 | 同一视觉语法贯穿多页    | 每个 section 像不同模板       |
+| 留白与节奏        |   10 | 密度有变化、呼吸合理    | 全站等距、连续卡片墙          |
+| 对比与可读性      |   10 | 文本/背景/CTA 清楚      | 灰字过浅、叠图不可读          |
+| 图片策略          |   10 | 角色明确、裁切稳定      | 重复占位、拉伸、主题不符      |
+| 移动端构图        |   15 | 重排自然、CTA 可触达    | 只是缩小、横向溢出            |
+| CTA 清晰度        |   10 | 主要 CTA 单一、路径明确 | 每段都抢主 CTA                |
+| 可信度            |   10 | 事实与证据匹配          | 虚构数字、空洞形容词          |
+| 原创性 / 非模板感 |    5 | 家族一致但不机械重复    | 只换色、结构全同              |
 
 **硬失败清单**（任一命中即阻断，不被总分抵消）：虚构认证/客户/数字/地址、页面不可构建、关键 CTA 不可用、移动端横向溢出、对比度严重不合格、未批准外部请求、未知组件被静默删除。
 
@@ -122,19 +124,19 @@ Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包
 
 M1 发布门（v3.2 §10.2 回写）；每维带**独立阻断条件**，不允许总平均掩盖单维硬伤：
 
-| 维度 | M1 目标 | 阻断条件 |
-|---|---:|---|
-| Demo API P95 | < 10 秒 | 超过现有 PRD 红线 |
-| Demo 生成成功率 | ≥ 99% | 无兜底或生成失败 |
-| Lighthouse Performance | ≥ 85 | 任一 Golden 页面 < 85 |
-| Lighthouse Accessibility | ≥ 90 | 任一 Golden 页面 < 90 |
-| 结构化审美分 | ≥ 85/100 | 任一硬伤维度 < 60 |
-| 事实安全 | 100% | 出现无证据认证/客户/数字/承诺 |
-| 外部运行时依赖 | 0 个未批准域名 | 字体/图片/脚本/表单偷偷出站 |
-| 组件契约覆盖 | 100% | 未知组件被静默丢弃（ADR-015 fail-closed） |
-| 三断点溢出 | 0 | 375 / 768 / 1440 任一横向溢出 |
-| 新方案盲测胜率 | ≥ 80% | 对当前 Demo 的成对盲测未达标 |
-| 同质化 | 10 样本中 ≥ 4 个明显结构家族 | 10 样本只换色不换结构 |
+| 维度                     |                      M1 目标 | 阻断条件                                  |
+| ------------------------ | ---------------------------: | ----------------------------------------- |
+| Demo API P95             |                      < 10 秒 | 超过现有 PRD 红线                         |
+| Demo 生成成功率          |                        ≥ 99% | 无兜底或生成失败                          |
+| Lighthouse Performance   |                         ≥ 85 | 任一 Golden 页面 < 85                     |
+| Lighthouse Accessibility |                         ≥ 90 | 任一 Golden 页面 < 90                     |
+| 结构化审美分             |                     ≥ 85/100 | 任一硬伤维度 < 60                         |
+| 事实安全                 |                         100% | 出现无证据认证/客户/数字/承诺             |
+| 外部运行时依赖           |               0 个未批准域名 | 字体/图片/脚本/表单偷偷出站               |
+| 组件契约覆盖             |                         100% | 未知组件被静默丢弃（ADR-015 fail-closed） |
+| 三断点溢出               |                            0 | 375 / 768 / 1440 任一横向溢出             |
+| 新方案盲测胜率           |                        ≥ 80% | 对当前 Demo 的成对盲测未达标              |
+| 同质化                   | 10 样本中 ≥ 4 个明显结构家族 | 10 样本只换色不换结构                     |
 
 ### 2.3 Core Web Vitals 工程阈值
 
@@ -186,17 +188,17 @@ M1 发布门（v3.2 §10.2 回写）；每维带**独立阻断条件**，不允�
 
 **已确认的 evidence 门缺陷**（v3.2 §24.2，as-built 代码问题，**须 M1-d 前修**，评测 fixture 须含对抗回归）：
 
-| ID | 代码证据 | 问题 |
-|---|---|---|
-| R4-1 | `enforceEvidenceGate` | 普通事实无 quote 也过；quote 只查"存在于来源"，不查数字/实体/claim 是否被支持 → 可用真实 URL/无关引文给虚构事实洗白 |
-| R4-2 ✅ A1 隐私半闭环 | `brand-research.ts` | 新写已不冻结原始 title/snippet/path/query/fragment，只生成 origin hint；A2 仍须让任何 `research_hint` 不可发布，并要求事实回抓权威正文 |
-| R4-3 | 认证 evidence | intake/upload 标签 + 任意命中 quote 即放行认证，无强制 ready cert 资产引用 → 自填"ISO"可变成站点事实 |
+| ID                    | 代码证据              | 问题                                                                                                                                   |
+| --------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| R4-1                  | `enforceEvidenceGate` | 普通事实无 quote 也过；quote 只查"存在于来源"，不查数字/实体/claim 是否被支持 → 可用真实 URL/无关引文给虚构事实洗白                    |
+| R4-2 ✅ A1 隐私半闭环 | `brand-research.ts`   | 新写已不冻结原始 title/snippet/path/query/fragment，只生成 origin hint；A2 仍须让任何 `research_hint` 不可发布，并要求事实回抓权威正文 |
+| R4-3                  | 认证 evidence         | intake/upload 标签 + 任意命中 quote 即放行认证，无强制 ready cert 资产引用 → 自填"ISO"可变成站点事实                                   |
 
 ### 2.8 视频 QA rubric（M3 目标态）
 
 视频/动效不塞进 M1；QA 契约预埋（v3.2 §21.4 回写）：
 
-- **多模态评审模型**（`multimodal.review`，型号经 ADR-016 档选、不硬编码）**按时间戳输出 finding**；当前已接文本集合中 `minimax-m3` 是视觉候选，但 plan 端点能否接收真实图像输入仍须 M1-f capability probe，未通过不得冒充可用。模型不可用时保留**确定性时长/编码/闪烁基础门**。
+- **多模态评审模型**（`multimodal.review`，型号经 ADR-016 档选、不硬编码）**按时间戳输出 finding**；`minimax-m3` 只以旧文本 `currentRoute` / `legacy-only` 语境保留，不再是视觉 target pool。当前非运行时视觉候选只认 ADR-021 的机器基线，真实图像输入仍须 capability probe，未通过不得冒充可用。模型不可用时保留**确定性时长/编码/闪烁基础门**。
 - 检查：产品形状/标签/Logo/人物异常/闪烁/字幕/音画/品牌色/黑帧/违规内容。
 - **关键产品或人物严重漂移直接拒绝 Shot**；低风险缺陷可替换为静态图/上一版镜头。
 - **证据记录要求**：必须记录输入帧/时间戳、rubric、model snapshot 与置信度，**不能只保存总分**（v3.2 §21.4）。
@@ -207,14 +209,14 @@ M1 发布门（v3.2 §10.2 回写）；每维带**独立阻断条件**，不允�
 
 ### 3.1 task-shaped 分期表
 
-| Task | 永久硬门 | Bootstrap 排序指标 |
-|---|---|---|
-| Brand | 事实虚构=0、引用捏造=0 | 覆盖、gap、schema、accepted cost |
-| Copy / Localization | 未批准 Claim=0、术语/槽位合法 | 目标市场偏好、清晰度、长度、成本 |
-| Design / Assemble | 未知组件=0、最终 schema/引用门通过 | 一次成功、修复轮数、审美、P95 |
-| Aesthetic Review | 高风险缺陷不能被文风掩盖 | 漏检、误报、定位、成本 |
-| Image / Video | 身份/证件/人像违规=0 | 可用率、重做次数、单位合格成本 |
-| QA / SEO | 硬门由代码命中 | finding 归并与解释准确度 |
+| Task                | 永久硬门                           | Bootstrap 排序指标               |
+| ------------------- | ---------------------------------- | -------------------------------- |
+| Brand               | 事实虚构=0、引用捏造=0             | 覆盖、gap、schema、accepted cost |
+| Copy / Localization | 未批准 Claim=0、术语/槽位合法      | 目标市场偏好、清晰度、长度、成本 |
+| Design / Assemble   | 未知组件=0、最终 schema/引用门通过 | 一次成功、修复轮数、审美、P95    |
+| Aesthetic Review    | 高风险缺陷不能被文风掩盖           | 漏检、误报、定位、成本           |
+| Image / Video       | 身份/证件/人像违规=0               | 可用率、重做次数、单位合格成本   |
+| QA / SEO            | 硬门由代码命中                     | finding 归并与解释准确度         |
 
 > as-built 覆盖：Brand=`brand_profile`、Copy=`copy`、Design/Assemble=`design_spec`+`assemble`+`assembly_fix`、QA/SEO=`qa_summarize`+`seo_review`（7 个已落地）。Aesthetic Review / Localization / Image·Video 为目标态。
 
@@ -280,13 +282,13 @@ Bootstrap 由产品 owner/用户做**成对比较**（v3.2 §27.5）：
 
 **指标六层**（v3.2 §3.6 回写，事件进公共 Outbox、不建第二套消息系统）：
 
-| 层 | 至少记录 |
-|---|---|
-| 激活 | Demo ready rate、P95 |
-| 资料 | profile completion |
-| 构建 | publishable Claim 覆盖、build success/degraded、成本 |
-| 发布 | preview→publish |
-| 增长 | CTA / form / inquiry conversion |
+| 层   | 至少记录                                                            |
+| ---- | ------------------------------------------------------------------- |
+| 激活 | Demo ready rate、P95                                                |
+| 资料 | profile completion                                                  |
+| 构建 | publishable Claim 覆盖、build success/degraded、成本                |
+| 发布 | preview→publish                                                     |
+| 增长 | CTA / form / inquiry conversion                                     |
 | 护栏 | hallucination、identity rejection、a11y/performance、abuse/takedown |
 
 - 访客分析受 region/consent 控制；**询盘正文与个人信息不得进入分析事件**。
@@ -314,7 +316,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ## 10. 待拍板
 
 1. 真实工厂资料进 Golden Set 的**授权方式**（2~3 家合作工厂：口头授权+书面记录 or 简单授权书模板）。
-2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。2026-07-17 本机网关已扩到 39 个可调用型号，包含 GPT/Claude/Gemini 候选与原方舟/DeepSeek；但不能由清单可见或单次连通直接指定 Judge。多模态与跨 provider Judge 均须 MODEL-1 用真实输入、固定 snapshot 校准后再写入 ADR；ADR-020 只决定目标组合，不代替 Judge 校准。
+2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。2026-07-27 非运行时候选只认 ADR-021 的 `site-builder-model-candidate-baseline/2026-07-27-v1`；Gemini 文本虽仍在上游目录可见，但当前渠道已 fail-closed 禁用并只记 `deferred`。不能由目录可见或一次最小连通直接指定 Judge；多模态与跨 provider Judge 均须后续 harness 用真实任务输入、固定 snapshot 校准，并以独立 evidence/ADR 收口。
 3. Bootstrap 6 fixture 的 sparse/rich 素材与期望锚点**由谁产出、何时冻结**（EVAL-bootstrap PR 前置）。
 
 ---
@@ -326,6 +328,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 > **as-built 注记（2026-07-16）**：#121/#123/#124 已完成无条件 Demo、禁虚构身份、业务邮箱隔离、真取消与失败保站；#126 已补齐 `buildId`、intake 幂等、Temporal 启动证据和 Swagger/OpenAPI，并以单测、真 PostgreSQL 与真实 Temporal probe 覆盖 DoD-1 第一项。
 
 ### DoD-1 M0~M1-b 回补
+
 - [x] hasWebsite true/false 都无条件产生同一 site 的 demo buildId，Idempotency-Key 可重放。（R0-1/2，#121/#126）
 - [ ] Demo 不虚构企业类型/工厂/团队/认证/年限/客户/数字；P95 < 10s。（🔴 ADR-017 / R0-3）
 - [ ] active preview 不被失败/取消/未发布 build 覆盖；Release/版本分配并发安全。（ADR-013）
@@ -335,12 +338,14 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 - [ ] 首个付费 fan-out 前预算 reserve/settle、AiTrace、costSummary 可持久对账。
 
 ### DoD-2 M1-c 媒体基础与图片
+
 - [x] AssetVariant additive migration/RLS/recipe 幂等/derivedKeys 兼容/回滚通过；M1-c 不预建 MediaJob/AssetUsage。（MF0-A/B + M1-c verifier；ADR-018 / 14）
 - [x] M1-c 纯 Sharp；原图 immutable；EXIF/GPS/方向/色彩/透明与响应式格式由实际 Sharp fixture/开发环境 MinIO 对账覆盖；不把编码子进程描述为生产容器/cgroup 隔离。
 - [x] active SiteSpec 引用素材不可删（→409）；对象/DB/checksum 可对账；MF-1 后无感切 AssetUsage。（MF0-B + M1-c verifier）
 - [x] video/audio/poster/caption 演进方向已记录，且 M1-c 未调用 video/TTS provider。（14 §6–7）
 
 ### DoD-3 M1-d~g 内容、设计与质量
+
 - [ ] 6 Family 各 ≥2 首页 + 2 内页 Blueprint，差异可解释；26 组件 schema/Astro/fixture/a11y/content budget/visual test 一致。（04 / 13）
 - [ ] Demo 无模型也有视觉锚点；sparse 不虚构、rich 正确利用产品/工厂/证书/地址。
 - [x] Copy 只消费 PublishableClaimSnapshot；locale default 阻断、optional 省略/degraded 与空快照中性路径已覆盖。人工编辑锁定仍属后续编辑能力，不在 M1-d 冒充完成。
@@ -350,6 +355,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 - [ ] 6 Bootstrap fixture ≥4/6 成对偏好胜出，性能/事实/a11y 无回退；扩 12 后设多人盲测门。
 
 ### DoD-4 模型、运维与公开发布前门
+
 - [x] MODEL-0 的 profile/能力/策略 registry 已落；Agent 卡不散落型号。（ADR-016）
 - [x] BrandProfile 完成 capability probe + 6×2 候选/现役同形报告并经 owner 批准为代码级 `promotedRoute`；有任务失败门、原生协议与 rollback。其余 task 仍逐项待评测，不能继承本结论。
 - [ ] 每 Release 可追溯 model snapshot/routePolicy/prompt/schema/rubric/accepted-artifact cost。
@@ -357,6 +363,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 - [ ] Readdy/字体/图标/图片/视频/音乐许可来源撤权可审计；Tier B 原始输出不入生产 RAG/训练。（ADR-019）
 
 ### DoD-5 M3 媒体门（不阻断 M1）
+
 - [ ] MF-1 MediaJob/AssetUsage 由视频真实消费者驱动落地；Seedance Shot job/取消/重试/成本/QA/静态降级可用，Veo 仅 policy 进 premium/shadow。
 - [ ] 旁白/转写/字幕/poster/reduced-motion/移动端码率完整；无声音克隆。
 - [ ] 产品/Logo/人物/文字时序 QA 通过；失败只重做 Shot，回滚恢复整套媒体。

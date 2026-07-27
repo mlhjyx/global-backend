@@ -1,0 +1,496 @@
+{
+  "schemaVersion": "site-builder-model-candidate-baseline/v1",
+  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-07-27-v1",
+  "effectiveDate": "2026-07-27",
+  "scope": "non_runtime_evaluation_candidates",
+  "statusDefinitions": {
+    "runnable": "Admitted to a future capability probe or task-shaped evaluation; not promoted and not production-qualified.",
+    "deferred": "Recorded but excluded from the runnable evaluation pool until the stated upstream, consumer, or capability gate is satisfied.",
+    "preview": "Preview alias recorded for shadow-only evaluation; it cannot be the sole production dependency.",
+    "legacy-only": "Retained only by an unchanged currentRoute or rollback snapshot; excluded from every new target pool."
+  },
+  "models": [
+    {
+      "alias": "gpt-5.6-terra",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["openai-responses"],
+      "boundary": "Existing BrandProfile promotion remains unchanged; other tasks require their own evaluation."
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["anthropic-messages"],
+      "boundary": "Existing BrandProfile fallback remains unchanged; other tasks require their own evaluation."
+    },
+    {
+      "alias": "gpt-5.5",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["openai-responses"],
+      "boundary": "Gateway visibility and minimal channel health do not prove structured or task-shaped capability."
+    },
+    {
+      "alias": "gpt-5.6-sol",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["openai-responses"],
+      "boundary": "High-reasoning and multimodal-review candidate only; no runtime task promotion."
+    },
+    {
+      "alias": "gpt-5.6-luna",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["openai-responses"],
+      "boundary": "Summary and bulk evaluation candidate only."
+    },
+    {
+      "alias": "gpt-5.4-mini",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["openai-responses"],
+      "boundary": "Summary and bulk evaluation candidate only."
+    },
+    {
+      "alias": "gpt-5.4",
+      "domain": "text",
+      "status": "runnable",
+      "expectedProtocols": ["openai-responses"],
+      "boundary": "Bulk evaluation candidate only."
+    },
+    {
+      "alias": "gemini-3.5-flash",
+      "domain": "text",
+      "status": "deferred",
+      "expectedProtocols": ["google-generate-content"],
+      "boundary": "Upstream channel is disabled until a supported inference path is activated and re-probed."
+    },
+    {
+      "alias": "gpt-image-2",
+      "domain": "image",
+      "status": "runnable",
+      "expectedProtocols": ["openai-images-generations", "openai-images-edits"],
+      "boundary": "Generation may enter a future probe; edits and mask semantics require a separate capability probe."
+    },
+    {
+      "alias": "gpt-image-2-4k",
+      "domain": "image",
+      "status": "runnable",
+      "expectedProtocols": ["openai-images-generations"],
+      "boundary": "Premium-image evaluation candidate only; no MediaGateway or runtime consumer exists."
+    },
+    {
+      "alias": "gemini-3.1-flash-image-preview",
+      "domain": "image",
+      "status": "preview",
+      "expectedProtocols": ["openai-images-generations"],
+      "boundary": "Shadow-only preview candidate; task-shaped image protocol remains unverified."
+    },
+    {
+      "alias": "gemini-3-pro-image-preview",
+      "domain": "image",
+      "status": "preview",
+      "expectedProtocols": ["openai-images-generations"],
+      "boundary": "Shadow-only preview candidate; task-shaped image protocol remains unverified."
+    },
+    {
+      "alias": "seedance-2-5s",
+      "domain": "video",
+      "status": "deferred",
+      "expectedProtocols": ["openai-videos"],
+      "boundary": "No current consumer or task-shaped create/query/cancel probe."
+    },
+    {
+      "alias": "seedance-2-10s",
+      "domain": "video",
+      "status": "deferred",
+      "expectedProtocols": ["openai-videos"],
+      "boundary": "No current consumer or task-shaped create/query/cancel probe."
+    },
+    {
+      "alias": "seedance-2-15s",
+      "domain": "video",
+      "status": "deferred",
+      "expectedProtocols": ["openai-videos"],
+      "boundary": "No current consumer or task-shaped create/query/cancel probe."
+    },
+    {
+      "alias": "grok-video-1.0",
+      "domain": "video",
+      "status": "deferred",
+      "expectedProtocols": ["openai-videos"],
+      "boundary": "No current consumer or task-shaped create/query/cancel probe."
+    },
+    {
+      "alias": "grok-video-1.5",
+      "domain": "video",
+      "status": "deferred",
+      "expectedProtocols": ["openai-videos"],
+      "boundary": "No current consumer or task-shaped create/query/cancel probe."
+    },
+    {
+      "alias": "site-builder-bge-m3-local",
+      "domain": "embedding",
+      "status": "runnable",
+      "expectedProtocols": ["openai-embeddings"],
+      "boundary": "Unchanged private BGE-M3 route; not part of a model replacement pool."
+    },
+    {
+      "alias": "deepseek-v4-pro",
+      "domain": "text",
+      "status": "legacy-only",
+      "expectedProtocols": ["openai-chat-completions"],
+      "boundary": "Unchanged currentRoute or rollback only."
+    },
+    {
+      "alias": "deepseek-v4-flash",
+      "domain": "text",
+      "status": "legacy-only",
+      "expectedProtocols": ["openai-chat-completions"],
+      "boundary": "Unchanged currentRoute only."
+    },
+    {
+      "alias": "glm-5.2",
+      "domain": "text",
+      "status": "legacy-only",
+      "expectedProtocols": ["openai-chat-completions"],
+      "boundary": "Unchanged currentRoute or rollback only."
+    },
+    {
+      "alias": "minimax-m3",
+      "domain": "text",
+      "status": "legacy-only",
+      "expectedProtocols": ["openai-chat-completions"],
+      "boundary": "Unchanged currentRoute only; excluded from every new target pool."
+    },
+    {
+      "alias": "doubao-seed-2.0-pro",
+      "domain": "text",
+      "status": "legacy-only",
+      "expectedProtocols": ["openai-chat-completions"],
+      "boundary": "Unchanged currentRoute fallback only; excluded from every new target pool."
+    },
+    {
+      "alias": "doubao-seed-2.0-lite",
+      "domain": "text",
+      "status": "legacy-only",
+      "expectedProtocols": ["openai-chat-completions"],
+      "boundary": "Unchanged currentRoute fallback only; excluded from every new target pool."
+    }
+  ],
+  "profileCandidatePools": [
+    {
+      "profile": "structured.workspace_materials",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "gate": "task-shaped structure, evidence, factuality, stability, latency, and cost"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "gate": "task-shaped structure, evidence, factuality, stability, latency, and cost"
+        },
+        {
+          "alias": "gpt-5.5",
+          "expectedProtocol": "openai-responses",
+          "gate": "capability probe before the task-shaped matrix"
+        }
+      ]
+    },
+    {
+      "profile": "structured.default",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "gate": "per-task structured-output and closed-catalog evaluation"
+        },
+        {
+          "alias": "gpt-5.5",
+          "expectedProtocol": "openai-responses",
+          "gate": "capability probe before the per-task matrix"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "gate": "per-task structured-output and closed-catalog evaluation"
+        }
+      ]
+    },
+    {
+      "profile": "reasoning.high",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-sol",
+          "expectedProtocol": "openai-responses",
+          "gate": "complex-repair task envelope and deterministic safety fallback"
+        },
+        {
+          "alias": "gpt-5.5",
+          "expectedProtocol": "openai-responses",
+          "gate": "complex-repair capability probe before evaluation"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "gate": "complex-repair task envelope and deterministic safety fallback"
+        }
+      ]
+    },
+    {
+      "profile": "copy.premium",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "gate": "claim-bound multilingual copy evaluation"
+        },
+        {
+          "alias": "gpt-5.5",
+          "expectedProtocol": "openai-responses",
+          "gate": "capability probe before claim-bound copy evaluation"
+        },
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "gate": "claim-bound multilingual copy evaluation"
+        }
+      ]
+    },
+    {
+      "profile": "text.summary",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-luna",
+          "expectedProtocol": "openai-responses",
+          "gate": "task-shaped summary validity and omission evaluation"
+        },
+        {
+          "alias": "gpt-5.4-mini",
+          "expectedProtocol": "openai-responses",
+          "gate": "task-shaped summary validity and omission evaluation"
+        },
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "gate": "task-shaped summary validity and omission evaluation"
+        }
+      ]
+    },
+    {
+      "profile": "text.bulk",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.4-mini",
+          "expectedProtocol": "openai-responses",
+          "gate": "bounded batch quality, stability, and absolute spend stop"
+        },
+        {
+          "alias": "gpt-5.6-luna",
+          "expectedProtocol": "openai-responses",
+          "gate": "bounded batch quality, stability, and absolute spend stop"
+        },
+        {
+          "alias": "gpt-5.4",
+          "expectedProtocol": "openai-responses",
+          "gate": "bounded batch quality, stability, and absolute spend stop"
+        }
+      ]
+    },
+    {
+      "profile": "multimodal.review",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-sol",
+          "expectedProtocol": "openai-responses",
+          "gate": "vision-input, closed-output, provenance, and task-shaped review evaluation"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "gate": "vision-input, closed-output, provenance, and task-shaped review evaluation"
+        },
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "gate": "vision-input, closed-output, provenance, and task-shaped review evaluation"
+        }
+      ]
+    },
+    {
+      "profile": "image.bulk.creative",
+      "activation": "requires_media_gateway",
+      "candidates": [
+        {
+          "alias": "gemini-3.1-flash-image-preview",
+          "expectedProtocol": "openai-images-generations",
+          "gate": "shadow-only preview plus task-shaped generation and rights evaluation"
+        },
+        {
+          "alias": "gpt-image-2",
+          "expectedProtocol": "openai-images-generations",
+          "gate": "MediaGateway, task-shaped generation, rights, identity, and cost evaluation"
+        }
+      ]
+    },
+    {
+      "profile": "image.premium.design",
+      "activation": "requires_media_gateway",
+      "candidates": [
+        {
+          "alias": "gpt-image-2-4k",
+          "expectedProtocol": "openai-images-generations",
+          "gate": "MediaGateway plus premium composition, text, identity, rights, and cost evaluation"
+        },
+        {
+          "alias": "gemini-3-pro-image-preview",
+          "expectedProtocol": "openai-images-generations",
+          "gate": "shadow-only preview plus premium task-shaped evaluation"
+        }
+      ]
+    },
+    {
+      "profile": "image.precise_edit",
+      "activation": "requires_media_gateway",
+      "candidates": [
+        {
+          "alias": "gpt-image-2",
+          "expectedProtocol": "openai-images-edits",
+          "gate": "edits endpoint, mask semantics, subject preservation, and original-Sharp fallback probe"
+        }
+      ]
+    },
+    {
+      "profile": "video.primary",
+      "activation": "requires_media_gateway",
+      "candidates": [
+        {
+          "alias": "seedance-2-5s",
+          "expectedProtocol": "openai-videos",
+          "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
+        },
+        {
+          "alias": "seedance-2-10s",
+          "expectedProtocol": "openai-videos",
+          "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
+        },
+        {
+          "alias": "seedance-2-15s",
+          "expectedProtocol": "openai-videos",
+          "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
+        },
+        {
+          "alias": "grok-video-1.0",
+          "expectedProtocol": "openai-videos",
+          "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
+        },
+        {
+          "alias": "grok-video-1.5",
+          "expectedProtocol": "openai-videos",
+          "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
+        }
+      ]
+    }
+  ],
+  "taskEvaluationPools": [
+    {
+      "taskId": "site_builder.brand_profile",
+      "profile": "structured.workspace_materials"
+    },
+    {
+      "taskId": "site_builder.copy",
+      "profile": "copy.premium"
+    },
+    {
+      "taskId": "site_builder.design_spec",
+      "profile": "structured.default"
+    },
+    {
+      "taskId": "site_builder.assemble",
+      "profile": "structured.default"
+    },
+    {
+      "taskId": "site_builder.assembly_fix",
+      "profile": "structured.default"
+    },
+    {
+      "taskId": "site_builder.qa_summarize",
+      "profile": "text.summary"
+    },
+    {
+      "taskId": "site_builder.seo_review",
+      "profile": "text.summary"
+    }
+  ],
+  "evaluationPolicy": {
+    "ordering": [
+      "quality",
+      "structure",
+      "factuality",
+      "stability",
+      "p95_latency",
+      "accepted_artifact_cost"
+    ],
+    "taskWindow": "production_task_envelope",
+    "diagnosticWindow": "extended_observation_after_runtime_envelope",
+    "qualityValidLateClass": "quality_valid_runtime_late",
+    "contentInvalidClass": "content_invalid",
+    "absoluteStop": "pre_dispatch_campaign_budget_plus_per_call_cap",
+    "promotionRule": "No baseline entry routes traffic; promotion remains a separate per-task evidence and approval PR."
+  },
+  "followUpPrs": [
+    {
+      "order": 2,
+      "name": "capability-and-task-evaluation-harness",
+      "output": "Protocol, capability, task-envelope, diagnostic-window, and closed-result harness only."
+    },
+    {
+      "order": 3,
+      "name": "fixed-commit-real-evidence",
+      "output": "Create-only evidence from a fixed commit with complete provenance and conservative cost settlement."
+    },
+    {
+      "order": 4,
+      "name": "per-task-promotion",
+      "output": "One task at a time, with explicit owner approval, failure gates, rollback, and no automatic merge."
+    }
+  ],
+  "documentationPolicy": {
+    "canonicalDocument": "docs/site-builder/model-candidate-baseline.md",
+    "requiredBaselineIdReferences": [
+      "AGENTS.md",
+      "docs/status/current.md",
+      "docs/architecture/current.md",
+      "docs/adr/registry.md",
+      "docs/roadmap/release-plan.md",
+      "docs/site-builder/00-decisions-and-coordination.md",
+      "docs/site-builder/02-architecture.md",
+      "docs/site-builder/03-agents.md",
+      "docs/site-builder/08-eval-testing.md",
+      "docs/site-builder/09-m1-implementation-design.md"
+    ],
+    "activeRouteDocuments": [
+      "AGENTS.md",
+      "docs/status/current.md",
+      "docs/architecture/current.md",
+      "docs/adr/registry.md",
+      "docs/roadmap/release-plan.md",
+      "docs/site-builder/00-decisions-and-coordination.md",
+      "docs/site-builder/02-architecture.md",
+      "docs/site-builder/03-agents.md",
+      "docs/site-builder/08-eval-testing.md",
+      "docs/site-builder/09-m1-implementation-design.md"
+    ],
+    "registrySource": "apps/api/src/site-builder/agents/model-policy.registry.ts"
+  }
+}
