@@ -47,6 +47,33 @@ services:
     volumes:
       - newapi-data:/data
 
+  # OpenOx exposes video creation at /v1/video/generations, while the pinned
+  # new-api OpenAI video task adaptor submits to /v1/videos. Keep new-api in
+  # charge of async task persistence/polling and rewrite only that exact create
+  # path. This service is Compose-internal, stores no credentials and has no
+  # host port or access log.
+  openox-video-compat:
+    build:
+      context: ./infra/new-api
+      dockerfile: Dockerfile.openox-video-compat
+    image: global-openox-video-compat:local
+    container_name: global-openox-video-compat
+    restart: unless-stopped
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=160m,uid=101,gid=101
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   # Crawler (PRD §10.18: Crawl4AI, self-hosted). Isolated container (ADR-013);
   # the worker calls its REST API behind the WebCrawlerProvider adapter.
   # Built from a thin dev wrapper (infra/crawl4ai/Dockerfile) that only disables
