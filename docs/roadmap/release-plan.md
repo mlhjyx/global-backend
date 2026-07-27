@@ -43,6 +43,8 @@
 
 后续必须拆为三个独立 PR：① capability/协议与 task-shaped harness，按每个 task 的生产 envelope 加扩展诊断观察窗，并把 `quality_valid_runtime_late` 与 `content_invalid` 分开；② 固定提交、create-only、完整 provenance 与保守结算的真实 evidence；③ 每次只晋级一个 task，带失败门、rollback 与用户批准。质量/结构/事实/稳定性先排序，P95/accepted-artifact cost 后评判；绝对预算止损、未知成本 fail-closed、不自动合并和禁止 mega switch 均不变。真实外部流量/高风险部署前仍走 MODEL-2。
 
+第一项的代码级合同为 `site-builder-model-evaluation-harness/2026-07-27-v1`，与 `site-builder-model-candidate-baseline/2026-07-27-v1` 的精确关系、task envelope、canonical suite、矩阵、预算和 provenance 统一见[生成评测基线](../site-builder/model-evaluation-harness.md)。没有完整 suite 的 task 继续 blocked；本项不包含真实网关调用或 evidence。下一项仍是固定提交的独立真实 evidence PR；其后才允许一次一个 task 的 promotion PR。
+
 ---
 
 以下为**冻结的获客路线**，保留作为恢复开发时的历史计划。
