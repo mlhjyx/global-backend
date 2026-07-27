@@ -447,6 +447,49 @@ describe("absolute budget guard", () => {
     });
   });
 
+  it("reserves a bounded repair call up front without relaxing the attempt cap", () => {
+    const guard = new ModelEvaluationBudgetGuard(100);
+    expect(guard.reserve("repairable-call", 20, 2)).toEqual({
+      allowed: true,
+      reservation: { callId: "repairable-call", reservedCents: 40 },
+    });
+    expect(guard.snapshot()).toMatchObject({
+      reservedCents: 40,
+      remainingDispatchableCents: 60,
+    });
+    expect(
+      guard.settle("repairable-call", {
+        state: "settled",
+        amountCents: 19,
+        basis: "provider_reported",
+      }),
+    ).toMatchObject({
+      capExceeded: false,
+      settlementInvalid: false,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 19,
+      reservedCents: 0,
+      blocked: false,
+    });
+
+    expect(guard.reserve("single-call", 20, 2).allowed).toBe(true);
+    expect(
+      guard.settle("single-call", {
+        state: "settled",
+        amountCents: 21,
+        basis: "provider_reported",
+      }),
+    ).toMatchObject({
+      capExceeded: true,
+      settlementInvalid: false,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "per_call_cap_exceeded",
+    });
+  });
+
   it("blocks subsequent dispatch after unknown settlement", () => {
     const guard = new ModelEvaluationBudgetGuard(50);
     expect(guard.reserve("call-1", 20).allowed).toBe(true);
@@ -823,7 +866,7 @@ describe("task attempt observation window", () => {
       expect(guard.snapshot()).toMatchObject({
         committedCents: 0,
         reservedCents: 0,
-        unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+        unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
         blocked: true,
         blockReason: "unknown_settlement",
       });
@@ -854,7 +897,7 @@ describe("task attempt observation window", () => {
     expect(guard.snapshot()).toMatchObject({
       committedCents: 0,
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1197,7 +1240,7 @@ describe("task attempt observation window", () => {
       settlementInvalid: true,
     });
     expect(guard.snapshot()).toMatchObject({
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1228,7 +1271,7 @@ describe("task attempt observation window", () => {
     });
     expect(guard.snapshot()).toMatchObject({
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
     });
   });
@@ -1257,7 +1300,7 @@ describe("task attempt observation window", () => {
     });
     expect(guard.snapshot()).toMatchObject({
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1297,7 +1340,7 @@ describe("task attempt observation window", () => {
       settlementInvalid: true,
     });
     expect(guard.snapshot()).toMatchObject({
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1338,7 +1381,7 @@ describe("task attempt observation window", () => {
     expect(guard.snapshot()).toMatchObject({
       committedCents: 0,
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1984,7 +2027,7 @@ describe("quality-first candidate summary and ranking", () => {
       (entry) => entry.alias === "gpt-5.6-terra",
     )!;
     const budget = new ModelEvaluationBudgetGuard(
-      plan.envelope.perCallCostCapCents,
+      plan.envelope.perCallCostCapCents * 2,
     );
     const runs = await fullMatrix(
       candidate.alias,

@@ -615,6 +615,121 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
+  it("reserves the full repair-call upper bound before any wire dispatch", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const request = canonicalRequest();
+    const wireCall = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+      ),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: settlementResolver(),
+    });
+    const insufficientRunBudget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents * 2 - 1,
+    );
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: request.fixtureId,
+        attempt: 1,
+        campaignBudget: insufficientRunBudget,
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "budget_stop",
+      failureCode: "campaign_budget_exhausted",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(wireCall).not.toHaveBeenCalled();
+    expect(insufficientRunBudget.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      blocked: false,
+    });
+
+    const probeCandidate = plan.candidates.find(
+      (candidate) => candidate.preflight === "capability_probe",
+    );
+    if (!probeCandidate) throw new Error("test requires a probe candidate");
+    const insufficientProbeBudget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents * 2 - 1,
+    );
+    const campaign = new ModelEvaluationCapabilityCampaign(
+      insufficientProbeBudget,
+    );
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate: probeCandidate,
+        execute: executor.execute,
+      }),
+    ).resolves.toEqual({
+      status: "budget_blocked",
+      protocolVerified: false,
+      identityVerified: false,
+      outputVerified: false,
+    });
+    expect(wireCall).not.toHaveBeenCalled();
+    expect(insufficientProbeBudget.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      blocked: false,
+    });
+  });
+
+  it("keeps the original attempt cap after a two-call repair", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const request = canonicalRequest();
+    const accepted = canonicalAcceptedArtifact();
+    const wireCall = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(openAIResponsesBody(request.alias, {}), 30),
+      )
+      .mockResolvedValueOnce(
+        wireResponse(openAIResponsesBody(request.alias, accepted), 30),
+      );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: settlementResolver(),
+    });
+    const budget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents * 2,
+    );
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: request.fixtureId,
+        attempt: 1,
+        campaignBudget: budget,
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "quality_valid_runtime_on_time",
+      usage: { callCount: 2 },
+      costSettlement: { state: "settled", amountCents: 60 },
+      budgetCapExceeded: true,
+    });
+    expect(wireCall).toHaveBeenCalledTimes(2);
+    expect(budget.snapshot()).toMatchObject({
+      committedCents: 60,
+      reservedCents: 0,
+      remainingDispatchableCents: plan.envelope.perCallCostCapCents * 2 - 60,
+      blocked: true,
+      blockReason: "per_call_cap_exceeded",
+    });
+  });
+
   it("repairs a task-gate failure without weakening the canonical gate", async () => {
     const request = canonicalRequest();
     const accepted = canonicalAcceptedArtifact();

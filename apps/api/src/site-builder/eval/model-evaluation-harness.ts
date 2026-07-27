@@ -680,6 +680,10 @@ function readMonotonicElapsed(
   return Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null;
 }
 
+function maximumExecutionCallCount(repairTaskOutput: boolean): number {
+  return repairTaskOutput ? 2 : 1;
+}
+
 const TRUSTED_MODEL_EVALUATION_BUDGETS = new WeakMap<
   object,
   { readonly campaignId: string }
@@ -691,7 +695,13 @@ const TRUSTED_MODEL_EVALUATION_RUN_BUDGETS = new WeakMap<
 
 export class ModelEvaluationBudgetGuard {
   readonly #campaignBudgetCents: number;
-  readonly #reservations = new Map<string, number>();
+  readonly #reservations = new Map<
+    string,
+    {
+      reservedCents: number;
+      perCallCapCents: number;
+    }
+  >();
   readonly #completedCalls = new Set<string>();
   #committedCents = 0;
   #unknownUpperBoundCents = 0;
@@ -716,24 +726,33 @@ export class ModelEvaluationBudgetGuard {
   reserve(
     callId: string,
     perCallCapCents: number,
+    maximumCallCount = 1,
   ): ModelEvaluationBudgetReserveResult {
     assertNonNegativeFinite(perCallCapCents, "perCallCapCents");
     if (perCallCapCents === 0) {
       throw new Error("perCallCapCents must be greater than zero");
     }
+    if (!Number.isInteger(maximumCallCount) || maximumCallCount < 1) {
+      throw new Error("maximumCallCount must be a positive integer");
+    }
+    const reservedCents = perCallCapCents * maximumCallCount;
+    assertNonNegativeFinite(reservedCents, "reservedCents");
     if (this.#reservations.has(callId) || this.#completedCalls.has(callId)) {
       return { allowed: false, reason: "duplicate_call" };
     }
     if (this.#blockReason) {
       return { allowed: false, reason: this.#blockReason };
     }
-    if (perCallCapCents > this.#remainingDispatchableCents()) {
+    if (reservedCents > this.#remainingDispatchableCents()) {
       return { allowed: false, reason: "campaign_budget_exhausted" };
     }
-    this.#reservations.set(callId, perCallCapCents);
+    this.#reservations.set(callId, {
+      reservedCents,
+      perCallCapCents,
+    });
     return {
       allowed: true,
-      reservation: { callId, reservedCents: perCallCapCents },
+      reservation: { callId, reservedCents },
     };
   }
 
@@ -741,8 +760,8 @@ export class ModelEvaluationBudgetGuard {
     callId: string,
     settlement: unknown,
   ): ModelEvaluationBudgetSettlementResult {
-    const reservedCents = this.#reservations.get(callId);
-    if (reservedCents === undefined) {
+    const reservation = this.#reservations.get(callId);
+    if (reservation === undefined) {
       throw new Error(
         `model evaluation call has no active reservation: ${callId}`,
       );
@@ -752,7 +771,7 @@ export class ModelEvaluationBudgetGuard {
     this.#completedCalls.add(callId);
 
     if (normalized.settlement.state === "unknown") {
-      this.#unknownUpperBoundCents += reservedCents;
+      this.#unknownUpperBoundCents += reservation.reservedCents;
       this.#blockReason = "unknown_settlement";
       return normalized;
     }
@@ -760,7 +779,7 @@ export class ModelEvaluationBudgetGuard {
 
     this.#committedCents += normalized.settlement.amountCents;
     if (
-      normalized.settlement.amountCents > reservedCents ||
+      normalized.settlement.amountCents > reservation.perCallCapCents ||
       this.#committedCents + this.#unknownUpperBoundCents >
         this.#campaignBudgetCents
     ) {
@@ -768,13 +787,14 @@ export class ModelEvaluationBudgetGuard {
     }
     return {
       ...normalized,
-      capExceeded: normalized.settlement.amountCents > reservedCents,
+      capExceeded:
+        normalized.settlement.amountCents > reservation.perCallCapCents,
     };
   }
 
   #reservedCents(): number {
     return [...this.#reservations.values()].reduce(
-      (total, value) => total + value,
+      (total, value) => total + value.reservedCents,
       0,
     );
   }
@@ -854,12 +874,14 @@ function reserveTrustedModelEvaluationBudget(
   budget: unknown,
   callId: string,
   perCallCapCents: number,
+  maximumCallCount = 1,
 ): ModelEvaluationBudgetReserveResult {
   assertTrustedModelEvaluationBudget(budget);
   return RESERVE_TRUSTED_MODEL_EVALUATION_BUDGET.call(
     budget,
     callId,
     perCallCapCents,
+    maximumCallCount,
   );
 }
 
@@ -1448,6 +1470,7 @@ export class ModelEvaluationCapabilityCampaign {
       this.#budget,
       callId,
       options.plan.envelope.perCallCostCapCents,
+      maximumExecutionCallCount(options.plan.evaluationSuite.repairTaskOutput),
     );
     if (!reservation.allowed) {
       return {
@@ -2246,6 +2269,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     options.campaignBudget,
     callId,
     options.plan.envelope.perCallCostCapCents,
+    maximumExecutionCallCount(options.plan.evaluationSuite.repairTaskOutput),
   );
   if (!reservation.allowed) {
     return bindRun({
