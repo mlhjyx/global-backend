@@ -97,6 +97,9 @@ jobs:
       - name: Memory control transaction tests
         run: pnpm memory:test
 
+      - name: Nontechnical PR decision card tests
+        run: pnpm decision-card:test
+
       - name: ContractGraph extractor tests and deterministic full-repository gate
         run: |
           pnpm code-intelligence:test
