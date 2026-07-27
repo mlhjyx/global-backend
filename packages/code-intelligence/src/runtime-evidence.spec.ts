@@ -538,6 +538,29 @@ test("collector omits free-text Outbox correlation and preserves unknown health"
   }
 });
 
+test("runtime evidence accepts the registered OpenOx video compatibility service", () => {
+  const record = createRuntimeRecord({
+    kind: "COMPOSE_SERVICE",
+    environment: "development",
+    subject: "openox-video-compat",
+    observedAt: "2026-07-27T00:00:00.000Z",
+    graphNodeIds: ["service:compose:openox-video-compat"],
+    outcome: "SUCCESS",
+    metadata: {
+      state: "running",
+      health: "healthy",
+      image: "global-openox-video-compat:local",
+      composeProject: "global",
+      configurationRoot: "/global/backend",
+      configurationFile: "/global/backend/docker-compose.yml",
+      runtimeRevisionProven: false,
+    },
+  });
+
+  assert.equal(record.subject, "openox-video-compat");
+  assert.equal(record.outcome, "SUCCESS");
+});
+
 test("API probe failures remain safe FAILURE evidence", async () => {
   for (const options of [
     { fetchThrows: true },

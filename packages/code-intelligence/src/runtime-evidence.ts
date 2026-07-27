@@ -613,6 +613,7 @@ function assertSubjectForKind(input: RuntimeRecordInput): void {
       "minio",
       "embeddings",
       "docling",
+      "openox-video-compat",
     ]),
     TEMPORAL_CLUSTER: new Set(["temporal-dev"]),
   };
