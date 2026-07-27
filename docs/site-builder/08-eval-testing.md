@@ -10,6 +10,8 @@
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 >
 > **2026-07-27 候选重基线**：后续可评测型号、精确 alias、状态、预期协议与 task/Profile 池只认[生成候选基线](model-candidate-baseline.md)，不得从 `/models` 可见性直接推导能力、质量或晋级。后续真实评测必须按各 task 的生产 envelope 加扩展诊断观察窗，分别记录 `quality_valid_runtime_late` 与 `content_invalid`；先按质量、结构、事实、稳定性判断，P95 与 accepted-artifact cost 后评判，同时保留绝对预算止损、未知结算 fail-closed。此规则不回写本文件下方的历史报告。
+>
+> **代码级 harness（尚无真实 evidence）**：`site-builder-model-evaluation-harness/2026-07-27-v1` 从 `site-builder-model-candidate-baseline/2026-07-27-v1` 与当前 task binding 生成计划；精确 task/protocol/envelope、canonical suite、结果类、排序、预算与 provenance 只认[生成评测基线](model-evaluation-harness.md)，不得在本文件再抄矩阵。没有完整 suite 的 task 不可 dispatch。本阶段只有未接生产依赖的内存合同、假 executor 单测与文档校验，未发真实请求、未产生 evidence，也未改 P4/DesignEvaluation/ReleaseManifest/Temporal/route/env。
 
 ## 0. 定位与两层质量体系
 

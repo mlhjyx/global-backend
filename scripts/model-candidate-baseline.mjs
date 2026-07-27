@@ -18,6 +18,7 @@ const PROTOCOLS = new Set([
   'openai-videos',
   'openai-embeddings',
 ]);
+const PREFLIGHTS = new Set(['none', 'capability_probe']);
 const ACTIVATIONS = new Set([
   'requires_task_evaluation',
   'requires_media_gateway',
@@ -132,7 +133,7 @@ function hasNegatedPromotionMarker(line, markerIndex) {
 
 function hasUnnegatedPromotionClaim(line, alias) {
   const aliasIndexes = [];
-  for (let index = line.indexOf(alias); index !== -1; ) {
+  for (let index = line.indexOf(alias); index !== -1;) {
     aliasIndexes.push(index);
     index = line.indexOf(alias, index + alias.length);
   }
@@ -267,6 +268,7 @@ export function validateModelCandidateBaseline(baseline) {
         !isRecord(candidate) ||
         !nonEmptyString(candidate.alias) ||
         !nonEmptyString(candidate.expectedProtocol) ||
+        !PREFLIGHTS.has(candidate.preflight) ||
         !nonEmptyString(candidate.gate)
       ) {
         fail(`${pool.profile} contains an incomplete candidate`);
@@ -302,7 +304,9 @@ export function validateModelCandidateBaseline(baseline) {
       if (!MODEL_PROFILE_IDS.has(pool.profile)) {
         fail(`${pool.taskId} references unknown profile ${pool.profile}`);
       }
-      if (!pools.some((candidatePool) => candidatePool.profile === pool.profile)) {
+      if (
+        !pools.some((candidatePool) => candidatePool.profile === pool.profile)
+      ) {
         fail(`${pool.taskId} references profile without a candidate pool`);
       }
       taskMap.set(pool.taskId, pool.profile);
@@ -329,7 +333,9 @@ export function validateModelCandidateBaseline(baseline) {
         (item, index) => item !== EVALUATION_ORDER[index],
       )
     ) {
-      fail('evaluationPolicy.ordering must preserve the approved decision order');
+      fail(
+        'evaluationPolicy.ordering must preserve the approved decision order',
+      );
     }
     for (const field of [
       'taskWindow',
@@ -345,7 +351,10 @@ export function validateModelCandidateBaseline(baseline) {
     }
   }
 
-  if (!Array.isArray(baseline.followUpPrs) || baseline.followUpPrs.length === 0) {
+  if (
+    !Array.isArray(baseline.followUpPrs) ||
+    baseline.followUpPrs.length === 0
+  ) {
     fail('followUpPrs must be a non-empty array');
   } else {
     const orders = baseline.followUpPrs.map((item) => item?.order);
@@ -451,12 +460,12 @@ export function renderModelCandidateBaselineDocument(baseline) {
     '',
     '候选是相互独立的评测对象，不是 primary/fallback 运行链。排序只是首轮评测顺序。',
     '',
-    '| ModelProfile | activation | 候选（状态 · 预期协议） | 进入下一门的前提 |',
+    '| ModelProfile | activation | 候选（状态 · 预期协议 · preflight） | 进入下一门的前提 |',
     '|---|---|---|---|',
     ...baseline.profileCandidatePools.map((pool) => {
       const candidates = pool.candidates.map((candidate) => {
         const model = catalog.get(candidate.alias);
-        return `${code(candidate.alias)} (${code(model.status)} · ${code(candidate.expectedProtocol)})`;
+        return `${code(candidate.alias)} (${code(model.status)} · ${code(candidate.expectedProtocol)} · ${code(candidate.preflight)})`;
       });
       return `| ${code(pool.profile)} | ${code(pool.activation)} | ${candidates.join('<br>')} | ${pool.candidates.map((candidate) => escapeCell(candidate.gate)).join('<br>')} |`;
     }),
@@ -535,8 +544,7 @@ export function checkModelNarrativeDrift(baseline, contentsByPath) {
     for (const [index, line] of lines.entries()) {
       const nextLine = lines[index + 1] ?? '';
       const canJoinAdjacentLines = !(
-        line.trimStart().startsWith('|') &&
-        nextLine.trimStart().startsWith('|')
+        line.trimStart().startsWith('|') && nextLine.trimStart().startsWith('|')
       );
       const adjacentWindow = canJoinAdjacentLines
         ? `${line} ${nextLine}`
@@ -610,9 +618,7 @@ export function checkModelNarrativeDrift(baseline, contentsByPath) {
 
 export function checkRegistryBaselineDerivation(baseline, registrySource) {
   const issues = [];
-  if (
-    !registrySource.includes('modelCandidateRoutesFromBaseline')
-  ) {
+  if (!registrySource.includes('modelCandidateRoutesFromBaseline')) {
     issues.push({
       code: 'MODEL_REGISTRY_NOT_BASELINE_DERIVED',
       path: baseline.documentationPolicy.registrySource,

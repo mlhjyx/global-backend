@@ -187,16 +187,19 @@
         {
           "alias": "gpt-5.6-terra",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "task-shaped structure, evidence, factuality, stability, latency, and cost"
         },
         {
           "alias": "claude-sonnet-5",
           "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
           "gate": "task-shaped structure, evidence, factuality, stability, latency, and cost"
         },
         {
           "alias": "gpt-5.5",
           "expectedProtocol": "openai-responses",
+          "preflight": "capability_probe",
           "gate": "capability probe before the task-shaped matrix"
         }
       ]
@@ -208,16 +211,19 @@
         {
           "alias": "gpt-5.6-terra",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "per-task structured-output and closed-catalog evaluation"
         },
         {
           "alias": "gpt-5.5",
           "expectedProtocol": "openai-responses",
+          "preflight": "capability_probe",
           "gate": "capability probe before the per-task matrix"
         },
         {
           "alias": "claude-sonnet-5",
           "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
           "gate": "per-task structured-output and closed-catalog evaluation"
         }
       ]
@@ -229,16 +235,19 @@
         {
           "alias": "gpt-5.6-sol",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "complex-repair task envelope and deterministic safety fallback"
         },
         {
           "alias": "gpt-5.5",
           "expectedProtocol": "openai-responses",
+          "preflight": "capability_probe",
           "gate": "complex-repair capability probe before evaluation"
         },
         {
           "alias": "claude-sonnet-5",
           "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
           "gate": "complex-repair task envelope and deterministic safety fallback"
         }
       ]
@@ -250,16 +259,19 @@
         {
           "alias": "claude-sonnet-5",
           "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
           "gate": "claim-bound multilingual copy evaluation"
         },
         {
           "alias": "gpt-5.5",
           "expectedProtocol": "openai-responses",
+          "preflight": "capability_probe",
           "gate": "capability probe before claim-bound copy evaluation"
         },
         {
           "alias": "gpt-5.6-terra",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "claim-bound multilingual copy evaluation"
         }
       ]
@@ -271,16 +283,19 @@
         {
           "alias": "gpt-5.6-luna",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "task-shaped summary validity and omission evaluation"
         },
         {
           "alias": "gpt-5.4-mini",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "task-shaped summary validity and omission evaluation"
         },
         {
           "alias": "gpt-5.6-terra",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "task-shaped summary validity and omission evaluation"
         }
       ]
@@ -292,16 +307,19 @@
         {
           "alias": "gpt-5.4-mini",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "bounded batch quality, stability, and absolute spend stop"
         },
         {
           "alias": "gpt-5.6-luna",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "bounded batch quality, stability, and absolute spend stop"
         },
         {
           "alias": "gpt-5.4",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "bounded batch quality, stability, and absolute spend stop"
         }
       ]
@@ -313,16 +331,19 @@
         {
           "alias": "gpt-5.6-sol",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "vision-input, closed-output, provenance, and task-shaped review evaluation"
         },
         {
           "alias": "claude-sonnet-5",
           "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
           "gate": "vision-input, closed-output, provenance, and task-shaped review evaluation"
         },
         {
           "alias": "gpt-5.6-terra",
           "expectedProtocol": "openai-responses",
+          "preflight": "none",
           "gate": "vision-input, closed-output, provenance, and task-shaped review evaluation"
         }
       ]
@@ -334,11 +355,13 @@
         {
           "alias": "gemini-3.1-flash-image-preview",
           "expectedProtocol": "openai-images-generations",
+          "preflight": "none",
           "gate": "shadow-only preview plus task-shaped generation and rights evaluation"
         },
         {
           "alias": "gpt-image-2",
           "expectedProtocol": "openai-images-generations",
+          "preflight": "none",
           "gate": "MediaGateway, task-shaped generation, rights, identity, and cost evaluation"
         }
       ]
@@ -350,11 +373,13 @@
         {
           "alias": "gpt-image-2-4k",
           "expectedProtocol": "openai-images-generations",
+          "preflight": "none",
           "gate": "MediaGateway plus premium composition, text, identity, rights, and cost evaluation"
         },
         {
           "alias": "gemini-3-pro-image-preview",
           "expectedProtocol": "openai-images-generations",
+          "preflight": "none",
           "gate": "shadow-only preview plus premium task-shaped evaluation"
         }
       ]
@@ -366,6 +391,7 @@
         {
           "alias": "gpt-image-2",
           "expectedProtocol": "openai-images-edits",
+          "preflight": "none",
           "gate": "edits endpoint, mask semantics, subject preservation, and original-Sharp fallback probe"
         }
       ]
@@ -377,26 +403,31 @@
         {
           "alias": "seedance-2-5s",
           "expectedProtocol": "openai-videos",
+          "preflight": "none",
           "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
         },
         {
           "alias": "seedance-2-10s",
           "expectedProtocol": "openai-videos",
+          "preflight": "none",
           "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
         },
         {
           "alias": "seedance-2-15s",
           "expectedProtocol": "openai-videos",
+          "preflight": "none",
           "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
         },
         {
           "alias": "grok-video-1.0",
           "expectedProtocol": "openai-videos",
+          "preflight": "none",
           "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
         },
         {
           "alias": "grok-video-1.5",
           "expectedProtocol": "openai-videos",
+          "preflight": "none",
           "gate": "consumer, MediaGateway, create/query/cancel, identity, rights, timeout, and settlement probes"
         }
       ]
