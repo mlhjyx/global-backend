@@ -67,7 +67,7 @@ services:
     cap_drop:
       - ALL
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=101,gid=101
+      - /tmp:rw,noexec,nosuid,nodev,size=160m,uid=101,gid=101
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
       interval: 10s
