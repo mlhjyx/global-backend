@@ -40,6 +40,11 @@ export const MODEL_CANDIDATE_PROTOCOLS = [
 
 export type ModelCandidateProtocol = (typeof MODEL_CANDIDATE_PROTOCOLS)[number];
 
+export const MODEL_CANDIDATE_PREFLIGHTS = ['none', 'capability_probe'] as const;
+
+export type ModelCandidatePreflight =
+  (typeof MODEL_CANDIDATE_PREFLIGHTS)[number];
+
 export interface ModelCandidateCatalogEntry {
   alias: string;
   domain: ModelCandidateDomain;
@@ -51,6 +56,7 @@ export interface ModelCandidateCatalogEntry {
 export interface ModelProfileCandidate {
   alias: string;
   expectedProtocol: ModelCandidateProtocol;
+  preflight: ModelCandidatePreflight;
   gate: string;
 }
 
@@ -275,6 +281,12 @@ function assertCandidateBaseline(
         ),
         `profile ${rawPool.profile} protocol ${rawCandidate.expectedProtocol} is not registered for ${rawCandidate.alias}`,
       );
+      invariant(
+        MODEL_CANDIDATE_PREFLIGHTS.includes(
+          rawCandidate.preflight as ModelCandidatePreflight,
+        ),
+        `profileCandidatePools[${index}].candidates[${candidateIndex}].preflight is unknown`,
+      );
       assertString(
         rawCandidate.gate,
         `profileCandidatePools[${index}].candidates[${candidateIndex}].gate`,
@@ -349,10 +361,7 @@ function assertCandidateBaseline(
   const followUpOrders = new Set<number>();
   let previousFollowUpOrder = 0;
   for (const [index, rawFollowUp] of value.followUpPrs.entries()) {
-    invariant(
-      isRecord(rawFollowUp),
-      `followUpPrs[${index}] must be an object`,
-    );
+    invariant(isRecord(rawFollowUp), `followUpPrs[${index}] must be an object`);
     invariant(
       Number.isInteger(rawFollowUp.order) &&
         (rawFollowUp.order as number) > previousFollowUpOrder &&

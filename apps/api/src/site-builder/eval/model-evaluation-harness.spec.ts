@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ModelEvaluationBudgetGuard,
   ModelEvaluationCallError,
@@ -14,7 +14,6 @@ import {
   rankModelEvaluationCandidates as rankModelEvaluationCandidatesRaw,
   runTaskEvaluationAttempt,
   summarizeModelEvaluationCandidate as summarizeModelEvaluationCandidateRaw,
-  taskEvaluationContractFingerprint,
   validateCapabilityProbe,
   type ModelEvaluationCallResult,
   type ModelEvaluationRun,
@@ -155,16 +154,19 @@ describe("model evaluation planning", () => {
             alias: "gpt-5.6-terra",
             status: "runnable",
             expectedProtocol: "openai-responses",
+            preflight: "none",
           },
           {
             alias: "claude-sonnet-5",
             status: "runnable",
             expectedProtocol: "anthropic-messages",
+            preflight: "none",
           },
           {
             alias: "gpt-5.5",
             status: "runnable",
             expectedProtocol: "openai-responses",
+            preflight: "capability_probe",
           },
         ],
       },
@@ -244,6 +246,10 @@ describe("model evaluation planning", () => {
     expect(Object.isFrozen(suite)).toBe(true);
     expect(Object.isFrozen(suite.sourceBundleFiles)).toBe(true);
     expect(Object.isFrozen(suite.sourceBundleFiles[0])).toBe(true);
+    expect(suite.sourceBundleFiles).toContainEqual({
+      role: "claim_fact_key",
+      path: "apps/api/src/site-builder/claim-fact-key.ts",
+    });
     expect(() => {
       (suite.sourceBundleFiles[0] as { path: string }).path = "/etc/passwd";
     }).toThrow(TypeError);
@@ -937,7 +943,7 @@ describe("task attempt observation window", () => {
     const candidate = plan.candidates[0];
     const sourcePath = resolve(
       process.cwd(),
-      "../../packages/contracts/package.json",
+      "src/site-builder/claim-fact-key.ts",
     );
     const original = readFileSync(sourcePath);
     try {
@@ -1554,12 +1560,14 @@ describe("task attempt observation window", () => {
 describe("quality-first candidate summary and ranking", () => {
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
   const suite = plan.evaluationSuite!;
-  const capabilityBudget = new ModelEvaluationBudgetGuard(1000);
-  const capabilityCampaign = new ModelEvaluationCapabilityCampaign(
-    capabilityBudget,
-  );
+  let capabilityBudget: ModelEvaluationBudgetGuard;
+  let capabilityCampaign: ModelEvaluationCapabilityCampaign;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
+    capabilityBudget = new ModelEvaluationBudgetGuard(10_000);
+    capabilityCampaign = new ModelEvaluationCapabilityCampaign(
+      capabilityBudget,
+    );
     const candidate = plan.candidates.find(
       (entry) => entry.alias === "gpt-5.5",
     )!;
@@ -1585,6 +1593,7 @@ describe("quality-first candidate summary and ranking", () => {
       planValue,
       alias,
       runs,
+      capabilityBudget,
       capabilityCampaign,
     );
 
@@ -1595,16 +1604,11 @@ describe("quality-first candidate summary and ranking", () => {
     rankModelEvaluationCandidatesRaw(
       planValue,
       candidateRuns,
+      capabilityBudget,
       capabilityCampaign,
     );
 
-  function probeAttestation(alias: string) {
-    const candidate = plan.candidates.find((entry) => entry.alias === alias)!;
-    if (!candidate.requiresCapabilityProbe) return null;
-    return capabilityCampaign.attestationFor(plan, candidate, capabilityBudget);
-  }
-
-  function run(
+  async function run(
     alias: string,
     resultClass: ModelEvaluationRun["resultClass"],
     artifact: BrandProfileOutput,
@@ -1612,113 +1616,65 @@ describe("quality-first candidate summary and ranking", () => {
     amountCents: number | null,
     fixtureId: string,
     attempt: number,
-  ): ModelEvaluationRun {
-    const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
-    const artifactSha256 = sha256CanonicalJson(artifact);
-    const assessment =
-      resultClass === "content_invalid"
-        ? {
-            qualityPassed: false,
-            structurePassed: true,
-            factualityPassed: true,
-            stabilityKey: artifactSha256,
-            findingCodes: ["forbidden_output_term"],
-          }
-        : validAssessment(artifactSha256);
-    return {
-      schemaVersion: "site-builder-model-evaluation-run/v1",
-      harnessId: "site-builder-model-evaluation-harness/2026-07-27-v1",
-      candidateBaselineId:
-        "site-builder-model-candidate-baseline/2026-07-27-v1",
-      taskId: "site_builder.brand_profile",
-      profile: "structured.workspace_materials",
+  ): Promise<ModelEvaluationRun> {
+    const candidate = plan.candidates.find((entry) => entry.alias === alias)!;
+    const call = completedCall(
       alias,
-      expectedProtocol:
-        alias === "claude-sonnet-5" ? "anthropic-messages" : "openai-responses",
-      actualProtocol:
-        alias === "claude-sonnet-5" ? "anthropic-messages" : "openai-responses",
-      requestedModel: alias,
-      reportedModel: alias,
-      resolvedModel: alias,
-      modelResolutionSource: "upstream_response",
-      evaluationSuiteId: suite.suiteId,
-      adapterId: suite.adapterId,
-      taskContractFingerprint: taskEvaluationContractFingerprint(suite),
-      fixtureSetId: suite.fixtureSetId,
-      sourceBundleContractId: suite.sourceBundleContractId,
-      fixtureId,
-      fixtureSha256: suite.fixtureFingerprints.find(
-        (entry) => entry.fixtureId === fixtureId,
-      )!.fixtureSha256,
-      promptSha256: suite.fixtureFingerprints.find(
-        (entry) => entry.fixtureId === fixtureId,
-      )!.promptSha256,
-      sourceBundleSha256: evaluationCase.contract.sourceBundleSha256,
-      evaluatorVersion: suite.evaluatorVersion,
-      evaluatorRubricSha256: suite.evaluatorRubricSha256,
-      capabilityProbeAttestation: probeAttestation(alias),
-      artifactRetention: "retained_after_route_gate",
+      candidate.expectedProtocol,
       artifact,
-      artifactSha256,
+      amountCents ?? 0,
+    );
+    if (amountCents === null) {
+      call.costSettlement = {
+        state: "unknown",
+        reason: "provider_ack_unknown",
+      };
+    }
+    const times = [0, elapsedMs];
+    const produced = await runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId,
       attempt,
-      resultClass,
-      runtimeTiming:
-        resultClass === "quality_valid_runtime_late" ? "late" : "on_time",
-      elapsedMs,
-      protocolVerified: true,
-      identityVerified: true,
-      artifactAccepted: resultClass.startsWith("quality_valid_"),
-      assessment,
-      costSettlement:
-        amountCents === null
-          ? { state: "unknown", reason: "provider_ack_unknown" }
-          : {
-              state: "settled",
-              amountCents,
-              basis: "provider_reported",
-            },
-      budgetCapExceeded: false,
-      settlementInvalid: false,
-      usage: {
-        inputTokens: 100,
-        outputTokens: 50,
-        callCount: 1,
-        source: "provider_reported",
-      },
-      failureCode: resultClass === "content_invalid" ? "content_invalid" : null,
-    };
+      campaignBudget: capabilityBudget,
+      capabilityCampaign,
+      execute: async () => call,
+      now: () => times.shift() ?? elapsedMs,
+    });
+    expect(produced.resultClass).toBe(resultClass);
+    return produced;
   }
 
-  function fullMatrix(
+  async function fullMatrix(
     alias: string,
     build: (
       fixtureId: string,
       attempt: number,
       index: number,
-    ) => Omit<ModelEvaluationRun, "fixtureId" | "attempt">,
-  ): ModelEvaluationRun[] {
+    ) => Promise<ModelEvaluationRun>,
+  ): Promise<ModelEvaluationRun[]> {
     const runs: ModelEvaluationRun[] = [];
     let index = 0;
     for (const fixtureId of suite.fixtureIds) {
       for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
-        runs.push({ ...build(fixtureId, attempt, index), fixtureId, attempt });
+        runs.push(await build(fixtureId, attempt, index));
         index += 1;
       }
     }
     return runs;
   }
 
-  function acceptedRun(
+  async function acceptedRun(
     alias: string,
     fixtureId: string,
     attempt: number,
     elapsedMs = 1000,
     amountCents: number | null = 1,
     variant?: string,
-  ): ModelEvaluationRun {
+  ): Promise<ModelEvaluationRun> {
     const artifact = canonicalAcceptedArtifact(fixtureId);
     if (variant) artifact.keywords = [variant];
-    return run(
+    return await run(
       alias,
       "quality_valid_runtime_on_time",
       artifact,
@@ -1729,19 +1685,19 @@ describe("quality-first candidate summary and ranking", () => {
     );
   }
 
-  function contentInvalidRun(
+  async function contentInvalidRun(
     alias: string,
     fixtureId: string,
     attempt: number,
     elapsedMs = 1000,
     amountCents: number | null = 1,
-  ): ModelEvaluationRun {
+  ): Promise<ModelEvaluationRun> {
     const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
     const artifact = canonicalAcceptedArtifact(fixtureId);
     artifact.keywords = [
       evaluationCase.payload.fixture.assertions.forbiddenOutputTerms[0],
     ];
-    return run(
+    return await run(
       alias,
       "content_invalid",
       artifact,
@@ -1752,69 +1708,49 @@ describe("quality-first candidate summary and ranking", () => {
     );
   }
 
-  it("orders quality, structure, factuality, stability, P95, then accepted cost", () => {
-    const highQualityRuns = fullMatrix(
+  it("orders quality, structure, factuality, stability, P95, then accepted cost", async () => {
+    const highQualityRuns = await fullMatrix(
       "gpt-5.5",
-      (fixtureId, attempt, index) => {
-        const {
-          fixtureId: _fixtureId,
-          attempt: _attempt,
-          ...record
-        } = acceptedRun(
+      async (fixtureId, attempt, index) =>
+        await acceptedRun(
           "gpt-5.5",
           fixtureId,
           attempt,
           index % 2 === 0 ? 110_000 : 120_000,
           5,
           `${fixtureId}-stable`,
-        );
-        return record;
-      },
+        ),
     );
     const highQualitySlow = summarizeModelEvaluationCandidate(
       plan,
       "gpt-5.5",
       highQualityRuns,
     );
-    const lowerQualityRuns = fullMatrix(
+    const lowerQualityRuns = await fullMatrix(
       "claude-sonnet-5",
-      (fixtureId, attempt, index) => {
-        const record =
-          index === 0
-            ? contentInvalidRun("claude-sonnet-5", fixtureId, attempt)
-            : acceptedRun(
-                "claude-sonnet-5",
-                fixtureId,
-                attempt,
-                1000,
-                1,
-                `${fixtureId}-stable`,
-              );
-        const {
-          fixtureId: _fixtureId,
-          attempt: _attempt,
-          ...withoutKey
-        } = record;
-        return withoutKey;
-      },
+      async (fixtureId, attempt, index) =>
+        index === 0
+          ? await contentInvalidRun("claude-sonnet-5", fixtureId, attempt)
+          : await acceptedRun(
+              "claude-sonnet-5",
+              fixtureId,
+              attempt,
+              1000,
+              1,
+              `${fixtureId}-stable`,
+            ),
     );
-    const slowerTerraRuns = fullMatrix(
+    const slowerTerraRuns = await fullMatrix(
       "gpt-5.6-terra",
-      (fixtureId, attempt) => {
-        const {
-          fixtureId: _fixtureId,
-          attempt: _attempt,
-          ...record
-        } = acceptedRun(
+      async (fixtureId, attempt) =>
+        await acceptedRun(
           "gpt-5.6-terra",
           fixtureId,
           attempt,
           130_000,
           6,
           `${fixtureId}-stable`,
-        );
-        return record;
-      },
+        ),
     );
 
     expect(
@@ -1827,26 +1763,20 @@ describe("quality-first candidate summary and ranking", () => {
     expect(highQualitySlow.acceptedArtifactCostCents).toBe(5);
   });
 
-  it("keeps unknown settlement unrankable instead of treating it as zero", () => {
-    const summary = summarizeModelEvaluationCandidate(
-      plan,
+  it("keeps unknown settlement unrankable instead of treating it as zero", async () => {
+    const runs = await fullMatrix(
       "gpt-5.5",
-      fullMatrix("gpt-5.5", (fixtureId, attempt, index) => {
-        const {
-          fixtureId: _fixtureId,
-          attempt: _attempt,
-          ...record
-        } = acceptedRun(
+      async (fixtureId, attempt, index) =>
+        await acceptedRun(
           "gpt-5.5",
           fixtureId,
           attempt,
           1000,
-          index === 0 ? null : 1,
+          index === 11 ? null : 1,
           `${fixtureId}-stable`,
-        );
-        return record;
-      }),
+        ),
     );
+    const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
     expect(summary).toMatchObject({
       rankable: false,
       acceptedArtifactCostCents: null,
@@ -1854,23 +1784,20 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("keeps late quality observations but fails the production P95 promotion gate", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const record = acceptedRun(
-        "gpt-5.5",
-        fixtureId,
-        attempt,
-        plan.envelope.runtimeDeadlineMs + 1,
-      );
-      record.resultClass = "quality_valid_runtime_late";
-      record.runtimeTiming = "late";
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...withoutKey
-      } = record;
-      return withoutKey;
-    });
+  it("keeps late quality observations but fails the production P95 promotion gate", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt) =>
+        await run(
+          "gpt-5.5",
+          "quality_valid_runtime_late",
+          canonicalAcceptedArtifact(fixtureId),
+          plan.envelope.runtimeDeadlineMs + 1,
+          1,
+          fixtureId,
+          attempt,
+        ),
+    );
     const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
     expect(summary).toMatchObject({
       acceptedArtifactCount: 12,
@@ -1884,22 +1811,18 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("keeps quality observations but makes an over-cap run unrankable", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const record = acceptedRun("gpt-5.5", fixtureId, attempt);
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...withoutKey
-      } = record;
-      return withoutKey;
-    });
-    runs[0].budgetCapExceeded = true;
-    runs[0].costSettlement = {
-      state: "settled",
-      amountCents: plan.envelope.perCallCostCapCents + 1,
-      basis: "provider_reported",
-    };
+  it("keeps quality observations but makes an over-cap run unrankable", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt, index) =>
+        await acceptedRun(
+          "gpt-5.5",
+          fixtureId,
+          attempt,
+          1000,
+          index === 11 ? plan.envelope.perCallCostCapCents + 1 : 1,
+        ),
+    );
 
     const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
     expect(summary).toMatchObject({
@@ -1909,26 +1832,20 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("computes stability within each fixture instead of across unrelated fixtures", () => {
-    const summary = summarizeModelEvaluationCandidate(
-      plan,
+  it("computes stability within each fixture instead of across unrelated fixtures", async () => {
+    const runs = await fullMatrix(
       "gpt-5.5",
-      fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-        const {
-          fixtureId: _fixtureId,
-          attempt: _attempt,
-          ...record
-        } = acceptedRun(
+      async (fixtureId, attempt) =>
+        await acceptedRun(
           "gpt-5.5",
           fixtureId,
           attempt,
           1000,
           1,
           `${fixtureId}-output`,
-        );
-        return record;
-      }),
+        ),
     );
+    const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
 
     expect(summary).toMatchObject({
       matrixComplete: true,
@@ -1936,152 +1853,262 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("rejects persisted probe self-hashes without the originating trusted campaign", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...record
-      } = acceptedRun("gpt-5.5", fixtureId, attempt);
-      return record;
-    });
+  it("rejects a matrix assembled from fresh genuine budgets per attempt", async () => {
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.6-terra",
+    )!;
+    const budgets: ModelEvaluationBudgetGuard[] = [];
+    const runs: ModelEvaluationRun[] = [];
+    for (const fixtureId of suite.fixtureIds) {
+      for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
+        const budget = new ModelEvaluationBudgetGuard(100);
+        budgets.push(budget);
+        runs.push(
+          await runTaskEvaluationAttempt({
+            plan,
+            candidate,
+            fixtureId,
+            attempt,
+            campaignBudget: budget,
+            execute: async () =>
+              completedCall(
+                candidate.alias,
+                candidate.expectedProtocol,
+                canonicalAcceptedArtifact(fixtureId),
+              ),
+          }),
+        );
+      }
+    }
+
     expect(() =>
-      summarizeModelEvaluationCandidateRaw(plan, "gpt-5.5", runs),
-    ).toThrow("trusted in-memory capability campaign");
-    expect(() =>
-      summarizeModelEvaluationCandidateRaw(plan, "gpt-5.5", runs, {
-        attestationFor: () => runs[0].capabilityProbeAttestation,
-      } as never),
-    ).toThrow("trusted in-memory capability campaign");
+      summarizeModelEvaluationCandidateRaw(
+        plan,
+        candidate.alias,
+        runs,
+        budgets[0],
+      ),
+    ).toThrow("runs from one trusted in-memory campaign budget");
   });
 
-  it("rejects a non-canonical fixture before computing a matrix", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...record
-      } = acceptedRun("gpt-5.5", fixtureId, attempt);
-      return record;
+  it("freezes budget-stop runs before binding them to the campaign", async () => {
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.6-terra",
+    )!;
+    const budget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents,
+    );
+    const runs = await fullMatrix(
+      candidate.alias,
+      async (fixtureId, attempt) =>
+        await runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId,
+          attempt,
+          campaignBudget: budget,
+          execute: async () =>
+            completedCall(
+              candidate.alias,
+              candidate.expectedProtocol,
+              canonicalAcceptedArtifact(fixtureId),
+              plan.envelope.perCallCostCapCents,
+            ),
+        }),
+    );
+    expect(
+      runs.filter((run) => run.resultClass === "budget_stop"),
+    ).toHaveLength(11);
+    const stoppedRun = runs.find((run) => run.resultClass === "budget_stop")!;
+    expect(Object.isFrozen(stoppedRun)).toBe(true);
+    expect(() => {
+      stoppedRun.resultClass = "quality_valid_runtime_on_time";
+    }).toThrow(TypeError);
+    expect(() => {
+      stoppedRun.artifact = canonicalAcceptedArtifact(stoppedRun.fixtureId);
+    }).toThrow(TypeError);
+
+    expect(
+      summarizeModelEvaluationCandidateRaw(plan, candidate.alias, runs, budget),
+    ).toMatchObject({
+      matrixComplete: true,
+      acceptedArtifactCount: 1,
+      hardFailureCount: 11,
+      rankable: false,
     });
-    runs[0].fixtureId = "unexpected-fixture";
-    expect(() =>
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
-    ).toThrow("candidate summary contains a non-canonical run");
   });
 
-  it("rejects tampered protocol, fixture and cost provenance before ranking", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...record
-      } = acceptedRun("gpt-5.5", fixtureId, attempt);
-      return record;
+  it("summarizes delayed provider-attested no-cost failure but keeps it unrankable", async () => {
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.6-terra",
+    )!;
+    const runs = await fullMatrix(
+      candidate.alias,
+      async (fixtureId, attempt, index) => {
+        if (index !== 11) {
+          return await acceptedRun(candidate.alias, fixtureId, attempt);
+        }
+        const times = [0, plan.envelope.hardStopMs + 1];
+        return await runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId,
+          attempt,
+          campaignBudget: capabilityBudget,
+          capabilityCampaign,
+          execute: async () => {
+            throw new ModelEvaluationCallError("provider_unavailable", {
+              state: "not_incurred",
+              reason: "provider_attested_not_incurred",
+            });
+          },
+          now: () => times.shift() ?? plan.envelope.hardStopMs + 1,
+        });
+      },
+    );
+
+    const summary = summarizeModelEvaluationCandidate(
+      plan,
+      candidate.alias,
+      runs,
+    );
+    expect(runs[11]).toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+      runtimeTiming: "diagnostic_exhausted",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "provider_attested_not_incurred",
+      },
     });
-    runs[0].actualProtocol = "openai-chat-completions";
-    runs[0].sourceBundleSha256 = "e".repeat(64);
-    runs[0].costSettlement = {
-      state: "settled",
-      amountCents: plan.envelope.perCallCostCapCents + 1,
-      basis: "provider_reported",
-    };
+    expect(summary).toMatchObject({
+      matrixComplete: true,
+      hardFailureCount: 1,
+      rankable: false,
+    });
 
     expect(() =>
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
-    ).toThrow("candidate summary contains a non-canonical run");
-  });
-
-  it("rejects a tampered or mixed capability-probe attestation", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...record
-      } = acceptedRun("gpt-5.5", fixtureId, attempt);
-      return record;
-    });
-    runs[0].capabilityProbeAttestation = {
-      ...runs[0].capabilityProbeAttestation!,
-      resolvedModel: "gpt-5.6-terra",
-    };
-    expect(() =>
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
-    ).toThrow("candidate summary contains a non-canonical run");
-  });
-
-  it("rejects a completed-quality run that forges a pre-dispatch settlement", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...record
-      } = acceptedRun("gpt-5.5", fixtureId, attempt);
-      return record;
-    });
-    runs[0].costSettlement = {
-      state: "not_incurred",
-      reason: "rejected_before_dispatch",
-    };
-
-    expect(() =>
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
-    ).toThrow("candidate summary contains a non-canonical run");
-  });
-
-  it("re-evaluates persisted artifacts instead of trusting forged pass flags", () => {
-    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt, index) => {
-      const record =
-        index === 0
-          ? contentInvalidRun("gpt-5.5", fixtureId, attempt)
-          : acceptedRun("gpt-5.5", fixtureId, attempt);
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...withoutKey
-      } = record;
-      return withoutKey;
-    });
-    runs[0].resultClass = "quality_valid_runtime_on_time";
-    runs[0].artifactAccepted = true;
-    runs[0].assessment = validAssessment(runs[0].artifactSha256!);
-    runs[0].failureCode = null;
-
-    expect(() =>
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
-    ).toThrow("candidate summary contains a non-canonical run");
-  });
-
-  it("rebuilds summaries from canonical runs and rejects a forged source bundle", () => {
-    const candidateRuns = plan.candidates.map((candidate) => ({
-      alias: candidate.alias,
-      runs: fullMatrix(candidate.alias, (fixtureId, attempt) => {
-        const {
-          fixtureId: _fixtureId,
-          attempt: _attempt,
-          ...record
-        } = acceptedRun(candidate.alias, fixtureId, attempt);
-        return record;
+      Object.assign(runs[11].costSettlement, {
+        reason: "rejected_before_dispatch",
       }),
-    }));
-    for (const run of candidateRuns[1].runs) {
+    ).toThrow(TypeError);
+    expect(runs[11].costSettlement).toEqual({
+      state: "not_incurred",
+      reason: "provider_attested_not_incurred",
+    });
+  });
+
+  it("rejects persisted probe self-hashes without the originating trusted campaign", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt) =>
+        await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    expect(() =>
+      summarizeModelEvaluationCandidateRaw(
+        plan,
+        "gpt-5.5",
+        runs,
+        capabilityBudget,
+      ),
+    ).toThrow("trusted in-memory capability campaign");
+    expect(() =>
+      summarizeModelEvaluationCandidateRaw(
+        plan,
+        "gpt-5.5",
+        structuredClone(runs),
+        capabilityBudget,
+        capabilityCampaign,
+      ),
+    ).toThrow("runs from one trusted in-memory campaign budget");
+  });
+
+  it("deep-freezes every trusted run and its nested provenance", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt) =>
+        await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    const trustedRun = runs[0];
+    expect(Object.isFrozen(trustedRun)).toBe(true);
+    expect(Object.isFrozen(trustedRun.artifact)).toBe(true);
+    expect(Object.isFrozen(trustedRun.assessment)).toBe(true);
+    expect(Object.isFrozen(trustedRun.costSettlement)).toBe(true);
+    expect(Object.isFrozen(trustedRun.usage)).toBe(true);
+    expect(Object.isFrozen(trustedRun.capabilityProbeAttestation)).toBe(true);
+
+    expect(() => {
+      trustedRun.fixtureId = "unexpected-fixture";
+    }).toThrow(TypeError);
+    expect(() => {
+      trustedRun.artifact!.keywords[0] = "forged";
+    }).toThrow(TypeError);
+    expect(() => {
+      trustedRun.assessment!.findingCodes.push("forged");
+    }).toThrow(TypeError);
+    expect(() => {
+      trustedRun.costSettlement = {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      };
+    }).toThrow(TypeError);
+    expect(() => {
+      trustedRun.usage!.inputTokens = -1;
+    }).toThrow(TypeError);
+    expect(() => {
+      trustedRun.capabilityProbeAttestation!.resolvedModel = "gpt-5.6-terra";
+    }).toThrow(TypeError);
+
+    expect(
+      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs).rankable,
+    ).toBe(true);
+  });
+
+  it("rejects a forged persisted clone before trusting pass flags", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt, index) =>
+        index === 0
+          ? await contentInvalidRun("gpt-5.5", fixtureId, attempt)
+          : await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    const forgedRuns = structuredClone(runs);
+    forgedRuns[0].resultClass = "quality_valid_runtime_on_time";
+    forgedRuns[0].artifactAccepted = true;
+    forgedRuns[0].assessment = validAssessment(forgedRuns[0].artifactSha256!);
+    forgedRuns[0].failureCode = null;
+
+    expect(() =>
+      summarizeModelEvaluationCandidate(plan, "gpt-5.5", forgedRuns),
+    ).toThrow("runs from one trusted in-memory campaign budget");
+  });
+
+  it("rejects a ranking matrix containing forged persisted runs", async () => {
+    const candidateRuns = await Promise.all(
+      plan.candidates.map(async (candidate) => ({
+        alias: candidate.alias,
+        runs: await fullMatrix(
+          candidate.alias,
+          async (fixtureId, attempt) =>
+            await acceptedRun(candidate.alias, fixtureId, attempt),
+        ),
+      })),
+    );
+    const forgedCandidateRuns = structuredClone(candidateRuns);
+    for (const run of forgedCandidateRuns[1].runs) {
       run.sourceBundleSha256 = "d".repeat(64);
     }
 
-    expect(() => rankModelEvaluationCandidates(plan, candidateRuns)).toThrow(
-      "candidate summary contains a non-canonical run",
-    );
+    expect(() =>
+      rankModelEvaluationCandidates(plan, forgedCandidateRuns),
+    ).toThrow("runs from one trusted in-memory campaign budget");
   });
 
-  it("requires every planned alias exactly once before ranking", () => {
-    const terraRuns = fullMatrix("gpt-5.6-terra", (fixtureId, attempt) => {
-      const {
-        fixtureId: _fixtureId,
-        attempt: _attempt,
-        ...record
-      } = acceptedRun("gpt-5.6-terra", fixtureId, attempt);
-      return record;
-    });
+  it("requires every planned alias exactly once before ranking", async () => {
+    const terraRuns = await fullMatrix(
+      "gpt-5.6-terra",
+      async (fixtureId, attempt) =>
+        await acceptedRun("gpt-5.6-terra", fixtureId, attempt),
+    );
 
     expect(() =>
       rankModelEvaluationCandidates(plan, [

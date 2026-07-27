@@ -67,6 +67,35 @@ describe('Site Builder model candidate baseline', () => {
     ).toBe(false);
   });
 
+  it('encodes capability-probe admission as closed machine data', () => {
+    const candidates =
+      SITE_BUILDER_MODEL_CANDIDATE_BASELINE.profileCandidatePools.flatMap(
+        (pool) =>
+          pool.candidates.map((candidate) => ({
+            profile: pool.profile,
+            alias: candidate.alias,
+            preflight: candidate.preflight,
+          })),
+      );
+    expect(
+      candidates
+        .filter((candidate) => candidate.preflight === 'capability_probe')
+        .map(({ profile, alias }) => ({ profile, alias })),
+    ).toEqual([
+      { profile: 'structured.workspace_materials', alias: 'gpt-5.5' },
+      { profile: 'structured.default', alias: 'gpt-5.5' },
+      { profile: 'reasoning.high', alias: 'gpt-5.5' },
+      { profile: 'copy.premium', alias: 'gpt-5.5' },
+    ]);
+    expect(
+      candidates.every(
+        (candidate) =>
+          candidate.preflight === 'none' ||
+          candidate.preflight === 'capability_probe',
+      ),
+    ).toBe(true);
+  });
+
   it('freezes precise media aliases, preview/deferred states, and expected protocols', () => {
     expect({
       imageBulk: aliasesFor('image.bulk.creative'),

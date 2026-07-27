@@ -69,10 +69,7 @@ test('deferred or preview model cannot be documented as promoted', () => {
     'gpt-image-2-4k 需经任务评测后才可写入 promotedRoute。',
   ]) {
     assert.deepEqual(
-      checkModelNarrativeDrift(
-        baseline,
-        new Map([[path, boundedClaim]]),
-      ),
+      checkModelNarrativeDrift(baseline, new Map([[path, boundedClaim]])),
       [],
     );
   }
@@ -140,13 +137,31 @@ test('active promoted aliases remain scoped to BrandProfile', () => {
 test('schema rejects incomplete domains, activations, tasks, and documentation policy', () => {
   const invalidDomain = structuredClone(baseline);
   invalidDomain.models[0].domain = 'audio';
-  assert.match(validateModelCandidateBaseline(invalidDomain).join('\n'), /domain/);
+  assert.match(
+    validateModelCandidateBaseline(invalidDomain).join('\n'),
+    /domain/,
+  );
 
   const invalidActivation = structuredClone(baseline);
   invalidActivation.profileCandidatePools[0].activation = 'automatic';
   assert.match(
     validateModelCandidateBaseline(invalidActivation).join('\n'),
     /activation/,
+  );
+
+  const missingPreflight = structuredClone(baseline);
+  delete missingPreflight.profileCandidatePools[0].candidates[0].preflight;
+  assert.match(
+    validateModelCandidateBaseline(missingPreflight).join('\n'),
+    /incomplete candidate/,
+  );
+
+  const unknownPreflight = structuredClone(baseline);
+  unknownPreflight.profileCandidatePools[0].candidates[0].preflight =
+    'best_effort';
+  assert.match(
+    validateModelCandidateBaseline(unknownPreflight).join('\n'),
+    /incomplete candidate/,
   );
 
   const incompleteTasks = structuredClone(baseline);
@@ -187,12 +202,11 @@ test('registry must derive candidates instead of declaring target literals', () 
       [
         'getModelProfileCandidatePool();',
         'function modelCandidateRoutesFromBaseline() {}',
-        ...baseline.profileCandidatePools.map(
-          (pool) =>
-            [
-              `  candidates: modelCandidateRoutesFromBaseline('${pool.profile}'),`,
-              '  deterministicFallback: {},',
-            ].join('\n'),
+        ...baseline.profileCandidatePools.map((pool) =>
+          [
+            `  candidates: modelCandidateRoutesFromBaseline('${pool.profile}'),`,
+            '  deterministicFallback: {},',
+          ].join('\n'),
         ),
       ].join('\n'),
     ),

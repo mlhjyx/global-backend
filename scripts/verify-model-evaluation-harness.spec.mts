@@ -55,6 +55,14 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
       "apps/api/src/site-builder/agents/model-candidate-baseline.json",
     ],
   );
+  assert.ok(
+    suite.sourceBundleFiles.some(
+      (entry) =>
+        entry.role === "claim_fact_key" &&
+        entry.path === "apps/api/src/site-builder/claim-fact-key.ts",
+    ),
+    "BrandProfile evaluation source bundle must pin the claim fact-key logic",
+  );
   for (const fingerprint of suite.fixtureFingerprints) {
     const fixture = JSON.parse(
       await readFile(
