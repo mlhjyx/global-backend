@@ -1002,6 +1002,92 @@ describe("structured output, repair, errors, and settlement", () => {
     });
   });
 
+  it("keeps the full reservation when frozen pricing cannot price incomplete repair usage", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const request = canonicalRequest();
+    const wireCall = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(openAIResponsesBody(request.alias, {}), 30),
+      )
+      .mockRejectedValueOnce(new Error("repair transport unavailable"));
+    const resolver = settlementResolver({
+      state: "settled",
+      amountCents: 30,
+      basis: "frozen_pricing_snapshot",
+    });
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: resolver,
+    });
+    const budget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents * 2,
+    );
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: request.fixtureId,
+        attempt: 1,
+        campaignBudget: budget,
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "capability_unavailable",
+      failureCode: "provider_error",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+      settlementInvalid: true,
+    });
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        callCount: 2,
+        usage: expect.objectContaining({
+          callCount: 2,
+          complete: false,
+        }),
+        providerReportedCostCents: [30, null],
+      }),
+    );
+    expect(budget.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("allows a verified billing export to settle independently of partial usage", async () => {
+    const request = canonicalRequest();
+    const wireCall = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(openAIResponsesBody(request.alias, {}), 30),
+      )
+      .mockRejectedValueOnce(new Error("repair transport unavailable"));
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: settlementResolver({
+        state: "settled",
+        amountCents: 37,
+        basis: "verified_billing_export",
+      }),
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "provider_error",
+      costSettlement: {
+        state: "settled",
+        amountCents: 37,
+        basis: "verified_billing_export@fake-settlement/v1",
+      },
+    });
+  });
+
   it("applies the same conservative repair settlement to capability probes", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates.find(

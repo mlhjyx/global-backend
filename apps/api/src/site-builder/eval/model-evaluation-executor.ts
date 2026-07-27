@@ -307,6 +307,17 @@ function canonicalSettlement(
           0,
         )
       : null;
+  const completeUsage =
+    context !== undefined &&
+    context.callCount > 0 &&
+    context.usage.complete &&
+    context.usage.callCount === context.callCount &&
+    context.usage.source ===
+      (context.callCount === 1 ? "provider_reported" : "adapter_aggregated") &&
+    Number.isSafeInteger(context.usage.inputTokens) &&
+    context.usage.inputTokens >= 0 &&
+    Number.isSafeInteger(context.usage.outputTokens) &&
+    context.usage.outputTokens >= 0;
   if (
     value.state === "settled" &&
     exactKeys(value, ["state", "amountCents", "basis"]) &&
@@ -317,7 +328,8 @@ function canonicalSettlement(
     SETTLED_BASES.has(value.basis) &&
     (value.basis !== "provider_reported" ||
       (providerReportedAmount !== null &&
-        Math.abs(providerReportedAmount - value.amountCents) <= 1e-9))
+        Math.abs(providerReportedAmount - value.amountCents) <= 1e-9)) &&
+    (value.basis !== "frozen_pricing_snapshot" || completeUsage)
   ) {
     return {
       state: "settled",
