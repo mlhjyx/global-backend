@@ -1,7 +1,7 @@
 name: PR decision card
 
-# 安全边界：pull_request_target 只执行 default branch 的受信脚本，并明确
-# checkout base SHA；不得 checkout 或执行 PR head。PR 正文按不可信数据解析。
+# 安全边界：该 job 只接受目标为 default branch 的 PR，并 checkout 对应
+# base SHA；不得 checkout 或执行 PR head。PR 正文按不可信数据解析。
 on:
   pull_request_target:
     types:
@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   decision-card:
+    if: github.event.pull_request.base.ref == github.event.repository.default_branch
     name: nontechnical decision card freshness
     runs-on: ubuntu-latest
     steps:

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   evaluateDecisionCard,
@@ -6,6 +7,10 @@ import {
 } from "./pr-decision-card.mjs";
 
 const HEAD = "a".repeat(40);
+const WORKFLOW = readFileSync(
+  new URL("../.github/workflows/pr-decision-card.yml", import.meta.url),
+  "utf8",
+);
 
 function body(overrides = {}) {
   const values = {
@@ -60,7 +65,14 @@ function event(cardBody = body(), headSha = HEAD) {
 
 test("author-controlled positive declarations never become a trusted ready state", () => {
   const result = evaluateDecisionCard(
-    event(),
+    event(
+      body({
+        technicalGate: "PASS；可选 PASS / HOLD / UNKNOWN",
+        independentReview:
+          "RECOMMEND_MERGE；可选 RECOMMEND_MERGE / RECOMMEND_HOLD / NEED_USER_DECISION",
+        codexRecommendation: "MERGE；可选 MERGE / HOLD / NEED_USER_DECISION",
+      }),
+    ),
     new Date("2026-07-27T12:05:00.000Z"),
   );
   assert.equal(result.status, "CURRENT_UNVERIFIED");
@@ -68,6 +80,28 @@ test("author-controlled positive declarations never become a trusted ready state
   assert.equal(result.technicalGate, "PASS");
   assert.equal(result.independentReview, "RECOMMEND_MERGE");
   assert.match(renderDecisionCard(result), /未验证声明/);
+});
+
+test("a future timestamp cannot enter a nonblocking MERGE state", () => {
+  const result = evaluateDecisionCard(
+    event(body({ generatedAt: "2026-07-27T12:10:01.000Z" })),
+    new Date("2026-07-27T12:05:00.000Z"),
+  );
+  assert.equal(result.status, "INCOMPLETE");
+  assert.equal(result.blocking, true);
+  assert.match(result.reasons.join(" "), /生成时间无效或位于未来/);
+});
+
+test("pull_request_target execution is restricted to the default branch", () => {
+  assert.match(
+    WORKFLOW,
+    /if:\s*github\.event\.pull_request\.base\.ref\s*==\s*github\.event\.repository\.default_branch/,
+  );
+  assert.match(
+    WORKFLOW,
+    /ref:\s*\${{\s*github\.event\.pull_request\.base\.sha\s*}}/,
+  );
+  assert.doesNotMatch(WORKFLOW, /pull_request\.head\.sha/);
 });
 
 test("a changed head makes an old MERGE recommendation stale and blocking", () => {

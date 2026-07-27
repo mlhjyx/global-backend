@@ -127,6 +127,9 @@ export function evaluateDecisionCard(event, now = new Date()) {
   const boundPrNumber = parsePrNumber(card.prNumber);
   const generatedAtMs = Date.parse(card.generatedAt);
   const bindingPresent = bindingMissing.length === 0;
+  const generatedAtValid =
+    Number.isFinite(generatedAtMs) &&
+    generatedAtMs <= now.getTime() + 5 * 60 * 1000;
   const stale =
     bindingPresent &&
     (card.repository !== repository ||
@@ -135,11 +138,7 @@ export function evaluateDecisionCard(event, now = new Date()) {
   if (stale) {
     reasons.push("决策卡绑定的仓库、PR 或 head SHA 与当前 PR 不一致");
   }
-  if (
-    bindingPresent &&
-    (!Number.isFinite(generatedAtMs) ||
-      generatedAtMs > now.getTime() + 5 * 60 * 1000)
-  ) {
+  if (bindingPresent && !generatedAtValid) {
     reasons.push("决策卡生成时间无效或位于未来");
   }
 
@@ -174,7 +173,7 @@ export function evaluateDecisionCard(event, now = new Date()) {
   } else if (
     bindingMissing.length === 0 &&
     missing.length === 0 &&
-    Number.isFinite(generatedAtMs)
+    generatedAtValid
   ) {
     if (
       recommendation === "HOLD" ||
