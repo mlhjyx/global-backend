@@ -76,7 +76,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。",
     "- trusted probe/run 只接受 `createModelEvaluationProtocolExecutor` 私有 WeakSet 品牌化并冻结的 target execute；任意 callback、wrapper/Proxy 或 WeakSet prototype monkeypatch 均在预算 reserve 和 client dispatch 前拒绝。品牌模块不暴露 register 或测试注入入口。",
     "- adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。",
-    "- cost settlement 只认显式注入、带 resolverId 的 resolver；没有 provider-reported、冻结价格或核验账单依据即 `unknown`，绝不记 0。schema/task-gate 唯一修复调用的 usage 与 callCount 必须合并。",
+    "- cost settlement 只认显式注入、带 resolverId 的 resolver；没有 provider-reported、冻结价格或核验账单依据即 `unknown`，绝不记 0。`provider_attested_not_incurred` 只允许首个 dispatch 失败、callCount=1 且唯一 provider cost observation 为 null；任何已有成功/成本观察后的 repair failure 都强制为 unknown。schema/task-gate 唯一修复调用的 usage 与 callCount 必须合并。",
     "",
     "| protocol | domain | admission | operations |",
     "|---|---|---|---|",

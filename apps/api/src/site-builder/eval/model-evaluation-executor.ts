@@ -339,7 +339,11 @@ function canonicalSettlement(
     dispatched &&
     value.state === "not_incurred" &&
     exactKeys(value, ["state", "reason"]) &&
-    value.reason === "provider_attested_not_incurred"
+    value.reason === "provider_attested_not_incurred" &&
+    context?.outcome === "failed" &&
+    context.callCount === 1 &&
+    context.providerReportedCostCents.length === 1 &&
+    context.providerReportedCostCents[0] === null
   ) {
     return {
       state: "not_incurred",

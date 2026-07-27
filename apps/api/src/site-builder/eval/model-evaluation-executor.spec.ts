@@ -730,6 +730,185 @@ describe("structured output, repair, errors, and settlement", () => {
     });
   });
 
+  it("rejects a whole-attempt not-incurred claim after a billable first repair call", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const request = canonicalRequest();
+    const wireCall = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(openAIResponsesBody(request.alias, {}), 30),
+      )
+      .mockRejectedValueOnce(new Error("repair transport unavailable"));
+    const resolver = settlementResolver({
+      state: "not_incurred",
+      reason: "provider_attested_not_incurred",
+    });
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: resolver,
+    });
+    const budget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents * 2,
+    );
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: request.fixtureId,
+        attempt: 1,
+        campaignBudget: budget,
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "capability_unavailable",
+      failureCode: "provider_error",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+      settlementInvalid: true,
+    });
+    expect(wireCall).toHaveBeenCalledTimes(2);
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: "failed",
+        callCount: 2,
+        providerReportedCostCents: [30, null],
+      }),
+    );
+    expect(budget.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("applies the same conservative repair settlement to capability probes", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.preflight === "capability_probe",
+    );
+    if (!candidate) throw new Error("test requires a probe candidate");
+    const wireCall = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        wireResponse(openAIResponsesBody(candidate.alias, {}), 30),
+      )
+      .mockRejectedValueOnce(new Error("repair transport unavailable"));
+    const resolver = settlementResolver({
+      state: "not_incurred",
+      reason: "provider_attested_not_incurred",
+    });
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: resolver,
+    });
+    const budget = new ModelEvaluationBudgetGuard(
+      plan.envelope.perCallCostCapCents * 2,
+    );
+    const campaign = new ModelEvaluationCapabilityCampaign(budget);
+
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: executor.execute,
+      }),
+    ).resolves.toEqual({
+      status: "capability_unavailable",
+      protocolVerified: false,
+      identityVerified: false,
+      outputVerified: false,
+    });
+    expect(wireCall).toHaveBeenCalledTimes(2);
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: "failed",
+        callCount: 2,
+        providerReportedCostCents: [30, null],
+      }),
+    );
+    expect(budget.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("fails a repair abort closed without erasing the first call cost observation", async () => {
+    const request = canonicalRequest();
+    const controller = new AbortController();
+    request.signal = controller.signal;
+    const wireCall = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(openAIResponsesBody(request.alias, {}), 30),
+      )
+      .mockImplementationOnce(async () => {
+        controller.abort(new Error("repair aborted"));
+        throw new Error("repair aborted");
+      });
+    const resolver = settlementResolver({
+      state: "not_incurred",
+      reason: "provider_attested_not_incurred",
+    });
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: resolver,
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_aborted",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: "failed",
+        callCount: 2,
+        providerReportedCostCents: [30, null],
+      }),
+    );
+  });
+
+  it("accepts provider-attested no cost only for the first failed dispatch with no cost observation", async () => {
+    const request = canonicalRequest();
+    const resolver = settlementResolver({
+      state: "not_incurred",
+      reason: "provider_attested_not_incurred",
+    });
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () => {
+          throw new Error("provider rejected before generation");
+        },
+      }),
+      settlementResolver: resolver,
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "provider_error",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "provider_attested_not_incurred",
+      },
+    });
+    expect(resolver.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "failed",
+        callCount: 1,
+        providerReportedCostCents: [null],
+      }),
+    );
+  });
+
   it("repairs a task-gate failure without weakening the canonical gate", async () => {
     const request = canonicalRequest();
     const accepted = canonicalAcceptedArtifact();
