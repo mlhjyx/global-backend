@@ -43,6 +43,7 @@ function sanitize(value) {
   return String(value ?? "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -76,10 +77,11 @@ function placeholder(value) {
   );
 }
 
-function token(value, allowed) {
+function leadingToken(value, allowed) {
+  const normalized = value.toUpperCase();
   return allowed.find((item) =>
-    new RegExp(`(?:^|[^A-Z_])${escapeRegExp(item)}(?:$|[^A-Z_])`).test(
-      value.toUpperCase(),
+    new RegExp(`^${escapeRegExp(item)}(?:$|[\\s；;，,。.：:])`).test(
+      normalized,
     ),
   );
 }
@@ -141,17 +143,30 @@ export function evaluateDecisionCard(event, now = new Date()) {
     reasons.push("决策卡生成时间无效或位于未来");
   }
 
-  const recommendation = token(card.codexRecommendation, [
+  const recommendation = leadingToken(card.codexRecommendation, [
     "NEED_USER_DECISION",
     "HOLD",
     "MERGE",
   ]);
-  const technicalGate = token(card.technicalGate, ["UNKNOWN", "HOLD", "PASS"]);
-  const independentReview = token(card.independentReview, [
+  const technicalGate = leadingToken(card.technicalGate, [
+    "UNKNOWN",
+    "HOLD",
+    "PASS",
+  ]);
+  const independentReview = leadingToken(card.independentReview, [
     "NEED_USER_DECISION",
     "RECOMMEND_HOLD",
     "RECOMMEND_MERGE",
   ]);
+  if (!placeholder(card.codexRecommendation) && !recommendation) {
+    reasons.push("Codex 建议必须以精确枚举值开头");
+  }
+  if (!placeholder(card.technicalGate) && !technicalGate) {
+    reasons.push("技术门必须以精确枚举值开头");
+  }
+  if (!placeholder(card.independentReview) && !independentReview) {
+    reasons.push("独立审查必须以精确枚举值开头");
+  }
 
   let status = "INCOMPLETE";
   if (stale) {
@@ -161,11 +176,16 @@ export function evaluateDecisionCard(event, now = new Date()) {
     missing.length === 0 &&
     Number.isFinite(generatedAtMs)
   ) {
-    if (recommendation === "HOLD" || technicalGate === "HOLD") {
+    if (
+      recommendation === "HOLD" ||
+      technicalGate === "HOLD" ||
+      independentReview === "RECOMMEND_HOLD"
+    ) {
       status = "HOLD";
     } else if (
       recommendation === "NEED_USER_DECISION" ||
-      independentReview === "NEED_USER_DECISION"
+      independentReview === "NEED_USER_DECISION" ||
+      technicalGate === "UNKNOWN"
     ) {
       status = "NEED_USER_DECISION";
     } else if (
@@ -173,7 +193,10 @@ export function evaluateDecisionCard(event, now = new Date()) {
       technicalGate === "PASS" &&
       independentReview === "RECOMMEND_MERGE"
     ) {
-      status = "READY_FOR_PRODUCT_DECISION";
+      status = "CURRENT_UNVERIFIED";
+      reasons.push(
+        "技术门、独立审查和 Codex 建议来自 PR 正文，机器人未验证其真实来源",
+      );
     } else {
       status = "INCOMPLETE";
     }
@@ -187,10 +210,10 @@ export function evaluateDecisionCard(event, now = new Date()) {
   }
 
   return {
-    schemaVersion: "pr-decision-card-status/v1",
+    schemaVersion: "pr-decision-card-status/v2",
     status,
     blocking:
-      recommendation === "MERGE" && status !== "READY_FOR_PRODUCT_DECISION",
+      recommendation === "MERGE" && !["CURRENT_UNVERIFIED"].includes(status),
     repository,
     prNumber,
     headSha,
@@ -212,7 +235,11 @@ export function evaluateDecisionCard(event, now = new Date()) {
 }
 
 function shown(value) {
-  return placeholder(value) ? "UNKNOWN" : value;
+  if (placeholder(value)) return "UNKNOWN";
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_[\]()#!|>~])/g, "\\$1")
+    .replace(/@/g, "＠");
 }
 
 export function renderDecisionCard(result) {
@@ -225,6 +252,7 @@ export function renderDecisionCard(result) {
 ## 非技术合并决策卡 · 自动状态
 
 > 本评论由默认分支上的受信脚本根据当前 PR 事件与 PR 正文生成。它只检查绑定、完整性和过期状态，**不会批准或合并 PR**。
+> PR 正文由作者控制，因此其中的技术门、独立审查和 Codex 建议一律按**未验证声明**展示；本机器人永远不会仅凭正文输出“已准备合并”。
 
 - 卡片状态：\`${result.status}\`
 - 实时绑定：\`${result.repository}#${result.prNumber}@${result.headSha}\`
@@ -234,10 +262,10 @@ export function renderDecisionCard(result) {
 - 明确没有改变什么：${shown(card.unchanged)}
 - 成功、失败与恢复：${shown(card.paths)}
 - 数据、权限、迁移、外部合同或生产影响：${shown(card.sensitiveImpact)}
-- 技术门：${shown(card.technicalGate)}
-- 独立审查：${shown(card.independentReview)}
+- 正文自报技术门（未验证）：${shown(card.technicalGate)}
+- 正文自报独立审查（未验证）：${shown(card.independentReview)}
 - 最大风险与回退：${shown(card.riskRollback)}
-- Codex 建议：${shown(card.codexRecommendation)}
+- 正文自报 Codex 建议（未验证）：${shown(card.codexRecommendation)}
 - 产品负责人授权：${shown(card.productAuthorization)}（仅展示，机器人不把它当作自动合并输入）
 
 ### 自动检查发现
@@ -277,7 +305,7 @@ async function main() {
     const result = JSON.parse(await readFile(args.result, "utf8"));
     if (result.blocking) {
       console.error(
-        `decision card is ${result.status}: ${result.reasons.join("; ")}`,
+        `decision card declaration is ${result.status}: ${result.reasons.join("; ")}`,
       );
       process.exitCode = 1;
     }

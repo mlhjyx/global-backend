@@ -58,15 +58,16 @@ function event(cardBody = body(), headSha = HEAD) {
   };
 }
 
-test("a complete current card is ready only for the product decision", () => {
+test("author-controlled positive declarations never become a trusted ready state", () => {
   const result = evaluateDecisionCard(
     event(),
     new Date("2026-07-27T12:05:00.000Z"),
   );
-  assert.equal(result.status, "READY_FOR_PRODUCT_DECISION");
+  assert.equal(result.status, "CURRENT_UNVERIFIED");
   assert.equal(result.blocking, false);
   assert.equal(result.technicalGate, "PASS");
   assert.equal(result.independentReview, "RECOMMEND_MERGE");
+  assert.match(renderDecisionCard(result), /未验证声明/);
 });
 
 test("a changed head makes an old MERGE recommendation stale and blocking", () => {
@@ -129,6 +130,28 @@ test("product authorization text cannot override a technical hold", () => {
   assert.match(renderDecisionCard(result), /机器人不把它当作自动合并输入/);
 });
 
+test("negated status phrases cannot be parsed as positive enumerations", () => {
+  const result = evaluateDecisionCard(
+    event(
+      body({
+        technicalGate: "NOT PASS",
+        independentReview: "DO NOT RECOMMEND_MERGE",
+        codexRecommendation: "DO NOT MERGE",
+      }),
+    ),
+    new Date("2026-07-27T12:05:00.000Z"),
+  );
+  assert.equal(result.status, "INCOMPLETE");
+  assert.equal(result.blocking, false);
+  assert.equal(result.technicalGate, null);
+  assert.equal(result.independentReview, null);
+  assert.equal(result.recommendation, null);
+  assert.equal(
+    result.reasons.filter((reason) => reason.includes("精确枚举值")).length,
+    3,
+  );
+});
+
 test("untrusted HTML comments from the PR body are not copied into the bot marker", () => {
   const result = evaluateDecisionCard(
     event(body({ userValue: "可见结果 <!-- injected -->" })),
@@ -140,4 +163,22 @@ test("untrusted HTML comments from the PR body are not copied into the bot marke
     1,
   );
   assert.equal(rendered.includes("injected"), false);
+});
+
+test("bot output neutralizes Markdown, mentions, and bidi controls from the PR body", () => {
+  const result = evaluateDecisionCard(
+    event(
+      body({
+        userValue:
+          "查看 [伪链接](https://example.invalid) ![图片](https://example.invalid/a.png) @maintainer \u202eMERGE",
+      }),
+    ),
+    new Date("2026-07-27T12:05:00.000Z"),
+  );
+  const rendered = renderDecisionCard(result);
+  assert.equal(rendered.includes("[伪链接]("), false);
+  assert.equal(rendered.includes("![图片]("), false);
+  assert.equal(rendered.includes("@maintainer"), false);
+  assert.equal(rendered.includes("\u202e"), false);
+  assert.match(rendered, /＠maintainer/);
 });

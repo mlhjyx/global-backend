@@ -117,7 +117,9 @@ Codex 不能代替产品负责人批准产品范围，也不能代替隐私、�
 
 决策卡必须绑定仓库、PR 编号、head 提交和生成时间；head 改变即视为 `STALE`。其中 `technical_gate`、独立审查建议和产品/用户授权是三个独立字段：CI 全绿或 `RECOMMEND_MERGE` 都不自动构成授权，也不得被合并脚本当作授权输入。
 
-仓库的 `PR decision card` 工作流在 `pull_request_target` 上只执行默认分支的受信脚本，不 checkout 或执行 PR head。它从 PR 正文生成或更新一条 bot-owned 决策卡评论，并核对仓库、PR、head SHA 和生成时间；当正文仍建议 `MERGE` 但 head 已变化、技术门不是 `PASS` 或独立审查不是 `RECOMMEND_MERGE` 时，检查失败并标记 `STALE/INCOMPLETE`。未进入合并候选的 `HOLD/NEED_USER_DECISION` 卡片保持可见但不冒充就绪。该工作流永不读取“产品负责人授权”字段作为自动合并输入，也不执行合并。
+仓库的 `PR decision card` 工作流在 `pull_request_target` 上只执行默认分支的受信脚本，不 checkout 或执行 PR head。它从 PR 正文生成或更新一条 bot-owned 决策卡评论，并核对仓库、PR、head SHA 和生成时间；当正文仍自报 `MERGE` 但 head 已变化、技术门不是 `PASS` 或独立审查不是 `RECOMMEND_MERGE` 时，检查失败并标记 `STALE/INCOMPLETE`。状态值必须位于字段开头并精确匹配枚举，`NOT PASS`、`DO NOT RECOMMEND_MERGE`、`DO NOT MERGE` 等否定句不得命中正向状态。
+
+PR 正文由作者控制，所以 bot 评论必须把技术门、独立审查与 Codex 建议明确标为“未验证声明”；即使三项自报为正向，也只能显示 `CURRENT_UNVERIFIED`，绝不输出 `READY_FOR_PRODUCT_DECISION` 或其他“已准备合并”结论。真实 CI、审查代理结论和产品负责人授权仍由 Codex 分别核验并向产品负责人报告。该工作流永不读取“产品负责人授权”字段作为自动合并输入，也不执行合并。
 
 ## 4. 什么问题 Codex 应自行解决
 

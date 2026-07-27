@@ -77,7 +77,7 @@ jobs:
               });
             }
 
-      - name: Reject a stale MERGE recommendation
+      - name: Reject a stale author-declared MERGE card
         run: >-
           node scripts/pr-decision-card.mjs check
           --result "$RUNNER_TEMP/pr-decision-card-result.json"
