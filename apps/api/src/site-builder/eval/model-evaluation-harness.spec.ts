@@ -1,15 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   ModelEvaluationBudgetGuard,
   ModelEvaluationCallError,
+  ModelEvaluationCapabilityCampaign,
   buildAllTaskEvaluationPlans,
   buildCanonicalModelEvaluationCase,
   buildProfileEvaluationAdmission,
   buildTaskEvaluationPlan,
   classifyCompletedTaskResult,
-  rankModelEvaluationCandidates,
+  rankModelEvaluationCandidates as rankModelEvaluationCandidatesRaw,
   runTaskEvaluationAttempt,
-  summarizeModelEvaluationCandidate,
+  summarizeModelEvaluationCandidate as summarizeModelEvaluationCandidateRaw,
   taskEvaluationContractFingerprint,
   validateCapabilityProbe,
   type ModelEvaluationCallResult,
@@ -71,10 +75,37 @@ function canonicalAcceptedArtifact(
     buildTaskEvaluationPlan("site_builder.brand_profile"),
     fixtureId,
   );
-  const source = evaluationCase.payload.taskInput.kbSources.find(
-    (entry) => entry.sourceId === "drawing-1",
-  );
-  if (!source) throw new Error("test requires the canonical drawing source");
+  const sources = [
+    evaluationCase.payload.taskInput.intakeSource,
+    ...evaluationCase.payload.taskInput.kbSources,
+    ...evaluationCase.payload.taskInput.research,
+  ];
+  const facts =
+    evaluationCase.payload.fixture.assertions.requiredAcceptedTerms.map(
+      (term) => {
+        const source = sources.find((entry) =>
+          entry.content.toLowerCase().includes(term.toLowerCase()),
+        );
+        if (!source) {
+          throw new Error(`test requires canonical evidence for ${term}`);
+        }
+        const index = source.content.toLowerCase().indexOf(term.toLowerCase());
+        const quote = source.content.slice(
+          Math.max(0, index - 120),
+          Math.min(source.content.length, index + term.length + 120),
+        );
+        return {
+          key: "products",
+          value: term,
+          evidence: {
+            sourceType: source.sourceType,
+            sourceId: source.sourceId,
+            contentHash: source.contentHash,
+            quote,
+          },
+        };
+      },
+    );
   return {
     valueProps: [],
     glossary: [],
@@ -82,28 +113,7 @@ function canonicalAcceptedArtifact(
     differentiators: [],
     competitors: [],
     gaps: [],
-    factSheet: [
-      {
-        key: "materials",
-        value: "42CrMo4 steel",
-        evidence: {
-          sourceType: source.sourceType,
-          sourceId: source.sourceId,
-          contentHash: source.contentHash,
-          quote: "uses 42CrMo4 steel",
-        },
-      },
-      {
-        key: "technical_parameters",
-        value: "88 mm to 160 mm",
-        evidence: {
-          sourceType: source.sourceType,
-          sourceId: source.sourceId,
-          contentHash: source.contentHash,
-          quote: "diameters from 88 mm to 160 mm",
-        },
-      },
-    ],
+    factSheet: facts,
   };
 }
 
@@ -498,6 +508,141 @@ describe("absolute budget guard", () => {
       blockReason: "unknown_settlement",
     });
   });
+
+  it("rejects duck and Proxy budgets before campaign or matrix dispatch", async () => {
+    const duckBudget = {
+      reserve: () => ({
+        allowed: true,
+        reservation: { callId: "forged", reservedCents: 0 },
+      }),
+      settle: () => ({
+        settlement: {
+          state: "settled",
+          amountCents: 0,
+          basis: "provider_reported",
+        },
+        capExceeded: false,
+        settlementInvalid: false,
+      }),
+    };
+    expect(
+      () => new ModelEvaluationCapabilityCampaign(duckBudget as never),
+    ).toThrow("trusted model evaluation budget guard is required");
+
+    const realGuard = new ModelEvaluationBudgetGuard(100);
+    const proxiedGuard = new Proxy(realGuard, {});
+    expect(() => new ModelEvaluationCapabilityCampaign(proxiedGuard)).toThrow(
+      "trusted model evaluation budget guard is required",
+    );
+
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const execute = vi.fn();
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: duckBudget as never,
+        execute,
+      }),
+    ).rejects.toThrow("trusted model evaluation budget guard is required");
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: proxiedGuard,
+        execute,
+      }),
+    ).rejects.toThrow("trusted model evaluation budget guard is required");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("uses captured budget methods despite instance and prototype monkeypatches", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const probeCandidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const instanceReserve = vi.fn();
+    const instanceSettle = vi.fn();
+    Object.defineProperties(guard, {
+      reserve: { configurable: true, value: instanceReserve },
+      settle: { configurable: true, value: instanceSettle },
+    });
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate: probeCandidate,
+        execute: async () =>
+          completedCall(
+            probeCandidate.alias,
+            probeCandidate.expectedProtocol,
+            canonicalAcceptedArtifact(),
+          ),
+      }),
+    ).resolves.toMatchObject({ status: "capability_proven" });
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: probeCandidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        capabilityCampaign: campaign,
+        execute: async () =>
+          completedCall(
+            probeCandidate.alias,
+            probeCandidate.expectedProtocol,
+            canonicalAcceptedArtifact(),
+          ),
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "quality_valid_runtime_on_time",
+    });
+    expect(instanceReserve).not.toHaveBeenCalled();
+    expect(instanceSettle).not.toHaveBeenCalled();
+    expect(guard.snapshot()).toMatchObject({ committedCents: 2 });
+
+    const prototype = ModelEvaluationBudgetGuard.prototype;
+    const originalReserve = prototype.reserve;
+    const originalSettle = prototype.settle;
+    const prototypeReserve = vi.fn();
+    const prototypeSettle = vi.fn();
+    prototype.reserve = prototypeReserve as never;
+    prototype.settle = prototypeSettle as never;
+    try {
+      const secondGuard = new ModelEvaluationBudgetGuard(100);
+      const candidate = plan.candidates[0];
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: secondGuard,
+          execute: async () =>
+            completedCall(
+              candidate.alias,
+              candidate.expectedProtocol,
+              canonicalAcceptedArtifact(),
+            ),
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "quality_valid_runtime_on_time",
+      });
+      expect(prototypeReserve).not.toHaveBeenCalled();
+      expect(prototypeSettle).not.toHaveBeenCalled();
+      expect(secondGuard.snapshot()).toMatchObject({ committedCents: 1 });
+    } finally {
+      prototype.reserve = originalReserve;
+      prototype.settle = originalSettle;
+    }
+  });
 });
 
 describe("task attempt observation window", () => {
@@ -551,6 +696,198 @@ describe("task attempt observation window", () => {
     });
   });
 
+  it("requires a candidate-bound capability probe before dispatch or budget reservation", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const execute = vi.fn();
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        execute,
+      }),
+    ).rejects.toThrow("canonical campaign capability probe is required");
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        capabilityCampaign: new ModelEvaluationCapabilityCampaign(guard),
+        execute,
+      }),
+    ).rejects.toThrow("canonical campaign capability probe is required");
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        capabilityCampaign: {
+          attestationFor: () => ({ forged: true }),
+        } as never,
+        execute,
+      }),
+    ).rejects.toThrow("canonical campaign capability probe is required");
+    expect(execute).not.toHaveBeenCalled();
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: 0,
+    });
+  });
+
+  it("does not unlock matrix dispatch from a probe with forged model identity", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: async () => {
+          const result = completedCall(
+            candidate.alias,
+            candidate.expectedProtocol,
+            canonicalAcceptedArtifact(),
+          );
+          result.resolvedModel = "gpt-5.6-terra";
+          return result;
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: "identity_unproven",
+      identityVerified: false,
+    });
+
+    const execute = vi.fn();
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        capabilityCampaign: campaign,
+        execute,
+      }),
+    ).rejects.toThrow("canonical campaign capability probe is required");
+    expect(execute).not.toHaveBeenCalled();
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 1,
+      reservedCents: 0,
+    });
+  });
+
+  it("freezes the campaign when a dispatched probe falsely claims pre-dispatch zero cost", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: async () => {
+          throw new ModelEvaluationCallError("probe_failed", {
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          });
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: "capability_unavailable",
+    });
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("admits a probed candidate and binds structured-output repair semantics", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    const probeExecute = vi.fn(async (request) => {
+      expect(request.probeKind).toBe("canonical_task_shaped_capability");
+      expect(request.campaignId).toBe(campaign.campaignId);
+      expect(request.caseContract.sourceBundleSha256).toBe(
+        sha256CanonicalJson(request.casePayload.sourceFiles),
+      );
+      return completedCall(
+        candidate.alias,
+        candidate.expectedProtocol,
+        canonicalAcceptedArtifact(),
+      );
+    });
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: probeExecute,
+      }),
+    ).resolves.toMatchObject({
+      status: "capability_proven",
+      protocolVerified: true,
+      identityVerified: true,
+      outputVerified: true,
+    });
+    const execute = vi.fn(async (request) => {
+      expect(request.repairTaskOutput).toBe(true);
+      expect(request.caseContract.repairTaskOutput).toBe(true);
+      expect(request.caseContract.outputSchemaSha256).toBe(
+        sha256CanonicalJson(request.outputSchema),
+      );
+      expect(Object.isFrozen(request.outputSchema)).toBe(true);
+      return completedCall(
+        candidate.alias,
+        candidate.expectedProtocol,
+        canonicalAcceptedArtifact(),
+      );
+    });
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        capabilityCampaign: campaign,
+        execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "quality_valid_runtime_on_time",
+      artifactAccepted: true,
+      capabilityProbeAttestation: {
+        campaignId: campaign.campaignId,
+        alias: candidate.alias,
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(probeExecute).toHaveBeenCalledTimes(1);
+  });
+
   it("dispatches the exact frozen fixture, task input, prompt, and source bundle bound by the case contract", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
@@ -593,6 +930,43 @@ describe("task attempt observation window", () => {
       artifactAccepted: true,
     });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an otherwise valid completion when a bound source changes in flight", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const sourcePath = resolve(
+      process.cwd(),
+      "../../packages/contracts/package.json",
+    );
+    const original = readFileSync(sourcePath);
+    try {
+      const result = await runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: async () => {
+          writeFileSync(
+            sourcePath,
+            Buffer.concat([original, Buffer.from("\n")]),
+          );
+          return completedCall(
+            candidate.alias,
+            candidate.expectedProtocol,
+            canonicalAcceptedArtifact(),
+          );
+        },
+      });
+      expect(result).toMatchObject({
+        resultClass: "provenance_invalid",
+        artifactAccepted: false,
+        failureCode: "source_bundle_changed_during_dispatch",
+      });
+    } finally {
+      writeFileSync(sourcePath, original);
+    }
   });
 
   it("keeps waiting after the production runtime deadline and classifies a valid late result", async () => {
@@ -651,6 +1025,10 @@ describe("task attempt observation window", () => {
       const candidate = plan.candidates[0];
       const guard = new ModelEvaluationBudgetGuard(100);
       let signal: AbortSignal | undefined;
+      const clock = vi
+        .fn<() => number>()
+        .mockReturnValueOnce(1000)
+        .mockReturnValueOnce(1000 + plan.envelope.hardStopMs + 37);
       const pending = runTaskEvaluationAttempt({
         plan,
         candidate,
@@ -662,6 +1040,7 @@ describe("task attempt observation window", () => {
           await new Promise(() => undefined);
           throw new Error("unreachable");
         },
+        now: clock,
       });
 
       await vi.advanceTimersByTimeAsync(plan.envelope.runtimeDeadlineMs + 1);
@@ -671,6 +1050,7 @@ describe("task attempt observation window", () => {
       await expect(pending).resolves.toMatchObject({
         resultClass: "diagnostic_window_exhausted",
         runtimeTiming: "diagnostic_exhausted",
+        elapsedMs: plan.envelope.hardStopMs + 37,
         artifactAccepted: false,
         costSettlement: {
           state: "unknown",
@@ -681,6 +1061,35 @@ describe("task attempt observation window", () => {
       expect(guard.snapshot()).toMatchObject({
         blocked: true,
         blockReason: "unknown_settlement",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when the hard-stop timer cannot obtain valid monotonic elapsed time", async () => {
+    vi.useFakeTimers();
+    try {
+      const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+      const candidate = plan.candidates[0];
+      const pending = runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: async () => new Promise(() => undefined),
+        now: vi
+          .fn<() => number>()
+          .mockReturnValueOnce(1000)
+          .mockReturnValueOnce(999),
+      });
+      await vi.advanceTimersByTimeAsync(plan.envelope.hardStopMs);
+      await expect(pending).resolves.toMatchObject({
+        resultClass: "capability_unavailable",
+        runtimeTiming: "not_started",
+        elapsedMs: 0,
+        failureCode: "monotonic_clock_invalid",
       });
     } finally {
       vi.useRealTimers();
@@ -933,20 +1342,22 @@ describe("task attempt observation window", () => {
       unexpected: "schema bypass",
     };
 
-    await expect(
-      runTaskEvaluationAttempt({
-        plan,
-        candidate,
-        fixtureId: "auto-parts-rich",
-        attempt: 1,
-        campaignBudget: guard,
-        execute: async () =>
-          completedCall(candidate.alias, candidate.expectedProtocol, artifact),
-      }),
-    ).resolves.toMatchObject({
+    const result = await runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId: "auto-parts-rich",
+      attempt: 1,
+      campaignBudget: guard,
+      execute: async () =>
+        completedCall(candidate.alias, candidate.expectedProtocol, artifact),
+    });
+    expect(result).toMatchObject({
       resultClass: "content_invalid",
       artifactAccepted: false,
       assessment: null,
+      artifactRetention: "digest_only",
+      artifact: null,
+      artifactSha256: sha256CanonicalJson(artifact),
       failureCode: "assessment_failed",
     });
   });
@@ -960,22 +1371,25 @@ describe("task attempt observation window", () => {
       valueProps: ["Contact John Smith at john.smith@example.com"],
     };
 
-    await expect(
-      runTaskEvaluationAttempt({
-        plan,
-        candidate,
-        fixtureId: "auto-parts-rich",
-        attempt: 1,
-        campaignBudget: guard,
-        execute: async () =>
-          completedCall(candidate.alias, candidate.expectedProtocol, artifact),
-      }),
-    ).resolves.toMatchObject({
+    const result = await runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId: "auto-parts-rich",
+      attempt: 1,
+      campaignBudget: guard,
+      execute: async () =>
+        completedCall(candidate.alias, candidate.expectedProtocol, artifact),
+    });
+    expect(result).toMatchObject({
       resultClass: "content_invalid",
       artifactAccepted: false,
       assessment: null,
+      artifactRetention: "digest_only",
+      artifact: null,
+      artifactSha256: sha256CanonicalJson(artifact),
       failureCode: "assessment_failed",
     });
+    expect(JSON.stringify(result)).not.toContain("john.smith@example.com");
   });
 
   it("uses captured schema and validator contracts after exported task mutation", async () => {
@@ -1140,16 +1554,77 @@ describe("task attempt observation window", () => {
 describe("quality-first candidate summary and ranking", () => {
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
   const suite = plan.evaluationSuite!;
+  const capabilityBudget = new ModelEvaluationBudgetGuard(1000);
+  const capabilityCampaign = new ModelEvaluationCapabilityCampaign(
+    capabilityBudget,
+  );
+
+  beforeAll(async () => {
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const validation = await capabilityCampaign.runCanonicalProbe({
+      plan,
+      candidate,
+      execute: async () =>
+        completedCall(
+          candidate.alias,
+          candidate.expectedProtocol,
+          canonicalAcceptedArtifact(),
+        ),
+    });
+    expect(validation.status).toBe("capability_proven");
+  });
+
+  const summarizeModelEvaluationCandidate = (
+    planValue: Parameters<typeof summarizeModelEvaluationCandidateRaw>[0],
+    alias: Parameters<typeof summarizeModelEvaluationCandidateRaw>[1],
+    runs: Parameters<typeof summarizeModelEvaluationCandidateRaw>[2],
+  ) =>
+    summarizeModelEvaluationCandidateRaw(
+      planValue,
+      alias,
+      runs,
+      capabilityCampaign,
+    );
+
+  const rankModelEvaluationCandidates = (
+    planValue: Parameters<typeof rankModelEvaluationCandidatesRaw>[0],
+    candidateRuns: Parameters<typeof rankModelEvaluationCandidatesRaw>[1],
+  ) =>
+    rankModelEvaluationCandidatesRaw(
+      planValue,
+      candidateRuns,
+      capabilityCampaign,
+    );
+
+  function probeAttestation(alias: string) {
+    const candidate = plan.candidates.find((entry) => entry.alias === alias)!;
+    if (!candidate.requiresCapabilityProbe) return null;
+    return capabilityCampaign.attestationFor(plan, candidate, capabilityBudget);
+  }
 
   function run(
     alias: string,
     resultClass: ModelEvaluationRun["resultClass"],
-    assessment: TaskArtifactAssessment | null,
+    artifact: BrandProfileOutput,
     elapsedMs: number,
     amountCents: number | null,
     fixtureId: string,
     attempt: number,
   ): ModelEvaluationRun {
+    const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
+    const artifactSha256 = sha256CanonicalJson(artifact);
+    const assessment =
+      resultClass === "content_invalid"
+        ? {
+            qualityPassed: false,
+            structurePassed: true,
+            factualityPassed: true,
+            stabilityKey: artifactSha256,
+            findingCodes: ["forbidden_output_term"],
+          }
+        : validAssessment(artifactSha256);
     return {
       schemaVersion: "site-builder-model-evaluation-run/v1",
       harnessId: "site-builder-model-evaluation-harness/2026-07-27-v1",
@@ -1178,10 +1653,13 @@ describe("quality-first candidate summary and ranking", () => {
       promptSha256: suite.fixtureFingerprints.find(
         (entry) => entry.fixtureId === fixtureId,
       )!.promptSha256,
-      sourceBundleSha256: "c".repeat(64),
+      sourceBundleSha256: evaluationCase.contract.sourceBundleSha256,
       evaluatorVersion: suite.evaluatorVersion,
       evaluatorRubricSha256: suite.evaluatorRubricSha256,
-      artifactSha256: "d".repeat(64),
+      capabilityProbeAttestation: probeAttestation(alias),
+      artifactRetention: "retained_after_route_gate",
+      artifact,
+      artifactSha256,
       attempt,
       resultClass,
       runtimeTiming:
@@ -1234,14 +1712,39 @@ describe("quality-first candidate summary and ranking", () => {
     alias: string,
     fixtureId: string,
     attempt: number,
-    assessment = validAssessment(`${fixtureId}-stable`),
     elapsedMs = 1000,
     amountCents: number | null = 1,
+    variant?: string,
   ): ModelEvaluationRun {
+    const artifact = canonicalAcceptedArtifact(fixtureId);
+    if (variant) artifact.keywords = [variant];
     return run(
       alias,
       "quality_valid_runtime_on_time",
-      assessment,
+      artifact,
+      elapsedMs,
+      amountCents,
+      fixtureId,
+      attempt,
+    );
+  }
+
+  function contentInvalidRun(
+    alias: string,
+    fixtureId: string,
+    attempt: number,
+    elapsedMs = 1000,
+    amountCents: number | null = 1,
+  ): ModelEvaluationRun {
+    const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
+    const artifact = canonicalAcceptedArtifact(fixtureId);
+    artifact.keywords = [
+      evaluationCase.payload.fixture.assertions.forbiddenOutputTerms[0],
+    ];
+    return run(
+      alias,
+      "content_invalid",
+      artifact,
       elapsedMs,
       amountCents,
       fixtureId,
@@ -1261,9 +1764,9 @@ describe("quality-first candidate summary and ranking", () => {
           "gpt-5.5",
           fixtureId,
           attempt,
-          validAssessment(`${fixtureId}-stable`),
           index % 2 === 0 ? 110_000 : 120_000,
           5,
+          `${fixtureId}-stable`,
         );
         return record;
       },
@@ -1278,24 +1781,14 @@ describe("quality-first candidate summary and ranking", () => {
       (fixtureId, attempt, index) => {
         const record =
           index === 0
-            ? run(
-                "claude-sonnet-5",
-                "content_invalid",
-                {
-                  ...validAssessment(`${fixtureId}-stable`),
-                  qualityPassed: false,
-                  findingCodes: ["quality_failure"],
-                },
-                1000,
-                1,
-                fixtureId,
-                attempt,
-              )
+            ? contentInvalidRun("claude-sonnet-5", fixtureId, attempt)
             : acceptedRun(
                 "claude-sonnet-5",
                 fixtureId,
                 attempt,
-                validAssessment(`${fixtureId}-stable`),
+                1000,
+                1,
+                `${fixtureId}-stable`,
               );
         const {
           fixtureId: _fixtureId,
@@ -1316,9 +1809,9 @@ describe("quality-first candidate summary and ranking", () => {
           "gpt-5.6-terra",
           fixtureId,
           attempt,
-          validAssessment(`${fixtureId}-stable`),
           130_000,
           6,
+          `${fixtureId}-stable`,
         );
         return record;
       },
@@ -1347,9 +1840,9 @@ describe("quality-first candidate summary and ranking", () => {
           "gpt-5.5",
           fixtureId,
           attempt,
-          validAssessment(`${fixtureId}-stable`),
           1000,
           index === 0 ? null : 1,
+          `${fixtureId}-stable`,
         );
         return record;
       }),
@@ -1358,6 +1851,36 @@ describe("quality-first candidate summary and ranking", () => {
       rankable: false,
       acceptedArtifactCostCents: null,
       costSettlementComplete: false,
+    });
+  });
+
+  it("keeps late quality observations but fails the production P95 promotion gate", () => {
+    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
+      const record = acceptedRun(
+        "gpt-5.5",
+        fixtureId,
+        attempt,
+        plan.envelope.runtimeDeadlineMs + 1,
+      );
+      record.resultClass = "quality_valid_runtime_late";
+      record.runtimeTiming = "late";
+      const {
+        fixtureId: _fixtureId,
+        attempt: _attempt,
+        ...withoutKey
+      } = record;
+      return withoutKey;
+    });
+    const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
+    expect(summary).toMatchObject({
+      acceptedArtifactCount: 12,
+      p95LatencyMs: plan.envelope.runtimeDeadlineMs + 1,
+      runtimeDeadlinePassed: false,
+      rankable: false,
+      capabilityProbeAttestation: {
+        alias: "gpt-5.5",
+        campaignId: capabilityCampaign.campaignId,
+      },
     });
   });
 
@@ -1399,7 +1922,9 @@ describe("quality-first candidate summary and ranking", () => {
           "gpt-5.5",
           fixtureId,
           attempt,
-          validAssessment(`${fixtureId}-output`),
+          1000,
+          1,
+          `${fixtureId}-output`,
         );
         return record;
       }),
@@ -1409,6 +1934,25 @@ describe("quality-first candidate summary and ranking", () => {
       matrixComplete: true,
       stabilityRate: 1,
     });
+  });
+
+  it("rejects persisted probe self-hashes without the originating trusted campaign", () => {
+    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
+      const {
+        fixtureId: _fixtureId,
+        attempt: _attempt,
+        ...record
+      } = acceptedRun("gpt-5.5", fixtureId, attempt);
+      return record;
+    });
+    expect(() =>
+      summarizeModelEvaluationCandidateRaw(plan, "gpt-5.5", runs),
+    ).toThrow("trusted in-memory capability campaign");
+    expect(() =>
+      summarizeModelEvaluationCandidateRaw(plan, "gpt-5.5", runs, {
+        attestationFor: () => runs[0].capabilityProbeAttestation,
+      } as never),
+    ).toThrow("trusted in-memory capability campaign");
   });
 
   it("rejects a non-canonical fixture before computing a matrix", () => {
@@ -1448,6 +1992,24 @@ describe("quality-first candidate summary and ranking", () => {
     ).toThrow("candidate summary contains a non-canonical run");
   });
 
+  it("rejects a tampered or mixed capability-probe attestation", () => {
+    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
+      const {
+        fixtureId: _fixtureId,
+        attempt: _attempt,
+        ...record
+      } = acceptedRun("gpt-5.5", fixtureId, attempt);
+      return record;
+    });
+    runs[0].capabilityProbeAttestation = {
+      ...runs[0].capabilityProbeAttestation!,
+      resolvedModel: "gpt-5.6-terra",
+    };
+    expect(() =>
+      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
+    ).toThrow("candidate summary contains a non-canonical run");
+  });
+
   it("rejects a completed-quality run that forges a pre-dispatch settlement", () => {
     const runs = fullMatrix("gpt-5.5", (fixtureId, attempt) => {
       const {
@@ -1467,7 +2029,30 @@ describe("quality-first candidate summary and ranking", () => {
     ).toThrow("candidate summary contains a non-canonical run");
   });
 
-  it("rebuilds summaries from canonical runs and rejects mixed source bundles", () => {
+  it("re-evaluates persisted artifacts instead of trusting forged pass flags", () => {
+    const runs = fullMatrix("gpt-5.5", (fixtureId, attempt, index) => {
+      const record =
+        index === 0
+          ? contentInvalidRun("gpt-5.5", fixtureId, attempt)
+          : acceptedRun("gpt-5.5", fixtureId, attempt);
+      const {
+        fixtureId: _fixtureId,
+        attempt: _attempt,
+        ...withoutKey
+      } = record;
+      return withoutKey;
+    });
+    runs[0].resultClass = "quality_valid_runtime_on_time";
+    runs[0].artifactAccepted = true;
+    runs[0].assessment = validAssessment(runs[0].artifactSha256!);
+    runs[0].failureCode = null;
+
+    expect(() =>
+      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
+    ).toThrow("candidate summary contains a non-canonical run");
+  });
+
+  it("rebuilds summaries from canonical runs and rejects a forged source bundle", () => {
     const candidateRuns = plan.candidates.map((candidate) => ({
       alias: candidate.alias,
       runs: fullMatrix(candidate.alias, (fixtureId, attempt) => {
@@ -1484,7 +2069,7 @@ describe("quality-first candidate summary and ranking", () => {
     }
 
     expect(() => rankModelEvaluationCandidates(plan, candidateRuns)).toThrow(
-      "candidate summaries do not share one evaluation scope",
+      "candidate summary contains a non-canonical run",
     );
   });
 
