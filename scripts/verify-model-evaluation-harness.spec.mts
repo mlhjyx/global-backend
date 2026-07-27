@@ -7,7 +7,10 @@ import {
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from "../apps/api/src/site-builder/eval/brand-profile-eval";
-import { buildTaskEvaluationPlan } from "../apps/api/src/site-builder/eval/model-evaluation-harness";
+import {
+  buildCanonicalModelEvaluationCase,
+  buildTaskEvaluationPlan,
+} from "../apps/api/src/site-builder/eval/model-evaluation-harness";
 import {
   sha256CanonicalJson,
   sha256Text,
@@ -36,13 +39,21 @@ test("task plans and authoritative documents bind the current harness", async ()
 });
 
 test("the canonical suite pins the committed fixture and prompt fingerprints", async () => {
-  const suite = buildTaskEvaluationPlan(
-    "site_builder.brand_profile",
-  ).evaluationSuite;
+  const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+  const suite = plan.evaluationSuite;
   assert.ok(suite);
   assert.deepEqual(
     suite.fixtureFingerprints.map((entry) => entry.fixtureId),
     suite.fixtureIds,
+  );
+  assert.deepEqual(
+    suite.sourceBundleFiles
+      .filter((entry) => entry.role === "candidate_baseline")
+      .map((entry) => entry.path),
+    [
+      "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+      "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+    ],
   );
   for (const fingerprint of suite.fixtureFingerprints) {
     const fixture = JSON.parse(
@@ -61,6 +72,25 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
       sha256Text(BRAND_PROFILE_TASK.buildPrompt(prepared.input)),
       fingerprint.promptSha256,
       `${fingerprint.fixtureId} prompt fingerprint drifted`,
+    );
+    const evaluationCase = buildCanonicalModelEvaluationCase(
+      plan,
+      fingerprint.fixtureId,
+    );
+    assert.deepEqual(evaluationCase.payload.fixture, fixture);
+    assert.deepEqual(evaluationCase.payload.taskInput, prepared.input);
+    assert.equal(
+      evaluationCase.payload.prompt,
+      BRAND_PROFILE_TASK.buildPrompt(prepared.input),
+    );
+    assert.equal(
+      evaluationCase.contract.sourceBundleSha256,
+      sha256CanonicalJson(evaluationCase.payload.sourceFiles),
+      `${fingerprint.fixtureId} dispatched source bundle is not hash-bound`,
+    );
+    assert.equal(
+      evaluationCase.payload.sourceFiles.length,
+      suite.sourceBundleFiles.length,
     );
   }
 });
