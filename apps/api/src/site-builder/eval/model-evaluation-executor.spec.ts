@@ -13,13 +13,13 @@ import {
   buildTaskEvaluationPlan,
   runTaskEvaluationAttempt,
   validateCapabilityProbe,
-  type CostSettlement,
   type ModelEvaluationExecutionRequest,
 } from "./model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
   createModelEvaluationProtocolExecutor,
   isTrustedModelEvaluationProtocolExecute,
+  type ModelEvaluationSettlementResolution,
   type ModelEvaluationSettlementResolver,
   type ModelEvaluationWireClient,
   type ModelEvaluationWireResponse,
@@ -187,7 +187,7 @@ function wireClient(
 }
 
 function settlementResolver(
-  settlement?: CostSettlement,
+  settlement?: ModelEvaluationSettlementResolution,
 ): ModelEvaluationSettlementResolver {
   return {
     resolverId: "fake-settlement/v1",
@@ -413,6 +413,32 @@ describe("model evaluation text wire adapters", () => {
     expect(call).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["minimax-m3", "deepseek-v4-flash", "doubao-seed-2.0-pro"])(
+    "rejects legacy comparator alias %s outside the task rollback route",
+    async (alias) => {
+      const call = vi.fn();
+      const executor = createModelEvaluationProtocolExecutor({
+        wireClient: wireClient({ openAIChatCompletions: call }),
+        settlementResolver: settlementResolver(),
+      });
+
+      await expect(
+        executor.executeLegacyComparator({
+          ...canonicalRequest(),
+          alias,
+          expectedProtocol: "openai-chat-completions",
+        }),
+      ).rejects.toMatchObject({
+        failureCode: "legacy_comparator_not_admitted",
+        costSettlement: {
+          state: "not_incurred",
+          reason: "rejected_before_dispatch",
+        },
+      });
+      expect(call).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects a caller-supplied protocol mismatch before selecting an adapter", async () => {
     const call = vi.fn();
     const executor = createModelEvaluationProtocolExecutor({
@@ -615,6 +641,189 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
+  it("isolates frozen settlement usage from resolver mutation and records resolver identity", async () => {
+    const request = canonicalRequest();
+    const resolver: ModelEvaluationSettlementResolver = {
+      resolverId: "pricing-snapshot/2026-07-28-v1",
+      resolve: vi.fn((context) => {
+        expect(Object.isFrozen(context)).toBe(true);
+        expect(Object.isFrozen(context.usage)).toBe(true);
+        expect(Object.isFrozen(context.providerReportedCostCents)).toBe(true);
+        expect(Reflect.set(context.usage, "inputTokens", 9_999_999)).toBe(
+          false,
+        );
+        return {
+          state: "settled",
+          amountCents: 1,
+          basis: "frozen_pricing_snapshot",
+        };
+      }),
+    };
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () =>
+          wireResponse(
+            openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+              inputTokens: 100,
+              outputTokens: 50,
+            }),
+          ),
+      }),
+      settlementResolver: resolver,
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        callCount: 1,
+        source: "provider_reported",
+      },
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+        basis: "frozen_pricing_snapshot@pricing-snapshot/2026-07-28-v1",
+      },
+    });
+  });
+
+  it("captures resolver identity and implementation once when branding the executor", async () => {
+    const request = canonicalRequest();
+    const initialResolve = vi.fn(function (this: { resolverId: string }) {
+      return {
+        state: "settled" as const,
+        amountCents: this.resolverId === "captured-resolver/v1" ? 1 : 999,
+        basis: "provider_reported" as const,
+      };
+    });
+    const replacementResolve = vi.fn(() => ({
+      state: "settled" as const,
+      amountCents: 999,
+      basis: "frozen_pricing_snapshot" as const,
+    }));
+    const mutableResolver: {
+      resolverId: string;
+      resolve: ModelEvaluationSettlementResolver["resolve"];
+    } = {
+      resolverId: "captured-resolver/v1",
+      resolve: initialResolve,
+    };
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () =>
+          wireResponse(
+            openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+          ),
+      }),
+      settlementResolver: mutableResolver,
+    });
+    mutableResolver.resolverId = "replacement-resolver/v2";
+    mutableResolver.resolve = replacementResolve;
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+        basis: "provider_reported@captured-resolver/v1",
+      },
+    });
+    expect(initialResolve).toHaveBeenCalledTimes(1);
+    expect(replacementResolve).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "contains space", "contains@delimiter"])(
+    "rejects invalid settlement resolver identity %j at factory creation",
+    (resolverId) => {
+      expect(() =>
+        createModelEvaluationProtocolExecutor({
+          wireClient: wireClient(),
+          settlementResolver: {
+            resolverId,
+            resolve: () => ({
+              state: "unknown",
+              reason: "invalid_settlement",
+            }),
+          },
+        }),
+      ).toThrow(
+        "evaluation wire client and auditable settlement resolver are required",
+      );
+    },
+  );
+
+  it("rejects unsafe provider token counts and aggregate overflow", async () => {
+    const request = canonicalRequest();
+    const singleCall = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () =>
+          wireResponse(
+            openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+              inputTokens: Number.MAX_SAFE_INTEGER + 1,
+              outputTokens: 1,
+            }),
+          ),
+      }),
+      settlementResolver: settlementResolver(),
+    });
+    await expect(singleCall.execute(request)).rejects.toMatchObject({
+      failureCode: "usage_unavailable",
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+        basis: "provider_reported@fake-settlement/v1",
+      },
+    });
+
+    const repairWire = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(
+          openAIResponsesBody(
+            request.alias,
+            {},
+            {
+              inputTokens: Number.MAX_SAFE_INTEGER,
+              outputTokens: 1,
+            },
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
+        wireResponse(
+          openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+            inputTokens: 1,
+            outputTokens: 1,
+          }),
+        ),
+      );
+    const resolver = settlementResolver();
+    const repair = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: repairWire }),
+      settlementResolver: resolver,
+    });
+    await expect(repair.execute(request)).rejects.toMatchObject({
+      failureCode: "usage_unavailable",
+      costSettlement: {
+        state: "settled",
+        amountCents: 2,
+        basis: "provider_reported@fake-settlement/v1",
+      },
+    });
+    expect(repairWire).toHaveBeenCalledTimes(2);
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        callCount: 2,
+        usage: {
+          inputTokens: Number.MAX_SAFE_INTEGER,
+          outputTokens: 1,
+          callCount: 2,
+          source: "adapter_aggregated",
+          complete: false,
+        },
+      }),
+    );
+  });
+
   it("reserves the full repair-call upper bound before any wire dispatch", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const request = canonicalRequest();
@@ -774,6 +983,13 @@ describe("structured output, repair, errors, and settlement", () => {
       expect.objectContaining({
         outcome: "failed",
         callCount: 2,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          callCount: 2,
+          source: "adapter_aggregated",
+          complete: false,
+        },
         providerReportedCostCents: [30, null],
       }),
     );
@@ -828,6 +1044,13 @@ describe("structured output, repair, errors, and settlement", () => {
       expect.objectContaining({
         outcome: "failed",
         callCount: 2,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          callCount: 2,
+          source: "adapter_aggregated",
+          complete: false,
+        },
         providerReportedCostCents: [30, null],
       }),
     );
@@ -873,6 +1096,13 @@ describe("structured output, repair, errors, and settlement", () => {
       expect.objectContaining({
         outcome: "failed",
         callCount: 2,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          callCount: 2,
+          source: "adapter_aggregated",
+          complete: false,
+        },
         providerReportedCostCents: [30, null],
       }),
     );
@@ -1037,7 +1267,13 @@ describe("structured output, repair, errors, and settlement", () => {
         expect.objectContaining({
           outcome: "failed",
           callCount: 1,
-          usage: null,
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            callCount: 1,
+            source: "provider_reported",
+            complete: false,
+          },
           providerReportedCostCents: [null],
         }),
       );

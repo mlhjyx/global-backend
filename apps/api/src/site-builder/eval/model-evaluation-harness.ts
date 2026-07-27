@@ -601,14 +601,17 @@ export function validateCapabilityProbe(
   };
 }
 
+export type ModelEvaluationCostBasis =
+  "provider_reported" | "frozen_pricing_snapshot" | "verified_billing_export";
+
+export type ModelEvaluationAuditedCostBasis =
+  `${ModelEvaluationCostBasis}@${string}`;
+
 export type CostSettlement =
   | {
       state: "settled";
       amountCents: number;
-      basis:
-        | "provider_reported"
-        | "frozen_pricing_snapshot"
-        | "verified_billing_export";
+      basis: ModelEvaluationAuditedCostBasis;
     }
   | {
       state: "not_incurred";
@@ -903,6 +906,7 @@ const SETTLED_COST_BASES = new Set([
   "frozen_pricing_snapshot",
   "verified_billing_export",
 ]);
+const SETTLEMENT_RESOLVER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 const NOT_INCURRED_REASONS = new Set([
   "rejected_before_dispatch",
   "provider_attested_not_incurred",
@@ -934,13 +938,23 @@ function normalizeCostSettlement(
   if (!value || typeof value !== "object") return invalid();
   const record = value as Record<string, unknown>;
   if (record.state === "settled") {
+    const basis =
+      typeof record.basis === "string"
+        ? record.basis.slice(0, record.basis.indexOf("@"))
+        : "";
+    const resolverId =
+      typeof record.basis === "string"
+        ? record.basis.slice(record.basis.indexOf("@") + 1)
+        : "";
     if (
       !exactKeys(record, ["state", "amountCents", "basis"]) ||
       typeof record.amountCents !== "number" ||
       !Number.isFinite(record.amountCents) ||
       record.amountCents < 0 ||
       typeof record.basis !== "string" ||
-      !SETTLED_COST_BASES.has(record.basis)
+      record.basis.indexOf("@") < 1 ||
+      !SETTLED_COST_BASES.has(basis) ||
+      !SETTLEMENT_RESOLVER_ID.test(resolverId)
     ) {
       return invalid();
     }
@@ -2102,11 +2116,11 @@ function validEvaluationUsage(value: unknown): value is ModelEvaluationUsage {
   const usage = value as Record<string, unknown>;
   return (
     exactKeys(usage, ["inputTokens", "outputTokens", "callCount", "source"]) &&
-    Number.isInteger(usage.inputTokens) &&
+    Number.isSafeInteger(usage.inputTokens) &&
     (usage.inputTokens as number) >= 0 &&
-    Number.isInteger(usage.outputTokens) &&
+    Number.isSafeInteger(usage.outputTokens) &&
     (usage.outputTokens as number) >= 0 &&
-    Number.isInteger(usage.callCount) &&
+    Number.isSafeInteger(usage.callCount) &&
     (usage.callCount as number) >= 1 &&
     (usage.source === "provider_reported" ||
       usage.source === "adapter_aggregated")

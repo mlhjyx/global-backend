@@ -64,7 +64,7 @@ function completedCall<T>(
     costSettlement: {
       state: "settled",
       amountCents: costCents,
-      basis: "provider_reported",
+      basis: "provider_reported@fake-settlement/v1",
     },
   };
 }
@@ -435,7 +435,7 @@ describe("absolute budget guard", () => {
     guard.settle("call-1", {
       state: "settled",
       amountCents: 7,
-      basis: "provider_reported",
+      basis: "provider_reported@fake-settlement/v1",
     });
     expect(guard.snapshot()).toMatchObject({
       campaignBudgetCents: 50,
@@ -461,7 +461,7 @@ describe("absolute budget guard", () => {
       guard.settle("repairable-call", {
         state: "settled",
         amountCents: 19,
-        basis: "provider_reported",
+        basis: "provider_reported@fake-settlement/v1",
       }),
     ).toMatchObject({
       capExceeded: false,
@@ -478,7 +478,7 @@ describe("absolute budget guard", () => {
       guard.settle("single-call", {
         state: "settled",
         amountCents: 21,
-        basis: "provider_reported",
+        basis: "provider_reported@fake-settlement/v1",
       }),
     ).toMatchObject({
       capExceeded: true,
@@ -524,7 +524,7 @@ describe("absolute budget guard", () => {
     guard.settle("call-1", {
       state: "settled",
       amountCents: 21,
-      basis: "provider_reported",
+      basis: "provider_reported@fake-settlement/v1",
     });
     expect(guard.snapshot()).toMatchObject({
       committedCents: 21,
@@ -560,6 +560,31 @@ describe("absolute budget guard", () => {
     });
   });
 
+  it("rejects settled cost without an audited resolver identity", () => {
+    const guard = new ModelEvaluationBudgetGuard(50);
+    expect(guard.reserve("call-1", 20).allowed).toBe(true);
+    expect(
+      guard.settle("call-1", {
+        state: "settled",
+        amountCents: 7,
+        basis: "provider_reported",
+      }),
+    ).toEqual({
+      settlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+      capExceeded: false,
+      settlementInvalid: true,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
+      unknownUpperBoundCents: 20,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
   it("rejects duck and Proxy budgets before campaign or matrix dispatch", async () => {
     const duckBudget = {
       reserve: () => ({
@@ -570,7 +595,7 @@ describe("absolute budget guard", () => {
         settlement: {
           state: "settled",
           amountCents: 0,
-          basis: "provider_reported",
+          basis: "provider_reported@fake-settlement/v1",
         },
         capExceeded: false,
         settlementInvalid: false,
@@ -1173,7 +1198,7 @@ describe("task attempt observation window", () => {
       costSettlement: {
         state: "settled",
         amountCents: 1,
-        basis: "provider_reported",
+        basis: "provider_reported@fake-settlement/v1",
       },
     });
   });
@@ -1409,7 +1434,7 @@ describe("task attempt observation window", () => {
       costSettlement: {
         state: "settled",
         amountCents: 1,
-        basis: "provider_reported",
+        basis: "provider_reported@fake-settlement/v1",
       },
     });
     expect(guard.snapshot()).toMatchObject({

@@ -3,6 +3,7 @@ import {
   type ModelCandidateProtocol,
 } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
+import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import { checkAgainstSchema } from "../../model-gateway/schema-validate";
 import {
   buildCanonicalModelEvaluationCase,
@@ -10,6 +11,7 @@ import {
   ModelEvaluationCallError,
   type CapabilityProbeExecutionRequest,
   type CostSettlement,
+  type ModelEvaluationCostBasis,
   type ModelEvaluationCallResult,
   type ModelEvaluationExecutionRequest,
   type ModelEvaluationUsage,
@@ -185,16 +187,30 @@ export interface ModelEvaluationSettlementContext {
   protocol: ModelCandidateProtocol;
   outcome: "completed" | "failed";
   callCount: number;
-  usage: ModelEvaluationUsage | null;
+  usage: ModelEvaluationSettlementUsage;
   providerReportedCostCents: readonly (number | null)[];
   error?: unknown;
 }
+
+export interface ModelEvaluationSettlementUsage extends ModelEvaluationUsage {
+  complete: boolean;
+}
+
+export type ModelEvaluationSettlementResolution =
+  | {
+      state: "settled";
+      amountCents: number;
+      basis: ModelEvaluationCostBasis;
+    }
+  | Exclude<CostSettlement, { state: "settled" }>;
 
 export interface ModelEvaluationSettlementResolver {
   readonly resolverId: string;
   resolve(
     context: Readonly<ModelEvaluationSettlementContext>,
-  ): CostSettlement | Promise<CostSettlement>;
+  ):
+    | ModelEvaluationSettlementResolution
+    | Promise<ModelEvaluationSettlementResolution>;
 }
 
 export interface ModelEvaluationProtocolExecutor {
@@ -257,6 +273,7 @@ const UNKNOWN_REASONS = new Set([
   "diagnostic_hard_stop",
   "invalid_settlement",
 ]);
+const SETTLEMENT_RESOLVER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -272,6 +289,7 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]) {
 function canonicalSettlement(
   value: unknown,
   dispatched: boolean,
+  resolverId: string,
   context?: ModelEvaluationSettlementContext,
 ): CostSettlement {
   if (!isRecord(value)) {
@@ -304,7 +322,7 @@ function canonicalSettlement(
     return {
       state: "settled",
       amountCents: value.amountCents,
-      basis: value.basis as Extract<
+      basis: `${value.basis}@${resolverId}` as Extract<
         CostSettlement,
         { state: "settled" }
       >["basis"],
@@ -439,13 +457,18 @@ function assertCanonicalRequest(
       throw preDispatchError("target_protocol_not_admitted");
     }
     selectedProtocol = candidate.expectedProtocol;
-  } else if (
-    catalog.status !== "legacy-only" ||
-    catalog.domain !== "text" ||
-    request.expectedProtocol !== "openai-chat-completions"
-  ) {
-    throw preDispatchError("legacy_comparator_not_admitted");
   } else {
+    const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+      request.taskId,
+    ).route;
+    if (
+      catalog.status !== "legacy-only" ||
+      catalog.domain !== "text" ||
+      request.expectedProtocol !== "openai-chat-completions" ||
+      ![legacyRoute.primary, ...legacyRoute.fallbacks].includes(request.alias)
+    ) {
+      throw preDispatchError("legacy_comparator_not_admitted");
+    }
     selectedProtocol = "openai-chat-completions";
   }
 
@@ -511,7 +534,7 @@ function nonEmptyReportedModel(value: unknown): string | undefined {
 }
 
 function nonNegativeInteger(value: unknown): number | null {
-  return Number.isInteger(value) && (value as number) >= 0
+  return Number.isSafeInteger(value) && (value as number) >= 0
     ? (value as number)
     : null;
 }
@@ -691,21 +714,38 @@ function addUsage(
     accumulator.complete = false;
     return;
   }
-  accumulator.inputTokens += usage.inputTokens;
-  accumulator.outputTokens += usage.outputTokens;
+  const inputTokens = accumulator.inputTokens + usage.inputTokens;
+  const outputTokens = accumulator.outputTokens + usage.outputTokens;
+  if (
+    !Number.isSafeInteger(inputTokens) ||
+    !Number.isSafeInteger(outputTokens)
+  ) {
+    accumulator.complete = false;
+    return;
+  }
+  accumulator.inputTokens = inputTokens;
+  accumulator.outputTokens = outputTokens;
 }
 
-function evaluationUsage(
+function settlementUsage(
   accumulator: UsageAccumulator,
-): ModelEvaluationUsage | null {
-  if (!accumulator.complete || accumulator.callCount < 1) return null;
+): ModelEvaluationSettlementUsage {
   return {
     inputTokens: accumulator.inputTokens,
     outputTokens: accumulator.outputTokens,
     callCount: accumulator.callCount,
     source:
       accumulator.callCount === 1 ? "provider_reported" : "adapter_aggregated",
+    complete: accumulator.complete,
   };
+}
+
+function evaluationUsage(
+  accumulator: UsageAccumulator,
+): ModelEvaluationUsage | null {
+  if (!accumulator.complete || accumulator.callCount < 1) return null;
+  const { complete: _complete, ...usage } = settlementUsage(accumulator);
+  return usage;
 }
 
 async function safeResolveSettlement(
@@ -713,10 +753,18 @@ async function safeResolveSettlement(
   context: ModelEvaluationSettlementContext,
 ): Promise<CostSettlement> {
   try {
+    const resolverContext = Object.freeze({
+      ...context,
+      usage: Object.freeze({ ...context.usage }),
+      providerReportedCostCents: Object.freeze([
+        ...context.providerReportedCostCents,
+      ]),
+    });
     return canonicalSettlement(
-      await resolver.resolve(Object.freeze({ ...context })),
+      await resolver.resolve(resolverContext),
       true,
-      context,
+      resolver.resolverId,
+      resolverContext,
     );
   } catch {
     return { state: "unknown", reason: "invalid_settlement" };
@@ -733,11 +781,24 @@ export function createModelEvaluationProtocolExecutor(deps: {
   wireClient: ModelEvaluationWireClient;
   settlementResolver: ModelEvaluationSettlementResolver;
 }): ModelEvaluationProtocolExecutor {
-  if (!deps?.wireClient || !deps.settlementResolver?.resolverId) {
+  const resolverReceiver = deps?.settlementResolver;
+  const resolverId = resolverReceiver?.resolverId;
+  const resolverResolve = resolverReceiver?.resolve;
+  if (
+    !deps?.wireClient ||
+    !SETTLEMENT_RESOLVER_ID.test(resolverId ?? "") ||
+    typeof resolverResolve !== "function"
+  ) {
     throw new Error(
       "evaluation wire client and auditable settlement resolver are required",
     );
   }
+  const resolverThis = Object.freeze({ resolverId });
+  const capturedResolve = Object.freeze(resolverResolve.bind(resolverThis));
+  const settlementResolver = Object.freeze({
+    resolverId,
+    resolve: capturedResolve,
+  }) satisfies ModelEvaluationSettlementResolver;
 
   const executeWithMode = async <T>(
     request: EvaluationExecutionRequest,
@@ -812,21 +873,18 @@ export function createModelEvaluationProtocolExecutor(deps: {
         usage.callCount += 1;
         usage.complete = false;
         providerReportedCostCents.push(null);
-        const settlement = await safeResolveSettlement(
-          deps.settlementResolver,
-          {
-            taskId: request.taskId,
-            alias: request.alias,
-            protocol,
-            outcome: "failed",
-            callCount: usage.callCount,
-            usage: null,
-            providerReportedCostCents: Object.freeze([
-              ...providerReportedCostCents,
-            ]),
-            error,
-          },
-        );
+        const settlement = await safeResolveSettlement(settlementResolver, {
+          taskId: request.taskId,
+          alias: request.alias,
+          protocol,
+          outcome: "failed",
+          callCount: usage.callCount,
+          usage: settlementUsage(usage),
+          providerReportedCostCents: Object.freeze([
+            ...providerReportedCostCents,
+          ]),
+          error,
+        });
         throw new ModelEvaluationCallError(
           request.signal.aborted ? "evaluation_aborted" : "provider_error",
           settlement,
@@ -855,21 +913,18 @@ export function createModelEvaluationProtocolExecutor(deps: {
         }
         usage.callCount += 1;
         usage.complete = false;
-        const settlement = await safeResolveSettlement(
-          deps.settlementResolver,
-          {
-            taskId: request.taskId,
-            alias: request.alias,
-            protocol,
-            outcome: "failed",
-            callCount: usage.callCount,
-            usage: null,
-            providerReportedCostCents: Object.freeze([
-              ...providerReportedCostCents,
-            ]),
-            error,
-          },
-        );
+        const settlement = await safeResolveSettlement(settlementResolver, {
+          taskId: request.taskId,
+          alias: request.alias,
+          protocol,
+          outcome: "failed",
+          callCount: usage.callCount,
+          usage: settlementUsage(usage),
+          providerReportedCostCents: Object.freeze([
+            ...providerReportedCostCents,
+          ]),
+          error,
+        });
         throw new ModelEvaluationCallError(
           "provider_response_invalid",
           settlement,
@@ -903,13 +958,13 @@ export function createModelEvaluationProtocolExecutor(deps: {
     }
 
     const resolvedUsage = evaluationUsage(usage);
-    const settlement = await safeResolveSettlement(deps.settlementResolver, {
+    const settlement = await safeResolveSettlement(settlementResolver, {
       taskId: request.taskId,
       alias: request.alias,
       protocol,
       outcome: "completed",
       callCount: usage.callCount,
-      usage: resolvedUsage,
+      usage: settlementUsage(usage),
       providerReportedCostCents: Object.freeze([...providerReportedCostCents]),
     });
     if (!resolvedUsage) {
