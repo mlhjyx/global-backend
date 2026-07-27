@@ -47,7 +47,7 @@ import {
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-27-v1" as const;
+  "site-builder-model-evaluation-harness/2026-07-28-v2" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v2" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -145,6 +145,10 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
   },
   {
+    role: "evaluation_executor",
+    path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
     role: "provider",
     path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
   },
@@ -238,7 +242,7 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
 
 const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
   suiteId: "site-builder.brand-profile-evaluation-suite/2026-07-27-v1",
-  adapterId: "site-builder.brand-profile-evaluation-adapter/v1",
+  adapterId: "site-builder.brand-profile-evaluation-adapter/v2",
   taskContractId: "site_builder.brand_profile",
   promptVersion: BRAND_PROFILE_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_INPUT_SCHEMA_SNAPSHOT),
@@ -302,7 +306,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
-  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v3",
+  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v4",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1265,6 +1269,58 @@ export interface ModelEvaluationSourceFileFingerprint {
   sha256: string;
 }
 
+/**
+ * Opaque evaluation-internal seam for deterministic integration tests. The
+ * reader has no public read method and is accepted only when created by the
+ * bounded sequence factory below; normal harness/evidence paths always read
+ * the repository directly.
+ */
+export interface ModelEvaluationSourceBundleFingerprintReaderForTesting {
+  readonly kind: "evaluation_source_bundle_test_sequence";
+}
+
+const TRUSTED_SOURCE_BUNDLE_TEST_READERS = new WeakMap<
+  object,
+  {
+    observations: readonly (readonly ModelEvaluationSourceFileFingerprint[])[];
+    index: number;
+  }
+>();
+
+export function createModelEvaluationSourceBundleFingerprintReaderForTesting(
+  observations: readonly (readonly ModelEvaluationSourceFileFingerprint[])[],
+): ModelEvaluationSourceBundleFingerprintReaderForTesting {
+  if (observations.length < 2) {
+    throw new Error(
+      "source bundle test reader requires at least before/after observations",
+    );
+  }
+  const frozenObservations = observations.map((observation) =>
+    deepFreeze(
+      observation.map((entry) => {
+        if (
+          typeof entry.role !== "string" ||
+          !entry.role ||
+          typeof entry.path !== "string" ||
+          !entry.path ||
+          !SHA256.test(entry.sha256)
+        ) {
+          throw new Error("source bundle test observation is invalid");
+        }
+        return { ...entry };
+      }),
+    ),
+  );
+  const reader = Object.freeze({
+    kind: "evaluation_source_bundle_test_sequence" as const,
+  });
+  TRUSTED_SOURCE_BUNDLE_TEST_READERS.set(reader, {
+    observations: frozenObservations,
+    index: 0,
+  });
+  return reader;
+}
+
 export interface ModelEvaluationCasePayload {
   fixture: BrandProfileEvalFixture;
   taskInput: BrandProfileInput;
@@ -1763,23 +1819,49 @@ function currentSourceBundle(
   }));
 }
 
+function readSourceBundle(
+  suite: TaskEvaluationSuite,
+  reader?: ModelEvaluationSourceBundleFingerprintReaderForTesting,
+): readonly ModelEvaluationSourceFileFingerprint[] {
+  if (!reader) return currentSourceBundle(suite);
+  const state = TRUSTED_SOURCE_BUNDLE_TEST_READERS.get(reader);
+  if (!state) {
+    throw new Error("trusted source bundle test reader is required");
+  }
+  const observation = state.observations[state.index];
+  if (!observation) {
+    throw new Error("source bundle test reader observation sequence exhausted");
+  }
+  state.index += 1;
+  return observation;
+}
+
+export function modelEvaluationSourceBundleMatches(
+  expected: readonly ModelEvaluationSourceFileFingerprint[],
+  observed: readonly ModelEvaluationSourceFileFingerprint[],
+): boolean {
+  return JSON.stringify(observed) === JSON.stringify(expected);
+}
+
 function sourceBundleMatchesCase(
   suite: TaskEvaluationSuite,
   payload: ModelEvaluationCasePayload,
+  reader?: ModelEvaluationSourceBundleFingerprintReaderForTesting,
 ): boolean {
   try {
-    return (
-      JSON.stringify(currentSourceBundle(suite)) ===
-      JSON.stringify(payload.sourceFiles)
+    return modelEvaluationSourceBundleMatches(
+      payload.sourceFiles,
+      readSourceBundle(suite, reader),
     );
   } catch {
     return false;
   }
 }
 
-export function buildCanonicalModelEvaluationCase(
+function buildCanonicalModelEvaluationCaseWithReader(
   plan: TaskEvaluationPlan,
   fixtureId: string,
+  reader?: ModelEvaluationSourceBundleFingerprintReaderForTesting,
 ): ModelEvaluationCase {
   const firstCandidate = plan.candidates[0];
   if (!firstCandidate) {
@@ -1808,7 +1890,7 @@ export function buildCanonicalModelEvaluationCase(
     ),
   ) as BrandProfileEvalFixture;
   const prepared = prepareBrandProfileEvalFixture(fixture);
-  const sourceFiles = currentSourceBundle(suite);
+  const sourceFiles = readSourceBundle(suite, reader);
   const payload = deepFreeze({
     fixture,
     taskInput: prepared.input,
@@ -1838,6 +1920,13 @@ export function buildCanonicalModelEvaluationCase(
   const evaluationCase = deepFreeze({ contract, payload });
   assertCaseContract(plan, evaluationCase);
   return evaluationCase;
+}
+
+export function buildCanonicalModelEvaluationCase(
+  plan: TaskEvaluationPlan,
+  fixtureId: string,
+): ModelEvaluationCase {
+  return buildCanonicalModelEvaluationCaseWithReader(plan, fixtureId);
 }
 
 function assertCaseContract(
@@ -2156,6 +2245,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     request: ModelEvaluationExecutionRequest,
   ) => Promise<ModelEvaluationCallResult<T>>;
   now?: () => number;
+  sourceBundleFingerprintReaderForTesting?: ModelEvaluationSourceBundleFingerprintReaderForTesting;
 }): Promise<ModelEvaluationRun> {
   assertCandidateBelongsToPlan(options.plan, options.candidate);
   assertTrustedModelEvaluationBudget(options.campaignBudget);
@@ -2176,9 +2266,10 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `model evaluation attempt must be within 1..${options.plan.evaluationSuite.repeats}`,
     );
   }
-  const evaluationCase = buildCanonicalModelEvaluationCase(
+  const evaluationCase = buildCanonicalModelEvaluationCaseWithReader(
     options.plan,
     options.fixtureId,
+    options.sourceBundleFingerprintReaderForTesting,
   );
   const capabilityProbeAttestation =
     options.candidate.preflight === "capability_probe"
@@ -2437,6 +2528,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
   const sourceBundleStable = sourceBundleMatchesCase(
     options.plan.evaluationSuite,
     evaluationCase.payload,
+    options.sourceBundleFingerprintReaderForTesting,
   );
   if (!elapsedIsValid) {
     return bindRun({

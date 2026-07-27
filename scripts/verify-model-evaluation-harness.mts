@@ -15,6 +15,10 @@ import {
   SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
   buildAllTaskEvaluationPlans,
 } from "../apps/api/src/site-builder/eval/model-evaluation-harness";
+import {
+  MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
+  MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION,
+} from "../apps/api/src/site-builder/eval/model-evaluation-executor";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -60,9 +64,25 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "",
     "## 范围",
     "",
-    "- 这是离线、未接生产依赖的内存合同；没有真实模型请求、评测 evidence、运行路由或发布行为。",
+    "- 这是 evaluation-only、依赖注入的协议 executor 与内存 harness；只通过显式 wire client/cost resolver seam 执行，未接生产依赖。",
+    "- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。",
     "- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。",
     "- 当前唯一可 dispatch suite 是 BrandProfile；其余 6 个 task fail-closed 为 `blocked_no_evaluation_suite`。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
+    "",
+    "## 协议执行边界",
+    "",
+    `- admission contract：${code(MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION)}；它独立于生产 ${code("VERIFIED_GATEWAY_MODEL_TRANSPORTS")}，不能改变 runtime provider/route。`,
+    "- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只有隔离的 legacy comparator 入口，legacy-only alias 不能进入 target dispatch。",
+    "- actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。",
+    "- adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。",
+    "- cost settlement 只认显式注入、带 resolverId 的 resolver；没有 provider-reported、冻结价格或核验账单依据即 `unknown`，绝不记 0。schema/task-gate 唯一修复调用的 usage 与 callCount 必须合并。",
+    "",
+    "| protocol | domain | admission | operations |",
+    "|---|---|---|---|",
+    ...MODEL_EVALUATION_PROTOCOL_ADMISSIONS.map(
+      (entry) =>
+        `| ${code(entry.protocol)} | ${entry.domain} | ${code(entry.admission)} | ${entry.operations.map(code).join("、")} |`,
+    ),
     "",
     "## Task 计划",
     "",
@@ -113,6 +133,56 @@ export function verifyModelEvaluationHarness(
       .map((plan) => plan.taskId),
     ["site_builder.brand_profile"],
     "only tasks with a canonical task/fixture/evaluator suite may dispatch",
+  );
+  assert.deepEqual(
+    MODEL_EVALUATION_PROTOCOL_ADMISSIONS.map((entry) => ({
+      protocol: entry.protocol,
+      admission: entry.admission,
+      operations: [...entry.operations],
+    })),
+    [
+      {
+        protocol: "openai-responses",
+        admission: "target_text_dispatch",
+        operations: ["structured_text"],
+      },
+      {
+        protocol: "anthropic-messages",
+        admission: "target_text_dispatch",
+        operations: ["structured_text"],
+      },
+      {
+        protocol: "openai-chat-completions",
+        admission: "legacy_comparator_only",
+        operations: ["structured_text_comparator"],
+      },
+      {
+        protocol: "google-generate-content",
+        admission: "blocked_deferred",
+        operations: ["structured_text"],
+      },
+      {
+        protocol: "openai-images-generations",
+        admission: "blocked_requires_media_gateway",
+        operations: ["generate"],
+      },
+      {
+        protocol: "openai-images-edits",
+        admission: "blocked_requires_media_gateway",
+        operations: ["edit", "mask"],
+      },
+      {
+        protocol: "openai-videos",
+        admission: "blocked_no_consumer",
+        operations: ["create", "query", "cancel"],
+      },
+      {
+        protocol: "openai-embeddings",
+        admission: "blocked_no_evaluation_suite",
+        operations: ["embed"],
+      },
+    ],
+    "evaluation protocol admission must remain independent and fail closed",
   );
 
   for (const plan of plans) {

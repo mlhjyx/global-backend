@@ -1,12 +1,32 @@
 # Site Builder 模型评测 Harness 基线
 
-> 机器合同：`site-builder-model-evaluation-harness/2026-07-27-v1`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
+> 机器合同：`site-builder-model-evaluation-harness/2026-07-28-v2`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
 
 ## 范围
 
-- 这是离线、未接生产依赖的内存合同；没有真实模型请求、评测 evidence、运行路由或发布行为。
+- 这是 evaluation-only、依赖注入的协议 executor 与内存 harness；只通过显式 wire client/cost resolver seam 执行，未接生产依赖。
+- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。
 - 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。
 - 当前唯一可 dispatch suite 是 BrandProfile；其余 6 个 task fail-closed 为 `blocked_no_evaluation_suite`。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。
+
+## 协议执行边界
+
+- admission contract：`site-builder-model-evaluation-protocol-admission/v1`；它独立于生产 `VERIFIED_GATEWAY_MODEL_TRANSPORTS`，不能改变 runtime provider/route。
+- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只有隔离的 legacy comparator 入口，legacy-only alias 不能进入 target dispatch。
+- actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。
+- adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。
+- cost settlement 只认显式注入、带 resolverId 的 resolver；没有 provider-reported、冻结价格或核验账单依据即 `unknown`，绝不记 0。schema/task-gate 唯一修复调用的 usage 与 callCount 必须合并。
+
+| protocol | domain | admission | operations |
+|---|---|---|---|
+| `openai-responses` | text | `target_text_dispatch` | `structured_text` |
+| `anthropic-messages` | text | `target_text_dispatch` | `structured_text` |
+| `openai-chat-completions` | text | `legacy_comparator_only` | `structured_text_comparator` |
+| `google-generate-content` | text | `blocked_deferred` | `structured_text` |
+| `openai-images-generations` | image | `blocked_requires_media_gateway` | `generate` |
+| `openai-images-edits` | image | `blocked_requires_media_gateway` | `edit`、`mask` |
+| `openai-videos` | video | `blocked_no_consumer` | `create`、`query`、`cancel` |
+| `openai-embeddings` | embedding | `blocked_no_evaluation_suite` | `embed` |
 
 ## Task 计划
 
@@ -23,11 +43,11 @@
 ## Canonical suite
 
 - suite：`site-builder.brand-profile-evaluation-suite/2026-07-27-v1`
-- adapter：`site-builder.brand-profile-evaluation-adapter/v1`
+- adapter：`site-builder.brand-profile-evaluation-adapter/v2`
 - task contract：`site_builder.brand_profile` / prompt `brand-profile/14` / route validation `brand-profile-route-validation/14`；dispatch 同时绑定冻结 output schema 与 `repairTaskOutput=true`
 - fixture set：`site-builder.brand-profile-golden/2026-07-18-v1`；schema `brand-profile-eval-fixture/v1`；6 fixtures × 2 repeats = 12 runs/model
 - fixtures：`auto-parts-rich`、`auto-parts-sparse`、`industrial-pump-rich`、`industrial-pump-sparse`、`lab-instrument-rich`、`lab-instrument-sparse`
-- source bundle contract：`brand-profile-evaluation-source-bundle/v3`；固定 32 份仓库内源码/合同文件，路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
+- source bundle contract：`brand-profile-evaluation-source-bundle/v4`；固定 33 份仓库内源码/合同文件，路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
 - dispatch payload：fixture、prepared task input、prompt 与 source fingerprints 全部由 canonical case builder 构造、冻结并纳入 case SHA-256；executor 不能替换为未绑定内容。
 - capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
 - evaluator：`brand-profile-evaluator/10`；rubric SHA-256 `c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c`；harness 内部依次执行 output schema、生产 `validateOutput` 与 canonical task rubric，不接受 caller 自带 grader。

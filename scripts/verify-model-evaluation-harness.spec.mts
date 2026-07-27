@@ -63,6 +63,23 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
     ),
     "BrandProfile evaluation source bundle must pin the claim fact-key logic",
   );
+  assert.equal(
+    suite.adapterId,
+    "site-builder.brand-profile-evaluation-adapter/v2",
+  );
+  assert.equal(
+    suite.sourceBundleContractId,
+    "brand-profile-evaluation-source-bundle/v4",
+  );
+  assert.ok(
+    suite.sourceBundleFiles.some(
+      (entry) =>
+        entry.role === "evaluation_executor" &&
+        entry.path ===
+          "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+    ),
+    "BrandProfile evaluation source bundle must pin the protocol executor",
+  );
   for (const fingerprint of suite.fixtureFingerprints) {
     const fixture = JSON.parse(
       await readFile(
@@ -108,7 +125,7 @@ test("a missing harness id fails documentation verification", async () => {
   documents["docs/status/current.md"] = documents[
     "docs/status/current.md"
   ].replace(
-    "site-builder-model-evaluation-harness/2026-07-27-v1",
+    "site-builder-model-evaluation-harness/2026-07-28-v2",
     "missing-harness-id",
   );
   assert.throws(

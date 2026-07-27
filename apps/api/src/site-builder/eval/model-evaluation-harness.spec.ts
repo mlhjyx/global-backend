@@ -1,6 +1,3 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ModelEvaluationBudgetGuard,
@@ -11,6 +8,7 @@ import {
   buildProfileEvaluationAdmission,
   buildTaskEvaluationPlan,
   classifyCompletedTaskResult,
+  createModelEvaluationSourceBundleFingerprintReaderForTesting,
   rankModelEvaluationCandidates as rankModelEvaluationCandidatesRaw,
   runTaskEvaluationAttempt,
   summarizeModelEvaluationCandidate as summarizeModelEvaluationCandidateRaw,
@@ -969,41 +967,49 @@ describe("task attempt observation window", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects an otherwise valid completion when a bound source changes in flight", async () => {
+  it("detects an otherwise valid completion when a bound source changes in flight", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
-    const sourcePath = resolve(
-      process.cwd(),
-      "src/site-builder/claim-fact-key.ts",
+    const evaluationCase = buildCanonicalModelEvaluationCase(
+      plan,
+      "auto-parts-rich",
     );
-    const original = readFileSync(sourcePath);
-    try {
-      const result = await runTaskEvaluationAttempt({
+    const observedAfterCall = structuredClone(
+      evaluationCase.payload.sourceFiles,
+    );
+    observedAfterCall[0] = {
+      ...observedAfterCall[0],
+      sha256: "0".repeat(64),
+    };
+    const execute = vi.fn(async () =>
+      completedCall(
+        candidate.alias,
+        candidate.expectedProtocol,
+        canonicalAcceptedArtifact(),
+      ),
+    );
+    const sourceBundleFingerprintReaderForTesting =
+      createModelEvaluationSourceBundleFingerprintReaderForTesting([
+        evaluationCase.payload.sourceFiles,
+        observedAfterCall,
+      ]);
+
+    await expect(
+      runTaskEvaluationAttempt({
         plan,
         candidate,
         fixtureId: "auto-parts-rich",
         attempt: 1,
         campaignBudget: new ModelEvaluationBudgetGuard(100),
-        execute: async () => {
-          writeFileSync(
-            sourcePath,
-            Buffer.concat([original, Buffer.from("\n")]),
-          );
-          return completedCall(
-            candidate.alias,
-            candidate.expectedProtocol,
-            canonicalAcceptedArtifact(),
-          );
-        },
-      });
-      expect(result).toMatchObject({
-        resultClass: "provenance_invalid",
-        artifactAccepted: false,
-        failureCode: "source_bundle_changed_during_dispatch",
-      });
-    } finally {
-      writeFileSync(sourcePath, original);
-    }
+        execute,
+        sourceBundleFingerprintReaderForTesting,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "provenance_invalid",
+      artifactAccepted: false,
+      failureCode: "source_bundle_changed_during_dispatch",
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("keeps waiting after the production runtime deadline and classifies a valid late result", async () => {
