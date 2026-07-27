@@ -17,6 +17,7 @@
       "docs/site-builder/07-api-contract-draft.md",
       "docs/site-builder/08-eval-testing.md",
       "docs/site-builder/09-m1-implementation-design.md",
+      "docs/site-builder/model-candidate-baseline.md",
       "docs/site-builder/13-design-domain-model.md",
       "docs/site-builder/14-media-foundation-mf0.md"
     ],
@@ -44,6 +45,7 @@
       "docs/site-builder/07-api-contract-draft.md",
       "docs/site-builder/08-eval-testing.md",
       "docs/site-builder/09-m1-implementation-design.md",
+      "docs/site-builder/model-candidate-baseline.md",
       "docs/site-builder/13-design-domain-model.md",
       "docs/site-builder/14-media-foundation-mf0.md"
     ],
@@ -58,7 +60,14 @@
       "docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md"
     ],
     "prefixes": ["docs/site-builder/handoffs/"],
-    "requiredAny": ["FROZEN", "DATED", "SUPERSEDED", "历史", "证据", "provenance"]
+    "requiredAny": [
+      "FROZEN",
+      "DATED",
+      "SUPERSEDED",
+      "历史",
+      "证据",
+      "provenance"
+    ]
   },
   "immutableEvidence": {
     "prefixes": ["docs/evidence/"]

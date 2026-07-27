@@ -13,12 +13,7 @@
 4. **每个 agent = 有界 AI Task**：输入/输出 zod schema 严校验、失败重试带错误反馈、预算 reserve-settle、全链 trace。
 5. **模型统一走 new-api 网关**（已拍板，付费开闸）：所有 agent 的文本/图像/视频调用集中网关记账，key 不散落。
 
-> **补充架构原则（v3.2 §4.1 回写，与上五条并列的工程不变量）**：
-> 6. **AI 只做开放性理解 / 生成 / 审美判断**；安全、结构、引用完整性、预算、发布与回滚一律由**确定性代码**决定，模型输出无权改这些。
-> 7. **Agent 只交换版本化结构化工件**（schema 化 JSON），不做自由聊天、不产任意代码。
-> 8. **SiteSpec 是渲染合同，不是事实数据库**——事实真相源是公共 `Company/Offering/Claim/Evidence`（§9），站点只保存**渠道投影 + 不可变 Release**。
-> 9. **所有 AI/媒体任务可重试、取消、追踪、计费、降级、回放**（AiTask 基类内建，§4.4/§6）。
-> 10. **Preview 与 Publish 用同一 Release 产物**，切换只动可见指针与域名，绝不二次构建（§4.6、§7）。
+> **补充架构原则（v3.2 §4.1 回写，与上五条并列的工程不变量）**：6. **AI 只做开放性理解 / 生成 / 审美判断**；安全、结构、引用完整性、预算、发布与回滚一律由**确定性代码**决定，模型输出无权改这些。7. **Agent 只交换版本化结构化工件**（schema 化 JSON），不做自由聊天、不产任意代码。8. **SiteSpec 是渲染合同，不是事实数据库**——事实真相源是公共 `Company/Offering/Claim/Evidence`（§9），站点只保存**渠道投影 + 不可变 Release**。9. **所有 AI/媒体任务可重试、取消、追踪、计费、降级、回放**（AiTask 基类内建，§4.4/§6）。10. **Preview 与 Publish 用同一 Release 产物**，切换只动可见指针与域名，绝不二次构建（§4.6、§7）。
 
 ### 0.1 运行时硬约束（v3.2 §0.1 回写，护 D1/D13）
 
@@ -58,22 +53,23 @@ apps/api/src/site-builder/
 新增基建：**MinIO**（compose，对象存储）、**Astro 构建容器**（渲染器）、网关新模型通道（§6）。
 
 > **目标态新增/修改目录（v3.2 §25.2/§25.3 回写，target，随 M1-c~g 落地）**：
+>
 > - API 侧新增 `design/{catalog,resolver,rules,demo-visual-packs,design-lint,families/,blueprints/}`、`agents/{design-spec,aesthetic-review,model-profiles,model-policy.registry,model-capabilities,model-capability-probe,model-promotion.service}`、`media-gateway/`、`releases/`；修改 `demo-spec`/`task-routes`/`refurbish.workflow`/`site-builder.activities`/`schema.prisma`/迁移。
 > - Renderer 侧新增 `components/variants/`、`lib/{design-catalog,design-tokens,picture}`、`fixtures/design/`、`tests/visual/`。
 > - 🔴 **Renderer fail-closed（v3.2 §25.3，收敛 as-built）**：`Section.astro` 当前对未知组件**静默返回 null**（ADR-015 as-built，10 组件已注册）；目标改为**开发显错误块 + 测试/生产对未知组件 fail-closed**（不再静默）；`themes.ts` 从"两主题换皮"迁**版本化 StylePreset**；`spec.ts` 已迁共享契约（#117）删重复；locale 路由在 M1-e/M1-g 补完整验证（当前 `[...slug].astro` 只渲染默认 locale）。
 
 ## 2. 数据模型（Prisma 新表，全部 `workspace_id` + RLS policy）
 
-| 表 | 关键字段 | 说明 |
-|---|---|---|
-| `site` | status(draft/building/ready/published), active_version_id, locales, style_preset | 每 workspace 可多站（先限 1） |
-| `site_version` | spec(jsonb=SiteSpec), artifact_key, build_status, source_run_id | 版本化：回滚=切指针 |
-| `site_build_run` | phase, progress, steps(jsonb 读模型), cost_summary, temporal_run_id, error | 一次精装修管线 |
-| `site_build_step` | build_run_id, key, item_key, attempt, status, phase, progress, degraded, error_code | R3-B2 一等可恢复步骤真值（FORCE RLS） |
-| `asset` | kind(logo/product_image/factory_image/cert/doc/video/generated), object_key, derived_keys(jsonb), processing_status, content_hash, meta | content_hash 幂等；EXIF 已剥离后落库 |
-| `kb_document` / `kb_chunk` | source(intake/wizard/upload/storefront/web_research), embedding(pgvector) | 知识库 |
-| `brand_profile` | value_props, tone, glossary, keywords, competitors, evidence(jsonb), version | Brand Brief 落库，版本化 |
-| `inquiry`(M2) | form_data, source_page, status | 询盘回流（未来接获客管线） |
+| 表                         | 关键字段                                                                                                                                | 说明                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `site`                     | status(draft/building/ready/published), active_version_id, locales, style_preset                                                        | 每 workspace 可多站（先限 1）         |
+| `site_version`             | spec(jsonb=SiteSpec), artifact_key, build_status, source_run_id                                                                         | 版本化：回滚=切指针                   |
+| `site_build_run`           | phase, progress, steps(jsonb 读模型), cost_summary, temporal_run_id, error                                                              | 一次精装修管线                        |
+| `site_build_step`          | build_run_id, key, item_key, attempt, status, phase, progress, degraded, error_code                                                     | R3-B2 一等可恢复步骤真值（FORCE RLS） |
+| `asset`                    | kind(logo/product_image/factory_image/cert/doc/video/generated), object_key, derived_keys(jsonb), processing_status, content_hash, meta | content_hash 幂等；EXIF 已剥离后落库  |
+| `kb_document` / `kb_chunk` | source(intake/wizard/upload/storefront/web_research), embedding(pgvector)                                                               | 知识库                                |
+| `brand_profile`            | value_props, tone, glossary, keywords, competitors, evidence(jsonb), version                                                            | Brand Brief 落库，版本化              |
+| `inquiry`(M2)              | form_data, source_page, status                                                                                                          | 询盘回流（未来接获客管线）            |
 
 对象存储 key 约定：`ws/{workspace_id}/{site_id}/{kind}/{content_hash}.{ext}`；owner 凭证只在后端，外部一律短时 presigned URL。
 
@@ -123,7 +119,7 @@ flowchart TD
 **目标（DV-0 / M1-e）**才扩为 8 阶段快路径：**注册资料 → 规则识别 Archetype → Family/Blueprint 规则打分排序 → 安全 DemoVisualPack → 确定性 SiteSpec → 可选轻文案润色 → Astro 构建 → 快速 lint + 发布预览**。当前与目标共同硬约束：
 
 - **关键路径不调视觉模型**：当前仅 `pickPreset` 关键词规则；目标 Family/Blueprint 也只用规则打分，不在 10s 预算内调多模态模型（保确定性）。
-- **文案润色可取消、非依赖**：一次异步轻文案调用（deepseek-v4-flash）为锦上添花；硬超时即用模板默认文案，Demo 成功不依赖它。
+- **文案润色可取消、非依赖**：一次异步轻文案 currentRoute 调用（deepseek-v4-flash）为锦上添花；硬超时即用模板默认文案，Demo 成功不依赖它。
 - **只用注册明确事实**（ADR-017 禁虚构身份）；preview-only ≠ 可公开发布。
 - **不跑**图片生成 / 视频 / 全页多模态 QA / 网络研究。
 - **目标 DemoVisualPack 素材约束**：必须为平台原创、明确许可或程序化生成的**非事实性**素材；推荐三类来源=①平台自制抽象 SVG/网格/渐变/技术纹理；②明确可商用并本地化的图片；③后期由已批准图片模型生成的非事实性场景（不进 M1 Demo 必选路径）。
@@ -133,14 +129,14 @@ flowchart TD
 
 as-built：`refurbish.workflow.ts` 当前从 P1 直接进 `assembleAndBuild`，`site-builder.activities.ts` 里 `assemble` 仍调 `buildDemoSpec`、image/copy/quality 是**步骤位**——**设计升级落现有步骤位，不另建第二条工作流**。目标态六阶段产物与失败语义（v3.2 §4.2 回写）：
 
-| 阶段 | 产物 | 失败语义 |
-|---|---|---|
-| P0 Prepare | BuildContext、预算、基准 Release、locks、ResolvedPackSnapshot | 阻断 |
-| P1 Understand | BrandProjection、ClaimSnapshot、Gaps | 研究可降级；无可信事实走安全模板 |
-| P2 Media+Copy | AssetVariant、CopyBundle | 可选素材/非默认 locale 可降级；必需项阻断；`MediaJob` 仍是 MF-1 目标 |
-| P3 Design+Assemble | DesignBrief、DesignSpec、SiteSpec、BuildArtifact | 有限修复，仍失败**不切指针** |
-| P4 Quality | QA/SEO/Aesthetic/Safety Report、FixPatch | 最多三轮；硬门不过不 publishable |
-| P5 Release | SiteReleaseManifest、preview URL、Outbox | 原子提交；失败**保留旧 Release** |
+| 阶段               | 产物                                                          | 失败语义                                                             |
+| ------------------ | ------------------------------------------------------------- | -------------------------------------------------------------------- |
+| P0 Prepare         | BuildContext、预算、基准 Release、locks、ResolvedPackSnapshot | 阻断                                                                 |
+| P1 Understand      | BrandProjection、ClaimSnapshot、Gaps                          | 研究可降级；无可信事实走安全模板                                     |
+| P2 Media+Copy      | AssetVariant、CopyBundle                                      | 可选素材/非默认 locale 可降级；必需项阻断；`MediaJob` 仍是 MF-1 目标 |
+| P3 Design+Assemble | DesignBrief、DesignSpec、SiteSpec、BuildArtifact              | 有限修复，仍失败**不切指针**                                         |
+| P4 Quality         | QA/SEO/Aesthetic/Safety Report、FixPatch                      | 最多三轮；硬门不过不 publishable                                     |
+| P5 Release         | SiteReleaseManifest、preview URL、Outbox                      | 原子提交；失败**保留旧 Release**                                     |
 
 原 ASCII 管线是同一意图的粗粒度视图：
 
@@ -154,14 +150,14 @@ P5 发布     outbox: SiteReleaseCreated / SitePublished → SaaS 前端刷新�
 
 **阶段职责 I/O（v3.2 §19.1 回写，逻辑 agent → 产物）**：
 
-| 阶段 | 输入 | 输出 | 设计相关变化 |
-|---|---|---|---|
-| P1 brandProfile | intake、资料、研究 | BrandProfile | 不改 |
-| P2 imagePipeline | 用户资产 | 派生图片 + 能力摘要 | M1-c 纯 Sharp，不加设计模型（ADR-018） |
-| P3 copy | BrandProfile + DesignBrief 内容预算 | CopyBundle | M1-d 增槽位长度 + 证据要求 |
-| P3 designSpec | BrandProfile + Catalog + AssetCapabilitySummary | DesignBrief | M1-e 新增 Family/Blueprint/variant 决策 |
-| P3 assembly | DesignBrief + CopyBundle + AssetManifest | SiteSpec | 只引批准组件 + 变体 |
-| P4 quality | 构建产物 + 三断点截图 | Findings + Patch | M1-f 新增审美 + 通用感 |
+| 阶段             | 输入                                            | 输出                | 设计相关变化                            |
+| ---------------- | ----------------------------------------------- | ------------------- | --------------------------------------- |
+| P1 brandProfile  | intake、资料、研究                              | BrandProfile        | 不改                                    |
+| P2 imagePipeline | 用户资产                                        | 派生图片 + 能力摘要 | M1-c 纯 Sharp，不加设计模型（ADR-018）  |
+| P3 copy          | BrandProfile + DesignBrief 内容预算             | CopyBundle          | M1-d 增槽位长度 + 证据要求              |
+| P3 designSpec    | BrandProfile + Catalog + AssetCapabilitySummary | DesignBrief         | M1-e 新增 Family/Blueprint/variant 决策 |
+| P3 assembly      | DesignBrief + CopyBundle + AssetManifest        | SiteSpec            | 只引批准组件 + 变体                     |
+| P4 quality       | 构建产物 + 三断点截图                           | Findings + Patch    | M1-f 新增审美 + 通用感                  |
 
 ### 4.3 增量构建（scope 语义，v3.2 §4.3 回写）
 
@@ -174,16 +170,16 @@ P5 发布     outbox: SiteReleaseCreated / SitePublished → SaaS 前端刷新�
 
 `SiteBuildRun.steps JSON` 只做读模型；一等记录用 `SiteBuildStep(buildRunId,key,itemKey,attempt,status,progress,degraded,errorCode,costCents,artifactRefs,…)`，唯一键 `(buildRunId,key,itemKey,attempt)`。关键失败处理表：
 
-| 场景 | 处理 |
-|---|---|
-| KB 摄入失败 | 沿用 ready 文档并 degraded |
-| Brand 全路由失败 | 用上一版 BrandProjection；无上一版走安全模板 |
-| 可选图片失败 | 原图优化 Variant 或占位（fail-safe，不阻断整站） |
-| Logo/Hero 必需素材不可用 | 返回明确 gap 并阻断 |
-| 非默认 locale 失败 | 本 Release 不含该 locale；**默认 locale 失败阻断** |
-| 预算耗尽 | 停发新调用、结算已完成、状态 `resumable` + `SiteBuildFailed(reason=budget)`，绝不静默 |
-| 取消 | 停新任务、执行不可取消补偿、**不改旧 Release** |
-| 模型通道异常 | 按 registry fallback；**不能用无媒体能力的文本模型硬顶**媒体任务 |
+| 场景                     | 处理                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| KB 摄入失败              | 沿用 ready 文档并 degraded                                                            |
+| Brand 全路由失败         | 用上一版 BrandProjection；无上一版走安全模板                                          |
+| 可选图片失败             | 原图优化 Variant 或占位（fail-safe，不阻断整站）                                      |
+| Logo/Hero 必需素材不可用 | 返回明确 gap 并阻断                                                                   |
+| 非默认 locale 失败       | 本 Release 不含该 locale；**默认 locale 失败阻断**                                    |
+| 预算耗尽                 | 停发新调用、结算已完成、状态 `resumable` + `SiteBuildFailed(reason=budget)`，绝不静默 |
+| 取消                     | 停新任务、执行不可取消补偿、**不改旧 Release**                                        |
+| 模型通道异常             | 按 registry fallback；**不能用无媒体能力的文本模型硬顶**媒体任务                      |
 
 - phase 级 Temporal 重试；**并发**：同 site 同时只允许一个 build run（Temporal workflow id = site id 派生，天然去重）。
 
@@ -211,12 +207,12 @@ P5 发布     outbox: SiteReleaseCreated / SitePublished → SaaS 前端刷新�
 
 as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy / design_spec / assemble / assembly_fix / qa_summarize / seo_review`）。下表**不做命名重构**，只在文档/owner/trace 上把它们（含 M1 目标新增 task）归成**四个逻辑 Agent**，明确责任与禁止边界：
 
-| 逻辑 Agent | AiTask（含目标 *） | 责任 | 禁止 |
-|---|---|---|---|
-| Brand & Evidence | `brand_profile`、claim_projection* | 品牌、术语、引用、gaps | 不批准 Claim；不输出具名个人 |
-| Content & SEO | `copy`、localize*、`seo_review` | 多语言文案、FAQ、metadata、Schema 文本 | 只消费允许公开的 ClaimSnapshot |
-| Visual Media Director | image_select/qc/edit*、video_storyboard/qc*、aesthetic_review* | 媒体用途、编辑 brief、多模态质检 | 不改原件；证书/人像/Logo 禁生成式改造 |
-| Site Composer & Fixer | `design_spec`、`assemble`、`assembly_fix` | Archetype/Family、冻结选择与结构化 findings | 不生成代码、props、CSS、HTML、Astro 或任意 JSON Patch；不绕过白名单 |
+| 逻辑 Agent            | AiTask（含目标 *）                                             | 责任                                        | 禁止                                                                |
+| --------------------- | -------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------- |
+| Brand & Evidence      | `brand_profile`、claim_projection*                             | 品牌、术语、引用、gaps                      | 不批准 Claim；不输出具名个人                                        |
+| Content & SEO         | `copy`、localize*、`seo_review`                                | 多语言文案、FAQ、metadata、Schema 文本      | 只消费允许公开的 ClaimSnapshot                                      |
+| Visual Media Director | image_select/qc/edit*、video_storyboard/qc*、aesthetic_review* | 媒体用途、编辑 brief、多模态质检            | 不改原件；证书/人像/Logo 禁生成式改造                               |
+| Site Composer & Fixer | `design_spec`、`assemble`、`assembly_fix`                      | Archetype/Family、冻结选择与结构化 findings | 不生成代码、props、CSS、HTML、Astro 或任意 JSON Patch；不绕过白名单 |
 
 （* = M1-d/e/f 目标 task，尚未落地；下方 §5.2 的 8 卡是**能力设计视图**，与 7 as-built task 非一一对应——planner 卡已按 D13 砍。）
 
@@ -226,17 +222,17 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ### 5.2 能力设计视图（8 卡；模型列见 §6 四态路由，非终选）
 
-| # | Agent | 职责 | 输入 → 输出 | 模型（首选） | 工具/护栏 |
-|---|---|---|---|---|---|
-| ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | — | 无（确定性零模型） | 固定 DAG + 规则判定 |
-| 2 | 品牌定位 brandProfile | 资料理解+全网研究 → Brand Brief | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | `structured.default` | SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）** |
-| 3 | 图片管线 imagePipeline | 产品/工厂图生成安全可发布的响应式派生件 | 原图 → 多尺寸 webp/avif + fallback | **M1-c 确定性零模型（纯 Sharp）** | 目标固定序：MIME/像素/解码炸弹检查→方向与 sRGB→重编码去 EXIF/GPS→质量门→安全裁切/focal point→多尺寸导出→`AssetVariant`；原图不可变、单图失败隔离。rembg、超分、生成式背景重绘、视觉质检与 pHash/embedding 主体校验均属 M1-c2/M3 后置能力，出现真实消费者、同意与 provider 门后另行落地（ADR-018） |
-| 4 | 文案 copy | 每语种全站文案 | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc） | `copy.premium` | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist |
-| 5 | 动效/视频 motion/video | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 图生视频（工厂环境/产品展示 5-10s） | 图片 → 动效参数 / 视频 asset | M1=`deterministic`；M3=`video.primary` | 每站视频条数配额；视频失败自动降级动效 |
-| 6 | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病 | Brand Brief+模板 → DesignSpec；截图 → findings | 生成=`structured.default`；评审=`multimodal.review` | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过 |
-| 7 | 组装 siteAssembly + assemblyFix | 产出/修补 SiteSpec | DesignSpec+文案+素材清单 → SiteSpec；findings → SiteSpec patch | 普通=`structured.default`；复杂升级=`reasoning.high` | 输出必过 zod schema+素材引用存在性+内链有效性（确定性校验器），不过=带错误重试 |
-| 8 | 审核 qa | 功能/性能体检 | 构建产物 → findings | `text.summary` / `multimodal.review`（只做汇总/审美 finding） | **主体是确定性工具**：Playwright 遍历（链接/表单/响应式 3 断点/console error）+ Lighthouse（性能/a11y/SEO 基线分） |
-| 9 | SEO seo | 技术 SEO+关键词落位 | 构建产物+Brand Brief → findings+patch 建议 | `text.summary` | 确定性检查：meta/OG/schema.org(Organization+Product)/sitemap/robots/**hreflang 多语言**/图 alt；关键词→页面映射 |
+| #     | Agent                             | 职责                                                                                                                                                                                  | 输入 → 输出                                                         | 模型（首选）                                                  | 工具/护栏                                                                                                                                                                                                                                                                                         |
+| ----- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~1~~ | ~~规划 planner~~ ❌**已砍 (D13)** | **职责已拆分（非删除）**：编排/预算/增量范围 → 「编排/增量规划」确定性零模型（§6·§11 D13）；"该有哪些页/每页什么结构"的设计智能 → 卡 6 designSpec（未砍）；用户自由意图改站 → M2 预留 | —                                                                   | 无（确定性零模型）                                            | 固定 DAG + 规则判定                                                                                                                                                                                                                                                                               |
+| 2     | 品牌定位 brandProfile             | 资料理解+全网研究 → Brand Brief                                                                                                                                                       | KB+店铺/官网/社媒抓取+同行参考 → 价值主张/tone/术语表/关键词/差异点 | `structured.default`                                          | SearXNG+Crawl4AI（已有）；**事实红线：认证/产能/年限等必须带出处，缺=留空提示用户补，绝不虚构（ADR-017）**                                                                                                                                                                                        |
+| 3     | 图片管线 imagePipeline            | 产品/工厂图生成安全可发布的响应式派生件                                                                                                                                               | 原图 → 多尺寸 webp/avif + fallback                                  | **M1-c 确定性零模型（纯 Sharp）**                             | 目标固定序：MIME/像素/解码炸弹检查→方向与 sRGB→重编码去 EXIF/GPS→质量门→安全裁切/focal point→多尺寸导出→`AssetVariant`；原图不可变、单图失败隔离。rembg、超分、生成式背景重绘、视觉质检与 pHash/embedding 主体校验均属 M1-c2/M3 后置能力，出现真实消费者、同意与 provider 门后另行落地（ADR-018） |
+| 4     | 文案 copy                         | 每语种全站文案                                                                                                                                                                        | Brand Brief+页面结构+KB → locale×section 文案（含 SEO title/desc）  | `copy.premium`                                                | 术语表一致；每语种原生生成非机翻腔；禁绝对化宣称；目标市场文化禁忌 checklist                                                                                                                                                                                                                      |
+| 5     | 动效/视频 motion/video            | v1 动效参数（Ken Burns/视差=确定性零模型）；M3 图生视频（工厂环境/产品展示 5-10s）                                                                                                    | 图片 → 动效参数 / 视频 asset                                        | M1=`deterministic`；M3=`video.primary`                        | 每站视频条数配额；视频失败自动降级动效                                                                                                                                                                                                                                                            |
+| 6     | 审美 designSpec + aestheticReview | 生成期：DesignSpec（主题 token 选择/板块布局/图文节奏）；评审期：看整站截图挑毛病                                                                                                     | Brand Brief+模板 → DesignSpec；截图 → findings                      | 生成=`structured.default`；评审=`multimodal.review`           | Playwright 全页截图（3 断点）；评分 rubric（层次/一致性/留白/对比度/CTA 显著度），≥85 过                                                                                                                                                                                                          |
+| 7     | 组装 siteAssembly + assemblyFix   | 产出/修补 SiteSpec                                                                                                                                                                    | DesignSpec+文案+素材清单 → SiteSpec；findings → SiteSpec patch      | 普通=`structured.default`；复杂升级=`reasoning.high`          | 输出必过 zod schema+素材引用存在性+内链有效性（确定性校验器），不过=带错误重试                                                                                                                                                                                                                    |
+| 8     | 审核 qa                           | 功能/性能体检                                                                                                                                                                         | 构建产物 → findings                                                 | `text.summary` / `multimodal.review`（只做汇总/审美 finding） | **主体是确定性工具**：Playwright 遍历（链接/表单/响应式 3 断点/console error）+ Lighthouse（性能/a11y/SEO 基线分）                                                                                                                                                                                |
+| 9     | SEO seo                           | 技术 SEO+关键词落位                                                                                                                                                                   | 构建产物+Brand Brief → findings+patch 建议                          | `text.summary`                                                | 确定性检查：meta/OG/schema.org(Organization+Product)/sitemap/robots/**hreflang 多语言**/图 alt；关键词→页面映射                                                                                                                                                                                   |
 
 > 评审三人组（8/9/6 评审面）= GAN 式生成-评审循环（生成者改，评审者挑），有界 ≤3 轮防死循环；单维不过阈值出 findings，全过或轮数用尽即出环。
 >
@@ -246,45 +242,23 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ## 6. 模型路由（currentRoute 与 ADR-020 目标组合分层）
 
-> **代码事实优先**：`task-routes.ts` 是现役唯一真值；7 个文本 task 中只有 BrandProfile 经真实 endpoint 协议探针、同形 6×2 Golden、成本/质量、失败门和 rollback 成为代码级 `promotedRoute`，其余仍是 `currentRoute`。下方 ADR-020 表是用户批准的整组质量优先 target portfolio，不表示其他 task 已切换。本轮选择以任务效果、结构化稳定性、成本可核对、协议与安全边界为门；真实外部流量/高风险部署前仍须 MODEL-2 shadow/canary。外部依据与历史实测见 [10-model-selection-study.md](10-model-selection-study.md)。
+2026-07-27 起，非运行时候选由 ADR-021 与 `site-builder-model-candidate-baseline/2026-07-27-v1` 接管；本节标题保留旧 anchor 以兼容历史设计稿链接。
+
+> **代码事实优先**：`task-routes.ts` 是现役唯一真值；7 个文本 task 中只有 BrandProfile 经真实 endpoint 协议探针、同形 6×2 Golden、成本/质量、失败门和 rollback 成为代码级 `promotedRoute`，其余仍是 `currentRoute`。非运行时候选唯一看 ADR-021 的 `site-builder-model-candidate-baseline/2026-07-27-v1` 与[生成文档](model-candidate-baseline.md)；ADR-020 和 [10-model-selection-study.md](10-model-selection-study.md) 只保留历史决策/实测 provenance，不再复制当前候选表。
 
 **active route（as-built）**：
 
-| task | primary | fallback | state |
-|---|---|---|---|
-| `brand_profile` | `gpt-5.6-terra`（Responses） | `claude-sonnet-5`（Messages） | `promotedRoute`；可回 DeepSeek Pro→GLM |
-| `copy` | `deepseek-v4-pro` | `glm-5.2` → `doubao-seed-2.0-pro` | `currentRoute` |
-| `design_spec` | `minimax-m3` | `doubao-seed-2.0-pro` | `currentRoute` |
-| `assemble` / `assembly_fix` | `glm-5.2` | `deepseek-v4-pro` | `currentRoute` |
-| `qa_summarize` / `seo_review` | `deepseek-v4-flash` | `doubao-seed-2.0-lite` | `currentRoute` |
+| task                          | primary                      | fallback                          | state                                  |
+| ----------------------------- | ---------------------------- | --------------------------------- | -------------------------------------- |
+| `brand_profile`               | `gpt-5.6-terra`（Responses） | `claude-sonnet-5`（Messages）     | `promotedRoute`；可回 DeepSeek Pro→GLM |
+| `copy`                        | `deepseek-v4-pro`            | `glm-5.2` → `doubao-seed-2.0-pro` | `currentRoute`                         |
+| `design_spec`                 | `minimax-m3`                 | `doubao-seed-2.0-pro`             | `currentRoute`                         |
+| `assemble` / `assembly_fix`   | `glm-5.2`                    | `deepseek-v4-pro`                 | `currentRoute`                         |
+| `qa_summarize` / `seo_review` | `deepseek-v4-flash`          | `doubao-seed-2.0-lite`            | `currentRoute`                         |
 
-**ADR-020 质量优先目标组合（approved target portfolio；除 BrandProfile 外仍待逐 task 晋级）**：
+**非运行时候选**：精确 alias、`runnable/deferred/preview/legacy-only`、预期协议、Profile 候选池、task 映射与媒体能力门全部由 machine baseline 生成；本文件不再维护第二张候选表。registry 的 `targetCandidate` 从 baseline 构造且永不进入 active route。MiniMax/Doubao 等旧文本只保留 currentRoute/rollback/legacy-only；Gemini 文本在上游恢复前 deferred，Gemini 图片 preview 只能 shadow，视频在消费者、MediaGateway 和 task-shaped create/query/cancel 探针前 deferred。`runnable` 也只表示可进入探针/评测，不表示可上线。
 
-| 任务 | 目标主模型 | 唯一模型回退 / 降级 | 不可绕过的规则 |
-|---|---|---|---|
-| 品牌研究归纳、FactSheet、BrandProfile、Claim Gap | `gpt-5.6-terra` | `claude-sonnet-5` | 搜索/抓取由确定性服务完成；模型只处理 R4 冻结证据 |
-| 海外英文/德文文案、产品页、品牌叙事、本地化 | `claude-sonnet-5` | `gpt-5.6-terra` | 只引用 APPROVED ClaimSnapshot；术语/长度/事实后校验 |
-| DesignBrief、Family/Blueprint/组件变体选择 | `gpt-5.6-terra` | `claude-sonnet-5` | 只从封闭 DesignCatalog 选择，不生成前端代码 |
-| SiteSpec 首次组装与普通修复 | `gpt-5.6-terra` | `claude-sonnet-5` | Structured Output + schema/引用/兼容矩阵/Astro 八门 |
-| 连续两次失败后的高难 SiteSpec 修复 | `gpt-5.6-sol` | 确定性安全 Blueprint | Sol 只作显式 escalation，不进入普通 fallback 链 |
-| 三断点截图审美、图片/后续视频 QA | `gemini-3.5-flash` | `gpt-5.6-terra` | 只输出 Finding；不能直接任意重写页面 |
-| QA/SEO 摘要、标签、内部分类、可选 Demo 润色 | `gemini-3.5-flash` | `gpt-5.6-terra` | 硬门继续由代码执行；Demo 无模型仍必须成功 |
-| 企业 KB 向量 | `bge-m3` 自托管 | 无 | 经 new-api `/v1/embeddings`；维持 1024 维/版本，不出域 |
-
-**图片与视频目标路由（不进入 M1-c；由真实媒体消费者触发）**：
-
-| 任务 | 目标主模型 | 回退 | 安全边界 |
-|---|---|---|---|
-| 批量非事实 Hero、抽象背景、通用工业场景 | `gemini-3.1-flash-image` | `doubao-seedream-5.0-lite` | 禁伪造工厂、客户、认证、项目现场 |
-| 高价值首页 Hero、品牌主视觉、复杂营销合成 | `gemini-3-pro-image` | `gpt-image-2` | 高价值小批量；文字/OCR 与权利门必过 |
-| 产品主体敏感的背景替换、mask 外编辑 | `gpt-image-2` | 原图 Sharp Variant | mask 内产品锁定；Logo/标签/颜色/接口/孔位/轮廓任一变化即拒绝 |
-| OG 图、带文字营销横幅 | `gpt-image-2` | 确定性 HTML/SVG | 事实文字仍来自批准 Claim |
-| 产品几何、证书/报告、人物身份图片 | **禁生成式编辑** | 原图 | 永久 fail-closed |
-| M3 5–10 秒图生视频 | `seedance-2.0` | 确定性动效/静态图 | 不进 Demo；主体/时序/权利 QA 后才能发布 |
-
-`gemini-omni-flash-preview` 与 `veo-3.1-generate-preview` 只保留为评测候选：Preview 不作唯一生产依赖；Omni 当前没有不可替代职责，截图/媒体 QA 由稳定的 `gemini-3.5-flash` 承担。更换上述 target portfolio 必须新增 ADR，不能通过改一张表静默换型。
-
-**2026-07-27 本机网关事实**：BGE 不暴露公共名，而只通过专用令牌暴露私有别名 `site-builder-bge-m3-local`。开发网关已另建按能力域跨供应商划分的文本 23 型、图片 4 型、视频 5 型白名单令牌；图片目录精确包含 `gpt-image-2`、`gpt-image-2-4k`、`gemini-3-pro-image-preview`、`gemini-3.1-flash-image-preview`。这些 `-preview` 型号只能 shadow，不能冒充本节 target portfolio 中尚未由目录提供的稳定名 `gemini-3-pro-image` / `gemini-3.1-flash-image`；`gemini-omni-flash-preview` 仍不可见。Gemini 文本 key 虽列出 `gemini-3.1-pro-preview` / `gemini-3.5-flash`，但 OpenAI Chat 上游未配置且原生入口 404，渠道已禁用；令牌 allowlist 可见不等于健康。分域令牌尚未接入应用消费者，历史 `MODEL_GATEWAY_KEY` 仍为宽权限，故当前不构成端到端凭据隔离。BGE 专用令牌的 `/v1/models` 只返回该一个别名，真实 `/v1/embeddings` 两条输入返回两组 1024 维有限向量。**型号可见/单次连通不等于 task promotion**；图片渠道的内置测试会实际计费或错误走 Chat，不能替代 task-shaped 探针；图片编辑、视觉输入、Structured Output、长任务和 provider 失败语义仍须分别真探。`MODEL_DEFAULT_MODEL=deepseek-v4-flash` 只服务未显式传 model 的 legacy/general 调用，不是 Site Builder 主模型，也不覆盖本节 per-task 路由；在未显式化并评测那些旧调用前不得借 ADR-020 顺手修改它。
+**2026-07-27 本机网关事实**：BGE 不暴露公共名，而只通过专用令牌暴露私有别名 `site-builder-bge-m3-local`。开发网关已另建按能力域跨供应商划分的文本 23 型、图片 4 型、视频 5 型白名单令牌；精确目录状态已归入 candidate baseline，不在此重复维护。Gemini 文本 key 虽列目录，但 OpenAI Chat 上游未配置且原生入口 404，渠道已禁用；令牌 allowlist 可见不等于健康。分域令牌尚未接入应用消费者，历史 `MODEL_GATEWAY_KEY` 仍为宽权限，故当前不构成端到端凭据隔离。BGE 专用令牌的 `/v1/models` 只返回该一个别名，真实 `/v1/embeddings` 两条输入返回两组 1024 维有限向量。**型号可见/单次连通不等于 task promotion**；图片渠道的内置测试会实际计费或错误走 Chat，不能替代 task-shaped 探针；图片编辑、视觉输入、Structured Output、长任务和 provider 失败语义仍须分别真探。`MODEL_DEFAULT_MODEL=deepseek-v4-flash` 只服务未显式传 model 的 legacy/general currentRoute 调用，不是 Site Builder 主模型，也不覆盖本节 per-task 路由。
 
 **BGE new-api 配置合同（#140；2026-07-18 Ubuntu 开发环境 as-built）**：幂等引导命令 `pnpm --filter @global/api new-api:ensure-embeddings -- --write-env` 创建唯一 OpenAI-compatible channel：base URL=`http://embeddings:11434`（Compose 内网），对应用只声明 `site-builder-bge-m3-local`，并以 model mapping 映射到 Ollama `bge-m3`；同时创建只允许该别名、禁跨 group retry 的专用令牌并真验 1024 维。网关路径的模型别名固定、`EMBEDDINGS_API_KEY` 必填，禁止复用 `MODEL_GATEWAY_KEY` 或用 env 改投公共模型；只有精确 allowlist 的 `localhost/127.0.0.1/[::1]/embeddings:11434/v1` break-glass 可无 token 使用上游名 `bge-m3`。应用 `.env` 已切到 new-api，真实 `EmbeddingsClient` 两条输入均返回 1024 维有限向量，专用令牌 `/v1/models` 仅暴露该别名；这不代表生产部署。回滚把应用 `EMBEDDINGS_URL` 指回上述受控本机上游即可，维持同一模型/维度/version，不改数据库向量；定位完成后重新运行引导命令恢复统一网关。
 
@@ -310,7 +284,7 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
   - **Google Fonts**：OFL 开源、免费商用；🔴 **必须自托管**——德国法院已有判例：网页远程加载 Google Fonts 向 Google 泄露访客 IP 违反 GDPR。
   - **LottieFiles**：平台素材授权混杂（Simple License/订阅内容），**v1 不依赖**——动效走自建 motion token 预设，Lottie 后期按单个素材核授权再用。
 - **图库使用原则**：真实工厂/产品图永远优先（B2B 信任的核心），图库图只补氛围位；AI 生成图按目标市场透明度要求处理（欧盟 AI Act 披露义务跟踪）。
-- 组件库基底：Astro + Tailwind；section 组件 v1 约 15~20 种（hero/产品网格/工厂实力/认证墙/数字带/时间线/案例/FAQ/CTA/询盘表单/页脚…），每种 2~3 布局变体 × 动效预设。
+- 组件库基底：Astro + Tailwind；section 组件 v1 约 15~~20 种（hero/产品网格/工厂实力/认证墙/数字带/时间线/案例/FAQ/CTA/询盘表单/页脚…），每种 2~~3 布局变体 × 动效预设。
 
 ## 9. 与获客后端的闭环（未来）
 
@@ -332,25 +306,25 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 > 站建承重决策已收口为 **ADR-013~020**（`docs/adr/registry.md`，唯一决策真值：SCOPE/SiteSpec/封闭组件库/模型档路由/禁虚构身份/媒体地基/Readdy 参考/质量优先目标模型组合）；下表 D1-D17 为此前拍板原文，与 ADR 的对应见各 ADR「出处」列。
 
-| # | 决策 | 结论 |
-|---|---|---|
-| D1 | SiteSpec+组件库 vs 自由写码 | SiteSpec+组件库（用户同意推荐） |
-| D2 | 视频方案 | 付费开闸：Seedance（火山）；动效保底降级 |
-| D3 | 模型接入 | 全部统一走 new-api 网关 |
-| D4 | 生产 agent 运行时 | 自建有界 AI Task（L2 续用），不引入 Claude Agent SDK——网关是 OpenAI 兼容协议，SDK 绑 Anthropic 协议且自主漫游不可控；详见对话记录 |
-| D5 | 站点诊断 | 「独立站管理」二级栏目（**非注册分支**，修订④）；已有站用户 SEO 体检，后置 M3+ |
-| D6 | 多租户隔离 | RLS + 对象存储前缀 + 签名 URL（§7） |
-| D7 | 预览方式 | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属 |
-| D8 | 模型选型原则 | 按 agent 能力需求全市场选型；**2026-07-14 现役档定档**（§6 表=currentRoute as-built：实测评比+用户三轮拍板，依据见 10 号文档；ADR-016 四态路由，候选经评测晋级非终选）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档） |
-| D9 | readdy 定位 | **已由 ADR-019 取代（2026-07-16）**：默认 `visual_research_only`，仅允许开发期少量、临时、多来源净室观察，持久化抽象 `DesignObservation/DesignRule`；**未经覆盖 AI 建站产品、衍生组件和商业分发的书面授权，且未完整登记证据、范围、期限、地域、撤回与再分发权，不得导出或改造 React/Figma**。全部满足后才可登记为 `owned_export_authorized`，按授权边界走一次性改造工序；缺任一项 fail-closed，运行时零依赖、禁止逆向，生产素材仍走开放授权生态（§8）。 |
-| D10 | 发布部署 | **海外服务器**（免 ICP 备案）；静态托管=对象存储+CDN 优先（非 VPS）；预览国内友好线路/发布海外 CDN 双链路 |
-| D11 | SiteSpec 数据形状 | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认） |
-| D12 | 模板策略 | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认）；**组件库 v1 扩容 17→55 型**（2026-07-14 用户拍板，readdy demo 缺口实证见 11 号文档：9 个小难度缺口并入 M1-e，中难度 3 个 v1.5，沉浸叙事类不进封闭库） |
-| D13 | v1 编排 | **无 planner agent**：固定 DAG + 规则判定增量范围；M2+ 真需要再评估（修订①，用户确认） |
-| D14 | 知识库与 embedding | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12）；模型从 day1 自托管，经 new-api 统一鉴权/审计传输（换模型才需全量重嵌，单纯换传输不需） |
-| D15 | 富文本 | v1 即开（用户拍板）：受限 ProseMirror JSON、不存 HTML（04 §5） |
-| D16 | MapLocation 发布合同 | 无外呼的地址文本卡；`static` 归一为 `technical-grid`，可选 `quiet`。禁止 iframe、第三方地图、Geocoding、坐标、地理定位和地图 key（04 §10，2026-07-23 修订） |
-| D17 | 注册去分支 + 引导式 onboarding | **修订④（2026-07-14 用户确认）**：注册「有无海外独立站」**只作背景知识、不分叉栏目**；后台统一一级「独立站管理」下挂**独立站建设 + 站点诊断**两个二级栏目；注册即**无条件**生成 demo（不论有无既有站）；进后台的引导（消息卡片→跳转预览→引导填向导）**流程与状态全在前端**（本仓不管），后端只提供**已有的预览链接**（`previewUrl`）供卡片跳转、**不为引导新增编排/状态端点** |
+| #   | 决策                           | 结论                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | SiteSpec+组件库 vs 自由写码    | SiteSpec+组件库（用户同意推荐）                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D2  | 视频方案                       | 付费开闸：Seedance（火山）；动效保底降级                                                                                                                                                                                                                                                                                                                                                                                                                |
+| D3  | 模型接入                       | 全部统一走 new-api 网关                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| D4  | 生产 agent 运行时              | 自建有界 AI Task（L2 续用），不引入 Claude Agent SDK——网关是 OpenAI 兼容协议，SDK 绑 Anthropic 协议且自主漫游不可控；详见对话记录                                                                                                                                                                                                                                                                                                                       |
+| D5  | 站点诊断                       | 「独立站管理」二级栏目（**非注册分支**，修订④）；已有站用户 SEO 体检，后置 M3+                                                                                                                                                                                                                                                                                                                                                                          |
+| D6  | 多租户隔离                     | RLS + 对象存储前缀 + 签名 URL（§7）                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| D7  | 预览方式                       | **独立预览域名** `{slug}.preview.<平台域>`（泛解析+泛证书+Host 回源，§7）；需与 SaaS 侧对齐平台域与 DNS/证书运维归属                                                                                                                                                                                                                                                                                                                                    |
+| D8  | 模型选型原则                   | 按 agent 能力需求全市场选型；**2026-07-14 现役档定档**（§6 表=currentRoute as-built：实测评比+用户三轮拍板，依据见 10 号文档；ADR-016 四态路由，候选经评测晋级非终选）；视频=火山 **Seedance 2.0**（需 Large 档，用户将升档）                                                                                                                                                                                                                           |
+| D9  | readdy 定位                    | **已由 ADR-019 取代（2026-07-16）**：默认 `visual_research_only`，仅允许开发期少量、临时、多来源净室观察，持久化抽象 `DesignObservation/DesignRule`；**未经覆盖 AI 建站产品、衍生组件和商业分发的书面授权，且未完整登记证据、范围、期限、地域、撤回与再分发权，不得导出或改造 React/Figma**。全部满足后才可登记为 `owned_export_authorized`，按授权边界走一次性改造工序；缺任一项 fail-closed，运行时零依赖、禁止逆向，生产素材仍走开放授权生态（§8）。 |
+| D10 | 发布部署                       | **海外服务器**（免 ICP 备案）；静态托管=对象存储+CDN 优先（非 VPS）；预览国内友好线路/发布海外 CDN 双链路                                                                                                                                                                                                                                                                                                                                               |
+| D11 | SiteSpec 数据形状              | 对标 **Puck**（MIT 可视化编辑器）兼容形状，渲染器自写 Astro（修订②，用户确认）                                                                                                                                                                                                                                                                                                                                                                          |
+| D12 | 模板策略                       | Astro MIT 主题**改造+补缺**为基底，不从零画（修订③，用户确认）；**组件库 v1 扩容 17→55 型**（2026-07-14 用户拍板，readdy demo 缺口实证见 11 号文档：9 个小难度缺口并入 M1-e，中难度 3 个 v1.5，沉浸叙事类不进封闭库）                                                                                                                                                                                                                                   |
+| D13 | v1 编排                        | **无 planner agent**：固定 DAG + 规则判定增量范围；M2+ 真需要再评估（修订①，用户确认）                                                                                                                                                                                                                                                                                                                                                                  |
+| D14 | 知识库与 embedding             | **pgvector + BGE-M3 自托管**（沿 v3.0 D1 既定规格 vector(1024)/HNSW）+ **Docling** 文档解析（详见 §12）；模型从 day1 自托管，经 new-api 统一鉴权/审计传输（换模型才需全量重嵌，单纯换传输不需）                                                                                                                                                                                                                                                         |
+| D15 | 富文本                         | v1 即开（用户拍板）：受限 ProseMirror JSON、不存 HTML（04 §5）                                                                                                                                                                                                                                                                                                                                                                                          |
+| D16 | MapLocation 发布合同           | 无外呼的地址文本卡；`static` 归一为 `technical-grid`，可选 `quiet`。禁止 iframe、第三方地图、Geocoding、坐标、地理定位和地图 key（04 §10，2026-07-23 修订）                                                                                                                                                                                                                                                                                             |
+| D17 | 注册去分支 + 引导式 onboarding | **修订④（2026-07-14 用户确认）**：注册「有无海外独立站」**只作背景知识、不分叉栏目**；后台统一一级「独立站管理」下挂**独立站建设 + 站点诊断**两个二级栏目；注册即**无条件**生成 demo（不论有无既有站）；进后台的引导（消息卡片→跳转预览→引导填向导）**流程与状态全在前端**（本仓不管），后端只提供**已有的预览链接**（`previewUrl`）供卡片跳转、**不为引导新增编排/状态端点**                                                                           |
 
 ## 12. 知识库详设（2026-07-14 补，02 §2 kb 表的实现规格）
 

@@ -4,6 +4,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { verifyModelCandidateBaseline } from "./model-candidate-baseline.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const policyPath = join(root, "docs/governance/docs-verification-policy.json");
 const policy = JSON.parse(readFileSync(policyPath, "utf8"));
@@ -523,6 +525,10 @@ if (existsSync(releaseDirectory)) {
         report("error", "RELEASE_SECTION", path, `missing ## ${heading}`);
     }
   }
+}
+
+for (const issue of verifyModelCandidateBaseline(root)) {
+  report("error", issue.code, join(root, issue.path), issue.detail);
 }
 
 const errors = issues.filter((issue) => issue.severity === "error");

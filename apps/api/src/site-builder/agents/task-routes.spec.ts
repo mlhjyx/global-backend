@@ -48,8 +48,12 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
   });
 
   it('qa_summarize / seo_review：flash 快档', () => {
-    expect(resolveTaskRoute('site_builder.qa_summarize').primary).toBe('deepseek-v4-flash');
-    expect(resolveTaskRoute('site_builder.seo_review').primary).toBe('deepseek-v4-flash');
+    expect(resolveTaskRoute('site_builder.qa_summarize').primary).toBe(
+      'deepseek-v4-flash',
+    );
+    expect(resolveTaskRoute('site_builder.seo_review').primary).toBe(
+      'deepseek-v4-flash',
+    );
   });
 
   it('全部 task id 都能解析出完整路由（回归守卫：新增 task 忘配路由=测试红）', () => {
@@ -179,7 +183,9 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
   });
 
   it('未知 task 抛错（fail-fast，不静默用错路由）', () => {
-    expect(() => resolveTaskRoute('site_builder.nope' as never)).toThrow(/unknown site_builder task/);
+    expect(() => resolveTaskRoute('site_builder.nope' as never)).toThrow(
+      /unknown site_builder task/,
+    );
   });
 });
 
@@ -189,15 +195,23 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       'structured.workspace_materials',
     );
     expect(resolveTaskRoute('site_builder.copy').profile).toBe('copy.premium');
-    expect(resolveTaskRoute('site_builder.qa_summarize').profile).toBe('text.summary');
-    expect(modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec')).toEqual({
+    expect(resolveTaskRoute('site_builder.qa_summarize').profile).toBe(
+      'text.summary',
+    );
+    expect(
+      modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec'),
+    ).toEqual({
       primary: 'minimax-m3',
       fallbacks: ['doubao-seed-2.0-pro'],
     });
-    expect(modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec')).toMatchObject({
+    expect(
+      modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec'),
+    ).toMatchObject({
       state: 'currentRoute',
     });
-    expect(modelPolicyRegistry.getActiveTaskPolicy('site_builder.brand_profile')).toMatchObject({
+    expect(
+      modelPolicyRegistry.getActiveTaskPolicy('site_builder.brand_profile'),
+    ).toMatchObject({
       state: 'promotedRoute',
       promotionEvidenceId: 'model1-brand-profile-20260719-v20',
     });
@@ -206,7 +220,10 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
   it('active route 快照只切 BrandProfile，其他 task 逐项保持 pre-MODEL-0 行为', () => {
     expect(
       Object.fromEntries(
-        SITE_BUILDER_TASK_IDS.map((taskId) => [taskId, modelPolicyRegistry.resolveActiveTaskRoute(taskId)]),
+        SITE_BUILDER_TASK_IDS.map((taskId) => [
+          taskId,
+          modelPolicyRegistry.resolveActiveTaskRoute(taskId),
+        ]),
       ),
     ).toEqual({
       'site_builder.brand_profile': {
@@ -282,23 +299,36 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       }),
     ]);
     expect(Object.isFrozen(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE)).toBe(true);
-    expect(Object.isFrozen(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.pricing.rates)).toBe(true);
+    expect(
+      Object.isFrozen(BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.pricing.rates),
+    ).toBe(true);
   });
 
   it('17 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
     expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(17);
-    for (const profile of ['video.premium', 'speech.production', 'transcription', 'moderation.media'] as const) {
-      expect(SITE_BUILDER_MODEL_PROFILES[profile].requiredCapabilities).not.toHaveLength(0);
+    for (const profile of [
+      'video.premium',
+      'speech.production',
+      'transcription',
+      'moderation.media',
+    ] as const) {
+      expect(
+        SITE_BUILDER_MODEL_PROFILES[profile].requiredCapabilities,
+      ).not.toHaveLength(0);
       expect(modelPolicyRegistry.getCandidates(profile)).toEqual([]);
     }
-    expect(modelPolicyRegistry.getProfile('text.summary').requiredCapabilities).toContain('structured_output');
+    expect(
+      modelPolicyRegistry.getProfile('text.summary').requiredCapabilities,
+    ).toContain('structured_output');
     expect(modelPolicyRegistry.getProfile('text.summary').dataPolicy).toEqual({
       transport: 'new_api_only',
       region: 'gateway_controlled',
       personalData: 'forbidden',
       dataScope: 'company_facts_only',
     });
-    expect(modelPolicyRegistry.getProfile('structured.default').dataPolicy).toEqual({
+    expect(
+      modelPolicyRegistry.getProfile('structured.default').dataPolicy,
+    ).toEqual({
       transport: 'new_api_only',
       region: 'gateway_controlled',
       personalData: 'forbidden',
@@ -313,15 +343,17 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       personalData: 'workspace_controlled',
       dataScope: 'workspace_site_materials',
     });
-    expect(modelPolicyRegistry.getProfile('embedding.private').dataPolicy.region).toBe('private_local');
+    expect(
+      modelPolicyRegistry.getProfile('embedding.private').dataPolicy.region,
+    ).toBe('private_local');
   });
 
-  it('ADR-020 profile targets remain registered candidates；只有有 task 证据的 BrandProfile 可晋级', () => {
+  it('candidate baseline targets remain registry-only；只有有 task 证据的 BrandProfile 可晋级', () => {
     const target = modelPolicyRegistry.getCandidates('structured.default');
     expect(target).toContainEqual(
       expect.objectContaining({
         state: 'targetCandidate',
-        route: { primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] },
+        route: { primary: 'gpt-5.6-terra', fallbacks: [] },
         activation: 'requires_task_evaluation',
       }),
     );
@@ -330,50 +362,16 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     ).toContainEqual(
       expect.objectContaining({
         state: 'targetCandidate',
-        route: { primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] },
+        route: { primary: 'gpt-5.6-terra', fallbacks: [] },
         activation: 'requires_task_evaluation',
       }),
     );
-    expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe('gpt-5.6-terra');
-    expect(resolveTaskRoute('site_builder.design_spec').primary).toBe('minimax-m3');
-  });
-
-  it('registers every ADR-020 target portfolio route without activating it', () => {
-    const targetRoute = (profile: keyof typeof SITE_BUILDER_MODEL_PROFILES) =>
-      modelPolicyRegistry.getCandidates(profile).map((candidate) => candidate.route);
-
-    expect({
-      structured: targetRoute('structured.default'),
-      structuredWorkspace: targetRoute('structured.workspace_materials'),
-      reasoning: targetRoute('reasoning.high'),
-      copy: targetRoute('copy.premium'),
-      summary: targetRoute('text.summary'),
-      bulk: targetRoute('text.bulk'),
-      multimodal: targetRoute('multimodal.review'),
-      imageBulk: targetRoute('image.bulk.creative'),
-      imagePremium: targetRoute('image.premium.design'),
-      imageEdit: targetRoute('image.precise_edit'),
-      video: targetRoute('video.primary'),
-    }).toEqual({
-      structured: [{ primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] }],
-      structuredWorkspace: [
-        { primary: 'gpt-5.6-terra', fallbacks: ['claude-sonnet-5'] },
-      ],
-      reasoning: [{ primary: 'gpt-5.6-sol', fallbacks: [] }],
-      copy: [{ primary: 'claude-sonnet-5', fallbacks: ['gpt-5.6-terra'] }],
-      summary: [{ primary: 'gemini-3.5-flash', fallbacks: ['gpt-5.6-terra'] }],
-      bulk: [{ primary: 'gemini-2.5-flash-lite', fallbacks: ['gpt-5.6-luna'] }],
-      multimodal: [{ primary: 'gemini-3.5-flash', fallbacks: ['gpt-5.6-terra'] }],
-      imageBulk: [
-        {
-          primary: 'gemini-3.1-flash-image',
-          fallbacks: ['doubao-seedream-5.0-lite'],
-        },
-      ],
-      imagePremium: [{ primary: 'gemini-3-pro-image', fallbacks: ['gpt-image-2'] }],
-      imageEdit: [{ primary: 'gpt-image-2', fallbacks: [] }],
-      video: [{ primary: 'seedance-2.0', fallbacks: [] }],
-    });
+    expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe(
+      'gpt-5.6-terra',
+    );
+    expect(resolveTaskRoute('site_builder.design_spec').primary).toBe(
+      'minimax-m3',
+    );
   });
 
   it('bounds multimodal review to controlled workspace site material without activating a task route', () => {
@@ -397,32 +395,40 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       'image.precise_edit',
       'video.primary',
     ] as const) {
-      expect(modelPolicyRegistry.getCandidates(profile)).toEqual([
-        expect.objectContaining({
-          state: 'targetCandidate',
-          activation: 'requires_media_gateway',
-        }),
-      ]);
+      expect(modelPolicyRegistry.getCandidates(profile)).not.toHaveLength(0);
+      expect(modelPolicyRegistry.getCandidates(profile)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            state: 'targetCandidate',
+            activation: 'requires_media_gateway',
+          }),
+        ]),
+      );
     }
   });
 
   it('returns defensive copies, so callers cannot mutate the registered policy', () => {
-    const current = modelPolicyRegistry.resolveActiveTaskRoute('site_builder.brand_profile');
+    const current = modelPolicyRegistry.resolveActiveTaskRoute(
+      'site_builder.brand_profile',
+    );
     (current.fallbacks as string[]).push('not-a-policy-model');
-    expect(modelPolicyRegistry.resolveActiveTaskRoute('site_builder.brand_profile').fallbacks).toEqual([
-      'claude-sonnet-5',
-    ]);
+    expect(
+      modelPolicyRegistry.resolveActiveTaskRoute('site_builder.brand_profile')
+        .fallbacks,
+    ).toEqual(['claude-sonnet-5']);
 
     const candidates = modelPolicyRegistry.getCandidates('structured.default');
     (candidates[0].route.fallbacks as string[]).push('not-a-policy-model');
-    expect(modelPolicyRegistry.getCandidates('structured.default')[0].route.fallbacks).toEqual(['claude-sonnet-5']);
+    expect(
+      modelPolicyRegistry.getCandidates('structured.default')[0].route
+        .fallbacks,
+    ).toEqual([]);
 
     const profile = modelPolicyRegistry.getProfile('structured.default');
     (profile.requiredCapabilities as string[]).push('not-a-capability');
-    expect(modelPolicyRegistry.getProfile('structured.default').requiredCapabilities).toEqual([
-      'text_generation',
-      'structured_output',
-    ]);
+    expect(
+      modelPolicyRegistry.getProfile('structured.default').requiredCapabilities,
+    ).toEqual(['text_generation', 'structured_output']);
   });
 
   it('freezes exported profile definitions at runtime, including nested constraints', () => {
@@ -431,6 +437,8 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     expect(Object.isFrozen(profile)).toBe(true);
     expect(Object.isFrozen(profile.requiredCapabilities)).toBe(true);
     expect(Object.isFrozen(profile.dataPolicy)).toBe(true);
-    expect(() => (profile.requiredCapabilities as string[]).push('reasoning')).toThrow(TypeError);
+    expect(() =>
+      (profile.requiredCapabilities as string[]).push('reasoning'),
+    ).toThrow(TypeError);
   });
 });

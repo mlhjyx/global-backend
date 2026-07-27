@@ -17,6 +17,7 @@
 - **NestJS 单体（模块化）+ Prisma + PostgreSQL**（多租户 **RLS**：`app_user` 连接 + `set_config('app.current_workspace_id')` + `current_workspace_id()` policy；owner 连接绕 RLS 供 relay/seed）。
 - **Temporal** 持久工作流（understanding / discovery / qualify）；**Transactional Outbox** + relay 发领域事件。
 - **模型与 embedding 网关 = new-api 中转站**（单一网关，按模型显式选择已验证的 OpenAI Chat/Responses/Anthropic Messages 协议）。2026-07-27 Ubuntu 开发网关已建立按能力域跨供应商划分的三把模型白名单令牌：文本 23 型、图片 4 型、视频 5 型。图片目录精确包含 `gpt-image-2`、`gpt-image-2-4k`、`gemini-3-pro-image-preview`、`gemini-3.1-flash-image-preview`；OpenOx 文本目录新增 `gemini-3.1-pro-preview`、`gemini-3.5-flash`、`gpt-5.4/5.4-mini/5.5/5.6-luna/5.6-sol/5.6-terra`，上游组合密钥虽同时列出 `gpt-image-2`，渠道只由图片专用密钥承载该重叠型号；用户期望的 `gpt-5.3-codex` 未出现在该密钥的真实 `/v1/models`，不得虚配。Gemini 文本 key 虽能列目录，但 OpenAI Chat 两个官方展示入口均返回 `openai unified upstream not configured`，Gemini 原生入口返回 404；该渠道已 fail-closed 禁用，令牌 allowlist 中保留两型号不代表当前可调用。GPT 文本渠道实测内置最小测试约 2–3 秒；图片渠道的内置“测试”会真实生成并计费，GPT Image 2 三次约 36–44 秒，Gemini 图片因错误走 `/v1/chat/completions` 在 62–74 秒后失败，故图片/视频禁止用通用渠道测试按钮判断健康。分域令牌尚未接入应用消费者，历史 `MODEL_GATEWAY_KEY` 仍是宽权限令牌，因此当前只是为后续迁移建立真实白名单，不得称已完成端到端凭据隔离或路由切换。自托管 BGE-M3 只以私有别名 `site-builder-bge-m3-local` 暴露，专用令牌只允许该别名。#140 合并并完成 Ubuntu 开发环境切换后，真实 `EmbeddingsClient` 经 new-api 返回两组 1024 维有限向量，专用令牌 `/v1/models` 仅返回该别名；这不代表生产部署。现役文本路由唯一真值仍是 `task-routes.ts`：2026-07-19 只有 `site_builder.brand_profile` 成为代码级 `promotedRoute`=`gpt-5.6-terra`（Responses）→`claude-sonnet-5`（Messages）；active evidence id=`model1-brand-profile-20260719-v20` 在同一 final-code/source bundle 下证明 candidate 24/24（两模型各 12/12）与完整 legacy DeepSeek Pro→GLM baseline 12/12，并精确记录 transport 和 requested/reported/resolved model。旧失败/诊断证据保留且不覆盖；路由有 EvidenceRef v2 任务硬门与一键 rollback。其他 6 个文本 task 仍是原 currentRoute。ADR-020 记录整组质量优先目标，逐 task 晋级仍服从 ADR-016。`gpt-image-2` 的 `/images/generations` 单次历史真探已成功，但本轮没有 task-shaped 图片/视频接口验证；edit/mask、生产 MediaGateway 与消费者未落，绝不冒充上线。Preview 图片型号只能作为 shadow 候选，ADR-020 中无 `-preview` 的稳定目标名仍未由当前目录提供；`gemini-omni-flash-preview` 也仍不可见。旧别名 `deepseek-chat`/`deepseek-reasoner` 官方 2026-07-24 关停，一律用显式 V4 型号。
+- **模型候选基线 = ADR-021 / `site-builder-model-candidate-baseline/2026-07-27-v1`**：它是独立于 execution policy v3 的非运行时候选唯一真值，[人类可读镜像](docs/site-builder/model-candidate-baseline.md) 由机器基线生成并受 `docs:verify` 校验。registry 的 targetCandidate 只能从该基线构造且不可路由；BrandProfile promotedRoute/rollback 与其他六个 currentRoute 不变。`runnable` 只表示可进后续 probe/评测；Gemini 文本为 deferred、Gemini 图片为 preview、无消费者的视频为 deferred，DeepSeek/GLM/MiniMax/Doubao 文本只以 currentRoute/rollback/legacy-only 语境保留。后续 harness、真实 evidence、逐 task promotion 必须分 PR，禁止目录可见即切换。
 - **发现四层**：L0 Tool → L1 ProviderAdapter（按 SourceClass）→ L2 AI Task（有界任务契约，**非超级 Agent**）→ L3 Temporal Workflow。**ToolBroker** 是唯一确定性执行闸门（allowedTools 白名单 + 预算 reserve-settle + 限流 + source_policy + 幂等 + trace）。
 - **MCP = 传输非授权**，第一步不做；第三方 MCP 内化到 ProviderAdapter 后面。
 - **Site Builder** = NestJS bounded context + Temporal 固定 DAG + 有界 AI Task + `@global/contracts` SiteSpec + Astro 静态渲染；不使用自由 Planner。素材/KB 对象进 MinIO，KB 使用 Docling + BGE-M3；当前 renderer 构建产物仍是本地路径，不得把目标态 immutable Release 写成 as-built。
@@ -29,6 +30,7 @@
 **Compose 项目名迁移护栏**：当前 Ubuntu 实机的容器标签、固定容器名和数据卷已核验为项目 `global`（例如 `global_pgdata`）；`-p global` 是现行真值。旧 Mac/WSL 曾可能使用目录推导的 `global-backend`，切换时**不得**直接 `down -v`、删除固定 `global-*` 容器或假定新卷已有数据。先读 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md)；若尚未迁移，临时使用 `pnpm infra:up:legacy`，完成 pg_dump/restore 和卷/服务验收后再切换。
 
 **跑起来**：
+
 ```bash
 cd /global/backend
 pnpm install
@@ -42,6 +44,7 @@ pnpm --filter @global/api start:dev    # API
 pnpm --filter @global/api worker       # Temporal worker
 pnpm --filter @global/api test         # vitest
 ```
+
 data_provider 源（gleif/directory/trade_fair/wikidata/…）在 **API/relay 启动时自动 seed**。
 
 **唯一当前开发环境**：**Ubuntu 26.04**（2026-07-15 迁入），代码在 `/global/backend`；Mac 仅作 SSH 瘦客户端，旧 Mac/WSL 路径都不是当前施工目录。Tailscale 主机 `xin`（root，`100.88.153.74`），8T 盘挂 `/data` 且承载 Docker data-root。墙内网络经桌面用户 xin 的 mihomo `127.0.0.1:7897`，apt 使用 `mirrors.aliyun.com`，Docker registry 使用 daocloud 镜像。`docker compose` 一律带 `-p global`；Temporal 一律走 systemd `temporal-dev.service`。Compose 开发服务端口一律只绑 `127.0.0.1`，Mac 访问须用 SSH 端口转发，不向 Tailscale/公网直接暴露。
@@ -75,7 +78,7 @@ data_provider 源（gleif/directory/trade_fair/wikidata/…）在 **API/relay �
 
 ## 6. 当前主线与冻结 backlog
 
-> 🔴 **2026-07-13 起获客侧开发暂停**（用户指示，明确通知才恢复）。当前唯一主线 = **Site Builder**。活文档是 [docs/site-builder/](docs/site-builder/) 00–14 + [ADR-013~020](docs/adr/registry.md)；v3.1/v3.2 与旧 Word/研究稿只作 dated proposal/历史输入，不能覆盖活文档或代码。
+> 🔴 **2026-07-13 起获客侧开发暂停**（用户指示，明确通知才恢复）。当前唯一主线 = **Site Builder**。活文档是 [docs/site-builder/](docs/site-builder/) 00–14 + [ADR-013~021](docs/adr/registry.md)；v3.1/v3.2 与旧 Word/研究稿只作 dated proposal/历史输入，不能覆盖活文档或代码。
 >
 > **DOC-12 状态**：#119/#120 已把主要设计内容分发入活文档；2026-07-16 truth-sync（#125）已收口项目级状态、00–14 漂移与接入说明，R0 contract（#126）、R1-safety ①+②、**R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2/B-min、M1-d、R1-min、DI-0（#164）、M1-e-A/B 与 M1-f** 均已闭环，不把 DOC-12 重新描述为一项代码能力。M1-e-A 的 55 型全部 `m1_e_a_qualified`，保留 385 份七件套证据与 165 张三断点 SHA-256 快照。M1-e-B 已交付六个 `1.0.0/approved` Family、DesignBrief、封闭 adapter/copy-slot/四层 validator、SiteSpec 1.1、tenant/catalog asset overlay、ReleaseManifest v2、局部 v2-base 与 Temporal patch；12 个 sparse/rich Golden 对应 36 张整站三断点证据。M1-f 已接入确定性 QA/SEO/a11y/genericness、三断点截图、closed-shape DesignEvaluation v2、最多三次闭合 optionId 修复、ReleaseManifest v3 与 replay-safe quality patch；旧 history 与 Demo v0/SiteSpec 1.0/Release v1 继续兼容。Gemini 原生图像接口及 Terra/Responses、Sol/Responses、Sonnet/Messages 均已连通；复核发现现有确定性 Golden 不是独立审美 Gold，旧四模型结果只能作诊断、不得晋级。**下一施工顺序**：M1-g 阶段收口；`template-distillation` 未采纳。R4-A2 继续提供 Claim/Evidence truth bridge；R4-B-min 继续提供 BuildRun hard cap、task fencing、model/tool spend ledger 与 kill switch。上述开发验证均不代表生产部署；M1-c 仍没有公开 process/select API。
 >

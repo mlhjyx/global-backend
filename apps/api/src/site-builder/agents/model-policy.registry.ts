@@ -8,27 +8,19 @@ import type {
   ModelRouteSnapshot,
 } from '@global/contracts';
 
+import { SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID } from './model-candidate-baseline';
+import { modelCandidateRoutesFromBaseline } from './model-candidate-registry';
 import type { SiteBuilderTaskId } from './task-route-bindings';
-import { SITE_BUILDER_MODEL_PROFILES, type SiteBuilderModelProfileId } from './model-profiles';
+import {
+  SITE_BUILDER_MODEL_PROFILES,
+  type SiteBuilderModelProfileId,
+} from './model-profiles';
 
 interface ProfilePolicy {
   profile: ModelProfileDefinition;
   candidates: readonly ModelCandidateRoute[];
   deterministicFallback: DeterministicFallback;
 }
-
-const target = (
-  primary: string,
-  fallbacks: readonly string[],
-  activation: ModelCandidateRoute['activation'],
-  notes?: string,
-): ModelCandidateRoute => ({
-  state: 'targetCandidate',
-  lifecycle: 'candidate',
-  route: { primary, fallbacks },
-  activation,
-  notes,
-});
 
 /**
  * Exact pre-MODEL-0 routes, retained as task-local rollback snapshots. They are
@@ -164,14 +156,14 @@ const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
 };
 
 /**
- * ADR-020 profile-level registrations. A task promotion does not promote every
- * other task sharing that profile; those candidates remain non-routable until
+ * Candidate-baseline profile registrations. A task promotion does not promote
+ * every other task sharing that profile; candidates remain non-routable until
  * each task has its own evidence record.
  */
 const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   deterministic: {
     profile: SITE_BUILDER_MODEL_PROFILES.deterministic,
-    candidates: [],
+    candidates: modelCandidateRoutesFromBaseline('deterministic'),
     deterministicFallback: {
       id: 'code-path',
       description: 'Execute the fixed deterministic implementation.',
@@ -179,7 +171,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'structured.default': {
     profile: SITE_BUILDER_MODEL_PROFILES['structured.default'],
-    candidates: [target('gpt-5.6-terra', ['claude-sonnet-5'], 'requires_task_evaluation')],
+    candidates: modelCandidateRoutesFromBaseline('structured.default'),
     deterministicFallback: {
       id: 'safe-blueprint',
       description: 'Return the validated deterministic safe blueprint.',
@@ -187,13 +179,9 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'structured.workspace_materials': {
     profile: SITE_BUILDER_MODEL_PROFILES['structured.workspace_materials'],
-    candidates: [
-      target(
-        'gpt-5.6-terra',
-        ['claude-sonnet-5'],
-        'requires_task_evaluation',
-      ),
-    ],
+    candidates: modelCandidateRoutesFromBaseline(
+      'structured.workspace_materials',
+    ),
     deterministicFallback: {
       id: 'approved-company-facts',
       description:
@@ -202,7 +190,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'reasoning.high': {
     profile: SITE_BUILDER_MODEL_PROFILES['reasoning.high'],
-    candidates: [target('gpt-5.6-sol', [], 'requires_task_evaluation', 'Only after two complex repair failures.')],
+    candidates: modelCandidateRoutesFromBaseline('reasoning.high'),
     deterministicFallback: {
       id: 'safe-blueprint',
       description: 'Keep the validated deterministic safe blueprint.',
@@ -210,7 +198,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'copy.premium': {
     profile: SITE_BUILDER_MODEL_PROFILES['copy.premium'],
-    candidates: [target('claude-sonnet-5', ['gpt-5.6-terra'], 'requires_task_evaluation')],
+    candidates: modelCandidateRoutesFromBaseline('copy.premium'),
     deterministicFallback: {
       id: 'approved-copy-slots',
       description: 'Use approved deterministic copy slots or omit.',
@@ -218,7 +206,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'text.summary': {
     profile: SITE_BUILDER_MODEL_PROFILES['text.summary'],
-    candidates: [target('gemini-3.5-flash', ['gpt-5.6-terra'], 'requires_task_evaluation')],
+    candidates: modelCandidateRoutesFromBaseline('text.summary'),
     deterministicFallback: {
       id: 'rule-summary',
       description: 'Return deterministic findings without a model summary.',
@@ -226,15 +214,16 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'text.bulk': {
     profile: SITE_BUILDER_MODEL_PROFILES['text.bulk'],
-    candidates: [target('gemini-2.5-flash-lite', ['gpt-5.6-luna'], 'requires_task_evaluation')],
+    candidates: modelCandidateRoutesFromBaseline('text.bulk'),
     deterministicFallback: {
       id: 'batch-skip',
-      description: 'Skip the optional batch operation without manufacturing output.',
+      description:
+        'Skip the optional batch operation without manufacturing output.',
     },
   },
   'multimodal.review': {
     profile: SITE_BUILDER_MODEL_PROFILES['multimodal.review'],
-    candidates: [target('gemini-3.5-flash', ['gpt-5.6-terra'], 'requires_task_evaluation')],
+    candidates: modelCandidateRoutesFromBaseline('multimodal.review'),
     deterministicFallback: {
       id: 'deterministic-qa',
       description: 'Keep deterministic QA findings only.',
@@ -242,7 +231,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'image.bulk.creative': {
     profile: SITE_BUILDER_MODEL_PROFILES['image.bulk.creative'],
-    candidates: [target('gemini-3.1-flash-image', ['doubao-seedream-5.0-lite'], 'requires_media_gateway')],
+    candidates: modelCandidateRoutesFromBaseline('image.bulk.creative'),
     deterministicFallback: {
       id: 'asset-or-omit',
       description: 'Use an approved asset or omit the visual.',
@@ -250,7 +239,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'image.premium.design': {
     profile: SITE_BUILDER_MODEL_PROFILES['image.premium.design'],
-    candidates: [target('gemini-3-pro-image', ['gpt-image-2'], 'requires_media_gateway')],
+    candidates: modelCandidateRoutesFromBaseline('image.premium.design'),
     deterministicFallback: {
       id: 'asset-or-omit',
       description: 'Use an approved asset or omit the visual.',
@@ -258,7 +247,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'image.precise_edit': {
     profile: SITE_BUILDER_MODEL_PROFILES['image.precise_edit'],
-    candidates: [target('gpt-image-2', [], 'requires_media_gateway')],
+    candidates: modelCandidateRoutesFromBaseline('image.precise_edit'),
     deterministicFallback: {
       id: 'original-sharp-variant',
       description: 'Keep the original Sharp-derived variant.',
@@ -266,7 +255,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'video.primary': {
     profile: SITE_BUILDER_MODEL_PROFILES['video.primary'],
-    candidates: [target('seedance-2.0', [], 'requires_media_gateway')],
+    candidates: modelCandidateRoutesFromBaseline('video.primary'),
     deterministicFallback: {
       id: 'motion-or-static',
       description: 'Use deterministic motion or a static asset.',
@@ -274,7 +263,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'video.premium': {
     profile: SITE_BUILDER_MODEL_PROFILES['video.premium'],
-    candidates: [],
+    candidates: modelCandidateRoutesFromBaseline('video.premium'),
     deterministicFallback: {
       id: 'motion-or-static',
       description: 'Use deterministic motion or a static asset.',
@@ -282,7 +271,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'speech.production': {
     profile: SITE_BUILDER_MODEL_PROFILES['speech.production'],
-    candidates: [],
+    candidates: modelCandidateRoutesFromBaseline('speech.production'),
     deterministicFallback: {
       id: 'omit-audio',
       description: 'Do not fabricate an audio track.',
@@ -290,7 +279,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   transcription: {
     profile: SITE_BUILDER_MODEL_PROFILES.transcription,
-    candidates: [],
+    candidates: modelCandidateRoutesFromBaseline('transcription'),
     deterministicFallback: {
       id: 'transcription-unavailable',
       description: 'Keep audio unavailable until transcription is verified.',
@@ -298,7 +287,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'moderation.media': {
     profile: SITE_BUILDER_MODEL_PROFILES['moderation.media'],
-    candidates: [],
+    candidates: modelCandidateRoutesFromBaseline('moderation.media'),
     deterministicFallback: {
       id: 'hold-for-review',
       description: 'Hold media when no verified moderation path exists.',
@@ -306,7 +295,7 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
   'embedding.private': {
     profile: SITE_BUILDER_MODEL_PROFILES['embedding.private'],
-    candidates: [],
+    candidates: modelCandidateRoutesFromBaseline('embedding.private'),
     deterministicFallback: {
       id: 'fail-closed',
       description: 'Do not substitute a remote embedding space.',
@@ -362,7 +351,9 @@ export class ModelPolicyRegistry {
     };
   }
 
-  getCandidates(profileId: SiteBuilderModelProfileId): readonly ModelCandidateRoute[] {
+  getCandidates(
+    profileId: SiteBuilderModelProfileId,
+  ): readonly ModelCandidateRoute[] {
     return PROFILE_POLICIES[profileId].candidates.map((candidate) => ({
       ...candidate,
       route: cloneRoute(candidate.route),
@@ -373,7 +364,13 @@ export class ModelPolicyRegistry {
     return SITE_BUILDER_MODEL_POLICY_VERSION;
   }
 
-  getDeterministicFallback(profileId: SiteBuilderModelProfileId): DeterministicFallback {
+  getCandidateBaselineId(): string {
+    return SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID;
+  }
+
+  getDeterministicFallback(
+    profileId: SiteBuilderModelProfileId,
+  ): DeterministicFallback {
     return { ...PROFILE_POLICIES[profileId].deterministicFallback };
   }
 }
