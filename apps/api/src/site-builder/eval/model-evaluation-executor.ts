@@ -8,6 +8,7 @@ import { checkAgainstSchema } from "../../model-gateway/schema-validate";
 import {
   buildCanonicalModelEvaluationCase,
   buildTaskEvaluationPlan,
+  consumeAuthorizedModelEvaluationExecutionRequest,
   ModelEvaluationCallError,
   type CapabilityProbeExecutionRequest,
   type CostSettlement,
@@ -109,6 +110,7 @@ export const MODEL_EVALUATION_PROTOCOL_ADMISSIONS = Object.freeze([
 ] as const satisfies readonly ModelEvaluationProtocolAdmissionEntry[]);
 
 export interface OpenAIResponsesEvaluationWireRequest {
+  executionId: string;
   body: {
     model: string;
     input: readonly {
@@ -130,6 +132,7 @@ export interface OpenAIResponsesEvaluationWireRequest {
 }
 
 export interface AnthropicMessagesEvaluationWireRequest {
+  executionId: string;
   body: {
     model: string;
     system: string;
@@ -144,6 +147,7 @@ export interface AnthropicMessagesEvaluationWireRequest {
 }
 
 export interface OpenAIChatCompletionsEvaluationWireRequest {
+  executionId: string;
   body: {
     model: string;
     messages: readonly {
@@ -182,6 +186,7 @@ export interface ModelEvaluationWireClient {
 }
 
 export interface ModelEvaluationSettlementContext {
+  executionId: string;
   taskId: ModelEvaluationExecutionRequest["taskId"];
   alias: string;
   protocol: ModelCandidateProtocol;
@@ -225,22 +230,28 @@ export interface ModelEvaluationProtocolExecutor {
 type EvaluationExecutionRequest =
   ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest;
 
-const TRUSTED_MODEL_EVALUATION_EXECUTES = new WeakSet<object>();
-const TRUSTED_EXECUTE_ADD = WeakSet.prototype.add;
-const TRUSTED_EXECUTE_HAS = WeakSet.prototype.has;
+const TRUSTED_MODEL_EVALUATION_EXECUTES = new WeakMap<object, object>();
+const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
+const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
 const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
+
+export function modelEvaluationProtocolExecutorIdentity(
+  value: unknown,
+): object | null {
+  if (typeof value !== "function") return null;
+  return (
+    (APPLY_TRUSTED_EXECUTE_INTRINSIC(
+      TRUSTED_EXECUTE_GET,
+      TRUSTED_MODEL_EVALUATION_EXECUTES,
+      [value],
+    ) as object | undefined) ?? null
+  );
+}
 
 export function isTrustedModelEvaluationProtocolExecute(
   value: unknown,
 ): value is ModelEvaluationProtocolExecutor["execute"] {
-  return (
-    typeof value === "function" &&
-    APPLY_TRUSTED_EXECUTE_INTRINSIC(
-      TRUSTED_EXECUTE_HAS,
-      TRUSTED_MODEL_EVALUATION_EXECUTES,
-      [value],
-    )
-  );
+  return modelEvaluationProtocolExecutorIdentity(value) !== null;
 }
 
 type TextEvaluationProtocol =
@@ -274,6 +285,7 @@ const UNKNOWN_REASONS = new Set([
   "invalid_settlement",
 ]);
 const SETTLEMENT_RESOLVER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
+const EXECUTION_ID = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,511}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -404,6 +416,12 @@ function assertCanonicalRequest(
 ): TextEvaluationProtocol {
   if (!request || typeof request !== "object") {
     throw preDispatchError("evaluation_request_invalid");
+  }
+  if (
+    typeof request.executionId !== "string" ||
+    !EXECUTION_ID.test(request.executionId)
+  ) {
+    throw preDispatchError("evaluation_execution_id_invalid");
   }
   let plan;
   try {
@@ -793,11 +811,19 @@ export function createModelEvaluationProtocolExecutor(deps: {
   wireClient: ModelEvaluationWireClient;
   settlementResolver: ModelEvaluationSettlementResolver;
 }): ModelEvaluationProtocolExecutor {
+  const wireReceiver = deps?.wireClient;
+  const openAIResponses = wireReceiver?.openAIResponses;
+  const anthropicMessages = wireReceiver?.anthropicMessages;
+  const openAIChatCompletions = wireReceiver?.openAIChatCompletions;
   const resolverReceiver = deps?.settlementResolver;
   const resolverId = resolverReceiver?.resolverId;
   const resolverResolve = resolverReceiver?.resolve;
   if (
-    !deps?.wireClient ||
+    !wireReceiver ||
+    typeof openAIResponses !== "function" ||
+    typeof anthropicMessages !== "function" ||
+    typeof openAIChatCompletions !== "function" ||
+    !resolverReceiver ||
     !SETTLEMENT_RESOLVER_ID.test(resolverId ?? "") ||
     typeof resolverResolve !== "function"
   ) {
@@ -805,8 +831,15 @@ export function createModelEvaluationProtocolExecutor(deps: {
       "evaluation wire client and auditable settlement resolver are required",
     );
   }
-  const resolverThis = Object.freeze({ resolverId });
-  const capturedResolve = Object.freeze(resolverResolve.bind(resolverThis));
+  const wireClient = Object.freeze({
+    openAIResponses: Object.freeze(openAIResponses.bind(wireReceiver)),
+    anthropicMessages: Object.freeze(anthropicMessages.bind(wireReceiver)),
+    openAIChatCompletions: Object.freeze(
+      openAIChatCompletions.bind(wireReceiver),
+    ),
+  }) satisfies ModelEvaluationWireClient;
+  Object.freeze(resolverReceiver);
+  const capturedResolve = Object.freeze(resolverResolve.bind(resolverReceiver));
   const settlementResolver = Object.freeze({
     resolverId,
     resolve: capturedResolve,
@@ -816,6 +849,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
     request: EvaluationExecutionRequest,
     mode: "target" | "legacy_comparator",
   ): Promise<ModelEvaluationCallResult<T>> => {
+    if (!consumeAuthorizedModelEvaluationExecutionRequest(request)) {
+      throw preDispatchError("evaluation_dispatch_not_authorized");
+    }
     const protocol = assertCanonicalRequest(request, mode);
     const usage: UsageAccumulator = {
       inputTokens: 0,
@@ -833,7 +869,8 @@ export function createModelEvaluationProtocolExecutor(deps: {
       try {
         switch (protocol) {
           case "openai-responses":
-            response = await deps.wireClient.openAIResponses({
+            response = await wireClient.openAIResponses({
+              executionId: request.executionId,
               body: {
                 model: request.alias,
                 input: Object.freeze([
@@ -851,7 +888,8 @@ export function createModelEvaluationProtocolExecutor(deps: {
             });
             break;
           case "anthropic-messages":
-            response = await deps.wireClient.anthropicMessages({
+            response = await wireClient.anthropicMessages({
+              executionId: request.executionId,
               body: {
                 model: request.alias,
                 system,
@@ -863,7 +901,8 @@ export function createModelEvaluationProtocolExecutor(deps: {
             });
             break;
           case "openai-chat-completions":
-            response = await deps.wireClient.openAIChatCompletions({
+            response = await wireClient.openAIChatCompletions({
+              executionId: request.executionId,
               body: {
                 model: request.alias,
                 messages: Object.freeze([
@@ -886,6 +925,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
         usage.complete = false;
         providerReportedCostCents.push(null);
         const settlement = await safeResolveSettlement(settlementResolver, {
+          executionId: request.executionId,
           taskId: request.taskId,
           alias: request.alias,
           protocol,
@@ -926,6 +966,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
         usage.callCount += 1;
         usage.complete = false;
         const settlement = await safeResolveSettlement(settlementResolver, {
+          executionId: request.executionId,
           taskId: request.taskId,
           alias: request.alias,
           protocol,
@@ -971,6 +1012,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
 
     const resolvedUsage = evaluationUsage(usage);
     const settlement = await safeResolveSettlement(settlementResolver, {
+      executionId: request.executionId,
       taskId: request.taskId,
       alias: request.alias,
       protocol,
@@ -1011,10 +1053,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
         ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest,
     ) => executeWithMode<T>(request, "target"),
   );
+  const executorIdentity = Object.freeze({});
   APPLY_TRUSTED_EXECUTE_INTRINSIC(
-    TRUSTED_EXECUTE_ADD,
+    TRUSTED_EXECUTE_SET,
     TRUSTED_MODEL_EVALUATION_EXECUTES,
-    [execute],
+    [execute, executorIdentity],
   );
   const executeLegacyComparator = Object.freeze(
     <T>(request: ModelEvaluationExecutionRequest) =>

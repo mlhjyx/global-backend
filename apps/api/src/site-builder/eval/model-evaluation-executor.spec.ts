@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BRAND_PROFILE_TASK,
   type BrandProfileOutput,
@@ -15,6 +15,7 @@ import {
   validateCapabilityProbe,
   type ModelEvaluationExecutionRequest,
 } from "./model-evaluation-harness";
+import * as modelEvaluationHarness from "./model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
   createModelEvaluationProtocolExecutor,
@@ -36,6 +37,7 @@ function canonicalRequest(
   }
   const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
   return {
+    executionId: `executor-spec:${candidate.alias}:${fixtureId}:1`,
     taskId: plan.taskId,
     profile: plan.profile,
     alias: candidate.alias,
@@ -207,6 +209,13 @@ function settlementResolver(
     }),
   };
 }
+
+beforeEach(() => {
+  vi.spyOn(
+    modelEvaluationHarness,
+    "consumeAuthorizedModelEvaluationExecutionRequest",
+  ).mockReturnValue(true);
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -717,8 +726,13 @@ describe("structured output, repair, errors, and settlement", () => {
       }),
       settlementResolver: mutableResolver,
     });
-    mutableResolver.resolverId = "replacement-resolver/v2";
-    mutableResolver.resolve = replacementResolve;
+    expect(Object.isFrozen(mutableResolver)).toBe(true);
+    expect(() => {
+      mutableResolver.resolverId = "replacement-resolver/v2";
+    }).toThrow(TypeError);
+    expect(() => {
+      mutableResolver.resolve = replacementResolve;
+    }).toThrow(TypeError);
 
     await expect(executor.execute(request)).resolves.toMatchObject({
       costSettlement: {
@@ -729,6 +743,73 @@ describe("structured output, repair, errors, and settlement", () => {
     });
     expect(initialResolve).toHaveBeenCalledTimes(1);
     expect(replacementResolve).not.toHaveBeenCalled();
+  });
+
+  it("preserves a frozen class resolver receiver with private pricing state", async () => {
+    const request = canonicalRequest();
+    class PrivatePricingResolver implements ModelEvaluationSettlementResolver {
+      readonly resolverId = "private-pricing-resolver/v1";
+      readonly #amountCents = 1;
+
+      resolve(): ModelEvaluationSettlementResolution {
+        return {
+          state: "settled",
+          amountCents: this.#amountCents,
+          basis: "frozen_pricing_snapshot",
+        };
+      }
+    }
+    const resolver = new PrivatePricingResolver();
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () =>
+          wireResponse(
+            openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+          ),
+      }),
+      settlementResolver: resolver,
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+        basis: "frozen_pricing_snapshot@private-pricing-resolver/v1",
+      },
+    });
+    expect(Object.isFrozen(resolver)).toBe(true);
+  });
+
+  it("captures bound wire methods before a repair can replace the client", async () => {
+    const request = canonicalRequest();
+    const replacement = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+      ),
+    );
+    const initial = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        mutableWire.openAIResponses = replacement;
+        return wireResponse(openAIResponsesBody(request.alias, {}));
+      })
+      .mockImplementationOnce(async () =>
+        wireResponse(
+          openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+        ),
+      );
+    const mutableWire = wireClient({ openAIResponses: initial });
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: mutableWire,
+      settlementResolver: settlementResolver(),
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      artifactState: "complete",
+      usage: { callCount: 2 },
+    });
+    expect(initial).toHaveBeenCalledTimes(2);
+    expect(replacement).not.toHaveBeenCalled();
   });
 
   it.each(["", "contains space", "contains@delimiter"])(
@@ -1069,13 +1150,14 @@ describe("structured output, repair, errors, and settlement", () => {
         wireResponse(openAIResponsesBody(request.alias, {}), 30),
       )
       .mockRejectedValueOnce(new Error("repair transport unavailable"));
+    const resolver = settlementResolver({
+      state: "settled",
+      amountCents: 37,
+      basis: "verified_billing_export",
+    });
     const executor = createModelEvaluationProtocolExecutor({
       wireClient: wireClient({ openAIResponses: wireCall }),
-      settlementResolver: settlementResolver({
-        state: "settled",
-        amountCents: 37,
-        basis: "verified_billing_export",
-      }),
+      settlementResolver: resolver,
     });
 
     await expect(executor.execute(request)).rejects.toMatchObject({
@@ -1086,6 +1168,12 @@ describe("structured output, repair, errors, and settlement", () => {
         basis: "verified_billing_export@fake-settlement/v1",
       },
     });
+    expect(resolver.resolve).toHaveBeenLastCalledWith(
+      expect.objectContaining({ executionId: request.executionId }),
+    );
+    expect(wireCall).toHaveBeenCalledWith(
+      expect.objectContaining({ executionId: request.executionId }),
+    );
   });
 
   it("applies the same conservative repair settlement to capability probes", async () => {

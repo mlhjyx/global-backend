@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { trustedExecutorIdentity } = vi.hoisted(() => ({
+  trustedExecutorIdentity: Object.freeze({}),
+}));
+
 vi.mock("./model-evaluation-executor", () => ({
   isTrustedModelEvaluationProtocolExecute: () => true,
+  modelEvaluationProtocolExecutorIdentity: () => trustedExecutorIdentity,
 }));
 
 import {

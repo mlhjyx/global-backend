@@ -43,7 +43,10 @@ import {
   sha256CanonicalJson,
   sha256Text,
 } from "./eval-provenance";
-import { isTrustedModelEvaluationProtocolExecute } from "./model-evaluation-executor";
+import {
+  isTrustedModelEvaluationProtocolExecute,
+  modelEvaluationProtocolExecutorIdentity,
+} from "./model-evaluation-executor";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
@@ -695,6 +698,31 @@ const TRUSTED_MODEL_EVALUATION_RUN_BUDGETS = new WeakMap<
   object,
   ModelEvaluationBudgetGuard
 >();
+const TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS = new WeakMap<object, object>();
+
+function bindTrustedModelEvaluationExecutor(
+  budget: ModelEvaluationBudgetGuard,
+  execute: unknown,
+): void {
+  const identity = modelEvaluationProtocolExecutorIdentity(execute);
+  if (identity === null) {
+    throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  const bound = TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.get(budget);
+  if (bound && bound !== identity) {
+    throw new ModelEvaluationCallError(
+      "evaluation_executor_campaign_mismatch",
+      {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    );
+  }
+  if (!bound) TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.set(budget, identity);
+}
 
 export class ModelEvaluationBudgetGuard {
   readonly #campaignBudgetCents: number;
@@ -1319,6 +1347,7 @@ export interface ModelEvaluationCase {
 }
 
 export interface ModelEvaluationExecutionRequest {
+  executionId: string;
   taskId: SiteBuilderTaskId;
   profile: SiteBuilderModelProfileId;
   alias: string;
@@ -1343,6 +1372,40 @@ export interface CapabilityProbeExecutionRequest extends Omit<
 > {
   campaignId: string;
   probeKind: "canonical_task_shaped_capability";
+}
+
+const AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS = new WeakSet<object>();
+const AUTHORIZED_EXECUTION_ADD = WeakSet.prototype.add;
+const AUTHORIZED_EXECUTION_HAS = WeakSet.prototype.has;
+const AUTHORIZED_EXECUTION_DELETE = WeakSet.prototype.delete;
+const APPLY_AUTHORIZED_EXECUTION_INTRINSIC = Reflect.apply;
+
+function authorizeModelEvaluationExecutionRequest(
+  request: ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest,
+): void {
+  APPLY_AUTHORIZED_EXECUTION_INTRINSIC(
+    AUTHORIZED_EXECUTION_ADD,
+    AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS,
+    [request],
+  );
+}
+
+export function consumeAuthorizedModelEvaluationExecutionRequest(
+  request: unknown,
+): boolean {
+  if (!request || typeof request !== "object") return false;
+  const authorized = APPLY_AUTHORIZED_EXECUTION_INTRINSIC(
+    AUTHORIZED_EXECUTION_HAS,
+    AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS,
+    [request],
+  ) as boolean;
+  if (!authorized) return false;
+  APPLY_AUTHORIZED_EXECUTION_INTRINSIC(
+    AUTHORIZED_EXECUTION_DELETE,
+    AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS,
+    [request],
+  );
+  return true;
 }
 
 export class ModelEvaluationCallError extends Error {
@@ -1467,6 +1530,7 @@ export class ModelEvaluationCapabilityCampaign {
         `candidate does not require a canonical capability probe: ${options.plan.taskId}/${options.candidate.alias}`,
       );
     }
+    bindTrustedModelEvaluationExecutor(this.#budget, options.execute);
     const evaluationCase = buildCanonicalModelEvaluationCase(
       options.plan,
       options.plan.evaluationSuite.fixtureIds[0],
@@ -1523,6 +1587,7 @@ export class ModelEvaluationCapabilityCampaign {
     }
     const controller = new AbortController();
     const request: CapabilityProbeExecutionRequest = Object.freeze({
+      executionId: callId,
       campaignId: this.campaignId,
       probeKind: "canonical_task_shaped_capability",
       taskId: options.plan.taskId,
@@ -1541,6 +1606,7 @@ export class ModelEvaluationCapabilityCampaign {
       casePayload: evaluationCase.payload,
       signal: controller.signal,
     });
+    authorizeModelEvaluationExecutionRequest(request);
     type ProbeOutcome =
       | { kind: "completed"; value: ModelEvaluationCallResult<T> }
       | { kind: "failed"; error: unknown }
@@ -2273,17 +2339,19 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `canonical campaign capability probe is required before matrix dispatch: ${options.candidate.alias}`,
     );
   }
+  bindTrustedModelEvaluationExecutor(options.campaignBudget, options.execute);
   const now = options.now ?? (() => performance.now());
   const startedAt = readMonotonicNow(now);
   if (startedAt === null) {
     throw new Error("model evaluation monotonic clock is invalid");
   }
+  const campaignId = trustedModelEvaluationCampaignId(options.campaignBudget);
   const identity = runIdentity(
     options.plan,
     options.candidate,
     evaluationCase.contract,
     options.attempt,
-    trustedModelEvaluationCampaignId(options.campaignBudget),
+    campaignId,
     capabilityProbeAttestation,
   );
   const bindRun = (run: ModelEvaluationRun): ModelEvaluationRun =>
@@ -2294,6 +2362,9 @@ export async function runTaskEvaluationAttempt<T>(options: {
     evaluationCase.contract.fixtureId,
     options.attempt,
   ].join(":");
+  const executionId = ["model-evaluation-attempt", campaignId, callId].join(
+    ":",
+  );
   const reservation = reserveTrustedModelEvaluationBudget(
     options.campaignBudget,
     callId,
@@ -2322,7 +2393,8 @@ export async function runTaskEvaluationAttempt<T>(options: {
   }
 
   const controller = new AbortController();
-  const request: ModelEvaluationExecutionRequest = {
+  const request: ModelEvaluationExecutionRequest = Object.freeze({
+    executionId,
     taskId: options.plan.taskId,
     profile: options.plan.profile,
     alias: options.candidate.alias,
@@ -2339,7 +2411,8 @@ export async function runTaskEvaluationAttempt<T>(options: {
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
     signal: controller.signal,
-  };
+  });
+  authorizeModelEvaluationExecutionRequest(request);
 
   type ExecutionOutcome =
     | { kind: "completed"; value: ModelEvaluationCallResult<T> }
