@@ -76,6 +76,8 @@ const PROMOTED_CONTEXT =
 const LEGACY_CONTEXT =
   /\bcurrentRoute\b|current route|\brollback\b|\blegacy(?:-only)?\b|现役|回滚|可回|回退|基线|历史/i;
 const ACTIVE_PROMOTED_ALIASES = new Set(['gpt-5.6-terra', 'claude-sonnet-5']);
+const BRAND_PROFILE_CONTEXT =
+  /\bsite_builder\.brand_profile\b|\bbrand_profile\b|\bBrandProfile\b|品牌画像/i;
 
 function escapeCell(value) {
   return String(value).replaceAll('|', '\\|').replaceAll('\n', '<br>');
@@ -128,11 +130,7 @@ function hasNegatedPromotionMarker(line, markerIndex) {
   );
 }
 
-function hasUnnegatedPromotionClaim(
-  line,
-  alias,
-  allowSeparatedLegacyContext = false,
-) {
+function hasUnnegatedPromotionClaim(line, alias) {
   const aliasIndexes = [];
   for (let index = line.indexOf(alias); index !== -1; ) {
     aliasIndexes.push(index);
@@ -143,20 +141,17 @@ function hasUnnegatedPromotionClaim(
     const markerIndex = match.index ?? 0;
     for (const aliasIndex of aliasIndexes) {
       if (Math.abs(aliasIndex - markerIndex) > 120) continue;
-      const relation = line.slice(
-        Math.min(aliasIndex, markerIndex),
-        Math.max(aliasIndex + alias.length, markerIndex + match[0].length),
-      );
-      if (
-        allowSeparatedLegacyContext &&
-        LEGACY_CONTEXT.test(relation)
-      ) {
-        continue;
-      }
       if (!hasNegatedPromotionMarker(line, markerIndex)) return true;
     }
   }
   return false;
+}
+
+function hasNonBrandTaskContext(text) {
+  const taskIds = text.match(/\bsite_builder\.[a-z0-9_.-]+\b/gi) ?? [];
+  return taskIds.some(
+    (taskId) => taskId.toLowerCase() !== 'site_builder.brand_profile',
+  );
 }
 
 export function loadModelCandidateBaseline(root) {
@@ -564,13 +559,33 @@ export function checkModelNarrativeDrift(baseline, contentsByPath) {
           });
         }
       }
+      for (const alias of ACTIVE_PROMOTED_ALIASES) {
+        if (
+          (line.includes(alias) ||
+            (canJoinAdjacentLines &&
+              PROMOTED_CONTEXT.test(line) &&
+              nextLine.includes(alias))) &&
+          hasUnnegatedPromotionClaim(adjacentWindow, alias) &&
+          (!BRAND_PROFILE_CONTEXT.test(adjacentWindow) ||
+            hasNonBrandTaskContext(adjacentWindow))
+        ) {
+          const issueKey = `active-task:${path}:${alias}:${index}`;
+          if (reported.has(issueKey)) continue;
+          reported.add(issueKey);
+          issues.push({
+            code: 'MODEL_ACTIVE_PROMOTION_TASK_DRIFT',
+            path,
+            detail: `line ${index + 1}: ${alias} promotion must remain scoped to site_builder.brand_profile`,
+          });
+        }
+      }
       for (const alias of legacyAliases) {
         if (
           (line.includes(alias) ||
             (canJoinAdjacentLines &&
               PROMOTED_CONTEXT.test(line) &&
               nextLine.includes(alias))) &&
-          hasUnnegatedPromotionClaim(adjacentWindow, alias, true)
+          hasUnnegatedPromotionClaim(adjacentWindow, alias)
         ) {
           const issueKey = `legacy-promoted:${path}:${alias}:${index}`;
           if (reported.has(issueKey)) continue;

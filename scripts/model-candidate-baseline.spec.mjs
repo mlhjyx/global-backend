@@ -101,6 +101,40 @@ test('legacy-only model requires current, rollback, baseline, or legacy context'
     )[0]?.code,
     'MODEL_LEGACY_PROMOTED_DRIFT',
   );
+  assert.equal(
+    checkModelNarrativeDrift(
+      baseline,
+      new Map([[path, 'minimax-m3 currentRoute was promotedRoute today.']]),
+    )[0]?.code,
+    'MODEL_LEGACY_PROMOTED_DRIFT',
+  );
+});
+
+test('active promoted aliases remain scoped to BrandProfile', () => {
+  const path = baseline.documentationPolicy.activeRouteDocuments[0];
+  for (const claim of [
+    'site_builder.copy now uses claude-sonnet-5 as its promotedRoute.',
+    'site_builder.qa_summarize 已晋级 gpt-5.6-terra 为生产主路。',
+    'BrandProfile and site_builder.new_task now use gpt-5.6-terra as promotedRoute.',
+    'BrandProfile 与 site_builder.nope 已晋级 claude-sonnet-5 为生产主路。',
+  ]) {
+    assert.equal(
+      checkModelNarrativeDrift(baseline, new Map([[path, claim]]))[0]?.code,
+      'MODEL_ACTIVE_PROMOTION_TASK_DRIFT',
+    );
+  }
+  assert.deepEqual(
+    checkModelNarrativeDrift(
+      baseline,
+      new Map([
+        [
+          path,
+          'site_builder.brand_profile uses gpt-5.6-terra with claude-sonnet-5 as its promotedRoute.',
+        ],
+      ]),
+    ),
+    [],
+  );
 });
 
 test('schema rejects incomplete domains, activations, tasks, and documentation policy', () => {
