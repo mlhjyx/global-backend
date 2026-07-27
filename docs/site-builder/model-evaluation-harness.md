@@ -50,14 +50,14 @@
 - fixtures：`auto-parts-rich`、`auto-parts-sparse`、`industrial-pump-rich`、`industrial-pump-sparse`、`lab-instrument-rich`、`lab-instrument-sparse`
 - source bundle contract：`brand-profile-evaluation-source-bundle/v4`；固定 33 份仓库内源码/合同文件，路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
 - dispatch payload：fixture、prepared task input、prompt 与 source fingerprints 全部由 canonical case builder 构造、冻结并纳入 case SHA-256；executor 不能替换为未绑定内容。
-- capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
+- capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。同一 campaign/candidate 的重复请求复用既有 canonical attestation，不重复 dispatch、reserve 或擦除有效证明。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
 - evaluator：`brand-profile-evaluator/10`；rubric SHA-256 `c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c`；harness 内部依次执行 output schema、生产 `validateOutput` 与 canonical task rubric，不接受 caller 自带 grader。
 
 ## 闭合结果与排序
 
 - 结果类：`quality_valid_runtime_on_time`、`quality_valid_runtime_late`、`content_invalid`、`protocol_or_identity_invalid`、`provenance_invalid`、`capability_unavailable`、`diagnostic_window_exhausted`、`budget_stop`。
 - 单次 runtime deadline 只把结果标记为 late 并保留质量观察；候选 accepted-artifact P95 超过生产 deadline 时不得 rankable/晋级。hard stop 才中止，使用 monotonic clock 记录实际耗时，异常时钟 fail-closed，且 hard-stop 后观测到的完成不能回写成质量有效。
-- 先按 quality → structure → factuality → fixture 内 stability；通过生产 P95 硬门后，再按 accepted-artifact P95 latency → canonical capability probe 与矩阵全部已结算尝试成本/accepted artifact 排序。
+- 先按 quality → structure → factuality → fixture 内 stability；任一 `content_invalid` 都是 hard failure，完整矩阵必须每次通过结构、质量与事实门才可 rankable。通过生产 P95 硬门后，再按 accepted-artifact P95 latency → canonical capability probe 与矩阵全部已结算尝试成本/accepted artifact 排序。
 - matrix 必须精确等于 suite 的 fixtureIds × repeats；缺失、意外或重复 key 均不可排名；超出 repeats 的尝试在 dispatch 前拒绝；ranker 只接受 plan + raw runs 并在内部重新生成 summary。
 
 ## 预算与 provenance

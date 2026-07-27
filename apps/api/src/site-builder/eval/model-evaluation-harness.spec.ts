@@ -995,6 +995,41 @@ describe("task attempt observation window", () => {
     expect(probeExecute).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses a canonical probe attestation without dispatch or budget mutation", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    const execute = vi.fn(async () =>
+      completedCall(
+        candidate.alias,
+        candidate.expectedProtocol,
+        canonicalAcceptedArtifact(),
+      ),
+    );
+
+    const first = await campaign.runCanonicalProbe({
+      plan,
+      candidate,
+      execute,
+    });
+    const attestation = campaign.attestationFor(plan, candidate, guard);
+    const budgetAfterFirst = guard.snapshot();
+    const duplicate = await campaign.runCanonicalProbe({
+      plan,
+      candidate,
+      execute,
+    });
+
+    expect(first).toMatchObject({ status: "capability_proven" });
+    expect(duplicate).toEqual(first);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(campaign.attestationFor(plan, candidate, guard)).toBe(attestation);
+    expect(guard.snapshot()).toEqual(budgetAfterFirst);
+  });
+
   it("dispatches the exact frozen fixture, task input, prompt, and source bundle bound by the case contract", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
@@ -1886,6 +1921,24 @@ describe("quality-first candidate summary and ranking", () => {
       rankable: false,
       acceptedArtifactCostCents: null,
       costSettlementComplete: false,
+    });
+  });
+
+  it("treats every content-invalid run as a hard ranking failure", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt, index) =>
+        index === 11
+          ? await contentInvalidRun("gpt-5.5", fixtureId, attempt)
+          : await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
+
+    expect(summary).toMatchObject({
+      matrixComplete: true,
+      acceptedArtifactCount: 11,
+      hardFailureCount: 1,
+      rankable: false,
     });
   });
 

@@ -1471,9 +1471,24 @@ export class ModelEvaluationCapabilityCampaign {
       options.plan,
       options.plan.evaluationSuite.fixtureIds[0],
     );
-    this.#attestations.delete(
-      capabilityProbeKey(options.plan, options.candidate),
-    );
+    const probeKey = capabilityProbeKey(options.plan, options.candidate);
+    const existingAttestation = this.#attestations.get(probeKey);
+    if (
+      existingAttestation &&
+      capabilityProbeAttestationIsCanonical(
+        options.plan,
+        options.candidate,
+        existingAttestation,
+      )
+    ) {
+      return {
+        status: "capability_proven",
+        protocolVerified: true,
+        identityVerified: true,
+        outputVerified: true,
+      };
+    }
+    this.#attestations.delete(probeKey);
     const callId = [
       "capability-probe",
       this.campaignId,
@@ -3047,6 +3062,7 @@ export function summarizeModelEvaluationCandidate(
       ? totalSettledCost / acceptedRuns.length
       : null;
   const hardFailureClasses = new Set<ModelEvaluationResultClass>([
+    "content_invalid",
     "protocol_or_identity_invalid",
     "provenance_invalid",
     "capability_unavailable",
