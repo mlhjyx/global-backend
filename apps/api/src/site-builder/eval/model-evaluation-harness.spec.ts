@@ -797,6 +797,37 @@ describe("task attempt observation window", () => {
     });
   });
 
+  it("settles malformed capability probe results as unknown without leaking reservations", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+
+    for (const malformed of [null, {}]) {
+      const guard = new ModelEvaluationBudgetGuard(100);
+      const campaign = new ModelEvaluationCapabilityCampaign(guard);
+      await expect(
+        campaign.runCanonicalProbe({
+          plan,
+          candidate,
+          execute: async () => malformed as never,
+        }),
+      ).resolves.toMatchObject({
+        status: "provenance_invalid",
+        protocolVerified: false,
+        identityVerified: false,
+        outputVerified: false,
+      });
+      expect(guard.snapshot()).toMatchObject({
+        committedCents: 0,
+        reservedCents: 0,
+        unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+        blocked: true,
+        blockReason: "unknown_settlement",
+      });
+    }
+  });
+
   it("freezes the campaign when a dispatched probe falsely claims pre-dispatch zero cost", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates.find(
@@ -1307,6 +1338,47 @@ describe("task attempt observation window", () => {
     });
   });
 
+  it("preserves explicit invalid settlement as a closed budget failure", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const call = completedCall(
+      candidate.alias,
+      candidate.expectedProtocol,
+      canonicalAcceptedArtifact(),
+    );
+    call.costSettlement = {
+      state: "unknown",
+      reason: "invalid_settlement",
+    };
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        execute: async () => call,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "quality_valid_runtime_on_time",
+      artifactAccepted: true,
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+      settlementInvalid: true,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
   it("invokes the canonical evaluator and rejects a malformed artifact", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
@@ -1760,7 +1832,7 @@ describe("quality-first candidate summary and ranking", () => {
         { alias: "gpt-5.5", runs: highQualityRuns },
       ]).map((summary) => summary.alias),
     ).toEqual(["gpt-5.5", "gpt-5.6-terra", "claude-sonnet-5"]);
-    expect(highQualitySlow.acceptedArtifactCostCents).toBe(5);
+    expect(highQualitySlow.acceptedArtifactCostCents).toBeCloseTo(61 / 12);
   });
 
   it("keeps unknown settlement unrankable instead of treating it as zero", async () => {
@@ -1781,6 +1853,57 @@ describe("quality-first candidate summary and ranking", () => {
       rankable: false,
       acceptedArtifactCostCents: null,
       costSettlementComplete: false,
+    });
+  });
+
+  it("accepts the producer's invalid-settlement flag and keeps the matrix unrankable", async () => {
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const runs = await fullMatrix(
+      candidate.alias,
+      async (fixtureId, attempt, index) => {
+        if (index < 11) {
+          return await acceptedRun(
+            candidate.alias,
+            fixtureId,
+            attempt,
+            1000,
+            1,
+          );
+        }
+        const call = completedCall(
+          candidate.alias,
+          candidate.expectedProtocol,
+          canonicalAcceptedArtifact(fixtureId),
+        );
+        call.costSettlement = {
+          state: "unknown",
+          reason: "invalid_settlement",
+        };
+        return await runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId,
+          attempt,
+          campaignBudget: capabilityBudget,
+          capabilityCampaign,
+          execute: async () => call,
+        });
+      },
+    );
+
+    const summary = summarizeModelEvaluationCandidate(
+      plan,
+      candidate.alias,
+      runs,
+    );
+    expect(summary).toMatchObject({
+      acceptedArtifactCount: 12,
+      hardFailureCount: 1,
+      costSettlementComplete: false,
+      acceptedArtifactCostCents: null,
+      rankable: false,
     });
   });
 

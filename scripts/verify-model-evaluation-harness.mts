@@ -86,7 +86,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "",
     "- 结果类：`quality_valid_runtime_on_time`、`quality_valid_runtime_late`、`content_invalid`、`protocol_or_identity_invalid`、`provenance_invalid`、`capability_unavailable`、`diagnostic_window_exhausted`、`budget_stop`。",
     "- 单次 runtime deadline 只把结果标记为 late 并保留质量观察；候选 accepted-artifact P95 超过生产 deadline 时不得 rankable/晋级。hard stop 才中止，使用 monotonic clock 记录实际耗时，异常时钟 fail-closed，且 hard-stop 后观测到的完成不能回写成质量有效。",
-    "- 先按 quality → structure → factuality → fixture 内 stability；通过生产 P95 硬门后，再按 accepted-artifact P95 latency → 全部已结算尝试成本/accepted artifact 排序。",
+    "- 先按 quality → structure → factuality → fixture 内 stability；通过生产 P95 硬门后，再按 accepted-artifact P95 latency → canonical capability probe 与矩阵全部已结算尝试成本/accepted artifact 排序。",
     "- matrix 必须精确等于 suite 的 fixtureIds × repeats；缺失、意外或重复 key 均不可排名；超出 repeats 的尝试在 dispatch 前拒绝；ranker 只接受 plan + raw runs 并在内部重新生成 summary。",
     "",
     "## 预算与 provenance",

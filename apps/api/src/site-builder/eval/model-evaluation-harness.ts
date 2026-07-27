@@ -967,7 +967,7 @@ function normalizeCostSettlement(
         >["reason"],
       },
       capExceeded: false,
-      settlementInvalid: false,
+      settlementInvalid: record.reason === "invalid_settlement",
     };
   }
   return invalid();
@@ -1533,6 +1533,23 @@ export class ModelEvaluationCapabilityCampaign {
       };
     }
 
+    if (!outcome.value || typeof outcome.value !== "object") {
+      settleTrustedModelEvaluationBudget(this.#budget, callId, null);
+      return {
+        status: "provenance_invalid",
+        protocolVerified: false,
+        identityVerified: false,
+        outputVerified: false,
+      };
+    }
+
+    const settled = settleTrustedModelEvaluationBudget(
+      this.#budget,
+      callId,
+      outcome.value.costSettlement,
+    );
+    const settlementCoherent =
+      settled.settlement.state === "settled" && !settled.settlementInvalid;
     const elapsedMs = readMonotonicElapsed(now, startedAt);
     const observation: CapabilityProbeObservation = {
       actualProtocol: outcome.value.actualProtocol,
@@ -1546,12 +1563,6 @@ export class ModelEvaluationCapabilityCampaign {
           : outcome.value.artifactState,
     };
     const validation = validateCapabilityProbe(options.candidate, observation);
-    const settlementCoherent = outcome.value.costSettlement.state === "settled";
-    const settled = settleTrustedModelEvaluationBudget(
-      this.#budget,
-      callId,
-      settlementCoherent ? outcome.value.costSettlement : null,
-    );
     const evidenceValid =
       elapsedMs !== null &&
       elapsedMs <= options.plan.envelope.hardStopMs &&
@@ -1612,7 +1623,7 @@ export class ModelEvaluationCapabilityCampaign {
       probePromptSha256: evaluationCase.contract.promptSha256,
       artifactSha256: outcome.value.artifactSha256!,
       elapsedMs: elapsedMs!,
-      costSettlement: outcome.value.costSettlement as Extract<
+      costSettlement: settled.settlement as Extract<
         CostSettlement,
         { state: "settled" }
       >,
@@ -2649,9 +2660,7 @@ function assertCanonicalEvaluationRun(
   const capExceeded =
     run.costSettlement.state === "settled" &&
     run.costSettlement.amountCents > plan.envelope.perCallCostCapCents;
-  const settlementWasInvalid =
-    run.costSettlement.state === "unknown" &&
-    run.costSettlement.reason === "invalid_settlement";
+  const settlementWasInvalid = normalizedSettlement.settlementInvalid;
   const settlementResultCoherent =
     run.costSettlement.state !== "not_incurred" ||
     (run.costSettlement.reason === "rejected_before_dispatch"
@@ -2718,7 +2727,6 @@ function assertCanonicalEvaluationRun(
         run.artifactSha256 === null)
     ) ||
     (run.usage !== null && !validEvaluationUsage(run.usage)) ||
-    normalizedSettlement.settlementInvalid ||
     JSON.stringify(normalizedSettlement.settlement) !==
       JSON.stringify(run.costSettlement) ||
     !settlementResultCoherent ||
@@ -2962,14 +2970,16 @@ export function summarizeModelEvaluationCandidate(
   const costSettlementComplete = runs.every(
     (run) => run.costSettlement.state !== "unknown",
   );
-  const totalSettledCost = runs.reduce(
-    (total, run) =>
-      total +
-      (run.costSettlement.state === "settled"
-        ? run.costSettlement.amountCents
-        : 0),
-    0,
-  );
+  const totalSettledCost =
+    (trustedProbeAttestation?.costSettlement.amountCents ?? 0) +
+    runs.reduce(
+      (total, run) =>
+        total +
+        (run.costSettlement.state === "settled"
+          ? run.costSettlement.amountCents
+          : 0),
+      0,
+    );
   const acceptedArtifactCostCents =
     costSettlementComplete && acceptedRuns.length > 0
       ? totalSettledCost / acceptedRuns.length
