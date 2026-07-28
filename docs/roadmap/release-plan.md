@@ -45,7 +45,7 @@
 
 第一项的代码级合同现为 `site-builder-model-evaluation-harness/2026-07-28-v3`，与保持不变的 `site-builder-model-candidate-baseline/2026-07-27-v1` 的精确关系、task envelope、canonical suite、协议 admission、矩阵、预算和 provenance 统一见[生成评测基线](../site-builder/model-evaluation-harness.md)。本项只新增 evaluation-only、依赖注入的协议 executor：唯一完整 suite 仍是 BrandProfile；Responses/Messages target 与隔离的 legacy Chat comparator 使用 fake wire/cost 测试，媒体/embedding/preview/deferred/legacy-only target/无 suite 在 client 前 blocked。其 fast-follow `site-builder-model-evaluation-cost-safety/2026-07-28-v1` 强制未来真实 executor 使用专用有限额度凭据、精确 scope、冻结显式价格、request 级结算和多层绝对上限，拒绝无限额度、默认倍率与 generic media test。
 
-第二项先落零费用准备合同 `site-builder-model-evaluation-evidence-prep/2026-07-29-v1`：从 fixed commit 冻结 BrandProfile 的 1 probe + 36 target + 24 legacy = 61 executions、最多 122 wire calls、source bundle、一次 repair 上限与停止条件；只接受受信 cost-safety attestation，并从不可逆凭据 fingerprint、有限额度/余额采样、真实冻结价格及计费单位生成 create-only 决策卡。61/122/2440¢ 仍是未验证规划上界，不是确认预算；`READY_FOR_PRODUCT_DECISION` 也固定 `dispatchAuthorization=NOT_AUTHORIZED`。该准备 PR 不读取 `.env`、不接 client、不产生请求、费用或 evidence。合并后才可另开 fixed-commit/create-only 真实 evidence PR；再后才允许一次一个 task 的 promotion PR。
+第二项先落零费用准备合同 `site-builder-model-evaluation-evidence-prep/2026-07-29-v1`：从 fixed commit 冻结 BrandProfile 的 1 probe + 36 target + 24 legacy = 61 executions、最多 122 wire calls、source bundle、一次 repair 上限与停止条件；只接受同一 fixed commit 已跟踪的脱敏 safe-snapshot envelope，逐文件复核 Git source bundle，并从不可逆凭据 fingerprint、有限额度/余额采样、spend authorization/ledger、真实冻结价格及计费单位生成 create-only 决策卡。61/122/2440¢ 仍是未验证规划上界，不是确认预算；`READY_FOR_PRODUCT_DECISION` 也固定 `dispatchAuthorization=NOT_AUTHORIZED`。该准备 PR 不读取 `.env`、不接 client、不产生请求、费用或 evidence。合并后才可另开 fixed-commit/create-only 真实 evidence PR；再后才允许一次一个 task 的 promotion PR。
 
 ---
 

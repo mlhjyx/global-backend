@@ -1,15 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  createModelEvaluationCostSafetyAttestation,
-  type ModelEvaluationCostSafetyInput,
-} from "../src/site-builder/eval/model-evaluation-cost-safety";
-import {
   buildModelEvaluationEvidencePlanningManifest,
   createModelEvaluationEvidencePrepBundle,
+  createTrustedModelEvaluationEvidencePrepSnapshots,
+  type ModelEvaluationEvidencePrepSafeSnapshotEnvelope,
   writeModelEvaluationEvidencePrepBundleCreateOnly,
 } from "../src/site-builder/eval/model-evaluation-evidence-prep";
 
@@ -20,11 +19,12 @@ const REPOSITORY_ROOT = resolve(
 const HELP = `Usage:
   pnpm --filter @global/api exec tsx scripts/prepare-site-builder-model-evaluation-evidence.mts \\
     --fixed-commit=<40-char-sha> \\
-    --attestation=<explicit-safe-json> \\
+    --attestation=<tracked-repository-relative-safe-snapshot-json> \\
     --output=<new-repository-relative-json>
 
 This zero-cost preparation command never reads .env and has no model client.
-It requires a clean worktree at the exact fixed commit and writes only with wx.
+It requires a clean worktree, tracked snapshots and sources at the exact fixed
+commit, and writes only with wx.
 `;
 
 function option(name: string): string | null {
@@ -36,7 +36,10 @@ function option(name: string): string | null {
   return values[0]!.slice(prefix.length);
 }
 
-function repositoryOutputPath(value: string): string {
+function repositoryJsonPath(
+  value: string,
+  role: "attestation" | "output",
+): string {
   if (
     value.length === 0 ||
     value.startsWith("/") ||
@@ -44,9 +47,54 @@ function repositoryOutputPath(value: string): string {
     value.split("/").includes("..") ||
     !value.endsWith(".json")
   ) {
-    throw new Error("output must be a new repository-relative JSON path");
+    throw new Error(`${role} must be a repository-relative JSON path`);
+  }
+  if (/(^|\/)\.env(?:\.|$)/i.test(value)) {
+    throw new Error(`${role} must not be .env`);
   }
   return value;
+}
+
+function fixedCommitFile(fixedCommitSha: string, path: string): Buffer {
+  try {
+    return execFileSync("git", ["show", `${fixedCommitSha}:${path}`], {
+      cwd: REPOSITORY_ROOT,
+      encoding: null,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch {
+    throw new Error(`${path} must be tracked at the fixed commit`);
+  }
+}
+
+async function assertWorkingFileMatchesFixedCommit(
+  fixedCommitSha: string,
+  path: string,
+): Promise<Buffer> {
+  const committed = fixedCommitFile(fixedCommitSha, path);
+  const working = await readFile(resolve(REPOSITORY_ROOT, path));
+  if (!working.equals(committed)) {
+    throw new Error(`${path} drifted from the fixed commit`);
+  }
+  return committed;
+}
+
+async function assertSourceBundleAtFixedCommit(
+  fixedCommitSha: string,
+  manifest: ReturnType<typeof buildModelEvaluationEvidencePlanningManifest>,
+): Promise<void> {
+  for (const source of manifest.sourceFiles) {
+    const committed = await assertWorkingFileMatchesFixedCommit(
+      fixedCommitSha,
+      source.path,
+    );
+    const digest = createHash("sha256").update(committed).digest("hex");
+    if (digest !== source.sha256) {
+      throw new Error(
+        `${source.path} does not match the fixed source bundle digest`,
+      );
+    }
+  }
 }
 
 function assertFixedRepositoryState(fixedCommitSha: string): void {
@@ -85,31 +133,29 @@ async function main(): Promise<void> {
   if (!fixedCommitSha || !attestationArgument || !outputArgument) {
     throw new Error(HELP);
   }
-  if (
-    /(^|[/\\])\.env(?:\.|$)/i.test(attestationArgument) ||
-    !attestationArgument.endsWith(".json")
-  ) {
-    throw new Error(
-      "attestation must be an explicit safe JSON snapshot, not .env",
-    );
-  }
+  const attestation = repositoryJsonPath(attestationArgument, "attestation");
+  const output = repositoryJsonPath(outputArgument, "output");
 
   assertFixedRepositoryState(fixedCommitSha);
-
-  const attestationPath = await realpath(resolve(attestationArgument));
-  if (/(^|[/\\])\.env(?:\.|$)/i.test(attestationPath)) {
-    throw new Error("resolved attestation must not be .env");
-  }
+  const committedSnapshot = await assertWorkingFileMatchesFixedCommit(
+    fixedCommitSha,
+    attestation,
+  );
   const raw = JSON.parse(
-    await readFile(attestationPath, "utf8"),
-  ) as ModelEvaluationCostSafetyInput;
-  const costSafety = createModelEvaluationCostSafetyAttestation(raw);
+    committedSnapshot.toString("utf8"),
+  ) as ModelEvaluationEvidencePrepSafeSnapshotEnvelope;
+  const snapshots = createTrustedModelEvaluationEvidencePrepSnapshots(raw);
   const bundle = createModelEvaluationEvidencePrepBundle({
     fixedCommitSha,
-    costSafety,
+    snapshots,
   });
-  const output = repositoryOutputPath(outputArgument);
+  await assertSourceBundleAtFixedCommit(
+    fixedCommitSha,
+    bundle.planningManifest,
+  );
+
   assertFixedRepositoryState(fixedCommitSha);
+  await assertWorkingFileMatchesFixedCommit(fixedCommitSha, attestation);
   const currentManifest = buildModelEvaluationEvidencePlanningManifest();
   if (
     currentManifest.sourceBundleSha256 !==
@@ -119,6 +165,7 @@ async function main(): Promise<void> {
   ) {
     throw new Error("source bundle drifted during evidence preparation");
   }
+  await assertSourceBundleAtFixedCommit(fixedCommitSha, currentManifest);
   await writeModelEvaluationEvidencePrepBundleCreateOnly(
     REPOSITORY_ROOT,
     output,

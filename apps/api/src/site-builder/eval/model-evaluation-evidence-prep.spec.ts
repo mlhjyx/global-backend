@@ -8,13 +8,14 @@ import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
-  createModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyInput,
 } from "./model-evaluation-cost-safety";
+import { sha256CanonicalJson } from "./eval-provenance";
 import {
   MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND,
   buildModelEvaluationEvidencePlanningManifest,
   createModelEvaluationEvidencePrepBundle,
+  createTrustedModelEvaluationEvidencePrepSnapshots,
   writeModelEvaluationEvidencePrepBundleCreateOnly,
 } from "./model-evaluation-evidence-prep";
 
@@ -98,6 +99,27 @@ function exactCostSafetyInput(): ModelEvaluationCostSafetyInput {
   };
 }
 
+function trustedSnapshots(input = exactCostSafetyInput()) {
+  return createTrustedModelEvaluationEvidencePrepSnapshots(
+    safeSnapshotEnvelope(input),
+  );
+}
+
+function safeSnapshotEnvelope(input = exactCostSafetyInput()) {
+  const { snapshotSha256: _credentialDigest, ...credentialSnapshot } =
+    input.credential;
+  const { snapshotSha256: _pricingDigest, ...pricingSnapshot } = input.pricing;
+  input.credential.snapshotSha256 = sha256CanonicalJson(credentialSnapshot);
+  input.pricing.snapshotSha256 = sha256CanonicalJson(pricingSnapshot);
+  return {
+    schemaVersion: "site-builder-model-evaluation-safe-snapshots/v1",
+    authorizationSnapshot: structuredClone(input.authorization),
+    credentialSnapshot,
+    pricingSnapshot,
+    costSafety: input,
+  } as const;
+}
+
 describe("model evaluation evidence preparation", () => {
   it("derives the exact 61-execution and 122-wire-call manifest from canonical contracts", () => {
     const manifest = buildModelEvaluationEvidencePlanningManifest();
@@ -124,6 +146,18 @@ describe("model evaluation evidence preparation", () => {
     expect(manifest.unverifiedPlanningUpperBound).toEqual(
       MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND,
     );
+    expect(manifest.promptUtf8Bytes.maximumCanonicalInitial).toBeGreaterThan(0);
+    expect(manifest.promptUtf8Bytes.maximumCanonicalRepair).toBeGreaterThan(
+      manifest.promptUtf8Bytes.maximumCanonicalInitial,
+    );
+    expect(
+      manifest.sourceFiles.every(
+        (source) =>
+          !source.path.includes("/dist/") &&
+          !source.path.startsWith("/") &&
+          !source.path.split("/").includes(".."),
+      ),
+    ).toBe(true);
   });
 
   it("contains only the BrandProfile canonical suite and admitted text dispatches", () => {
@@ -151,12 +185,10 @@ describe("model evaluation evidence preparation", () => {
   });
 
   it("consumes an exact trusted cost attestation and emits a redacted non-dispatchable decision bundle", () => {
-    const attestation = createModelEvaluationCostSafetyAttestation(
-      exactCostSafetyInput(),
-    );
+    const snapshots = trustedSnapshots();
     const bundle = createModelEvaluationEvidencePrepBundle({
       fixedCommitSha: "e".repeat(40),
-      costSafety: attestation,
+      snapshots,
     });
     const serialized = JSON.stringify(bundle);
 
@@ -173,6 +205,17 @@ describe("model evaluation evidence preparation", () => {
       scopeExact: true,
     });
     expect(bundle.pricingEvidence.billingUnit).toBe("cents_per_million_tokens");
+    expect(bundle.authorizationEvidence).toMatchObject({
+      authorizationId: "brand-profile-evidence-approval/2026-07-29-v1",
+      ledgerId: "brand-profile-evidence-ledger/2026-07-29-v1",
+      approvedDispatchExecutions: 61,
+    });
+    expect(bundle.authorizationEvidence.costSafetyAttestationSha256).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    expect(bundle.authorizationEvidence.safeSnapshotEnvelopeSha256).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
     expect(bundle.bundleSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(serialized).not.toContain("Bearer ");
     expect(serialized).not.toContain("responseBody");
@@ -180,34 +223,50 @@ describe("model evaluation evidence preparation", () => {
     expect(serialized).not.toContain("personalData");
   });
 
+  it("rejects undeclared or non-reproducing safe snapshot data", () => {
+    const extra = {
+      ...safeSnapshotEnvelope(),
+      responseBody: "must never be accepted",
+    };
+    expect(() =>
+      createTrustedModelEvaluationEvidencePrepSnapshots(extra as never),
+    ).toThrow("undeclared or missing fields");
+
+    const mismatched = safeSnapshotEnvelope();
+    mismatched.credentialSnapshot.remainingQuotaCents -= 1;
+    expect(() =>
+      createTrustedModelEvaluationEvidencePrepSnapshots(mismatched),
+    ).toThrow("do not reproduce");
+  });
+
   it("rejects untrusted, overbroad, or non-exact cost safety before producing a bundle", () => {
     const input = exactCostSafetyInput();
-    const trusted = createModelEvaluationCostSafetyAttestation(input);
+    const trusted = trustedSnapshots(input);
     expect(() =>
       createModelEvaluationEvidencePrepBundle({
         fixedCommitSha: "e".repeat(40),
-        costSafety: structuredClone(trusted),
+        snapshots: structuredClone(trusted),
       }),
-    ).toThrow("trusted model evaluation cost safety attestation required");
+    ).toThrow("trusted fixed snapshot evidence required");
 
     input.authorization.approvedDispatchExecutions = 62;
     input.limits.maxDispatchExecutions = 62;
-    const drifted = createModelEvaluationCostSafetyAttestation(input);
+    const drifted = trustedSnapshots(input);
     expect(() =>
       createModelEvaluationEvidencePrepBundle({
         fixedCommitSha: "e".repeat(40),
-        costSafety: drifted,
+        snapshots: drifted,
       }),
     ).toThrow("does not exactly match the frozen evidence manifest");
   });
 
   it("rejects invalid fixed commits and a priced maximum above finite funds", () => {
     const input = exactCostSafetyInput();
-    const attestation = createModelEvaluationCostSafetyAttestation(input);
+    const snapshots = trustedSnapshots(input);
     expect(() =>
       createModelEvaluationEvidencePrepBundle({
         fixedCommitSha: "main",
-        costSafety: attestation,
+        snapshots,
       }),
     ).toThrow("full lowercase SHA-1");
 
@@ -216,13 +275,22 @@ describe("model evaluation evidence preparation", () => {
       inputCentsPerMillionTokens: 100_000,
       outputCentsPerMillionTokens: 100_000,
     }));
-    const expensive = createModelEvaluationCostSafetyAttestation(input);
+    const expensive = trustedSnapshots(input);
     expect(() =>
       createModelEvaluationEvidencePrepBundle({
         fixedCommitSha: "e".repeat(40),
-        costSafety: expensive,
+        snapshots: expensive,
       }),
     ).toThrow("exceeds priced cost safety");
+
+    const undersizedPrompt = exactCostSafetyInput();
+    undersizedPrompt.limits.maxPromptUtf8BytesPerCall = 1;
+    expect(() =>
+      createModelEvaluationEvidencePrepBundle({
+        fixedCommitSha: "e".repeat(40),
+        snapshots: trustedSnapshots(undersizedPrompt),
+      }),
+    ).toThrow("exceeds cost safety scope");
   });
 
   it("writes create-only with no overwrite path", async () => {
@@ -231,9 +299,7 @@ describe("model evaluation evidence preparation", () => {
     const path = join(directory, "nested", "prep.json");
     const bundle = createModelEvaluationEvidencePrepBundle({
       fixedCommitSha: "e".repeat(40),
-      costSafety: createModelEvaluationCostSafetyAttestation(
-        exactCostSafetyInput(),
-      ),
+      snapshots: trustedSnapshots(),
     });
 
     await writeModelEvaluationEvidencePrepBundleCreateOnly(
@@ -262,9 +328,7 @@ describe("model evaluation evidence preparation", () => {
     temporaryDirectories.push(directory, outside);
     const bundle = createModelEvaluationEvidencePrepBundle({
       fixedCommitSha: "e".repeat(40),
-      costSafety: createModelEvaluationCostSafetyAttestation(
-        exactCostSafetyInput(),
-      ),
+      snapshots: trustedSnapshots(),
     });
 
     await expect(

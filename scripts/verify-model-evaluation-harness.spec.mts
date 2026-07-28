@@ -69,7 +69,16 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
   );
   assert.equal(
     suite.sourceBundleContractId,
-    "brand-profile-evaluation-source-bundle/v6",
+    "brand-profile-evaluation-source-bundle/v7",
+  );
+  assert.ok(
+    suite.sourceBundleFiles.every(
+      (entry) =>
+        !entry.path.includes("/dist/") &&
+        !entry.path.startsWith("/") &&
+        !entry.path.split("/").includes(".."),
+    ),
+    "fixed-commit source bundle must contain only tracked source paths",
   );
   assert.ok(
     suite.sourceBundleFiles.some(

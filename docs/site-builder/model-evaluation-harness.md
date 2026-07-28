@@ -50,7 +50,7 @@
 - task contract：`site_builder.brand_profile` / prompt `brand-profile/14` / route validation `brand-profile-route-validation/14`；dispatch 同时绑定冻结 output schema 与 `repairTaskOutput=true`
 - fixture set：`site-builder.brand-profile-golden/2026-07-18-v1`；schema `brand-profile-eval-fixture/v1`；6 fixtures × 2 repeats = 12 runs/model
 - fixtures：`auto-parts-rich`、`auto-parts-sparse`、`industrial-pump-rich`、`industrial-pump-sparse`、`lab-instrument-rich`、`lab-instrument-sparse`
-- source bundle contract：`brand-profile-evaluation-source-bundle/v6`；固定 36 份仓库内源码/合同文件，路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
+- source bundle contract：`brand-profile-evaluation-source-bundle/v7`；固定 37 份 Git 跟踪的源码/合同文件（不引用 ignored build output），路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
 - dispatch payload：fixture、prepared task input、prompt 与 source fingerprints 全部由 canonical case builder 构造、冻结并纳入 case SHA-256；executor 不能替换为未绑定内容。
 - capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。同一 campaign/candidate 的重复请求复用既有 canonical attestation，不重复 dispatch、reserve 或擦除有效证明。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
 - evaluator：`brand-profile-evaluator/10`；rubric SHA-256 `c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c`；harness 内部依次执行 output schema、生产 `validateOutput` 与 canonical task rubric，不接受 caller 自带 grader。
@@ -73,8 +73,10 @@
 
 ## Zero-cost evidence 准备
 
-- 准备合同：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1`；固定 task `site_builder.brand_profile`、suite `site-builder.brand-profile-evaluation-suite/2026-07-27-v1`、source bundle `brand-profile-evaluation-source-bundle/v6`。
+- 准备合同：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1`；固定 task `site_builder.brand_profile`、suite `site-builder.brand-profile-evaluation-suite/2026-07-27-v1`、source bundle `brand-profile-evaluation-source-bundle/v7`。
 - manifest：61 executions / 最多 122 wire calls；其中 capability probe 1、target 36、legacy comparator 24。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。
+- prompt 上界从六个 canonical case 的真实 initial/repair payload 派生：initial 最多 6092 UTF-8 bytes，repair 最多 10399 UTF-8 bytes；repair reason 另受机器常量硬限，不以 attestation 自报上限替代真实 payload。
 - 61 executions / 122 wire calls / 2440¢ 仍标记为 `unverified_planning_upper_bound`，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。
-- create-only runner 只接受完整 fixed commit、clean worktree、显式安全 JSON attestation 和新的 repository-relative 输出路径，以 `wx` 写入；拒绝 `.env`，不导入 executor/client，不保存 token、response body、个人或客户数据。输出状态最多为 `READY_FOR_PRODUCT_DECISION`，同时固定 `dispatchAuthorization=NOT_AUTHORIZED`。
+- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 `wx` 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 `.env` 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。
+- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 `READY_FOR_PRODUCT_DECISION`，同时固定 `dispatchAuthorization=NOT_AUTHORIZED`。
 - 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。图片、视频、embedding、preview、deferred、其他六个无 suite task 继续在 client 前阻断。

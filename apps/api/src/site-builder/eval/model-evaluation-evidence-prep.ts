@@ -11,6 +11,7 @@ import {
 
 import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import type { ModelCandidateProtocol } from "../agents/model-candidate-baseline";
+import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
 import {
   SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
   buildCanonicalModelEvaluationCase,
@@ -20,11 +21,17 @@ import {
   MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND,
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   assertModelEvaluationCostSafetyDispatch,
+  createModelEvaluationCostSafetyAttestation,
   frozenModelEvaluationPriceCents,
   isTrustedModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyInput,
   type ModelEvaluationDispatchMode,
 } from "./model-evaluation-cost-safety";
+import {
+  modelEvaluationInitialPromptUtf8Bytes,
+  modelEvaluationRepairPromptUtf8BytesUpperBound,
+} from "./model-evaluation-executor";
 import { sha256CanonicalJson } from "./eval-provenance";
 
 export const SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID =
@@ -90,6 +97,10 @@ export interface ModelEvaluationEvidencePlanningManifest {
     maximumWireCallsPerExecution: 2;
     maximumRepairCallsPerExecution: 1;
   };
+  promptUtf8Bytes: {
+    maximumCanonicalInitial: number;
+    maximumCanonicalRepair: number;
+  };
   executions: readonly ModelEvaluationEvidenceExecutionPlan[];
   executionCount: 61;
   maximumWireCallCount: 122;
@@ -135,6 +146,16 @@ export interface ModelEvaluationEvidencePrepBundle {
       outputCentsPerMillionTokens: number;
     }[];
   };
+  authorizationEvidence: {
+    authorizationId: string;
+    ledgerId: string;
+    ledgerDirectorySha256: string;
+    approvedAt: string;
+    approvedCampaignBudgetCents: number;
+    approvedDispatchExecutions: number;
+    costSafetyAttestationSha256: string;
+    safeSnapshotEnvelopeSha256: string;
+  };
   decisionCard: {
     schemaVersion: typeof MODEL_EVALUATION_EVIDENCE_DECISION_CARD_SCHEMA_VERSION;
     status: "READY_FOR_PRODUCT_DECISION";
@@ -148,14 +169,37 @@ export interface ModelEvaluationEvidencePrepBundle {
     unverifiedPlanningUpperBound: typeof MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND;
     pricingSnapshotSha256: string;
     credentialSnapshotSha256: string;
+    costSafetyAttestationSha256: string;
+    safeSnapshotEnvelopeSha256: string;
     manifestSha256: string;
   };
   bundleSha256: string;
 }
 
+export interface ModelEvaluationEvidencePrepSafeSnapshotEnvelope {
+  schemaVersion: "site-builder-model-evaluation-safe-snapshots/v1";
+  authorizationSnapshot: ModelEvaluationCostSafetyInput["authorization"];
+  credentialSnapshot: Omit<
+    ModelEvaluationCostSafetyInput["credential"],
+    "snapshotSha256"
+  >;
+  pricingSnapshot: Omit<
+    ModelEvaluationCostSafetyInput["pricing"],
+    "snapshotSha256"
+  >;
+  costSafety: ModelEvaluationCostSafetyInput;
+}
+
+export interface TrustedModelEvaluationEvidencePrepSnapshots {
+  costSafety: ModelEvaluationCostSafetyAttestation;
+  costSafetyAttestationSha256: string;
+  safeSnapshotEnvelopeSha256: string;
+}
+
 const SHA1 = /^[a-f0-9]{40}$/;
 const MAXIMUM_WIRE_CALLS_PER_EXECUTION = 2 as const;
 const TRUSTED_EVIDENCE_PREP_BUNDLES = new WeakSet<object>();
+const TRUSTED_EVIDENCE_PREP_SNAPSHOTS = new WeakSet<object>();
 const WIRE_CALLS = Object.freeze([
   Object.freeze({ wireCallOrdinal: 1, purpose: "initial" }),
   Object.freeze({
@@ -196,6 +240,95 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  return (
+    JSON.stringify(Object.keys(value).sort()) ===
+    JSON.stringify([...expected].sort())
+  );
+}
+
+export function createTrustedModelEvaluationEvidencePrepSnapshots(
+  input: ModelEvaluationEvidencePrepSafeSnapshotEnvelope,
+): TrustedModelEvaluationEvidencePrepSnapshots {
+  let copy: ModelEvaluationEvidencePrepSafeSnapshotEnvelope;
+  try {
+    copy = structuredClone(input);
+  } catch {
+    throw new Error("safe snapshot envelope must be cloneable");
+  }
+  if (
+    !hasExactKeys(copy, [
+      "schemaVersion",
+      "authorizationSnapshot",
+      "credentialSnapshot",
+      "pricingSnapshot",
+      "costSafety",
+    ]) ||
+    copy.schemaVersion !== "site-builder-model-evaluation-safe-snapshots/v1" ||
+    !hasExactKeys(copy.authorizationSnapshot, [
+      "authorizationId",
+      "ledgerId",
+      "ledgerDirectorySha256",
+      "approvedAt",
+      "approvedCampaignBudgetCents",
+      "approvedDispatchExecutions",
+    ]) ||
+    !hasExactKeys(copy.credentialSnapshot, [
+      "attestationId",
+      "observedAt",
+      "bearerTokenSha256",
+      "gatewayOrigin",
+      "purpose",
+      "quotaMode",
+      "scopeExact",
+      "quotaCapCents",
+      "remainingQuotaCents",
+      "allowedDispatches",
+    ]) ||
+    !hasExactKeys(copy.pricingSnapshot, [
+      "snapshotId",
+      "basis",
+      "defaultOrUnconfiguredRatioAllowed",
+      "resolverId",
+      "entries",
+    ])
+  ) {
+    throw new Error("safe snapshot envelope has undeclared or missing fields");
+  }
+  const credentialSnapshotSha256 = sha256CanonicalJson(copy.credentialSnapshot);
+  const pricingSnapshotSha256 = sha256CanonicalJson(copy.pricingSnapshot);
+  const expectedCredential = {
+    ...copy.credentialSnapshot,
+    snapshotSha256: credentialSnapshotSha256,
+  };
+  const expectedPricing = {
+    ...copy.pricingSnapshot,
+    snapshotSha256: pricingSnapshotSha256,
+  };
+  if (
+    sha256CanonicalJson(copy.authorizationSnapshot) !==
+      sha256CanonicalJson(copy.costSafety.authorization) ||
+    sha256CanonicalJson(expectedCredential) !==
+      sha256CanonicalJson(copy.costSafety.credential) ||
+    sha256CanonicalJson(expectedPricing) !==
+      sha256CanonicalJson(copy.costSafety.pricing)
+  ) {
+    throw new Error(
+      "safe snapshots do not reproduce the cost safety attestation",
+    );
+  }
+  const costSafety = createModelEvaluationCostSafetyAttestation(
+    copy.costSafety,
+  );
+  const trusted = deepFreeze({
+    costSafety,
+    costSafetyAttestationSha256: sha256CanonicalJson(copy.costSafety),
+    safeSnapshotEnvelopeSha256: sha256CanonicalJson(copy),
+  });
+  TRUSTED_EVIDENCE_PREP_SNAPSHOTS.add(trusted);
+  return trusted;
+}
+
 export function buildModelEvaluationEvidencePlanningManifest(): ModelEvaluationEvidencePlanningManifest {
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
   const suite = plan.evaluationSuite;
@@ -207,9 +340,21 @@ export function buildModelEvaluationEvidencePlanningManifest(): ModelEvaluationE
     throw new Error("BrandProfile canonical repairable suite is required");
   }
 
-  const firstCase = buildCanonicalModelEvaluationCase(
-    plan,
-    suite.fixtureIds[0]!,
+  const canonicalCases = suite.fixtureIds.map((fixtureId) =>
+    buildCanonicalModelEvaluationCase(plan, fixtureId),
+  );
+  const firstCase = canonicalCases[0]!;
+  const initialPromptBytes = canonicalCases.map((entry) =>
+    modelEvaluationInitialPromptUtf8Bytes(
+      entry.payload.prompt,
+      BRAND_PROFILE_TASK.outputSchema,
+    ),
+  );
+  const repairPromptBytes = canonicalCases.map((entry) =>
+    modelEvaluationRepairPromptUtf8BytesUpperBound(
+      entry.payload.prompt,
+      BRAND_PROFILE_TASK.outputSchema,
+    ),
   );
   const executions: ModelEvaluationEvidenceExecutionPlan[] = [];
   const append = (
@@ -301,6 +446,10 @@ export function buildModelEvaluationEvidencePlanningManifest(): ModelEvaluationE
       maximumWireCallsPerExecution: 2,
       maximumRepairCallsPerExecution: 1,
     },
+    promptUtf8Bytes: {
+      maximumCanonicalInitial: Math.max(...initialPromptBytes),
+      maximumCanonicalRepair: Math.max(...repairPromptBytes),
+    },
     executions,
     executionCount: executions.length as 61,
     maximumWireCallCount: maximumWireCallCount as 122,
@@ -363,7 +512,7 @@ function assertExactCostSafety(
     assertModelEvaluationCostSafetyDispatch(costSafety, {
       ...dispatch,
       maxOutputTokens: plan.envelope.maxTokens,
-      promptUtf8Bytes: costSafety.limits.maxPromptUtf8BytesPerCall,
+      promptUtf8Bytes: manifest.promptUtf8Bytes.maximumCanonicalRepair,
       maximumWireCalls: executionCount * MAXIMUM_WIRE_CALLS_PER_EXECUTION,
       perCallCostCapCents: plan.envelope.perCallCostCapCents,
     });
@@ -377,38 +526,50 @@ function frozenPricedMaximumCents(
   const plan = buildTaskEvaluationPlan(manifest.taskId);
   let total = 0;
   for (const execution of manifest.executions) {
-    const perCall = frozenModelEvaluationPriceCents(costSafety, {
+    const initialCall = frozenModelEvaluationPriceCents(costSafety, {
       alias: execution.alias,
       protocol: execution.protocol,
       inputTokens:
-        costSafety.limits.maxPromptUtf8BytesPerCall +
+        manifest.promptUtf8Bytes.maximumCanonicalInitial +
         MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND,
       outputTokens: plan.envelope.maxTokens,
     });
-    if (perCall === null) {
+    const repairCall = frozenModelEvaluationPriceCents(costSafety, {
+      alias: execution.alias,
+      protocol: execution.protocol,
+      inputTokens:
+        manifest.promptUtf8Bytes.maximumCanonicalRepair +
+        MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND,
+      outputTokens: plan.envelope.maxTokens,
+    });
+    if (initialCall === null || repairCall === null) {
       throw new Error("frozen pricing is incomplete for evidence manifest");
     }
-    total += Math.ceil(perCall) * execution.maximumWireCalls;
+    total += Math.ceil(initialCall) + Math.ceil(repairCall);
   }
   return Math.ceil(total);
 }
 
 export function createModelEvaluationEvidencePrepBundle(input: {
   fixedCommitSha: string;
-  costSafety: ModelEvaluationCostSafetyAttestation;
+  snapshots: TrustedModelEvaluationEvidencePrepSnapshots;
 }): ModelEvaluationEvidencePrepBundle {
   if (!SHA1.test(input.fixedCommitSha)) {
     throw new Error("fixed evidence commit must be a full lowercase SHA-1");
   }
+  if (!TRUSTED_EVIDENCE_PREP_SNAPSHOTS.has(input.snapshots)) {
+    throw new Error("trusted fixed snapshot evidence required");
+  }
+  const costSafety = input.snapshots.costSafety;
   const planningManifest = buildModelEvaluationEvidencePlanningManifest();
-  assertExactCostSafety(planningManifest, input.costSafety);
+  assertExactCostSafety(planningManifest, costSafety);
   const frozenMaximumCents = frozenPricedMaximumCents(
     planningManifest,
-    input.costSafety,
+    costSafety,
   );
   if (
-    frozenMaximumCents > input.costSafety.limits.campaignBudgetCents ||
-    frozenMaximumCents > input.costSafety.credential.remainingQuotaCents
+    frozenMaximumCents > costSafety.limits.campaignBudgetCents ||
+    frozenMaximumCents > costSafety.credential.remainingQuotaCents
   ) {
     throw new Error("frozen priced maximum exceeds approved finite funds");
   }
@@ -421,26 +582,31 @@ export function createModelEvaluationEvidencePrepBundle(input: {
     dispatchAuthorization: "NOT_AUTHORIZED" as const,
     planningManifest,
     credentialEvidence: {
-      attestationId: input.costSafety.credential.attestationId,
-      credentialSnapshotSha256: input.costSafety.credential.snapshotSha256,
-      bearerTokenSha256: input.costSafety.credential.bearerTokenSha256,
-      observedAt: input.costSafety.credential.observedAt,
-      balanceSampledAt: input.costSafety.credential.observedAt,
-      gatewayOrigin: input.costSafety.credential.gatewayOrigin,
-      purpose: input.costSafety.credential.purpose,
-      quotaMode: input.costSafety.credential.quotaMode,
-      scopeExact: input.costSafety.credential.scopeExact,
-      quotaCapCents: input.costSafety.credential.quotaCapCents,
-      remainingQuotaCents: input.costSafety.credential.remainingQuotaCents,
-      allowedDispatches: input.costSafety.credential.allowedDispatches,
+      attestationId: costSafety.credential.attestationId,
+      credentialSnapshotSha256: costSafety.credential.snapshotSha256,
+      bearerTokenSha256: costSafety.credential.bearerTokenSha256,
+      observedAt: costSafety.credential.observedAt,
+      balanceSampledAt: costSafety.credential.observedAt,
+      gatewayOrigin: costSafety.credential.gatewayOrigin,
+      purpose: costSafety.credential.purpose,
+      quotaMode: costSafety.credential.quotaMode,
+      scopeExact: costSafety.credential.scopeExact,
+      quotaCapCents: costSafety.credential.quotaCapCents,
+      remainingQuotaCents: costSafety.credential.remainingQuotaCents,
+      allowedDispatches: costSafety.credential.allowedDispatches,
     },
     pricingEvidence: {
-      snapshotId: input.costSafety.pricing.snapshotId,
-      snapshotSha256: input.costSafety.pricing.snapshotSha256,
-      basis: input.costSafety.pricing.basis,
-      resolverId: input.costSafety.pricing.resolverId,
+      snapshotId: costSafety.pricing.snapshotId,
+      snapshotSha256: costSafety.pricing.snapshotSha256,
+      basis: costSafety.pricing.basis,
+      resolverId: costSafety.pricing.resolverId,
       billingUnit: "cents_per_million_tokens" as const,
-      entries: input.costSafety.pricing.entries,
+      entries: costSafety.pricing.entries,
+    },
+    authorizationEvidence: {
+      ...costSafety.authorization,
+      costSafetyAttestationSha256: input.snapshots.costSafetyAttestationSha256,
+      safeSnapshotEnvelopeSha256: input.snapshots.safeSnapshotEnvelopeSha256,
     },
     decisionCard: {
       schemaVersion: MODEL_EVALUATION_EVIDENCE_DECISION_CARD_SCHEMA_VERSION,
@@ -451,12 +617,14 @@ export function createModelEvaluationEvidencePrepBundle(input: {
       maximumWireCallCount: planningManifest.maximumWireCallCount,
       frozenPricedMaximumCents: frozenMaximumCents,
       approvedCampaignBudgetCents:
-        input.costSafety.authorization.approvedCampaignBudgetCents,
-      remainingQuotaCents: input.costSafety.credential.remainingQuotaCents,
+        costSafety.authorization.approvedCampaignBudgetCents,
+      remainingQuotaCents: costSafety.credential.remainingQuotaCents,
       unverifiedPlanningUpperBound:
         MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND,
-      pricingSnapshotSha256: input.costSafety.pricing.snapshotSha256,
-      credentialSnapshotSha256: input.costSafety.credential.snapshotSha256,
+      pricingSnapshotSha256: costSafety.pricing.snapshotSha256,
+      credentialSnapshotSha256: costSafety.credential.snapshotSha256,
+      costSafetyAttestationSha256: input.snapshots.costSafetyAttestationSha256,
+      safeSnapshotEnvelopeSha256: input.snapshots.safeSnapshotEnvelopeSha256,
       manifestSha256,
     },
   };
