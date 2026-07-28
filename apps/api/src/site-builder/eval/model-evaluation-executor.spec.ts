@@ -28,6 +28,7 @@ import {
 } from "./model-evaluation-executor";
 import {
   bindFakeModelEvaluationWireCredential,
+  createFakeModelEvaluationAuthorizationLedger,
   createFakeModelEvaluationCostSafety,
 } from "./model-evaluation-cost-safety.spec-support";
 import {
@@ -38,7 +39,7 @@ import {
 function createModelEvaluationProtocolExecutor(
   deps: Omit<
     Parameters<typeof createRawModelEvaluationProtocolExecutor>[0],
-    "costSafety"
+    "authorizationLedger" | "costSafety"
   >,
 ) {
   const costSafety = createFakeModelEvaluationCostSafety(
@@ -52,6 +53,8 @@ function createModelEvaluationProtocolExecutor(
       deps.wireClient,
       costSafety,
     ),
+    authorizationLedger:
+      createFakeModelEvaluationAuthorizationLedger(costSafety),
     costSafety,
   });
 }
@@ -224,13 +227,18 @@ function settlementResolver(
   return {
     resolverId: "fake-settlement/v1",
     resolve: vi.fn((context) => {
-      if (settlement) return settlement;
+      if (settlement) {
+        return settlement.state === "settled"
+          ? { ...settlement, executionId: context.executionId }
+          : settlement;
+      }
       const costs = context.providerReportedCostCents;
       return costs.every((amount): amount is number => amount !== null)
         ? {
             state: "settled" as const,
             amountCents: costs.reduce((sum, amount) => sum + amount, 0),
             basis: "provider_reported" as const,
+            executionId: context.executionId,
           }
         : {
             state: "unknown" as const,
@@ -703,7 +711,9 @@ describe("structured output, repair, errors, and settlement", () => {
     const pending = executor.execute(request);
     await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
     controller.abort(new Error("diagnostic hard stop"));
-    expect(freezeModelEvaluationProtocolExecutor(executor.execute)).toBe(true);
+    await expect(
+      freezeModelEvaluationProtocolExecutor(executor.execute),
+    ).resolves.toBe(true);
     resolveFirst?.(
       wireResponse(
         openAIResponsesBody(request.alias, {}, {
@@ -734,6 +744,7 @@ describe("structured output, repair, errors, and settlement", () => {
           state: "settled",
           amountCents: 0.02,
           basis: "frozen_pricing_snapshot",
+          executionId: context.executionId,
         };
       }),
     };
@@ -797,11 +808,15 @@ describe("structured output, repair, errors, and settlement", () => {
 
   it("captures resolver identity and implementation once when branding the executor", async () => {
     const request = canonicalRequest();
-    const initialResolve = vi.fn(function (this: { resolverId: string }) {
+    const initialResolve = vi.fn(function (
+      this: { resolverId: string },
+      context: { executionId: string },
+    ) {
       return {
         state: "settled" as const,
         amountCents: this.resolverId === "captured-resolver/v1" ? 1 : 999,
         basis: "provider_reported" as const,
+        executionId: context.executionId,
       };
     });
     const replacementResolve = vi.fn(() => ({
@@ -850,11 +865,14 @@ describe("structured output, repair, errors, and settlement", () => {
       readonly resolverId = "private-pricing-resolver/v1";
       readonly #amountCents = 0.02;
 
-      resolve(): ModelEvaluationSettlementResolution {
+      resolve(
+        context: Readonly<{ executionId: string }>,
+      ): ModelEvaluationSettlementResolution {
         return {
           state: "settled",
           amountCents: this.#amountCents,
           basis: "frozen_pricing_snapshot",
+          executionId: context.executionId,
         };
       }
     }
@@ -931,6 +949,8 @@ describe("structured output, repair, errors, and settlement", () => {
         wireClient({ openAIResponses: call }),
         costSafety,
       ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
       settlementResolver: resolver,
       costSafety,
     });
@@ -1160,6 +1180,21 @@ describe("structured output, repair, errors, and settlement", () => {
       blocked: true,
       blockReason: "per_call_cap_exceeded",
     });
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "industrial-pump-sparse",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(
+          plan.envelope.perCallCostCapCents * 2,
+        ),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      failureCode: "post_dispatch_settlement_incoherent",
+    });
+    expect(wireCall).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a whole-attempt not-incurred claim after a billable first repair call", async () => {
@@ -1316,6 +1351,38 @@ describe("structured output, repair, errors, and settlement", () => {
     expect(wireCall).toHaveBeenCalledWith(
       expect.objectContaining({ executionId: request.executionId }),
     );
+  });
+
+  it("rejects a verified billing export for a different execution identity", async () => {
+    const request = canonicalRequest();
+    const wireCall = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(
+          request.alias,
+          canonicalAcceptedArtifact(request.fixtureId),
+        ),
+      ),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: {
+        resolverId: "mismatched-billing-export/v1",
+        resolve: () => ({
+          state: "settled" as const,
+          amountCents: 1,
+          basis: "verified_billing_export" as const,
+          executionId: "another-evaluation-execution",
+        }),
+      },
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(wireCall).toHaveBeenCalledTimes(1);
   });
 
   it("applies the same conservative repair settlement to capability probes", async () => {
@@ -1550,6 +1617,7 @@ describe("structured output, repair, errors, and settlement", () => {
       settlementResolver: unknown,
     });
     const pending = abortExecutor.execute(request);
+    await vi.waitFor(() => expect(observed).toHaveBeenCalledOnce());
     controller.abort(new Error("test abort"));
     await expect(pending).rejects.toMatchObject({
       failureCode: "evaluation_aborted",

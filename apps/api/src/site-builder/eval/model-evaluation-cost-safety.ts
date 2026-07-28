@@ -32,6 +32,8 @@ export interface ModelEvaluationCostSafetyInput {
   contractId: typeof SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID;
   authorization: {
     authorizationId: string;
+    ledgerId: string;
+    ledgerDirectorySha256: string;
     approvedAt: string;
     approvedCampaignBudgetCents: number;
     approvedDispatchExecutions: number;
@@ -178,6 +180,8 @@ export function createModelEvaluationCostSafetyAttestation(
     ]) ||
     !hasExactKeys(copy.authorization, [
       "authorizationId",
+      "ledgerId",
+      "ledgerDirectorySha256",
       "approvedAt",
       "approvedCampaignBudgetCents",
       "approvedDispatchExecutions",
@@ -216,6 +220,8 @@ export function createModelEvaluationCostSafetyAttestation(
     !hasExactKeys(copy.media, ["genericChannelTest", "allowedDispatches"]) ||
     copy.contractId !== SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID ||
     !ATTESTATION_ID.test(copy.authorization.authorizationId) ||
+    !RESOLVER_ID.test(copy.authorization.ledgerId) ||
+    !SHA256.test(copy.authorization.ledgerDirectorySha256) ||
     !canonicalUtcInstant(copy.authorization.approvedAt) ||
     copy.authorization.approvedCampaignBudgetCents !==
       copy.limits.campaignBudgetCents ||

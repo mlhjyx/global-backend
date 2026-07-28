@@ -41,6 +41,7 @@ describe("model evaluation source bundle drift", () => {
       await import("./model-evaluation-executor");
     const {
       bindFakeModelEvaluationWireCredential,
+      createFakeModelEvaluationAuthorizationLedger,
       createFakeModelEvaluationCostSafety,
     } = await import("./model-evaluation-cost-safety.spec-support");
     const plan = harness.buildTaskEvaluationPlan("site_builder.brand_profile");
@@ -127,12 +128,15 @@ describe("model evaluation source bundle drift", () => {
     };
     const executor = createModelEvaluationProtocolExecutor({
       wireClient: bindFakeModelEvaluationWireCredential(wireClient, costSafety),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
       settlementResolver: {
         resolverId: "source-drift-spec-settlement/v1",
-        resolve: () => ({
+        resolve: (context) => ({
           state: "settled" as const,
           amountCents: 1,
           basis: "provider_reported" as const,
+          executionId: context.executionId,
         }),
       },
       costSafety,

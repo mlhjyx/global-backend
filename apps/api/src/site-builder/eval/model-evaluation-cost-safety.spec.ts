@@ -13,6 +13,9 @@ function validInput(): ModelEvaluationCostSafetyInput {
     contractId: SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
     authorization: {
       authorizationId: "brand-profile-evaluation-approval/2026-07-28-v1",
+      ledgerId: "brand-profile-evaluation-ledger/2026-07-28-v1",
+      ledgerDirectorySha256:
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: 1_000,
       approvedDispatchExecutions: 37,

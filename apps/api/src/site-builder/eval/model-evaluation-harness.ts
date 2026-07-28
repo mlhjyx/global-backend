@@ -1716,7 +1716,7 @@ export class ModelEvaluationCapabilityCampaign {
       controller.abort(
         new Error("model capability probe diagnostic window exhausted"),
       );
-      freezeModelEvaluationProtocolExecutor(options.execute);
+      await freezeModelEvaluationProtocolExecutor(options.execute);
       settleTrustedModelEvaluationBudget(this.#budget, callId, {
         state: "unknown",
         reason: "diagnostic_hard_stop",
@@ -2535,7 +2535,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
 
   if (outcome.kind === "hard_stop") {
     controller.abort(new Error("model evaluation diagnostic window exhausted"));
-    freezeModelEvaluationProtocolExecutor(options.execute);
+    await freezeModelEvaluationProtocolExecutor(options.execute);
     const settled = settleTrustedModelEvaluationBudget(
       options.campaignBudget,
       callId,

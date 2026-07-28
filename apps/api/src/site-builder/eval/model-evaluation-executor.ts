@@ -1,3 +1,13 @@
+import { createHash, randomUUID } from "node:crypto";
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
+import { isAbsolute, join } from "node:path";
 import {
   getModelCandidateCatalogEntry,
   type ModelCandidateProtocol,
@@ -201,36 +211,103 @@ const TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS = new WeakMap<
   }>
 >();
 
-export function createCredentialBoundModelEvaluationWireClient(
-  wireClient: ModelEvaluationWireClient,
-  credential: Readonly<{
-    attestationId: string;
-    snapshotSha256: string;
-  }>,
-): ModelEvaluationWireClient {
-  const openAIResponses = wireClient?.openAIResponses;
-  const anthropicMessages = wireClient?.anthropicMessages;
-  const openAIChatCompletions = wireClient?.openAIChatCompletions;
+export interface ModelEvaluationCredentialHandle {
+  readonly attestationId: string;
+  readonly snapshotSha256: string;
+  readonly bearerToken: string;
+}
+
+export function createCredentialBoundModelEvaluationWireClient(options: {
+  credential: ModelEvaluationCredentialHandle;
+  baseUrl: string;
+  fetch: typeof fetch;
+}): ModelEvaluationWireClient {
+  const credential = options?.credential;
+  const fetchImpl = options?.fetch;
+  const normalizedBaseUrl =
+    typeof options?.baseUrl === "string"
+      ? options.baseUrl.replace(/\/+$/, "")
+      : "";
   if (
-    !wireClient ||
-    typeof openAIResponses !== "function" ||
-    typeof anthropicMessages !== "function" ||
-    typeof openAIChatCompletions !== "function" ||
-    typeof credential?.attestationId !== "string" ||
+    !credential ||
+    typeof credential.attestationId !== "string" ||
     credential.attestationId.length === 0 ||
-    !/^[a-f0-9]{64}$/.test(credential.snapshotSha256)
+    !/^[a-f0-9]{64}$/.test(credential.snapshotSha256) ||
+    typeof credential.bearerToken !== "string" ||
+    credential.bearerToken.length < 8 ||
+    !/^https:\/\/[^/\s]+(?:\/.*)?$/.test(normalizedBaseUrl) ||
+    typeof fetchImpl !== "function"
   ) {
     throw new Error(
-      "evaluation wire transport and credential identity are required",
+      "attested evaluation credential handle, HTTPS base URL, and fetch are required",
     );
   }
+  const bearerToken = credential.bearerToken;
+  const capturedFetch = fetchImpl.bind(globalThis);
+  const dispatch = async (
+    path: string,
+    executionId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<ModelEvaluationWireResponse> => {
+    const response = await capturedFetch(`${normalizedBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${bearerToken}`,
+        "content-type": "application/json",
+        "x-site-builder-evaluation-execution-id": executionId,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(`evaluation transport HTTP ${response.status}`);
+    }
+    const providerCostHeader = response.headers.get(
+      "x-provider-cost-cents",
+    );
+    const providerReportedCostCents =
+      providerCostHeader !== null && providerCostHeader.trim() !== ""
+        ? Number(providerCostHeader)
+        : undefined;
+    return {
+      body: await response.json(),
+      ...(providerReportedCostCents !== undefined &&
+      Number.isFinite(providerReportedCostCents) &&
+      providerReportedCostCents >= 0
+        ? { providerReportedCostCents }
+        : {}),
+    };
+  };
   const bound = Object.freeze({
     credentialAttestationId: credential.attestationId,
     credentialSnapshotSha256: credential.snapshotSha256,
-    openAIResponses: Object.freeze(openAIResponses.bind(wireClient)),
-    anthropicMessages: Object.freeze(anthropicMessages.bind(wireClient)),
+    openAIResponses: Object.freeze(
+      (request: OpenAIResponsesEvaluationWireRequest) =>
+        dispatch(
+          "/responses",
+          request.executionId,
+          request.body,
+          request.signal,
+        ),
+    ),
+    anthropicMessages: Object.freeze(
+      (request: AnthropicMessagesEvaluationWireRequest) =>
+        dispatch(
+          "/messages",
+          request.executionId,
+          request.body,
+          request.signal,
+        ),
+    ),
     openAIChatCompletions: Object.freeze(
-      openAIChatCompletions.bind(wireClient),
+      (request: OpenAIChatCompletionsEvaluationWireRequest) =>
+        dispatch(
+          "/chat/completions",
+          request.executionId,
+          request.body,
+          request.signal,
+        ),
     ),
   }) satisfies ModelEvaluationWireClient;
   TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.set(
@@ -241,6 +318,221 @@ export function createCredentialBoundModelEvaluationWireClient(
     }),
   );
   return bound;
+}
+
+export interface ModelEvaluationAuthorizationLedgerClaim {
+  authorizationId: string;
+  executorClaimId: string;
+  campaignBudgetCents: number;
+  maxDispatchExecutions: number;
+  maxWireCalls: number;
+}
+
+export interface ModelEvaluationAuthorizationLedgerReservation {
+  authorizationId: string;
+  executorClaimId: string;
+  executionId: string;
+  wireCalls: number;
+  upperBoundCents: number;
+}
+
+export interface ModelEvaluationAuthorizationLedgerSettlement {
+  authorizationId: string;
+  executorClaimId: string;
+  executionId: string;
+  settlement: CostSettlement;
+}
+
+export interface ModelEvaluationAuthorizationLedger {
+  readonly ledgerId: string;
+  readonly directorySha256: string;
+  claim(
+    claim: Readonly<ModelEvaluationAuthorizationLedgerClaim>,
+  ): boolean | Promise<boolean>;
+  reserve(
+    reservation: Readonly<ModelEvaluationAuthorizationLedgerReservation>,
+  ): boolean | Promise<boolean>;
+  settle(
+    settlement: Readonly<ModelEvaluationAuthorizationLedgerSettlement>,
+  ): boolean | Promise<boolean>;
+  freeze(
+    claim: Readonly<{
+      authorizationId: string;
+      executorClaimId: string;
+      reason: string;
+    }>,
+  ): boolean | Promise<boolean>;
+}
+
+const TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS = new WeakSet<object>();
+const LEDGER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
+
+export function createFileBackedModelEvaluationAuthorizationLedger(options: {
+  ledgerId: string;
+  directory: string;
+}): ModelEvaluationAuthorizationLedger {
+  if (
+    !LEDGER_ID.test(options?.ledgerId ?? "") ||
+    typeof options?.directory !== "string" ||
+    !isAbsolute(options.directory)
+  ) {
+    throw new Error(
+      "absolute durable evaluation authorization ledger directory is required",
+    );
+  }
+  type LedgerState = {
+    claimId: string;
+    filePath: string;
+    budgetCents: number;
+    maxExecutions: number;
+    maxWireCalls: number;
+    executions: number;
+    wireCalls: number;
+    committedCents: number;
+    reservedCents: number;
+    frozen: boolean;
+    reservations: Map<string, number>;
+  };
+  const states = new Map<string, LedgerState>();
+  const appendDurably = (filePath: string, value: unknown): void => {
+    const descriptor = openSync(filePath, "a", 0o600);
+    try {
+      writeSync(descriptor, `${JSON.stringify(value)}\n`, undefined, "utf8");
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+  };
+  const ledger: ModelEvaluationAuthorizationLedger = {
+    ledgerId: options.ledgerId,
+    directorySha256: createHash("sha256")
+      .update(options.directory)
+      .digest("hex"),
+    claim: (input) => {
+        if (states.has(input.authorizationId)) return false;
+        mkdirSync(options.directory, { recursive: true, mode: 0o700 });
+        const filePath = join(
+          options.directory,
+          `${createHash("sha256")
+            .update(input.authorizationId)
+            .digest("hex")}.jsonl`,
+        );
+        let descriptor;
+        try {
+          descriptor = openSync(filePath, "wx", 0o600);
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "EEXIST"
+          ) {
+            return false;
+          }
+          throw error;
+        }
+        try {
+          writeFileSync(
+            descriptor,
+            `${JSON.stringify({
+              event: "authorization_claimed",
+              ...input,
+            })}\n`,
+            "utf8",
+          );
+          fsyncSync(descriptor);
+        } finally {
+          closeSync(descriptor);
+        }
+        states.set(input.authorizationId, {
+          claimId: input.executorClaimId,
+          filePath,
+          budgetCents: input.campaignBudgetCents,
+          maxExecutions: input.maxDispatchExecutions,
+          maxWireCalls: input.maxWireCalls,
+          executions: 0,
+          wireCalls: 0,
+          committedCents: 0,
+          reservedCents: 0,
+          frozen: false,
+          reservations: new Map(),
+        });
+        return true;
+      },
+    reserve: (input) => {
+        const state = states.get(input.authorizationId);
+        if (
+          !state ||
+          state.claimId !== input.executorClaimId ||
+          state.frozen ||
+          state.reservations.has(input.executionId) ||
+          state.executions + 1 > state.maxExecutions ||
+          state.wireCalls + input.wireCalls > state.maxWireCalls ||
+          state.committedCents +
+            state.reservedCents +
+            input.upperBoundCents >
+            state.budgetCents
+        ) {
+          return false;
+        }
+        appendDurably(state.filePath, {
+          event: "dispatch_reserved",
+          ...input,
+        });
+        state.executions += 1;
+        state.wireCalls += input.wireCalls;
+        state.reservedCents += input.upperBoundCents;
+        state.reservations.set(input.executionId, input.upperBoundCents);
+        return true;
+      },
+    settle: (input) => {
+        const state = states.get(input.authorizationId);
+        const reservation = state?.reservations.get(input.executionId);
+        if (
+          !state ||
+          state.claimId !== input.executorClaimId ||
+          reservation === undefined
+        ) {
+          return false;
+        }
+        appendDurably(state.filePath, {
+          event: "dispatch_settled",
+          ...input,
+        });
+        state.reservations.delete(input.executionId);
+        state.reservedCents -= reservation;
+        if (input.settlement.state === "settled") {
+          state.committedCents += input.settlement.amountCents;
+          if (state.committedCents > state.budgetCents) state.frozen = true;
+        } else if (input.settlement.state === "unknown") {
+          state.frozen = true;
+        }
+        return true;
+      },
+    freeze: (input) => {
+        const state = states.get(input.authorizationId);
+        if (!state || state.claimId !== input.executorClaimId) return false;
+        appendDurably(state.filePath, {
+          event: "authorization_frozen",
+          ...input,
+        });
+        state.frozen = true;
+        return true;
+      },
+  };
+  const trusted = Object.freeze(ledger);
+  TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS.add(trusted);
+  return trusted;
+}
+
+function isTrustedModelEvaluationAuthorizationLedger(
+  value: unknown,
+): value is ModelEvaluationAuthorizationLedger {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS.has(value)
+  );
 }
 
 export interface ModelEvaluationSettlementContext {
@@ -264,6 +556,7 @@ export type ModelEvaluationSettlementResolution =
       state: "settled";
       amountCents: number;
       basis: ModelEvaluationCostBasis;
+      executionId?: string;
     }
   | Exclude<CostSettlement, { state: "settled" }>;
 
@@ -295,7 +588,7 @@ const TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY = new WeakMap<
 >();
 const TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS = new WeakMap<
   object,
-  () => void
+  () => Promise<void>
 >();
 const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
 const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
@@ -330,13 +623,15 @@ export function modelEvaluationProtocolExecutorCostSafety(
     : (TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.get(identity) ?? null);
 }
 
-export function freezeModelEvaluationProtocolExecutor(value: unknown): boolean {
+export async function freezeModelEvaluationProtocolExecutor(
+  value: unknown,
+): Promise<boolean> {
   const identity = modelEvaluationProtocolExecutorIdentity(value);
   const freeze = identity
     ? TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.get(identity)
     : undefined;
   if (!freeze) return false;
-  freeze();
+  await freeze();
   return true;
 }
 
@@ -428,12 +723,14 @@ function canonicalSettlement(
       : null;
   if (
     value.state === "settled" &&
-    exactKeys(value, ["state", "amountCents", "basis"]) &&
+    exactKeys(value, ["state", "amountCents", "basis", "executionId"]) &&
     typeof value.amountCents === "number" &&
     Number.isFinite(value.amountCents) &&
     value.amountCents >= 0 &&
     typeof value.basis === "string" &&
     SETTLED_BASES.has(value.basis) &&
+    context !== undefined &&
+    value.executionId === context.executionId &&
     (value.basis !== "provider_reported" ||
       (providerReportedAmount !== null &&
         Math.abs(providerReportedAmount - value.amountCents) <= 1e-9)) &&
@@ -911,6 +1208,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   wireClient: ModelEvaluationWireClient;
   settlementResolver: ModelEvaluationSettlementResolver;
   costSafety: ModelEvaluationCostSafetyAttestation;
+  authorizationLedger: ModelEvaluationAuthorizationLedger;
 }): ModelEvaluationProtocolExecutor {
   const wireReceiver = deps?.wireClient;
   const openAIResponses = wireReceiver?.openAIResponses;
@@ -920,6 +1218,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const resolverId = resolverReceiver?.resolverId;
   const resolverResolve = resolverReceiver?.resolve;
   const costSafety = deps?.costSafety;
+  const authorizationLedger = deps?.authorizationLedger;
   const credentialAttestationId = wireReceiver?.credentialAttestationId;
   const credentialSnapshotSha256 = wireReceiver?.credentialSnapshotSha256;
   const trustedWireCredential =
@@ -935,6 +1234,10 @@ export function createModelEvaluationProtocolExecutor(deps: {
     !SETTLEMENT_RESOLVER_ID.test(resolverId ?? "") ||
     typeof resolverResolve !== "function" ||
     !isTrustedModelEvaluationCostSafetyAttestation(costSafety) ||
+    !isTrustedModelEvaluationAuthorizationLedger(authorizationLedger) ||
+    authorizationLedger.ledgerId !== costSafety.authorization.ledgerId ||
+    authorizationLedger.directorySha256 !==
+      costSafety.authorization.ledgerDirectorySha256 ||
     costSafety.pricing.resolverId !== resolverId ||
     trustedWireCredential?.credentialAttestationId !==
       credentialAttestationId ||
@@ -970,11 +1273,60 @@ export function createModelEvaluationProtocolExecutor(deps: {
   let committedCampaignCents = 0;
   let reservedCampaignUpperBoundCents = 0;
   let campaignFrozen = false;
+  const executorClaimId = randomUUID();
+  let durableClaim:
+    | Promise<Readonly<{ claimed: boolean; error: unknown | null }>>
+    | undefined;
+  const claimDurableAuthorization = () => {
+    durableClaim ??= Promise.resolve()
+      .then(() =>
+        authorizationLedger.claim(
+          Object.freeze({
+            authorizationId: costSafety.authorization.authorizationId,
+            executorClaimId,
+            campaignBudgetCents: costSafety.limits.campaignBudgetCents,
+            maxDispatchExecutions: costSafety.limits.maxDispatchExecutions,
+            maxWireCalls: costSafety.limits.maxWireCalls,
+          }),
+        ),
+      )
+      .then(
+        (claimed) =>
+          Object.freeze({
+            claimed: claimed === true,
+            error: claimed === true ? null : new Error("claim rejected"),
+          }),
+        (error: unknown) => Object.freeze({ claimed: false, error }),
+      );
+    return durableClaim;
+  };
+  const freezeDurableAuthorization = async (reason: string): Promise<void> => {
+    campaignFrozen = true;
+    const claim = await claimDurableAuthorization();
+    if (!claim.claimed) return;
+    try {
+      const frozen = await authorizationLedger.freeze(
+        Object.freeze({
+          authorizationId: costSafety.authorization.authorizationId,
+          executorClaimId,
+          reason,
+        }),
+      );
+      if (frozen !== true) campaignFrozen = true;
+    } catch {
+      campaignFrozen = true;
+    }
+  };
 
   const executeWithMode = async <T>(
     request: EvaluationExecutionRequest,
     mode: "target" | "legacy_comparator",
   ): Promise<ModelEvaluationCallResult<T>> => {
+    const claim = await claimDurableAuthorization();
+    if (!claim.claimed) {
+      campaignFrozen = true;
+      throw preDispatchError("evaluation_cost_safety_rejected");
+    }
     if (!consumeAuthorizedModelEvaluationExecutionRequest(request)) {
       throw preDispatchError("evaluation_dispatch_not_authorized");
     }
@@ -991,18 +1343,48 @@ export function createModelEvaluationProtocolExecutor(deps: {
     const campaignReservationCents =
       request.perCallCostCapCents * maximumWireCalls;
     let campaignReservationActive = false;
-    const closeCampaignReservation = (settlement: CostSettlement): void => {
-      if (!campaignReservationActive) return;
+    const closeCampaignReservation = async (
+      settlement: CostSettlement,
+    ): Promise<CostSettlement> => {
+      if (!campaignReservationActive) return settlement;
       reservedCampaignUpperBoundCents -= campaignReservationCents;
       campaignReservationActive = false;
-      if (settlement.state === "settled") {
-        committedCampaignCents += settlement.amountCents;
-        if (committedCampaignCents > costSafety.limits.campaignBudgetCents) {
-          campaignFrozen = true;
+      let effectiveSettlement = settlement;
+      try {
+        const persisted = await authorizationLedger.settle(
+          Object.freeze({
+            authorizationId: costSafety.authorization.authorizationId,
+            executorClaimId,
+            executionId: request.executionId,
+            settlement,
+          }),
+        );
+        if (persisted !== true) {
+          await freezeDurableAuthorization("settlement_persistence_rejected");
+          effectiveSettlement = {
+            state: "unknown",
+            reason: "invalid_settlement",
+          };
         }
-      } else if (settlement.state === "unknown") {
-        campaignFrozen = true;
+      } catch {
+        await freezeDurableAuthorization("settlement_persistence_failed");
+        effectiveSettlement = {
+          state: "unknown",
+          reason: "invalid_settlement",
+        };
       }
+      if (effectiveSettlement.state === "settled") {
+        committedCampaignCents += effectiveSettlement.amountCents;
+        if (
+          effectiveSettlement.amountCents > request.perCallCostCapCents ||
+          committedCampaignCents > costSafety.limits.campaignBudgetCents
+        ) {
+          await freezeDurableAuthorization("settled_cost_cap_exceeded");
+        }
+      } else if (effectiveSettlement.state === "unknown") {
+        await freezeDurableAuthorization("unknown_settlement");
+      }
+      return effectiveSettlement;
     };
     try {
       assertModelEvaluationCostSafetyDispatch(costSafety, {
@@ -1035,6 +1417,27 @@ export function createModelEvaluationProtocolExecutor(deps: {
     reservedWireCalls += maximumWireCalls;
     reservedCampaignUpperBoundCents += campaignReservationCents;
     campaignReservationActive = true;
+    try {
+      const persisted = await authorizationLedger.reserve(
+        Object.freeze({
+          authorizationId: costSafety.authorization.authorizationId,
+          executorClaimId,
+          executionId: request.executionId,
+          wireCalls: maximumWireCalls,
+          upperBoundCents: campaignReservationCents,
+        }),
+      );
+      if (persisted !== true) {
+        throw new Error("durable reservation rejected");
+      }
+    } catch {
+      reservedDispatchExecutions -= 1;
+      reservedWireCalls -= maximumWireCalls;
+      reservedCampaignUpperBoundCents -= campaignReservationCents;
+      campaignReservationActive = false;
+      await freezeDurableAuthorization("reservation_persistence_failed");
+      throw preDispatchError("evaluation_cost_safety_rejected");
+    }
 
     const dispatch = async (
       prompt: string,
@@ -1057,10 +1460,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
             state: "not_incurred",
             reason: "rejected_before_dispatch",
           } as const;
-          closeCampaignReservation(rejected);
+          const effectiveSettlement =
+            await closeCampaignReservation(rejected);
           throw new ModelEvaluationCallError(
             "evaluation_cost_safety_rejected",
-            rejected,
+            effectiveSettlement,
           );
         }
         const settlement = await safeResolveSettlement(
@@ -1080,10 +1484,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        closeCampaignReservation(settlement);
+        const effectiveSettlement =
+          await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           "evaluation_cost_safety_rejected",
-          settlement,
+          effectiveSettlement,
         );
       }
       if (campaignFrozen || request.signal.aborted) {
@@ -1092,12 +1497,13 @@ export function createModelEvaluationProtocolExecutor(deps: {
             state: "not_incurred",
             reason: "rejected_before_dispatch",
           } as const;
-          closeCampaignReservation(rejected);
+          const effectiveSettlement =
+            await closeCampaignReservation(rejected);
           throw new ModelEvaluationCallError(
             request.signal.aborted
               ? "evaluation_aborted"
               : "evaluation_cost_safety_rejected",
-            rejected,
+            effectiveSettlement,
           );
         }
         const error = new Error(
@@ -1122,13 +1528,14 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        closeCampaignReservation(settlement);
+        const effectiveSettlement =
+          await closeCampaignReservation(settlement);
         campaignFrozen = true;
         throw new ModelEvaluationCallError(
           request.signal.aborted
             ? "evaluation_aborted"
             : "evaluation_cost_safety_rejected",
-          settlement,
+          effectiveSettlement,
         );
       }
       let response: ModelEvaluationWireResponse;
@@ -1207,10 +1614,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        closeCampaignReservation(settlement);
+        const effectiveSettlement =
+          await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           request.signal.aborted ? "evaluation_aborted" : "provider_error",
-          settlement,
+          effectiveSettlement,
         );
       }
 
@@ -1253,10 +1661,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        closeCampaignReservation(settlement);
+        const effectiveSettlement =
+          await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           "provider_response_invalid",
-          settlement,
+          effectiveSettlement,
         );
       }
       if (
@@ -1283,11 +1692,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        closeCampaignReservation(settlement);
+        const effectiveSettlement =
+          await closeCampaignReservation(settlement);
         campaignFrozen = true;
         throw new ModelEvaluationCallError(
           "evaluation_output_token_limit_exceeded",
-          settlement,
+          effectiveSettlement,
         );
       }
       addUsage(usage, normalized.usage);
@@ -1318,7 +1728,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
     }
 
     const resolvedUsage = evaluationUsage(usage);
-    const settlement = await safeResolveSettlement(
+    let settlement = await safeResolveSettlement(
       settlementResolver,
       {
         executionId: request.executionId,
@@ -1334,7 +1744,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
       },
       costSafety,
     );
-    closeCampaignReservation(settlement);
+    settlement = await closeCampaignReservation(settlement);
     if (!resolvedUsage) {
       throw new ModelEvaluationCallError("usage_unavailable", settlement);
     }
@@ -1375,9 +1785,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
     executorIdentity,
     costSafety,
   );
-  TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.set(executorIdentity, () => {
-    campaignFrozen = true;
-  });
+  TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.set(executorIdentity, () =>
+    freezeDurableAuthorization("harness_hard_stop"),
+  );
   APPLY_TRUSTED_EXECUTE_INTRINSIC(
     TRUSTED_EXECUTE_SET,
     TRUSTED_MODEL_EVALUATION_EXECUTES,
