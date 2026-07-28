@@ -466,6 +466,12 @@ const LEDGER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
   directory: string;
   sha256: string;
+  markerPath: string;
+  markerDevice: bigint;
+  markerInode: bigint;
+  markerCtimeNs: bigint;
+  markerSize: bigint;
+  claimedAuthorizationDigests: readonly string[];
 }> {
   const absoluteDirectory = resolve(directory);
   mkdirSync(absoluteDirectory, { recursive: true, mode: 0o700 });
@@ -518,24 +524,38 @@ function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
     }
     const markerStats = fstatSync(markerDescriptor, { bigint: true });
     const marker = readFileSync(markerDescriptor, "utf8");
+    const markerLines = marker.split("\n");
+    const markerId = markerLines[0] ?? "";
+    const claimLines = markerLines.slice(1, -1);
     if (
       !markerStats.isFile() ||
       markerStats.nlink !== 1n ||
-      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\n$/.test(
-        marker,
-      )
+      markerLines.at(-1) !== "" ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+        markerId,
+      ) ||
+      claimLines.some((line) => !/^claim:[a-f0-9]{64}$/.test(line))
     ) {
       throw new Error(
         "evaluation authorization ledger directory marker is invalid",
       );
     }
+    const claimedAuthorizationDigests = claimLines.map((line) =>
+      line.slice("claim:".length),
+    );
     return Object.freeze({
       directory: realDirectory,
       sha256: createHash("sha256")
         .update(
-          `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${marker}`,
+          `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${markerStats.dev.toString()}\0${markerStats.ino.toString()}\0${markerId}`,
         )
         .digest("hex"),
+      markerPath,
+      markerDevice: markerStats.dev,
+      markerInode: markerStats.ino,
+      markerCtimeNs: markerStats.ctimeNs,
+      markerSize: markerStats.size,
+      claimedAuthorizationDigests: Object.freeze(claimedAuthorizationDigests),
     });
   } finally {
     if (markerDescriptor !== undefined) closeSync(markerDescriptor);
@@ -611,6 +631,63 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       offset += written;
     }
   };
+  const appendAuthorizationClaimDurably = (
+    authorizationId: string,
+  ): boolean => {
+    const authorizationDigest = createHash("sha256")
+      .update(authorizationId)
+      .digest("hex");
+    const currentIdentity = resolveLedgerDirectoryIdentity(
+      directoryIdentity.directory,
+    );
+    if (currentIdentity.sha256 !== directoryIdentity.sha256) {
+      throw new Error(
+        "evaluation authorization ledger directory identity changed",
+      );
+    }
+    if (
+      currentIdentity.claimedAuthorizationDigests.includes(authorizationDigest)
+    ) {
+      return false;
+    }
+    const descriptor = openSync(
+      currentIdentity.markerPath,
+      fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      const before = fstatSync(descriptor, { bigint: true });
+      if (
+        !before.isFile() ||
+        before.nlink !== 1n ||
+        before.dev !== currentIdentity.markerDevice ||
+        before.ino !== currentIdentity.markerInode ||
+        before.ctimeNs !== currentIdentity.markerCtimeNs ||
+        before.size !== currentIdentity.markerSize
+      ) {
+        throw new Error(
+          "evaluation authorization ledger directory marker identity changed",
+        );
+      }
+      const payload = `claim:${authorizationDigest}\n`;
+      writeAllSync(descriptor, payload);
+      fsyncSync(descriptor);
+      const after = fstatSync(descriptor, { bigint: true });
+      if (
+        !after.isFile() ||
+        after.nlink !== 1n ||
+        after.dev !== currentIdentity.markerDevice ||
+        after.ino !== currentIdentity.markerInode ||
+        after.size !== before.size + BigInt(Buffer.byteLength(payload, "utf8"))
+      ) {
+        throw new Error(
+          "evaluation authorization ledger directory marker changed during append",
+        );
+      }
+    } finally {
+      closeSync(descriptor);
+    }
+    return true;
+  };
   const appendDurably = (state: LedgerState, value: unknown): void => {
     assertDirectoryIdentity();
     const descriptor = openSync(
@@ -658,6 +735,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     claim: (input) => {
       if (states.has(input.authorizationId)) return false;
       assertDirectoryIdentity();
+      if (!appendAuthorizationClaimDurably(input.authorizationId)) return false;
       const filePath = join(
         directoryIdentity.directory,
         `${createHash("sha256")

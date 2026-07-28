@@ -662,6 +662,45 @@ describe("model evaluation executor authorization", () => {
     }
   });
 
+  it("preserves a claimed authorization after its JSONL file is deleted", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-deleted-claim-spec-"),
+    );
+    const ledgerId = "deleted-claim-spec-ledger/durable-v1";
+    const claim = {
+      authorizationId: "deleted-claim-spec/authorization-v1",
+      executorClaimId: "deleted-claim-spec/executor-v1",
+      campaignBudgetCents: 100,
+      maxDispatchExecutions: 1,
+      maxWireCalls: 1,
+    };
+    try {
+      const priorProcessLedger =
+        createFileBackedModelEvaluationAuthorizationLedger({
+          ledgerId,
+          directory,
+        });
+      expect(priorProcessLedger.claim(claim)).toBe(true);
+      const claimFiles = (await readdir(directory)).filter((entry) =>
+        entry.endsWith(".jsonl"),
+      );
+      expect(claimFiles).toHaveLength(1);
+      await rm(join(directory, claimFiles[0]!), { force: true });
+
+      const restartedLedger =
+        createFileBackedModelEvaluationAuthorizationLedger({
+          ledgerId,
+          directory,
+        });
+      expect(restartedLedger.claim(claim)).toBe(false);
+      expect(
+        (await readdir(directory)).filter((entry) => entry.endsWith(".jsonl")),
+      ).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a replaced or symlinked claim file before ledger append", async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "evaluation-ledger-file-identity-spec-"),
