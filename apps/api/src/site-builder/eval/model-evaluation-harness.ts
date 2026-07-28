@@ -1728,6 +1728,26 @@ export class ModelEvaluationCapabilityCampaign {
         outputVerified: false,
       };
     }
+    const observedProbeElapsedMs = readMonotonicElapsed(now, startedAt);
+    if (
+      observedProbeElapsedMs !== null &&
+      observedProbeElapsedMs >= options.plan.envelope.hardStopMs
+    ) {
+      controller.abort(
+        new Error("model capability probe completed after hard stop"),
+      );
+      await freezeModelEvaluationProtocolExecutor(options.execute);
+      settleTrustedModelEvaluationBudget(this.#budget, callId, {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      });
+      return {
+        status: "diagnostic_window_exhausted",
+        protocolVerified: false,
+        identityVerified: false,
+        outputVerified: false,
+      };
+    }
     if (outcome.kind === "failed") {
       const settlement =
         outcome.error instanceof ModelEvaluationCallError
@@ -1766,7 +1786,7 @@ export class ModelEvaluationCapabilityCampaign {
     );
     const settlementCoherent =
       settled.settlement.state === "settled" && !settled.settlementInvalid;
-    const elapsedMs = readMonotonicElapsed(now, startedAt);
+    const elapsedMs = observedProbeElapsedMs;
     const observation: CapabilityProbeObservation = {
       actualProtocol: outcome.value.actualProtocol,
       requestedModel: outcome.value.requestedModel,
@@ -2571,6 +2591,33 @@ export async function runTaskEvaluationAttempt<T>(options: {
   const observedElapsedMs = readMonotonicElapsed(now, startedAt);
   const elapsedIsValid = observedElapsedMs !== null;
   const elapsedMs = observedElapsedMs ?? 0;
+  if (elapsedIsValid && elapsedMs >= options.plan.envelope.hardStopMs) {
+    controller.abort(new Error("model evaluation completed after hard stop"));
+    await freezeModelEvaluationProtocolExecutor(options.execute);
+    const settled = settleTrustedModelEvaluationBudget(
+      options.campaignBudget,
+      callId,
+      {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      },
+    );
+    return bindRun({
+      ...identity,
+      resultClass: "diagnostic_window_exhausted",
+      runtimeTiming: "diagnostic_exhausted",
+      elapsedMs,
+      protocolVerified: false,
+      identityVerified: false,
+      artifactAccepted: false,
+      assessment: null,
+      costSettlement: settled.settlement,
+      budgetCapExceeded: settled.capExceeded,
+      settlementInvalid: settled.settlementInvalid,
+      usage: null,
+      failureCode: "completed_after_hard_stop",
+    });
+  }
   if (outcome.kind === "failed") {
     const failure =
       outcome.error instanceof ModelEvaluationCallError

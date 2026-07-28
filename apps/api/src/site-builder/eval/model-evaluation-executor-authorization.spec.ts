@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rename, rm, symlink } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +27,7 @@ import {
   createFileBackedModelEvaluationAuthorizationLedger,
   createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
   MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES,
+  modelEvaluationLedgerDirectorySha256,
   type ModelEvaluationWireClient,
 } from "./model-evaluation-executor";
 import {
@@ -393,6 +402,51 @@ describe("model evaluation executor authorization", () => {
     ).toThrow("trusted cost safety must match");
   });
 
+  it("uses captured brand intrinsics after WeakMap and WeakSet monkeypatches", () => {
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
+    const untrustedWire = Object.assign(fakeWireClient(vi.fn()), {
+      credentialAttestationId: costSafety.credential.attestationId,
+      credentialSnapshotSha256: costSafety.credential.snapshotSha256,
+      credentialBearerTokenSha256: costSafety.credential.bearerTokenSha256,
+      credentialGatewayOrigin: costSafety.credential.gatewayOrigin,
+    });
+    const duckLedger = {
+      ledgerId: costSafety.authorization.ledgerId,
+      directorySha256: costSafety.authorization.ledgerDirectorySha256,
+      claim: vi.fn(() => true),
+      reserve: vi.fn(() => true),
+      settle: vi.fn(() => true),
+      freeze: vi.fn(() => true),
+    };
+    const weakMapGet = vi.spyOn(WeakMap.prototype, "get").mockReturnValue({
+      credentialAttestationId: costSafety.credential.attestationId,
+      credentialSnapshotSha256: costSafety.credential.snapshotSha256,
+      credentialBearerTokenSha256: costSafety.credential.bearerTokenSha256,
+      credentialGatewayOrigin: costSafety.credential.gatewayOrigin,
+    });
+    const weakSetHas = vi.spyOn(WeakSet.prototype, "has").mockReturnValue(true);
+    let thrown: unknown;
+    try {
+      try {
+        createRawModelEvaluationProtocolExecutor({
+          wireClient: untrustedWire,
+          authorizationLedger: duckLedger,
+          settlementResolver: resolver,
+          costSafety,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+    } finally {
+      weakMapGet.mockRestore();
+      weakSetHas.mockRestore();
+    }
+    expect(thrown).toMatchObject({
+      message: expect.stringContaining("trusted cost safety must match"),
+    });
+  });
+
   it("rejects a ledger directory that does not match the spend authorization", async () => {
     const resolver = fakeResolver();
     const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
@@ -472,6 +526,40 @@ describe("model evaluation executor authorization", () => {
       ).toThrow("trusted cost safety must match");
     } finally {
       await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("changes durable ledger identity when a deleted directory is recreated", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-marker-spec-"),
+    );
+    try {
+      const first = modelEvaluationLedgerDirectorySha256(directory);
+      await rm(directory, { recursive: true, force: true });
+      await mkdir(directory);
+      const second = modelEvaluationLedgerDirectorySha256(directory);
+      expect(second).not.toBe(first);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a malformed durable ledger directory marker", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-invalid-marker-spec-"),
+    );
+    try {
+      modelEvaluationLedgerDirectorySha256(directory);
+      await writeFile(
+        join(directory, ".site-builder-model-evaluation-ledger-id"),
+        "00000000-0000-0000-0000-000000000000\n",
+        "utf8",
+      );
+      expect(() => modelEvaluationLedgerDirectorySha256(directory)).toThrow(
+        "directory marker is invalid",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   });
 
@@ -653,7 +741,9 @@ describe("model evaluation executor authorization", () => {
       await expect(executor.execute(directRequest())).rejects.toMatchObject({
         failureCode: "evaluation_dispatch_not_authorized",
       });
-      expect(await readdir(directory)).toEqual([]);
+      expect(await readdir(directory)).toEqual([
+        ".site-builder-model-evaluation-ledger-id",
+      ]);
 
       const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
       await expect(
@@ -668,7 +758,7 @@ describe("model evaluation executor authorization", () => {
       ).resolves.toMatchObject({
         resultClass: "content_invalid",
       });
-      expect(await readdir(directory)).toHaveLength(1);
+      expect(await readdir(directory)).toHaveLength(2);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

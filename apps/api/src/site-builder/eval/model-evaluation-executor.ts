@@ -7,8 +7,10 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   realpathSync,
   type BigIntStats,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -220,6 +222,11 @@ const TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS = new WeakMap<
     credentialGatewayOrigin: string;
   }>
 >();
+const MODEL_EVALUATION_WEAK_MAP_GET = WeakMap.prototype.get;
+const MODEL_EVALUATION_WEAK_MAP_SET = WeakMap.prototype.set;
+const MODEL_EVALUATION_WEAK_SET_ADD = WeakSet.prototype.add;
+const MODEL_EVALUATION_WEAK_SET_HAS = WeakSet.prototype.has;
+const APPLY_MODEL_EVALUATION_INTRINSIC = Reflect.apply;
 
 export interface ModelEvaluationCredentialHandle {
   readonly attestationId: string;
@@ -393,14 +400,18 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
         ),
     ),
   }) satisfies ModelEvaluationWireClient;
-  TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.set(
-    bound,
-    Object.freeze({
-      credentialAttestationId: credential.attestationId,
-      credentialSnapshotSha256: credential.snapshotSha256,
-      credentialBearerTokenSha256: credential.bearerTokenSha256,
-      credentialGatewayOrigin: gatewayOrigin,
-    }),
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS,
+    [
+      bound,
+      Object.freeze({
+        credentialAttestationId: credential.attestationId,
+        credentialSnapshotSha256: credential.snapshotSha256,
+        credentialBearerTokenSha256: credential.bearerTokenSha256,
+        credentialGatewayOrigin: gatewayOrigin,
+      }),
+    ],
   );
   return bound;
 }
@@ -469,14 +480,66 @@ function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
       "evaluation authorization ledger directory must be a stable real directory",
     );
   }
-  return Object.freeze({
-    directory: realDirectory,
-    sha256: createHash("sha256")
-      .update(
-        `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}`,
+  const markerPath = join(
+    realDirectory,
+    ".site-builder-model-evaluation-ledger-id",
+  );
+  let markerDescriptor: number | undefined;
+  try {
+    try {
+      markerDescriptor = openSync(markerPath, "wx+", 0o600);
+      writeFileSync(markerDescriptor, `${randomUUID()}\n`, "utf8");
+      fsyncSync(markerDescriptor);
+      closeSync(markerDescriptor);
+      markerDescriptor = undefined;
+      markerDescriptor = openSync(
+        markerPath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+      const directoryDescriptor = openSync(realDirectory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "EEXIST"
+      ) {
+        throw error;
+      }
+      markerDescriptor = openSync(
+        markerPath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+    }
+    const markerStats = fstatSync(markerDescriptor, { bigint: true });
+    const marker = readFileSync(markerDescriptor, "utf8");
+    if (
+      !markerStats.isFile() ||
+      markerStats.nlink !== 1n ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\n$/.test(
+        marker,
       )
-      .digest("hex"),
-  });
+    ) {
+      throw new Error(
+        "evaluation authorization ledger directory marker is invalid",
+      );
+    }
+    return Object.freeze({
+      directory: realDirectory,
+      sha256: createHash("sha256")
+        .update(
+          `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${marker}`,
+        )
+        .digest("hex"),
+    });
+  } finally {
+    if (markerDescriptor !== undefined) closeSync(markerDescriptor);
+  }
 }
 
 export function modelEvaluationLedgerDirectorySha256(
@@ -719,7 +782,11 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     },
   };
   const trusted = Object.freeze(ledger);
-  TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS.add(trusted);
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_SET_ADD,
+    TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS,
+    [trusted],
+  );
   return trusted;
 }
 
@@ -729,7 +796,11 @@ function isTrustedModelEvaluationAuthorizationLedger(
   return (
     !!value &&
     typeof value === "object" &&
-    TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS.has(value)
+    APPLY_MODEL_EVALUATION_INTRINSIC(
+      MODEL_EVALUATION_WEAK_SET_HAS,
+      TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS,
+      [value],
+    ) === true
   );
 }
 
@@ -788,9 +859,6 @@ const TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS = new WeakMap<
   object,
   () => Promise<void>
 >();
-const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
-const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
-const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
 const CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS = new Set<string>();
 
 export function modelEvaluationProtocolExecutorIdentity(
@@ -798,8 +866,8 @@ export function modelEvaluationProtocolExecutorIdentity(
 ): object | null {
   if (typeof value !== "function") return null;
   return (
-    (APPLY_TRUSTED_EXECUTE_INTRINSIC(
-      TRUSTED_EXECUTE_GET,
+    (APPLY_MODEL_EVALUATION_INTRINSIC(
+      MODEL_EVALUATION_WEAK_MAP_GET,
       TRUSTED_MODEL_EVALUATION_EXECUTES,
       [value],
     ) as object | undefined) ?? null
@@ -818,7 +886,11 @@ export function modelEvaluationProtocolExecutorCostSafety(
   const identity = modelEvaluationProtocolExecutorIdentity(value);
   return identity === null
     ? null
-    : (TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.get(identity) ?? null);
+    : ((APPLY_MODEL_EVALUATION_INTRINSIC(
+        MODEL_EVALUATION_WEAK_MAP_GET,
+        TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY,
+        [identity],
+      ) as ModelEvaluationCostSafetyAttestation | undefined) ?? null);
 }
 
 export async function freezeModelEvaluationProtocolExecutor(
@@ -826,7 +898,11 @@ export async function freezeModelEvaluationProtocolExecutor(
 ): Promise<boolean> {
   const identity = modelEvaluationProtocolExecutorIdentity(value);
   const freeze = identity
-    ? TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.get(identity)
+    ? (APPLY_MODEL_EVALUATION_INTRINSIC(
+        MODEL_EVALUATION_WEAK_MAP_GET,
+        TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS,
+        [identity],
+      ) as (() => Promise<void>) | undefined)
     : undefined;
   if (!freeze) return false;
   await freeze();
@@ -1423,7 +1499,18 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const credentialGatewayOrigin = wireReceiver?.credentialGatewayOrigin;
   const trustedWireCredential =
     wireReceiver && typeof wireReceiver === "object"
-      ? TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.get(wireReceiver)
+      ? (APPLY_MODEL_EVALUATION_INTRINSIC(
+          MODEL_EVALUATION_WEAK_MAP_GET,
+          TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS,
+          [wireReceiver],
+        ) as
+          | Readonly<{
+              credentialAttestationId: string;
+              credentialSnapshotSha256: string;
+              credentialBearerTokenSha256: string;
+              credentialGatewayOrigin: string;
+            }>
+          | undefined)
       : undefined;
   if (
     !wireReceiver ||
@@ -1985,15 +2072,18 @@ export function createModelEvaluationProtocolExecutor(deps: {
   CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.add(
     costSafety.authorization.authorizationId,
   );
-  TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.set(
-    executorIdentity,
-    costSafety,
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY,
+    [executorIdentity, costSafety],
   );
-  TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.set(executorIdentity, () =>
-    freezeDurableAuthorization("harness_hard_stop"),
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS,
+    [executorIdentity, () => freezeDurableAuthorization("harness_hard_stop")],
   );
-  APPLY_TRUSTED_EXECUTE_INTRINSIC(
-    TRUSTED_EXECUTE_SET,
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
     TRUSTED_MODEL_EVALUATION_EXECUTES,
     [execute, executorIdentity],
   );

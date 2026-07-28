@@ -1281,10 +1281,88 @@ describe("task attempt observation window", () => {
       artifactAccepted: false,
       failureCode: "completed_after_hard_stop",
       costSettlement: {
-        state: "settled",
-        amountCents: 1,
-        basis: "provider_reported@fake-settlement/v1",
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
       },
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("freezes a failed outcome observed after the hard stop", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const clock = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1000 + plan.envelope.hardStopMs + 1);
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        execute: async () => {
+          throw new ModelEvaluationCallError("provider_unavailable", {
+            state: "settled",
+            amountCents: 1,
+            basis: "provider_reported@fake-settlement/v1",
+          });
+        },
+        now: clock,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+      runtimeTiming: "diagnostic_exhausted",
+      costSettlement: {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      },
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("freezes a capability probe completion observed after the hard stop", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    const clock = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1000 + plan.envelope.hardStopMs + 1);
+
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: async () =>
+          completedCall(
+            candidate.alias,
+            candidate.expectedProtocol,
+            canonicalAcceptedArtifact(),
+          ),
+        now: clock,
+      }),
+    ).resolves.toMatchObject({
+      status: "diagnostic_window_exhausted",
+      protocolVerified: false,
+      identityVerified: false,
+      outputVerified: false,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
     });
   });
 
@@ -2197,7 +2275,7 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("summarizes delayed provider-attested no-cost failure but keeps it unrankable", async () => {
+  it("freezes a delayed provider-attested no-cost failure at hard stop", async () => {
     const candidate = plan.candidates.find(
       (entry) => entry.alias === "gpt-5.6-terra",
     )!;
@@ -2235,8 +2313,8 @@ describe("quality-first candidate summary and ranking", () => {
       resultClass: "diagnostic_window_exhausted",
       runtimeTiming: "diagnostic_exhausted",
       costSettlement: {
-        state: "not_incurred",
-        reason: "provider_attested_not_incurred",
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
       },
     });
     expect(summary).toMatchObject({
@@ -2247,12 +2325,12 @@ describe("quality-first candidate summary and ranking", () => {
 
     expect(() =>
       Object.assign(runs[11].costSettlement, {
-        reason: "rejected_before_dispatch",
+        reason: "provider_ack_unknown",
       }),
     ).toThrow(TypeError);
     expect(runs[11].costSettlement).toEqual({
-      state: "not_incurred",
-      reason: "provider_attested_not_incurred",
+      state: "unknown",
+      reason: "diagnostic_hard_stop",
     });
   });
 

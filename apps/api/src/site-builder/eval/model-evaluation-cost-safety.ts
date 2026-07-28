@@ -89,6 +89,9 @@ const ATTESTATION_ID = /^[a-z0-9][a-z0-9._/-]{7,127}$/;
 const RESOLVER_ID = /^[a-z0-9][a-z0-9._/-]{2,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const TRUSTED_COST_SAFETY_ATTESTATIONS = new WeakSet<object>();
+const COST_SAFETY_WEAK_SET_ADD = WeakSet.prototype.add;
+const COST_SAFETY_WEAK_SET_HAS = WeakSet.prototype.has;
+const APPLY_COST_SAFETY_INTRINSIC = Reflect.apply;
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -343,7 +346,11 @@ export function createModelEvaluationCostSafetyAttestation(
   }
 
   const attestation = deepFreeze(copy);
-  TRUSTED_COST_SAFETY_ATTESTATIONS.add(attestation);
+  APPLY_COST_SAFETY_INTRINSIC(
+    COST_SAFETY_WEAK_SET_ADD,
+    TRUSTED_COST_SAFETY_ATTESTATIONS,
+    [attestation],
+  );
   return attestation;
 }
 
@@ -353,7 +360,11 @@ export function isTrustedModelEvaluationCostSafetyAttestation(
   return (
     !!value &&
     typeof value === "object" &&
-    TRUSTED_COST_SAFETY_ATTESTATIONS.has(value)
+    APPLY_COST_SAFETY_INTRINSIC(
+      COST_SAFETY_WEAK_SET_HAS,
+      TRUSTED_COST_SAFETY_ATTESTATIONS,
+      [value],
+    ) === true
   );
 }
 
