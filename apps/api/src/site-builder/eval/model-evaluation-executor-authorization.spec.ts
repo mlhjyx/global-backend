@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -427,7 +427,7 @@ describe("model evaluation executor authorization", () => {
         10_000,
         { ledgerId, directory },
       );
-      await rm(directory, { recursive: true, force: true });
+      await rename(directory, join(parent, "original-ledger"));
       await mkdir(directory);
       expect(() =>
         createRawModelEvaluationProtocolExecutor({
