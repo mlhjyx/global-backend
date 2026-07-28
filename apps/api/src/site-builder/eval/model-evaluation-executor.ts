@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   type BigIntStats,
+  unlinkSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
@@ -631,7 +632,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       offset += written;
     }
   };
-  const appendAuthorizationClaimDurably = (
+  const appendAuthorizationClaimUnderLock = (
     authorizationId: string,
   ): boolean => {
     const authorizationDigest = createHash("sha256")
@@ -687,6 +688,88 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       closeSync(descriptor);
     }
     return true;
+  };
+  const appendAuthorizationClaimDurably = (
+    authorizationId: string,
+  ): boolean => {
+    assertDirectoryIdentity();
+    const lockPath = join(
+      directoryIdentity.directory,
+      ".site-builder-model-evaluation-claim.lock",
+    );
+    let lockDescriptor: number;
+    try {
+      lockDescriptor = openSync(lockPath, "wx", 0o600);
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "EEXIST"
+      ) {
+        throw new Error(
+          "evaluation authorization claim index is locked; retry without reissuing authorization",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    const lockStats = fstatSync(lockDescriptor, { bigint: true });
+    let result: boolean | undefined;
+    let operationFailed = false;
+    let operationError: unknown;
+    try {
+      fsyncSync(lockDescriptor);
+      const directoryDescriptor = openSync(directoryIdentity.directory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
+      result = appendAuthorizationClaimUnderLock(authorizationId);
+    } catch (error) {
+      operationFailed = true;
+      operationError = error;
+    }
+    let cleanupError: unknown;
+    try {
+      closeSync(lockDescriptor);
+      const currentLockStats = lstatSync(lockPath, { bigint: true });
+      if (
+        !currentLockStats.isFile() ||
+        currentLockStats.isSymbolicLink() ||
+        currentLockStats.nlink !== 1n ||
+        currentLockStats.dev !== lockStats.dev ||
+        currentLockStats.ino !== lockStats.ino
+      ) {
+        throw new Error(
+          "evaluation authorization claim index lock identity changed",
+        );
+      }
+      unlinkSync(lockPath);
+      const directoryDescriptor = openSync(directoryIdentity.directory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
+    } catch (error) {
+      cleanupError = error;
+    }
+    if (cleanupError !== undefined) {
+      if (operationFailed) {
+        throw new AggregateError(
+          [operationError, cleanupError],
+          "evaluation authorization claim and lock cleanup both failed",
+        );
+      }
+      throw cleanupError;
+    }
+    if (operationFailed) throw operationError;
+    if (result === undefined) {
+      throw new Error("evaluation authorization claim result is missing");
+    }
+    return result;
   };
   const appendDurably = (state: LedgerState, value: unknown): void => {
     assertDirectoryIdentity();

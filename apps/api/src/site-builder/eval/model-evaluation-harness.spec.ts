@@ -1,51 +1,60 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { trustedExecutorIdentity, trustedCostSafety } = vi.hoisted(() => ({
-  trustedExecutorIdentity: Object.freeze({}),
-  trustedCostSafety: Object.freeze({
-    credential: Object.freeze({
-      snapshotSha256:
-        "1111111111111111111111111111111111111111111111111111111111111111",
-      allowedDispatches: Object.freeze([
-        Object.freeze({
-          mode: "target",
-          alias: "gpt-5.6-terra",
-          protocol: "openai-responses",
+const { trustedExecutorIdentity, trustedCostSafety, trustedMonotonicClock } =
+  vi.hoisted(() => {
+    const trustedMonotonicClock = { offsetMs: 0 };
+    const nativeNow = performance.now.bind(performance);
+    vi.spyOn(performance, "now").mockImplementation(
+      () => nativeNow() + trustedMonotonicClock.offsetMs,
+    );
+    return {
+      trustedMonotonicClock,
+      trustedExecutorIdentity: Object.freeze({}),
+      trustedCostSafety: Object.freeze({
+        credential: Object.freeze({
+          snapshotSha256:
+            "1111111111111111111111111111111111111111111111111111111111111111",
+          allowedDispatches: Object.freeze([
+            Object.freeze({
+              mode: "target",
+              alias: "gpt-5.6-terra",
+              protocol: "openai-responses",
+            }),
+            Object.freeze({
+              mode: "target",
+              alias: "claude-sonnet-5",
+              protocol: "anthropic-messages",
+            }),
+            Object.freeze({
+              mode: "target",
+              alias: "gpt-5.5",
+              protocol: "openai-responses",
+            }),
+            Object.freeze({
+              mode: "legacy_comparator",
+              alias: "deepseek-v4-pro",
+              protocol: "openai-chat-completions",
+            }),
+            Object.freeze({
+              mode: "legacy_comparator",
+              alias: "glm-5.2",
+              protocol: "openai-chat-completions",
+            }),
+          ]),
         }),
-        Object.freeze({
-          mode: "target",
-          alias: "claude-sonnet-5",
-          protocol: "anthropic-messages",
+        pricing: Object.freeze({
+          snapshotSha256:
+            "2222222222222222222222222222222222222222222222222222222222222222",
         }),
-        Object.freeze({
-          mode: "target",
-          alias: "gpt-5.5",
-          protocol: "openai-responses",
+        limits: Object.freeze({
+          campaignBudgetCents: 10_000,
+          maxDispatchExecutions: 500,
+          maxWireCalls: 1_000,
+          maxOutputTokensPerCall: 100_000,
         }),
-        Object.freeze({
-          mode: "legacy_comparator",
-          alias: "deepseek-v4-pro",
-          protocol: "openai-chat-completions",
-        }),
-        Object.freeze({
-          mode: "legacy_comparator",
-          alias: "glm-5.2",
-          protocol: "openai-chat-completions",
-        }),
-      ]),
-    }),
-    pricing: Object.freeze({
-      snapshotSha256:
-        "2222222222222222222222222222222222222222222222222222222222222222",
-    }),
-    limits: Object.freeze({
-      campaignBudgetCents: 10_000,
-      maxDispatchExecutions: 500,
-      maxWireCalls: 1_000,
-      maxOutputTokensPerCall: 100_000,
-    }),
-  }),
-}));
+      }),
+    };
+  });
 
 vi.mock("./model-evaluation-executor", () => ({
   freezeModelEvaluationProtocolExecutor: () => true,
@@ -76,6 +85,10 @@ import {
   type BrandProfileOutput,
 } from "../agents/brand-profile";
 import { sha256CanonicalJson, sha256Text } from "./eval-provenance";
+
+beforeEach(() => {
+  trustedMonotonicClock.offsetMs = 0;
+});
 
 const validAssessment = (
   stabilityKey = "semantic-set-a",
@@ -1222,7 +1235,7 @@ describe("task attempt observation window", () => {
     }
   });
 
-  it("fails closed when the hard-stop timer cannot obtain valid monotonic elapsed time", async () => {
+  it("uses trusted elapsed when the hard-stop timer sees an invalid caller clock", async () => {
     vi.useFakeTimers();
     try {
       const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
@@ -1241,10 +1254,10 @@ describe("task attempt observation window", () => {
       });
       await vi.advanceTimersByTimeAsync(plan.envelope.hardStopMs);
       await expect(pending).resolves.toMatchObject({
-        resultClass: "capability_unavailable",
-        runtimeTiming: "not_started",
-        elapsedMs: 0,
-        failureCode: "monotonic_clock_invalid",
+        resultClass: "diagnostic_window_exhausted",
+        runtimeTiming: "diagnostic_exhausted",
+        elapsedMs: plan.envelope.hardStopMs,
+        failureCode: "diagnostic_window_exhausted",
       });
     } finally {
       vi.useRealTimers();
@@ -1285,6 +1298,44 @@ describe("task attempt observation window", () => {
         reason: "diagnostic_hard_stop",
       },
     });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("uses the captured monotonic clock when a stale caller clock hides an event-loop stall", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const result = await runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId: "auto-parts-rich",
+      attempt: 1,
+      campaignBudget: guard,
+      execute: async () => {
+        trustedMonotonicClock.offsetMs = plan.envelope.hardStopMs + 20;
+        return completedCall(
+          candidate.alias,
+          candidate.expectedProtocol,
+          canonicalAcceptedArtifact(),
+        );
+      },
+      now: () => 0,
+    });
+
+    expect(result).toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+      runtimeTiming: "diagnostic_exhausted",
+      artifactAccepted: false,
+      failureCode: "completed_after_hard_stop",
+      costSettlement: {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      },
+    });
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(plan.envelope.hardStopMs);
     expect(guard.snapshot()).toMatchObject({
       blocked: true,
       blockReason: "unknown_settlement",

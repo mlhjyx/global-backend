@@ -701,6 +701,8 @@ function readMonotonicElapsed(
   return Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null;
 }
 
+const TRUSTED_MONOTONIC_NOW = performance.now.bind(performance);
+
 function maximumExecutionCallCount(repairTaskOutput: boolean): number {
   return repairTaskOutput ? 2 : 1;
 }
@@ -1662,7 +1664,8 @@ export class ModelEvaluationCapabilityCampaign {
 
     const now = options.now ?? (() => performance.now());
     const startedAt = readMonotonicNow(now);
-    if (startedAt === null) {
+    const trustedStartedAt = readMonotonicNow(TRUSTED_MONOTONIC_NOW);
+    if (startedAt === null || trustedStartedAt === null) {
       settleTrustedModelEvaluationBudget(this.#budget, callId, null);
       return {
         status: "provenance_invalid",
@@ -1728,10 +1731,19 @@ export class ModelEvaluationCapabilityCampaign {
         outputVerified: false,
       };
     }
-    const observedProbeElapsedMs = readMonotonicElapsed(now, startedAt);
+    const reportedProbeElapsedMs = readMonotonicElapsed(now, startedAt);
+    const trustedProbeElapsedMs = readMonotonicElapsed(
+      TRUSTED_MONOTONIC_NOW,
+      trustedStartedAt,
+    );
+    const observedProbeElapsedMs =
+      trustedProbeElapsedMs === null
+        ? null
+        : Math.max(reportedProbeElapsedMs ?? 0, trustedProbeElapsedMs);
     if (
-      observedProbeElapsedMs !== null &&
-      observedProbeElapsedMs >= options.plan.envelope.hardStopMs
+      trustedProbeElapsedMs === null ||
+      (observedProbeElapsedMs !== null &&
+        observedProbeElapsedMs >= options.plan.envelope.hardStopMs)
     ) {
       controller.abort(
         new Error("model capability probe completed after hard stop"),
@@ -2460,7 +2472,8 @@ export async function runTaskEvaluationAttempt<T>(options: {
   );
   const now = options.now ?? (() => performance.now());
   const startedAt = readMonotonicNow(now);
-  if (startedAt === null) {
+  const trustedStartedAt = readMonotonicNow(TRUSTED_MONOTONIC_NOW);
+  if (startedAt === null || trustedStartedAt === null) {
     throw new Error("model evaluation monotonic clock is invalid");
   }
   const campaignId = trustedModelEvaluationCampaignId(options.campaignBudget);
@@ -2564,16 +2577,27 @@ export async function runTaskEvaluationAttempt<T>(options: {
         reason: "diagnostic_hard_stop",
       },
     );
-    const elapsedMs = readMonotonicElapsed(now, startedAt);
-    const elapsedIsValid =
-      elapsedMs !== null && elapsedMs >= options.plan.envelope.hardStopMs;
+    const reportedElapsedMs = readMonotonicElapsed(now, startedAt);
+    const trustedElapsedMs = readMonotonicElapsed(
+      TRUSTED_MONOTONIC_NOW,
+      trustedStartedAt,
+    );
+    const observedElapsedMs =
+      trustedElapsedMs === null
+        ? null
+        : Math.max(reportedElapsedMs ?? 0, trustedElapsedMs);
+    const elapsedMs = Math.max(
+      observedElapsedMs ?? 0,
+      options.plan.envelope.hardStopMs,
+    );
+    const elapsedIsValid = trustedElapsedMs !== null;
     return bindRun({
       ...identity,
       resultClass: elapsedIsValid
         ? "diagnostic_window_exhausted"
         : "capability_unavailable",
       runtimeTiming: elapsedIsValid ? "diagnostic_exhausted" : "not_started",
-      elapsedMs: elapsedIsValid ? elapsedMs! : 0,
+      elapsedMs: elapsedIsValid ? elapsedMs : 0,
       protocolVerified: false,
       identityVerified: false,
       artifactAccepted: false,
@@ -2588,10 +2612,21 @@ export async function runTaskEvaluationAttempt<T>(options: {
     });
   }
 
-  const observedElapsedMs = readMonotonicElapsed(now, startedAt);
+  const reportedElapsedMs = readMonotonicElapsed(now, startedAt);
+  const trustedElapsedMs = readMonotonicElapsed(
+    TRUSTED_MONOTONIC_NOW,
+    trustedStartedAt,
+  );
+  const observedElapsedMs =
+    trustedElapsedMs === null
+      ? null
+      : Math.max(reportedElapsedMs ?? 0, trustedElapsedMs);
   const elapsedIsValid = observedElapsedMs !== null;
   const elapsedMs = observedElapsedMs ?? 0;
-  if (elapsedIsValid && elapsedMs >= options.plan.envelope.hardStopMs) {
+  if (
+    trustedElapsedMs === null ||
+    (elapsedIsValid && elapsedMs >= options.plan.envelope.hardStopMs)
+  ) {
     controller.abort(new Error("model evaluation completed after hard stop"));
     await freezeModelEvaluationProtocolExecutor(options.execute);
     const settled = settleTrustedModelEvaluationBudget(
@@ -2604,8 +2639,12 @@ export async function runTaskEvaluationAttempt<T>(options: {
     );
     return bindRun({
       ...identity,
-      resultClass: "diagnostic_window_exhausted",
-      runtimeTiming: "diagnostic_exhausted",
+      resultClass:
+        trustedElapsedMs === null
+          ? "capability_unavailable"
+          : "diagnostic_window_exhausted",
+      runtimeTiming:
+        trustedElapsedMs === null ? "not_started" : "diagnostic_exhausted",
       elapsedMs,
       protocolVerified: false,
       identityVerified: false,
@@ -2615,7 +2654,10 @@ export async function runTaskEvaluationAttempt<T>(options: {
       budgetCapExceeded: settled.capExceeded,
       settlementInvalid: settled.settlementInvalid,
       usage: null,
-      failureCode: "completed_after_hard_stop",
+      failureCode:
+        trustedElapsedMs === null
+          ? "monotonic_clock_invalid"
+          : "completed_after_hard_stop",
     });
   }
   if (outcome.kind === "failed") {

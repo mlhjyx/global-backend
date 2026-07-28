@@ -701,6 +701,40 @@ describe("model evaluation executor authorization", () => {
     }
   });
 
+  it("serializes marker claims without burning an authorization on lock contention", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-claim-lock-spec-"),
+    );
+    const ledger = createFileBackedModelEvaluationAuthorizationLedger({
+      ledgerId: "claim-lock-spec-ledger/durable-v1",
+      directory,
+    });
+    const claim = {
+      authorizationId: "claim-lock-spec/authorization-v1",
+      executorClaimId: "claim-lock-spec/executor-v1",
+      campaignBudgetCents: 100,
+      maxDispatchExecutions: 1,
+      maxWireCalls: 1,
+    };
+    const lockPath = join(
+      directory,
+      ".site-builder-model-evaluation-claim.lock",
+    );
+    try {
+      await writeFile(lockPath, "", { flag: "wx", mode: 0o600 });
+      expect(() => ledger.claim(claim)).toThrow(
+        "claim index is locked; retry without reissuing authorization",
+      );
+      await rm(lockPath, { force: true });
+      expect(ledger.claim(claim)).toBe(true);
+      expect(await readdir(directory)).not.toContain(
+        ".site-builder-model-evaluation-claim.lock",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a replaced or symlinked claim file before ledger append", async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "evaluation-ledger-file-identity-spec-"),
