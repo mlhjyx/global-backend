@@ -1,11 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
+  constants as fsConstants,
+  fstatSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
   realpathSync,
+  type BigIntStats,
   writeSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -196,6 +199,7 @@ export interface ModelEvaluationWireClient {
   readonly credentialAttestationId?: string;
   readonly credentialSnapshotSha256?: string;
   readonly credentialBearerTokenSha256?: string;
+  readonly credentialGatewayOrigin?: string;
   openAIResponses(
     request: OpenAIResponsesEvaluationWireRequest,
   ): Promise<ModelEvaluationWireResponse>;
@@ -213,6 +217,7 @@ const TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS = new WeakMap<
     credentialAttestationId: string;
     credentialSnapshotSha256: string;
     credentialBearerTokenSha256: string;
+    credentialGatewayOrigin: string;
   }>
 >();
 
@@ -220,6 +225,7 @@ export interface ModelEvaluationCredentialHandle {
   readonly attestationId: string;
   readonly snapshotSha256: string;
   readonly bearerTokenSha256: string;
+  readonly gatewayOrigin: string;
   readonly bearerToken: string;
 }
 
@@ -259,6 +265,12 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
   ) {
     throw new Error(
       "attested evaluation credential handle, HTTPS base URL, and fetch are required",
+    );
+  }
+  const gatewayOrigin = new URL(normalizedBaseUrl).origin;
+  if (credential.gatewayOrigin !== gatewayOrigin) {
+    throw new Error(
+      "attested evaluation credential gateway origin does not match",
     );
   }
   const bearerToken = credential.bearerToken;
@@ -352,6 +364,7 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
     credentialAttestationId: credential.attestationId,
     credentialSnapshotSha256: credential.snapshotSha256,
     credentialBearerTokenSha256: credential.bearerTokenSha256,
+    credentialGatewayOrigin: gatewayOrigin,
     openAIResponses: Object.freeze(
       (request: OpenAIResponsesEvaluationWireRequest) =>
         dispatch(
@@ -386,6 +399,7 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
       credentialAttestationId: credential.attestationId,
       credentialSnapshotSha256: credential.snapshotSha256,
       credentialBearerTokenSha256: credential.bearerTokenSha256,
+      credentialGatewayOrigin: gatewayOrigin,
     }),
   );
   return bound;
@@ -503,6 +517,10 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
   type LedgerState = {
     claimId: string;
     filePath: string;
+    fileDevice: bigint;
+    fileInode: bigint;
+    fileCtimeNs: bigint;
+    fileSize: bigint;
     budgetCents: number;
     maxExecutions: number;
     maxWireCalls: number;
@@ -530,12 +548,43 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       offset += written;
     }
   };
-  const appendDurably = (filePath: string, value: unknown): void => {
+  const appendDurably = (state: LedgerState, value: unknown): void => {
     assertDirectoryIdentity();
-    const descriptor = openSync(filePath, "a", 0o600);
+    const descriptor = openSync(
+      state.filePath,
+      fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+    );
     try {
-      writeAllSync(descriptor, `${JSON.stringify(value)}\n`);
+      const before = fstatSync(descriptor, { bigint: true });
+      if (
+        !before.isFile() ||
+        before.nlink < 1n ||
+        before.dev !== state.fileDevice ||
+        before.ino !== state.fileInode ||
+        before.ctimeNs !== state.fileCtimeNs ||
+        before.size !== state.fileSize
+      ) {
+        throw new Error(
+          "durable evaluation ledger claim file identity changed",
+        );
+      }
+      const payload = `${JSON.stringify(value)}\n`;
+      writeAllSync(descriptor, payload);
       fsyncSync(descriptor);
+      const after = fstatSync(descriptor, { bigint: true });
+      if (
+        !after.isFile() ||
+        after.nlink < 1n ||
+        after.dev !== state.fileDevice ||
+        after.ino !== state.fileInode ||
+        after.size !== before.size + BigInt(Buffer.byteLength(payload, "utf8"))
+      ) {
+        throw new Error(
+          "durable evaluation ledger claim file changed during append",
+        );
+      }
+      state.fileCtimeNs = after.ctimeNs;
+      state.fileSize = after.size;
     } finally {
       closeSync(descriptor);
     }
@@ -553,6 +602,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
           .digest("hex")}.jsonl`,
       );
       let descriptor;
+      let claimFileStats: BigIntStats | undefined;
       try {
         descriptor = openSync(filePath, "wx", 0o600);
       } catch (error) {
@@ -575,8 +625,14 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
           })}\n`,
         );
         fsyncSync(descriptor);
+        claimFileStats = fstatSync(descriptor, { bigint: true });
       } finally {
         closeSync(descriptor);
+      }
+      if (!claimFileStats) {
+        throw new Error(
+          "durable evaluation ledger claim file identity is missing",
+        );
       }
       const directoryDescriptor = openSync(directoryIdentity.directory, "r");
       try {
@@ -587,6 +643,10 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       states.set(input.authorizationId, {
         claimId: input.executorClaimId,
         filePath,
+        fileDevice: claimFileStats.dev,
+        fileInode: claimFileStats.ino,
+        fileCtimeNs: claimFileStats.ctimeNs,
+        fileSize: claimFileStats.size,
         budgetCents: input.campaignBudgetCents,
         maxExecutions: input.maxDispatchExecutions,
         maxWireCalls: input.maxWireCalls,
@@ -613,7 +673,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       ) {
         return false;
       }
-      appendDurably(state.filePath, {
+      appendDurably(state, {
         event: "dispatch_reserved",
         ...input,
       });
@@ -633,7 +693,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       ) {
         return false;
       }
-      appendDurably(state.filePath, {
+      appendDurably(state, {
         event: "dispatch_settled",
         ...input,
       });
@@ -650,7 +710,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     freeze: (input) => {
       const state = states.get(input.authorizationId);
       if (!state || state.claimId !== input.executorClaimId) return false;
-      appendDurably(state.filePath, {
+      appendDurably(state, {
         event: "authorization_frozen",
         ...input,
       });
@@ -1360,6 +1420,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const credentialAttestationId = wireReceiver?.credentialAttestationId;
   const credentialSnapshotSha256 = wireReceiver?.credentialSnapshotSha256;
   const credentialBearerTokenSha256 = wireReceiver?.credentialBearerTokenSha256;
+  const credentialGatewayOrigin = wireReceiver?.credentialGatewayOrigin;
   const trustedWireCredential =
     wireReceiver && typeof wireReceiver === "object"
       ? TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.get(wireReceiver)
@@ -1384,9 +1445,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
       credentialSnapshotSha256 ||
     trustedWireCredential?.credentialBearerTokenSha256 !==
       credentialBearerTokenSha256 ||
+    trustedWireCredential?.credentialGatewayOrigin !==
+      credentialGatewayOrigin ||
     credentialAttestationId !== costSafety.credential.attestationId ||
     credentialSnapshotSha256 !== costSafety.credential.snapshotSha256 ||
     credentialBearerTokenSha256 !== costSafety.credential.bearerTokenSha256 ||
+    credentialGatewayOrigin !== costSafety.credential.gatewayOrigin ||
     CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.has(
       costSafety.authorization.authorizationId,
     )
@@ -1399,6 +1463,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
     credentialAttestationId,
     credentialSnapshotSha256,
     credentialBearerTokenSha256,
+    credentialGatewayOrigin,
     openAIResponses: Object.freeze(openAIResponses.bind(wireReceiver)),
     anthropicMessages: Object.freeze(anthropicMessages.bind(wireReceiver)),
     openAIChatCompletions: Object.freeze(
@@ -1464,15 +1529,15 @@ export function createModelEvaluationProtocolExecutor(deps: {
     request: EvaluationExecutionRequest,
     mode: "target" | "legacy_comparator",
   ): Promise<ModelEvaluationCallResult<T>> => {
+    const protocol = assertCanonicalRequest(request, mode);
+    if (!consumeAuthorizedModelEvaluationExecutionRequest(request)) {
+      throw preDispatchError("evaluation_dispatch_not_authorized");
+    }
     const claim = await claimDurableAuthorization();
     if (!claim.claimed) {
       campaignFrozen = true;
       throw preDispatchError("evaluation_cost_safety_rejected");
     }
-    if (!consumeAuthorizedModelEvaluationExecutionRequest(request)) {
-      throw preDispatchError("evaluation_dispatch_not_authorized");
-    }
-    const protocol = assertCanonicalRequest(request, mode);
     const usage: UsageAccumulator = {
       inputTokens: 0,
       outputTokens: 0,

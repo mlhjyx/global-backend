@@ -81,6 +81,7 @@ export function createFakeModelEvaluationCostSafety(
       bearerTokenSha256: createHash("sha256")
         .update("fake-limited-evaluation-token")
         .digest("hex"),
+      gatewayOrigin: "https://fake-model-evaluation.invalid",
       purpose: "site_builder_model_evaluation",
       quotaMode: "limited",
       scopeExact: true,
@@ -181,6 +182,7 @@ export function bindFakeModelEvaluationWireCredential<T extends object>(
       attestationId: costSafety.credential.attestationId,
       snapshotSha256: costSafety.credential.snapshotSha256,
       bearerTokenSha256: costSafety.credential.bearerTokenSha256,
+      gatewayOrigin: costSafety.credential.gatewayOrigin,
       bearerToken: "fake-limited-evaluation-token",
     },
     baseUrl: "https://fake-model-evaluation.invalid/v1",

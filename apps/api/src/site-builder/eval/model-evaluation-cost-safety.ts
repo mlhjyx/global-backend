@@ -43,6 +43,7 @@ export interface ModelEvaluationCostSafetyInput {
     observedAt: string;
     snapshotSha256: string;
     bearerTokenSha256: string;
+    gatewayOrigin: string;
     purpose: "site_builder_model_evaluation";
     quotaMode: "limited";
     scopeExact: true;
@@ -116,6 +117,16 @@ function canonicalUtcInstant(value: unknown): value is string {
     Number.isFinite(milliseconds) &&
     new Date(milliseconds).toISOString() === value
   );
+}
+
+function canonicalHttpsOrigin(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.origin === value;
+  } catch {
+    return false;
+  }
 }
 
 function dispatchKey(value: ModelEvaluationCostSafetyDispatch): string {
@@ -192,6 +203,7 @@ export function createModelEvaluationCostSafetyAttestation(
       "observedAt",
       "snapshotSha256",
       "bearerTokenSha256",
+      "gatewayOrigin",
       "purpose",
       "quotaMode",
       "scopeExact",
@@ -236,6 +248,7 @@ export function createModelEvaluationCostSafetyAttestation(
     !canonicalUtcInstant(copy.credential.observedAt) ||
     !SHA256.test(copy.credential.snapshotSha256) ||
     !SHA256.test(copy.credential.bearerTokenSha256) ||
+    !canonicalHttpsOrigin(copy.credential.gatewayOrigin) ||
     !positiveFinite(copy.credential.quotaCapCents) ||
     copy.credential.quotaCapCents >
       MODEL_EVALUATION_ABSOLUTE_LIMITS.credentialQuotaCapCents ||

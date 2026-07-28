@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -124,6 +124,7 @@ describe("model evaluation executor authorization", () => {
       bearerTokenSha256: createHash("sha256")
         .update("limited-evaluation-secret")
         .digest("hex"),
+      gatewayOrigin: "https://fake-model-evaluation.invalid",
       bearerToken: "limited-evaluation-secret",
     };
     const observedAuthorization: string[] = [];
@@ -165,12 +166,33 @@ describe("model evaluation executor authorization", () => {
           bearerTokenSha256: createHash("sha256")
             .update("dedicated-limited-secret")
             .digest("hex"),
+          gatewayOrigin: "https://fake-model-evaluation.invalid",
           bearerToken: "historical-broad-secret",
         },
         baseUrl: "https://fake-model-evaluation.invalid/v1",
         fetch: vi.fn() as typeof fetch,
       }),
     ).toThrow("attested evaluation credential handle");
+  });
+
+  it("rejects a transport origin that does not match the credential attestation", () => {
+    const bearerToken = "limited-evaluation-secret";
+    expect(() =>
+      createCredentialBoundModelEvaluationWireClient({
+        credential: {
+          attestationId: "fake-evaluation-credential/origin-mismatch",
+          snapshotSha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          bearerTokenSha256: createHash("sha256")
+            .update(bearerToken)
+            .digest("hex"),
+          gatewayOrigin: "https://expected-gateway.invalid",
+          bearerToken,
+        },
+        baseUrl: "https://attacker-controlled.invalid/v1",
+        fetch: vi.fn() as typeof fetch,
+      }),
+    ).toThrow("gateway origin does not match");
   });
 
   it("adds the Anthropic protocol version header only to Messages", async () => {
@@ -188,6 +210,7 @@ describe("model evaluation executor authorization", () => {
         bearerTokenSha256: createHash("sha256")
           .update(bearerToken)
           .digest("hex"),
+        gatewayOrigin: "https://fake-model-evaluation.invalid",
         bearerToken,
       },
       baseUrl: "https://fake-model-evaluation.invalid/v1",
@@ -231,6 +254,7 @@ describe("model evaluation executor authorization", () => {
         bearerTokenSha256: createHash("sha256")
           .update(bearerToken)
           .digest("hex"),
+        gatewayOrigin: "https://fake-model-evaluation.invalid",
         bearerToken,
       },
       baseUrl: "https://fake-model-evaluation.invalid/v1",
@@ -269,6 +293,7 @@ describe("model evaluation executor authorization", () => {
         attestationId: costSafety.credential.attestationId,
         snapshotSha256: costSafety.credential.snapshotSha256,
         bearerTokenSha256: costSafety.credential.bearerTokenSha256,
+        gatewayOrigin: costSafety.credential.gatewayOrigin,
         bearerToken,
       },
       baseUrl: "https://fake-model-evaluation.invalid/v1",
@@ -331,6 +356,7 @@ describe("model evaluation executor authorization", () => {
         bearerTokenSha256: createHash("sha256")
           .update("limited-evaluation-secret")
           .digest("hex"),
+        gatewayOrigin: "https://fake-model-evaluation.invalid",
         bearerToken: "limited-evaluation-secret",
       },
       baseUrl: "https://fake-model-evaluation.invalid/v1",
@@ -525,14 +551,124 @@ describe("model evaluation executor authorization", () => {
         costSafety,
       });
 
-      await expect(executor.execute(directRequest())).rejects.toMatchObject({
-        failureCode: "evaluation_cost_safety_rejected",
+      const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "capability_unavailable",
         costSettlement: {
-          state: "not_incurred",
-          reason: "rejected_before_dispatch",
+          state: "unknown",
+          reason: "invalid_settlement",
         },
       });
       expect(wire).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a replaced or symlinked claim file before ledger append", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-file-identity-spec-"),
+    );
+    const ledger = createFileBackedModelEvaluationAuthorizationLedger({
+      ledgerId: "claim-file-identity-spec/durable-v1",
+      directory,
+    });
+    const authorizationId = "claim-file-identity-spec/authorization-v1";
+    const claim = {
+      authorizationId,
+      executorClaimId: "claim-file-identity-spec/executor-v1",
+      campaignBudgetCents: 100,
+      maxDispatchExecutions: 1,
+      maxWireCalls: 1,
+    };
+    try {
+      expect(ledger.claim(claim)).toBe(true);
+      const filePath = join(
+        directory,
+        `${createHash("sha256").update(authorizationId).digest("hex")}.jsonl`,
+      );
+      const originalPath = `${filePath}.original`;
+      await rename(filePath, originalPath);
+      await symlink(originalPath, filePath);
+
+      expect(() =>
+        ledger.reserve({
+          authorizationId,
+          executorClaimId: claim.executorClaimId,
+          executionId: "claim-file-identity-spec:1",
+          wireCalls: 1,
+          upperBoundCents: 1,
+        }),
+      ).toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not claim durable authorization for an unbranded request", async () => {
+    const resolver = fakeResolver();
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-prevalidation-spec-"),
+    );
+    const ledgerId = "prevalidation-spec-ledger/durable-v1";
+    const costSafety = createFakeModelEvaluationCostSafety(
+      resolver.resolverId,
+      10_000,
+      { ledgerId, directory },
+    );
+    const wire = vi.fn(async () => ({
+      body: {
+        status: "completed",
+        model: "gpt-5.6-terra",
+        output: [{ content: [{ type: "output_text", text: "" }] }],
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+      providerReportedCostCents: 1,
+    }));
+    try {
+      const executor = createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          fakeWireClient(wire),
+          costSafety,
+        ),
+        authorizationLedger: createFileBackedModelEvaluationAuthorizationLedger(
+          {
+            ledgerId,
+            directory,
+          },
+        ),
+        settlementResolver: resolver,
+        costSafety,
+      });
+
+      await expect(executor.execute(directRequest())).rejects.toMatchObject({
+        failureCode: "evaluation_dispatch_not_authorized",
+      });
+      expect(await readdir(directory)).toEqual([]);
+
+      const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "content_invalid",
+      });
+      expect(await readdir(directory)).toHaveLength(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

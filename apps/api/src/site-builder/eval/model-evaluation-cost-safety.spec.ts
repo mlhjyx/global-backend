@@ -27,6 +27,7 @@ function validInput(): ModelEvaluationCostSafetyInput {
         "1111111111111111111111111111111111111111111111111111111111111111",
       bearerTokenSha256:
         "3333333333333333333333333333333333333333333333333333333333333333",
+      gatewayOrigin: "https://new-api.example.invalid",
       purpose: "site_builder_model_evaluation",
       quotaMode: "limited",
       scopeExact: true,
@@ -167,6 +168,14 @@ describe("model evaluation cost safety contract", () => {
     const input = validInput();
     delete (input.credential as { bearerTokenSha256?: string })
       .bearerTokenSha256;
+    expect(() => createModelEvaluationCostSafetyAttestation(input)).toThrow(
+      "attestation is invalid",
+    );
+  });
+
+  it("rejects a non-canonical or non-HTTPS gateway origin", () => {
+    const input = validInput();
+    input.credential.gatewayOrigin = "http://new-api.example.invalid/";
     expect(() => createModelEvaluationCostSafetyAttestation(input)).toThrow(
       "attestation is invalid",
     );
