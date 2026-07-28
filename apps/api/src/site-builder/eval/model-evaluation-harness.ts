@@ -13,6 +13,7 @@ import {
   type ModelCandidateStatus,
 } from "../agents/model-candidate-baseline";
 import type { SiteBuilderModelProfileId } from "../agents/model-profiles";
+import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import {
   BRAND_PROFILE_PROMPT_VERSION,
   BRAND_PROFILE_ROUTE_VALIDATION_VERSION,
@@ -44,18 +45,24 @@ import {
   sha256Text,
 } from "./eval-provenance";
 import {
+  freezeModelEvaluationProtocolExecutor,
   isTrustedModelEvaluationProtocolExecute,
+  modelEvaluationProtocolExecutorCostSafety,
   modelEvaluationProtocolExecutorIdentity,
 } from "./model-evaluation-executor";
+import {
+  SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
+  type ModelEvaluationCostSafetyAttestation,
+} from "./model-evaluation-cost-safety";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-28-v2" as const;
+  "site-builder-model-evaluation-harness/2026-07-28-v3" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
-  "site-builder-model-evaluation-run/v2" as const;
+  "site-builder-model-evaluation-run/v3" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
-  "site-builder-model-capability-probe-attestation/v1" as const;
+  "site-builder-model-capability-probe-attestation/v2" as const;
 
 export interface TaskEvaluationEnvelope {
   maxTokens: number;
@@ -102,14 +109,88 @@ export interface TaskEvaluationSuite {
   }[];
 }
 
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) {
-      deepFreeze(child);
-    }
+const TRUSTED_OBJECT_FREEZE = Object.freeze;
+const TRUSTED_OBJECT_IS_FROZEN = Object.isFrozen;
+const TRUSTED_OBJECT_VALUES = Object.values;
+const TRUSTED_BRAND_WEAK_MAP_GET = WeakMap.prototype.get;
+const TRUSTED_BRAND_WEAK_MAP_SET = WeakMap.prototype.set;
+const TRUSTED_BRAND_WEAK_MAP_HAS = WeakMap.prototype.has;
+const TRUSTED_BRAND_WEAK_SET_ADD = WeakSet.prototype.add;
+const TRUSTED_BRAND_WEAK_SET_HAS = WeakSet.prototype.has;
+const APPLY_TRUSTED_BRAND_INTRINSIC = Reflect.apply;
+
+function trustedObjectIsFrozen(value: object): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_OBJECT_IS_FROZEN,
+    Object,
+    [value],
+  ) as boolean;
+}
+
+function trustedObjectFreeze(value: object): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_OBJECT_FREEZE, Object, [value]);
+}
+
+function trustedObjectValues(value: object): unknown[] {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_OBJECT_VALUES,
+    Object,
+    [value],
+  ) as unknown[];
+}
+
+function trustedWeakSetAdd(set: WeakSet<object>, value: object): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_ADD, set, [value]);
+}
+
+function trustedWeakSetHas(set: WeakSet<object>, value: object): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_SET_HAS,
+    set,
+    [value],
+  ) as boolean;
+}
+
+function deepFreezeValue(value: unknown, seen: WeakSet<object>): void {
+  if (!value || typeof value !== "object" || trustedWeakSetHas(seen, value)) {
+    return;
   }
+  trustedWeakSetAdd(seen, value);
+  if (!trustedObjectIsFrozen(value)) {
+    trustedObjectFreeze(value);
+  }
+  if (!trustedObjectIsFrozen(value)) {
+    throw new Error("trusted evaluation value could not be frozen");
+  }
+  for (const child of trustedObjectValues(value)) {
+    deepFreezeValue(child, seen);
+  }
+}
+
+function deepFreeze<T>(value: T): T {
+  deepFreezeValue(value, new WeakSet<object>());
   return value;
+}
+
+function assertDeepFrozen(value: unknown): void {
+  const seen = new WeakSet<object>();
+  const visit = (candidate: unknown): void => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      trustedWeakSetHas(seen, candidate)
+    ) {
+      return;
+    }
+    trustedWeakSetAdd(seen, candidate);
+    if (!trustedObjectIsFrozen(candidate)) {
+      throw new Error("trusted evaluation value is not deeply frozen");
+    }
+    for (const child of trustedObjectValues(candidate)) {
+      visit(child);
+    }
+  };
+  visit(value);
 }
 
 const BRAND_PROFILE_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
@@ -151,6 +232,10 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
   {
     role: "evaluation_executor",
     path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
+    role: "evaluation_cost_safety",
+    path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
   },
   {
     role: "provider",
@@ -310,7 +395,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
-  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v4",
+  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v5",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -539,6 +624,10 @@ export interface CapabilityProbeAttestation {
   campaignId: string;
   harnessId: typeof SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID;
   candidateBaselineId: typeof SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID;
+  costSafetyContractId: typeof SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID;
+  costSafetyAttestationSha256: string;
+  credentialSnapshotSha256: string;
+  pricingSnapshotSha256: string;
   taskId: SiteBuilderTaskId;
   profile: SiteBuilderModelProfileId;
   alias: string;
@@ -686,6 +775,8 @@ function readMonotonicElapsed(
   return Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null;
 }
 
+const TRUSTED_MONOTONIC_NOW = performance.now.bind(performance);
+
 function maximumExecutionCallCount(repairTaskOutput: boolean): number {
   return repairTaskOutput ? 2 : 1;
 }
@@ -700,18 +791,109 @@ const TRUSTED_MODEL_EVALUATION_RUN_BUDGETS = new WeakMap<
 >();
 const TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS = new WeakMap<object, object>();
 
+function trustedBrandGet<K extends object, V>(
+  map: WeakMap<K, V>,
+  key: K,
+): V | undefined {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_MAP_GET,
+    map,
+    [key],
+  ) as V | undefined;
+}
+
+function trustedBrandSet<K extends object, V>(
+  map: WeakMap<K, V>,
+  key: K,
+  value: V,
+): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_MAP_SET, map, [key, value]);
+}
+
+function trustedBrandHas<K extends object, V>(
+  map: WeakMap<K, V>,
+  key: K,
+): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_MAP_HAS,
+    map,
+    [key],
+  ) as boolean;
+}
+
+function trustedBrandWeakSetAdd(set: WeakSet<object>, value: object): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_ADD, set, [value]);
+}
+
+function trustedBrandWeakSetHas(
+  set: WeakSet<object>,
+  value: object,
+): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_SET_HAS,
+    set,
+    [value],
+  ) as boolean;
+}
+
 function bindTrustedModelEvaluationExecutor(
   budget: ModelEvaluationBudgetGuard,
   execute: unknown,
-): void {
+  plan: TaskEvaluationPlan,
+): ModelEvaluationCostSafetyAttestation {
   const identity = modelEvaluationProtocolExecutorIdentity(execute);
-  if (identity === null) {
+  const costSafety = modelEvaluationProtocolExecutorCostSafety(execute);
+  if (identity === null || costSafety === null) {
     throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
       state: "not_incurred",
       reason: "rejected_before_dispatch",
     });
   }
-  const bound = TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.get(budget);
+  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+    plan.taskId,
+  ).route;
+  const expectedDispatches = [
+    ...plan.candidates.map(
+      (candidate) => `target:${candidate.alias}:${candidate.expectedProtocol}`,
+    ),
+    ...[legacyRoute.primary, ...legacyRoute.fallbacks].map(
+      (alias) => `legacy_comparator:${alias}:openai-chat-completions`,
+    ),
+  ].sort();
+  const actualDispatches = costSafety.credential.allowedDispatches
+    .map((entry) => `${entry.mode}:${entry.alias}:${entry.protocol}`)
+    .sort();
+  const requiredExecutions =
+    plan.evaluationSuite === null
+      ? 0
+      : plan.candidates.length *
+          plan.evaluationSuite.fixtureIds.length *
+          plan.evaluationSuite.repeats +
+        [legacyRoute.primary, ...legacyRoute.fallbacks].length *
+          plan.evaluationSuite.fixtureIds.length *
+          plan.evaluationSuite.repeats +
+        plan.candidates.filter(
+          (candidate) => candidate.preflight === "capability_probe",
+        ).length;
+  const requiredWireCalls =
+    requiredExecutions *
+    maximumExecutionCallCount(plan.evaluationSuite?.repairTaskOutput === true);
+  if (
+    JSON.stringify(actualDispatches) !== JSON.stringify(expectedDispatches) ||
+    budget.campaignBudgetCents > costSafety.limits.campaignBudgetCents ||
+    costSafety.limits.maxOutputTokensPerCall < plan.envelope.maxTokens ||
+    costSafety.limits.maxDispatchExecutions < requiredExecutions ||
+    costSafety.limits.maxWireCalls < requiredWireCalls
+  ) {
+    throw new ModelEvaluationCallError("evaluation_cost_safety_mismatch", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  const bound = trustedBrandGet(
+    TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS,
+    budget,
+  );
   if (bound && bound !== identity) {
     throw new ModelEvaluationCallError(
       "evaluation_executor_campaign_mismatch",
@@ -721,7 +903,31 @@ function bindTrustedModelEvaluationExecutor(
       },
     );
   }
-  if (!bound) TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.set(budget, identity);
+  if (!bound) {
+    trustedBrandSet(
+      TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS,
+      budget,
+      identity,
+    );
+  }
+  return costSafety;
+}
+
+function costSafetyProvenance(
+  attestation: ModelEvaluationCostSafetyAttestation,
+): Pick<
+  CapabilityProbeAttestation,
+  | "costSafetyContractId"
+  | "costSafetyAttestationSha256"
+  | "credentialSnapshotSha256"
+  | "pricingSnapshotSha256"
+> {
+  return {
+    costSafetyContractId: SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
+    costSafetyAttestationSha256: sha256CanonicalJson(attestation),
+    credentialSnapshotSha256: attestation.credential.snapshotSha256,
+    pricingSnapshotSha256: attestation.pricing.snapshotSha256,
+  };
 }
 
 export class ModelEvaluationBudgetGuard {
@@ -744,7 +950,8 @@ export class ModelEvaluationBudgetGuard {
       throw new Error("campaignBudgetCents must be greater than zero");
     }
     this.#campaignBudgetCents = campaignBudgetCents;
-    TRUSTED_MODEL_EVALUATION_BUDGETS.set(
+    trustedBrandSet(
+      TRUSTED_MODEL_EVALUATION_BUDGETS,
       this,
       Object.freeze({ campaignId: randomUUID() }),
     );
@@ -864,7 +1071,7 @@ function assertTrustedModelEvaluationBudget(
   if (
     !budget ||
     typeof budget !== "object" ||
-    !TRUSTED_MODEL_EVALUATION_BUDGETS.has(budget)
+    !trustedBrandHas(TRUSTED_MODEL_EVALUATION_BUDGETS, budget)
   ) {
     throw new Error("trusted model evaluation budget guard is required");
   }
@@ -872,7 +1079,10 @@ function assertTrustedModelEvaluationBudget(
 
 function trustedModelEvaluationCampaignId(budget: unknown): string {
   assertTrustedModelEvaluationBudget(budget);
-  const campaignId = TRUSTED_MODEL_EVALUATION_BUDGETS.get(budget)?.campaignId;
+  const campaignId = trustedBrandGet(
+    TRUSTED_MODEL_EVALUATION_BUDGETS,
+    budget,
+  )?.campaignId;
   if (!campaignId) {
     throw new Error("trusted model evaluation campaign id is unavailable");
   }
@@ -885,7 +1095,8 @@ function bindTrustedModelEvaluationRun<T extends ModelEvaluationRun>(
 ): T {
   assertTrustedModelEvaluationBudget(budget);
   const frozenRun = deepFreeze(run);
-  TRUSTED_MODEL_EVALUATION_RUN_BUDGETS.set(frozenRun, budget);
+  assertDeepFrozen(frozenRun);
+  trustedBrandSet(TRUSTED_MODEL_EVALUATION_RUN_BUDGETS, frozenRun, budget);
   return frozenRun;
 }
 
@@ -894,7 +1105,7 @@ function assertTrustedModelEvaluationRunBudget(
   budget: ModelEvaluationBudgetGuard,
 ): void {
   assertTrustedModelEvaluationBudget(budget);
-  if (TRUSTED_MODEL_EVALUATION_RUN_BUDGETS.get(run) !== budget) {
+  if (trustedBrandGet(TRUSTED_MODEL_EVALUATION_RUN_BUDGETS, run) !== budget) {
     throw new Error(
       "candidate summary requires runs from one trusted in-memory campaign budget",
     );
@@ -1267,6 +1478,10 @@ export interface ModelEvaluationRun {
   schemaVersion: typeof MODEL_EVALUATION_RUN_SCHEMA_VERSION;
   harnessId: typeof SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID;
   candidateBaselineId: typeof SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID;
+  costSafetyContractId: typeof SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID;
+  costSafetyAttestationSha256: string;
+  credentialSnapshotSha256: string;
+  pricingSnapshotSha256: string;
   campaignId: string;
   taskId: SiteBuilderTaskId;
   profile: SiteBuilderModelProfileId;
@@ -1457,6 +1672,11 @@ function capabilityProbeAttestationIsCanonical(
     attestation.harnessId === SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID &&
     attestation.candidateBaselineId ===
       SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID &&
+    attestation.costSafetyContractId ===
+      SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID &&
+    SHA256.test(attestation.costSafetyAttestationSha256) &&
+    SHA256.test(attestation.credentialSnapshotSha256) &&
+    SHA256.test(attestation.pricingSnapshotSha256) &&
     attestation.taskId === plan.taskId &&
     attestation.profile === plan.profile &&
     attestation.alias === candidate.alias &&
@@ -1499,7 +1719,7 @@ export class ModelEvaluationCapabilityCampaign {
     assertTrustedModelEvaluationBudget(budget);
     this.#budget = budget;
     this.#campaignId = trustedModelEvaluationCampaignId(budget);
-    TRUSTED_CAPABILITY_CAMPAIGNS.add(this);
+    trustedBrandWeakSetAdd(TRUSTED_CAPABILITY_CAMPAIGNS, this);
   }
 
   get campaignId(): string {
@@ -1530,7 +1750,11 @@ export class ModelEvaluationCapabilityCampaign {
         `candidate does not require a canonical capability probe: ${options.plan.taskId}/${options.candidate.alias}`,
       );
     }
-    bindTrustedModelEvaluationExecutor(this.#budget, options.execute);
+    const costSafety = bindTrustedModelEvaluationExecutor(
+      this.#budget,
+      options.execute,
+      options.plan,
+    );
     const evaluationCase = buildCanonicalModelEvaluationCase(
       options.plan,
       options.plan.evaluationSuite.fixtureIds[0],
@@ -1576,7 +1800,8 @@ export class ModelEvaluationCapabilityCampaign {
 
     const now = options.now ?? (() => performance.now());
     const startedAt = readMonotonicNow(now);
-    if (startedAt === null) {
+    const trustedStartedAt = readMonotonicNow(TRUSTED_MONOTONIC_NOW);
+    if (startedAt === null || trustedStartedAt === null) {
       settleTrustedModelEvaluationBudget(this.#budget, callId, null);
       return {
         status: "provenance_invalid",
@@ -1630,6 +1855,36 @@ export class ModelEvaluationCapabilityCampaign {
       controller.abort(
         new Error("model capability probe diagnostic window exhausted"),
       );
+      await freezeModelEvaluationProtocolExecutor(options.execute);
+      settleTrustedModelEvaluationBudget(this.#budget, callId, {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      });
+      return {
+        status: "diagnostic_window_exhausted",
+        protocolVerified: false,
+        identityVerified: false,
+        outputVerified: false,
+      };
+    }
+    const reportedProbeElapsedMs = readMonotonicElapsed(now, startedAt);
+    const trustedProbeElapsedMs = readMonotonicElapsed(
+      TRUSTED_MONOTONIC_NOW,
+      trustedStartedAt,
+    );
+    const observedProbeElapsedMs =
+      trustedProbeElapsedMs === null
+        ? null
+        : Math.max(reportedProbeElapsedMs ?? 0, trustedProbeElapsedMs);
+    if (
+      trustedProbeElapsedMs === null ||
+      (observedProbeElapsedMs !== null &&
+        observedProbeElapsedMs >= options.plan.envelope.hardStopMs)
+    ) {
+      controller.abort(
+        new Error("model capability probe completed after hard stop"),
+      );
+      await freezeModelEvaluationProtocolExecutor(options.execute);
       settleTrustedModelEvaluationBudget(this.#budget, callId, {
         state: "unknown",
         reason: "diagnostic_hard_stop",
@@ -1679,7 +1934,7 @@ export class ModelEvaluationCapabilityCampaign {
     );
     const settlementCoherent =
       settled.settlement.state === "settled" && !settled.settlementInvalid;
-    const elapsedMs = readMonotonicElapsed(now, startedAt);
+    const elapsedMs = observedProbeElapsedMs;
     const observation: CapabilityProbeObservation = {
       actualProtocol: outcome.value.actualProtocol,
       requestedModel: outcome.value.requestedModel,
@@ -1735,6 +1990,7 @@ export class ModelEvaluationCapabilityCampaign {
       campaignId: this.campaignId,
       harnessId: SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
       candidateBaselineId: SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
+      ...costSafetyProvenance(costSafety),
       taskId: options.plan.taskId,
       profile: options.plan.profile,
       alias: options.candidate.alias,
@@ -1806,7 +2062,7 @@ function trustedCapabilityAttestation(
   if (
     !campaign ||
     typeof campaign !== "object" ||
-    !TRUSTED_CAPABILITY_CAMPAIGNS.has(campaign)
+    !trustedBrandWeakSetHas(TRUSTED_CAPABILITY_CAMPAIGNS, campaign)
   ) {
     return null;
   }
@@ -2051,11 +2307,16 @@ function runIdentity(
   attempt: number,
   campaignId: string,
   capabilityProbeAttestation: CapabilityProbeAttestation | null,
+  costSafety: ModelEvaluationCostSafetyAttestation,
 ): Pick<
   ModelEvaluationRun,
   | "schemaVersion"
   | "harnessId"
   | "candidateBaselineId"
+  | "costSafetyContractId"
+  | "costSafetyAttestationSha256"
+  | "credentialSnapshotSha256"
+  | "pricingSnapshotSha256"
   | "campaignId"
   | "taskId"
   | "profile"
@@ -2087,6 +2348,7 @@ function runIdentity(
     schemaVersion: MODEL_EVALUATION_RUN_SCHEMA_VERSION,
     harnessId: SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
     candidateBaselineId: SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
+    ...costSafetyProvenance(costSafety),
     campaignId,
     taskId: plan.taskId,
     profile: plan.profile,
@@ -2281,6 +2543,188 @@ function gradeCanonicalTaskArtifact(
   };
 }
 
+export async function runLegacyComparatorEvaluationAttempt<T>(options: {
+  plan: TaskEvaluationPlan;
+  alias: string;
+  fixtureId: string;
+  attempt: number;
+  campaignBudget: ModelEvaluationBudgetGuard;
+  executeLegacyComparator: (
+    request: ModelEvaluationExecutionRequest,
+  ) => Promise<ModelEvaluationCallResult<T>>;
+}): Promise<ModelEvaluationCallResult<T>> {
+  if (
+    !isTrustedModelEvaluationProtocolExecute(options.executeLegacyComparator)
+  ) {
+    throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  const firstCandidate = options.plan.candidates[0];
+  if (!firstCandidate) {
+    throw new Error(
+      `task evaluation has no canonical candidate plan: ${options.plan.taskId}`,
+    );
+  }
+  assertCandidateBelongsToPlan(options.plan, firstCandidate);
+  assertTrustedModelEvaluationBudget(options.campaignBudget);
+  if (
+    options.plan.dispatchAdmission !== "task_evaluation_ready" ||
+    !options.plan.evaluationSuite
+  ) {
+    throw new Error(
+      `legacy comparator has no canonical suite: ${options.plan.taskId}`,
+    );
+  }
+  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+    options.plan.taskId,
+  ).route;
+  if (
+    ![legacyRoute.primary, ...legacyRoute.fallbacks].includes(options.alias)
+  ) {
+    throw new ModelEvaluationCallError("legacy_comparator_not_admitted", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  if (
+    !Number.isInteger(options.attempt) ||
+    options.attempt < 1 ||
+    options.attempt > options.plan.evaluationSuite.repeats
+  ) {
+    throw new Error(
+      `legacy comparator attempt must be within 1..${options.plan.evaluationSuite.repeats}`,
+    );
+  }
+  const evaluationCase = buildCanonicalModelEvaluationCase(
+    options.plan,
+    options.fixtureId,
+  );
+  bindTrustedModelEvaluationExecutor(
+    options.campaignBudget,
+    options.executeLegacyComparator,
+    options.plan,
+  );
+  const campaignId = trustedModelEvaluationCampaignId(options.campaignBudget);
+  const callId = [
+    "legacy-comparator",
+    options.plan.taskId,
+    options.alias,
+    evaluationCase.contract.fixtureId,
+    options.attempt,
+  ].join(":");
+  const executionId = ["model-evaluation-attempt", campaignId, callId].join(
+    ":",
+  );
+  const reservation = reserveTrustedModelEvaluationBudget(
+    options.campaignBudget,
+    callId,
+    options.plan.envelope.perCallCostCapCents,
+    maximumExecutionCallCount(options.plan.evaluationSuite.repairTaskOutput),
+  );
+  if (!reservation.allowed) {
+    throw new ModelEvaluationCallError(reservation.reason, {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+
+  const controller = new AbortController();
+  const request: ModelEvaluationExecutionRequest = Object.freeze({
+    executionId,
+    taskId: options.plan.taskId,
+    profile: options.plan.profile,
+    alias: options.alias,
+    expectedProtocol: "openai-chat-completions",
+    fixtureId: evaluationCase.contract.fixtureId,
+    attempt: options.attempt,
+    maxTokens: options.plan.envelope.maxTokens,
+    runtimeDeadlineMs: options.plan.envelope.runtimeDeadlineMs,
+    hardStopMs: options.plan.envelope.hardStopMs,
+    perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
+    reasoningEffort: options.plan.envelope.reasoningEffort,
+    outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+    repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
+    caseContract: evaluationCase.contract,
+    casePayload: evaluationCase.payload,
+    signal: controller.signal,
+  });
+  authorizeModelEvaluationExecutionRequest(request);
+  const trustedStartedAt = readMonotonicNow(TRUSTED_MONOTONIC_NOW);
+  if (trustedStartedAt === null) {
+    settleTrustedModelEvaluationBudget(options.campaignBudget, callId, null);
+    throw new ModelEvaluationCallError("model_evaluation_clock_invalid", {
+      state: "unknown",
+      reason: "invalid_settlement",
+    });
+  }
+  type ComparatorOutcome =
+    | { kind: "completed"; value: ModelEvaluationCallResult<T> }
+    | { kind: "failed"; error: unknown }
+    | { kind: "hard_stop" };
+  let timer: NodeJS.Timeout | undefined;
+  const execution = Promise.resolve()
+    .then(() => options.executeLegacyComparator(request))
+    .then<ComparatorOutcome, ComparatorOutcome>(
+      (value) => ({ kind: "completed", value }),
+      (error: unknown) => ({ kind: "failed", error }),
+    );
+  const hardStop = new Promise<ComparatorOutcome>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ kind: "hard_stop" }),
+      options.plan.envelope.hardStopMs,
+    );
+  });
+  let outcome = await Promise.race([execution, hardStop]);
+  if (timer) clearTimeout(timer);
+  const trustedElapsedMs = readMonotonicElapsed(
+    TRUSTED_MONOTONIC_NOW,
+    trustedStartedAt,
+  );
+  if (
+    outcome.kind !== "hard_stop" &&
+    (trustedElapsedMs === null ||
+      trustedElapsedMs >= options.plan.envelope.hardStopMs)
+  ) {
+    outcome = { kind: "hard_stop" };
+  }
+  if (outcome.kind === "hard_stop") {
+    controller.abort(
+      new Error("legacy comparator diagnostic window exhausted"),
+    );
+    await freezeModelEvaluationProtocolExecutor(
+      options.executeLegacyComparator,
+    );
+    settleTrustedModelEvaluationBudget(options.campaignBudget, callId, {
+      state: "unknown",
+      reason: "diagnostic_hard_stop",
+    });
+    throw new ModelEvaluationCallError("diagnostic_window_exhausted", {
+      state: "unknown",
+      reason: "diagnostic_hard_stop",
+    });
+  }
+  if (outcome.kind === "failed") {
+    const settlement =
+      outcome.error instanceof ModelEvaluationCallError
+        ? outcome.error.costSettlement
+        : ({ state: "unknown", reason: "invalid_settlement" } as const);
+    settleTrustedModelEvaluationBudget(
+      options.campaignBudget,
+      callId,
+      settlement,
+    );
+    throw outcome.error;
+  }
+  settleTrustedModelEvaluationBudget(
+    options.campaignBudget,
+    callId,
+    outcome.value.costSettlement,
+  );
+  return outcome.value;
+}
+
 export async function runTaskEvaluationAttempt<T>(options: {
   plan: TaskEvaluationPlan;
   candidate: TaskEvaluationCandidate;
@@ -2339,10 +2783,15 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `canonical campaign capability probe is required before matrix dispatch: ${options.candidate.alias}`,
     );
   }
-  bindTrustedModelEvaluationExecutor(options.campaignBudget, options.execute);
+  const costSafety = bindTrustedModelEvaluationExecutor(
+    options.campaignBudget,
+    options.execute,
+    options.plan,
+  );
   const now = options.now ?? (() => performance.now());
   const startedAt = readMonotonicNow(now);
-  if (startedAt === null) {
+  const trustedStartedAt = readMonotonicNow(TRUSTED_MONOTONIC_NOW);
+  if (startedAt === null || trustedStartedAt === null) {
     throw new Error("model evaluation monotonic clock is invalid");
   }
   const campaignId = trustedModelEvaluationCampaignId(options.campaignBudget);
@@ -2353,6 +2802,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     options.attempt,
     campaignId,
     capabilityProbeAttestation,
+    costSafety,
   );
   const bindRun = (run: ModelEvaluationRun): ModelEvaluationRun =>
     bindTrustedModelEvaluationRun(options.campaignBudget, run);
@@ -2436,6 +2886,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
 
   if (outcome.kind === "hard_stop") {
     controller.abort(new Error("model evaluation diagnostic window exhausted"));
+    await freezeModelEvaluationProtocolExecutor(options.execute);
     const settled = settleTrustedModelEvaluationBudget(
       options.campaignBudget,
       callId,
@@ -2444,16 +2895,27 @@ export async function runTaskEvaluationAttempt<T>(options: {
         reason: "diagnostic_hard_stop",
       },
     );
-    const elapsedMs = readMonotonicElapsed(now, startedAt);
-    const elapsedIsValid =
-      elapsedMs !== null && elapsedMs >= options.plan.envelope.hardStopMs;
+    const reportedElapsedMs = readMonotonicElapsed(now, startedAt);
+    const trustedElapsedMs = readMonotonicElapsed(
+      TRUSTED_MONOTONIC_NOW,
+      trustedStartedAt,
+    );
+    const observedElapsedMs =
+      trustedElapsedMs === null
+        ? null
+        : Math.max(reportedElapsedMs ?? 0, trustedElapsedMs);
+    const elapsedMs = Math.max(
+      observedElapsedMs ?? 0,
+      options.plan.envelope.hardStopMs,
+    );
+    const elapsedIsValid = trustedElapsedMs !== null;
     return bindRun({
       ...identity,
       resultClass: elapsedIsValid
         ? "diagnostic_window_exhausted"
         : "capability_unavailable",
       runtimeTiming: elapsedIsValid ? "diagnostic_exhausted" : "not_started",
-      elapsedMs: elapsedIsValid ? elapsedMs! : 0,
+      elapsedMs: elapsedIsValid ? elapsedMs : 0,
       protocolVerified: false,
       identityVerified: false,
       artifactAccepted: false,
@@ -2468,9 +2930,54 @@ export async function runTaskEvaluationAttempt<T>(options: {
     });
   }
 
-  const observedElapsedMs = readMonotonicElapsed(now, startedAt);
+  const reportedElapsedMs = readMonotonicElapsed(now, startedAt);
+  const trustedElapsedMs = readMonotonicElapsed(
+    TRUSTED_MONOTONIC_NOW,
+    trustedStartedAt,
+  );
+  const observedElapsedMs =
+    trustedElapsedMs === null
+      ? null
+      : Math.max(reportedElapsedMs ?? 0, trustedElapsedMs);
   const elapsedIsValid = observedElapsedMs !== null;
   const elapsedMs = observedElapsedMs ?? 0;
+  if (
+    trustedElapsedMs === null ||
+    (elapsedIsValid && elapsedMs >= options.plan.envelope.hardStopMs)
+  ) {
+    controller.abort(new Error("model evaluation completed after hard stop"));
+    await freezeModelEvaluationProtocolExecutor(options.execute);
+    const settled = settleTrustedModelEvaluationBudget(
+      options.campaignBudget,
+      callId,
+      {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      },
+    );
+    return bindRun({
+      ...identity,
+      resultClass:
+        trustedElapsedMs === null
+          ? "capability_unavailable"
+          : "diagnostic_window_exhausted",
+      runtimeTiming:
+        trustedElapsedMs === null ? "not_started" : "diagnostic_exhausted",
+      elapsedMs,
+      protocolVerified: false,
+      identityVerified: false,
+      artifactAccepted: false,
+      assessment: null,
+      costSettlement: settled.settlement,
+      budgetCapExceeded: settled.capExceeded,
+      settlementInvalid: settled.settlementInvalid,
+      usage: null,
+      failureCode:
+        trustedElapsedMs === null
+          ? "monotonic_clock_invalid"
+          : "completed_after_hard_stop",
+    });
+  }
   if (outcome.kind === "failed") {
     const failure =
       outcome.error instanceof ModelEvaluationCallError
@@ -2752,6 +3259,10 @@ export async function runTaskEvaluationAttempt<T>(options: {
 export interface ModelEvaluationCandidateSummary {
   harnessId: typeof SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID;
   candidateBaselineId: typeof SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID;
+  costSafetyContractId: typeof SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID;
+  costSafetyAttestationSha256: string | null;
+  credentialSnapshotSha256: string | null;
+  pricingSnapshotSha256: string | null;
   campaignId: string;
   taskId: SiteBuilderTaskId;
   profile: SiteBuilderModelProfileId;
@@ -2823,6 +3334,17 @@ function assertCanonicalEvaluationRun(
     run.schemaVersion !== MODEL_EVALUATION_RUN_SCHEMA_VERSION ||
     run.harnessId !== SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID ||
     run.candidateBaselineId !== SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID ||
+    run.costSafetyContractId !== SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID ||
+    !SHA256.test(run.costSafetyAttestationSha256) ||
+    !SHA256.test(run.credentialSnapshotSha256) ||
+    !SHA256.test(run.pricingSnapshotSha256) ||
+    (run.capabilityProbeAttestation !== null &&
+      (run.capabilityProbeAttestation.costSafetyAttestationSha256 !==
+        run.costSafetyAttestationSha256 ||
+        run.capabilityProbeAttestation.credentialSnapshotSha256 !==
+          run.credentialSnapshotSha256 ||
+        run.capabilityProbeAttestation.pricingSnapshotSha256 !==
+          run.pricingSnapshotSha256)) ||
     run.campaignId !== campaignId ||
     run.taskId !== plan.taskId ||
     run.profile !== plan.profile ||
@@ -3134,6 +3656,27 @@ export function summarizeModelEvaluationCandidate(
     costSettlementComplete && acceptedRuns.length > 0
       ? totalSettledCost / acceptedRuns.length
       : null;
+  const costSafetyAttestationSha256 =
+    runs[0]?.costSafetyAttestationSha256 ?? null;
+  const credentialSnapshotSha256 = runs[0]?.credentialSnapshotSha256 ?? null;
+  const pricingSnapshotSha256 = runs[0]?.pricingSnapshotSha256 ?? null;
+  if (
+    runs.some(
+      (run) =>
+        run.costSafetyAttestationSha256 !== costSafetyAttestationSha256 ||
+        run.credentialSnapshotSha256 !== credentialSnapshotSha256 ||
+        run.pricingSnapshotSha256 !== pricingSnapshotSha256,
+    ) ||
+    (trustedProbeAttestation !== null &&
+      (trustedProbeAttestation.costSafetyAttestationSha256 !==
+        costSafetyAttestationSha256 ||
+        trustedProbeAttestation.credentialSnapshotSha256 !==
+          credentialSnapshotSha256 ||
+        trustedProbeAttestation.pricingSnapshotSha256 !==
+          pricingSnapshotSha256))
+  ) {
+    throw new Error("candidate summary contains cost safety provenance drift");
+  }
   const hardFailureClasses = new Set<ModelEvaluationResultClass>([
     "content_invalid",
     "protocol_or_identity_invalid",
@@ -3154,6 +3697,10 @@ export function summarizeModelEvaluationCandidate(
   return {
     harnessId: SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
     candidateBaselineId: SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
+    costSafetyContractId: SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
+    costSafetyAttestationSha256,
+    credentialSnapshotSha256,
+    pricingSnapshotSha256,
     campaignId: trustedModelEvaluationCampaignId(campaignBudget),
     taskId: plan.taskId,
     profile: plan.profile,

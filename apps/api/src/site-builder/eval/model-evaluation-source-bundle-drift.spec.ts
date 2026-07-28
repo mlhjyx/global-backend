@@ -39,6 +39,11 @@ describe("model evaluation source bundle drift", () => {
     const harness = await import("./model-evaluation-harness");
     const { createModelEvaluationProtocolExecutor } =
       await import("./model-evaluation-executor");
+    const {
+      bindFakeModelEvaluationWireCredential,
+      createFakeModelEvaluationAuthorizationLedger,
+      createFakeModelEvaluationCostSafety,
+    } = await import("./model-evaluation-cost-safety.spec-support");
     const plan = harness.buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
     const evaluationCase = harness.buildCanonicalModelEvaluationCase(
@@ -109,24 +114,32 @@ describe("model evaluation source bundle drift", () => {
         providerReportedCostCents: 1,
       };
     });
-    const executor = createModelEvaluationProtocolExecutor({
-      wireClient: {
-        openAIResponses: wireCall,
-        anthropicMessages: async () => {
-          throw new Error("unexpected Messages dispatch");
-        },
-        openAIChatCompletions: async () => {
-          throw new Error("unexpected Chat dispatch");
-        },
+    const costSafety = createFakeModelEvaluationCostSafety(
+      "source-drift-spec-settlement/v1",
+    );
+    const wireClient = {
+      openAIResponses: wireCall,
+      anthropicMessages: async () => {
+        throw new Error("unexpected Messages dispatch");
       },
+      openAIChatCompletions: async () => {
+        throw new Error("unexpected Chat dispatch");
+      },
+    };
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(wireClient, costSafety),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
       settlementResolver: {
         resolverId: "source-drift-spec-settlement/v1",
-        resolve: () => ({
+        resolve: (context) => ({
           state: "settled" as const,
           amountCents: 1,
           basis: "provider_reported" as const,
+          executionId: context.executionId,
         }),
       },
+      costSafety,
     });
 
     await expect(

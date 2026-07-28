@@ -69,7 +69,7 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
   );
   assert.equal(
     suite.sourceBundleContractId,
-    "brand-profile-evaluation-source-bundle/v4",
+    "brand-profile-evaluation-source-bundle/v5",
   );
   assert.ok(
     suite.sourceBundleFiles.some(
@@ -79,6 +79,15 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
           "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
     ),
     "BrandProfile evaluation source bundle must pin the protocol executor",
+  );
+  assert.ok(
+    suite.sourceBundleFiles.some(
+      (entry) =>
+        entry.role === "evaluation_cost_safety" &&
+        entry.path ===
+          "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+    ),
+    "BrandProfile evaluation source bundle must pin cost safety",
   );
   for (const fingerprint of suite.fixtureFingerprints) {
     const fixture = JSON.parse(
@@ -125,7 +134,7 @@ test("a missing harness id fails documentation verification", async () => {
   documents["docs/status/current.md"] = documents[
     "docs/status/current.md"
   ].replace(
-    "site-builder-model-evaluation-harness/2026-07-28-v2",
+    "site-builder-model-evaluation-harness/2026-07-28-v3",
     "missing-harness-id",
   );
   assert.throws(
@@ -145,6 +154,20 @@ test("a missing candidate baseline id fails documentation verification", async (
   assert.throws(
     () => verifyModelEvaluationHarness(documents),
     /08-eval-testing\.md must reference the current candidate baseline id/,
+  );
+});
+
+test("a missing cost safety id fails documentation verification", async () => {
+  const documents = await currentDocuments();
+  documents["docs/architecture/current.md"] = documents[
+    "docs/architecture/current.md"
+  ].replaceAll(
+    "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+    "missing-cost-safety-id",
+  );
+  assert.throws(
+    () => verifyModelEvaluationHarness(documents),
+    /architecture\/current\.md must reference the current evaluation cost safety id/,
   );
 });
 

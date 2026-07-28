@@ -1,12 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { trustedExecutorIdentity } = vi.hoisted(() => ({
-  trustedExecutorIdentity: Object.freeze({}),
-}));
+const { trustedExecutorIdentity, trustedCostSafety, trustedMonotonicClock } =
+  vi.hoisted(() => {
+    const trustedMonotonicClock = { offsetMs: 0 };
+    const nativeNow = performance.now.bind(performance);
+    vi.spyOn(performance, "now").mockImplementation(
+      () => nativeNow() + trustedMonotonicClock.offsetMs,
+    );
+    return {
+      trustedMonotonicClock,
+      trustedExecutorIdentity: Object.freeze({}),
+      trustedCostSafety: Object.freeze({
+        credential: Object.freeze({
+          snapshotSha256:
+            "1111111111111111111111111111111111111111111111111111111111111111",
+          allowedDispatches: Object.freeze([
+            Object.freeze({
+              mode: "target",
+              alias: "gpt-5.6-terra",
+              protocol: "openai-responses",
+            }),
+            Object.freeze({
+              mode: "target",
+              alias: "claude-sonnet-5",
+              protocol: "anthropic-messages",
+            }),
+            Object.freeze({
+              mode: "target",
+              alias: "gpt-5.5",
+              protocol: "openai-responses",
+            }),
+            Object.freeze({
+              mode: "legacy_comparator",
+              alias: "deepseek-v4-pro",
+              protocol: "openai-chat-completions",
+            }),
+            Object.freeze({
+              mode: "legacy_comparator",
+              alias: "glm-5.2",
+              protocol: "openai-chat-completions",
+            }),
+          ]),
+        }),
+        pricing: Object.freeze({
+          snapshotSha256:
+            "2222222222222222222222222222222222222222222222222222222222222222",
+        }),
+        limits: Object.freeze({
+          campaignBudgetCents: 10_000,
+          maxDispatchExecutions: 500,
+          maxWireCalls: 1_000,
+          maxOutputTokensPerCall: 100_000,
+        }),
+      }),
+    };
+  });
 
 vi.mock("./model-evaluation-executor", () => ({
+  freezeModelEvaluationProtocolExecutor: () => true,
   isTrustedModelEvaluationProtocolExecute: () => true,
   modelEvaluationProtocolExecutorIdentity: () => trustedExecutorIdentity,
+  modelEvaluationProtocolExecutorCostSafety: () => trustedCostSafety,
 }));
 
 import {
@@ -31,6 +85,10 @@ import {
   type BrandProfileOutput,
 } from "../agents/brand-profile";
 import { sha256CanonicalJson, sha256Text } from "./eval-provenance";
+
+beforeEach(() => {
+  trustedMonotonicClock.offsetMs = 0;
+});
 
 const validAssessment = (
   stabilityKey = "semantic-set-a",
@@ -1177,7 +1235,7 @@ describe("task attempt observation window", () => {
     }
   });
 
-  it("fails closed when the hard-stop timer cannot obtain valid monotonic elapsed time", async () => {
+  it("uses trusted elapsed when the hard-stop timer sees an invalid caller clock", async () => {
     vi.useFakeTimers();
     try {
       const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
@@ -1196,10 +1254,10 @@ describe("task attempt observation window", () => {
       });
       await vi.advanceTimersByTimeAsync(plan.envelope.hardStopMs);
       await expect(pending).resolves.toMatchObject({
-        resultClass: "capability_unavailable",
-        runtimeTiming: "not_started",
-        elapsedMs: 0,
-        failureCode: "monotonic_clock_invalid",
+        resultClass: "diagnostic_window_exhausted",
+        runtimeTiming: "diagnostic_exhausted",
+        elapsedMs: plan.envelope.hardStopMs,
+        failureCode: "diagnostic_window_exhausted",
       });
     } finally {
       vi.useRealTimers();
@@ -1236,10 +1294,126 @@ describe("task attempt observation window", () => {
       artifactAccepted: false,
       failureCode: "completed_after_hard_stop",
       costSettlement: {
-        state: "settled",
-        amountCents: 1,
-        basis: "provider_reported@fake-settlement/v1",
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
       },
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("uses the captured monotonic clock when a stale caller clock hides an event-loop stall", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const result = await runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId: "auto-parts-rich",
+      attempt: 1,
+      campaignBudget: guard,
+      execute: async () => {
+        trustedMonotonicClock.offsetMs = plan.envelope.hardStopMs + 20;
+        return completedCall(
+          candidate.alias,
+          candidate.expectedProtocol,
+          canonicalAcceptedArtifact(),
+        );
+      },
+      now: () => 0,
+    });
+
+    expect(result).toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+      runtimeTiming: "diagnostic_exhausted",
+      artifactAccepted: false,
+      failureCode: "completed_after_hard_stop",
+      costSettlement: {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      },
+    });
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(plan.envelope.hardStopMs);
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("freezes a failed outcome observed after the hard stop", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const clock = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1000 + plan.envelope.hardStopMs + 1);
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        execute: async () => {
+          throw new ModelEvaluationCallError("provider_unavailable", {
+            state: "settled",
+            amountCents: 1,
+            basis: "provider_reported@fake-settlement/v1",
+          });
+        },
+        now: clock,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+      runtimeTiming: "diagnostic_exhausted",
+      costSettlement: {
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
+      },
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
+  it("freezes a capability probe completion observed after the hard stop", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    const clock = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1000 + plan.envelope.hardStopMs + 1);
+
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: async () =>
+          completedCall(
+            candidate.alias,
+            candidate.expectedProtocol,
+            canonicalAcceptedArtifact(),
+          ),
+        now: clock,
+      }),
+    ).resolves.toMatchObject({
+      status: "diagnostic_window_exhausted",
+      protocolVerified: false,
+      identityVerified: false,
+      outputVerified: false,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "unknown_settlement",
     });
   });
 
@@ -2152,7 +2326,7 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("summarizes delayed provider-attested no-cost failure but keeps it unrankable", async () => {
+  it("freezes a delayed provider-attested no-cost failure at hard stop", async () => {
     const candidate = plan.candidates.find(
       (entry) => entry.alias === "gpt-5.6-terra",
     )!;
@@ -2190,8 +2364,8 @@ describe("quality-first candidate summary and ranking", () => {
       resultClass: "diagnostic_window_exhausted",
       runtimeTiming: "diagnostic_exhausted",
       costSettlement: {
-        state: "not_incurred",
-        reason: "provider_attested_not_incurred",
+        state: "unknown",
+        reason: "diagnostic_hard_stop",
       },
     });
     expect(summary).toMatchObject({
@@ -2202,12 +2376,12 @@ describe("quality-first candidate summary and ranking", () => {
 
     expect(() =>
       Object.assign(runs[11].costSettlement, {
-        reason: "rejected_before_dispatch",
+        reason: "provider_ack_unknown",
       }),
     ).toThrow(TypeError);
     expect(runs[11].costSettlement).toEqual({
-      state: "not_incurred",
-      reason: "provider_attested_not_incurred",
+      state: "unknown",
+      reason: "diagnostic_hard_stop",
     });
   });
 
@@ -2236,6 +2410,66 @@ describe("quality-first candidate summary and ranking", () => {
     ).toThrow("runs from one trusted in-memory campaign budget");
   });
 
+  it("uses captured brand-map intrinsics when rejecting fabricated runs", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt) =>
+        await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    const weakMapGet = vi
+      .spyOn(WeakMap.prototype, "get")
+      .mockReturnValue(capabilityBudget);
+    let thrown: unknown;
+    try {
+      try {
+        summarizeModelEvaluationCandidateRaw(
+          plan,
+          "gpt-5.5",
+          structuredClone(runs),
+          capabilityBudget,
+          capabilityCampaign,
+        );
+      } catch (error) {
+        thrown = error;
+      }
+    } finally {
+      weakMapGet.mockRestore();
+    }
+    expect(thrown).toMatchObject({
+      message: expect.stringContaining(
+        "runs from one trusted in-memory campaign budget",
+      ),
+    });
+  });
+
+  it("uses captured freeze intrinsics before branding trusted runs", async () => {
+    const objectIsFrozen = vi
+      .spyOn(Object, "isFrozen")
+      .mockReturnValue(true);
+    let trustedRun:
+      | Awaited<ReturnType<typeof acceptedRun>>
+      | undefined;
+    try {
+      trustedRun = (
+        await fullMatrix(
+          "gpt-5.5",
+          async (fixtureId, attempt) =>
+            await acceptedRun("gpt-5.5", fixtureId, attempt),
+        )
+      )[0];
+    } finally {
+      objectIsFrozen.mockRestore();
+    }
+
+    expect(trustedRun).toBeDefined();
+    expect(Object.isFrozen(trustedRun)).toBe(true);
+    expect(Object.isFrozen(trustedRun!.artifact)).toBe(true);
+    expect(Object.isFrozen(trustedRun!.assessment)).toBe(true);
+    expect(() => {
+      trustedRun!.elapsedMs = 0;
+    }).toThrow(TypeError);
+  });
+
   it("deep-freezes every trusted run and its nested provenance", async () => {
     const runs = await fullMatrix(
       "gpt-5.5",
@@ -2249,6 +2483,22 @@ describe("quality-first candidate summary and ranking", () => {
     expect(Object.isFrozen(trustedRun.costSettlement)).toBe(true);
     expect(Object.isFrozen(trustedRun.usage)).toBe(true);
     expect(Object.isFrozen(trustedRun.capabilityProbeAttestation)).toBe(true);
+    expect(trustedRun).toMatchObject({
+      schemaVersion: "site-builder-model-evaluation-run/v3",
+      costSafetyContractId:
+        "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+      credentialSnapshotSha256:
+        "1111111111111111111111111111111111111111111111111111111111111111",
+      pricingSnapshotSha256:
+        "2222222222222222222222222222222222222222222222222222222222222222",
+      capabilityProbeAttestation: {
+        schemaVersion: "site-builder-model-capability-probe-attestation/v2",
+      },
+    });
+    expect(trustedRun.costSafetyAttestationSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      trustedRun.capabilityProbeAttestation!.costSafetyAttestationSha256,
+    ).toBe(trustedRun.costSafetyAttestationSha256);
 
     expect(() => {
       trustedRun.fixtureId = "unexpected-fixture";
@@ -2273,8 +2523,15 @@ describe("quality-first candidate summary and ranking", () => {
     }).toThrow(TypeError);
 
     expect(
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs).rankable,
-    ).toBe(true);
+      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
+    ).toMatchObject({
+      rankable: true,
+      costSafetyContractId:
+        "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+      costSafetyAttestationSha256: trustedRun.costSafetyAttestationSha256,
+      credentialSnapshotSha256: trustedRun.credentialSnapshotSha256,
+      pricingSnapshotSha256: trustedRun.pricingSnapshotSha256,
+    });
   });
 
   it("rejects a forged persisted clone before trusting pass flags", async () => {

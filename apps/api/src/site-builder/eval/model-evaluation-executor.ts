@@ -1,3 +1,21 @@
+import { createHash, randomUUID } from "node:crypto";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  type BigIntStats,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   getModelCandidateCatalogEntry,
   type ModelCandidateProtocol,
@@ -18,9 +36,18 @@ import {
   type ModelEvaluationUsage,
 } from "./model-evaluation-harness";
 import { sha256CanonicalJson } from "./eval-provenance";
+import {
+  assertModelEvaluationCostSafetyDispatch,
+  frozenModelEvaluationPriceCents,
+  isAllowedModelEvaluationGatewayOrigin,
+  isTrustedModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyAttestation,
+} from "./model-evaluation-cost-safety";
 
 export const MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION =
   "site-builder-model-evaluation-protocol-admission/v1" as const;
+export const MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES =
+  2_097_152 as const;
 
 export type ModelEvaluationProtocolAdmission =
   | "target_text_dispatch"
@@ -174,6 +201,10 @@ export interface ModelEvaluationWireResponse {
 }
 
 export interface ModelEvaluationWireClient {
+  readonly credentialAttestationId?: string;
+  readonly credentialSnapshotSha256?: string;
+  readonly credentialBearerTokenSha256?: string;
+  readonly credentialGatewayOrigin?: string;
   openAIResponses(
     request: OpenAIResponsesEvaluationWireRequest,
   ): Promise<ModelEvaluationWireResponse>;
@@ -183,6 +214,1100 @@ export interface ModelEvaluationWireClient {
   openAIChatCompletions(
     request: OpenAIChatCompletionsEvaluationWireRequest,
   ): Promise<ModelEvaluationWireResponse>;
+}
+
+const TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<{
+    credentialAttestationId: string;
+    credentialSnapshotSha256: string;
+    credentialBearerTokenSha256: string;
+    credentialGatewayOrigin: string;
+  }>
+>();
+const MODEL_EVALUATION_WEAK_MAP_GET = WeakMap.prototype.get;
+const MODEL_EVALUATION_WEAK_MAP_SET = WeakMap.prototype.set;
+const MODEL_EVALUATION_WEAK_SET_ADD = WeakSet.prototype.add;
+const MODEL_EVALUATION_WEAK_SET_HAS = WeakSet.prototype.has;
+const APPLY_MODEL_EVALUATION_INTRINSIC = Reflect.apply;
+
+export interface ModelEvaluationCredentialHandle {
+  readonly attestationId: string;
+  readonly snapshotSha256: string;
+  readonly bearerTokenSha256: string;
+  readonly gatewayOrigin: string;
+  readonly bearerToken: string;
+}
+
+class ModelEvaluationWireHttpError extends Error {
+  readonly providerReportedCostCents?: number;
+
+  constructor(status: number, providerReportedCostCents?: number) {
+    super(`evaluation transport HTTP ${status}`);
+    this.name = "ModelEvaluationWireHttpError";
+    this.providerReportedCostCents = providerReportedCostCents;
+  }
+}
+
+class ModelEvaluationWireResponseBodyError extends Error {
+  readonly providerReportedCostCents?: number;
+
+  constructor(providerReportedCostCents: number | undefined, cause: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : "evaluation transport response body is invalid",
+      { cause },
+    );
+    this.name = "ModelEvaluationWireResponseBodyError";
+    this.providerReportedCostCents = providerReportedCostCents;
+  }
+}
+
+export function createCredentialBoundModelEvaluationWireClient(options: {
+  credential: ModelEvaluationCredentialHandle;
+  baseUrl: string;
+  fetch: typeof fetch;
+}): ModelEvaluationWireClient {
+  const credential = options?.credential;
+  const fetchImpl = options?.fetch;
+  const normalizedBaseUrl =
+    typeof options?.baseUrl === "string"
+      ? options.baseUrl.replace(/\/+$/, "")
+      : "";
+  let parsedBaseUrl: URL | undefined;
+  try {
+    parsedBaseUrl = new URL(normalizedBaseUrl);
+  } catch {
+    parsedBaseUrl = undefined;
+  }
+  if (
+    !credential ||
+    typeof credential.attestationId !== "string" ||
+    credential.attestationId.length === 0 ||
+    !/^[a-f0-9]{64}$/.test(credential.snapshotSha256) ||
+    !/^[a-f0-9]{64}$/.test(credential.bearerTokenSha256) ||
+    typeof credential.bearerToken !== "string" ||
+    credential.bearerToken.length < 8 ||
+    createHash("sha256").update(credential.bearerToken).digest("hex") !==
+      credential.bearerTokenSha256 ||
+    !parsedBaseUrl ||
+    !isAllowedModelEvaluationGatewayOrigin(parsedBaseUrl.origin) ||
+    parsedBaseUrl.username !== "" ||
+    parsedBaseUrl.password !== "" ||
+    parsedBaseUrl.search !== "" ||
+    parsedBaseUrl.hash !== "" ||
+    typeof fetchImpl !== "function"
+  ) {
+    throw new Error(
+      "attested evaluation credential handle, HTTPS or explicit loopback HTTP base URL, and fetch are required",
+    );
+  }
+  const gatewayOrigin = parsedBaseUrl.origin;
+  if (credential.gatewayOrigin !== gatewayOrigin) {
+    throw new Error(
+      "attested evaluation credential gateway origin does not match",
+    );
+  }
+  const bearerToken = credential.bearerToken;
+  const capturedFetch = fetchImpl.bind(globalThis);
+  const readBoundedJsonBody = async (response: Response): Promise<unknown> => {
+    const declaredLength = response.headers.get("content-length");
+    if (
+      declaredLength !== null &&
+      Number.isSafeInteger(Number(declaredLength)) &&
+      Number(declaredLength) >
+        MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES
+    ) {
+      await response.body?.cancel();
+      throw new Error("evaluation transport response body exceeds byte limit");
+    }
+    if (!response.body) {
+      throw new Error("evaluation transport response body is missing");
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        totalBytes += result.value.byteLength;
+        if (totalBytes > MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES) {
+          await reader.cancel();
+          throw new Error(
+            "evaluation transport response body exceeds byte limit",
+          );
+        }
+        chunks.push(result.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bodyBytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bodyBytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bodyBytes),
+    );
+  };
+  const dispatch = async (
+    path: string,
+    executionId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<ModelEvaluationWireResponse> => {
+    const response = await capturedFetch(`${normalizedBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${bearerToken}`,
+        "content-type": "application/json",
+        "x-site-builder-evaluation-execution-id": executionId,
+        ...(path === "/messages" ? { "anthropic-version": "2023-06-01" } : {}),
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    const providerCostHeader = response.headers.get("x-provider-cost-cents");
+    const providerReportedCostCents =
+      providerCostHeader !== null && providerCostHeader.trim() !== ""
+        ? Number(providerCostHeader)
+        : undefined;
+    const validProviderReportedCostCents =
+      providerReportedCostCents !== undefined &&
+      Number.isFinite(providerReportedCostCents) &&
+      providerReportedCostCents >= 0
+        ? providerReportedCostCents
+        : undefined;
+    if (!response.ok) {
+      try {
+        await response.body?.cancel();
+      } catch {
+        // Preserve the already parsed status and provider cost observation.
+      }
+      throw new ModelEvaluationWireHttpError(
+        response.status,
+        validProviderReportedCostCents,
+      );
+    }
+    let responseBody: unknown;
+    try {
+      responseBody = await readBoundedJsonBody(response);
+    } catch (error) {
+      throw new ModelEvaluationWireResponseBodyError(
+        validProviderReportedCostCents,
+        error,
+      );
+    }
+    return {
+      body: responseBody,
+      ...(validProviderReportedCostCents !== undefined
+        ? { providerReportedCostCents: validProviderReportedCostCents }
+        : {}),
+    };
+  };
+  const bound = Object.freeze({
+    credentialAttestationId: credential.attestationId,
+    credentialSnapshotSha256: credential.snapshotSha256,
+    credentialBearerTokenSha256: credential.bearerTokenSha256,
+    credentialGatewayOrigin: gatewayOrigin,
+    openAIResponses: Object.freeze(
+      (request: OpenAIResponsesEvaluationWireRequest) =>
+        dispatch(
+          "/responses",
+          request.executionId,
+          request.body,
+          request.signal,
+        ),
+    ),
+    anthropicMessages: Object.freeze(
+      (request: AnthropicMessagesEvaluationWireRequest) =>
+        dispatch(
+          "/messages",
+          request.executionId,
+          request.body,
+          request.signal,
+        ),
+    ),
+    openAIChatCompletions: Object.freeze(
+      (request: OpenAIChatCompletionsEvaluationWireRequest) =>
+        dispatch(
+          "/chat/completions",
+          request.executionId,
+          request.body,
+          request.signal,
+        ),
+    ),
+  }) satisfies ModelEvaluationWireClient;
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS,
+    [
+      bound,
+      Object.freeze({
+        credentialAttestationId: credential.attestationId,
+        credentialSnapshotSha256: credential.snapshotSha256,
+        credentialBearerTokenSha256: credential.bearerTokenSha256,
+        credentialGatewayOrigin: gatewayOrigin,
+      }),
+    ],
+  );
+  return bound;
+}
+
+export interface ModelEvaluationAuthorizationLedgerClaim {
+  authorizationId: string;
+  executorClaimId: string;
+  campaignBudgetCents: number;
+  maxDispatchExecutions: number;
+  maxWireCalls: number;
+}
+
+export interface ModelEvaluationAuthorizationLedgerReservation {
+  authorizationId: string;
+  executorClaimId: string;
+  executionId: string;
+  wireCalls: number;
+  upperBoundCents: number;
+}
+
+export interface ModelEvaluationAuthorizationLedgerSettlement {
+  authorizationId: string;
+  executorClaimId: string;
+  executionId: string;
+  settlement: CostSettlement;
+}
+
+export interface ModelEvaluationAuthorizationLedger {
+  readonly ledgerId: string;
+  readonly directorySha256: string;
+  claim(
+    claim: Readonly<ModelEvaluationAuthorizationLedgerClaim>,
+  ): boolean | Promise<boolean>;
+  reserve(
+    reservation: Readonly<ModelEvaluationAuthorizationLedgerReservation>,
+  ): boolean | Promise<boolean>;
+  settle(
+    settlement: Readonly<ModelEvaluationAuthorizationLedgerSettlement>,
+  ): boolean | Promise<boolean>;
+  freeze(
+    claim: Readonly<{
+      authorizationId: string;
+      executorClaimId: string;
+      reason: string;
+    }>,
+  ): boolean | Promise<boolean>;
+}
+
+const TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS = new WeakSet<object>();
+const LEDGER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
+
+class ModelEvaluationClaimLockContentionError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      "evaluation authorization claim index is locked; retry without reissuing authorization",
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = "ModelEvaluationClaimLockContentionError";
+  }
+}
+
+function decodeLinuxMountInfoPath(value: string): string {
+  return value.replace(/\\([0-7]{3})/g, (_match, octal: string) =>
+    String.fromCharCode(Number.parseInt(octal, 8)),
+  );
+}
+
+function linuxMountGenerationIdentity(directory: string): string {
+  const mountInfo = readFileSync("/proc/self/mountinfo", "utf8");
+  let selected:
+    | Readonly<{
+        mountId: string;
+        parentMountId: string;
+        majorMinor: string;
+        root: string;
+        mountPoint: string;
+      }>
+    | undefined;
+  for (const line of mountInfo.split("\n")) {
+    if (line.length === 0) continue;
+    const fields = line.split(" ");
+    if (fields.length < 6) continue;
+    const mountId = fields[0] ?? "";
+    const parentMountId = fields[1] ?? "";
+    const majorMinor = fields[2] ?? "";
+    const root = decodeLinuxMountInfoPath(fields[3] ?? "");
+    const mountPoint = decodeLinuxMountInfoPath(fields[4] ?? "");
+    if (
+      !/^\d+$/.test(mountId) ||
+      !/^\d+$/.test(parentMountId) ||
+      !/^\d+:\d+$/.test(majorMinor) ||
+      root.length === 0 ||
+      !mountPoint.startsWith("/")
+    ) {
+      continue;
+    }
+    const containsDirectory =
+      mountPoint === "/" ||
+      directory === mountPoint ||
+      directory.startsWith(`${mountPoint}/`);
+    if (
+      containsDirectory &&
+      (!selected || mountPoint.length > selected.mountPoint.length)
+    ) {
+      selected = { mountId, parentMountId, majorMinor, root, mountPoint };
+    }
+  }
+  if (!selected) {
+    throw new Error(
+      "evaluation authorization ledger mount generation is unavailable",
+    );
+  }
+  return [
+    linuxBootId(),
+    selected.mountId,
+    selected.parentMountId,
+    selected.majorMinor,
+    selected.root,
+    selected.mountPoint,
+  ].join("\0");
+}
+
+function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
+  directory: string;
+  sha256: string;
+  baseSha256: string;
+  markerPath: string;
+  markerDevice: bigint;
+  markerInode: bigint;
+  markerCtimeNs: bigint;
+  markerSize: bigint;
+  claimedAuthorizationDigests: readonly string[];
+}> {
+  const absoluteDirectory = resolve(directory);
+  mkdirSync(absoluteDirectory, { recursive: true, mode: 0o700 });
+  const stats = lstatSync(absoluteDirectory, { bigint: true });
+  const realDirectory = realpathSync.native(absoluteDirectory);
+  if (
+    !stats.isDirectory() ||
+    stats.isSymbolicLink() ||
+    realDirectory !== absoluteDirectory
+  ) {
+    throw new Error(
+      "evaluation authorization ledger directory must be a stable real directory",
+    );
+  }
+  const mountGenerationIdentity = linuxMountGenerationIdentity(realDirectory);
+  const markerPath = join(
+    realDirectory,
+    ".site-builder-model-evaluation-ledger-id",
+  );
+  let markerDescriptor: number | undefined;
+  try {
+    try {
+      markerDescriptor = openSync(markerPath, "wx+", 0o600);
+      writeFileSync(markerDescriptor, `${randomUUID()}\n`, "utf8");
+      fsyncSync(markerDescriptor);
+      closeSync(markerDescriptor);
+      markerDescriptor = undefined;
+      markerDescriptor = openSync(
+        markerPath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+      const directoryDescriptor = openSync(realDirectory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "EEXIST"
+      ) {
+        throw error;
+      }
+      markerDescriptor = openSync(
+        markerPath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+    }
+    const markerStats = fstatSync(markerDescriptor, { bigint: true });
+    const marker = readFileSync(markerDescriptor, "utf8");
+    const markerLines = marker.split("\n");
+    const markerId = markerLines[0] ?? "";
+    const claimLines = markerLines.slice(1, -1);
+    if (
+      !markerStats.isFile() ||
+      markerStats.nlink !== 1n ||
+      markerLines.at(-1) !== "" ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+        markerId,
+      ) ||
+      claimLines.some((line) => !/^claim:[a-f0-9]{64}$/.test(line))
+    ) {
+      throw new Error(
+        "evaluation authorization ledger directory marker is invalid",
+      );
+    }
+    const claimedAuthorizationDigests = claimLines.map((line) =>
+      line.slice("claim:".length),
+    );
+    const baseIdentity = `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${markerStats.dev.toString()}\0${markerStats.ino.toString()}\0${markerId}\0${mountGenerationIdentity}`;
+    const baseSha256 = createHash("sha256").update(baseIdentity).digest("hex");
+    return Object.freeze({
+      directory: realDirectory,
+      sha256: createHash("sha256")
+        .update(baseIdentity)
+        .update("\0")
+        .update(marker)
+        .digest("hex"),
+      baseSha256,
+      markerPath,
+      markerDevice: markerStats.dev,
+      markerInode: markerStats.ino,
+      markerCtimeNs: markerStats.ctimeNs,
+      markerSize: markerStats.size,
+      claimedAuthorizationDigests: Object.freeze(claimedAuthorizationDigests),
+    });
+  } finally {
+    if (markerDescriptor !== undefined) closeSync(markerDescriptor);
+  }
+}
+
+export function modelEvaluationLedgerDirectorySha256(
+  directory: string,
+): string {
+  if (typeof directory !== "string" || !isAbsolute(directory)) {
+    throw new Error(
+      "absolute durable evaluation authorization ledger directory is required",
+    );
+  }
+  return resolveLedgerDirectoryIdentity(directory).sha256;
+}
+
+interface ModelEvaluationClaimLockOwner {
+  pid: number;
+  bootId: string;
+  processStartTimeTicks: string;
+  nonce: string;
+}
+
+function linuxBootId(): string {
+  const value = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  if (!/^[a-f0-9-]{36}$/.test(value)) {
+    throw new Error("evaluation authorization claim lock boot id is invalid");
+  }
+  return value;
+}
+
+function linuxProcessStartTimeTicks(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(")");
+    if (commandEnd < 0) {
+      throw new Error(
+        "evaluation authorization claim lock process stat is malformed",
+      );
+    }
+    const fields = stat
+      .slice(commandEnd + 2)
+      .trim()
+      .split(/\s+/);
+    const startTimeTicks = fields[19];
+    if (!startTimeTicks || !/^\d+$/.test(startTimeTicks)) {
+      throw new Error(
+        "evaluation authorization claim lock process start time is invalid",
+      );
+    }
+    return startTimeTicks;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function parseClaimLockOwner(
+  value: string,
+): ModelEvaluationClaimLockOwner | null {
+  try {
+    const owner = JSON.parse(value) as Record<string, unknown>;
+    if (
+      Object.keys(owner).sort().join(",") !==
+        "bootId,nonce,pid,processStartTimeTicks" ||
+      !Number.isSafeInteger(owner.pid) ||
+      (owner.pid as number) <= 0 ||
+      typeof owner.bootId !== "string" ||
+      !/^[a-f0-9-]{36}$/.test(owner.bootId) ||
+      typeof owner.processStartTimeTicks !== "string" ||
+      !/^\d+$/.test(owner.processStartTimeTicks) ||
+      typeof owner.nonce !== "string" ||
+      !/^[a-f0-9-]{36}$/.test(owner.nonce)
+    ) {
+      return null;
+    }
+    return owner as unknown as ModelEvaluationClaimLockOwner;
+  } catch {
+    return null;
+  }
+}
+
+export function createFileBackedModelEvaluationAuthorizationLedger(options: {
+  ledgerId: string;
+  directory: string;
+}): ModelEvaluationAuthorizationLedger {
+  if (
+    !LEDGER_ID.test(options?.ledgerId ?? "") ||
+    typeof options?.directory !== "string" ||
+    !isAbsolute(options.directory)
+  ) {
+    throw new Error(
+      "absolute durable evaluation authorization ledger directory is required",
+    );
+  }
+  const directoryIdentity = resolveLedgerDirectoryIdentity(options.directory);
+  let observedClaimHistory = [
+    ...directoryIdentity.claimedAuthorizationDigests,
+  ];
+  const assertDirectoryIdentity = () => {
+    const currentIdentity = resolveLedgerDirectoryIdentity(
+      directoryIdentity.directory,
+    );
+    if (
+      currentIdentity.baseSha256 !== directoryIdentity.baseSha256 ||
+      currentIdentity.claimedAuthorizationDigests.length <
+        observedClaimHistory.length ||
+      observedClaimHistory.some(
+        (digest, index) =>
+          currentIdentity.claimedAuthorizationDigests[index] !== digest,
+      )
+    ) {
+      throw new Error(
+        "evaluation authorization ledger directory identity or append-only claim history changed",
+      );
+    }
+    observedClaimHistory = [...currentIdentity.claimedAuthorizationDigests];
+    return currentIdentity;
+  };
+  type LedgerState = {
+    claimId: string;
+    filePath: string;
+    fileDevice: bigint;
+    fileInode: bigint;
+    fileCtimeNs: bigint;
+    fileSize: bigint;
+    budgetCents: number;
+    maxExecutions: number;
+    maxWireCalls: number;
+    executions: number;
+    wireCalls: number;
+    committedCents: number;
+    reservedCents: number;
+    frozen: boolean;
+    reservations: Map<string, number>;
+  };
+  const states = new Map<string, LedgerState>();
+  const writeAllSync = (descriptor: number, value: string): void => {
+    const payload = Buffer.from(value, "utf8");
+    let offset = 0;
+    while (offset < payload.byteLength) {
+      const written = writeSync(
+        descriptor,
+        payload,
+        offset,
+        payload.byteLength - offset,
+      );
+      if (!Number.isSafeInteger(written) || written <= 0) {
+        throw new Error("durable evaluation ledger write was incomplete");
+      }
+      offset += written;
+    }
+  };
+  const fsyncLedgerDirectory = (): void => {
+    const directoryDescriptor = openSync(directoryIdentity.directory, "r");
+    try {
+      fsyncSync(directoryDescriptor);
+    } finally {
+      closeSync(directoryDescriptor);
+    }
+  };
+  const claimLockContention = (
+    cause?: unknown,
+  ): ModelEvaluationClaimLockContentionError =>
+    new ModelEvaluationClaimLockContentionError(cause);
+  const acquireAuthorizationClaimLock = (
+    lockPath: string,
+  ): { descriptor: number; stats: BigIntStats } => {
+    const bootId = linuxBootId();
+    const processStartTimeTicks = linuxProcessStartTimeTicks(process.pid);
+    if (processStartTimeTicks === null) {
+      throw new Error(
+        "evaluation authorization claim lock process identity is unavailable",
+      );
+    }
+    const owner: ModelEvaluationClaimLockOwner = {
+      pid: process.pid,
+      bootId,
+      processStartTimeTicks,
+      nonce: randomUUID(),
+    };
+    const temporaryPath = `${lockPath}.${owner.pid}.${owner.nonce}.tmp`;
+    const descriptor = openSync(temporaryPath, "wx+", 0o600);
+    const descriptorStats = fstatSync(descriptor, { bigint: true });
+    let linked = false;
+    try {
+      writeAllSync(descriptor, `${JSON.stringify(owner)}\n`);
+      fsyncSync(descriptor);
+      const acquire = (): void => {
+        try {
+          linkSync(temporaryPath, lockPath);
+          linked = true;
+          return;
+        } catch (error) {
+          if (
+            typeof error !== "object" ||
+            error === null ||
+            !("code" in error) ||
+            error.code !== "EEXIST"
+          ) {
+            throw error;
+          }
+        }
+
+        const existingDescriptor = openSync(
+          lockPath,
+          fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+        );
+        let existingStats: BigIntStats;
+        let existingOwner: ModelEvaluationClaimLockOwner | null;
+        try {
+          existingStats = fstatSync(existingDescriptor, { bigint: true });
+          existingOwner = parseClaimLockOwner(
+            readFileSync(existingDescriptor, "utf8").trim(),
+          );
+        } finally {
+          closeSync(existingDescriptor);
+        }
+        if (
+          !existingStats.isFile() ||
+          existingStats.isSymbolicLink() ||
+          existingStats.nlink < 1n ||
+          existingOwner === null
+        ) {
+          throw claimLockContention();
+        }
+        const existingProcessStartTimeTicks =
+          existingOwner.bootId === bootId
+            ? linuxProcessStartTimeTicks(existingOwner.pid)
+            : null;
+        if (
+          existingOwner.bootId === bootId &&
+          existingProcessStartTimeTicks === existingOwner.processStartTimeTicks
+        ) {
+          throw claimLockContention();
+        }
+        const currentStats = lstatSync(lockPath, { bigint: true });
+        if (
+          !currentStats.isFile() ||
+          currentStats.isSymbolicLink() ||
+          currentStats.dev !== existingStats.dev ||
+          currentStats.ino !== existingStats.ino
+        ) {
+          throw claimLockContention();
+        }
+        unlinkSync(lockPath);
+        const staleTemporaryPath = `${lockPath}.${existingOwner.pid}.${existingOwner.nonce}.tmp`;
+        try {
+          const staleTemporaryStats = lstatSync(staleTemporaryPath, {
+            bigint: true,
+          });
+          if (
+            staleTemporaryStats.isFile() &&
+            !staleTemporaryStats.isSymbolicLink() &&
+            staleTemporaryStats.dev === existingStats.dev &&
+            staleTemporaryStats.ino === existingStats.ino
+          ) {
+            unlinkSync(staleTemporaryPath);
+          }
+        } catch (error) {
+          if (
+            typeof error !== "object" ||
+            error === null ||
+            !("code" in error) ||
+            error.code !== "ENOENT"
+          ) {
+            throw error;
+          }
+        }
+        fsyncLedgerDirectory();
+        try {
+          linkSync(temporaryPath, lockPath);
+          linked = true;
+        } catch (error) {
+          throw claimLockContention(error);
+        }
+      };
+
+      acquire();
+      unlinkSync(temporaryPath);
+      fsyncLedgerDirectory();
+      const lockStats = fstatSync(descriptor, { bigint: true });
+      if (
+        !lockStats.isFile() ||
+        lockStats.nlink !== 1n ||
+        lockStats.dev !== descriptorStats.dev ||
+        lockStats.ino !== descriptorStats.ino
+      ) {
+        throw new Error(
+          "evaluation authorization claim index lock identity changed",
+        );
+      }
+      return { descriptor, stats: lockStats };
+    } catch (error) {
+      try {
+        const temporaryStats = lstatSync(temporaryPath, { bigint: true });
+        if (
+          temporaryStats.isFile() &&
+          !temporaryStats.isSymbolicLink() &&
+          temporaryStats.dev === descriptorStats.dev &&
+          temporaryStats.ino === descriptorStats.ino
+        ) {
+          unlinkSync(temporaryPath);
+        }
+      } catch {
+        // The temporary link may already be gone.
+      }
+      if (linked) {
+        try {
+          const currentStats = lstatSync(lockPath, { bigint: true });
+          if (
+            currentStats.isFile() &&
+            !currentStats.isSymbolicLink() &&
+            currentStats.dev === descriptorStats.dev &&
+            currentStats.ino === descriptorStats.ino
+          ) {
+            unlinkSync(lockPath);
+            fsyncLedgerDirectory();
+          }
+        } catch {
+          // Preserve the original acquisition error.
+        }
+      }
+      closeSync(descriptor);
+      throw error;
+    }
+  };
+  const appendAuthorizationClaimUnderLock = (
+    authorizationId: string,
+  ): boolean => {
+    const authorizationDigest = createHash("sha256")
+      .update(authorizationId)
+      .digest("hex");
+    const currentIdentity = assertDirectoryIdentity();
+    if (
+      currentIdentity.claimedAuthorizationDigests.includes(authorizationDigest)
+    ) {
+      return false;
+    }
+    const descriptor = openSync(
+      currentIdentity.markerPath,
+      fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      const before = fstatSync(descriptor, { bigint: true });
+      if (
+        !before.isFile() ||
+        before.nlink !== 1n ||
+        before.dev !== currentIdentity.markerDevice ||
+        before.ino !== currentIdentity.markerInode ||
+        before.ctimeNs !== currentIdentity.markerCtimeNs ||
+        before.size !== currentIdentity.markerSize
+      ) {
+        throw new Error(
+          "evaluation authorization ledger directory marker identity changed",
+        );
+      }
+      const payload = `claim:${authorizationDigest}\n`;
+      writeAllSync(descriptor, payload);
+      fsyncSync(descriptor);
+      const after = fstatSync(descriptor, { bigint: true });
+      if (
+        !after.isFile() ||
+        after.nlink !== 1n ||
+        after.dev !== currentIdentity.markerDevice ||
+        after.ino !== currentIdentity.markerInode ||
+        after.size !== before.size + BigInt(Buffer.byteLength(payload, "utf8"))
+      ) {
+        throw new Error(
+          "evaluation authorization ledger directory marker changed during append",
+        );
+      }
+      observedClaimHistory.push(authorizationDigest);
+    } finally {
+      closeSync(descriptor);
+    }
+    return true;
+  };
+  const appendAuthorizationClaimDurably = (
+    authorizationId: string,
+  ): boolean => {
+    assertDirectoryIdentity();
+    const lockPath = join(
+      directoryIdentity.directory,
+      ".site-builder-model-evaluation-claim.lock",
+    );
+    const { descriptor: lockDescriptor, stats: lockStats } =
+      acquireAuthorizationClaimLock(lockPath);
+    let result: boolean | undefined;
+    let operationFailed = false;
+    let operationError: unknown;
+    try {
+      fsyncSync(lockDescriptor);
+      fsyncLedgerDirectory();
+      result = appendAuthorizationClaimUnderLock(authorizationId);
+    } catch (error) {
+      operationFailed = true;
+      operationError = error;
+    }
+    let cleanupError: unknown;
+    try {
+      closeSync(lockDescriptor);
+      const currentLockStats = lstatSync(lockPath, { bigint: true });
+      if (
+        !currentLockStats.isFile() ||
+        currentLockStats.isSymbolicLink() ||
+        currentLockStats.nlink !== 1n ||
+        currentLockStats.dev !== lockStats.dev ||
+        currentLockStats.ino !== lockStats.ino
+      ) {
+        throw new Error(
+          "evaluation authorization claim index lock identity changed",
+        );
+      }
+      unlinkSync(lockPath);
+      fsyncLedgerDirectory();
+    } catch (error) {
+      cleanupError = error;
+    }
+    if (cleanupError !== undefined) {
+      if (operationFailed) {
+        throw new AggregateError(
+          [operationError, cleanupError],
+          "evaluation authorization claim and lock cleanup both failed",
+        );
+      }
+      throw cleanupError;
+    }
+    if (operationFailed) throw operationError;
+    if (result === undefined) {
+      throw new Error("evaluation authorization claim result is missing");
+    }
+    return result;
+  };
+  const appendDurably = (state: LedgerState, value: unknown): void => {
+    assertDirectoryIdentity();
+    const descriptor = openSync(
+      state.filePath,
+      fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      const before = fstatSync(descriptor, { bigint: true });
+      if (
+        !before.isFile() ||
+        before.nlink < 1n ||
+        before.dev !== state.fileDevice ||
+        before.ino !== state.fileInode ||
+        before.ctimeNs !== state.fileCtimeNs ||
+        before.size !== state.fileSize
+      ) {
+        throw new Error(
+          "durable evaluation ledger claim file identity changed",
+        );
+      }
+      const payload = `${JSON.stringify(value)}\n`;
+      writeAllSync(descriptor, payload);
+      fsyncSync(descriptor);
+      const after = fstatSync(descriptor, { bigint: true });
+      if (
+        !after.isFile() ||
+        after.nlink < 1n ||
+        after.dev !== state.fileDevice ||
+        after.ino !== state.fileInode ||
+        after.size !== before.size + BigInt(Buffer.byteLength(payload, "utf8"))
+      ) {
+        throw new Error(
+          "durable evaluation ledger claim file changed during append",
+        );
+      }
+      state.fileCtimeNs = after.ctimeNs;
+      state.fileSize = after.size;
+    } finally {
+      closeSync(descriptor);
+    }
+  };
+  const ledger: ModelEvaluationAuthorizationLedger = {
+    ledgerId: options.ledgerId,
+    directorySha256: directoryIdentity.sha256,
+    claim: (input) => {
+      if (states.has(input.authorizationId)) return false;
+      assertDirectoryIdentity();
+      if (!appendAuthorizationClaimDurably(input.authorizationId)) return false;
+      const filePath = join(
+        directoryIdentity.directory,
+        `${createHash("sha256")
+          .update(input.authorizationId)
+          .digest("hex")}.jsonl`,
+      );
+      let descriptor;
+      let claimFileStats: BigIntStats | undefined;
+      try {
+        descriptor = openSync(filePath, "wx", 0o600);
+      } catch (error) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "EEXIST"
+        ) {
+          return false;
+        }
+        throw error;
+      }
+      try {
+        writeAllSync(
+          descriptor,
+          `${JSON.stringify({
+            event: "authorization_claimed",
+            ...input,
+          })}\n`,
+        );
+        fsyncSync(descriptor);
+        claimFileStats = fstatSync(descriptor, { bigint: true });
+      } finally {
+        closeSync(descriptor);
+      }
+      if (!claimFileStats) {
+        throw new Error(
+          "durable evaluation ledger claim file identity is missing",
+        );
+      }
+      const directoryDescriptor = openSync(directoryIdentity.directory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
+      states.set(input.authorizationId, {
+        claimId: input.executorClaimId,
+        filePath,
+        fileDevice: claimFileStats.dev,
+        fileInode: claimFileStats.ino,
+        fileCtimeNs: claimFileStats.ctimeNs,
+        fileSize: claimFileStats.size,
+        budgetCents: input.campaignBudgetCents,
+        maxExecutions: input.maxDispatchExecutions,
+        maxWireCalls: input.maxWireCalls,
+        executions: 0,
+        wireCalls: 0,
+        committedCents: 0,
+        reservedCents: 0,
+        frozen: false,
+        reservations: new Map(),
+      });
+      return true;
+    },
+    reserve: (input) => {
+      const state = states.get(input.authorizationId);
+      if (
+        !state ||
+        state.claimId !== input.executorClaimId ||
+        state.frozen ||
+        state.reservations.has(input.executionId) ||
+        state.executions + 1 > state.maxExecutions ||
+        state.wireCalls + input.wireCalls > state.maxWireCalls ||
+        state.committedCents + state.reservedCents + input.upperBoundCents >
+          state.budgetCents
+      ) {
+        return false;
+      }
+      appendDurably(state, {
+        event: "dispatch_reserved",
+        ...input,
+      });
+      state.executions += 1;
+      state.wireCalls += input.wireCalls;
+      state.reservedCents += input.upperBoundCents;
+      state.reservations.set(input.executionId, input.upperBoundCents);
+      return true;
+    },
+    settle: (input) => {
+      const state = states.get(input.authorizationId);
+      const reservation = state?.reservations.get(input.executionId);
+      if (
+        !state ||
+        state.claimId !== input.executorClaimId ||
+        reservation === undefined
+      ) {
+        return false;
+      }
+      appendDurably(state, {
+        event: "dispatch_settled",
+        ...input,
+      });
+      state.reservations.delete(input.executionId);
+      state.reservedCents -= reservation;
+      if (input.settlement.state === "settled") {
+        state.committedCents += input.settlement.amountCents;
+        if (state.committedCents > state.budgetCents) state.frozen = true;
+      } else if (input.settlement.state === "unknown") {
+        state.frozen = true;
+      }
+      return true;
+    },
+    freeze: (input) => {
+      const state = states.get(input.authorizationId);
+      if (!state || state.claimId !== input.executorClaimId) return false;
+      appendDurably(state, {
+        event: "authorization_frozen",
+        ...input,
+      });
+      state.frozen = true;
+      return true;
+    },
+  };
+  const trusted = Object.freeze(ledger);
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_SET_ADD,
+    TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS,
+    [trusted],
+  );
+  return trusted;
+}
+
+function isTrustedModelEvaluationAuthorizationLedger(
+  value: unknown,
+): value is ModelEvaluationAuthorizationLedger {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    APPLY_MODEL_EVALUATION_INTRINSIC(
+      MODEL_EVALUATION_WEAK_SET_HAS,
+      TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS,
+      [value],
+    ) === true
+  );
 }
 
 export interface ModelEvaluationSettlementContext {
@@ -206,6 +1331,7 @@ export type ModelEvaluationSettlementResolution =
       state: "settled";
       amountCents: number;
       basis: ModelEvaluationCostBasis;
+      executionId?: string;
     }
   | Exclude<CostSettlement, { state: "settled" }>;
 
@@ -231,17 +1357,23 @@ type EvaluationExecutionRequest =
   ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest;
 
 const TRUSTED_MODEL_EVALUATION_EXECUTES = new WeakMap<object, object>();
-const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
-const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
-const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
+const TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY = new WeakMap<
+  object,
+  ModelEvaluationCostSafetyAttestation
+>();
+const TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS = new WeakMap<
+  object,
+  () => Promise<void>
+>();
+const CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS = new Set<string>();
 
 export function modelEvaluationProtocolExecutorIdentity(
   value: unknown,
 ): object | null {
   if (typeof value !== "function") return null;
   return (
-    (APPLY_TRUSTED_EXECUTE_INTRINSIC(
-      TRUSTED_EXECUTE_GET,
+    (APPLY_MODEL_EVALUATION_INTRINSIC(
+      MODEL_EVALUATION_WEAK_MAP_GET,
       TRUSTED_MODEL_EVALUATION_EXECUTES,
       [value],
     ) as object | undefined) ?? null
@@ -252,6 +1384,35 @@ export function isTrustedModelEvaluationProtocolExecute(
   value: unknown,
 ): value is ModelEvaluationProtocolExecutor["execute"] {
   return modelEvaluationProtocolExecutorIdentity(value) !== null;
+}
+
+export function modelEvaluationProtocolExecutorCostSafety(
+  value: unknown,
+): ModelEvaluationCostSafetyAttestation | null {
+  const identity = modelEvaluationProtocolExecutorIdentity(value);
+  return identity === null
+    ? null
+    : ((APPLY_MODEL_EVALUATION_INTRINSIC(
+        MODEL_EVALUATION_WEAK_MAP_GET,
+        TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY,
+        [identity],
+      ) as ModelEvaluationCostSafetyAttestation | undefined) ?? null);
+}
+
+export async function freezeModelEvaluationProtocolExecutor(
+  value: unknown,
+): Promise<boolean> {
+  const identity = modelEvaluationProtocolExecutorIdentity(value);
+  const freeze = identity
+    ? (APPLY_MODEL_EVALUATION_INTRINSIC(
+        MODEL_EVALUATION_WEAK_MAP_GET,
+        TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS,
+        [identity],
+      ) as (() => Promise<void>) | undefined)
+    : undefined;
+  if (!freeze) return false;
+  await freeze();
+  return true;
 }
 
 type TextEvaluationProtocol =
@@ -303,6 +1464,7 @@ function canonicalSettlement(
   dispatched: boolean,
   resolverId: string,
   context?: ModelEvaluationSettlementContext,
+  costSafety?: ModelEvaluationCostSafetyAttestation,
 ): CostSettlement {
   if (!isRecord(value)) {
     return { state: "unknown", reason: "invalid_settlement" };
@@ -330,18 +1492,31 @@ function canonicalSettlement(
     context.usage.inputTokens >= 0 &&
     Number.isSafeInteger(context.usage.outputTokens) &&
     context.usage.outputTokens >= 0;
+  const frozenPricingAmount =
+    completeUsage && context && costSafety
+      ? frozenModelEvaluationPriceCents(costSafety, {
+          alias: context.alias,
+          protocol: context.protocol,
+          inputTokens: context.usage.inputTokens,
+          outputTokens: context.usage.outputTokens,
+        })
+      : null;
   if (
     value.state === "settled" &&
-    exactKeys(value, ["state", "amountCents", "basis"]) &&
+    exactKeys(value, ["state", "amountCents", "basis", "executionId"]) &&
     typeof value.amountCents === "number" &&
     Number.isFinite(value.amountCents) &&
     value.amountCents >= 0 &&
     typeof value.basis === "string" &&
     SETTLED_BASES.has(value.basis) &&
+    context !== undefined &&
+    value.executionId === context.executionId &&
     (value.basis !== "provider_reported" ||
       (providerReportedAmount !== null &&
         Math.abs(providerReportedAmount - value.amountCents) <= 1e-9)) &&
-    (value.basis !== "frozen_pricing_snapshot" || completeUsage)
+    (value.basis !== "frozen_pricing_snapshot" ||
+      (frozenPricingAmount !== null &&
+        Math.abs(frozenPricingAmount - value.amountCents) <= 1e-9))
   ) {
     return {
       state: "settled",
@@ -375,21 +1550,6 @@ function canonicalSettlement(
     return {
       state: "not_incurred",
       reason: "rejected_before_dispatch",
-    };
-  }
-  if (
-    dispatched &&
-    value.state === "not_incurred" &&
-    exactKeys(value, ["state", "reason"]) &&
-    value.reason === "provider_attested_not_incurred" &&
-    context?.outcome === "failed" &&
-    context.callCount === 1 &&
-    context.providerReportedCostCents.length === 1 &&
-    context.providerReportedCostCents[0] === null
-  ) {
-    return {
-      state: "not_incurred",
-      reason: "provider_attested_not_incurred",
     };
   }
   return { state: "unknown", reason: "invalid_settlement" };
@@ -781,6 +1941,7 @@ function evaluationUsage(
 async function safeResolveSettlement(
   resolver: ModelEvaluationSettlementResolver,
   context: ModelEvaluationSettlementContext,
+  costSafety: ModelEvaluationCostSafetyAttestation,
 ): Promise<CostSettlement> {
   try {
     const resolverContext = Object.freeze({
@@ -795,6 +1956,7 @@ async function safeResolveSettlement(
       true,
       resolver.resolverId,
       resolverContext,
+      costSafety,
     );
   } catch {
     return { state: "unknown", reason: "invalid_settlement" };
@@ -810,6 +1972,8 @@ function responseCost(value: unknown): number | null {
 export function createModelEvaluationProtocolExecutor(deps: {
   wireClient: ModelEvaluationWireClient;
   settlementResolver: ModelEvaluationSettlementResolver;
+  costSafety: ModelEvaluationCostSafetyAttestation;
+  authorizationLedger: ModelEvaluationAuthorizationLedger;
 }): ModelEvaluationProtocolExecutor {
   const wireReceiver = deps?.wireClient;
   const openAIResponses = wireReceiver?.openAIResponses;
@@ -818,6 +1982,27 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const resolverReceiver = deps?.settlementResolver;
   const resolverId = resolverReceiver?.resolverId;
   const resolverResolve = resolverReceiver?.resolve;
+  const costSafety = deps?.costSafety;
+  const authorizationLedger = deps?.authorizationLedger;
+  const credentialAttestationId = wireReceiver?.credentialAttestationId;
+  const credentialSnapshotSha256 = wireReceiver?.credentialSnapshotSha256;
+  const credentialBearerTokenSha256 = wireReceiver?.credentialBearerTokenSha256;
+  const credentialGatewayOrigin = wireReceiver?.credentialGatewayOrigin;
+  const trustedWireCredential =
+    wireReceiver && typeof wireReceiver === "object"
+      ? (APPLY_MODEL_EVALUATION_INTRINSIC(
+          MODEL_EVALUATION_WEAK_MAP_GET,
+          TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS,
+          [wireReceiver],
+        ) as
+          | Readonly<{
+              credentialAttestationId: string;
+              credentialSnapshotSha256: string;
+              credentialBearerTokenSha256: string;
+              credentialGatewayOrigin: string;
+            }>
+          | undefined)
+      : undefined;
   if (
     !wireReceiver ||
     typeof openAIResponses !== "function" ||
@@ -825,13 +2010,38 @@ export function createModelEvaluationProtocolExecutor(deps: {
     typeof openAIChatCompletions !== "function" ||
     !resolverReceiver ||
     !SETTLEMENT_RESOLVER_ID.test(resolverId ?? "") ||
-    typeof resolverResolve !== "function"
+    typeof resolverResolve !== "function" ||
+    !isTrustedModelEvaluationCostSafetyAttestation(costSafety) ||
+    !isTrustedModelEvaluationAuthorizationLedger(authorizationLedger) ||
+    authorizationLedger.ledgerId !== costSafety.authorization.ledgerId ||
+    authorizationLedger.directorySha256 !==
+      costSafety.authorization.ledgerDirectorySha256 ||
+    costSafety.pricing.resolverId !== resolverId ||
+    trustedWireCredential?.credentialAttestationId !==
+      credentialAttestationId ||
+    trustedWireCredential?.credentialSnapshotSha256 !==
+      credentialSnapshotSha256 ||
+    trustedWireCredential?.credentialBearerTokenSha256 !==
+      credentialBearerTokenSha256 ||
+    trustedWireCredential?.credentialGatewayOrigin !==
+      credentialGatewayOrigin ||
+    credentialAttestationId !== costSafety.credential.attestationId ||
+    credentialSnapshotSha256 !== costSafety.credential.snapshotSha256 ||
+    credentialBearerTokenSha256 !== costSafety.credential.bearerTokenSha256 ||
+    credentialGatewayOrigin !== costSafety.credential.gatewayOrigin ||
+    CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.has(
+      costSafety.authorization.authorizationId,
+    )
   ) {
     throw new Error(
-      "evaluation wire client and auditable settlement resolver are required",
+      "evaluation wire client and auditable settlement resolver are required; trusted cost safety must match",
     );
   }
   const wireClient = Object.freeze({
+    credentialAttestationId,
+    credentialSnapshotSha256,
+    credentialBearerTokenSha256,
+    credentialGatewayOrigin,
     openAIResponses: Object.freeze(openAIResponses.bind(wireReceiver)),
     anthropicMessages: Object.freeze(anthropicMessages.bind(wireReceiver)),
     openAIChatCompletions: Object.freeze(
@@ -844,15 +2054,81 @@ export function createModelEvaluationProtocolExecutor(deps: {
     resolverId,
     resolve: capturedResolve,
   }) satisfies ModelEvaluationSettlementResolver;
+  let reservedDispatchExecutions = 0;
+  let reservedWireCalls = 0;
+  let committedCampaignCents = 0;
+  let reservedCampaignUpperBoundCents = 0;
+  let campaignFrozen = false;
+  const executorClaimId = randomUUID();
+  let durableClaim:
+    Promise<Readonly<{ claimed: boolean; error: unknown | null }>> | undefined;
+  const claimDurableAuthorization = () => {
+    if (durableClaim) return durableClaim;
+    const claimAttempt = Promise.resolve()
+      .then(() =>
+        authorizationLedger.claim(
+          Object.freeze({
+            authorizationId: costSafety.authorization.authorizationId,
+            executorClaimId,
+            campaignBudgetCents: costSafety.limits.campaignBudgetCents,
+            maxDispatchExecutions: costSafety.limits.maxDispatchExecutions,
+            maxWireCalls: costSafety.limits.maxWireCalls,
+          }),
+        ),
+      )
+      .then(
+        (claimed) =>
+          Object.freeze({
+            claimed: claimed === true,
+            error: claimed === true ? null : new Error("claim rejected"),
+          }),
+        (error: unknown) => Object.freeze({ claimed: false, error }),
+      );
+    durableClaim = claimAttempt;
+    void claimAttempt.then((claim) => {
+      if (
+        !claim.claimed &&
+        claim.error instanceof ModelEvaluationClaimLockContentionError &&
+        durableClaim === claimAttempt
+      ) {
+        durableClaim = undefined;
+      }
+    });
+    return claimAttempt;
+  };
+  const freezeDurableAuthorization = async (reason: string): Promise<void> => {
+    campaignFrozen = true;
+    const claim = await claimDurableAuthorization();
+    if (!claim.claimed) return;
+    try {
+      const frozen = await authorizationLedger.freeze(
+        Object.freeze({
+          authorizationId: costSafety.authorization.authorizationId,
+          executorClaimId,
+          reason,
+        }),
+      );
+      if (frozen !== true) campaignFrozen = true;
+    } catch {
+      campaignFrozen = true;
+    }
+  };
 
   const executeWithMode = async <T>(
     request: EvaluationExecutionRequest,
     mode: "target" | "legacy_comparator",
   ): Promise<ModelEvaluationCallResult<T>> => {
+    const protocol = assertCanonicalRequest(request, mode);
     if (!consumeAuthorizedModelEvaluationExecutionRequest(request)) {
       throw preDispatchError("evaluation_dispatch_not_authorized");
     }
-    const protocol = assertCanonicalRequest(request, mode);
+    const claim = await claimDurableAuthorization();
+    if (!claim.claimed) {
+      if (!(claim.error instanceof ModelEvaluationClaimLockContentionError)) {
+        campaignFrozen = true;
+      }
+      throw preDispatchError("evaluation_cost_safety_rejected");
+    }
     const usage: UsageAccumulator = {
       inputTokens: 0,
       outputTokens: 0,
@@ -861,10 +2137,201 @@ export function createModelEvaluationProtocolExecutor(deps: {
     };
     const providerReportedCostCents: (number | null)[] = [];
     const system = structuredSystemPrompt(request.outputSchema);
+    const maximumWireCalls = request.repairTaskOutput ? 2 : 1;
+    const campaignReservationCents =
+      request.perCallCostCapCents * maximumWireCalls;
+    let campaignReservationActive = false;
+    const closeCampaignReservation = async (
+      settlement: CostSettlement,
+    ): Promise<CostSettlement> => {
+      if (!campaignReservationActive) return settlement;
+      reservedCampaignUpperBoundCents -= campaignReservationCents;
+      campaignReservationActive = false;
+      let effectiveSettlement = settlement;
+      try {
+        const persisted = await authorizationLedger.settle(
+          Object.freeze({
+            authorizationId: costSafety.authorization.authorizationId,
+            executorClaimId,
+            executionId: request.executionId,
+            settlement,
+          }),
+        );
+        if (persisted !== true) {
+          await freezeDurableAuthorization("settlement_persistence_rejected");
+          effectiveSettlement = {
+            state: "unknown",
+            reason: "invalid_settlement",
+          };
+        }
+      } catch {
+        await freezeDurableAuthorization("settlement_persistence_failed");
+        effectiveSettlement = {
+          state: "unknown",
+          reason: "invalid_settlement",
+        };
+      }
+      if (effectiveSettlement.state === "settled") {
+        committedCampaignCents += effectiveSettlement.amountCents;
+        if (
+          effectiveSettlement.amountCents > request.perCallCostCapCents ||
+          committedCampaignCents > costSafety.limits.campaignBudgetCents
+        ) {
+          await freezeDurableAuthorization("settled_cost_cap_exceeded");
+        }
+      } else if (effectiveSettlement.state === "unknown") {
+        await freezeDurableAuthorization("unknown_settlement");
+      }
+      return effectiveSettlement;
+    };
+    try {
+      assertModelEvaluationCostSafetyDispatch(costSafety, {
+        mode,
+        alias: request.alias,
+        protocol,
+        maxOutputTokens: request.maxTokens,
+        promptUtf8Bytes:
+          Buffer.byteLength(system, "utf8") +
+          Buffer.byteLength(request.casePayload.prompt, "utf8"),
+        maximumWireCalls,
+        perCallCostCapCents: request.perCallCostCapCents,
+      });
+      if (
+        reservedDispatchExecutions + 1 >
+          costSafety.limits.maxDispatchExecutions ||
+        reservedWireCalls + maximumWireCalls > costSafety.limits.maxWireCalls ||
+        campaignFrozen ||
+        committedCampaignCents +
+          reservedCampaignUpperBoundCents +
+          campaignReservationCents >
+          costSafety.limits.campaignBudgetCents
+      ) {
+        throw new Error("model evaluation campaign call cap exhausted");
+      }
+    } catch {
+      throw preDispatchError("evaluation_cost_safety_rejected");
+    }
+    reservedDispatchExecutions += 1;
+    reservedWireCalls += maximumWireCalls;
+    reservedCampaignUpperBoundCents += campaignReservationCents;
+    campaignReservationActive = true;
+    try {
+      const persisted = await authorizationLedger.reserve(
+        Object.freeze({
+          authorizationId: costSafety.authorization.authorizationId,
+          executorClaimId,
+          executionId: request.executionId,
+          wireCalls: maximumWireCalls,
+          upperBoundCents: campaignReservationCents,
+        }),
+      );
+      if (persisted !== true) {
+        throw new Error("durable reservation rejected");
+      }
+    } catch {
+      reservedDispatchExecutions -= 1;
+      reservedWireCalls -= maximumWireCalls;
+      reservedCampaignUpperBoundCents -= campaignReservationCents;
+      campaignReservationActive = false;
+      await freezeDurableAuthorization("reservation_persistence_failed");
+      throw preDispatchError("evaluation_cost_safety_rejected");
+    }
 
     const dispatch = async (
       prompt: string,
     ): Promise<NormalizedTextResponse> => {
+      try {
+        assertModelEvaluationCostSafetyDispatch(costSafety, {
+          mode,
+          alias: request.alias,
+          protocol,
+          maxOutputTokens: request.maxTokens,
+          promptUtf8Bytes:
+            Buffer.byteLength(system, "utf8") +
+            Buffer.byteLength(prompt, "utf8"),
+          maximumWireCalls: 1,
+          perCallCostCapCents: request.perCallCostCapCents,
+        });
+      } catch {
+        if (usage.callCount === 0) {
+          const rejected = {
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          } as const;
+          const effectiveSettlement = await closeCampaignReservation(rejected);
+          throw new ModelEvaluationCallError(
+            "evaluation_cost_safety_rejected",
+            effectiveSettlement,
+          );
+        }
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error: new Error("evaluation_prompt_cost_safety_rejected"),
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        throw new ModelEvaluationCallError(
+          "evaluation_cost_safety_rejected",
+          effectiveSettlement,
+        );
+      }
+      if (campaignFrozen || request.signal.aborted) {
+        if (usage.callCount === 0) {
+          const rejected = {
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          } as const;
+          const effectiveSettlement = await closeCampaignReservation(rejected);
+          throw new ModelEvaluationCallError(
+            request.signal.aborted
+              ? "evaluation_aborted"
+              : "evaluation_cost_safety_rejected",
+            effectiveSettlement,
+          );
+        }
+        const error = new Error(
+          request.signal.aborted
+            ? "evaluation_aborted_before_wire_dispatch"
+            : "evaluation_campaign_frozen_before_wire_dispatch",
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        campaignFrozen = true;
+        throw new ModelEvaluationCallError(
+          request.signal.aborted
+            ? "evaluation_aborted"
+            : "evaluation_cost_safety_rejected",
+          effectiveSettlement,
+        );
+      }
       let response: ModelEvaluationWireResponse;
       try {
         switch (protocol) {
@@ -923,23 +2390,33 @@ export function createModelEvaluationProtocolExecutor(deps: {
       } catch (error) {
         usage.callCount += 1;
         usage.complete = false;
-        providerReportedCostCents.push(null);
-        const settlement = await safeResolveSettlement(settlementResolver, {
-          executionId: request.executionId,
-          taskId: request.taskId,
-          alias: request.alias,
-          protocol,
-          outcome: "failed",
-          callCount: usage.callCount,
-          usage: settlementUsage(usage),
-          providerReportedCostCents: Object.freeze([
-            ...providerReportedCostCents,
-          ]),
-          error,
-        });
+        providerReportedCostCents.push(
+          error instanceof ModelEvaluationWireHttpError ||
+            error instanceof ModelEvaluationWireResponseBodyError
+            ? responseCost(error.providerReportedCostCents)
+            : null,
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           request.signal.aborted ? "evaluation_aborted" : "provider_error",
-          settlement,
+          effectiveSettlement,
         );
       }
 
@@ -965,22 +2442,58 @@ export function createModelEvaluationProtocolExecutor(deps: {
         }
         usage.callCount += 1;
         usage.complete = false;
-        const settlement = await safeResolveSettlement(settlementResolver, {
-          executionId: request.executionId,
-          taskId: request.taskId,
-          alias: request.alias,
-          protocol,
-          outcome: "failed",
-          callCount: usage.callCount,
-          usage: settlementUsage(usage),
-          providerReportedCostCents: Object.freeze([
-            ...providerReportedCostCents,
-          ]),
-          error,
-        });
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           "provider_response_invalid",
-          settlement,
+          effectiveSettlement,
+        );
+      }
+      if (
+        normalized.usage &&
+        (normalized.usage.outputTokens > request.maxTokens ||
+          normalized.usage.outputTokens >
+            costSafety.limits.maxOutputTokensPerCall)
+      ) {
+        addUsage(usage, normalized.usage);
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error: new Error("evaluation_output_token_limit_exceeded"),
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        campaignFrozen = true;
+        throw new ModelEvaluationCallError(
+          "evaluation_output_token_limit_exceeded",
+          effectiveSettlement,
         );
       }
       addUsage(usage, normalized.usage);
@@ -996,6 +2509,47 @@ export function createModelEvaluationProtocolExecutor(deps: {
     if (identityProven && artifact !== undefined && request.repairTaskOutput) {
       const failure = validationFailure(request, artifact);
       if (failure) {
+        const knownProviderReportedCostCents =
+          providerReportedCostCents.length > 0 &&
+          providerReportedCostCents.every((value) => value !== null)
+            ? providerReportedCostCents.reduce(
+                (total, value) => total + (value ?? 0),
+                0,
+              )
+            : null;
+        if (
+          knownProviderReportedCostCents !== null &&
+          knownProviderReportedCostCents >= request.perCallCostCapCents
+        ) {
+          const settlement = await safeResolveSettlement(
+            settlementResolver,
+            {
+              executionId: request.executionId,
+              taskId: request.taskId,
+              alias: request.alias,
+              protocol,
+              outcome: "failed",
+              callCount: usage.callCount,
+              usage: settlementUsage(usage),
+              providerReportedCostCents: Object.freeze([
+                ...providerReportedCostCents,
+              ]),
+              error: new Error(
+                "evaluation_known_attempt_cost_cap_reached_before_repair",
+              ),
+            },
+            costSafety,
+          );
+          const effectiveSettlement =
+            await closeCampaignReservation(settlement);
+          await freezeDurableAuthorization(
+            "known_attempt_cost_cap_reached_before_repair",
+          );
+          throw new ModelEvaluationCallError(
+            "evaluation_cost_safety_rejected",
+            effectiveSettlement,
+          );
+        }
         normalized = await dispatch(
           repairPrompt(
             request.casePayload.prompt,
@@ -1011,16 +2565,23 @@ export function createModelEvaluationProtocolExecutor(deps: {
     }
 
     const resolvedUsage = evaluationUsage(usage);
-    const settlement = await safeResolveSettlement(settlementResolver, {
-      executionId: request.executionId,
-      taskId: request.taskId,
-      alias: request.alias,
-      protocol,
-      outcome: "completed",
-      callCount: usage.callCount,
-      usage: settlementUsage(usage),
-      providerReportedCostCents: Object.freeze([...providerReportedCostCents]),
-    });
+    let settlement = await safeResolveSettlement(
+      settlementResolver,
+      {
+        executionId: request.executionId,
+        taskId: request.taskId,
+        alias: request.alias,
+        protocol,
+        outcome: "completed",
+        callCount: usage.callCount,
+        usage: settlementUsage(usage),
+        providerReportedCostCents: Object.freeze([
+          ...providerReportedCostCents,
+        ]),
+      },
+      costSafety,
+    );
+    settlement = await closeCampaignReservation(settlement);
     if (!resolvedUsage) {
       throw new ModelEvaluationCallError("usage_unavailable", settlement);
     }
@@ -1054,14 +2615,32 @@ export function createModelEvaluationProtocolExecutor(deps: {
     ) => executeWithMode<T>(request, "target"),
   );
   const executorIdentity = Object.freeze({});
-  APPLY_TRUSTED_EXECUTE_INTRINSIC(
-    TRUSTED_EXECUTE_SET,
+  CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.add(
+    costSafety.authorization.authorizationId,
+  );
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY,
+    [executorIdentity, costSafety],
+  );
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS,
+    [executorIdentity, () => freezeDurableAuthorization("harness_hard_stop")],
+  );
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
     TRUSTED_MODEL_EVALUATION_EXECUTES,
     [execute, executorIdentity],
   );
   const executeLegacyComparator = Object.freeze(
     <T>(request: ModelEvaluationExecutionRequest) =>
       executeWithMode<T>(request, "legacy_comparator"),
+  );
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_EXECUTES,
+    [executeLegacyComparator, executorIdentity],
   );
   return Object.freeze({
     execute,

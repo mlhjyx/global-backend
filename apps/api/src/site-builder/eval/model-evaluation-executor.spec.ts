@@ -18,13 +18,46 @@ import {
 import * as modelEvaluationHarness from "./model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
-  createModelEvaluationProtocolExecutor,
+  createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
+  freezeModelEvaluationProtocolExecutor,
   isTrustedModelEvaluationProtocolExecute,
   type ModelEvaluationSettlementResolution,
   type ModelEvaluationSettlementResolver,
   type ModelEvaluationWireClient,
   type ModelEvaluationWireResponse,
 } from "./model-evaluation-executor";
+import {
+  bindFakeModelEvaluationWireCredential,
+  createFakeModelEvaluationAuthorizationLedger,
+  createFakeModelEvaluationCostSafety,
+} from "./model-evaluation-cost-safety.spec-support";
+import {
+  createModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyInput,
+} from "./model-evaluation-cost-safety";
+
+function createModelEvaluationProtocolExecutor(
+  deps: Omit<
+    Parameters<typeof createRawModelEvaluationProtocolExecutor>[0],
+    "authorizationLedger" | "costSafety"
+  >,
+) {
+  const costSafety = createFakeModelEvaluationCostSafety(
+    /^[a-z0-9][a-z0-9._/-]{0,127}$/.test(deps.settlementResolver.resolverId)
+      ? deps.settlementResolver.resolverId
+      : "fake-invalid-resolver-guard/v1",
+  );
+  return createRawModelEvaluationProtocolExecutor({
+    ...deps,
+    wireClient: bindFakeModelEvaluationWireCredential(
+      deps.wireClient,
+      costSafety,
+    ),
+    authorizationLedger:
+      createFakeModelEvaluationAuthorizationLedger(costSafety),
+    costSafety,
+  });
+}
 
 function canonicalRequest(
   candidateIndex = 0,
@@ -194,13 +227,18 @@ function settlementResolver(
   return {
     resolverId: "fake-settlement/v1",
     resolve: vi.fn((context) => {
-      if (settlement) return settlement;
+      if (settlement) {
+        return settlement.state === "settled"
+          ? { ...settlement, executionId: context.executionId }
+          : settlement;
+      }
       const costs = context.providerReportedCostCents;
       return costs.every((amount): amount is number => amount !== null)
         ? {
             state: "settled" as const,
             amountCents: costs.reduce((sum, amount) => sum + amount, 0),
             basis: "provider_reported" as const,
+            executionId: context.executionId,
           }
         : {
             state: "unknown" as const,
@@ -650,6 +688,87 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
+  it("does not dispatch repair after the first response reaches the known attempt cost cap", async () => {
+    const request = canonicalRequest();
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(
+          openAIResponsesBody(
+            request.alias,
+            {},
+            {
+              inputTokens: 10,
+              outputTokens: 5,
+            },
+          ),
+          request.perCallCostCapCents,
+        ),
+      )
+      .mockResolvedValueOnce(
+        wireResponse(
+          openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+        ),
+      );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: call }),
+      settlementResolver: settlementResolver(),
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_rejected",
+      costSettlement: {
+        state: "settled",
+        amountCents: request.perCallCostCapCents,
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch repair after a hard-stop freeze if the first wire ignored abort", async () => {
+    const controller = new AbortController();
+    const request = {
+      ...canonicalRequest(),
+      signal: controller.signal,
+    };
+    let resolveFirst:
+      ((response: ModelEvaluationWireResponse) => void) | undefined;
+    const call = vi.fn(
+      () =>
+        new Promise<ModelEvaluationWireResponse>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: call }),
+      settlementResolver: settlementResolver(),
+    });
+
+    const pending = executor.execute(request);
+    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+    controller.abort(new Error("diagnostic hard stop"));
+    await expect(
+      freezeModelEvaluationProtocolExecutor(executor.execute),
+    ).resolves.toBe(true);
+    resolveFirst?.(
+      wireResponse(
+        openAIResponsesBody(
+          request.alias,
+          {},
+          {
+            inputTokens: 10,
+            outputTokens: 5,
+          },
+        ),
+      ),
+    );
+
+    await expect(pending).rejects.toMatchObject({
+      failureCode: "evaluation_aborted",
+    });
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it("isolates frozen settlement usage from resolver mutation and records resolver identity", async () => {
     const request = canonicalRequest();
     const resolver: ModelEvaluationSettlementResolver = {
@@ -663,8 +782,9 @@ describe("structured output, repair, errors, and settlement", () => {
         );
         return {
           state: "settled",
-          amountCents: 1,
+          amountCents: 0.02,
           basis: "frozen_pricing_snapshot",
+          executionId: context.executionId,
         };
       }),
     };
@@ -690,19 +810,53 @@ describe("structured output, repair, errors, and settlement", () => {
       },
       costSettlement: {
         state: "settled",
-        amountCents: 1,
+        amountCents: 0.02,
         basis: "frozen_pricing_snapshot@pricing-snapshot/2026-07-28-v1",
+      },
+    });
+  });
+
+  it("rejects a frozen settlement amount that disagrees with the attested unit prices", async () => {
+    const request = canonicalRequest();
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () =>
+          wireResponse(
+            openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+              inputTokens: 100,
+              outputTokens: 50,
+            }),
+          ),
+      }),
+      settlementResolver: {
+        resolverId: "undercounting-pricing-resolver/v1",
+        resolve: () => ({
+          state: "settled" as const,
+          amountCents: 0.01,
+          basis: "frozen_pricing_snapshot" as const,
+        }),
+      },
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
       },
     });
   });
 
   it("captures resolver identity and implementation once when branding the executor", async () => {
     const request = canonicalRequest();
-    const initialResolve = vi.fn(function (this: { resolverId: string }) {
+    const initialResolve = vi.fn(function (
+      this: { resolverId: string },
+      context: { executionId: string },
+    ) {
       return {
         state: "settled" as const,
         amountCents: this.resolverId === "captured-resolver/v1" ? 1 : 999,
         basis: "provider_reported" as const,
+        executionId: context.executionId,
       };
     });
     const replacementResolve = vi.fn(() => ({
@@ -749,13 +903,16 @@ describe("structured output, repair, errors, and settlement", () => {
     const request = canonicalRequest();
     class PrivatePricingResolver implements ModelEvaluationSettlementResolver {
       readonly resolverId = "private-pricing-resolver/v1";
-      readonly #amountCents = 1;
+      readonly #amountCents = 0.02;
 
-      resolve(): ModelEvaluationSettlementResolution {
+      resolve(
+        context: Readonly<{ executionId: string }>,
+      ): ModelEvaluationSettlementResolution {
         return {
           state: "settled",
           amountCents: this.#amountCents,
           basis: "frozen_pricing_snapshot",
+          executionId: context.executionId,
         };
       }
     }
@@ -773,7 +930,7 @@ describe("structured output, repair, errors, and settlement", () => {
     await expect(executor.execute(request)).resolves.toMatchObject({
       costSettlement: {
         state: "settled",
-        amountCents: 1,
+        amountCents: 0.02,
         basis: "frozen_pricing_snapshot@private-pricing-resolver/v1",
       },
     });
@@ -812,6 +969,42 @@ describe("structured output, repair, errors, and settlement", () => {
     expect(replacement).not.toHaveBeenCalled();
   });
 
+  it("rechecks the expanded repair prompt before the second wire call", async () => {
+    const request = canonicalRequest();
+    const resolver = settlementResolver();
+    const input = structuredClone(
+      createFakeModelEvaluationCostSafety(resolver.resolverId),
+    ) as ModelEvaluationCostSafetyInput;
+    const system = `${BRAND_PROFILE_TASK.system ?? ""}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(request.outputSchema)}`;
+    input.limits.maxPromptUtf8BytesPerCall =
+      Buffer.byteLength(system, "utf8") +
+      Buffer.byteLength(request.casePayload.prompt, "utf8") +
+      1;
+    const costSafety = createModelEvaluationCostSafetyAttestation(input);
+    const call = vi.fn(async () =>
+      wireResponse(openAIResponsesBody(request.alias, {})),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        wireClient({ openAIResponses: call }),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_rejected",
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["", "contains space", "contains@delimiter"])(
     "rejects invalid settlement resolver identity %j at factory creation",
     (resolverId) => {
@@ -831,6 +1024,15 @@ describe("structured output, repair, errors, and settlement", () => {
       );
     },
   );
+
+  it("requires a branded cost safety attestation at factory creation", () => {
+    expect(() =>
+      createRawModelEvaluationProtocolExecutor({
+        wireClient: wireClient(),
+        settlementResolver: settlementResolver(),
+      } as Parameters<typeof createRawModelEvaluationProtocolExecutor>[0]),
+    ).toThrow("trusted cost safety must match");
+  });
 
   it("rejects unsafe provider token counts and aggregate overflow", async () => {
     const request = canonicalRequest();
@@ -1018,6 +1220,21 @@ describe("structured output, repair, errors, and settlement", () => {
       blocked: true,
       blockReason: "per_call_cap_exceeded",
     });
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "industrial-pump-sparse",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(
+          plan.envelope.perCallCostCapCents * 2,
+        ),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      failureCode: "post_dispatch_settlement_incoherent",
+    });
+    expect(wireCall).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a whole-attempt not-incurred claim after a billable first repair call", async () => {
@@ -1176,6 +1393,38 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
+  it("rejects a verified billing export for a different execution identity", async () => {
+    const request = canonicalRequest();
+    const wireCall = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(
+          request.alias,
+          canonicalAcceptedArtifact(request.fixtureId),
+        ),
+      ),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: {
+        resolverId: "mismatched-billing-export/v1",
+        resolve: () => ({
+          state: "settled" as const,
+          amountCents: 1,
+          basis: "verified_billing_export" as const,
+          executionId: "another-evaluation-execution",
+        }),
+      },
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(wireCall).toHaveBeenCalledTimes(1);
+  });
+
   it("applies the same conservative repair settlement to capability probes", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates.find(
@@ -1282,17 +1531,18 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
-  it("accepts provider-attested no cost only for the first failed dispatch with no cost observation", async () => {
+  it("freezes after a dispatched request lacks positive execution-bound no-charge proof", async () => {
     const request = canonicalRequest();
+    const call = vi.fn(async () => {
+      throw new Error("connection dropped after dispatch");
+    });
     const resolver = settlementResolver({
       state: "not_incurred",
       reason: "provider_attested_not_incurred",
     });
     const executor = createModelEvaluationProtocolExecutor({
       wireClient: wireClient({
-        openAIResponses: async () => {
-          throw new Error("provider rejected before generation");
-        },
+        openAIResponses: call,
       }),
       settlementResolver: resolver,
     });
@@ -1300,8 +1550,8 @@ describe("structured output, repair, errors, and settlement", () => {
     await expect(executor.execute(request)).rejects.toMatchObject({
       failureCode: "provider_error",
       costSettlement: {
-        state: "not_incurred",
-        reason: "provider_attested_not_incurred",
+        state: "unknown",
+        reason: "invalid_settlement",
       },
     });
     expect(resolver.resolve).toHaveBeenCalledWith(
@@ -1311,6 +1561,19 @@ describe("structured output, repair, errors, and settlement", () => {
         providerReportedCostCents: [null],
       }),
     );
+    await expect(
+      executor.execute({
+        ...request,
+        executionId: `${request.executionId}:retry`,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_rejected",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it("repairs a task-gate failure without weakening the canonical gate", async () => {
@@ -1408,6 +1671,7 @@ describe("structured output, repair, errors, and settlement", () => {
       settlementResolver: unknown,
     });
     const pending = abortExecutor.execute(request);
+    await vi.waitFor(() => expect(observed).toHaveBeenCalledOnce());
     controller.abort(new Error("test abort"));
     await expect(pending).rejects.toMatchObject({
       failureCode: "evaluation_aborted",
@@ -1475,6 +1739,31 @@ describe("structured output, repair, errors, and settlement", () => {
       reason: "invalid_settlement",
     });
     expect(result.costSettlement).not.toMatchObject({ amountCents: 0 });
+  });
+
+  it("rejects provider output usage above the attested request limit", async () => {
+    const request = canonicalRequest();
+    const call = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+          inputTokens: 100,
+          outputTokens: request.maxTokens + 1,
+        }),
+      ),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: call }),
+      settlementResolver: settlementResolver(),
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_output_token_limit_exceeded",
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it("preserves a settled cost and lets the harness fail a cap exceedance", async () => {
@@ -1699,6 +1988,60 @@ describe("harness integration and unchanged runtime routes", () => {
     });
     expect(observed).toHaveBeenCalledTimes(1);
     expect(observed.mock.calls[0][0].aborted).toBe(true);
+  });
+
+  it("freezes the executor immediately when a wire ignores hard-stop abort", async () => {
+    vi.useFakeTimers();
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const wireCall = vi.fn(
+      async () =>
+        new Promise<ModelEvaluationWireResponse>(() => {
+          // Intentionally ignores AbortSignal to exercise authorization freeze.
+        }),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: settlementResolver({
+        state: "unknown",
+        reason: "provider_ack_unknown",
+      }),
+    });
+    const first = runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId: "auto-parts-rich",
+      attempt: 1,
+      campaignBudget: new ModelEvaluationBudgetGuard(100),
+      execute: executor.execute,
+      now: vi
+        .fn()
+        .mockReturnValueOnce(0)
+        .mockReturnValue(plan.envelope.hardStopMs),
+    });
+
+    await vi.advanceTimersByTimeAsync(plan.envelope.hardStopMs);
+    await expect(first).resolves.toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+    });
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "industrial-pump-sparse",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: executor.execute,
+        now: () => 0,
+      }),
+    ).resolves.toMatchObject({
+      failureCode: "post_dispatch_settlement_incoherent",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(wireCall).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the promoted BrandProfile route, rollback, and all six other current routes unchanged", () => {
