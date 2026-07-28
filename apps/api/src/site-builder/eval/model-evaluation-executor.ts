@@ -1086,6 +1086,51 @@ export function createModelEvaluationProtocolExecutor(deps: {
           settlement,
         );
       }
+      if (campaignFrozen || request.signal.aborted) {
+        if (usage.callCount === 0) {
+          const rejected = {
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          } as const;
+          closeCampaignReservation(rejected);
+          throw new ModelEvaluationCallError(
+            request.signal.aborted
+              ? "evaluation_aborted"
+              : "evaluation_cost_safety_rejected",
+            rejected,
+          );
+        }
+        const error = new Error(
+          request.signal.aborted
+            ? "evaluation_aborted_before_wire_dispatch"
+            : "evaluation_campaign_frozen_before_wire_dispatch",
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        closeCampaignReservation(settlement);
+        campaignFrozen = true;
+        throw new ModelEvaluationCallError(
+          request.signal.aborted
+            ? "evaluation_aborted"
+            : "evaluation_cost_safety_rejected",
+          settlement,
+        );
+      }
       let response: ModelEvaluationWireResponse;
       try {
         switch (protocol) {

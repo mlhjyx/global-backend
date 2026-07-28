@@ -19,6 +19,7 @@ import * as modelEvaluationHarness from "./model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
   createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
+  freezeModelEvaluationProtocolExecutor,
   isTrustedModelEvaluationProtocolExecute,
   type ModelEvaluationSettlementResolution,
   type ModelEvaluationSettlementResolver,
@@ -677,6 +678,45 @@ describe("structured output, repair, errors, and settlement", () => {
         usage: expect.objectContaining({ callCount: 2 }),
       }),
     );
+  });
+
+  it("does not dispatch repair after a hard-stop freeze if the first wire ignored abort", async () => {
+    const controller = new AbortController();
+    const request = {
+      ...canonicalRequest(),
+      signal: controller.signal,
+    };
+    let resolveFirst:
+      | ((response: ModelEvaluationWireResponse) => void)
+      | undefined;
+    const call = vi.fn(
+      () =>
+        new Promise<ModelEvaluationWireResponse>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: call }),
+      settlementResolver: settlementResolver(),
+    });
+
+    const pending = executor.execute(request);
+    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+    controller.abort(new Error("diagnostic hard stop"));
+    expect(freezeModelEvaluationProtocolExecutor(executor.execute)).toBe(true);
+    resolveFirst?.(
+      wireResponse(
+        openAIResponsesBody(request.alias, {}, {
+          inputTokens: 10,
+          outputTokens: 5,
+        }),
+      ),
+    );
+
+    await expect(pending).rejects.toMatchObject({
+      failureCode: "evaluation_aborted",
+    });
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it("isolates frozen settlement usage from resolver mutation and records resolver identity", async () => {
