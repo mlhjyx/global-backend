@@ -1579,6 +1579,31 @@ describe("structured output, repair, errors, and settlement", () => {
     expect(result.costSettlement).not.toMatchObject({ amountCents: 0 });
   });
 
+  it("rejects provider output usage above the attested request limit", async () => {
+    const request = canonicalRequest();
+    const call = vi.fn(async () =>
+      wireResponse(
+        openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+          inputTokens: 100,
+          outputTokens: request.maxTokens + 1,
+        }),
+      ),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: call }),
+      settlementResolver: settlementResolver(),
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_output_token_limit_exceeded",
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves a settled cost and lets the harness fail a cap exceedance", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const request = canonicalRequest();
@@ -1801,6 +1826,60 @@ describe("harness integration and unchanged runtime routes", () => {
     });
     expect(observed).toHaveBeenCalledTimes(1);
     expect(observed.mock.calls[0][0].aborted).toBe(true);
+  });
+
+  it("freezes the executor immediately when a wire ignores hard-stop abort", async () => {
+    vi.useFakeTimers();
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const wireCall = vi.fn(
+      async () =>
+        new Promise<ModelEvaluationWireResponse>(() => {
+          // Intentionally ignores AbortSignal to exercise authorization freeze.
+        }),
+    );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: wireCall }),
+      settlementResolver: settlementResolver({
+        state: "unknown",
+        reason: "provider_ack_unknown",
+      }),
+    });
+    const first = runTaskEvaluationAttempt({
+      plan,
+      candidate,
+      fixtureId: "auto-parts-rich",
+      attempt: 1,
+      campaignBudget: new ModelEvaluationBudgetGuard(100),
+      execute: executor.execute,
+      now: vi
+        .fn()
+        .mockReturnValueOnce(0)
+        .mockReturnValue(plan.envelope.hardStopMs),
+    });
+
+    await vi.advanceTimersByTimeAsync(plan.envelope.hardStopMs);
+    await expect(first).resolves.toMatchObject({
+      resultClass: "diagnostic_window_exhausted",
+    });
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "industrial-pump-sparse",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: executor.execute,
+        now: () => 0,
+      }),
+    ).resolves.toMatchObject({
+      failureCode: "post_dispatch_settlement_incoherent",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(wireCall).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the promoted BrandProfile route, rollback, and all six other current routes unchanged", () => {

@@ -293,6 +293,10 @@ const TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY = new WeakMap<
   object,
   ModelEvaluationCostSafetyAttestation
 >();
+const TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS = new WeakMap<
+  object,
+  () => void
+>();
 const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
 const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
 const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
@@ -324,6 +328,16 @@ export function modelEvaluationProtocolExecutorCostSafety(
   return identity === null
     ? null
     : (TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.get(identity) ?? null);
+}
+
+export function freezeModelEvaluationProtocolExecutor(value: unknown): boolean {
+  const identity = modelEvaluationProtocolExecutorIdentity(value);
+  const freeze = identity
+    ? TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.get(identity)
+    : undefined;
+  if (!freeze) return false;
+  freeze();
+  return true;
 }
 
 type TextEvaluationProtocol =
@@ -1200,6 +1214,37 @@ export function createModelEvaluationProtocolExecutor(deps: {
           settlement,
         );
       }
+      if (
+        normalized.usage &&
+        (normalized.usage.outputTokens > request.maxTokens ||
+          normalized.usage.outputTokens >
+            costSafety.limits.maxOutputTokensPerCall)
+      ) {
+        addUsage(usage, normalized.usage);
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error: new Error("evaluation_output_token_limit_exceeded"),
+          },
+          costSafety,
+        );
+        closeCampaignReservation(settlement);
+        campaignFrozen = true;
+        throw new ModelEvaluationCallError(
+          "evaluation_output_token_limit_exceeded",
+          settlement,
+        );
+      }
       addUsage(usage, normalized.usage);
       return normalized;
     };
@@ -1285,6 +1330,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
     executorIdentity,
     costSafety,
   );
+  TRUSTED_MODEL_EVALUATION_EXECUTOR_FREEZERS.set(executorIdentity, () => {
+    campaignFrozen = true;
+  });
   APPLY_TRUSTED_EXECUTE_INTRINSIC(
     TRUSTED_EXECUTE_SET,
     TRUSTED_MODEL_EVALUATION_EXECUTES,

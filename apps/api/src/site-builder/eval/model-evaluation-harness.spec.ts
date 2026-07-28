@@ -48,6 +48,7 @@ const { trustedExecutorIdentity, trustedCostSafety } = vi.hoisted(() => ({
 }));
 
 vi.mock("./model-evaluation-executor", () => ({
+  freezeModelEvaluationProtocolExecutor: () => true,
   isTrustedModelEvaluationProtocolExecute: () => true,
   modelEvaluationProtocolExecutorIdentity: () => trustedExecutorIdentity,
   modelEvaluationProtocolExecutorCostSafety: () => trustedCostSafety,
