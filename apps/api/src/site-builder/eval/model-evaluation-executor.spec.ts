@@ -1531,17 +1531,18 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
-  it("accepts provider-attested no cost only for the first failed dispatch with no cost observation", async () => {
+  it("freezes after a dispatched request lacks positive execution-bound no-charge proof", async () => {
     const request = canonicalRequest();
+    const call = vi.fn(async () => {
+      throw new Error("connection dropped after dispatch");
+    });
     const resolver = settlementResolver({
       state: "not_incurred",
       reason: "provider_attested_not_incurred",
     });
     const executor = createModelEvaluationProtocolExecutor({
       wireClient: wireClient({
-        openAIResponses: async () => {
-          throw new Error("provider rejected before generation");
-        },
+        openAIResponses: call,
       }),
       settlementResolver: resolver,
     });
@@ -1549,8 +1550,8 @@ describe("structured output, repair, errors, and settlement", () => {
     await expect(executor.execute(request)).rejects.toMatchObject({
       failureCode: "provider_error",
       costSettlement: {
-        state: "not_incurred",
-        reason: "provider_attested_not_incurred",
+        state: "unknown",
+        reason: "invalid_settlement",
       },
     });
     expect(resolver.resolve).toHaveBeenCalledWith(
@@ -1560,6 +1561,19 @@ describe("structured output, repair, errors, and settlement", () => {
         providerReportedCostCents: [null],
       }),
     );
+    await expect(
+      executor.execute({
+        ...request,
+        executionId: `${request.executionId}:retry`,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_rejected",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it("repairs a task-gate failure without weakening the canonical gate", async () => {
