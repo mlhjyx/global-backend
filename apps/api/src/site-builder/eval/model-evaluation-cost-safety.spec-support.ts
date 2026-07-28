@@ -3,12 +3,18 @@ import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   createModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
+import { createCredentialBoundModelEvaluationWireClient } from "./model-evaluation-executor";
+
+let fakeAttestationSequence = 0;
 
 export function createFakeModelEvaluationCostSafety(
   resolverId: string,
   campaignBudgetCents = 10_000,
 ) {
+  fakeAttestationSequence += 1;
+  const suffix = fakeAttestationSequence.toString().padStart(4, "0");
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
   const legacy = modelPolicyRegistry.getLegacyTaskPolicy(plan.taskId).route;
   const allowedDispatches = [
@@ -37,13 +43,13 @@ export function createFakeModelEvaluationCostSafety(
   return createModelEvaluationCostSafetyAttestation({
     contractId: SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
     authorization: {
-      authorizationId: "fake-evaluation-approval/2026-07-28-v1",
+      authorizationId: `fake-evaluation-approval/2026-07-28-${suffix}`,
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: campaignBudgetCents,
       approvedDispatchExecutions: 500,
     },
     credential: {
-      attestationId: "fake-evaluation-credential/2026-07-28-v1",
+      attestationId: `fake-evaluation-credential/2026-07-28-${suffix}`,
       observedAt: "2026-07-28T00:00:00.000Z",
       snapshotSha256:
         "1111111111111111111111111111111111111111111111111111111111111111",
@@ -80,4 +86,16 @@ export function createFakeModelEvaluationCostSafety(
       allowedDispatches: [],
     },
   });
+}
+
+export function bindFakeModelEvaluationWireCredential<T extends object>(
+  wireClient: T,
+  costSafety: ModelEvaluationCostSafetyAttestation,
+): T {
+  return createCredentialBoundModelEvaluationWireClient(
+    wireClient as Parameters<
+      typeof createCredentialBoundModelEvaluationWireClient
+    >[0],
+    costSafety.credential,
+  ) as T;
 }

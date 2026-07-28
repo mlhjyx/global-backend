@@ -20,6 +20,7 @@ import {
 import { sha256CanonicalJson } from "./eval-provenance";
 import {
   assertModelEvaluationCostSafetyDispatch,
+  frozenModelEvaluationPriceCents,
   isTrustedModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
@@ -179,6 +180,8 @@ export interface ModelEvaluationWireResponse {
 }
 
 export interface ModelEvaluationWireClient {
+  readonly credentialAttestationId?: string;
+  readonly credentialSnapshotSha256?: string;
   openAIResponses(
     request: OpenAIResponsesEvaluationWireRequest,
   ): Promise<ModelEvaluationWireResponse>;
@@ -188,6 +191,56 @@ export interface ModelEvaluationWireClient {
   openAIChatCompletions(
     request: OpenAIChatCompletionsEvaluationWireRequest,
   ): Promise<ModelEvaluationWireResponse>;
+}
+
+const TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<{
+    credentialAttestationId: string;
+    credentialSnapshotSha256: string;
+  }>
+>();
+
+export function createCredentialBoundModelEvaluationWireClient(
+  wireClient: ModelEvaluationWireClient,
+  credential: Readonly<{
+    attestationId: string;
+    snapshotSha256: string;
+  }>,
+): ModelEvaluationWireClient {
+  const openAIResponses = wireClient?.openAIResponses;
+  const anthropicMessages = wireClient?.anthropicMessages;
+  const openAIChatCompletions = wireClient?.openAIChatCompletions;
+  if (
+    !wireClient ||
+    typeof openAIResponses !== "function" ||
+    typeof anthropicMessages !== "function" ||
+    typeof openAIChatCompletions !== "function" ||
+    typeof credential?.attestationId !== "string" ||
+    credential.attestationId.length === 0 ||
+    !/^[a-f0-9]{64}$/.test(credential.snapshotSha256)
+  ) {
+    throw new Error(
+      "evaluation wire transport and credential identity are required",
+    );
+  }
+  const bound = Object.freeze({
+    credentialAttestationId: credential.attestationId,
+    credentialSnapshotSha256: credential.snapshotSha256,
+    openAIResponses: Object.freeze(openAIResponses.bind(wireClient)),
+    anthropicMessages: Object.freeze(anthropicMessages.bind(wireClient)),
+    openAIChatCompletions: Object.freeze(
+      openAIChatCompletions.bind(wireClient),
+    ),
+  }) satisfies ModelEvaluationWireClient;
+  TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.set(
+    bound,
+    Object.freeze({
+      credentialAttestationId: credential.attestationId,
+      credentialSnapshotSha256: credential.snapshotSha256,
+    }),
+  );
+  return bound;
 }
 
 export interface ModelEvaluationSettlementContext {
@@ -243,6 +296,7 @@ const TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY = new WeakMap<
 const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
 const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
 const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
+const CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS = new Set<string>();
 
 export function modelEvaluationProtocolExecutorIdentity(
   value: unknown,
@@ -321,6 +375,7 @@ function canonicalSettlement(
   dispatched: boolean,
   resolverId: string,
   context?: ModelEvaluationSettlementContext,
+  costSafety?: ModelEvaluationCostSafetyAttestation,
 ): CostSettlement {
   if (!isRecord(value)) {
     return { state: "unknown", reason: "invalid_settlement" };
@@ -348,6 +403,15 @@ function canonicalSettlement(
     context.usage.inputTokens >= 0 &&
     Number.isSafeInteger(context.usage.outputTokens) &&
     context.usage.outputTokens >= 0;
+  const frozenPricingAmount =
+    completeUsage && context && costSafety
+      ? frozenModelEvaluationPriceCents(costSafety, {
+          alias: context.alias,
+          protocol: context.protocol,
+          inputTokens: context.usage.inputTokens,
+          outputTokens: context.usage.outputTokens,
+        })
+      : null;
   if (
     value.state === "settled" &&
     exactKeys(value, ["state", "amountCents", "basis"]) &&
@@ -359,7 +423,9 @@ function canonicalSettlement(
     (value.basis !== "provider_reported" ||
       (providerReportedAmount !== null &&
         Math.abs(providerReportedAmount - value.amountCents) <= 1e-9)) &&
-    (value.basis !== "frozen_pricing_snapshot" || completeUsage)
+    (value.basis !== "frozen_pricing_snapshot" ||
+      (frozenPricingAmount !== null &&
+        Math.abs(frozenPricingAmount - value.amountCents) <= 1e-9))
   ) {
     return {
       state: "settled",
@@ -799,6 +865,7 @@ function evaluationUsage(
 async function safeResolveSettlement(
   resolver: ModelEvaluationSettlementResolver,
   context: ModelEvaluationSettlementContext,
+  costSafety: ModelEvaluationCostSafetyAttestation,
 ): Promise<CostSettlement> {
   try {
     const resolverContext = Object.freeze({
@@ -813,6 +880,7 @@ async function safeResolveSettlement(
       true,
       resolver.resolverId,
       resolverContext,
+      costSafety,
     );
   } catch {
     return { state: "unknown", reason: "invalid_settlement" };
@@ -838,6 +906,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const resolverId = resolverReceiver?.resolverId;
   const resolverResolve = resolverReceiver?.resolve;
   const costSafety = deps?.costSafety;
+  const credentialAttestationId = wireReceiver?.credentialAttestationId;
+  const credentialSnapshotSha256 = wireReceiver?.credentialSnapshotSha256;
+  const trustedWireCredential =
+    wireReceiver && typeof wireReceiver === "object"
+      ? TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.get(wireReceiver)
+      : undefined;
   if (
     !wireReceiver ||
     typeof openAIResponses !== "function" ||
@@ -847,13 +921,24 @@ export function createModelEvaluationProtocolExecutor(deps: {
     !SETTLEMENT_RESOLVER_ID.test(resolverId ?? "") ||
     typeof resolverResolve !== "function" ||
     !isTrustedModelEvaluationCostSafetyAttestation(costSafety) ||
-    costSafety.pricing.resolverId !== resolverId
+    costSafety.pricing.resolverId !== resolverId ||
+    trustedWireCredential?.credentialAttestationId !==
+      credentialAttestationId ||
+    trustedWireCredential?.credentialSnapshotSha256 !==
+      credentialSnapshotSha256 ||
+    credentialAttestationId !== costSafety.credential.attestationId ||
+    credentialSnapshotSha256 !== costSafety.credential.snapshotSha256 ||
+    CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.has(
+      costSafety.authorization.authorizationId,
+    )
   ) {
     throw new Error(
       "evaluation wire client and auditable settlement resolver are required; trusted cost safety must match",
     );
   }
   const wireClient = Object.freeze({
+    credentialAttestationId,
+    credentialSnapshotSha256,
     openAIResponses: Object.freeze(openAIResponses.bind(wireReceiver)),
     anthropicMessages: Object.freeze(anthropicMessages.bind(wireReceiver)),
     openAIChatCompletions: Object.freeze(
@@ -868,6 +953,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
   }) satisfies ModelEvaluationSettlementResolver;
   let reservedDispatchExecutions = 0;
   let reservedWireCalls = 0;
+  let committedCampaignCents = 0;
+  let reservedCampaignUpperBoundCents = 0;
+  let campaignFrozen = false;
 
   const executeWithMode = async <T>(
     request: EvaluationExecutionRequest,
@@ -886,6 +974,22 @@ export function createModelEvaluationProtocolExecutor(deps: {
     const providerReportedCostCents: (number | null)[] = [];
     const system = structuredSystemPrompt(request.outputSchema);
     const maximumWireCalls = request.repairTaskOutput ? 2 : 1;
+    const campaignReservationCents =
+      request.perCallCostCapCents * maximumWireCalls;
+    let campaignReservationActive = false;
+    const closeCampaignReservation = (settlement: CostSettlement): void => {
+      if (!campaignReservationActive) return;
+      reservedCampaignUpperBoundCents -= campaignReservationCents;
+      campaignReservationActive = false;
+      if (settlement.state === "settled") {
+        committedCampaignCents += settlement.amountCents;
+        if (committedCampaignCents > costSafety.limits.campaignBudgetCents) {
+          campaignFrozen = true;
+        }
+      } else if (settlement.state === "unknown") {
+        campaignFrozen = true;
+      }
+    };
     try {
       assertModelEvaluationCostSafetyDispatch(costSafety, {
         mode,
@@ -896,11 +1000,17 @@ export function createModelEvaluationProtocolExecutor(deps: {
           Buffer.byteLength(system, "utf8") +
           Buffer.byteLength(request.casePayload.prompt, "utf8"),
         maximumWireCalls,
+        perCallCostCapCents: request.perCallCostCapCents,
       });
       if (
         reservedDispatchExecutions + 1 >
           costSafety.limits.maxDispatchExecutions ||
-        reservedWireCalls + maximumWireCalls > costSafety.limits.maxWireCalls
+        reservedWireCalls + maximumWireCalls > costSafety.limits.maxWireCalls ||
+        campaignFrozen ||
+        committedCampaignCents +
+          reservedCampaignUpperBoundCents +
+          campaignReservationCents >
+          costSafety.limits.campaignBudgetCents
       ) {
         throw new Error("model evaluation campaign call cap exhausted");
       }
@@ -909,10 +1019,59 @@ export function createModelEvaluationProtocolExecutor(deps: {
     }
     reservedDispatchExecutions += 1;
     reservedWireCalls += maximumWireCalls;
+    reservedCampaignUpperBoundCents += campaignReservationCents;
+    campaignReservationActive = true;
 
     const dispatch = async (
       prompt: string,
     ): Promise<NormalizedTextResponse> => {
+      try {
+        assertModelEvaluationCostSafetyDispatch(costSafety, {
+          mode,
+          alias: request.alias,
+          protocol,
+          maxOutputTokens: request.maxTokens,
+          promptUtf8Bytes:
+            Buffer.byteLength(system, "utf8") +
+            Buffer.byteLength(prompt, "utf8"),
+          maximumWireCalls: 1,
+          perCallCostCapCents: request.perCallCostCapCents,
+        });
+      } catch {
+        if (usage.callCount === 0) {
+          const rejected = {
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          } as const;
+          closeCampaignReservation(rejected);
+          throw new ModelEvaluationCallError(
+            "evaluation_cost_safety_rejected",
+            rejected,
+          );
+        }
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error: new Error("evaluation_prompt_cost_safety_rejected"),
+          },
+          costSafety,
+        );
+        closeCampaignReservation(settlement);
+        throw new ModelEvaluationCallError(
+          "evaluation_cost_safety_rejected",
+          settlement,
+        );
+      }
       let response: ModelEvaluationWireResponse;
       try {
         switch (protocol) {
@@ -972,19 +1131,24 @@ export function createModelEvaluationProtocolExecutor(deps: {
         usage.callCount += 1;
         usage.complete = false;
         providerReportedCostCents.push(null);
-        const settlement = await safeResolveSettlement(settlementResolver, {
-          executionId: request.executionId,
-          taskId: request.taskId,
-          alias: request.alias,
-          protocol,
-          outcome: "failed",
-          callCount: usage.callCount,
-          usage: settlementUsage(usage),
-          providerReportedCostCents: Object.freeze([
-            ...providerReportedCostCents,
-          ]),
-          error,
-        });
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           request.signal.aborted ? "evaluation_aborted" : "provider_error",
           settlement,
@@ -1013,19 +1177,24 @@ export function createModelEvaluationProtocolExecutor(deps: {
         }
         usage.callCount += 1;
         usage.complete = false;
-        const settlement = await safeResolveSettlement(settlementResolver, {
-          executionId: request.executionId,
-          taskId: request.taskId,
-          alias: request.alias,
-          protocol,
-          outcome: "failed",
-          callCount: usage.callCount,
-          usage: settlementUsage(usage),
-          providerReportedCostCents: Object.freeze([
-            ...providerReportedCostCents,
-          ]),
-          error,
-        });
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           "provider_response_invalid",
           settlement,
@@ -1059,16 +1228,23 @@ export function createModelEvaluationProtocolExecutor(deps: {
     }
 
     const resolvedUsage = evaluationUsage(usage);
-    const settlement = await safeResolveSettlement(settlementResolver, {
-      executionId: request.executionId,
-      taskId: request.taskId,
-      alias: request.alias,
-      protocol,
-      outcome: "completed",
-      callCount: usage.callCount,
-      usage: settlementUsage(usage),
-      providerReportedCostCents: Object.freeze([...providerReportedCostCents]),
-    });
+    const settlement = await safeResolveSettlement(
+      settlementResolver,
+      {
+        executionId: request.executionId,
+        taskId: request.taskId,
+        alias: request.alias,
+        protocol,
+        outcome: "completed",
+        callCount: usage.callCount,
+        usage: settlementUsage(usage),
+        providerReportedCostCents: Object.freeze([
+          ...providerReportedCostCents,
+        ]),
+      },
+      costSafety,
+    );
+    closeCampaignReservation(settlement);
     if (!resolvedUsage) {
       throw new ModelEvaluationCallError("usage_unavailable", settlement);
     }
@@ -1102,6 +1278,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
     ) => executeWithMode<T>(request, "target"),
   );
   const executorIdentity = Object.freeze({});
+  CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.add(
+    costSafety.authorization.authorizationId,
+  );
   TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.set(
     executorIdentity,
     costSafety,

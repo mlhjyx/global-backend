@@ -14,7 +14,10 @@ import {
   createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
   type ModelEvaluationWireClient,
 } from "./model-evaluation-executor";
-import { createFakeModelEvaluationCostSafety } from "./model-evaluation-cost-safety.spec-support";
+import {
+  bindFakeModelEvaluationWireCredential,
+  createFakeModelEvaluationCostSafety,
+} from "./model-evaluation-cost-safety.spec-support";
 import {
   createModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyInput,
@@ -26,11 +29,16 @@ function createModelEvaluationProtocolExecutor(
     "costSafety"
   >,
 ) {
+  const costSafety = createFakeModelEvaluationCostSafety(
+    deps.settlementResolver.resolverId,
+  );
   return createRawModelEvaluationProtocolExecutor({
     ...deps,
-    costSafety: createFakeModelEvaluationCostSafety(
-      deps.settlementResolver.resolverId,
+    wireClient: bindFakeModelEvaluationWireCredential(
+      deps.wireClient,
+      costSafety,
     ),
+    costSafety,
   });
 }
 
@@ -96,6 +104,47 @@ function directRequest(): ModelEvaluationExecutionRequest {
 }
 
 describe("model evaluation executor authorization", () => {
+  it("requires the immutable wire credential identity to match the attestation", () => {
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
+
+    expect(() =>
+      createRawModelEvaluationProtocolExecutor({
+        wireClient: fakeWireClient(vi.fn()),
+        settlementResolver: resolver,
+        costSafety,
+      }),
+    ).toThrow("trusted cost safety must match");
+  });
+
+  it("allows one executor factory to claim an authorization id only once", () => {
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
+    const firstWire = fakeWireClient(vi.fn());
+    const secondWire = fakeWireClient(vi.fn());
+
+    expect(() =>
+      createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          firstWire,
+          costSafety,
+        ),
+        settlementResolver: resolver,
+        costSafety,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          secondWire,
+          costSafety,
+        ),
+        settlementResolver: fakeResolver(),
+        costSafety,
+      }),
+    ).toThrow("trusted cost safety must match");
+  });
+
   it("rejects direct target and legacy dispatch before any wire call", async () => {
     const targetWire = vi.fn();
     const wireClient = fakeWireClient(targetWire);
@@ -198,10 +247,12 @@ describe("model evaluation executor authorization", () => {
     input.pricing.entries = input.pricing.entries.filter(
       (entry) => entry.alias !== "gpt-5.5",
     );
+    const costSafety = createModelEvaluationCostSafetyAttestation(input);
+    const wireClient = fakeWireClient(wire);
     const executor = createRawModelEvaluationProtocolExecutor({
-      wireClient: fakeWireClient(wire),
+      wireClient: bindFakeModelEvaluationWireCredential(wireClient, costSafety),
       settlementResolver: resolver,
-      costSafety: createModelEvaluationCostSafetyAttestation(input),
+      costSafety,
     });
     const budget = new ModelEvaluationBudgetGuard(100);
     const snapshot = budget.snapshot();
@@ -224,5 +275,112 @@ describe("model evaluation executor authorization", () => {
     });
     expect(wire).not.toHaveBeenCalled();
     expect(budget.snapshot()).toEqual(snapshot);
+  });
+
+  it("rejects an unrelated legacy alias in an otherwise complete scope", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const wire = vi.fn();
+    const resolver = fakeResolver();
+    const input = structuredClone(
+      createFakeModelEvaluationCostSafety(resolver.resolverId),
+    ) as ModelEvaluationCostSafetyInput;
+    input.credential.allowedDispatches = [
+      ...input.credential.allowedDispatches,
+      {
+        mode: "legacy_comparator",
+        alias: "unrelated-legacy-model",
+        protocol: "openai-chat-completions",
+      },
+    ];
+    input.pricing.entries = [
+      ...input.pricing.entries,
+      {
+        alias: "unrelated-legacy-model",
+        protocol: "openai-chat-completions",
+        inputCentsPerMillionTokens: 1,
+        outputCentsPerMillionTokens: 1,
+      },
+    ];
+    const costSafety = createModelEvaluationCostSafetyAttestation(input);
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    const budget = new ModelEvaluationBudgetGuard(100);
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: budget,
+        execute: executor.execute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_mismatch",
+    });
+    expect(wire).not.toHaveBeenCalled();
+  });
+
+  it("keeps campaign spend shared when one executor is presented to fresh budget guards", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const wire = vi.fn(async () => ({
+      body: {
+        status: "completed",
+        model: candidate.alias,
+        output: [{ content: [{ type: "output_text", text: "{}" }] }],
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+      providerReportedCostCents: 40,
+    }));
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(
+      resolver.resolverId,
+      80,
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      settlementResolver: resolver,
+      costSafety,
+    });
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(80),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({ resultClass: "content_invalid" });
+    expect(wire).toHaveBeenCalledTimes(2);
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "industrial-pump-sparse",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(80),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      failureCode: "post_dispatch_settlement_incoherent",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(wire).toHaveBeenCalledTimes(2);
   });
 });

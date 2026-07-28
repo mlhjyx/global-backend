@@ -22,6 +22,16 @@ const { trustedExecutorIdentity, trustedCostSafety } = vi.hoisted(() => ({
           alias: "gpt-5.5",
           protocol: "openai-responses",
         }),
+        Object.freeze({
+          mode: "legacy_comparator",
+          alias: "deepseek-v4-pro",
+          protocol: "openai-chat-completions",
+        }),
+        Object.freeze({
+          mode: "legacy_comparator",
+          alias: "glm-5.2",
+          protocol: "openai-chat-completions",
+        }),
       ]),
     }),
     pricing: Object.freeze({

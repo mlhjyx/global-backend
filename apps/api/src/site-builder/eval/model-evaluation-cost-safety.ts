@@ -13,6 +13,7 @@ export const MODEL_EVALUATION_ABSOLUTE_LIMITS = Object.freeze({
   promptUtf8BytesPerCall: 1_048_576,
   outputTokensPerCall: 100_000,
 });
+const MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND = 4_096;
 
 export type ModelEvaluationDispatchMode = "target" | "legacy_comparator";
 
@@ -20,6 +21,11 @@ export interface ModelEvaluationCostSafetyDispatch {
   mode: ModelEvaluationDispatchMode;
   alias: string;
   protocol: ModelCandidateProtocol;
+}
+
+export interface ModelEvaluationCredentialIdentity {
+  attestationId: string;
+  snapshotSha256: string;
 }
 
 export interface ModelEvaluationCostSafetyInput {
@@ -118,6 +124,24 @@ function priceKey(value: {
   protocol: ModelCandidateProtocol;
 }): string {
   return `${value.alias}:${value.protocol}`;
+}
+
+function priceCents(
+  attestation: ModelEvaluationCostSafetyAttestation,
+  alias: string,
+  protocol: ModelCandidateProtocol,
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  const price = attestation.pricing.entries.find(
+    (entry) => entry.alias === alias && entry.protocol === protocol,
+  );
+  if (!price) return Number.POSITIVE_INFINITY;
+  return (
+    (inputTokens * price.inputCentsPerMillionTokens +
+      outputTokens * price.outputCentsPerMillionTokens) /
+    1_000_000
+  );
 }
 
 function assertExactUniqueKeys(values: readonly string[], label: string): void {
@@ -320,6 +344,7 @@ export function assertModelEvaluationCostSafetyDispatch(
     maxOutputTokens: number;
     promptUtf8Bytes: number;
     maximumWireCalls: number;
+    perCallCostCapCents: number;
   },
 ): void {
   if (!isTrustedModelEvaluationCostSafetyAttestation(attestation)) {
@@ -338,8 +363,53 @@ export function assertModelEvaluationCostSafetyDispatch(
     request.maxOutputTokens > attestation.limits.maxOutputTokensPerCall ||
     !positiveSafeInteger(request.promptUtf8Bytes) ||
     request.promptUtf8Bytes > attestation.limits.maxPromptUtf8BytesPerCall ||
-    !positiveSafeInteger(request.maximumWireCalls)
+    !positiveSafeInteger(request.maximumWireCalls) ||
+    !positiveFinite(request.perCallCostCapCents)
   ) {
     throw new Error("model evaluation dispatch exceeds cost safety scope");
   }
+  const worstCasePerCallCents = priceCents(
+    attestation,
+    request.alias,
+    request.protocol,
+    request.promptUtf8Bytes +
+      MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND,
+    request.maxOutputTokens,
+  );
+  if (
+    !Number.isFinite(worstCasePerCallCents) ||
+    worstCasePerCallCents > request.perCallCostCapCents ||
+    worstCasePerCallCents * request.maximumWireCalls >
+      attestation.limits.campaignBudgetCents
+  ) {
+    throw new Error("model evaluation dispatch exceeds priced cost safety");
+  }
+}
+
+export function frozenModelEvaluationPriceCents(
+  attestation: ModelEvaluationCostSafetyAttestation,
+  request: {
+    alias: string;
+    protocol: ModelCandidateProtocol;
+    inputTokens: number;
+    outputTokens: number;
+  },
+): number | null {
+  if (
+    !isTrustedModelEvaluationCostSafetyAttestation(attestation) ||
+    !Number.isSafeInteger(request.inputTokens) ||
+    request.inputTokens < 0 ||
+    !Number.isSafeInteger(request.outputTokens) ||
+    request.outputTokens < 0
+  ) {
+    return null;
+  }
+  const amount = priceCents(
+    attestation,
+    request.alias,
+    request.protocol,
+    request.inputTokens,
+    request.outputTokens,
+  );
+  return Number.isFinite(amount) ? amount : null;
 }

@@ -236,6 +236,7 @@ describe("model evaluation cost safety contract", () => {
       maxOutputTokens: 12_000,
       promptUtf8Bytes: 20_000,
       maximumWireCalls: 2,
+      perCallCostCapCents: 40,
     };
     expect(() =>
       assertModelEvaluationCostSafetyDispatch(attestation, canonical),
@@ -245,10 +246,29 @@ describe("model evaluation cost safety contract", () => {
       { ...canonical, maxOutputTokens: 12_001 },
       { ...canonical, promptUtf8Bytes: 65_537 },
       { ...canonical, maximumWireCalls: 0 },
+      { ...canonical, perCallCostCapCents: 0 },
     ]) {
       expect(() =>
         assertModelEvaluationCostSafetyDispatch(attestation, drift),
       ).toThrow("model evaluation dispatch exceeds cost safety scope");
     }
+  });
+
+  it("rejects a frozen price whose worst-case request can exceed the hard budget", () => {
+    const input = validInput();
+    input.pricing.entries[0]!.outputCentsPerMillionTokens = 1_000_000;
+    const attestation = createModelEvaluationCostSafetyAttestation(input);
+
+    expect(() =>
+      assertModelEvaluationCostSafetyDispatch(attestation, {
+        mode: "target",
+        alias: "gpt-5.6-terra",
+        protocol: "openai-responses",
+        maxOutputTokens: 12_000,
+        promptUtf8Bytes: 1_000,
+        maximumWireCalls: 1,
+        perCallCostCapCents: 1_000,
+      }),
+    ).toThrow("model evaluation dispatch exceeds priced cost safety");
   });
 });

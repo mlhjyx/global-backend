@@ -39,8 +39,10 @@ describe("model evaluation source bundle drift", () => {
     const harness = await import("./model-evaluation-harness");
     const { createModelEvaluationProtocolExecutor } =
       await import("./model-evaluation-executor");
-    const { createFakeModelEvaluationCostSafety } =
-      await import("./model-evaluation-cost-safety.spec-support");
+    const {
+      bindFakeModelEvaluationWireCredential,
+      createFakeModelEvaluationCostSafety,
+    } = await import("./model-evaluation-cost-safety.spec-support");
     const plan = harness.buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
     const evaluationCase = harness.buildCanonicalModelEvaluationCase(
@@ -111,16 +113,20 @@ describe("model evaluation source bundle drift", () => {
         providerReportedCostCents: 1,
       };
     });
-    const executor = createModelEvaluationProtocolExecutor({
-      wireClient: {
-        openAIResponses: wireCall,
-        anthropicMessages: async () => {
-          throw new Error("unexpected Messages dispatch");
-        },
-        openAIChatCompletions: async () => {
-          throw new Error("unexpected Chat dispatch");
-        },
+    const costSafety = createFakeModelEvaluationCostSafety(
+      "source-drift-spec-settlement/v1",
+    );
+    const wireClient = {
+      openAIResponses: wireCall,
+      anthropicMessages: async () => {
+        throw new Error("unexpected Messages dispatch");
       },
+      openAIChatCompletions: async () => {
+        throw new Error("unexpected Chat dispatch");
+      },
+    };
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(wireClient, costSafety),
       settlementResolver: {
         resolverId: "source-drift-spec-settlement/v1",
         resolve: () => ({
@@ -129,9 +135,7 @@ describe("model evaluation source bundle drift", () => {
           basis: "provider_reported" as const,
         }),
       },
-      costSafety: createFakeModelEvaluationCostSafety(
-        "source-drift-spec-settlement/v1",
-      ),
+      costSafety,
     });
 
     await expect(

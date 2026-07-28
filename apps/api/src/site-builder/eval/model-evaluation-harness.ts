@@ -13,6 +13,7 @@ import {
   type ModelCandidateStatus,
 } from "../agents/model-candidate-baseline";
 import type { SiteBuilderModelProfileId } from "../agents/model-profiles";
+import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import {
   BRAND_PROFILE_PROMPT_VERSION,
   BRAND_PROFILE_ROUTE_VALIDATION_VERSION,
@@ -726,13 +727,18 @@ function bindTrustedModelEvaluationExecutor(
       reason: "rejected_before_dispatch",
     });
   }
-  const expectedTargets = plan.candidates
-    .map(
+  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+    plan.taskId,
+  ).route;
+  const expectedDispatches = [
+    ...plan.candidates.map(
       (candidate) => `target:${candidate.alias}:${candidate.expectedProtocol}`,
-    )
-    .sort();
-  const actualTargets = costSafety.credential.allowedDispatches
-    .filter((entry) => entry.mode === "target")
+    ),
+    ...[legacyRoute.primary, ...legacyRoute.fallbacks].map(
+      (alias) => `legacy_comparator:${alias}:openai-chat-completions`,
+    ),
+  ].sort();
+  const actualDispatches = costSafety.credential.allowedDispatches
     .map((entry) => `${entry.mode}:${entry.alias}:${entry.protocol}`)
     .sort();
   const requiredExecutions =
@@ -748,7 +754,7 @@ function bindTrustedModelEvaluationExecutor(
     requiredExecutions *
     maximumExecutionCallCount(plan.evaluationSuite?.repairTaskOutput === true);
   if (
-    JSON.stringify(actualTargets) !== JSON.stringify(expectedTargets) ||
+    JSON.stringify(actualDispatches) !== JSON.stringify(expectedDispatches) ||
     budget.campaignBudgetCents > costSafety.limits.campaignBudgetCents ||
     costSafety.limits.maxOutputTokensPerCall < plan.envelope.maxTokens ||
     costSafety.limits.maxDispatchExecutions < requiredExecutions ||

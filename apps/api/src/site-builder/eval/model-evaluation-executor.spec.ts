@@ -25,7 +25,14 @@ import {
   type ModelEvaluationWireClient,
   type ModelEvaluationWireResponse,
 } from "./model-evaluation-executor";
-import { createFakeModelEvaluationCostSafety } from "./model-evaluation-cost-safety.spec-support";
+import {
+  bindFakeModelEvaluationWireCredential,
+  createFakeModelEvaluationCostSafety,
+} from "./model-evaluation-cost-safety.spec-support";
+import {
+  createModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyInput,
+} from "./model-evaluation-cost-safety";
 
 function createModelEvaluationProtocolExecutor(
   deps: Omit<
@@ -33,13 +40,18 @@ function createModelEvaluationProtocolExecutor(
     "costSafety"
   >,
 ) {
+  const costSafety = createFakeModelEvaluationCostSafety(
+    /^[a-z0-9][a-z0-9._/-]{0,127}$/.test(deps.settlementResolver.resolverId)
+      ? deps.settlementResolver.resolverId
+      : "fake-invalid-resolver-guard/v1",
+  );
   return createRawModelEvaluationProtocolExecutor({
     ...deps,
-    costSafety: createFakeModelEvaluationCostSafety(
-      /^[a-z0-9][a-z0-9._/-]{0,127}$/.test(deps.settlementResolver.resolverId)
-        ? deps.settlementResolver.resolverId
-        : "fake-invalid-resolver-guard/v1",
+    wireClient: bindFakeModelEvaluationWireCredential(
+      deps.wireClient,
+      costSafety,
     ),
+    costSafety,
   });
 }
 
@@ -680,7 +692,7 @@ describe("structured output, repair, errors, and settlement", () => {
         );
         return {
           state: "settled",
-          amountCents: 1,
+          amountCents: 0.02,
           basis: "frozen_pricing_snapshot",
         };
       }),
@@ -707,8 +719,38 @@ describe("structured output, repair, errors, and settlement", () => {
       },
       costSettlement: {
         state: "settled",
-        amountCents: 1,
+        amountCents: 0.02,
         basis: "frozen_pricing_snapshot@pricing-snapshot/2026-07-28-v1",
+      },
+    });
+  });
+
+  it("rejects a frozen settlement amount that disagrees with the attested unit prices", async () => {
+    const request = canonicalRequest();
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({
+        openAIResponses: async () =>
+          wireResponse(
+            openAIResponsesBody(request.alias, canonicalAcceptedArtifact(), {
+              inputTokens: 100,
+              outputTokens: 50,
+            }),
+          ),
+      }),
+      settlementResolver: {
+        resolverId: "undercounting-pricing-resolver/v1",
+        resolve: () => ({
+          state: "settled" as const,
+          amountCents: 0.01,
+          basis: "frozen_pricing_snapshot" as const,
+        }),
+      },
+    });
+
+    await expect(executor.execute(request)).resolves.toMatchObject({
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
       },
     });
   });
@@ -766,7 +808,7 @@ describe("structured output, repair, errors, and settlement", () => {
     const request = canonicalRequest();
     class PrivatePricingResolver implements ModelEvaluationSettlementResolver {
       readonly resolverId = "private-pricing-resolver/v1";
-      readonly #amountCents = 1;
+      readonly #amountCents = 0.02;
 
       resolve(): ModelEvaluationSettlementResolution {
         return {
@@ -790,7 +832,7 @@ describe("structured output, repair, errors, and settlement", () => {
     await expect(executor.execute(request)).resolves.toMatchObject({
       costSettlement: {
         state: "settled",
-        amountCents: 1,
+        amountCents: 0.02,
         basis: "frozen_pricing_snapshot@private-pricing-resolver/v1",
       },
     });
@@ -827,6 +869,40 @@ describe("structured output, repair, errors, and settlement", () => {
     });
     expect(initial).toHaveBeenCalledTimes(2);
     expect(replacement).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the expanded repair prompt before the second wire call", async () => {
+    const request = canonicalRequest();
+    const resolver = settlementResolver();
+    const input = structuredClone(
+      createFakeModelEvaluationCostSafety(resolver.resolverId),
+    ) as ModelEvaluationCostSafetyInput;
+    const system = `${BRAND_PROFILE_TASK.system ?? ""}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(request.outputSchema)}`;
+    input.limits.maxPromptUtf8BytesPerCall =
+      Buffer.byteLength(system, "utf8") +
+      Buffer.byteLength(request.casePayload.prompt, "utf8") +
+      1;
+    const costSafety = createModelEvaluationCostSafetyAttestation(input);
+    const call = vi.fn(async () =>
+      wireResponse(openAIResponsesBody(request.alias, {})),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        wireClient({ openAIResponses: call }),
+        costSafety,
+      ),
+      settlementResolver: resolver,
+      costSafety,
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_rejected",
+      costSettlement: {
+        state: "settled",
+        amountCents: 1,
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it.each(["", "contains space", "contains@delimiter"])(
