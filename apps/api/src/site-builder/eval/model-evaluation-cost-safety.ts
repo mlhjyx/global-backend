@@ -13,7 +13,7 @@ export const MODEL_EVALUATION_ABSOLUTE_LIMITS = Object.freeze({
   promptUtf8BytesPerCall: 1_048_576,
   outputTokensPerCall: 100_000,
 });
-const MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND = 4_096;
+export const MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND = 4_096;
 
 export type ModelEvaluationDispatchMode = "target" | "legacy_comparator";
 

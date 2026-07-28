@@ -238,6 +238,14 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
   },
   {
+    role: "evidence_preparation",
+    path: "apps/api/src/site-builder/eval/model-evaluation-evidence-prep.ts",
+  },
+  {
+    role: "evidence_preparation_runner",
+    path: "apps/api/scripts/prepare-site-builder-model-evaluation-evidence.mts",
+  },
+  {
     role: "provider",
     path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
   },
@@ -395,7 +403,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
-  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v5",
+  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v6",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 

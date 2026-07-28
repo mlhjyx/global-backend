@@ -69,7 +69,7 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
   );
   assert.equal(
     suite.sourceBundleContractId,
-    "brand-profile-evaluation-source-bundle/v5",
+    "brand-profile-evaluation-source-bundle/v6",
   );
   assert.ok(
     suite.sourceBundleFiles.some(
@@ -88,6 +88,15 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
           "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
     ),
     "BrandProfile evaluation source bundle must pin cost safety",
+  );
+  assert.ok(
+    suite.sourceBundleFiles.some(
+      (entry) =>
+        entry.role === "evidence_preparation" &&
+        entry.path ===
+          "apps/api/src/site-builder/eval/model-evaluation-evidence-prep.ts",
+    ),
+    "BrandProfile evaluation source bundle must pin evidence preparation",
   );
   for (const fingerprint of suite.fixtureFingerprints) {
     const fixture = JSON.parse(

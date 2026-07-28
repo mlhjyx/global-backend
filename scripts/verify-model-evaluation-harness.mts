@@ -24,6 +24,11 @@ import {
   MODEL_EVALUATION_ABSOLUTE_LIMITS,
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
 } from "../apps/api/src/site-builder/eval/model-evaluation-cost-safety";
+import {
+  MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND,
+  SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID,
+  buildModelEvaluationEvidencePlanningManifest,
+} from "../apps/api/src/site-builder/eval/model-evaluation-evidence-prep";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -53,6 +58,7 @@ function seconds(milliseconds: number): string {
 
 export function renderModelEvaluationHarnessBaseline(): string {
   const plans = buildAllTaskEvaluationPlans();
+  const evidencePrep = buildModelEvaluationEvidencePlanningManifest();
   const rows = plans.map((plan) => {
     const suite = plan.evaluationSuite;
     return `| ${code(plan.taskId)} | ${code(plan.profile)} | ${code(plan.dispatchAdmission)} | ${suite ? code(suite.suiteId) : "—"} | ${plan.candidates.map((candidate) => `${code(candidate.alias)} / ${code(candidate.expectedProtocol)} / ${code(candidate.preflight)}`).join("<br>")} | ${plan.envelope.maxTokens} | ${seconds(plan.envelope.runtimeDeadlineMs)} | ${seconds(plan.envelope.diagnosticObservationMs)} | ${seconds(plan.envelope.hardStopMs)} | ${plan.envelope.perCallCostCapCents}¢ | ${plan.envelope.reasoningEffort ?? "—"} |`;
@@ -74,6 +80,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。",
     "- 当前唯一可 dispatch suite 是 BrandProfile；其余 6 个 task fail-closed 为 `blocked_no_evaluation_suite`。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
     "- 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。",
+    `- zero-cost evidence 准备合同 ${code(SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID)} 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。`,
     "",
     "## 协议执行边界",
     "",
@@ -124,6 +131,14 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 每次 task/probe 在任何 wire dispatch 前，按 `repairTaskOutput` 的最坏调用数（当前最多 2 次）一次性 reserve campaign 全部上界，因此 repair 不能在只预留首调预算时超发；结算释放未用 headroom，但不会把既有 envelope attempt cap 乘以实际 callCount。首次或累计响应的已知 provider-reported cost 达到 `perCallCostCapCents` 时，executor 必须在第二次计费 repair 前结算并持久 freeze authorization；repair 聚合成本超过原 cap 时同样是当前 budget 的硬失败，换 fresh guard 也不能续发。budget guard 使用模块私有 WeakMap 品牌、JavaScript 私有状态与捕获的 reserve/settle 原型方法，duck/Proxy budget 或实例/prototype monkeypatch 都不能绕过。每个返回 run 使用模块加载时捕获的 `freeze`/`isFrozen`/`values` 整棵 deep-freeze 并复验，再由模块私有 WeakMap 绑定实际 guard；summary/ranker 必须显式收到同一个 genuine guard，并逐 run 核验对象身份与 campaignId，因此逐次新建 genuine guard、混用 guard、运行时替换 Object intrinsic、原地改写已绑定 run、clone/JSON reload 或只改公开 campaignId 都 fail-closed。unknown、malformed 或无法持久化的 settlement 保留完整最坏上界并冻结后续 dispatch。`rejected_before_dispatch` 只允许本地 reserve 拒绝路径，probe/matrix 在 executor 进入后声称该 reason 一律归 unknown 并冻结；当前 attempt 超过原 cap 时保留质量观察，但标记预算硬失败并不可排名。",
     "- 每个 run（schema v3）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、evaluator rubric、成本安全合同/attestation/凭据快照/价格快照 SHA-256 和所需 capability-probe attestation；probe attestation v2 绑定同一组成本安全摘要，矩阵内漂移即拒绝。终态原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；终态被拒输出只留 SHA-256 digest 与 failureCode，不把 PII/schema-invalid 原文写入 evidence。v2 adapter 对 repair 中间输出只聚合 usage/callCount，不保存其中间 digest 或 rejection reason，也不得把它称为已持久化 evidence；后续 fixed-commit evidence 若要求中间 repair provenance，必须先在独立 PR 显式升级 run schema/source contract。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。",
     "- 可用性、协议、身份、probe attestation、usage、artifact fingerprint、matrix、生产 P95、预算和成本任一未闭合，都不能生成可晋级排名。",
+    "",
+    "## Zero-cost evidence 准备",
+    "",
+    `- 准备合同：${code(SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID)}；固定 task ${code(evidencePrep.taskId)}、suite ${code(evidencePrep.suiteId)}、source bundle ${code(evidencePrep.sourceBundleContractId)}。`,
+    `- manifest：${evidencePrep.executionCount} executions / 最多 ${evidencePrep.maximumWireCallCount} wire calls；其中 capability probe ${evidencePrep.executions.filter((entry) => entry.kind === "capability_probe").length}、target ${evidencePrep.executions.filter((entry) => entry.kind === "target").length}、legacy comparator ${evidencePrep.executions.filter((entry) => entry.kind === "legacy_comparator").length}。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。`,
+    `- ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.executions} executions / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.wireCalls} wire calls / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.amountCents}¢ 仍标记为 ${code(MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.verification)}，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。`,
+    `- create-only runner 只接受完整 fixed commit、clean worktree、显式安全 JSON attestation 和新的 repository-relative 输出路径，以 ${code("wx")} 写入；拒绝 ${code(".env")}，不导入 executor/client，不保存 token、response body、个人或客户数据。输出状态最多为 ${code("READY_FOR_PRODUCT_DECISION")}，同时固定 ${code("dispatchAuthorization=NOT_AUTHORIZED")}。`,
+    "- 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。图片、视频、embedding、preview、deferred、其他六个无 suite task 继续在 client 前阻断。",
     "",
   ].join("\n");
 }
@@ -281,6 +296,16 @@ export function verifyModelEvaluationHarness(
         ),
       ),
       `${path} must reference the current evaluation cost safety id`,
+    );
+    assert.match(
+      document,
+      new RegExp(
+        SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID.replaceAll(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `${path} must reference the current evaluation evidence prep id`,
     );
   }
 }
