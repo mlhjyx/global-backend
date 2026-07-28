@@ -42,7 +42,7 @@ jobs:
           --result "$RUNNER_TEMP/pr-decision-card-result.json"
 
       - name: Create or update the bot-owned card
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           CARD_PATH: ${{ runner.temp }}/pr-decision-card.md
         with:
