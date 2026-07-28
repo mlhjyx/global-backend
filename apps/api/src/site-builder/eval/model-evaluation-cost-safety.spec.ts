@@ -25,6 +25,8 @@ function validInput(): ModelEvaluationCostSafetyInput {
       observedAt: "2026-07-28T00:00:00.000Z",
       snapshotSha256:
         "1111111111111111111111111111111111111111111111111111111111111111",
+      bearerTokenSha256:
+        "3333333333333333333333333333333333333333333333333333333333333333",
       purpose: "site_builder_model_evaluation",
       quotaMode: "limited",
       scopeExact: true,
@@ -160,6 +162,15 @@ describe("model evaluation cost safety contract", () => {
       ).toThrow("model evaluation cost safety attestation is invalid");
     },
   );
+
+  it("rejects a missing bearer secret digest", () => {
+    const input = validInput();
+    delete (input.credential as { bearerTokenSha256?: string })
+      .bearerTokenSha256;
+    expect(() => createModelEvaluationCostSafetyAttestation(input)).toThrow(
+      "attestation is invalid",
+    );
+  });
 
   it("requires pricing to cover the credential scope exactly", () => {
     const input = validInput();

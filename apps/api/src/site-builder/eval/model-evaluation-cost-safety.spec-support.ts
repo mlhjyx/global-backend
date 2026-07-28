@@ -12,6 +12,7 @@ import {
 import {
   createCredentialBoundModelEvaluationWireClient,
   createFileBackedModelEvaluationAuthorizationLedger,
+  modelEvaluationLedgerDirectorySha256,
   type ModelEvaluationAuthorizationLedger,
   type ModelEvaluationWireClient,
   type ModelEvaluationWireResponse,
@@ -66,9 +67,8 @@ export function createFakeModelEvaluationCostSafety(
     authorization: {
       authorizationId: `fake-evaluation-approval/2026-07-28-${suffix}`,
       ledgerId,
-      ledgerDirectorySha256: createHash("sha256")
-        .update(ledgerDirectory)
-        .digest("hex"),
+      ledgerDirectorySha256:
+        modelEvaluationLedgerDirectorySha256(ledgerDirectory),
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: campaignBudgetCents,
       approvedDispatchExecutions: 500,
@@ -78,6 +78,9 @@ export function createFakeModelEvaluationCostSafety(
       observedAt: "2026-07-28T00:00:00.000Z",
       snapshotSha256:
         "1111111111111111111111111111111111111111111111111111111111111111",
+      bearerTokenSha256: createHash("sha256")
+        .update("fake-limited-evaluation-token")
+        .digest("hex"),
       purpose: "site_builder_model_evaluation",
       quotaMode: "limited",
       scopeExact: true,
@@ -120,8 +123,7 @@ export function bindFakeModelEvaluationWireCredential<T extends object>(
   const receiver = wireClient as ModelEvaluationWireClient;
   const openAIResponses = receiver.openAIResponses.bind(receiver);
   const anthropicMessages = receiver.anthropicMessages.bind(receiver);
-  const openAIChatCompletions =
-    receiver.openAIChatCompletions.bind(receiver);
+  const openAIChatCompletions = receiver.openAIChatCompletions.bind(receiver);
   const fakeFetch = async (
     input: string | URL | Request,
     init?: RequestInit,
@@ -139,9 +141,7 @@ export function bindFakeModelEvaluationWireCredential<T extends object>(
     ) {
       return new Response("unauthorized", { status: 401 });
     }
-    const executionId = headers.get(
-      "x-site-builder-evaluation-execution-id",
-    );
+    const executionId = headers.get("x-site-builder-evaluation-execution-id");
     if (!executionId || typeof init?.body !== "string") {
       return new Response("invalid fake request", { status: 400 });
     }
@@ -180,6 +180,7 @@ export function bindFakeModelEvaluationWireCredential<T extends object>(
     credential: {
       attestationId: costSafety.credential.attestationId,
       snapshotSha256: costSafety.credential.snapshotSha256,
+      bearerTokenSha256: costSafety.credential.bearerTokenSha256,
       bearerToken: "fake-limited-evaluation-token",
     },
     baseUrl: "https://fake-model-evaluation.invalid/v1",

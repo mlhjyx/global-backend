@@ -42,6 +42,7 @@ export interface ModelEvaluationCostSafetyInput {
     attestationId: string;
     observedAt: string;
     snapshotSha256: string;
+    bearerTokenSha256: string;
     purpose: "site_builder_model_evaluation";
     quotaMode: "limited";
     scopeExact: true;
@@ -190,6 +191,7 @@ export function createModelEvaluationCostSafetyAttestation(
       "attestationId",
       "observedAt",
       "snapshotSha256",
+      "bearerTokenSha256",
       "purpose",
       "quotaMode",
       "scopeExact",
@@ -233,6 +235,7 @@ export function createModelEvaluationCostSafetyAttestation(
     !ATTESTATION_ID.test(copy.credential.attestationId) ||
     !canonicalUtcInstant(copy.credential.observedAt) ||
     !SHA256.test(copy.credential.snapshotSha256) ||
+    !SHA256.test(copy.credential.bearerTokenSha256) ||
     !positiveFinite(copy.credential.quotaCapCents) ||
     copy.credential.quotaCapCents >
       MODEL_EVALUATION_ABSOLUTE_LIMITS.credentialQuotaCapCents ||

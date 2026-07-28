@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -120,6 +121,9 @@ describe("model evaluation executor authorization", () => {
       attestationId: "fake-evaluation-credential/transport-boundary",
       snapshotSha256:
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bearerTokenSha256: createHash("sha256")
+        .update("limited-evaluation-secret")
+        .digest("hex"),
       bearerToken: "limited-evaluation-secret",
     };
     const observedAuthorization: string[] = [];
@@ -151,6 +155,159 @@ describe("model evaluation executor authorization", () => {
     expect(observedAuthorization).toEqual(["Bearer limited-evaluation-secret"]);
   });
 
+  it("rejects a bearer secret that does not match the attested digest", () => {
+    expect(() =>
+      createCredentialBoundModelEvaluationWireClient({
+        credential: {
+          attestationId: "fake-evaluation-credential/secret-mismatch",
+          snapshotSha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          bearerTokenSha256: createHash("sha256")
+            .update("dedicated-limited-secret")
+            .digest("hex"),
+          bearerToken: "historical-broad-secret",
+        },
+        baseUrl: "https://fake-model-evaluation.invalid/v1",
+        fetch: vi.fn() as typeof fetch,
+      }),
+    ).toThrow("attested evaluation credential handle");
+  });
+
+  it("adds the Anthropic protocol version header only to Messages", async () => {
+    const observedHeaders: Headers[] = [];
+    const fakeFetch = vi.fn(async (_input, init?: RequestInit) => {
+      observedHeaders.push(new Headers(init?.headers));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    const bearerToken = "limited-evaluation-secret";
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: "fake-evaluation-credential/protocol-headers",
+        snapshotSha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bearerTokenSha256: createHash("sha256")
+          .update(bearerToken)
+          .digest("hex"),
+        bearerToken,
+      },
+      baseUrl: "https://fake-model-evaluation.invalid/v1",
+      fetch: fakeFetch as typeof fetch,
+    });
+
+    await wireClient.anthropicMessages({
+      executionId: "protocol-headers:messages",
+      body: {
+        model: "claude-sonnet-5",
+        system: "system",
+        messages: [{ role: "user", content: "probe" }],
+        max_tokens: 1,
+        temperature: 0,
+      },
+      signal: new AbortController().signal,
+    });
+    await wireClient.openAIResponses({
+      executionId: "protocol-headers:responses",
+      body: {
+        model: "gpt-5.6-terra",
+        input: [{ role: "user", content: "probe" }],
+        max_output_tokens: 1,
+        temperature: 0,
+        text: { format: { type: "json_object" } },
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(observedHeaders[0]?.get("anthropic-version")).toBe("2023-06-01");
+    expect(observedHeaders[1]?.has("anthropic-version")).toBe(false);
+  });
+
+  it("preserves a provider cost observation on non-success HTTP responses", async () => {
+    const bearerToken = "limited-evaluation-secret";
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: "fake-evaluation-credential/http-cost",
+        snapshotSha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bearerTokenSha256: createHash("sha256")
+          .update(bearerToken)
+          .digest("hex"),
+        bearerToken,
+      },
+      baseUrl: "https://fake-model-evaluation.invalid/v1",
+      fetch: vi.fn(
+        async () =>
+          new Response("provider rejected after acceptance", {
+            status: 429,
+            headers: { "x-provider-cost-cents": "7" },
+          }),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      wireClient.openAIResponses({
+        executionId: "http-cost:1",
+        body: {
+          model: "gpt-5.6-terra",
+          input: [{ role: "user", content: "probe" }],
+          max_output_tokens: 1,
+          temperature: 0,
+          text: { format: { type: "json_object" } },
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      providerReportedCostCents: 7,
+    });
+  });
+
+  it("settles a non-success response from its preserved provider cost", async () => {
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
+    const bearerToken = "fake-limited-evaluation-token";
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: costSafety.credential.attestationId,
+        snapshotSha256: costSafety.credential.snapshotSha256,
+        bearerTokenSha256: costSafety.credential.bearerTokenSha256,
+        bearerToken,
+      },
+      baseUrl: "https://fake-model-evaluation.invalid/v1",
+      fetch: vi.fn(
+        async () =>
+          new Response("provider rejected after acceptance", {
+            status: 429,
+            headers: { "x-provider-cost-cents": "7" },
+          }),
+      ) as typeof fetch,
+    });
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient,
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "capability_unavailable",
+      costSettlement: {
+        state: "settled",
+        amountCents: 7,
+        basis: `${"provider_reported"}@${resolver.resolverId}`,
+      },
+    });
+  });
+
   it("rejects an oversized chunked response before JSON parsing", async () => {
     const oversizedChunk = new Uint8Array(
       MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES + 1,
@@ -171,6 +328,9 @@ describe("model evaluation executor authorization", () => {
         attestationId: "fake-evaluation-credential/response-boundary",
         snapshotSha256:
           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bearerTokenSha256: createHash("sha256")
+          .update("limited-evaluation-secret")
+          .digest("hex"),
         bearerToken: "limited-evaluation-secret",
       },
       baseUrl: "https://fake-model-evaluation.invalid/v1",
@@ -231,6 +391,61 @@ describe("model evaluation executor authorization", () => {
       ).toThrow("trusted cost safety must match");
     } finally {
       await rm(unrelatedDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a symlinked durable ledger directory", async () => {
+    const parent = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-symlink-spec-"),
+    );
+    const target = join(parent, "target");
+    const linked = join(parent, "linked");
+    try {
+      await mkdir(target);
+      await symlink(target, linked);
+      expect(() =>
+        createFileBackedModelEvaluationAuthorizationLedger({
+          ledgerId: "symlink-spec-ledger/durable-v1",
+          directory: linked,
+        }),
+      ).toThrow("stable real directory");
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a durable ledger directory whose device or inode identity changed", async () => {
+    const parent = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-replaced-spec-"),
+    );
+    const directory = join(parent, "ledger");
+    const resolver = fakeResolver();
+    const ledgerId = "replaced-spec-ledger/durable-v1";
+    try {
+      const costSafety = createFakeModelEvaluationCostSafety(
+        resolver.resolverId,
+        10_000,
+        { ledgerId, directory },
+      );
+      await rm(directory, { recursive: true, force: true });
+      await mkdir(directory);
+      expect(() =>
+        createRawModelEvaluationProtocolExecutor({
+          wireClient: bindFakeModelEvaluationWireCredential(
+            fakeWireClient(vi.fn()),
+            costSafety,
+          ),
+          authorizationLedger:
+            createFileBackedModelEvaluationAuthorizationLedger({
+              ledgerId,
+              directory,
+            }),
+          settlementResolver: resolver,
+          costSafety,
+        }),
+      ).toThrow("trusted cost safety must match");
+    } finally {
+      await rm(parent, { recursive: true, force: true });
     }
   });
 

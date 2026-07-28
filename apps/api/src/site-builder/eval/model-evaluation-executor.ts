@@ -2,12 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
-  writeFileSync,
+  realpathSync,
   writeSync,
 } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   getModelCandidateCatalogEntry,
   type ModelCandidateProtocol,
@@ -194,6 +195,7 @@ export interface ModelEvaluationWireResponse {
 export interface ModelEvaluationWireClient {
   readonly credentialAttestationId?: string;
   readonly credentialSnapshotSha256?: string;
+  readonly credentialBearerTokenSha256?: string;
   openAIResponses(
     request: OpenAIResponsesEvaluationWireRequest,
   ): Promise<ModelEvaluationWireResponse>;
@@ -210,13 +212,25 @@ const TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS = new WeakMap<
   Readonly<{
     credentialAttestationId: string;
     credentialSnapshotSha256: string;
+    credentialBearerTokenSha256: string;
   }>
 >();
 
 export interface ModelEvaluationCredentialHandle {
   readonly attestationId: string;
   readonly snapshotSha256: string;
+  readonly bearerTokenSha256: string;
   readonly bearerToken: string;
+}
+
+class ModelEvaluationWireHttpError extends Error {
+  readonly providerReportedCostCents?: number;
+
+  constructor(status: number, providerReportedCostCents?: number) {
+    super(`evaluation transport HTTP ${status}`);
+    this.name = "ModelEvaluationWireHttpError";
+    this.providerReportedCostCents = providerReportedCostCents;
+  }
 }
 
 export function createCredentialBoundModelEvaluationWireClient(options: {
@@ -235,8 +249,11 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
     typeof credential.attestationId !== "string" ||
     credential.attestationId.length === 0 ||
     !/^[a-f0-9]{64}$/.test(credential.snapshotSha256) ||
+    !/^[a-f0-9]{64}$/.test(credential.bearerTokenSha256) ||
     typeof credential.bearerToken !== "string" ||
     credential.bearerToken.length < 8 ||
+    createHash("sha256").update(credential.bearerToken).digest("hex") !==
+      credential.bearerTokenSha256 ||
     !/^https:\/\/[^/\s]+(?:\/.*)?$/.test(normalizedBaseUrl) ||
     typeof fetchImpl !== "function"
   ) {
@@ -301,30 +318,40 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
         authorization: `Bearer ${bearerToken}`,
         "content-type": "application/json",
         "x-site-builder-evaluation-execution-id": executionId,
+        ...(path === "/messages" ? { "anthropic-version": "2023-06-01" } : {}),
       },
       body: JSON.stringify(body),
       signal,
     });
-    if (!response.ok) {
-      throw new Error(`evaluation transport HTTP ${response.status}`);
-    }
     const providerCostHeader = response.headers.get("x-provider-cost-cents");
     const providerReportedCostCents =
       providerCostHeader !== null && providerCostHeader.trim() !== ""
         ? Number(providerCostHeader)
         : undefined;
-    return {
-      body: await readBoundedJsonBody(response),
-      ...(providerReportedCostCents !== undefined &&
+    const validProviderReportedCostCents =
+      providerReportedCostCents !== undefined &&
       Number.isFinite(providerReportedCostCents) &&
       providerReportedCostCents >= 0
-        ? { providerReportedCostCents }
+        ? providerReportedCostCents
+        : undefined;
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new ModelEvaluationWireHttpError(
+        response.status,
+        validProviderReportedCostCents,
+      );
+    }
+    return {
+      body: await readBoundedJsonBody(response),
+      ...(validProviderReportedCostCents !== undefined
+        ? { providerReportedCostCents: validProviderReportedCostCents }
         : {}),
     };
   };
   const bound = Object.freeze({
     credentialAttestationId: credential.attestationId,
     credentialSnapshotSha256: credential.snapshotSha256,
+    credentialBearerTokenSha256: credential.bearerTokenSha256,
     openAIResponses: Object.freeze(
       (request: OpenAIResponsesEvaluationWireRequest) =>
         dispatch(
@@ -358,6 +385,7 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
     Object.freeze({
       credentialAttestationId: credential.attestationId,
       credentialSnapshotSha256: credential.snapshotSha256,
+      credentialBearerTokenSha256: credential.bearerTokenSha256,
     }),
   );
   return bound;
@@ -410,6 +438,44 @@ export interface ModelEvaluationAuthorizationLedger {
 const TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS = new WeakSet<object>();
 const LEDGER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 
+function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
+  directory: string;
+  sha256: string;
+}> {
+  const absoluteDirectory = resolve(directory);
+  mkdirSync(absoluteDirectory, { recursive: true, mode: 0o700 });
+  const stats = lstatSync(absoluteDirectory, { bigint: true });
+  const realDirectory = realpathSync.native(absoluteDirectory);
+  if (
+    !stats.isDirectory() ||
+    stats.isSymbolicLink() ||
+    realDirectory !== absoluteDirectory
+  ) {
+    throw new Error(
+      "evaluation authorization ledger directory must be a stable real directory",
+    );
+  }
+  return Object.freeze({
+    directory: realDirectory,
+    sha256: createHash("sha256")
+      .update(
+        `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}`,
+      )
+      .digest("hex"),
+  });
+}
+
+export function modelEvaluationLedgerDirectorySha256(
+  directory: string,
+): string {
+  if (typeof directory !== "string" || !isAbsolute(directory)) {
+    throw new Error(
+      "absolute durable evaluation authorization ledger directory is required",
+    );
+  }
+  return resolveLedgerDirectoryIdentity(directory).sha256;
+}
+
 export function createFileBackedModelEvaluationAuthorizationLedger(options: {
   ledgerId: string;
   directory: string;
@@ -423,6 +489,17 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       "absolute durable evaluation authorization ledger directory is required",
     );
   }
+  const directoryIdentity = resolveLedgerDirectoryIdentity(options.directory);
+  const assertDirectoryIdentity = (): void => {
+    if (
+      resolveLedgerDirectoryIdentity(directoryIdentity.directory).sha256 !==
+      directoryIdentity.sha256
+    ) {
+      throw new Error(
+        "evaluation authorization ledger directory identity changed",
+      );
+    }
+  };
   type LedgerState = {
     claimId: string;
     filePath: string;
@@ -437,10 +514,27 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     reservations: Map<string, number>;
   };
   const states = new Map<string, LedgerState>();
+  const writeAllSync = (descriptor: number, value: string): void => {
+    const payload = Buffer.from(value, "utf8");
+    let offset = 0;
+    while (offset < payload.byteLength) {
+      const written = writeSync(
+        descriptor,
+        payload,
+        offset,
+        payload.byteLength - offset,
+      );
+      if (!Number.isSafeInteger(written) || written <= 0) {
+        throw new Error("durable evaluation ledger write was incomplete");
+      }
+      offset += written;
+    }
+  };
   const appendDurably = (filePath: string, value: unknown): void => {
+    assertDirectoryIdentity();
     const descriptor = openSync(filePath, "a", 0o600);
     try {
-      writeSync(descriptor, `${JSON.stringify(value)}\n`, undefined, "utf8");
+      writeAllSync(descriptor, `${JSON.stringify(value)}\n`);
       fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);
@@ -448,14 +542,12 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
   };
   const ledger: ModelEvaluationAuthorizationLedger = {
     ledgerId: options.ledgerId,
-    directorySha256: createHash("sha256")
-      .update(options.directory)
-      .digest("hex"),
+    directorySha256: directoryIdentity.sha256,
     claim: (input) => {
       if (states.has(input.authorizationId)) return false;
-      mkdirSync(options.directory, { recursive: true, mode: 0o700 });
+      assertDirectoryIdentity();
       const filePath = join(
-        options.directory,
+        directoryIdentity.directory,
         `${createHash("sha256")
           .update(input.authorizationId)
           .digest("hex")}.jsonl`,
@@ -475,19 +567,18 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
         throw error;
       }
       try {
-        writeFileSync(
+        writeAllSync(
           descriptor,
           `${JSON.stringify({
             event: "authorization_claimed",
             ...input,
           })}\n`,
-          "utf8",
         );
         fsyncSync(descriptor);
       } finally {
         closeSync(descriptor);
       }
-      const directoryDescriptor = openSync(options.directory, "r");
+      const directoryDescriptor = openSync(directoryIdentity.directory, "r");
       try {
         fsyncSync(directoryDescriptor);
       } finally {
@@ -1268,6 +1359,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const authorizationLedger = deps?.authorizationLedger;
   const credentialAttestationId = wireReceiver?.credentialAttestationId;
   const credentialSnapshotSha256 = wireReceiver?.credentialSnapshotSha256;
+  const credentialBearerTokenSha256 = wireReceiver?.credentialBearerTokenSha256;
   const trustedWireCredential =
     wireReceiver && typeof wireReceiver === "object"
       ? TRUSTED_MODEL_EVALUATION_WIRE_CREDENTIALS.get(wireReceiver)
@@ -1290,8 +1382,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
       credentialAttestationId ||
     trustedWireCredential?.credentialSnapshotSha256 !==
       credentialSnapshotSha256 ||
+    trustedWireCredential?.credentialBearerTokenSha256 !==
+      credentialBearerTokenSha256 ||
     credentialAttestationId !== costSafety.credential.attestationId ||
     credentialSnapshotSha256 !== costSafety.credential.snapshotSha256 ||
+    credentialBearerTokenSha256 !== costSafety.credential.bearerTokenSha256 ||
     CLAIMED_MODEL_EVALUATION_AUTHORIZATIONS.has(
       costSafety.authorization.authorizationId,
     )
@@ -1303,6 +1398,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const wireClient = Object.freeze({
     credentialAttestationId,
     credentialSnapshotSha256,
+    credentialBearerTokenSha256,
     openAIResponses: Object.freeze(openAIResponses.bind(wireReceiver)),
     anthropicMessages: Object.freeze(anthropicMessages.bind(wireReceiver)),
     openAIChatCompletions: Object.freeze(
@@ -1638,7 +1734,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
       } catch (error) {
         usage.callCount += 1;
         usage.complete = false;
-        providerReportedCostCents.push(null);
+        providerReportedCostCents.push(
+          error instanceof ModelEvaluationWireHttpError
+            ? responseCost(error.providerReportedCostCents)
+            : null,
+        );
         const settlement = await safeResolveSettlement(
           settlementResolver,
           {
