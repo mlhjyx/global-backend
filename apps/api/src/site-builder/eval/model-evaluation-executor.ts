@@ -594,17 +594,32 @@ function linuxProcessStartTimeTicks(pid: number): string | null {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     const commandEnd = stat.lastIndexOf(")");
-    if (commandEnd < 0) return null;
+    if (commandEnd < 0) {
+      throw new Error(
+        "evaluation authorization claim lock process stat is malformed",
+      );
+    }
     const fields = stat
       .slice(commandEnd + 2)
       .trim()
       .split(/\s+/);
     const startTimeTicks = fields[19];
-    return startTimeTicks && /^\d+$/.test(startTimeTicks)
-      ? startTimeTicks
-      : null;
-  } catch {
-    return null;
+    if (!startTimeTicks || !/^\d+$/.test(startTimeTicks)) {
+      throw new Error(
+        "evaluation authorization claim lock process start time is invalid",
+      );
+    }
+    return startTimeTicks;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
   }
 }
 
