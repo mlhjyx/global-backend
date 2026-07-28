@@ -196,7 +196,13 @@ describe("model evaluation cost safety contract", () => {
     );
   });
 
-  it("rejects a non-canonical or non-HTTPS gateway origin", () => {
+  it("admits only HTTPS or an explicit canonical loopback HTTP origin", () => {
+    const loopback = validInput();
+    loopback.credential.gatewayOrigin = "http://127.0.0.1:3001";
+    expect(() =>
+      createModelEvaluationCostSafetyAttestation(loopback),
+    ).not.toThrow();
+
     const input = validInput();
     input.credential.gatewayOrigin = "http://new-api.example.invalid/";
     expect(() => createModelEvaluationCostSafetyAttestation(input)).toThrow(

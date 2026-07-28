@@ -39,6 +39,7 @@ import { sha256CanonicalJson } from "./eval-provenance";
 import {
   assertModelEvaluationCostSafetyDispatch,
   frozenModelEvaluationPriceCents,
+  isAllowedModelEvaluationGatewayOrigin,
   isTrustedModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
@@ -259,6 +260,12 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
     typeof options?.baseUrl === "string"
       ? options.baseUrl.replace(/\/+$/, "")
       : "";
+  let parsedBaseUrl: URL | undefined;
+  try {
+    parsedBaseUrl = new URL(normalizedBaseUrl);
+  } catch {
+    parsedBaseUrl = undefined;
+  }
   if (
     !credential ||
     typeof credential.attestationId !== "string" ||
@@ -269,14 +276,19 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
     credential.bearerToken.length < 8 ||
     createHash("sha256").update(credential.bearerToken).digest("hex") !==
       credential.bearerTokenSha256 ||
-    !/^https:\/\/[^/\s]+(?:\/.*)?$/.test(normalizedBaseUrl) ||
+    !parsedBaseUrl ||
+    !isAllowedModelEvaluationGatewayOrigin(parsedBaseUrl.origin) ||
+    parsedBaseUrl.username !== "" ||
+    parsedBaseUrl.password !== "" ||
+    parsedBaseUrl.search !== "" ||
+    parsedBaseUrl.hash !== "" ||
     typeof fetchImpl !== "function"
   ) {
     throw new Error(
-      "attested evaluation credential handle, HTTPS base URL, and fetch are required",
+      "attested evaluation credential handle, HTTPS or explicit loopback HTTP base URL, and fetch are required",
     );
   }
-  const gatewayOrigin = new URL(normalizedBaseUrl).origin;
+  const gatewayOrigin = parsedBaseUrl.origin;
   if (credential.gatewayOrigin !== gatewayOrigin) {
     throw new Error(
       "attested evaluation credential gateway origin does not match",
@@ -465,6 +477,77 @@ export interface ModelEvaluationAuthorizationLedger {
 const TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS = new WeakSet<object>();
 const LEDGER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 
+class ModelEvaluationClaimLockContentionError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      "evaluation authorization claim index is locked; retry without reissuing authorization",
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = "ModelEvaluationClaimLockContentionError";
+  }
+}
+
+function decodeLinuxMountInfoPath(value: string): string {
+  return value.replace(/\\([0-7]{3})/g, (_match, octal: string) =>
+    String.fromCharCode(Number.parseInt(octal, 8)),
+  );
+}
+
+function linuxMountGenerationIdentity(directory: string): string {
+  const mountInfo = readFileSync("/proc/self/mountinfo", "utf8");
+  let selected:
+    | Readonly<{
+        mountId: string;
+        parentMountId: string;
+        majorMinor: string;
+        root: string;
+        mountPoint: string;
+      }>
+    | undefined;
+  for (const line of mountInfo.split("\n")) {
+    if (line.length === 0) continue;
+    const fields = line.split(" ");
+    if (fields.length < 6) continue;
+    const mountId = fields[0] ?? "";
+    const parentMountId = fields[1] ?? "";
+    const majorMinor = fields[2] ?? "";
+    const root = decodeLinuxMountInfoPath(fields[3] ?? "");
+    const mountPoint = decodeLinuxMountInfoPath(fields[4] ?? "");
+    if (
+      !/^\d+$/.test(mountId) ||
+      !/^\d+$/.test(parentMountId) ||
+      !/^\d+:\d+$/.test(majorMinor) ||
+      root.length === 0 ||
+      !mountPoint.startsWith("/")
+    ) {
+      continue;
+    }
+    const containsDirectory =
+      mountPoint === "/" ||
+      directory === mountPoint ||
+      directory.startsWith(`${mountPoint}/`);
+    if (
+      containsDirectory &&
+      (!selected || mountPoint.length > selected.mountPoint.length)
+    ) {
+      selected = { mountId, parentMountId, majorMinor, root, mountPoint };
+    }
+  }
+  if (!selected) {
+    throw new Error(
+      "evaluation authorization ledger mount generation is unavailable",
+    );
+  }
+  return [
+    linuxBootId(),
+    selected.mountId,
+    selected.parentMountId,
+    selected.majorMinor,
+    selected.root,
+    selected.mountPoint,
+  ].join("\0");
+}
+
 function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
   directory: string;
   sha256: string;
@@ -488,6 +571,7 @@ function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
       "evaluation authorization ledger directory must be a stable real directory",
     );
   }
+  const mountGenerationIdentity = linuxMountGenerationIdentity(realDirectory);
   const markerPath = join(
     realDirectory,
     ".site-builder-model-evaluation-ledger-id",
@@ -551,6 +635,7 @@ function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
         .update(
           `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${markerStats.dev.toString()}\0${markerStats.ino.toString()}\0${markerId}`,
         )
+        .update(`\0${mountGenerationIdentity}`)
         .digest("hex"),
       markerPath,
       markerDevice: markerStats.dev,
@@ -714,11 +799,10 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       closeSync(directoryDescriptor);
     }
   };
-  const claimLockContention = (cause?: unknown): Error =>
-    new Error(
-      "evaluation authorization claim index is locked; retry without reissuing authorization",
-      cause === undefined ? undefined : { cause },
-    );
+  const claimLockContention = (
+    cause?: unknown,
+  ): ModelEvaluationClaimLockContentionError =>
+    new ModelEvaluationClaimLockContentionError(cause);
   const acquireAuthorizationClaimLock = (
     lockPath: string,
   ): { descriptor: number; stats: BigIntStats } => {
@@ -1941,7 +2025,8 @@ export function createModelEvaluationProtocolExecutor(deps: {
   let durableClaim:
     Promise<Readonly<{ claimed: boolean; error: unknown | null }>> | undefined;
   const claimDurableAuthorization = () => {
-    durableClaim ??= Promise.resolve()
+    if (durableClaim) return durableClaim;
+    const claimAttempt = Promise.resolve()
       .then(() =>
         authorizationLedger.claim(
           Object.freeze({
@@ -1961,7 +2046,17 @@ export function createModelEvaluationProtocolExecutor(deps: {
           }),
         (error: unknown) => Object.freeze({ claimed: false, error }),
       );
-    return durableClaim;
+    durableClaim = claimAttempt;
+    void claimAttempt.then((claim) => {
+      if (
+        !claim.claimed &&
+        claim.error instanceof ModelEvaluationClaimLockContentionError &&
+        durableClaim === claimAttempt
+      ) {
+        durableClaim = undefined;
+      }
+    });
+    return claimAttempt;
   };
   const freezeDurableAuthorization = async (reason: string): Promise<void> => {
     campaignFrozen = true;
@@ -1991,7 +2086,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
     }
     const claim = await claimDurableAuthorization();
     if (!claim.claimed) {
-      campaignFrozen = true;
+      if (!(claim.error instanceof ModelEvaluationClaimLockContentionError)) {
+        campaignFrozen = true;
+      }
       throw preDispatchError("evaluation_cost_safety_rejected");
     }
     const usage: UsageAccumulator = {
@@ -2406,7 +2503,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
           );
           const effectiveSettlement =
             await closeCampaignReservation(settlement);
-          campaignFrozen = true;
+          await freezeDurableAuthorization(
+            "known_attempt_cost_cap_reached_before_repair",
+          );
           throw new ModelEvaluationCallError(
             "evaluation_cost_safety_rejected",
             effectiveSettlement,

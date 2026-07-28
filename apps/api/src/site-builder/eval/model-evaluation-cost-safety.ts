@@ -138,11 +138,23 @@ function canonicalUtcInstant(value: unknown): value is string {
   );
 }
 
-function canonicalHttpsOrigin(value: unknown): value is string {
+export function isAllowedModelEvaluationGatewayOrigin(
+  value: unknown,
+): value is string {
   if (typeof value !== "string") return false;
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "https:" && parsed.origin === value;
+    const loopbackHttp =
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "[::1]");
+    return (
+      (parsed.protocol === "https:" || loopbackHttp) &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.origin === value
+    );
   } catch {
     return false;
   }
@@ -267,7 +279,7 @@ export function createModelEvaluationCostSafetyAttestation(
     !canonicalUtcInstant(copy.credential.observedAt) ||
     !SHA256.test(copy.credential.snapshotSha256) ||
     !SHA256.test(copy.credential.bearerTokenSha256) ||
-    !canonicalHttpsOrigin(copy.credential.gatewayOrigin) ||
+    !isAllowedModelEvaluationGatewayOrigin(copy.credential.gatewayOrigin) ||
     !positiveFinite(copy.credential.quotaCapCents) ||
     copy.credential.quotaCapCents >
       MODEL_EVALUATION_ABSOLUTE_LIMITS.credentialQuotaCapCents ||

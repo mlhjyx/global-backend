@@ -207,6 +207,61 @@ describe("model evaluation executor authorization", () => {
     ).toThrow("gateway origin does not match");
   });
 
+  it("admits the explicitly loopback-bound Ubuntu development gateway over HTTP", async () => {
+    const bearerToken = "limited-evaluation-secret";
+    const fakeFetch = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: "fake-evaluation-credential/loopback-http",
+        snapshotSha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bearerTokenSha256: createHash("sha256")
+          .update(bearerToken)
+          .digest("hex"),
+        gatewayOrigin: "http://127.0.0.1:3001",
+        bearerToken,
+      },
+      baseUrl: "http://127.0.0.1:3001/v1",
+      fetch: fakeFetch as typeof fetch,
+    });
+
+    await wireClient.openAIResponses({
+      executionId: "loopback-http:1",
+      body: {
+        model: "gpt-5.6-terra",
+        input: [{ role: "user", content: "probe" }],
+        max_output_tokens: 1,
+        temperature: 0,
+        text: { format: { type: "json_object" } },
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(fakeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects non-loopback HTTP before fetch", () => {
+    const bearerToken = "limited-evaluation-secret";
+    expect(() =>
+      createCredentialBoundModelEvaluationWireClient({
+        credential: {
+          attestationId: "fake-evaluation-credential/remote-http",
+          snapshotSha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          bearerTokenSha256: createHash("sha256")
+            .update(bearerToken)
+            .digest("hex"),
+          gatewayOrigin: "http://new-api.example.invalid",
+          bearerToken,
+        },
+        baseUrl: "http://new-api.example.invalid/v1",
+        fetch: vi.fn() as typeof fetch,
+      }),
+    ).toThrow("HTTPS or explicit loopback HTTP");
+  });
+
   it("adds the Anthropic protocol version header only to Messages", async () => {
     const observedHeaders: Headers[] = [];
     const fakeFetch = vi.fn(async (_input, init?: RequestInit) => {
@@ -732,6 +787,148 @@ describe("model evaluation executor authorization", () => {
       expect(ledger.claim(claim)).toBe(true);
       expect(await readdir(directory)).not.toContain(
         ".site-builder-model-evaluation-claim.lock",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("lets the same spend authorization retry after transient claim lock contention", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-executor-lock-retry-spec-"),
+    );
+    const ledgerId = "executor-lock-retry-spec-ledger/durable-v1";
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(
+      resolver.resolverId,
+      10_000,
+      { ledgerId, directory },
+    );
+    const wire = vi.fn(async () => ({
+      body: {
+        status: "completed",
+        model: "gpt-5.6-terra",
+        output: [{ content: [{ type: "output_text", text: "" }] }],
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+      providerReportedCostCents: 1,
+    }));
+    const lockPath = join(
+      directory,
+      ".site-builder-model-evaluation-claim.lock",
+    );
+    try {
+      const executor = createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          fakeWireClient(wire),
+          costSafety,
+        ),
+        authorizationLedger:
+          createFileBackedModelEvaluationAuthorizationLedger({
+            ledgerId,
+            directory,
+          }),
+        settlementResolver: resolver,
+        costSafety,
+      });
+      const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+      await writeFile(lockPath, "", { flag: "wx", mode: 0o600 });
+
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "capability_unavailable",
+      });
+      expect(wire).not.toHaveBeenCalled();
+
+      await rm(lockPath, { force: true });
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 2,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "content_invalid",
+      });
+      expect(wire).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("durably freezes the authorization when the first call reaches the attempt cap", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-at-cap-freeze-spec-"),
+    );
+    const ledgerId = "at-cap-freeze-spec-ledger/durable-v1";
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(
+      resolver.resolverId,
+      10_000,
+      { ledgerId, directory },
+    );
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const wire = vi.fn(async () => ({
+      body: {
+        status: "completed",
+        model: plan.candidates[0]!.alias,
+        output: [{ content: [{ type: "output_text", text: "{}" }] }],
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+      providerReportedCostCents: plan.envelope.perCallCostCapCents,
+    }));
+    try {
+      const executor = createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          fakeWireClient(wire),
+          costSafety,
+        ),
+        authorizationLedger:
+          createFileBackedModelEvaluationAuthorizationLedger({
+            ledgerId,
+            directory,
+          }),
+        settlementResolver: resolver,
+        costSafety,
+      });
+
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "capability_unavailable",
+      });
+      expect(wire).toHaveBeenCalledTimes(1);
+      const claimFile = (await readdir(directory)).find((entry) =>
+        entry.endsWith(".jsonl"),
+      );
+      expect(claimFile).toBeDefined();
+      const events = (await readFile(join(directory, claimFile!), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { event: string; reason?: string });
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "authorization_frozen",
+          reason: "known_attempt_cost_cap_reached_before_repair",
+        }),
       );
     } finally {
       await rm(directory, { recursive: true, force: true });
