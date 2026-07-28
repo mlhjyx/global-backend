@@ -11,7 +11,7 @@
 >
 > **2026-07-27 候选重基线**：后续可评测型号、精确 alias、状态、预期协议与 task/Profile 池只认[生成候选基线](model-candidate-baseline.md)，不得从 `/models` 可见性直接推导能力、质量或晋级。后续真实评测必须按各 task 的生产 envelope 加扩展诊断观察窗，分别记录 `quality_valid_runtime_late` 与 `content_invalid`；先按质量、结构、事实、稳定性判断，P95 与 accepted-artifact cost 后评判，同时保留绝对预算止损、未知结算 fail-closed。此规则不回写本文件下方的历史报告。
 >
-> **代码级 harness（尚无真实 evidence）**：`site-builder-model-evaluation-harness/2026-07-27-v1` 从 `site-builder-model-candidate-baseline/2026-07-27-v1` 与当前 task binding 生成计划；精确 task/protocol/envelope、canonical suite、结果类、排序、预算与 provenance 只认[生成评测基线](model-evaluation-harness.md)，不得在本文件再抄矩阵。没有完整 suite 的 task 不可 dispatch。本阶段只有未接生产依赖的内存合同、假 executor 单测与文档校验，未发真实请求、未产生 evidence，也未改 P4/DesignEvaluation/ReleaseManifest/Temporal/route/env。
+> **代码级 harness（尚无真实 evidence）**：`site-builder-model-evaluation-harness/2026-07-28-v2` 从保持不变的 `site-builder-model-candidate-baseline/2026-07-27-v1` 与当前 task binding 生成计划；精确 task/protocol/envelope、canonical suite、结果类、排序、预算、协议 admission 与 provenance 只认[生成评测基线](model-evaluation-harness.md)，不得在本文件再抄矩阵。当前唯一完整 suite 仍是 BrandProfile；evaluation-only executor 用注入的 fake wire/cost resolver 覆盖 Responses、Messages 与隔离的 legacy Chat comparator，实际协议、精确模型 identity、repair usage/callCount、成本依据及调用后 source fingerprint 均 fail-closed。trusted probe/run 只接受 factory 私有品牌化的 target execute，任意 callback/wrapper 与媒体/embedding/preview/deferred/legacy-only target/无 suite 都在任何预算或 client 调用前阻断。本阶段未发真实模型或媒体请求、未产生 evidence，也未改 P4/DesignEvaluation/ReleaseManifest/Temporal/route/env、公共 API 或 DB。
 
 ## 0. 定位与两层质量体系
 

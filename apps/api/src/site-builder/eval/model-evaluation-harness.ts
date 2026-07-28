@@ -43,11 +43,15 @@ import {
   sha256CanonicalJson,
   sha256Text,
 } from "./eval-provenance";
+import {
+  isTrustedModelEvaluationProtocolExecute,
+  modelEvaluationProtocolExecutorIdentity,
+} from "./model-evaluation-executor";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-27-v1" as const;
+  "site-builder-model-evaluation-harness/2026-07-28-v2" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v2" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -145,6 +149,10 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
   },
   {
+    role: "evaluation_executor",
+    path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
     role: "provider",
     path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
   },
@@ -238,7 +246,7 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
 
 const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
   suiteId: "site-builder.brand-profile-evaluation-suite/2026-07-27-v1",
-  adapterId: "site-builder.brand-profile-evaluation-adapter/v1",
+  adapterId: "site-builder.brand-profile-evaluation-adapter/v2",
   taskContractId: "site_builder.brand_profile",
   promptVersion: BRAND_PROFILE_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_INPUT_SCHEMA_SNAPSHOT),
@@ -302,7 +310,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
-  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v3",
+  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v4",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -596,14 +604,17 @@ export function validateCapabilityProbe(
   };
 }
 
+export type ModelEvaluationCostBasis =
+  "provider_reported" | "frozen_pricing_snapshot" | "verified_billing_export";
+
+export type ModelEvaluationAuditedCostBasis =
+  `${ModelEvaluationCostBasis}@${string}`;
+
 export type CostSettlement =
   | {
       state: "settled";
       amountCents: number;
-      basis:
-        | "provider_reported"
-        | "frozen_pricing_snapshot"
-        | "verified_billing_export";
+      basis: ModelEvaluationAuditedCostBasis;
     }
   | {
       state: "not_incurred";
@@ -675,6 +686,10 @@ function readMonotonicElapsed(
   return Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs : null;
 }
 
+function maximumExecutionCallCount(repairTaskOutput: boolean): number {
+  return repairTaskOutput ? 2 : 1;
+}
+
 const TRUSTED_MODEL_EVALUATION_BUDGETS = new WeakMap<
   object,
   { readonly campaignId: string }
@@ -683,10 +698,41 @@ const TRUSTED_MODEL_EVALUATION_RUN_BUDGETS = new WeakMap<
   object,
   ModelEvaluationBudgetGuard
 >();
+const TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS = new WeakMap<object, object>();
+
+function bindTrustedModelEvaluationExecutor(
+  budget: ModelEvaluationBudgetGuard,
+  execute: unknown,
+): void {
+  const identity = modelEvaluationProtocolExecutorIdentity(execute);
+  if (identity === null) {
+    throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  const bound = TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.get(budget);
+  if (bound && bound !== identity) {
+    throw new ModelEvaluationCallError(
+      "evaluation_executor_campaign_mismatch",
+      {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    );
+  }
+  if (!bound) TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.set(budget, identity);
+}
 
 export class ModelEvaluationBudgetGuard {
   readonly #campaignBudgetCents: number;
-  readonly #reservations = new Map<string, number>();
+  readonly #reservations = new Map<
+    string,
+    {
+      reservedCents: number;
+      perCallCapCents: number;
+    }
+  >();
   readonly #completedCalls = new Set<string>();
   #committedCents = 0;
   #unknownUpperBoundCents = 0;
@@ -711,24 +757,33 @@ export class ModelEvaluationBudgetGuard {
   reserve(
     callId: string,
     perCallCapCents: number,
+    maximumCallCount = 1,
   ): ModelEvaluationBudgetReserveResult {
     assertNonNegativeFinite(perCallCapCents, "perCallCapCents");
     if (perCallCapCents === 0) {
       throw new Error("perCallCapCents must be greater than zero");
     }
+    if (!Number.isInteger(maximumCallCount) || maximumCallCount < 1) {
+      throw new Error("maximumCallCount must be a positive integer");
+    }
+    const reservedCents = perCallCapCents * maximumCallCount;
+    assertNonNegativeFinite(reservedCents, "reservedCents");
     if (this.#reservations.has(callId) || this.#completedCalls.has(callId)) {
       return { allowed: false, reason: "duplicate_call" };
     }
     if (this.#blockReason) {
       return { allowed: false, reason: this.#blockReason };
     }
-    if (perCallCapCents > this.#remainingDispatchableCents()) {
+    if (reservedCents > this.#remainingDispatchableCents()) {
       return { allowed: false, reason: "campaign_budget_exhausted" };
     }
-    this.#reservations.set(callId, perCallCapCents);
+    this.#reservations.set(callId, {
+      reservedCents,
+      perCallCapCents,
+    });
     return {
       allowed: true,
-      reservation: { callId, reservedCents: perCallCapCents },
+      reservation: { callId, reservedCents },
     };
   }
 
@@ -736,8 +791,8 @@ export class ModelEvaluationBudgetGuard {
     callId: string,
     settlement: unknown,
   ): ModelEvaluationBudgetSettlementResult {
-    const reservedCents = this.#reservations.get(callId);
-    if (reservedCents === undefined) {
+    const reservation = this.#reservations.get(callId);
+    if (reservation === undefined) {
       throw new Error(
         `model evaluation call has no active reservation: ${callId}`,
       );
@@ -747,7 +802,7 @@ export class ModelEvaluationBudgetGuard {
     this.#completedCalls.add(callId);
 
     if (normalized.settlement.state === "unknown") {
-      this.#unknownUpperBoundCents += reservedCents;
+      this.#unknownUpperBoundCents += reservation.reservedCents;
       this.#blockReason = "unknown_settlement";
       return normalized;
     }
@@ -755,7 +810,7 @@ export class ModelEvaluationBudgetGuard {
 
     this.#committedCents += normalized.settlement.amountCents;
     if (
-      normalized.settlement.amountCents > reservedCents ||
+      normalized.settlement.amountCents > reservation.perCallCapCents ||
       this.#committedCents + this.#unknownUpperBoundCents >
         this.#campaignBudgetCents
     ) {
@@ -763,13 +818,14 @@ export class ModelEvaluationBudgetGuard {
     }
     return {
       ...normalized,
-      capExceeded: normalized.settlement.amountCents > reservedCents,
+      capExceeded:
+        normalized.settlement.amountCents > reservation.perCallCapCents,
     };
   }
 
   #reservedCents(): number {
     return [...this.#reservations.values()].reduce(
-      (total, value) => total + value,
+      (total, value) => total + value.reservedCents,
       0,
     );
   }
@@ -849,12 +905,14 @@ function reserveTrustedModelEvaluationBudget(
   budget: unknown,
   callId: string,
   perCallCapCents: number,
+  maximumCallCount = 1,
 ): ModelEvaluationBudgetReserveResult {
   assertTrustedModelEvaluationBudget(budget);
   return RESERVE_TRUSTED_MODEL_EVALUATION_BUDGET.call(
     budget,
     callId,
     perCallCapCents,
+    maximumCallCount,
   );
 }
 
@@ -876,6 +934,7 @@ const SETTLED_COST_BASES = new Set([
   "frozen_pricing_snapshot",
   "verified_billing_export",
 ]);
+const SETTLEMENT_RESOLVER_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 const NOT_INCURRED_REASONS = new Set([
   "rejected_before_dispatch",
   "provider_attested_not_incurred",
@@ -907,13 +966,23 @@ function normalizeCostSettlement(
   if (!value || typeof value !== "object") return invalid();
   const record = value as Record<string, unknown>;
   if (record.state === "settled") {
+    const basis =
+      typeof record.basis === "string"
+        ? record.basis.slice(0, record.basis.indexOf("@"))
+        : "";
+    const resolverId =
+      typeof record.basis === "string"
+        ? record.basis.slice(record.basis.indexOf("@") + 1)
+        : "";
     if (
       !exactKeys(record, ["state", "amountCents", "basis"]) ||
       typeof record.amountCents !== "number" ||
       !Number.isFinite(record.amountCents) ||
       record.amountCents < 0 ||
       typeof record.basis !== "string" ||
-      !SETTLED_COST_BASES.has(record.basis)
+      record.basis.indexOf("@") < 1 ||
+      !SETTLED_COST_BASES.has(basis) ||
+      !SETTLEMENT_RESOLVER_ID.test(resolverId)
     ) {
       return invalid();
     }
@@ -1278,6 +1347,7 @@ export interface ModelEvaluationCase {
 }
 
 export interface ModelEvaluationExecutionRequest {
+  executionId: string;
   taskId: SiteBuilderTaskId;
   profile: SiteBuilderModelProfileId;
   alias: string;
@@ -1302,6 +1372,40 @@ export interface CapabilityProbeExecutionRequest extends Omit<
 > {
   campaignId: string;
   probeKind: "canonical_task_shaped_capability";
+}
+
+const AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS = new WeakSet<object>();
+const AUTHORIZED_EXECUTION_ADD = WeakSet.prototype.add;
+const AUTHORIZED_EXECUTION_HAS = WeakSet.prototype.has;
+const AUTHORIZED_EXECUTION_DELETE = WeakSet.prototype.delete;
+const APPLY_AUTHORIZED_EXECUTION_INTRINSIC = Reflect.apply;
+
+function authorizeModelEvaluationExecutionRequest(
+  request: ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest,
+): void {
+  APPLY_AUTHORIZED_EXECUTION_INTRINSIC(
+    AUTHORIZED_EXECUTION_ADD,
+    AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS,
+    [request],
+  );
+}
+
+export function consumeAuthorizedModelEvaluationExecutionRequest(
+  request: unknown,
+): boolean {
+  if (!request || typeof request !== "object") return false;
+  const authorized = APPLY_AUTHORIZED_EXECUTION_INTRINSIC(
+    AUTHORIZED_EXECUTION_HAS,
+    AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS,
+    [request],
+  ) as boolean;
+  if (!authorized) return false;
+  APPLY_AUTHORIZED_EXECUTION_INTRINSIC(
+    AUTHORIZED_EXECUTION_DELETE,
+    AUTHORIZED_MODEL_EVALUATION_EXECUTION_REQUESTS,
+    [request],
+  );
+  return true;
 }
 
 export class ModelEvaluationCallError extends Error {
@@ -1410,6 +1514,12 @@ export class ModelEvaluationCapabilityCampaign {
     ) => Promise<ModelEvaluationCallResult<T>>;
     now?: () => number;
   }): Promise<CapabilityProbeValidation> {
+    if (!isTrustedModelEvaluationProtocolExecute(options.execute)) {
+      throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      });
+    }
     assertCandidateBelongsToPlan(options.plan, options.candidate);
     if (
       options.candidate.preflight !== "capability_probe" ||
@@ -1420,13 +1530,29 @@ export class ModelEvaluationCapabilityCampaign {
         `candidate does not require a canonical capability probe: ${options.plan.taskId}/${options.candidate.alias}`,
       );
     }
+    bindTrustedModelEvaluationExecutor(this.#budget, options.execute);
     const evaluationCase = buildCanonicalModelEvaluationCase(
       options.plan,
       options.plan.evaluationSuite.fixtureIds[0],
     );
-    this.#attestations.delete(
-      capabilityProbeKey(options.plan, options.candidate),
-    );
+    const probeKey = capabilityProbeKey(options.plan, options.candidate);
+    const existingAttestation = this.#attestations.get(probeKey);
+    if (
+      existingAttestation &&
+      capabilityProbeAttestationIsCanonical(
+        options.plan,
+        options.candidate,
+        existingAttestation,
+      )
+    ) {
+      return {
+        status: "capability_proven",
+        protocolVerified: true,
+        identityVerified: true,
+        outputVerified: true,
+      };
+    }
+    this.#attestations.delete(probeKey);
     const callId = [
       "capability-probe",
       this.campaignId,
@@ -1437,6 +1563,7 @@ export class ModelEvaluationCapabilityCampaign {
       this.#budget,
       callId,
       options.plan.envelope.perCallCostCapCents,
+      maximumExecutionCallCount(options.plan.evaluationSuite.repairTaskOutput),
     );
     if (!reservation.allowed) {
       return {
@@ -1460,6 +1587,7 @@ export class ModelEvaluationCapabilityCampaign {
     }
     const controller = new AbortController();
     const request: CapabilityProbeExecutionRequest = Object.freeze({
+      executionId: callId,
       campaignId: this.campaignId,
       probeKind: "canonical_task_shaped_capability",
       taskId: options.plan.taskId,
@@ -1478,6 +1606,7 @@ export class ModelEvaluationCapabilityCampaign {
       casePayload: evaluationCase.payload,
       signal: controller.signal,
     });
+    authorizeModelEvaluationExecutionRequest(request);
     type ProbeOutcome =
       | { kind: "completed"; value: ModelEvaluationCallResult<T> }
       | { kind: "failed"; error: unknown }
@@ -1763,14 +1892,21 @@ function currentSourceBundle(
   }));
 }
 
+export function modelEvaluationSourceBundleMatches(
+  expected: readonly ModelEvaluationSourceFileFingerprint[],
+  observed: readonly ModelEvaluationSourceFileFingerprint[],
+): boolean {
+  return JSON.stringify(observed) === JSON.stringify(expected);
+}
+
 function sourceBundleMatchesCase(
   suite: TaskEvaluationSuite,
   payload: ModelEvaluationCasePayload,
 ): boolean {
   try {
-    return (
-      JSON.stringify(currentSourceBundle(suite)) ===
-      JSON.stringify(payload.sourceFiles)
+    return modelEvaluationSourceBundleMatches(
+      payload.sourceFiles,
+      currentSourceBundle(suite),
     );
   } catch {
     return false;
@@ -2061,11 +2197,11 @@ function validEvaluationUsage(value: unknown): value is ModelEvaluationUsage {
   const usage = value as Record<string, unknown>;
   return (
     exactKeys(usage, ["inputTokens", "outputTokens", "callCount", "source"]) &&
-    Number.isInteger(usage.inputTokens) &&
+    Number.isSafeInteger(usage.inputTokens) &&
     (usage.inputTokens as number) >= 0 &&
-    Number.isInteger(usage.outputTokens) &&
+    Number.isSafeInteger(usage.outputTokens) &&
     (usage.outputTokens as number) >= 0 &&
-    Number.isInteger(usage.callCount) &&
+    Number.isSafeInteger(usage.callCount) &&
     (usage.callCount as number) >= 1 &&
     (usage.source === "provider_reported" ||
       usage.source === "adapter_aggregated")
@@ -2157,6 +2293,12 @@ export async function runTaskEvaluationAttempt<T>(options: {
   ) => Promise<ModelEvaluationCallResult<T>>;
   now?: () => number;
 }): Promise<ModelEvaluationRun> {
+  if (!isTrustedModelEvaluationProtocolExecute(options.execute)) {
+    throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
   assertCandidateBelongsToPlan(options.plan, options.candidate);
   assertTrustedModelEvaluationBudget(options.campaignBudget);
   if (
@@ -2197,17 +2339,19 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `canonical campaign capability probe is required before matrix dispatch: ${options.candidate.alias}`,
     );
   }
+  bindTrustedModelEvaluationExecutor(options.campaignBudget, options.execute);
   const now = options.now ?? (() => performance.now());
   const startedAt = readMonotonicNow(now);
   if (startedAt === null) {
     throw new Error("model evaluation monotonic clock is invalid");
   }
+  const campaignId = trustedModelEvaluationCampaignId(options.campaignBudget);
   const identity = runIdentity(
     options.plan,
     options.candidate,
     evaluationCase.contract,
     options.attempt,
-    trustedModelEvaluationCampaignId(options.campaignBudget),
+    campaignId,
     capabilityProbeAttestation,
   );
   const bindRun = (run: ModelEvaluationRun): ModelEvaluationRun =>
@@ -2218,10 +2362,14 @@ export async function runTaskEvaluationAttempt<T>(options: {
     evaluationCase.contract.fixtureId,
     options.attempt,
   ].join(":");
+  const executionId = ["model-evaluation-attempt", campaignId, callId].join(
+    ":",
+  );
   const reservation = reserveTrustedModelEvaluationBudget(
     options.campaignBudget,
     callId,
     options.plan.envelope.perCallCostCapCents,
+    maximumExecutionCallCount(options.plan.evaluationSuite.repairTaskOutput),
   );
   if (!reservation.allowed) {
     return bindRun({
@@ -2245,7 +2393,8 @@ export async function runTaskEvaluationAttempt<T>(options: {
   }
 
   const controller = new AbortController();
-  const request: ModelEvaluationExecutionRequest = {
+  const request: ModelEvaluationExecutionRequest = Object.freeze({
+    executionId,
     taskId: options.plan.taskId,
     profile: options.plan.profile,
     alias: options.candidate.alias,
@@ -2262,7 +2411,8 @@ export async function runTaskEvaluationAttempt<T>(options: {
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
     signal: controller.signal,
-  };
+  });
+  authorizeModelEvaluationExecutionRequest(request);
 
   type ExecutionOutcome =
     | { kind: "completed"; value: ModelEvaluationCallResult<T> }
@@ -2985,6 +3135,7 @@ export function summarizeModelEvaluationCandidate(
       ? totalSettledCost / acceptedRuns.length
       : null;
   const hardFailureClasses = new Set<ModelEvaluationResultClass>([
+    "content_invalid",
     "protocol_or_identity_invalid",
     "provenance_invalid",
     "capability_unavailable",

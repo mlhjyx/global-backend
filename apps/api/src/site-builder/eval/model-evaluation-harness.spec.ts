@@ -1,7 +1,14 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { trustedExecutorIdentity } = vi.hoisted(() => ({
+  trustedExecutorIdentity: Object.freeze({}),
+}));
+
+vi.mock("./model-evaluation-executor", () => ({
+  isTrustedModelEvaluationProtocolExecute: () => true,
+  modelEvaluationProtocolExecutorIdentity: () => trustedExecutorIdentity,
+}));
+
 import {
   ModelEvaluationBudgetGuard,
   ModelEvaluationCallError,
@@ -62,7 +69,7 @@ function completedCall<T>(
     costSettlement: {
       state: "settled",
       amountCents: costCents,
-      basis: "provider_reported",
+      basis: "provider_reported@fake-settlement/v1",
     },
   };
 }
@@ -433,7 +440,7 @@ describe("absolute budget guard", () => {
     guard.settle("call-1", {
       state: "settled",
       amountCents: 7,
-      basis: "provider_reported",
+      basis: "provider_reported@fake-settlement/v1",
     });
     expect(guard.snapshot()).toMatchObject({
       campaignBudgetCents: 50,
@@ -442,6 +449,49 @@ describe("absolute budget guard", () => {
       unknownUpperBoundCents: 0,
       remainingDispatchableCents: 43,
       blocked: false,
+    });
+  });
+
+  it("reserves a bounded repair call up front without relaxing the attempt cap", () => {
+    const guard = new ModelEvaluationBudgetGuard(100);
+    expect(guard.reserve("repairable-call", 20, 2)).toEqual({
+      allowed: true,
+      reservation: { callId: "repairable-call", reservedCents: 40 },
+    });
+    expect(guard.snapshot()).toMatchObject({
+      reservedCents: 40,
+      remainingDispatchableCents: 60,
+    });
+    expect(
+      guard.settle("repairable-call", {
+        state: "settled",
+        amountCents: 19,
+        basis: "provider_reported@fake-settlement/v1",
+      }),
+    ).toMatchObject({
+      capExceeded: false,
+      settlementInvalid: false,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 19,
+      reservedCents: 0,
+      blocked: false,
+    });
+
+    expect(guard.reserve("single-call", 20, 2).allowed).toBe(true);
+    expect(
+      guard.settle("single-call", {
+        state: "settled",
+        amountCents: 21,
+        basis: "provider_reported@fake-settlement/v1",
+      }),
+    ).toMatchObject({
+      capExceeded: true,
+      settlementInvalid: false,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      blocked: true,
+      blockReason: "per_call_cap_exceeded",
     });
   });
 
@@ -479,7 +529,7 @@ describe("absolute budget guard", () => {
     guard.settle("call-1", {
       state: "settled",
       amountCents: 21,
-      basis: "provider_reported",
+      basis: "provider_reported@fake-settlement/v1",
     });
     expect(guard.snapshot()).toMatchObject({
       committedCents: 21,
@@ -515,6 +565,31 @@ describe("absolute budget guard", () => {
     });
   });
 
+  it("rejects settled cost without an audited resolver identity", () => {
+    const guard = new ModelEvaluationBudgetGuard(50);
+    expect(guard.reserve("call-1", 20).allowed).toBe(true);
+    expect(
+      guard.settle("call-1", {
+        state: "settled",
+        amountCents: 7,
+        basis: "provider_reported",
+      }),
+    ).toEqual({
+      settlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+      capExceeded: false,
+      settlementInvalid: true,
+    });
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
+      unknownUpperBoundCents: 20,
+      blocked: true,
+      blockReason: "unknown_settlement",
+    });
+  });
+
   it("rejects duck and Proxy budgets before campaign or matrix dispatch", async () => {
     const duckBudget = {
       reserve: () => ({
@@ -525,7 +600,7 @@ describe("absolute budget guard", () => {
         settlement: {
           state: "settled",
           amountCents: 0,
-          basis: "provider_reported",
+          basis: "provider_reported@fake-settlement/v1",
         },
         capExceeded: false,
         settlementInvalid: false,
@@ -821,7 +896,7 @@ describe("task attempt observation window", () => {
       expect(guard.snapshot()).toMatchObject({
         committedCents: 0,
         reservedCents: 0,
-        unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+        unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
         blocked: true,
         blockReason: "unknown_settlement",
       });
@@ -852,7 +927,7 @@ describe("task attempt observation window", () => {
     expect(guard.snapshot()).toMatchObject({
       committedCents: 0,
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -925,6 +1000,41 @@ describe("task attempt observation window", () => {
     expect(probeExecute).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses a canonical probe attestation without dispatch or budget mutation", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    const execute = vi.fn(async () =>
+      completedCall(
+        candidate.alias,
+        candidate.expectedProtocol,
+        canonicalAcceptedArtifact(),
+      ),
+    );
+
+    const first = await campaign.runCanonicalProbe({
+      plan,
+      candidate,
+      execute,
+    });
+    const attestation = campaign.attestationFor(plan, candidate, guard);
+    const budgetAfterFirst = guard.snapshot();
+    const duplicate = await campaign.runCanonicalProbe({
+      plan,
+      candidate,
+      execute,
+    });
+
+    expect(first).toMatchObject({ status: "capability_proven" });
+    expect(duplicate).toEqual(first);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(campaign.attestationFor(plan, candidate, guard)).toBe(attestation);
+    expect(guard.snapshot()).toEqual(budgetAfterFirst);
+  });
+
   it("dispatches the exact frozen fixture, task input, prompt, and source bundle bound by the case contract", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
@@ -967,43 +1077,6 @@ describe("task attempt observation window", () => {
       artifactAccepted: true,
     });
     expect(execute).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects an otherwise valid completion when a bound source changes in flight", async () => {
-    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-    const candidate = plan.candidates[0];
-    const sourcePath = resolve(
-      process.cwd(),
-      "src/site-builder/claim-fact-key.ts",
-    );
-    const original = readFileSync(sourcePath);
-    try {
-      const result = await runTaskEvaluationAttempt({
-        plan,
-        candidate,
-        fixtureId: "auto-parts-rich",
-        attempt: 1,
-        campaignBudget: new ModelEvaluationBudgetGuard(100),
-        execute: async () => {
-          writeFileSync(
-            sourcePath,
-            Buffer.concat([original, Buffer.from("\n")]),
-          );
-          return completedCall(
-            candidate.alias,
-            candidate.expectedProtocol,
-            canonicalAcceptedArtifact(),
-          );
-        },
-      });
-      expect(result).toMatchObject({
-        resultClass: "provenance_invalid",
-        artifactAccepted: false,
-        failureCode: "source_bundle_changed_during_dispatch",
-      });
-    } finally {
-      writeFileSync(sourcePath, original);
-    }
   });
 
   it("keeps waiting after the production runtime deadline and classifies a valid late result", async () => {
@@ -1165,7 +1238,7 @@ describe("task attempt observation window", () => {
       costSettlement: {
         state: "settled",
         amountCents: 1,
-        basis: "provider_reported",
+        basis: "provider_reported@fake-settlement/v1",
       },
     });
   });
@@ -1232,7 +1305,7 @@ describe("task attempt observation window", () => {
       settlementInvalid: true,
     });
     expect(guard.snapshot()).toMatchObject({
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1263,7 +1336,7 @@ describe("task attempt observation window", () => {
     });
     expect(guard.snapshot()).toMatchObject({
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
     });
   });
@@ -1292,7 +1365,7 @@ describe("task attempt observation window", () => {
     });
     expect(guard.snapshot()).toMatchObject({
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1332,7 +1405,7 @@ describe("task attempt observation window", () => {
       settlementInvalid: true,
     });
     expect(guard.snapshot()).toMatchObject({
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1373,7 +1446,7 @@ describe("task attempt observation window", () => {
     expect(guard.snapshot()).toMatchObject({
       committedCents: 0,
       reservedCents: 0,
-      unknownUpperBoundCents: plan.envelope.perCallCostCapCents,
+      unknownUpperBoundCents: plan.envelope.perCallCostCapCents * 2,
       blocked: true,
       blockReason: "unknown_settlement",
     });
@@ -1401,7 +1474,7 @@ describe("task attempt observation window", () => {
       costSettlement: {
         state: "settled",
         amountCents: 1,
-        basis: "provider_reported",
+        basis: "provider_reported@fake-settlement/v1",
       },
     });
     expect(guard.snapshot()).toMatchObject({
@@ -1856,6 +1929,24 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
+  it("treats every content-invalid run as a hard ranking failure", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt, index) =>
+        index === 11
+          ? await contentInvalidRun("gpt-5.5", fixtureId, attempt)
+          : await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    const summary = summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs);
+
+    expect(summary).toMatchObject({
+      matrixComplete: true,
+      acceptedArtifactCount: 11,
+      hardFailureCount: 1,
+      rankable: false,
+    });
+  });
+
   it("accepts the producer's invalid-settlement flag and keeps the matrix unrankable", async () => {
     const candidate = plan.candidates.find(
       (entry) => entry.alias === "gpt-5.5",
@@ -2019,7 +2110,7 @@ describe("quality-first candidate summary and ranking", () => {
       (entry) => entry.alias === "gpt-5.6-terra",
     )!;
     const budget = new ModelEvaluationBudgetGuard(
-      plan.envelope.perCallCostCapCents,
+      plan.envelope.perCallCostCapCents * 2,
     );
     const runs = await fullMatrix(
       candidate.alias,
