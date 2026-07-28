@@ -37,6 +37,8 @@ import {
 
 export const MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION =
   "site-builder-model-evaluation-protocol-admission/v1" as const;
+export const MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES =
+  2_097_152 as const;
 
 export type ModelEvaluationProtocolAdmission =
   | "target_text_dispatch"
@@ -244,6 +246,49 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
   }
   const bearerToken = credential.bearerToken;
   const capturedFetch = fetchImpl.bind(globalThis);
+  const readBoundedJsonBody = async (response: Response): Promise<unknown> => {
+    const declaredLength = response.headers.get("content-length");
+    if (
+      declaredLength !== null &&
+      Number.isSafeInteger(Number(declaredLength)) &&
+      Number(declaredLength) >
+        MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES
+    ) {
+      await response.body?.cancel();
+      throw new Error("evaluation transport response body exceeds byte limit");
+    }
+    if (!response.body) {
+      throw new Error("evaluation transport response body is missing");
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        totalBytes += result.value.byteLength;
+        if (totalBytes > MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES) {
+          await reader.cancel();
+          throw new Error(
+            "evaluation transport response body exceeds byte limit",
+          );
+        }
+        chunks.push(result.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bodyBytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bodyBytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bodyBytes),
+    );
+  };
   const dispatch = async (
     path: string,
     executionId: string,
@@ -263,15 +308,13 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
     if (!response.ok) {
       throw new Error(`evaluation transport HTTP ${response.status}`);
     }
-    const providerCostHeader = response.headers.get(
-      "x-provider-cost-cents",
-    );
+    const providerCostHeader = response.headers.get("x-provider-cost-cents");
     const providerReportedCostCents =
       providerCostHeader !== null && providerCostHeader.trim() !== ""
         ? Number(providerCostHeader)
         : undefined;
     return {
-      body: await response.json(),
+      body: await readBoundedJsonBody(response),
       ...(providerReportedCostCents !== undefined &&
       Number.isFinite(providerReportedCostCents) &&
       providerReportedCostCents >= 0
@@ -409,116 +452,120 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       .update(options.directory)
       .digest("hex"),
     claim: (input) => {
-        if (states.has(input.authorizationId)) return false;
-        mkdirSync(options.directory, { recursive: true, mode: 0o700 });
-        const filePath = join(
-          options.directory,
-          `${createHash("sha256")
-            .update(input.authorizationId)
-            .digest("hex")}.jsonl`,
+      if (states.has(input.authorizationId)) return false;
+      mkdirSync(options.directory, { recursive: true, mode: 0o700 });
+      const filePath = join(
+        options.directory,
+        `${createHash("sha256")
+          .update(input.authorizationId)
+          .digest("hex")}.jsonl`,
+      );
+      let descriptor;
+      try {
+        descriptor = openSync(filePath, "wx", 0o600);
+      } catch (error) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "EEXIST"
+        ) {
+          return false;
+        }
+        throw error;
+      }
+      try {
+        writeFileSync(
+          descriptor,
+          `${JSON.stringify({
+            event: "authorization_claimed",
+            ...input,
+          })}\n`,
+          "utf8",
         );
-        let descriptor;
-        try {
-          descriptor = openSync(filePath, "wx", 0o600);
-        } catch (error) {
-          if (
-            typeof error === "object" &&
-            error !== null &&
-            "code" in error &&
-            error.code === "EEXIST"
-          ) {
-            return false;
-          }
-          throw error;
-        }
-        try {
-          writeFileSync(
-            descriptor,
-            `${JSON.stringify({
-              event: "authorization_claimed",
-              ...input,
-            })}\n`,
-            "utf8",
-          );
-          fsyncSync(descriptor);
-        } finally {
-          closeSync(descriptor);
-        }
-        states.set(input.authorizationId, {
-          claimId: input.executorClaimId,
-          filePath,
-          budgetCents: input.campaignBudgetCents,
-          maxExecutions: input.maxDispatchExecutions,
-          maxWireCalls: input.maxWireCalls,
-          executions: 0,
-          wireCalls: 0,
-          committedCents: 0,
-          reservedCents: 0,
-          frozen: false,
-          reservations: new Map(),
-        });
-        return true;
-      },
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      const directoryDescriptor = openSync(options.directory, "r");
+      try {
+        fsyncSync(directoryDescriptor);
+      } finally {
+        closeSync(directoryDescriptor);
+      }
+      states.set(input.authorizationId, {
+        claimId: input.executorClaimId,
+        filePath,
+        budgetCents: input.campaignBudgetCents,
+        maxExecutions: input.maxDispatchExecutions,
+        maxWireCalls: input.maxWireCalls,
+        executions: 0,
+        wireCalls: 0,
+        committedCents: 0,
+        reservedCents: 0,
+        frozen: false,
+        reservations: new Map(),
+      });
+      return true;
+    },
     reserve: (input) => {
-        const state = states.get(input.authorizationId);
-        if (
-          !state ||
-          state.claimId !== input.executorClaimId ||
-          state.frozen ||
-          state.reservations.has(input.executionId) ||
-          state.executions + 1 > state.maxExecutions ||
-          state.wireCalls + input.wireCalls > state.maxWireCalls ||
-          state.committedCents +
-            state.reservedCents +
-            input.upperBoundCents >
-            state.budgetCents
-        ) {
-          return false;
-        }
-        appendDurably(state.filePath, {
-          event: "dispatch_reserved",
-          ...input,
-        });
-        state.executions += 1;
-        state.wireCalls += input.wireCalls;
-        state.reservedCents += input.upperBoundCents;
-        state.reservations.set(input.executionId, input.upperBoundCents);
-        return true;
-      },
+      const state = states.get(input.authorizationId);
+      if (
+        !state ||
+        state.claimId !== input.executorClaimId ||
+        state.frozen ||
+        state.reservations.has(input.executionId) ||
+        state.executions + 1 > state.maxExecutions ||
+        state.wireCalls + input.wireCalls > state.maxWireCalls ||
+        state.committedCents + state.reservedCents + input.upperBoundCents >
+          state.budgetCents
+      ) {
+        return false;
+      }
+      appendDurably(state.filePath, {
+        event: "dispatch_reserved",
+        ...input,
+      });
+      state.executions += 1;
+      state.wireCalls += input.wireCalls;
+      state.reservedCents += input.upperBoundCents;
+      state.reservations.set(input.executionId, input.upperBoundCents);
+      return true;
+    },
     settle: (input) => {
-        const state = states.get(input.authorizationId);
-        const reservation = state?.reservations.get(input.executionId);
-        if (
-          !state ||
-          state.claimId !== input.executorClaimId ||
-          reservation === undefined
-        ) {
-          return false;
-        }
-        appendDurably(state.filePath, {
-          event: "dispatch_settled",
-          ...input,
-        });
-        state.reservations.delete(input.executionId);
-        state.reservedCents -= reservation;
-        if (input.settlement.state === "settled") {
-          state.committedCents += input.settlement.amountCents;
-          if (state.committedCents > state.budgetCents) state.frozen = true;
-        } else if (input.settlement.state === "unknown") {
-          state.frozen = true;
-        }
-        return true;
-      },
-    freeze: (input) => {
-        const state = states.get(input.authorizationId);
-        if (!state || state.claimId !== input.executorClaimId) return false;
-        appendDurably(state.filePath, {
-          event: "authorization_frozen",
-          ...input,
-        });
+      const state = states.get(input.authorizationId);
+      const reservation = state?.reservations.get(input.executionId);
+      if (
+        !state ||
+        state.claimId !== input.executorClaimId ||
+        reservation === undefined
+      ) {
+        return false;
+      }
+      appendDurably(state.filePath, {
+        event: "dispatch_settled",
+        ...input,
+      });
+      state.reservations.delete(input.executionId);
+      state.reservedCents -= reservation;
+      if (input.settlement.state === "settled") {
+        state.committedCents += input.settlement.amountCents;
+        if (state.committedCents > state.budgetCents) state.frozen = true;
+      } else if (input.settlement.state === "unknown") {
         state.frozen = true;
-        return true;
-      },
+      }
+      return true;
+    },
+    freeze: (input) => {
+      const state = states.get(input.authorizationId);
+      if (!state || state.claimId !== input.executorClaimId) return false;
+      appendDurably(state.filePath, {
+        event: "authorization_frozen",
+        ...input,
+      });
+      state.frozen = true;
+      return true;
+    },
   };
   const trusted = Object.freeze(ledger);
   TRUSTED_MODEL_EVALUATION_AUTHORIZATION_LEDGERS.add(trusted);
@@ -1275,8 +1322,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   let campaignFrozen = false;
   const executorClaimId = randomUUID();
   let durableClaim:
-    | Promise<Readonly<{ claimed: boolean; error: unknown | null }>>
-    | undefined;
+    Promise<Readonly<{ claimed: boolean; error: unknown | null }>> | undefined;
   const claimDurableAuthorization = () => {
     durableClaim ??= Promise.resolve()
       .then(() =>
@@ -1460,8 +1506,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
             state: "not_incurred",
             reason: "rejected_before_dispatch",
           } as const;
-          const effectiveSettlement =
-            await closeCampaignReservation(rejected);
+          const effectiveSettlement = await closeCampaignReservation(rejected);
           throw new ModelEvaluationCallError(
             "evaluation_cost_safety_rejected",
             effectiveSettlement,
@@ -1484,8 +1529,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        const effectiveSettlement =
-          await closeCampaignReservation(settlement);
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           "evaluation_cost_safety_rejected",
           effectiveSettlement,
@@ -1497,8 +1541,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
             state: "not_incurred",
             reason: "rejected_before_dispatch",
           } as const;
-          const effectiveSettlement =
-            await closeCampaignReservation(rejected);
+          const effectiveSettlement = await closeCampaignReservation(rejected);
           throw new ModelEvaluationCallError(
             request.signal.aborted
               ? "evaluation_aborted"
@@ -1528,8 +1571,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        const effectiveSettlement =
-          await closeCampaignReservation(settlement);
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         campaignFrozen = true;
         throw new ModelEvaluationCallError(
           request.signal.aborted
@@ -1614,8 +1656,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        const effectiveSettlement =
-          await closeCampaignReservation(settlement);
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           request.signal.aborted ? "evaluation_aborted" : "provider_error",
           effectiveSettlement,
@@ -1661,8 +1702,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        const effectiveSettlement =
-          await closeCampaignReservation(settlement);
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         throw new ModelEvaluationCallError(
           "provider_response_invalid",
           effectiveSettlement,
@@ -1692,8 +1732,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           },
           costSafety,
         );
-        const effectiveSettlement =
-          await closeCampaignReservation(settlement);
+        const effectiveSettlement = await closeCampaignReservation(settlement);
         campaignFrozen = true;
         throw new ModelEvaluationCallError(
           "evaluation_output_token_limit_exceeded",

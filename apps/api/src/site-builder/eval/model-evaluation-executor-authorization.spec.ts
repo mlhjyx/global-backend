@@ -17,6 +17,7 @@ import {
   createCredentialBoundModelEvaluationWireClient,
   createFileBackedModelEvaluationAuthorizationLedger,
   createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
+  MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES,
   type ModelEvaluationWireClient,
 } from "./model-evaluation-executor";
 import {
@@ -147,9 +148,48 @@ describe("model evaluation executor authorization", () => {
       signal: new AbortController().signal,
     });
 
-    expect(observedAuthorization).toEqual([
-      "Bearer limited-evaluation-secret",
-    ]);
+    expect(observedAuthorization).toEqual(["Bearer limited-evaluation-secret"]);
+  });
+
+  it("rejects an oversized chunked response before JSON parsing", async () => {
+    const oversizedChunk = new Uint8Array(
+      MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES + 1,
+    );
+    const fakeFetch = vi.fn(async () => {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(oversizedChunk);
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      );
+    });
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: "fake-evaluation-credential/response-boundary",
+        snapshotSha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bearerToken: "limited-evaluation-secret",
+      },
+      baseUrl: "https://fake-model-evaluation.invalid/v1",
+      fetch: fakeFetch as typeof fetch,
+    });
+
+    await expect(
+      wireClient.openAIResponses({
+        executionId: "response-boundary:1",
+        body: {
+          model: "gpt-5.6-terra",
+          input: [{ role: "user", content: "probe" }],
+          max_output_tokens: 1,
+          temperature: 0,
+          text: { format: { type: "json_object" } },
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("evaluation transport response body exceeds byte limit");
   });
 
   it("requires the immutable wire credential identity to match the attestation", () => {
