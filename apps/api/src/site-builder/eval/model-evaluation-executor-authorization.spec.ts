@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import {
+  link,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rename,
   rm,
@@ -19,6 +21,7 @@ import {
   ModelEvaluationCallError,
   buildCanonicalModelEvaluationCase,
   buildTaskEvaluationPlan,
+  runLegacyComparatorEvaluationAttempt,
   runTaskEvaluationAttempt,
   type ModelEvaluationExecutionRequest,
 } from "./model-evaluation-harness";
@@ -735,6 +738,104 @@ describe("model evaluation executor authorization", () => {
     }
   });
 
+  it("recovers a complete claim lock whose process identity no longer exists", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-stale-claim-lock-spec-"),
+    );
+    const ledger = createFileBackedModelEvaluationAuthorizationLedger({
+      ledgerId: "stale-claim-lock-spec-ledger/durable-v1",
+      directory,
+    });
+    const lockPath = join(
+      directory,
+      ".site-builder-model-evaluation-claim.lock",
+    );
+    const claim = {
+      authorizationId: "stale-claim-lock-spec/authorization-v1",
+      executorClaimId: "stale-claim-lock-spec/executor-v1",
+      campaignBudgetCents: 100,
+      maxDispatchExecutions: 1,
+      maxWireCalls: 1,
+    };
+    try {
+      const staleOwner = {
+        pid: 2_147_483_647,
+        bootId: (
+          await readFile("/proc/sys/kernel/random/boot_id", "utf8")
+        ).trim(),
+        processStartTimeTicks: "1",
+        nonce: "00000000-0000-4000-8000-000000000001",
+      };
+      const staleTemporaryPath = `${lockPath}.${staleOwner.pid}.${staleOwner.nonce}.tmp`;
+      await writeFile(staleTemporaryPath, `${JSON.stringify(staleOwner)}\n`, {
+        flag: "wx",
+        mode: 0o600,
+      });
+      await link(staleTemporaryPath, lockPath);
+
+      expect(ledger.claim(claim)).toBe(true);
+      const entries = await readdir(directory);
+      expect(entries).not.toContain(
+        ".site-builder-model-evaluation-claim.lock",
+      );
+      expect(entries).not.toContain(staleTemporaryPath.split("/").at(-1));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not recover a complete claim lock owned by the current process", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-live-claim-lock-spec-"),
+    );
+    const ledger = createFileBackedModelEvaluationAuthorizationLedger({
+      ledgerId: "live-claim-lock-spec-ledger/durable-v1",
+      directory,
+    });
+    const lockPath = join(
+      directory,
+      ".site-builder-model-evaluation-claim.lock",
+    );
+    const processStat = await readFile(`/proc/${process.pid}/stat`, "utf8");
+    const commandEnd = processStat.lastIndexOf(")");
+    const processStartTimeTicks = processStat
+      .slice(commandEnd + 2)
+      .trim()
+      .split(/\s+/)[19];
+    if (!processStartTimeTicks || !/^\d+$/.test(processStartTimeTicks)) {
+      throw new Error("test requires the current Linux process start time");
+    }
+    try {
+      await writeFile(
+        lockPath,
+        `${JSON.stringify({
+          pid: process.pid,
+          bootId: (
+            await readFile("/proc/sys/kernel/random/boot_id", "utf8")
+          ).trim(),
+          processStartTimeTicks,
+          nonce: "00000000-0000-4000-8000-000000000002",
+        })}\n`,
+        { flag: "wx", mode: 0o600 },
+      );
+
+      expect(() =>
+        ledger.claim({
+          authorizationId: "live-claim-lock-spec/authorization-v1",
+          executorClaimId: "live-claim-lock-spec/executor-v1",
+          campaignBudgetCents: 100,
+          maxDispatchExecutions: 1,
+          maxWireCalls: 1,
+        }),
+      ).toThrow("claim index is locked; retry without reissuing authorization");
+      expect(await readdir(directory)).toContain(
+        ".site-builder-model-evaluation-claim.lock",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a replaced or symlinked claim file before ledger append", async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "evaluation-ledger-file-identity-spec-"),
@@ -867,6 +968,63 @@ describe("model evaluation executor authorization", () => {
     });
     expect(targetWire).not.toHaveBeenCalled();
     expect(wireClient.openAIChatCompletions).not.toHaveBeenCalled();
+  });
+
+  it("authorizes a canonical legacy comparator through the harness runner", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const alias = modelPolicyRegistry.getLegacyTaskPolicy(plan.taskId).route
+      .primary;
+    const artifact = {
+      valueProps: [],
+      glossary: [],
+      keywords: [],
+      differentiators: [],
+      competitors: [],
+      gaps: [],
+      factSheet: [],
+    };
+    const chat = vi.fn(async () => ({
+      body: {
+        model: alias,
+        choices: [
+          {
+            finish_reason: "stop",
+            message: { content: JSON.stringify(artifact) },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      },
+      providerReportedCostCents: 1,
+    }));
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: {
+        openAIResponses: vi.fn(async () => {
+          throw new Error("unexpected Responses dispatch");
+        }),
+        anthropicMessages: vi.fn(async () => {
+          throw new Error("unexpected Messages dispatch");
+        }),
+        openAIChatCompletions: chat,
+      },
+      settlementResolver: fakeResolver(),
+    });
+
+    await expect(
+      runLegacyComparatorEvaluationAttempt({
+        plan,
+        alias,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        executeLegacyComparator: executor.executeLegacyComparator,
+      }),
+    ).resolves.toMatchObject({
+      actualProtocol: "openai-chat-completions",
+      requestedModel: alias,
+      reportedModel: alias,
+      costSettlement: { state: "settled", amountCents: 1 },
+    });
+    expect(chat).toHaveBeenCalledTimes(1);
   });
 
   it("binds one budget campaign to one branded executor identity", async () => {

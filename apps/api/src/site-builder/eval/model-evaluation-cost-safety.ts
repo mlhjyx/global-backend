@@ -92,13 +92,29 @@ const TRUSTED_COST_SAFETY_ATTESTATIONS = new WeakSet<object>();
 const COST_SAFETY_WEAK_SET_ADD = WeakSet.prototype.add;
 const COST_SAFETY_WEAK_SET_HAS = WeakSet.prototype.has;
 const APPLY_COST_SAFETY_INTRINSIC = Reflect.apply;
+const COST_SAFETY_OBJECT_FREEZE = Object.freeze;
+const COST_SAFETY_OBJECT_IS_FROZEN = Object.isFrozen;
+const COST_SAFETY_OBJECT_VALUES = Object.values;
 
 function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child);
+  if (
+    value &&
+    typeof value === "object" &&
+    !COST_SAFETY_OBJECT_IS_FROZEN(value)
+  ) {
+    COST_SAFETY_OBJECT_FREEZE(value);
+    for (const child of COST_SAFETY_OBJECT_VALUES(value)) deepFreeze(child);
   }
   return value;
+}
+
+function isDeeplyFrozen(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (!value || typeof value !== "object" || seen.has(value)) return true;
+  if (!COST_SAFETY_OBJECT_IS_FROZEN(value)) return false;
+  seen.add(value);
+  return COST_SAFETY_OBJECT_VALUES(value).every((child) =>
+    isDeeplyFrozen(child, seen),
+  );
 }
 
 function positiveFinite(value: unknown): value is number {
@@ -346,6 +362,9 @@ export function createModelEvaluationCostSafetyAttestation(
   }
 
   const attestation = deepFreeze(copy);
+  if (!isDeeplyFrozen(attestation)) {
+    throw new Error("cost safety attestation could not be deeply frozen");
+  }
   APPLY_COST_SAFETY_INTRINSIC(
     COST_SAFETY_WEAK_SET_ADD,
     TRUSTED_COST_SAFETY_ATTESTATIONS,

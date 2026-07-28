@@ -750,6 +750,9 @@ function bindTrustedModelEvaluationExecutor(
       : plan.candidates.length *
           plan.evaluationSuite.fixtureIds.length *
           plan.evaluationSuite.repeats +
+        [legacyRoute.primary, ...legacyRoute.fallbacks].length *
+          plan.evaluationSuite.fixtureIds.length *
+          plan.evaluationSuite.repeats +
         plan.candidates.filter(
           (candidate) => candidate.preflight === "capability_probe",
         ).length;
@@ -2405,6 +2408,188 @@ function gradeCanonicalTaskArtifact(
     stabilityKey: sha256CanonicalJson(artifact),
     findingCodes,
   };
+}
+
+export async function runLegacyComparatorEvaluationAttempt<T>(options: {
+  plan: TaskEvaluationPlan;
+  alias: string;
+  fixtureId: string;
+  attempt: number;
+  campaignBudget: ModelEvaluationBudgetGuard;
+  executeLegacyComparator: (
+    request: ModelEvaluationExecutionRequest,
+  ) => Promise<ModelEvaluationCallResult<T>>;
+}): Promise<ModelEvaluationCallResult<T>> {
+  if (
+    !isTrustedModelEvaluationProtocolExecute(options.executeLegacyComparator)
+  ) {
+    throw new ModelEvaluationCallError("untrusted_evaluation_executor", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  const firstCandidate = options.plan.candidates[0];
+  if (!firstCandidate) {
+    throw new Error(
+      `task evaluation has no canonical candidate plan: ${options.plan.taskId}`,
+    );
+  }
+  assertCandidateBelongsToPlan(options.plan, firstCandidate);
+  assertTrustedModelEvaluationBudget(options.campaignBudget);
+  if (
+    options.plan.dispatchAdmission !== "task_evaluation_ready" ||
+    !options.plan.evaluationSuite
+  ) {
+    throw new Error(
+      `legacy comparator has no canonical suite: ${options.plan.taskId}`,
+    );
+  }
+  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+    options.plan.taskId,
+  ).route;
+  if (
+    ![legacyRoute.primary, ...legacyRoute.fallbacks].includes(options.alias)
+  ) {
+    throw new ModelEvaluationCallError("legacy_comparator_not_admitted", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+  if (
+    !Number.isInteger(options.attempt) ||
+    options.attempt < 1 ||
+    options.attempt > options.plan.evaluationSuite.repeats
+  ) {
+    throw new Error(
+      `legacy comparator attempt must be within 1..${options.plan.evaluationSuite.repeats}`,
+    );
+  }
+  const evaluationCase = buildCanonicalModelEvaluationCase(
+    options.plan,
+    options.fixtureId,
+  );
+  bindTrustedModelEvaluationExecutor(
+    options.campaignBudget,
+    options.executeLegacyComparator,
+    options.plan,
+  );
+  const campaignId = trustedModelEvaluationCampaignId(options.campaignBudget);
+  const callId = [
+    "legacy-comparator",
+    options.plan.taskId,
+    options.alias,
+    evaluationCase.contract.fixtureId,
+    options.attempt,
+  ].join(":");
+  const executionId = ["model-evaluation-attempt", campaignId, callId].join(
+    ":",
+  );
+  const reservation = reserveTrustedModelEvaluationBudget(
+    options.campaignBudget,
+    callId,
+    options.plan.envelope.perCallCostCapCents,
+    maximumExecutionCallCount(options.plan.evaluationSuite.repairTaskOutput),
+  );
+  if (!reservation.allowed) {
+    throw new ModelEvaluationCallError(reservation.reason, {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
+
+  const controller = new AbortController();
+  const request: ModelEvaluationExecutionRequest = Object.freeze({
+    executionId,
+    taskId: options.plan.taskId,
+    profile: options.plan.profile,
+    alias: options.alias,
+    expectedProtocol: "openai-chat-completions",
+    fixtureId: evaluationCase.contract.fixtureId,
+    attempt: options.attempt,
+    maxTokens: options.plan.envelope.maxTokens,
+    runtimeDeadlineMs: options.plan.envelope.runtimeDeadlineMs,
+    hardStopMs: options.plan.envelope.hardStopMs,
+    perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
+    reasoningEffort: options.plan.envelope.reasoningEffort,
+    outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+    repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
+    caseContract: evaluationCase.contract,
+    casePayload: evaluationCase.payload,
+    signal: controller.signal,
+  });
+  authorizeModelEvaluationExecutionRequest(request);
+  const trustedStartedAt = readMonotonicNow(TRUSTED_MONOTONIC_NOW);
+  if (trustedStartedAt === null) {
+    settleTrustedModelEvaluationBudget(options.campaignBudget, callId, null);
+    throw new ModelEvaluationCallError("model_evaluation_clock_invalid", {
+      state: "unknown",
+      reason: "invalid_settlement",
+    });
+  }
+  type ComparatorOutcome =
+    | { kind: "completed"; value: ModelEvaluationCallResult<T> }
+    | { kind: "failed"; error: unknown }
+    | { kind: "hard_stop" };
+  let timer: NodeJS.Timeout | undefined;
+  const execution = Promise.resolve()
+    .then(() => options.executeLegacyComparator(request))
+    .then<ComparatorOutcome, ComparatorOutcome>(
+      (value) => ({ kind: "completed", value }),
+      (error: unknown) => ({ kind: "failed", error }),
+    );
+  const hardStop = new Promise<ComparatorOutcome>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ kind: "hard_stop" }),
+      options.plan.envelope.hardStopMs,
+    );
+  });
+  let outcome = await Promise.race([execution, hardStop]);
+  if (timer) clearTimeout(timer);
+  const trustedElapsedMs = readMonotonicElapsed(
+    TRUSTED_MONOTONIC_NOW,
+    trustedStartedAt,
+  );
+  if (
+    outcome.kind !== "hard_stop" &&
+    (trustedElapsedMs === null ||
+      trustedElapsedMs >= options.plan.envelope.hardStopMs)
+  ) {
+    outcome = { kind: "hard_stop" };
+  }
+  if (outcome.kind === "hard_stop") {
+    controller.abort(
+      new Error("legacy comparator diagnostic window exhausted"),
+    );
+    await freezeModelEvaluationProtocolExecutor(
+      options.executeLegacyComparator,
+    );
+    settleTrustedModelEvaluationBudget(options.campaignBudget, callId, {
+      state: "unknown",
+      reason: "diagnostic_hard_stop",
+    });
+    throw new ModelEvaluationCallError("diagnostic_window_exhausted", {
+      state: "unknown",
+      reason: "diagnostic_hard_stop",
+    });
+  }
+  if (outcome.kind === "failed") {
+    const settlement =
+      outcome.error instanceof ModelEvaluationCallError
+        ? outcome.error.costSettlement
+        : ({ state: "unknown", reason: "invalid_settlement" } as const);
+    settleTrustedModelEvaluationBudget(
+      options.campaignBudget,
+      callId,
+      settlement,
+    );
+    throw outcome.error;
+  }
+  settleTrustedModelEvaluationBudget(
+    options.campaignBudget,
+    callId,
+    outcome.value.costSettlement,
+  );
+  return outcome.value;
 }
 
 export async function runTaskEvaluationAttempt<T>(options: {

@@ -4,6 +4,7 @@ import {
   constants as fsConstants,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -574,6 +575,64 @@ export function modelEvaluationLedgerDirectorySha256(
   return resolveLedgerDirectoryIdentity(directory).sha256;
 }
 
+interface ModelEvaluationClaimLockOwner {
+  pid: number;
+  bootId: string;
+  processStartTimeTicks: string;
+  nonce: string;
+}
+
+function linuxBootId(): string {
+  const value = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  if (!/^[a-f0-9-]{36}$/.test(value)) {
+    throw new Error("evaluation authorization claim lock boot id is invalid");
+  }
+  return value;
+}
+
+function linuxProcessStartTimeTicks(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(")");
+    if (commandEnd < 0) return null;
+    const fields = stat
+      .slice(commandEnd + 2)
+      .trim()
+      .split(/\s+/);
+    const startTimeTicks = fields[19];
+    return startTimeTicks && /^\d+$/.test(startTimeTicks)
+      ? startTimeTicks
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseClaimLockOwner(
+  value: string,
+): ModelEvaluationClaimLockOwner | null {
+  try {
+    const owner = JSON.parse(value) as Record<string, unknown>;
+    if (
+      Object.keys(owner).sort().join(",") !==
+        "bootId,nonce,pid,processStartTimeTicks" ||
+      !Number.isSafeInteger(owner.pid) ||
+      (owner.pid as number) <= 0 ||
+      typeof owner.bootId !== "string" ||
+      !/^[a-f0-9-]{36}$/.test(owner.bootId) ||
+      typeof owner.processStartTimeTicks !== "string" ||
+      !/^\d+$/.test(owner.processStartTimeTicks) ||
+      typeof owner.nonce !== "string" ||
+      !/^[a-f0-9-]{36}$/.test(owner.nonce)
+    ) {
+      return null;
+    }
+    return owner as unknown as ModelEvaluationClaimLockOwner;
+  } catch {
+    return null;
+  }
+}
+
 export function createFileBackedModelEvaluationAuthorizationLedger(options: {
   ledgerId: string;
   directory: string;
@@ -630,6 +689,181 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
         throw new Error("durable evaluation ledger write was incomplete");
       }
       offset += written;
+    }
+  };
+  const fsyncLedgerDirectory = (): void => {
+    const directoryDescriptor = openSync(directoryIdentity.directory, "r");
+    try {
+      fsyncSync(directoryDescriptor);
+    } finally {
+      closeSync(directoryDescriptor);
+    }
+  };
+  const claimLockContention = (cause?: unknown): Error =>
+    new Error(
+      "evaluation authorization claim index is locked; retry without reissuing authorization",
+      cause === undefined ? undefined : { cause },
+    );
+  const acquireAuthorizationClaimLock = (
+    lockPath: string,
+  ): { descriptor: number; stats: BigIntStats } => {
+    const bootId = linuxBootId();
+    const processStartTimeTicks = linuxProcessStartTimeTicks(process.pid);
+    if (processStartTimeTicks === null) {
+      throw new Error(
+        "evaluation authorization claim lock process identity is unavailable",
+      );
+    }
+    const owner: ModelEvaluationClaimLockOwner = {
+      pid: process.pid,
+      bootId,
+      processStartTimeTicks,
+      nonce: randomUUID(),
+    };
+    const temporaryPath = `${lockPath}.${owner.pid}.${owner.nonce}.tmp`;
+    const descriptor = openSync(temporaryPath, "wx+", 0o600);
+    const descriptorStats = fstatSync(descriptor, { bigint: true });
+    let linked = false;
+    try {
+      writeAllSync(descriptor, `${JSON.stringify(owner)}\n`);
+      fsyncSync(descriptor);
+      const acquire = (): void => {
+        try {
+          linkSync(temporaryPath, lockPath);
+          linked = true;
+          return;
+        } catch (error) {
+          if (
+            typeof error !== "object" ||
+            error === null ||
+            !("code" in error) ||
+            error.code !== "EEXIST"
+          ) {
+            throw error;
+          }
+        }
+
+        const existingDescriptor = openSync(
+          lockPath,
+          fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+        );
+        let existingStats: BigIntStats;
+        let existingOwner: ModelEvaluationClaimLockOwner | null;
+        try {
+          existingStats = fstatSync(existingDescriptor, { bigint: true });
+          existingOwner = parseClaimLockOwner(
+            readFileSync(existingDescriptor, "utf8").trim(),
+          );
+        } finally {
+          closeSync(existingDescriptor);
+        }
+        if (
+          !existingStats.isFile() ||
+          existingStats.isSymbolicLink() ||
+          existingStats.nlink < 1n ||
+          existingOwner === null
+        ) {
+          throw claimLockContention();
+        }
+        const existingProcessStartTimeTicks =
+          existingOwner.bootId === bootId
+            ? linuxProcessStartTimeTicks(existingOwner.pid)
+            : null;
+        if (
+          existingOwner.bootId === bootId &&
+          existingProcessStartTimeTicks === existingOwner.processStartTimeTicks
+        ) {
+          throw claimLockContention();
+        }
+        const currentStats = lstatSync(lockPath, { bigint: true });
+        if (
+          !currentStats.isFile() ||
+          currentStats.isSymbolicLink() ||
+          currentStats.dev !== existingStats.dev ||
+          currentStats.ino !== existingStats.ino
+        ) {
+          throw claimLockContention();
+        }
+        unlinkSync(lockPath);
+        const staleTemporaryPath = `${lockPath}.${existingOwner.pid}.${existingOwner.nonce}.tmp`;
+        try {
+          const staleTemporaryStats = lstatSync(staleTemporaryPath, {
+            bigint: true,
+          });
+          if (
+            staleTemporaryStats.isFile() &&
+            !staleTemporaryStats.isSymbolicLink() &&
+            staleTemporaryStats.dev === existingStats.dev &&
+            staleTemporaryStats.ino === existingStats.ino
+          ) {
+            unlinkSync(staleTemporaryPath);
+          }
+        } catch (error) {
+          if (
+            typeof error !== "object" ||
+            error === null ||
+            !("code" in error) ||
+            error.code !== "ENOENT"
+          ) {
+            throw error;
+          }
+        }
+        fsyncLedgerDirectory();
+        try {
+          linkSync(temporaryPath, lockPath);
+          linked = true;
+        } catch (error) {
+          throw claimLockContention(error);
+        }
+      };
+
+      acquire();
+      unlinkSync(temporaryPath);
+      fsyncLedgerDirectory();
+      const lockStats = fstatSync(descriptor, { bigint: true });
+      if (
+        !lockStats.isFile() ||
+        lockStats.nlink !== 1n ||
+        lockStats.dev !== descriptorStats.dev ||
+        lockStats.ino !== descriptorStats.ino
+      ) {
+        throw new Error(
+          "evaluation authorization claim index lock identity changed",
+        );
+      }
+      return { descriptor, stats: lockStats };
+    } catch (error) {
+      try {
+        const temporaryStats = lstatSync(temporaryPath, { bigint: true });
+        if (
+          temporaryStats.isFile() &&
+          !temporaryStats.isSymbolicLink() &&
+          temporaryStats.dev === descriptorStats.dev &&
+          temporaryStats.ino === descriptorStats.ino
+        ) {
+          unlinkSync(temporaryPath);
+        }
+      } catch {
+        // The temporary link may already be gone.
+      }
+      if (linked) {
+        try {
+          const currentStats = lstatSync(lockPath, { bigint: true });
+          if (
+            currentStats.isFile() &&
+            !currentStats.isSymbolicLink() &&
+            currentStats.dev === descriptorStats.dev &&
+            currentStats.ino === descriptorStats.ino
+          ) {
+            unlinkSync(lockPath);
+            fsyncLedgerDirectory();
+          }
+        } catch {
+          // Preserve the original acquisition error.
+        }
+      }
+      closeSync(descriptor);
+      throw error;
     }
   };
   const appendAuthorizationClaimUnderLock = (
@@ -697,35 +931,14 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
       directoryIdentity.directory,
       ".site-builder-model-evaluation-claim.lock",
     );
-    let lockDescriptor: number;
-    try {
-      lockDescriptor = openSync(lockPath, "wx", 0o600);
-    } catch (error) {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "EEXIST"
-      ) {
-        throw new Error(
-          "evaluation authorization claim index is locked; retry without reissuing authorization",
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-    const lockStats = fstatSync(lockDescriptor, { bigint: true });
+    const { descriptor: lockDescriptor, stats: lockStats } =
+      acquireAuthorizationClaimLock(lockPath);
     let result: boolean | undefined;
     let operationFailed = false;
     let operationError: unknown;
     try {
       fsyncSync(lockDescriptor);
-      const directoryDescriptor = openSync(directoryIdentity.directory, "r");
-      try {
-        fsyncSync(directoryDescriptor);
-      } finally {
-        closeSync(directoryDescriptor);
-      }
+      fsyncLedgerDirectory();
       result = appendAuthorizationClaimUnderLock(authorizationId);
     } catch (error) {
       operationFailed = true;
@@ -747,12 +960,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
         );
       }
       unlinkSync(lockPath);
-      const directoryDescriptor = openSync(directoryIdentity.directory, "r");
-      try {
-        fsyncSync(directoryDescriptor);
-      } finally {
-        closeSync(directoryDescriptor);
-      }
+      fsyncLedgerDirectory();
     } catch (error) {
       cleanupError = error;
     }
@@ -2275,6 +2483,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const executeLegacyComparator = Object.freeze(
     <T>(request: ModelEvaluationExecutionRequest) =>
       executeWithMode<T>(request, "legacy_comparator"),
+  );
+  APPLY_MODEL_EVALUATION_INTRINSIC(
+    MODEL_EVALUATION_WEAK_MAP_SET,
+    TRUSTED_MODEL_EVALUATION_EXECUTES,
+    [executeLegacyComparator, executorIdentity],
   );
   return Object.freeze({
     execute,

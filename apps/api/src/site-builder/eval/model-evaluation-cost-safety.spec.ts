@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
@@ -149,6 +149,29 @@ describe("model evaluation cost safety contract", () => {
     expect(Object.isFrozen(attestation.credential.allowedDispatches)).toBe(
       true,
     );
+  });
+
+  it("uses captured freeze intrinsics before branding an attestation", () => {
+    const freeze = vi
+      .spyOn(Object, "freeze")
+      .mockImplementation((value) => value);
+    const isFrozen = vi.spyOn(Object, "isFrozen").mockReturnValue(false);
+    const values = vi.spyOn(Object, "values").mockReturnValue([]);
+    let attestation;
+    try {
+      attestation = createModelEvaluationCostSafetyAttestation(validInput());
+    } finally {
+      freeze.mockRestore();
+      isFrozen.mockRestore();
+      values.mockRestore();
+    }
+
+    expect(isTrustedModelEvaluationCostSafetyAttestation(attestation)).toBe(
+      true,
+    );
+    expect(Object.isFrozen(attestation)).toBe(true);
+    expect(Object.isFrozen(attestation.limits)).toBe(true);
+    expect(Object.isFrozen(attestation.pricing.entries)).toBe(true);
   });
 
   it.each(invalidAttestationMutations)(
