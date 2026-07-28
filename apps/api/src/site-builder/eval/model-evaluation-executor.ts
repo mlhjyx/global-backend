@@ -18,6 +18,11 @@ import {
   type ModelEvaluationUsage,
 } from "./model-evaluation-harness";
 import { sha256CanonicalJson } from "./eval-provenance";
+import {
+  assertModelEvaluationCostSafetyDispatch,
+  isTrustedModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyAttestation,
+} from "./model-evaluation-cost-safety";
 
 export const MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION =
   "site-builder-model-evaluation-protocol-admission/v1" as const;
@@ -231,6 +236,10 @@ type EvaluationExecutionRequest =
   ModelEvaluationExecutionRequest | CapabilityProbeExecutionRequest;
 
 const TRUSTED_MODEL_EVALUATION_EXECUTES = new WeakMap<object, object>();
+const TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY = new WeakMap<
+  object,
+  ModelEvaluationCostSafetyAttestation
+>();
 const TRUSTED_EXECUTE_SET = WeakMap.prototype.set;
 const TRUSTED_EXECUTE_GET = WeakMap.prototype.get;
 const APPLY_TRUSTED_EXECUTE_INTRINSIC = Reflect.apply;
@@ -252,6 +261,15 @@ export function isTrustedModelEvaluationProtocolExecute(
   value: unknown,
 ): value is ModelEvaluationProtocolExecutor["execute"] {
   return modelEvaluationProtocolExecutorIdentity(value) !== null;
+}
+
+export function modelEvaluationProtocolExecutorCostSafety(
+  value: unknown,
+): ModelEvaluationCostSafetyAttestation | null {
+  const identity = modelEvaluationProtocolExecutorIdentity(value);
+  return identity === null
+    ? null
+    : (TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.get(identity) ?? null);
 }
 
 type TextEvaluationProtocol =
@@ -810,6 +828,7 @@ function responseCost(value: unknown): number | null {
 export function createModelEvaluationProtocolExecutor(deps: {
   wireClient: ModelEvaluationWireClient;
   settlementResolver: ModelEvaluationSettlementResolver;
+  costSafety: ModelEvaluationCostSafetyAttestation;
 }): ModelEvaluationProtocolExecutor {
   const wireReceiver = deps?.wireClient;
   const openAIResponses = wireReceiver?.openAIResponses;
@@ -818,6 +837,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
   const resolverReceiver = deps?.settlementResolver;
   const resolverId = resolverReceiver?.resolverId;
   const resolverResolve = resolverReceiver?.resolve;
+  const costSafety = deps?.costSafety;
   if (
     !wireReceiver ||
     typeof openAIResponses !== "function" ||
@@ -825,10 +845,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
     typeof openAIChatCompletions !== "function" ||
     !resolverReceiver ||
     !SETTLEMENT_RESOLVER_ID.test(resolverId ?? "") ||
-    typeof resolverResolve !== "function"
+    typeof resolverResolve !== "function" ||
+    !isTrustedModelEvaluationCostSafetyAttestation(costSafety) ||
+    costSafety.pricing.resolverId !== resolverId
   ) {
     throw new Error(
-      "evaluation wire client and auditable settlement resolver are required",
+      "evaluation wire client and auditable settlement resolver are required; trusted cost safety must match",
     );
   }
   const wireClient = Object.freeze({
@@ -844,6 +866,8 @@ export function createModelEvaluationProtocolExecutor(deps: {
     resolverId,
     resolve: capturedResolve,
   }) satisfies ModelEvaluationSettlementResolver;
+  let reservedDispatchExecutions = 0;
+  let reservedWireCalls = 0;
 
   const executeWithMode = async <T>(
     request: EvaluationExecutionRequest,
@@ -861,6 +885,30 @@ export function createModelEvaluationProtocolExecutor(deps: {
     };
     const providerReportedCostCents: (number | null)[] = [];
     const system = structuredSystemPrompt(request.outputSchema);
+    const maximumWireCalls = request.repairTaskOutput ? 2 : 1;
+    try {
+      assertModelEvaluationCostSafetyDispatch(costSafety, {
+        mode,
+        alias: request.alias,
+        protocol,
+        maxOutputTokens: request.maxTokens,
+        promptUtf8Bytes:
+          Buffer.byteLength(system, "utf8") +
+          Buffer.byteLength(request.casePayload.prompt, "utf8"),
+        maximumWireCalls,
+      });
+      if (
+        reservedDispatchExecutions + 1 >
+          costSafety.limits.maxDispatchExecutions ||
+        reservedWireCalls + maximumWireCalls > costSafety.limits.maxWireCalls
+      ) {
+        throw new Error("model evaluation campaign call cap exhausted");
+      }
+    } catch {
+      throw preDispatchError("evaluation_cost_safety_rejected");
+    }
+    reservedDispatchExecutions += 1;
+    reservedWireCalls += maximumWireCalls;
 
     const dispatch = async (
       prompt: string,
@@ -1054,6 +1102,10 @@ export function createModelEvaluationProtocolExecutor(deps: {
     ) => executeWithMode<T>(request, "target"),
   );
   const executorIdentity = Object.freeze({});
+  TRUSTED_MODEL_EVALUATION_EXECUTOR_COST_SAFETY.set(
+    executorIdentity,
+    costSafety,
+  );
   APPLY_TRUSTED_EXECUTE_INTRINSIC(
     TRUSTED_EXECUTE_SET,
     TRUSTED_MODEL_EVALUATION_EXECUTES,

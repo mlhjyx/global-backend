@@ -19,6 +19,10 @@ import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
   MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION,
 } from "../apps/api/src/site-builder/eval/model-evaluation-executor";
+import {
+  MODEL_EVALUATION_ABSOLUTE_LIMITS,
+  SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
+} from "../apps/api/src/site-builder/eval/model-evaluation-cost-safety";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -60,7 +64,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
   return [
     "# Site Builder 模型评测 Harness 基线",
     "",
-    `> 机器合同：${code(SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID)}；候选来源：${code(SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID)}。本文件由代码计划生成并由 ${code("pnpm docs:verify")} 精确校验，不得手抄另一个任务矩阵。`,
+    `> 机器合同：${code(SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID)}；成本安全合同：${code(SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID)}；候选来源：${code(SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID)}。本文件由代码计划生成并由 ${code("pnpm docs:verify")} 精确校验，不得手抄另一个任务矩阵。`,
     "",
     "## 范围",
     "",
@@ -68,6 +72,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。",
     "- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。",
     "- 当前唯一可 dispatch suite 是 BrandProfile；其余 6 个 task fail-closed 为 `blocked_no_evaluation_suite`。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
+    "- 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。",
     "",
     "## 协议执行边界",
     "",
@@ -112,8 +117,11 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "",
     "## 预算与 provenance",
     "",
+    `- 成本安全合同 ${code(SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID)} 在 executor branding 时强制绑定：独立 spend authorization 的批准金额/execution 数必须与 campaign limits 精确一致；凭据 purpose 必须是 ${code("site_builder_model_evaluation")}、quota 必须 limited，target/legacy comparator 的 alias+protocol scope 与冻结价格表必须精确覆盖且禁止默认/未配置倍率；resolverId 必须匹配价格快照。仓库绝对止损为 credential ${MODEL_EVALUATION_ABSOLUTE_LIMITS.credentialQuotaCapCents}¢、campaign ${MODEL_EVALUATION_ABSOLUTE_LIMITS.campaignBudgetCents}¢、${MODEL_EVALUATION_ABSOLUTE_LIMITS.dispatchExecutions} executions、${MODEL_EVALUATION_ABSOLUTE_LIMITS.wireCalls} wire calls、单次 prompt ${MODEL_EVALUATION_ABSOLUTE_LIMITS.promptUtf8BytesPerCall} bytes 与 output ${MODEL_EVALUATION_ABSOLUTE_LIMITS.outputTokensPerCall} tokens；具体 campaign 只能更低。`,
+    "- attestation branding 只证明同进程输入满足机器合同，不冒充 new-api 管理面真值。后续真实 evidence runner 必须从固定提交读取并保存脱敏凭据管理快照及其 SHA-256、价格快照和 resolver 实现，先核验真实 token quota/scope 再构造 attestation；本 PR 不提供绕过该步骤的默认值、环境变量读取或 live introspection。",
+    "- harness 在任何 budget reserve/client dispatch 前重新核对 target scope 与 canonical plan，并确认完整矩阵所需的 execution/wire-call headroom；executor 在每个请求前再核对 alias、协议、prompt/output 上限并保守占用 repair 最坏调用数。`executionId` 是唯一 request billing identity；缺 request 级可核验结算或出现 unknown 时继续沿用 budget guard 的 `freeze_campaign`，不得记零或继续下一调用。媒体 generic channel test 固定 forbidden。",
     "- 每次 task/probe 在任何 wire dispatch 前，按 `repairTaskOutput` 的最坏调用数（当前最多 2 次）一次性 reserve campaign 全部上界，因此 repair 不能在只预留首调预算时超发；结算释放未用 headroom，但不会把既有 envelope attempt cap 乘以实际 callCount，repair 聚合成本超过原 `perCallCostCapCents` 仍是预算硬失败且不可排名。budget guard 使用模块私有 WeakMap 品牌、JavaScript 私有状态与捕获的 reserve/settle 原型方法，duck/Proxy budget 或实例/prototype monkeypatch 都不能绕过。每个返回 run 先整棵 deep-freeze，再由模块私有 WeakMap 绑定实际 guard；summary/ranker 必须显式收到同一个 genuine guard，并逐 run 核验对象身份与 campaignId，因此逐次新建 genuine guard、混用 guard、原地改写已绑定 run、clone/JSON reload 或只改公开 campaignId 都 fail-closed。unknown 或 malformed settlement 保留完整最坏上界并冻结后续 dispatch。`rejected_before_dispatch` 只允许本地 reserve 拒绝路径，probe/matrix 在 executor 进入后声称该 reason 一律归 unknown 并冻结；当前 attempt 超过原 cap 时保留质量观察，但标记预算硬失败并不可排名。",
-    "- 每个 run（schema v2）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、evaluator rubric 和所需 capability-probe attestation。终态原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；终态被拒输出只留 SHA-256 digest 与 failureCode，不把 PII/schema-invalid 原文写入 evidence。v2 adapter 对 repair 中间输出只聚合 usage/callCount，不保存其中间 digest 或 rejection reason，也不得把它称为已持久化 evidence；后续 fixed-commit evidence 若要求中间 repair provenance，必须先在独立 PR 显式升级 run schema/source contract。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。",
+    "- 每个 run（schema v3）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、evaluator rubric、成本安全合同/attestation/凭据快照/价格快照 SHA-256 和所需 capability-probe attestation；probe attestation v2 绑定同一组成本安全摘要，矩阵内漂移即拒绝。终态原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；终态被拒输出只留 SHA-256 digest 与 failureCode，不把 PII/schema-invalid 原文写入 evidence。v2 adapter 对 repair 中间输出只聚合 usage/callCount，不保存其中间 digest 或 rejection reason，也不得把它称为已持久化 evidence；后续 fixed-commit evidence 若要求中间 repair provenance，必须先在独立 PR 显式升级 run schema/source contract。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。",
     "- 可用性、协议、身份、probe attestation、usage、artifact fingerprint、matrix、生产 P95、预算和成本任一未闭合，都不能生成可晋级排名。",
     "",
   ].join("\n");
@@ -262,6 +270,16 @@ export function verifyModelEvaluationHarness(
         ),
       ),
       `${path} must reference the current candidate baseline id`,
+    );
+    assert.match(
+      document,
+      new RegExp(
+        SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID.replaceAll(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `${path} must reference the current evaluation cost safety id`,
     );
   }
 }

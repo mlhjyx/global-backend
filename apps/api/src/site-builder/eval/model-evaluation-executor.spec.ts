@@ -18,13 +18,30 @@ import {
 import * as modelEvaluationHarness from "./model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
-  createModelEvaluationProtocolExecutor,
+  createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
   isTrustedModelEvaluationProtocolExecute,
   type ModelEvaluationSettlementResolution,
   type ModelEvaluationSettlementResolver,
   type ModelEvaluationWireClient,
   type ModelEvaluationWireResponse,
 } from "./model-evaluation-executor";
+import { createFakeModelEvaluationCostSafety } from "./model-evaluation-cost-safety.spec-support";
+
+function createModelEvaluationProtocolExecutor(
+  deps: Omit<
+    Parameters<typeof createRawModelEvaluationProtocolExecutor>[0],
+    "costSafety"
+  >,
+) {
+  return createRawModelEvaluationProtocolExecutor({
+    ...deps,
+    costSafety: createFakeModelEvaluationCostSafety(
+      /^[a-z0-9][a-z0-9._/-]{0,127}$/.test(deps.settlementResolver.resolverId)
+        ? deps.settlementResolver.resolverId
+        : "fake-invalid-resolver-guard/v1",
+    ),
+  });
+}
 
 function canonicalRequest(
   candidateIndex = 0,
@@ -831,6 +848,15 @@ describe("structured output, repair, errors, and settlement", () => {
       );
     },
   );
+
+  it("requires a branded cost safety attestation at factory creation", () => {
+    expect(() =>
+      createRawModelEvaluationProtocolExecutor({
+        wireClient: wireClient(),
+        settlementResolver: settlementResolver(),
+      } as Parameters<typeof createRawModelEvaluationProtocolExecutor>[0]),
+    ).toThrow("trusted cost safety must match");
+  });
 
   it("rejects unsafe provider token counts and aggregate overflow", async () => {
     const request = canonicalRequest();

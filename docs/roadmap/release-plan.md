@@ -43,7 +43,7 @@
 
 后续必须拆为三个独立 PR：① capability/协议与 task-shaped harness，按每个 task 的生产 envelope 加扩展诊断观察窗，并把 `quality_valid_runtime_late` 与 `content_invalid` 分开；② 固定提交、create-only、完整 provenance 与保守结算的真实 evidence；③ 每次只晋级一个 task，带失败门、rollback 与用户批准。质量/结构/事实/稳定性先排序，P95/accepted-artifact cost 后评判；绝对预算止损、未知成本 fail-closed、不自动合并和禁止 mega switch 均不变。真实外部流量/高风险部署前仍走 MODEL-2。
 
-第一项的代码级合同现为 `site-builder-model-evaluation-harness/2026-07-28-v2`，与保持不变的 `site-builder-model-candidate-baseline/2026-07-27-v1` 的精确关系、task envelope、canonical suite、协议 admission、矩阵、预算和 provenance 统一见[生成评测基线](../site-builder/model-evaluation-harness.md)。本项只新增 evaluation-only、依赖注入的协议 executor：唯一完整 suite 仍是 BrandProfile；Responses/Messages target 与隔离的 legacy Chat comparator 使用 fake wire/cost 测试，媒体/embedding/preview/deferred/legacy-only target/无 suite 在 client 前 blocked。它不包含真实网关调用、真实 evidence、运行路由或消费者变化。下一项仍是合并后另开的 fixed-commit/create-only 真实 evidence PR；其后才允许一次一个 task 的 promotion PR。
+第一项的代码级合同现为 `site-builder-model-evaluation-harness/2026-07-28-v3`，与保持不变的 `site-builder-model-candidate-baseline/2026-07-27-v1` 的精确关系、task envelope、canonical suite、协议 admission、矩阵、预算和 provenance 统一见[生成评测基线](../site-builder/model-evaluation-harness.md)。本项只新增 evaluation-only、依赖注入的协议 executor：唯一完整 suite 仍是 BrandProfile；Responses/Messages target 与隔离的 legacy Chat comparator 使用 fake wire/cost 测试，媒体/embedding/preview/deferred/legacy-only target/无 suite 在 client 前 blocked。其 fast-follow `site-builder-model-evaluation-cost-safety/2026-07-28-v1` 强制未来真实 executor 使用专用有限额度凭据、精确 scope、冻结显式价格、request 级结算和多层绝对上限，拒绝无限额度、默认倍率与 generic media test；本 PR 自身不读取 `.env`、不修改 new-api token/channel、不产生真实费用或 evidence。下一项仍是合并后另开的 fixed-commit/create-only 真实 evidence PR，且必须先提供该成本安全 attestation；其后才允许一次一个 task 的 promotion PR。
 
 ---
 

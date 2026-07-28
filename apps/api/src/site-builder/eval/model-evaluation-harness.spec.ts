@@ -1,12 +1,46 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { trustedExecutorIdentity } = vi.hoisted(() => ({
+const { trustedExecutorIdentity, trustedCostSafety } = vi.hoisted(() => ({
   trustedExecutorIdentity: Object.freeze({}),
+  trustedCostSafety: Object.freeze({
+    credential: Object.freeze({
+      snapshotSha256:
+        "1111111111111111111111111111111111111111111111111111111111111111",
+      allowedDispatches: Object.freeze([
+        Object.freeze({
+          mode: "target",
+          alias: "gpt-5.6-terra",
+          protocol: "openai-responses",
+        }),
+        Object.freeze({
+          mode: "target",
+          alias: "claude-sonnet-5",
+          protocol: "anthropic-messages",
+        }),
+        Object.freeze({
+          mode: "target",
+          alias: "gpt-5.5",
+          protocol: "openai-responses",
+        }),
+      ]),
+    }),
+    pricing: Object.freeze({
+      snapshotSha256:
+        "2222222222222222222222222222222222222222222222222222222222222222",
+    }),
+    limits: Object.freeze({
+      campaignBudgetCents: 10_000,
+      maxDispatchExecutions: 500,
+      maxWireCalls: 1_000,
+      maxOutputTokensPerCall: 100_000,
+    }),
+  }),
 }));
 
 vi.mock("./model-evaluation-executor", () => ({
   isTrustedModelEvaluationProtocolExecute: () => true,
   modelEvaluationProtocolExecutorIdentity: () => trustedExecutorIdentity,
+  modelEvaluationProtocolExecutorCostSafety: () => trustedCostSafety,
 }));
 
 import {
@@ -2249,6 +2283,22 @@ describe("quality-first candidate summary and ranking", () => {
     expect(Object.isFrozen(trustedRun.costSettlement)).toBe(true);
     expect(Object.isFrozen(trustedRun.usage)).toBe(true);
     expect(Object.isFrozen(trustedRun.capabilityProbeAttestation)).toBe(true);
+    expect(trustedRun).toMatchObject({
+      schemaVersion: "site-builder-model-evaluation-run/v3",
+      costSafetyContractId:
+        "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+      credentialSnapshotSha256:
+        "1111111111111111111111111111111111111111111111111111111111111111",
+      pricingSnapshotSha256:
+        "2222222222222222222222222222222222222222222222222222222222222222",
+      capabilityProbeAttestation: {
+        schemaVersion: "site-builder-model-capability-probe-attestation/v2",
+      },
+    });
+    expect(trustedRun.costSafetyAttestationSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      trustedRun.capabilityProbeAttestation!.costSafetyAttestationSha256,
+    ).toBe(trustedRun.costSafetyAttestationSha256);
 
     expect(() => {
       trustedRun.fixtureId = "unexpected-fixture";
@@ -2273,8 +2323,15 @@ describe("quality-first candidate summary and ranking", () => {
     }).toThrow(TypeError);
 
     expect(
-      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs).rankable,
-    ).toBe(true);
+      summarizeModelEvaluationCandidate(plan, "gpt-5.5", runs),
+    ).toMatchObject({
+      rankable: true,
+      costSafetyContractId:
+        "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+      costSafetyAttestationSha256: trustedRun.costSafetyAttestationSha256,
+      credentialSnapshotSha256: trustedRun.credentialSnapshotSha256,
+      pricingSnapshotSha256: trustedRun.pricingSnapshotSha256,
+    });
   });
 
   it("rejects a forged persisted clone before trusting pass flags", async () => {

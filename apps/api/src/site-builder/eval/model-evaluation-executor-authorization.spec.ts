@@ -11,9 +11,28 @@ import {
   type ModelEvaluationExecutionRequest,
 } from "./model-evaluation-harness";
 import {
-  createModelEvaluationProtocolExecutor,
+  createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
   type ModelEvaluationWireClient,
 } from "./model-evaluation-executor";
+import { createFakeModelEvaluationCostSafety } from "./model-evaluation-cost-safety.spec-support";
+import {
+  createModelEvaluationCostSafetyAttestation,
+  type ModelEvaluationCostSafetyInput,
+} from "./model-evaluation-cost-safety";
+
+function createModelEvaluationProtocolExecutor(
+  deps: Omit<
+    Parameters<typeof createRawModelEvaluationProtocolExecutor>[0],
+    "costSafety"
+  >,
+) {
+  return createRawModelEvaluationProtocolExecutor({
+    ...deps,
+    costSafety: createFakeModelEvaluationCostSafety(
+      deps.settlementResolver.resolverId,
+    ),
+  });
+}
 
 function fakeWireClient(openAIResponses: ReturnType<typeof vi.fn>) {
   return {
@@ -162,6 +181,48 @@ describe("model evaluation executor authorization", () => {
     );
     expect(firstWire).toHaveBeenCalledTimes(1);
     expect(secondWire).not.toHaveBeenCalled();
+    expect(budget.snapshot()).toEqual(snapshot);
+  });
+
+  it("rejects an incomplete target credential scope before budget or client", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const wire = vi.fn();
+    const resolver = fakeResolver();
+    const input = structuredClone(
+      createFakeModelEvaluationCostSafety(resolver.resolverId),
+    ) as ModelEvaluationCostSafetyInput;
+    input.credential.allowedDispatches =
+      input.credential.allowedDispatches.filter(
+        (entry) => entry.alias !== "gpt-5.5",
+      );
+    input.pricing.entries = input.pricing.entries.filter(
+      (entry) => entry.alias !== "gpt-5.5",
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: fakeWireClient(wire),
+      settlementResolver: resolver,
+      costSafety: createModelEvaluationCostSafetyAttestation(input),
+    });
+    const budget = new ModelEvaluationBudgetGuard(100);
+    const snapshot = budget.snapshot();
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: budget,
+        execute: executor.execute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_mismatch",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(wire).not.toHaveBeenCalled();
     expect(budget.snapshot()).toEqual(snapshot);
   });
 });
