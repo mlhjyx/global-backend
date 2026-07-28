@@ -1033,7 +1033,7 @@ describe("model evaluation executor authorization", () => {
         output: [{ content: [{ type: "output_text", text: "{}" }] }],
         usage: { input_tokens: 10, output_tokens: 1 },
       },
-      providerReportedCostCents: 40,
+      providerReportedCostCents: 20,
     }));
     const resolver = fakeResolver();
     const costSafety = createFakeModelEvaluationCostSafety(

@@ -2165,6 +2165,45 @@ export function createModelEvaluationProtocolExecutor(deps: {
     if (identityProven && artifact !== undefined && request.repairTaskOutput) {
       const failure = validationFailure(request, artifact);
       if (failure) {
+        const knownProviderReportedCostCents =
+          providerReportedCostCents.length > 0 &&
+          providerReportedCostCents.every((value) => value !== null)
+            ? providerReportedCostCents.reduce(
+                (total, value) => total + (value ?? 0),
+                0,
+              )
+            : null;
+        if (
+          knownProviderReportedCostCents !== null &&
+          knownProviderReportedCostCents >= request.perCallCostCapCents
+        ) {
+          const settlement = await safeResolveSettlement(
+            settlementResolver,
+            {
+              executionId: request.executionId,
+              taskId: request.taskId,
+              alias: request.alias,
+              protocol,
+              outcome: "failed",
+              callCount: usage.callCount,
+              usage: settlementUsage(usage),
+              providerReportedCostCents: Object.freeze([
+                ...providerReportedCostCents,
+              ]),
+              error: new Error(
+                "evaluation_known_attempt_cost_cap_reached_before_repair",
+              ),
+            },
+            costSafety,
+          );
+          const effectiveSettlement =
+            await closeCampaignReservation(settlement);
+          campaignFrozen = true;
+          throw new ModelEvaluationCallError(
+            "evaluation_cost_safety_rejected",
+            effectiveSettlement,
+          );
+        }
         normalized = await dispatch(
           repairPrompt(
             request.casePayload.prompt,

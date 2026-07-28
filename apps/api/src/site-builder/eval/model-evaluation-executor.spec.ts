@@ -688,6 +688,43 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
+  it("does not dispatch repair after the first response reaches the known attempt cost cap", async () => {
+    const request = canonicalRequest();
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce(
+        wireResponse(
+          openAIResponsesBody(
+            request.alias,
+            {},
+            {
+              inputTokens: 10,
+              outputTokens: 5,
+            },
+          ),
+          request.perCallCostCapCents,
+        ),
+      )
+      .mockResolvedValueOnce(
+        wireResponse(
+          openAIResponsesBody(request.alias, canonicalAcceptedArtifact()),
+        ),
+      );
+    const executor = createModelEvaluationProtocolExecutor({
+      wireClient: wireClient({ openAIResponses: call }),
+      settlementResolver: settlementResolver(),
+    });
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_rejected",
+      costSettlement: {
+        state: "settled",
+        amountCents: request.perCallCostCapCents,
+      },
+    });
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it("does not dispatch repair after a hard-stop freeze if the first wire ignored abort", async () => {
     const controller = new AbortController();
     const request = {
@@ -695,8 +732,7 @@ describe("structured output, repair, errors, and settlement", () => {
       signal: controller.signal,
     };
     let resolveFirst:
-      | ((response: ModelEvaluationWireResponse) => void)
-      | undefined;
+      ((response: ModelEvaluationWireResponse) => void) | undefined;
     const call = vi.fn(
       () =>
         new Promise<ModelEvaluationWireResponse>((resolve) => {
@@ -716,10 +752,14 @@ describe("structured output, repair, errors, and settlement", () => {
     ).resolves.toBe(true);
     resolveFirst?.(
       wireResponse(
-        openAIResponsesBody(request.alias, {}, {
-          inputTokens: 10,
-          outputTokens: 5,
-        }),
+        openAIResponsesBody(
+          request.alias,
+          {},
+          {
+            inputTokens: 10,
+            outputTokens: 5,
+          },
+        ),
       ),
     );
 
