@@ -2410,6 +2410,38 @@ describe("quality-first candidate summary and ranking", () => {
     ).toThrow("runs from one trusted in-memory campaign budget");
   });
 
+  it("uses captured brand-map intrinsics when rejecting fabricated runs", async () => {
+    const runs = await fullMatrix(
+      "gpt-5.5",
+      async (fixtureId, attempt) =>
+        await acceptedRun("gpt-5.5", fixtureId, attempt),
+    );
+    const weakMapGet = vi
+      .spyOn(WeakMap.prototype, "get")
+      .mockReturnValue(capabilityBudget);
+    let thrown: unknown;
+    try {
+      try {
+        summarizeModelEvaluationCandidateRaw(
+          plan,
+          "gpt-5.5",
+          structuredClone(runs),
+          capabilityBudget,
+          capabilityCampaign,
+        );
+      } catch (error) {
+        thrown = error;
+      }
+    } finally {
+      weakMapGet.mockRestore();
+    }
+    expect(thrown).toMatchObject({
+      message: expect.stringContaining(
+        "runs from one trusted in-memory campaign budget",
+      ),
+    });
+  });
+
   it("deep-freezes every trusted run and its nested provenance", async () => {
     const runs = await fullMatrix(
       "gpt-5.5",

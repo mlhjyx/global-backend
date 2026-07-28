@@ -716,6 +716,57 @@ const TRUSTED_MODEL_EVALUATION_RUN_BUDGETS = new WeakMap<
   ModelEvaluationBudgetGuard
 >();
 const TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS = new WeakMap<object, object>();
+const TRUSTED_BRAND_WEAK_MAP_GET = WeakMap.prototype.get;
+const TRUSTED_BRAND_WEAK_MAP_SET = WeakMap.prototype.set;
+const TRUSTED_BRAND_WEAK_MAP_HAS = WeakMap.prototype.has;
+const TRUSTED_BRAND_WEAK_SET_ADD = WeakSet.prototype.add;
+const TRUSTED_BRAND_WEAK_SET_HAS = WeakSet.prototype.has;
+const APPLY_TRUSTED_BRAND_INTRINSIC = Reflect.apply;
+
+function trustedBrandGet<K extends object, V>(
+  map: WeakMap<K, V>,
+  key: K,
+): V | undefined {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_MAP_GET,
+    map,
+    [key],
+  ) as V | undefined;
+}
+
+function trustedBrandSet<K extends object, V>(
+  map: WeakMap<K, V>,
+  key: K,
+  value: V,
+): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_MAP_SET, map, [key, value]);
+}
+
+function trustedBrandHas<K extends object, V>(
+  map: WeakMap<K, V>,
+  key: K,
+): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_MAP_HAS,
+    map,
+    [key],
+  ) as boolean;
+}
+
+function trustedBrandWeakSetAdd(set: WeakSet<object>, value: object): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_ADD, set, [value]);
+}
+
+function trustedBrandWeakSetHas(
+  set: WeakSet<object>,
+  value: object,
+): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_SET_HAS,
+    set,
+    [value],
+  ) as boolean;
+}
 
 function bindTrustedModelEvaluationExecutor(
   budget: ModelEvaluationBudgetGuard,
@@ -771,7 +822,10 @@ function bindTrustedModelEvaluationExecutor(
       reason: "rejected_before_dispatch",
     });
   }
-  const bound = TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.get(budget);
+  const bound = trustedBrandGet(
+    TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS,
+    budget,
+  );
   if (bound && bound !== identity) {
     throw new ModelEvaluationCallError(
       "evaluation_executor_campaign_mismatch",
@@ -781,7 +835,13 @@ function bindTrustedModelEvaluationExecutor(
       },
     );
   }
-  if (!bound) TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS.set(budget, identity);
+  if (!bound) {
+    trustedBrandSet(
+      TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS,
+      budget,
+      identity,
+    );
+  }
   return costSafety;
 }
 
@@ -822,7 +882,8 @@ export class ModelEvaluationBudgetGuard {
       throw new Error("campaignBudgetCents must be greater than zero");
     }
     this.#campaignBudgetCents = campaignBudgetCents;
-    TRUSTED_MODEL_EVALUATION_BUDGETS.set(
+    trustedBrandSet(
+      TRUSTED_MODEL_EVALUATION_BUDGETS,
       this,
       Object.freeze({ campaignId: randomUUID() }),
     );
@@ -942,7 +1003,7 @@ function assertTrustedModelEvaluationBudget(
   if (
     !budget ||
     typeof budget !== "object" ||
-    !TRUSTED_MODEL_EVALUATION_BUDGETS.has(budget)
+    !trustedBrandHas(TRUSTED_MODEL_EVALUATION_BUDGETS, budget)
   ) {
     throw new Error("trusted model evaluation budget guard is required");
   }
@@ -950,7 +1011,10 @@ function assertTrustedModelEvaluationBudget(
 
 function trustedModelEvaluationCampaignId(budget: unknown): string {
   assertTrustedModelEvaluationBudget(budget);
-  const campaignId = TRUSTED_MODEL_EVALUATION_BUDGETS.get(budget)?.campaignId;
+  const campaignId = trustedBrandGet(
+    TRUSTED_MODEL_EVALUATION_BUDGETS,
+    budget,
+  )?.campaignId;
   if (!campaignId) {
     throw new Error("trusted model evaluation campaign id is unavailable");
   }
@@ -963,7 +1027,7 @@ function bindTrustedModelEvaluationRun<T extends ModelEvaluationRun>(
 ): T {
   assertTrustedModelEvaluationBudget(budget);
   const frozenRun = deepFreeze(run);
-  TRUSTED_MODEL_EVALUATION_RUN_BUDGETS.set(frozenRun, budget);
+  trustedBrandSet(TRUSTED_MODEL_EVALUATION_RUN_BUDGETS, frozenRun, budget);
   return frozenRun;
 }
 
@@ -972,7 +1036,7 @@ function assertTrustedModelEvaluationRunBudget(
   budget: ModelEvaluationBudgetGuard,
 ): void {
   assertTrustedModelEvaluationBudget(budget);
-  if (TRUSTED_MODEL_EVALUATION_RUN_BUDGETS.get(run) !== budget) {
+  if (trustedBrandGet(TRUSTED_MODEL_EVALUATION_RUN_BUDGETS, run) !== budget) {
     throw new Error(
       "candidate summary requires runs from one trusted in-memory campaign budget",
     );
@@ -1586,7 +1650,7 @@ export class ModelEvaluationCapabilityCampaign {
     assertTrustedModelEvaluationBudget(budget);
     this.#budget = budget;
     this.#campaignId = trustedModelEvaluationCampaignId(budget);
-    TRUSTED_CAPABILITY_CAMPAIGNS.add(this);
+    trustedBrandWeakSetAdd(TRUSTED_CAPABILITY_CAMPAIGNS, this);
   }
 
   get campaignId(): string {
@@ -1929,7 +1993,7 @@ function trustedCapabilityAttestation(
   if (
     !campaign ||
     typeof campaign !== "object" ||
-    !TRUSTED_CAPABILITY_CAMPAIGNS.has(campaign)
+    !trustedBrandWeakSetHas(TRUSTED_CAPABILITY_CAMPAIGNS, campaign)
   ) {
     return null;
   }

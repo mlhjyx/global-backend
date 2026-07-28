@@ -383,7 +383,11 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
         ? providerReportedCostCents
         : undefined;
     if (!response.ok) {
-      await response.body?.cancel();
+      try {
+        await response.body?.cancel();
+      } catch {
+        // Preserve the already parsed status and provider cost observation.
+      }
       throw new ModelEvaluationWireHttpError(
         response.status,
         validProviderReportedCostCents,

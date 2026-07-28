@@ -351,6 +351,53 @@ describe("model evaluation executor authorization", () => {
     });
   });
 
+  it("preserves a non-success provider cost when body cancellation fails", async () => {
+    const bearerToken = "limited-evaluation-secret";
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: "fake-evaluation-credential/http-cancel-cost",
+        snapshotSha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bearerTokenSha256: createHash("sha256")
+          .update(bearerToken)
+          .digest("hex"),
+        gatewayOrigin: "https://fake-model-evaluation.invalid",
+        bearerToken,
+      },
+      baseUrl: "https://fake-model-evaluation.invalid/v1",
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              cancel() {
+                throw new Error("stream cancellation failed");
+              },
+            }),
+            {
+              status: 429,
+              headers: { "x-provider-cost-cents": "7" },
+            },
+          ),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      wireClient.openAIResponses({
+        executionId: "http-cancel-cost:1",
+        body: {
+          model: "gpt-5.6-terra",
+          input: [{ role: "user", content: "probe" }],
+          max_output_tokens: 1,
+          temperature: 0,
+          text: { format: { type: "json_object" } },
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      providerReportedCostCents: 7,
+    });
+  });
+
   it("settles a non-success response from its preserved provider cost", async () => {
     const resolver = fakeResolver();
     const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
