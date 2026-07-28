@@ -109,14 +109,88 @@ export interface TaskEvaluationSuite {
   }[];
 }
 
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) {
-      deepFreeze(child);
-    }
+const TRUSTED_OBJECT_FREEZE = Object.freeze;
+const TRUSTED_OBJECT_IS_FROZEN = Object.isFrozen;
+const TRUSTED_OBJECT_VALUES = Object.values;
+const TRUSTED_BRAND_WEAK_MAP_GET = WeakMap.prototype.get;
+const TRUSTED_BRAND_WEAK_MAP_SET = WeakMap.prototype.set;
+const TRUSTED_BRAND_WEAK_MAP_HAS = WeakMap.prototype.has;
+const TRUSTED_BRAND_WEAK_SET_ADD = WeakSet.prototype.add;
+const TRUSTED_BRAND_WEAK_SET_HAS = WeakSet.prototype.has;
+const APPLY_TRUSTED_BRAND_INTRINSIC = Reflect.apply;
+
+function trustedObjectIsFrozen(value: object): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_OBJECT_IS_FROZEN,
+    Object,
+    [value],
+  ) as boolean;
+}
+
+function trustedObjectFreeze(value: object): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_OBJECT_FREEZE, Object, [value]);
+}
+
+function trustedObjectValues(value: object): unknown[] {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_OBJECT_VALUES,
+    Object,
+    [value],
+  ) as unknown[];
+}
+
+function trustedWeakSetAdd(set: WeakSet<object>, value: object): void {
+  APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_ADD, set, [value]);
+}
+
+function trustedWeakSetHas(set: WeakSet<object>, value: object): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(
+    TRUSTED_BRAND_WEAK_SET_HAS,
+    set,
+    [value],
+  ) as boolean;
+}
+
+function deepFreezeValue(value: unknown, seen: WeakSet<object>): void {
+  if (!value || typeof value !== "object" || trustedWeakSetHas(seen, value)) {
+    return;
   }
+  trustedWeakSetAdd(seen, value);
+  if (!trustedObjectIsFrozen(value)) {
+    trustedObjectFreeze(value);
+  }
+  if (!trustedObjectIsFrozen(value)) {
+    throw new Error("trusted evaluation value could not be frozen");
+  }
+  for (const child of trustedObjectValues(value)) {
+    deepFreezeValue(child, seen);
+  }
+}
+
+function deepFreeze<T>(value: T): T {
+  deepFreezeValue(value, new WeakSet<object>());
   return value;
+}
+
+function assertDeepFrozen(value: unknown): void {
+  const seen = new WeakSet<object>();
+  const visit = (candidate: unknown): void => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      trustedWeakSetHas(seen, candidate)
+    ) {
+      return;
+    }
+    trustedWeakSetAdd(seen, candidate);
+    if (!trustedObjectIsFrozen(candidate)) {
+      throw new Error("trusted evaluation value is not deeply frozen");
+    }
+    for (const child of trustedObjectValues(candidate)) {
+      visit(child);
+    }
+  };
+  visit(value);
 }
 
 const BRAND_PROFILE_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
@@ -716,12 +790,6 @@ const TRUSTED_MODEL_EVALUATION_RUN_BUDGETS = new WeakMap<
   ModelEvaluationBudgetGuard
 >();
 const TRUSTED_MODEL_EVALUATION_BUDGET_EXECUTORS = new WeakMap<object, object>();
-const TRUSTED_BRAND_WEAK_MAP_GET = WeakMap.prototype.get;
-const TRUSTED_BRAND_WEAK_MAP_SET = WeakMap.prototype.set;
-const TRUSTED_BRAND_WEAK_MAP_HAS = WeakMap.prototype.has;
-const TRUSTED_BRAND_WEAK_SET_ADD = WeakSet.prototype.add;
-const TRUSTED_BRAND_WEAK_SET_HAS = WeakSet.prototype.has;
-const APPLY_TRUSTED_BRAND_INTRINSIC = Reflect.apply;
 
 function trustedBrandGet<K extends object, V>(
   map: WeakMap<K, V>,
@@ -1027,6 +1095,7 @@ function bindTrustedModelEvaluationRun<T extends ModelEvaluationRun>(
 ): T {
   assertTrustedModelEvaluationBudget(budget);
   const frozenRun = deepFreeze(run);
+  assertDeepFrozen(frozenRun);
   trustedBrandSet(TRUSTED_MODEL_EVALUATION_RUN_BUDGETS, frozenRun, budget);
   return frozenRun;
 }

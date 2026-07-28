@@ -2442,6 +2442,34 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
+  it("uses captured freeze intrinsics before branding trusted runs", async () => {
+    const objectIsFrozen = vi
+      .spyOn(Object, "isFrozen")
+      .mockReturnValue(true);
+    let trustedRun:
+      | Awaited<ReturnType<typeof acceptedRun>>
+      | undefined;
+    try {
+      trustedRun = (
+        await fullMatrix(
+          "gpt-5.5",
+          async (fixtureId, attempt) =>
+            await acceptedRun("gpt-5.5", fixtureId, attempt),
+        )
+      )[0];
+    } finally {
+      objectIsFrozen.mockRestore();
+    }
+
+    expect(trustedRun).toBeDefined();
+    expect(Object.isFrozen(trustedRun)).toBe(true);
+    expect(Object.isFrozen(trustedRun!.artifact)).toBe(true);
+    expect(Object.isFrozen(trustedRun!.assessment)).toBe(true);
+    expect(() => {
+      trustedRun!.elapsedMs = 0;
+    }).toThrow(TypeError);
+  });
+
   it("deep-freezes every trusted run and its nested provenance", async () => {
     const runs = await fullMatrix(
       "gpt-5.5",
