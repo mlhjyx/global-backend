@@ -1,0 +1,198 @@
+{
+  "schemaVersion": "site-builder-m1-g-stage-closeout/v1",
+  "status": "LIVE_NO_MODEL_VERIFICATION_PASSED",
+  "networkCallsDuringStaticBaseline": 0,
+  "modelCallsDuringStaticBaseline": 0,
+  "bootstrap": {
+    "count": 6,
+    "sparse": 3,
+    "rich": 3,
+    "fixtures": [
+      {
+        "id": "auto-parts-rich",
+        "mode": "rich",
+        "path": "apps/api/test/fixtures/golden-companies/brand-profile/auto-parts-rich.json",
+        "sha256": "bc860ea3435bbf6cb011881b2b7edc2b0477dcf3162db063673cdfe505775703"
+      },
+      {
+        "id": "auto-parts-sparse",
+        "mode": "sparse",
+        "path": "apps/api/test/fixtures/golden-companies/brand-profile/auto-parts-sparse.json",
+        "sha256": "07c411727aea092938094e058c52e05befede4b283c65b51e16fc594252a5038"
+      },
+      {
+        "id": "industrial-pump-rich",
+        "mode": "rich",
+        "path": "apps/api/test/fixtures/golden-companies/brand-profile/industrial-pump-rich.json",
+        "sha256": "4372ed3ef193610ef19747f98eae5fa34069fa2d6e88f9085ac5c0a20b296348"
+      },
+      {
+        "id": "industrial-pump-sparse",
+        "mode": "sparse",
+        "path": "apps/api/test/fixtures/golden-companies/brand-profile/industrial-pump-sparse.json",
+        "sha256": "a8961c129f65607b392da2fd582182db3b002f472cdb1ed60d6159c1bf95169f"
+      },
+      {
+        "id": "lab-instrument-rich",
+        "mode": "rich",
+        "path": "apps/api/test/fixtures/golden-companies/brand-profile/lab-instrument-rich.json",
+        "sha256": "f97103ac0601a64d07a7b9ec30b386e5317335ac8eeba6e4c813339f9c58126e"
+      },
+      {
+        "id": "lab-instrument-sparse",
+        "mode": "sparse",
+        "path": "apps/api/test/fixtures/golden-companies/brand-profile/lab-instrument-sparse.json",
+        "sha256": "b09747ff2334e73bfe5cfb467276531beb773749cd3c401add629ce47c2ea635"
+      }
+    ]
+  },
+  "visual": {
+    "fixtureCount": 12,
+    "familyCount": 6,
+    "factSafetyFindingCount": 0,
+    "genericness": {
+      "sampleIds": [
+        "natural-origin-rich",
+        "natural-origin-sparse",
+        "oem-capability-rich",
+        "oem-capability-sparse",
+        "precision-industrial-rich",
+        "precision-industrial-sparse",
+        "premium-innovation-rich",
+        "premium-innovation-sparse",
+        "scientific-trust-rich",
+        "scientific-trust-sparse"
+      ],
+      "distinctFamilyCount": 5,
+      "distinctHomeStructureCount": 9,
+      "maximumIdenticalHomeCount": 2,
+      "maximumIdenticalHomeRatio": 0.2,
+      "maximumCardSectionRatio": 0.2
+    },
+    "fixtures": [
+      {
+        "id": "natural-origin-rich",
+        "familyId": "natural-origin",
+        "mode": "rich",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/natural-origin-rich-spec.json",
+        "sha256": "fb4c65f067634ed88818b8da8808443c38aa3602f3afa5bf16039caf44493383"
+      },
+      {
+        "id": "natural-origin-sparse",
+        "familyId": "natural-origin",
+        "mode": "sparse",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/natural-origin-sparse-spec.json",
+        "sha256": "46ec432348292abeef2925c88e44a6b89ee4ebc03123f68385a135df24ef1394"
+      },
+      {
+        "id": "oem-capability-rich",
+        "familyId": "oem-capability",
+        "mode": "rich",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/oem-capability-rich-spec.json",
+        "sha256": "89085ed3fd727228cfaaf6aeb82e2fea74f799dae2be5cba7eb7e895e3713ab3"
+      },
+      {
+        "id": "oem-capability-sparse",
+        "familyId": "oem-capability",
+        "mode": "sparse",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/oem-capability-sparse-spec.json",
+        "sha256": "94b7a484f0d56069696c7ec1a728658177bee95491742cbbfc5c35297186a341"
+      },
+      {
+        "id": "precision-industrial-rich",
+        "familyId": "precision-industrial",
+        "mode": "rich",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/precision-industrial-rich-spec.json",
+        "sha256": "ade57b0593f2f24d9a76425084e7a1bbd0b6beb32ac2b412825a2a829132451e"
+      },
+      {
+        "id": "precision-industrial-sparse",
+        "familyId": "precision-industrial",
+        "mode": "sparse",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/precision-industrial-sparse-spec.json",
+        "sha256": "7886121dd280a12431a0654125588b22543ae4a55345bbd03f6db87b4a0d30d1"
+      },
+      {
+        "id": "premium-innovation-rich",
+        "familyId": "premium-innovation",
+        "mode": "rich",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/premium-innovation-rich-spec.json",
+        "sha256": "576a72b637feebdabbb2b3b0f3edbe3474507629ad806185af860b142463d2a8"
+      },
+      {
+        "id": "premium-innovation-sparse",
+        "familyId": "premium-innovation",
+        "mode": "sparse",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/premium-innovation-sparse-spec.json",
+        "sha256": "bc71b881c6bfcbbd60db0df41a46d103c91f72431f0797593074e424a78fa67e"
+      },
+      {
+        "id": "scientific-trust-rich",
+        "familyId": "scientific-trust",
+        "mode": "rich",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/scientific-trust-rich-spec.json",
+        "sha256": "3d29d7b73244cd92a399c0e4180aa2e7c89392c7252c793cb9d6093d69221e8d"
+      },
+      {
+        "id": "scientific-trust-sparse",
+        "familyId": "scientific-trust",
+        "mode": "sparse",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/scientific-trust-sparse-spec.json",
+        "sha256": "108bae54dc05e0c49e06bd93a38773d54ed52c0fa6bbd2c3eafb789b32bb1977"
+      },
+      {
+        "id": "technical-catalog-rich",
+        "familyId": "technical-catalog",
+        "mode": "rich",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/technical-catalog-rich-spec.json",
+        "sha256": "431e5a427b79ae4e5072df3cdecee469ef2c0f54304695a5ac4c3ed39c27e869"
+      },
+      {
+        "id": "technical-catalog-sparse",
+        "familyId": "technical-catalog",
+        "mode": "sparse",
+        "path": "apps/site-renderer/fixtures/m1-e-b-golden/technical-catalog-sparse-spec.json",
+        "sha256": "3a3996ca03008cd7d4ec558e198326519b2be17cbb9319dabc9a25f7d1d47956"
+      }
+    ],
+    "screenshots": {
+      "count": 36,
+      "manifestPath": "apps/site-renderer/visual-tests/__screenshots__/m1-e-b/manifest.json",
+      "manifestSha256": "e96d4c4e5986b305aba5a6a061dfa756df947a41adb9761b49e71c8d0c2da577"
+    }
+  },
+  "compatibility": {
+    "siteSpec": [
+      "1.0.0",
+      "1.1.0"
+    ],
+    "releaseManifest": [
+      "v1",
+      "v2",
+      "v3"
+    ],
+    "locales": [
+      "en",
+      "de-DE",
+      "ar"
+    ]
+  },
+  "explicitlyIncomplete": {
+    "matureSystemGolden": "0/30+",
+    "model2TaskPromotions": "incomplete",
+    "aestheticGold": "not established by deterministic screenshots",
+    "productionDeployment": false
+  },
+  "liveNoModel": {
+    "developmentOnly": true,
+    "currentRouteModelCalls": 0,
+    "verified": [
+      "PostgreSQL/FORCE RLS non-superuser",
+      "new-api /models",
+      "MinIO image variants and cleanup",
+      "en/de-DE neutral copy and Release v1",
+      "Temporal replay/cancel/rollback matrix",
+      "Astro 12 fixtures x 3 breakpoints"
+    ]
+  }
+}

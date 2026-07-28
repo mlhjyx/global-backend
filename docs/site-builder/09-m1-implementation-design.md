@@ -153,6 +153,8 @@
 | M1-f ✅ | P4 质量环：确定性 QA/SEO/a11y/genericness + Playwright/Lighthouse + 三断点冻结证据；aesthetic capability-gate；仅服务端闭合 `optionId` 修复，round 0 后≤3 次；通过才 materialize Release v3 并 pointer CAS                                                                                                                                                                                                   | quality service、closed repair、release v3、workflow patch             | 合同负例、quality/repair/release specs、workflow loop、真 replay/Temporal 注入矩阵                         |
 | M1-g    | 收尾：`verify-site-builder-m1.mts`（§8）、执行完整 **Bootstrap 6 fixture** 并按门扩成 **12 个视觉 fixture**、eval 硬门基线（factSheet 零虚构/主体保护占位）、OpenAPI 重导出、状态文档更新；2 fixture 只可作日常 smoke，不算阶段覆盖                                                                                                                                                                          | scripts、test/fixtures/golden-companies、contracts                     | verify 脚本 + 6→12 分阶段评测报告=验收                                                                     |
 
+> **2026-07-29 M1-g 当前交付分支**：统一入口、6→12、36 张三断点、事实零虚构、10 站 genericness 与无模型真机链已完成；现役产品路由在 P4 前被未知结算门正确阻断，因此阶段状态仍是进行中。不得通过放宽 paid gate、切模型或伪造 deterministic success 收口；先按 [runtime decision card](../evidence/site-builder/m1-g-runtime-decision-card.md) 恢复 currentRoute 健康后复跑。
+
 ## 8. 真机验证计划（verify-site-builder-m1.mts，真库真容器真网关，无 sandbox）
 
 1. **is_superuser guard**（RLS 证明前置，获客侧先例）。

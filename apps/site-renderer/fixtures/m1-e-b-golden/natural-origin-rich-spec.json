@@ -44,11 +44,11 @@
               },
               "stats": [
                 {
-                  "value": "24h",
+                  "value": "—",
                   "labelKey": "home.natural-home-seasonal-hero.stats.0.label"
                 },
                 {
-                  "value": "12",
+                  "value": "—",
                   "labelKey": "home.natural-home-seasonal-hero.stats.1.label"
                 }
               ],
@@ -220,15 +220,15 @@
               "introKey": "detail.natural-provenance-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "detail.natural-provenance-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "detail.natural-provenance-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "detail.natural-provenance-trust.portraitname",
               "portraitRoleKey": "detail.natural-provenance-trust.portraitrole",
               "variant": "technical-grid"

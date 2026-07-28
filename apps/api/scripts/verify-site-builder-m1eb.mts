@@ -19,12 +19,17 @@ import {
   SiteReleaseService,
   resolveSiteRendererBuildIdentity,
 } from "../src/site-builder/site-release.service";
+import { ClosedRepairService } from "../src/site-builder/quality/closed-repair.service";
+import { DeterministicQualityService } from "../src/site-builder/quality/deterministic-quality.service";
+import { StorageQualityArtifactSink } from "../src/site-builder/quality/quality-artifact-sink";
+import { QualityCandidateService } from "../src/site-builder/quality/quality-candidate.service";
 import { StorageService } from "../src/site-builder/storage.service";
 import { createSiteBuilderActivities } from "../src/temporal/site-builder.activities";
 import { previewRoot } from "../src/temporal/site-builder.activities";
 
 function guard(): void {
   assert.equal(process.env.ALLOW_DEV_DB_VERIFIER, "true");
+  assert.equal(process.env.ALLOW_M1_G_CURRENT_ROUTE_MODEL_CALLS, "true");
   assert.notEqual(process.env.NODE_ENV, "production");
   for (const name of ["DATABASE_URL", "APP_DATABASE_URL"]) {
     const url = new URL(process.env[name] ?? "");
@@ -110,7 +115,10 @@ try {
     workspaceId,
     siteId,
     buildRunId,
-    capMicrousd: 50_000_000n,
+    // Four structured tasks reserve primary/fallback and one repair before
+    // dispatch. Unused reservation is released; actual settlement remains
+    // usage-based. This is a per-build stop, not an expected charge.
+    capMicrousd: 5_000_000n,
   });
   const registry = new ModelProviderRegistry();
   const provider = buildGatewayProvider();
@@ -137,6 +145,13 @@ try {
   const releaseService = new SiteReleaseService(app, storage, {
     buildIdentity: rendererBuildIdentity,
   });
+  const closedRepairService = new ClosedRepairService();
+  const qualityCandidateService = new QualityCandidateService(
+    app,
+    new DeterministicQualityService(new StorageQualityArtifactSink(storage)),
+    closedRepairService,
+    releaseService,
+  );
   nativeConnection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? "127.0.0.1:7233",
   });
@@ -152,6 +167,8 @@ try {
       costLedger,
       gateway: meteredGateway,
       releaseService,
+      qualityCandidateService,
+      closedRepairService,
       storage,
       rendererBuildIdentity,
       imagePipeline: {
@@ -222,6 +239,9 @@ try {
       `${artifactPrefix}/attempts/${result.version.release!.producerToken}/release-manifest.json`,
     ),
     "ReleaseManifest v2 is absent from MinIO",
+  );
+  console.log(
+    `M1-g current-route cost summary: ${JSON.stringify(result.run.costSummary)}`,
   );
   const isolated = await app.withWorkspace(otherWorkspaceId, (tx) =>
     tx.siteVersion.count({ where: { siteId } }),

@@ -116,7 +116,7 @@ export function neutralCopySlotContent(key: string, locale: string): string {
   if (/^nav\.products$/.test(key)) return german ? "Lösungen" : "Solutions";
   if (/^nav\.contact$/.test(key)) return german ? "Kontakt" : "Contact";
   if (
-    /\.(?:primary|secondary)?cta(?:\.label)?$|\.submit$|(?:all|add)label$/.test(
+    /(?:^|\.)(?:primary|secondary)?cta(?:\.label)?$|(?:^|\.)submit$|(?:all|add)label$/.test(
       key,
     )
   )

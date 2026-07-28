@@ -164,6 +164,35 @@ function stableSlotKey(
   return `${pageKey}.${sectionId}.${semantic}`.toLowerCase();
 }
 
+const CLAIM_BACKED_ARRAY_FIELDS = new Set(['badges', 'clients']);
+const CLAIM_BACKED_VALUE_CONTAINERS = new Set([
+  'leftStats',
+  'stats',
+  'systems',
+]);
+
+function claimBackedLiteralReplacement(
+  key: string,
+  child: unknown,
+  path: readonly (string | number)[],
+): unknown | undefined {
+  if (CLAIM_BACKED_ARRAY_FIELDS.has(key) && Array.isArray(child)) {
+    // Qualified fixtures demonstrate layout only. Literal badges/client names
+    // are tenant facts and must not survive controlled assembly without Claim
+    // references. LedgerStats requires one client entry, hence the neutral
+    // non-claim placeholder rather than an empty array.
+    return key === 'clients' ? ['—'] : [];
+  }
+  const container = path.at(-2);
+  if (
+    typeof container === 'string' &&
+    CLAIM_BACKED_VALUE_CONTAINERS.has(container)
+  ) {
+    if (key === 'value' || key === 'metric' || key === 'suffix') return '—';
+  }
+  return undefined;
+}
+
 function controlledClone(
   value: unknown,
   input: BuildAdapterPropsInput,
@@ -178,7 +207,10 @@ function controlledClone(
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
     const fieldPath = [...path, key];
-    if (key === 'id') {
+    const factReplacement = claimBackedLiteralReplacement(key, child, path);
+    if (factReplacement !== undefined) {
+      result[key] = factReplacement;
+    } else if (key === 'id') {
       result[key] =
         `${input.section.componentType}-${input.pageKey}-${input.section.id}`;
     } else if (key === 'variant') {

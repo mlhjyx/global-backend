@@ -37,8 +37,8 @@
               "leftSubKey": "home.precision-home-hero.leftsub",
               "leftStats": [
                 {
-                  "value": "24",
-                  "suffix": "h",
+                  "value": "—",
+                  "suffix": "—",
                   "labelKey": "home.precision-home-hero.leftstats.0.label"
                 }
               ],
@@ -70,16 +70,16 @@
                   "label": "Hydraulic",
                   "titleKey": "home.precision-home-systems.systems.0.title",
                   "descKey": "home.precision-home-systems.systems.0.desc",
-                  "metric": "16",
-                  "suffix": "bar",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "home.precision-home-systems.systems.0.metriclabel"
                 },
                 {
                   "label": "Materials",
                   "titleKey": "home.precision-home-systems.systems.1.title",
                   "descKey": "home.precision-home-systems.systems.1.desc",
-                  "metric": "320",
-                  "suffix": "°C",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "home.precision-home-systems.systems.1.metriclabel"
                 }
               ],
@@ -92,15 +92,15 @@
               "id": "StatsBand-home-precision-home-stats",
               "stats": [
                 {
-                  "value": "20+",
+                  "value": "—",
                   "labelKey": "home.precision-home-stats.stats.0.label"
                 },
                 {
-                  "value": "40+",
+                  "value": "—",
                   "labelKey": "home.precision-home-stats.stats.1.label"
                 },
                 {
-                  "value": "ISO 9001",
+                  "value": "—",
                   "labelKey": "home.precision-home-stats.stats.2.label"
                 }
               ],

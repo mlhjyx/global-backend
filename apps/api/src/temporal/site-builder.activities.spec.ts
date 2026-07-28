@@ -1730,7 +1730,7 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     expect(tx.siteRelease.updateMany).not.toHaveBeenCalled();
     expect(tx.siteVersion.updateMany).not.toHaveBeenCalled();
     expect(deletePrefix).toHaveBeenCalledWith(
-      "sites/site-1/quality-candidates/run-1",
+      "sites/site-1/quality-candidates/run-1/",
     );
   });
 

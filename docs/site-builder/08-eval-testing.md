@@ -75,6 +75,8 @@ final-code v4 均绑定 new-api 镜像 digest、起止源码 hash 与脱敏失�
 
 Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包装机械、食品原料/创新材料等（v3.2 §27.2）。每个 Family **必须在层级、hero 构图、section rhythm、卡片语法、密度上可区分，不能只换颜色**（呼应审美 rubric 的原创性维与通用感检测）。
 
+**2026-07-29 当前交付分支实况**：12 个 SiteSpec 与 36 张三断点截图已由统一 verifier 逐字节复核；固定 10 站样本包含 9 种首页结构，最高完全重复 2/10，卡片 section 峰值 20%，空 Claim 下的模板认证、客户名、指标、承诺与徽章已全部中性化。该结果只证明确定性视觉/事实基线，不是独立审美 Gold。现役产品路由整链仍因未知结算在 P4 前 fail-closed，详见 [runtime decision card](../evidence/site-builder/m1-g-runtime-decision-card.md)，故 M1-g 尚未完成。
+
 ### 1.3 成熟系统集：逐步达 30+（M2 / 真实流量后，含对抗样本）
 
 规模化验收**不当作零流量硬前置**（v3.2 §27.3）：

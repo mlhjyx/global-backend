@@ -11,7 +11,6 @@ import {
   type AssetRefV1_1,
   type DesignCatalogV2,
   type DesignCatalogV2Draft,
-  type SiteSpecComponentType,
 } from '@global/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -285,6 +284,36 @@ describe('M1-e-B controlled assembly', () => {
     expect(serialized).not.toContain('../../escape');
     expect(result.spec.specVersion).toBe('1.1.0');
     expect(result.spec.site.familyId).toBe(designBrief.familyId);
+  });
+
+  it('neutralizes fixture-only facts before controlled assembly', async () => {
+    const { catalog, designBrief, copyBundleSet, assets, assetUrls } =
+      await fixture();
+    const result = await new ControlledAssemblyService({
+      generate: async () => ({ sections: [] }),
+    }).assemble({
+      brief: designBrief,
+      catalog,
+      copyBundleSet,
+      templates,
+      assets,
+      assetUrls,
+      claimSnapshot: snapshot,
+      siteName: 'B5 Test',
+    });
+    const serialized = JSON.stringify(result.spec);
+    for (const unsupportedFact of [
+      'ISO 9001',
+      'Northworks',
+      'Delta Systems',
+      'Documented review',
+      'Material traceability',
+      '320',
+      '24/7',
+    ]) {
+      expect(serialized).not.toContain(unsupportedFact);
+    }
+    expect(serialized).toContain('"value":"—"');
   });
 
   it('rejects a server template that violates the qualified props shape', () => {

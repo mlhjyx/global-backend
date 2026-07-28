@@ -6,6 +6,11 @@ import { tmpdir } from "node:os";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { SiteBuildCostLedger } from "../src/site-builder/site-build-cost-ledger";
+import {
+  SiteReleaseService,
+  resolveSiteRendererBuildIdentity,
+} from "../src/site-builder/site-release.service";
+import { StorageService } from "../src/site-builder/storage.service";
 import { createSiteBuilderActivities } from "../src/temporal/site-builder.activities";
 
 const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -16,11 +21,14 @@ const companyProfileId = randomUUID();
 const siteId = randomUUID();
 const buildRunId = randomUUID();
 const previewDir = await mkdtemp(`${tmpdir()}/m1d-preview-`);
+const storage = new StorageService();
+let artifactPrefix: string | undefined;
 
 async function main(): Promise<void> {
   assert(process.env.DATABASE_URL, "DATABASE_URL is required");
   assert(process.env.APP_DATABASE_URL, "APP_DATABASE_URL is required");
   await Promise.all([owner.$connect(), app.$connect()]);
+  await storage.onModuleInit();
   process.env.PREVIEW_DIR = previewDir;
   try {
     await owner.workspace.createMany({
@@ -80,6 +88,11 @@ async function main(): Promise<void> {
       prisma: app,
       costLedger,
       gateway: gateway as never,
+      releaseService: new SiteReleaseService(app, storage, {
+        buildIdentity: resolveSiteRendererBuildIdentity(),
+      }),
+      storage,
+      rendererBuildIdentity: resolveSiteRendererBuildIdentity(),
     });
     const baseInput = {
       workspaceId,
@@ -89,6 +102,7 @@ async function main(): Promise<void> {
         scope: "site" as const,
         options: { locales: ["en", "de-DE"] },
       },
+      progressV1: true,
     };
     const copy = await activities.generateCopyBundles(baseInput);
     assert.deepEqual(Object.keys(copy.set.bundles), ["en", "de-DE"]);
@@ -133,10 +147,28 @@ async function main(): Promise<void> {
     ]);
     assert.equal(own.site.activeVersionId, build.versionId);
     assert.equal(isolated, 0);
+    artifactPrefix = await app.withWorkspace(workspaceId, async (tx) => {
+      const release = await tx.siteRelease.findUnique({
+        where: { siteVersionId: build.versionId },
+        select: { artifactPrefix: true, status: true },
+      });
+      assert.equal(release?.status, "ready");
+      return release?.artifactPrefix;
+    });
     console.log(
-      "M1-d verify OK: empty immutable snapshot, neutral en/de-DE bundles, Astro build, activation recheck, and RLS isolation",
+      "M1-d verify OK: empty immutable snapshot, neutral en/de-DE bundles, Astro build, Release v1 activation recheck, and RLS isolation",
     );
   } finally {
+    if (artifactPrefix) {
+      await storage.deletePrefix(`${artifactPrefix}/`).catch(() => undefined);
+    }
+    await owner.site
+      .update({
+        where: { id: siteId },
+        data: { activeVersionId: null },
+      })
+      .catch(() => undefined);
+    await owner.siteRelease.deleteMany({ where: { siteId } });
     await owner.site.deleteMany({ where: { id: siteId } });
     await owner.companyProfile.deleteMany({ where: { id: companyProfileId } });
     await owner.workspace.deleteMany({

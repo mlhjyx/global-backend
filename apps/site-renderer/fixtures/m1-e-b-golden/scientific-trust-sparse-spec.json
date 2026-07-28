@@ -65,16 +65,16 @@
                   "label": "Hydraulic",
                   "titleKey": "home.scientific-home-system-technical.systems.0.title",
                   "descKey": "home.scientific-home-system-technical.systems.0.desc",
-                  "metric": "16",
-                  "suffix": "bar",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "home.scientific-home-system-technical.systems.0.metriclabel"
                 },
                 {
                   "label": "Materials",
                   "titleKey": "home.scientific-home-system-technical.systems.1.title",
                   "descKey": "home.scientific-home-system-technical.systems.1.desc",
-                  "metric": "320",
-                  "suffix": "°C",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "home.scientific-home-system-technical.systems.1.metriclabel"
                 }
               ],

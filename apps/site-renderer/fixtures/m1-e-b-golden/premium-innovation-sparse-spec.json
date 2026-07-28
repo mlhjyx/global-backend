@@ -189,16 +189,16 @@
                   "label": "Hydraulic",
                   "titleKey": "detail.premium-innovation-systems.systems.0.title",
                   "descKey": "detail.premium-innovation-systems.systems.0.desc",
-                  "metric": "16",
-                  "suffix": "bar",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "detail.premium-innovation-systems.systems.0.metriclabel"
                 },
                 {
                   "label": "Materials",
                   "titleKey": "detail.premium-innovation-systems.systems.1.title",
                   "descKey": "detail.premium-innovation-systems.systems.1.desc",
-                  "metric": "320",
-                  "suffix": "°C",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "detail.premium-innovation-systems.systems.1.metriclabel"
                 }
               ],

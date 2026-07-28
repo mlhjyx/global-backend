@@ -37,8 +37,8 @@
               "leftSubKey": "home.oem-home-process-hero.leftsub",
               "leftStats": [
                 {
-                  "value": "24",
-                  "suffix": "h",
+                  "value": "—",
+                  "suffix": "—",
                   "labelKey": "home.oem-home-process-hero.leftstats.0.label"
                 }
               ],
@@ -67,15 +67,15 @@
               "clientsLabelKey": "home.oem-home-process-stats.clientslabel",
               "stats": [
                 {
-                  "value": "24/7",
+                  "value": "—",
                   "labelKey": "home.oem-home-process-stats.stats.0.label"
                 },
                 {
-                  "value": "≤ 1 hr",
+                  "value": "—",
                   "labelKey": "home.oem-home-process-stats.stats.1.label"
                 }
               ],
-              "clients": ["Northworks", "Delta Systems"],
+              "clients": ["—"],
               "variant": "technical-grid"
             }
           },
@@ -92,16 +92,16 @@
                   "label": "Hydraulic",
                   "titleKey": "home.oem-home-process-systems.systems.0.title",
                   "descKey": "home.oem-home-process-systems.systems.0.desc",
-                  "metric": "16",
-                  "suffix": "bar",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "home.oem-home-process-systems.systems.0.metriclabel"
                 },
                 {
                   "label": "Materials",
                   "titleKey": "home.oem-home-process-systems.systems.1.title",
                   "descKey": "home.oem-home-process-systems.systems.1.desc",
-                  "metric": "320",
-                  "suffix": "°C",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "home.oem-home-process-systems.systems.1.metriclabel"
                 }
               ],

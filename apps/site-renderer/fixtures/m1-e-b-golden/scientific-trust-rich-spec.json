@@ -56,15 +56,15 @@
               "introKey": "home.scientific-home-evidence-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "home.scientific-home-evidence-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "home.scientific-home-evidence-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "home.scientific-home-evidence-trust.portraitname",
               "portraitRoleKey": "home.scientific-home-evidence-trust.portraitrole",
               "variant": "technical-grid"
@@ -188,15 +188,15 @@
               "introKey": "detail.scientific-validation-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "detail.scientific-validation-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "detail.scientific-validation-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "detail.scientific-validation-trust.portraitname",
               "portraitRoleKey": "detail.scientific-validation-trust.portraitrole",
               "variant": "technical-grid"

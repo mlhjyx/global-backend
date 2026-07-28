@@ -446,7 +446,7 @@ export async function assertRenderedOutboundDomains(
             !approved.has(parsed.hostname.toLowerCase()))
         ) {
           throw new Error(
-            `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname}`,
+            `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname} in ${path.relative(root, filePath)} (${raw})`,
           );
         }
       }

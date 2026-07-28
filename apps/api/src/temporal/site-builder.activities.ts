@@ -3843,7 +3843,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       budgetLedger.close(buildRunId, { force: true });
       if (input.qualityV1 && storage) {
         await storage
-          .deletePrefix(qualityCandidatePrefix(siteId, buildRunId))
+          .deletePrefix(`${qualityCandidatePrefix(siteId, buildRunId)}/`)
           .catch((cleanupError) =>
             log.warn(
               `quality candidate cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
@@ -3991,7 +3991,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         }
         if (input.qualityV1 && storage) {
           await storage
-            .deletePrefix(qualityCandidatePrefix(siteId, buildRunId))
+            .deletePrefix(`${qualityCandidatePrefix(siteId, buildRunId)}/`)
             .catch((cleanupError) =>
               log.warn(
                 `quality evidence cleanup failed for run ${buildRunId}: ${String(cleanupError)}`,
