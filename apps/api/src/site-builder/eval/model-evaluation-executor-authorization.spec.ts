@@ -400,6 +400,54 @@ describe("model evaluation executor authorization", () => {
     });
   });
 
+  it("settles a successful response parse failure from its preserved provider cost", async () => {
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(resolver.resolverId);
+    const wireClient = createCredentialBoundModelEvaluationWireClient({
+      credential: {
+        attestationId: costSafety.credential.attestationId,
+        snapshotSha256: costSafety.credential.snapshotSha256,
+        bearerTokenSha256: costSafety.credential.bearerTokenSha256,
+        gatewayOrigin: costSafety.credential.gatewayOrigin,
+        bearerToken: "fake-limited-evaluation-token",
+      },
+      baseUrl: "https://fake-model-evaluation.invalid/v1",
+      fetch: vi.fn(
+        async () =>
+          new Response("{not-json", {
+            status: 200,
+            headers: { "x-provider-cost-cents": "7" },
+          }),
+      ) as typeof fetch,
+    });
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient,
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate: plan.candidates[0],
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      resultClass: "capability_unavailable",
+      costSettlement: {
+        state: "settled",
+        amountCents: 7,
+        basis: `${"provider_reported"}@${resolver.resolverId}`,
+      },
+    });
+  });
+
   it("rejects an oversized chunked response before JSON parsing", async () => {
     const oversizedChunk = new Uint8Array(
       MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES + 1,
@@ -687,33 +735,17 @@ describe("model evaluation executor authorization", () => {
           directory,
         });
       const wire = vi.fn();
-      const executor = createRawModelEvaluationProtocolExecutor({
-        wireClient: bindFakeModelEvaluationWireCredential(
-          fakeWireClient(wire),
+      expect(() =>
+        createRawModelEvaluationProtocolExecutor({
+          wireClient: bindFakeModelEvaluationWireCredential(
+            fakeWireClient(wire),
+            costSafety,
+          ),
+          authorizationLedger,
+          settlementResolver: resolver,
           costSafety,
-        ),
-        authorizationLedger,
-        settlementResolver: resolver,
-        costSafety,
-      });
-
-      const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-      await expect(
-        runTaskEvaluationAttempt({
-          plan,
-          candidate: plan.candidates[0],
-          fixtureId: "auto-parts-rich",
-          attempt: 1,
-          campaignBudget: new ModelEvaluationBudgetGuard(100),
-          execute: executor.execute,
         }),
-      ).resolves.toMatchObject({
-        resultClass: "capability_unavailable",
-        costSettlement: {
-          state: "unknown",
-          reason: "invalid_settlement",
-        },
-      });
+      ).toThrow("trusted cost safety must match");
       expect(wire).not.toHaveBeenCalled();
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -754,6 +786,56 @@ describe("model evaluation executor authorization", () => {
       expect(
         (await readdir(directory)).filter((entry) => entry.endsWith(".jsonl")),
       ).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a rewritten marker claim history instead of adopting it as authoritative", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-rewritten-marker-spec-"),
+    );
+    const ledger = createFileBackedModelEvaluationAuthorizationLedger({
+      ledgerId: "rewritten-marker-spec-ledger/durable-v1",
+      directory,
+    });
+    const firstAuthorizationId =
+      "rewritten-marker-spec/authorization-first-v1";
+    const secondAuthorizationId =
+      "rewritten-marker-spec/authorization-second-v1";
+    const claim = (authorizationId: string) => ({
+      authorizationId,
+      executorClaimId: `rewritten-marker-spec/${authorizationId.split("/").at(-1)}`,
+      campaignBudgetCents: 100,
+      maxDispatchExecutions: 1,
+      maxWireCalls: 1,
+    });
+    const markerPath = join(
+      directory,
+      ".site-builder-model-evaluation-ledger-id",
+    );
+    try {
+      expect(ledger.claim(claim(firstAuthorizationId))).toBe(true);
+      const originalDigest = createHash("sha256")
+        .update(firstAuthorizationId)
+        .digest("hex");
+      const replacementDigest = createHash("sha256")
+        .update(secondAuthorizationId)
+        .digest("hex");
+      const marker = await readFile(markerPath, "utf8");
+      expect(marker).toContain(`claim:${originalDigest}\n`);
+      await writeFile(
+        markerPath,
+        marker.replace(
+          `claim:${originalDigest}\n`,
+          `claim:${replacementDigest}\n`,
+        ),
+        { flag: "w", mode: 0o600 },
+      );
+
+      expect(() => ledger.claim(claim(secondAuthorizationId))).toThrow(
+        "append-only claim history changed",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

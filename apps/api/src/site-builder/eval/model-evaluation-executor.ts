@@ -249,6 +249,21 @@ class ModelEvaluationWireHttpError extends Error {
   }
 }
 
+class ModelEvaluationWireResponseBodyError extends Error {
+  readonly providerReportedCostCents?: number;
+
+  constructor(providerReportedCostCents: number | undefined, cause: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : "evaluation transport response body is invalid",
+      { cause },
+    );
+    this.name = "ModelEvaluationWireResponseBodyError";
+    this.providerReportedCostCents = providerReportedCostCents;
+  }
+}
+
 export function createCredentialBoundModelEvaluationWireClient(options: {
   credential: ModelEvaluationCredentialHandle;
   baseUrl: string;
@@ -374,8 +389,17 @@ export function createCredentialBoundModelEvaluationWireClient(options: {
         validProviderReportedCostCents,
       );
     }
+    let responseBody: unknown;
+    try {
+      responseBody = await readBoundedJsonBody(response);
+    } catch (error) {
+      throw new ModelEvaluationWireResponseBodyError(
+        validProviderReportedCostCents,
+        error,
+      );
+    }
     return {
-      body: await readBoundedJsonBody(response),
+      body: responseBody,
       ...(validProviderReportedCostCents !== undefined
         ? { providerReportedCostCents: validProviderReportedCostCents }
         : {}),
@@ -551,6 +575,7 @@ function linuxMountGenerationIdentity(directory: string): string {
 function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
   directory: string;
   sha256: string;
+  baseSha256: string;
   markerPath: string;
   markerDevice: bigint;
   markerInode: bigint;
@@ -629,14 +654,16 @@ function resolveLedgerDirectoryIdentity(directory: string): Readonly<{
     const claimedAuthorizationDigests = claimLines.map((line) =>
       line.slice("claim:".length),
     );
+    const baseIdentity = `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${markerStats.dev.toString()}\0${markerStats.ino.toString()}\0${markerId}\0${mountGenerationIdentity}`;
+    const baseSha256 = createHash("sha256").update(baseIdentity).digest("hex");
     return Object.freeze({
       directory: realDirectory,
       sha256: createHash("sha256")
-        .update(
-          `${realDirectory}\0${stats.dev.toString()}\0${stats.ino.toString()}\0${markerStats.dev.toString()}\0${markerStats.ino.toString()}\0${markerId}`,
-        )
-        .update(`\0${mountGenerationIdentity}`)
+        .update(baseIdentity)
+        .update("\0")
+        .update(marker)
         .digest("hex"),
+      baseSha256,
       markerPath,
       markerDevice: markerStats.dev,
       markerInode: markerStats.ino,
@@ -747,15 +774,28 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     );
   }
   const directoryIdentity = resolveLedgerDirectoryIdentity(options.directory);
-  const assertDirectoryIdentity = (): void => {
+  let observedClaimHistory = [
+    ...directoryIdentity.claimedAuthorizationDigests,
+  ];
+  const assertDirectoryIdentity = () => {
+    const currentIdentity = resolveLedgerDirectoryIdentity(
+      directoryIdentity.directory,
+    );
     if (
-      resolveLedgerDirectoryIdentity(directoryIdentity.directory).sha256 !==
-      directoryIdentity.sha256
+      currentIdentity.baseSha256 !== directoryIdentity.baseSha256 ||
+      currentIdentity.claimedAuthorizationDigests.length <
+        observedClaimHistory.length ||
+      observedClaimHistory.some(
+        (digest, index) =>
+          currentIdentity.claimedAuthorizationDigests[index] !== digest,
+      )
     ) {
       throw new Error(
-        "evaluation authorization ledger directory identity changed",
+        "evaluation authorization ledger directory identity or append-only claim history changed",
       );
     }
+    observedClaimHistory = [...currentIdentity.claimedAuthorizationDigests];
+    return currentIdentity;
   };
   type LedgerState = {
     claimId: string;
@@ -971,14 +1011,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     const authorizationDigest = createHash("sha256")
       .update(authorizationId)
       .digest("hex");
-    const currentIdentity = resolveLedgerDirectoryIdentity(
-      directoryIdentity.directory,
-    );
-    if (currentIdentity.sha256 !== directoryIdentity.sha256) {
-      throw new Error(
-        "evaluation authorization ledger directory identity changed",
-      );
-    }
+    const currentIdentity = assertDirectoryIdentity();
     if (
       currentIdentity.claimedAuthorizationDigests.includes(authorizationDigest)
     ) {
@@ -1017,6 +1050,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
           "evaluation authorization ledger directory marker changed during append",
         );
       }
+      observedClaimHistory.push(authorizationDigest);
     } finally {
       closeSync(descriptor);
     }
@@ -2353,7 +2387,8 @@ export function createModelEvaluationProtocolExecutor(deps: {
         usage.callCount += 1;
         usage.complete = false;
         providerReportedCostCents.push(
-          error instanceof ModelEvaluationWireHttpError
+          error instanceof ModelEvaluationWireHttpError ||
+            error instanceof ModelEvaluationWireResponseBodyError
             ? responseCost(error.providerReportedCostCents)
             : null,
         );
