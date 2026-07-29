@@ -1,4 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,13 +12,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SAFE_SNAPSHOT_VERSION,
+  SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT,
+  SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION,
   buildCurrentRouteRecoveryReport,
+  currentRouteRecoveryDispatchSha256,
   currentRouteRecoveryRequiredAliases,
+  readCurrentRouteRecoveryRepositoryJson,
   writeCurrentRouteRecoveryReportCreateOnly,
+  type CurrentRouteRecoveryOpenOxSourceBundle,
   type CurrentRouteRecoverySafeSnapshot,
 } from './current-route-recovery';
 
 const temporaryDirectories: string[] = [];
+const SOURCE_BUNDLE_SHA256 = 'a'.repeat(64);
 
 afterEach(async () => {
   await Promise.all(
@@ -27,7 +39,9 @@ function snapshot(): CurrentRouteRecoverySafeSnapshot {
   return {
     schemaVersion: SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SAFE_SNAPSHOT_VERSION,
     capturedAt: '2026-07-29T12:53:41.818Z',
-    routeBaselineCommitSha: 'e'.repeat(40),
+    routeBaselineCommitSha:
+      SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT,
+    routeDispatchSha256: currentRouteRecoveryDispatchSha256(),
     gateway: {
       source: 'local_new_api_read_only_sqlite',
       channels: aliases.map((alias, index) => ({
@@ -51,36 +65,85 @@ function snapshot(): CurrentRouteRecoverySafeSnapshot {
       catalogEndpoint: 'https://openox.tech/api/public/pricing-catalog',
       capturedAt: '2026-07-29T12:53:41.818Z',
       httpStatus: 200,
-      responseSha256: 'a'.repeat(64),
+      sourceBundlePath: 'docs/evidence/openox.json',
+      sourceBundleSha256: SOURCE_BUNDLE_SHA256,
+      sourceBundleCommitSha: 'e'.repeat(40),
       modelRows: aliases.length,
-      groupRows: 4,
+      groupRows: 6,
       runtimeFetch: 'http_200',
-      models: aliases.map((alias) => ({
-        alias,
-        productLine: 'test',
-        selectedGroup: 'test',
-        currency: 'USD',
-        pricingUnit: 'native_currency_per_million_tokens',
-        groupMultiplier: '1',
-        inputRate: '1',
-        outputRate: '2',
-        cacheReadRate: '0',
-        cacheWriteRate: '0',
-        effectiveInputRate: '1',
-        effectiveOutputRate: '2',
-        effectiveCacheReadRate: '0',
-        effectiveCacheWriteRate: '0',
-        status: 'enabled',
-        updatedAt: '2026-07-29T12:49:39.000Z',
-        modelBillingMultiplier: null,
-      })),
     },
   };
 }
 
+function productLine(alias: string): string {
+  if (alias.startsWith('gpt-')) return 'gpt';
+  if (alias.startsWith('claude-')) return 'claude';
+  if (alias.startsWith('deepseek-')) return 'deepseek';
+  if (alias.startsWith('doubao-')) return 'doubao';
+  if (alias.startsWith('minimax-')) return 'minimax';
+  return 'glm';
+}
+
+function groupName(alias: string): string {
+  if (alias === 'gpt-5.6-terra') return 'gpt-unified';
+  if (alias === 'claude-sonnet-5') return 'special';
+  return productLine(alias);
+}
+
+function sourceBundle(): CurrentRouteRecoveryOpenOxSourceBundle {
+  const aliases = currentRouteRecoveryRequiredAliases();
+  const groups = [...new Set(aliases.map(groupName))].sort();
+  return {
+    schemaVersion: SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION,
+    authority: 'openox_model_marketplace',
+    catalogEndpoint: 'https://openox.tech/api/public/pricing-catalog',
+    capturedAt: '2026-07-29T12:53:41.818Z',
+    httpStatus: 200,
+    fullModelCount: aliases.length,
+    fullGroupCount: groups.length,
+    modelIds: aliases,
+    groupNames: groups,
+    catalog: {
+      success: true,
+      data: {
+        models: aliases.map((alias) => ({
+          model_id: alias,
+          product_line: productLine(alias),
+          input_rate: '1',
+          output_rate: '2',
+          cache_read_rate: '0',
+          cache_write_rate: '0',
+          group_rates:
+            alias === 'glm-5.2' ? { billing_multiplier: '1' } : null,
+          status: 'enabled',
+          updated_at: '2026-07-29T12:49:39.000Z',
+        })),
+        groups: groups.map((name) => ({
+          name,
+          product_line:
+            name === 'gpt-unified'
+              ? 'gpt'
+              : name === 'special'
+                ? 'claude'
+                : name,
+          rate_multiplier: '1',
+        })),
+      },
+    },
+  };
+}
+
+function build(
+  input = snapshot(),
+  catalog = sourceBundle(),
+  digest = SOURCE_BUNDLE_SHA256,
+) {
+  return buildCurrentRouteRecoveryReport(input, catalog, digest);
+}
+
 describe('current-route zero-model recovery preparation', () => {
   it('derives all seven tasks, fifteen dispatches and eight exact aliases from the registry', () => {
-    const report = buildCurrentRouteRecoveryReport(snapshot());
+    const report = build();
 
     expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(7);
     expect(report.dispatches).toHaveLength(15);
@@ -127,20 +190,32 @@ describe('current-route zero-model recovery preparation', () => {
       priority: 0,
       weight: 0,
     });
-    input.pricing.models = input.pricing.models.filter(
-      ({ alias }) =>
-        ![
-          'minimax-m3',
-          'deepseek-v4-flash',
-          'doubao-seed-2.0-pro',
-          'doubao-seed-2.0-lite',
-        ].includes(alias),
+    const catalog = sourceBundle();
+    const missing = [
+      'minimax-m3',
+      'deepseek-v4-flash',
+      'doubao-seed-2.0-pro',
+      'doubao-seed-2.0-lite',
+    ];
+    catalog.modelIds = catalog.modelIds.filter(
+      (alias) => !missing.includes(alias),
     );
+    catalog.fullModelCount = catalog.modelIds.length;
+    catalog.catalog.data!.models = (
+      catalog.catalog.data!.models as Array<{ model_id: string }>
+    ).filter(({ model_id }) => !missing.includes(model_id));
+    const selectedGroups = [
+      ...new Set(catalog.modelIds.map(groupName)),
+    ];
+    catalog.catalog.data!.groups = (
+      catalog.catalog.data!.groups as Array<{ name: string }>
+    ).filter(({ name }) => selectedGroups.includes(name));
+    input.pricing.modelRows = catalog.fullModelCount;
     input.credential.unlimitedQuota = true;
     input.credential.modelLimitsEnabled = false;
     input.credential.modelAllowlist = [];
 
-    const report = buildCurrentRouteRecoveryReport(input);
+    const report = build(input, catalog);
 
     expect(report.status).toBe('BLOCKED_CURRENT_ROUTE_RECOVERY');
     expect(report.blockers).toEqual([
@@ -178,7 +253,7 @@ describe('current-route zero-model recovery preparation', () => {
     const previous = process.env.SITE_BUILDER_MODEL_COPY;
     process.env.SITE_BUILDER_MODEL_COPY = 'unreviewed-alias';
     try {
-      const report = buildCurrentRouteRecoveryReport(snapshot());
+      const report = build();
       expect(report.dispatches.some(({ alias }) => alias === 'unreviewed-alias')).toBe(
         false,
       );
@@ -188,17 +263,63 @@ describe('current-route zero-model recovery preparation', () => {
     }
   });
 
+  it('binds the exact route baseline, dispatch digest and credential visibility', () => {
+    const wrongCommit = snapshot() as CurrentRouteRecoverySafeSnapshot & {
+      routeBaselineCommitSha: string;
+    };
+    wrongCommit.routeBaselineCommitSha = 'e'.repeat(40);
+    expect(() => build(wrongCommit)).toThrow(
+      'route baseline commit or dispatch digest is not frozen',
+    );
+
+    const wrongDigest = snapshot();
+    wrongDigest.routeDispatchSha256 = 'b'.repeat(64);
+    expect(() => build(wrongDigest)).toThrow(
+      'route baseline commit or dispatch digest is not frozen',
+    );
+
+    const broadVisibility = snapshot();
+    broadVisibility.credential.visibleModelCount += 1;
+    expect(build(broadVisibility).credential.status).toBe('not_finite_exact');
+  });
+
+  it('recomputes effective OpenOx prices from the bound source bundle', () => {
+    const catalog = sourceBundle();
+    const special = (
+      catalog.catalog.data!.groups as Array<{
+        name: string;
+        rate_multiplier: string;
+      }>
+    ).find(({ name }) => name === 'special')!;
+    special.rate_multiplier = '1.26';
+
+    const report = build(snapshot(), catalog);
+    expect(
+      report.aliases.find(({ alias }) => alias === 'claude-sonnet-5')
+        ?.openOxPricing,
+    ).toMatchObject({
+      groupMultiplier: '1.26',
+      inputRate: '1',
+      effectiveInputRate: '1.26',
+      outputRate: '2',
+      effectiveOutputRate: '2.52',
+    });
+    expect(() => build(snapshot(), catalog, 'b'.repeat(64))).toThrow(
+      'does not reproduce the safe snapshot',
+    );
+  });
+
   it('rejects secret-adjacent or undeclared snapshot fields', () => {
     const withSecret = {
       ...snapshot(),
       token: 'must never be admitted',
     };
-    expect(() => buildCurrentRouteRecoveryReport(withSecret)).toThrow(
+    expect(() => build(withSecret as never)).toThrow(
       'prohibited field token',
     );
 
     const extra = { ...snapshot(), responseContent: 'not admitted' };
-    expect(() => buildCurrentRouteRecoveryReport(extra)).toThrow(
+    expect(() => build(extra as never)).toThrow(
       'undeclared or missing fields',
     );
 
@@ -210,7 +331,7 @@ describe('current-route zero-model recovery preparation', () => {
       priority: 0,
       weight: 0,
     });
-    expect(() => buildCurrentRouteRecoveryReport(unrelated)).toThrow(
+    expect(() => build(unrelated)).toThrow(
       'outside the frozen current route',
     );
   });
@@ -232,7 +353,7 @@ describe('current-route zero-model recovery preparation', () => {
   it('writes the report once and refuses overwrite', async () => {
     const root = await mkdtemp(join(tmpdir(), 'current-route-recovery-'));
     temporaryDirectories.push(root);
-    const report = buildCurrentRouteRecoveryReport(snapshot());
+    const report = build();
 
     await writeCurrentRouteRecoveryReportCreateOnly(root, 'report.json', report);
     await expect(
@@ -241,5 +362,24 @@ describe('current-route zero-model recovery preparation', () => {
     expect(JSON.parse(await readFile(join(root, 'report.json'), 'utf8'))).toEqual(
       report,
     );
+  });
+
+  it('rejects input and output paths that traverse a directory symlink', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'current-route-root-'));
+    const outside = await mkdtemp(join(tmpdir(), 'current-route-outside-'));
+    temporaryDirectories.push(root, outside);
+    await writeFile(join(outside, 'source.json'), '{}\n', 'utf8');
+    await symlink(outside, join(root, 'linked'), 'dir');
+
+    await expect(
+      readCurrentRouteRecoveryRepositoryJson(root, 'linked/source.json'),
+    ).rejects.toThrow('must not traverse a symbolic link');
+    await expect(
+      writeCurrentRouteRecoveryReportCreateOnly(
+        root,
+        'linked/report.json',
+        build(),
+      ),
+    ).rejects.toThrow('must not traverse a symbolic link');
   });
 });

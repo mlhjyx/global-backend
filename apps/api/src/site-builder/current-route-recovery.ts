@@ -1,25 +1,34 @@
 import { createHash } from 'node:crypto';
-import { open } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { open, readFile, realpath } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
-import type { PaidModelProtocol } from '../model-gateway/paid-model-settlement';
+import type {
+  PaidModelProtocol,
+} from '../model-gateway/paid-model-settlement';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import {
   resolveTaskRoute,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
 } from './agents/task-routes';
-import { OPENOX_PRICING_AUTHORITY } from './site-builder-model-settlement';
+import {
+  OPENOX_PRICING_AUTHORITY,
+  settlementOpenOxPrice,
+  type OpenOxPricingCatalog,
+} from './site-builder-model-settlement';
 
 export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SAFE_SNAPSHOT_VERSION =
-  'site-builder-current-route-recovery-safe-snapshot/2026-07-29-v1' as const;
+  'site-builder-current-route-recovery-safe-snapshot/2026-07-29-v2' as const;
 export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_REPORT_VERSION =
-  'site-builder-current-route-recovery-report/2026-07-29-v1' as const;
+  'site-builder-current-route-recovery-report/2026-07-29-v2' as const;
+export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION =
+  'site-builder-current-route-openox-source-bundle/2026-07-29-v1' as const;
+export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT =
+  'e727bb141ad2c8c5fdd4379308ed85cfc7aefb86' as const;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 const ALIAS = /^[a-z0-9][a-z0-9._-]{1,127}$/;
-const DECIMAL = /^(0|[1-9]\d*)(\.\d+)?$/;
 const PROHIBITED_KEYS = new Set([
   'authorization',
   'apikey',
@@ -65,7 +74,8 @@ export interface CurrentRouteRecoveryPricingModelSnapshot {
 export interface CurrentRouteRecoverySafeSnapshot {
   schemaVersion: typeof SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SAFE_SNAPSHOT_VERSION;
   capturedAt: string;
-  routeBaselineCommitSha: string;
+  routeBaselineCommitSha: typeof SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT;
+  routeDispatchSha256: string;
   gateway: {
     source: 'local_new_api_read_only_sqlite';
     channels: CurrentRouteRecoveryChannelSnapshot[];
@@ -83,12 +93,26 @@ export interface CurrentRouteRecoverySafeSnapshot {
     catalogEndpoint: 'https://openox.tech/api/public/pricing-catalog';
     capturedAt: string;
     httpStatus: 200;
-    responseSha256: string;
+    sourceBundlePath: string;
+    sourceBundleSha256: string;
+    sourceBundleCommitSha: string;
     modelRows: number;
     groupRows: number;
     runtimeFetch: 'http_200';
-    models: CurrentRouteRecoveryPricingModelSnapshot[];
   };
+}
+
+export interface CurrentRouteRecoveryOpenOxSourceBundle {
+  schemaVersion: typeof SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION;
+  authority: typeof OPENOX_PRICING_AUTHORITY.provider;
+  catalogEndpoint: 'https://openox.tech/api/public/pricing-catalog';
+  capturedAt: string;
+  httpStatus: 200;
+  fullModelCount: number;
+  fullGroupCount: number;
+  modelIds: string[];
+  groupNames: string[];
+  catalog: OpenOxPricingCatalog;
 }
 
 export type CurrentRouteRecoveryBlocker =
@@ -109,8 +133,10 @@ export interface CurrentRouteRecoveryReport {
   source: {
     capturedAt: string;
     routeBaselineCommitSha: string;
+    routeDispatchSha256: string;
     safeSnapshotSha256: string;
-    openOxCatalogResponseSha256: string;
+    openOxSourceBundleSha256: string;
+    openOxSourceBundleCommitSha: string;
   };
   credential: {
     status: 'finite_exact' | 'not_finite_exact';
@@ -214,6 +240,12 @@ export function currentRouteRecoveryRequiredAliases(): string[] {
   return [...new Set(canonicalDispatches().map(({ alias }) => alias))].sort();
 }
 
+export function currentRouteRecoveryDispatchSha256(): string {
+  return createHash('sha256')
+    .update(canonicalJson(canonicalDispatches()))
+    .digest('hex');
+}
+
 function assertAliasList(value: unknown, role: string): asserts value is string[] {
   if (
     !Array.isArray(value) ||
@@ -234,6 +266,7 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
       'schemaVersion',
       'capturedAt',
       'routeBaselineCommitSha',
+      'routeDispatchSha256',
       'gateway',
       'credential',
       'pricing',
@@ -248,10 +281,11 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
   }
   iso(snapshot.capturedAt, 'capturedAt');
   if (
-    typeof snapshot.routeBaselineCommitSha !== 'string' ||
-    !COMMIT_SHA.test(snapshot.routeBaselineCommitSha)
+    snapshot.routeBaselineCommitSha !==
+      SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT ||
+    snapshot.routeDispatchSha256 !== currentRouteRecoveryDispatchSha256()
   ) {
-    throw new Error('routeBaselineCommitSha must be a 40-character commit SHA');
+    throw new Error('route baseline commit or dispatch digest is not frozen');
   }
 
   const gateway = object(snapshot.gateway, 'gateway');
@@ -320,11 +354,12 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
       'catalogEndpoint',
       'capturedAt',
       'httpStatus',
-      'responseSha256',
+      'sourceBundlePath',
+      'sourceBundleSha256',
+      'sourceBundleCommitSha',
       'modelRows',
       'groupRows',
       'runtimeFetch',
-      'models',
     ],
     'pricing',
   );
@@ -334,83 +369,20 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
       'https://openox.tech/api/public/pricing-catalog' ||
     pricing.httpStatus !== 200 ||
     pricing.runtimeFetch !== 'http_200' ||
-    typeof pricing.responseSha256 !== 'string' ||
-    !SHA256.test(pricing.responseSha256)
+    typeof pricing.sourceBundlePath !== 'string' ||
+    !pricing.sourceBundlePath.endsWith('.json') ||
+    pricing.sourceBundlePath.startsWith('/') ||
+    pricing.sourceBundlePath.split('/').includes('..') ||
+    typeof pricing.sourceBundleSha256 !== 'string' ||
+    !SHA256.test(pricing.sourceBundleSha256) ||
+    typeof pricing.sourceBundleCommitSha !== 'string' ||
+    !COMMIT_SHA.test(pricing.sourceBundleCommitSha)
   ) {
     throw new Error('pricing authority or capture evidence is invalid');
   }
   iso(pricing.capturedAt, 'pricing capturedAt');
   nonNegativeInteger(pricing.modelRows, 'pricing modelRows');
   nonNegativeInteger(pricing.groupRows, 'pricing groupRows');
-  if (!Array.isArray(pricing.models)) throw new Error('pricing models must be an array');
-  const pricingAliases = new Set<string>();
-  for (const raw of pricing.models) {
-    const model = object(raw, 'pricing model');
-    exactKeys(
-      model,
-      [
-        'alias',
-        'productLine',
-        'selectedGroup',
-        'currency',
-        'pricingUnit',
-        'groupMultiplier',
-        'inputRate',
-        'outputRate',
-        'cacheReadRate',
-        'cacheWriteRate',
-        'effectiveInputRate',
-        'effectiveOutputRate',
-        'effectiveCacheReadRate',
-        'effectiveCacheWriteRate',
-        'status',
-        'updatedAt',
-        'modelBillingMultiplier',
-      ],
-      'pricing model',
-    );
-    if (
-      typeof model.alias !== 'string' ||
-      !ALIAS.test(model.alias) ||
-      typeof model.productLine !== 'string' ||
-      !ALIAS.test(model.productLine) ||
-      typeof model.selectedGroup !== 'string' ||
-      model.selectedGroup.length === 0 ||
-      !['USD', 'CNY'].includes(model.currency as string) ||
-      model.pricingUnit !== 'native_currency_per_million_tokens' ||
-      model.status !== 'enabled'
-    ) {
-      throw new Error('pricing model identity is invalid');
-    }
-    if (!requiredAliases.has(model.alias)) {
-      throw new Error('pricing alias is outside the frozen current route');
-    }
-    for (const field of [
-      'inputRate',
-      'outputRate',
-      'cacheReadRate',
-      'cacheWriteRate',
-      'groupMultiplier',
-      'effectiveInputRate',
-      'effectiveOutputRate',
-      'effectiveCacheReadRate',
-      'effectiveCacheWriteRate',
-    ] as const) {
-      if (typeof model[field] !== 'string' || !DECIMAL.test(model[field])) {
-        throw new Error(`pricing model ${field} is invalid`);
-      }
-    }
-    if (
-      model.modelBillingMultiplier !== null &&
-      (typeof model.modelBillingMultiplier !== 'string' ||
-        !DECIMAL.test(model.modelBillingMultiplier))
-    ) {
-      throw new Error('pricing model billing multiplier is invalid');
-    }
-    iso(model.updatedAt, 'pricing model updatedAt');
-    if (pricingAliases.has(model.alias)) throw new Error('duplicate pricing alias');
-    pricingAliases.add(model.alias);
-  }
   return structuredClone(snapshot) as unknown as CurrentRouteRecoverySafeSnapshot;
 }
 
@@ -441,15 +413,231 @@ function canonicalJson(value: unknown): string {
   throw new Error('safe snapshot contains unsupported JSON value');
 }
 
+function selectedOpenOxGroup(alias: string): string {
+  if (alias === 'gpt-5.6-terra') return 'gpt-unified';
+  if (alias === 'claude-sonnet-5') return 'special';
+  if (alias.startsWith('deepseek-')) return 'deepseek';
+  if (alias.startsWith('doubao-')) return 'doubao';
+  if (alias.startsWith('minimax-')) return 'minimax';
+  if (alias.startsWith('glm-')) return 'glm';
+  throw new Error(`no frozen OpenOx group for ${alias}`);
+}
+
+function microunitsToDecimal(value: number): string {
+  const whole = Math.floor(value / 1_000_000);
+  const fraction = String(value % 1_000_000)
+    .padStart(6, '0')
+    .replace(/0+$/, '');
+  return fraction.length > 0 ? `${whole}.${fraction}` : String(whole);
+}
+
+function assertOpenOxSourceBundle(
+  input: unknown,
+): CurrentRouteRecoveryOpenOxSourceBundle {
+  assertNoSecretAdjacentKeys(input);
+  const bundle = object(input, 'OpenOx source bundle');
+  exactKeys(
+    bundle,
+    [
+      'schemaVersion',
+      'authority',
+      'catalogEndpoint',
+      'capturedAt',
+      'httpStatus',
+      'fullModelCount',
+      'fullGroupCount',
+      'modelIds',
+      'groupNames',
+      'catalog',
+    ],
+    'OpenOx source bundle',
+  );
+  if (
+    bundle.schemaVersion !==
+      SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION ||
+    bundle.authority !== OPENOX_PRICING_AUTHORITY.provider ||
+    bundle.catalogEndpoint !==
+      'https://openox.tech/api/public/pricing-catalog' ||
+    bundle.httpStatus !== 200
+  ) {
+    throw new Error('OpenOx source bundle identity is invalid');
+  }
+  iso(bundle.capturedAt, 'OpenOx source bundle capturedAt');
+  nonNegativeInteger(bundle.fullModelCount, 'OpenOx fullModelCount');
+  nonNegativeInteger(bundle.fullGroupCount, 'OpenOx fullGroupCount');
+  assertAliasList(bundle.modelIds, 'OpenOx modelIds');
+  if (
+    bundle.fullModelCount !== bundle.modelIds.length ||
+    !Array.isArray(bundle.groupNames) ||
+    bundle.groupNames.some(
+      (name) => typeof name !== 'string' || name.length === 0 || name.length > 128,
+    ) ||
+    new Set(bundle.groupNames).size !== bundle.groupNames.length ||
+    bundle.fullGroupCount !== bundle.groupNames.length
+  ) {
+    throw new Error('OpenOx full catalog identity sets are invalid');
+  }
+
+  const catalog = object(bundle.catalog, 'OpenOx catalog');
+  exactKeys(catalog, ['success', 'data'], 'OpenOx catalog');
+  if (catalog.success !== true) throw new Error('OpenOx catalog must succeed');
+  const data = object(catalog.data, 'OpenOx catalog data');
+  exactKeys(data, ['models', 'groups'], 'OpenOx catalog data');
+  if (!Array.isArray(data.models) || !Array.isArray(data.groups)) {
+    throw new Error('OpenOx catalog models and groups must be arrays');
+  }
+  const requiredAliases = currentRouteRecoveryRequiredAliases();
+  const expectedPublishedAliases = requiredAliases.filter((alias) =>
+    (bundle.modelIds as string[]).includes(alias),
+  );
+  const modelAliases: string[] = [];
+  for (const raw of data.models) {
+    const model = object(raw, 'OpenOx catalog model');
+    exactKeys(
+      model,
+      [
+        'model_id',
+        'product_line',
+        'input_rate',
+        'output_rate',
+        'cache_read_rate',
+        'cache_write_rate',
+        'group_rates',
+        'status',
+        'updated_at',
+      ],
+      'OpenOx catalog model',
+    );
+    if (
+      typeof model.model_id !== 'string' ||
+      !expectedPublishedAliases.includes(model.model_id) ||
+      typeof model.product_line !== 'string' ||
+      model.status !== 'enabled'
+    ) {
+      throw new Error('OpenOx selected model row is invalid');
+    }
+    iso(model.updated_at, 'OpenOx model updatedAt');
+    modelAliases.push(model.model_id);
+  }
+  if (
+    JSON.stringify([...modelAliases].sort()) !==
+    JSON.stringify(expectedPublishedAliases)
+  ) {
+    throw new Error('OpenOx selected model rows do not match the full model set');
+  }
+  const expectedGroups = [
+    ...new Set(expectedPublishedAliases.map(selectedOpenOxGroup)),
+  ].sort();
+  const selectedGroups: string[] = [];
+  for (const raw of data.groups) {
+    const group = object(raw, 'OpenOx catalog group');
+    exactKeys(
+      group,
+      ['name', 'product_line', 'rate_multiplier'],
+      'OpenOx catalog group',
+    );
+    if (
+      typeof group.name !== 'string' ||
+      !expectedGroups.includes(group.name) ||
+      !(bundle.groupNames as string[]).includes(group.name)
+    ) {
+      throw new Error('OpenOx selected group row is invalid');
+    }
+    selectedGroups.push(group.name);
+  }
+  if (
+    JSON.stringify([...selectedGroups].sort()) !== JSON.stringify(expectedGroups)
+  ) {
+    throw new Error('OpenOx selected groups do not match published aliases');
+  }
+  return structuredClone(
+    bundle,
+  ) as unknown as CurrentRouteRecoveryOpenOxSourceBundle;
+}
+
+function deriveOpenOxPricing(
+  sourceBundle: CurrentRouteRecoveryOpenOxSourceBundle,
+): CurrentRouteRecoveryPricingModelSnapshot[] {
+  return currentRouteRecoveryRequiredAliases().flatMap((alias) => {
+    if (!sourceBundle.modelIds.includes(alias)) return [];
+    const selectedGroup = selectedOpenOxGroup(alias);
+    const price = settlementOpenOxPrice(
+      sourceBundle.catalog,
+      alias,
+      selectedGroup,
+    );
+    if (!price) {
+      throw new Error(`OpenOx source bundle cannot price ${alias}`);
+    }
+    const source = price.source;
+    if (
+      typeof source.inputRate !== 'string' ||
+      typeof source.outputRate !== 'string' ||
+      typeof source.cacheReadRate !== 'string' ||
+      typeof source.cacheWriteRate !== 'string' ||
+      typeof source.groupMultiplier !== 'string' ||
+      typeof source.updatedAt !== 'string'
+    ) {
+      throw new Error(`OpenOx source fields are invalid for ${alias}`);
+    }
+    return [
+      {
+        alias,
+        productLine: price.productLine,
+        selectedGroup,
+        currency: price.currency,
+        pricingUnit: 'native_currency_per_million_tokens' as const,
+        groupMultiplier: source.groupMultiplier,
+        inputRate: source.inputRate,
+        outputRate: source.outputRate,
+        cacheReadRate: source.cacheReadRate,
+        cacheWriteRate: source.cacheWriteRate,
+        effectiveInputRate: microunitsToDecimal(
+          price.inputPriceMicrounitsPerMillionTokens,
+        ),
+        effectiveOutputRate: microunitsToDecimal(
+          price.outputPriceMicrounitsPerMillionTokens,
+        ),
+        effectiveCacheReadRate: microunitsToDecimal(
+          price.cacheReadPriceMicrounitsPerMillionTokens,
+        ),
+        effectiveCacheWriteRate: microunitsToDecimal(
+          price.cacheWritePriceMicrounitsPerMillionTokens,
+        ),
+        status: 'enabled' as const,
+        updatedAt: source.updatedAt,
+        modelBillingMultiplier:
+          typeof source.modelBillingMultiplier === 'string'
+            ? source.modelBillingMultiplier
+            : null,
+      },
+    ];
+  });
+}
+
 export function buildCurrentRouteRecoveryReport(
   input: unknown,
+  openOxSourceInput: unknown,
+  openOxSourceBundleSha256: string,
 ): CurrentRouteRecoveryReport {
   const snapshot = assertSnapshot(input);
+  const openOxSourceBundle = assertOpenOxSourceBundle(openOxSourceInput);
+  if (
+    !SHA256.test(openOxSourceBundleSha256) ||
+    snapshot.pricing.sourceBundleSha256 !== openOxSourceBundleSha256 ||
+    snapshot.pricing.modelRows !== openOxSourceBundle.fullModelCount ||
+    snapshot.pricing.groupRows !== openOxSourceBundle.fullGroupCount ||
+    snapshot.pricing.capturedAt !== openOxSourceBundle.capturedAt
+  ) {
+    throw new Error('OpenOx source bundle does not reproduce the safe snapshot');
+  }
+  const openOxPricing = deriveOpenOxPricing(openOxSourceBundle);
   const dispatches = canonicalDispatches();
   const requiredModelAllowlist = currentRouteRecoveryRequiredAliases();
   const exactCredential =
     snapshot.credential.unlimitedQuota === false &&
     snapshot.credential.modelLimitsEnabled === true &&
+    snapshot.credential.visibleModelCount === requiredModelAllowlist.length &&
     JSON.stringify(snapshot.credential.modelAllowlist) ===
       JSON.stringify(requiredModelAllowlist);
   const runtimeEgressProven = snapshot.pricing.runtimeFetch === 'http_200';
@@ -476,10 +664,10 @@ export function buildCurrentRouteRecoveryReport(
           : enabledChannelIds.length === 1
             ? 'unique'
             : 'ambiguous';
-      const openOxPricing =
-        snapshot.pricing.models.find((entry) => entry.alias === alias) ?? null;
+      const selectedOpenOxPricing =
+        openOxPricing.find((entry) => entry.alias === alias) ?? null;
       const blockers: CurrentRouteRecoveryBlocker[] = [];
-      if (!openOxPricing) blockers.push('OPENOX_PRICE_MISSING');
+      if (!selectedOpenOxPricing) blockers.push('OPENOX_PRICE_MISSING');
       if (channelSelection === 'missing')
         blockers.push('ENABLED_CHANNEL_MISSING');
       if (channelSelection === 'ambiguous')
@@ -496,7 +684,7 @@ export function buildCurrentRouteRecoveryReport(
         enabledChannelIds,
         disabledChannelIds,
         channelSelection,
-        openOxPricing,
+        openOxPricing: selectedOpenOxPricing,
         blockers,
       };
     });
@@ -537,10 +725,12 @@ export function buildCurrentRouteRecoveryReport(
     source: {
       capturedAt: snapshot.capturedAt,
       routeBaselineCommitSha: snapshot.routeBaselineCommitSha,
+      routeDispatchSha256: snapshot.routeDispatchSha256,
       safeSnapshotSha256: createHash('sha256')
         .update(canonicalJson(snapshot))
         .digest('hex'),
-      openOxCatalogResponseSha256: snapshot.pricing.responseSha256,
+      openOxSourceBundleSha256,
+      openOxSourceBundleCommitSha: snapshot.pricing.sourceBundleCommitSha,
     },
     credential: {
       status: exactCredential ? 'finite_exact' : 'not_finite_exact',
@@ -567,8 +757,8 @@ export async function writeCurrentRouteRecoveryReportCreateOnly(
   repositoryRelativeOutput: string,
   report: CurrentRouteRecoveryReport,
 ): Promise<void> {
-  const path = resolve(repositoryRoot, repositoryRelativeOutput);
-  const root = resolve(repositoryRoot);
+  const root = await realpath(resolve(repositoryRoot));
+  const path = resolve(root, repositoryRelativeOutput);
   if (
     !path.startsWith(`${root}/`) ||
     !repositoryRelativeOutput.endsWith('.json') ||
@@ -576,10 +766,42 @@ export async function writeCurrentRouteRecoveryReportCreateOnly(
   ) {
     throw new Error('output must be a repository-relative JSON path');
   }
+  const expectedParent = dirname(path);
+  const actualParent = await realpath(expectedParent);
+  if (
+    actualParent !== expectedParent ||
+    (actualParent !== root && !actualParent.startsWith(`${root}/`))
+  ) {
+    throw new Error('output path must not traverse a symbolic link');
+  }
   const handle = await open(path, 'wx', 0o600);
   try {
     await handle.writeFile(`${JSON.stringify(report, null, 2)}\n`, 'utf8');
   } finally {
     await handle.close();
   }
+}
+
+export async function readCurrentRouteRecoveryRepositoryJson(
+  repositoryRoot: string,
+  repositoryRelativeInput: string,
+): Promise<{ parsed: unknown; sha256: string }> {
+  const root = await realpath(resolve(repositoryRoot));
+  const path = resolve(root, repositoryRelativeInput);
+  if (
+    !path.startsWith(`${root}/`) ||
+    !repositoryRelativeInput.endsWith('.json') ||
+    repositoryRelativeInput.split('/').includes('..')
+  ) {
+    throw new Error('input must be a repository-relative JSON path');
+  }
+  const actualPath = await realpath(path);
+  if (actualPath !== path || !actualPath.startsWith(`${root}/`)) {
+    throw new Error('input path must not traverse a symbolic link');
+  }
+  const bytes = await readFile(actualPath);
+  return {
+    parsed: JSON.parse(bytes.toString('utf8')) as unknown,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  };
 }
