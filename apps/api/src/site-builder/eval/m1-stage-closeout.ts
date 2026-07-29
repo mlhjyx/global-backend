@@ -78,6 +78,21 @@ function factLiteralFindings(
       output.push(`/${fieldPath.join('/')}`);
     }
     if (
+      ['cat', 'code', 'name', 'readTime', 'years'].includes(key) &&
+      typeof child === 'string' &&
+      child !== '—'
+    ) {
+      output.push(`/${fieldPath.join('/')}`);
+    }
+    if (
+      key === 'marqueeItems' &&
+      (!Array.isArray(child) ||
+        child.length < 2 ||
+        child.some((item) => item !== '—'))
+    ) {
+      output.push(`/${fieldPath.join('/')}`);
+    }
+    if (
       key === 'clients' &&
       (!Array.isArray(child) ||
         child.length !== 1 ||

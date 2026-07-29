@@ -67,7 +67,7 @@
               "f2Key": "home.premium-home-product-showcase.f2",
               "products": [
                 {
-                  "code": "PX-24",
+                  "code": "—",
                   "nameKey": "home.premium-home-product-showcase.products.0.name",
                   "taglineKey": "home.premium-home-product-showcase.products.0.tagline",
                   "capacityKey": "home.premium-home-product-showcase.products.0.capacity",
@@ -242,10 +242,10 @@
               "introKey": "detail.premium-proof-articles.intro",
               "items": [
                 {
-                  "cat": "Guides",
+                  "cat": "—",
                   "titleKey": "detail.premium-proof-articles.items.0.title",
                   "descKey": "detail.premium-proof-articles.items.0.desc",
-                  "readTime": "4 min read"
+                  "readTime": "—"
                 }
               ],
               "variant": "technical-grid"

@@ -18,7 +18,7 @@
       "fixtureId": "oem-capability-rich",
       "viewport": "desktop-1440",
       "path": "desktop-1440/oem-capability-rich.png",
-      "sha256": "bc6ce6c352cff1cd726e775804af2e3758537a3bb6dfc7c50dfecdd710496026"
+      "sha256": "c963644d5411c2f10d9aef0361dca6cc6a2c1c9fd445f893ce15f85856615301"
     },
     {
       "fixtureId": "oem-capability-sparse",
@@ -48,13 +48,13 @@
       "fixtureId": "premium-innovation-sparse",
       "viewport": "desktop-1440",
       "path": "desktop-1440/premium-innovation-sparse.png",
-      "sha256": "358cb3a25327c2aa9bd8a94c5b2a1aa4f81ebc502752967c3534ab42a5dc23ce"
+      "sha256": "83715352dd96c645df65f13b13007f398e244fb351abd2eeada5bd5605e34c47"
     },
     {
       "fixtureId": "scientific-trust-rich",
       "viewport": "desktop-1440",
       "path": "desktop-1440/scientific-trust-rich.png",
-      "sha256": "683163fef0fd2c8358fe71d4d0e3aa62df24b2eec9de970fb7aa64ee0a7f150e"
+      "sha256": "dc2d82eb670c31f3426d9f8cb7c4231a635e45bb4bd7dde919d13ec75d1ffbe4"
     },
     {
       "fixtureId": "scientific-trust-sparse",
@@ -90,7 +90,7 @@
       "fixtureId": "oem-capability-rich",
       "viewport": "mobile-375",
       "path": "mobile-375/oem-capability-rich.png",
-      "sha256": "630b64684a81f09d0f4ebd9266f9d79b6bdb359e1bfb00a2227506b2843062f2"
+      "sha256": "d60d727fe6449ca03af8b338e1bc524a5187aa0637dc0362132b50211ef34480"
     },
     {
       "fixtureId": "oem-capability-sparse",
@@ -120,13 +120,13 @@
       "fixtureId": "premium-innovation-sparse",
       "viewport": "mobile-375",
       "path": "mobile-375/premium-innovation-sparse.png",
-      "sha256": "8d518c3e66f384e08e989c295a6dae7047a0c412663637bfb02c081b11cd7f65"
+      "sha256": "48de09470130744fca70d57ae09ad6f1fdc524e95f967869a67725e0a840fb9b"
     },
     {
       "fixtureId": "scientific-trust-rich",
       "viewport": "mobile-375",
       "path": "mobile-375/scientific-trust-rich.png",
-      "sha256": "836cc3888c496e9fd46acda4eaa286ce8496a5942603711ceedbe1cb013c75db"
+      "sha256": "ac3f59f04deaee0451ab947474705f2f6430044f3a53f1f83a61fc5fc9e572ff"
     },
     {
       "fixtureId": "scientific-trust-sparse",
@@ -162,7 +162,7 @@
       "fixtureId": "oem-capability-rich",
       "viewport": "tablet-768",
       "path": "tablet-768/oem-capability-rich.png",
-      "sha256": "83d03b131a1ec1ff585a7b4ed7c9d60af3b63a9ed81575011224888d54291e61"
+      "sha256": "4d0ab5178e92ee86bd8e1c5f0b7b645deadc3db132049859e7df00ed2a5c1248"
     },
     {
       "fixtureId": "oem-capability-sparse",
@@ -192,13 +192,13 @@
       "fixtureId": "premium-innovation-sparse",
       "viewport": "tablet-768",
       "path": "tablet-768/premium-innovation-sparse.png",
-      "sha256": "b4b3eb2f7f45831d993e5181351541f4daa39e52bd026f1e421183c02546f136"
+      "sha256": "2a0145fc10df33f2152a8c7bc81b586be6e87aca71494d5293e288cb36da1186"
     },
     {
       "fixtureId": "scientific-trust-rich",
       "viewport": "tablet-768",
       "path": "tablet-768/scientific-trust-rich.png",
-      "sha256": "71460ee4e2b3916efedfa26bf686450ba51e6fa5c466ec4b36ce53ac915d4777"
+      "sha256": "3ed1482ad6c266b4d92923c0905a270f8d5fa00d3486ae9a6c702cf73c9fb8f5"
     },
     {
       "fixtureId": "scientific-trust-sparse",

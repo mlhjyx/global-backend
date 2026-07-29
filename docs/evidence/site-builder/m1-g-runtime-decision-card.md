@@ -1,9 +1,14 @@
 # M1-g runtime decision card
 
 Date: 2026-07-29  
-Base commit: `d9518e1c4814c80840fec78b68795fe70656c428`  
 Branch: `codex/m1-g-stage-closeout`  
 Status: `BLOCKED_CURRENT_ROUTE_SETTLEMENT`
+
+The immutable source commit, verifier digest, and tracked source-bundle digest
+are recorded in
+`docs/evidence/site-builder/m1-g-stage-closeout-baseline.json`. The evidence
+writer refuses a dirty source tree; the evidence JSON itself is excluded from
+the source-bundle digest to avoid a recursive self-hash.
 
 ## Verified without product-model dispatch
 

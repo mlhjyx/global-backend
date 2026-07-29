@@ -103,10 +103,10 @@
               "introKey": "home.premium-home-editorial-articles.intro",
               "items": [
                 {
-                  "cat": "Guides",
+                  "cat": "—",
                   "titleKey": "home.premium-home-editorial-articles.items.0.title",
                   "descKey": "home.premium-home-editorial-articles.items.0.desc",
-                  "readTime": "4 min read"
+                  "readTime": "—"
                 }
               ],
               "variant": "technical-grid"

@@ -81,6 +81,29 @@ describe('M1-g stage closeout gates', () => {
     );
   });
 
+  it('rejects fixture-only geography, product, and article metadata', () => {
+    const fixtures = Array.from({ length: 12 }, (_, index) => fixture(index));
+    fixtures[0]!.spec.pages[0]!.puck.content.push(
+      {
+        type: 'DispatchHero',
+        props: { marqueeItems: ['North district', 'Harbor corridor'] },
+      },
+      {
+        type: 'ProductShowcaseAlt',
+        props: { products: [{ code: 'PX-24' }] },
+      },
+      {
+        type: 'ArticleGrid',
+        props: {
+          items: [{ cat: 'Guides', readTime: '4 min read' }],
+        },
+      },
+    ) as never;
+    expect(() => verifyM1GoldenSuite(fixtures)).toThrowError(
+      /M1_G_UNSUPPORTED_FACT_LITERAL/,
+    );
+  });
+
   it('rejects a ten-site batch that only changes identity and color', () => {
     const fixtures = Array.from({ length: 10 }, (_, index) => {
       const item = fixture(index);

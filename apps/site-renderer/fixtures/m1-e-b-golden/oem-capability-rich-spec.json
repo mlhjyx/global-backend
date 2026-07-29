@@ -46,7 +46,7 @@
               "coverageValueKey": "home.oem-home-proof-hero.coveragevalue",
               "etaLabelKey": "home.oem-home-proof-hero.etalabel",
               "etaValueKey": "home.oem-home-proof-hero.etavalue",
-              "marqueeItems": ["North district", "Harbor corridor"],
+              "marqueeItems": ["—", "—"],
               "variant": "quiet"
             }
           },
@@ -82,13 +82,13 @@
               "titleKey": "home.oem-home-proof-services.title",
               "services": [
                 {
-                  "code": "01",
+                  "code": "—",
                   "titleKey": "home.oem-home-proof-services.services.0.title",
                   "bodyKey": "home.oem-home-proof-services.services.0.body",
                   "specKey": "home.oem-home-proof-services.services.0.spec"
                 },
                 {
-                  "code": "02",
+                  "code": "—",
                   "titleKey": "home.oem-home-proof-services.services.1.title",
                   "bodyKey": "home.oem-home-proof-services.services.1.body",
                   "specKey": "home.oem-home-proof-services.services.1.spec"

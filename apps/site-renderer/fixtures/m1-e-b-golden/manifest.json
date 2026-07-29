@@ -22,7 +22,7 @@
       "mode": "rich",
       "familyId": "oem-capability",
       "designBriefDigest": "15343ffac06a5c22404520e0570cac7d854cbf777a48e1d3f5e7842361d5cb3d",
-      "specSha256": "89085ed3fd727228cfaaf6aeb82e2fea74f799dae2be5cba7eb7e895e3713ab3"
+      "specSha256": "49ce8a4094f6452c862ed7b1a143fb45a211a73b3ad47b15dda64a4ea7e6ef41"
     },
     {
       "id": "oem-capability-sparse",
@@ -50,21 +50,21 @@
       "mode": "rich",
       "familyId": "premium-innovation",
       "designBriefDigest": "1a14f07310614e45fcefb173444758dee69b48bd7df1fd9c3e7d403fc85dad43",
-      "specSha256": "576a72b637feebdabbb2b3b0f3edbe3474507629ad806185af860b142463d2a8"
+      "specSha256": "7adb0525c85de81e0f38e7b8e58e4959f83cfbb9d82cf3cb62214e481aa9b9ab"
     },
     {
       "id": "premium-innovation-sparse",
       "mode": "sparse",
       "familyId": "premium-innovation",
       "designBriefDigest": "f62d927e5002971cb3f7272474e481b0e5e6908b733a57a6b8e1b164bbcc75b3",
-      "specSha256": "bc71b881c6bfcbbd60db0df41a46d103c91f72431f0797593074e424a78fa67e"
+      "specSha256": "a4cfa68eac91e9b915b286a70af62c4612650c49e5671c5873cf7e0cb2be586d"
     },
     {
       "id": "scientific-trust-rich",
       "mode": "rich",
       "familyId": "scientific-trust",
       "designBriefDigest": "f4ed405b35a3b7aaa31d11f494dd4703cf037ecb8fa7be3891b6527835009977",
-      "specSha256": "3d29d7b73244cd92a399c0e4180aa2e7c89392c7252c793cb9d6093d69221e8d"
+      "specSha256": "2ebeeef47e045509fb85bb47d44d54607b342d6ed5612a7349e67323cb50c76e"
     },
     {
       "id": "scientific-trust-sparse",
@@ -78,7 +78,7 @@
       "mode": "rich",
       "familyId": "technical-catalog",
       "designBriefDigest": "11918d7c84fcb79550c7fd3f4c1c0bfef263098decdc4da527014ee4e0ecfd83",
-      "specSha256": "431e5a427b79ae4e5072df3cdecee469ef2c0f54304695a5ac4c3ed39c27e869"
+      "specSha256": "efd0af6ff4a4f62299f3609ba68409a359bf0844fcb5a37580f7d2cccd5b702d"
     },
     {
       "id": "technical-catalog-sparse",
