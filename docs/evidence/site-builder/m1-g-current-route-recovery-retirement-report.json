@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "site-builder-current-route-recovery-report/2026-07-29-v3",
+  "schemaVersion": "site-builder-current-route-recovery-report/2026-07-29-v4",
   "status": "BLOCKED_CURRENT_ROUTE_RECOVERY",
   "modelDispatchAuthorization": "NOT_AUTHORIZED",
   "modelGenerationCalls": 0,
@@ -11,7 +11,7 @@
     "safeSnapshotSha256": "f26d146cad4b16d74287949cd9aeef34a4e9ee5b736012b57b5240de8e32e160",
     "openOxSourceBundleSha256": "6e3eceb33f69a6011eeb185cea378a13f2af5a1893adfb67f4d4dc5e0a2d451e",
     "openOxSourceBundleCommitSha": "e91b184741a10b83459a8041e3ecd9701fdf3b5b",
-    "runnerCommitSha": "b8cb034e50fda10ed54e272b16777511f8dab601"
+    "runnerSourceSha256": "9690ecd9848c81169e3314d540654a4ef3b868b239fa771bc47a4dc3265524de"
   },
   "credential": {
     "status": "not_finite_exact",
