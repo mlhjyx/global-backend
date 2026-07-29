@@ -48,8 +48,11 @@ This contract does not:
      pricing digest;
    - the conservative two-wire structured-output maximum fits the ledger
      reservation when calculated from OpenOx rates.
-4. Reserve the durable operation using an operation key that includes the
-   attestation snapshot digest.
+4. Reserve the durable operation using a logical operation key that remains
+   stable across attestation rotation. Retain the attestation snapshot digest
+   as operation metadata so a worker retry cannot bypass an existing
+   settled/unknown operation merely because the maximum-24-hour attestation
+   was refreshed.
 5. Execute at most one initial call and one closed structured repair.
 6. For each response, capture `x-oneapi-request-id`, query the token-scoped
    new-api consume log, and require exactly one row with the frozen alias,

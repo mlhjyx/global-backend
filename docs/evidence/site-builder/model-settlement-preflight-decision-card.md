@@ -34,6 +34,37 @@ Model-generation calls made by this PR: **0**
 
 Model fees incurred by this PR: **$0.00**
 
+## Live zero-model refresh
+
+Read-only capture time: `2026-07-29T11:15:53Z`
+
+- The existing application credential returned HTTP 200 from both
+  `/v1/models` and `/api/usage/token`, but reported `unlimited_quota=true`,
+  `model_limits_enabled=false`, and no exact allowlist. It therefore has no
+  admissible finite cap or remaining-balance snapshot for this contract.
+- The public OpenOx catalog returned HTTP 200 with 37 model rows and 15 price
+  groups. Coverage remains 4 of the 8 unique aliases required by the seven
+  current task routes.
+- The local new-api database was opened read-only. No channel, token, route, or
+  price setting was changed.
+
+| Current alias | Required protocol | Read-only gateway state | OpenOx price |
+| --- | --- | --- | --- |
+| `gpt-5.6-terra` | Responses | enabled channel 17 | published |
+| `claude-sonnet-5` | Messages | enabled channels 8 and 19; expected channel is ambiguous | published |
+| `deepseek-v4-pro` | Chat | enabled channel 1 | published |
+| `glm-5.2` | Chat | enabled channel 11 | published |
+| `minimax-m3` | Chat | only disabled channel 3 | absent |
+| `doubao-seed-2.0-pro` | Chat | only disabled channel 3 | absent |
+| `deepseek-v4-flash` | Chat | enabled channel 1 | absent |
+| `doubao-seed-2.0-lite` | Chat | only disabled channel 3 | absent |
+
+Because the exact route matrix cannot currently bind one healthy channel and
+one published upstream price for every dispatch, no replacement credential or
+runtime attestation was created. Enabling a disabled channel would not repair
+the missing OpenOx price evidence and could expose the historical broad token
+to an unapproved paid route.
+
 ## Live read-only blockers observed before implementation
 
 - The currently wired application token reports unlimited quota and does not
