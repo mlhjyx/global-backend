@@ -136,6 +136,7 @@ export interface CurrentRouteRecoveryReport {
     safeSnapshotSha256: string;
     openOxSourceBundleSha256: string;
     openOxSourceBundleCommitSha: string;
+    runnerCommitSha: string;
   };
   credential: {
     status: 'finite_exact' | 'not_finite_exact';
@@ -642,11 +643,13 @@ export function buildCurrentRouteRecoveryReport(
   input: unknown,
   openOxSourceInput: unknown,
   openOxSourceBundleSha256: string,
+  runnerCommitSha: string,
 ): CurrentRouteRecoveryReport {
   const snapshot = assertSnapshot(input);
   const openOxSourceBundle = assertOpenOxSourceBundle(openOxSourceInput);
   if (
     !SHA256.test(openOxSourceBundleSha256) ||
+    !COMMIT_SHA.test(runnerCommitSha) ||
     snapshot.pricing.sourceBundleSha256 !== openOxSourceBundleSha256 ||
     snapshot.pricing.modelRows !== openOxSourceBundle.fullModelCount ||
     snapshot.pricing.groupRows !== openOxSourceBundle.fullGroupCount ||
@@ -772,6 +775,7 @@ export function buildCurrentRouteRecoveryReport(
         .digest('hex'),
       openOxSourceBundleSha256,
       openOxSourceBundleCommitSha: snapshot.pricing.sourceBundleCommitSha,
+      runnerCommitSha,
     },
     credential: {
       status: exactCredential ? 'finite_exact' : 'not_finite_exact',

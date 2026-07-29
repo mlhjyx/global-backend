@@ -133,7 +133,12 @@ function build(
   catalog = sourceBundle(),
   digest = SOURCE_BUNDLE_SHA256,
 ) {
-  return buildCurrentRouteRecoveryReport(input, catalog, digest);
+  return buildCurrentRouteRecoveryReport(
+    input,
+    catalog,
+    digest,
+    'f'.repeat(40),
+  );
 }
 
 describe('current-route zero-model recovery preparation', () => {

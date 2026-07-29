@@ -192,6 +192,7 @@ async function main(): Promise<void> {
     snapshotSource.parsed,
     catalog.parsed,
     catalog.sha256,
+    runnerCommit,
   );
   await writeCurrentRouteRecoveryReportCreateOnly(
     REPOSITORY_ROOT,
