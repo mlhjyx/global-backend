@@ -793,15 +793,16 @@ export class RouterModelGateway extends ModelGateway {
     try {
       decision = await this.paidLedger!.settleOperation(input);
     } catch (error) {
-      if (error instanceof PaidOperationUnknownError) throw error;
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        'SETTLEMENT_ACK_UNKNOWN',
+      return this.freezeUnknownSettlement(
+        input.scope,
+        error instanceof PaidOperationUnknownError
+          ? error.errorCode
+          : 'SETTLEMENT_ACK_UNKNOWN',
       );
     }
     if (decision !== 'SETTLED') {
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
+      return this.freezeUnknownSettlement(
+        input.scope,
         `SETTLEMENT_${decision}`,
       );
     }

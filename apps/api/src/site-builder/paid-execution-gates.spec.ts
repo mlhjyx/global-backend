@@ -677,6 +677,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       usage: { inputTokens: 10, outputTokens: 5 },
     }));
     const model = provider(execute);
+    const disablePaidCalls = vi.fn(async () => undefined);
     const gateway = new RouterModelGateway({
       route: () => [model],
     } as unknown as ModelRouter);
@@ -685,6 +686,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       settleOperation: vi.fn(async () => {
         throw new Error('database response lost');
       }),
+      disablePaidCalls,
     } as never;
 
     await expect(
@@ -701,6 +703,55 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       ),
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
     expect(execute).toHaveBeenCalledOnce();
+    expect(disablePaidCalls).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RUN_ID,
+      'SETTLEMENT_ACK_UNKNOWN',
+    );
+  });
+
+  it('freezes the BuildRun when settlement returns a non-SETTLED decision', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      reportedModel: 'gpt-5.6-terra',
+      modelResolutionSource: 'upstream_response',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }));
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation: vi.fn(async () => 'STALE_FENCE'),
+      disablePaidCalls,
+    } as never;
+
+    const error = await gateway
+      .generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        paidModelContext,
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PaidOperationUnknownError);
+    expect((error as PaidOperationUnknownError).errorCode).toBe(
+      'SETTLEMENT_STALE_FENCE',
+    );
+    expect(disablePaidCalls).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RUN_ID,
+      'SETTLEMENT_STALE_FENCE',
+    );
   });
 
   it('settles conservatively, freezes the run, and never returns an unknown model settlement', async () => {
