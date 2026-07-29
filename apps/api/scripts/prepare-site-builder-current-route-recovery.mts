@@ -19,7 +19,8 @@ const HELP = `Usage:
     --snapshot=<repository-relative-safe-snapshot-json> \\
     --catalog-source=<repository-relative-openox-source-bundle-json> \\
     --fixed-commit=<40-char-route-baseline-sha> \\
-    --source-commit=<40-char-runner-and-catalog-sha> \\
+    --catalog-source-commit=<40-char-catalog-source-sha> \\
+    --runner-commit=<40-char-runner-source-sha> \\
     --output=<new-repository-relative-report-json>
 
 This create-only preparation command never reads .env, mutates new-api, or
@@ -71,25 +72,32 @@ function assertFixedRouteBaseline(fixedCommit: string): void {
   // governance may evolve without rewriting the historical route baseline.
 }
 
-function assertFixedSourceBundleCommit(
-  sourceCommit: string,
+function assertCommitExistsAndIsAncestor(
+  commit: string,
+  role: 'catalog source' | 'runner',
+): void {
+  if (!/^[a-f0-9]{40}$/.test(commit)) {
+    throw new Error(`${role} commit must be a 40-character commit SHA`);
+  }
+  execFileSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
+    cwd: REPOSITORY_ROOT,
+    stdio: 'ignore',
+  });
+  execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+    cwd: REPOSITORY_ROOT,
+    stdio: 'ignore',
+  });
+}
+
+function assertFixedCatalogSourceCommit(
+  catalogSourceCommit: string,
   catalogSource: string,
   catalogSha256: string,
 ): void {
-  if (!/^[a-f0-9]{40}$/.test(sourceCommit)) {
-    throw new Error('source commit must be a 40-character commit SHA');
-  }
-  execFileSync('git', ['cat-file', '-e', `${sourceCommit}^{commit}`], {
-    cwd: REPOSITORY_ROOT,
-    stdio: 'ignore',
-  });
-  execFileSync('git', ['merge-base', '--is-ancestor', sourceCommit, 'HEAD'], {
-    cwd: REPOSITORY_ROOT,
-    stdio: 'ignore',
-  });
+  assertCommitExistsAndIsAncestor(catalogSourceCommit, 'catalog source');
   const committedCatalog = execFileSync(
     'git',
-    ['show', `${sourceCommit}:${catalogSource}`],
+    ['show', `${catalogSourceCommit}:${catalogSource}`],
     { cwd: REPOSITORY_ROOT, encoding: null },
   );
   if (
@@ -98,19 +106,22 @@ function assertFixedSourceBundleCommit(
   ) {
     throw new Error('catalog source does not match its fixed source commit');
   }
+}
+
+function assertFixedRunnerCommit(runnerCommit: string): void {
+  assertCommitExistsAndIsAncestor(runnerCommit, 'runner');
   execFileSync(
     'git',
     [
       'diff',
       '--quiet',
-      sourceCommit,
+      runnerCommit,
       '--',
       'apps/api/src/site-builder/current-route-recovery.ts',
       'apps/api/src/site-builder/site-builder-model-settlement.ts',
       'apps/api/src/site-builder/agents/model-policy.registry.ts',
       'packages/contracts/src/site-builder/model-policy.ts',
       'apps/api/scripts/prepare-site-builder-current-route-recovery.mts',
-      catalogSource,
     ],
     { cwd: REPOSITORY_ROOT, stdio: 'ignore' },
   );
@@ -124,13 +135,15 @@ async function main(): Promise<void> {
   const snapshotArgument = option('snapshot');
   const catalogSourceArgument = option('catalog-source');
   const fixedCommit = option('fixed-commit');
-  const sourceCommit = option('source-commit');
+  const catalogSourceCommit = option('catalog-source-commit');
+  const runnerCommit = option('runner-commit');
   const outputArgument = option('output');
   if (
     !snapshotArgument ||
     !catalogSourceArgument ||
     !fixedCommit ||
-    !sourceCommit ||
+    !catalogSourceCommit ||
+    !runnerCommit ||
     !outputArgument
   ) {
     throw new Error(HELP);
@@ -166,10 +179,15 @@ async function main(): Promise<void> {
       pricing?: { sourceBundleCommitSha?: unknown };
     }
   ).pricing?.sourceBundleCommitSha;
-  if (declaredSourceCommit !== sourceCommit) {
-    throw new Error('source commit does not match the safe snapshot');
+  if (declaredSourceCommit !== catalogSourceCommit) {
+    throw new Error('catalog source commit does not match the safe snapshot');
   }
-  assertFixedSourceBundleCommit(sourceCommit, catalogSource, catalog.sha256);
+  assertFixedCatalogSourceCommit(
+    catalogSourceCommit,
+    catalogSource,
+    catalog.sha256,
+  );
+  assertFixedRunnerCommit(runnerCommit);
   const report = buildCurrentRouteRecoveryReport(
     snapshotSource.parsed,
     catalog.parsed,
