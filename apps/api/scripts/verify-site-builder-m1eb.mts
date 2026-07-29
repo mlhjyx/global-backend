@@ -2,7 +2,8 @@ import "dotenv/config";
 import "reflect-metadata";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
@@ -19,12 +20,17 @@ import {
   SiteReleaseService,
   resolveSiteRendererBuildIdentity,
 } from "../src/site-builder/site-release.service";
+import { ClosedRepairService } from "../src/site-builder/quality/closed-repair.service";
+import { DeterministicQualityService } from "../src/site-builder/quality/deterministic-quality.service";
+import { StorageQualityArtifactSink } from "../src/site-builder/quality/quality-artifact-sink";
+import { QualityCandidateService } from "../src/site-builder/quality/quality-candidate.service";
 import { StorageService } from "../src/site-builder/storage.service";
 import { createSiteBuilderActivities } from "../src/temporal/site-builder.activities";
 import { previewRoot } from "../src/temporal/site-builder.activities";
 
 function guard(): void {
   assert.equal(process.env.ALLOW_DEV_DB_VERIFIER, "true");
+  assert.equal(process.env.ALLOW_M1_G_CURRENT_ROUTE_MODEL_CALLS, "true");
   assert.notEqual(process.env.NODE_ENV, "production");
   for (const name of ["DATABASE_URL", "APP_DATABASE_URL"]) {
     const url = new URL(process.env[name] ?? "");
@@ -34,6 +40,21 @@ function guard(): void {
   assert(process.env.MODEL_GATEWAY_URL);
   assert(process.env.MODEL_GATEWAY_KEY);
   assert(process.env.S3_ACCESS_KEY);
+  const temporalAddress =
+    process.env.TEMPORAL_ADDRESS?.trim() || "127.0.0.1:7233";
+  const temporalTarget = new URL(`tcp://${temporalAddress}`);
+  assert(
+    ["127.0.0.1", "localhost", "::1", "[::1]"].includes(
+      temporalTarget.hostname.toLowerCase(),
+    ) && temporalTarget.port === "7233",
+  );
+  const temporalNamespace =
+    process.env.TEMPORAL_NAMESPACE?.trim() || "default";
+  assert(
+    temporalNamespace === "default" ||
+      /^dev-[a-z0-9-]+$/.test(temporalNamespace) ||
+      /^m1-g-[a-z0-9-]+$/.test(temporalNamespace),
+  );
 }
 
 guard();
@@ -110,7 +131,10 @@ try {
     workspaceId,
     siteId,
     buildRunId,
-    capMicrousd: 50_000_000n,
+    // Four structured tasks reserve primary/fallback and one repair before
+    // dispatch. Unused reservation is released; actual settlement remains
+    // usage-based. This is a per-build stop, not an expected charge.
+    capMicrousd: 5_000_000n,
   });
   const registry = new ModelProviderRegistry();
   const provider = buildGatewayProvider();
@@ -137,6 +161,13 @@ try {
   const releaseService = new SiteReleaseService(app, storage, {
     buildIdentity: rendererBuildIdentity,
   });
+  const closedRepairService = new ClosedRepairService();
+  const qualityCandidateService = new QualityCandidateService(
+    app,
+    new DeterministicQualityService(new StorageQualityArtifactSink(storage)),
+    closedRepairService,
+    releaseService,
+  );
   nativeConnection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? "127.0.0.1:7233",
   });
@@ -152,6 +183,8 @@ try {
       costLedger,
       gateway: meteredGateway,
       releaseService,
+      qualityCandidateService,
+      closedRepairService,
       storage,
       rendererBuildIdentity,
       imagePipeline: {
@@ -191,11 +224,28 @@ try {
       where: { id: site.activeVersionId! },
       include: { release: true },
     });
-    const steps = await tx.siteBuildStep.findMany({
-      where: { buildRunId },
-      orderBy: [{ progress: "asc" }, { key: "asc" }],
-    });
-    return { run, site, version, steps };
+    const [steps, taskAttempts, spends] = await Promise.all([
+      tx.siteBuildStep.findMany({
+        where: { buildRunId },
+        orderBy: [{ progress: "asc" }, { key: "asc" }],
+      }),
+      tx.siteBuildTaskAttempt.findMany({
+        where: { buildRunId },
+        select: { taskId: true, status: true },
+        orderBy: { taskId: "asc" },
+      }),
+      tx.siteBuildSpend.findMany({
+        where: { buildRunId, kind: "model" },
+        select: {
+          taskId: true,
+          status: true,
+          costBasis: true,
+          callCount: true,
+        },
+        orderBy: [{ taskId: "asc" }, { operationKey: "asc" }],
+      }),
+    ]);
+    return { run, site, version, steps, taskAttempts, spends };
   });
   assert.equal(result.run.status, "succeeded");
   assert.equal(result.run.progress, 1);
@@ -204,31 +254,125 @@ try {
   assert.equal(
     (result.version.release?.manifest as { schemaVersion?: string })
       .schemaVersion,
-    "site-builder-release-manifest/v2",
+    "site-builder-release-manifest/v3",
   );
   assert.equal(
     result.steps.find(({ key }) => key === "design_spec")?.status,
     "done",
   );
-  assert.equal(
-    result.steps.find(({ key }) => key === "quality_loop")?.status,
-    "skipped",
+  const qualitySteps = result.steps.filter(({ key }) => key === "quality_loop");
+  assert(
+    qualitySteps.some(({ status }) => ["done", "degraded"].includes(status)) &&
+      qualitySteps.every(
+        ({ status }) => !["failed", "skipped", "aborted"].includes(status),
+      ),
+    "M1-g quality loop did not produce a successful M1-f v3 outcome",
   );
-  assert(gatewayCalls > 0, "controlled workflow did not reach new-api gateway");
+  const requiredTaskAttempts = [
+    "site_builder.assemble",
+    "site_builder.brand_profile",
+    "site_builder.copy:en",
+    "site_builder.design_spec",
+  ];
+  for (const taskId of requiredTaskAttempts) {
+    assert(
+      result.taskAttempts.some(
+        (attempt) => attempt.taskId === taskId && attempt.status === "SUCCEEDED",
+      ),
+      `M1-g task did not succeed: ${taskId}`,
+    );
+  }
+  const requiredSettledModelTasks = [
+    "site_builder.assemble",
+    "site_builder.brand_profile",
+    "site_builder.copy",
+    "site_builder.design_spec",
+  ];
+  for (const taskId of requiredSettledModelTasks) {
+    assert(
+      result.spends.some(
+        (spend) =>
+          spend.taskId === taskId &&
+          spend.status === "SUCCEEDED" &&
+          spend.costBasis !== null &&
+          spend.costBasis !== "unknown" &&
+          (spend.callCount ?? 0) > 0,
+      ),
+      `M1-g model task lacks successful known settlement: ${taskId}`,
+    );
+  }
+  assert(
+    result.spends.every(
+      ({ status, costBasis }) =>
+        status !== "UNKNOWN" && costBasis !== "unknown",
+    ),
+    "M1-g model settlement remains unknown",
+  );
+  const costSummary = result.run.costSummary as {
+    totals?: { unknownOperations?: number };
+    usage?: { modelCalls?: number };
+  };
+  assert.equal(costSummary.totals?.unknownOperations, 0);
+  assert(
+    (costSummary.usage?.modelCalls ?? 0) >= requiredSettledModelTasks.length,
+    "M1-g cost summary does not contain all required model calls",
+  );
+  assert(
+    gatewayCalls >= requiredSettledModelTasks.length,
+    "controlled workflow did not complete all current-route model tasks",
+  );
   artifactPrefix = result.version.release?.artifactPrefix;
   assert(artifactPrefix);
   assert(
     await storage.head(
       `${artifactPrefix}/attempts/${result.version.release!.producerToken}/release-manifest.json`,
     ),
-    "ReleaseManifest v2 is absent from MinIO",
+    "ReleaseManifest v3 is absent from MinIO",
+  );
+  console.log(
+    `M1-g current-route cost summary: ${JSON.stringify(result.run.costSummary)}`,
   );
   const isolated = await app.withWorkspace(otherWorkspaceId, (tx) =>
     tx.siteVersion.count({ where: { siteId } }),
   );
   assert.equal(isolated, 0);
+  const fullResultPath = process.env.M1_G_FULL_RESULT_PATH;
+  if (fullResultPath) {
+    const resolved = path.resolve(fullResultPath);
+    const allowedRoot = `${path.resolve(tmpdir())}${path.sep}`;
+    assert(
+      resolved.startsWith(allowedRoot) &&
+        path.basename(resolved) === "full-result.json",
+      "M1_G_FULL_RESULT_PATH must be an exact temporary result path",
+    );
+    await writeFile(
+      resolved,
+      `${JSON.stringify(
+        {
+          schemaVersion: "site-builder-m1-g-full-result/v1",
+          status: "passed",
+          releaseManifestSchemaVersion: "site-builder-release-manifest/v3",
+          successfulTaskAttemptIds: requiredTaskAttempts,
+          knownSettledModelTaskIds: requiredSettledModelTasks,
+          modelCalls: costSummary.usage?.modelCalls,
+          unknownOperations: costSummary.totals?.unknownOperations,
+          qualityLoopStatuses: qualitySteps.map(
+            ({ itemKey, attempt, status, errorCode }) => ({
+              itemKey,
+              attempt,
+              status,
+              errorCode,
+            }),
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+  }
   console.log(
-    "M1-e-B verify OK: real Temporal, PostgreSQL/RLS, new-api, Astro, MinIO and SiteRelease v2",
+    "M1-g full verify OK: real Temporal, PostgreSQL/RLS, known-settled current routes, Astro, MinIO and SiteRelease v3",
   );
 } finally {
   if (worker) await worker.shutdown();

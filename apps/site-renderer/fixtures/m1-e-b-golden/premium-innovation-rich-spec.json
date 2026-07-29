@@ -67,7 +67,7 @@
               "f2Key": "home.premium-home-product-showcase.f2",
               "products": [
                 {
-                  "code": "PX-24",
+                  "code": "—",
                   "nameKey": "home.premium-home-product-showcase.products.0.name",
                   "taglineKey": "home.premium-home-product-showcase.products.0.tagline",
                   "capacityKey": "home.premium-home-product-showcase.products.0.capacity",
@@ -218,15 +218,15 @@
               "introKey": "detail.premium-proof-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "detail.premium-proof-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "detail.premium-proof-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "detail.premium-proof-trust.portraitname",
               "portraitRoleKey": "detail.premium-proof-trust.portraitrole",
               "variant": "technical-grid"
@@ -242,10 +242,10 @@
               "introKey": "detail.premium-proof-articles.intro",
               "items": [
                 {
-                  "cat": "Guides",
+                  "cat": "—",
                   "titleKey": "detail.premium-proof-articles.items.0.title",
                   "descKey": "detail.premium-proof-articles.items.0.desc",
-                  "readTime": "4 min read"
+                  "readTime": "—"
                 }
               ],
               "variant": "technical-grid"

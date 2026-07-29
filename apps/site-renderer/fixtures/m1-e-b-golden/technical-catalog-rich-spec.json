@@ -58,7 +58,7 @@
               "f2Key": "home.catalog-materials-hero.f2",
               "products": [
                 {
-                  "code": "PX-24",
+                  "code": "—",
                   "nameKey": "home.catalog-materials-hero.products.0.name",
                   "taglineKey": "home.catalog-materials-hero.products.0.tagline",
                   "capacityKey": "home.catalog-materials-hero.products.0.capacity",
@@ -188,7 +188,7 @@
               "f2Key": "detail.catalog-application-hero.f2",
               "products": [
                 {
-                  "code": "PX-24",
+                  "code": "—",
                   "nameKey": "detail.catalog-application-hero.products.0.name",
                   "taglineKey": "detail.catalog-application-hero.products.0.tagline",
                   "capacityKey": "detail.catalog-application-hero.products.0.capacity",

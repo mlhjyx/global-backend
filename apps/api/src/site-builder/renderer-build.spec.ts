@@ -118,6 +118,30 @@ describe("rendered outbound-domain gate", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("redacts credentials and query values from rejected URLs", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "m1g-url-redaction-"));
+    try {
+      await writeFile(
+        path.join(dir, "index.html"),
+        '<a href="https://user:secret@evil.example/path?token=private#fragment">x</a>',
+      );
+      const caught = await assertRenderedOutboundDomains(
+        dir,
+        [],
+        SITE_ORIGIN,
+      ).catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toContain(
+        "RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: evil.example",
+      );
+      expect((caught as Error).message).not.toMatch(
+        /user|secret|token|private|fragment/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("renderer output candidate binding", () => {

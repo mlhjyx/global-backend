@@ -4,6 +4,7 @@ import { buildPublishableClaimSnapshot } from "./publishable-claim-snapshot";
 import {
   CopyBundleGenerationError,
   CopyBundleService,
+  neutralCopySlotContent,
   type CopySlotGenerator,
 } from "./copy-bundle.service";
 
@@ -74,6 +75,13 @@ function snapshotWithClaim(statement: string) {
 }
 
 describe("CopyBundleService", () => {
+  it("keeps root and nested CTA neutral copy inside the qualified budget", () => {
+    for (const key of ["cta.label", "home.banner.cta.label"]) {
+      expect(neutralCopySlotContent(key, "en")).toBe("Get in touch");
+      expect(neutralCopySlotContent(key, "de-DE")).toBe("Kontakt aufnehmen");
+    }
+  });
+
   it("generates every locale and slot from the frozen Claim snapshot only", async () => {
     const model = generator();
     const result = await new CopyBundleService(model, () => NOW).generate({
@@ -130,12 +138,11 @@ describe("CopyBundleService", () => {
 
   it("replaces model embellishment with the exact cited Claim statement", async () => {
     const claimId = "66666666-6666-4666-8666-666666666666";
-    const factualSnapshot = snapshotWithClaim(
-      "Industrial pumps up to 400 bar",
-    );
+    const factualSnapshot = snapshotWithClaim("Industrial pumps up to 400 bar");
     const model: CopySlotGenerator = {
       generateSlot: vi.fn(async () => ({
-        content: "Industrial pumps up to 400 bar with market-leading reliability",
+        content:
+          "Industrial pumps up to 400 bar with market-leading reliability",
         claimRefs: [claimId],
       })),
     };

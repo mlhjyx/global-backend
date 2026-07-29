@@ -6,7 +6,7 @@
       "fixtureId": "natural-origin-rich",
       "viewport": "desktop-1440",
       "path": "desktop-1440/natural-origin-rich.png",
-      "sha256": "454e8b21562271f6765b822c1d88146392ea92adf395eab2091bb9703f3f357d"
+      "sha256": "7cf61eef5118792dd4a4f27a7db2d93aba343dc2681eb8611e0b06ef451a76b0"
     },
     {
       "fixtureId": "natural-origin-sparse",
@@ -18,25 +18,25 @@
       "fixtureId": "oem-capability-rich",
       "viewport": "desktop-1440",
       "path": "desktop-1440/oem-capability-rich.png",
-      "sha256": "42dca3c846f5e458e270ceab6e11c2c4070042547dca441ccfc121b8a0750c20"
+      "sha256": "c963644d5411c2f10d9aef0361dca6cc6a2c1c9fd445f893ce15f85856615301"
     },
     {
       "fixtureId": "oem-capability-sparse",
       "viewport": "desktop-1440",
       "path": "desktop-1440/oem-capability-sparse.png",
-      "sha256": "a19050ae8f46d8773503bee8d54c89d0f4847696d6743949003238941dbfe9a4"
+      "sha256": "5570485848d03b14f76351f1847d247e1ede956af98661a076435a0f048049bb"
     },
     {
       "fixtureId": "precision-industrial-rich",
       "viewport": "desktop-1440",
       "path": "desktop-1440/precision-industrial-rich.png",
-      "sha256": "582c6101942c2bce1e92e8c4a5cbc696285e447733a350c4a9d0bd0c46ea9f2d"
+      "sha256": "731f179c9d2394f70b3bc33bb082dfaac37d9eee920c122057fb845112632b2d"
     },
     {
       "fixtureId": "precision-industrial-sparse",
       "viewport": "desktop-1440",
       "path": "desktop-1440/precision-industrial-sparse.png",
-      "sha256": "3ca115eb70b3f7ab041d17e440c21d6f656257eec1c27850ee25350ece494f52"
+      "sha256": "a5d83e104a596b39fb54f5bb7544a307285ec71f9ee9de876e7f390052dde286"
     },
     {
       "fixtureId": "premium-innovation-rich",
@@ -48,19 +48,19 @@
       "fixtureId": "premium-innovation-sparse",
       "viewport": "desktop-1440",
       "path": "desktop-1440/premium-innovation-sparse.png",
-      "sha256": "358cb3a25327c2aa9bd8a94c5b2a1aa4f81ebc502752967c3534ab42a5dc23ce"
+      "sha256": "83715352dd96c645df65f13b13007f398e244fb351abd2eeada5bd5605e34c47"
     },
     {
       "fixtureId": "scientific-trust-rich",
       "viewport": "desktop-1440",
       "path": "desktop-1440/scientific-trust-rich.png",
-      "sha256": "2035e5459beb3db41bded7ce79293271b232efcda7a531990e782a74137ac507"
+      "sha256": "dc2d82eb670c31f3426d9f8cb7c4231a635e45bb4bd7dde919d13ec75d1ffbe4"
     },
     {
       "fixtureId": "scientific-trust-sparse",
       "viewport": "desktop-1440",
       "path": "desktop-1440/scientific-trust-sparse.png",
-      "sha256": "6693d3c9701d1828023256059cf95cca2bc7760b61ed64608c8cda2ad4ce9704"
+      "sha256": "b38e06afa3b525f8edb2a9d31f565168c628f43b69512b5d95951e9a422fa73f"
     },
     {
       "fixtureId": "technical-catalog-rich",
@@ -78,7 +78,7 @@
       "fixtureId": "natural-origin-rich",
       "viewport": "mobile-375",
       "path": "mobile-375/natural-origin-rich.png",
-      "sha256": "53bc46f65d9ea4a0f2f7322e66474e30dc78e96be59ef1d8b69123fb3c3b3505"
+      "sha256": "61fa6598742ff559b53d3c5cf7ccac3acd974df03b8961af3f1c60e614316e8b"
     },
     {
       "fixtureId": "natural-origin-sparse",
@@ -90,25 +90,25 @@
       "fixtureId": "oem-capability-rich",
       "viewport": "mobile-375",
       "path": "mobile-375/oem-capability-rich.png",
-      "sha256": "35fe5e3915d319594d2a69e643878d5e006145a74ed66ec69278bf4f94e43e69"
+      "sha256": "d60d727fe6449ca03af8b338e1bc524a5187aa0637dc0362132b50211ef34480"
     },
     {
       "fixtureId": "oem-capability-sparse",
       "viewport": "mobile-375",
       "path": "mobile-375/oem-capability-sparse.png",
-      "sha256": "2a3763688144d8548f60d5f1996cb1e1f224682d37e013442aeb64bd2fdf93bb"
+      "sha256": "59b38938e07a681746a0efb9f0bcd7dd74fafe3c63cfa2b8497280b318e189f4"
     },
     {
       "fixtureId": "precision-industrial-rich",
       "viewport": "mobile-375",
       "path": "mobile-375/precision-industrial-rich.png",
-      "sha256": "860aa2b7790e4e7546e9d525f5fc001549dfb080c189227c30773518b51d8856"
+      "sha256": "b5a304e4eac9dfc9bcfe649c53554f022b90ec0dab828604075fb55de08f855a"
     },
     {
       "fixtureId": "precision-industrial-sparse",
       "viewport": "mobile-375",
       "path": "mobile-375/precision-industrial-sparse.png",
-      "sha256": "3d39b96dea60bf1dcec40a65f2aaff8e1e56df6bcd5d1062963b74db8fa3fc76"
+      "sha256": "fe8677a7e30e50c096e7bf7f9129b0d331fdbf000489d0d1ba4a0aa47a1010c3"
     },
     {
       "fixtureId": "premium-innovation-rich",
@@ -120,19 +120,19 @@
       "fixtureId": "premium-innovation-sparse",
       "viewport": "mobile-375",
       "path": "mobile-375/premium-innovation-sparse.png",
-      "sha256": "8d518c3e66f384e08e989c295a6dae7047a0c412663637bfb02c081b11cd7f65"
+      "sha256": "48de09470130744fca70d57ae09ad6f1fdc524e95f967869a67725e0a840fb9b"
     },
     {
       "fixtureId": "scientific-trust-rich",
       "viewport": "mobile-375",
       "path": "mobile-375/scientific-trust-rich.png",
-      "sha256": "a1f4dceb9673a143d0851d9c1f6971f2fe743e070425e2880795c064a461c4b2"
+      "sha256": "ac3f59f04deaee0451ab947474705f2f6430044f3a53f1f83a61fc5fc9e572ff"
     },
     {
       "fixtureId": "scientific-trust-sparse",
       "viewport": "mobile-375",
       "path": "mobile-375/scientific-trust-sparse.png",
-      "sha256": "09d4ba44112a2b0b48735e86ab2eb8a0a738e12c7c682c601297c3239ff6670f"
+      "sha256": "a71765f0c0d5d332d0301ba1bb11c98082d34e0f87f834ca8f670336a9babe3a"
     },
     {
       "fixtureId": "technical-catalog-rich",
@@ -150,7 +150,7 @@
       "fixtureId": "natural-origin-rich",
       "viewport": "tablet-768",
       "path": "tablet-768/natural-origin-rich.png",
-      "sha256": "44050f8d4638ed3e3cf27dd0676b6e37f73ef2b9eeeda3a898d4c350197cda26"
+      "sha256": "9ed6bb668a3a5dc544b0923a19f0c67f1fa43a0f6de6d5a98286a00269fbb996"
     },
     {
       "fixtureId": "natural-origin-sparse",
@@ -162,25 +162,25 @@
       "fixtureId": "oem-capability-rich",
       "viewport": "tablet-768",
       "path": "tablet-768/oem-capability-rich.png",
-      "sha256": "dcfd49e2768db5b77fc181339d6244ad5e25a0a398a95041f12941a9c2292392"
+      "sha256": "4d0ab5178e92ee86bd8e1c5f0b7b645deadc3db132049859e7df00ed2a5c1248"
     },
     {
       "fixtureId": "oem-capability-sparse",
       "viewport": "tablet-768",
       "path": "tablet-768/oem-capability-sparse.png",
-      "sha256": "5f0c4dd1946e930a437b2b94013c7e73ca440af5493ea6326d11fbd5260b1870"
+      "sha256": "a299f51c7da6f7d03925439361c4c1985880578cbe9927d2f8ab7d44108aec98"
     },
     {
       "fixtureId": "precision-industrial-rich",
       "viewport": "tablet-768",
       "path": "tablet-768/precision-industrial-rich.png",
-      "sha256": "af04b99982fe03871afe286f43bc0b922609213926c68f2b72258b25b9f3dca9"
+      "sha256": "9e87efe2d0e086614a64a2f69c028b5af20d7c5344be0dede857df22f1ef704d"
     },
     {
       "fixtureId": "precision-industrial-sparse",
       "viewport": "tablet-768",
       "path": "tablet-768/precision-industrial-sparse.png",
-      "sha256": "f618bdc09a6630f080e1b0f63224145a9ebf44125037be68cfa0100106f2d79c"
+      "sha256": "3c6b35deb81c17e539feff3eb36ecdc6b74c914838fe0a017d796aebc09f7122"
     },
     {
       "fixtureId": "premium-innovation-rich",
@@ -192,19 +192,19 @@
       "fixtureId": "premium-innovation-sparse",
       "viewport": "tablet-768",
       "path": "tablet-768/premium-innovation-sparse.png",
-      "sha256": "b4b3eb2f7f45831d993e5181351541f4daa39e52bd026f1e421183c02546f136"
+      "sha256": "2a0145fc10df33f2152a8c7bc81b586be6e87aca71494d5293e288cb36da1186"
     },
     {
       "fixtureId": "scientific-trust-rich",
       "viewport": "tablet-768",
       "path": "tablet-768/scientific-trust-rich.png",
-      "sha256": "8da1e307e56f663a17e34de573373c96e4421dc43845da0d1c9a60786944c7a8"
+      "sha256": "3ed1482ad6c266b4d92923c0905a270f8d5fa00d3486ae9a6c702cf73c9fb8f5"
     },
     {
       "fixtureId": "scientific-trust-sparse",
       "viewport": "tablet-768",
       "path": "tablet-768/scientific-trust-sparse.png",
-      "sha256": "b746865c6328fb065a3386dd7e2bc93b919d46d4a75f3a62e9178c8bcfe75bc8"
+      "sha256": "64839ed7374314c387eab5443287b80743f843d95266b2e6a4c0d8e78f417076"
     },
     {
       "fixtureId": "technical-catalog-rich",

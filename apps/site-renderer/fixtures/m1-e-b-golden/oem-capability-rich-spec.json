@@ -46,7 +46,7 @@
               "coverageValueKey": "home.oem-home-proof-hero.coveragevalue",
               "etaLabelKey": "home.oem-home-proof-hero.etalabel",
               "etaValueKey": "home.oem-home-proof-hero.etavalue",
-              "marqueeItems": ["North district", "Harbor corridor"],
+              "marqueeItems": ["—", "—"],
               "variant": "quiet"
             }
           },
@@ -60,15 +60,15 @@
               "introKey": "home.oem-home-proof-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "home.oem-home-proof-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "home.oem-home-proof-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "home.oem-home-proof-trust.portraitname",
               "portraitRoleKey": "home.oem-home-proof-trust.portraitrole",
               "variant": "technical-grid"
@@ -82,13 +82,13 @@
               "titleKey": "home.oem-home-proof-services.title",
               "services": [
                 {
-                  "code": "01",
+                  "code": "—",
                   "titleKey": "home.oem-home-proof-services.services.0.title",
                   "bodyKey": "home.oem-home-proof-services.services.0.body",
                   "specKey": "home.oem-home-proof-services.services.0.spec"
                 },
                 {
-                  "code": "02",
+                  "code": "—",
                   "titleKey": "home.oem-home-proof-services.services.1.title",
                   "bodyKey": "home.oem-home-proof-services.services.1.body",
                   "specKey": "home.oem-home-proof-services.services.1.spec"
@@ -158,15 +158,15 @@
               "introKey": "detail.oem-quality-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "detail.oem-quality-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "detail.oem-quality-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "detail.oem-quality-trust.portraitname",
               "portraitRoleKey": "detail.oem-quality-trust.portraitrole",
               "variant": "technical-grid"

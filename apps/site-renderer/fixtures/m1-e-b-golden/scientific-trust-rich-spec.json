@@ -56,15 +56,15 @@
               "introKey": "home.scientific-home-evidence-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "home.scientific-home-evidence-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "home.scientific-home-evidence-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "home.scientific-home-evidence-trust.portraitname",
               "portraitRoleKey": "home.scientific-home-evidence-trust.portraitrole",
               "variant": "technical-grid"
@@ -109,7 +109,7 @@
               "f2Key": "home.scientific-home-evidence-products.f2",
               "products": [
                 {
-                  "code": "PX-24",
+                  "code": "—",
                   "nameKey": "home.scientific-home-evidence-products.products.0.name",
                   "taglineKey": "home.scientific-home-evidence-products.products.0.tagline",
                   "capacityKey": "home.scientific-home-evidence-products.products.0.capacity",
@@ -135,10 +135,10 @@
               "introKey": "home.scientific-home-evidence-articles.intro",
               "items": [
                 {
-                  "cat": "Guides",
+                  "cat": "—",
                   "titleKey": "home.scientific-home-evidence-articles.items.0.title",
                   "descKey": "home.scientific-home-evidence-articles.items.0.desc",
-                  "readTime": "4 min read"
+                  "readTime": "—"
                 }
               ],
               "variant": "technical-grid"
@@ -188,15 +188,15 @@
               "introKey": "detail.scientific-validation-trust.intro",
               "stats": [
                 {
-                  "value": "24",
+                  "value": "—",
                   "labelKey": "detail.scientific-validation-trust.stats.0.label"
                 },
                 {
-                  "value": "18",
+                  "value": "—",
                   "labelKey": "detail.scientific-validation-trust.stats.1.label"
                 }
               ],
-              "badges": ["Documented review", "Material traceability"],
+              "badges": [],
               "portraitNameKey": "detail.scientific-validation-trust.portraitname",
               "portraitRoleKey": "detail.scientific-validation-trust.portraitrole",
               "variant": "technical-grid"
@@ -231,10 +231,10 @@
               "introKey": "detail.scientific-validation-articles.intro",
               "items": [
                 {
-                  "cat": "Guides",
+                  "cat": "—",
                   "titleKey": "detail.scientific-validation-articles.items.0.title",
                   "descKey": "detail.scientific-validation-articles.items.0.desc",
-                  "readTime": "4 min read"
+                  "readTime": "—"
                 }
               ],
               "variant": "technical-grid"

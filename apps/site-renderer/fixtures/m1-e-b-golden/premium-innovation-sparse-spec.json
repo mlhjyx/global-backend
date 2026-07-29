@@ -103,10 +103,10 @@
               "introKey": "home.premium-home-editorial-articles.intro",
               "items": [
                 {
-                  "cat": "Guides",
+                  "cat": "—",
                   "titleKey": "home.premium-home-editorial-articles.items.0.title",
                   "descKey": "home.premium-home-editorial-articles.items.0.desc",
-                  "readTime": "4 min read"
+                  "readTime": "—"
                 }
               ],
               "variant": "technical-grid"
@@ -189,16 +189,16 @@
                   "label": "Hydraulic",
                   "titleKey": "detail.premium-innovation-systems.systems.0.title",
                   "descKey": "detail.premium-innovation-systems.systems.0.desc",
-                  "metric": "16",
-                  "suffix": "bar",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "detail.premium-innovation-systems.systems.0.metriclabel"
                 },
                 {
                   "label": "Materials",
                   "titleKey": "detail.premium-innovation-systems.systems.1.title",
                   "descKey": "detail.premium-innovation-systems.systems.1.desc",
-                  "metric": "320",
-                  "suffix": "°C",
+                  "metric": "—",
+                  "suffix": "—",
                   "metricLabelKey": "detail.premium-innovation-systems.systems.1.metriclabel"
                 }
               ],

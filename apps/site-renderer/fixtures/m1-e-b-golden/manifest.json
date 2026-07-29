@@ -8,7 +8,7 @@
       "mode": "rich",
       "familyId": "natural-origin",
       "designBriefDigest": "46d3e0935a4fa69b578f5b318be98a12ac2c60de7fa5079af3d09c8849b5f40d",
-      "specSha256": "b1aba2999ad20c6c8a609cf7290d8a6cba6edca6f1da7a0ade3e9e177d4d76d4"
+      "specSha256": "fb4c65f067634ed88818b8da8808443c38aa3602f3afa5bf16039caf44493383"
     },
     {
       "id": "natural-origin-sparse",
@@ -22,63 +22,63 @@
       "mode": "rich",
       "familyId": "oem-capability",
       "designBriefDigest": "15343ffac06a5c22404520e0570cac7d854cbf777a48e1d3f5e7842361d5cb3d",
-      "specSha256": "52b6295cab5a997a3891548f6c76826ec1ed4306a0ef63750c727367bb38d58a"
+      "specSha256": "49ce8a4094f6452c862ed7b1a143fb45a211a73b3ad47b15dda64a4ea7e6ef41"
     },
     {
       "id": "oem-capability-sparse",
       "mode": "sparse",
       "familyId": "oem-capability",
       "designBriefDigest": "41c391ca2501a50b2948008c79d722e0872cd5e4dcd4952e271ac8d628bc9a7e",
-      "specSha256": "60e0fc38cd536f0598aff4a49a07b57f065bc69b8f7c125e2b8d21de5567b2dd"
+      "specSha256": "94b7a484f0d56069696c7ec1a728658177bee95491742cbbfc5c35297186a341"
     },
     {
       "id": "precision-industrial-rich",
       "mode": "rich",
       "familyId": "precision-industrial",
       "designBriefDigest": "b674c44443a9d74dedb39cf5c53eca10081f7655360e2de04fe9ff004a5d4190",
-      "specSha256": "1b7d563d7b1a50eb56a6f6d493b8b1d99d06c2119118e9bf51b61ea49f6fcb6a"
+      "specSha256": "ade57b0593f2f24d9a76425084e7a1bbd0b6beb32ac2b412825a2a829132451e"
     },
     {
       "id": "precision-industrial-sparse",
       "mode": "sparse",
       "familyId": "precision-industrial",
       "designBriefDigest": "b9df4dfba24835d40cf9bdebba33680578e0cc4bc55e82ea58337a8669b5d7f4",
-      "specSha256": "b62c6f0f17469089a1c42ca54ca860ce9a62c98ceecbc4c857d0a4ba137cf683"
+      "specSha256": "7886121dd280a12431a0654125588b22543ae4a55345bbd03f6db87b4a0d30d1"
     },
     {
       "id": "premium-innovation-rich",
       "mode": "rich",
       "familyId": "premium-innovation",
       "designBriefDigest": "1a14f07310614e45fcefb173444758dee69b48bd7df1fd9c3e7d403fc85dad43",
-      "specSha256": "d2975171d06f4fcd205c2a30a375dad91d04ae4ec09e468dc35b09c6d464ff88"
+      "specSha256": "7adb0525c85de81e0f38e7b8e58e4959f83cfbb9d82cf3cb62214e481aa9b9ab"
     },
     {
       "id": "premium-innovation-sparse",
       "mode": "sparse",
       "familyId": "premium-innovation",
       "designBriefDigest": "f62d927e5002971cb3f7272474e481b0e5e6908b733a57a6b8e1b164bbcc75b3",
-      "specSha256": "db81903261fbe0ba5393728ca1dbe5c36cb13e80670530460f1b5ddc8ee3465c"
+      "specSha256": "a4cfa68eac91e9b915b286a70af62c4612650c49e5671c5873cf7e0cb2be586d"
     },
     {
       "id": "scientific-trust-rich",
       "mode": "rich",
       "familyId": "scientific-trust",
       "designBriefDigest": "f4ed405b35a3b7aaa31d11f494dd4703cf037ecb8fa7be3891b6527835009977",
-      "specSha256": "f92fa7a7cc7d3d876d0c253ac9f0ff648e4fe164020ae596a2f31168b79f2258"
+      "specSha256": "2ebeeef47e045509fb85bb47d44d54607b342d6ed5612a7349e67323cb50c76e"
     },
     {
       "id": "scientific-trust-sparse",
       "mode": "sparse",
       "familyId": "scientific-trust",
       "designBriefDigest": "f3f842c90b98d90125154810e66ef2d87fe0615933bb89b79abc525f2d8cbf28",
-      "specSha256": "6160bbf747542956c74c29eea36d29c68f1b16eacc36bd92135ea1fede61d1a5"
+      "specSha256": "108bae54dc05e0c49e06bd93a38773d54ed52c0fa6bbd2c3eafb789b32bb1977"
     },
     {
       "id": "technical-catalog-rich",
       "mode": "rich",
       "familyId": "technical-catalog",
       "designBriefDigest": "11918d7c84fcb79550c7fd3f4c1c0bfef263098decdc4da527014ee4e0ecfd83",
-      "specSha256": "431e5a427b79ae4e5072df3cdecee469ef2c0f54304695a5ac4c3ed39c27e869"
+      "specSha256": "efd0af6ff4a4f62299f3609ba68409a359bf0844fcb5a37580f7d2cccd5b702d"
     },
     {
       "id": "technical-catalog-sparse",

@@ -437,7 +437,9 @@ export async function assertRenderedOutboundDomains(
         try {
           parsed = new URL(raw.startsWith("//") ? `https:${raw}` : raw);
         } catch {
-          throw new Error(`RENDERER_OUTBOUND_URL_INVALID: ${raw}`);
+          throw new Error(
+            `RENDERER_OUTBOUND_URL_INVALID in ${path.relative(root, filePath)}`,
+          );
         }
         const ownUrl = ownOrigin !== null && parsed.origin === ownOrigin;
         if (
@@ -446,7 +448,7 @@ export async function assertRenderedOutboundDomains(
             !approved.has(parsed.hostname.toLowerCase()))
         ) {
           throw new Error(
-            `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname}`,
+            `RENDERER_OUTBOUND_DOMAIN_FORBIDDEN: ${parsed.hostname} in ${path.relative(root, filePath)}`,
           );
         }
       }
