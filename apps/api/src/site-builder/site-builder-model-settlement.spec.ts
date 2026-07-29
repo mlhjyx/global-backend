@@ -426,6 +426,64 @@ describe('Site Builder zero-generation model preflight', () => {
     );
   });
 
+  it.each([
+    [
+      'declared content length',
+      () =>
+        new Response('{}', {
+          status: 200,
+          headers: { 'content-length': '1048577' },
+        }),
+    ],
+    [
+      'accumulated streamed bytes',
+      () => new Response(new Uint8Array(1_048_577), { status: 200 }),
+    ],
+  ])(
+    'rejects an OpenOx catalog that exceeds the %s limit',
+    async (_case, oversizedResponse) => {
+      const { attestation, entries } = fixture();
+      const settlement = new NewApiSiteBuilderModelSettlement(
+        attestation,
+        API_KEY,
+        {
+          now: () => NOW,
+          fetch: vi.fn(async (input: string | URL | Request) => {
+            const url = new URL(String(input));
+            if (url.pathname === '/api/public/pricing-catalog') {
+              return oversizedResponse();
+            }
+            return liveFetch(input);
+          }) as typeof fetch,
+        },
+      );
+      const dispatch = entries[0]!;
+
+      await expect(
+        settlement.preflight(
+          {
+            taskId: dispatch.taskId,
+            op: 'generateStructured',
+            providerId: 'gateway',
+            gatewayOrigin: GATEWAY_ORIGIN,
+            credentialSha256:
+              '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+            alias: dispatch.alias,
+            protocol: dispatch.protocol,
+            promptUtf8BytesPerCall: 500,
+            maxOutputTokens: 1_000,
+            maximumWireCalls: 2,
+            reservationMicrousd: 800_000,
+          },
+          paidContext(),
+        ),
+      ).rejects.toMatchObject({
+        name: 'PaidModelPreflightError',
+        code: 'LIVE_PREFLIGHT_UNAVAILABLE',
+      });
+    },
+  );
+
   it('propagates caller cancellation through every live preflight read', async () => {
     const { attestation, entries } = fixture();
     const controller = new AbortController();
@@ -621,6 +679,7 @@ describe('new-api request-bound settlement resolver', () => {
           ledgerMicrousdPerPricingUnit: 1_000_000,
           gatewayCredentialQuotaCapPoints: 5_000_000,
           gatewayCredentialRemainingPoints: 4_500_000,
+          maxOutputTokensPerCall: 1_000,
           pricedMaximumMicrousd: 100_000,
         },
         usage: { inputTokens: 100, outputTokens: 20 },
@@ -681,6 +740,7 @@ describe('new-api request-bound settlement resolver', () => {
           ledgerMicrousdPerPricingUnit: 1_000_000,
           gatewayCredentialQuotaCapPoints: 5_000_000,
           gatewayCredentialRemainingPoints: 4_500_000,
+          maxOutputTokensPerCall: 1_000,
           pricedMaximumMicrousd: 100_000,
         },
       }),
@@ -736,6 +796,63 @@ describe('new-api request-bound settlement resolver', () => {
           ledgerMicrousdPerPricingUnit: 1_000_000,
           gatewayCredentialQuotaCapPoints: 5_000_000,
           gatewayCredentialRemainingPoints: 4_500_000,
+          maxOutputTokensPerCall: 1_000,
+          pricedMaximumMicrousd: 100_000,
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: 'unknown',
+      reason: 'log_invalid',
+    });
+  });
+
+  it('rejects consume logs that exceed the attested per-call output limit', async () => {
+    const { attestation } = fixture();
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      attestation,
+      API_KEY,
+      {
+        fetch: vi.fn(async () =>
+          jsonResponse({
+            data: [
+              {
+                request_id: 'req_output_limit',
+                type: 2,
+                quota: 500,
+                prompt_tokens: 10,
+                completion_tokens: 11,
+                model_name: 'gpt-5.6-terra',
+                channel: CHANNEL_ID,
+              },
+            ],
+          }),
+        ) as typeof fetch,
+        wait: async () => undefined,
+      },
+    );
+
+    await expect(
+      settlement.resolve({
+        requestId: 'req_output_limit',
+        evidence: {
+          schemaVersion: 'site-builder-paid-model-preflight-evidence/v2',
+          attestationId: attestation.snapshot.attestationId,
+          snapshotSha256: attestation.snapshotSha256,
+          resolverId: 'new-api-token-log-v1',
+          taskId: 'site_builder.brand_profile',
+          alias: 'gpt-5.6-terra',
+          protocol: 'openai-responses',
+          expectedChannelId: CHANNEL_ID,
+          pricingAuthority: 'openox_model_marketplace',
+          pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+          pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
+          pricingCurrency: 'CNY',
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+          ledgerMicrousdPerPricingUnit: 1_000_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          gatewayCredentialRemainingPoints: 4_500_000,
+          maxOutputTokensPerCall: 10,
           pricedMaximumMicrousd: 100_000,
         },
       }),
@@ -790,6 +907,7 @@ describe('new-api request-bound settlement resolver', () => {
           ledgerMicrousdPerPricingUnit: 1_000_000,
           gatewayCredentialQuotaCapPoints: 5_000_000,
           gatewayCredentialRemainingPoints: 4_500_000,
+          maxOutputTokensPerCall: 1_000,
           pricedMaximumMicrousd: 100_000,
         },
       }),

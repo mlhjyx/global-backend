@@ -5,6 +5,7 @@ import {
 } from './model-transports';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { loadSiteBuilderModelSettlement } from '../site-builder/site-builder-model-settlement';
+import type { PaidModelSettlementController } from './paid-model-settlement';
 
 export interface GatewayEvaluationConfig {
   /**
@@ -13,6 +14,20 @@ export interface GatewayEvaluationConfig {
    * immutable catalog explicitly.
    */
   visionEvalFixtureDigests?: Readonly<Record<string, string>>;
+}
+
+function loadPaidModelSettlementFailClosed(
+  env: NodeJS.ProcessEnv,
+): PaidModelSettlementController | undefined {
+  try {
+    return loadSiteBuilderModelSettlement(env);
+  } catch {
+    // A stale, unreadable, or otherwise invalid operational attestation must
+    // deny paid calls without taking the API or worker process down. The
+    // provider's preflightPaidCall reports ATTESTATION_UNAVAILABLE before
+    // reserve when this controller is absent.
+    return undefined;
+  }
 }
 
 /**
@@ -35,7 +50,7 @@ export function buildGatewayProvider(
     // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',
     modelTransports: VERIFIED_GATEWAY_MODEL_TRANSPORTS,
-    paidModelSettlement: loadSiteBuilderModelSettlement(env),
+    paidModelSettlement: loadPaidModelSettlementFailClosed(env),
     visionModelTransports: CANDIDATE_GATEWAY_VISION_TRANSPORTS,
     visionEvalFixtureDigests: evaluation.visionEvalFixtureDigests,
   });

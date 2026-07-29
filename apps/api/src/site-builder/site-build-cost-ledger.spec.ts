@@ -96,6 +96,7 @@ describe('R4-B cost truth classification', () => {
           ledgerMicrousdPerPricingUnit: 1_000_000,
           gatewayCredentialQuotaCapPoints: 5_000_000,
           gatewayCredentialRemainingPoints: 4_500_000,
+          maxOutputTokensPerCall: 1_000,
           pricedMaximumMicrousd: 100_000,
         };
         const measurement = modelCostMeasurement({
@@ -153,6 +154,7 @@ describe('R4-B cost truth classification', () => {
       ledgerMicrousdPerPricingUnit: 1_000_000,
       gatewayCredentialQuotaCapPoints: 5_000_000,
       gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
       pricedMaximumMicrousd: 400_000,
     };
     expect(
@@ -206,6 +208,7 @@ describe('R4-B cost truth classification', () => {
       ledgerMicrousdPerPricingUnit: 1_000_000,
       gatewayCredentialQuotaCapPoints: 5_000_000,
       gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
       pricedMaximumMicrousd: 50_000,
     };
     const observation = (requestId: string, costMicrousd = 1_000) => ({
@@ -278,6 +281,7 @@ describe('R4-B cost truth classification', () => {
       ledgerMicrousdPerPricingUnit: 1_000_000,
       gatewayCredentialQuotaCapPoints: 5_000_000,
       gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
       pricedMaximumMicrousd: 50_000,
     };
     const settled = (requestId: string, inputTokens: number, outputTokens: number) => ({

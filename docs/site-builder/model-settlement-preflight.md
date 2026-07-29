@@ -33,7 +33,9 @@ This contract does not:
 
 1. Load the attestation from
    `SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH` and verify the exact file
-   digest from `SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256`.
+   digest from `SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256`. A missing,
+   stale, unreadable, or invalid installed attestation leaves paid preflight
+   unavailable but does not take the API or worker process down.
 2. Verify a maximum 24-hour lifetime, gateway origin, irreversible bearer-token
    SHA-256, and an exact dispatch matrix generated from all seven current
    `site_builder.*` task routes.
@@ -45,7 +47,8 @@ This contract does not:
      points are a supplemental kill switch, not price truth;
    - the public OpenOx catalog still matches the frozen selected model rows,
      product line, price group, native currency, input/output/cache rates, and
-     pricing digest;
+     pricing digest; its response is rejected before JSON parsing when either
+     declared or accumulated body bytes exceed 1 MiB;
    - the conservative two-wire structured-output maximum fits the ledger
      reservation when calculated from OpenOx rates.
 4. Reserve the durable operation using a logical operation key that remains
@@ -59,8 +62,10 @@ This contract does not:
    paid operation without a second wire call.
 6. For each response, capture `x-oneapi-request-id`, query the token-scoped
    new-api consume log, and require exactly one row with the frozen alias,
-   channel, token counts, and gateway quota observation. Gateway quota is
-   retained for audit but is not converted into money.
+   channel, token counts, and gateway quota observation. The response's output
+   token count must not exceed the per-call maximum copied into immutable
+   preflight evidence. Gateway quota is retained for audit but is not converted
+   into money.
 7. Settle only if the number of matching observations equals the physical call
    count. Each accepted observation is priced from the frozen OpenOx
    input/output token rates. Missing, ambiguous, stale, model-mismatched,

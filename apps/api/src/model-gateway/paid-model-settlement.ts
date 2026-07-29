@@ -57,6 +57,7 @@ export interface PaidModelPreflightEvidence {
   ledgerMicrousdPerPricingUnit: number;
   gatewayCredentialQuotaCapPoints: number;
   gatewayCredentialRemainingPoints: number;
+  maxOutputTokensPerCall: number;
   pricedMaximumMicrousd: number;
 }
 

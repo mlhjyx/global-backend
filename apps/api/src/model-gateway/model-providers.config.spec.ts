@@ -94,6 +94,55 @@ describe('buildGatewayProvider — verified production model transports', () => 
     expect(request().url).toBe('http://gw.test/v1/chat/completions');
   });
 
+  it('keeps the provider online but denies paid calls when the installed attestation is unreadable', async () => {
+    mockResponse({
+      model: 'deepseek-v4-flash',
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+    const provider = buildGatewayProvider({
+      ...providerEnv(),
+      SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH:
+        '/missing/site-builder-settlement-attestation.json',
+      SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: 'a'.repeat(64),
+    });
+    expect(provider).not.toBeNull();
+    await expect(
+      provider!.generateStructured({
+        task: 'legacy',
+        model: 'deepseek-v4-flash',
+        prompt: 'p',
+        schema: {},
+        maxTokens: 100,
+      }),
+    ).resolves.toMatchObject({ data: { ok: true } });
+    await expect(
+      provider!.preflightPaidCall!(
+        {
+          taskId: 'site_builder.copy',
+          op: 'generateStructured',
+          alias: 'deepseek-v4-flash',
+          promptUtf8BytesPerCall: 1,
+          maxOutputTokens: 100,
+          maximumWireCalls: 2,
+          reservationMicrousd: 100_000,
+        },
+        {
+          workspaceId: '11111111-1111-4111-8111-111111111111',
+          runId: '22222222-2222-4222-8222-222222222222',
+          paidCost: {
+            siteId: '33333333-3333-4333-8333-333333333333',
+            scopeKey: 'attempt:model:0',
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'PaidModelPreflightError',
+      code: 'ATTESTATION_UNAVAILABLE',
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it('registers the native Gemini vision adapter without changing any active text route', async () => {
     mockResponse({
       modelVersion: 'gemini-3.5-flash',

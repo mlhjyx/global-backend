@@ -124,6 +124,7 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       ledgerMicrousdPerPricingUnit: 1_000_000,
       gatewayCredentialQuotaCapPoints: 5_000_000,
       gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
       pricedMaximumMicrousd: 100_000,
     };
     const resolve = vi.fn(async () => ({
@@ -223,6 +224,7 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       ledgerMicrousdPerPricingUnit: 1_000_000,
       gatewayCredentialQuotaCapPoints: 5_000_000,
       gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
       pricedMaximumMicrousd: 100_000,
     };
     const resolve = vi.fn(async () => ({
@@ -333,6 +335,7 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
         ledgerMicrousdPerPricingUnit: 1_000_000,
         gatewayCredentialQuotaCapPoints: 5_000_000,
         gatewayCredentialRemainingPoints: 4_500_000,
+        maxOutputTokensPerCall: 1_000,
         pricedMaximumMicrousd: 100_000,
       };
       const resolve = vi.fn(async () => ({

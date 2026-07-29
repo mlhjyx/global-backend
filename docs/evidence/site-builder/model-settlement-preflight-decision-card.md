@@ -18,6 +18,10 @@ Model dispatch authorization: `NOT_AUTHORIZED`
   OpenOx price snapshot, native pricing currency, and balance-credit
   conversion.
 - The preflight runs before durable reserve and before a generative client.
+- A stale, unreadable, or invalid installed attestation keeps the API and
+  worker online while leaving every paid call denied before reserve.
+- The public OpenOx catalog is rejected before JSON parsing above a 1 MiB
+  declared or accumulated response limit.
 - One initial structured request plus at most one closed repair is priced
   conservatively before execution. Repair is suppressed when the initial
   physical call has an unknown settlement.
@@ -25,7 +29,8 @@ Model dispatch authorization: `NOT_AUTHORIZED`
   token-scoped consume-log row. Multi-call usage is accepted only when all
   observations match. new-api supplies request/channel/token evidence only;
   cost is calculated from the frozen OpenOx catalog and labelled
-  `token_pricing`.
+  `token_pricing`. A consume-log row whose output tokens exceed the immutable
+  per-call request cap is invalid and freezes the paid operation.
 - Unknown settlement charges the conservative reservation, records a failed
   operation, freezes later paid calls for the BuildRun, and cannot fall through
   to another paid provider.

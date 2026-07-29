@@ -36,6 +36,7 @@ const SETTLEMENT_PREFLIGHT = {
   ledgerMicrousdPerPricingUnit: 1_000_000,
   gatewayCredentialQuotaCapPoints: 5_000_000,
   gatewayCredentialRemainingPoints: 4_500_000,
+  maxOutputTokensPerCall: 1_000,
   pricedMaximumMicrousd: 50_000,
 };
 

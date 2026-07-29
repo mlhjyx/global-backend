@@ -34,6 +34,47 @@ const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_ATTESTATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const PROTOCOL_FRAMING_TOKEN_UPPER_BOUND = 4_096;
 const DEFAULT_CONTROL_PLANE_TIMEOUT_MS = 5_000;
+const MAX_OPENOX_CATALOG_BYTES = 1_048_576;
+
+async function boundedJsonResponse(
+  response: Response,
+  maximumBytes: number,
+): Promise<unknown> {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength);
+    if (
+      !Number.isSafeInteger(parsedLength) ||
+      parsedLength < 0 ||
+      parsedLength > maximumBytes
+    ) {
+      throw new Error('response body exceeds byte limit');
+    }
+  }
+  if (!response.body) {
+    throw new Error('response body unavailable');
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maximumBytes) {
+      await reader.cancel();
+      throw new Error('response body exceeds byte limit');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+}
 
 export interface SettlementDispatch {
   taskId: SiteBuilderTaskId;
@@ -659,7 +700,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       return {
         ok: response.ok,
         status: response.status,
-        body: await response.json(),
+        body: await boundedJsonResponse(response, MAX_OPENOX_CATALOG_BYTES),
       };
     } catch {
       return { ok: false, status: 0, body: null };
@@ -814,6 +855,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       ledgerMicrousdPerPricingUnit: dispatch.ledgerMicrousdPerPricingUnit,
       gatewayCredentialQuotaCapPoints: snapshot.credential.quotaCapPoints,
       gatewayCredentialRemainingPoints: totalAvailable as number,
+      maxOutputTokensPerCall: request.maxOutputTokens,
       pricedMaximumMicrousd,
     });
   }
@@ -882,6 +924,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
         !nonNegativeSafeInteger(row.quota) ||
         !positiveSafeInteger(row.prompt_tokens) ||
         !nonNegativeSafeInteger(row.completion_tokens) ||
+        row.completion_tokens > input.evidence.maxOutputTokensPerCall ||
         (input.usage?.inputTokens !== undefined &&
           input.usage.inputTokens !== row.prompt_tokens) ||
         (input.usage?.outputTokens !== undefined &&
