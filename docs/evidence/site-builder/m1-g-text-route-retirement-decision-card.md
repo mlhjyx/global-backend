@@ -1,7 +1,7 @@
 # M1-g text-route retirement governance card
 
-Date: 2026-07-29  
-Status: `ZERO_COST_GOVERNANCE_READY_FOR_REVIEW`  
+Date: 2026-07-29
+Status: `ZERO_COST_GOVERNANCE_READY_FOR_REVIEW`
 Model dispatch authorization: `NOT_AUTHORIZED`
 
 本卡只冻结 M1-g 六个剩余文本任务的退役与回滚治理，不是模型
