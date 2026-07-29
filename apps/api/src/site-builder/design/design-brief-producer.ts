@@ -108,6 +108,15 @@ export interface DesignSpecTaskOutput {
   warnings: string[];
 }
 
+interface DesignSpecTaskSelection {
+  output?: DesignSpecTaskOutput;
+  deterministicRollback?: {
+    source: "rollback_override";
+    fallbackId: string;
+    rollbackPolicyVersion: string;
+  };
+}
+
 function validateTaskOutput(
   input: DesignSpecTaskInput,
   output: DesignSpecTaskOutput,
@@ -672,7 +681,7 @@ export class DesignBriefProducer {
       taskAttemptId: string;
       fenceToken: string;
     },
-  ): Promise<DesignSpecTaskOutput | undefined> {
+  ): Promise<DesignSpecTaskSelection> {
     const executionTarget = resolveTaskExecutionTarget(DESIGN_SPEC_TASK_ID);
     if (executionTarget.kind === "deterministic_fallback") {
       if (executionTarget.fallback.id !== "safe-blueprint") {
@@ -680,33 +689,41 @@ export class DesignBriefProducer {
           `design_spec deterministic fallback is not supported: ${executionTarget.fallback.id}`,
         );
       }
-      return undefined;
+      return {
+        deterministicRollback: {
+          source: executionTarget.source,
+          fallbackId: executionTarget.fallback.id,
+          rollbackPolicyVersion: executionTarget.rollbackPolicyVersion,
+        },
+      };
     }
     if (this.deps.executeTask) {
       const output = await this.deps.executeTask(input, context);
       validateTaskOutput(input, output);
-      return output;
+      return { output };
     }
     if (!this.deps.gateway) {
       throw new Error("design_spec model gateway unavailable");
     }
-    return (
-      await runAiTask(DESIGN_SPEC_TASK, input, {
-        gateway: this.deps.gateway,
-        route: executionTarget.route,
-        ctx: {
-          workspaceId: context.workspaceId,
-          runId: context.buildRunId,
-          paidCost: {
-            siteId: context.siteId,
-            taskAttemptId: context.taskAttemptId,
-            fenceToken: context.fenceToken,
-            scopeKey: "design_spec",
-            durableReplayResult: (providerResult) => providerResult,
+    return {
+      output: (
+        await runAiTask(DESIGN_SPEC_TASK, input, {
+          gateway: this.deps.gateway,
+          route: executionTarget.route,
+          ctx: {
+            workspaceId: context.workspaceId,
+            runId: context.buildRunId,
+            paidCost: {
+              siteId: context.siteId,
+              taskAttemptId: context.taskAttemptId,
+              fenceToken: context.fenceToken,
+              scopeKey: "design_spec",
+              durableReplayResult: (providerResult) => providerResult,
+            },
           },
-        },
-      })
-    ).data;
+        })
+      ).data,
+    };
   }
 
   async produce(rawInput: DesignSpecInputV1): Promise<ProducedDesignBrief> {
@@ -784,15 +801,19 @@ export class DesignBriefProducer {
         candidates: top.map((candidate) => candidate.summary),
       };
       let modelOutput: DesignSpecTaskOutput | undefined;
+      let deterministicRollback:
+        DesignSpecTaskSelection["deterministicRollback"] | undefined;
       try {
         this.ensureNotCancelled();
-        modelOutput = await this.selectWithModel(taskInput, {
+        const selection = await this.selectWithModel(taskInput, {
           workspaceId: input.workspaceId,
           buildRunId: input.buildRunId,
           siteId: input.siteId,
           taskAttemptId: claim.attempt.id,
           fenceToken: claim.attempt.fenceToken,
         });
+        modelOutput = selection.output;
+        deterministicRollback = selection.deterministicRollback;
       } catch (error) {
         this.ensureNotCancelled();
         if (
@@ -820,7 +841,14 @@ export class DesignBriefProducer {
       this.ensureNotCancelled();
       await this.deps.ledger.storeTaskOutput(fence, {
         candidateId: selected.summary.id,
-        selectionSource: modelOutput ? "model" : "deterministic",
+        selectionSource: modelOutput
+          ? "model"
+          : deterministicRollback
+            ? "rollback_deterministic"
+            : "deterministic",
+        ...(deterministicRollback
+          ? { rollbackProvenance: deterministicRollback }
+          : {}),
         designBriefDigest: designBrief.digest,
       });
       const result: ProducedDesignBrief = {

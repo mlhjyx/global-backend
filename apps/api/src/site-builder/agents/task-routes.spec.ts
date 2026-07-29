@@ -207,6 +207,7 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
         profile: 'structured.default',
         fallback: expect.objectContaining({ id: 'safe-blueprint' }),
         source: 'rollback_override',
+        rollbackPolicyVersion: 'site-builder-model-rollback-policy/v1',
       });
     } finally {
       policy.mockRestore();

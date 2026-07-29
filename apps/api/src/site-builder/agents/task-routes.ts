@@ -50,6 +50,7 @@ export type TaskExecutionTarget =
       profile: SiteBuilderModelProfileId;
       fallback: DeterministicFallback;
       source: 'rollback_override';
+      rollbackPolicyVersion: string;
     };
 
 type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
@@ -110,6 +111,7 @@ export function resolveTaskExecutionTarget(
       profile,
       fallback: { ...rollbackPolicy.fallback },
       source: 'rollback_override',
+      rollbackPolicyVersion: modelPolicyRegistry.getRollbackPolicyVersion(),
     };
   }
   const selectedPolicy = activePolicy;
