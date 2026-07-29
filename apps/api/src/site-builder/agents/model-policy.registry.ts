@@ -441,11 +441,16 @@ export class ModelPolicyRegistry {
   }
 
   getAliasRetirementPolicy(alias: string): ModelAliasRetirementPolicy | null {
+    if (
+      !Object.prototype.hasOwnProperty.call(PENDING_MODEL_RETIREMENTS, alias)
+    ) {
+      return null;
+    }
     const policy =
       PENDING_MODEL_RETIREMENTS[
         alias as keyof typeof PENDING_MODEL_RETIREMENTS
       ];
-    return policy ? { ...policy } : null;
+    return { ...policy };
   }
 
   getProfile(profileId: SiteBuilderModelProfileId): ModelProfileDefinition {

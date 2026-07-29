@@ -102,6 +102,8 @@ export interface ModelExecutionPolicySnapshot {
   source: 'registry' | 'env_override' | 'rollback_override';
   /** Present only when the selected base policy is a recorded promotion. */
   promotionEvidenceId?: string;
+  /** Present when an independently versioned rollback policy selected the route. */
+  rollbackPolicyVersion?: string;
   dataPolicy: ModelDataPolicy;
   maxCostCents: number;
   route: ModelRouteSnapshot;

@@ -144,6 +144,12 @@ export function resolveTaskExecutionTarget(
     selectedPolicy.state === 'promotedRoute'
       ? { promotionEvidenceId: selectedPolicy.promotionEvidenceId }
       : {}),
+    ...(rollback && !emergencyOverride
+      ? {
+          rollbackPolicyVersion:
+            modelPolicyRegistry.getRollbackPolicyVersion(),
+        }
+      : {}),
     dataPolicy: profileDefinition.dataPolicy,
     maxCostCents: binding.maxCostCents,
     route: { primary: resolvedPrimary, fallbacks: [...resolvedFallbacks] },

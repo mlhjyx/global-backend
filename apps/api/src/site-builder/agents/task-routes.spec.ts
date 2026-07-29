@@ -139,6 +139,7 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
       routeState: 'currentRoute',
       lifecycle: 'active',
       source: 'rollback_override',
+      rollbackPolicyVersion: 'site-builder-model-rollback-policy/v1',
       route: {
         primary: 'deepseek-v4-pro',
         fallbacks: ['glm-5.2'],
@@ -361,6 +362,10 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         },
       );
     }
+    expect(
+      modelPolicyRegistry.getAliasRetirementPolicy('constructor'),
+    ).toBeNull();
+    expect(modelPolicyRegistry.getAliasRetirementPolicy('toString')).toBeNull();
   });
 
   it('评测 comparator 只从可执行模型 rollback 派生，确定性任务不接纳付费 legacy', () => {

@@ -112,6 +112,7 @@ const RUNNER_SOURCE_FILES = [
   'apps/api/src/site-builder/current-route-recovery.ts',
   'apps/api/src/site-builder/site-builder-model-settlement.ts',
   'apps/api/src/site-builder/agents/model-policy.registry.ts',
+  'apps/api/src/site-builder/agents/task-route-bindings.ts',
   'apps/api/src/site-builder/agents/task-routes.ts',
   'apps/api/src/model-gateway/model-transports.ts',
   'packages/contracts/src/site-builder/model-policy.ts',
