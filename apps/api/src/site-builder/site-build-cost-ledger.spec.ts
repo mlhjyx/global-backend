@@ -82,7 +82,7 @@ describe('R4-B cost truth classification', () => {
           'openai-chat-completions';
         const settlementPreflight = {
           schemaVersion:
-            'site-builder-paid-model-preflight-evidence/v1' as const,
+            'site-builder-paid-model-preflight-evidence/v2' as const,
           attestationId: 'runtime-seven-task-test',
           snapshotSha256: 'a'.repeat(64),
           resolverId: 'new-api-token-log-v1',
@@ -90,9 +90,15 @@ describe('R4-B cost truth classification', () => {
           alias,
           protocol,
           expectedChannelId: 17,
-          quotaPerUnit: 500_000,
-          credentialQuotaCapMicrousd: 10_000_000,
-          credentialRemainingMicrousd: 9_000_000,
+          pricingAuthority: 'openox_model_marketplace' as const,
+          pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+          pricingSnapshotSha256: 'c'.repeat(64),
+          pricingCurrency: 'CNY' as const,
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+          ledgerMicrousdPerPricingUnit: 1_000_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          gatewayCredentialRemainingPoints: 4_500_000,
           pricedMaximumMicrousd: 100_000,
         };
         const measurement = modelCostMeasurement({
@@ -111,8 +117,8 @@ describe('R4-B cost truth classification', () => {
                 alias,
                 protocol,
                 channelId: settlementPreflight.expectedChannelId,
+                basis: 'openox_catalog_token_pricing' as const,
                 quota: 1_250,
-                quotaPerUnit: settlementPreflight.quotaPerUnit,
                 costMicrousd: 2_500,
                 inputTokens: 100,
                 outputTokens: 20,
@@ -122,9 +128,10 @@ describe('R4-B cost truth classification', () => {
           reservationMicrousd: 400_000,
         });
         expect(measurement).toMatchObject({
-          basis: 'provider_reported',
+          basis: 'token_pricing',
           budgetChargeMicrousd: 2_500,
-          reportedCostMicrousd: 2_500,
+          reportedCostMicrousd: null,
+          calculatedCostMicrousd: 2_500,
         });
       }
     }
@@ -132,7 +139,7 @@ describe('R4-B cost truth classification', () => {
 
   it('keeps partial or channel-mismatched multi-wire settlement unknown', () => {
     const settlementPreflight = {
-      schemaVersion: 'site-builder-paid-model-preflight-evidence/v1' as const,
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
       attestationId: 'runtime-repair-test',
       snapshotSha256: 'b'.repeat(64),
       resolverId: 'new-api-token-log-v1',
@@ -140,9 +147,15 @@ describe('R4-B cost truth classification', () => {
       alias: 'deepseek-v4-pro',
       protocol: 'openai-chat-completions' as const,
       expectedChannelId: 11,
-      quotaPerUnit: 500_000,
-      credentialQuotaCapMicrousd: 10_000_000,
-      credentialRemainingMicrousd: 9_000_000,
+      pricingAuthority: 'openox_model_marketplace' as const,
+      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+      pricingSnapshotSha256: 'c'.repeat(64),
+      pricingCurrency: 'CNY' as const,
+      inputPriceMicrounitsPerMillionTokens: 2_000_000,
+      outputPriceMicrounitsPerMillionTokens: 10_000_000,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      gatewayCredentialQuotaCapPoints: 5_000_000,
+      gatewayCredentialRemainingPoints: 4_500_000,
       pricedMaximumMicrousd: 400_000,
     };
     expect(
@@ -160,8 +173,8 @@ describe('R4-B cost truth classification', () => {
               alias: settlementPreflight.alias,
               protocol: settlementPreflight.protocol,
               channelId: settlementPreflight.expectedChannelId + 1,
+              basis: 'openox_catalog_token_pricing' as const,
               quota: 500,
-              quotaPerUnit: settlementPreflight.quotaPerUnit,
               costMicrousd: 1_000,
               inputTokens: 10,
               outputTokens: 5,

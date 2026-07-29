@@ -19,9 +19,14 @@ import {
 } from './agents/task-routes';
 
 export const SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION =
-  'site-builder-model-settlement-attestation/2026-07-29-v1' as const;
+  'site-builder-model-settlement-attestation/2026-07-29-v2' as const;
 export const SITE_BUILDER_MODEL_SETTLEMENT_EVIDENCE_VERSION =
-  'site-builder-paid-model-preflight-evidence/v1' as const;
+  'site-builder-paid-model-preflight-evidence/v2' as const;
+export const OPENOX_PRICING_AUTHORITY = {
+  provider: 'openox_model_marketplace',
+  origin: 'https://openox.tech',
+  catalogEndpoint: '/api/public/pricing-catalog',
+} as const;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const IDENTIFIER = /^[a-z0-9][a-z0-9._/-]{2,127}$/;
@@ -34,10 +39,15 @@ export interface SettlementDispatch {
   alias: string;
   protocol: PaidModelProtocol;
   channelId: number;
-  quotaType: 0;
-  modelRatio: number;
-  completionRatio: number;
-  groupRatio: number;
+  upstreamModelId: string;
+  upstreamProductLine: string;
+  upstreamGroupName: string;
+  pricingCurrency: 'USD' | 'CNY';
+  inputPriceMicrounitsPerMillionTokens: number;
+  outputPriceMicrounitsPerMillionTokens: number;
+  cacheReadPriceMicrounitsPerMillionTokens: number;
+  cacheWritePriceMicrounitsPerMillionTokens: number;
+  ledgerMicrousdPerPricingUnit: number;
   pricingVersion: string;
 }
 
@@ -47,15 +57,22 @@ export interface SettlementSnapshot {
   expiresAt: string;
   gateway: {
     origin: string;
-    quotaPerUnit: number;
-    pricingSnapshotSha256: string;
     channelSnapshotSha256: string;
+  };
+  pricing: {
+    authority: typeof OPENOX_PRICING_AUTHORITY.provider;
+    origin: typeof OPENOX_PRICING_AUTHORITY.origin;
+    catalogEndpoint: typeof OPENOX_PRICING_AUTHORITY.catalogEndpoint;
+    snapshotSha256: string;
+    ledgerConversionPolicy: 'openox_1_to_1_balance_credit';
+    ledgerMicrousdPerUsd: 1_000_000;
+    ledgerMicrousdPerCny: 1_000_000;
   };
   credential: {
     bearerTokenSha256: string;
     purpose: 'site_builder_runtime';
     quotaMode: 'limited';
-    quotaCapMicrousd: number;
+    quotaCapPoints: number;
     scopeExact: true;
     modelAllowlist: string[];
   };
@@ -80,15 +97,30 @@ interface RuntimeDeps {
   wait?: (milliseconds: number) => Promise<void>;
 }
 
-export interface PricingRow {
-  model_name?: unknown;
-  quota_type?: unknown;
-  model_ratio?: unknown;
-  model_price?: unknown;
-  completion_ratio?: unknown;
-  pricing_version?: unknown;
-  enable_groups?: unknown;
-  supported_endpoint_types?: unknown;
+export interface OpenOxPricingRow {
+  model_id?: unknown;
+  product_line?: unknown;
+  input_rate?: unknown;
+  output_rate?: unknown;
+  cache_read_rate?: unknown;
+  cache_write_rate?: unknown;
+  group_rates?: unknown;
+  status?: unknown;
+  updated_at?: unknown;
+}
+
+export interface OpenOxPricingGroup {
+  name?: unknown;
+  product_line?: unknown;
+  rate_multiplier?: unknown;
+}
+
+export interface OpenOxPricingCatalog {
+  success?: unknown;
+  data?: {
+    models?: unknown;
+    groups?: unknown;
+  };
 }
 
 interface LogRow {
@@ -143,10 +175,6 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-function positiveFinite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 function canonicalInstant(value: unknown): value is string {
@@ -225,21 +253,26 @@ function assertAttestation(
       'capturedAt',
       'expiresAt',
       'gateway',
+      'pricing',
       'credential',
       'dispatches',
       'settlement',
     ]) ||
-    !exactKeys(snapshot.gateway, [
+    !exactKeys(snapshot.gateway, ['origin', 'channelSnapshotSha256']) ||
+    !exactKeys(snapshot.pricing, [
+      'authority',
       'origin',
-      'quotaPerUnit',
-      'pricingSnapshotSha256',
-      'channelSnapshotSha256',
+      'catalogEndpoint',
+      'snapshotSha256',
+      'ledgerConversionPolicy',
+      'ledgerMicrousdPerUsd',
+      'ledgerMicrousdPerCny',
     ]) ||
     !exactKeys(snapshot.credential, [
       'bearerTokenSha256',
       'purpose',
       'quotaMode',
-      'quotaCapMicrousd',
+      'quotaCapPoints',
       'scopeExact',
       'modelAllowlist',
     ]) ||
@@ -254,15 +287,22 @@ function assertAttestation(
     !canonicalInstant(snapshot.expiresAt) ||
     !SHA256.test(envelope.snapshotSha256) ||
     envelope.snapshotSha256 !== sha256CanonicalJson(snapshot) ||
-    !SHA256.test(snapshot.gateway.pricingSnapshotSha256) ||
     !SHA256.test(snapshot.gateway.channelSnapshotSha256) ||
-    !positiveSafeInteger(snapshot.gateway.quotaPerUnit) ||
+    snapshot.pricing.authority !== OPENOX_PRICING_AUTHORITY.provider ||
+    snapshot.pricing.origin !== OPENOX_PRICING_AUTHORITY.origin ||
+    snapshot.pricing.catalogEndpoint !==
+      OPENOX_PRICING_AUTHORITY.catalogEndpoint ||
+    !SHA256.test(snapshot.pricing.snapshotSha256) ||
+    snapshot.pricing.ledgerConversionPolicy !==
+      'openox_1_to_1_balance_credit' ||
+    snapshot.pricing.ledgerMicrousdPerUsd !== 1_000_000 ||
+    snapshot.pricing.ledgerMicrousdPerCny !== 1_000_000 ||
     !SHA256.test(snapshot.credential.bearerTokenSha256) ||
     snapshot.credential.bearerTokenSha256 !== sha256(apiKey) ||
     snapshot.credential.purpose !== 'site_builder_runtime' ||
     snapshot.credential.quotaMode !== 'limited' ||
     snapshot.credential.scopeExact !== true ||
-    !positiveSafeInteger(snapshot.credential.quotaCapMicrousd) ||
+    !positiveSafeInteger(snapshot.credential.quotaCapPoints) ||
     snapshot.settlement.requestIdentityHeader !== 'x-oneapi-request-id' ||
     snapshot.settlement.logEndpoint !== '/api/log/token' ||
     snapshot.settlement.unknownSettlementPolicy !== 'freeze_campaign' ||
@@ -311,10 +351,15 @@ function assertAttestation(
         'alias',
         'protocol',
         'channelId',
-        'quotaType',
-        'modelRatio',
-        'completionRatio',
-        'groupRatio',
+        'upstreamModelId',
+        'upstreamProductLine',
+        'upstreamGroupName',
+        'pricingCurrency',
+        'inputPriceMicrounitsPerMillionTokens',
+        'outputPriceMicrounitsPerMillionTokens',
+        'cacheReadPriceMicrounitsPerMillionTokens',
+        'cacheWritePriceMicrounitsPerMillionTokens',
+        'ledgerMicrousdPerPricingUnit',
         'pricingVersion',
       ]) ||
       !SITE_BUILDER_TASK_IDS.includes(dispatch.taskId) ||
@@ -322,10 +367,27 @@ function assertAttestation(
       dispatch.alias.length === 0 ||
       !PAID_MODEL_PROTOCOLS.includes(dispatch.protocol) ||
       !positiveSafeInteger(dispatch.channelId) ||
-      dispatch.quotaType !== 0 ||
-      !positiveFinite(dispatch.modelRatio) ||
-      !positiveFinite(dispatch.completionRatio) ||
-      !positiveFinite(dispatch.groupRatio) ||
+      dispatch.upstreamModelId !== dispatch.alias ||
+      !IDENTIFIER.test(dispatch.upstreamProductLine) ||
+      !IDENTIFIER.test(dispatch.upstreamGroupName) ||
+      !['USD', 'CNY'].includes(dispatch.pricingCurrency) ||
+      !nonNegativeSafeInteger(
+        dispatch.inputPriceMicrounitsPerMillionTokens,
+      ) ||
+      !nonNegativeSafeInteger(
+        dispatch.outputPriceMicrounitsPerMillionTokens,
+      ) ||
+      !nonNegativeSafeInteger(
+        dispatch.cacheReadPriceMicrounitsPerMillionTokens,
+      ) ||
+      !nonNegativeSafeInteger(
+        dispatch.cacheWritePriceMicrounitsPerMillionTokens,
+      ) ||
+      !positiveSafeInteger(dispatch.ledgerMicrousdPerPricingUnit) ||
+      dispatch.ledgerMicrousdPerPricingUnit !==
+        (dispatch.pricingCurrency === 'USD'
+          ? snapshot.pricing.ledgerMicrousdPerUsd
+          : snapshot.pricing.ledgerMicrousdPerCny) ||
       !SHA256.test(dispatch.pricingVersion)
     ) {
       throw new Error('model settlement dispatch entry is invalid');
@@ -355,42 +417,176 @@ function channelSnapshot(dispatches: readonly SettlementDispatch[]): string {
   );
 }
 
-function normalizePricingRow(row: PricingRow) {
+function decimalMicrounits(value: unknown): number | null {
+  const raw =
+    typeof value === 'number' && Number.isFinite(value)
+      ? String(value)
+      : typeof value === 'string'
+        ? value
+        : '';
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null;
+  const [whole, fraction = ''] = raw.split('.');
+  const result =
+    Number(whole) * 1_000_000 +
+    Number(fraction.padEnd(6, '0'));
+  return Number.isSafeInteger(result) ? result : null;
+}
+
+function multiplyMicrounits(
+  rateMicrounits: number,
+  multiplierMicrounits: number,
+): number | null {
+  const result = Math.round(
+    (rateMicrounits * multiplierMicrounits) / 1_000_000,
+  );
+  return Number.isSafeInteger(result) ? result : null;
+}
+
+function catalogRows(catalog: OpenOxPricingCatalog): {
+  models: OpenOxPricingRow[];
+  groups: OpenOxPricingGroup[];
+} | null {
+  const models = catalog.data?.models;
+  const groups = catalog.data?.groups;
+  if (
+    catalog.success !== true ||
+    !Array.isArray(models) ||
+    !Array.isArray(groups)
+  ) {
+    return null;
+  }
   return {
-    modelName: row.model_name,
-    quotaType: row.quota_type,
-    modelRatio: row.model_ratio,
-    modelPrice: row.model_price,
-    completionRatio: row.completion_ratio,
-    pricingVersion: row.pricing_version,
-    enableGroups: row.enable_groups,
-    supportedEndpointTypes: row.supported_endpoint_types,
+    models: models as OpenOxPricingRow[],
+    groups: groups as OpenOxPricingGroup[],
+  };
+}
+
+function pricingCurrency(productLine: string): 'USD' | 'CNY' | null {
+  if (productLine === 'claude' || productLine === 'kimi') return 'USD';
+  if (
+    ['gpt', 'deepseek', 'glm', 'grok', 'gemini'].includes(productLine)
+  ) {
+    return 'CNY';
+  }
+  return null;
+}
+
+function deriveOpenOxPrice(
+  catalog: OpenOxPricingCatalog,
+  modelId: string,
+  groupName: string,
+) {
+  const rows = catalogRows(catalog);
+  if (!rows) return null;
+  const model = rows.models.find((entry) => entry.model_id === modelId);
+  if (
+    !model ||
+    model.status !== 'enabled' ||
+    typeof model.product_line !== 'string'
+  ) {
+    return null;
+  }
+  const group = rows.groups.find(
+    (entry) =>
+      entry.name === groupName &&
+      entry.product_line === model.product_line,
+  );
+  const currency = pricingCurrency(model.product_line);
+  if (!group || !currency) return null;
+
+  const modelMultiplier =
+    modelId === 'glm-5.2' &&
+    model.group_rates &&
+    typeof model.group_rates === 'object' &&
+    !Array.isArray(model.group_rates)
+      ? (model.group_rates as Record<string, unknown>).billing_multiplier
+      : undefined;
+  const multiplierMicrounits = decimalMicrounits(
+    modelMultiplier ?? group.rate_multiplier,
+  );
+  const input = decimalMicrounits(model.input_rate);
+  const output = decimalMicrounits(model.output_rate);
+  const cacheRead = decimalMicrounits(model.cache_read_rate ?? 0);
+  const cacheWrite = decimalMicrounits(model.cache_write_rate ?? 0);
+  if (
+    multiplierMicrounits === null ||
+    input === null ||
+    output === null ||
+    cacheRead === null ||
+    cacheWrite === null
+  ) {
+    return null;
+  }
+  const effective = {
+    input: multiplyMicrounits(input, multiplierMicrounits),
+    output: multiplyMicrounits(output, multiplierMicrounits),
+    cacheRead: multiplyMicrounits(cacheRead, multiplierMicrounits),
+    cacheWrite: multiplyMicrounits(cacheWrite, multiplierMicrounits),
+  };
+  if (Object.values(effective).some((value) => value === null)) return null;
+
+  const source = {
+    modelId,
+    productLine: model.product_line,
+    groupName,
+    groupMultiplier: group.rate_multiplier,
+    modelBillingMultiplier: modelMultiplier ?? null,
+    currency,
+    inputRate: model.input_rate,
+    outputRate: model.output_rate,
+    cacheReadRate: model.cache_read_rate ?? '0',
+    cacheWriteRate: model.cache_write_rate ?? '0',
+    status: model.status,
+    updatedAt: model.updated_at,
+  };
+  return {
+    source,
+    pricingVersion: sha256CanonicalJson(source),
+    productLine: model.product_line,
+    currency,
+    inputPriceMicrounitsPerMillionTokens: effective.input!,
+    outputPriceMicrounitsPerMillionTokens: effective.output!,
+    cacheReadPriceMicrounitsPerMillionTokens: effective.cacheRead!,
+    cacheWritePriceMicrounitsPerMillionTokens: effective.cacheWrite!,
   };
 }
 
 function pricingSnapshot(
-  rows: readonly PricingRow[],
-  allowlist: readonly string[],
+  catalog: OpenOxPricingCatalog,
+  dispatches: readonly SettlementDispatch[],
 ): string {
-  const selected = rows
-    .filter(
-      (row) =>
-        typeof row.model_name === 'string' &&
-        allowlist.includes(row.model_name),
-    )
-    .map(normalizePricingRow)
+  const selected = dispatches
+    .map((dispatch) => ({
+      taskId: dispatch.taskId,
+      alias: dispatch.alias,
+      protocol: dispatch.protocol,
+      price: deriveOpenOxPrice(
+        catalog,
+        dispatch.upstreamModelId,
+        dispatch.upstreamGroupName,
+      )?.source,
+    }))
     .sort((left, right) =>
-      String(left.modelName).localeCompare(String(right.modelName)),
+      dispatchKey(left).localeCompare(dispatchKey(right)),
     );
   return sha256CanonicalJson(selected);
 }
 
-function pointsToMicrousd(points: number, quotaPerUnit: number): number | null {
-  if (!nonNegativeSafeInteger(points) || !positiveSafeInteger(quotaPerUnit)) {
-    return null;
-  }
-  const microusd = (points * 1_000_000) / quotaPerUnit;
-  return Number.isSafeInteger(microusd) ? microusd : null;
+function openOxPricedCostMicrousd(input: {
+  inputTokens: number;
+  outputTokens: number;
+  inputPriceMicrounitsPerMillionTokens: number;
+  outputPriceMicrounitsPerMillionTokens: number;
+  ledgerMicrousdPerPricingUnit: number;
+}): number | null {
+  const nativePriceNumerator =
+    input.inputTokens * input.inputPriceMicrounitsPerMillionTokens +
+    input.outputTokens * input.outputPriceMicrounitsPerMillionTokens;
+  const cost = Math.ceil(
+    (nativePriceNumerator * input.ledgerMicrousdPerPricingUnit) /
+      1_000_000_000_000,
+  );
+  return Number.isSafeInteger(cost) && cost >= 0 ? cost : null;
 }
 
 export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementController {
@@ -434,6 +630,25 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     }
   }
 
+  private async getOpenOxCatalog(): Promise<{
+    ok: boolean;
+    status: number;
+    body: unknown;
+  }> {
+    try {
+      const response = await this.fetchImpl(
+        `${OPENOX_PRICING_AUTHORITY.origin}${OPENOX_PRICING_AUTHORITY.catalogEndpoint}`,
+      );
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: await response.json(),
+      };
+    } catch {
+      return { ok: false, status: 0, body: null };
+    }
+  }
+
   async preflight(
     request: PaidModelPreflightRequest,
     ctx: AiContext,
@@ -464,26 +679,19 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       throw new PaidModelPreflightError('DISPATCH_NOT_ATTESTED');
     }
 
-    const [model, usage, status, pricing] = await Promise.all([
+    const [model, usage, pricing] = await Promise.all([
       this.getJson(`/v1/models/${encodeURIComponent(request.alias)}`),
       this.getJson('/api/usage/token'),
-      this.getJson('/api/status'),
-      this.getJson('/api/pricing'),
+      this.getOpenOxCatalog(),
     ]);
-    if (!model.ok || !usage.ok || !status.ok || !pricing.ok) {
+    if (!model.ok || !usage.ok || !pricing.ok) {
       throw new PaidModelPreflightError('LIVE_PREFLIGHT_UNAVAILABLE');
     }
 
     const modelBody = model.body as { id?: unknown };
     const usageBody = ((usage.body as { data?: unknown })?.data ??
       usage.body) as Record<string, unknown>;
-    const statusBody = ((status.body as { data?: unknown })?.data ??
-      status.body) as Record<string, unknown>;
-    const pricingBody = ((pricing.body as { data?: unknown })?.data ??
-      pricing.body) as unknown;
-    const pricingRows = Array.isArray(pricingBody)
-      ? (pricingBody as PricingRow[])
-      : [];
+    const pricingCatalog = pricing.body as OpenOxPricingCatalog;
     const liveAllowlist =
       usageBody.model_limits &&
       typeof usageBody.model_limits === 'object' &&
@@ -492,57 +700,71 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
         : [];
     const totalGranted = usageBody.total_granted;
     const totalAvailable = usageBody.total_available;
-    const quotaPerUnit = statusBody.quota_per_unit;
-    const capMicrousd =
-      typeof totalGranted === 'number' && typeof quotaPerUnit === 'number'
-        ? pointsToMicrousd(totalGranted, quotaPerUnit)
-        : null;
-    const remainingMicrousd =
-      typeof totalAvailable === 'number' && typeof quotaPerUnit === 'number'
-        ? pointsToMicrousd(totalAvailable, quotaPerUnit)
-        : null;
     if (
       modelBody.id !== request.alias ||
       usageBody.unlimited_quota !== false ||
       usageBody.model_limits_enabled !== true ||
       JSON.stringify(liveAllowlist) !==
         JSON.stringify(snapshot.credential.modelAllowlist) ||
-      quotaPerUnit !== snapshot.gateway.quotaPerUnit ||
-      capMicrousd !== snapshot.credential.quotaCapMicrousd ||
-      remainingMicrousd === null ||
-      remainingMicrousd < request.reservationMicrousd ||
-      pricingSnapshot(pricingRows, snapshot.credential.modelAllowlist) !==
-        snapshot.gateway.pricingSnapshotSha256
+      totalGranted !== snapshot.credential.quotaCapPoints ||
+      !positiveSafeInteger(totalAvailable) ||
+      (totalAvailable as number) > snapshot.credential.quotaCapPoints ||
+      pricingSnapshot(pricingCatalog, snapshot.dispatches) !==
+        snapshot.pricing.snapshotSha256
     ) {
       throw new PaidModelPreflightError('LIVE_SCOPE_OR_QUOTA_MISMATCH');
     }
-    const price = pricingRows.find(
-      (entry) => entry.model_name === request.alias,
+    if (
+      snapshot.dispatches.some(
+        (entry) =>
+          !deriveOpenOxPrice(
+            pricingCatalog,
+            entry.upstreamModelId,
+            entry.upstreamGroupName,
+          ),
+      )
+    ) {
+      throw new PaidModelPreflightError(
+        'LIVE_PRICING_COVERAGE_INCOMPLETE',
+      );
+    }
+    const price = deriveOpenOxPrice(
+      pricingCatalog,
+      dispatch.upstreamModelId,
+      dispatch.upstreamGroupName,
     );
     if (
       !price ||
-      price.quota_type !== dispatch.quotaType ||
-      price.model_ratio !== dispatch.modelRatio ||
-      (price.completion_ratio ?? 1) !== dispatch.completionRatio ||
-      price.pricing_version !== dispatch.pricingVersion
+      price.productLine !== dispatch.upstreamProductLine ||
+      price.currency !== dispatch.pricingCurrency ||
+      price.inputPriceMicrounitsPerMillionTokens !==
+        dispatch.inputPriceMicrounitsPerMillionTokens ||
+      price.outputPriceMicrounitsPerMillionTokens !==
+        dispatch.outputPriceMicrounitsPerMillionTokens ||
+      price.cacheReadPriceMicrounitsPerMillionTokens !==
+        dispatch.cacheReadPriceMicrounitsPerMillionTokens ||
+      price.cacheWritePriceMicrounitsPerMillionTokens !==
+        dispatch.cacheWritePriceMicrounitsPerMillionTokens ||
+      price.pricingVersion !== dispatch.pricingVersion
     ) {
       throw new PaidModelPreflightError('LIVE_PRICING_MISMATCH');
     }
 
-    const tokensPerCall =
-      request.promptUtf8BytesPerCall +
-      PROTOCOL_FRAMING_TOKEN_UPPER_BOUND +
-      request.maxOutputTokens * dispatch.completionRatio;
-    const quotaUpperBound =
-      tokensPerCall *
-      dispatch.modelRatio *
-      dispatch.groupRatio *
-      request.maximumWireCalls;
-    const pricedMaximumMicrousd = Math.ceil(
-      (quotaUpperBound * 1_000_000) / snapshot.gateway.quotaPerUnit,
-    );
+    const pricedMaximumMicrousd = openOxPricedCostMicrousd({
+      inputTokens:
+        (request.promptUtf8BytesPerCall +
+          PROTOCOL_FRAMING_TOKEN_UPPER_BOUND) *
+        request.maximumWireCalls,
+      outputTokens: request.maxOutputTokens * request.maximumWireCalls,
+      inputPriceMicrounitsPerMillionTokens:
+        dispatch.inputPriceMicrounitsPerMillionTokens,
+      outputPriceMicrounitsPerMillionTokens:
+        dispatch.outputPriceMicrounitsPerMillionTokens,
+      ledgerMicrousdPerPricingUnit:
+        dispatch.ledgerMicrousdPerPricingUnit,
+    });
     if (
-      !Number.isSafeInteger(pricedMaximumMicrousd) ||
+      pricedMaximumMicrousd === null ||
       pricedMaximumMicrousd > request.reservationMicrousd
     ) {
       throw new PaidModelPreflightError('PRICED_MAXIMUM_EXCEEDS_RESERVATION');
@@ -557,9 +779,18 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       alias: request.alias,
       protocol: request.protocol,
       expectedChannelId: dispatch.channelId,
-      quotaPerUnit: snapshot.gateway.quotaPerUnit,
-      credentialQuotaCapMicrousd: snapshot.credential.quotaCapMicrousd,
-      credentialRemainingMicrousd: remainingMicrousd,
+      pricingAuthority: snapshot.pricing.authority,
+      pricingSourceUrl: `${snapshot.pricing.origin}${snapshot.pricing.catalogEndpoint}`,
+      pricingSnapshotSha256: snapshot.pricing.snapshotSha256,
+      pricingCurrency: dispatch.pricingCurrency,
+      inputPriceMicrounitsPerMillionTokens:
+        dispatch.inputPriceMicrounitsPerMillionTokens,
+      outputPriceMicrounitsPerMillionTokens:
+        dispatch.outputPriceMicrounitsPerMillionTokens,
+      ledgerMicrousdPerPricingUnit:
+        dispatch.ledgerMicrousdPerPricingUnit,
+      gatewayCredentialQuotaCapPoints: snapshot.credential.quotaCapPoints,
+      gatewayCredentialRemainingPoints: totalAvailable as number,
       pricedMaximumMicrousd,
     });
   }
@@ -633,10 +864,16 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
           reason: 'log_invalid',
         };
       }
-      const costMicrousd = pointsToMicrousd(
-        row.quota,
-        input.evidence.quotaPerUnit,
-      );
+      const costMicrousd = openOxPricedCostMicrousd({
+        inputTokens: row.prompt_tokens,
+        outputTokens: row.completion_tokens,
+        inputPriceMicrounitsPerMillionTokens:
+          input.evidence.inputPriceMicrounitsPerMillionTokens,
+        outputPriceMicrounitsPerMillionTokens:
+          input.evidence.outputPriceMicrounitsPerMillionTokens,
+        ledgerMicrousdPerPricingUnit:
+          input.evidence.ledgerMicrousdPerPricingUnit,
+      });
       if (costMicrousd === null) {
         return {
           status: 'unknown',
@@ -652,8 +889,8 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
         alias: input.evidence.alias,
         protocol: input.evidence.protocol,
         channelId: row.channel,
+        basis: 'openox_catalog_token_pricing',
         quota: row.quota,
-        quotaPerUnit: input.evidence.quotaPerUnit,
         costMicrousd,
         inputTokens: row.prompt_tokens,
         outputTokens: row.completion_tokens,
@@ -709,10 +946,18 @@ export function settlementAttestationSnapshotSha256(
 }
 
 export function settlementPricingSnapshotSha256(
-  rows: readonly PricingRow[],
-  allowlist: readonly string[],
+  catalog: OpenOxPricingCatalog,
+  dispatches: readonly SettlementDispatch[],
 ): string {
-  return pricingSnapshot(rows, allowlist);
+  return pricingSnapshot(catalog, dispatches);
+}
+
+export function settlementOpenOxPrice(
+  catalog: OpenOxPricingCatalog,
+  modelId: string,
+  groupName: string,
+): ReturnType<typeof deriveOpenOxPrice> {
+  return deriveOpenOxPrice(catalog, modelId, groupName);
 }
 
 export function settlementChannelSnapshotSha256(

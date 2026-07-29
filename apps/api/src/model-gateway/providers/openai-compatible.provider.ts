@@ -467,9 +467,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     });
     return {
       ...usage,
-      ...(observation.status === 'settled'
-        ? { costUsd: observation.costMicrousd / 1_000_000 }
-        : {}),
       gatewaySettlements: [observation],
     };
   }

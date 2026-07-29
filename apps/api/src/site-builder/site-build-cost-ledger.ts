@@ -79,19 +79,18 @@ export function modelCostMeasurement(
           observation.protocol === input.settlementPreflight!.protocol &&
           observation.channelId ===
             input.settlementPreflight!.expectedChannelId &&
-          observation.quotaPerUnit ===
-            input.settlementPreflight!.quotaPerUnit,
+          observation.basis === 'openox_catalog_token_pricing',
       );
     if (complete) {
-      const reportedCostMicrousd = settled.reduce(
+      const calculatedCostMicrousd = settled.reduce(
         (sum, observation) => sum + observation.costMicrousd,
         0,
       );
       return {
-        basis: 'provider_reported',
-        budgetChargeMicrousd: reportedCostMicrousd,
-        reportedCostMicrousd,
-        calculatedCostMicrousd: null,
+        basis: 'token_pricing',
+        budgetChargeMicrousd: calculatedCostMicrousd,
+        reportedCostMicrousd: null,
+        calculatedCostMicrousd,
         estimatedCostMicrousd: null,
         inputTokens,
         outputTokens,

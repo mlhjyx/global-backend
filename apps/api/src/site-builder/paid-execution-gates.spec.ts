@@ -18,7 +18,7 @@ const RUN_ID = '33333333-3333-4333-8333-333333333333';
 const ATTEMPT_ID = '44444444-4444-4444-8444-444444444444';
 const FENCE = '55555555-5555-4555-8555-555555555555';
 const SETTLEMENT_PREFLIGHT = {
-  schemaVersion: 'site-builder-paid-model-preflight-evidence/v1' as const,
+  schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
   attestationId: 'site-builder-runtime-test',
   snapshotSha256: 'a'.repeat(64),
   resolverId: 'new-api-token-log-v1',
@@ -26,9 +26,15 @@ const SETTLEMENT_PREFLIGHT = {
   alias: 'gpt-5.6-terra',
   protocol: 'openai-responses' as const,
   expectedChannelId: 7,
-  quotaPerUnit: 500_000,
-  credentialQuotaCapMicrousd: 10_000_000,
-  credentialRemainingMicrousd: 9_000_000,
+  pricingAuthority: 'openox_model_marketplace' as const,
+  pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+  pricingSnapshotSha256: 'b'.repeat(64),
+  pricingCurrency: 'CNY' as const,
+  inputPriceMicrounitsPerMillionTokens: 2_000_000,
+  outputPriceMicrounitsPerMillionTokens: 10_000_000,
+  ledgerMicrousdPerPricingUnit: 1_000_000,
+  gatewayCredentialQuotaCapPoints: 5_000_000,
+  gatewayCredentialRemainingPoints: 4_500_000,
   pricedMaximumMicrousd: 50_000,
 };
 
@@ -45,8 +51,8 @@ function settledUsage(
         alias: SETTLEMENT_PREFLIGHT.alias,
         protocol: SETTLEMENT_PREFLIGHT.protocol,
         channelId: SETTLEMENT_PREFLIGHT.expectedChannelId,
+        basis: 'openox_catalog_token_pricing',
         quota: 500,
-        quotaPerUnit: SETTLEMENT_PREFLIGHT.quotaPerUnit,
         costMicrousd: 1_000,
         inputTokens: usage?.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0,
@@ -190,8 +196,9 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       expect.objectContaining({
         status: 'SUCCEEDED',
         measurement: expect.objectContaining({
-          basis: 'provider_reported',
-          reportedCostMicrousd: 1_000,
+          basis: 'token_pricing',
+          reportedCostMicrousd: null,
+          calculatedCostMicrousd: 1_000,
         }),
         meta: expect.objectContaining({
           provider: 'gateway',

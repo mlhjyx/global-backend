@@ -11,9 +11,10 @@ import {
   loadSiteBuilderModelSettlement,
   settlementAttestationSnapshotSha256,
   settlementChannelSnapshotSha256,
+  settlementOpenOxPrice,
   settlementPricingSnapshotSha256,
   SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION,
-  type PricingRow,
+  type OpenOxPricingCatalog,
   type SettlementDispatch,
   type SettlementSnapshot,
   type SiteBuilderModelSettlementAttestation,
@@ -22,28 +23,94 @@ import {
 const API_KEY = 'test-runtime-token';
 const NOW = new Date('2026-07-29T06:00:00.000Z');
 const GATEWAY_ORIGIN = 'https://gateway.example.test';
-const QUOTA_PER_UNIT = 500_000;
 const CHANNEL_ID = 17;
-const PRICING_VERSION = 'c'.repeat(64);
 
 function protocolFor(alias: string) {
   return VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? 'openai-chat-completions';
 }
 
-function dispatches(): SettlementDispatch[] {
+function routeEntries() {
   return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
     const route = resolveTaskRoute(taskId);
     return [route.primary, ...route.fallbacks].map((alias) => ({
       taskId,
       alias,
       protocol: protocolFor(alias),
-      channelId: CHANNEL_ID,
-      quotaType: 0 as const,
-      modelRatio: 1,
-      completionRatio: 1,
-      groupRatio: 1,
-      pricingVersion: PRICING_VERSION,
     }));
+  });
+}
+
+function productLineFor(alias: string): string {
+  if (alias.startsWith('gpt-')) return 'gpt';
+  if (alias.startsWith('claude-')) return 'claude';
+  if (alias.startsWith('glm-')) return 'glm';
+  return 'deepseek';
+}
+
+function groupFor(alias: string): string {
+  const productLine = productLineFor(alias);
+  if (productLine === 'gpt') return 'gpt-unified';
+  if (productLine === 'claude') return 'special';
+  return productLine;
+}
+
+function pricingCatalog(models: readonly string[]): OpenOxPricingCatalog {
+  const productLines = [...new Set(models.map(productLineFor))];
+  return {
+    success: true,
+    data: {
+      models: models.map((modelId) => ({
+        model_id: modelId,
+        product_line: productLineFor(modelId),
+        input_rate: '2',
+        output_rate: '10',
+        cache_read_rate: '0.2',
+        cache_write_rate: '2.5',
+        group_rates:
+          modelId === 'glm-5.2' ? { billing_multiplier: '1' } : null,
+        status: 'enabled',
+        updated_at: '2026-07-29T05:00:00.000Z',
+      })),
+      groups: productLines.map((productLine) => ({
+        name:
+          productLine === 'gpt'
+            ? 'gpt-unified'
+            : productLine === 'claude'
+              ? 'special'
+              : productLine,
+        product_line: productLine,
+        rate_multiplier: '1',
+      })),
+    },
+  };
+}
+
+function dispatches(catalog: OpenOxPricingCatalog): SettlementDispatch[] {
+  return routeEntries().map((entry) => {
+    const price = settlementOpenOxPrice(
+      catalog,
+      entry.alias,
+      groupFor(entry.alias),
+    );
+    if (!price) throw new Error(`missing fake OpenOx price ${entry.alias}`);
+    return {
+      ...entry,
+      channelId: CHANNEL_ID,
+      upstreamModelId: entry.alias,
+      upstreamProductLine: price.productLine,
+      upstreamGroupName: groupFor(entry.alias),
+      pricingCurrency: price.currency,
+      inputPriceMicrounitsPerMillionTokens:
+        price.inputPriceMicrounitsPerMillionTokens,
+      outputPriceMicrounitsPerMillionTokens:
+        price.outputPriceMicrounitsPerMillionTokens,
+      cacheReadPriceMicrounitsPerMillionTokens:
+        price.cacheReadPriceMicrounitsPerMillionTokens,
+      cacheWritePriceMicrounitsPerMillionTokens:
+        price.cacheWritePriceMicrounitsPerMillionTokens,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      pricingVersion: price.pricingVersion,
+    };
   });
 }
 
@@ -51,36 +118,34 @@ function allowlist(entries: readonly SettlementDispatch[]): string[] {
   return [...new Set(entries.map((entry) => entry.alias))].sort();
 }
 
-function pricingRows(models: readonly string[]): PricingRow[] {
-  return models.map((model) => ({
-    model_name: model,
-    quota_type: 0,
-    model_ratio: 1,
-    completion_ratio: 1,
-    pricing_version: PRICING_VERSION,
-  }));
-}
-
 function fixture() {
-  const entries = dispatches();
+  const routeModels = [...new Set(routeEntries().map((entry) => entry.alias))];
+  const prices = pricingCatalog(routeModels);
+  const entries = dispatches(prices);
   const models = allowlist(entries);
-  const prices = pricingRows(models);
   const snapshot: SettlementSnapshot = {
     attestationId: 'site-builder-runtime-20260729-test',
     capturedAt: '2026-07-29T05:30:00.000Z',
     expiresAt: '2026-07-29T07:30:00.000Z',
     gateway: {
       origin: GATEWAY_ORIGIN,
-      quotaPerUnit: QUOTA_PER_UNIT,
-      pricingSnapshotSha256: settlementPricingSnapshotSha256(prices, models),
       channelSnapshotSha256: settlementChannelSnapshotSha256(entries),
+    },
+    pricing: {
+      authority: 'openox_model_marketplace',
+      origin: 'https://openox.tech',
+      catalogEndpoint: '/api/public/pricing-catalog',
+      snapshotSha256: settlementPricingSnapshotSha256(prices, entries),
+      ledgerConversionPolicy: 'openox_1_to_1_balance_credit',
+      ledgerMicrousdPerUsd: 1_000_000,
+      ledgerMicrousdPerCny: 1_000_000,
     },
     credential: {
       bearerTokenSha256:
         '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
       purpose: 'site_builder_runtime',
       quotaMode: 'limited',
-      quotaCapMicrousd: 10_000_000,
+      quotaCapPoints: 5_000_000,
       scopeExact: true,
       modelAllowlist: models,
     },
@@ -129,13 +194,8 @@ function liveFetch(input: string | URL | Request): Promise<Response> {
       }),
     );
   }
-  if (url.pathname === '/api/status') {
-    return Promise.resolve(
-      jsonResponse({ data: { quota_per_unit: QUOTA_PER_UNIT } }),
-    );
-  }
-  if (url.pathname === '/api/pricing') {
-    return Promise.resolve(jsonResponse({ data: prices }));
+  if (url.pathname === '/api/public/pricing-catalog') {
+    return Promise.resolve(jsonResponse(prices));
   }
   throw new Error(`unexpected test URL ${url.pathname}`);
 }
@@ -222,12 +282,14 @@ describe('Site Builder zero-generation model preflight', () => {
         alias: dispatch.alias,
         protocol: dispatch.protocol,
         expectedChannelId: CHANNEL_ID,
-        quotaPerUnit: QUOTA_PER_UNIT,
+        pricingAuthority: 'openox_model_marketplace',
+        pricingSourceUrl:
+          'https://openox.tech/api/public/pricing-catalog',
       });
       expect(evidence.pricedMaximumMicrousd).toBeLessThanOrEqual(800_000);
       expect(JSON.stringify(evidence)).not.toContain(API_KEY);
     }
-    expect(fetchMock).toHaveBeenCalledTimes(entries.length * 4);
+    expect(fetchMock).toHaveBeenCalledTimes(entries.length * 3);
   });
 
   it('denies an unlimited credential before any generative request', async () => {
@@ -283,6 +345,64 @@ describe('Site Builder zero-generation model preflight', () => {
       ),
     ).toBe(false);
   });
+
+  it('denies a current alias that is absent from the OpenOx catalog', async () => {
+    const { attestation, entries, prices } = fixture();
+    const dispatch = entries.find((entry) => entry.alias === 'minimax-m3')!;
+    const missingCatalog = structuredClone(prices);
+    missingCatalog.data!.models = (
+      missingCatalog.data!.models as Array<{ model_id: string }>
+    ).filter((model) => model.model_id !== dispatch.alias);
+    const snapshot = structuredClone(attestation.snapshot);
+    snapshot.pricing.snapshotSha256 = settlementPricingSnapshotSha256(
+      missingCatalog,
+      snapshot.dispatches,
+    );
+    const missingAttestation: SiteBuilderModelSettlementAttestation = {
+      schemaVersion: SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION,
+      snapshot,
+      snapshotSha256: settlementAttestationSnapshotSha256(snapshot),
+    };
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      missingAttestation,
+      API_KEY,
+      {
+        now: () => NOW,
+        fetch: vi.fn(async (input: string | URL | Request) => {
+          const url = new URL(String(input));
+          if (url.pathname === '/api/public/pricing-catalog') {
+            return jsonResponse(missingCatalog);
+          }
+          return liveFetch(input);
+        }) as typeof fetch,
+      },
+    );
+
+    const error = await settlement
+      .preflight(
+        {
+          taskId: dispatch.taskId,
+          op: 'generateStructured',
+          providerId: 'gateway',
+          gatewayOrigin: GATEWAY_ORIGIN,
+          credentialSha256:
+            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          alias: dispatch.alias,
+          protocol: dispatch.protocol,
+          promptUtf8BytesPerCall: 500,
+          maxOutputTokens: 1_000,
+          maximumWireCalls: 2,
+          reservationMicrousd: 800_000,
+        },
+        paidContext(),
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PaidModelPreflightError);
+    expect((error as PaidModelPreflightError).code).toBe(
+      'LIVE_PRICING_COVERAGE_INCOMPLETE',
+    );
+  });
 });
 
 describe('new-api request-bound settlement resolver', () => {
@@ -313,7 +433,7 @@ describe('new-api request-bound settlement resolver', () => {
       settlement.resolve({
         requestId: 'req_exact_123456',
         evidence: {
-          schemaVersion: 'site-builder-paid-model-preflight-evidence/v1',
+          schemaVersion: 'site-builder-paid-model-preflight-evidence/v2',
           attestationId: attestation.snapshot.attestationId,
           snapshotSha256: attestation.snapshotSha256,
           resolverId: 'new-api-token-log-v1',
@@ -321,9 +441,16 @@ describe('new-api request-bound settlement resolver', () => {
           alias: 'gpt-5.6-terra',
           protocol: 'openai-responses',
           expectedChannelId: CHANNEL_ID,
-          quotaPerUnit: QUOTA_PER_UNIT,
-          credentialQuotaCapMicrousd: 10_000_000,
-          credentialRemainingMicrousd: 9_000_000,
+          pricingAuthority: 'openox_model_marketplace',
+          pricingSourceUrl:
+            'https://openox.tech/api/public/pricing-catalog',
+          pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
+          pricingCurrency: 'CNY',
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+          ledgerMicrousdPerPricingUnit: 1_000_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          gatewayCredentialRemainingPoints: 4_500_000,
           pricedMaximumMicrousd: 100_000,
         },
         usage: { inputTokens: 100, outputTokens: 20 },
@@ -333,7 +460,8 @@ describe('new-api request-bound settlement resolver', () => {
       requestId: 'req_exact_123456',
       alias: 'gpt-5.6-terra',
       channelId: CHANNEL_ID,
-      costMicrousd: 2_500,
+      basis: 'openox_catalog_token_pricing',
+      costMicrousd: 400,
     });
   });
 
@@ -366,7 +494,7 @@ describe('new-api request-bound settlement resolver', () => {
       settlement.resolve({
         requestId: 'req_wrong_channel',
         evidence: {
-          schemaVersion: 'site-builder-paid-model-preflight-evidence/v1',
+          schemaVersion: 'site-builder-paid-model-preflight-evidence/v2',
           attestationId: attestation.snapshot.attestationId,
           snapshotSha256: attestation.snapshotSha256,
           resolverId: 'new-api-token-log-v1',
@@ -374,9 +502,16 @@ describe('new-api request-bound settlement resolver', () => {
           alias: 'gpt-5.6-terra',
           protocol: 'openai-responses',
           expectedChannelId: CHANNEL_ID,
-          quotaPerUnit: QUOTA_PER_UNIT,
-          credentialQuotaCapMicrousd: 10_000_000,
-          credentialRemainingMicrousd: 9_000_000,
+          pricingAuthority: 'openox_model_marketplace',
+          pricingSourceUrl:
+            'https://openox.tech/api/public/pricing-catalog',
+          pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
+          pricingCurrency: 'CNY',
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+          ledgerMicrousdPerPricingUnit: 1_000_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          gatewayCredentialRemainingPoints: 4_500_000,
           pricedMaximumMicrousd: 100_000,
         },
       }),

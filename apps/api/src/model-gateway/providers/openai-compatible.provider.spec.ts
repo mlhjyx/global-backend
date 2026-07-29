@@ -102,7 +102,7 @@ describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
 describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
   it('passes x-oneapi-request-id to the frozen settlement resolver', async () => {
     const preflight = {
-      schemaVersion: 'site-builder-paid-model-preflight-evidence/v1' as const,
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
       attestationId: 'provider-settlement-test',
       snapshotSha256: 'a'.repeat(64),
       resolverId: 'new-api-token-log-v1',
@@ -110,9 +110,15 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       alias: 'deepseek-v4-pro',
       protocol: 'openai-chat-completions' as const,
       expectedChannelId: 9,
-      quotaPerUnit: 500_000,
-      credentialQuotaCapMicrousd: 10_000_000,
-      credentialRemainingMicrousd: 9_000_000,
+      pricingAuthority: 'openox_model_marketplace' as const,
+      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+      pricingSnapshotSha256: 'b'.repeat(64),
+      pricingCurrency: 'CNY' as const,
+      inputPriceMicrounitsPerMillionTokens: 2_000_000,
+      outputPriceMicrounitsPerMillionTokens: 10_000_000,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      gatewayCredentialQuotaCapPoints: 5_000_000,
+      gatewayCredentialRemainingPoints: 4_500_000,
       pricedMaximumMicrousd: 100_000,
     };
     const resolve = vi.fn(async () => ({
@@ -122,8 +128,8 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       alias: preflight.alias,
       protocol: preflight.protocol,
       channelId: preflight.expectedChannelId,
+      basis: 'openox_catalog_token_pricing' as const,
       quota: 500,
-      quotaPerUnit: preflight.quotaPerUnit,
       costMicrousd: 1_000,
       inputTokens: 10,
       outputTokens: 5,
@@ -184,7 +190,6 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       usage: { inputTokens: 10, outputTokens: 5 },
     });
     expect(result.usage).toMatchObject({
-      costUsd: 0.001,
       gatewaySettlements: [
         expect.objectContaining({
           status: 'settled',

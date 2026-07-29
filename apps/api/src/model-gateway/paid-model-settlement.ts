@@ -37,7 +37,7 @@ export interface PaidModelPreflightRequest {
  * bearer token, prompt, response body, or reversible credential material.
  */
 export interface PaidModelPreflightEvidence {
-  schemaVersion: 'site-builder-paid-model-preflight-evidence/v1';
+  schemaVersion: 'site-builder-paid-model-preflight-evidence/v2';
   attestationId: string;
   snapshotSha256: string;
   resolverId: string;
@@ -45,9 +45,15 @@ export interface PaidModelPreflightEvidence {
   alias: string;
   protocol: PaidModelProtocol;
   expectedChannelId: number;
-  quotaPerUnit: number;
-  credentialQuotaCapMicrousd: number;
-  credentialRemainingMicrousd: number;
+  pricingAuthority: 'openox_model_marketplace';
+  pricingSourceUrl: string;
+  pricingSnapshotSha256: string;
+  pricingCurrency: 'USD' | 'CNY';
+  inputPriceMicrounitsPerMillionTokens: number;
+  outputPriceMicrounitsPerMillionTokens: number;
+  ledgerMicrousdPerPricingUnit: number;
+  gatewayCredentialQuotaCapPoints: number;
+  gatewayCredentialRemainingPoints: number;
   pricedMaximumMicrousd: number;
 }
 
@@ -59,8 +65,8 @@ export type GatewaySettlementObservation =
       alias: string;
       protocol: PaidModelProtocol;
       channelId: number;
+      basis: 'openox_catalog_token_pricing';
       quota: number;
-      quotaPerUnit: number;
       costMicrousd: number;
       inputTokens: number;
       outputTokens: number;

@@ -15,13 +15,16 @@ Model dispatch authorization: `NOT_AUTHORIZED`
   matrix and invalidates the old attestation.
 - A maximum-24-hour, digest-bound runtime attestation binds credential
   fingerprint, finite quota, exact model allowlist, protocol, expected channel,
-  price snapshot, and quota conversion.
+  OpenOx price snapshot, native pricing currency, and balance-credit
+  conversion.
 - The preflight runs before durable reserve and before a generative client.
 - One initial structured request plus at most one closed repair is priced
   conservatively before execution.
 - Every physical response must bind `x-oneapi-request-id` to exactly one
   token-scoped consume-log row. Multi-call usage is accepted only when all
-  observations match.
+  observations match. new-api supplies request/channel/token evidence only;
+  cost is calculated from the frozen OpenOx catalog and labelled
+  `token_pricing`.
 - Unknown settlement charges the conservative reservation, records a failed
   operation, freezes later paid calls for the BuildRun, and cannot fall through
   to another paid provider.
@@ -39,6 +42,23 @@ Model fees incurred by this PR: **$0.00**
   its model list does not cover every current MiniMax/Doubao alias.
 - The M1-g decision card already records unhealthy or missing current-route
   channels. This PR deliberately does not replace aliases or change routes.
+- new-api has no user-configured authoritative price table. Its `/api/pricing`
+  and quota conversion are explicitly excluded from model-cost truth.
+- OpenOx's public catalog capture at `2026-07-29T09:21:17Z` contains only four
+  of the aliases needed by current routes:
+
+| Alias | OpenOx group | Native unit / 1M tokens | Input | Output | Cache read | Cache write |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `gpt-5.6-terra` | `gpt-unified` | CNY | 2.50 | 15.00 | 0.25 | 3.125 |
+| `claude-sonnet-5` | `special` 1.26x | USD | 2.52 | 12.60 | 0.252 | 3.15 |
+| `deepseek-v4-pro` | `deepseek` | CNY | 1.827 | 3.654 | 0.015225 | 0 |
+| `glm-5.2` | `glm`, model billing 0.70x | CNY | 5.60 | 19.60 | 1.40 | 0 |
+
+  Selected public-source snapshot SHA-256:
+  `10ff60010717ea86a1e9a0feb0c0d5480e7e37c5a9faf7e7432f080e43b9c8f3`.
+- `minimax-m3`, `deepseek-v4-flash`, `doubao-seed-2.0-pro`, and
+  `doubao-seed-2.0-lite` are absent from that OpenOx catalog. Their prices are
+  unknown and must remain blocked; new-api defaults are not a substitute.
 - No reviewed channel snapshot, exact finite quota cap, or short-lived runtime
   attestation is installed.
 
@@ -53,12 +73,15 @@ choosing the finite cap. The next card must show, in one frozen snapshot:
 1. exact allowlist for all current primary/fallback aliases;
 2. exact expected channel ID and healthy non-generative configuration for each
    alias/protocol;
-3. `quota_per_unit`, frozen price rows, pricing/channel digests, capture time,
-   expiry, granted quota, and remaining quota;
+3. frozen OpenOx price rows/groups/native currencies, pricing/channel digests,
+   capture time, expiry, granted gateway quota points, and remaining points;
 4. the intended M1-g execution count, maximum two wire calls per structured
    execution, priced estimate, and absolute BuildRun ceiling.
 
-Creating that credential/attestation is not model dispatch, but installing it
-and rerunning M1-g still requires a separate explicit cost authorization.
+The current route matrix cannot satisfy that card until the four missing
+OpenOx aliases are restored with published prices or the affected route changes
+through a separately approved evidence/promotion decision. Creating a
+credential/attestation is not model dispatch, but installing it and rerunning
+M1-g still requires a separate explicit cost authorization.
 Fixed-commit model evidence and every task promotion remain different
 decisions and PRs.
