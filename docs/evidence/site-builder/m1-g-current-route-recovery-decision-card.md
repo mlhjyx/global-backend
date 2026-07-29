@@ -1,0 +1,87 @@
+# M1-g current-route recovery decision card
+
+Date: 2026-07-29
+Route baseline: `e727bb141ad2c8c5fdd4379308ed85cfc7aefb86`
+Status: `BLOCKED_CURRENT_ROUTE_RECOVERY`
+Model dispatch authorization: `NOT_AUTHORIZED`
+
+This zero-model preparation derives all 15 primary/fallback dispatches for the
+seven Site Builder tasks from the frozen registry. It does not read an
+environment route override, create or install a runtime attestation, change a
+channel, replace an alias, or call a model.
+
+Model-generation calls made: **0**
+
+Model fees incurred: **$0.00**
+
+## Frozen read-only evidence
+
+- The local new-api SQLite database was opened read-only and only non-secret
+  channel fields were retained.
+- The existing application credential returned HTTP 200, but it is unlimited,
+  has model limits disabled, and has no exact allowlist. It is therefore not an
+  admissible M1-g runtime credential.
+- The application Node runtime fetched the official OpenOx public catalog with
+  HTTP 200. The response contained 37 model rows and 15 price groups; full
+  response SHA-256:
+  `db2647f67fb5b0e61ddfca11860d3080222ebfead7ffa6b95e75c3f327bcb122`.
+- The safe input and deterministic output are
+  `m1-g-current-route-recovery-safe-snapshot.json` and
+  `m1-g-current-route-recovery-report.json`; canonical safe-snapshot SHA-256:
+  `fe3e076e7e60306127843eff14392d4927c002057caacd38c5ab800979eec2a6`.
+
+The snapshot contains no gateway key, bearer token, authorization header,
+base URL, prompt, model response, customer data, or reversible credential
+material.
+
+## Exact matrix result
+
+| Alias | Protocol | Enabled channel selection | OpenOx pricing | Result |
+| --- | --- | --- | --- | --- |
+| `gpt-5.6-terra` | Responses | unique: 17 | published | credential blocked |
+| `claude-sonnet-5` | Messages | ambiguous: 8, 19 | published | channel + credential blocked |
+| `deepseek-v4-pro` | Chat | unique: 1 | published | credential blocked |
+| `glm-5.2` | Chat | unique: 11 | published | credential blocked |
+| `minimax-m3` | Chat | none; disabled: 3 | absent | channel + price + credential blocked |
+| `deepseek-v4-flash` | Chat | unique: 1 | absent | price + credential blocked |
+| `doubao-seed-2.0-pro` | Chat | none; disabled: 3 | absent | channel + price + credential blocked |
+| `doubao-seed-2.0-lite` | Chat | none; disabled: 3 | absent | channel + price + credential blocked |
+
+An enabled configuration is not a health claim. The previous bounded M1-g
+evidence remains the runtime truth for 401/403/502/503 failures; this PR does
+not use a paid generic channel test to overwrite it.
+
+## OpenOx price basis
+
+These are upstream OpenOx prices, not new-api defaults. Units are native
+currency per one million tokens after the selected public group/model
+multiplier.
+
+| Alias | Group | Currency | Input | Output | Cache read | Cache write |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| `gpt-5.6-terra` | `gpt-unified` | CNY | 2.50 | 15.00 | 0.25 | 3.125 |
+| `claude-sonnet-5` | `special` 1.26x | USD | 2.52 | 12.60 | 0.252 | 3.15 |
+| `deepseek-v4-pro` | `deepseek` | CNY | 1.827 | 3.654 | 0.015225 | 0 |
+| `glm-5.2` | `glm`, model billing 0.70x | CNY | 5.60 | 19.60 | 1.40 | 0 |
+
+`minimax-m3`, `deepseek-v4-flash`, `doubao-seed-2.0-pro`, and
+`doubao-seed-2.0-lite` have no row in the captured OpenOx catalog. Their exact
+cost, the complete M1-g estimate, and a defensible absolute ceiling therefore
+cannot be calculated. The old `$24.40` value belongs to a separate
+BrandProfile evaluation planning bound and is not an M1-g budget.
+
+## Required next decisions
+
+1. Ask OpenOx to publish the four exact missing aliases, or move each affected
+   task into a separate fixed-commit evidence/promotion decision.
+2. Restore one reviewed exact channel for MiniMax/Doubao and pin exactly one
+   Sonnet channel. Do not silently substitute aliases.
+3. Only after complete channel and price coverage, create a finite quota token
+   whose allowlist is exactly the eight aliases.
+4. Generate a short-lived digest-bound runtime attestation and present the
+   exact M1-g estimate, credential cap, and absolute BuildRun ceiling.
+5. Obtain separate user authorization before installing that attestation or
+   rerunning the paid M1-g verifier.
+
+Until all five gates are complete, M1-g remains incomplete and M2-PUBLISH,
+model promotion, images, video, and production routing remain blocked.

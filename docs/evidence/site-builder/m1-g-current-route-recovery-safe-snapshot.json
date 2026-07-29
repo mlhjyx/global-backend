@@ -1,0 +1,183 @@
+{
+  "schemaVersion": "site-builder-current-route-recovery-safe-snapshot/2026-07-29-v1",
+  "capturedAt": "2026-07-29T12:53:41.818Z",
+  "routeBaselineCommitSha": "e727bb141ad2c8c5fdd4379308ed85cfc7aefb86",
+  "gateway": {
+    "source": "local_new_api_read_only_sqlite",
+    "channels": [
+      {
+        "alias": "deepseek-v4-pro",
+        "channelId": 1,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "deepseek-v4-flash",
+        "channelId": 1,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "minimax-m3",
+        "channelId": 3,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "doubao-seed-2.0-pro",
+        "channelId": 3,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "doubao-seed-2.0-lite",
+        "channelId": 3,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "channelId": 6,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "glm-5.2",
+        "channelId": 6,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "claude-sonnet-5",
+        "channelId": 8,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "glm-5.2",
+        "channelId": 11,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "channelId": 17,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "claude-sonnet-5",
+        "channelId": 19,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      }
+    ]
+  },
+  "credential": {
+    "observedAt": "2026-07-29T12:48:52.947Z",
+    "httpStatus": 200,
+    "unlimitedQuota": true,
+    "modelLimitsEnabled": false,
+    "modelAllowlist": [],
+    "visibleModelCount": 41
+  },
+  "pricing": {
+    "authority": "openox_model_marketplace",
+    "catalogEndpoint": "https://openox.tech/api/public/pricing-catalog",
+    "capturedAt": "2026-07-29T12:53:41.818Z",
+    "httpStatus": 200,
+    "responseSha256": "db2647f67fb5b0e61ddfca11860d3080222ebfead7ffa6b95e75c3f327bcb122",
+    "modelRows": 37,
+    "groupRows": 15,
+    "runtimeFetch": "http_200",
+    "models": [
+      {
+        "alias": "claude-sonnet-5",
+        "productLine": "claude",
+        "selectedGroup": "special",
+        "currency": "USD",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1.26",
+        "inputRate": "2",
+        "outputRate": "10",
+        "cacheReadRate": "0.2",
+        "cacheWriteRate": "2.5",
+        "effectiveInputRate": "2.52",
+        "effectiveOutputRate": "12.60",
+        "effectiveCacheReadRate": "0.252",
+        "effectiveCacheWriteRate": "3.15",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T12:49:39.851294Z",
+        "modelBillingMultiplier": null
+      },
+      {
+        "alias": "deepseek-v4-pro",
+        "productLine": "deepseek",
+        "selectedGroup": "deepseek",
+        "currency": "CNY",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1",
+        "inputRate": "1.827",
+        "outputRate": "3.654",
+        "cacheReadRate": "0.015225",
+        "cacheWriteRate": "0",
+        "effectiveInputRate": "1.827",
+        "effectiveOutputRate": "3.654",
+        "effectiveCacheReadRate": "0.015225",
+        "effectiveCacheWriteRate": "0",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T12:49:39.75376Z",
+        "modelBillingMultiplier": null
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "productLine": "gpt",
+        "selectedGroup": "gpt-unified",
+        "currency": "CNY",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1",
+        "inputRate": "2.5",
+        "outputRate": "15",
+        "cacheReadRate": "0.25",
+        "cacheWriteRate": "3.125",
+        "effectiveInputRate": "2.5",
+        "effectiveOutputRate": "15",
+        "effectiveCacheReadRate": "0.25",
+        "effectiveCacheWriteRate": "3.125",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T12:49:39.854386Z",
+        "modelBillingMultiplier": null
+      },
+      {
+        "alias": "glm-5.2",
+        "productLine": "glm",
+        "selectedGroup": "glm",
+        "currency": "CNY",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1",
+        "inputRate": "8",
+        "outputRate": "28",
+        "cacheReadRate": "2",
+        "cacheWriteRate": "0",
+        "effectiveInputRate": "5.60",
+        "effectiveOutputRate": "19.60",
+        "effectiveCacheReadRate": "1.40",
+        "effectiveCacheWriteRate": "0",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T12:49:39.761037Z",
+        "modelBillingMultiplier": "0.70"
+      }
+    ]
+  }
+}
