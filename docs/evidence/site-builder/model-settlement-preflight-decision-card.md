@@ -59,6 +59,11 @@ Model fees incurred by this PR: **$0.00**
 - `minimax-m3`, `deepseek-v4-flash`, `doubao-seed-2.0-pro`, and
   `doubao-seed-2.0-lite` are absent from that OpenOx catalog. Their prices are
   unknown and must remain blocked; new-api defaults are not a substitute.
+- The catalog was captured successfully through the Ubuntu host's configured
+  proxy with `curl`, but the application runtime's direct Node `fetch` timed
+  out in the same environment. A reviewed runtime proxy/egress path or an
+  equivalent digest-bound catalog delivery must be proven before installing
+  the attestation; this PR does not weaken TLS or bypass the egress policy.
 - No reviewed channel snapshot, exact finite quota cap, or short-lived runtime
   attestation is installed.
 
