@@ -77,12 +77,9 @@ describe('R4-B cost truth classification', () => {
     for (const taskId of SITE_BUILDER_TASK_IDS) {
       const route = resolveTaskRoute(taskId);
       for (const alias of [route.primary, ...route.fallbacks]) {
-        const protocol =
-          VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ??
-          'openai-chat-completions';
+        const protocol = VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? 'openai-chat-completions';
         const settlementPreflight = {
-          schemaVersion:
-            'site-builder-paid-model-preflight-evidence/v2' as const,
+          schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
           attestationId: 'runtime-seven-task-test',
           snapshotSha256: 'a'.repeat(64),
           resolverId: 'new-api-token-log-v1',
@@ -187,6 +184,136 @@ describe('R4-B cost truth classification', () => {
       basis: 'unknown',
       budgetChargeMicrousd: 400_000,
       reportedCostMicrousd: null,
+    });
+  });
+
+  it('fails closed on replayed request IDs, model drift, or cost above the attested bound', () => {
+    const settlementPreflight = {
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
+      attestationId: 'runtime-strict-settlement-test',
+      snapshotSha256: 'd'.repeat(64),
+      resolverId: 'new-api-token-log-v1',
+      taskId: 'site_builder.copy',
+      alias: 'deepseek-v4-pro',
+      protocol: 'openai-chat-completions' as const,
+      expectedChannelId: 11,
+      pricingAuthority: 'openox_model_marketplace' as const,
+      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+      pricingSnapshotSha256: 'e'.repeat(64),
+      pricingCurrency: 'CNY' as const,
+      inputPriceMicrounitsPerMillionTokens: 2_000_000,
+      outputPriceMicrounitsPerMillionTokens: 10_000_000,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      gatewayCredentialQuotaCapPoints: 5_000_000,
+      gatewayCredentialRemainingPoints: 4_500_000,
+      pricedMaximumMicrousd: 50_000,
+    };
+    const observation = (requestId: string, costMicrousd = 1_000) => ({
+      status: 'settled' as const,
+      requestId,
+      resolverId: settlementPreflight.resolverId,
+      alias: settlementPreflight.alias,
+      protocol: settlementPreflight.protocol,
+      channelId: settlementPreflight.expectedChannelId,
+      basis: 'openox_catalog_token_pricing' as const,
+      quota: 500,
+      costMicrousd,
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    const measure = (input: {
+      resolvedModel: string;
+      callCount: number;
+      gatewaySettlements: ReturnType<typeof observation>[];
+    }) =>
+      modelCostMeasurement({
+        taskId: settlementPreflight.taskId,
+        requestedModel: settlementPreflight.alias,
+        settlementPreflight,
+        resolvedModel: input.resolvedModel,
+        callCount: input.callCount,
+        usage: { gatewaySettlements: input.gatewaySettlements },
+        reservationMicrousd: 80_000,
+      });
+
+    expect(
+      measure({
+        resolvedModel: settlementPreflight.alias,
+        callCount: 2,
+        gatewaySettlements: [observation('req_reused_wire_id'), observation('req_reused_wire_id')],
+      }).basis,
+    ).toBe('unknown');
+    expect(
+      measure({
+        resolvedModel: 'different-upstream-model',
+        callCount: 1,
+        gatewaySettlements: [observation('req_model_drift')],
+      }).basis,
+    ).toBe('unknown');
+    expect(
+      measure({
+        resolvedModel: settlementPreflight.alias,
+        callCount: 1,
+        gatewaySettlements: [observation('req_cost_over_bound', 50_001)],
+      }).basis,
+    ).toBe('unknown');
+  });
+
+  it('persists authoritative token totals from every settled log observation', () => {
+    const settlementPreflight = {
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
+      attestationId: 'runtime-token-total-test',
+      snapshotSha256: 'f'.repeat(64),
+      resolverId: 'new-api-token-log-v1',
+      taskId: 'site_builder.copy',
+      alias: 'deepseek-v4-pro',
+      protocol: 'openai-chat-completions' as const,
+      expectedChannelId: 11,
+      pricingAuthority: 'openox_model_marketplace' as const,
+      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+      pricingSnapshotSha256: 'a'.repeat(64),
+      pricingCurrency: 'CNY' as const,
+      inputPriceMicrounitsPerMillionTokens: 2_000_000,
+      outputPriceMicrounitsPerMillionTokens: 10_000_000,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      gatewayCredentialQuotaCapPoints: 5_000_000,
+      gatewayCredentialRemainingPoints: 4_500_000,
+      pricedMaximumMicrousd: 50_000,
+    };
+    const settled = (requestId: string, inputTokens: number, outputTokens: number) => ({
+      status: 'settled' as const,
+      requestId,
+      resolverId: settlementPreflight.resolverId,
+      alias: settlementPreflight.alias,
+      protocol: settlementPreflight.protocol,
+      channelId: settlementPreflight.expectedChannelId,
+      basis: 'openox_catalog_token_pricing' as const,
+      quota: 500,
+      costMicrousd: 1_000,
+      inputTokens,
+      outputTokens,
+    });
+
+    expect(
+      modelCostMeasurement({
+        taskId: settlementPreflight.taskId,
+        requestedModel: settlementPreflight.alias,
+        resolvedModel: settlementPreflight.alias,
+        settlementPreflight,
+        callCount: 2,
+        usage: {
+          gatewaySettlements: [
+            settled('req_token_total_1', 10, 5),
+            settled('req_token_total_2', 20, 7),
+          ],
+        },
+        reservationMicrousd: 80_000,
+      }),
+    ).toMatchObject({
+      basis: 'token_pricing',
+      inputTokens: 30,
+      outputTokens: 12,
+      calculatedCostMicrousd: 2_000,
     });
   });
 

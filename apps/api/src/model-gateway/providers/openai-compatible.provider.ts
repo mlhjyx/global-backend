@@ -235,33 +235,24 @@ export class OpenAICompatibleProvider implements ModelProvider {
     return { healthy: true, detail: this.cfg.model };
   }
 
-  async preflightPaidCall(
-    input: PaidModelCallPlan,
-    ctx: AiContext,
-  ): Promise<PaidModelPreflightEvidence> {
+  async preflightPaidCall(input: PaidModelCallPlan, ctx: AiContext): Promise<PaidModelPreflightEvidence> {
     if (!this.cfg.paidModelSettlement) {
       throw new PaidModelPreflightError('ATTESTATION_UNAVAILABLE');
     }
-    const protocol =
-      this.cfg.modelTransports?.[input.alias] ?? 'openai-chat-completions';
+    const protocol = this.cfg.modelTransports?.[input.alias] ?? 'openai-chat-completions';
     return this.cfg.paidModelSettlement.preflight(
       {
         ...input,
         providerId: this.id,
         gatewayOrigin: new URL(this.cfg.baseUrl).origin,
-        credentialSha256: createHash('sha256')
-          .update(this.cfg.apiKey)
-          .digest('hex'),
+        credentialSha256: createHash('sha256').update(this.cfg.apiKey).digest('hex'),
         protocol,
       },
       ctx,
     );
   }
 
-  async generateText(
-    input: GenerateTextInput,
-    ctx: AiContext,
-  ): Promise<ModelResult<string>> {
+  async generateText(input: GenerateTextInput, ctx: AiContext): Promise<ModelResult<string>> {
     const model = input.model ?? this.cfg.model;
     const {
       content,
@@ -289,10 +280,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
   }
 
-  async generateStructured<T = unknown>(
-    input: GenerateStructuredInput,
-    ctx: AiContext,
-  ): Promise<ModelResult<T>> {
+  async generateStructured<T = unknown>(input: GenerateStructuredInput, ctx: AiContext): Promise<ModelResult<T>> {
     const model = input.model ?? this.cfg.model;
     const system = `${input.system ?? ''}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(input.schema)}`;
     const {
@@ -443,6 +431,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     response: Response,
     usage: Pick<ModelUsage, 'inputTokens' | 'outputTokens'> | undefined,
     ctx: AiContext | undefined,
+    signal?: AbortSignal,
   ): Promise<ModelUsage | undefined> {
     if (!ctx?.paidCost) return usage;
     const evidence = ctx.paidCost.settlementPreflight;
@@ -464,11 +453,85 @@ export class OpenAICompatibleProvider implements ModelProvider {
       requestId: response.headers.get('x-oneapi-request-id'),
       evidence,
       usage,
+      signal,
     });
     return {
       ...usage,
+      ...(observation.status === 'settled'
+        ? {
+            inputTokens: observation.inputTokens,
+            outputTokens: observation.outputTokens,
+          }
+        : {}),
       gatewaySettlements: [observation],
     };
+  }
+
+  private reconcileBodyUsage(
+    settlementUsage: ModelUsage | undefined,
+    bodyUsage: Pick<ModelUsage, 'inputTokens' | 'outputTokens'>,
+  ): ModelUsage {
+    const observations = settlementUsage?.gatewaySettlements;
+    if (!observations) return bodyUsage;
+    const settled = observations.filter((observation) => observation.status === 'settled');
+    const settledInputTokens = settled.reduce((sum, observation) => sum + observation.inputTokens, 0);
+    const settledOutputTokens = settled.reduce((sum, observation) => sum + observation.outputTokens, 0);
+    const mismatch =
+      (bodyUsage.inputTokens !== undefined && bodyUsage.inputTokens !== settledInputTokens) ||
+      (bodyUsage.outputTokens !== undefined && bodyUsage.outputTokens !== settledOutputTokens);
+    return {
+      inputTokens: settled.length === observations.length ? settledInputTokens : bodyUsage.inputTokens,
+      outputTokens: settled.length === observations.length ? settledOutputTokens : bodyUsage.outputTokens,
+      gatewaySettlements: mismatch
+        ? observations.map((observation) => ({
+            status: 'unknown' as const,
+            requestId: observation.requestId,
+            resolverId: observation.resolverId,
+            reason: 'log_invalid' as const,
+          }))
+        : observations,
+    };
+  }
+
+  private async parseResponseJson<T>(response: Response, usage: ModelUsage | undefined, model: string): Promise<T> {
+    try {
+      return (await response.json()) as T;
+    } catch (error) {
+      throw new ProviderOutputError(`${this.id} ${model}: response body is not valid JSON`, usage, {
+        cause: error,
+        provider: this.id,
+        model,
+      });
+    }
+  }
+
+  private async throwHttpFailure(
+    response: Response,
+    model: string,
+    ctx: AiContext | undefined,
+    signal?: AbortSignal,
+  ): Promise<never> {
+    const responseExcerpt = async (): Promise<string> => {
+      try {
+        return (await response.text()).slice(0, 300);
+      } catch {
+        return 'response body unavailable';
+      }
+    };
+    if (!ctx?.paidCost) {
+      throw new ProviderHttpError({
+        status: response.status,
+        provider: this.id,
+        model,
+        responseExcerpt: await responseExcerpt(),
+      });
+    }
+    const usage = await this.settledUsage(response, undefined, ctx, signal);
+    throw new ProviderOutputError(
+      `${this.id} ${model}: HTTP ${response.status}: ${await responseExcerpt()}`,
+      usage,
+      { provider: this.id, model },
+    );
   }
 
   /** Combines the process-wide ceiling with the task's per-call cancellation. */
@@ -511,26 +574,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!res.ok) {
-      const usage = await this.settledUsage(res, undefined, ctx);
-      throw new ProviderOutputError(
-        `${this.id} ${opts.model}: HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`,
-        usage,
-        { provider: this.id, model: opts.model },
-      );
+      return this.throwHttpFailure(res, opts.model, ctx, opts.signal);
     }
-    const json = (await res.json()) as {
+    const settlementUsage = await this.settledUsage(res, undefined, ctx, opts.signal);
+    const json = await this.parseResponseJson<{
       choices?: { message?: { content?: string }; finish_reason?: string }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
       model?: string;
-    };
-    const usage = await this.settledUsage(
-      res,
-      {
-        inputTokens: json.usage?.prompt_tokens,
-        outputTokens: json.usage?.completion_tokens,
-      },
-      ctx,
-    );
+    }>(res, settlementUsage, opts.model);
+    const usage = this.reconcileBodyUsage(settlementUsage, {
+      inputTokens: json.usage?.prompt_tokens,
+      outputTokens: json.usage?.completion_tokens,
+    });
     return {
       content: json.choices?.[0]?.message?.content ?? '',
       usage,
@@ -1049,33 +1104,25 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!res.ok) {
-      const usage = await this.settledUsage(res, undefined, ctx);
-      throw new ProviderOutputError(
-        `${this.id} ${opts.model}: HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`,
-        usage,
-        { provider: this.id, model: opts.model },
-      );
+      return this.throwHttpFailure(res, opts.model, ctx, opts.signal);
     }
-    const json = (await res.json()) as {
+    const settlementUsage = await this.settledUsage(res, undefined, ctx, opts.signal);
+    const json = await this.parseResponseJson<{
       output?: { content?: { type?: string; text?: string }[] }[];
       output_text?: string;
       status?: string;
       usage?: { input_tokens?: number; output_tokens?: number };
       model?: string;
-    };
+    }>(res, settlementUsage, opts.model);
     const nestedContent = (json.output ?? [])
       .flatMap((item) => item.content ?? [])
       .filter((item) => item.type === 'output_text' && typeof item.text === 'string')
       .map((item) => item.text ?? '')
       .join('');
-    const usage = await this.settledUsage(
-      res,
-      {
-        inputTokens: json.usage?.input_tokens,
-        outputTokens: json.usage?.output_tokens,
-      },
-      ctx,
-    );
+    const usage = this.reconcileBodyUsage(settlementUsage, {
+      inputTokens: json.usage?.input_tokens,
+      outputTokens: json.usage?.output_tokens,
+    });
     if (json.status !== 'completed') {
       throw new ProviderOutputError(
         `${this.id} ${opts.model}: Responses request did not complete (status=${json.status ?? 'unknown'})`,
@@ -1150,27 +1197,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!res.ok) {
-      const usage = await this.settledUsage(res, undefined, ctx);
-      throw new ProviderOutputError(
-        `${this.id} ${opts.model}: HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`,
-        usage,
-        { provider: this.id, model: opts.model },
-      );
+      return this.throwHttpFailure(res, opts.model, ctx, opts.signal);
     }
-    const json = (await res.json()) as {
+    const settlementUsage = await this.settledUsage(res, undefined, ctx, opts.signal);
+    const json = await this.parseResponseJson<{
       content?: { type?: string; text?: string }[];
       stop_reason?: string;
       usage?: { input_tokens?: number; output_tokens?: number };
       model?: string;
-    };
-    const usage = await this.settledUsage(
-      res,
-      {
-        inputTokens: json.usage?.input_tokens,
-        outputTokens: json.usage?.output_tokens,
-      },
-      ctx,
-    );
+    }>(res, settlementUsage, opts.model);
+    const usage = this.reconcileBodyUsage(settlementUsage, {
+      inputTokens: json.usage?.input_tokens,
+      outputTokens: json.usage?.output_tokens,
+    });
     if (json.stop_reason === 'max_tokens' || json.stop_reason === 'model_context_window_exceeded') {
       throw new ProviderOutputError(
         `${this.id} ${opts.model}: Claude response truncated (stop_reason=${json.stop_reason})`,

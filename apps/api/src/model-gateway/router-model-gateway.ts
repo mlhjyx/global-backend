@@ -53,10 +53,7 @@ function centsFromTokens(usage?: {
  * 让网关 catch 按 centsFromTokens 结算真实消耗——否则修复抛错只带修复 usage（漏首调）、recheck 失败
  * 抛裸 Error（记 0¢），都绕过改动 2 的硬预算上界「凡消耗 token 的调用都不该 settle 0¢」。
  */
-function mergeStructuredUsage(
-  a?: ModelUsage,
-  b?: ModelUsage,
-): ModelUsage {
+function mergeStructuredUsage(a?: ModelUsage, b?: ModelUsage): ModelUsage {
   const bothReported =
     Number.isFinite(a?.costUsd) && Number.isFinite(b?.costUsd);
   const gatewaySettlements = [
@@ -287,9 +284,7 @@ export class RouterModelGateway extends ModelGateway {
         snapshot.validateOutput?.(result.data);
       } catch (error) {
         throw new TaskOutputValidationError(
-          `vision review hard gate rejected: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `vision review hard gate rejected: ${error instanceof Error ? error.message : String(error)}`,
           result.usage,
           {
             cause: error,
@@ -318,6 +313,7 @@ export class RouterModelGateway extends ModelGateway {
       prompt?: string;
       system?: string;
       schema?: Record<string, unknown>;
+      signal?: AbortSignal;
     },
     ctx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
@@ -342,14 +338,7 @@ export class RouterModelGateway extends ModelGateway {
     const reserveCents =
       op === 'generateStructured' ? baseCents * 2 : baseCents;
     if (ctx.paidCost) {
-      return this.runPersistent(
-        op,
-        input,
-        ctx,
-        chain,
-        call,
-        reserveCents,
-      );
+      return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }
     let reservation: { runId: string; estCents: number };
     try {
@@ -460,6 +449,7 @@ export class RouterModelGateway extends ModelGateway {
       prompt?: string;
       system?: string;
       schema?: Record<string, unknown>;
+      signal?: AbortSignal;
     },
     ctx: AiContext,
     chain: readonly ModelProvider[],
@@ -504,6 +494,7 @@ export class RouterModelGateway extends ModelGateway {
             maxOutputTokens: input.maxTokens,
             maximumWireCalls: 2,
             reservationMicrousd: reserveCents * 10_000,
+            signal: input.signal,
           },
           ctx,
         );
@@ -539,7 +530,6 @@ export class RouterModelGateway extends ModelGateway {
           provider.id,
           String(providerIndex),
           requestedModel,
-          settlementPreflight.snapshotSha256,
         ]),
         kind: 'model',
         taskId: input.task,
@@ -605,7 +595,8 @@ export class RouterModelGateway extends ModelGateway {
       try {
         result = await call(provider, executionCtx);
       } catch (error) {
-        const providerError = error instanceof ProviderOutputError ? error : null;
+        const providerError =
+          error instanceof ProviderOutputError ? error : null;
         const measurement = modelCostMeasurement({
           taskId: input.task,
           requestedModel,
@@ -630,8 +621,7 @@ export class RouterModelGateway extends ModelGateway {
               : {}),
             ...(providerError?.modelResolutionSource
               ? {
-                  modelResolutionSource:
-                    providerError.modelResolutionSource,
+                  modelResolutionSource: providerError.modelResolutionSource,
                 }
               : {}),
           },
@@ -640,10 +630,7 @@ export class RouterModelGateway extends ModelGateway {
             : 'PROVIDER_CALL_ERROR',
         });
         if (measurement.basis === 'unknown') {
-          await this.freezeUnknownSettlement(
-            scope,
-            'MODEL_SETTLEMENT_UNKNOWN',
-          );
+          await this.freezeUnknownSettlement(scope, 'MODEL_SETTLEMENT_UNKNOWN');
         }
         this.trace?.record({
           workspaceId: ctx.workspaceId,
@@ -693,10 +680,7 @@ export class RouterModelGateway extends ModelGateway {
           },
           errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
         });
-        await this.freezeUnknownSettlement(
-          scope,
-          'MODEL_SETTLEMENT_UNKNOWN',
-        );
+        await this.freezeUnknownSettlement(scope, 'MODEL_SETTLEMENT_UNKNOWN');
       }
       let durableResult: Record<string, unknown> | undefined;
       try {

@@ -33,6 +33,7 @@ const IDENTIFIER = /^[a-z0-9][a-z0-9._/-]{2,127}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_ATTESTATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const PROTOCOL_FRAMING_TOKEN_UPPER_BOUND = 4_096;
+const DEFAULT_CONTROL_PLANE_TIMEOUT_MS = 5_000;
 
 export interface SettlementDispatch {
   taskId: SiteBuilderTaskId;
@@ -95,6 +96,7 @@ interface RuntimeDeps {
   fetch?: typeof fetch;
   now?: () => Date;
   wait?: (milliseconds: number) => Promise<void>;
+  controlPlaneTimeoutMs?: number;
 }
 
 export interface OpenOxPricingRow {
@@ -371,12 +373,8 @@ function assertAttestation(
       !IDENTIFIER.test(dispatch.upstreamProductLine) ||
       !IDENTIFIER.test(dispatch.upstreamGroupName) ||
       !['USD', 'CNY'].includes(dispatch.pricingCurrency) ||
-      !nonNegativeSafeInteger(
-        dispatch.inputPriceMicrounitsPerMillionTokens,
-      ) ||
-      !nonNegativeSafeInteger(
-        dispatch.outputPriceMicrounitsPerMillionTokens,
-      ) ||
+      !nonNegativeSafeInteger(dispatch.inputPriceMicrounitsPerMillionTokens) ||
+      !nonNegativeSafeInteger(dispatch.outputPriceMicrounitsPerMillionTokens) ||
       !nonNegativeSafeInteger(
         dispatch.cacheReadPriceMicrounitsPerMillionTokens,
       ) ||
@@ -426,9 +424,7 @@ function decimalMicrounits(value: unknown): number | null {
         : '';
   if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null;
   const [whole, fraction = ''] = raw.split('.');
-  const result =
-    Number(whole) * 1_000_000 +
-    Number(fraction.padEnd(6, '0'));
+  const result = Number(whole) * 1_000_000 + Number(fraction.padEnd(6, '0'));
   return Number.isSafeInteger(result) ? result : null;
 }
 
@@ -463,9 +459,7 @@ function catalogRows(catalog: OpenOxPricingCatalog): {
 
 function pricingCurrency(productLine: string): 'USD' | 'CNY' | null {
   if (productLine === 'claude' || productLine === 'kimi') return 'USD';
-  if (
-    ['gpt', 'deepseek', 'glm', 'grok', 'gemini'].includes(productLine)
-  ) {
+  if (['gpt', 'deepseek', 'glm', 'grok', 'gemini'].includes(productLine)) {
     return 'CNY';
   }
   return null;
@@ -488,8 +482,7 @@ function deriveOpenOxPrice(
   }
   const group = rows.groups.find(
     (entry) =>
-      entry.name === groupName &&
-      entry.product_line === model.product_line,
+      entry.name === groupName && entry.product_line === model.product_line,
   );
   const currency = pricingCurrency(model.product_line);
   if (!group || !currency) return null;
@@ -566,9 +559,7 @@ function pricingSnapshot(
         dispatch.upstreamGroupName,
       )?.source,
     }))
-    .sort((left, right) =>
-      dispatchKey(left).localeCompare(dispatchKey(right)),
-    );
+    .sort((left, right) => dispatchKey(left).localeCompare(dispatchKey(right)));
   return sha256CanonicalJson(selected);
 }
 
@@ -593,6 +584,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;
   private readonly wait: (milliseconds: number) => Promise<void>;
+  private readonly controlPlaneTimeoutMs: number;
   private readonly gatewayOrigin: string;
 
   constructor(
@@ -606,12 +598,25 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       deps.wait ??
       ((milliseconds) =>
         new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)));
+    this.controlPlaneTimeoutMs =
+      Number.isSafeInteger(deps.controlPlaneTimeoutMs) &&
+      (deps.controlPlaneTimeoutMs ?? 0) > 0
+        ? deps.controlPlaneTimeoutMs!
+        : DEFAULT_CONTROL_PLANE_TIMEOUT_MS;
     this.gatewayOrigin = canonicalGatewayOrigin(
       this.attestation.snapshot.gateway.origin,
     );
   }
 
-  private async getJson(path: string): Promise<{
+  private controlPlaneSignal(callerSignal?: AbortSignal): AbortSignal {
+    const timeout = AbortSignal.timeout(this.controlPlaneTimeoutMs);
+    return callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
+  }
+
+  private async getJson(
+    path: string,
+    signal: AbortSignal,
+  ): Promise<{
     ok: boolean;
     status: number;
     body: unknown;
@@ -619,6 +624,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     try {
       const response = await this.fetchImpl(`${this.gatewayOrigin}${path}`, {
         headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal,
       });
       return {
         ok: response.ok,
@@ -630,7 +636,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     }
   }
 
-  private async getOpenOxCatalog(): Promise<{
+  private async getOpenOxCatalog(signal: AbortSignal): Promise<{
     ok: boolean;
     status: number;
     body: unknown;
@@ -638,6 +644,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     try {
       const response = await this.fetchImpl(
         `${OPENOX_PRICING_AUTHORITY.origin}${OPENOX_PRICING_AUTHORITY.catalogEndpoint}`,
+        { signal },
       );
       return {
         ok: response.ok,
@@ -655,8 +662,10 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
   ): Promise<PaidModelPreflightEvidence> {
     const snapshot = this.attestation.snapshot;
     const now = this.now();
+    const signal = this.controlPlaneSignal(request.signal);
     if (
       !ctx.paidCost ||
+      request.signal?.aborted ||
       request.op !== 'generateStructured' ||
       request.providerId !== 'gateway' ||
       canonicalGatewayOrigin(request.gatewayOrigin) !== this.gatewayOrigin ||
@@ -680,10 +689,19 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     }
 
     const [model, usage, pricing] = await Promise.all([
-      this.getJson(`/v1/models/${encodeURIComponent(request.alias)}`),
-      this.getJson('/api/usage/token'),
-      this.getOpenOxCatalog(),
+      this.getJson(`/v1/models/${encodeURIComponent(request.alias)}`, signal),
+      this.getJson('/api/usage/token', signal),
+      this.getOpenOxCatalog(signal),
     ]);
+    if (request.signal?.aborted) {
+      throw new PaidModelPreflightError('REQUEST_CANCELLED');
+    }
+    if (signal.aborted) {
+      throw new PaidModelPreflightError('LIVE_PREFLIGHT_UNAVAILABLE');
+    }
+    if (Date.parse(snapshot.expiresAt) <= this.now().getTime()) {
+      throw new PaidModelPreflightError('ATTESTATION_EXPIRED_DURING_PREFLIGHT');
+    }
     if (!model.ok || !usage.ok || !pricing.ok) {
       throw new PaidModelPreflightError('LIVE_PREFLIGHT_UNAVAILABLE');
     }
@@ -724,9 +742,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
           ),
       )
     ) {
-      throw new PaidModelPreflightError(
-        'LIVE_PRICING_COVERAGE_INCOMPLETE',
-      );
+      throw new PaidModelPreflightError('LIVE_PRICING_COVERAGE_INCOMPLETE');
     }
     const price = deriveOpenOxPrice(
       pricingCatalog,
@@ -752,16 +768,14 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
 
     const pricedMaximumMicrousd = openOxPricedCostMicrousd({
       inputTokens:
-        (request.promptUtf8BytesPerCall +
-          PROTOCOL_FRAMING_TOKEN_UPPER_BOUND) *
+        (request.promptUtf8BytesPerCall + PROTOCOL_FRAMING_TOKEN_UPPER_BOUND) *
         request.maximumWireCalls,
       outputTokens: request.maxOutputTokens * request.maximumWireCalls,
       inputPriceMicrounitsPerMillionTokens:
         dispatch.inputPriceMicrounitsPerMillionTokens,
       outputPriceMicrounitsPerMillionTokens:
         dispatch.outputPriceMicrounitsPerMillionTokens,
-      ledgerMicrousdPerPricingUnit:
-        dispatch.ledgerMicrousdPerPricingUnit,
+      ledgerMicrousdPerPricingUnit: dispatch.ledgerMicrousdPerPricingUnit,
     });
     if (
       pricedMaximumMicrousd === null ||
@@ -787,8 +801,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
         dispatch.inputPriceMicrounitsPerMillionTokens,
       outputPriceMicrounitsPerMillionTokens:
         dispatch.outputPriceMicrounitsPerMillionTokens,
-      ledgerMicrousdPerPricingUnit:
-        dispatch.ledgerMicrousdPerPricingUnit,
+      ledgerMicrousdPerPricingUnit: dispatch.ledgerMicrousdPerPricingUnit,
       gatewayCredentialQuotaCapPoints: snapshot.credential.quotaCapPoints,
       gatewayCredentialRemainingPoints: totalAvailable as number,
       pricedMaximumMicrousd,
@@ -799,6 +812,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
     requestId: string | null;
     evidence: PaidModelPreflightEvidence;
     usage?: { inputTokens?: number; outputTokens?: number };
+    signal?: AbortSignal;
   }): Promise<GatewaySettlementObservation> {
     const resolverId = this.attestation.snapshot.settlement.resolverId;
     if (!input.requestId || !REQUEST_ID.test(input.requestId)) {
@@ -810,10 +824,16 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       };
     }
 
+    const signal = this.controlPlaneSignal(input.signal);
     for (const delay of [0, 50, 150, 400]) {
-      if (delay) await this.wait(delay);
+      if (signal.aborted) break;
+      if (delay) {
+        await this.wait(delay);
+        if (signal.aborted) break;
+      }
       const response = await this.getJson(
         this.attestation.snapshot.settlement.logEndpoint,
+        signal,
       );
       if (!response.ok) continue;
       const rows = ((response.body as { data?: unknown })?.data ??
@@ -850,7 +870,7 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       }
       if (
         !nonNegativeSafeInteger(row.quota) ||
-        !nonNegativeSafeInteger(row.prompt_tokens) ||
+        !positiveSafeInteger(row.prompt_tokens) ||
         !nonNegativeSafeInteger(row.completion_tokens) ||
         (input.usage?.inputTokens !== undefined &&
           input.usage.inputTokens !== row.prompt_tokens) ||

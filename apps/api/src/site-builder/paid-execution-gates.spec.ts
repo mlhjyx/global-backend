@@ -211,6 +211,88 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     );
   });
 
+  it('keeps the logical operation key stable across attestation rotation', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      reportedModel: 'gpt-5.6-terra',
+      modelResolutionSource: 'upstream_response',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }));
+    vi.mocked(model.preflightPaidCall!)
+      .mockResolvedValueOnce(SETTLEMENT_PREFLIGHT)
+      .mockResolvedValueOnce({
+        ...SETTLEMENT_PREFLIGHT,
+        attestationId: 'site-builder-runtime-rotated-test',
+        snapshotSha256: 'c'.repeat(64),
+      });
+    const paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation: vi.fn(async () => 'SETTLED'),
+    };
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = paidLedger as never;
+    const input = {
+      task: 'site_builder.brand_profile',
+      prompt: 'p',
+      schema: {},
+      model: 'gpt-5.6-terra',
+      maxCostCents: 40,
+      maxTokens: 1_000,
+    };
+
+    await gateway.generateStructured(input, paidModelContext);
+    await gateway.generateStructured(input, paidModelContext);
+
+    const firstKey = paidLedger.reserveOperation.mock.calls[0]![0].operationKey;
+    const secondKey =
+      paidLedger.reserveOperation.mock.calls[1]![0].operationKey;
+    expect(firstKey).toBe(secondKey);
+    expect(paidLedger.reserveOperation.mock.calls[1]![0].meta).toMatchObject({
+      settlementPreflight: {
+        snapshotSha256: 'c'.repeat(64),
+      },
+    });
+  });
+
+  it('passes task cancellation into paid preflight before reserving', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }));
+    const controller = new AbortController();
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation: vi.fn(async () => 'SETTLED'),
+    } as never;
+
+    await gateway.generateStructured(
+      {
+        task: 'site_builder.brand_profile',
+        prompt: 'p',
+        schema: {},
+        model: 'gpt-5.6-terra',
+        maxCostCents: 40,
+        maxTokens: 1_000,
+        signal: controller.signal,
+      },
+      paidModelContext,
+    );
+
+    expect(model.preflightPaidCall).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+      paidModelContext,
+    );
+  });
+
   it('persists only the caller-approved durable model replay projection', async () => {
     const rawResult = {
       data: {
@@ -636,7 +718,11 @@ describe('ToolBroker persistent paid-call gate', () => {
     });
 
     await expect(
-      broker.invoke('crawl4ai.fetch', { url: 'https://example.com' }, paidToolContext),
+      broker.invoke(
+        'crawl4ai.fetch',
+        { url: 'https://example.com' },
+        paidToolContext,
+      ),
     ).resolves.toMatchObject({ data: { text: 'ok' }, costCents: 2 });
     expect(order).toEqual(['reserve', 'tool', 'settle']);
     expect(paidLedger.reserveOperation).toHaveBeenCalledWith(
@@ -682,7 +768,11 @@ describe('ToolBroker persistent paid-call gate', () => {
     });
 
     await expect(
-      broker.invoke('crawl4ai.fetch', { url: 'https://example.com' }, paidToolContext),
+      broker.invoke(
+        'crawl4ai.fetch',
+        { url: 'https://example.com' },
+        paidToolContext,
+      ),
     ).resolves.toEqual({
       data: { text: '[scrubbed-replay]' },
       costCents: 2,

@@ -16,6 +16,8 @@ export interface PaidModelCallPlan {
   maxOutputTokens: number;
   maximumWireCalls: number;
   reservationMicrousd: number;
+  /** Caller cancellation must cover zero-generation preflight and settlement. */
+  signal?: AbortSignal;
 }
 
 export interface PaidModelPreflightRequest {
@@ -30,6 +32,7 @@ export interface PaidModelPreflightRequest {
   maxOutputTokens: PaidModelCallPlan['maxOutputTokens'];
   maximumWireCalls: PaidModelCallPlan['maximumWireCalls'];
   reservationMicrousd: PaidModelCallPlan['reservationMicrousd'];
+  signal?: PaidModelCallPlan['signal'];
 }
 
 /**
@@ -93,6 +96,7 @@ export interface PaidModelSettlementController {
     requestId: string | null;
     evidence: PaidModelPreflightEvidence;
     usage?: Pick<ModelUsage, 'inputTokens' | 'outputTokens'>;
+    signal?: AbortSignal;
   }): Promise<GatewaySettlementObservation>;
 }
 

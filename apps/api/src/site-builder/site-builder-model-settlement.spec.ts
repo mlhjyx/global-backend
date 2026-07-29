@@ -66,8 +66,7 @@ function pricingCatalog(models: readonly string[]): OpenOxPricingCatalog {
         output_rate: '10',
         cache_read_rate: '0.2',
         cache_write_rate: '2.5',
-        group_rates:
-          modelId === 'glm-5.2' ? { billing_multiplier: '1' } : null,
+        group_rates: modelId === 'glm-5.2' ? { billing_multiplier: '1' } : null,
         status: 'enabled',
         updated_at: '2026-07-29T05:00:00.000Z',
       })),
@@ -256,7 +255,10 @@ describe('Site Builder zero-generation model preflight', () => {
     const settlement = new NewApiSiteBuilderModelSettlement(
       attestation,
       API_KEY,
-      { fetch: fetchMock as typeof fetch, now: () => NOW },
+      {
+        fetch: fetchMock as typeof fetch,
+        now: () => NOW,
+      },
     );
 
     for (const dispatch of entries) {
@@ -283,8 +285,7 @@ describe('Site Builder zero-generation model preflight', () => {
         protocol: dispatch.protocol,
         expectedChannelId: CHANNEL_ID,
         pricingAuthority: 'openox_model_marketplace',
-        pricingSourceUrl:
-          'https://openox.tech/api/public/pricing-catalog',
+        pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
       });
       expect(evidence.pricedMaximumMicrousd).toBeLessThanOrEqual(800_000);
       expect(JSON.stringify(evidence)).not.toContain(API_KEY);
@@ -311,7 +312,10 @@ describe('Site Builder zero-generation model preflight', () => {
     const settlement = new NewApiSiteBuilderModelSettlement(
       attestation,
       API_KEY,
-      { fetch: fetchMock as typeof fetch, now: () => NOW },
+      {
+        fetch: fetchMock as typeof fetch,
+        now: () => NOW,
+      },
     );
     const dispatch = entries[0]!;
 
@@ -403,6 +407,152 @@ describe('Site Builder zero-generation model preflight', () => {
       'LIVE_PRICING_COVERAGE_INCOMPLETE',
     );
   });
+
+  it('propagates caller cancellation through every live preflight read', async () => {
+    const { attestation, entries } = fixture();
+    const controller = new AbortController();
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            {
+              once: true,
+            },
+          );
+        }),
+    );
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      attestation,
+      API_KEY,
+      {
+        fetch: fetchMock as typeof fetch,
+        now: () => NOW,
+        controlPlaneTimeoutMs: 1_000,
+      },
+    );
+    const dispatch = entries[0]!;
+    const pending = settlement.preflight(
+      {
+        taskId: dispatch.taskId,
+        op: 'generateStructured',
+        providerId: 'gateway',
+        gatewayOrigin: GATEWAY_ORIGIN,
+        credentialSha256:
+          '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+        alias: dispatch.alias,
+        protocol: dispatch.protocol,
+        promptUtf8BytesPerCall: 500,
+        maxOutputTokens: 1_000,
+        maximumWireCalls: 2,
+        reservationMicrousd: 800_000,
+        signal: controller.signal,
+      },
+      paidContext(),
+    );
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'PaidModelPreflightError',
+      code: 'REQUEST_CANCELLED',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      fetchMock.mock.calls.every(
+        ([, init]) => init?.signal instanceof AbortSignal,
+      ),
+    ).toBe(true);
+  });
+
+  it('bounds stalled control-plane preflight reads before the task timeout', async () => {
+    const { attestation, entries } = fixture();
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            {
+              once: true,
+            },
+          );
+        }),
+    );
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      attestation,
+      API_KEY,
+      {
+        fetch: fetchMock as typeof fetch,
+        now: () => NOW,
+        controlPlaneTimeoutMs: 10,
+      },
+    );
+    const dispatch = entries[0]!;
+
+    await expect(
+      settlement.preflight(
+        {
+          taskId: dispatch.taskId,
+          op: 'generateStructured',
+          providerId: 'gateway',
+          gatewayOrigin: GATEWAY_ORIGIN,
+          credentialSha256:
+            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          alias: dispatch.alias,
+          protocol: dispatch.protocol,
+          promptUtf8BytesPerCall: 500,
+          maxOutputTokens: 1_000,
+          maximumWireCalls: 2,
+          reservationMicrousd: 800_000,
+        },
+        paidContext(),
+      ),
+    ).rejects.toMatchObject({
+      name: 'PaidModelPreflightError',
+      code: 'LIVE_PREFLIGHT_UNAVAILABLE',
+    });
+  });
+
+  it('rechecks attestation expiry after live reads complete', async () => {
+    const { attestation, entries } = fixture();
+    const now = vi
+      .fn<() => Date>()
+      .mockReturnValueOnce(NOW)
+      .mockReturnValueOnce(new Date('2026-07-29T07:30:00.001Z'));
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      attestation,
+      API_KEY,
+      {
+        fetch: vi.fn(liveFetch) as typeof fetch,
+        now,
+      },
+    );
+    const dispatch = entries[0]!;
+
+    await expect(
+      settlement.preflight(
+        {
+          taskId: dispatch.taskId,
+          op: 'generateStructured',
+          providerId: 'gateway',
+          gatewayOrigin: GATEWAY_ORIGIN,
+          credentialSha256:
+            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          alias: dispatch.alias,
+          protocol: dispatch.protocol,
+          promptUtf8BytesPerCall: 500,
+          maxOutputTokens: 1_000,
+          maximumWireCalls: 2,
+          reservationMicrousd: 800_000,
+        },
+        paidContext(),
+      ),
+    ).rejects.toMatchObject({
+      name: 'PaidModelPreflightError',
+      code: 'ATTESTATION_EXPIRED_DURING_PREFLIGHT',
+    });
+  });
 });
 
 describe('new-api request-bound settlement resolver', () => {
@@ -426,7 +576,10 @@ describe('new-api request-bound settlement resolver', () => {
     const settlement = new NewApiSiteBuilderModelSettlement(
       attestation,
       API_KEY,
-      { fetch: fetchMock as typeof fetch, wait: async () => undefined },
+      {
+        fetch: fetchMock as typeof fetch,
+        wait: async () => undefined,
+      },
     );
 
     await expect(
@@ -442,8 +595,7 @@ describe('new-api request-bound settlement resolver', () => {
           protocol: 'openai-responses',
           expectedChannelId: CHANNEL_ID,
           pricingAuthority: 'openox_model_marketplace',
-          pricingSourceUrl:
-            'https://openox.tech/api/public/pricing-catalog',
+          pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
           pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
           pricingCurrency: 'CNY',
           inputPriceMicrounitsPerMillionTokens: 2_000_000,
@@ -503,8 +655,7 @@ describe('new-api request-bound settlement resolver', () => {
           protocol: 'openai-responses',
           expectedChannelId: CHANNEL_ID,
           pricingAuthority: 'openox_model_marketplace',
-          pricingSourceUrl:
-            'https://openox.tech/api/public/pricing-catalog',
+          pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
           pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
           pricingCurrency: 'CNY',
           inputPriceMicrounitsPerMillionTokens: 2_000_000,
@@ -519,5 +670,115 @@ describe('new-api request-bound settlement resolver', () => {
       status: 'unknown',
       reason: 'channel_mismatch',
     });
+  });
+
+  it('rejects consume logs with zero prompt tokens for nonempty structured calls', async () => {
+    const { attestation } = fixture();
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      attestation,
+      API_KEY,
+      {
+        fetch: vi.fn(async () =>
+          jsonResponse({
+            data: [
+              {
+                request_id: 'req_zero_prompt_tokens',
+                type: 2,
+                quota: 500,
+                prompt_tokens: 0,
+                completion_tokens: 5,
+                model_name: 'gpt-5.6-terra',
+                channel: CHANNEL_ID,
+              },
+            ],
+          }),
+        ) as typeof fetch,
+        wait: async () => undefined,
+      },
+    );
+
+    await expect(
+      settlement.resolve({
+        requestId: 'req_zero_prompt_tokens',
+        evidence: {
+          schemaVersion: 'site-builder-paid-model-preflight-evidence/v2',
+          attestationId: attestation.snapshot.attestationId,
+          snapshotSha256: attestation.snapshotSha256,
+          resolverId: 'new-api-token-log-v1',
+          taskId: 'site_builder.brand_profile',
+          alias: 'gpt-5.6-terra',
+          protocol: 'openai-responses',
+          expectedChannelId: CHANNEL_ID,
+          pricingAuthority: 'openox_model_marketplace',
+          pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+          pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
+          pricingCurrency: 'CNY',
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+          ledgerMicrousdPerPricingUnit: 1_000_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          gatewayCredentialRemainingPoints: 4_500_000,
+          pricedMaximumMicrousd: 100_000,
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: 'unknown',
+      reason: 'log_invalid',
+    });
+  });
+
+  it('bounds stalled consume-log lookups as an unknown settlement', async () => {
+    const { attestation } = fixture();
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            {
+              once: true,
+            },
+          );
+        }),
+    );
+    const settlement = new NewApiSiteBuilderModelSettlement(
+      attestation,
+      API_KEY,
+      {
+        fetch: fetchMock as typeof fetch,
+        wait: async () => undefined,
+        controlPlaneTimeoutMs: 10,
+      },
+    );
+
+    await expect(
+      settlement.resolve({
+        requestId: 'req_stalled_log_lookup',
+        evidence: {
+          schemaVersion: 'site-builder-paid-model-preflight-evidence/v2',
+          attestationId: attestation.snapshot.attestationId,
+          snapshotSha256: attestation.snapshotSha256,
+          resolverId: 'new-api-token-log-v1',
+          taskId: 'site_builder.brand_profile',
+          alias: 'gpt-5.6-terra',
+          protocol: 'openai-responses',
+          expectedChannelId: CHANNEL_ID,
+          pricingAuthority: 'openox_model_marketplace',
+          pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+          pricingSnapshotSha256: attestation.snapshot.pricing.snapshotSha256,
+          pricingCurrency: 'CNY',
+          inputPriceMicrounitsPerMillionTokens: 2_000_000,
+          outputPriceMicrounitsPerMillionTokens: 10_000_000,
+          ledgerMicrousdPerPricingUnit: 1_000_000,
+          gatewayCredentialQuotaCapPoints: 5_000_000,
+          gatewayCredentialRemainingPoints: 4_500_000,
+          pricedMaximumMicrousd: 100_000,
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: 'unknown',
+      reason: 'log_unavailable',
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
