@@ -22,17 +22,29 @@ Model fees incurred: **$0.00**
   has model limits disabled, and has no exact allowlist. It is therefore not an
   admissible M1-g runtime credential.
 - The application Node runtime fetched the official OpenOx public catalog with
-  HTTP 200. The response contained 37 model rows and 15 price groups; full
-  response SHA-256:
-  `db2647f67fb5b0e61ddfca11860d3080222ebfead7ffa6b95e75c3f327bcb122`.
+  HTTP 200. The response contained 37 model rows and 15 price groups. The
+  restricted public source bundle is byte-bound at SHA-256
+  `6e3eceb33f69a6011eeb185cea378a13f2af5a1893adfb67f4d4dc5e0a2d451e`;
+  its fixed source commit is
+  `e91b184741a10b83459a8041e3ecd9701fdf3b5b`;
+  the runner recomputes selected group/model multipliers through the runtime
+  settlement price resolver instead of accepting effective prices from the
+  safe snapshot.
 - The safe input and deterministic output are
   `m1-g-current-route-recovery-safe-snapshot.json` and
   `m1-g-current-route-recovery-report.json`; canonical safe-snapshot SHA-256:
-  `fe3e076e7e60306127843eff14392d4927c002057caacd38c5ab800979eec2a6`.
+  `f26d146cad4b16d74287949cd9aeef34a4e9ee5b736012b57b5240de8e32e160`.
+- The route baseline is fixed to
+  `e727bb141ad2c8c5fdd4379308ed85cfc7aefb86`; the canonical 15-dispatch
+  digest is
+  `f0cb1473cb025621a3f9e6df7dec6045bb7e5df2a3586c6d3e93716913733184`.
+  The CLI rejects route-source drift from that commit.
 
 The snapshot contains no gateway key, bearer token, authorization header,
 base URL, prompt, model response, customer data, or reversible credential
 material.
+Input, source-bundle and create-only output paths are resolved against the real
+repository root; any intermediate symbolic-link traversal is rejected.
 
 ## Exact matrix result
 

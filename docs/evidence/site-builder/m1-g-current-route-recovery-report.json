@@ -1,14 +1,16 @@
 {
-  "schemaVersion": "site-builder-current-route-recovery-report/2026-07-29-v1",
+  "schemaVersion": "site-builder-current-route-recovery-report/2026-07-29-v2",
   "status": "BLOCKED_CURRENT_ROUTE_RECOVERY",
   "modelDispatchAuthorization": "NOT_AUTHORIZED",
   "modelGenerationCalls": 0,
   "modelFeesUsd": 0,
   "source": {
-    "capturedAt": "2026-07-29T12:53:41.818Z",
+    "capturedAt": "2026-07-29T13:48:29.680Z",
     "routeBaselineCommitSha": "e727bb141ad2c8c5fdd4379308ed85cfc7aefb86",
-    "safeSnapshotSha256": "fe3e076e7e60306127843eff14392d4927c002057caacd38c5ab800979eec2a6",
-    "openOxCatalogResponseSha256": "db2647f67fb5b0e61ddfca11860d3080222ebfead7ffa6b95e75c3f327bcb122"
+    "routeDispatchSha256": "f0cb1473cb025621a3f9e6df7dec6045bb7e5df2a3586c6d3e93716913733184",
+    "safeSnapshotSha256": "f26d146cad4b16d74287949cd9aeef34a4e9ee5b736012b57b5240de8e32e160",
+    "openOxSourceBundleSha256": "6e3eceb33f69a6011eeb185cea378a13f2af5a1893adfb67f4d4dc5e0a2d451e",
+    "openOxSourceBundleCommitSha": "e91b184741a10b83459a8041e3ecd9701fdf3b5b"
   },
   "credential": {
     "status": "not_finite_exact",
@@ -126,11 +128,11 @@
         "cacheReadRate": "0.2",
         "cacheWriteRate": "2.5",
         "effectiveInputRate": "2.52",
-        "effectiveOutputRate": "12.60",
+        "effectiveOutputRate": "12.6",
         "effectiveCacheReadRate": "0.252",
         "effectiveCacheWriteRate": "3.15",
         "status": "enabled",
-        "updatedAt": "2026-07-29T12:49:39.851294Z",
+        "updatedAt": "2026-07-29T13:37:37.129057Z",
         "modelBillingMultiplier": null
       },
       "blockers": [
@@ -185,7 +187,7 @@
         "effectiveCacheReadRate": "0.015225",
         "effectiveCacheWriteRate": "0",
         "status": "enabled",
-        "updatedAt": "2026-07-29T12:49:39.75376Z",
+        "updatedAt": "2026-07-29T13:37:37.058074Z",
         "modelBillingMultiplier": null
       },
       "blockers": [
@@ -256,12 +258,12 @@
         "outputRate": "28",
         "cacheReadRate": "2",
         "cacheWriteRate": "0",
-        "effectiveInputRate": "5.60",
-        "effectiveOutputRate": "19.60",
-        "effectiveCacheReadRate": "1.40",
+        "effectiveInputRate": "5.6",
+        "effectiveOutputRate": "19.6",
+        "effectiveCacheReadRate": "1.4",
         "effectiveCacheWriteRate": "0",
         "status": "enabled",
-        "updatedAt": "2026-07-29T12:49:39.761037Z",
+        "updatedAt": "2026-07-29T13:37:37.066603Z",
         "modelBillingMultiplier": "0.70"
       },
       "blockers": [
@@ -297,7 +299,7 @@
         "effectiveCacheReadRate": "0.25",
         "effectiveCacheWriteRate": "3.125",
         "status": "enabled",
-        "updatedAt": "2026-07-29T12:49:39.854386Z",
+        "updatedAt": "2026-07-29T13:37:37.131732Z",
         "modelBillingMultiplier": null
       },
       "blockers": [
