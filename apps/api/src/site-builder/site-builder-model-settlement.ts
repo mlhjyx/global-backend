@@ -17,6 +17,7 @@ import {
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
 } from './agents/task-routes';
+import { modelPolicyRegistry } from './agents/model-policy.registry';
 
 export const SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION =
   'site-builder-model-settlement-attestation/2026-07-29-v2' as const;
@@ -263,7 +264,13 @@ function requiredDispatches(
     const target = resolveTaskExecutionTarget(taskId, env);
     if (target.kind === 'deterministic_fallback') return [];
     const route = target.route;
-    return [route.primary, ...route.fallbacks].map((alias) => ({
+    const aliases = [route.primary, ...route.fallbacks];
+    for (const alias of aliases) {
+      if (modelPolicyRegistry.getAliasRetirementPolicy(alias)) {
+        throw new Error(`RETIRED_ALIAS_STILL_ACTIVE: ${taskId}:${alias}`);
+      }
+    }
+    return aliases.map((alias) => ({
       taskId,
       alias,
       protocol: protocolFor(alias),
