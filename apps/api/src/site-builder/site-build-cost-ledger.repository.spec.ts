@@ -21,6 +21,54 @@ const SCOPE = {
 };
 
 describe('SiteBuildCostLedger paid-operation replay gate', () => {
+  it('commits unknown settlement and the BuildRun kill switch in one workspace transaction', async () => {
+    const settle = vi.fn(async () => [{ decision: 'SETTLED' }]);
+    const disable = vi.fn(async () => ({ count: 1 }));
+    const ledger = new SiteBuildCostLedger(
+      fakePrisma({
+        $queryRaw: settle,
+        siteBuildBudget: { updateMany: disable },
+      }),
+    );
+
+    await expect(
+      ledger.settleOperation({
+        scope: {
+          ...SCOPE,
+          operationKey: 'f'.repeat(64),
+          kind: 'model',
+          taskId: 'site_builder.copy',
+          subject: 'deepseek-v4-pro@gateway',
+          reservationMicrousd: 400_000,
+        },
+        status: 'FAILED',
+        measurement: {
+          basis: 'unknown',
+          budgetChargeMicrousd: 400_000,
+          reportedCostMicrousd: null,
+          calculatedCostMicrousd: null,
+          estimatedCostMicrousd: null,
+          inputTokens: 10,
+          outputTokens: 5,
+          callCount: 1,
+          meta: { reason: 'gateway_settlement_incomplete_or_mismatched' },
+        },
+        errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
+        disablePaidCallsReason: 'MODEL_SETTLEMENT_UNKNOWN',
+      }),
+    ).resolves.toBe('SETTLED');
+    expect(disable).toHaveBeenCalledWith({
+      where: { buildRunId: SCOPE.buildRunId },
+      data: {
+        paidCallsEnabled: false,
+        disabledReason: 'MODEL_SETTLEMENT_UNKNOWN',
+      },
+    });
+    expect(settle.mock.invocationCallOrder[0]).toBeLessThan(
+      disable.mock.invocationCallOrder[0],
+    );
+  });
+
   it('serializes a manual kill switch with final pointer publication', async () => {
     const executeRaw = vi.fn(async () => 0);
     const updateMany = vi.fn(async () => ({ count: 1 }));

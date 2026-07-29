@@ -26,6 +26,10 @@ import {
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
+import {
+  PaidModelPreflightError,
+  type PaidModelPreflightEvidence,
+} from './paid-model-settlement';
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -49,13 +53,20 @@ function centsFromTokens(usage?: {
  * 让网关 catch 按 centsFromTokens 结算真实消耗——否则修复抛错只带修复 usage（漏首调）、recheck 失败
  * 抛裸 Error（记 0¢），都绕过改动 2 的硬预算上界「凡消耗 token 的调用都不该 settle 0¢」。
  */
-function mergeStructuredUsage(
-  a?: { inputTokens?: number; outputTokens?: number },
-  b?: { inputTokens?: number; outputTokens?: number },
-): { inputTokens: number; outputTokens: number } {
+function mergeStructuredUsage(a?: ModelUsage, b?: ModelUsage): ModelUsage {
+  const bothReported =
+    Number.isFinite(a?.costUsd) && Number.isFinite(b?.costUsd);
+  const gatewaySettlements = [
+    ...(a?.gatewaySettlements ?? []),
+    ...(b?.gatewaySettlements ?? []),
+  ];
   return {
     inputTokens: (a?.inputTokens ?? 0) + (b?.inputTokens ?? 0),
     outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
+    ...(bothReported ? { costUsd: a!.costUsd! + b!.costUsd! } : {}),
+    ...(a?.gatewaySettlements || b?.gatewaySettlements
+      ? { gatewaySettlements }
+      : {}),
   };
 }
 import {
@@ -65,6 +76,7 @@ import {
   GenerateTextInput,
   ModelOp,
   ModelResult,
+  ModelUsage,
   ReviewVisionInput,
 } from './types';
 import { snapshotVisionReviewInput } from './vision-review-input';
@@ -100,8 +112,8 @@ export class RouterModelGateway extends ModelGateway {
     input: GenerateTextInput,
     ctx: AiContext,
   ): Promise<ModelResult<string>> {
-    return this.run('generateText', input, ctx, (p) =>
-      p.generateText(input, ctx),
+    return this.run('generateText', input, ctx, (p, runCtx) =>
+      p.generateText(input, runCtx),
     );
   }
 
@@ -109,7 +121,7 @@ export class RouterModelGateway extends ModelGateway {
     input: GenerateStructuredInput,
     ctx: AiContext,
   ): Promise<ModelResult<T>> {
-    return this.run('generateStructured', input, ctx, async (p) => {
+    return this.run('generateStructured', input, ctx, async (p, runCtx) => {
       const validateTaskOutput = (result: ModelResult<T>): ModelResult<T> => {
         try {
           input.validateOutput?.(result.data);
@@ -129,8 +141,25 @@ export class RouterModelGateway extends ModelGateway {
           );
         }
       };
-      const first = await p.generateStructured<T>(input, ctx);
+      const first = await p.generateStructured<T>(input, runCtx);
       if (p.id === 'stub') return first; // stub 输出不参与 schema 校验（dev 兜底）
+      if (
+        first.usage?.gatewaySettlements?.some(
+          (observation) => observation.status === 'unknown',
+        )
+      ) {
+        throw new ProviderOutputError(
+          'initial structured call settlement is unknown; repair suppressed',
+          first.usage,
+          {
+            callCount: 1,
+            provider: first.provider,
+            model: first.model,
+            reportedModel: first.reportedModel,
+            modelResolutionSource: first.modelResolutionSource,
+          },
+        );
+      }
       const check = checkAgainstSchema(input.schema, first.data);
       let repairReason: string;
       let repairKind: 'JSON Schema' | '任务确定性硬门';
@@ -159,7 +188,7 @@ export class RouterModelGateway extends ModelGateway {
             ...input,
             prompt: `${input.prompt}\n\n上一次输出未通过${repairKind}校验，错误：\n${repairReason}\n请只修正被拒字段，不得新增、猜测或放宽任何事实；重新只输出同时通过 JSON Schema 和任务硬门的合法 JSON。`,
           },
-          ctx,
+          runCtx,
         );
       } catch (err) {
         // FIX 1：修复调用抛错也要带上首调已消耗的 token（否则网关 catch 只结算修复那次、漏首调，少记绕硬顶）。
@@ -233,8 +262,8 @@ export class RouterModelGateway extends ModelGateway {
     ) {
       throw new Error('VISION_REVIEW_WORKSPACE_MISMATCH');
     }
-    return this.run('reviewVision', snapshot, ctx, async (provider) => {
-      const result = await provider.reviewVision<T>(snapshot, ctx);
+    return this.run('reviewVision', snapshot, ctx, async (provider, runCtx) => {
+      const result = await provider.reviewVision<T>(snapshot, runCtx);
       if (
         result.modelResolutionSource !== 'upstream_response' ||
         !hasTrustedModelIdentity({
@@ -272,9 +301,7 @@ export class RouterModelGateway extends ModelGateway {
         snapshot.validateOutput?.(result.data);
       } catch (error) {
         throw new TaskOutputValidationError(
-          `vision review hard gate rejected: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `vision review hard gate rejected: ${error instanceof Error ? error.message : String(error)}`,
           result.usage,
           {
             cause: error,
@@ -290,14 +317,23 @@ export class RouterModelGateway extends ModelGateway {
   }
 
   embed(input: EmbedInput, ctx: AiContext): Promise<ModelResult<number[][]>> {
-    return this.run('embed', input, ctx, (p) => p.embed(input, ctx));
+    return this.run('embed', input, ctx, (p, runCtx) => p.embed(input, runCtx));
   }
 
   private async run<T>(
     op: ModelOp,
-    input: { task: string; model?: string; maxCostCents?: number },
+    input: {
+      task: string;
+      model?: string;
+      maxCostCents?: number;
+      maxTokens?: number;
+      prompt?: string;
+      system?: string;
+      schema?: Record<string, unknown>;
+      signal?: AbortSignal;
+    },
     ctx: AiContext,
-    call: (p: ModelProvider) => Promise<ModelResult<T>>,
+    call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
     const chain = this.router.route(op, input.task);
     if (chain.length === 0)
@@ -319,14 +355,7 @@ export class RouterModelGateway extends ModelGateway {
     const reserveCents =
       op === 'generateStructured' ? baseCents * 2 : baseCents;
     if (ctx.paidCost) {
-      return this.runPersistent(
-        op,
-        input,
-        ctx,
-        chain,
-        call,
-        reserveCents,
-      );
+      return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }
     let reservation: { runId: string; estCents: number };
     try {
@@ -364,7 +393,7 @@ export class RouterModelGateway extends ModelGateway {
       for (const provider of chain) {
         const started = Date.now();
         try {
-          const result = await call(provider);
+          const result = await call(provider, ctx);
           const costUsd = result.usage?.costUsd;
           settle(
             costUsd != null
@@ -429,20 +458,105 @@ export class RouterModelGateway extends ModelGateway {
 
   private async runPersistent<T>(
     op: ModelOp,
-    input: { task: string; model?: string; maxCostCents?: number },
+    input: {
+      task: string;
+      model?: string;
+      maxCostCents?: number;
+      maxTokens?: number;
+      prompt?: string;
+      system?: string;
+      schema?: Record<string, unknown>;
+      signal?: AbortSignal;
+    },
     ctx: AiContext,
     chain: readonly ModelProvider[],
-    call: (provider: ModelProvider) => Promise<ModelResult<T>>,
+    call: (
+      provider: ModelProvider,
+      runCtx: AiContext,
+    ) => Promise<ModelResult<T>>,
     reserveCents: number,
   ): Promise<ModelResult<T>> {
     const paid = ctx.paidCost!;
     if (!this.paidLedger || !ctx.runId) {
       throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
     }
+    if (!chain.some((provider) => provider.preflightPaidCall)) {
+      this.trace?.record({
+        workspaceId: ctx.workspaceId,
+        task: input.task,
+        op,
+        provider: 'model-preflight',
+        model: input.model ?? 'provider-default',
+        status: 'ERROR',
+        errorMessage:
+          'paid call denied before reserve: MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED',
+        latencyMs: 0,
+        correlationId: ctx.correlationId,
+        modelPolicy: ctx.modelPolicy,
+      });
+      throw new PaidCallDeniedError(
+        'MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED',
+      );
+    }
 
     let lastErr: unknown;
     for (const [providerIndex, provider] of chain.entries()) {
+      // Paid Site Builder execution may only enter an attested provider.
+      // Development stubs remain useful for non-paid local flows, but after a
+      // known, fully settled provider failure they must not replace that error
+      // with a terminal preflight denial and prevent the task-level model
+      // fallback from running.
+      if (!provider.preflightPaidCall) continue;
       const requestedModel = input.model ?? 'provider-default';
+      let settlementPreflight: PaidModelPreflightEvidence;
+      try {
+        if (
+          op !== 'generateStructured' ||
+          !input.prompt ||
+          !input.maxTokens
+        ) {
+          throw new PaidModelPreflightError('PAID_OPERATION_NOT_ATTESTED');
+        }
+        const schemaText = input.schema ? JSON.stringify(input.schema) : '';
+        const promptUtf8BytesPerCall = Math.max(
+          1,
+          Buffer.byteLength(
+            `${input.system ?? ''}\n${input.prompt}\n${schemaText}`,
+            'utf8',
+          ),
+        );
+        settlementPreflight = await provider.preflightPaidCall(
+          {
+            taskId: input.task,
+            op,
+            alias: requestedModel,
+            promptUtf8BytesPerCall,
+            maxOutputTokens: input.maxTokens,
+            maximumWireCalls: 2,
+            reservationMicrousd: reserveCents * 10_000,
+            signal: input.signal,
+          },
+          ctx,
+        );
+      } catch (error) {
+        const decision =
+          error instanceof PaidModelPreflightError
+            ? `MODEL_PREFLIGHT_${error.code}`
+            : 'MODEL_PREFLIGHT_UNAVAILABLE';
+        this.trace?.record({
+          workspaceId: ctx.workspaceId,
+          task: input.task,
+          op,
+          provider: 'model-preflight',
+          model: requestedModel,
+          status: 'ERROR',
+          errorMessage: `paid call denied before reserve: ${decision}`,
+          latencyMs: 0,
+          correlationId: ctx.correlationId,
+          modelPolicy: ctx.modelPolicy,
+        });
+        throw new PaidCallDeniedError(decision);
+      }
       const scope: PaidOperationReservation = {
         workspaceId: ctx.workspaceId,
         siteId: paid.siteId,
@@ -465,6 +579,7 @@ export class RouterModelGateway extends ModelGateway {
           op,
           provider: provider.id,
           requestedModel,
+          settlementPreflight,
           ...(ctx.modelPolicy ? { modelPolicy: ctx.modelPolicy } : {}),
         },
       };
@@ -510,15 +625,24 @@ export class RouterModelGateway extends ModelGateway {
 
       const started = Date.now();
       let result: ModelResult<T>;
+      const executionCtx: AiContext = {
+        ...ctx,
+        paidCost: {
+          ...paid,
+          settlementPreflight,
+        },
+      };
       try {
-        result = await call(provider);
+        result = await call(provider, executionCtx);
       } catch (error) {
-        const providerError = error instanceof ProviderOutputError ? error : null;
+        const providerError =
+          error instanceof ProviderOutputError ? error : null;
         const measurement = modelCostMeasurement({
           taskId: input.task,
           requestedModel,
           resolvedModel: providerError?.model,
           usage: providerError?.usage,
+          settlementPreflight,
           callCount: providerError?.callCount,
           reservationMicrousd: scope.reservationMicrousd,
         });
@@ -537,14 +661,16 @@ export class RouterModelGateway extends ModelGateway {
               : {}),
             ...(providerError?.modelResolutionSource
               ? {
-                  modelResolutionSource:
-                    providerError.modelResolutionSource,
+                  modelResolutionSource: providerError.modelResolutionSource,
                 }
               : {}),
           },
-          errorCode: providerError
-            ? 'PROVIDER_OUTPUT_ERROR'
-            : 'PROVIDER_CALL_ERROR',
+          errorCode:
+            measurement.basis === 'unknown'
+              ? 'MODEL_SETTLEMENT_UNKNOWN'
+              : providerError
+                ? 'PROVIDER_OUTPUT_ERROR'
+                : 'PROVIDER_CALL_ERROR',
         });
         this.trace?.record({
           workspaceId: ctx.workspaceId,
@@ -578,9 +704,23 @@ export class RouterModelGateway extends ModelGateway {
         requestedModel,
         resolvedModel: result.model,
         usage: result.usage,
+        settlementPreflight,
         callCount: result.callCount,
         reservationMicrousd: scope.reservationMicrousd,
       });
+      if (measurement.basis === 'unknown') {
+        await this.settlePersistentOperation({
+          scope,
+          status: 'FAILED',
+          measurement,
+          meta: {
+            provider: result.provider,
+            requestedModel,
+            resolvedModel: result.model,
+          },
+          errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
+        });
+      }
       let durableResult: Record<string, unknown> | undefined;
       try {
         durableResult = paid.durableReplayResult?.(
@@ -645,21 +785,54 @@ export class RouterModelGateway extends ModelGateway {
   private async settlePersistentOperation(
     input: Parameters<SiteBuildCostLedger['settleOperation']>[0],
   ): Promise<void> {
+    const disablePaidCallsReason =
+      input.measurement.basis === 'unknown'
+        ? (input.errorCode ?? 'MODEL_SETTLEMENT_UNKNOWN')
+        : undefined;
     let decision: string;
     try {
-      decision = await this.paidLedger!.settleOperation(input);
+      decision = await this.paidLedger!.settleOperation({
+        ...input,
+        ...(disablePaidCallsReason ? { disablePaidCallsReason } : {}),
+      });
     } catch (error) {
-      if (error instanceof PaidOperationUnknownError) throw error;
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        'SETTLEMENT_ACK_UNKNOWN',
+      return this.freezeUnknownSettlement(
+        input.scope,
+        error instanceof PaidOperationUnknownError
+          ? error.errorCode
+          : 'SETTLEMENT_ACK_UNKNOWN',
       );
     }
     if (decision !== 'SETTLED') {
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
+      return this.freezeUnknownSettlement(
+        input.scope,
         `SETTLEMENT_${decision}`,
       );
     }
+    if (disablePaidCallsReason) {
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        disablePaidCallsReason,
+      );
+    }
+  }
+
+  private async freezeUnknownSettlement(
+    scope: PaidOperationReservation,
+    errorCode: string,
+  ): Promise<never> {
+    try {
+      await this.paidLedger!.disablePaidCalls(
+        scope.workspaceId,
+        scope.buildRunId,
+        errorCode,
+      );
+    } catch {
+      throw new PaidOperationUnknownError(
+        scope.operationKey,
+        'UNKNOWN_FREEZE_ACK_UNKNOWN',
+      );
+    }
+    throw new PaidOperationUnknownError(scope.operationKey, errorCode);
   }
 }

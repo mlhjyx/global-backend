@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OpenAICompatibleProvider, stripJsonFence, type GatewayVisionTransport } from './openai-compatible.provider';
+import {
+  OpenAICompatibleProvider,
+  stripJsonFence,
+  type GatewayModelTransport,
+  type GatewayVisionTransport,
+} from './openai-compatible.provider';
 import { ProviderHttpError, ProviderIdentityError, ProviderOutputError } from './provider-output-error';
 
 /**
@@ -97,6 +102,319 @@ describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
     await provider.generateStructured({ task: 't', prompt: 'p', schema: {} });
     expect('reasoning_effort' in lastRequestBody()).toBe(false);
   });
+});
+
+describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
+  it('lets request-bound settlement outlive the caller generation deadline', async () => {
+    const preflight = {
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
+      attestationId: 'provider-settlement-test',
+      snapshotSha256: 'a'.repeat(64),
+      resolverId: 'new-api-token-log-v1',
+      taskId: 'site_builder.copy',
+      alias: 'deepseek-v4-pro',
+      protocol: 'openai-chat-completions' as const,
+      expectedChannelId: 9,
+      pricingAuthority: 'openox_model_marketplace' as const,
+      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+      pricingSnapshotSha256: 'b'.repeat(64),
+      pricingCurrency: 'CNY' as const,
+      inputPriceMicrounitsPerMillionTokens: 2_000_000,
+      outputPriceMicrounitsPerMillionTokens: 10_000_000,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      gatewayCredentialQuotaCapPoints: 5_000_000,
+      gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
+      pricedMaximumMicrousd: 100_000,
+    };
+    const resolve = vi.fn(async () => ({
+      status: 'settled' as const,
+      requestId: 'req_provider_paid_001',
+      resolverId: preflight.resolverId,
+      alias: preflight.alias,
+      protocol: preflight.protocol,
+      channelId: preflight.expectedChannelId,
+      basis: 'openox_catalog_token_pricing' as const,
+      quota: 500,
+      costMicrousd: 1_000,
+      inputTokens: 10,
+      outputTokens: 5,
+    }));
+    const paidProvider = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'https://gateway.example.test/v1',
+      apiKey: 'runtime-token',
+      model: 'deepseek-v4-pro',
+      paidModelSettlement: {
+        preflight: vi.fn(async () => preflight),
+        resolve,
+      },
+    });
+    const generation = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        generation.abort(
+          new DOMException('generation deadline', 'TimeoutError'),
+        );
+        return new Response(
+          JSON.stringify({
+            model: 'deepseek-v4-pro',
+            choices: [
+              {
+                message: { content: '{"ok":true}' },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'x-oneapi-request-id': 'req_provider_paid_001',
+            },
+          },
+        );
+      }),
+    );
+
+    const result = await paidProvider.generateStructured(
+      {
+        task: 'site_builder.copy',
+        prompt: 'p',
+        schema: {},
+        model: 'deepseek-v4-pro',
+        signal: generation.signal,
+      },
+      {
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        runId: '22222222-2222-4222-8222-222222222222',
+        paidCost: {
+          siteId: '33333333-3333-4333-8333-333333333333',
+          scopeKey: 'copy:model:0',
+          settlementPreflight: preflight,
+        },
+      },
+    );
+
+    expect(resolve).toHaveBeenCalledWith({
+      requestId: 'req_provider_paid_001',
+      evidence: preflight,
+      usage: undefined,
+    });
+    expect(resolve.mock.calls[0]![0]).not.toHaveProperty('signal');
+    expect(result.usage).toMatchObject({
+      gatewaySettlements: [
+        expect.objectContaining({
+          status: 'settled',
+          requestId: 'req_provider_paid_001',
+        }),
+      ],
+    });
+  });
+
+  it('settles from the request header before parsing a malformed success body', async () => {
+    const preflight = {
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
+      attestationId: 'provider-malformed-body-test',
+      snapshotSha256: 'a'.repeat(64),
+      resolverId: 'new-api-token-log-v1',
+      taskId: 'site_builder.copy',
+      alias: 'deepseek-v4-pro',
+      protocol: 'openai-chat-completions' as const,
+      expectedChannelId: 9,
+      pricingAuthority: 'openox_model_marketplace' as const,
+      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+      pricingSnapshotSha256: 'b'.repeat(64),
+      pricingCurrency: 'CNY' as const,
+      inputPriceMicrounitsPerMillionTokens: 2_000_000,
+      outputPriceMicrounitsPerMillionTokens: 10_000_000,
+      ledgerMicrousdPerPricingUnit: 1_000_000,
+      gatewayCredentialQuotaCapPoints: 5_000_000,
+      gatewayCredentialRemainingPoints: 4_500_000,
+      maxOutputTokensPerCall: 1_000,
+      pricedMaximumMicrousd: 100_000,
+    };
+    const resolve = vi.fn(async () => ({
+      status: 'settled' as const,
+      requestId: 'req_malformed_paid_001',
+      resolverId: preflight.resolverId,
+      alias: preflight.alias,
+      protocol: preflight.protocol,
+      channelId: preflight.expectedChannelId,
+      basis: 'openox_catalog_token_pricing' as const,
+      quota: 500,
+      costMicrousd: 1_000,
+      inputTokens: 10,
+      outputTokens: 5,
+    }));
+    const paidProvider = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'https://gateway.example.test/v1',
+      apiKey: 'runtime-token',
+      model: preflight.alias,
+      paidModelSettlement: {
+        preflight: vi.fn(async () => preflight),
+        resolve,
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('{"truncated"', {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'x-oneapi-request-id': 'req_malformed_paid_001',
+            },
+          }),
+      ),
+    );
+
+    const error = await paidProvider
+      .generateStructured(
+        {
+          task: preflight.taskId,
+          prompt: 'p',
+          schema: {},
+          model: preflight.alias,
+        },
+        {
+          workspaceId: '11111111-1111-4111-8111-111111111111',
+          runId: '22222222-2222-4222-8222-222222222222',
+          paidCost: {
+            siteId: '33333333-3333-4333-8333-333333333333',
+            scopeKey: 'copy:model:0',
+            settlementPreflight: preflight,
+          },
+        },
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProviderOutputError);
+    expect((error as ProviderOutputError).usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+      gatewaySettlements: [
+        expect.objectContaining({
+          status: 'settled',
+          requestId: 'req_malformed_paid_001',
+        }),
+      ],
+    });
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it('keeps ordinary non-paid HTTP failures non-billable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('gateway unavailable', { status: 503 })),
+    );
+
+    await expect(
+      provider.generateStructured({
+        task: 't',
+        prompt: 'p',
+        schema: {},
+      }),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+  });
+
+  it.each(['openai-responses', 'anthropic-messages'] satisfies GatewayModelTransport[])(
+    'settles %s before parsing malformed JSON',
+    async (transport) => {
+      const alias = `paid-${transport}`;
+      const preflight = {
+        schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
+        attestationId: `provider-${transport}-test`,
+        snapshotSha256: 'a'.repeat(64),
+        resolverId: 'new-api-token-log-v1',
+        taskId: 'site_builder.copy',
+        alias,
+        protocol: transport,
+        expectedChannelId: 9,
+        pricingAuthority: 'openox_model_marketplace' as const,
+        pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
+        pricingSnapshotSha256: 'b'.repeat(64),
+        pricingCurrency: 'CNY' as const,
+        inputPriceMicrounitsPerMillionTokens: 2_000_000,
+        outputPriceMicrounitsPerMillionTokens: 10_000_000,
+        ledgerMicrousdPerPricingUnit: 1_000_000,
+        gatewayCredentialQuotaCapPoints: 5_000_000,
+        gatewayCredentialRemainingPoints: 4_500_000,
+        maxOutputTokensPerCall: 1_000,
+        pricedMaximumMicrousd: 100_000,
+      };
+      const resolve = vi.fn(async () => ({
+        status: 'settled' as const,
+        requestId: `req_${transport.replaceAll('-', '_')}`,
+        resolverId: preflight.resolverId,
+        alias,
+        protocol: transport,
+        channelId: preflight.expectedChannelId,
+        basis: 'openox_catalog_token_pricing' as const,
+        quota: 500,
+        costMicrousd: 1_000,
+        inputTokens: 10,
+        outputTokens: 5,
+      }));
+      const paidProvider = new OpenAICompatibleProvider({
+        id: 'gateway',
+        baseUrl: 'https://gateway.example.test/v1',
+        apiKey: 'runtime-token',
+        model: alias,
+        modelTransports: { [alias]: transport },
+        paidModelSettlement: {
+          preflight: vi.fn(async () => preflight),
+          resolve,
+        },
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response('{"truncated"', {
+              status: 200,
+              headers: {
+                'content-type': 'application/json',
+                'x-oneapi-request-id': `req_${transport.replaceAll('-', '_')}`,
+              },
+            }),
+        ),
+      );
+
+      const error = await paidProvider
+        .generateStructured(
+          {
+            task: preflight.taskId,
+            prompt: 'p',
+            schema: {},
+            model: alias,
+            maxTokens: 100,
+          },
+          {
+            workspaceId: '11111111-1111-4111-8111-111111111111',
+            runId: '22222222-2222-4222-8222-222222222222',
+            paidCost: {
+              siteId: '33333333-3333-4333-8333-333333333333',
+              scopeKey: 'copy:model:0',
+              settlementPreflight: preflight,
+            },
+          },
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ProviderOutputError);
+      expect((error as ProviderOutputError).usage).toMatchObject({
+        inputTokens: 10,
+        outputTokens: 5,
+        gatewaySettlements: [expect.objectContaining({ status: 'settled' })],
+      });
+      expect(resolve).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 describe('OpenAICompatibleProvider — 空输出显式失败', () => {
@@ -633,7 +951,9 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       usage: { input_tokens: 24, output_tokens: 8 },
     });
     const input = { ...visionInput(), model: 'gpt-5.6-sol' };
-    const result = await visionProviderFor('gpt-5.6-sol', 'openai-responses').reviewVision<{ ok: boolean }>(input);
+    const result = await visionProviderFor('gpt-5.6-sol', 'openai-responses').reviewVision<{
+      ok: boolean;
+    }>(input);
 
     expect(lastRequestUrl()).toBe('http://gw.test/v1/responses');
     const body = lastRequestBody();
@@ -681,9 +1001,9 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       model: 'claude-sonnet-5',
       maxTokens: 4000,
     };
-    const result = await visionProviderFor('claude-sonnet-5', 'anthropic-messages').reviewVision<{ ok: boolean }>(
-      input,
-    );
+    const result = await visionProviderFor('claude-sonnet-5', 'anthropic-messages').reviewVision<{
+      ok: boolean;
+    }>(input);
 
     expect(lastRequestUrl()).toBe('http://gw.test/v1/messages');
     expect(lastRequestHeaders()).toMatchObject({
@@ -732,7 +1052,12 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       transport: 'google-generate-content' as const,
       response: {
         modelVersion: 'provider-fallback',
-        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }],
+        candidates: [
+          {
+            content: { parts: [{ text: '{"ok":true}' }] },
+            finishReason: 'STOP',
+          },
+        ],
       },
       expected: ProviderIdentityError,
     },
@@ -742,7 +1067,12 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       transport: 'google-generate-content' as const,
       response: {
         modelVersion: 'gemini-3.5-flash',
-        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'SAFETY' }],
+        candidates: [
+          {
+            content: { parts: [{ text: '{"ok":true}' }] },
+            finishReason: 'SAFETY',
+          },
+        ],
       },
       expected: 'VISION_REVIEW_FINISH_REASON_INVALID',
     },
@@ -752,7 +1082,12 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       transport: 'google-generate-content' as const,
       response: {
         modelVersion: 'gemini-3.5-flash',
-        candidates: [{ content: { parts: [{ thought: true, text: 'not output' }] }, finishReason: 'STOP' }],
+        candidates: [
+          {
+            content: { parts: [{ thought: true, text: 'not output' }] },
+            finishReason: 'STOP',
+          },
+        ],
       },
       expected: 'VISION_REVIEW_EMPTY_OUTPUT',
     },

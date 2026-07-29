@@ -1,6 +1,8 @@
 import { createHash, randomUUID as nodeRandomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PaidModelPreflightEvidence } from '../model-gateway/paid-model-settlement';
+import type { ModelUsage } from '../model-gateway/types';
 import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from './agents/model-policy.registry';
 
 export const SITE_BUILD_COST_SUMMARY_VERSION =
@@ -30,11 +32,8 @@ interface ModelMeasurementInput {
   taskId: string;
   requestedModel: string;
   resolvedModel?: string;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    costUsd?: number;
-  };
+  usage?: ModelUsage;
+  settlementPreflight?: PaidModelPreflightEvidence;
   callCount?: number;
   reservationMicrousd: number;
 }
@@ -65,6 +64,79 @@ export function modelCostMeasurement(
   const outputTokens = nonNegativeInt(input.usage?.outputTokens);
   const callCount = Math.max(1, Math.floor(input.callCount ?? 1));
   const costUsd = input.usage?.costUsd;
+  const gatewaySettlements = input.usage?.gatewaySettlements ?? [];
+  if (input.settlementPreflight) {
+    const settled = gatewaySettlements.filter(
+      (observation) => observation.status === 'settled',
+    );
+    const calculatedCostMicrousd = settled.reduce(
+      (sum, observation) => sum + observation.costMicrousd,
+      0,
+    );
+    const settledInputTokens = settled.reduce(
+      (sum, observation) => sum + observation.inputTokens,
+      0,
+    );
+    const settledOutputTokens = settled.reduce(
+      (sum, observation) => sum + observation.outputTokens,
+      0,
+    );
+    const complete =
+      gatewaySettlements.length === callCount &&
+      settled.length === callCount &&
+      input.resolvedModel === input.requestedModel &&
+      new Set(settled.map((observation) => observation.requestId)).size ===
+        callCount &&
+      calculatedCostMicrousd <=
+        input.settlementPreflight.pricedMaximumMicrousd &&
+      calculatedCostMicrousd <= input.reservationMicrousd &&
+      settledOutputTokens <=
+        input.settlementPreflight.maxOutputTokensPerCall * callCount &&
+      settled.every(
+        (observation) =>
+          observation.resolverId === input.settlementPreflight!.resolverId &&
+          observation.alias === input.settlementPreflight!.alias &&
+          observation.protocol === input.settlementPreflight!.protocol &&
+          observation.channelId ===
+            input.settlementPreflight!.expectedChannelId &&
+          observation.basis === 'openox_catalog_token_pricing' &&
+          observation.outputTokens <=
+            input.settlementPreflight!.maxOutputTokensPerCall,
+      );
+    if (complete) {
+      return {
+        basis: 'token_pricing',
+        budgetChargeMicrousd: calculatedCostMicrousd,
+        reportedCostMicrousd: null,
+        calculatedCostMicrousd,
+        estimatedCostMicrousd: null,
+        inputTokens: settledInputTokens,
+        outputTokens: settledOutputTokens,
+        callCount,
+        meta: {
+          settlementPreflight: input.settlementPreflight,
+          gatewaySettlements,
+        },
+      };
+    }
+    return {
+      basis: 'unknown',
+      budgetChargeMicrousd: input.reservationMicrousd,
+      reportedCostMicrousd: null,
+      calculatedCostMicrousd: null,
+      estimatedCostMicrousd: null,
+      inputTokens,
+      outputTokens,
+      callCount,
+      meta: {
+        reason: 'gateway_settlement_incomplete_or_mismatched',
+        requestedModel: input.requestedModel,
+        ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
+        settlementPreflight: input.settlementPreflight,
+        gatewaySettlements,
+      },
+    };
+  }
   if (Number.isFinite(costUsd) && costUsd! >= 0) {
     const reportedCostMicrousd = Math.round(costUsd! * 1_000_000);
     return {
@@ -151,10 +223,7 @@ export function legacyToolCostMeasurement(
   const estimatedCostMicrousd = Math.round(costCents * 10_000);
   return {
     basis: 'legacy_estimate',
-    budgetChargeMicrousd: Math.min(
-      reservationMicrousd,
-      estimatedCostMicrousd,
-    ),
+    budgetChargeMicrousd: Math.min(reservationMicrousd, estimatedCostMicrousd),
     reportedCostMicrousd: null,
     calculatedCostMicrousd: null,
     estimatedCostMicrousd,
@@ -205,9 +274,8 @@ export function buildSiteBuildCostSummary(
   budget: SummaryBudgetRow,
   spends: readonly SummarySpendRow[],
 ) {
-  const sumBigInt = (
-    pick: (row: SummarySpendRow) => bigint | null,
-  ): number => jsonInteger(spends.reduce((sum, row) => sum + (pick(row) ?? 0n), 0n));
+  const sumBigInt = (pick: (row: SummarySpendRow) => bigint | null): number =>
+    jsonInteger(spends.reduce((sum, row) => sum + (pick(row) ?? 0n), 0n));
   const operationCount = (status: string): number =>
     spends.filter((row) => row.status === status).length;
   const calls = (kind: string): number =>
@@ -233,24 +301,15 @@ export function buildSiteBuildCostSummary(
       exhaustedAt: budget.exhaustedAt?.toISOString() ?? null,
     },
     totals: {
-      reportedCostMicrousd: sumBigInt(
-        (row) => row.reportedCostMicrousd,
-      ),
-      calculatedCostMicrousd: sumBigInt(
-        (row) => row.calculatedCostMicrousd,
-      ),
-      estimatedCostMicrousd: sumBigInt(
-        (row) => row.estimatedCostMicrousd,
-      ),
+      reportedCostMicrousd: sumBigInt((row) => row.reportedCostMicrousd),
+      calculatedCostMicrousd: sumBigInt((row) => row.calculatedCostMicrousd),
+      estimatedCostMicrousd: sumBigInt((row) => row.estimatedCostMicrousd),
       unknownOperations: spends.filter(
         (row) => row.costBasis === 'unknown' || row.status === 'UNKNOWN',
       ).length,
     },
     usage: {
-      inputTokens: spends.reduce(
-        (sum, row) => sum + (row.inputTokens ?? 0),
-        0,
-      ),
+      inputTokens: spends.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0),
       outputTokens: spends.reduce(
         (sum, row) => sum + (row.outputTokens ?? 0),
         0,
@@ -267,9 +326,7 @@ export function buildSiteBuildCostSummary(
   };
 }
 
-export type SiteBuildCostSummary = ReturnType<
-  typeof buildSiteBuildCostSummary
->;
+export type SiteBuildCostSummary = ReturnType<typeof buildSiteBuildCostSummary>;
 
 export class PaidCallDeniedError extends Error {
   constructor(public readonly decision: string) {
@@ -316,6 +373,8 @@ export interface PaidCostContext {
   scopeKey: string;
   taskAttemptId?: string;
   fenceToken?: string;
+  /** Installed by RouterModelGateway only after the paid preflight succeeds. */
+  settlementPreflight?: PaidModelPreflightEvidence;
   /**
    * Explicit domain persistence gate for model replay. The gateway never
    * stores a raw provider result when this projection is absent.
@@ -424,8 +483,10 @@ export class SiteBuildCostLedger {
     if (!/^[0-9a-f]{64}$/.test(input.operationKey)) {
       throw new Error('paid operation key must be a lowercase SHA-256');
     }
-    const rows = await this.prisma.withWorkspace(input.workspaceId, (tx) =>
-      tx.$queryRaw<ReserveRow[]>`
+    const rows = await this.prisma.withWorkspace(
+      input.workspaceId,
+      (tx) =>
+        tx.$queryRaw<ReserveRow[]>`
         SELECT * FROM reserve_site_build_spend(
           ${input.workspaceId}::uuid,
           ${input.buildRunId}::uuid,
@@ -474,10 +535,23 @@ export class SiteBuildCostLedger {
     result?: Record<string, unknown> | null;
     meta?: Record<string, unknown>;
     errorCode?: string;
+    /**
+     * When present, settlement and the BuildRun paid-call kill switch commit
+     * in the same workspace transaction. This is required for unknown
+     * settlement: a replay must never observe FAILED before the kill switch.
+     */
+    disablePaidCallsReason?: string;
   }): Promise<string> {
     const { scope, measurement } = input;
-    const rows = await this.prisma.withWorkspace(scope.workspaceId, (tx) =>
-      tx.$queryRaw<Array<{ decision: string }>>`
+    const disableReason = input.disablePaidCallsReason?.trim().slice(0, 80);
+    if (
+      input.disablePaidCallsReason !== undefined &&
+      (!disableReason || measurement.basis !== 'unknown')
+    ) {
+      throw new Error('atomic paid-call disable requires unknown settlement');
+    }
+    return this.prisma.withWorkspace(scope.workspaceId, async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ decision: string }>>`
         SELECT settle_site_build_spend(
           ${scope.workspaceId}::uuid,
           ${scope.buildRunId}::uuid,
@@ -496,9 +570,22 @@ export class SiteBuildCostLedger {
           ${asJsonText({ ...scope.meta, ...measurement.meta, ...input.meta })}::jsonb,
           ${input.errorCode ?? null}::text
         ) AS decision
-      `,
-    );
-    return rows[0]?.decision ?? 'MISSING';
+      `;
+      const decision = rows[0]?.decision ?? 'MISSING';
+      if (decision === 'SETTLED' && disableReason) {
+        const disabled = await tx.siteBuildBudget.updateMany({
+          where: { buildRunId: scope.buildRunId },
+          data: {
+            paidCallsEnabled: false,
+            disabledReason: disableReason,
+          },
+        });
+        if (disabled.count !== 1) {
+          throw new Error('atomic paid-call disable target missing');
+        }
+      }
+      return decision;
+    });
   }
 
   async ensureBudget(input: {
@@ -755,9 +842,11 @@ export class SiteBuildCostLedger {
     });
   }
 
-  async releaseTask(
-    fence: { workspaceId: string; attemptId: string; fenceToken: string },
-  ): Promise<void> {
+  async releaseTask(fence: {
+    workspaceId: string;
+    attemptId: string;
+    fenceToken: string;
+  }): Promise<void> {
     await this.prisma.withWorkspace(fence.workspaceId, async (tx) => {
       await tx.siteBuildTaskAttempt.updateMany({
         where: { id: fence.attemptId, fenceToken: fence.fenceToken },

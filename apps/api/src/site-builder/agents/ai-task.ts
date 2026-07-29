@@ -160,58 +160,66 @@ export async function runAiTask<TIn, TOut>(
     route.primary,
     ...route.fallbacks,
   ].entries()) {
-    // per-task 超时（复审 Temporal F1）：既 abort signal（真取消底层 fetch，含网关内修复重试的
-    // 两次调用，不留后台弃单烧钱）——又 race 一个 reject 让本层立即换模型，不干等底层响应 abort。
+    // per-task 超时（复审 Temporal F1）：abort signal 真取消底层 fetch（含网关内修复重试）。
+    // 非付费调用继续以 Promise.race 及时换模型；付费调用在 abort 后必须等待网关完成请求级
+    // 结算/冻结，不能让外层 fallback 抢跑并产生第二笔费用。
     const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
+    const timeoutError = () =>
+      new Error(`${def.id}@${model} timed out after ${route.timeoutMs}ms`);
+    let timeout: Promise<never> | undefined;
+    if (deps.ctx.paidCost) {
       timer = setTimeout(() => {
-        const e = new Error(
-          `${def.id}@${model} timed out after ${route.timeoutMs}ms`,
-        );
-        controller.abort(e);
-        reject(e);
+        controller.abort(timeoutError());
       }, route.timeoutMs);
-    });
+    } else {
+      timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = timeoutError();
+          controller.abort(error);
+          reject(error);
+        }, route.timeoutMs);
+      });
+    }
     try {
-      const result: ModelResult<TOut> = await Promise.race([
-        deps.gateway.generateStructured<TOut>(
-          {
-            task: def.id,
-            prompt,
-            system: def.system,
-            schema: def.outputSchema,
-            ...(def.validateOutput
-              ? {
-                  validateOutput: (output: unknown) =>
-                    def.validateOutput?.(rawInput, output as TOut),
-                }
-              : {}),
-            ...(def.repairTaskOutput ? { repairTaskOutput: true } : {}),
-            model,
-            maxTokens: route.maxTokens,
-            maxCostCents: route.maxCostCents,
-            reasoningEffort: route.reasoningEffort,
-            signal: controller.signal,
+      const execution = deps.gateway.generateStructured<TOut>(
+        {
+          task: def.id,
+          prompt,
+          system: def.system,
+          schema: def.outputSchema,
+          ...(def.validateOutput
+            ? {
+                validateOutput: (output: unknown) =>
+                  def.validateOutput?.(rawInput, output as TOut),
+              }
+            : {}),
+          ...(def.repairTaskOutput ? { repairTaskOutput: true } : {}),
+          model,
+          maxTokens: route.maxTokens,
+          maxCostCents: route.maxCostCents,
+          reasoningEffort: route.reasoningEffort,
+          signal: controller.signal,
+        },
+        {
+          ...deps.ctx,
+          ...(deps.ctx.paidCost
+            ? {
+                paidCost: {
+                  ...deps.ctx.paidCost,
+                  scopeKey: `${deps.ctx.paidCost.scopeKey}:model:${fallbackIndex}:${model}`,
+                },
+              }
+            : {}),
+          modelPolicy: {
+            ...cloneRoutePolicy(routePolicy),
+            fallbackIndex,
           },
-          {
-            ...deps.ctx,
-            ...(deps.ctx.paidCost
-              ? {
-                  paidCost: {
-                    ...deps.ctx.paidCost,
-                    scopeKey: `${deps.ctx.paidCost.scopeKey}:model:${fallbackIndex}:${model}`,
-                  },
-                }
-              : {}),
-            modelPolicy: {
-              ...cloneRoutePolicy(routePolicy),
-              fallbackIndex,
-            },
-          },
-        ),
-        timeout,
-      ]);
+        },
+      );
+      const result: ModelResult<TOut> = deps.ctx.paidCost
+        ? await execution
+        : await Promise.race([execution, timeout!]);
       usage = addUsage(usage, result.usage, result.callCount ?? 1);
       if (result.provider === 'stub') {
         // 🔴 stub 兜底绝不写真实产物：dev 网关瞬时失败会 fallback 到 stub（罐头输出）。
