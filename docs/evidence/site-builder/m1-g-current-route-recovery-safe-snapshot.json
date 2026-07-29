@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "site-builder-current-route-recovery-safe-snapshot/2026-07-29-v2",
+  "capturedAt": "2026-07-29T13:48:29.680Z",
+  "routeBaselineCommitSha": "e727bb141ad2c8c5fdd4379308ed85cfc7aefb86",
+  "routeDispatchSha256": "f0cb1473cb025621a3f9e6df7dec6045bb7e5df2a3586c6d3e93716913733184",
+  "gateway": {
+    "source": "local_new_api_read_only_sqlite",
+    "channels": [
+      {
+        "alias": "deepseek-v4-pro",
+        "channelId": 1,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "deepseek-v4-flash",
+        "channelId": 1,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "minimax-m3",
+        "channelId": 3,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "doubao-seed-2.0-pro",
+        "channelId": 3,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "doubao-seed-2.0-lite",
+        "channelId": 3,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "channelId": 6,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "glm-5.2",
+        "channelId": 6,
+        "status": "disabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "claude-sonnet-5",
+        "channelId": 8,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "glm-5.2",
+        "channelId": 11,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "channelId": 17,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      },
+      {
+        "alias": "claude-sonnet-5",
+        "channelId": 19,
+        "status": "enabled",
+        "priority": 0,
+        "weight": 0
+      }
+    ]
+  },
+  "credential": {
+    "observedAt": "2026-07-29T12:48:52.947Z",
+    "httpStatus": 200,
+    "unlimitedQuota": true,
+    "modelLimitsEnabled": false,
+    "modelAllowlist": [],
+    "visibleModelCount": 41
+  },
+  "pricing": {
+    "authority": "openox_model_marketplace",
+    "catalogEndpoint": "https://openox.tech/api/public/pricing-catalog",
+    "capturedAt": "2026-07-29T13:48:29.680Z",
+    "httpStatus": 200,
+    "sourceBundlePath": "docs/evidence/site-builder/m1-g-current-route-openox-source-bundle.json",
+    "sourceBundleSha256": "6e3eceb33f69a6011eeb185cea378a13f2af5a1893adfb67f4d4dc5e0a2d451e",
+    "sourceBundleCommitSha": "e91b184741a10b83459a8041e3ecd9701fdf3b5b",
+    "modelRows": 37,
+    "groupRows": 15,
+    "runtimeFetch": "http_200"
+  }
+}

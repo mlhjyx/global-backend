@@ -1,0 +1,141 @@
+{
+  "schemaVersion": "site-builder-current-route-openox-source-bundle/2026-07-29-v1",
+  "authority": "openox_model_marketplace",
+  "catalogEndpoint": "https://openox.tech/api/public/pricing-catalog",
+  "capturedAt": "2026-07-29T13:48:29.680Z",
+  "httpStatus": 200,
+  "fullModelCount": 37,
+  "fullGroupCount": 15,
+  "modelIds": [
+    "claude-fable-5",
+    "claude-haiku-4-5-20251001",
+    "claude-opus-4-5-20251101",
+    "claude-opus-4-6",
+    "claude-opus-4-6-thinking",
+    "claude-opus-4-7",
+    "claude-opus-4-7-thinking",
+    "claude-opus-4-8",
+    "claude-opus-4-8-thinking",
+    "claude-opus-5",
+    "claude-opus-5-thinking",
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-6",
+    "claude-sonnet-5",
+    "deepseek-v4-pro",
+    "gemini-3-pro-image-preview",
+    "gemini-3.1-flash-image-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
+    "glm-5.1",
+    "glm-5.2",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.5",
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-image-2",
+    "gpt-image-2-4k",
+    "grok-4.5",
+    "grok-video-1.0",
+    "grok-video-1.5",
+    "kimi-k3",
+    "seedance-2-10s",
+    "seedance-2-15s",
+    "seedance-2-5s"
+  ],
+  "groupNames": [
+    "grok",
+    "GPT限时特惠组",
+    "限时特惠组",
+    "gemini",
+    "kimi",
+    "Claude 订阅特惠组",
+    "deepseek",
+    "glm",
+    "gpt-unified",
+    "image",
+    "video",
+    "special",
+    "pro直连",
+    "reverse",
+    "direct"
+  ],
+  "catalog": {
+    "success": true,
+    "data": {
+      "models": [
+        {
+          "model_id": "claude-sonnet-5",
+          "product_line": "claude",
+          "input_rate": "2",
+          "output_rate": "10",
+          "cache_read_rate": "0.2",
+          "cache_write_rate": "2.5",
+          "group_rates": null,
+          "status": "enabled",
+          "updated_at": "2026-07-29T13:37:37.129057Z"
+        },
+        {
+          "model_id": "deepseek-v4-pro",
+          "product_line": "deepseek",
+          "input_rate": "1.827",
+          "output_rate": "3.654",
+          "cache_read_rate": "0.015225",
+          "cache_write_rate": "0",
+          "group_rates": null,
+          "status": "enabled",
+          "updated_at": "2026-07-29T13:37:37.058074Z"
+        },
+        {
+          "model_id": "gpt-5.6-terra",
+          "product_line": "gpt",
+          "input_rate": "2.5",
+          "output_rate": "15",
+          "cache_read_rate": "0.25",
+          "cache_write_rate": "3.125",
+          "group_rates": null,
+          "status": "enabled",
+          "updated_at": "2026-07-29T13:37:37.131732Z"
+        },
+        {
+          "model_id": "glm-5.2",
+          "product_line": "glm",
+          "input_rate": "8",
+          "output_rate": "28",
+          "cache_read_rate": "2",
+          "cache_write_rate": "0",
+          "group_rates": {
+            "endpoint": "/v1/chat/completions",
+            "billing_multiplier": "0.70"
+          },
+          "status": "enabled",
+          "updated_at": "2026-07-29T13:37:37.066603Z"
+        }
+      ],
+      "groups": [
+        {
+          "name": "deepseek",
+          "product_line": "deepseek",
+          "rate_multiplier": "1"
+        },
+        {
+          "name": "glm",
+          "product_line": "glm",
+          "rate_multiplier": "1"
+        },
+        {
+          "name": "gpt-unified",
+          "product_line": "gpt",
+          "rate_multiplier": "1"
+        },
+        {
+          "name": "special",
+          "product_line": "claude",
+          "rate_multiplier": "1.26"
+        }
+      ]
+    }
+  }
+}
