@@ -1,17 +1,17 @@
-import { createHash } from "node:crypto";
-import { access, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { createHash } from 'node:crypto';
+import { access, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import {
   SITE_BUILDER_MODEL_POLICY_VERSION,
   type ModelExecutionPolicySnapshot,
-} from "@global/contracts";
-import type { TaskRoute } from "../agents/task-routes";
+} from '@global/contracts';
+import type { TaskRoute } from '../agents/task-routes';
 import {
   getSiteBuilderTaskRouteBinding,
   type SiteBuilderTaskId,
-} from "../agents/task-route-bindings";
-import { SITE_BUILDER_MODEL_PROFILES } from "../agents/model-profiles";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
+} from '../agents/task-route-bindings';
+import { SITE_BUILDER_MODEL_PROFILES } from '../agents/model-profiles';
+import { modelPolicyRegistry } from '../agents/model-policy.registry';
 
 export interface EvaluationExecutionPolicy {
   /** Registry/env policy used by the gateway, including profile and data policy. */
@@ -19,13 +19,13 @@ export interface EvaluationExecutionPolicy {
   maxTokens: number;
   timeoutMs: number;
   maxCostCents: number;
-  reasoningEffort: TaskRoute["reasoningEffort"] | null;
+  reasoningEffort: TaskRoute['reasoningEffort'] | null;
 }
 
 export class EvaluationDeadlineError extends Error {
   constructor(readonly timeoutMs: number) {
     super(`model evaluation deadline exceeded after ${timeoutMs}ms`);
-    this.name = "EvaluationDeadlineError";
+    this.name = 'EvaluationDeadlineError';
   }
 }
 
@@ -36,10 +36,10 @@ export class EvaluationDeadlineError extends Error {
  * different insertion order.
  */
 export function canonicalJson(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
 
-  if (typeof value === "object") {
+  if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       // Do not use localeCompare here: its collation can differ by host locale,
       // which would make an otherwise identical evaluator report hash differ
@@ -49,22 +49,22 @@ export function canonicalJson(value: unknown): string {
       .map(
         ([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`,
       );
-    return `{${entries.join(",")}}`;
+    return `{${entries.join(',')}}`;
   }
 
   const serialized = JSON.stringify(value);
-  if (typeof serialized !== "string") {
-    throw new Error("evaluator provenance must be JSON-serializable");
+  if (typeof serialized !== 'string') {
+    throw new Error('evaluator provenance must be JSON-serializable');
   }
   return serialized;
 }
 
 export function sha256Text(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+  return createHash('sha256').update(value).digest('hex');
 }
 
 export function sha256Bytes(value: Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
+  return createHash('sha256').update(value).digest('hex');
 }
 
 export function sha256CanonicalJson(value: unknown): string {
@@ -89,9 +89,7 @@ export function inspectEvaluationSourceBundle(
 ): EvaluationSourceBundleIntegrity {
   const startByPath = new Map(start.map((item) => [item.path, item.sha256]));
   const endByPath = new Map(end.map((item) => [item.path, item.sha256]));
-  const changedPaths = [
-    ...new Set([...startByPath.keys(), ...endByPath.keys()]),
-  ]
+  const changedPaths = [...new Set([...startByPath.keys(), ...endByPath.keys()])]
     .filter((path) => startByPath.get(path) !== endByPath.get(path))
     .sort();
   const startBundleSha256 = sha256CanonicalJson(start);
@@ -99,18 +97,19 @@ export function inspectEvaluationSourceBundle(
   return {
     startBundleSha256,
     endBundleSha256,
-    stable: changedPaths.length === 0 && startBundleSha256 === endBundleSha256,
+    stable:
+      changedPaths.length === 0 && startBundleSha256 === endBundleSha256,
     changedPaths,
   };
 }
 
 export function sanitizeGatewayBaseUrl(raw: string): string {
   const url = new URL(raw);
-  url.username = "";
-  url.password = "";
-  url.search = "";
-  url.hash = "";
-  return url.href.replace(/\/$/, "");
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return url.href.replace(/\/$/, '');
 }
 
 export function assertUniqueEvaluationValues(
@@ -125,7 +124,7 @@ export function assertUniqueEvaluationValues(
   }
   if (duplicates.size > 0) {
     throw new Error(
-      `${name} contains duplicate values: ${[...duplicates].join(", ")}`,
+      `${name} contains duplicate values: ${[...duplicates].join(', ')}`,
     );
   }
 }
@@ -137,7 +136,7 @@ const evaluationPathExists: EvaluationPathExists = async (path) => {
     await access(path);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
   }
 };
@@ -202,10 +201,10 @@ export interface EvaluationModelResolution {
   requestedModel: string;
   resolvedModel?: string;
   reportedModel?: string;
-  modelResolutionSource?: "upstream_response" | "requested_fallback";
+  modelResolutionSource?: 'upstream_response' | 'requested_fallback';
 }
 
-export type EvaluationEvidenceRole = "candidate" | "baseline" | "diagnostic";
+export type EvaluationEvidenceRole = 'candidate' | 'baseline' | 'diagnostic';
 
 export interface EvaluationOutcomeInput {
   evidenceRole: EvaluationEvidenceRole;
@@ -219,14 +218,14 @@ export interface EvaluationOutcomeInput {
 
 export interface EvaluationOutcome {
   status:
-    | "failed_preflight"
-    | "failed_source_drift"
-    | "failed_incomplete_matrix"
-    | "completed_with_failures"
-    | "completed_diagnostic"
-    | "completed_eligible"
-    | "completed_baseline"
-    | "completed_unproven_provenance";
+    | 'failed_preflight'
+    | 'failed_source_drift'
+    | 'failed_incomplete_matrix'
+    | 'completed_with_failures'
+    | 'completed_diagnostic'
+    | 'completed_eligible'
+    | 'completed_baseline'
+    | 'completed_unproven_provenance';
   promotionEligible: boolean;
   shouldFail: boolean;
 }
@@ -242,25 +241,25 @@ export function classifyEvaluationOutcome(
     input.artifactFailures === 0 &&
     input.provenanceExact;
   const promotionEligible =
-    input.evidenceRole === "candidate" && completeEvidence;
+    input.evidenceRole === 'candidate' && completeEvidence;
   const baselineComplete =
-    input.evidenceRole === "baseline" && completeEvidence;
+    input.evidenceRole === 'baseline' && completeEvidence;
 
   const status = !input.preflightPassed
-    ? "failed_preflight"
+    ? 'failed_preflight'
     : !input.sourceStable
-      ? "failed_source_drift"
+      ? 'failed_source_drift'
       : !input.matrixComplete
-        ? "failed_incomplete_matrix"
+        ? 'failed_incomplete_matrix'
         : input.artifactFailures > 0
-          ? "completed_with_failures"
+          ? 'completed_with_failures'
           : input.diagnosticsEnabled
-            ? "completed_diagnostic"
+            ? 'completed_diagnostic'
             : promotionEligible
-              ? "completed_eligible"
+              ? 'completed_eligible'
               : baselineComplete
-                ? "completed_baseline"
-                : "completed_unproven_provenance";
+                ? 'completed_baseline'
+                : 'completed_unproven_provenance';
 
   return {
     status,
@@ -270,7 +269,9 @@ export function classifyEvaluationOutcome(
       !input.sourceStable ||
       !input.matrixComplete ||
       input.artifactFailures > 0 ||
-      (!input.diagnosticsEnabled && !promotionEligible && !baselineComplete),
+      (!input.diagnosticsEnabled &&
+        !promotionEligible &&
+        !baselineComplete),
   };
 }
 
@@ -278,7 +279,7 @@ export function isExactUpstreamModelResolution(
   resolution: EvaluationModelResolution,
 ): boolean {
   return (
-    resolution.modelResolutionSource === "upstream_response" &&
+    resolution.modelResolutionSource === 'upstream_response' &&
     resolution.reportedModel === resolution.requestedModel &&
     resolution.resolvedModel === resolution.reportedModel
   );
@@ -293,8 +294,8 @@ export function isProvenUpstreamModelResolution(
   resolution: EvaluationModelResolution,
 ): boolean {
   return (
-    resolution.modelResolutionSource === "upstream_response" &&
-    typeof resolution.reportedModel === "string" &&
+    resolution.modelResolutionSource === 'upstream_response' &&
+    typeof resolution.reportedModel === 'string' &&
     resolution.reportedModel.length > 0 &&
     resolution.resolvedModel === resolution.reportedModel
   );
@@ -360,9 +361,9 @@ export function routeForModelEvaluation(
     dataPolicy: { ...baseRoute.dataPolicy },
     policy: {
       ...basePolicy,
-      routeState: "currentRoute",
-      lifecycle: "active",
-      source: "env_override",
+      routeState: 'currentRoute',
+      lifecycle: 'active',
+      source: 'env_override',
       dataPolicy: { ...basePolicy.dataPolicy },
       route: { primary: model, fallbacks: [] },
     },
@@ -391,9 +392,9 @@ export function routeForTaskEvaluation(
     policy: {
       policyVersion: SITE_BUILDER_MODEL_POLICY_VERSION,
       profile: binding.profile,
-      routeState: "currentRoute",
-      lifecycle: "active",
-      source: "env_override",
+      routeState: 'currentRoute',
+      lifecycle: 'active',
+      source: 'env_override',
       dataPolicy: { ...dataPolicy },
       maxCostCents: binding.maxCostCents,
       route,
@@ -431,9 +432,9 @@ export function routeForTaskBaselineEvaluation(
     policy: {
       policyVersion: SITE_BUILDER_MODEL_POLICY_VERSION,
       profile: binding.profile,
-      routeState: "currentRoute",
-      lifecycle: "active",
-      source: "registry",
+      routeState: 'currentRoute',
+      lifecycle: 'active',
+      source: 'registry',
       dataPolicy: { ...dataPolicy },
       maxCostCents: binding.maxCostCents,
       route,
@@ -469,7 +470,7 @@ export function snapshotEvaluationExecutionPolicy(
 export function evaluationProbePolicy(route: TaskRoute): {
   maxTokens: number;
   maxCostCents: number;
-  reasoningEffort?: TaskRoute["reasoningEffort"];
+  reasoningEffort?: TaskRoute['reasoningEffort'];
 } {
   return {
     maxTokens: Math.min(route.maxTokens, 1024),

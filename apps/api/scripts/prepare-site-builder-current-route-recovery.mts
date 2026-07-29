@@ -1,18 +1,18 @@
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT,
   buildCurrentRouteRecoveryReport,
   readCurrentRouteRecoveryRepositoryJson,
   writeCurrentRouteRecoveryReportCreateOnly,
-} from "../src/site-builder/current-route-recovery";
+} from '../src/site-builder/current-route-recovery';
 
 const REPOSITORY_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  "../../..",
+  '../../..',
 );
 const HELP = `Usage:
   pnpm --filter @global/api prepare:site-builder:current-route-recovery -- \\
@@ -39,14 +39,14 @@ function option(name: string): string | null {
 
 function repositoryJsonPath(
   value: string,
-  role: "snapshot" | "catalog-source" | "output",
+  role: 'snapshot' | 'catalog-source' | 'output',
 ): string {
   if (
     value.length === 0 ||
-    value.startsWith("/") ||
-    value.includes("\\") ||
-    value.split("/").includes("..") ||
-    !value.endsWith(".json") ||
+    value.startsWith('/') ||
+    value.includes('\\') ||
+    value.split('/').includes('..') ||
+    !value.endsWith('.json') ||
     /(^|\/)\.env(?:\.|$)/i.test(value)
   ) {
     throw new Error(`${role} must be a repository-relative non-.env JSON path`);
@@ -58,15 +58,15 @@ function assertFixedRouteBaseline(fixedCommit: string): void {
   if (
     fixedCommit !== SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT
   ) {
-    throw new Error("fixed commit does not match the frozen route baseline");
+    throw new Error('fixed commit does not match the frozen route baseline');
   }
-  execFileSync("git", ["cat-file", "-e", `${fixedCommit}^{commit}`], {
+  execFileSync('git', ['cat-file', '-e', `${fixedCommit}^{commit}`], {
     cwd: REPOSITORY_ROOT,
-    stdio: "ignore",
+    stdio: 'ignore',
   });
-  execFileSync("git", ["merge-base", "--is-ancestor", fixedCommit, "HEAD"], {
+  execFileSync('git', ['merge-base', '--is-ancestor', fixedCommit, 'HEAD'], {
     cwd: REPOSITORY_ROOT,
-    stdio: "ignore",
+    stdio: 'ignore',
   });
   // The safe snapshot binds the exact active dispatch list by SHA-256. Policy
   // governance may evolve without rewriting the historical route baseline.
@@ -74,18 +74,18 @@ function assertFixedRouteBaseline(fixedCommit: string): void {
 
 function assertCommitExistsAndIsAncestor(
   commit: string,
-  role: "catalog source",
+  role: 'catalog source',
 ): void {
   if (!/^[a-f0-9]{40}$/.test(commit)) {
     throw new Error(`${role} commit must be a 40-character commit SHA`);
   }
-  execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
+  execFileSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
     cwd: REPOSITORY_ROOT,
-    stdio: "ignore",
+    stdio: 'ignore',
   });
-  execFileSync("git", ["merge-base", "--is-ancestor", commit, "HEAD"], {
+  execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
     cwd: REPOSITORY_ROOT,
-    stdio: "ignore",
+    stdio: 'ignore',
   });
 }
 
@@ -94,71 +94,71 @@ function assertFixedCatalogSourceCommit(
   catalogSource: string,
   catalogSha256: string,
 ): void {
-  assertCommitExistsAndIsAncestor(catalogSourceCommit, "catalog source");
+  assertCommitExistsAndIsAncestor(catalogSourceCommit, 'catalog source');
   const committedCatalog = execFileSync(
-    "git",
-    ["show", `${catalogSourceCommit}:${catalogSource}`],
+    'git',
+    ['show', `${catalogSourceCommit}:${catalogSource}`],
     { cwd: REPOSITORY_ROOT, encoding: null },
   );
   if (
-    createHash("sha256").update(committedCatalog).digest("hex") !==
+    createHash('sha256').update(committedCatalog).digest('hex') !==
     catalogSha256
   ) {
-    throw new Error("catalog source does not match its fixed source commit");
+    throw new Error('catalog source does not match its fixed source commit');
   }
 }
 
 const RUNNER_SOURCE_FILES = [
-  "apps/api/src/site-builder/current-route-recovery.ts",
-  "apps/api/src/site-builder/site-builder-model-settlement.ts",
-  "apps/api/src/site-builder/agents/model-policy.registry.ts",
-  "apps/api/src/site-builder/agents/task-routes.ts",
-  "packages/contracts/src/site-builder/model-policy.ts",
-  "apps/api/scripts/prepare-site-builder-current-route-recovery.mts",
+  'apps/api/src/site-builder/current-route-recovery.ts',
+  'apps/api/src/site-builder/site-builder-model-settlement.ts',
+  'apps/api/src/site-builder/agents/model-policy.registry.ts',
+  'apps/api/src/site-builder/agents/task-routes.ts',
+  'packages/contracts/src/site-builder/model-policy.ts',
+  'apps/api/scripts/prepare-site-builder-current-route-recovery.mts',
 ] as const;
 
 function runnerSourceSha256(revision: string): string {
-  const digest = createHash("sha256");
+  const digest = createHash('sha256');
   for (const path of RUNNER_SOURCE_FILES) {
-    const content = execFileSync("git", ["show", `${revision}:${path}`], {
+    const content = execFileSync('git', ['show', `${revision}:${path}`], {
       cwd: REPOSITORY_ROOT,
       encoding: null,
     });
     digest.update(path);
-    digest.update("\0");
+    digest.update('\0');
     digest.update(content);
-    digest.update("\0");
+    digest.update('\0');
   }
-  return digest.digest("hex");
+  return digest.digest('hex');
 }
 
 function assertFixedRunnerSource(runnerSourceDigest: string): void {
   if (!/^[a-f0-9]{64}$/.test(runnerSourceDigest)) {
-    throw new Error("runner source digest must be a 64-character SHA-256");
+    throw new Error('runner source digest must be a 64-character SHA-256');
   }
   execFileSync(
-    "git",
-    ["diff", "--quiet", "HEAD", "--", ...RUNNER_SOURCE_FILES],
-    { cwd: REPOSITORY_ROOT, stdio: "ignore" },
+    'git',
+    ['diff', '--quiet', 'HEAD', '--', ...RUNNER_SOURCE_FILES],
+    { cwd: REPOSITORY_ROOT, stdio: 'ignore' },
   );
-  if (runnerSourceSha256("HEAD") !== runnerSourceDigest) {
+  if (runnerSourceSha256('HEAD') !== runnerSourceDigest) {
     throw new Error(
-      "runner source digest does not match the reviewed HEAD contents",
+      'runner source digest does not match the reviewed HEAD contents',
     );
   }
 }
 
 async function main(): Promise<void> {
-  if (process.argv.includes("--help")) {
+  if (process.argv.includes('--help')) {
     process.stdout.write(HELP);
     return;
   }
-  const snapshotArgument = option("snapshot");
-  const catalogSourceArgument = option("catalog-source");
-  const fixedCommit = option("fixed-commit");
-  const catalogSourceCommit = option("catalog-source-commit");
-  const runnerSourceDigest = option("runner-source-sha256");
-  const outputArgument = option("output");
+  const snapshotArgument = option('snapshot');
+  const catalogSourceArgument = option('catalog-source');
+  const fixedCommit = option('fixed-commit');
+  const catalogSourceCommit = option('catalog-source-commit');
+  const runnerSourceDigest = option('runner-source-sha256');
+  const outputArgument = option('output');
   if (
     !snapshotArgument ||
     !catalogSourceArgument ||
@@ -169,12 +169,12 @@ async function main(): Promise<void> {
   ) {
     throw new Error(HELP);
   }
-  const snapshot = repositoryJsonPath(snapshotArgument, "snapshot");
+  const snapshot = repositoryJsonPath(snapshotArgument, 'snapshot');
   const catalogSource = repositoryJsonPath(
     catalogSourceArgument,
-    "catalog-source",
+    'catalog-source',
   );
-  const output = repositoryJsonPath(outputArgument, "output");
+  const output = repositoryJsonPath(outputArgument, 'output');
   assertFixedRouteBaseline(fixedCommit);
   const snapshotSource = await readCurrentRouteRecoveryRepositoryJson(
     REPOSITORY_ROOT,
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
     }
   ).pricing?.sourceBundlePath;
   if (declaredCatalogPath !== catalogSource) {
-    throw new Error("catalog source path does not match the safe snapshot");
+    throw new Error('catalog source path does not match the safe snapshot');
   }
   const declaredSourceCommit = (
     snapshotSource.parsed as {
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
     }
   ).pricing?.sourceBundleCommitSha;
   if (declaredSourceCommit !== catalogSourceCommit) {
-    throw new Error("catalog source commit does not match the safe snapshot");
+    throw new Error('catalog source commit does not match the safe snapshot');
   }
   assertFixedCatalogSourceCommit(
     catalogSourceCommit,

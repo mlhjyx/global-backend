@@ -14,15 +14,15 @@ import type {
   DeterministicFallback,
   ModelDataPolicy,
   ModelExecutionPolicySnapshot,
-} from "@global/contracts";
-import { modelPolicyRegistry } from "./model-policy.registry";
-import type { SiteBuilderModelProfileId } from "./model-profiles";
+} from '@global/contracts';
+import { modelPolicyRegistry } from './model-policy.registry';
+import type { SiteBuilderModelProfileId } from './model-profiles';
 import {
   getSiteBuilderTaskRouteBinding,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
   type SiteBuilderTaskRouteBinding,
-} from "./task-route-bindings";
+} from './task-route-bindings';
 
 export { SITE_BUILDER_TASK_IDS, type SiteBuilderTaskId };
 
@@ -39,17 +39,17 @@ export interface TaskRoute {
   /** Resolved production-policy snapshot for audit/replay. */
   policy: ModelExecutionPolicySnapshot;
   /** 🔴 reasoning 模型护栏：v4-pro 做 copy 必配 low（评测实证，02 §6）。 */
-  reasoningEffort?: "low" | "medium" | "high";
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export type TaskExecutionTarget =
-  | { kind: "model_route"; route: TaskRoute }
+  | { kind: 'model_route'; route: TaskRoute }
   | {
-      kind: "deterministic_fallback";
+      kind: 'deterministic_fallback';
       taskId: SiteBuilderTaskId;
       profile: SiteBuilderModelProfileId;
       fallback: DeterministicFallback;
-      source: "rollback_override";
+      source: 'rollback_override';
     };
 
 type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
@@ -58,7 +58,7 @@ type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
 
 /** taskId → env 后缀：site_builder.brand_profile → BRAND_PROFILE。 */
 function envSuffix(taskId: SiteBuilderTaskId): string {
-  return taskId.split(".")[1].toUpperCase();
+  return taskId.split('.')[1].toUpperCase();
 }
 
 function assertNoProfileOverride(suffix: string, env: NodeJS.ProcessEnv): void {
@@ -75,8 +75,8 @@ function resolveRollbackOverride(
 ): boolean {
   const name = `SITE_BUILDER_MODEL_ROLLBACK_${suffix}`;
   const raw = env[name]?.trim().toLowerCase();
-  if (!raw || raw === "false") return false;
-  if (raw === "true") return true;
+  if (!raw || raw === 'false') return false;
+  if (raw === 'true') return true;
   throw new Error(`${name} must be true or false`);
 }
 
@@ -89,7 +89,7 @@ export function resolveTaskExecutionTarget(
   assertNoProfileOverride(suffix, env);
   const activePolicy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
   const rollback = resolveRollbackOverride(suffix, env);
-  if (rollback && activePolicy.state !== "promotedRoute") {
+  if (rollback && activePolicy.state !== 'promotedRoute') {
     throw new Error(`${taskId} has no promoted route to roll back`);
   }
   const rollbackPolicy = rollback
@@ -99,38 +99,38 @@ export function resolveTaskExecutionTarget(
   const primary = env[`SITE_BUILDER_MODEL_${suffix}`]?.trim();
   const fallbacksRaw = env[`SITE_BUILDER_FALLBACKS_${suffix}`];
   const fallbacks = fallbacksRaw
-    ?.split(",")
+    ?.split(',')
     .map((m) => m.trim())
     .filter(Boolean);
   const emergencyOverride = primary !== undefined || fallbacksRaw !== undefined;
-  if (rollbackPolicy?.kind === "deterministic_fallback" && !emergencyOverride) {
+  if (rollbackPolicy?.kind === 'deterministic_fallback' && !emergencyOverride) {
     return {
-      kind: "deterministic_fallback",
+      kind: 'deterministic_fallback',
       taskId,
       profile,
       fallback: { ...rollbackPolicy.fallback },
-      source: "rollback_override",
+      source: 'rollback_override',
     };
   }
   const selectedPolicy = activePolicy;
   const selectedRoute =
-    rollbackPolicy?.kind === "model_route"
+    rollbackPolicy?.kind === 'model_route'
       ? rollbackPolicy.route
       : selectedPolicy.route;
   const resolvedPrimary = primary || selectedRoute.primary;
   const resolvedFallbacks = fallbacks || [...selectedRoute.fallbacks];
   const profileDefinition = modelPolicyRegistry.getProfile(profile);
   const source = emergencyOverride
-    ? "env_override"
+    ? 'env_override'
     : rollback
-      ? "rollback_override"
-      : "registry";
+      ? 'rollback_override'
+      : 'registry';
   // An operator override deliberately leaves the evidence-bound promoted
   // route. Keep the actual route in the trace, but never attribute an
   // un-evaluated model/profile/fallback combination to the registry's
   // promotion report.
   const routeState =
-    emergencyOverride || rollback ? "currentRoute" : selectedPolicy.state;
+    emergencyOverride || rollback ? 'currentRoute' : selectedPolicy.state;
   const policy: ModelExecutionPolicySnapshot = {
     policyVersion: modelPolicyRegistry.getPolicyVersion(),
     profile,
@@ -139,7 +139,7 @@ export function resolveTaskExecutionTarget(
     source,
     ...(!emergencyOverride &&
     !rollback &&
-    selectedPolicy.state === "promotedRoute"
+    selectedPolicy.state === 'promotedRoute'
       ? { promotionEvidenceId: selectedPolicy.promotionEvidenceId }
       : {}),
     dataPolicy: profileDefinition.dataPolicy,
@@ -148,7 +148,7 @@ export function resolveTaskExecutionTarget(
   };
 
   return {
-    kind: "model_route",
+    kind: 'model_route',
     route: {
       ...binding,
       profile,
@@ -165,7 +165,7 @@ export function resolveTaskRoute(
   env: NodeJS.ProcessEnv = process.env,
 ): TaskRoute {
   const target = resolveTaskExecutionTarget(taskId, env);
-  if (target.kind === "deterministic_fallback") {
+  if (target.kind === 'deterministic_fallback') {
     throw new Error(
       `${taskId} rollback must execute deterministic fallback ${target.fallback.id}`,
     );
