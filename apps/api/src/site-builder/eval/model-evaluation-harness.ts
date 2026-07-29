@@ -120,11 +120,9 @@ const TRUSTED_BRAND_WEAK_SET_HAS = WeakSet.prototype.has;
 const APPLY_TRUSTED_BRAND_INTRINSIC = Reflect.apply;
 
 function trustedObjectIsFrozen(value: object): boolean {
-  return APPLY_TRUSTED_BRAND_INTRINSIC(
-    TRUSTED_OBJECT_IS_FROZEN,
-    Object,
-    [value],
-  ) as boolean;
+  return APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_OBJECT_IS_FROZEN, Object, [
+    value,
+  ]) as boolean;
 }
 
 function trustedObjectFreeze(value: object): void {
@@ -132,11 +130,9 @@ function trustedObjectFreeze(value: object): void {
 }
 
 function trustedObjectValues(value: object): unknown[] {
-  return APPLY_TRUSTED_BRAND_INTRINSIC(
-    TRUSTED_OBJECT_VALUES,
-    Object,
-    [value],
-  ) as unknown[];
+  return APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_OBJECT_VALUES, Object, [
+    value,
+  ]) as unknown[];
 }
 
 function trustedWeakSetAdd(set: WeakSet<object>, value: object): void {
@@ -144,11 +140,9 @@ function trustedWeakSetAdd(set: WeakSet<object>, value: object): void {
 }
 
 function trustedWeakSetHas(set: WeakSet<object>, value: object): boolean {
-  return APPLY_TRUSTED_BRAND_INTRINSIC(
-    TRUSTED_BRAND_WEAK_SET_HAS,
-    set,
-    [value],
-  ) as boolean;
+  return APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_HAS, set, [
+    value,
+  ]) as boolean;
 }
 
 function deepFreezeValue(value: unknown, seen: WeakSet<object>): void {
@@ -238,6 +232,14 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
   },
   {
+    role: "evidence_preparation",
+    path: "apps/api/src/site-builder/eval/model-evaluation-evidence-prep.ts",
+  },
+  {
+    role: "evidence_preparation_runner",
+    path: "apps/api/scripts/prepare-site-builder-model-evaluation-evidence.mts",
+  },
+  {
     role: "provider",
     path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
   },
@@ -308,23 +310,24 @@ const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/model-gateway/model-provider.ts",
   },
   { role: "budget_ledger", path: "apps/api/src/tools/budget.ts" },
-  { role: "contracts_runtime", path: "packages/contracts/dist/index.js" },
   {
-    role: "contracts_runtime",
-    path: "packages/contracts/dist/site-builder/evidence.js",
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/evidence.ts",
   },
   {
-    role: "contracts_runtime",
-    path: "packages/contracts/dist/site-builder/media-foundation.js",
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/media-foundation.ts",
   },
   {
-    role: "contracts_runtime",
-    path: "packages/contracts/dist/site-builder/model-policy.js",
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/model-policy.ts",
   },
   {
-    role: "contracts_runtime",
-    path: "packages/contracts/dist/site-builder/site-spec.js",
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/site-spec.ts",
   },
+  { role: "contracts_source", path: "packages/contracts/src/index.ts" },
+  { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
   { role: "contracts_manifest", path: "packages/contracts/package.json" },
   { role: "dependency_lock", path: "pnpm-lock.yaml" },
 ] as const);
@@ -395,7 +398,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
-  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v5",
+  sourceBundleContractId: "brand-profile-evaluation-source-bundle/v7",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -795,11 +798,9 @@ function trustedBrandGet<K extends object, V>(
   map: WeakMap<K, V>,
   key: K,
 ): V | undefined {
-  return APPLY_TRUSTED_BRAND_INTRINSIC(
-    TRUSTED_BRAND_WEAK_MAP_GET,
-    map,
-    [key],
-  ) as V | undefined;
+  return APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_MAP_GET, map, [
+    key,
+  ]) as V | undefined;
 }
 
 function trustedBrandSet<K extends object, V>(
@@ -814,26 +815,19 @@ function trustedBrandHas<K extends object, V>(
   map: WeakMap<K, V>,
   key: K,
 ): boolean {
-  return APPLY_TRUSTED_BRAND_INTRINSIC(
-    TRUSTED_BRAND_WEAK_MAP_HAS,
-    map,
-    [key],
-  ) as boolean;
+  return APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_MAP_HAS, map, [
+    key,
+  ]) as boolean;
 }
 
 function trustedBrandWeakSetAdd(set: WeakSet<object>, value: object): void {
   APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_ADD, set, [value]);
 }
 
-function trustedBrandWeakSetHas(
-  set: WeakSet<object>,
-  value: object,
-): boolean {
-  return APPLY_TRUSTED_BRAND_INTRINSIC(
-    TRUSTED_BRAND_WEAK_SET_HAS,
-    set,
-    [value],
-  ) as boolean;
+function trustedBrandWeakSetHas(set: WeakSet<object>, value: object): boolean {
+  return APPLY_TRUSTED_BRAND_INTRINSIC(TRUSTED_BRAND_WEAK_SET_HAS, set, [
+    value,
+  ]) as boolean;
 }
 
 function bindTrustedModelEvaluationExecutor(
