@@ -413,11 +413,15 @@ export function routeForTaskBaselineEvaluation(
 ): TaskRoute {
   const binding = getSiteBuilderTaskRouteBinding(taskId);
   const profile = SITE_BUILDER_MODEL_PROFILES[binding.profile];
-  const legacy = modelPolicyRegistry.getLegacyTaskPolicy(taskId);
+  const comparatorRoute =
+    modelPolicyRegistry.getEvaluationComparatorRoute(taskId);
+  if (!comparatorRoute) {
+    throw new Error(`${taskId} uses a deterministic evaluation comparator`);
+  }
   const dataPolicy = { ...profile.dataPolicy };
   const route = {
-    primary: legacy.route.primary,
-    fallbacks: [...legacy.route.fallbacks],
+    primary: comparatorRoute.primary,
+    fallbacks: [...comparatorRoute.fallbacks],
   };
   return {
     ...binding,
@@ -428,8 +432,8 @@ export function routeForTaskBaselineEvaluation(
     policy: {
       policyVersion: SITE_BUILDER_MODEL_POLICY_VERSION,
       profile: binding.profile,
-      routeState: legacy.state,
-      lifecycle: legacy.lifecycle,
+      routeState: 'currentRoute',
+      lifecycle: 'active',
       source: 'registry',
       dataPolicy: { ...dataPolicy },
       maxCostCents: binding.maxCostCents,

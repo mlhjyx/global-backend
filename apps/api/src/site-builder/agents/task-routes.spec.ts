@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE,
   modelPolicyRegistry,
 } from './model-policy.registry';
 import { SITE_BUILDER_MODEL_PROFILES } from './model-profiles';
-import { resolveTaskRoute, SITE_BUILDER_TASK_IDS } from './task-routes';
+import {
+  resolveTaskExecutionTarget,
+  resolveTaskRoute,
+  SITE_BUILDER_TASK_IDS,
+} from './task-routes';
 
 /**
  * site_builder per-task 模型路由（09 §3 终版定档表的代码化，02 §6 唯一真值）。
@@ -125,7 +129,7 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
     ).toThrow(/profile override.*not supported/i);
   });
 
-  it('SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true 回到该任务冻结的 legacy currentRoute', () => {
+  it('SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true 执行独立 rollback policy', () => {
     const route = resolveTaskRoute('site_builder.brand_profile', {
       SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE: 'true',
     } as NodeJS.ProcessEnv);
@@ -135,6 +139,7 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
       routeState: 'currentRoute',
       lifecycle: 'active',
       source: 'rollback_override',
+      rollbackPolicyVersion: 'site-builder-model-rollback-policy/v1',
       route: {
         primary: 'deepseek-v4-pro',
         fallbacks: ['glm-5.2'],
@@ -172,6 +177,42 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
         SITE_BUILDER_MODEL_ROLLBACK_COPY: 'true',
       } as NodeJS.ProcessEnv),
     ).toThrow(/has no promoted route/);
+  });
+
+  it('晋级后的 design_spec rollback 由运行决策携带 safe-blueprint，不再解析成模型错误', () => {
+    const original =
+      modelPolicyRegistry.getActiveTaskPolicy.bind(modelPolicyRegistry);
+    const policy = vi
+      .spyOn(modelPolicyRegistry, 'getActiveTaskPolicy')
+      .mockImplementation((taskId) =>
+        taskId === 'site_builder.design_spec'
+          ? {
+              state: 'promotedRoute',
+              lifecycle: 'active',
+              route: {
+                primary: 'candidate-primary',
+                fallbacks: ['candidate-fallback'],
+              },
+              promotionEvidenceId: 'test-design-spec-promotion',
+            }
+          : original(taskId),
+      );
+    try {
+      expect(
+        resolveTaskExecutionTarget('site_builder.design_spec', {
+          SITE_BUILDER_MODEL_ROLLBACK_DESIGN_SPEC: 'true',
+        } as NodeJS.ProcessEnv),
+      ).toEqual({
+        kind: 'deterministic_fallback',
+        taskId: 'site_builder.design_spec',
+        profile: 'structured.default',
+        fallback: expect.objectContaining({ id: 'safe-blueprint' }),
+        source: 'rollback_override',
+        rollbackPolicyVersion: 'site-builder-model-rollback-policy/v1',
+      });
+    } finally {
+      policy.mockRestore();
+    }
   });
 
   it('未知 SITE_BUILDER_PROFILE_<TASK> 同样 fail-fast，绝不静默忽略', () => {
@@ -255,6 +296,100 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         fallbacks: ['doubao-seed-2.0-lite'],
       },
     });
+  });
+
+  it('历史路由与可执行 rollback 分离，MiniMax/Doubao 不进入 rollback target', () => {
+    expect(modelPolicyRegistry.getRollbackPolicyVersion()).toBe(
+      'site-builder-model-rollback-policy/v1',
+    );
+    expect(
+      Object.fromEntries(
+        SITE_BUILDER_TASK_IDS.map((taskId) => [
+          taskId,
+          modelPolicyRegistry.getExecutableRollbackPolicy(taskId),
+        ]),
+      ),
+    ).toEqual({
+      'site_builder.brand_profile': {
+        kind: 'model_route',
+        route: {
+          primary: 'deepseek-v4-pro',
+          fallbacks: ['glm-5.2'],
+        },
+      },
+      'site_builder.copy': {
+        kind: 'model_route',
+        route: {
+          primary: 'deepseek-v4-pro',
+          fallbacks: ['glm-5.2'],
+        },
+      },
+      'site_builder.design_spec': {
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'safe-blueprint' }),
+      },
+      'site_builder.assemble': {
+        kind: 'model_route',
+        route: {
+          primary: 'glm-5.2',
+          fallbacks: ['deepseek-v4-pro'],
+        },
+      },
+      'site_builder.assembly_fix': {
+        kind: 'model_route',
+        route: {
+          primary: 'glm-5.2',
+          fallbacks: ['deepseek-v4-pro'],
+        },
+      },
+      'site_builder.qa_summarize': {
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'rule-summary' }),
+      },
+      'site_builder.seo_review': {
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'rule-summary' }),
+      },
+    });
+    for (const alias of [
+      'minimax-m3',
+      'doubao-seed-2.0-pro',
+      'doubao-seed-2.0-lite',
+    ]) {
+      expect(modelPolicyRegistry.getAliasRetirementPolicy(alias)).toMatchObject(
+        {
+          decision: 'pending_retirement',
+        },
+      );
+    }
+    expect(
+      modelPolicyRegistry.getAliasRetirementPolicy('constructor'),
+    ).toBeNull();
+    expect(modelPolicyRegistry.getAliasRetirementPolicy('toString')).toBeNull();
+  });
+
+  it('评测 comparator 只从可执行模型 rollback 派生，确定性任务不接纳付费 legacy', () => {
+    expect(
+      modelPolicyRegistry.getEvaluationComparatorRoute('site_builder.copy'),
+    ).toEqual({
+      primary: 'deepseek-v4-pro',
+      fallbacks: ['glm-5.2'],
+    });
+    expect(
+      modelPolicyRegistry.getEvaluationComparatorRoute(
+        'site_builder.design_spec',
+      ),
+    ).toBeNull();
+    expect(
+      modelPolicyRegistry.getEvaluationComparatorRoute(
+        'site_builder.qa_summarize',
+      ),
+    ).toBeNull();
+    expect(
+      modelPolicyRegistry.getEvaluationComparatorRoute(
+        'site_builder.seo_review',
+      ),
+    ).toBeNull();
   });
 
   it('BrandProfile promotion evidence 冻结候选、现役基线、协议与价格快照', () => {

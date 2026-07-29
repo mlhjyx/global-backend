@@ -1,10 +1,4 @@
-import {
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +9,7 @@ import {
   SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT,
   SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION,
   buildCurrentRouteRecoveryReport,
+  currentRouteRecoveryActiveAliases,
   currentRouteRecoveryDispatchSha256,
   currentRouteRecoveryRequiredAliases,
   readCurrentRouteRecoveryRepositoryJson,
@@ -35,7 +30,8 @@ afterEach(async () => {
 });
 
 function snapshot(): CurrentRouteRecoverySafeSnapshot {
-  const aliases = currentRouteRecoveryRequiredAliases();
+  const activeAliases = currentRouteRecoveryActiveAliases();
+  const requiredAliases = currentRouteRecoveryRequiredAliases();
   return {
     schemaVersion: SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SAFE_SNAPSHOT_VERSION,
     capturedAt: '2026-07-29T12:53:41.818Z',
@@ -44,7 +40,7 @@ function snapshot(): CurrentRouteRecoverySafeSnapshot {
     routeDispatchSha256: currentRouteRecoveryDispatchSha256(),
     gateway: {
       source: 'local_new_api_read_only_sqlite',
-      channels: aliases.map((alias, index) => ({
+      channels: activeAliases.map((alias, index) => ({
         alias,
         channelId: index + 1,
         status: 'enabled',
@@ -57,8 +53,8 @@ function snapshot(): CurrentRouteRecoverySafeSnapshot {
       httpStatus: 200,
       unlimitedQuota: false,
       modelLimitsEnabled: true,
-      modelAllowlist: aliases,
-      visibleModelCount: aliases.length,
+      modelAllowlist: requiredAliases,
+      visibleModelCount: requiredAliases.length,
     },
     pricing: {
       authority: 'openox_model_marketplace',
@@ -68,8 +64,8 @@ function snapshot(): CurrentRouteRecoverySafeSnapshot {
       sourceBundlePath: 'docs/evidence/openox.json',
       sourceBundleSha256: SOURCE_BUNDLE_SHA256,
       sourceBundleCommitSha: 'e'.repeat(40),
-      modelRows: aliases.length,
-      groupRows: 6,
+      modelRows: requiredAliases.length,
+      groupRows: [...new Set(requiredAliases.map(groupName))].length,
       runtimeFetch: 'http_200',
     },
   };
@@ -113,8 +109,7 @@ function sourceBundle(): CurrentRouteRecoveryOpenOxSourceBundle {
           output_rate: '2',
           cache_read_rate: '0',
           cache_write_rate: '0',
-          group_rates:
-            alias === 'glm-5.2' ? { billing_multiplier: '1' } : null,
+          group_rates: alias === 'glm-5.2' ? { billing_multiplier: '1' } : null,
           status: 'enabled',
           updated_at: '2026-07-29T12:49:39.000Z',
         })),
@@ -138,7 +133,12 @@ function build(
   catalog = sourceBundle(),
   digest = SOURCE_BUNDLE_SHA256,
 ) {
-  return buildCurrentRouteRecoveryReport(input, catalog, digest);
+  return buildCurrentRouteRecoveryReport(
+    input,
+    catalog,
+    digest,
+    'f'.repeat(64),
+  );
 }
 
 describe('current-route zero-model recovery preparation', () => {
@@ -148,7 +148,15 @@ describe('current-route zero-model recovery preparation', () => {
     expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(7);
     expect(report.dispatches).toHaveLength(15);
     expect(report.aliases).toHaveLength(8);
-    expect(report.status).toBe('READY_FOR_RUNTIME_ATTESTATION_DECISION');
+    expect(report.status).toBe('BLOCKED_CURRENT_ROUTE_RECOVERY');
+    expect(report.credential.requiredModelAllowlist).toEqual([
+      'claude-sonnet-5',
+      'deepseek-v4-flash',
+      'deepseek-v4-pro',
+      'glm-5.2',
+      'gpt-5.6-terra',
+    ]);
+    expect(report.blockers).toEqual(['RETIRED_ALIAS_STILL_ACTIVE']);
     expect(report.modelDispatchAuthorization).toBe('NOT_AUTHORIZED');
     expect(report.modelGenerationCalls).toBe(0);
     expect(report.modelFeesUsd).toBe(0);
@@ -171,17 +179,30 @@ describe('current-route zero-model recovery preparation', () => {
     expect(
       report.dispatches.find(({ alias }) => alias === 'claude-sonnet-5'),
     ).toMatchObject({ protocol: 'anthropic-messages' });
+    for (const alias of [
+      'minimax-m3',
+      'doubao-seed-2.0-pro',
+      'doubao-seed-2.0-lite',
+    ]) {
+      expect(
+        report.aliases.find((entry) => entry.alias === alias),
+      ).toMatchObject({
+        retirementDecision: 'pending_retirement',
+        channelSelection: 'not_applicable',
+        openOxPricing: null,
+        blockers: ['RETIRED_ALIAS_STILL_ACTIVE'],
+      });
+      expect(report.credential.requiredModelAllowlist).not.toContain(alias);
+    }
   });
 
-  it('reports the live recovery blockers without treating enabled configuration as price evidence', () => {
+  it('does not ask to restore or price retired aliases while retaining other fail-closed blockers', () => {
     const input = snapshot();
     input.gateway.channels = input.gateway.channels.filter(
       ({ alias }) =>
-        ![
-          'minimax-m3',
-          'doubao-seed-2.0-pro',
-          'doubao-seed-2.0-lite',
-        ].includes(alias),
+        !['minimax-m3', 'doubao-seed-2.0-pro', 'doubao-seed-2.0-lite'].includes(
+          alias,
+        ),
     );
     input.gateway.channels.push({
       alias: 'claude-sonnet-5',
@@ -191,12 +212,7 @@ describe('current-route zero-model recovery preparation', () => {
       weight: 0,
     });
     const catalog = sourceBundle();
-    const missing = [
-      'minimax-m3',
-      'deepseek-v4-flash',
-      'doubao-seed-2.0-pro',
-      'doubao-seed-2.0-lite',
-    ];
+    const missing = ['deepseek-v4-flash'];
     catalog.modelIds = catalog.modelIds.filter(
       (alias) => !missing.includes(alias),
     );
@@ -204,9 +220,7 @@ describe('current-route zero-model recovery preparation', () => {
     catalog.catalog.data!.models = (
       catalog.catalog.data!.models as Array<{ model_id: string }>
     ).filter(({ model_id }) => !missing.includes(model_id));
-    const selectedGroups = [
-      ...new Set(catalog.modelIds.map(groupName)),
-    ];
+    const selectedGroups = [...new Set(catalog.modelIds.map(groupName))];
     catalog.catalog.data!.groups = (
       catalog.catalog.data!.groups as Array<{ name: string }>
     ).filter(({ name }) => selectedGroups.includes(name));
@@ -221,8 +235,8 @@ describe('current-route zero-model recovery preparation', () => {
     expect(report.blockers).toEqual([
       'CREDENTIAL_NOT_FINITE_EXACT',
       'ENABLED_CHANNEL_AMBIGUOUS',
-      'ENABLED_CHANNEL_MISSING',
       'OPENOX_PRICE_MISSING',
+      'RETIRED_ALIAS_STILL_ACTIVE',
     ]);
     expect(
       report.aliases.find(({ alias }) => alias === 'deepseek-v4-flash'),
@@ -235,18 +249,29 @@ describe('current-route zero-model recovery preparation', () => {
       report.aliases.find(({ alias }) => alias === 'claude-sonnet-5'),
     ).toMatchObject({
       channelSelection: 'ambiguous',
-      blockers: [
-        'ENABLED_CHANNEL_AMBIGUOUS',
-        'CREDENTIAL_NOT_FINITE_EXACT',
-      ],
+      blockers: ['ENABLED_CHANNEL_AMBIGUOUS', 'CREDENTIAL_NOT_FINITE_EXACT'],
     });
     expect(report.requiredActions).toEqual([
+      'PROMOTE_TASKS_OFF_RETIRED_ALIASES',
       'REQUEST_OPENOX_EXACT_ALIAS_PRICING_OR_OPEN_TASK_EVIDENCE',
-      'RESTORE_EXACT_ALIAS_CHANNEL_OR_OPEN_TASK_EVIDENCE',
       'PIN_ONE_REVIEWED_CHANNEL',
       'CREATE_FINITE_EXACT_ALLOWLIST_TOKEN_AFTER_COVERAGE',
     ]);
     expect(report.blockedTaskIds).toHaveLength(7);
+    expect(
+      report.requiredActions.includes(
+        'RESTORE_EXACT_ALIAS_CHANNEL_OR_OPEN_TASK_EVIDENCE',
+      ),
+    ).toBe(false);
+    for (const alias of [
+      'minimax-m3',
+      'doubao-seed-2.0-pro',
+      'doubao-seed-2.0-lite',
+    ]) {
+      expect(
+        report.aliases.find((entry) => entry.alias === alias)?.blockers,
+      ).toEqual(['RETIRED_ALIAS_STILL_ACTIVE']);
+    }
   });
 
   it('ignores process environment route overrides by resolving only the frozen registry', () => {
@@ -254,9 +279,9 @@ describe('current-route zero-model recovery preparation', () => {
     process.env.SITE_BUILDER_MODEL_COPY = 'unreviewed-alias';
     try {
       const report = build();
-      expect(report.dispatches.some(({ alias }) => alias === 'unreviewed-alias')).toBe(
-        false,
-      );
+      expect(
+        report.dispatches.some(({ alias }) => alias === 'unreviewed-alias'),
+      ).toBe(false);
     } finally {
       if (previous === undefined) delete process.env.SITE_BUILDER_MODEL_COPY;
       else process.env.SITE_BUILDER_MODEL_COPY = previous;
@@ -314,14 +339,10 @@ describe('current-route zero-model recovery preparation', () => {
       ...snapshot(),
       token: 'must never be admitted',
     };
-    expect(() => build(withSecret as never)).toThrow(
-      'prohibited field token',
-    );
+    expect(() => build(withSecret as never)).toThrow('prohibited field token');
 
     const extra = { ...snapshot(), responseContent: 'not admitted' };
-    expect(() => build(extra as never)).toThrow(
-      'undeclared or missing fields',
-    );
+    expect(() => build(extra as never)).toThrow('undeclared or missing fields');
 
     const unrelated = snapshot();
     unrelated.gateway.channels.push({
@@ -331,9 +352,7 @@ describe('current-route zero-model recovery preparation', () => {
       priority: 0,
       weight: 0,
     });
-    expect(() => build(unrelated)).toThrow(
-      'outside the frozen current route',
-    );
+    expect(() => build(unrelated)).toThrow('outside the frozen current route');
   });
 
   it('keeps the CLI free of environment, network and model-client access', async () => {
@@ -355,13 +374,17 @@ describe('current-route zero-model recovery preparation', () => {
     temporaryDirectories.push(root);
     const report = build();
 
-    await writeCurrentRouteRecoveryReportCreateOnly(root, 'report.json', report);
+    await writeCurrentRouteRecoveryReportCreateOnly(
+      root,
+      'report.json',
+      report,
+    );
     await expect(
       writeCurrentRouteRecoveryReportCreateOnly(root, 'report.json', report),
     ).rejects.toMatchObject({ code: 'EEXIST' });
-    expect(JSON.parse(await readFile(join(root, 'report.json'), 'utf8'))).toEqual(
-      report,
-    );
+    expect(
+      JSON.parse(await readFile(join(root, 'report.json'), 'utf8')),
+    ).toEqual(report);
   });
 
   it('rejects input and output paths that traverse a directory symlink', async () => {

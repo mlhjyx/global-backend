@@ -8,6 +8,7 @@ import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
 } from "../site-build-cost-ledger";
+import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import { STATIC_DESIGN_CATALOG_V2 } from "./catalog";
 import { M1_E_B_B3_CATALOG_V2_DRAFT } from "./catalog-v2-b3-drafts";
 import {
@@ -267,6 +268,46 @@ describe("M1-e-B DesignBrief producer", () => {
       expect(ledger.stored).toMatchObject({
         selectionSource: "deterministic",
       });
+    }
+  });
+
+  it("persists explicit safe-blueprint rollback provenance separately from provider failure", async () => {
+    const catalog = approvedCatalog();
+    const ledger = new Ledger();
+    const original =
+      modelPolicyRegistry.getActiveTaskPolicy.bind(modelPolicyRegistry);
+    const policy = vi
+      .spyOn(modelPolicyRegistry, "getActiveTaskPolicy")
+      .mockImplementation((taskId) =>
+        taskId === "site_builder.design_spec"
+          ? {
+              state: "promotedRoute",
+              lifecycle: "active",
+              route: {
+                primary: "candidate-primary",
+                fallbacks: ["candidate-fallback"],
+              },
+              promotionEvidenceId: "test-design-spec-promotion",
+            }
+          : original(taskId),
+      );
+    vi.stubEnv("SITE_BUILDER_MODEL_ROLLBACK_DESIGN_SPEC", "true");
+    try {
+      await new DesignBriefProducer({
+        ledger,
+        catalog,
+      }).produce(input(catalog));
+      expect(ledger.stored).toMatchObject({
+        selectionSource: "rollback_deterministic",
+        rollbackProvenance: {
+          source: "rollback_override",
+          fallbackId: "safe-blueprint",
+          rollbackPolicyVersion: "site-builder-model-rollback-policy/v1",
+        },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      policy.mockRestore();
     }
   });
 

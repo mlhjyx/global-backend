@@ -13,10 +13,11 @@ import {
 import type { AiContext } from '../model-gateway/types';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import {
-  resolveTaskRoute,
+  resolveTaskExecutionTarget,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
 } from './agents/task-routes';
+import { modelPolicyRegistry } from './agents/model-policy.registry';
 
 export const SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION =
   'site-builder-model-settlement-attestation/2026-07-29-v2' as const;
@@ -260,8 +261,16 @@ function requiredDispatches(
   env: NodeJS.ProcessEnv,
 ): Array<Pick<SettlementDispatch, 'taskId' | 'alias' | 'protocol'>> {
   return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
-    const route = resolveTaskRoute(taskId, env);
-    return [route.primary, ...route.fallbacks].map((alias) => ({
+    const target = resolveTaskExecutionTarget(taskId, env);
+    if (target.kind === 'deterministic_fallback') return [];
+    const route = target.route;
+    const aliases = [route.primary, ...route.fallbacks];
+    for (const alias of aliases) {
+      if (modelPolicyRegistry.getAliasRetirementPolicy(alias)) {
+        throw new Error(`RETIRED_ALIAS_STILL_ACTIVE: ${taskId}:${alias}`);
+      }
+    }
+    return aliases.map((alias) => ({
       taskId,
       alias,
       protocol: protocolFor(alias),
@@ -501,15 +510,9 @@ function catalogRows(catalog: OpenOxPricingCatalog): {
 function pricingCurrency(productLine: string): 'USD' | 'CNY' | null {
   if (productLine === 'claude' || productLine === 'kimi') return 'USD';
   if (
-    [
-      'gpt',
-      'deepseek',
-      'glm',
-      'grok',
-      'gemini',
-      'minimax',
-      'doubao',
-    ].includes(productLine)
+    ['gpt', 'deepseek', 'glm', 'grok', 'gemini', 'minimax', 'doubao'].includes(
+      productLine,
+    )
   ) {
     return 'CNY';
   }

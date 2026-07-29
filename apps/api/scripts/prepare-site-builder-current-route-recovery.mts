@@ -19,7 +19,8 @@ const HELP = `Usage:
     --snapshot=<repository-relative-safe-snapshot-json> \\
     --catalog-source=<repository-relative-openox-source-bundle-json> \\
     --fixed-commit=<40-char-route-baseline-sha> \\
-    --source-commit=<40-char-runner-and-catalog-sha> \\
+    --catalog-source-commit=<40-char-catalog-source-sha> \\
+    --runner-source-sha256=<64-char-squash-stable-source-digest> \\
     --output=<new-repository-relative-report-json>
 
 This create-only preparation command never reads .env, mutates new-api, or
@@ -55,8 +56,7 @@ function repositoryJsonPath(
 
 function assertFixedRouteBaseline(fixedCommit: string): void {
   if (
-    fixedCommit !==
-    SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT
+    fixedCommit !== SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT
   ) {
     throw new Error('fixed commit does not match the frozen route baseline');
   }
@@ -68,39 +68,36 @@ function assertFixedRouteBaseline(fixedCommit: string): void {
     cwd: REPOSITORY_ROOT,
     stdio: 'ignore',
   });
-  execFileSync(
-    'git',
-    [
-      'diff',
-      '--quiet',
-      fixedCommit,
-      '--',
-      'apps/api/src/site-builder/agents',
-      'apps/api/src/model-gateway/model-transports.ts',
-    ],
-    { cwd: REPOSITORY_ROOT, stdio: 'ignore' },
-  );
+  // The safe snapshot binds the exact active dispatch list by SHA-256. Policy
+  // governance may evolve without rewriting the historical route baseline.
 }
 
-function assertFixedSourceBundleCommit(
-  sourceCommit: string,
+function assertCommitExistsAndIsAncestor(
+  commit: string,
+  role: 'catalog source',
+): void {
+  if (!/^[a-f0-9]{40}$/.test(commit)) {
+    throw new Error(`${role} commit must be a 40-character commit SHA`);
+  }
+  execFileSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
+    cwd: REPOSITORY_ROOT,
+    stdio: 'ignore',
+  });
+  execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+    cwd: REPOSITORY_ROOT,
+    stdio: 'ignore',
+  });
+}
+
+function assertFixedCatalogSourceCommit(
+  catalogSourceCommit: string,
   catalogSource: string,
   catalogSha256: string,
 ): void {
-  if (!/^[a-f0-9]{40}$/.test(sourceCommit)) {
-    throw new Error('source commit must be a 40-character commit SHA');
-  }
-  execFileSync('git', ['cat-file', '-e', `${sourceCommit}^{commit}`], {
-    cwd: REPOSITORY_ROOT,
-    stdio: 'ignore',
-  });
-  execFileSync('git', ['merge-base', '--is-ancestor', sourceCommit, 'HEAD'], {
-    cwd: REPOSITORY_ROOT,
-    stdio: 'ignore',
-  });
+  assertCommitExistsAndIsAncestor(catalogSourceCommit, 'catalog source');
   const committedCatalog = execFileSync(
     'git',
-    ['show', `${sourceCommit}:${catalogSource}`],
+    ['show', `${catalogSourceCommit}:${catalogSource}`],
     { cwd: REPOSITORY_ROOT, encoding: null },
   );
   if (
@@ -109,20 +106,48 @@ function assertFixedSourceBundleCommit(
   ) {
     throw new Error('catalog source does not match its fixed source commit');
   }
+}
+
+const RUNNER_SOURCE_FILES = [
+  'apps/api/src/site-builder/current-route-recovery.ts',
+  'apps/api/src/site-builder/site-builder-model-settlement.ts',
+  'apps/api/src/site-builder/agents/model-policy.registry.ts',
+  'apps/api/src/site-builder/agents/task-route-bindings.ts',
+  'apps/api/src/site-builder/agents/task-routes.ts',
+  'apps/api/src/model-gateway/model-transports.ts',
+  'packages/contracts/src/site-builder/model-policy.ts',
+  'apps/api/scripts/prepare-site-builder-current-route-recovery.mts',
+] as const;
+
+function runnerSourceSha256(revision: string): string {
+  const digest = createHash('sha256');
+  for (const path of RUNNER_SOURCE_FILES) {
+    const content = execFileSync('git', ['show', `${revision}:${path}`], {
+      cwd: REPOSITORY_ROOT,
+      encoding: null,
+    });
+    digest.update(path);
+    digest.update('\0');
+    digest.update(content);
+    digest.update('\0');
+  }
+  return digest.digest('hex');
+}
+
+function assertFixedRunnerSource(runnerSourceDigest: string): void {
+  if (!/^[a-f0-9]{64}$/.test(runnerSourceDigest)) {
+    throw new Error('runner source digest must be a 64-character SHA-256');
+  }
   execFileSync(
     'git',
-    [
-      'diff',
-      '--quiet',
-      sourceCommit,
-      '--',
-      'apps/api/src/site-builder/current-route-recovery.ts',
-      'apps/api/src/site-builder/site-builder-model-settlement.ts',
-      'apps/api/scripts/prepare-site-builder-current-route-recovery.mts',
-      catalogSource,
-    ],
+    ['diff', '--quiet', 'HEAD', '--', ...RUNNER_SOURCE_FILES],
     { cwd: REPOSITORY_ROOT, stdio: 'ignore' },
   );
+  if (runnerSourceSha256('HEAD') !== runnerSourceDigest) {
+    throw new Error(
+      'runner source digest does not match the reviewed HEAD contents',
+    );
+  }
 }
 
 async function main(): Promise<void> {
@@ -133,13 +158,15 @@ async function main(): Promise<void> {
   const snapshotArgument = option('snapshot');
   const catalogSourceArgument = option('catalog-source');
   const fixedCommit = option('fixed-commit');
-  const sourceCommit = option('source-commit');
+  const catalogSourceCommit = option('catalog-source-commit');
+  const runnerSourceDigest = option('runner-source-sha256');
   const outputArgument = option('output');
   if (
     !snapshotArgument ||
     !catalogSourceArgument ||
     !fixedCommit ||
-    !sourceCommit ||
+    !catalogSourceCommit ||
+    !runnerSourceDigest ||
     !outputArgument
   ) {
     throw new Error(HELP);
@@ -175,14 +202,20 @@ async function main(): Promise<void> {
       pricing?: { sourceBundleCommitSha?: unknown };
     }
   ).pricing?.sourceBundleCommitSha;
-  if (declaredSourceCommit !== sourceCommit) {
-    throw new Error('source commit does not match the safe snapshot');
+  if (declaredSourceCommit !== catalogSourceCommit) {
+    throw new Error('catalog source commit does not match the safe snapshot');
   }
-  assertFixedSourceBundleCommit(sourceCommit, catalogSource, catalog.sha256);
+  assertFixedCatalogSourceCommit(
+    catalogSourceCommit,
+    catalogSource,
+    catalog.sha256,
+  );
+  assertFixedRunnerSource(runnerSourceDigest);
   const report = buildCurrentRouteRecoveryReport(
     snapshotSource.parsed,
     catalog.parsed,
     catalog.sha256,
+    runnerSourceDigest,
   );
   await writeCurrentRouteRecoveryReportCreateOnly(
     REPOSITORY_ROOT,

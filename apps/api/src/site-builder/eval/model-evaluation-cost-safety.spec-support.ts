@@ -38,7 +38,10 @@ export function createFakeModelEvaluationCostSafety(
   const ledgerDirectory =
     ledgerOverride?.directory ?? join(fakeLedgerRoot, suffix);
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-  const legacy = modelPolicyRegistry.getLegacyTaskPolicy(plan.taskId).route;
+  const legacy = modelPolicyRegistry.getEvaluationComparatorRoute(plan.taskId);
+  if (!legacy) {
+    throw new Error(`${plan.taskId} has no paid legacy comparator`);
+  }
   const allowedDispatches = [
     ...plan.candidates.map((candidate) => ({
       mode: "target" as const,

@@ -843,14 +843,17 @@ function bindTrustedModelEvaluationExecutor(
       reason: "rejected_before_dispatch",
     });
   }
-  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
     plan.taskId,
-  ).route;
+  );
+  const comparatorAliases = comparatorRoute
+    ? [comparatorRoute.primary, ...comparatorRoute.fallbacks]
+    : [];
   const expectedDispatches = [
     ...plan.candidates.map(
       (candidate) => `target:${candidate.alias}:${candidate.expectedProtocol}`,
     ),
-    ...[legacyRoute.primary, ...legacyRoute.fallbacks].map(
+    ...comparatorAliases.map(
       (alias) => `legacy_comparator:${alias}:openai-chat-completions`,
     ),
   ].sort();
@@ -863,7 +866,7 @@ function bindTrustedModelEvaluationExecutor(
       : plan.candidates.length *
           plan.evaluationSuite.fixtureIds.length *
           plan.evaluationSuite.repeats +
-        [legacyRoute.primary, ...legacyRoute.fallbacks].length *
+        comparatorAliases.length *
           plan.evaluationSuite.fixtureIds.length *
           plan.evaluationSuite.repeats +
         plan.candidates.filter(
@@ -2571,11 +2574,14 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
       `legacy comparator has no canonical suite: ${options.plan.taskId}`,
     );
   }
-  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
     options.plan.taskId,
-  ).route;
+  );
   if (
-    ![legacyRoute.primary, ...legacyRoute.fallbacks].includes(options.alias)
+    !comparatorRoute ||
+    ![comparatorRoute.primary, ...comparatorRoute.fallbacks].includes(
+      options.alias,
+    )
   ) {
     throw new ModelEvaluationCallError("legacy_comparator_not_admitted", {
       state: "not_incurred",

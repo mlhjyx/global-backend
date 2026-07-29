@@ -1,0 +1,356 @@
+{
+  "schemaVersion": "site-builder-current-route-recovery-report/2026-07-29-v4",
+  "status": "BLOCKED_CURRENT_ROUTE_RECOVERY",
+  "modelDispatchAuthorization": "NOT_AUTHORIZED",
+  "modelGenerationCalls": 0,
+  "modelFeesUsd": 0,
+  "source": {
+    "capturedAt": "2026-07-29T13:48:29.680Z",
+    "routeBaselineCommitSha": "e727bb141ad2c8c5fdd4379308ed85cfc7aefb86",
+    "routeDispatchSha256": "f0cb1473cb025621a3f9e6df7dec6045bb7e5df2a3586c6d3e93716913733184",
+    "safeSnapshotSha256": "f26d146cad4b16d74287949cd9aeef34a4e9ee5b736012b57b5240de8e32e160",
+    "openOxSourceBundleSha256": "6e3eceb33f69a6011eeb185cea378a13f2af5a1893adfb67f4d4dc5e0a2d451e",
+    "openOxSourceBundleCommitSha": "e91b184741a10b83459a8041e3ecd9701fdf3b5b",
+    "runnerSourceSha256": "12f0928c7675410ad2bd81770530dc3ca2141afb62ad7b81b46d27396198a528"
+  },
+  "credential": {
+    "status": "not_finite_exact",
+    "requiredModelAllowlist": [
+      "claude-sonnet-5",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "glm-5.2",
+      "gpt-5.6-terra"
+    ],
+    "observedModelAllowlist": []
+  },
+  "dispatches": [
+    {
+      "taskId": "site_builder.brand_profile",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses"
+    },
+    {
+      "taskId": "site_builder.brand_profile",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages"
+    },
+    {
+      "taskId": "site_builder.copy",
+      "alias": "deepseek-v4-pro",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.copy",
+      "alias": "glm-5.2",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.copy",
+      "alias": "doubao-seed-2.0-pro",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.design_spec",
+      "alias": "minimax-m3",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.design_spec",
+      "alias": "doubao-seed-2.0-pro",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.assemble",
+      "alias": "glm-5.2",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.assemble",
+      "alias": "deepseek-v4-pro",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.assembly_fix",
+      "alias": "glm-5.2",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.assembly_fix",
+      "alias": "deepseek-v4-pro",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.qa_summarize",
+      "alias": "deepseek-v4-flash",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.qa_summarize",
+      "alias": "doubao-seed-2.0-lite",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.seo_review",
+      "alias": "deepseek-v4-flash",
+      "protocol": "openai-chat-completions"
+    },
+    {
+      "taskId": "site_builder.seo_review",
+      "alias": "doubao-seed-2.0-lite",
+      "protocol": "openai-chat-completions"
+    }
+  ],
+  "aliases": [
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "taskIds": [
+        "site_builder.brand_profile"
+      ],
+      "retirementDecision": null,
+      "enabledChannelIds": [
+        8,
+        19
+      ],
+      "disabledChannelIds": [],
+      "channelSelection": "ambiguous",
+      "openOxPricing": {
+        "alias": "claude-sonnet-5",
+        "productLine": "claude",
+        "selectedGroup": "special",
+        "currency": "USD",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1.26",
+        "inputRate": "2",
+        "outputRate": "10",
+        "cacheReadRate": "0.2",
+        "cacheWriteRate": "2.5",
+        "effectiveInputRate": "2.52",
+        "effectiveOutputRate": "12.6",
+        "effectiveCacheReadRate": "0.252",
+        "effectiveCacheWriteRate": "3.15",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T13:37:37.129057Z",
+        "modelBillingMultiplier": null
+      },
+      "blockers": [
+        "ENABLED_CHANNEL_AMBIGUOUS",
+        "CREDENTIAL_NOT_FINITE_EXACT"
+      ]
+    },
+    {
+      "alias": "deepseek-v4-flash",
+      "protocol": "openai-chat-completions",
+      "taskIds": [
+        "site_builder.qa_summarize",
+        "site_builder.seo_review"
+      ],
+      "retirementDecision": null,
+      "enabledChannelIds": [
+        1
+      ],
+      "disabledChannelIds": [],
+      "channelSelection": "unique",
+      "openOxPricing": null,
+      "blockers": [
+        "OPENOX_PRICE_MISSING",
+        "CREDENTIAL_NOT_FINITE_EXACT"
+      ]
+    },
+    {
+      "alias": "deepseek-v4-pro",
+      "protocol": "openai-chat-completions",
+      "taskIds": [
+        "site_builder.assemble",
+        "site_builder.assembly_fix",
+        "site_builder.copy"
+      ],
+      "retirementDecision": null,
+      "enabledChannelIds": [
+        1
+      ],
+      "disabledChannelIds": [],
+      "channelSelection": "unique",
+      "openOxPricing": {
+        "alias": "deepseek-v4-pro",
+        "productLine": "deepseek",
+        "selectedGroup": "deepseek",
+        "currency": "CNY",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1",
+        "inputRate": "1.827",
+        "outputRate": "3.654",
+        "cacheReadRate": "0.015225",
+        "cacheWriteRate": "0",
+        "effectiveInputRate": "1.827",
+        "effectiveOutputRate": "3.654",
+        "effectiveCacheReadRate": "0.015225",
+        "effectiveCacheWriteRate": "0",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T13:37:37.058074Z",
+        "modelBillingMultiplier": null
+      },
+      "blockers": [
+        "CREDENTIAL_NOT_FINITE_EXACT"
+      ]
+    },
+    {
+      "alias": "doubao-seed-2.0-lite",
+      "protocol": "openai-chat-completions",
+      "taskIds": [
+        "site_builder.qa_summarize",
+        "site_builder.seo_review"
+      ],
+      "retirementDecision": "pending_retirement",
+      "enabledChannelIds": [],
+      "disabledChannelIds": [
+        3
+      ],
+      "channelSelection": "not_applicable",
+      "openOxPricing": null,
+      "blockers": [
+        "RETIRED_ALIAS_STILL_ACTIVE"
+      ]
+    },
+    {
+      "alias": "doubao-seed-2.0-pro",
+      "protocol": "openai-chat-completions",
+      "taskIds": [
+        "site_builder.copy",
+        "site_builder.design_spec"
+      ],
+      "retirementDecision": "pending_retirement",
+      "enabledChannelIds": [],
+      "disabledChannelIds": [
+        3
+      ],
+      "channelSelection": "not_applicable",
+      "openOxPricing": null,
+      "blockers": [
+        "RETIRED_ALIAS_STILL_ACTIVE"
+      ]
+    },
+    {
+      "alias": "glm-5.2",
+      "protocol": "openai-chat-completions",
+      "taskIds": [
+        "site_builder.assemble",
+        "site_builder.assembly_fix",
+        "site_builder.copy"
+      ],
+      "retirementDecision": null,
+      "enabledChannelIds": [
+        11
+      ],
+      "disabledChannelIds": [
+        6
+      ],
+      "channelSelection": "unique",
+      "openOxPricing": {
+        "alias": "glm-5.2",
+        "productLine": "glm",
+        "selectedGroup": "glm",
+        "currency": "CNY",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1",
+        "inputRate": "8",
+        "outputRate": "28",
+        "cacheReadRate": "2",
+        "cacheWriteRate": "0",
+        "effectiveInputRate": "5.6",
+        "effectiveOutputRate": "19.6",
+        "effectiveCacheReadRate": "1.4",
+        "effectiveCacheWriteRate": "0",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T13:37:37.066603Z",
+        "modelBillingMultiplier": "0.70"
+      },
+      "blockers": [
+        "CREDENTIAL_NOT_FINITE_EXACT"
+      ]
+    },
+    {
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "taskIds": [
+        "site_builder.brand_profile"
+      ],
+      "retirementDecision": null,
+      "enabledChannelIds": [
+        17
+      ],
+      "disabledChannelIds": [
+        6
+      ],
+      "channelSelection": "unique",
+      "openOxPricing": {
+        "alias": "gpt-5.6-terra",
+        "productLine": "gpt",
+        "selectedGroup": "gpt-unified",
+        "currency": "CNY",
+        "pricingUnit": "native_currency_per_million_tokens",
+        "groupMultiplier": "1",
+        "inputRate": "2.5",
+        "outputRate": "15",
+        "cacheReadRate": "0.25",
+        "cacheWriteRate": "3.125",
+        "effectiveInputRate": "2.5",
+        "effectiveOutputRate": "15",
+        "effectiveCacheReadRate": "0.25",
+        "effectiveCacheWriteRate": "3.125",
+        "status": "enabled",
+        "updatedAt": "2026-07-29T13:37:37.131732Z",
+        "modelBillingMultiplier": null
+      },
+      "blockers": [
+        "CREDENTIAL_NOT_FINITE_EXACT"
+      ]
+    },
+    {
+      "alias": "minimax-m3",
+      "protocol": "openai-chat-completions",
+      "taskIds": [
+        "site_builder.design_spec"
+      ],
+      "retirementDecision": "pending_retirement",
+      "enabledChannelIds": [],
+      "disabledChannelIds": [
+        3
+      ],
+      "channelSelection": "not_applicable",
+      "openOxPricing": null,
+      "blockers": [
+        "RETIRED_ALIAS_STILL_ACTIVE"
+      ]
+    }
+  ],
+  "blockers": [
+    "CREDENTIAL_NOT_FINITE_EXACT",
+    "ENABLED_CHANNEL_AMBIGUOUS",
+    "OPENOX_PRICE_MISSING",
+    "RETIRED_ALIAS_STILL_ACTIVE"
+  ],
+  "blockedTaskIds": [
+    "site_builder.assemble",
+    "site_builder.assembly_fix",
+    "site_builder.brand_profile",
+    "site_builder.copy",
+    "site_builder.design_spec",
+    "site_builder.qa_summarize",
+    "site_builder.seo_review"
+  ],
+  "requiredActions": [
+    "PROMOTE_TASKS_OFF_RETIRED_ALIASES",
+    "REQUEST_OPENOX_EXACT_ALIAS_PRICING_OR_OPEN_TASK_EVIDENCE",
+    "PIN_ONE_REVIEWED_CHANNEL",
+    "CREATE_FINITE_EXACT_ALLOWLIST_TOKEN_AFTER_COVERAGE"
+  ],
+  "boundaries": {
+    "changesTaskRoutes": false,
+    "createsRuntimeAttestation": false,
+    "installsRuntimeAttestation": false,
+    "mutatesGateway": false,
+    "dispatchesModels": false
+  }
+}

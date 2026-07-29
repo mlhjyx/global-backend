@@ -24,6 +24,13 @@ const API_KEY = 'test-runtime-token';
 const NOW = new Date('2026-07-29T06:00:00.000Z');
 const GATEWAY_ORIGIN = 'https://gateway.example.test';
 const CHANNEL_ID = 17;
+const REVIEWED_RUNTIME_ROUTE_ENV = {
+  SITE_BUILDER_FALLBACKS_COPY: 'glm-5.2',
+  SITE_BUILDER_MODEL_DESIGN_SPEC: 'deepseek-v4-pro',
+  SITE_BUILDER_FALLBACKS_DESIGN_SPEC: 'glm-5.2',
+  SITE_BUILDER_FALLBACKS_QA_SUMMARIZE: '',
+  SITE_BUILDER_FALLBACKS_SEO_REVIEW: '',
+} satisfies NodeJS.ProcessEnv;
 
 function protocolFor(alias: string) {
   return VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? 'openai-chat-completions';
@@ -31,7 +38,7 @@ function protocolFor(alias: string) {
 
 function routeEntries() {
   return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
-    const route = resolveTaskRoute(taskId);
+    const route = resolveTaskRoute(taskId, REVIEWED_RUNTIME_ROUTE_ENV);
     return [route.primary, ...route.fallbacks].map((alias) => ({
       taskId,
       alias,
@@ -236,9 +243,25 @@ describe('Site Builder zero-generation model preflight', () => {
     const bytes = JSON.stringify(attestation);
     writeFileSync(path, bytes, { mode: 0o600 });
     try {
+      expect(() =>
+        loadSiteBuilderModelSettlement(
+          {
+            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
+            MODEL_GATEWAY_KEY: API_KEY,
+            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
+            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: createHash(
+              'sha256',
+            )
+              .update(bytes)
+              .digest('hex'),
+          },
+          { now: () => NOW },
+        ),
+      ).toThrow('RETIRED_ALIAS_STILL_ACTIVE');
       expect(
         loadSiteBuilderModelSettlement(
           {
+            ...REVIEWED_RUNTIME_ROUTE_ENV,
             MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
             MODEL_GATEWAY_KEY: API_KEY,
             SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
@@ -254,6 +277,7 @@ describe('Site Builder zero-generation model preflight', () => {
       expect(() =>
         loadSiteBuilderModelSettlement(
           {
+            ...REVIEWED_RUNTIME_ROUTE_ENV,
             MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
             MODEL_GATEWAY_KEY: API_KEY,
             SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
@@ -370,7 +394,9 @@ describe('Site Builder zero-generation model preflight', () => {
 
   it('denies a current alias that is absent from the OpenOx catalog', async () => {
     const { attestation, entries, prices } = fixture();
-    const dispatch = entries.find((entry) => entry.alias === 'minimax-m3')!;
+    const dispatch = entries.find(
+      (entry) => entry.alias === 'deepseek-v4-pro',
+    )!;
     const missingCatalog = structuredClone(prices);
     missingCatalog.data!.models = (
       missingCatalog.data!.models as Array<{ model_id: string }>
