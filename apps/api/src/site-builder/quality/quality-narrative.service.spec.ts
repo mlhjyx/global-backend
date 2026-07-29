@@ -168,6 +168,26 @@ describe("QualityNarrativeService", () => {
     expect(storedSet(storage).seo.fallbackReason).toBe("paid_gate_denied");
   });
 
+  it("records a prior unknown settlement without invoking either consumer", async () => {
+    const fixture = qualityNarrativeFixture();
+    const storage = new MemoryStorage(fixture.objects);
+    const execute = vi.fn();
+    await new QualityNarrativeService(storage).build({
+      siteId: "site-1",
+      buildRunId: "run-prior-unknown",
+      evaluation: fixture.evaluation,
+      artifactSet: fixture.artifactSet,
+      executionUnavailableReason: "prior_settlement_unknown",
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(storedSet(storage).qa.fallbackReason).toBe(
+      "prior_settlement_unknown",
+    );
+    expect(storedSet(storage).seo.fallbackReason).toBe(
+      "prior_settlement_unknown",
+    );
+  });
+
   it("marks invalid model output without changing any deterministic finding", async () => {
     const fixture = qualityNarrativeFixture();
     const storage = new MemoryStorage(fixture.objects);

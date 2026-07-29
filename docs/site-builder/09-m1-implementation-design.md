@@ -155,7 +155,7 @@
 
 > **2026-07-29 M1-g 当前交付分支**：统一入口、6→12、36 张三断点、事实零虚构、10 站 genericness 与无模型真机链已完成；现役产品路由在 P4 前被未知结算门正确阻断，因此阶段状态仍是进行中。不得通过放宽 paid gate、切模型或伪造 deterministic success 收口；先按 [runtime decision card](../evidence/site-builder/m1-g-runtime-decision-card.md) 恢复 currentRoute 健康后复跑。
 >
-> **2026-07-30 QA/SEO consumer fast-follow**：退役治理合并后，独立 PR 将 `qa_summarize` / `seo_review` 接到 P4 确定性 finding。私有 `QualityNarrativeSetV1` 只允许既有 finding ID 的分组、排序和服务器预定义解释；空 finding 不调用，付费拒绝/模型失败/无效输出走显式 rule summary，unknown settlement 停后续调用，取消终止。该接线不改 DesignEvaluation v2 verdict、repair、ReleaseManifest、active route、API 或数据库，模型调用数仍为 0；见[消费者决策卡](../evidence/site-builder/m1-g-quality-narrative-consumers-decision-card.md)。下一独立步骤是 `design_spec` fixed-commit/create-only suite 准备，不是直接运行模型。
+> **2026-07-30 QA/SEO consumer fast-follow**：退役治理合并后，独立 PR 将 `qa_summarize` / `seo_review` 接到 P4 确定性 finding。私有 `QualityNarrativeSetV1` 只允许既有 finding ID 的分组、排序和服务器预定义解释；空 finding 不调用，付费拒绝/模型失败/无效输出走显式 rule summary，既有未结算 spend 在 executor 注入前阻断，unknown settlement 停后续调用且清理错误不得覆盖它，取消终止。私有 sidecar 校验或存储失败只省略叙事，不推翻确定性结果。该接线不改 DesignEvaluation v2 verdict、repair、ReleaseManifest、active route、API 或数据库，模型调用数仍为 0；见[消费者决策卡](../evidence/site-builder/m1-g-quality-narrative-consumers-decision-card.md)。下一独立步骤是 `design_spec` fixed-commit/create-only suite 准备，不是直接运行模型。
 
 ## 8. 真机验证计划（verify-site-builder-m1.mts，真库真容器真网关，无 sandbox）
 

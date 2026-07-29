@@ -11,7 +11,10 @@ import {
   controlledAssemblyEffectiveBrief,
   intakeToMarkdown,
   neutralCopyOutput,
+  qualityNarrativePaidGateDecision,
+  releaseTaskWithoutMaskingPrimaryFailure,
   runBrandProfilePersistenceWithRetry,
+  runNonAuthoritativeQualityNarrative,
   RefurbishActivityInput,
   RefurbishFinalizeInput,
 } from "./site-builder.activities";
@@ -74,6 +77,85 @@ function spyBudget() {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+describe("M1-g non-authoritative quality narrative failure boundaries", () => {
+  it("does not authorize a narrative dispatch while any spend is unresolved", () => {
+    expect(
+      qualityNarrativePaidGateDecision({
+        paidCallsEnabled: true,
+        unresolvedSpends: 1,
+      }),
+    ).toBe("prior_settlement_unknown");
+    expect(
+      qualityNarrativePaidGateDecision({
+        paidCallsEnabled: true,
+        unresolvedSpends: 0,
+      }),
+    ).toBe("allowed");
+    expect(
+      qualityNarrativePaidGateDecision({
+        paidCallsEnabled: false,
+        unresolvedSpends: 0,
+      }),
+    ).toBe("paid_gate_denied");
+  });
+
+  it("omits a failed private sidecar without changing the deterministic activity result", async () => {
+    const failure = new Error("transient object storage failure");
+    const observed = vi.fn();
+    await expect(
+      runNonAuthoritativeQualityNarrative(
+        async () => {
+          throw failure;
+        },
+        undefined,
+        observed,
+      ),
+    ).resolves.toBeUndefined();
+    expect(observed).toHaveBeenCalledWith(failure);
+  });
+
+  it("keeps cancellation terminal instead of downgrading it to an omitted sidecar", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("activity cancelled");
+    controller.abort(cancellation);
+    await expect(
+      runNonAuthoritativeQualityNarrative(
+        async () => {
+          throw new Error("storage aborted");
+        },
+        controller.signal,
+      ),
+    ).rejects.toBe(cancellation);
+  });
+
+  it("preserves the paid settlement error when task release also fails", async () => {
+    const releaseFailure = new Error("lease release failed");
+    const observed = vi.fn();
+    await expect(
+      releaseTaskWithoutMaskingPrimaryFailure(
+        async () => {
+          throw releaseFailure;
+        },
+        true,
+        observed,
+      ),
+    ).resolves.toBeUndefined();
+    expect(observed).toHaveBeenCalledWith(releaseFailure);
+  });
+
+  it("still surfaces a standalone task-release failure", async () => {
+    const releaseFailure = new Error("lease release failed");
+    await expect(
+      releaseTaskWithoutMaskingPrimaryFailure(
+        async () => {
+          throw releaseFailure;
+        },
+        false,
+      ),
+    ).rejects.toBe(releaseFailure);
+  });
 });
 
 describe("neutralCopyOutput — M1-d empty fact snapshot", () => {

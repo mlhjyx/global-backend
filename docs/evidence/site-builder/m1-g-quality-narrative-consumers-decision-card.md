@@ -34,13 +34,17 @@ Model dispatch authorization: `NOT_AUTHORIZED`
 | --- | --- |
 | finding slice 为空 | `empty_findings`，不进入 executor |
 | consumer/付费闸不可用 | 明示 `consumer_unavailable` / `paid_gate_denied` |
+| 既有 RESERVED/UNKNOWN/unknown-cost spend | 不向消费者提供 executor，不发起后续付费调用 |
 | 模型失败或 closed output 无效 | 明示 `model_failed` / `output_invalid` |
 | 结算 unknown | 当前任务 `settlement_unknown`，后续任务 `prior_settlement_unknown`，停止后续付费调用 |
+| narrative/私有对象持久化失败 | 省略非权威 sidecar，保留确定性质量结果，不触发整条 BuildRun 补偿 |
 | Activity 取消 | 等待已发付费请求完成结算后终止；不写确定性“成功”checkpoint |
 
-所有非取消失败均生成服务器确定的 rule summary；它只归组并解释原 finding，
-不改变 finding、severity、证据引用或 repair option。unknown settlement
-继续由 durable ledger 冻结后续付费调用，不能被 fallback 绕过。
+消费者级非取消失败生成服务器确定的 rule summary；它只归组并解释原
+finding，不改变 finding、severity、证据引用或 repair option。若连私有
+sidecar 本身都无法安全校验或写入，则省略 sidecar，不反向改变确定性结果。
+unknown settlement 继续由 durable ledger 冻结后续付费调用；task lease
+释放失败也不能覆盖原始 unknown-settlement 错误。
 
 ## 本 PR 明确不做
 

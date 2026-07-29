@@ -273,6 +273,45 @@ export function qualitySettlementIsPublishable(
   );
 }
 
+export function qualityNarrativePaidGateDecision(state: {
+  paidCallsEnabled: boolean;
+  unresolvedSpends: number;
+}): "allowed" | "paid_gate_denied" | "prior_settlement_unknown" {
+  if (state.unresolvedSpends > 0) return "prior_settlement_unknown";
+  return state.paidCallsEnabled ? "allowed" : "paid_gate_denied";
+}
+
+export async function runNonAuthoritativeQualityNarrative(
+  operation: () => Promise<QualityNarrativeEvidenceRefV1>,
+  signal?: AbortSignal,
+  onFailure?: (error: unknown) => void,
+): Promise<QualityNarrativeEvidenceRefV1 | undefined> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error("QUALITY_NARRATIVE_CANCELLED");
+    }
+    onFailure?.(error);
+    return undefined;
+  }
+}
+
+export async function releaseTaskWithoutMaskingPrimaryFailure(
+  release: () => Promise<void>,
+  primaryFailure: boolean,
+  onReleaseFailure?: (error: unknown) => void,
+): Promise<void> {
+  try {
+    await release();
+  } catch (error) {
+    if (!primaryFailure) throw error;
+    onReleaseFailure?.(error);
+  }
+}
+
 export interface DemoV0ActivityInput {
   workspaceId: string;
   siteId: string;
@@ -788,6 +827,34 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
   };
 
+  const qualityNarrativeDispatchDecision = async (input: {
+    workspaceId: string;
+    buildRunId: string;
+  }): Promise<
+    "allowed" | "paid_gate_denied" | "prior_settlement_unknown"
+  > =>
+    prisma.withWorkspace(input.workspaceId, async (tx) => {
+      const [budget, unresolvedSpends] = await Promise.all([
+        tx.siteBuildBudget.findUnique({
+          where: { buildRunId: input.buildRunId },
+          select: { paidCallsEnabled: true },
+        }),
+        tx.siteBuildSpend.count({
+          where: {
+            buildRunId: input.buildRunId,
+            OR: [
+              { status: { in: ["RESERVED", "UNKNOWN"] } },
+              { costBasis: "unknown" },
+            ],
+          },
+        }),
+      ]);
+      return qualityNarrativePaidGateDecision({
+        paidCallsEnabled: budget?.paidCallsEnabled === true,
+        unresolvedSpends,
+      });
+    });
+
   const qualityNarrativeExecutionResult = (
     value: Record<string, unknown>,
   ): QualityNarrativeExecutionResult => {
@@ -835,6 +902,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       fenceToken: attempt.fenceToken,
     };
     let completed = false;
+    let primaryFailure = false;
     try {
       const frozen = await costLedger.freezeTaskInput(
         fence,
@@ -904,8 +972,20 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       );
       completed = true;
       return result;
+    } catch (error) {
+      primaryFailure = true;
+      throw error;
     } finally {
-      if (!completed) await costLedger.releaseTask(fence);
+      if (!completed) {
+        await releaseTaskWithoutMaskingPrimaryFailure(
+          () => costLedger.releaseTask(fence),
+          primaryFailure,
+          (error) =>
+            log.error(
+              `Quality narrative task release failed after primary failure (${error instanceof Error ? error.name : "UnknownError"})`,
+            ),
+        );
+      }
     }
   };
 
@@ -3183,26 +3263,47 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         deterministic,
         "timeout",
       );
+      const narrativeSignal = activityCancellationSignal();
+      const narrativeDispatchDecision =
+        qualityNarrativeService && gateway && costLedger
+          ? await qualityNarrativeDispatchDecision(input).catch((error) => {
+              log.warn(
+                `Quality narrative paid gate unavailable; dispatch denied (${error instanceof Error ? error.name : "UnknownError"})`,
+              );
+              return "paid_gate_denied" as const;
+            })
+          : ("consumer_unavailable" as const);
       const qualityNarrativeRef = qualityNarrativeService
-        ? await qualityNarrativeService.build({
-            siteId: input.siteId,
-            buildRunId: input.buildRunId,
-            evaluation,
-            artifactSet: deterministic.artifactSet,
-            signal: activityCancellationSignal(),
-            ...(gateway && costLedger
-              ? {
-                  execute: (taskInput, signal) =>
-                    executeQualityNarrativeTask(
-                      input.workspaceId,
-                      input.siteId,
-                      input.buildRunId,
-                      taskInput,
-                      signal,
-                    ),
-                }
-              : {}),
-          })
+        ? await runNonAuthoritativeQualityNarrative(
+            () =>
+              qualityNarrativeService.build({
+                siteId: input.siteId,
+                buildRunId: input.buildRunId,
+                evaluation,
+                artifactSet: deterministic.artifactSet,
+                signal: narrativeSignal,
+                ...(narrativeDispatchDecision === "allowed"
+                  ? {
+                      execute: (taskInput, signal) =>
+                        executeQualityNarrativeTask(
+                          input.workspaceId,
+                          input.siteId,
+                          input.buildRunId,
+                          taskInput,
+                          signal,
+                        ),
+                    }
+                  : {
+                      executionUnavailableReason:
+                        narrativeDispatchDecision,
+                    }),
+              }),
+            narrativeSignal,
+            (error) =>
+              log.warn(
+                `Non-authoritative quality narrative omitted (${error instanceof Error ? error.name : "UnknownError"})`,
+              ),
+          )
         : undefined;
       return {
         candidate: input.qualityCandidate.candidate,

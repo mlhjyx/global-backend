@@ -81,6 +81,10 @@ export interface BuildQualityNarrativeInput {
   evaluation: DesignEvaluationV2;
   artifactSet: QualityArtifactSetV1;
   execute?: QualityNarrativeExecutor;
+  executionUnavailableReason?:
+    | "consumer_unavailable"
+    | "paid_gate_denied"
+    | "prior_settlement_unknown";
   signal?: AbortSignal;
 }
 
@@ -404,6 +408,10 @@ export class QualityNarrativeService {
   private async consume(
     taskInput: QualityNarrativeTaskInputV1,
     execute: QualityNarrativeExecutor | undefined,
+    executionUnavailableReason:
+      | "consumer_unavailable"
+      | "paid_gate_denied"
+      | "prior_settlement_unknown",
     signal?: AbortSignal,
   ): Promise<{
     consumer: QualityNarrativeConsumerV1;
@@ -418,7 +426,7 @@ export class QualityNarrativeService {
     }
     if (!execute) {
       return {
-        consumer: fallbackConsumer(taskInput, "consumer_unavailable"),
+        consumer: fallbackConsumer(taskInput, executionUnavailableReason),
         settlementUnknown: false,
       };
     }
@@ -500,10 +508,24 @@ export class QualityNarrativeService {
       partitioned.seo,
       seoReports,
     );
-    const qa = await this.consume(qaInput, input.execute, input.signal);
+    const executionUnavailableReason =
+      input.executionUnavailableReason ?? "consumer_unavailable";
+    const qa = await this.consume(
+      qaInput,
+      input.execute,
+      executionUnavailableReason,
+      input.signal,
+    );
     const seo = qa.settlementUnknown
       ? fallbackConsumer(seoInput, "prior_settlement_unknown")
-      : (await this.consume(seoInput, input.execute, input.signal)).consumer;
+      : (
+          await this.consume(
+            seoInput,
+            input.execute,
+            executionUnavailableReason,
+            input.signal,
+          )
+        ).consumer;
     assertNotCancelled(input.signal);
     const value: QualityNarrativeSetV1 = {
       schemaVersion: QUALITY_NARRATIVE_SET_V1_SCHEMA_VERSION,
