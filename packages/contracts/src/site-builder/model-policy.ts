@@ -2,7 +2,12 @@
  * Shared model-policy vocabulary. A profile describes required task semantics,
  * never a provider or model name; provider names belong to a policy snapshot.
  */
-export const MODEL_ROUTE_STATES = ['currentRoute', 'evaluatedCandidate', 'targetCandidate', 'promotedRoute'] as const;
+export const MODEL_ROUTE_STATES = [
+  'currentRoute',
+  'evaluatedCandidate',
+  'targetCandidate',
+  'promotedRoute',
+] as const;
 
 export type ModelRouteState = (typeof MODEL_ROUTE_STATES)[number];
 
@@ -38,9 +43,7 @@ export interface ModelDataPolicy {
   personalData: 'forbidden' | 'workspace_controlled';
   /** The bounded input scope a profile is allowed to process. */
   dataScope:
-    | 'company_facts_only'
-    | 'workspace_site_materials'
-    | 'not_applicable';
+    'company_facts_only' | 'workspace_site_materials' | 'not_applicable';
 }
 
 export interface ModelProfileDefinition {
@@ -72,7 +75,8 @@ export interface ModelPromotedRoute {
 export type ModelActiveRoute = ModelCurrentRoute | ModelPromotedRoute;
 
 /** Candidate registration is deliberately not a traffic-switch instruction. */
-export type ModelCandidateActivation = 'registry_only' | 'requires_task_evaluation' | 'requires_media_gateway';
+export type ModelCandidateActivation =
+  'registry_only' | 'requires_task_evaluation' | 'requires_media_gateway';
 
 export interface ModelCandidateRoute {
   state: Exclude<ModelRouteState, 'currentRoute'>;
@@ -83,7 +87,8 @@ export interface ModelCandidateRoute {
   notes?: string;
 }
 
-export const SITE_BUILDER_MODEL_POLICY_VERSION = 'site-builder-model-policy/v3' as const;
+export const SITE_BUILDER_MODEL_POLICY_VERSION =
+  'site-builder-model-policy/v3' as const;
 
 /**
  * Immutable-at-execution evidence of the resolved policy. `route` is the
@@ -110,4 +115,33 @@ export interface ModelExecutionTrace extends ModelExecutionPolicySnapshot {
 export interface DeterministicFallback {
   id: string;
   description: string;
+}
+
+/**
+ * A rollback target is independent from the historical route snapshot. Model
+ * promotion may therefore retire an old provider without deleting provenance.
+ */
+export type ModelRollbackTarget =
+  | {
+      kind: 'model_route';
+      route: ModelRouteSnapshot;
+    }
+  | {
+      kind: 'deterministic_fallback';
+      fallback: DeterministicFallback;
+    };
+
+export const SITE_BUILDER_MODEL_ROLLBACK_POLICY_VERSION =
+  'site-builder-model-rollback-policy/v1' as const;
+
+/**
+ * Transitional governance state. The alias may still occur in an unchanged
+ * active route, but it is excluded from new runtime credentials, price
+ * coverage, comparators, and executable rollback targets.
+ */
+export type ModelRetirementDecision = 'pending_retirement';
+
+export interface ModelAliasRetirementPolicy {
+  decision: ModelRetirementDecision;
+  reason: string;
 }

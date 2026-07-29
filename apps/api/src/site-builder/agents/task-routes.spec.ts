@@ -125,7 +125,7 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
     ).toThrow(/profile override.*not supported/i);
   });
 
-  it('SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true 回到该任务冻结的 legacy currentRoute', () => {
+  it('SITE_BUILDER_MODEL_ROLLBACK_<TASK>=true 执行独立 rollback policy', () => {
     const route = resolveTaskRoute('site_builder.brand_profile', {
       SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE: 'true',
     } as NodeJS.ProcessEnv);
@@ -255,6 +255,72 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         fallbacks: ['doubao-seed-2.0-lite'],
       },
     });
+  });
+
+  it('历史路由与可执行 rollback 分离，MiniMax/Doubao 不进入 rollback target', () => {
+    expect(modelPolicyRegistry.getRollbackPolicyVersion()).toBe(
+      'site-builder-model-rollback-policy/v1',
+    );
+    expect(
+      Object.fromEntries(
+        SITE_BUILDER_TASK_IDS.map((taskId) => [
+          taskId,
+          modelPolicyRegistry.getExecutableRollbackPolicy(taskId),
+        ]),
+      ),
+    ).toEqual({
+      'site_builder.brand_profile': {
+        kind: 'model_route',
+        route: {
+          primary: 'deepseek-v4-pro',
+          fallbacks: ['glm-5.2'],
+        },
+      },
+      'site_builder.copy': {
+        kind: 'model_route',
+        route: {
+          primary: 'deepseek-v4-pro',
+          fallbacks: ['glm-5.2'],
+        },
+      },
+      'site_builder.design_spec': {
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'safe-blueprint' }),
+      },
+      'site_builder.assemble': {
+        kind: 'model_route',
+        route: {
+          primary: 'glm-5.2',
+          fallbacks: ['deepseek-v4-pro'],
+        },
+      },
+      'site_builder.assembly_fix': {
+        kind: 'model_route',
+        route: {
+          primary: 'glm-5.2',
+          fallbacks: ['deepseek-v4-pro'],
+        },
+      },
+      'site_builder.qa_summarize': {
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'rule-summary' }),
+      },
+      'site_builder.seo_review': {
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'rule-summary' }),
+      },
+    });
+    for (const alias of [
+      'minimax-m3',
+      'doubao-seed-2.0-pro',
+      'doubao-seed-2.0-lite',
+    ]) {
+      expect(modelPolicyRegistry.getAliasRetirementPolicy(alias)).toMatchObject(
+        {
+          decision: 'pending_retirement',
+        },
+      );
+    }
   });
 
   it('BrandProfile promotion evidence 冻结候选、现役基线、协议与价格快照', () => {

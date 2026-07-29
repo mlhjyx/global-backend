@@ -1,10 +1,15 @@
-import { SITE_BUILDER_MODEL_POLICY_VERSION } from '@global/contracts';
+import {
+  SITE_BUILDER_MODEL_POLICY_VERSION,
+  SITE_BUILDER_MODEL_ROLLBACK_POLICY_VERSION,
+} from '@global/contracts';
 import type {
   DeterministicFallback,
   ModelActiveRoute,
+  ModelAliasRetirementPolicy,
   ModelCandidateRoute,
   ModelCurrentRoute,
   ModelProfileDefinition,
+  ModelRollbackTarget,
   ModelRouteSnapshot,
 } from '@global/contracts';
 
@@ -23,9 +28,9 @@ interface ProfilePolicy {
 }
 
 /**
- * Exact pre-MODEL-0 routes, retained as task-local rollback snapshots. They are
- * never deleted when a task is promoted, so one env switch can restore the
- * previously proven route without editing code or relying on historical docs.
+ * Exact pre-MODEL-0 routes retained as historical provenance. They are not an
+ * executable rollback policy: a provider may be retired while this snapshot
+ * remains available for audit and evidence interpretation.
  */
 const LEGACY_TASK_POLICIES: Record<SiteBuilderTaskId, ModelCurrentRoute> = {
   'site_builder.brand_profile': {
@@ -303,8 +308,76 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
   },
 };
 
+const EXECUTABLE_ROLLBACK_POLICIES: Record<
+  SiteBuilderTaskId,
+  ModelRollbackTarget
+> = {
+  'site_builder.brand_profile': {
+    kind: 'model_route',
+    route: { primary: 'deepseek-v4-pro', fallbacks: ['glm-5.2'] },
+  },
+  'site_builder.copy': {
+    kind: 'model_route',
+    route: { primary: 'deepseek-v4-pro', fallbacks: ['glm-5.2'] },
+  },
+  'site_builder.design_spec': {
+    kind: 'deterministic_fallback',
+    fallback: {
+      id: 'safe-blueprint',
+      description: 'Return the validated deterministic safe blueprint.',
+    },
+  },
+  'site_builder.assemble': {
+    kind: 'model_route',
+    route: { primary: 'glm-5.2', fallbacks: ['deepseek-v4-pro'] },
+  },
+  'site_builder.assembly_fix': {
+    kind: 'model_route',
+    route: { primary: 'glm-5.2', fallbacks: ['deepseek-v4-pro'] },
+  },
+  'site_builder.qa_summarize': {
+    kind: 'deterministic_fallback',
+    fallback: {
+      id: 'rule-summary',
+      description: 'Return deterministic findings without a model summary.',
+    },
+  },
+  'site_builder.seo_review': {
+    kind: 'deterministic_fallback',
+    fallback: {
+      id: 'rule-summary',
+      description: 'Return deterministic findings without a model summary.',
+    },
+  },
+};
+
+const PENDING_MODEL_RETIREMENTS = Object.freeze({
+  'minimax-m3': Object.freeze({
+    decision: 'pending_retirement',
+    reason:
+      'Replace the unchanged design_spec current route through task evidence and promotion; do not restore this channel.',
+  }),
+  'doubao-seed-2.0-pro': Object.freeze({
+    decision: 'pending_retirement',
+    reason:
+      'Remove this legacy fallback through task evidence and promotion; do not restore this channel.',
+  }),
+  'doubao-seed-2.0-lite': Object.freeze({
+    decision: 'pending_retirement',
+    reason:
+      'Replace summary-task fallbacks with deterministic rule-summary; do not restore this channel.',
+  }),
+} satisfies Record<string, ModelAliasRetirementPolicy>);
+
 function cloneRoute(route: ModelRouteSnapshot): ModelRouteSnapshot {
   return { primary: route.primary, fallbacks: [...route.fallbacks] };
+}
+
+function cloneRollbackTarget(target: ModelRollbackTarget): ModelRollbackTarget {
+  if (target.kind === 'model_route') {
+    return { kind: target.kind, route: cloneRoute(target.route) };
+  }
+  return { kind: target.kind, fallback: { ...target.fallback } };
 }
 
 /**
@@ -342,6 +415,18 @@ export class ModelPolicyRegistry {
     };
   }
 
+  getExecutableRollbackPolicy(taskId: SiteBuilderTaskId): ModelRollbackTarget {
+    return cloneRollbackTarget(EXECUTABLE_ROLLBACK_POLICIES[taskId]);
+  }
+
+  getAliasRetirementPolicy(alias: string): ModelAliasRetirementPolicy | null {
+    const policy =
+      PENDING_MODEL_RETIREMENTS[
+        alias as keyof typeof PENDING_MODEL_RETIREMENTS
+      ];
+    return policy ? { ...policy } : null;
+  }
+
   getProfile(profileId: SiteBuilderModelProfileId): ModelProfileDefinition {
     const profile = PROFILE_POLICIES[profileId].profile;
     return {
@@ -362,6 +447,10 @@ export class ModelPolicyRegistry {
 
   getPolicyVersion(): string {
     return SITE_BUILDER_MODEL_POLICY_VERSION;
+  }
+
+  getRollbackPolicyVersion(): string {
+    return SITE_BUILDER_MODEL_ROLLBACK_POLICY_VERSION;
   }
 
   getCandidateBaselineId(): string {

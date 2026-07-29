@@ -2,15 +2,14 @@ import { createHash } from 'node:crypto';
 import { open, readFile, realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import type {
-  PaidModelProtocol,
-} from '../model-gateway/paid-model-settlement';
+import type { PaidModelProtocol } from '../model-gateway/paid-model-settlement';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import {
   resolveTaskRoute,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
 } from './agents/task-routes';
+import { modelPolicyRegistry } from './agents/model-policy.registry';
 import {
   OPENOX_PRICING_AUTHORITY,
   settlementOpenOxPrice,
@@ -20,7 +19,7 @@ import {
 export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SAFE_SNAPSHOT_VERSION =
   'site-builder-current-route-recovery-safe-snapshot/2026-07-29-v2' as const;
 export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_REPORT_VERSION =
-  'site-builder-current-route-recovery-report/2026-07-29-v2' as const;
+  'site-builder-current-route-recovery-report/2026-07-29-v3' as const;
 export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_SOURCE_BUNDLE_VERSION =
   'site-builder-current-route-openox-source-bundle/2026-07-29-v1' as const;
 export const SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT =
@@ -120,13 +119,13 @@ export type CurrentRouteRecoveryBlocker =
   | 'ENABLED_CHANNEL_AMBIGUOUS'
   | 'ENABLED_CHANNEL_MISSING'
   | 'OPENOX_PRICE_MISSING'
+  | 'RETIRED_ALIAS_STILL_ACTIVE'
   | 'RUNTIME_PRICING_EGRESS_UNPROVEN';
 
 export interface CurrentRouteRecoveryReport {
   schemaVersion: typeof SITE_BUILDER_CURRENT_ROUTE_RECOVERY_REPORT_VERSION;
   status:
-    | 'BLOCKED_CURRENT_ROUTE_RECOVERY'
-    | 'READY_FOR_RUNTIME_ATTESTATION_DECISION';
+    'BLOCKED_CURRENT_ROUTE_RECOVERY' | 'READY_FOR_RUNTIME_ATTESTATION_DECISION';
   modelDispatchAuthorization: 'NOT_AUTHORIZED';
   modelGenerationCalls: 0;
   modelFeesUsd: 0;
@@ -152,9 +151,10 @@ export interface CurrentRouteRecoveryReport {
     alias: string;
     protocol: PaidModelProtocol;
     taskIds: SiteBuilderTaskId[];
+    retirementDecision: 'pending_retirement' | null;
     enabledChannelIds: number[];
     disabledChannelIds: number[];
-    channelSelection: 'missing' | 'unique' | 'ambiguous';
+    channelSelection: 'missing' | 'unique' | 'ambiguous' | 'not_applicable';
     openOxPricing: CurrentRouteRecoveryPricingModelSnapshot | null;
     blockers: CurrentRouteRecoveryBlocker[];
   }>;
@@ -164,6 +164,7 @@ export interface CurrentRouteRecoveryReport {
     | 'CREATE_FINITE_EXACT_ALLOWLIST_TOKEN_AFTER_COVERAGE'
     | 'PIN_ONE_REVIEWED_CHANNEL'
     | 'PROVE_REVIEWED_RUNTIME_PRICING_EGRESS'
+    | 'PROMOTE_TASKS_OFF_RETIRED_ALIASES'
     | 'REQUEST_OPENOX_EXACT_ALIAS_PRICING_OR_OPEN_TASK_EVIDENCE'
     | 'RESTORE_EXACT_ALIAS_CHANNEL_OR_OPEN_TASK_EVIDENCE'
   >;
@@ -176,7 +177,11 @@ export interface CurrentRouteRecoveryReport {
   };
 }
 
-function exactKeys(value: object, expected: readonly string[], role: string): void {
+function exactKeys(
+  value: object,
+  expected: readonly string[],
+  role: string,
+): void {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
   if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
@@ -201,7 +206,10 @@ function iso(value: unknown, role: string): asserts value is string {
   }
 }
 
-function nonNegativeInteger(value: unknown, role: string): asserts value is number {
+function nonNegativeInteger(
+  value: unknown,
+  role: string,
+): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     throw new Error(`${role} must be a non-negative safe integer`);
   }
@@ -236,8 +244,14 @@ function canonicalDispatches(): CurrentRouteRecoveryReport['dispatches'] {
   });
 }
 
-export function currentRouteRecoveryRequiredAliases(): string[] {
+export function currentRouteRecoveryActiveAliases(): string[] {
   return [...new Set(canonicalDispatches().map(({ alias }) => alias))].sort();
+}
+
+export function currentRouteRecoveryRequiredAliases(): string[] {
+  return currentRouteRecoveryActiveAliases().filter(
+    (alias) => modelPolicyRegistry.getAliasRetirementPolicy(alias) === null,
+  );
 }
 
 export function currentRouteRecoveryDispatchSha256(): string {
@@ -246,7 +260,10 @@ export function currentRouteRecoveryDispatchSha256(): string {
     .digest('hex');
 }
 
-function assertAliasList(value: unknown, role: string): asserts value is string[] {
+function assertAliasList(
+  value: unknown,
+  role: string,
+): asserts value is string[] {
   if (
     !Array.isArray(value) ||
     value.some((alias) => typeof alias !== 'string' || !ALIAS.test(alias)) ||
@@ -296,7 +313,7 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
   if (!Array.isArray(gateway.channels)) {
     throw new Error('gateway channels must be an array');
   }
-  const requiredAliases = new Set(currentRouteRecoveryRequiredAliases());
+  const activeAliases = new Set(currentRouteRecoveryActiveAliases());
   const channelKeys = new Set<string>();
   for (const raw of gateway.channels) {
     const channel = object(raw, 'channel');
@@ -308,7 +325,7 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
     if (typeof channel.alias !== 'string' || !ALIAS.test(channel.alias)) {
       throw new Error('channel alias is invalid');
     }
-    if (!requiredAliases.has(channel.alias)) {
+    if (!activeAliases.has(channel.alias)) {
       throw new Error('channel alias is outside the frozen current route');
     }
     nonNegativeInteger(channel.channelId, 'channelId');
@@ -383,7 +400,9 @@ function assertSnapshot(input: unknown): CurrentRouteRecoverySafeSnapshot {
   iso(pricing.capturedAt, 'pricing capturedAt');
   nonNegativeInteger(pricing.modelRows, 'pricing modelRows');
   nonNegativeInteger(pricing.groupRows, 'pricing groupRows');
-  return structuredClone(snapshot) as unknown as CurrentRouteRecoverySafeSnapshot;
+  return structuredClone(
+    snapshot,
+  ) as unknown as CurrentRouteRecoverySafeSnapshot;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -470,7 +489,8 @@ function assertOpenOxSourceBundle(
     bundle.fullModelCount !== bundle.modelIds.length ||
     !Array.isArray(bundle.groupNames) ||
     bundle.groupNames.some(
-      (name) => typeof name !== 'string' || name.length === 0 || name.length > 128,
+      (name) =>
+        typeof name !== 'string' || name.length === 0 || name.length > 128,
     ) ||
     new Set(bundle.groupNames).size !== bundle.groupNames.length ||
     bundle.fullGroupCount !== bundle.groupNames.length
@@ -523,7 +543,9 @@ function assertOpenOxSourceBundle(
     JSON.stringify([...modelAliases].sort()) !==
     JSON.stringify(expectedPublishedAliases)
   ) {
-    throw new Error('OpenOx selected model rows do not match the full model set');
+    throw new Error(
+      'OpenOx selected model rows do not match the full model set',
+    );
   }
   const expectedGroups = [
     ...new Set(expectedPublishedAliases.map(selectedOpenOxGroup)),
@@ -546,7 +568,8 @@ function assertOpenOxSourceBundle(
     selectedGroups.push(group.name);
   }
   if (
-    JSON.stringify([...selectedGroups].sort()) !== JSON.stringify(expectedGroups)
+    JSON.stringify([...selectedGroups].sort()) !==
+    JSON.stringify(expectedGroups)
   ) {
     throw new Error('OpenOx selected groups do not match published aliases');
   }
@@ -629,11 +652,14 @@ export function buildCurrentRouteRecoveryReport(
     snapshot.pricing.groupRows !== openOxSourceBundle.fullGroupCount ||
     snapshot.pricing.capturedAt !== openOxSourceBundle.capturedAt
   ) {
-    throw new Error('OpenOx source bundle does not reproduce the safe snapshot');
+    throw new Error(
+      'OpenOx source bundle does not reproduce the safe snapshot',
+    );
   }
   const openOxPricing = deriveOpenOxPricing(openOxSourceBundle);
   const dispatches = canonicalDispatches();
   const requiredModelAllowlist = currentRouteRecoveryRequiredAliases();
+  const activeAliases = currentRouteRecoveryActiveAliases();
   const exactCredential =
     snapshot.credential.unlimitedQuota === false &&
     snapshot.credential.modelLimitsEnabled === true &&
@@ -642,11 +668,13 @@ export function buildCurrentRouteRecoveryReport(
       JSON.stringify(requiredModelAllowlist);
   const runtimeEgressProven = snapshot.pricing.runtimeFetch === 'http_200';
 
-  const aliases: CurrentRouteRecoveryReport['aliases'] =
-    requiredModelAllowlist.map((alias) => {
+  const aliases: CurrentRouteRecoveryReport['aliases'] = activeAliases.map(
+    (alias) => {
       const aliasDispatches = dispatches.filter(
         (entry) => entry.alias === alias,
       );
+      const retirementPolicy =
+        modelPolicyRegistry.getAliasRetirementPolicy(alias);
       const channels = snapshot.gateway.channels.filter(
         (entry) => entry.alias === alias,
       );
@@ -658,8 +686,10 @@ export function buildCurrentRouteRecoveryReport(
         .filter(({ status }) => status === 'disabled')
         .map(({ channelId }) => channelId)
         .sort((left, right) => left - right);
-      const channelSelection: 'missing' | 'unique' | 'ambiguous' =
-        enabledChannelIds.length === 0
+      const channelSelection:
+        'missing' | 'unique' | 'ambiguous' | 'not_applicable' = retirementPolicy
+        ? 'not_applicable'
+        : enabledChannelIds.length === 0
           ? 'missing'
           : enabledChannelIds.length === 1
             ? 'unique'
@@ -667,28 +697,36 @@ export function buildCurrentRouteRecoveryReport(
       const selectedOpenOxPricing =
         openOxPricing.find((entry) => entry.alias === alias) ?? null;
       const blockers: CurrentRouteRecoveryBlocker[] = [];
-      if (!selectedOpenOxPricing) blockers.push('OPENOX_PRICE_MISSING');
-      if (channelSelection === 'missing')
-        blockers.push('ENABLED_CHANNEL_MISSING');
-      if (channelSelection === 'ambiguous')
-        blockers.push('ENABLED_CHANNEL_AMBIGUOUS');
-      if (!exactCredential) blockers.push('CREDENTIAL_NOT_FINITE_EXACT');
-      if (!runtimeEgressProven)
-        blockers.push('RUNTIME_PRICING_EGRESS_UNPROVEN');
+      if (retirementPolicy) {
+        blockers.push('RETIRED_ALIAS_STILL_ACTIVE');
+      } else {
+        if (!selectedOpenOxPricing) blockers.push('OPENOX_PRICE_MISSING');
+        if (channelSelection === 'missing')
+          blockers.push('ENABLED_CHANNEL_MISSING');
+        if (channelSelection === 'ambiguous')
+          blockers.push('ENABLED_CHANNEL_AMBIGUOUS');
+        if (!exactCredential) blockers.push('CREDENTIAL_NOT_FINITE_EXACT');
+        if (!runtimeEgressProven)
+          blockers.push('RUNTIME_PRICING_EGRESS_UNPROVEN');
+      }
       return {
         alias,
         protocol: aliasDispatches[0]!.protocol,
         taskIds: [
           ...new Set(aliasDispatches.map(({ taskId }) => taskId)),
         ].sort(),
+        retirementDecision: retirementPolicy?.decision ?? null,
         enabledChannelIds,
         disabledChannelIds,
         channelSelection,
         openOxPricing: selectedOpenOxPricing,
         blockers,
       };
-    });
-  const blockers = [...new Set(aliases.flatMap((entry) => entry.blockers))].sort();
+    },
+  );
+  const blockers = [
+    ...new Set(aliases.flatMap((entry) => entry.blockers)),
+  ].sort();
   const blockedTaskIds = [
     ...new Set(
       aliases
@@ -697,6 +735,9 @@ export function buildCurrentRouteRecoveryReport(
     ),
   ].sort();
   const requiredActions = [
+    ...(blockers.includes('RETIRED_ALIAS_STILL_ACTIVE')
+      ? (['PROMOTE_TASKS_OFF_RETIRED_ALIASES'] as const)
+      : []),
     ...(blockers.includes('OPENOX_PRICE_MISSING')
       ? (['REQUEST_OPENOX_EXACT_ALIAS_PRICING_OR_OPEN_TASK_EVIDENCE'] as const)
       : []),

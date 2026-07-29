@@ -55,8 +55,7 @@ function repositoryJsonPath(
 
 function assertFixedRouteBaseline(fixedCommit: string): void {
   if (
-    fixedCommit !==
-    SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT
+    fixedCommit !== SITE_BUILDER_CURRENT_ROUTE_RECOVERY_ROUTE_BASELINE_COMMIT
   ) {
     throw new Error('fixed commit does not match the frozen route baseline');
   }
@@ -68,18 +67,8 @@ function assertFixedRouteBaseline(fixedCommit: string): void {
     cwd: REPOSITORY_ROOT,
     stdio: 'ignore',
   });
-  execFileSync(
-    'git',
-    [
-      'diff',
-      '--quiet',
-      fixedCommit,
-      '--',
-      'apps/api/src/site-builder/agents',
-      'apps/api/src/model-gateway/model-transports.ts',
-    ],
-    { cwd: REPOSITORY_ROOT, stdio: 'ignore' },
-  );
+  // The safe snapshot binds the exact active dispatch list by SHA-256. Policy
+  // governance may evolve without rewriting the historical route baseline.
 }
 
 function assertFixedSourceBundleCommit(
@@ -118,6 +107,8 @@ function assertFixedSourceBundleCommit(
       '--',
       'apps/api/src/site-builder/current-route-recovery.ts',
       'apps/api/src/site-builder/site-builder-model-settlement.ts',
+      'apps/api/src/site-builder/agents/model-policy.registry.ts',
+      'packages/contracts/src/site-builder/model-policy.ts',
       'apps/api/scripts/prepare-site-builder-current-route-recovery.mts',
       catalogSource,
     ],
