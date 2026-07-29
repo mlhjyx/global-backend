@@ -37,6 +37,7 @@ import {
 } from "./model-evaluation-harness";
 import { sha256CanonicalJson } from "./eval-provenance";
 import {
+  MODEL_EVALUATION_REPAIR_REASON_UTF8_BYTES_UPPER_BOUND,
   assertModelEvaluationCostSafetyDispatch,
   frozenModelEvaluationPriceCents,
   isAllowedModelEvaluationGatewayOrigin,
@@ -778,9 +779,7 @@ export function createFileBackedModelEvaluationAuthorizationLedger(options: {
     );
   }
   const directoryIdentity = resolveLedgerDirectoryIdentity(options.directory);
-  let observedClaimHistory = [
-    ...directoryIdentity.claimedAuthorizationDigests,
-  ];
+  let observedClaimHistory = [...directoryIdentity.claimedAuthorizationDigests];
   const assertDirectoryIdentity = () => {
     const currentIdentity = resolveLedgerDirectoryIdentity(
       directoryIdentity.directory,
@@ -1713,6 +1712,33 @@ function repairPrompt(prompt: string, kind: string, reason: string): string {
   return `${prompt}\n\n上一次输出未通过${kind}校验，错误：\n${reason}\n请只修正被拒字段，不得新增、猜测或放宽任何事实；重新只输出同时通过 JSON Schema 和任务硬门的合法 JSON。`;
 }
 
+export function modelEvaluationInitialPromptUtf8Bytes(
+  prompt: string,
+  outputSchema: Readonly<Record<string, unknown>>,
+): number {
+  return (
+    Buffer.byteLength(structuredSystemPrompt(outputSchema), "utf8") +
+    Buffer.byteLength(prompt, "utf8")
+  );
+}
+
+export function modelEvaluationRepairPromptUtf8BytesUpperBound(
+  prompt: string,
+  outputSchema: Readonly<Record<string, unknown>>,
+): number {
+  return (
+    Buffer.byteLength(structuredSystemPrompt(outputSchema), "utf8") +
+    Buffer.byteLength(
+      repairPrompt(
+        prompt,
+        "任务确定性硬门",
+        "x".repeat(MODEL_EVALUATION_REPAIR_REASON_UTF8_BYTES_UPPER_BOUND),
+      ),
+      "utf8",
+    )
+  );
+}
+
 function stripJsonFence(content: string): string {
   const trimmed = content.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -2509,6 +2535,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
     if (identityProven && artifact !== undefined && request.repairTaskOutput) {
       const failure = validationFailure(request, artifact);
       if (failure) {
+        if (
+          Buffer.byteLength(failure.reason, "utf8") >
+          MODEL_EVALUATION_REPAIR_REASON_UTF8_BYTES_UPPER_BOUND
+        ) {
+          throw new Error("evaluation_repair_reason_too_large");
+        }
         const knownProviderReportedCostCents =
           providerReportedCostCents.length > 0 &&
           providerReportedCostCents.every((value) => value !== null)

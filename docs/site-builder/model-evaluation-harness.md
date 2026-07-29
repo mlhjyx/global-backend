@@ -9,6 +9,7 @@
 - 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。
 - 当前唯一可 dispatch suite 是 BrandProfile；其余 6 个 task fail-closed 为 `blocked_no_evaluation_suite`。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。
 - 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。
+- zero-cost evidence 准备合同 `site-builder-model-evaluation-evidence-prep/2026-07-29-v1` 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。
 
 ## 协议执行边界
 
@@ -49,7 +50,7 @@
 - task contract：`site_builder.brand_profile` / prompt `brand-profile/14` / route validation `brand-profile-route-validation/14`；dispatch 同时绑定冻结 output schema 与 `repairTaskOutput=true`
 - fixture set：`site-builder.brand-profile-golden/2026-07-18-v1`；schema `brand-profile-eval-fixture/v1`；6 fixtures × 2 repeats = 12 runs/model
 - fixtures：`auto-parts-rich`、`auto-parts-sparse`、`industrial-pump-rich`、`industrial-pump-sparse`、`lab-instrument-rich`、`lab-instrument-sparse`
-- source bundle contract：`brand-profile-evaluation-source-bundle/v5`；固定 34 份仓库内源码/合同文件，路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
+- source bundle contract：`brand-profile-evaluation-source-bundle/v7`；固定 37 份 Git 跟踪的源码/合同文件（不引用 ignored build output），路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
 - dispatch payload：fixture、prepared task input、prompt 与 source fingerprints 全部由 canonical case builder 构造、冻结并纳入 case SHA-256；executor 不能替换为未绑定内容。
 - capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。同一 campaign/candidate 的重复请求复用既有 canonical attestation，不重复 dispatch、reserve 或擦除有效证明。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
 - evaluator：`brand-profile-evaluator/10`；rubric SHA-256 `c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c`；harness 内部依次执行 output schema、生产 `validateOutput` 与 canonical task rubric，不接受 caller 自带 grader。
@@ -69,3 +70,13 @@
 - 每次 task/probe 在任何 wire dispatch 前，按 `repairTaskOutput` 的最坏调用数（当前最多 2 次）一次性 reserve campaign 全部上界，因此 repair 不能在只预留首调预算时超发；结算释放未用 headroom，但不会把既有 envelope attempt cap 乘以实际 callCount。首次或累计响应的已知 provider-reported cost 达到 `perCallCostCapCents` 时，executor 必须在第二次计费 repair 前结算并持久 freeze authorization；repair 聚合成本超过原 cap 时同样是当前 budget 的硬失败，换 fresh guard 也不能续发。budget guard 使用模块私有 WeakMap 品牌、JavaScript 私有状态与捕获的 reserve/settle 原型方法，duck/Proxy budget 或实例/prototype monkeypatch 都不能绕过。每个返回 run 使用模块加载时捕获的 `freeze`/`isFrozen`/`values` 整棵 deep-freeze 并复验，再由模块私有 WeakMap 绑定实际 guard；summary/ranker 必须显式收到同一个 genuine guard，并逐 run 核验对象身份与 campaignId，因此逐次新建 genuine guard、混用 guard、运行时替换 Object intrinsic、原地改写已绑定 run、clone/JSON reload 或只改公开 campaignId 都 fail-closed。unknown、malformed 或无法持久化的 settlement 保留完整最坏上界并冻结后续 dispatch。`rejected_before_dispatch` 只允许本地 reserve 拒绝路径，probe/matrix 在 executor 进入后声称该 reason 一律归 unknown 并冻结；当前 attempt 超过原 cap 时保留质量观察，但标记预算硬失败并不可排名。
 - 每个 run（schema v3）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、evaluator rubric、成本安全合同/attestation/凭据快照/价格快照 SHA-256 和所需 capability-probe attestation；probe attestation v2 绑定同一组成本安全摘要，矩阵内漂移即拒绝。终态原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；终态被拒输出只留 SHA-256 digest 与 failureCode，不把 PII/schema-invalid 原文写入 evidence。v2 adapter 对 repair 中间输出只聚合 usage/callCount，不保存其中间 digest 或 rejection reason，也不得把它称为已持久化 evidence；后续 fixed-commit evidence 若要求中间 repair provenance，必须先在独立 PR 显式升级 run schema/source contract。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。
 - 可用性、协议、身份、probe attestation、usage、artifact fingerprint、matrix、生产 P95、预算和成本任一未闭合，都不能生成可晋级排名。
+
+## Zero-cost evidence 准备
+
+- 准备合同：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1`；固定 task `site_builder.brand_profile`、suite `site-builder.brand-profile-evaluation-suite/2026-07-27-v1`、source bundle `brand-profile-evaluation-source-bundle/v7`。
+- manifest：61 executions / 最多 122 wire calls；其中 capability probe 1、target 36、legacy comparator 24。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。
+- prompt 上界从六个 canonical case 的真实 initial/repair payload 派生：initial 最多 6092 UTF-8 bytes，repair 最多 10399 UTF-8 bytes；repair reason 另受机器常量硬限，不以 attestation 自报上限替代真实 payload。
+- 61 executions / 122 wire calls / 2440¢ 仍标记为 `unverified_planning_upper_bound`，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。
+- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 `wx` 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 `.env` 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。
+- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 `READY_FOR_PRODUCT_DECISION`，同时固定 `dispatchAuthorization=NOT_AUTHORIZED`。
+- 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。图片、视频、embedding、preview、deferred、其他六个无 suite task 继续在 client 前阻断。
