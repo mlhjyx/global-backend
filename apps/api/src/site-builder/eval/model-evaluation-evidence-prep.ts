@@ -398,20 +398,25 @@ export function buildModelEvaluationEvidencePlanningManifest(): ModelEvaluationE
       }
     }
   }
-  const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
     plan.taskId,
-  ).route;
-  for (const alias of [legacyRoute.primary, ...legacyRoute.fallbacks]) {
-    for (const fixtureId of suite.fixtureIds) {
-      for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
-        append({
-          kind: "legacy_comparator",
-          mode: "legacy_comparator",
-          alias,
-          protocol: "openai-chat-completions",
-          fixtureId,
-          attempt,
-        });
+  );
+  if (comparatorRoute) {
+    for (const alias of [
+      comparatorRoute.primary,
+      ...comparatorRoute.fallbacks,
+    ]) {
+      for (const fixtureId of suite.fixtureIds) {
+        for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
+          append({
+            kind: "legacy_comparator",
+            mode: "legacy_comparator",
+            alias,
+            protocol: "openai-chat-completions",
+            fixtureId,
+            attempt,
+          });
+        }
       }
     }
   }

@@ -1647,14 +1647,17 @@ function assertCanonicalRequest(
     }
     selectedProtocol = candidate.expectedProtocol;
   } else {
-    const legacyRoute = modelPolicyRegistry.getLegacyTaskPolicy(
+    const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
       request.taskId,
-    ).route;
+    );
     if (
+      !comparatorRoute ||
       catalog.status !== "legacy-only" ||
       catalog.domain !== "text" ||
       request.expectedProtocol !== "openai-chat-completions" ||
-      ![legacyRoute.primary, ...legacyRoute.fallbacks].includes(request.alias)
+      ![comparatorRoute.primary, ...comparatorRoute.fallbacks].includes(
+        request.alias,
+      )
     ) {
       throw preDispatchError("legacy_comparator_not_admitted");
     }

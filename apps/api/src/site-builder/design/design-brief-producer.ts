@@ -23,6 +23,7 @@ import {
 } from "../site-build-cost-ledger";
 import type { SiteBuilderTaskDefinition } from "../agents/ai-task";
 import { runAiTask } from "../agents/ai-task";
+import { resolveTaskExecutionTarget } from "../agents/task-routes";
 import { STATIC_DESIGN_CATALOG_V2 } from "./catalog";
 
 export const DESIGN_SPEC_INPUT_VERSION = "site-builder-design-spec-input/v1";
@@ -671,7 +672,16 @@ export class DesignBriefProducer {
       taskAttemptId: string;
       fenceToken: string;
     },
-  ): Promise<DesignSpecTaskOutput> {
+  ): Promise<DesignSpecTaskOutput | undefined> {
+    const executionTarget = resolveTaskExecutionTarget(DESIGN_SPEC_TASK_ID);
+    if (executionTarget.kind === "deterministic_fallback") {
+      if (executionTarget.fallback.id !== "safe-blueprint") {
+        throw new Error(
+          `design_spec deterministic fallback is not supported: ${executionTarget.fallback.id}`,
+        );
+      }
+      return undefined;
+    }
     if (this.deps.executeTask) {
       const output = await this.deps.executeTask(input, context);
       validateTaskOutput(input, output);
@@ -683,6 +693,7 @@ export class DesignBriefProducer {
     return (
       await runAiTask(DESIGN_SPEC_TASK, input, {
         gateway: this.deps.gateway,
+        route: executionTarget.route,
         ctx: {
           workspaceId: context.workspaceId,
           runId: context.buildRunId,
