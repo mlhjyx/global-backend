@@ -53,6 +53,7 @@ import { StorageQualityArtifactSink } from "../site-builder/quality/quality-arti
 import { DeterministicQualityService } from "../site-builder/quality/deterministic-quality.service";
 import { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
 import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
+import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -76,6 +77,9 @@ async function main(): Promise<void> {
     ),
     closedRepairService,
     releaseService,
+  );
+  const qualityNarrativeService = new QualityNarrativeService(
+    siteBuilderStorage,
   );
   const imagePipeline = new ImagePipelineService(
     prisma,
@@ -222,6 +226,7 @@ async function main(): Promise<void> {
         imagePipeline,
         releaseService,
         qualityCandidateService,
+        qualityNarrativeService,
         closedRepairService,
         storage: siteBuilderStorage,
         rendererBuildIdentity,

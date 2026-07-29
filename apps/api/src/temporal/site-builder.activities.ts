@@ -161,6 +161,18 @@ import {
 import type { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import type { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
 import type { QualityCandidateIdentity } from "../site-builder/quality/quality-candidate.service";
+import {
+  QA_SUMMARIZE_TASK,
+  SEO_REVIEW_TASK,
+  type QualityNarrativeEvidenceRefV1,
+  type QualityNarrativeModelProvenanceV1,
+  type QualityNarrativeTaskInputV1,
+  type QualityNarrativeTaskOutputV1,
+} from "../site-builder/quality/quality-narrative";
+import type {
+  QualityNarrativeExecutionResult,
+  QualityNarrativeService,
+} from "../site-builder/quality/quality-narrative.service";
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -299,12 +311,18 @@ export interface SiteBuilderActivityDeps {
   >;
   /** M1-f fenced candidate/evaluate/repair/materialize boundary. */
   qualityCandidateService?: QualityCandidateService;
+  /** M1-g private QA/SEO narrator; absent means deterministic consumer_unavailable. */
+  qualityNarrativeService?: QualityNarrativeService;
   /** Server-only closed option generator used for deterministic repair fallback. */
   closedRepairService?: ClosedRepairService;
   /** Trusted private object store; quality evidence is never exposed as a public site file. */
   storage?: Pick<
     StorageService,
-    "getBufferBounded" | "putBufferImmutable" | "hashObject" | "deletePrefix"
+    | "head"
+    | "getBufferBounded"
+    | "putBufferImmutable"
+    | "hashObject"
+    | "deletePrefix"
   >;
   /** Immutable Renderer identity frozen into DesignBrief and ReleaseManifest v2. */
   rendererBuildIdentity?: string;
@@ -371,6 +389,8 @@ export interface RefurbishQualityEvaluationSummary {
   artifactSet: QualityArtifactSetV1;
   passed: boolean;
   artifactRefs: BuildStepArtifactRefsV1;
+  /** Private, non-authoritative JSON evidence. Never changes the P4 verdict. */
+  qualityNarrativeRef?: QualityNarrativeEvidenceRefV1;
 }
 
 export interface RefurbishQualityRepairSummary extends RefurbishQualityCandidateSummary {
@@ -671,6 +691,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     imagePipeline,
     releaseService,
     qualityCandidateService,
+    qualityNarrativeService,
     closedRepairService,
     storage,
     rendererBuildIdentity = "site-renderer@dev-unpinned",
@@ -745,6 +766,146 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     );
     if (!eligible) {
       throw new Error("QUALITY_GATE_FAILED: paid execution gate is closed");
+    }
+  };
+
+  const assertQualityEvaluationEligible = async (input: {
+    workspaceId: string;
+    buildRunId: string;
+  }): Promise<void> => {
+    const running = await prisma.withWorkspace(
+      input.workspaceId,
+      async (tx) =>
+        (
+          await tx.siteBuildRun.findUnique({
+            where: { id: input.buildRunId },
+            select: { status: true },
+          })
+        )?.status === "running",
+    );
+    if (!running) {
+      throw new Error("QUALITY_GATE_FAILED: build run is not running");
+    }
+  };
+
+  const qualityNarrativeExecutionResult = (
+    value: Record<string, unknown>,
+  ): QualityNarrativeExecutionResult => {
+    if (
+      !value.output ||
+      typeof value.output !== "object" ||
+      Array.isArray(value.output) ||
+      !value.provenance ||
+      typeof value.provenance !== "object" ||
+      Array.isArray(value.provenance)
+    ) {
+      throw new Error("QUALITY_NARRATIVE_TASK_REPLAY_INVALID");
+    }
+    return {
+      output: value.output as QualityNarrativeTaskOutputV1,
+      provenance:
+        value.provenance as unknown as QualityNarrativeModelProvenanceV1,
+    };
+  };
+
+  const executeQualityNarrativeTask = async (
+    workspaceId: string,
+    siteId: string,
+    buildRunId: string,
+    input: QualityNarrativeTaskInputV1,
+    signal?: AbortSignal,
+  ): Promise<QualityNarrativeExecutionResult> => {
+    if (!gateway || !costLedger) {
+      throw new Error("QUALITY_NARRATIVE_CONSUMER_UNAVAILABLE");
+    }
+    const logicalTaskId = `${input.taskId}:round:${input.round}`;
+    const taskClaim = await costLedger.claimTaskAttempt({
+      workspaceId,
+      siteId,
+      buildRunId,
+      taskId: logicalTaskId,
+    });
+    if (taskClaim.kind === "completed") {
+      return qualityNarrativeExecutionResult(taskClaim.result);
+    }
+    const attempt = taskClaim.attempt;
+    const fence = {
+      workspaceId,
+      attemptId: attempt.id,
+      fenceToken: attempt.fenceToken,
+    };
+    let completed = false;
+    try {
+      const frozen = await costLedger.freezeTaskInput(
+        fence,
+        input as unknown as Record<string, unknown>,
+      );
+      const replay =
+        attempt.status === "MODEL_SUCCEEDED" &&
+        attempt.outputJson &&
+        typeof attempt.outputJson === "object" &&
+        !Array.isArray(attempt.outputJson)
+          ? qualityNarrativeExecutionResult(
+              attempt.outputJson as Record<string, unknown>,
+            )
+          : null;
+      const result =
+        replay ??
+        (await (async (): Promise<QualityNarrativeExecutionResult> => {
+          const definition =
+            input.taskId === "site_builder.qa_summarize"
+              ? QA_SUMMARIZE_TASK
+              : SEO_REVIEW_TASK;
+          const run = await runAiTask<
+            QualityNarrativeTaskInputV1,
+            QualityNarrativeTaskOutputV1
+          >(
+            definition,
+            frozen.input as unknown as QualityNarrativeTaskInputV1,
+            {
+              gateway,
+              signal,
+              ctx: {
+                workspaceId,
+                runId: buildRunId,
+                paidCost: {
+                  siteId,
+                  taskAttemptId: attempt.id,
+                  fenceToken: attempt.fenceToken,
+                  scopeKey: `${input.taskId}:round:${input.round}`,
+                  durableReplayResult: (providerResult) => providerResult,
+                },
+              },
+            },
+          );
+          return {
+            output: run.data,
+            provenance: {
+              taskAttemptId: attempt.id,
+              model: run.model,
+              provider: run.provider,
+              reportedModel: run.reportedModel ?? null,
+              modelResolutionSource: run.modelResolutionSource ?? null,
+              fallbackIndex: run.fallbackIndex,
+              usage: run.usage,
+              routePolicy: run.routePolicy,
+            },
+          };
+        })());
+      if (!replay) {
+        await costLedger.storeTaskOutput(
+          fence,
+          result as unknown as Record<string, unknown>,
+        );
+      }
+      await costLedger.completeTask(
+        fence,
+        result as unknown as Record<string, unknown>,
+      );
+      completed = true;
+      return result;
+    } finally {
+      if (!completed) await costLedger.releaseTask(fence);
     }
   };
 
@@ -2985,7 +3146,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       if (!qualityCandidateService) {
         throw new Error("QUALITY_CANDIDATE_SERVICE_UNAVAILABLE");
       }
-      await assertQualityExecutionEligible(input);
+      await assertQualityEvaluationEligible(input);
       const context = await loadQualityContext({
         ...input,
         designBrief: input.qualityCandidate.designBrief,
@@ -3022,6 +3183,27 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         deterministic,
         "timeout",
       );
+      const qualityNarrativeRef = qualityNarrativeService
+        ? await qualityNarrativeService.build({
+            siteId: input.siteId,
+            buildRunId: input.buildRunId,
+            evaluation,
+            artifactSet: deterministic.artifactSet,
+            signal: activityCancellationSignal(),
+            ...(gateway && costLedger
+              ? {
+                  execute: (taskInput, signal) =>
+                    executeQualityNarrativeTask(
+                      input.workspaceId,
+                      input.siteId,
+                      input.buildRunId,
+                      taskInput,
+                      signal,
+                    ),
+                }
+              : {}),
+          })
+        : undefined;
       return {
         candidate: input.qualityCandidate.candidate,
         designBrief: input.qualityCandidate.designBrief,
@@ -3033,6 +3215,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         artifactSet: deterministic.artifactSet,
         passed: qualityPasses(evaluation),
         artifactRefs: qualityArtifactRefs(deterministic.artifactSet),
+        ...(qualityNarrativeRef ? { qualityNarrativeRef } : {}),
       };
     },
 
