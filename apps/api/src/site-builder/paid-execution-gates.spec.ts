@@ -3,6 +3,7 @@ import { RouterModelGateway } from '../model-gateway/router-model-gateway';
 import type { ModelProvider } from '../model-gateway/model-provider';
 import type { ModelRouter } from '../model-gateway/model-router';
 import type { ModelResult } from '../model-gateway/types';
+import { ProviderOutputError } from '../model-gateway/providers/provider-output-error';
 import { ToolBroker } from '../tools/tool-broker';
 import { ToolRegistry } from '../tools/tool-registry';
 import { RateLimiter } from '../tools/rate-limiter';
@@ -290,6 +291,125 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     expect(model.preflightPaidCall).toHaveBeenCalledWith(
       expect.objectContaining({ signal: controller.signal }),
       paidModelContext,
+    );
+  });
+
+  it('suppresses structured repair when the first physical settlement is unknown', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+    }));
+    vi.mocked(model.generateStructured).mockResolvedValue({
+      data: {},
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      reportedModel: 'gpt-5.6-terra',
+      modelResolutionSource: 'upstream_response',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        gatewaySettlements: [
+          {
+            status: 'unknown',
+            requestId: 'req_unknown_initial_001',
+            resolverId: SETTLEMENT_PREFLIGHT.resolverId,
+            reason: 'log_unavailable',
+          },
+        ],
+      },
+    });
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+      disablePaidCalls,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {
+            type: 'object',
+            required: ['ok'],
+            properties: { ok: { type: 'boolean' } },
+          },
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        paidModelContext,
+      ),
+    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+
+    expect(model.generateStructured).toHaveBeenCalledOnce();
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        measurement: expect.objectContaining({ basis: 'unknown' }),
+      }),
+    );
+    expect(disablePaidCalls).toHaveBeenCalledOnce();
+  });
+
+  it('skips a non-attested dev stub after a known settled provider failure', async () => {
+    const knownFailure = new ProviderOutputError(
+      'provider returned a schema-invalid result',
+      settledUsage({ inputTokens: 10, outputTokens: 5 }),
+      {
+        callCount: 1,
+        provider: 'gateway',
+        model: 'gpt-5.6-terra',
+        reportedModel: 'gpt-5.6-terra',
+        modelResolutionSource: 'upstream_response',
+      },
+    );
+    const model = provider(async () => {
+      throw knownFailure;
+    });
+    const stub = {
+      id: 'stub',
+      generateStructured: vi.fn(async () => ({
+        data: { ok: true },
+        provider: 'stub',
+        model: 'stub',
+      })),
+    } as unknown as ModelProvider;
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const gateway = new RouterModelGateway({
+      route: () => [model, stub],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        paidModelContext,
+      ),
+    ).rejects.toBe(knownFailure);
+
+    expect(stub.generateStructured).not.toHaveBeenCalled();
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        measurement: expect.objectContaining({ basis: 'token_pricing' }),
+      }),
     );
   });
 

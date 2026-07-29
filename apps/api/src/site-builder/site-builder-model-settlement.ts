@@ -459,7 +459,17 @@ function catalogRows(catalog: OpenOxPricingCatalog): {
 
 function pricingCurrency(productLine: string): 'USD' | 'CNY' | null {
   if (productLine === 'claude' || productLine === 'kimi') return 'USD';
-  if (['gpt', 'deepseek', 'glm', 'grok', 'gemini'].includes(productLine)) {
+  if (
+    [
+      'gpt',
+      'deepseek',
+      'glm',
+      'grok',
+      'gemini',
+      'minimax',
+      'doubao',
+    ].includes(productLine)
+  ) {
     return 'CNY';
   }
   return null;

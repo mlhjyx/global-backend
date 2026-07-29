@@ -143,6 +143,23 @@ export class RouterModelGateway extends ModelGateway {
       };
       const first = await p.generateStructured<T>(input, runCtx);
       if (p.id === 'stub') return first; // stub 输出不参与 schema 校验（dev 兜底）
+      if (
+        first.usage?.gatewaySettlements?.some(
+          (observation) => observation.status === 'unknown',
+        )
+      ) {
+        throw new ProviderOutputError(
+          'initial structured call settlement is unknown; repair suppressed',
+          first.usage,
+          {
+            callCount: 1,
+            provider: first.provider,
+            model: first.model,
+            reportedModel: first.reportedModel,
+            modelResolutionSource: first.modelResolutionSource,
+          },
+        );
+      }
       const check = checkAgainstSchema(input.schema, first.data);
       let repairReason: string;
       let repairKind: 'JSON Schema' | '任务确定性硬门';
@@ -463,15 +480,38 @@ export class RouterModelGateway extends ModelGateway {
     if (!this.paidLedger || !ctx.runId) {
       throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
     }
+    if (!chain.some((provider) => provider.preflightPaidCall)) {
+      this.trace?.record({
+        workspaceId: ctx.workspaceId,
+        task: input.task,
+        op,
+        provider: 'model-preflight',
+        model: input.model ?? 'provider-default',
+        status: 'ERROR',
+        errorMessage:
+          'paid call denied before reserve: MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED',
+        latencyMs: 0,
+        correlationId: ctx.correlationId,
+        modelPolicy: ctx.modelPolicy,
+      });
+      throw new PaidCallDeniedError(
+        'MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED',
+      );
+    }
 
     let lastErr: unknown;
     for (const [providerIndex, provider] of chain.entries()) {
+      // Paid Site Builder execution may only enter an attested provider.
+      // Development stubs remain useful for non-paid local flows, but after a
+      // known, fully settled provider failure they must not replace that error
+      // with a terminal preflight denial and prevent the task-level model
+      // fallback from running.
+      if (!provider.preflightPaidCall) continue;
       const requestedModel = input.model ?? 'provider-default';
       let settlementPreflight: PaidModelPreflightEvidence;
       try {
         if (
           op !== 'generateStructured' ||
-          !provider.preflightPaidCall ||
           !input.prompt ||
           !input.maxTokens
         ) {
@@ -625,9 +665,12 @@ export class RouterModelGateway extends ModelGateway {
                 }
               : {}),
           },
-          errorCode: providerError
-            ? 'PROVIDER_OUTPUT_ERROR'
-            : 'PROVIDER_CALL_ERROR',
+          errorCode:
+            measurement.basis === 'unknown'
+              ? 'MODEL_SETTLEMENT_UNKNOWN'
+              : providerError
+                ? 'PROVIDER_OUTPUT_ERROR'
+                : 'PROVIDER_CALL_ERROR',
         });
         if (measurement.basis === 'unknown') {
           await this.freezeUnknownSettlement(scope, 'MODEL_SETTLEMENT_UNKNOWN');

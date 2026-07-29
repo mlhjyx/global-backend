@@ -19,7 +19,8 @@ Model dispatch authorization: `NOT_AUTHORIZED`
   conversion.
 - The preflight runs before durable reserve and before a generative client.
 - One initial structured request plus at most one closed repair is priced
-  conservatively before execution.
+  conservatively before execution. Repair is suppressed when the initial
+  physical call has an unknown settlement.
 - Every physical response must bind `x-oneapi-request-id` to exactly one
   token-scoped consume-log row. Multi-call usage is accepted only when all
   observations match. new-api supplies request/channel/token evidence only;

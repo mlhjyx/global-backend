@@ -44,6 +44,8 @@ function productLineFor(alias: string): string {
   if (alias.startsWith('gpt-')) return 'gpt';
   if (alias.startsWith('claude-')) return 'claude';
   if (alias.startsWith('glm-')) return 'glm';
+  if (alias.startsWith('minimax-')) return 'minimax';
+  if (alias.startsWith('doubao-')) return 'doubao';
   return 'deepseek';
 }
 
@@ -198,6 +200,22 @@ function liveFetch(input: string | URL | Request): Promise<Response> {
   }
   throw new Error(`unexpected test URL ${url.pathname}`);
 }
+
+describe('OpenOx pricing family admission', () => {
+  it.each([
+    ['minimax-m3', 'minimax'],
+    ['doubao-seed-2.0-pro', 'doubao'],
+    ['doubao-seed-2.0-lite', 'doubao'],
+  ])('prices %s in CNY when OpenOx publishes its %s row', (alias) => {
+    const catalog = pricingCatalog([alias]);
+    expect(
+      settlementOpenOxPrice(catalog, alias, groupFor(alias)),
+    ).toMatchObject({
+      productLine: productLineFor(alias),
+      currency: 'CNY',
+    });
+  });
+});
 
 function paidContext() {
   return {

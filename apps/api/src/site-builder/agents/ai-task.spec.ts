@@ -421,4 +421,49 @@ describe('runAiTask — 回退链与显式失败', () => {
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
     expect(calls.map((call) => call.model)).toEqual(['model-a']);
   });
+
+  it('R4-B: paid timeout awaits terminal settlement before considering fallback', async () => {
+    const calls: string[] = [];
+    let settlementFinished = false;
+    const gateway = {
+      generateStructured: vi.fn(
+        async (input: GenerateStructuredInput): Promise<ModelResult<EchoOut>> => {
+          calls.push(input.model ?? 'unknown');
+          if (input.model === 'model-a') {
+            await new Promise<void>((resolve) => {
+              input.signal?.addEventListener(
+                'abort',
+                () => setTimeout(resolve, 10),
+                { once: true },
+              );
+            });
+            settlementFinished = true;
+            throw new PaidOperationUnknownError(
+              'b'.repeat(64),
+              'MODEL_SETTLEMENT_UNKNOWN',
+            );
+          }
+          return okResult(input.model ?? '?');
+        },
+      ),
+    } as unknown as ModelGateway;
+    const route = { ...ROUTE, timeoutMs: 5 };
+
+    await expect(
+      runAiTask(DEF, { name: 'Acme' }, {
+        gateway,
+        route,
+        ctx: {
+          ...CTX,
+          paidCost: {
+            siteId: 'site-1',
+            scopeKey: 'attempt-timeout',
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(PaidOperationUnknownError);
+
+    expect(settlementFinished).toBe(true);
+    expect(calls).toEqual(['model-a']);
+  });
 });

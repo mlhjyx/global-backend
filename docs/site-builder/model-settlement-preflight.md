@@ -53,7 +53,10 @@ This contract does not:
    as operation metadata so a worker retry cannot bypass an existing
    settled/unknown operation merely because the maximum-24-hour attestation
    was refreshed.
-5. Execute at most one initial call and one closed structured repair.
+5. Execute at most one initial call and one closed structured repair. Resolve
+   the initial call's request-bound settlement before deciding whether repair
+   is allowed; an `unknown` initial observation terminates and freezes the
+   paid operation without a second wire call.
 6. For each response, capture `x-oneapi-request-id`, query the token-scoped
    new-api consume log, and require exactly one row with the frozen alias,
    channel, token counts, and gateway quota observation. Gateway quota is
