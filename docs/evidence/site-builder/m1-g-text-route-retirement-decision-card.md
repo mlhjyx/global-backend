@@ -11,6 +11,25 @@ evidence、promotion、运行时 attestation 或费用授权。
 
 模型费用：**$0.00**
 
+## Create-only report
+
+- 新报告：
+  `m1-g-current-route-recovery-retirement-report.json`
+- 报告 schema：`site-builder-current-route-recovery-report/2026-07-29-v3`
+- 报告 SHA-256：
+  `4d37282952b2b89226765693b7f8d1775d828acf93c66bc9cd60a8a531c59386`
+- runner fixed commit：
+  `b8cb034e50fda10ed54e272b16777511f8dab601`
+- route baseline：
+  `e727bb141ad2c8c5fdd4379308ed85cfc7aefb86`
+- OpenOx source bundle fixed commit：
+  `e91b184741a10b83459a8041e3ecd9701fdf3b5b`
+
+报告仍冻结 7 task / 15 dispatch / 8 active alias，但新 runtime credential
+required allowlist 只含 5 个非退役 alias。结果为
+`BLOCKED_CURRENT_ROUTE_RECOVERY`，唯一退役 blocker 为
+`RETIRED_ALIAS_STILL_ACTIVE`；dispatch 始终 `NOT_AUTHORIZED`。
+
 ## 用户路径影响
 
 目标用户路径为 `CAP-SITE-BUILD-001 / SCN-FE-SITE-011 /

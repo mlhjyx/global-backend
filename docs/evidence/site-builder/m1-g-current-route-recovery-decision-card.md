@@ -44,7 +44,7 @@ Model fees incurred: **$0.00**
   `e727bb141ad2c8c5fdd4379308ed85cfc7aefb86`; the canonical 15-dispatch
   digest is
   `f0cb1473cb025621a3f9e6df7dec6045bb7e5df2a3586c6d3e93716913733184`.
-  The CLI rejects route-source drift from that commit.
+  The CLI rejects any current registry whose canonical dispatch digest differs.
 
 The snapshot contains no gateway key, bearer token, authorization header,
 base URL, prompt, model response, customer data, or reversible credential
