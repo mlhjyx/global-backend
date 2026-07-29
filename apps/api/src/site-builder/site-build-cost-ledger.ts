@@ -1,6 +1,8 @@
 import { createHash, randomUUID as nodeRandomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PaidModelPreflightEvidence } from '../model-gateway/paid-model-settlement';
+import type { ModelUsage } from '../model-gateway/types';
 import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from './agents/model-policy.registry';
 
 export const SITE_BUILD_COST_SUMMARY_VERSION =
@@ -30,11 +32,8 @@ interface ModelMeasurementInput {
   taskId: string;
   requestedModel: string;
   resolvedModel?: string;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    costUsd?: number;
-  };
+  usage?: ModelUsage;
+  settlementPreflight?: PaidModelPreflightEvidence;
   callCount?: number;
   reservationMicrousd: number;
 }
@@ -65,6 +64,62 @@ export function modelCostMeasurement(
   const outputTokens = nonNegativeInt(input.usage?.outputTokens);
   const callCount = Math.max(1, Math.floor(input.callCount ?? 1));
   const costUsd = input.usage?.costUsd;
+  const gatewaySettlements = input.usage?.gatewaySettlements ?? [];
+  if (input.settlementPreflight) {
+    const settled = gatewaySettlements.filter(
+      (observation) => observation.status === 'settled',
+    );
+    const complete =
+      gatewaySettlements.length === callCount &&
+      settled.length === callCount &&
+      settled.every(
+        (observation) =>
+          observation.resolverId === input.settlementPreflight!.resolverId &&
+          observation.alias === input.settlementPreflight!.alias &&
+          observation.protocol === input.settlementPreflight!.protocol &&
+          observation.channelId ===
+            input.settlementPreflight!.expectedChannelId &&
+          observation.quotaPerUnit ===
+            input.settlementPreflight!.quotaPerUnit,
+      );
+    if (complete) {
+      const reportedCostMicrousd = settled.reduce(
+        (sum, observation) => sum + observation.costMicrousd,
+        0,
+      );
+      return {
+        basis: 'provider_reported',
+        budgetChargeMicrousd: reportedCostMicrousd,
+        reportedCostMicrousd,
+        calculatedCostMicrousd: null,
+        estimatedCostMicrousd: null,
+        inputTokens,
+        outputTokens,
+        callCount,
+        meta: {
+          settlementPreflight: input.settlementPreflight,
+          gatewaySettlements,
+        },
+      };
+    }
+    return {
+      basis: 'unknown',
+      budgetChargeMicrousd: input.reservationMicrousd,
+      reportedCostMicrousd: null,
+      calculatedCostMicrousd: null,
+      estimatedCostMicrousd: null,
+      inputTokens,
+      outputTokens,
+      callCount,
+      meta: {
+        reason: 'gateway_settlement_incomplete_or_mismatched',
+        requestedModel: input.requestedModel,
+        ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
+        settlementPreflight: input.settlementPreflight,
+        gatewaySettlements,
+      },
+    };
+  }
   if (Number.isFinite(costUsd) && costUsd! >= 0) {
     const reportedCostMicrousd = Math.round(costUsd! * 1_000_000);
     return {
@@ -316,6 +371,8 @@ export interface PaidCostContext {
   scopeKey: string;
   taskAttemptId?: string;
   fenceToken?: string;
+  /** Installed by RouterModelGateway only after the paid preflight succeeds. */
+  settlementPreflight?: PaidModelPreflightEvidence;
   /**
    * Explicit domain persistence gate for model replay. The gateway never
    * stores a raw provider result when this projection is absent.

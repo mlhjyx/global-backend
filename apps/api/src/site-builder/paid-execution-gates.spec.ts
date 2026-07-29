@@ -17,15 +17,62 @@ const SITE_ID = '22222222-2222-4222-8222-222222222222';
 const RUN_ID = '33333333-3333-4333-8333-333333333333';
 const ATTEMPT_ID = '44444444-4444-4444-8444-444444444444';
 const FENCE = '55555555-5555-4555-8555-555555555555';
+const SETTLEMENT_PREFLIGHT = {
+  schemaVersion: 'site-builder-paid-model-preflight-evidence/v1' as const,
+  attestationId: 'site-builder-runtime-test',
+  snapshotSha256: 'a'.repeat(64),
+  resolverId: 'new-api-token-log-v1',
+  taskId: 'site_builder.brand_profile',
+  alias: 'gpt-5.6-terra',
+  protocol: 'openai-responses' as const,
+  expectedChannelId: 7,
+  quotaPerUnit: 500_000,
+  credentialQuotaCapMicrousd: 10_000_000,
+  credentialRemainingMicrousd: 9_000_000,
+  pricedMaximumMicrousd: 50_000,
+};
+
+function settledUsage(
+  usage: ModelResult<unknown>['usage'],
+): ModelResult<unknown>['usage'] {
+  return {
+    ...usage,
+    gatewaySettlements: [
+      {
+        status: 'settled',
+        requestId: 'req_paid_test_001',
+        resolverId: SETTLEMENT_PREFLIGHT.resolverId,
+        alias: SETTLEMENT_PREFLIGHT.alias,
+        protocol: SETTLEMENT_PREFLIGHT.protocol,
+        channelId: SETTLEMENT_PREFLIGHT.expectedChannelId,
+        quota: 500,
+        quotaPerUnit: SETTLEMENT_PREFLIGHT.quotaPerUnit,
+        costMicrousd: 1_000,
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+      },
+    ],
+  };
+}
 
 function provider(
   implementation: () => Promise<ModelResult<unknown>>,
 ): ModelProvider {
   return {
     id: 'gateway',
-    generateText: vi.fn(implementation),
-    generateStructured: vi.fn(implementation),
-    embed: vi.fn(implementation),
+    preflightPaidCall: vi.fn(async () => SETTLEMENT_PREFLIGHT),
+    generateText: vi.fn(async () => {
+      const result = await implementation();
+      return { ...result, usage: settledUsage(result.usage) };
+    }),
+    generateStructured: vi.fn(async () => {
+      const result = await implementation();
+      return { ...result, usage: settledUsage(result.usage) };
+    }),
+    embed: vi.fn(async () => {
+      const result = await implementation();
+      return { ...result, usage: settledUsage(result.usage) };
+    }),
     health: vi.fn(async () => ({ healthy: true })),
   } as unknown as ModelProvider;
 }
@@ -42,7 +89,43 @@ const paidModelContext = {
 };
 
 describe('RouterModelGateway persistent paid-call gate', () => {
-  it('reserves before the provider and settles measured token cost with provenance', async () => {
+  it('denies before reserve when the provider has no settlement preflight', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+    }));
+    delete (model as Partial<ModelProvider>).preflightPaidCall;
+    const reserveOperation = vi.fn();
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation,
+      settleOperation: vi.fn(),
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        paidModelContext,
+      ),
+    ).rejects.toMatchObject({
+      name: 'PaidCallDeniedError',
+      decision: 'MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED',
+    });
+    expect(reserveOperation).not.toHaveBeenCalled();
+    expect(model.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it('preflights before reserve and settles request-bound gateway cost with provenance', async () => {
     const order: string[] = [];
     const model = provider(async () => {
       order.push('provider');
@@ -54,6 +137,10 @@ describe('RouterModelGateway persistent paid-call gate', () => {
         modelResolutionSource: 'upstream_response',
         usage: { inputTokens: 1_000, outputTokens: 500 },
       };
+    });
+    vi.mocked(model.preflightPaidCall!).mockImplementation(async () => {
+      order.push('preflight');
+      return SETTLEMENT_PREFLIGHT;
     });
     const paidLedger = {
       reserveOperation: vi.fn(async () => {
@@ -77,12 +164,13 @@ describe('RouterModelGateway persistent paid-call gate', () => {
         schema: {},
         model: 'gpt-5.6-terra',
         maxCostCents: 40,
+        maxTokens: 1_000,
       },
       paidModelContext,
     );
 
     expect(result.data).toEqual({ ok: true });
-    expect(order).toEqual(['reserve', 'provider', 'settle']);
+    expect(order).toEqual(['preflight', 'reserve', 'provider', 'settle']);
     expect(paidLedger.reserveOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: WORKSPACE_ID,
@@ -102,8 +190,8 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       expect.objectContaining({
         status: 'SUCCEEDED',
         measurement: expect.objectContaining({
-          basis: 'token_pricing',
-          calculatedCostMicrousd: 1_000,
+          basis: 'provider_reported',
+          reportedCostMicrousd: 1_000,
         }),
         meta: expect.objectContaining({
           provider: 'gateway',
@@ -149,6 +237,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         {
           ...paidModelContext,
@@ -158,9 +247,16 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           },
         },
       ),
-    ).resolves.toEqual(rawResult);
+    ).resolves.toMatchObject(rawResult);
 
-    expect(durableReplayResult).toHaveBeenCalledWith(rawResult);
+    expect(durableReplayResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: rawResult.data,
+        provider: rawResult.provider,
+        model: rawResult.model,
+        usage: expect.objectContaining(rawResult.usage),
+      }),
+    );
     expect(settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'SUCCEEDED',
@@ -198,10 +294,11 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         paidModelContext,
       ),
-    ).resolves.toEqual(rawResult);
+    ).resolves.toMatchObject(rawResult);
     expect(settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({ result: undefined }),
     );
@@ -236,6 +333,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         paidModelContext,
       )
@@ -269,6 +367,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         {
           ...paidModelContext,
@@ -326,6 +425,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         paidModelContext,
       ),
@@ -352,6 +452,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         paidModelContext,
       ),
@@ -385,11 +486,81 @@ describe('RouterModelGateway persistent paid-call gate', () => {
           schema: {},
           model: 'gpt-5.6-terra',
           maxCostCents: 40,
+          maxTokens: 1_000,
         },
         paidModelContext,
       ),
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('settles conservatively, freezes the run, and never returns an unknown model settlement', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+    }));
+    vi.mocked(model.generateStructured).mockResolvedValue({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        gatewaySettlements: [
+          {
+            status: 'unknown',
+            requestId: 'req_unknown_001',
+            resolverId: SETTLEMENT_PREFLIGHT.resolverId,
+            reason: 'log_unavailable',
+          },
+        ],
+      },
+    });
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+      disablePaidCalls,
+    } as never;
+
+    const error = await gateway
+      .generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        paidModelContext,
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PaidOperationUnknownError);
+    expect((error as PaidOperationUnknownError).errorCode).toBe(
+      'MODEL_SETTLEMENT_UNKNOWN',
+    );
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
+        measurement: expect.objectContaining({
+          basis: 'unknown',
+          budgetChargeMicrousd: 800_000,
+        }),
+      }),
+    );
+    expect(disablePaidCalls).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RUN_ID,
+      'MODEL_SETTLEMENT_UNKNOWN',
+    );
   });
 });
 

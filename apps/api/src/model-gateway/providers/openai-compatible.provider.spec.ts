@@ -99,6 +99,102 @@ describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
   });
 });
 
+describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
+  it('passes x-oneapi-request-id to the frozen settlement resolver', async () => {
+    const preflight = {
+      schemaVersion: 'site-builder-paid-model-preflight-evidence/v1' as const,
+      attestationId: 'provider-settlement-test',
+      snapshotSha256: 'a'.repeat(64),
+      resolverId: 'new-api-token-log-v1',
+      taskId: 'site_builder.copy',
+      alias: 'deepseek-v4-pro',
+      protocol: 'openai-chat-completions' as const,
+      expectedChannelId: 9,
+      quotaPerUnit: 500_000,
+      credentialQuotaCapMicrousd: 10_000_000,
+      credentialRemainingMicrousd: 9_000_000,
+      pricedMaximumMicrousd: 100_000,
+    };
+    const resolve = vi.fn(async () => ({
+      status: 'settled' as const,
+      requestId: 'req_provider_paid_001',
+      resolverId: preflight.resolverId,
+      alias: preflight.alias,
+      protocol: preflight.protocol,
+      channelId: preflight.expectedChannelId,
+      quota: 500,
+      quotaPerUnit: preflight.quotaPerUnit,
+      costMicrousd: 1_000,
+      inputTokens: 10,
+      outputTokens: 5,
+    }));
+    const paidProvider = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'https://gateway.example.test/v1',
+      apiKey: 'runtime-token',
+      model: 'deepseek-v4-pro',
+      paidModelSettlement: {
+        preflight: vi.fn(async () => preflight),
+        resolve,
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            model: 'deepseek-v4-pro',
+            choices: [
+              { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'x-oneapi-request-id': 'req_provider_paid_001',
+            },
+          },
+        ),
+      ),
+    );
+
+    const result = await paidProvider.generateStructured(
+      {
+        task: 'site_builder.copy',
+        prompt: 'p',
+        schema: {},
+        model: 'deepseek-v4-pro',
+      },
+      {
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        runId: '22222222-2222-4222-8222-222222222222',
+        paidCost: {
+          siteId: '33333333-3333-4333-8333-333333333333',
+          scopeKey: 'copy:model:0',
+          settlementPreflight: preflight,
+        },
+      },
+    );
+
+    expect(resolve).toHaveBeenCalledWith({
+      requestId: 'req_provider_paid_001',
+      evidence: preflight,
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    expect(result.usage).toMatchObject({
+      costUsd: 0.001,
+      gatewaySettlements: [
+        expect.objectContaining({
+          status: 'settled',
+          requestId: 'req_provider_paid_001',
+        }),
+      ],
+    });
+  });
+});
+
 describe('OpenAICompatibleProvider — 空输出显式失败', () => {
   it('content 为空 + finish_reason=length → 抛 ProviderOutputError（含 finish_reason/模型名，携带 usage）', async () => {
     mockChatResponse({

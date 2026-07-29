@@ -4,7 +4,7 @@
  * 否则「reasoning 预算耗尽/截断」这类**花了 token 却失败**的调用会绕过硬预算上界（M1-b fast-follow 改动 2）。
  */
 export class ProviderOutputError extends Error {
-  readonly usage?: { inputTokens?: number; outputTokens?: number };
+  readonly usage?: ModelUsage;
   /** Number of provider requests represented by this error (schema repair may be two). */
   readonly callCount: number;
   readonly provider?: string;
@@ -14,7 +14,7 @@ export class ProviderOutputError extends Error {
 
   constructor(
     message: string,
-    usage?: { inputTokens?: number; outputTokens?: number },
+    usage?: ModelUsage,
     opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, opts);
@@ -37,7 +37,7 @@ export class ProviderOutputError extends Error {
 export class TaskOutputValidationError extends ProviderOutputError {
   constructor(
     message: string,
-    usage?: { inputTokens?: number; outputTokens?: number },
+    usage?: ModelUsage,
     opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, usage, opts);
@@ -49,7 +49,7 @@ export class TaskOutputValidationError extends ProviderOutputError {
 export class ProviderIdentityError extends ProviderOutputError {
   constructor(
     message: string,
-    usage?: { inputTokens?: number; outputTokens?: number },
+    usage?: ModelUsage,
     opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
   ) {
     super(message, usage, opts);
@@ -78,7 +78,7 @@ export class ProviderHttpError extends Error {
     this.model = input.model;
   }
 }
-import type { ModelResolutionSource } from '../types';
+import type { ModelResolutionSource, ModelUsage } from '../types';
 
 export interface ProviderErrorProvenance {
   provider?: string;

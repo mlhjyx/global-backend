@@ -1,5 +1,6 @@
 import type { ModelExecutionTrace } from '@global/contracts';
 import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
+import type { GatewaySettlementObservation } from './paid-model-settlement';
 
 /** Context threaded into every model call — for routing, tenancy, cost, trace. */
 export interface AiContext {
@@ -19,6 +20,12 @@ export interface ModelUsage {
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
+  /**
+   * One new-api request-bound observation per physical wire call. Runtime
+   * Site Builder accounting accepts the aggregate only when every observation
+   * is settled against the preflighted alias, protocol, channel, and quota.
+   */
+  gatewaySettlements?: readonly GatewaySettlementObservation[];
 }
 
 export type ModelResolutionSource = 'upstream_response' | 'requested_fallback';
