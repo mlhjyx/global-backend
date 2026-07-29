@@ -105,7 +105,7 @@ describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
 });
 
 describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
-  it('passes x-oneapi-request-id to the frozen settlement resolver', async () => {
+  it('lets request-bound settlement outlive the caller generation deadline', async () => {
     const preflight = {
       schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
       attestationId: 'provider-settlement-test',
@@ -150,25 +150,33 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
         resolve,
       },
     });
+    const generation = new AbortController();
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              model: 'deepseek-v4-pro',
-              choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
-              usage: { prompt_tokens: 10, completion_tokens: 5 },
-            }),
-            {
-              status: 200,
-              headers: {
-                'content-type': 'application/json',
-                'x-oneapi-request-id': 'req_provider_paid_001',
+      vi.fn(async () => {
+        generation.abort(
+          new DOMException('generation deadline', 'TimeoutError'),
+        );
+        return new Response(
+          JSON.stringify({
+            model: 'deepseek-v4-pro',
+            choices: [
+              {
+                message: { content: '{"ok":true}' },
+                finish_reason: 'stop',
               },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'x-oneapi-request-id': 'req_provider_paid_001',
             },
-          ),
-      ),
+          },
+        );
+      }),
     );
 
     const result = await paidProvider.generateStructured(
@@ -177,6 +185,7 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
         prompt: 'p',
         schema: {},
         model: 'deepseek-v4-pro',
+        signal: generation.signal,
       },
       {
         workspaceId: '11111111-1111-4111-8111-111111111111',
@@ -193,8 +202,8 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       requestId: 'req_provider_paid_001',
       evidence: preflight,
       usage: undefined,
-      signal: undefined,
     });
+    expect(resolve.mock.calls[0]![0]).not.toHaveProperty('signal');
     expect(result.usage).toMatchObject({
       gatewaySettlements: [
         expect.objectContaining({

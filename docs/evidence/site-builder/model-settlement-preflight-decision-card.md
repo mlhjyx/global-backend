@@ -32,8 +32,10 @@ Model dispatch authorization: `NOT_AUTHORIZED`
   `token_pricing`. A consume-log row whose output tokens exceed the immutable
   per-call request cap is invalid and freezes the paid operation.
 - Unknown settlement charges the conservative reservation, records a failed
-  operation, freezes later paid calls for the BuildRun, and cannot fall through
-  to another paid provider.
+  operation and freezes later paid calls for the BuildRun in one workspace
+  transaction, and cannot fall through to another paid provider. Once response
+  headers exist, bounded settlement polling can finish independently of the
+  expired generation deadline.
 - Tests use fake HTTP responses and fake ledgers only.
 
 Model-generation calls made by this PR: **0**

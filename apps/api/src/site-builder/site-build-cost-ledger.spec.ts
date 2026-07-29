@@ -260,6 +260,18 @@ describe('R4-B cost truth classification', () => {
         gatewaySettlements: [observation('req_cost_over_bound', 50_001)],
       }).basis,
     ).toBe('unknown');
+    expect(
+      measure({
+        resolvedModel: settlementPreflight.alias,
+        callCount: 1,
+        gatewaySettlements: [
+          {
+            ...observation('req_output_tokens_over_bound'),
+            outputTokens: 1_001,
+          },
+        ],
+      }).basis,
+    ).toBe('unknown');
   });
 
   it('persists authoritative token totals from every settled log observation', () => {

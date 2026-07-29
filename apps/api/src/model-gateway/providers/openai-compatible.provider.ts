@@ -431,7 +431,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     response: Response,
     usage: Pick<ModelUsage, 'inputTokens' | 'outputTokens'> | undefined,
     ctx: AiContext | undefined,
-    signal?: AbortSignal,
   ): Promise<ModelUsage | undefined> {
     if (!ctx?.paidCost) return usage;
     const evidence = ctx.paidCost.settlementPreflight;
@@ -453,7 +452,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
       requestId: response.headers.get('x-oneapi-request-id'),
       evidence,
       usage,
-      signal,
     });
     return {
       ...usage,
@@ -509,7 +507,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     response: Response,
     model: string,
     ctx: AiContext | undefined,
-    signal?: AbortSignal,
   ): Promise<never> {
     const responseExcerpt = async (): Promise<string> => {
       try {
@@ -526,7 +523,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         responseExcerpt: await responseExcerpt(),
       });
     }
-    const usage = await this.settledUsage(response, undefined, ctx, signal);
+    const usage = await this.settledUsage(response, undefined, ctx);
     throw new ProviderOutputError(
       `${this.id} ${model}: HTTP ${response.status}: ${await responseExcerpt()}`,
       usage,
@@ -574,9 +571,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!res.ok) {
-      return this.throwHttpFailure(res, opts.model, ctx, opts.signal);
+      return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const settlementUsage = await this.settledUsage(res, undefined, ctx, opts.signal);
+    const settlementUsage = await this.settledUsage(res, undefined, ctx);
     const json = await this.parseResponseJson<{
       choices?: { message?: { content?: string }; finish_reason?: string }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -1104,9 +1101,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!res.ok) {
-      return this.throwHttpFailure(res, opts.model, ctx, opts.signal);
+      return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const settlementUsage = await this.settledUsage(res, undefined, ctx, opts.signal);
+    const settlementUsage = await this.settledUsage(res, undefined, ctx);
     const json = await this.parseResponseJson<{
       output?: { content?: { type?: string; text?: string }[] }[];
       output_text?: string;
@@ -1197,9 +1194,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       }),
     });
     if (!res.ok) {
-      return this.throwHttpFailure(res, opts.model, ctx, opts.signal);
+      return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const settlementUsage = await this.settledUsage(res, undefined, ctx, opts.signal);
+    const settlementUsage = await this.settledUsage(res, undefined, ctx);
     const json = await this.parseResponseJson<{
       content?: { type?: string; text?: string }[];
       stop_reason?: string;

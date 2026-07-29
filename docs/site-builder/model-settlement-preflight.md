@@ -64,14 +64,17 @@ This contract does not:
    new-api consume log, and require exactly one row with the frozen alias,
    channel, token counts, and gateway quota observation. The response's output
    token count must not exceed the per-call maximum copied into immutable
-   preflight evidence. Gateway quota is retained for audit but is not converted
-   into money.
+   preflight evidence. Once response headers exist, settlement polling uses its
+   own bounded control-plane timeout rather than the expired generation
+   deadline. Gateway quota is retained for audit but is not converted into
+   money.
 7. Settle only if the number of matching observations equals the physical call
    count. Each accepted observation is priced from the frozen OpenOx
    input/output token rates. Missing, ambiguous, stale, model-mismatched,
    channel-mismatched, or price-mismatched evidence is `unknown`: charge the
    conservative reservation, mark the operation failed, disable further paid
-   calls for the BuildRun, and return `PaidOperationUnknownError`.
+   calls for the BuildRun in the same workspace transaction, and return
+   `PaidOperationUnknownError`.
 
 The preflight itself is fail-closed. No attestation, an unlimited token, a
 broader/narrower model list, exhausted quota points, a changed/missing OpenOx

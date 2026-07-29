@@ -90,6 +90,8 @@ export function modelCostMeasurement(
       calculatedCostMicrousd <=
         input.settlementPreflight.pricedMaximumMicrousd &&
       calculatedCostMicrousd <= input.reservationMicrousd &&
+      settledOutputTokens <=
+        input.settlementPreflight.maxOutputTokensPerCall * callCount &&
       settled.every(
         (observation) =>
           observation.resolverId === input.settlementPreflight!.resolverId &&
@@ -97,7 +99,9 @@ export function modelCostMeasurement(
           observation.protocol === input.settlementPreflight!.protocol &&
           observation.channelId ===
             input.settlementPreflight!.expectedChannelId &&
-          observation.basis === 'openox_catalog_token_pricing',
+          observation.basis === 'openox_catalog_token_pricing' &&
+          observation.outputTokens <=
+            input.settlementPreflight!.maxOutputTokensPerCall,
       );
     if (complete) {
       return {
@@ -531,12 +535,23 @@ export class SiteBuildCostLedger {
     result?: Record<string, unknown> | null;
     meta?: Record<string, unknown>;
     errorCode?: string;
+    /**
+     * When present, settlement and the BuildRun paid-call kill switch commit
+     * in the same workspace transaction. This is required for unknown
+     * settlement: a replay must never observe FAILED before the kill switch.
+     */
+    disablePaidCallsReason?: string;
   }): Promise<string> {
     const { scope, measurement } = input;
-    const rows = await this.prisma.withWorkspace(
-      scope.workspaceId,
-      (tx) =>
-        tx.$queryRaw<Array<{ decision: string }>>`
+    const disableReason = input.disablePaidCallsReason?.trim().slice(0, 80);
+    if (
+      input.disablePaidCallsReason !== undefined &&
+      (!disableReason || measurement.basis !== 'unknown')
+    ) {
+      throw new Error('atomic paid-call disable requires unknown settlement');
+    }
+    return this.prisma.withWorkspace(scope.workspaceId, async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ decision: string }>>`
         SELECT settle_site_build_spend(
           ${scope.workspaceId}::uuid,
           ${scope.buildRunId}::uuid,
@@ -555,9 +570,22 @@ export class SiteBuildCostLedger {
           ${asJsonText({ ...scope.meta, ...measurement.meta, ...input.meta })}::jsonb,
           ${input.errorCode ?? null}::text
         ) AS decision
-      `,
-    );
-    return rows[0]?.decision ?? 'MISSING';
+      `;
+      const decision = rows[0]?.decision ?? 'MISSING';
+      if (decision === 'SETTLED' && disableReason) {
+        const disabled = await tx.siteBuildBudget.updateMany({
+          where: { buildRunId: scope.buildRunId },
+          data: {
+            paidCallsEnabled: false,
+            disabledReason: disableReason,
+          },
+        });
+        if (disabled.count !== 1) {
+          throw new Error('atomic paid-call disable target missing');
+        }
+      }
+      return decision;
+    });
   }
 
   async ensureBudget(input: {

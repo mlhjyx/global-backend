@@ -354,9 +354,10 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       expect.objectContaining({
         status: 'FAILED',
         measurement: expect.objectContaining({ basis: 'unknown' }),
+        disablePaidCallsReason: 'MODEL_SETTLEMENT_UNKNOWN',
       }),
     );
-    expect(disablePaidCalls).toHaveBeenCalledOnce();
+    expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
   it('skips a non-attested dev stub after a known settled provider failure', async () => {
@@ -811,17 +812,14 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       expect.objectContaining({
         status: 'FAILED',
         errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
+        disablePaidCallsReason: 'MODEL_SETTLEMENT_UNKNOWN',
         measurement: expect.objectContaining({
           basis: 'unknown',
           budgetChargeMicrousd: 800_000,
         }),
       }),
     );
-    expect(disablePaidCalls).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      RUN_ID,
-      'MODEL_SETTLEMENT_UNKNOWN',
-    );
+    expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 });
 

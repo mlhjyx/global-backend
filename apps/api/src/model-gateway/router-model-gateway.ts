@@ -672,9 +672,6 @@ export class RouterModelGateway extends ModelGateway {
                 ? 'PROVIDER_OUTPUT_ERROR'
                 : 'PROVIDER_CALL_ERROR',
         });
-        if (measurement.basis === 'unknown') {
-          await this.freezeUnknownSettlement(scope, 'MODEL_SETTLEMENT_UNKNOWN');
-        }
         this.trace?.record({
           workspaceId: ctx.workspaceId,
           task: input.task,
@@ -723,7 +720,6 @@ export class RouterModelGateway extends ModelGateway {
           },
           errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
         });
-        await this.freezeUnknownSettlement(scope, 'MODEL_SETTLEMENT_UNKNOWN');
       }
       let durableResult: Record<string, unknown> | undefined;
       try {
@@ -789,9 +785,16 @@ export class RouterModelGateway extends ModelGateway {
   private async settlePersistentOperation(
     input: Parameters<SiteBuildCostLedger['settleOperation']>[0],
   ): Promise<void> {
+    const disablePaidCallsReason =
+      input.measurement.basis === 'unknown'
+        ? (input.errorCode ?? 'MODEL_SETTLEMENT_UNKNOWN')
+        : undefined;
     let decision: string;
     try {
-      decision = await this.paidLedger!.settleOperation(input);
+      decision = await this.paidLedger!.settleOperation({
+        ...input,
+        ...(disablePaidCallsReason ? { disablePaidCallsReason } : {}),
+      });
     } catch (error) {
       return this.freezeUnknownSettlement(
         input.scope,
@@ -804,6 +807,12 @@ export class RouterModelGateway extends ModelGateway {
       return this.freezeUnknownSettlement(
         input.scope,
         `SETTLEMENT_${decision}`,
+      );
+    }
+    if (disablePaidCallsReason) {
+      throw new PaidOperationUnknownError(
+        input.scope.operationKey,
+        disablePaidCallsReason,
       );
     }
   }
