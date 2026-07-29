@@ -17,9 +17,9 @@ evidence、promotion、运行时 attestation 或费用授权。
   `m1-g-current-route-recovery-retirement-report.json`
 - 报告 schema：`site-builder-current-route-recovery-report/2026-07-29-v4`
 - 报告 SHA-256：
-  `bbbe2ccf44fb37d70b3cd9231dd4cb706edf2b17892a476049a23225ed29f605`
+  `60e66d94abd56fccb5b6a5e28b241e74c794a234f611b5c8d797df4713d4bbf9`
 - squash-stable runner source SHA-256：
-  `661afd090f7b348a9598a532f6f9b172fbf8ba23a4ae4984a85429bf629e9e28`
+  `12f0928c7675410ad2bd81770530dc3ca2141afb62ad7b81b46d27396198a528`
 - route baseline：
   `e727bb141ad2c8c5fdd4379308ed85cfc7aefb86`
 - OpenOx source bundle fixed commit：
