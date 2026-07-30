@@ -7,6 +7,7 @@ import {
   assertCompiledContractsAttestationStable,
   buildCompiledContractsAttestation,
 } from "../src/site-builder/eval/compiled-contracts-attestation";
+import { SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX } from "../src/site-builder/eval/create-only-json";
 
 const REPOSITORY_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -38,9 +39,12 @@ function outputPath(value: string): string {
     value.startsWith("/") ||
     value.includes("\\") ||
     value.split("/").includes("..") ||
+    !value.startsWith(SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX) ||
     !value.endsWith(".json")
   ) {
-    throw new Error("output must be a repository-relative JSON path");
+    throw new Error(
+      "output must be a repository-relative Site Builder evidence JSON path",
+    );
   }
   return value;
 }
@@ -133,6 +137,7 @@ async function main(): Promise<void> {
     REPOSITORY_ROOT,
     output,
     manifest,
+    compiledContracts,
   );
   process.stdout.write(
     `created ${output} at ${fixedCommitSha}; network=0 model_cost_cents=0 dispatch=NOT_AUTHORIZED\n`,

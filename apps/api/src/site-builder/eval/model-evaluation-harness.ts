@@ -72,15 +72,18 @@ import {
 } from "./model-evaluation-cost-safety";
 import {
   compiledContractsRuntimeBindingMatches,
-  readCompiledContractsRuntimeBinding,
   type CompiledContractsRuntimeBinding,
 } from "./compiled-contracts-attestation";
 import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-compiled-contracts-runtime";
+import {
+  assertModelEvaluationRuntimeIntegrity,
+  modelEvaluationRuntimeIntegrityMatches,
+} from "./model-evaluation-runtime-integrity";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v7" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v8" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -512,6 +515,10 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/design-spec-compiled-contracts-runtime.ts",
   },
   {
+    role: "runtime_integrity",
+    path: "apps/api/src/site-builder/eval/model-evaluation-runtime-integrity.ts",
+  },
+  {
     role: "create_only_writer",
     path: "apps/api/src/site-builder/eval/create-only-json.ts",
   },
@@ -725,8 +732,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v4",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v4",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v5",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v5",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
@@ -745,7 +752,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v4",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v5",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -2451,42 +2458,26 @@ export function taskEvaluationContractFingerprint(
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const REAL_REPOSITORY_ROOT = realpathSync(REPOSITORY_ROOT);
-const COMPILED_CONTRACTS_RUNTIME_AT_HARNESS_LOAD = (() => {
-  try {
-    return deepFreeze(readCompiledContractsRuntimeBinding(REPOSITORY_ROOT));
-  } catch {
-    return null;
-  }
-})();
 
 function compiledContractsRuntimeMatchesSuite(
   suite: TaskEvaluationSuite,
 ): boolean {
   const expected = suite.compiledContractsRuntimeBinding;
   if (expected === null) return true;
-  if (
-    COMPILED_CONTRACTS_RUNTIME_AT_HARNESS_LOAD === null ||
-    !compiledContractsRuntimeBindingMatches(
+  return (
+    compiledContractsRuntimeBindingMatches(
       expected,
-      COMPILED_CONTRACTS_RUNTIME_AT_HARNESS_LOAD,
-    )
-  ) {
-    return false;
-  }
-  try {
-    return compiledContractsRuntimeBindingMatches(
-      expected,
-      readCompiledContractsRuntimeBinding(REPOSITORY_ROOT),
-    );
-  } catch {
-    return false;
-  }
+      DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
+    ) && modelEvaluationRuntimeIntegrityMatches(suite.taskContractId)
+  );
 }
 
 function assertCompiledContractsRuntimeBeforeDispatch(
   suite: TaskEvaluationSuite,
 ): void {
-  if (!compiledContractsRuntimeMatchesSuite(suite)) {
+  try {
+    assertModelEvaluationRuntimeIntegrity(suite.taskContractId);
+  } catch {
     throw new ModelEvaluationCallError(
       "compiled_contracts_runtime_attestation_mismatch",
       {
@@ -3032,7 +3023,7 @@ export function assessCanonicalTaskArtifact(
       qualityPassed: outcome.selectedDeterministicCandidate && factualityPassed,
       structurePassed: true,
       factualityPassed,
-      stabilityKey: output.candidateId,
+      stabilityKey: sha256CanonicalJson(output),
       findingCodes: [
         ...(!outcome.selectedDeterministicCandidate
           ? ["deterministic_catalog_baseline_mismatch"]

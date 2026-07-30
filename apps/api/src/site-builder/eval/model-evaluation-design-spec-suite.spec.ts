@@ -7,6 +7,7 @@ import {
   buildTaskEvaluationPlan,
   runLegacyComparatorEvaluationAttempt,
 } from "./model-evaluation-harness";
+import { sha256CanonicalJson } from "./eval-provenance";
 
 describe("design_spec canonical model evaluation suite", () => {
   it("admits exactly three structured candidates over twelve repeated fixtures", () => {
@@ -121,22 +122,29 @@ describe("design_spec canonical model evaluation suite", () => {
       }>;
     };
     const selected = input.candidates[0]!;
+    const acceptedOutput = {
+      candidateId: selected.id,
+      reasons: [
+        `selectedCandidateId=${selected.id}`,
+        `industryMatchCount=${selected.industryMatchCount}`,
+      ],
+      warnings: [],
+    };
     expect(
-      assessCanonicalTaskArtifact(plan, evaluationCase.payload, {
-        candidateId: selected.id,
-        reasons: [
-          `selectedCandidateId=${selected.id}`,
-          `industryMatchCount=${selected.industryMatchCount}`,
-        ],
-        warnings: [],
-      }),
+      assessCanonicalTaskArtifact(plan, evaluationCase.payload, acceptedOutput),
     ).toEqual({
       qualityPassed: true,
       structurePassed: true,
       factualityPassed: true,
-      stabilityKey: selected.id,
+      stabilityKey: sha256CanonicalJson(acceptedOutput),
       findingCodes: [],
     });
+    expect(
+      assessCanonicalTaskArtifact(plan, evaluationCase.payload, {
+        ...acceptedOutput,
+        reasons: [`selectedCandidateId=${selected.id}`],
+      }).stabilityKey,
+    ).not.toBe(sha256CanonicalJson(acceptedOutput));
 
     const alternative = input.candidates[1]!;
     expect(

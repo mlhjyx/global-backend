@@ -9,6 +9,9 @@ import {
   sep,
 } from "node:path";
 
+export const SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX =
+  "docs/evidence/site-builder/" as const;
+
 export async function writeRepositoryJsonCreateOnly(
   repositoryRoot: string,
   repositoryRelativePath: string,
@@ -19,9 +22,12 @@ export async function writeRepositoryJsonCreateOnly(
     isAbsolute(repositoryRelativePath) ||
     repositoryRelativePath.includes("\\") ||
     repositoryRelativePath.split("/").includes("..") ||
+    !repositoryRelativePath.startsWith(SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX) ||
     !repositoryRelativePath.endsWith(".json")
   ) {
-    throw new Error("output must be a new repository-relative JSON path");
+    throw new Error(
+      "output must be a new repository-relative Site Builder evidence JSON path",
+    );
   }
   const realRepositoryRoot = await realpath(repositoryRoot);
   const lexicalOutput = resolve(realRepositoryRoot, repositoryRelativePath);

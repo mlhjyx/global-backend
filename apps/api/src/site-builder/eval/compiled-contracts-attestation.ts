@@ -51,6 +51,16 @@ export interface CompiledContractArtifactFingerprint {
   sha256: string;
 }
 
+const TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS = new WeakSet<object>();
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -227,7 +237,7 @@ export function buildCompiledContractsAttestation(options: {
     },
   });
   const compiledArtifacts = compiledContractArtifacts(options.repositoryRoot);
-  return {
+  const attestation: CompiledContractsAttestation = deepFreeze({
     schemaVersion: COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
     buildId: COMPILED_CONTRACTS_BUILD_ID,
     buildCommand: COMPILED_CONTRACTS_BUILD_COMMAND,
@@ -239,13 +249,29 @@ export function buildCompiledContractsAttestation(options: {
     compiledArtifactTreeSha256: sha256(canonicalJson(compiledArtifacts)),
     staleOutputRemovedBeforeBuild: true,
     suiteImportedAfterBuild: true,
-  };
+  });
+  TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS.add(attestation);
+  return attestation;
+}
+
+export function isTrustedCompiledContractsAttestation(
+  value: unknown,
+): value is CompiledContractsAttestation {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.isFrozen(value) &&
+    TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS.has(value)
+  );
 }
 
 export function assertCompiledContractsAttestationStable(
   repositoryRoot: string,
   expected: CompiledContractsAttestation,
 ): void {
+  if (!isTrustedCompiledContractsAttestation(expected)) {
+    throw new Error("compiled contracts attestation is not builder-trusted");
+  }
   const trackedSourceFiles = trackedContractsAtFixedCommit(
     repositoryRoot,
     expected.fixedCommitSha,

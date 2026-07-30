@@ -45,6 +45,7 @@ import {
   isTrustedModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
+import { modelEvaluationRuntimeIntegrityMatches } from "./model-evaluation-runtime-integrity";
 
 export const MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION =
   "site-builder-model-evaluation-protocol-admission/v1" as const;
@@ -2390,6 +2391,46 @@ export function createModelEvaluationProtocolExecutor(deps: {
           effectiveSettlement,
         );
       }
+      if (!modelEvaluationRuntimeIntegrityMatches(request.taskId)) {
+        if (usage.callCount === 0) {
+          const effectiveSettlement = await closeCampaignReservation({
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          });
+          throw new ModelEvaluationCallError(
+            "compiled_contracts_runtime_attestation_mismatch",
+            effectiveSettlement,
+          );
+        }
+        const error = new Error(
+          "compiled_contracts_runtime_attestation_mismatch_before_repair",
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        await freezeDurableAuthorization(
+          "compiled_contracts_runtime_attestation_mismatch",
+        );
+        throw new ModelEvaluationCallError(
+          "compiled_contracts_runtime_attestation_mismatch",
+          effectiveSettlement,
+        );
+      }
       let response: ModelEvaluationWireResponse;
       try {
         switch (protocol) {
@@ -2555,6 +2596,36 @@ export function createModelEvaluationProtocolExecutor(deps: {
         );
       }
       addUsage(usage, normalized.usage);
+      if (!modelEvaluationRuntimeIntegrityMatches(request.taskId)) {
+        const error = new Error(
+          "compiled_contracts_runtime_attestation_mismatch_after_wire",
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        await freezeDurableAuthorization(
+          "compiled_contracts_runtime_attestation_mismatch",
+        );
+        throw new ModelEvaluationCallError(
+          "compiled_contracts_runtime_attestation_mismatch",
+          effectiveSettlement,
+        );
+      }
       return normalized;
     };
 

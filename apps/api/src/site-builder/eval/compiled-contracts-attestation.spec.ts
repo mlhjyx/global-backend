@@ -15,6 +15,7 @@ import {
   buildCompiledContractsAttestation,
   compiledContractsRuntimeBindingFromAttestation,
   compiledContractsRuntimeBindingMatches,
+  isTrustedCompiledContractsAttestation,
   readCompiledContractsRuntimeBinding,
 } from "./compiled-contracts-attestation";
 
@@ -87,6 +88,8 @@ describe("compiled contracts fixed-commit attestation", () => {
         staleOutputRemovedBeforeBuild: true,
         suiteImportedAfterBuild: true,
       });
+      expect(isTrustedCompiledContractsAttestation(attestation)).toBe(true);
+      expect(Object.isFrozen(attestation.compiledArtifacts)).toBe(true);
       expect(attestation.compiledArtifacts.map(({ path }) => path)).toEqual([
         "packages/contracts/dist/index.js",
         "packages/contracts/dist/site-builder/model.js",
@@ -116,6 +119,11 @@ describe("compiled contracts fixed-commit attestation", () => {
       expect(() =>
         assertCompiledContractsAttestationStable(root, attestation),
       ).toThrow("compiled contracts drifted during suite preparation");
+      expect(() =>
+        assertCompiledContractsAttestationStable(root, {
+          ...attestation,
+        }),
+      ).toThrow("not builder-trusted");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

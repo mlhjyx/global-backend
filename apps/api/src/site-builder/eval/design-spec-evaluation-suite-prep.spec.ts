@@ -16,6 +16,7 @@ import {
 } from "./compiled-contracts-attestation";
 import { sha256CanonicalJson } from "./eval-provenance";
 import { DESIGN_SPEC_COMPILED_CONTRACT_ARTIFACTS } from "./design-spec-compiled-contracts-runtime";
+import { writeRepositoryJsonCreateOnly } from "./create-only-json";
 
 const FIXED_COMMIT = "a".repeat(40);
 
@@ -137,20 +138,23 @@ describe("design_spec zero-cost suite preparation", () => {
       FIXED_COMMIT,
       compiledContracts(),
     );
-    await writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
+    await writeRepositoryJsonCreateOnly(
       root,
-      "evidence/design-spec-suite.json",
+      "docs/evidence/site-builder/design-spec-suite.json",
       manifest,
     );
     expect(
       JSON.parse(
-        await readFile(join(root, "evidence/design-spec-suite.json"), "utf8"),
+        await readFile(
+          join(root, "docs/evidence/site-builder/design-spec-suite.json"),
+          "utf8",
+        ),
       ),
     ).toEqual(manifest);
     await expect(
-      writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
+      writeRepositoryJsonCreateOnly(
         root,
-        "evidence/design-spec-suite.json",
+        "docs/evidence/site-builder/design-spec-suite.json",
         manifest,
       ),
     ).rejects.toMatchObject({ code: "EEXIST" });
@@ -160,17 +164,57 @@ describe("design_spec zero-cost suite preparation", () => {
     const root = await mkdtemp(join(tmpdir(), "design-spec-suite-root-"));
     const outside = await mkdtemp(join(tmpdir(), "design-spec-suite-outside-"));
     await mkdir(join(outside, "sink"));
-    await symlink(join(outside, "sink"), join(root, "evidence"));
+    await mkdir(join(root, "docs"));
+    await symlink(join(outside, "sink"), join(root, "docs/evidence"));
     await expect(
-      writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
+      writeRepositoryJsonCreateOnly(
         root,
-        "evidence/design-spec-suite.json",
+        "docs/evidence/site-builder/design-spec-suite.json",
         buildDesignSpecEvaluationSuitePrepManifest(
           FIXED_COMMIT,
           compiledContracts(),
         ),
       ),
     ).rejects.toThrow("parent must be a real directory");
+  });
+
+  it("rejects repository-control and non-evidence output paths", async () => {
+    const root = await mkdtemp(join(tmpdir(), "design-spec-suite-root-"));
+    const manifest = buildDesignSpecEvaluationSuitePrepManifest(
+      FIXED_COMMIT,
+      compiledContracts(),
+    );
+    await expect(
+      writeRepositoryJsonCreateOnly(
+        root,
+        ".git/refs/heads/evidence.json",
+        manifest,
+      ),
+    ).rejects.toThrow("Site Builder evidence JSON path");
+    await expect(
+      writeRepositoryJsonCreateOnly(
+        root,
+        "evidence/design-spec-suite.json",
+        manifest,
+      ),
+    ).rejects.toThrow("Site Builder evidence JSON path");
+  });
+
+  it("rejects a caller-constructed compiled attestation before evidence write", async () => {
+    const root = await mkdtemp(join(tmpdir(), "design-spec-suite-root-"));
+    const untrustedCompiledContracts = compiledContracts();
+    const manifest = buildDesignSpecEvaluationSuitePrepManifest(
+      FIXED_COMMIT,
+      untrustedCompiledContracts,
+    );
+    await expect(
+      writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
+        root,
+        "docs/evidence/site-builder/design-spec-suite.json",
+        manifest,
+        untrustedCompiledContracts,
+      ),
+    ).rejects.toThrow("trusted zero-cost design_spec suite manifest required");
   });
 
   it("rejects malformed fixed commits before building a manifest", () => {

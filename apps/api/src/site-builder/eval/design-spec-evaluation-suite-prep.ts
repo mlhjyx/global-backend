@@ -21,19 +21,22 @@ import {
   COMPILED_CONTRACTS_BUILD_COMMAND,
   COMPILED_CONTRACTS_BUILD_ID,
   COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+  assertCompiledContractsAttestationStable,
   compiledContractsRuntimeBindingFromAttestation,
   compiledContractsRuntimeBindingMatches,
+  isTrustedCompiledContractsAttestation,
   type CompiledContractsAttestation,
 } from "./compiled-contracts-attestation";
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v4" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v5" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 
 export const DESIGN_SPEC_EVALUATION_STOP_CONDITIONS = Object.freeze([
   "fixed_commit_or_source_bundle_drift",
   "compiled_contracts_runtime_attestation_drift",
+  "untrusted_compiled_contracts_build_attestation",
   "fixture_matrix_or_prompt_drift",
   "candidate_alias_or_protocol_drift",
   "retired_or_deferred_alias_present",
@@ -458,8 +461,11 @@ export async function writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
   repositoryRoot: string,
   repositoryRelativePath: string,
   manifest: DesignSpecEvaluationSuitePrepManifest,
+  compiledContracts: CompiledContractsAttestation,
 ): Promise<void> {
   if (
+    manifest.compiledContracts !== compiledContracts ||
+    !isTrustedCompiledContractsAttestation(compiledContracts) ||
     manifest.manifestSha256 !==
       sha256CanonicalJson(
         Object.fromEntries(
@@ -472,6 +478,7 @@ export async function writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
   ) {
     throw new Error("trusted zero-cost design_spec suite manifest required");
   }
+  assertCompiledContractsAttestationStable(repositoryRoot, compiledContracts);
   await writeRepositoryJsonCreateOnly(
     repositoryRoot,
     repositoryRelativePath,
