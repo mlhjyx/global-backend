@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
+import {
+  buildCanonicalModelEvaluationCase,
+  buildTaskEvaluationPlan,
+} from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   createModelEvaluationCostSafetyAttestation,
@@ -37,6 +40,12 @@ export function createFakeModelEvaluationCostSafety(
   const ledgerDirectory =
     ledgerOverride?.directory ?? join(fakeLedgerRoot, suffix);
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+  const suite = plan.evaluationSuite;
+  if (!suite) throw new Error(`${plan.taskId} has no evaluation suite`);
+  const preparedCase = buildCanonicalModelEvaluationCase(
+    plan,
+    suite.fixtureIds[0],
+  );
   const legacyAliases = plan.evaluationSuite?.legacyComparatorAliases;
   if (!legacyAliases || legacyAliases.length === 0) {
     throw new Error(`${plan.taskId} has no paid legacy comparator`);
@@ -74,6 +83,10 @@ export function createFakeModelEvaluationCostSafety(
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: campaignBudgetCents,
       approvedDispatchExecutions: 500,
+      preparedFixedCommitSha: "a".repeat(40),
+      preparedSuiteId: suite.suiteId,
+      preparedSourceBundleContractId: suite.sourceBundleContractId,
+      preparedSourceBundleSha256: preparedCase.contract.sourceBundleSha256,
     },
     credential: {
       attestationId: `fake-evaluation-credential/2026-07-28-${suffix}`,

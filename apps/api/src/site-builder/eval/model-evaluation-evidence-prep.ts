@@ -152,6 +152,10 @@ export interface ModelEvaluationEvidencePrepBundle {
     approvedAt: string;
     approvedCampaignBudgetCents: number;
     approvedDispatchExecutions: number;
+    preparedFixedCommitSha: string;
+    preparedSuiteId: string;
+    preparedSourceBundleContractId: string;
+    preparedSourceBundleSha256: string;
     costSafetyAttestationSha256: string;
     safeSnapshotEnvelopeSha256: string;
   };
@@ -271,6 +275,10 @@ export function createTrustedModelEvaluationEvidencePrepSnapshots(
       "approvedAt",
       "approvedCampaignBudgetCents",
       "approvedDispatchExecutions",
+      "preparedFixedCommitSha",
+      "preparedSuiteId",
+      "preparedSourceBundleContractId",
+      "preparedSourceBundleSha256",
     ]) ||
     !hasExactKeys(copy.credentialSnapshot, [
       "attestationId",
@@ -491,6 +499,11 @@ function assertExactCostSafety(
       JSON.stringify(expectedDispatches(manifest)) ||
     costSafety.authorization.approvedDispatchExecutions !==
       manifest.executionCount ||
+    costSafety.authorization.preparedSuiteId !== manifest.suiteId ||
+    costSafety.authorization.preparedSourceBundleContractId !==
+      manifest.sourceBundleContractId ||
+    costSafety.authorization.preparedSourceBundleSha256 !==
+      manifest.sourceBundleSha256 ||
     costSafety.limits.maxDispatchExecutions !== manifest.executionCount ||
     costSafety.limits.maxWireCalls !== manifest.maximumWireCallCount
   ) {
@@ -559,6 +572,13 @@ export function createModelEvaluationEvidencePrepBundle(input: {
     throw new Error("trusted fixed snapshot evidence required");
   }
   const costSafety = input.snapshots.costSafety;
+  if (
+    costSafety.authorization.preparedFixedCommitSha !== input.fixedCommitSha
+  ) {
+    throw new Error(
+      "cost safety authorization is not bound to the fixed evidence commit",
+    );
+  }
   const planningManifest = buildModelEvaluationEvidencePlanningManifest();
   assertExactCostSafety(planningManifest, costSafety);
   const frozenMaximumCents = frozenPricedMaximumCents(

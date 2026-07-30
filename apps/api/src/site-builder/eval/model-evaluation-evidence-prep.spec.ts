@@ -4,7 +4,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
+import {
+  buildCanonicalModelEvaluationCase,
+  buildTaskEvaluationPlan,
+} from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   type ModelEvaluationCostSafetyInput,
@@ -52,6 +55,14 @@ function exactCostSafetyInput(): ModelEvaluationCostSafetyInput {
       approvedAt: "2026-07-29T00:00:00.000Z",
       approvedCampaignBudgetCents: 10_000,
       approvedDispatchExecutions: 61,
+      preparedFixedCommitSha: "e".repeat(40),
+      preparedSuiteId: plan.evaluationSuite!.suiteId,
+      preparedSourceBundleContractId:
+        plan.evaluationSuite!.sourceBundleContractId,
+      preparedSourceBundleSha256: buildCanonicalModelEvaluationCase(
+        plan,
+        plan.evaluationSuite!.fixtureIds[0],
+      ).contract.sourceBundleSha256,
     },
     credential: {
       attestationId: "brand-profile-evidence-credential/2026-07-29-v1",
@@ -268,6 +279,12 @@ describe("model evaluation evidence preparation", () => {
         snapshots,
       }),
     ).toThrow("full lowercase SHA-1");
+    expect(() =>
+      createModelEvaluationEvidencePrepBundle({
+        fixedCommitSha: "d".repeat(40),
+        snapshots,
+      }),
+    ).toThrow("not bound to the fixed evidence commit");
 
     input.pricing.entries = input.pricing.entries.map((entry) => ({
       ...entry,

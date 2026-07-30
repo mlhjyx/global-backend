@@ -10,7 +10,13 @@ const { trustedExecutorIdentity, trustedCostSafety, trustedMonotonicClock } =
     return {
       trustedMonotonicClock,
       trustedExecutorIdentity: Object.freeze({}),
-      trustedCostSafety: Object.freeze({
+      trustedCostSafety: {
+        authorization: {
+          preparedFixedCommitSha: "a".repeat(40),
+          preparedSuiteId: "",
+          preparedSourceBundleContractId: "",
+          preparedSourceBundleSha256: "",
+        },
         credential: Object.freeze({
           snapshotSha256:
             "1111111111111111111111111111111111111111111111111111111111111111",
@@ -52,7 +58,7 @@ const { trustedExecutorIdentity, trustedCostSafety, trustedMonotonicClock } =
           maxWireCalls: 1_000,
           maxOutputTokensPerCall: 100_000,
         }),
-      }),
+      },
     };
   });
 
@@ -88,6 +94,16 @@ import { sha256CanonicalJson, sha256Text } from "./eval-provenance";
 
 beforeEach(() => {
   trustedMonotonicClock.offsetMs = 0;
+  const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+  const suite = plan.evaluationSuite!;
+  trustedCostSafety.authorization.preparedSuiteId = suite.suiteId;
+  trustedCostSafety.authorization.preparedSourceBundleContractId =
+    suite.sourceBundleContractId;
+  trustedCostSafety.authorization.preparedSourceBundleSha256 =
+    buildCanonicalModelEvaluationCase(
+      plan,
+      suite.fixtureIds[0],
+    ).contract.sourceBundleSha256;
 });
 
 const validAssessment = (
@@ -698,6 +714,37 @@ describe("absolute budget guard", () => {
       }),
     ).rejects.toThrow("trusted model evaluation budget guard is required");
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects a paid run whose authorization is not bound to the prepared source bundle", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const execute = vi.fn();
+    trustedCostSafety.authorization.preparedSourceBundleSha256 = "f".repeat(64);
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        execute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_mismatch",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
+      reservedCents: 0,
+      unknownUpperBoundCents: 0,
+    });
   });
 
   it("uses captured budget methods despite instance and prototype monkeypatches", async () => {
@@ -2482,7 +2529,7 @@ describe("quality-first candidate summary and ranking", () => {
     expect(trustedRun).toMatchObject({
       schemaVersion: "site-builder-model-evaluation-run/v4",
       costSafetyContractId:
-        "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+        "site-builder-model-evaluation-cost-safety/2026-07-30-v2",
       credentialSnapshotSha256:
         "1111111111111111111111111111111111111111111111111111111111111111",
       pricingSnapshotSha256:
@@ -2523,7 +2570,7 @@ describe("quality-first candidate summary and ranking", () => {
     ).toMatchObject({
       rankable: true,
       costSafetyContractId:
-        "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+        "site-builder-model-evaluation-cost-safety/2026-07-30-v2",
       costSafetyAttestationSha256: trustedRun.costSafetyAttestationSha256,
       credentialSnapshotSha256: trustedRun.credentialSnapshotSha256,
       pricingSnapshotSha256: trustedRun.pricingSnapshotSha256,

@@ -84,6 +84,7 @@ const ATTESTATION_WEAK_MAP_GET = WeakMap.prototype.get;
 const ATTESTATION_WEAK_MAP_SET = WeakMap.prototype.set;
 const ATTESTATION_MAP_GET = Map.prototype.get;
 const ATTESTATION_MAP_SET = Map.prototype.set;
+const ATTESTATION_ARRAY_SOME = Array.prototype.some;
 const APPLY_ATTESTATION_INTRINSIC = Reflect.apply;
 
 const TRUSTED_COMPILED_CONTRACTS_BUILD_RECEIPTS = new WeakSet<object>();
@@ -145,6 +146,15 @@ function intrinsicObjectIsFrozen(value: object): boolean {
   ]) as boolean;
 }
 
+function intrinsicArraySome<T>(
+  values: readonly T[],
+  predicate: (value: T) => boolean,
+): boolean {
+  return APPLY_ATTESTATION_INTRINSIC(ATTESTATION_ARRAY_SOME, values, [
+    predicate,
+  ]) as boolean;
+}
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !intrinsicObjectIsFrozen(value)) {
     const children = APPLY_ATTESTATION_INTRINSIC(
@@ -166,7 +176,7 @@ function assertCompiledContractsRuntimeNotCached(repositoryRoot: string): void {
     [require.cache],
   ) as string[];
   if (
-    cachedModulePaths.some((cachedPath) => {
+    intrinsicArraySome(cachedModulePaths, (cachedPath) => {
       const pathFromDist = relative(contractsDist, cachedPath);
       return (
         pathFromDist === "" ||
@@ -385,7 +395,9 @@ export function captureCompiledContractsSuiteImport(
   const realRepositoryRoot = realpathSync(repositoryRoot);
   const runtimeBinding: CompiledContractsRuntimeBinding | null = (() => {
     try {
-      return deepFreeze(readCompiledContractsRuntimeBinding(realRepositoryRoot));
+      return deepFreeze(
+        readCompiledContractsRuntimeBinding(realRepositoryRoot),
+      );
     } catch {
       return null;
     }

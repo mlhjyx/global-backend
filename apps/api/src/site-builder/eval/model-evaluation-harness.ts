@@ -83,7 +83,7 @@ import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-co
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v10" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v11" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -736,8 +736,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v7",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v6",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v8",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v7",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
@@ -756,7 +756,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v7",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v8",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1230,7 +1230,19 @@ function bindTrustedModelEvaluationExecutor(
   const requiredWireCalls =
     requiredExecutions *
     maximumExecutionCallCount(plan.evaluationSuite?.repairTaskOutput === true);
+  const suite = plan.evaluationSuite;
+  const preparedCase =
+    suite === null
+      ? null
+      : buildCanonicalModelEvaluationCase(plan, suite.fixtureIds[0]);
   if (
+    suite === null ||
+    preparedCase === null ||
+    costSafety.authorization.preparedSuiteId !== suite.suiteId ||
+    costSafety.authorization.preparedSourceBundleContractId !==
+      suite.sourceBundleContractId ||
+    costSafety.authorization.preparedSourceBundleSha256 !==
+      preparedCase.contract.sourceBundleSha256 ||
     JSON.stringify(actualDispatches) !== JSON.stringify(expectedDispatches) ||
     budget.campaignBudgetCents > costSafety.limits.campaignBudgetCents ||
     costSafety.limits.maxOutputTokensPerCall < plan.envelope.maxTokens ||

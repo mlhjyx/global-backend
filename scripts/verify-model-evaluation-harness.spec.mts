@@ -227,7 +227,7 @@ test("a missing cost safety id fails documentation verification", async () => {
   documents["docs/architecture/current.md"] = documents[
     "docs/architecture/current.md"
   ].replaceAll(
-    "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
+    "site-builder-model-evaluation-cost-safety/2026-07-30-v2",
     "missing-cost-safety-id",
   );
   assert.throws(

@@ -4,7 +4,7 @@ import {
 } from "./compiled-contracts-attestation";
 
 export const DESIGN_SPEC_EXPECTED_LOADED_CONTRACTS_RUNTIME_FINGERPRINT =
-  "7313b68ccc2ee68728d245a38f420b6e99c6a6ef159eecfa927d24bee7187b8e" as const;
+  "e0901414fa1f84ce38cf202c7c8462c11bf48d4d40926004d33132cdcb5b31b4" as const;
 
 export const DESIGN_SPEC_COMPILED_CONTRACT_ARTIFACTS = Object.freeze([
   {

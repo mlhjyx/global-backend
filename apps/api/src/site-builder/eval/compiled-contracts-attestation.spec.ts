@@ -100,12 +100,19 @@ describe("compiled contracts fixed-commit attestation", () => {
       );
       const cachedRuntimePath = join(root, "packages/contracts/dist/index.js");
       require(cachedRuntimePath);
-      expect(() =>
-        buildCompiledContractsForSuiteImport({
-          repositoryRoot: root,
-          fixedCommitSha,
-        }),
-      ).toThrow("must not be imported before the trusted build");
+      const arraySome = vi
+        .spyOn(Array.prototype, "some")
+        .mockReturnValue(false);
+      try {
+        expect(() =>
+          buildCompiledContractsForSuiteImport({
+            repositoryRoot: root,
+            fixedCommitSha,
+          }),
+        ).toThrow("must not be imported before the trusted build");
+      } finally {
+        arraySome.mockRestore();
+      }
       delete require.cache[require.resolve(cachedRuntimePath)];
 
       const weakSetAdd = vi

@@ -111,7 +111,17 @@ function designSpecTargetOnlyCostSafetyInput(
     alias: candidate.alias,
     protocol: candidate.expectedProtocol,
   }));
+  const suite = plan.evaluationSuite!;
+  const preparedCase = buildCanonicalModelEvaluationCase(
+    plan,
+    suite.fixtureIds[0],
+  );
   input.authorization.approvedDispatchExecutions = 73;
+  input.authorization.preparedSuiteId = suite.suiteId;
+  input.authorization.preparedSourceBundleContractId =
+    suite.sourceBundleContractId;
+  input.authorization.preparedSourceBundleSha256 =
+    preparedCase.contract.sourceBundleSha256;
   input.credential.allowedDispatches = allowedDispatches;
   input.pricing.entries = allowedDispatches.map(({ alias, protocol }) => ({
     alias,
@@ -1794,6 +1804,47 @@ describe("model evaluation executor authorization", () => {
         outputCentsPerMillionTokens: 2,
       },
     ];
+    const costSafety = createModelEvaluationCostSafetyAttestation(input);
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    const budget = new ModelEvaluationBudgetGuard(100);
+    const before = budget.snapshot();
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "precision-industrial-rich",
+        attempt: 1,
+        campaignBudget: budget,
+        execute: executor.execute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_mismatch",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(wire).not.toHaveBeenCalled();
+    expect(budget.snapshot()).toEqual(before);
+  });
+
+  it("rejects design_spec when paid authorization pins a different prepared source bundle", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+    const candidate = plan.candidates[0];
+    const wire = vi.fn();
+    const resolver = fakeResolver();
+    const input = designSpecTargetOnlyCostSafetyInput(resolver.resolverId);
+    input.authorization.preparedSourceBundleSha256 = "f".repeat(64);
     const costSafety = createModelEvaluationCostSafetyAttestation(input);
     const executor = createRawModelEvaluationProtocolExecutor({
       wireClient: bindFakeModelEvaluationWireCredential(
