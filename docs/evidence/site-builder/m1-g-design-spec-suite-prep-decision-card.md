@@ -2,7 +2,7 @@
 
 > 状态：`READY_FOR_SUITE_RE_REVIEW`；dispatch：`NOT_AUTHORIZED`；真实网络调用：`0`；模型费用：`$0.00`。
 
-第二轮修复后的固定 suite 提交：`e8d13af6a024a8a38bd4a36ebcd349767f04d6a2`。create-only runner 已从该 clean commit 逐文件复核 47 个 source bundle 成员并生成 [v3 机器 manifest](m1-g-design-spec-suite-prep-manifest-v3.json)；source bundle SHA-256=`d0484a31eb2fb11669fd083c44c3b086329a9aefea2c0fdd258d6639d2bd4d53`，manifest SHA-256=`2eb9ac54fc1b21129e5ad86e33033de8a97eafb88a2afd51b5d2ceed9d30d089`。旧 [v1 manifest](m1-g-design-spec-suite-prep-manifest.json) 与 [v2 manifest](m1-g-design-spec-suite-prep-manifest-v2.json) 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
+当前固定 suite 源提交：`5a82567842b59040ee85924c1ad2e31be545484d`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v9 机器 manifest](m1-g-design-spec-suite-prep-manifest-v9.json)；source bundle SHA-256=`811b198fb7251a3ea266ecd4cfb5aa25d6dbb71d73bf2a588d95fe3d700a48b1`，manifest semantic SHA-256=`246c25b707d975f6ae201b03d05d872bde152b8723caf4f61b7bc2918b944b9a`，文件 SHA-256=`530146309b142c546527a2ca62c2e14f0f22f07fc20b30bcf237e8c3f3e8d4d4`。v1–v8 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
 
 ## 本 PR 冻结什么
 
@@ -14,10 +14,13 @@
 - 每个 execution 最多 1 次 closed schema repair、最多 2 次 wire call
 - fixture task input 必须通过与产品运行共用的完整 catalog enumeration、required-role eligibility、ranking 和 top-3 projection 从该生产输入逐字重建，不能手工拼 candidate
 - fixture/prompt SHA-256 以独立常量固定；catalog 的 approved→B3→B2→B1 数据链、renderer preset digest 与 `design-catalog-v2` 合同实现纳入 source bundle
+- task system prompt SHA-256 纳入 task-contract fingerprint；executor 只发送模块加载时捕获的字符串，运行前导出对象漂移即在预算/client 前拒绝
 - evaluator 的 reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言指标、其他 candidate 或新事实均 fail-closed
 - comparator：24 个 `deterministic-catalog-selection/v1` case，逐例真实执行确定性选择并冻结 expected/actual/PASS/result digest，不调用模型
 - suite 自身固定 `legacyComparatorAliases=[]`；凭据必须精确覆盖三个 target alias，按 73 executions / 146 wire calls 绑定，MiniMax/Doubao extra scope 在预算和 client 前拒绝
-- runner 在导入 suite 前删除并本地重建 ignored 的 `packages/contracts/dist`；manifest 冻结 31 个 fixed-commit tracked contracts 文件（SHA-256=`c95bd7d5c90dd6cbe42dd35f6c58d6d0e1e473a3404efa5377e3547b99d15dd6`）及实际加载的 21 个 JS artifact（SHA-256=`d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01`），构建后漂移即停止
+- spend authorization 的 `preparedFixedCommitSha` 必须逐字等于执行 worktree 当前 `HEAD`，并同时匹配 suite、source-bundle contract 与 digest；任一不一致在预算/client 前拒绝
+- runner 在导入 suite 前删除并本地重建 ignored 的 `packages/contracts/dist`；manifest 冻结 31 个 fixed-commit tracked contracts 文件（SHA-256=`c95bd7d5c90dd6cbe42dd35f6c58d6d0e1e473a3404efa5377e3547b99d15dd6`）及实际加载的 21 个 JS artifact（SHA-256=`d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01`），artifact-tree serializer 不调用实时 Array `map`/`join`/`sort`；构建后漂移即停止
+- reservation 后、首个物理 wire 前发现 runtime drift 也会持久写入 `authorization_frozen`，恢复文件不能继续使用同一授权
 
 因此未来真实评测的模型清单为 73 executions、最多 146 wire calls。按任务现有 20¢ 单次物理调用硬门，规划绝对上界为 2920¢（$29.20）；它不是预计费用、凭据额度或支出授权。
 
