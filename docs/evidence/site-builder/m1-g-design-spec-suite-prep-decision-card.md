@@ -2,7 +2,7 @@
 
 > 状态：`READY_FOR_SUITE_RE_REVIEW`；dispatch：`NOT_AUTHORIZED`；真实网络调用：`0`；模型费用：`$0.00`。
 
-当前固定 suite 源提交：`5a82567842b59040ee85924c1ad2e31be545484d`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v9 机器 manifest](m1-g-design-spec-suite-prep-manifest-v9.json)；source bundle SHA-256=`811b198fb7251a3ea266ecd4cfb5aa25d6dbb71d73bf2a588d95fe3d700a48b1`，manifest semantic SHA-256=`246c25b707d975f6ae201b03d05d872bde152b8723caf4f61b7bc2918b944b9a`，文件 SHA-256=`530146309b142c546527a2ca62c2e14f0f22f07fc20b30bcf237e8c3f3e8d4d4`。v1–v8 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
+当前固定 suite 源提交：`589533051604e4577155d6ed19afcd934cbb1229`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v10 机器 manifest](m1-g-design-spec-suite-prep-manifest-v10.json)；source bundle SHA-256=`14894eb0832c07da841360c6c7c3ebf7b6d066be18b0d4dfa6033572ddc423f2`，manifest semantic SHA-256=`18dafb1dd97a26a333964fcfb2019cb548e6bcd9eb837733c5262748cf9e5768`，文件 SHA-256=`ca201a6b5b99cc1789ee0e5b0063144353cbccc435abe94d8fdc9dc3209165ae`。v1–v9 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
 
 ## 本 PR 冻结什么
 
