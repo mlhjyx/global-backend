@@ -49,7 +49,7 @@ describe("design_spec canonical evaluation fixtures", () => {
     }
   });
 
-  it("accepts the deterministic baseline and treats prose as non-authoritative", () => {
+  it("accepts the deterministic baseline with closed explanation claims", () => {
     const fixture = DESIGN_SPEC_EVAL_FIXTURES[0]!;
     const prepared = prepareDesignSpecEvalFixture(fixture);
     const selected = prepared.input.candidates[0]!;
@@ -57,8 +57,8 @@ describe("design_spec canonical evaluation fixtures", () => {
       evaluateDesignSpecOutput(prepared, {
         candidateId: selected.id,
         reasons: [
-          `Selected ${selected.familyId}`,
-          `industryMatchCount:${selected.industryMatchCount}`,
+          `selectedCandidateId=${selected.id}`,
+          `industryMatchCount=${selected.industryMatchCount}`,
         ],
         warnings: [],
       }),
@@ -66,6 +66,7 @@ describe("design_spec canonical evaluation fixtures", () => {
       selectedDeterministicCandidate: true,
       referencedForbiddenCatalogIdentifiers: [],
       contradictedMetricClaims: [],
+      invalidExplanationClaims: [],
     });
   });
 
@@ -91,35 +92,40 @@ describe("design_spec canonical evaluation fixtures", () => {
       evaluateDesignSpecOutput(prepared, {
         candidateId: selected.id,
         reasons: [
-          `Use ${unselected.familyId}`,
-          `industryMatchCount:${selected.industryMatchCount + 1}`,
+          `selectedCandidateId=${unselected.id}`,
+          `industryMatchCount=${selected.industryMatchCount + 1}`,
         ],
         warnings: [],
       }),
     ).toEqual({
       selectedDeterministicCandidate: true,
-      referencedForbiddenCatalogIdentifiers: [unselected.familyId],
+      referencedForbiddenCatalogIdentifiers: [unselected.id],
       contradictedMetricClaims: ["industryMatchCount"],
+      invalidExplanationClaims: [],
     });
   });
 
-  it("flags invented catalog-shaped identifiers in evaluation prose", () => {
+  it("rejects free-form prose without classifying ordinary hyphens as catalog ids", () => {
     const fixture = DESIGN_SPEC_EVAL_FIXTURES[0]!;
     const prepared = prepareDesignSpecEvalFixture(fixture);
     const selected = prepared.input.candidates[0]!;
     expect(
       evaluateDesignSpecOutput(prepared, {
         candidateId: selected.id,
-        reasons: ["Use invented-family and fabricated-blueprint"],
+        reasons: [
+          "B2B-ready launch date 2026-08-01",
+          "industryMatchCount is 999",
+        ],
         warnings: [],
       }),
-    ).toMatchObject({
+    ).toEqual({
       selectedDeterministicCandidate: true,
-      referencedForbiddenCatalogIdentifiers: [
-        "fabricated-blueprint",
-        "invented-family",
-      ],
+      referencedForbiddenCatalogIdentifiers: [],
       contradictedMetricClaims: [],
+      invalidExplanationClaims: [
+        "B2B-ready launch date 2026-08-01",
+        "industryMatchCount is 999",
+      ],
     });
   });
 
@@ -131,14 +137,15 @@ describe("design_spec canonical evaluation fixtures", () => {
       evaluateDesignSpecOutput(prepared, {
         candidateId: selected.id,
         reasons: [
-          `industryMatchCount:${selected.industryMatchCount}`,
-          `industryMatchCount:${selected.industryMatchCount + 999}`,
+          `industryMatchCount=${selected.industryMatchCount}`,
+          `industryMatchCount=${selected.industryMatchCount + 999}`,
         ],
         warnings: [],
       }),
     ).toMatchObject({
       referencedForbiddenCatalogIdentifiers: [],
       contradictedMetricClaims: ["industryMatchCount"],
+      invalidExplanationClaims: [],
     });
   });
 });

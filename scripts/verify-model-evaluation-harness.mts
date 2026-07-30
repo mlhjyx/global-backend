@@ -67,6 +67,10 @@ export function renderModelEvaluationHarnessBaseline(): string {
     (plan) => plan.taskId === "site_builder.brand_profile",
   )?.evaluationSuite;
   assert.ok(brandSuite, "BrandProfile canonical evaluation suite is required");
+  const designSuite = plans.find(
+    (plan) => plan.taskId === "site_builder.design_spec",
+  )?.evaluationSuite;
+  assert.ok(designSuite, "design_spec canonical evaluation suite is required");
 
   return [
     "# Site Builder 模型评测 Harness 基线",
@@ -85,7 +89,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "## 协议执行边界",
     "",
     `- admission contract：${code(MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION)}；它独立于生产 ${code("VERIFIED_GATEWAY_MODEL_TRANSPORTS")}，不能改变 runtime provider/route。`,
-    "- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只保留隔离的 legacy comparator，且 alias 必须属于该 task 冻结的 legacy current/rollback route。raw target/legacy execute 都必须消费 harness 在预算 reserve 后签发的一次性 request authorization；legacy comparator 只能由 `runLegacyComparatorEvaluationAttempt` 以同一 canonical suite/fixture/envelope、campaign budget、hard stop 和 trusted executor identity 编排，direct dispatch 在任何 client 前 fail-closed，其他 task 的 legacy-only alias 也不能混入 comparator 或 target dispatch。",
+    "- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只保留隔离的 legacy comparator，且 alias 必须逐字属于该 canonical suite 冻结的 `legacyComparatorAliases`，不在执行时从 current/rollback route 推导。BrandProfile 固定 DeepSeek Pro/GLM，`design_spec` 固定空集，因此 MiniMax/Doubao 不会扩大其凭据或 execution/wire-call 额度。raw target/legacy execute 都必须消费 harness 在预算 reserve 后签发的一次性 request authorization；legacy comparator 只能由 `runLegacyComparatorEvaluationAttempt` 以同一 canonical suite/fixture/envelope、campaign budget、hard stop 和 trusted executor identity 编排，direct dispatch 在任何 client 前 fail-closed，其他 task 的 legacy-only alias 也不能混入 comparator 或 target dispatch。",
     "- actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。",
     "- trusted probe/run 只接受 `createModelEvaluationProtocolExecutor` 私有 WeakMap 品牌化并冻结的 target 或 legacy execute；同一 budget campaign 在首次 probe/run 时绑定一个不可伪造 executor identity，后续换 factory 即在 reserve/client 前拒绝。executor、budget、run 与 capability campaign 的 WeakMap/WeakSet `get`/`set`/`has`/`add`，以及 run deep-freeze 的 Object `freeze`/`isFrozen`/`values` 都在模块加载时捕获并通过固定 intrinsic 调用；run 整棵递归确认不可变后才允许写入品牌 map，任意 callback、wrapper/Proxy 或运行时 prototype monkeypatch 均不能生成 identity、改写已授权 run 或把伪造 run 纳入排序；品牌模块不暴露 register 或测试注入入口。",
     "- adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。",
@@ -116,6 +120,14 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。同一 campaign/candidate 的重复请求复用既有 canonical attestation，不重复 dispatch、reserve 或擦除有效证明。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。",
     `- evaluator：${code(brandSuite.evaluatorVersion)}；rubric SHA-256 ${code(brandSuite.evaluatorRubricSha256)}；harness 内部依次执行 output schema、生产 ${code("validateOutput")} 与 canonical task rubric，不接受 caller 自带 grader。`,
     "",
+    "### design_spec suite",
+    "",
+    `- suite：${code(designSuite.suiteId)}；adapter ${code(designSuite.adapterId)}；fixture set ${code(designSuite.fixtureSetId)} / schema ${code(designSuite.fixtureSchemaVersion)}；${designSuite.fixtureIds.length} fixtures × ${designSuite.repeats} repeats。`,
+    `- comparator allowlist：${designSuite.legacyComparatorAliases.length === 0 ? "空集（仅零费用 deterministic catalog selection）" : designSuite.legacyComparatorAliases.map(code).join("、")}；source bundle ${code(designSuite.sourceBundleContractId)} 固定 ${designSuite.sourceBundleFiles.length} 份 Git 跟踪文件。`,
+    "- 12 个 sparse/rich fixture 保存完整合成生产输入，并通过与生产运行共用的完整 catalog enumeration、required-role eligibility、ranking 与 top-3 projection 重建；prepare 时逐字重算，不能手工拼 candidate。",
+    "- reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言数值、未知字段、其他 candidate 或新事实均事实门失败。",
+    "- create-only runner 在导入 suite 前删除 ignored 的 contracts build output，按 fixed commit 本地重建 `@global/contracts`，同时冻结全部 tracked contracts source tree 与实际加载的 `dist/**/*.js` tree；任一源码、入口、artifact 或构建后指纹漂移即停止。",
+    "",
     "## 闭合结果与排序",
     "",
     "- 结果类：`quality_valid_runtime_on_time`、`quality_valid_runtime_late`、`content_invalid`、`protocol_or_identity_invalid`、`provenance_invalid`、`capability_unavailable`、`diagnostic_window_exhausted`、`budget_stop`。",
@@ -140,7 +152,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     `- ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.executions} executions / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.wireCalls} wire calls / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.amountCents}¢ 仍标记为 ${code(MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.verification)}，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。`,
     `- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 ${code("wx")} 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 ${code(".env")} 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。`,
     `- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 ${code("READY_FOR_PRODUCT_DECISION")}，同时固定 ${code("dispatchAuthorization=NOT_AUTHORIZED")}。`,
-    "- 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。BrandProfile evidence-prep 仍只准入其固定任务；`design_spec` 仅有零费用 suite，其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。",
+    "- 当前 PR 没有生成真实费用 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。BrandProfile evidence-prep 仍只准入其固定任务；`design_spec` 仅有 fixed-commit/create-only 零费用 suite manifest，其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。",
     "",
   ].join("\n");
 }

@@ -21,7 +21,6 @@ import {
   type ModelCandidateProtocol,
 } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import type { SiteBuilderTaskId } from "../agents/task-route-bindings";
 import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
 import { checkAgainstSchema } from "../../model-gateway/schema-validate";
@@ -1655,18 +1654,12 @@ function assertCanonicalRequest(
     }
     selectedProtocol = candidate.expectedProtocol;
   } else {
-    const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-      request.taskId,
-    );
     if (
-      !comparatorRoute ||
       RETIRED_EVALUATION_COMPARATOR_ALIASES.has(request.alias) ||
       catalog.status !== "legacy-only" ||
       catalog.domain !== "text" ||
       request.expectedProtocol !== "openai-chat-completions" ||
-      ![comparatorRoute.primary, ...comparatorRoute.fallbacks].includes(
-        request.alias,
-      )
+      !plan.evaluationSuite.legacyComparatorAliases.includes(request.alias)
     ) {
       throw preDispatchError("legacy_comparator_not_admitted");
     }
@@ -1722,7 +1715,7 @@ function taskDefinition(taskId: SiteBuilderTaskId) {
 
 function taskEvaluationOutputConstraint(taskId: SiteBuilderTaskId): string {
   if (taskId !== "site_builder.design_spec") return "";
-  return "\n评测输出的 reasons/warnings 中，任何带连字符的标识符都必须逐字来自已选 candidate；不得创造或引用其他 family、preset、blueprint、visual-pack 或 candidate 标识符。";
+  return "\n评测输出的 reasons/warnings 必须为空，或每项严格使用以下封闭 claim 之一：selectedCandidateId=<已选 candidate 完整 id>、industryMatchCount=<已选 candidate 数值>、userAssetCoverage=<已选 candidate 数值>、demoFallbackCount=<已选 candidate 数值>。不得返回自由文本、其他字段、其他 candidate 或任何新事实。";
 }
 
 function structuredSystemPrompt(

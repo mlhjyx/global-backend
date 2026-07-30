@@ -16,9 +16,16 @@ import {
   prepareDesignSpecEvalFixture,
   selectDesignSpecDeterministicCandidate,
 } from "./design-spec-eval";
+import {
+  COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
+  COMPILED_CONTRACTS_BUILD_COMMAND,
+  COMPILED_CONTRACTS_BUILD_ID,
+  COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+  type CompiledContractsAttestation,
+} from "./compiled-contracts-attestation";
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v2" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v3" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 
@@ -71,6 +78,7 @@ export interface DesignSpecEvaluationSuitePrepManifest {
   dispatchAuthorization: "NOT_AUTHORIZED";
   actualNetworkCalls: 0;
   actualModelCostCents: 0;
+  compiledContracts: CompiledContractsAttestation;
   suite: {
     suiteId: string;
     fixtureSetId: string;
@@ -154,9 +162,56 @@ function executionKey(input: {
 
 export function buildDesignSpecEvaluationSuitePrepManifest(
   fixedCommitSha: string,
+  compiledContracts: CompiledContractsAttestation,
 ): DesignSpecEvaluationSuitePrepManifest {
   if (!/^[a-f0-9]{40}$/.test(fixedCommitSha)) {
     throw new Error("design_spec suite prep requires a 40-character commit");
+  }
+  if (
+    compiledContracts.schemaVersion !==
+      COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION ||
+    compiledContracts.buildId !== COMPILED_CONTRACTS_BUILD_ID ||
+    compiledContracts.buildCommand !== COMPILED_CONTRACTS_BUILD_COMMAND ||
+    compiledContracts.fixedCommitSha !== fixedCommitSha ||
+    compiledContracts.runtimeEntrypoint !==
+      COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT ||
+    compiledContracts.staleOutputRemovedBeforeBuild !== true ||
+    compiledContracts.suiteImportedAfterBuild !== true ||
+    compiledContracts.trackedSourceFiles.length === 0 ||
+    compiledContracts.compiledArtifacts.length === 0 ||
+    compiledContracts.trackedSourceFiles.some(
+      ({ path }, index, entries) =>
+        (index > 0 && entries[index - 1]!.path >= path) ||
+        path.includes("\\") ||
+        path.split("/").includes(".."),
+    ) ||
+    compiledContracts.compiledArtifacts.some(
+      ({ path }, index, entries) =>
+        (index > 0 && entries[index - 1]!.path >= path) ||
+        path.includes("\\") ||
+        path.split("/").includes(".."),
+    ) ||
+    compiledContracts.trackedSourceFiles.some(
+      ({ path, sha256 }) =>
+        !path.startsWith("packages/contracts/") ||
+        path.startsWith("packages/contracts/dist/") ||
+        !/^[a-f0-9]{64}$/.test(sha256),
+    ) ||
+    compiledContracts.compiledArtifacts.some(
+      ({ path, sha256 }) =>
+        !path.startsWith("packages/contracts/dist/") ||
+        !path.endsWith(".js") ||
+        !/^[a-f0-9]{64}$/.test(sha256),
+    ) ||
+    !compiledContracts.compiledArtifacts.some(
+      ({ path }) => path === COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+    ) ||
+    compiledContracts.trackedSourceTreeSha256 !==
+      sha256CanonicalJson(compiledContracts.trackedSourceFiles) ||
+    compiledContracts.compiledArtifactTreeSha256 !==
+      sha256CanonicalJson(compiledContracts.compiledArtifacts)
+  ) {
+    throw new Error("trusted fixed-commit compiled contracts required");
   }
   const plan = buildTaskEvaluationPlan("site_builder.design_spec");
   const suite = plan.evaluationSuite;
@@ -319,6 +374,7 @@ export function buildDesignSpecEvaluationSuitePrepManifest(
     dispatchAuthorization: "NOT_AUTHORIZED",
     actualNetworkCalls: 0,
     actualModelCostCents: 0,
+    compiledContracts,
     suite: {
       suiteId: suite.suiteId,
       fixtureSetId: suite.fixtureSetId,

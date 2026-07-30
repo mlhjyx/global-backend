@@ -38,6 +38,7 @@ describe("design_spec canonical model evaluation suite", () => {
       evaluationSuite: {
         taskContractId: "site_builder.design_spec",
         repeats: 2,
+        legacyComparatorAliases: [],
         fixtureIds: expect.arrayContaining([
           "precision-industrial-rich",
           "precision-industrial-sparse",
@@ -115,8 +116,8 @@ describe("design_spec canonical model evaluation suite", () => {
       assessCanonicalTaskArtifact(plan, evaluationCase.payload, {
         candidateId: selected.id,
         reasons: [
-          `Selected ${selected.familyId}`,
-          `industryMatchCount:${selected.industryMatchCount}`,
+          `selectedCandidateId=${selected.id}`,
+          `industryMatchCount=${selected.industryMatchCount}`,
         ],
         warnings: [],
       }),
@@ -146,9 +147,10 @@ describe("design_spec canonical model evaluation suite", () => {
       assessCanonicalTaskArtifact(plan, evaluationCase.payload, {
         candidateId: selected.id,
         reasons: [
-          `industryMatchCount:${selected.industryMatchCount}`,
-          "industryMatchCount:999",
-          "invented-family",
+          `selectedCandidateId=${alternative.id}`,
+          `industryMatchCount=${selected.industryMatchCount}`,
+          "industryMatchCount=999",
+          "B2B-ready launch date 2026-08-01",
         ],
         warnings: [],
       }),
@@ -159,6 +161,7 @@ describe("design_spec canonical model evaluation suite", () => {
       findingCodes: [
         "forbidden_catalog_identifier",
         "frozen_candidate_metric_contradiction",
+        "invalid_explanation_claim",
       ],
     });
   });

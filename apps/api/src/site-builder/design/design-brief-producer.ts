@@ -566,6 +566,70 @@ function buildCandidates(
   return ranked;
 }
 
+function prepareDesignSpecCandidatePipeline(
+  catalog: DesignCatalogV2,
+  input: DesignSpecInputV1,
+  variationSeed: string,
+): {
+  archetype: AuthoritativeArchetype;
+  candidates: Candidate[];
+  taskInput: DesignSpecTaskInput;
+} {
+  const archetype = resolveAuthoritativeArchetype(input);
+  const candidates = buildCandidates(catalog, input, archetype, variationSeed);
+  return {
+    archetype,
+    candidates,
+    taskInput: {
+      archetype,
+      industryTags: input.brandProfile?.industryTags ?? [],
+      candidates: candidates
+        .slice(0, 3)
+        .map((candidate) => structuredClone(candidate.summary)),
+    },
+  };
+}
+
+function assertDesignSpecInputContract(
+  catalog: DesignCatalogV2,
+  input: DesignSpecInputV1,
+): void {
+  if (input.catalogDigest !== catalog.digest) {
+    throw new DesignCatalogV2ContractError(
+      "DESIGN_BRIEF_V2_CATALOG_MISMATCH",
+      "frozen producer input does not pin the active catalog",
+    );
+  }
+  if (
+    input.schemaVersion !== DESIGN_SPEC_INPUT_VERSION ||
+    input.componentLibraryVersion !== M1_E_A_COMPONENT_LIBRARY_VERSION ||
+    input.locales.length === 0 ||
+    new Set(input.locales).size !== input.locales.length
+  ) {
+    throw new DesignBriefProducerError(
+      "DESIGN_BRIEF_NO_CANDIDATE",
+      "frozen producer input does not match the active build contract",
+    );
+  }
+}
+
+/**
+ * Evaluation fixtures use this exported projection so their task input is
+ * emitted by the same complete catalog enumeration and ranking path as a
+ * production build. The internal Candidate objects remain private.
+ */
+export function buildDesignSpecTaskInputFromProductionCandidates(
+  catalog: DesignCatalogV2,
+  input: DesignSpecInputV1,
+): DesignSpecTaskInput {
+  assertDesignSpecInputContract(catalog, input);
+  const variationSeed = hash(
+    `${input.siteId}${input.buildRunId}${input.catalogDigest}`,
+  );
+  return prepareDesignSpecCandidatePipeline(catalog, input, variationSeed)
+    .taskInput;
+}
+
 function variantSelections(candidate: Candidate) {
   const selections: Partial<Record<SiteSpecComponentType, string>> = {};
   for (const section of selectedSections(
@@ -767,39 +831,12 @@ export class DesignBriefProducer {
         rawInput as unknown as Record<string, unknown>,
       );
       const input = frozen.input as unknown as DesignSpecInputV1;
-      if (input.catalogDigest !== this.catalog.digest) {
-        throw new DesignCatalogV2ContractError(
-          "DESIGN_BRIEF_V2_CATALOG_MISMATCH",
-          "frozen producer input does not pin the active catalog",
-        );
-      }
-      if (
-        input.schemaVersion !== DESIGN_SPEC_INPUT_VERSION ||
-        input.componentLibraryVersion !== M1_E_A_COMPONENT_LIBRARY_VERSION ||
-        input.locales.length === 0 ||
-        new Set(input.locales).size !== input.locales.length
-      ) {
-        throw new DesignBriefProducerError(
-          "DESIGN_BRIEF_NO_CANDIDATE",
-          "frozen producer input does not match the active build contract",
-        );
-      }
+      assertDesignSpecInputContract(this.catalog, input);
       const variationSeed = hash(
         `${input.siteId}${input.buildRunId}${input.catalogDigest}`,
       );
-      const archetype = resolveAuthoritativeArchetype(input);
-      const candidates = buildCandidates(
-        this.catalog,
-        input,
-        archetype,
-        variationSeed,
-      );
-      const top = candidates.slice(0, 3);
-      const taskInput: DesignSpecTaskInput = {
-        archetype,
-        industryTags: input.brandProfile?.industryTags ?? [],
-        candidates: top.map((candidate) => candidate.summary),
-      };
+      const { archetype, candidates, taskInput } =
+        prepareDesignSpecCandidatePipeline(this.catalog, input, variationSeed);
       let modelOutput: DesignSpecTaskOutput | undefined;
       let deterministicRollback:
         DesignSpecTaskSelection["deterministicRollback"] | undefined;

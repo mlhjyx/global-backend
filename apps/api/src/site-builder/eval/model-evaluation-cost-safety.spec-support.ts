@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
@@ -38,8 +37,8 @@ export function createFakeModelEvaluationCostSafety(
   const ledgerDirectory =
     ledgerOverride?.directory ?? join(fakeLedgerRoot, suffix);
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-  const legacy = modelPolicyRegistry.getEvaluationComparatorRoute(plan.taskId);
-  if (!legacy) {
+  const legacyAliases = plan.evaluationSuite?.legacyComparatorAliases;
+  if (!legacyAliases || legacyAliases.length === 0) {
     throw new Error(`${plan.taskId} has no paid legacy comparator`);
   }
   const allowedDispatches = [
@@ -48,7 +47,7 @@ export function createFakeModelEvaluationCostSafety(
       alias: candidate.alias,
       protocol: candidate.expectedProtocol,
     })),
-    ...[legacy.primary, ...legacy.fallbacks].map((alias) => ({
+    ...legacyAliases.map((alias) => ({
       mode: "legacy_comparator" as const,
       alias,
       protocol: "openai-chat-completions" as const,

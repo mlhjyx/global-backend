@@ -9,7 +9,6 @@ import {
   sep,
 } from "node:path";
 
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import type { ModelCandidateProtocol } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
 import {
@@ -398,14 +397,8 @@ export function buildModelEvaluationEvidencePlanningManifest(): ModelEvaluationE
       }
     }
   }
-  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-    plan.taskId,
-  );
-  if (comparatorRoute) {
-    for (const alias of [
-      comparatorRoute.primary,
-      ...comparatorRoute.fallbacks,
-    ]) {
+  if (suite.legacyComparatorAliases.length > 0) {
+    for (const alias of suite.legacyComparatorAliases) {
       for (const fixtureId of suite.fixtureIds) {
         for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
           append({

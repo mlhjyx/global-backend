@@ -1,6 +1,6 @@
 # Site Builder 模型评测 Harness 基线
 
-> 机器合同：`site-builder-model-evaluation-harness/2026-07-30-v5`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-28-v1`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
+> 机器合同：`site-builder-model-evaluation-harness/2026-07-30-v6`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-28-v1`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
 
 ## 范围
 
@@ -14,7 +14,7 @@
 ## 协议执行边界
 
 - admission contract：`site-builder-model-evaluation-protocol-admission/v1`；它独立于生产 `VERIFIED_GATEWAY_MODEL_TRANSPORTS`，不能改变 runtime provider/route。
-- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只保留隔离的 legacy comparator，且 alias 必须属于该 task 冻结的 legacy current/rollback route。raw target/legacy execute 都必须消费 harness 在预算 reserve 后签发的一次性 request authorization；legacy comparator 只能由 `runLegacyComparatorEvaluationAttempt` 以同一 canonical suite/fixture/envelope、campaign budget、hard stop 和 trusted executor identity 编排，direct dispatch 在任何 client 前 fail-closed，其他 task 的 legacy-only alias 也不能混入 comparator 或 target dispatch。
+- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只保留隔离的 legacy comparator，且 alias 必须逐字属于该 canonical suite 冻结的 `legacyComparatorAliases`，不在执行时从 current/rollback route 推导。BrandProfile 固定 DeepSeek Pro/GLM，`design_spec` 固定空集，因此 MiniMax/Doubao 不会扩大其凭据或 execution/wire-call 额度。raw target/legacy execute 都必须消费 harness 在预算 reserve 后签发的一次性 request authorization；legacy comparator 只能由 `runLegacyComparatorEvaluationAttempt` 以同一 canonical suite/fixture/envelope、campaign budget、hard stop 和 trusted executor identity 编排，direct dispatch 在任何 client 前 fail-closed，其他 task 的 legacy-only alias 也不能混入 comparator 或 target dispatch。
 - actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。
 - trusted probe/run 只接受 `createModelEvaluationProtocolExecutor` 私有 WeakMap 品牌化并冻结的 target 或 legacy execute；同一 budget campaign 在首次 probe/run 时绑定一个不可伪造 executor identity，后续换 factory 即在 reserve/client 前拒绝。executor、budget、run 与 capability campaign 的 WeakMap/WeakSet `get`/`set`/`has`/`add`，以及 run deep-freeze 的 Object `freeze`/`isFrozen`/`values` 都在模块加载时捕获并通过固定 intrinsic 调用；run 整棵递归确认不可变后才允许写入品牌 map，任意 callback、wrapper/Proxy 或运行时 prototype monkeypatch 均不能生成 identity、改写已授权 run 或把伪造 run 纳入排序；品牌模块不暴露 register 或测试注入入口。
 - adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。
@@ -37,7 +37,7 @@
 |---|---|---|---|---|---:|---:|---:|---:|---:|---|
 | `site_builder.brand_profile` | `structured.workspace_materials` | `task_evaluation_ready` | `site-builder.brand-profile-evaluation-suite/2026-07-27-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe` | 12000 | 240s | 240s | 480s | 40¢ | low |
 | `site_builder.copy` | `copy.premium` | `blocked_no_evaluation_suite` | — | `claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 4000 | 120s | 120s | 240s | 20¢ | low |
-| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-07-30-v2` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
+| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-07-30-v3` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
 | `site_builder.assemble` | `structured.default` | `blocked_no_evaluation_suite` | — | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 16000 | 180s | 180s | 360s | 20¢ | — |
 | `site_builder.assembly_fix` | `structured.default` | `blocked_no_evaluation_suite` | — | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 8000 | 180s | 180s | 360s | 20¢ | — |
 | `site_builder.qa_summarize` | `text.summary` | `blocked_no_evaluation_suite` | — | `gpt-5.6-luna` / `openai-responses` / `none`<br>`gpt-5.4-mini` / `openai-responses` / `none`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 3000 | 90s | 90s | 180s | 20¢ | — |
@@ -54,6 +54,14 @@
 - dispatch payload：fixture、prepared task input、prompt 与 source fingerprints 全部由 canonical case builder 构造、冻结并纳入 case SHA-256；executor 不能替换为未绑定内容。
 - capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。同一 campaign/candidate 的重复请求复用既有 canonical attestation，不重复 dispatch、reserve 或擦除有效证明。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
 - evaluator：`brand-profile-evaluator/10`；rubric SHA-256 `c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c`；harness 内部依次执行 output schema、生产 `validateOutput` 与 canonical task rubric，不接受 caller 自带 grader。
+
+### design_spec suite
+
+- suite：`site-builder.design-spec-evaluation-suite/2026-07-30-v3`；adapter `site-builder.design-spec-evaluation-adapter/v3`；fixture set `site-builder.design-spec-golden/2026-07-30-v3` / schema `site-builder-design-spec-eval-fixture/v2`；12 fixtures × 2 repeats。
+- comparator allowlist：空集（仅零费用 deterministic catalog selection）；source bundle `design-spec-evaluation-source-bundle/v3` 固定 47 份 Git 跟踪文件。
+- 12 个 sparse/rich fixture 保存完整合成生产输入，并通过与生产运行共用的完整 catalog enumeration、required-role eligibility、ranking 与 top-3 projection 重建；prepare 时逐字重算，不能手工拼 candidate。
+- reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言数值、未知字段、其他 candidate 或新事实均事实门失败。
+- create-only runner 在导入 suite 前删除 ignored 的 contracts build output，按 fixed commit 本地重建 `@global/contracts`，同时冻结全部 tracked contracts source tree 与实际加载的 `dist/**/*.js` tree；任一源码、入口、artifact 或构建后指纹漂移即停止。
 
 ## 闭合结果与排序
 
@@ -79,4 +87,4 @@
 - 61 executions / 122 wire calls / 2440¢ 仍标记为 `unverified_planning_upper_bound`，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。
 - create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 `wx` 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 `.env` 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。
 - 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 `READY_FOR_PRODUCT_DECISION`，同时固定 `dispatchAuthorization=NOT_AUTHORIZED`。
-- 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。BrandProfile evidence-prep 仍只准入其固定任务；`design_spec` 仅有零费用 suite，其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。
+- 当前 PR 没有生成真实费用 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。BrandProfile evidence-prep 仍只准入其固定任务；`design_spec` 仅有 fixed-commit/create-only 零费用 suite manifest，其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。

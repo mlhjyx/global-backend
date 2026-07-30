@@ -7,12 +7,51 @@ import {
   buildDesignSpecEvaluationSuitePrepManifest,
   writeDesignSpecEvaluationSuitePrepManifestCreateOnly,
 } from "./design-spec-evaluation-suite-prep";
+import {
+  COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
+  COMPILED_CONTRACTS_BUILD_COMMAND,
+  COMPILED_CONTRACTS_BUILD_ID,
+  COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+  type CompiledContractsAttestation,
+} from "./compiled-contracts-attestation";
+import { sha256CanonicalJson } from "./eval-provenance";
 
 const FIXED_COMMIT = "a".repeat(40);
 
+function compiledContracts(): CompiledContractsAttestation {
+  const trackedSourceFiles = [
+    {
+      path: "packages/contracts/src/index.ts",
+      sha256: "1".repeat(64),
+    },
+  ];
+  const compiledArtifacts = [
+    {
+      path: COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+      sha256: "2".repeat(64),
+    },
+  ];
+  return {
+    schemaVersion: COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
+    buildId: COMPILED_CONTRACTS_BUILD_ID,
+    buildCommand: COMPILED_CONTRACTS_BUILD_COMMAND,
+    fixedCommitSha: FIXED_COMMIT,
+    trackedSourceFiles,
+    trackedSourceTreeSha256: sha256CanonicalJson(trackedSourceFiles),
+    runtimeEntrypoint: COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+    compiledArtifacts,
+    compiledArtifactTreeSha256: sha256CanonicalJson(compiledArtifacts),
+    staleOutputRemovedBeforeBuild: true,
+    suiteImportedAfterBuild: true,
+  };
+}
+
 describe("design_spec zero-cost suite preparation", () => {
   it("freezes the paid and deterministic matrices without retired aliases", () => {
-    const manifest = buildDesignSpecEvaluationSuitePrepManifest(FIXED_COMMIT);
+    const manifest = buildDesignSpecEvaluationSuitePrepManifest(
+      FIXED_COMMIT,
+      compiledContracts(),
+    );
     expect(manifest).toMatchObject({
       taskId: "site_builder.design_spec",
       fixedCommitSha: FIXED_COMMIT,
@@ -20,6 +59,12 @@ describe("design_spec zero-cost suite preparation", () => {
       dispatchAuthorization: "NOT_AUTHORIZED",
       actualNetworkCalls: 0,
       actualModelCostCents: 0,
+      compiledContracts: {
+        fixedCommitSha: FIXED_COMMIT,
+        runtimeEntrypoint: "packages/contracts/dist/index.js",
+        staleOutputRemovedBeforeBuild: true,
+        suiteImportedAfterBuild: true,
+      },
       executionCount: 73,
       maximumWireCallCount: 146,
       deterministicComparator: {
@@ -76,7 +121,8 @@ describe("design_spec zero-cost suite preparation", () => {
     expect(
       new Set(
         manifest.deterministicComparator.cases.map(
-          ({ expectedCandidateId }) => expectedCandidateId,
+          ({ fixtureId, expectedCandidateId }) =>
+            `${fixtureId}:${expectedCandidateId}`,
         ),
       ).size,
     ).toBe(12);
@@ -85,7 +131,10 @@ describe("design_spec zero-cost suite preparation", () => {
 
   it("writes once and rejects overwrite", async () => {
     const root = await mkdtemp(join(tmpdir(), "design-spec-suite-prep-"));
-    const manifest = buildDesignSpecEvaluationSuitePrepManifest(FIXED_COMMIT);
+    const manifest = buildDesignSpecEvaluationSuitePrepManifest(
+      FIXED_COMMIT,
+      compiledContracts(),
+    );
     await writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
       root,
       "evidence/design-spec-suite.json",
@@ -114,14 +163,34 @@ describe("design_spec zero-cost suite preparation", () => {
       writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
         root,
         "evidence/design-spec-suite.json",
-        buildDesignSpecEvaluationSuitePrepManifest(FIXED_COMMIT),
+        buildDesignSpecEvaluationSuitePrepManifest(
+          FIXED_COMMIT,
+          compiledContracts(),
+        ),
       ),
     ).rejects.toThrow("parent must be a real directory");
   });
 
   it("rejects malformed fixed commits before building a manifest", () => {
     expect(() =>
-      buildDesignSpecEvaluationSuitePrepManifest("origin/main"),
+      buildDesignSpecEvaluationSuitePrepManifest(
+        "origin/main",
+        compiledContracts(),
+      ),
     ).toThrow("40-character commit");
+  });
+
+  it("rejects stale or mismatched compiled contracts attestations", () => {
+    const staleArtifact = compiledContracts();
+    staleArtifact.compiledArtifacts[0]!.sha256 = "3".repeat(64);
+    expect(() =>
+      buildDesignSpecEvaluationSuitePrepManifest(FIXED_COMMIT, staleArtifact),
+    ).toThrow("trusted fixed-commit compiled contracts required");
+
+    const wrongCommit = compiledContracts();
+    wrongCommit.fixedCommitSha = "b".repeat(40);
+    expect(() =>
+      buildDesignSpecEvaluationSuitePrepManifest(FIXED_COMMIT, wrongCommit),
+    ).toThrow("trusted fixed-commit compiled contracts required");
   });
 });

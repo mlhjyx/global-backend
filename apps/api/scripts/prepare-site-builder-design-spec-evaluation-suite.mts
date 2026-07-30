@@ -3,11 +3,10 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
 import {
-  buildDesignSpecEvaluationSuitePrepManifest,
-  writeDesignSpecEvaluationSuitePrepManifestCreateOnly,
-} from "../src/site-builder/eval/design-spec-evaluation-suite-prep";
+  assertCompiledContractsAttestationStable,
+  buildCompiledContractsAttestation,
+} from "../src/site-builder/eval/compiled-contracts-attestation";
 
 const REPOSITORY_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -19,7 +18,9 @@ const HELP = `Usage:
     --output=<new-repository-relative-json>
 
 This create-only command never reads .env and has no model or network client.
-It requires a clean worktree at the exact fixed commit and writes only with wx.
+It requires a clean worktree at the exact fixed commit, rebuilds the ignored
+@global/contracts runtime locally before importing the suite, and writes only
+with wx.
 `;
 
 function option(name: string): string | null {
@@ -108,11 +109,25 @@ async function main(): Promise<void> {
   if (!fixedCommitSha || !outputArgument) throw new Error(HELP);
   const output = outputPath(outputArgument);
   assertFixedRepositoryState(fixedCommitSha);
-  const manifest = buildDesignSpecEvaluationSuitePrepManifest(fixedCommitSha);
+  const compiledContracts = buildCompiledContractsAttestation({
+    repositoryRoot: REPOSITORY_ROOT,
+    fixedCommitSha,
+  });
+  assertFixedRepositoryState(fixedCommitSha);
+  const {
+    buildDesignSpecEvaluationSuitePrepManifest,
+    writeDesignSpecEvaluationSuitePrepManifestCreateOnly,
+  } =
+    await import("../src/site-builder/eval/design-spec-evaluation-suite-prep");
+  const manifest = buildDesignSpecEvaluationSuitePrepManifest(
+    fixedCommitSha,
+    compiledContracts,
+  );
   await assertSourceBundleAtFixedCommit(
     fixedCommitSha,
     manifest.suite.sourceFiles,
   );
+  assertCompiledContractsAttestationStable(REPOSITORY_ROOT, compiledContracts);
   assertFixedRepositoryState(fixedCommitSha);
   await writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
     REPOSITORY_ROOT,

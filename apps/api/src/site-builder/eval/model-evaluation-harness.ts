@@ -13,7 +13,6 @@ import {
   type ModelCandidateStatus,
 } from "../agents/model-candidate-baseline";
 import type { SiteBuilderModelProfileId } from "../agents/model-profiles";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import {
   BRAND_PROFILE_PROMPT_VERSION,
   BRAND_PROFILE_ROUTE_VALIDATION_VERSION,
@@ -75,7 +74,7 @@ import {
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v5" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v6" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v3" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -119,6 +118,7 @@ export interface TaskEvaluationSuite {
     promptSha256: string;
   }[];
   repeats: number;
+  legacyComparatorAliases: readonly string[];
   sourceBundleContractId: string;
   sourceBundleFiles: readonly {
     role: string;
@@ -433,6 +433,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
+  legacyComparatorAliases: Object.freeze(["deepseek-v4-pro", "glm-5.2"]),
   sourceBundleContractId: "brand-profile-evaluation-source-bundle/v7",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
@@ -493,6 +494,10 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
   {
     role: "suite_preparation",
     path: "apps/api/src/site-builder/eval/design-spec-evaluation-suite-prep.ts",
+  },
+  {
+    role: "compiled_contracts_attestation",
+    path: "apps/api/src/site-builder/eval/compiled-contracts-attestation.ts",
   },
   {
     role: "create_only_writer",
@@ -610,86 +615,86 @@ const DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS = deepFreeze([
   {
     fixtureId: "natural-origin-rich",
     fixtureSha256:
-      "69b96bae10968fc9c482c779c99fea463ab9a601ced68d24bfbf7f1d94413a11",
+      "83ac126bf9e019442a028b894c70c13010a68b0c86bf7ee484b987e175692e9b",
     promptSha256:
-      "5fb86019a941070eeacbc7f1007fa9e92f003ae8979066766c5e10e964a1b525",
+      "b5f95c6c412beddd28e3ffb30dd9226cb0805967831f07af37c75af901dc1a66",
   },
   {
     fixtureId: "natural-origin-sparse",
     fixtureSha256:
-      "8d05755970beb1def90f295ddbc09a371bb1d804f560d0d832ffc83c955b7f35",
+      "15b4141169e4862cc6fc8a96fd5338e44fa9dc9e6e1cd53c4b83dd58b4ed1be8",
     promptSha256:
-      "692e857dd3091ef7c9a98f9aaabfef364f66fe3651aa9ebdaf11dab0b4931aac",
+      "8d658afd3e9f473f2edec47de8dfd3bd6aec885966331b4457697562c3d847c1",
   },
   {
     fixtureId: "oem-capability-rich",
     fixtureSha256:
-      "7138efc9eb08ae579dfdd9a2d18d193fde653e387286241cf1817c6775211972",
+      "cdfb18b5cadc568d794ff87366a001ac0fa10d1380e7ee35af1c7ca28634e581",
     promptSha256:
-      "aaeb5f48c16aa354b6522434224868407594eb57e6c0e152f5e2c3b2ebaa9842",
+      "3e8780dbb9429801c8c0c77d72e00a92880d75365bd5ba61e82df554e2177a0b",
   },
   {
     fixtureId: "oem-capability-sparse",
     fixtureSha256:
-      "a572ae5370b5d0d3840b00fa02d3d6977ec97cea17ae867687ffb5e653d450ee",
+      "e8365172be3afe76ac9fd9615f11eb6092807c883a78958d991e003cf22410d9",
     promptSha256:
-      "fb85e601456a8beaf36125258a1bc437bda5eb6b59258154f0eedaa88a4592b5",
+      "f46e796309c1e8bdda632bd1c01a4999abd820c55ce495ea13efee36f2ab5aaa",
   },
   {
     fixtureId: "precision-industrial-rich",
     fixtureSha256:
-      "9b56068c44b1d0a05c04d793e864299c6bc0ffc6e9bf73bd72e232b422b914bc",
+      "8c2a7cfa6207b863c15832cd1ff5abeefce420aa6c5b305db2eae8f5df284ff6",
     promptSha256:
-      "de947c94d93aa5bf1a16430a780e00192fb4763336263048a75f5a156bc6b492",
+      "bb694026658db537945520847e3588f1aceb10c163c4d488532b0213b2b668ec",
   },
   {
     fixtureId: "precision-industrial-sparse",
     fixtureSha256:
-      "d8f97c6bce8c726bd0e1b63a1769d916195e093cbf2246181cadf9d7f695d651",
+      "cc1c0e069f613d1d82ec53d4783ed26250ca06eddfb1b76cd3294022ccc5fcf6",
     promptSha256:
-      "e35c02133dc73349096fe93e8b4efac34e55ab3c7fa0cfa7386090a3b2391544",
+      "3f740cba234be448bedf15b60833401e43d173708d0ed5d141839d2d7478bfd2",
   },
   {
     fixtureId: "premium-innovation-rich",
     fixtureSha256:
-      "12f16155fbf46681d462838a2fab76cdd4502bcbdff765a4c175f07173d99115",
+      "3f2ec1f8f7519dcbc572e075f84d836cda73874d7ad53df063f92d4c42e251c4",
     promptSha256:
-      "604e7884e0ff94bf1eaf144dcf410f7fa79514bc15d9dba33a68253e8ca62b90",
+      "12c7c55fa40d83954e5e602c282c5e86d038adf943b3ec4a99d9fb72b2220417",
   },
   {
     fixtureId: "premium-innovation-sparse",
     fixtureSha256:
-      "9630449df0656a412ec586b2199f8e4f82d18872c75349a78368ddc73c67fae4",
+      "2946840a353835c9e1c8aa043f22d02eeef1739b75ba03afff6aa4e29fd1eb46",
     promptSha256:
-      "cfe08b810dce6ff460947d1d9e8cd1088e8e0873fc2bd2569781b733cd190a35",
+      "0659e2871f7673585aa083bce06e98dcb57e96d69ed50ef24a0b1df42a40bfea",
   },
   {
     fixtureId: "scientific-trust-rich",
     fixtureSha256:
-      "c63e4870404ff3cabee62e82df2fe949b5320af6470d44d94a45548419f78276",
+      "de6bcb2cc3c53390e7f153d23ec6770d429bb2aeb1772e4d3112be419b1a3a89",
     promptSha256:
-      "efb1384f20fbd07c2e5549b12413f03770d50dd17017a7a681f492d6c01ed7fb",
+      "7e5b9dde096487a523ac81cae4609ca36a555a0b4a693b65e422937dd09d3ede",
   },
   {
     fixtureId: "scientific-trust-sparse",
     fixtureSha256:
-      "ea14225ab33858efa950dd0408c430e394fd6af1e5e6a7a3371c41fb4337673a",
+      "9f97ed2b08d054da37e15aee4b4ac0ec95aa79827382200e3d329fd1640106c4",
     promptSha256:
-      "a4a1ecd4350c99c4c8041051f0091dc87545856488056d4e89af38a17f9da944",
+      "7b901063360f9686f595f3f15c2af3571fe64a4f80c8d639baf28696606b6a7f",
   },
   {
     fixtureId: "technical-catalog-rich",
     fixtureSha256:
-      "59a30ab16269d437d8df79640d58d952c993722898c93e5c470090af481d869f",
+      "8428714ffc6886f7ddff3448ae6c2ce19dffd5a68aba7e8825e23a9b18fd7404",
     promptSha256:
-      "73ebf0c6f6d526f8b0c6a64e4a689eee86c2a7006ac41007434faa5a2b4721be",
+      "2a8f33b841a6239199d10b0e881cee9375451f792a1468fa71597e5cd594daa7",
   },
   {
     fixtureId: "technical-catalog-sparse",
     fixtureSha256:
-      "35aabef149f16ef2a66a4ef97b9d0e751900bc0661c667606bc8213cd2679c96",
+      "31a62190afcee593f172892c20ac0370a43e4d27d4bcf51de95f58606afd4969",
     promptSha256:
-      "faa98f2db258841693fe50b528c7967d0621f09a9fbbbe675fbf17dd3162532c",
+      "09e634738d1d0cc6b12d2dbddbcd33501fb475717324607622603e08d8bb9983",
   },
 ] as const);
 
@@ -708,8 +713,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v2",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v2",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v3",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v3",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
@@ -718,14 +723,15 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   routeValidationVersion: DESIGN_SPEC_ROUTE_VALIDATION_VERSION,
   evaluatorVersion: DESIGN_SPEC_EVALUATOR_VERSION,
   evaluatorRubricSha256: sha256CanonicalJson(DESIGN_SPEC_EVALUATOR_RUBRIC),
-  fixtureSetId: "site-builder.design-spec-golden/2026-07-30-v2",
+  fixtureSetId: "site-builder.design-spec-golden/2026-07-30-v3",
   fixtureSchemaVersion: DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION,
   fixtureIds: Object.freeze(
     DESIGN_SPEC_EVAL_FIXTURES.map(({ fixtureId }) => fixtureId),
   ),
   fixtureFingerprints: DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS,
   repeats: 2,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v2",
+  legacyComparatorAliases: Object.freeze([]),
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v3",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1171,12 +1177,7 @@ function bindTrustedModelEvaluationExecutor(
       reason: "rejected_before_dispatch",
     });
   }
-  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-    plan.taskId,
-  );
-  const comparatorAliases = comparatorRoute
-    ? [comparatorRoute.primary, ...comparatorRoute.fallbacks]
-    : [];
+  const comparatorAliases = plan.evaluationSuite?.legacyComparatorAliases ?? [];
   const expectedDispatches = [
     ...plan.candidates.map(
       (candidate) => `target:${candidate.alias}:${candidate.expectedProtocol}`,
@@ -2946,7 +2947,8 @@ export function assessCanonicalTaskArtifact(
     const outcome = evaluateDesignSpecOutput(prepared, output);
     const factualityPassed =
       outcome.referencedForbiddenCatalogIdentifiers.length === 0 &&
-      outcome.contradictedMetricClaims.length === 0;
+      outcome.contradictedMetricClaims.length === 0 &&
+      outcome.invalidExplanationClaims.length === 0;
     return {
       qualityPassed: outcome.selectedDeterministicCandidate && factualityPassed,
       structurePassed: true,
@@ -2961,6 +2963,9 @@ export function assessCanonicalTaskArtifact(
           : []),
         ...(outcome.contradictedMetricClaims.length > 0
           ? ["frozen_candidate_metric_contradiction"]
+          : []),
+        ...(outcome.invalidExplanationClaims.length > 0
+          ? ["invalid_explanation_claim"]
           : []),
       ],
     };
@@ -3012,12 +3017,8 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
       `legacy comparator has no canonical suite: ${options.plan.taskId}`,
     );
   }
-  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-    options.plan.taskId,
-  );
   if (
-    !comparatorRoute ||
-    ![comparatorRoute.primary, ...comparatorRoute.fallbacks].includes(
+    !options.plan.evaluationSuite.legacyComparatorAliases.includes(
       options.alias,
     )
   ) {

@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
@@ -31,14 +30,14 @@ afterEach(async () => {
 
 function exactCostSafetyInput(): ModelEvaluationCostSafetyInput {
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-  const legacy = modelPolicyRegistry.getLegacyTaskPolicy(plan.taskId).route;
+  const legacyAliases = plan.evaluationSuite!.legacyComparatorAliases;
   const allowedDispatches = [
     ...plan.candidates.map((candidate) => ({
       mode: "target" as const,
       alias: candidate.alias,
       protocol: candidate.expectedProtocol,
     })),
-    ...[legacy.primary, ...legacy.fallbacks].map((alias) => ({
+    ...legacyAliases.map((alias) => ({
       mode: "legacy_comparator" as const,
       alias,
       protocol: "openai-chat-completions" as const,
